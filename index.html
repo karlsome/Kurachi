@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <link rel="stylesheet" href="Google Sheet.css">
+</head>
+<body>
+
+
+    <!-- this code is for process -->
+    <div class="container">
+        <form method="post" action="" name="contact-form">
+            <h4>倉知日報</h4>
+            <label for="設備">List</label>
+            <select name="設備" id="dropdown">
+            </select>
+            <select id="sub-dropdown" name="背番号">
+            <!-- options will be populated dynamically based on the selected value of #dropdown -->
+            </select>
+            <label for="Machine Operator">Machine Operator:</label>
+            <input list="machine-operator-suggestions" placeholder="Worker's Name" id="Machine Operator" name="Machine Operator">
+            <datalist id="machine-operator-suggestions"></datalist>
+            <br>
+            <label for="Final Quantity">Final Quantity:</label>
+            <input type="text" name="Final Quantity" id="Final Quantity" placeholder="Quantity">
+            <br>
+            <label for="Lot No.">Date:</label>
+            <input type="date" name="Lot No." id="Lot No." placeholder="Date" onfocus="setDefaultDate(this)">
+            <br>
+            <label for="Start Time">Start Time:</label>
+            <input type="time" name="Start Time" id="Start Time" placeholder="Time Start" onfocus="setDefaultTime(this)">
+            <br>
+            <label for="End Time">End Time:</label>
+            <input type="time" name="End Time" id="End Time" placeholder="Time End" onfocus="setDefaultTime(this)">
+            <br>
+            <label for="材料ロット">材料ロット:</label>
+            <input type="text" name="材料ロット" id="材料ロット" placeholder="Material Lot">
+            <br>
+            <textarea name="Comments1" rows="7" placeholder="Enter Comments"></textarea>
+            <br>
+            <br>
+            <br>
+    </div>
+
+
+    <!-- this code is for kensa -->
+    <div class="container">
+            <h4>倉知検査</h4>
+            <label for="Kensa Name">Kensa Name:</label>
+            <input list="kensa-name-suggestions" placeholder="Kensa Name" id="Kensa Name" name="Kensa Name" type="text">
+            <datalist id="kensa-name-suggestions"></datalist>
+            <br>
+            <label for="KDate">KDate:</label>
+            <input type="date" name="KDate" id="KDate" placeholder="KDate" onfocus="setDefaultDate(this)">
+            <br>
+            <label for="KStart Time">KTime Start:</label>
+            <input type="time" name="KStart Time" id="KStart Time" placeholder="KTime Start" onfocus="setDefaultTime(this)">
+            <br>
+            <label for="KEnd Time">KTime End:</label>
+            <input type="time" name="KEnd Time" id="KEnd Time" placeholder="KTime End" onfocus="setDefaultTime(this)">
+            <br>
+    
+
+
+            <!-- these are for the buttons numbers -->
+            <div class="counter-container">  
+                <div id="counter-box-1" class="counter-box"> 
+                    <label for="counter-1">1</label>
+                    <button class="plus-btn" type="button" onclick="incrementCounter(1)">+</button>  
+                    <input readonly id="counter-1" value="0" type="number" name="1">  
+                    <button class="minus-btn" type="button" onclick="decrementCounter(1)">-</button>  
+                </div>  
+                <div id="counter-box-2" class="counter-box">  
+                    <label for="counter-2">2</label>
+                    <button class="plus-btn" type="button" onclick="incrementCounter(2)">+</button>  
+                    <input readonly id="counter-2" value="0" type="number" name="2">  
+                    <button class="minus-btn" type="button" onclick="decrementCounter(2)">-</button>  
+                </div>  
+                <div id="counter-box-3" class="counter-box">  
+                    <label for="counter-3">3</label>
+                    <button class="plus-btn" type="button" onclick="incrementCounter(3)">+</button>  
+                    <input readonly id="counter-3" value="0" type="number" name="3">  
+                    <button class="minus-btn" type="button" onclick="decrementCounter(3)">-</button>  
+                </div>  
+                <div id="counter-box-4" class="counter-box">  
+                    <label for="counter-4">4</label>
+                    <button class="plus-btn" type="button" onclick="incrementCounter(4)">+</button>  
+                    <input readonly id="counter-4" value="0" type="number" name="4">  
+                    <button class="minus-btn" type="button" onclick="decrementCounter(4)">-</button>  
+                </div>  
+                <div id="counter-box-5" class="counter-box">  
+                    <label for="counter-5">5</label>
+                    <button class="plus-btn" type="button" onclick="incrementCounter(5)">+</button>  
+                    <input readonly id="counter-5" value="0" type="number" name="5">  
+                    <button class="minus-btn" type="button" onclick="decrementCounter(5)">-</button>  
+                </div>  
+                <div id="counter-box-6" class="counter-box">  
+                    <label for="counter-6">6</label>
+                    <button class="plus-btn" type="button" onclick="incrementCounter(6)">+</button>  
+                    <input readonly id="counter-6" value="0" type="number" name="6">  
+                    <button class="minus-btn" type="button" onclick="decrementCounter(6)">-</button>  
+                </div>  
+                <div id="counter-box-7" class="counter-box">  
+                    <label for="counter-7">7</label>
+                    <button class="plus-btn" type="button" onclick="incrementCounter(7)">+</button>  
+                    <input readonly id="counter-7" value="0" type="number" name="7">  
+                    <button class="minus-btn" type="button" onclick="decrementCounter(7)">-</button>  
+                </div>  
+                <div id="counter-box-8" class="counter-box">  
+                    <label for="counter-8">8</label>
+                    <button class="plus-btn" type="button" onclick="incrementCounter(8)">+</button>  
+                    <input readonly id="counter-8" value="0" type="number" name="8">  
+                    <button class="minus-btn" type="button" onclick="decrementCounter(8)">-</button>  
+                </div>  
+                <div id="counter-box-9" class="counter-box">  
+                    <label for="counter-9">9</label>
+                    <button class="plus-btn" type="button" onclick="incrementCounter(9)">+</button>  
+                    <input readonly id="counter-9" value="0" type="number" name="9">  
+                    <button class="minus-btn" type="button" onclick="decrementCounter(9)">-</button>  
+                </div>  
+                <div id="counter-box-10" class="counter-box">  
+                    <label for="counter-10">10</label>
+                    <button class="plus-btn" type="button" onclick="incrementCounter(10)">+</button>  
+                    <input readonly id="counter-10" value="0" type="number" name="10">  
+                    <button class="minus-btn" type="button" onclick="decrementCounter(10)">-</button>  
+                </div>  
+                <div id="counter-box-11" class="counter-box">  
+                    <label for="counter-11">11</label>
+                    <button class="plus-btn" type="button" onclick="incrementCounter(11)">+</button>  
+                    <input readonly id="counter-11" value="0" type="number" name="11">  
+                    <button class="minus-btn" type="button" onclick="decrementCounter(11)">-</button>  
+                </div>  
+                <div id="counter-box-12" class="counter-box">  
+                    <label for="counter-12">12</label>
+                    <button class="plus-btn" type="button" onclick="incrementCounter(12)">+</button>  
+                    <input readonly id="counter-12" value="0" type="number" name="12">  
+                    <button class="minus-btn" type="button" onclick="decrementCounter(12)">-</button>  
+                </div>  
+            </div>
+            
+            
+            
+            
+            
+                
+            
+
+            <textarea name="Comments2" rows="7" placeholder="Enter Comments"></textarea>
+            <input type="submit" value="Submit" id="submit">
+            <br>
+        </div>
+        </form>
+    
+
+        <!-- this is for the informations -->
+        <div class="container">
+            <div class = "container">
+                
+
+            </div>
+        </div>
+    
+    
+
+
+
+        
+
+
+    </div>
+    <script src="Google Sheet.js"></script>
+</body>
+</html>

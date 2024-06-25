@@ -1,0 +1,104 @@
+* {
+    box-sizing: border-box;
+    padding: 0;
+    margin: 0;
+    font-family: 'Poppins', sans-serif;
+    font-size: 18px;
+}
+
+body {
+    min-height: 100vh;
+    display: flex;
+    align-items: top;
+    justify-content: center;
+    margin: 0;
+    padding: 20px;
+}
+
+.container {
+    width: 100%;
+    max-width: 500px;
+    padding: 30px;
+    border: 2px solid #eeeeee;
+    border-radius: 10px;
+    background-color: #003b5b;
+}
+
+h4 {
+    margin-bottom: 10px;
+    font-size: 24px;
+    color: white;
+}
+
+input,
+textarea {
+    width: 100%;
+    padding: 10px;
+    margin-bottom: 10px;
+}
+
+#submit {
+    border: none;
+    background-color: orangered;
+    color: white;
+    width: 100%;
+    padding: 10px;
+    margin-top: 10px;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+#submit:hover {
+    background-color: #333333;
+}
+
+label {
+    display: block;
+    margin-bottom: 5px;
+    color: white;
+}
+
+.counter-container {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+}
+
+.counter-box {
+    display: flex;
+    align-items: center;
+    margin: 10px;
+}
+
+.plus-btn, .minus-btn {
+    width: 30px;
+    height: 30px;
+    font-size: 16px;
+    cursor: pointer;
+    background-color: white;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    color: #333;
+}
+
+input[type="number"] {
+    width: 60px; /* Increased width */
+    height: 30px;
+    text-align: center;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    font-size: 16px;
+    margin: 0 10px;
+    background-color: white;
+    color: #333;
+}
+
+.card {  
+	background-color: #003b5b;  
+	padding: 20px;  
+	border: 1px solid #ddd;  
+	border-radius: 10px;  
+	margin-bottom: 20px;  
+	box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);  
+  }  
+  
