@@ -1,11 +1,13 @@
 // link for final report
 const scriptURL = 'https://script.google.com/macros/s/AKfycby-_1ZH5JUXYJk4qzSUVEekfJM5F4QG7qTys67uwXFm2p9q2O_SI1HnqEDzjQnSx30J/exec'
 
-// link for database (nakaya)
+// link for database (nakaya -> main)
 const dbURL = 'https://script.google.com/macros/s/AKfycbwBzPZgoNiUK_ez3AzK5FXFr8_AsmdBjCWGzulG3eh0cryirgVxtMzIF4ehh98QYdkpUg/exec';
 
 // link for worker database
 const workerURL = 'https://script.google.com/macros/s/AKfycbxw4KtgqhSTVI4TKfQuT642LyvnkvYBQSh3IHaWc1GGI--89abQp0bUff-x8-rELeS_VQ/exec';
+
+
 
 const form = document.forms['contact-form']
 const filterValue = '倉知'; // put division here
@@ -128,4 +130,36 @@ function decrementCounter(counterId) {
       counterElement.value = currentValue - 1;
   }
 }
+
+
+
+
+const productNumberInput = document.getElementById('product-number');
+
+// Function to fetch data based on header parameter
+function fetchData(headerValue, searchValue) {
+  fetch(`${dbURL}?header=${headerValue}`)
+    .then(response => response.json())
+    .then(data => {
+      // Find the row where the specified column (headerValue) matches the searchValue
+      const row = data.find(item => item[headerValue] === searchValue);
+      // Display the product number if a matching row is found, otherwise display 'No data found'
+      if (row) {
+        productNumberInput.value = row['品番'];
+      } else {
+        productNumberInput.value = 'No data found';
+      }
+    })
+    .catch(error => {
+      console.error('Error:', error);
+    });
+}
+
+// Usage
+const header = '背番号'; // Set the header value
+const searchValue = 'BM03'; // Set the specific value to search for
+fetchData(header, searchValue);
+
+
+
 
