@@ -21,6 +21,16 @@ form.addEventListener('submit', e => {
     .catch(error => console.error('Error!', error.message))
 })
 
+
+//when checkbox is checked
+function toggleInputs() {
+  var isChecked = document.getElementById('enable-inputs').checked;
+  var inputs = document.querySelectorAll('#Kensa\\ Name, #KDate, #KStart\\ Time, #KEnd\\ Time, .plus-btn, .minus-btn, textarea[name="Comments2"], input[type="submit"]');
+  inputs.forEach(function(input) {
+      input.disabled = !isChecked;
+  });
+}
+
 // when time is pressed
 function setDefaultTime(input) {
   const now = new Date();
@@ -81,9 +91,33 @@ function fetchSubDropdownData(selectedValue) {
         opt.textContent = option;
         subDropdown.appendChild(opt);
       });
+
+      // Alert the value of the second dropdown immediately after populating
+      if (subDropdown.options.length > 0) {
+        productNumberInfo(subDropdown.value);
+        modelInfo(subDropdown.value);
+        shapeInfo(subDropdown.value);
+        RLInfo(subDropdown.value);
+        materialInfo(subDropdown.value);
+        materialCodeInfo(subDropdown.value);
+        materialColorInfo(subDropdown.value);
+      }
+      
+      // Add event listener to the second dropdown to alert the selected value
+      subDropdown.addEventListener('change', function () {
+        const selectedValue = this.value;
+        productNumberInfo(selectedValue);
+        modelInfo(subDropdown.value);
+        shapeInfo(subDropdown.value);
+        RLInfo(subDropdown.value);
+        materialInfo(subDropdown.value);
+        materialCodeInfo(subDropdown.value);
+        materialColorInfo(subDropdown.value);
+      });
     })
     .catch(error => console.error('Error fetching sub-dropdown options:', error));
 }
+
 
 
 
@@ -101,6 +135,8 @@ document.addEventListener('DOMContentLoaded', function () {
     })
     .catch(error => console.error('Error fetching worker name options:', error));
 });
+
+
 
 // suggestion for kensa name
 document.addEventListener('DOMContentLoaded', function () {
@@ -133,33 +169,135 @@ function decrementCounter(counterId) {
 
 
 
+// these codes just variables for displaying info
 
 const productNumberInput = document.getElementById('product-number');
+const modelInput = document.getElementById('model');
+const shapeInput = document.getElementById('shape');
+const RLInput = document.getElementById('R-L');
+const materialInput = document.getElementById('material');
+const materialCodeInput = document.getElementById('material-code');
+const materialColorInput = document.getElementById('material-color');
 
-// Function to fetch data based on header parameter
-function fetchData(headerValue, searchValue) {
-  fetch(`${dbURL}?header=${headerValue}`)
-    .then(response => response.json())
-    .then(data => {
-      // Find the row where the specified column (headerValue) matches the searchValue
-      const row = data.find(item => item[headerValue] === searchValue);
-      // Display the product number if a matching row is found, otherwise display 'No data found'
-      if (row) {
-        productNumberInput.value = row['品番'];
-      } else {
-        productNumberInput.value = 'No data found';
+
+
+// Function to fetch product info
+function productNumberInfo(headerValue) {
+  fetch(`${dbURL}?productNumber=${headerValue}`)
+    .then(response => {
+      if (!response.ok) {
+        throw new Error('Network response was not ok ' + response.statusText);
       }
+      return response.text();
+    })
+    .then(data => {
+      productNumberInput.value = data;
     })
     .catch(error => {
       console.error('Error:', error);
     });
 }
 
-// Usage
-const header = '背番号'; // Set the header value
-const searchValue = 'BM03'; // Set the specific value to search for
-fetchData(header, searchValue);
+// Function to fetch model info
+function modelInfo(headerValue) {
+  fetch(`${dbURL}?model=${headerValue}`)
+    .then(response => {
+      if (!response.ok) {
+        throw new Error('Network response was not ok ' + response.statusText);
+      }
+      return response.text();
+    })
+    .then(data => {
+      modelInput.value = data;
+    })
+    .catch(error => {
+      console.error('Error:', error);
+    });
+}
 
+// Function to fetch shape info
+function shapeInfo(headerValue) {
+  fetch(`${dbURL}?shape=${headerValue}`)
+    .then(response => {
+      if (!response.ok) {
+        throw new Error('Network response was not ok ' + response.statusText);
+      }
+      return response.text();
+    })
+    .then(data => {
+      shapeInput.value = data;
+    })
+    .catch(error => {
+      console.error('Error:', error);
+    });
+}
 
+// Function to fetch R-L info
+function RLInfo(headerValue) {
+  fetch(`${dbURL}?rl=${headerValue}`)
+    .then(response => {
+      if (!response.ok) {
+        throw new Error('Network response was not ok ' + response.statusText);
+      }
+      return response.text();
+    })
+    .then(data => {
+      RLInput.value = data;
+    })
+    .catch(error => {
+      console.error('Error:', error);
+    });
+}
+
+// Function to fetch material info
+function materialInfo(headerValue) {
+  fetch(`${dbURL}?material=${headerValue}`)
+    .then(response => {
+      if (!response.ok) {
+        throw new Error('Network response was not ok ' + response.statusText);
+      }
+      return response.text();
+    })
+    .then(data => {
+      materialInput.value = data;
+    })
+    .catch(error => {
+      console.error('Error:', error);
+    });
+}
+
+// Function to fetch material code info
+function materialCodeInfo(headerValue) {
+  fetch(`${dbURL}?materialcode=${headerValue}`)
+    .then(response => {
+      if (!response.ok) {
+        throw new Error('Network response was not ok ' + response.statusText);
+      }
+      return response.text();
+    })
+    .then(data => {
+      materialCodeInput.value = data;
+    })
+    .catch(error => {
+      console.error('Error:', error);
+    });
+}
+
+// Function to fetch material color info
+function materialColorInfo(headerValue) {
+  fetch(`${dbURL}?materialcolor=${headerValue}`)
+    .then(response => {
+      if (!response.ok) {
+        throw new Error('Network response was not ok ' + response.statusText);
+      }
+      return response.text();
+    })
+    .then(data => {
+      materialColorInput.value = data;
+    })
+    .catch(error => {
+      console.error('Error:', error);
+    });
+}
 
 

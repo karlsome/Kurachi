@@ -101,4 +101,44 @@ input[type="number"] {
 	margin-bottom: 20px;  
 	box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);  
   }  
+
   
+  
+  /* Checkbox Styling */
+.checkbox-container {
+    display: flex;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.checkbox-container input[type="checkbox"] {
+    display: none;
+}
+
+.checkbox-container label {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    color: white;
+}
+
+.checkbox-container label:before {
+    content: '';
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    border: 2px solid white;
+    border-radius: 4px;
+    margin-right: 10px;
+    background-color: transparent;
+    transition: background-color 0.3s, border-color 0.3s;
+}
+
+.checkbox-container input[type="checkbox"]:checked + label:before {
+    background-color: orangered;
+    border-color: orangered;
+}
+
+.checkbox-container label span {
+    font-size: 18px;
+}
