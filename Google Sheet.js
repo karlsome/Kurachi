@@ -22,14 +22,33 @@ form.addEventListener('submit', e => {
 })
 
 
+
 //when checkbox is checked
-function toggleInputs() {
-  var isChecked = document.getElementById('enable-inputs').checked;
-  var inputs = document.querySelectorAll('#Kensa\\ Name, #KDate, #KStart\\ Time, #KEnd\\ Time, .plus-btn, .minus-btn, textarea[name="Comments2"], input[type="submit"]');
-  inputs.forEach(function(input) {
-      input.disabled = !isChecked;
-  });
-}
+// function toggleInputs() {
+//   var isChecked = document.getElementById('enable-inputs').checked;
+//   var inputs = document.querySelectorAll('#Kensa\\ Name, #KDate, #KStart\\ Time, #KEnd\\ Time, .plus-btn, .minus-btn, textarea[name="Comments2"], input[type="submit"]');
+//   inputs.forEach(function(input) {
+//       input.disabled = !isChecked;
+//   });
+// }
+
+ 
+function toggleInputs() {  
+  var isChecked = document.getElementById('enable-inputs').checked;  
+  var inputs = document.querySelectorAll('#Kensa\\ Name, #KDate, #KStart\\ Time, #KEnd\\ Time,.plus-btn,.minus-btn, textarea[name="Comments2"], input[type="submit"]');  
+  inputs.forEach(function(input) {  
+    input.disabled =!isChecked;  
+  });  
+    
+  // Enable all inputs inside the counter container when the checkbox is checked  
+  if (isChecked) {  
+    var counterInputs = document.querySelectorAll('.counter-container input');  
+    counterInputs.forEach(function(input) {  
+      input.disabled = false;  
+    });  
+  }  
+}  
+
 
 // when time is pressed
 function setDefaultTime(input) {
@@ -37,6 +56,7 @@ function setDefaultTime(input) {
   const hours = String(now.getHours()).padStart(2, '0');
   const minutes = String(now.getMinutes()).padStart(2, '0');
   input.value = `${hours}:${minutes}`;
+  calculateTotalTime();
 }
 
 // when date is pressed
@@ -93,6 +113,7 @@ function fetchSubDropdownData(selectedValue) {
       });
 
       // Alert the value of the second dropdown immediately after populating
+      // call function to put value of dropdown 2 to fetch google sheets
       if (subDropdown.options.length > 0) {
         productNumberInfo(subDropdown.value);
         modelInfo(subDropdown.value);
@@ -153,19 +174,40 @@ document.addEventListener('DOMContentLoaded', function () {
     .catch(error => console.error('Error fetching kensa name options:', error));
 });
 
+
+//function for plus minus button
+// Function for plus minus button
 function incrementCounter(counterId) {
   const counterElement = document.getElementById(`counter-${counterId}`);
   let currentValue = parseInt(counterElement.value, 10);
   counterElement.value = currentValue + 1;
+  updateTotal();
 }
 
 function decrementCounter(counterId) {
   const counterElement = document.getElementById(`counter-${counterId}`);
   let currentValue = parseInt(counterElement.value, 10);
   if (currentValue > 0) {
-      counterElement.value = currentValue - 1;
+    counterElement.value = currentValue - 1;
+    updateTotal();
   }
 }
+
+function updateTotal() {
+  let ngTotal = 0;
+  for (let i = 1; i <= 12; i++) {
+    const counterElement = document.getElementById(`counter-${i}`);
+    ngTotal += parseInt(counterElement.value, 10);
+  }
+  document.getElementById('NG total').value = ngTotal;
+  
+  const processQuantity = parseInt(document.getElementById('Process Quantity').value, 10) || 0;
+  const totalQuantity = processQuantity - ngTotal;
+  document.getElementById('total').value = totalQuantity;
+}
+
+// Add event listener to process quantity input
+document.getElementById('Process Quantity').addEventListener('input', updateTotal);
 
 
 
@@ -191,7 +233,8 @@ function productNumberInfo(headerValue) {
       return response.text();
     })
     .then(data => {
-      productNumberInput.value = data;
+      const cleanedData = data.replace(/"/g, '');
+      productNumberInput.value = cleanedData;
     })
     .catch(error => {
       console.error('Error:', error);
@@ -208,7 +251,8 @@ function modelInfo(headerValue) {
       return response.text();
     })
     .then(data => {
-      modelInput.value = data;
+      const cleanedData = data.replace(/"/g, '');
+      modelInput.value = cleanedData;
     })
     .catch(error => {
       console.error('Error:', error);
@@ -225,7 +269,8 @@ function shapeInfo(headerValue) {
       return response.text();
     })
     .then(data => {
-      shapeInput.value = data;
+      const cleanedData = data.replace(/"/g, '');
+      shapeInput.value = cleanedData;
     })
     .catch(error => {
       console.error('Error:', error);
@@ -242,7 +287,8 @@ function RLInfo(headerValue) {
       return response.text();
     })
     .then(data => {
-      RLInput.value = data;
+      const cleanedData = data.replace(/"/g, '');
+      RLInput.value = cleanedData;
     })
     .catch(error => {
       console.error('Error:', error);
@@ -259,7 +305,8 @@ function materialInfo(headerValue) {
       return response.text();
     })
     .then(data => {
-      materialInput.value = data;
+      const cleanedData = data.replace(/"/g, '');
+      materialInput.value = cleanedData;
     })
     .catch(error => {
       console.error('Error:', error);
@@ -276,7 +323,8 @@ function materialCodeInfo(headerValue) {
       return response.text();
     })
     .then(data => {
-      materialCodeInput.value = data;
+      const cleanedData = data.replace(/"/g, '');
+      materialCodeInput.value = cleanedData;
     })
     .catch(error => {
       console.error('Error:', error);
@@ -293,7 +341,8 @@ function materialColorInfo(headerValue) {
       return response.text();
     })
     .then(data => {
-      materialColorInput.value = data;
+      const cleanedData = data.replace(/"/g, '');
+      materialColorInput.value = cleanedData;
     })
     .catch(error => {
       console.error('Error:', error);
@@ -301,3 +350,47 @@ function materialColorInfo(headerValue) {
 }
 
 
+
+
+
+function calculateTotalTime() {
+  const kStartTime = document.getElementById("KStart Time").value;
+  const kEndTime = document.getElementById("KEnd Time").value;
+  const startTime = document.getElementById("Start Time").value;
+  const endTime = document.getElementById("End Time").value;
+  const quantity = document.getElementById("Process Quantity").value;
+
+
+  if (kStartTime && kEndTime && startTime && endTime) {
+      const kStart = new Date(`1970-01-01T${kStartTime}:00Z`);
+      const kEnd = new Date(`1970-01-01T${kEndTime}:00Z`);
+      const start = new Date(`1970-01-01T${startTime}:00Z`);
+      const end = new Date(`1970-01-01T${endTime}:00Z`);
+
+      const kDiff = (kEnd - kStart) / 3600000; // Difference in hours
+      const diff = (end - start) / 3600000; // Difference in hours
+
+      const totalTime = kDiff + diff;
+      
+
+      const diffInSeconds = (end - start) / 1000; // Difference in seconds
+      const cycleTime = (diffInSeconds) / quantity; // Cycle time in seconds
+
+      // Display results
+      document.getElementById("cycleTime").value = cycleTime.toFixed(2);
+
+      document.getElementById("totalTime").value = totalTime.toFixed(2);
+      
+      
+  }
+
+  // if (startTime && endTime) {
+  //   const start = new Date(`1970-01-01T${startTime}:00Z`);
+  //   const end = new Date(`1970-01-01T${endTime}:00Z`);
+  
+  //   const diffInSeconds = (end - start) / 1000; // Difference in seconds
+  //   const cycleTime = (diffInSeconds) / quantity; // Cycle time in seconds
+  //   // Display results
+  //   document.getElementById("cycleTime").value = cycleTime.toFixed(2);
+  // } 
+}

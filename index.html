@@ -20,8 +20,8 @@
             <input list="machine-operator-suggestions" placeholder="Worker's Name" id="Machine Operator" name="Machine Operator">
             <datalist id="machine-operator-suggestions"></datalist>
             <br>
-            <label for="Final Quantity">Final Quantity:</label>
-            <input type="text" name="Final Quantity" id="Final Quantity" placeholder="Quantity">
+            <label for="Process Quantity">Process Quantity:</label>
+            <input type="text" name="Process Quantity" id="Process Quantity" placeholder="Process Quantity">
             <br>
             <label for="Lot No.">Date:</label>
             <input type="date" name="Lot No." id="Lot No." placeholder="Date" onfocus="setDefaultDate(this)">
@@ -133,15 +133,33 @@
         <div id="counter-box-12" class="counter-box">  
             <label for="counter-12">12</label>
             <button class="plus-btn" type="button" onclick="incrementCounter(12)" disabled>+</button>  
-            <input readonly id="counter-12" value="0" type="number" name="12" disabled>  
+            <input readonly id="counter-12" value="0" type="number" name="その他" disabled>  
             <button class="minus-btn" type="button" onclick="decrementCounter(12)" disabled>-</button>  
         </div>  
     </div>
-            
-    <textarea name="Comments2" rows="5" placeholder="Enter Comments" disabled></textarea>
-    <input type="submit" value="Submit" id="submit" disabled>
-    <br>
-</div>
+
+
+    <!-- this displays the total furyo -->
+    <div class="counter-container">
+        <!-- Add the total display element -->
+        <div id="NG-container">
+            <NGlabel for="NG-total">NG Quantity:</label>
+            <input readonly id="NG total" value="0" type="number" name="検査NG">
+        </div>
+        <br><br><br><br>
+        <div id="total-container">
+            <label for="total">TOTAL Quantity:</label>
+            <input readonly id="total" value="0" type="number" name="Final Quantity">
+        </div>
+            </div>
+            <label for="在庫">スペア:</label>
+            <input type="text" name="在庫" id="在庫" placeholder="スペア">
+            <br>
+                    
+            <textarea name="Comments2" rows="5" placeholder="Enter Comments" disabled></textarea>
+            <input type="submit" value="Submit" id="submit" disabled>
+            <br>
+        </div>
 
         
     
@@ -163,6 +181,13 @@
                 <input readonly id="material-code" value="">
                 <label>Material Color:</label>
                 <input readonly id="material-color" value="">
+                <br>
+                <label>Total Time (in hours):</label>
+                <input readonly id="totalTime" value="0" name="Total Time">
+                <br>
+                <label>Cycle Time:</label>
+                <input readonly id="cycleTime" value="0" name="Cycle Time">
+                <br>
 
             </div>
         </div>

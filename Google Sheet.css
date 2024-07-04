@@ -37,6 +37,8 @@ textarea {
     margin-bottom: 10px;
 }
 
+
+
 #submit {
     border: none;
     background-color: orangered;
@@ -56,6 +58,12 @@ label {
     display: block;
     margin-bottom: 5px;
     color: white;
+}
+
+NGlabel {
+    display: block;
+    margin-bottom: 5px;
+    color: red;
 }
 
 .counter-container {
@@ -82,7 +90,7 @@ label {
 }
 
 input[type="number"] {
-    width: 60px; /* Increased width */
+    width: 70px; /* Increased width */
     height: 30px;
     text-align: center;
     border: 1px solid #ccc;
