@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QR Code Scanner</title>
+    <script src="html5-qrcode.min.js"></script>
+</head>
+<body>
+    <button id="scan-button">Scan QR Code</button>
+    <div id="reader" style="width:500px;height:500px;"></div>
+
+    <script>
+        window.addEventListener('load', () => {
+            if (typeof Html5Qrcode === 'undefined') {
+                console.error("Html5Qrcode library is not loaded!");
+                return;
+            }
+
+            document.getElementById('scan-button').addEventListener('click', function() {
+                const html5QrCode = new Html5Qrcode("reader");
+                html5QrCode.start(
+                    { facingMode: "environment" }, // Use rear camera
+                    {
+                        fps: 10, // Sets the framerate to 10 scans per second
+                        qrbox: { width: 250, height: 250 } // Sets the scanning box dimensions
+                    },
+                    qrCodeMessage => {
+                        alert(`QR Code detected: ${qrCodeMessage}`);
+                        html5QrCode.stop().then(ignore => {
+                            // QR Code scanning is stopped.
+                        }).catch(err => {
+                            // Stop failed, handle it.
+                        });
+                    },
+                    errorMessage => {
+                        // parse error, ignore it.
+                    }
+                ).catch(err => {
+                    // Start failed, handle it.
+                });
+            });
+        });
+    </script>
+</body>
+</html>

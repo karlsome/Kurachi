@@ -150,3 +150,20 @@ input[type="number"] {
 .checkbox-container label span {
     font-size: 18px;
 }
+
+/* Container style */
+.image-container {
+    width: 80%; /* Adjust the width as needed */
+    max-width: 600px; /* Maximum width of the container */
+    margin: auto; /* Center the container */
+    border: 2px solid #ccc; /* Optional border for the container */
+    padding: 10px; /* Optional padding for the container */
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); /* Optional shadow for the container */
+}
+
+/* Image style */
+.image-container img {
+    width: 100%; /* Make the image fit within the container */
+    height: auto; /* Maintain the aspect ratio */
+    display: block; /* Remove bottom space */
+}

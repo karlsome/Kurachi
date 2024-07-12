@@ -7,6 +7,9 @@ const dbURL = 'https://script.google.com/macros/s/AKfycbwBzPZgoNiUK_ez3AzK5FXFr8
 // link for worker database
 const workerURL = 'https://script.google.com/macros/s/AKfycbxw4KtgqhSTVI4TKfQuT642LyvnkvYBQSh3IHaWc1GGI--89abQp0bUff-x8-rELeS_VQ/exec';
 
+// link for pictures database
+const picURL = 'https://script.google.com/macros/s/AKfycbwHUW1ia8hNZG-ljsguNq8K4LTPVnB6Ng_GLXIHmtJTdUgGGd2WoiQo9ToF-7PvcJh9bA/exec';
+
 
 
 const form = document.forms['contact-form']
@@ -122,6 +125,7 @@ function fetchSubDropdownData(selectedValue) {
         materialInfo(subDropdown.value);
         materialCodeInfo(subDropdown.value);
         materialColorInfo(subDropdown.value);
+        picLINK(subDropdown.value);
       }
       
       // Add event listener to the second dropdown to alert the selected value
@@ -134,6 +138,7 @@ function fetchSubDropdownData(selectedValue) {
         materialInfo(subDropdown.value);
         materialCodeInfo(subDropdown.value);
         materialColorInfo(subDropdown.value);
+        picLINK(subDropdown.value);
       });
     })
     .catch(error => console.error('Error fetching sub-dropdown options:', error));
@@ -348,6 +353,39 @@ function materialColorInfo(headerValue) {
       console.error('Error:', error);
     });
 }
+
+
+
+
+
+
+// Function to get link from Google Drive
+function picLINK(headerValue) {
+  fetch(`${picURL}?link=${headerValue}`)
+    .then(response => {
+      if (!response.ok) {
+        throw new Error('Network response was not ok ' + response.statusText);
+      }
+      return response.text();
+    })
+    .then(data => {
+      const cleanedData = data.replace(/"/g, '');
+     
+      updateImageSrc(cleanedData);
+    })
+    .catch(error => {
+      console.error('Error:', error);
+    });
+}
+
+// Function to update the image src attribute
+function updateImageSrc(link) {
+  const imageElement = document.getElementById('dynamicImage');
+  imageElement.src = `${link}&sz=s4000`; // this code puts the fetched link to the html picture div
+}
+
+
+
 
 
 
