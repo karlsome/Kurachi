@@ -5,17 +5,22 @@
 </head>
 <body>
 
-
+    
     <!-- this code is for process -->
-    <div class="container">
+    <div class="container">        
         <form method="post" action="" name="contact-form">
             <h4>倉知日報</h4>
             <label for="設備">List</label>
             <select name="設備" id="dropdown">
             </select>
-            <select id="sub-dropdown" name="背番号">
+            <select id="sub-dropdown" name="背番号">  
             <!-- options will be populated dynamically based on the selected value of #dropdown -->
             </select>
+
+            <!-- QR code button -->
+            <button id="scan-button" type="button">Scan QR Code</button>
+            
+            
             <label for="Machine Operator">Machine Operator:</label>
             <input list="machine-operator-suggestions" placeholder="Worker's Name" id="Machine Operator" name="Machine Operator">
             <datalist id="machine-operator-suggestions"></datalist>
@@ -41,10 +46,12 @@
             <br>
     </div>
 
+    
+
 
     <!-- this code is for kensa -->
     
-<div class="container">
+<div class="kensacontainer">
     <h4>
         <input type="checkbox" id="enable-inputs" onclick="toggleInputs()"> 倉知検査
     </h4>
@@ -204,5 +211,6 @@
 
     </div>
     <script src="Google Sheet.js"></script>
+    <script src="html5-qrcode.min.js"></script>
 </body>
 </html>

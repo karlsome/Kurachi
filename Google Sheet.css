@@ -24,6 +24,16 @@ body {
     background-color: #003b5b;
 }
 
+
+.kensacontainer {
+    width: 100%;
+    max-width: 500px;
+    padding: 30px;
+    border: 2px solid #eeeeee;
+    border-radius: 10px;
+    background-color: #FFC240;
+}
+
 h4 {
     margin-bottom: 10px;
     font-size: 24px;
@@ -53,6 +63,26 @@ textarea {
 #submit:hover {
     background-color: #333333;
 }
+
+#scan-button {
+    background-color: #4CAF50; /* Green background */
+    border: none; /* Remove borders */
+    color: white; /* White text */
+    padding: 15px 32px; /* Some padding */
+    text-align: center; /* Centered text */
+    text-decoration: none; /* Remove underline */
+    display: inline-block; /* Get it to line up properly */
+    font-size: 16px; /* Increase font size */
+    margin: 4px 2px; /* Some space around */
+    cursor: pointer; /* Pointer/hand icon */
+    border-radius: 8px; /* Rounded corners */
+    transition: background-color 0.3s; /* Smooth transition */
+}
+
+#scan-button:hover {
+    background-color: #45a049; /* Darker green on hover */
+}
+
 
 label {
     display: block;
@@ -167,3 +197,4 @@ input[type="number"] {
     height: auto; /* Maintain the aspect ratio */
     display: block; /* Remove bottom space */
 }
+

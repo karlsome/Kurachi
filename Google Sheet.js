@@ -25,23 +25,14 @@ form.addEventListener('submit', e => {
 })
 
 
-
-//when checkbox is checked
-// function toggleInputs() {
-//   var isChecked = document.getElementById('enable-inputs').checked;
-//   var inputs = document.querySelectorAll('#Kensa\\ Name, #KDate, #KStart\\ Time, #KEnd\\ Time, .plus-btn, .minus-btn, textarea[name="Comments2"], input[type="submit"]');
-//   inputs.forEach(function(input) {
-//       input.disabled = !isChecked;
-//   });
-// }
-
- 
+ //when checkbox is checked
 function toggleInputs() {  
   var isChecked = document.getElementById('enable-inputs').checked;  
   var inputs = document.querySelectorAll('#Kensa\\ Name, #KDate, #KStart\\ Time, #KEnd\\ Time,.plus-btn,.minus-btn, textarea[name="Comments2"], input[type="submit"]');  
   inputs.forEach(function(input) {  
     input.disabled =!isChecked;  
   });  
+
     
   // Enable all inputs inside the counter container when the checkbox is checked  
   if (isChecked) {  
@@ -356,6 +347,45 @@ function materialColorInfo(headerValue) {
 
 
 
+//This is a listener for the QR Code Button
+document.getElementById('scan-button').addEventListener('click', function() {
+  //pops up window using popup.html
+  const popup = window.open('popup.html', 'QR Scanner', 'width=400,height=300');
+  
+  window.addEventListener('message', function(event) {
+      if (event.origin === window.location.origin) {
+          
+          // event.data is the QR code value which is stored inside BarcodeValue
+          var BarcodeValue = event.data;
+          console.log(`QR Code detected: ${BarcodeValue}`);
+
+          SubDropdownChange(BarcodeValue);
+
+      }
+  });
+});
+
+function SubDropdownChange(selectedValue) {
+  fetch(`${dbURL}?filterE=${selectedValue}`)
+    .then(response => response.json())
+    .then(data => {
+      const subDropdown = document.getElementById('sub-dropdown');
+      
+      subDropdown.value = selectedValue;
+      
+        productNumberInfo(subDropdown.value);
+        modelInfo(subDropdown.value);
+        shapeInfo(subDropdown.value);
+        RLInfo(subDropdown.value);
+        materialInfo(subDropdown.value);
+        materialCodeInfo(subDropdown.value);
+        materialColorInfo(subDropdown.value);
+        picLINK(subDropdown.value);
+    })
+    .catch(error => console.error('Error fetching sub-dropdown options:', error));
+}
+
+ 
 
 
 
@@ -431,4 +461,6 @@ function calculateTotalTime() {
   //   // Display results
   //   document.getElementById("cycleTime").value = cycleTime.toFixed(2);
   // } 
+
+
 }
