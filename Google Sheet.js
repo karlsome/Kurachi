@@ -28,7 +28,7 @@ form.addEventListener('submit', e => {
  //when checkbox is checked
 function toggleInputs() {  
   var isChecked = document.getElementById('enable-inputs').checked;  
-  var inputs = document.querySelectorAll('#Kensa\\ Name, #KDate, #KStart\\ Time, #KEnd\\ Time,.plus-btn,.minus-btn, textarea[name="Comments2"], input[type="submit"]');  
+  var inputs = document.querySelectorAll('#Kensa\\ Name, #KDate, #KStart\\ Time, #KEnd\\ Time,.plus-btn,.minus-btn, textarea[name="Comments2"], input[type="submit"],#在庫');  
   inputs.forEach(function(input) {  
     input.disabled =!isChecked;  
   });  
