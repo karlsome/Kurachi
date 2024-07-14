@@ -10,25 +10,32 @@ nav {
     width: 100%;
     background-color: #333;
     overflow: hidden;
+    display: flex; /* Use flexbox for alignment */
+    align-items: center; /* Center items vertically */
 }
+
+
 nav a {
-    float: left;
     display: block;
     color: #f2f2f2;
     text-align: center;
     padding: 14px 16px;
     text-decoration: none;
     font-size: 17px;
+    flex-grow: 1; /* Allow links to grow and fill available space */
 }
 nav a:hover {
     background-color: #ddd;
     color: black;
 }
-.logo {
-    float: left;
-    display: block;
-    padding: 14px 16px;
+
+/* this is the sasaki coating logo */
+nav img {
+    width: 50px; /* Adjust the width as needed */
+    height: auto; /* Maintain aspect ratio */
+    margin-right: 1px; /* Space between the logo and the nav links */
 }
+
 .container {
     display: flex;
     flex-wrap: wrap;
@@ -68,4 +75,18 @@ nav a:hover {
 
 .centered {
     text-align: center;
+}
+
+.header-logo {
+    display: block;
+    margin: 0 auto;
+}
+
+.header img {
+    width: 14em; /* Adjust the width as needed */
+    height: auto; /* Maintain aspect ratio */
+}
+.header h1 {
+    margin-left: 10px; /* Adjust the space between the logo and the text */
+    font-size: 24px; /* Adjust font size as needed */
 }

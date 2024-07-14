@@ -463,6 +463,8 @@ function calculateTotalTime() {
   //   // Display results
   //   document.getElementById("cycleTime").value = cycleTime.toFixed(2);
   // } 
+}
 
-
+function navigateTo(location) {
+  window.location.href = `machine.html?selected=${location}`;
 }
