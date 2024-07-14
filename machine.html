@@ -42,7 +42,11 @@
                     });
 
                     const img = document.createElement('img');
-                    img.src = `src/machines/${list}.jpg`;
+                    if (list === "自動プレス機") {
+                        img.src = `src/machines/jido.jpg`;
+                    } else {
+                        img.src = `src/machines/${list}.jpg`;
+                    }
                     img.alt = list;
 
                     const label = document.createElement('div');
