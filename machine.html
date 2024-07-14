@@ -57,9 +57,37 @@
                     card.appendChild(label);
                     containers.appendChild(card);
                 });
+
+                // Add the additional card for QR code scanning
+                const qrCard = document.createElement('div');
+                qrCard.classList.add('card');
+                qrCard.addEventListener('click', () => {
+                    const popup = window.open('popup.html', 'QR Scanner', 'width=400,height=300');
+                    
+                    window.addEventListener('message', function(event) {
+                        if (event.origin === window.location.origin) {
+                            var BarcodeValue = event.data;
+                            console.log(`QR Code detected: ${BarcodeValue}`);
+
+                            // Redirect to nippo.html with the QR code value as filter
+                            window.location.href = `nippo.html?selected=${BarcodeValue}&filter=${filterValue}`;
+                        }
+                    });
+                });
+
+                const qrImg = document.createElement('img');
+                qrImg.src = 'src/qr-code.png';  // Path to your QR code image
+                qrImg.alt = 'QR Code Scanner';
+
+                const qrLabel = document.createElement('div');
+                qrLabel.classList.add('label');
+                qrLabel.textContent = 'Scan Machine!';
+
+                qrCard.appendChild(qrImg);
+                qrCard.appendChild(qrLabel);
+                containers.appendChild(qrCard);
             })
             .catch(error => console.error('Error fetching data:', error));
     </script>
-    
 </body>
 </html>

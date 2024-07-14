@@ -454,17 +454,12 @@ function calculateTotalTime() {
       
   }
 
-  // if (startTime && endTime) {
-  //   const start = new Date(`1970-01-01T${startTime}:00Z`);
-  //   const end = new Date(`1970-01-01T${endTime}:00Z`);
-  
-  //   const diffInSeconds = (end - start) / 1000; // Difference in seconds
-  //   const cycleTime = (diffInSeconds) / quantity; // Cycle time in seconds
-  //   // Display results
-  //   document.getElementById("cycleTime").value = cycleTime.toFixed(2);
-  // } 
 }
 
+//this function is from index.html
 function navigateTo(location) {
   window.location.href = `machine.html?selected=${location}`;
 }
+
+
+
