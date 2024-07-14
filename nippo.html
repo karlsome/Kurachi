@@ -14,7 +14,7 @@
                 <a href="machine.html">設備</a>
             </nav>
             <h4 id = "nippoTitle">倉知日報</h4>
-            <label name="設備" id="dropdown"></label>
+            <label>設備:</label><label name="設備" id="dropdown"></label>
             <input type="hidden" name="設備" id="hidden設備">
             <input type="hidden" name="工場" id="hidden工場">
 
@@ -47,8 +47,43 @@
             <br>
             <textarea name="Comments1" rows="5" placeholder="Enter Comments"></textarea>
             <br>
-            <br>
-            <br>
+
+            <!-- This code is for the checklist -->
+            <div>
+                <h4>Checklist</h4>
+                    <div class="checklist-item">
+                        <input type="checkbox" id="confirm-shape" name="confirm-shape">
+                        <label for="confirm-shape">Confirm Shape</label>
+                    </div>
+                    <div class="checklist-item">
+                        <input type="checkbox" id="confirm-material" name="confirm-material">
+                        <label for="confirm-material">Confirm Material</label>
+                    </div>
+                    <div class="checklist-item">
+                        <input type="checkbox" id="confirm-color" name="confirm-color">
+                        <label for="confirm-color">Confirm Color</label>
+                    </div>
+                    <div class="checklist-item">
+                        <input type="checkbox" id="confirm-pin-holes" name="confirm-pin-holes">
+                        <label for="confirm-pin-holes">Confirm Pin Holes</label>
+                    </div>
+                    <div class="checklist-item">
+                        <input type="checkbox" id="confirm-cutting-condition" name="confirm-cutting-condition">
+                        <label for="confirm-cutting-condition">Confirm Cutting Condition</label>
+                    </div>
+                    <div class="checklist-item">
+                        <input type="checkbox" id="confirm-product-number" name="confirm-product-number">
+                        <label for="confirm-product-number">Confirm Product Number</label>
+                    </div>
+                    <div class="checklist-item">
+                        <input type="checkbox" id="confirm-filename" name="confirm-filename">
+                        <label for="confirm-filename">Confirm Filename</label>
+                    </div>
+                    <div class="checklist-item">
+                        <input type="checkbox" id="confirm-sewing-line" name="confirm-sewing-line">
+                        <label for="confirm-sewing-line">Confirm Sewing Line</label>
+                    </div>
+            </div>
     </div>
 
     

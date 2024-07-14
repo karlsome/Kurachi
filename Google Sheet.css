@@ -199,6 +199,7 @@ input[type="number"] {
 }
 
 
+/* CSS code for navigation bar */
 nav {
     width: 100%;
     background-color: #333;
@@ -216,4 +217,15 @@ nav a {
 nav a:hover {
     background-color: #ddd;
     color: black;
+}
+
+/* CSS for checklist */
+.checklist-item {
+    display: flex;
+    align-items: center; /* Change to 'center' for better vertical alignment */
+    margin-bottom: 25px;
+    justify-content: flex-start; /* Align items to the left */
+}
+.checklist-item input {
+    margin-right: 10px;
 }
