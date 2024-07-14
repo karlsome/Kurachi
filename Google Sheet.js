@@ -62,6 +62,8 @@ function setDefaultDate(input) {
   input.value = `${year}-${month}-${day}`;
 }
 
+
+//this function listens to incoming input: selected is the machine value, filter is the factory value
 function getQueryParam(param) {
   const urlParams = new URLSearchParams(window.location.search);
   return urlParams.get(param);
@@ -73,6 +75,8 @@ if (selectedValue) {
   document.getElementById('dropdown').textContent = selectedValue;
   document.getElementById('nippoTitle').textContent = selectedFactory+"日報";
   document.getElementById('checkboxLabel').textContent = selectedFactory+"検査";
+  document.getElementById('hidden設備').value = selectedValue;
+  document.getElementById('hidden工場').value = selectedFactory;
   LoadList(selectedValue);
 }
 
