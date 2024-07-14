@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <link rel="stylesheet" href="Google Sheet.css">
+    <title>自動日報(倉知)</title>
+</head>
+<body>
+    <!-- this code is for process -->
+    <div class="container">        
+        <form method="post" action="" name="contact-form">
+            <nav>
+                <a href="index.html">Home</a>
+                <a href="index.html">工場</a>
+                <a href="machine.html">設備</a>
+            </nav>
+            <h4 id = "nippoTitle">倉知日報</h4>
+            <label name="設備" id="dropdown"></label>
+
+            <select id="sub-dropdown" name="背番号">  
+            <!-- options will be populated dynamically based on the selected value of #dropdown -->
+            </select>
+
+            <!-- QR code button -->
+            <button id="scan-button" type="button">Scan QR Code</button>
+            
+            
+            <label for="Machine Operator">Machine Operator:</label>
+            <input list="machine-operator-suggestions" placeholder="Worker's Name" id="Machine Operator" name="Machine Operator">
+            <datalist id="machine-operator-suggestions"></datalist>
+            <br>
+            <label for="Process Quantity">Process Quantity:</label>
+            <input type="text" name="Process Quantity" id="Process Quantity" placeholder="Process Quantity">
+            <br>
+            <label for="Lot No.">Date:</label>
+            <input type="date" name="Lot No." id="Lot No." placeholder="Date" onfocus="setDefaultDate(this)">
+            <br>
+            <label for="Start Time">Start Time:</label>
+            <input type="time" name="Start Time" id="Start Time" placeholder="Time Start" onfocus="setDefaultTime(this)">
+            <br>
+            <label for="End Time">End Time:</label>
+            <input type="time" name="End Time" id="End Time" placeholder="Time End" onfocus="setDefaultTime(this)">
+            <br>
+            <label for="材料ロット">材料ロット:</label>
+            <input type="text" name="材料ロット" id="材料ロット" placeholder="Material Lot">
+            <br>
+            <textarea name="Comments1" rows="5" placeholder="Enter Comments"></textarea>
+            <br>
+            <br>
+            <br>
+    </div>
+
+    
+
+
+    <!-- this code is for kensa -->
+    
+<div class="kensacontainer">
+    <h4>
+        <label>
+            <input type="checkbox" id="enable-inputs" onclick="toggleInputs()"> 
+            <span id="checkboxLabel">倉知検査</span>
+        </label>
+    </h4>
+    <label for="Kensa Name">Kensa Name:</label>
+    <input list="kensa-name-suggestions" placeholder="Kensa Name" id="Kensa Name" name="Kensa Name" type="text" disabled>
+    <datalist id="kensa-name-suggestions"></datalist>
+    <br>
+    <label for="KDate">KDate:</label>
+    <input type="date" name="KDate" id="KDate" placeholder="KDate" onfocus="setDefaultDate(this)" disabled>
+    <br>
+    <label for="KStart Time">KTime Start:</label>
+    <input type="time" name="KStart Time" id="KStart Time" placeholder="KTime Start" onfocus="setDefaultTime(this)" disabled>
+    <br>
+    <label for="KEnd Time">KTime End:</label>
+    <input type="time" name="KEnd Time" id="KEnd Time" placeholder="KTime End" onfocus="setDefaultTime(this)" disabled>
+    <br>
+
+    <!-- these are for the buttons numbers -->
+    <div class="counter-container">  
+        <div id="counter-box-1" class="counter-box"> 
+            <label for="counter-1">1</label>
+            <button class="plus-btn" type="button" onclick="incrementCounter(1)" disabled>+</button>  
+            <input readonly id="counter-1" value="0" type="number" name="1" disabled>  
+            <button class="minus-btn" type="button" onclick="decrementCounter(1)" disabled>-</button>  
+        </div>  
+        <div id="counter-box-2" class="counter-box">  
+            <label for="counter-2">2</label>
+            <button class="plus-btn" type="button" onclick="incrementCounter(2)" disabled>+</button>  
+            <input readonly id="counter-2" value="0" type="number" name="2" disabled>  
+            <button class="minus-btn" type="button" onclick="decrementCounter(2)" disabled>-</button>  
+        </div>  
+        <div id="counter-box-3" class="counter-box">  
+            <label for="counter-3">3</label>
+            <button class="plus-btn" type="button" onclick="incrementCounter(3)" disabled>+</button>  
+            <input readonly id="counter-3" value="0" type="number" name="3" disabled>  
+            <button class="minus-btn" type="button" onclick="decrementCounter(3)" disabled>-</button>  
+        </div>  
+        <div id="counter-box-4" class="counter-box">  
+            <label for="counter-4">4</label>
+            <button class="plus-btn" type="button" onclick="incrementCounter(4)" disabled>+</button>  
+            <input readonly id="counter-4" value="0" type="number" name="4" disabled>  
+            <button class="minus-btn" type="button" onclick="decrementCounter(4)" disabled>-</button>  
+        </div>  
+        <div id="counter-box-5" class="counter-box">  
+            <label for="counter-5">5</label>
+            <button class="plus-btn" type="button" onclick="incrementCounter(5)" disabled>+</button>  
+            <input readonly id="counter-5" value="0" type="number" name="5" disabled>  
+            <button class="minus-btn" type="button" onclick="decrementCounter(5)" disabled>-</button>  
+        </div>  
+        <div id="counter-box-6" class="counter-box">  
+            <label for="counter-6">6</label>
+            <button class="plus-btn" type="button" onclick="incrementCounter(6)" disabled>+</button>  
+            <input readonly id="counter-6" value="0" type="number" name="6" disabled>  
+            <button class="minus-btn" type="button" onclick="decrementCounter(6)" disabled>-</button>  
+        </div>  
+        <div id="counter-box-7" class="counter-box">  
+            <label for="counter-7">7</label>
+            <button class="plus-btn" type="button" onclick="incrementCounter(7)" disabled>+</button>  
+            <input readonly id="counter-7" value="0" type="number" name="7" disabled>  
+            <button class="minus-btn" type="button" onclick="decrementCounter(7)" disabled>-</button>  
+        </div>  
+        <div id="counter-box-8" class="counter-box">  
+            <label for="counter-8">8</label>
+            <button class="plus-btn" type="button" onclick="incrementCounter(8)" disabled>+</button>  
+            <input readonly id="counter-8" value="0" type="number" name="8" disabled>  
+            <button class="minus-btn" type="button" onclick="decrementCounter(8)" disabled>-</button>  
+        </div>  
+        <div id="counter-box-9" class="counter-box">  
+            <label for="counter-9">9</label>
+            <button class="plus-btn" type="button" onclick="incrementCounter(9)" disabled>+</button>  
+            <input readonly id="counter-9" value="0" type="number" name="9" disabled>  
+            <button class="minus-btn" type="button" onclick="decrementCounter(9)" disabled>-</button>  
+        </div>  
+        <div id="counter-box-10" class="counter-box">  
+            <label for="counter-10">10</label>
+            <button class="plus-btn" type="button" onclick="incrementCounter(10)" disabled>+</button>  
+            <input readonly id="counter-10" value="0" type="number" name="10" disabled>  
+            <button class="minus-btn" type="button" onclick="decrementCounter(10)" disabled>-</button>  
+        </div>  
+        <div id="counter-box-11" class="counter-box">  
+            <label for="counter-11">11</label>
+            <button class="plus-btn" type="button" onclick="incrementCounter(11)" disabled>+</button>  
+            <input readonly id="counter-11" value="0" type="number" name="11" disabled>  
+            <button class="minus-btn" type="button" onclick="decrementCounter(11)" disabled>-</button>  
+        </div>  
+        <div id="counter-box-12" class="counter-box">  
+            <label for="counter-12">12</label>
+            <button class="plus-btn" type="button" onclick="incrementCounter(12)" disabled>+</button>  
+            <input readonly id="counter-12" value="0" type="number" name="その他" disabled>  
+            <button class="minus-btn" type="button" onclick="decrementCounter(12)" disabled>-</button>  
+        </div>  
+    </div>
+
+
+    <!-- this displays the total furyo a -->
+    <div class="counter-container">
+        <!-- Add the total display element -->
+        <div id="NG-container">
+            <NGlabel for="NG-total">NG Quantity:</label>
+            <input readonly id="NG total" value="0" type="number" name="検査NG">
+        </div>
+        <br><br><br><br>
+        <div id="total-container">
+            <label for="total">TOTAL Quantity:</label>
+            <input readonly id="total" value="0" type="number" name="Final Quantity">
+        </div>
+            </div>
+            <label for="在庫">スペア:</label>
+            <input type="text" name="在庫" id="在庫" placeholder="スペア" disabled>
+            <br>
+                    
+            <textarea name="Comments2" rows="5" placeholder="Enter Comments" disabled></textarea>
+            <input type="submit" value="Submit" id="submit" disabled>
+            <br>
+        </div>
+
+        
+    
+
+        <!-- this is for the informations -->
+        <div class="container">
+            <div class = "container">
+                <div class="image-container">
+                    <img id="dynamicImage" src="" alt="Image Description">
+                </div>
+                <label>Product Number:</label>
+                <input readonly id="product-number" value="" name="品番"> 
+                <label>Model:</label>
+                <input readonly id="model" value="" >
+                <label>Shape:</label>
+                <input readonly id="shape" value="">
+                <label>R/L:</label>
+                <input readonly id="R-L" value="">
+                <label>Material:</label>
+                <input readonly id="material" value="">
+                <label>Material Code:</label>
+                <input readonly id="material-code" value="">
+                <label>Material Color:</label>
+                <input readonly id="material-color" value="">
+                <br>
+                <label>Total Time (in hours):</label>
+                <input readonly id="totalTime" value="0" name="Total Time">
+                <br>
+                <label>Cycle Time:</label>
+                <input readonly id="cycleTime" value="0" name="Cycle Time">
+                <br>
+
+            </div>
+        </div>
+    
+    </form>
+
+
+
+        
+
+
+    </div>
+    <script src="Google Sheet.js"></script>
+    <script src="html5-qrcode.min.js"></script>
+</body>
+</html>

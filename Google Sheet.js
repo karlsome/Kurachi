@@ -62,33 +62,35 @@ function setDefaultDate(input) {
   input.value = `${year}-${month}-${day}`;
 }
 
+function getQueryParam(param) {
+  const urlParams = new URLSearchParams(window.location.search);
+  return urlParams.get(param);
+}
+
+const selectedValue = getQueryParam('selected');
+const selectedFactory = getQueryParam('filter');
+if (selectedValue) {
+  document.getElementById('dropdown').textContent = selectedValue;
+  document.getElementById('nippoTitle').textContent = selectedFactory+"日報";
+  document.getElementById('checkboxLabel').textContent = selectedFactory+"検査";
+  LoadList(selectedValue);
+}
+
+
+
+
 // for the dynamic dropdown list (machine list)
-document.addEventListener('DOMContentLoaded', function () {
-  fetch(`${dbURL}?filter=${filterValue}`)
-    .then(response => response.json())
-    .then(data => {
-      const dropdown = document.getElementById('dropdown');
-      
-      // Populate the first dropdown
-      data.forEach(option => {
-        const opt = document.createElement('option');
-        opt.value = option;
-        opt.textContent = option;
-        dropdown.appendChild(opt);
-      });
-      
+function LoadList(selectedValue) {
+  
+       var dropdown = selectedValue;
+          
       // Fetch and populate the second dropdown based on the initial value of the first dropdown
-      const initialSelectedValue = dropdown.value;
-      fetchSubDropdownData(initialSelectedValue);
+      const initialSelectedValue = dropdown;
       
-      // Add an event listener to update the second dropdown when the first dropdown changes
-      dropdown.addEventListener('change', function () {
-        const selectedValue = this.value;
-        fetchSubDropdownData(selectedValue);
-      });
-    })
-    .catch(error => console.error('Error fetching dropdown options:', error));
-});
+      fetchSubDropdownData(initialSelectedValue);
+}
+
+
 
 // Function to fetch and populate the second dropdown
 function fetchSubDropdownData(selectedValue) {

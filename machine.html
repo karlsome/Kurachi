@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <link rel="stylesheet" href="floating card.css">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>設備</title>
+</head>
+<body>
+    <h1 class="centered">自動日報 v3.0</h1>
+    <nav>
+        <a href="index.html">Home</a>
+        <a href="index.html">工場</a>
+        <a href="machine.html">設備</a>
+    </nav>
+    <div class="main-content">
+        <h1 id="label1"></h1>
+        <div id="containers" class="container"></div>
+    </div>
+
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const filterValue = urlParams.get('selected') || 'none';  // Default to 'none' if no parameter is found
+
+        const dbURL = 'https://script.google.com/macros/s/AKfycbwBzPZgoNiUK_ez3AzK5FXFr8_AsmdBjCWGzulG3eh0cryirgVxtMzIF4ehh98QYdkpUg/exec';  // Replace with your actual database URL
+        
+        const label1 = document.getElementById('label1');
+        label1.textContent = filterValue + "の設備選んでください:"; // Set the text content of the h1 element
+        
+        fetch(`${dbURL}?filter=${filterValue}`)
+            .then(response => response.json())
+            .then(data => {
+                const containers = document.getElementById('containers');
+                
+                data.forEach((list, index) => {
+                    const card = document.createElement('div');
+                    card.classList.add('card');
+                    card.addEventListener('click', () => {
+                        window.location.href = `nippo.html?selected=${list}&filter=${filterValue}`;
+                    });
+
+                    const img = document.createElement('img');
+                    img.src = `src/machines/${list}.jpg`;
+                    img.alt = list;
+
+                    const label = document.createElement('div');
+                    label.classList.add('label');
+                    label.textContent = list;
+                    label.addEventListener('click', (event) => {
+                        event.stopPropagation();
+                        window.location.href = `nippo.html?selected=${list}&filter=${filterValue}`;
+                    });
+
+                    card.appendChild(img);
+                    card.appendChild(label);
+                    containers.appendChild(card);
+                });
+            })
+            .catch(error => console.error('Error fetching data:', error));
+    </script>
+</body>
+</html>
