@@ -26,22 +26,42 @@ form.addEventListener('submit', e => {
 
 
  //when checkbox is checked
-function toggleInputs() {  
+ function toggleInputs() {  
   var isChecked = document.getElementById('enable-inputs').checked;  
   var inputs = document.querySelectorAll('#Kensa\\ Name, #KDate, #KStart\\ Time, #KEnd\\ Time,.plus-btn,.minus-btn, textarea[name="Comments2"], input[type="submit"],#在庫');  
   inputs.forEach(function(input) {  
-    input.disabled =!isChecked;  
+      input.disabled = !isChecked;  
   });  
 
-    
   // Enable all inputs inside the counter container when the checkbox is checked  
   if (isChecked) {  
-    var counterInputs = document.querySelectorAll('.counter-container input');  
-    counterInputs.forEach(function(input) {  
-      input.disabled = false;  
-    });  
-  }  
-}  
+      var counterInputs = document.querySelectorAll('.counter-container input');  
+      counterInputs.forEach(function(input) {  
+          input.disabled = false;  
+      });
+      // Set hidden input value to "TRUE"
+      document.getElementById('検査STATUS').value = "TRUE";
+  } else {
+      // Set hidden input value to "false"
+      document.getElementById('検査STATUS').value = "false";
+  }
+}
+// function toggleInputs() {  
+//   var isChecked = document.getElementById('enable-inputs').checked;  
+//   var inputs = document.querySelectorAll('#Kensa\\ Name, #KDate, #KStart\\ Time, #KEnd\\ Time,.plus-btn,.minus-btn, textarea[name="Comments2"], input[type="submit"],#在庫');  
+//   inputs.forEach(function(input) {  
+//     input.disabled =!isChecked;  
+//   });  
+
+    
+//   // Enable all inputs inside the counter container when the checkbox is checked  
+//   if (isChecked) {  
+//     var counterInputs = document.querySelectorAll('.counter-container input');  
+//     counterInputs.forEach(function(input) {  
+//       input.disabled = false;  
+//     });  
+//   }  
+// }  
 
 
 // when time is pressed
@@ -104,6 +124,12 @@ function fetchSubDropdownData(selectedValue) {
       const subDropdown = document.getElementById('sub-dropdown');
       subDropdown.innerHTML = ''; // Clear the existing options
       
+      // Add a default blank option
+      const defaultOption = document.createElement('option');
+      defaultOption.value = '';
+      defaultOption.textContent = '';
+      subDropdown.appendChild(defaultOption);
+
       // Populate the second dropdown
       data.forEach(option => {
         const opt = document.createElement('option');
@@ -112,9 +138,48 @@ function fetchSubDropdownData(selectedValue) {
         subDropdown.appendChild(opt);
       });
 
-      // Alert the value of the second dropdown immediately after populating
-      // call function to put value of dropdown 2 to fetch google sheets
-      if (subDropdown.options.length > 0) {
+      // Add event listener to the second dropdown to alert the selected value
+      subDropdown.addEventListener('change', function () {
+        const selectedValue = this.value;
+        productNumberInfo(selectedValue);
+        modelInfo(selectedValue);
+        shapeInfo(selectedValue);
+        RLInfo(selectedValue);
+        materialInfo(selectedValue);
+        materialCodeInfo(selectedValue);
+        materialColorInfo(selectedValue);
+        picLINK(selectedValue);
+      });
+    })
+    .catch(error => console.error('Error fetching sub-dropdown options:', error));
+}
+
+//This is a listener for the QR Code Button
+document.getElementById('scan-button').addEventListener('click', function() {
+  //pops up window using popup.html
+  const popup = window.open('popup.html', 'QR Scanner', 'width=400,height=300');
+  
+  window.addEventListener('message', function(event) {
+      if (event.origin === window.location.origin) {
+          
+          // event.data is the QR code value which is stored inside BarcodeValue
+          var BarcodeValue = event.data;
+          console.log(`QR Code detected: ${BarcodeValue}`);
+          
+          SubDropdownChange(BarcodeValue);
+
+      }
+  });
+});
+
+function SubDropdownChange(selectedValue) {
+  fetch(`${dbURL}?filterE=${selectedValue}`)
+    .then(response => response.json())
+    .then(data => {
+      const subDropdown = document.getElementById('sub-dropdown');
+      
+      subDropdown.value = selectedValue;
+      
         productNumberInfo(subDropdown.value);
         modelInfo(subDropdown.value);
         shapeInfo(subDropdown.value);
@@ -123,20 +188,6 @@ function fetchSubDropdownData(selectedValue) {
         materialCodeInfo(subDropdown.value);
         materialColorInfo(subDropdown.value);
         picLINK(subDropdown.value);
-      }
-      
-      // Add event listener to the second dropdown to alert the selected value
-      subDropdown.addEventListener('change', function () {
-        const selectedValue = this.value;
-        productNumberInfo(selectedValue);
-        modelInfo(subDropdown.value);
-        shapeInfo(subDropdown.value);
-        RLInfo(subDropdown.value);
-        materialInfo(subDropdown.value);
-        materialCodeInfo(subDropdown.value);
-        materialColorInfo(subDropdown.value);
-        picLINK(subDropdown.value);
-      });
     })
     .catch(error => console.error('Error fetching sub-dropdown options:', error));
 }
@@ -351,47 +402,6 @@ function materialColorInfo(headerValue) {
     });
 }
 
-
-
-//This is a listener for the QR Code Button
-document.getElementById('scan-button').addEventListener('click', function() {
-  //pops up window using popup.html
-  const popup = window.open('popup.html', 'QR Scanner', 'width=400,height=300');
-  
-  window.addEventListener('message', function(event) {
-      if (event.origin === window.location.origin) {
-          
-          // event.data is the QR code value which is stored inside BarcodeValue
-          var BarcodeValue = event.data;
-          console.log(`QR Code detected: ${BarcodeValue}`);
-
-          SubDropdownChange(BarcodeValue);
-
-      }
-  });
-});
-
-function SubDropdownChange(selectedValue) {
-  fetch(`${dbURL}?filterE=${selectedValue}`)
-    .then(response => response.json())
-    .then(data => {
-      const subDropdown = document.getElementById('sub-dropdown');
-      
-      subDropdown.value = selectedValue;
-      
-        productNumberInfo(subDropdown.value);
-        modelInfo(subDropdown.value);
-        shapeInfo(subDropdown.value);
-        RLInfo(subDropdown.value);
-        materialInfo(subDropdown.value);
-        materialCodeInfo(subDropdown.value);
-        materialColorInfo(subDropdown.value);
-        picLINK(subDropdown.value);
-    })
-    .catch(error => console.error('Error fetching sub-dropdown options:', error));
-}
-
- 
 
 
 

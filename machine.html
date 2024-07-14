@@ -73,8 +73,13 @@
                             var BarcodeValue = event.data;
                             console.log(`QR Code detected: ${BarcodeValue}`);
 
-                            // Redirect to nippo.html with the QR code value as filter
-                            window.location.href = `nippo.html?selected=${BarcodeValue}&filter=${filterValue}`;
+                            // Check if the scanned value is in the list
+                            if (data.includes(BarcodeValue)) {
+                                // Redirect to nippo.html with the QR code value as filter
+                                window.location.href = `nippo.html?selected=${BarcodeValue}&filter=${filterValue}`;
+                            } else {
+                                alert('Invalid QR Code');
+                            }
                         }
                     });
                 });
