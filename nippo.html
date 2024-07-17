@@ -17,6 +17,7 @@
             <label>設備:</label><label name="設備" id="dropdown"></label>
             <input type="hidden" name="設備" id="hidden設備">
             <input type="hidden" name="工場" id="hidden工場">
+            <input type="hidden" name="printerCode" id="printerCode">
             <input type="hidden" name="検査STATUS" id="検査STATUS" value="false">
 
             <select id="sub-dropdown" name="背番号">  
@@ -99,6 +100,10 @@
             <span id="checkboxLabel">倉知検査</span>
         </label>
     </h4>
+    <!-- this is the printLabel button -->
+    <button id="printLabel">Print Label</button>
+
+
     <label for="Kensa Name">Kensa Name:</label>
     <input list="kensa-name-suggestions" placeholder="Kensa Name" id="Kensa Name" name="Kensa Name" type="text" disabled>
     <datalist id="kensa-name-suggestions"></datalist>

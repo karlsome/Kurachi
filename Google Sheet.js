@@ -10,6 +10,9 @@ const workerURL = 'https://script.google.com/macros/s/AKfycbxw4KtgqhSTVI4TKfQuT6
 // link for pictures database
 const picURL = 'https://script.google.com/macros/s/AKfycbwHUW1ia8hNZG-ljsguNq8K4LTPVnB6Ng_GLXIHmtJTdUgGGd2WoiQo9ToF-7PvcJh9bA/exec';
 
+//link for printer master database
+const printerCodeURL = 'https://script.google.com/macros/s/AKfycbxP9j_KH4fRe4io777vD-pnt9BQH9IwiS4JRrbsw8DkoDCfaAcdHeH7pbIWIy2ue_8jcQ/exec';
+
 
 
 const form = document.forms['contact-form']
@@ -149,6 +152,7 @@ function fetchSubDropdownData(selectedValue) {
         materialCodeInfo(selectedValue);
         materialColorInfo(selectedValue);
         picLINK(selectedValue);
+        printerCode(selectedValue);
       });
     })
     .catch(error => console.error('Error fetching sub-dropdown options:', error));
@@ -188,6 +192,7 @@ function SubDropdownChange(selectedValue) {
         materialCodeInfo(subDropdown.value);
         materialColorInfo(subDropdown.value);
         picLINK(subDropdown.value);
+        printerCode(selectedValue);
     })
     .catch(error => console.error('Error fetching sub-dropdown options:', error));
 }
@@ -476,4 +481,44 @@ function navigateTo(location) {
 }
 
 
+
+// Function to fetch printer info
+const printerInput = document.getElementById('printerCode');
+function printerCode(headerValue) {
+  fetch(`${printerCodeURL}?printerCode=${headerValue}`)
+    .then(response => {
+      if (!response.ok) {
+        throw new Error('Network response was not ok ' + response.statusText);
+      }
+      return response.text();
+    })
+    .then(data => {
+      const cleanedData = data.replace(/"/g, '');
+      printerInput.value = cleanedData;
+    })
+    .catch(error => {
+      console.error('Error:', error);
+    });
+}
+
+
+document.getElementById('printLabel').addEventListener('click', function(event) {
+  // Prevent the form from submitting
+  event.preventDefault();
+  
+  // Get the value of the hidden input field
+  const printerCode = document.getElementById('printerCode').value;
+  const url = `http://raspberrypi.local:5000/print?text=${printerCode}`;
+
+  // Use the fetch API to open the link in the background
+  fetch(url)
+      .then(response => {
+          if (response.ok) {
+              console.log('Label printed successfully');
+          } else {
+              console.error('Failed to print label');
+          }
+      })
+      .catch(error => console.error('Error:', error));
+});
 
