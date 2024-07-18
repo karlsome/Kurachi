@@ -518,6 +518,6 @@ function printerCode(headerValue) {
     // Set a timer to close the new tab after a delay (e.g., 1 seconds)
     setTimeout(() => {
       newTab.close();
-    }, 1000); // 1000 milliseconds = 1 seconds
+    }, 5000); // 5000 milliseconds = 5 seconds
   });
 
