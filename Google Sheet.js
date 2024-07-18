@@ -508,7 +508,7 @@ document.getElementById('printLabel').addEventListener('click', function(event) 
   
   // Get the value of the hidden input field
   const printerCode = document.getElementById('printerCode').value;
-  const url = `http://raspberrypi.local:5000/print?text=${printerCode}`;
+  const url = `https://raspberrypi.local:5000/print?text=${printerCode}`;
 
   // Use the fetch API to open the link in the background
   fetch(url)
