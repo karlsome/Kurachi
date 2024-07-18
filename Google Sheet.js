@@ -515,10 +515,9 @@ function printerCode(headerValue) {
     // Open a new tab with the desired URL
     const newTab = window.open(url, '_blank');
     
-    // Set a timer to close the new tab after a delay (e.g., 5 seconds)
+    // Set a timer to close the new tab after a delay (e.g., 1 seconds)
     setTimeout(() => {
       newTab.close();
-      // Redirect to the main page after closing the temporary tab
     }, 1000); // 1000 milliseconds = 1 seconds
   });
 
