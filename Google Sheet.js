@@ -484,6 +484,7 @@ function navigateTo(location) {
 
 // Function to fetch printer info
 const printerInput = document.getElementById('printerCode');
+
 function printerCode(headerValue) {
   fetch(`${printerCodeURL}?printerCode=${headerValue}`)
     .then(response => {
@@ -493,7 +494,8 @@ function printerCode(headerValue) {
       return response.text();
     })
     .then(data => {
-      const cleanedData = data.replace(/"/g, '');
+      // Remove square brackets and double quotes
+      const cleanedData = data.replace(/^[\["]+|[\]"]+$/g, '');
       printerInput.value = cleanedData;
     })
     .catch(error => {
@@ -509,9 +511,10 @@ document.getElementById('printLabel').addEventListener('click', function(event) 
   // Get the value of the hidden input field
   const printerCode = document.getElementById('printerCode').value;
   const url = `https://raspberrypi.local:5000/print?text=${printerCode}`;
+  
 
   // Use the fetch API to open the link in the background
-  fetch(url)
+  fetch(url,{mode: 'no-cors'})
       .then(response => {
           if (response.ok) {
               console.log('Label printed successfully');
