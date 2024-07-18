@@ -504,24 +504,42 @@ function printerCode(headerValue) {
 }
 
 
-document.getElementById('printLabel').addEventListener('click', function(event) {
-  // Prevent the form from submitting
-  event.preventDefault();
+// document.getElementById('printLabel').addEventListener('click', function(event) {
+//   // Prevent the form from submitting
+//   event.preventDefault();
   
-  // Get the value of the hidden input field
-  const printerCode = document.getElementById('printerCode').value;
-  const url = `https://raspberrypi.local:5000/print?text=${printerCode}`;
+//   // Get the value of the hidden input field
+//   const printerCode = document.getElementById('printerCode').value;
+//   const url = `https://raspberrypi.local:5000/print?text=${printerCode}`;
   
 
-  // Use the fetch API to open the link in the background
-  fetch(url,{mode: 'no-cors'})
-      .then(response => {
-          if (response.ok) {
-              console.log('Label printed successfully');
-          } else {
-              console.error('Failed to print label');
-          }
-      })
-      .catch(error => console.error('Error:', error));
-});
+//   // Use the fetch API to open the link in the background
+// //   fetch(url,{mode: 'no-cors'})
+// //       .then(response => {
+// //           if (response.ok) {
+// //               console.log('Label printed successfully');
+// //           } else {
+// //               console.error('Failed to print label');
+// //           }
+// //       })
+// //       .catch(error => console.error('Error:', error));
+//   });
+
+  document.getElementById('printLabel').addEventListener('click', function(event) {
+    // Prevent the form from submitting
+    event.preventDefault();
+    
+    // Get the value of the hidden input field
+    const printerCode = document.getElementById('printerCode').value;
+    const url = `http://raspberrypi.local:5000/print?text=${printerCode}`;
+    
+    // Open a new tab with the desired URL
+    const newTab = window.open(url, '_blank');
+    
+    // Set a timer to close the new tab after a delay (e.g., 5 seconds)
+    setTimeout(() => {
+      newTab.close();
+      // Redirect to the main page after closing the temporary tab
+    }, 5000); // 5000 milliseconds = 1 seconds
+  });
 
