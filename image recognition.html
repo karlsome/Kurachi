@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Camera Capture and Highlight Text</title>
+    <style>
+        #photo {
+            cursor: crosshair;
+            position: relative;
+        }
+        .highlight {
+            position: absolute;
+            border: 2px dashed #000;
+            background-color: rgba(255, 255, 0, 0.5);
+            pointer-events: none; /* Prevent the highlight box from interfering with mouse events */
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
+</head>
+<body>
+    <div class="camera">
+        <video id="video" width="320" height="240" autoplay></video>
+        <button id="capture">Capture</button>
+    </div>
+    <canvas id="canvas" style="display:none;"></canvas>
+    <img id="photo" alt="Captured Image" draggable="false">
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const photo = document.getElementById('photo');
+        const captureButton = document.getElementById('capture');
+
+        navigator.mediaDevices.getUserMedia({ video: true })
+            .then(stream => {
+                video.srcObject = stream;
+            })
+            .catch(err => {
+                console.error("Error accessing the camera: ", err);
+            });
+
+        captureButton.addEventListener('click', () => {
+            const context = canvas.getContext('2d');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const data = canvas.toDataURL('image/png');
+            photo.setAttribute('src', data);
+        });
+
+        let isDrawing = false;
+        let startX = 0;
+        let startY = 0;
+        let highlightBox = null;
+
+        photo.addEventListener('mousedown', (e) => {
+            const rect = photo.getBoundingClientRect();
+            isDrawing = true;
+            startX = e.clientX - rect.left;
+            startY = e.clientY - rect.top;
+
+            // Create a highlight box
+            highlightBox = document.createElement('div');
+            highlightBox.classList.add('highlight');
+            highlightBox.style.left = `${startX}px`;
+            highlightBox.style.top = `${startY}px`;
+            highlightBox.style.width = '0px';
+            highlightBox.style.height = '0px';
+            photo.parentElement.appendChild(highlightBox);
+        });
+
+        photo.addEventListener('mousemove', (e) => {
+            if (isDrawing) {
+                const rect = photo.getBoundingClientRect();
+                const currentX = e.clientX - rect.left;
+                const currentY = e.clientY - rect.top;
+                const width = currentX - startX;
+                const height = currentY - startY;
+
+                highlightBox.style.width = `${Math.abs(width)}px`;
+                highlightBox.style.height = `${Math.abs(height)}px`;
+                highlightBox.style.left = `${Math.min(startX, currentX)}px`;
+                highlightBox.style.top = `${Math.min(startY, currentY)}px`;
+            }
+        });
+
+        photo.addEventListener('mouseup', (e) => {
+            if (isDrawing) {
+                isDrawing = false;
+                const rect = photo.getBoundingClientRect();
+                const endX = e.clientX - rect.left;
+                const endY = e.clientY - rect.top;
+                const width = endX - startX;
+                const height = endY - startY;
+
+                const selectionCanvas = document.createElement('canvas');
+                selectionCanvas.width = Math.abs(width);
+                selectionCanvas.height = Math.abs(height);
+                const selectionContext = selectionCanvas.getContext('2d');
+                selectionContext.drawImage(photo, Math.min(startX, endX), Math.min(startY, endY), Math.abs(width), Math.abs(height), 0, 0, Math.abs(width), Math.abs(height));
+
+                const selectionData = selectionCanvas.toDataURL('image/png');
+
+                // Use Tesseract.js to extract text from the selected area
+                Tesseract.recognize(
+                    selectionData,
+                    'eng',
+                    {
+                        logger: m => console.log(m)
+                    }
+                ).then(({ data: { text } }) => {
+                    alert(text); // Display the extracted text in a pop-up window
+                });
+
+                // Optional: Remove the highlight box after use
+                photo.parentElement.removeChild(highlightBox);
+            }
+        });
+
+        photo.addEventListener('dragstart', (e) => {
+            e.preventDefault();
+        });
+    </script>
+</body>
+</html>

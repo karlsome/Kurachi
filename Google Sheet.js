@@ -49,22 +49,19 @@ form.addEventListener('submit', e => {
       document.getElementById('検査STATUS').value = "false";
   }
 }
-// function toggleInputs() {  
-//   var isChecked = document.getElementById('enable-inputs').checked;  
-//   var inputs = document.querySelectorAll('#Kensa\\ Name, #KDate, #KStart\\ Time, #KEnd\\ Time,.plus-btn,.minus-btn, textarea[name="Comments2"], input[type="submit"],#在庫');  
-//   inputs.forEach(function(input) {  
-//     input.disabled =!isChecked;  
-//   });  
 
-    
-//   // Enable all inputs inside the counter container when the checkbox is checked  
-//   if (isChecked) {  
-//     var counterInputs = document.querySelectorAll('.counter-container input');  
-//     counterInputs.forEach(function(input) {  
-//       input.disabled = false;  
-//     });  
-//   }  
-// }  
+document.getElementById('scan-lot').addEventListener('click', () => {
+  const scanWindow = window.open('rectangle overlay.html', 'Scan', 'width=400,height=300');
+  
+  const checkText = setInterval(() => {
+      const scannedText = localStorage.getItem('scannedText');
+      if (scannedText) {
+          document.getElementById('材料ロット').value = scannedText;
+          localStorage.removeItem('scannedText'); // Clear the storage
+          clearInterval(checkText);
+      }
+  }, 500);
+});
 
 
 // when time is pressed
