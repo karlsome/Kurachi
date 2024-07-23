@@ -250,6 +250,7 @@ nav a:hover {
 }
 
 /* Modal styles for scan lot button */
+/* Modal styles */
 .modal {
     display: none;
     position: fixed;
