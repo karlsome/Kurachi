@@ -50,19 +50,97 @@ form.addEventListener('submit', e => {
   }
 }
 
-document.getElementById('scan-lot').addEventListener('click', () => {
-  const scanWindow = window.open('rectangle overlay.html', 'Scan', 'width=400,height=300');
-  
-  const checkText = setInterval(() => {
-      const scannedText = localStorage.getItem('scannedText');
-      if (scannedText) {
-          document.getElementById('材料ロット').value = scannedText;
-          localStorage.removeItem('scannedText'); // Clear the storage
-          clearInterval(checkText);
-      }
-  }, 500);
-});
 
+//this code is for the scan lot number
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const photo = document.getElementById('photo');
+        const captureButton = document.getElementById('capture');
+        const highlightBox = document.getElementById('highlightBox');
+        const modal = document.getElementById('myModal');
+        const span = document.getElementsByClassName('close')[0];
+        
+        const highlightBoxSize = {
+            width: 100,
+            height: 30
+        };
+
+        highlightBox.style.width = `${highlightBoxSize.width}px`;
+        highlightBox.style.height = `${highlightBoxSize.height}px`;
+
+        document.getElementById('scan-lot').addEventListener('click', () => {
+            modal.style.display = 'block';
+            navigator.mediaDevices.getUserMedia({ video: true })
+                .then(stream => {
+                    video.srcObject = stream;
+                })
+                .catch(err => {
+                    console.error("Error accessing the camera: ", err);
+                });
+        });
+
+        span.onclick = () => {
+            modal.style.display = 'none';
+            video.srcObject.getTracks().forEach(track => track.stop()); // Stop the camera
+        };
+
+        window.onclick = event => {
+            if (event.target == modal) {
+                modal.style.display = 'none';
+                video.srcObject.getTracks().forEach(track => track.stop()); // Stop the camera
+            }
+        };
+
+        video.addEventListener('loadedmetadata', () => {
+            highlightBox.style.left = `${(video.offsetWidth - highlightBoxSize.width) / 2}px`;
+            highlightBox.style.top = `${(video.offsetHeight - highlightBoxSize.height) / 2}px`;
+            highlightBox.style.display = 'block';
+        });
+
+        captureButton.addEventListener('click', event => {
+            event.preventDefault();
+            const context = canvas.getContext('2d');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const data = canvas.toDataURL('image/png');
+            photo.setAttribute('src', data);
+
+            const rect = highlightBox.getBoundingClientRect();
+            const videoRect = video.getBoundingClientRect();
+
+            const scaleX = canvas.width / videoRect.width;
+            const scaleY = canvas.height / videoRect.height;
+
+            const captureX = (rect.left - videoRect.left) * scaleX;
+            const captureY = (rect.top - videoRect.top) * scaleY;
+            const captureWidth = highlightBoxSize.width * scaleX;
+            const captureHeight = highlightBoxSize.height * scaleY;
+
+            const selectionCanvas = document.createElement('canvas');
+            selectionCanvas.width = captureWidth;
+            selectionCanvas.height = captureHeight;
+            const selectionContext = selectionCanvas.getContext('2d');
+            selectionContext.drawImage(canvas, captureX, captureY, captureWidth, captureHeight, 0, 0, captureWidth, captureHeight);
+
+            const selectionData = selectionCanvas.toDataURL('image/png');
+
+            Tesseract.recognize(
+                selectionData,
+                'eng',
+                {
+                    logger: m => console.log(m)
+                }
+            ).then(({ data: { text } }) => {
+                alert(text); // Display the extracted text in a pop-up window
+                document.getElementById('材料ロット').value = text; // Set the input value
+                modal.style.display = 'none';
+                video.srcObject.getTracks().forEach(track => track.stop()); // Stop the camera
+            });
+        });
+
+
+        
 
 // when time is pressed
 function setDefaultTime(input) {

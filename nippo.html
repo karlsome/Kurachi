@@ -47,6 +47,18 @@
             <label for="材料ロット">材料ロット:</label>
             <button id="scan-lot" type="button">Scan ロット</button>
             <input type="text" name="材料ロット" id="材料ロット" placeholder="Material Lot">
+            <div id="myModal" class="modal">
+                <div class="modal-content">
+                    <span class="close">&times;</span>
+                    <div class="camera">
+                        <video id="video" width="320" height="240" autoplay></video>
+                        <div id="highlightBox" class="highlight"></div>
+                        <button id="capture">Capture</button>
+                    </div>
+                    <canvas id="canvas" style="display:none;"></canvas>
+                    <img id="photo" alt="Captured Image" draggable="false">
+                </div>
+            </div>
             <br>
             <textarea name="Comments1" rows="5" placeholder="Enter Comments"></textarea>
             <br>
@@ -263,5 +275,6 @@
     </div>
     <script src="Google Sheet.js"></script>
     <script src="html5-qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
 </body>
 </html>
