@@ -62,7 +62,7 @@ const span = document.getElementsByClassName('close')[0];
 
 const highlightBoxSize = {
     width: 50,
-    height: 10
+    height: 20
 };
 
 highlightBox.style.width = `${highlightBoxSize.width}px`;
