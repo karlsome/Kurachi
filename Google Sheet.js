@@ -61,7 +61,7 @@ const modal = document.getElementById('myModal');
 const span = document.getElementsByClassName('close')[0];
 
 const highlightBoxSize = {
-    width: 60,
+    width: 80,
     height: 20
 };
 
