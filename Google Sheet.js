@@ -232,7 +232,7 @@ function fetchSubDropdownData(selectedValue) {
         materialColorInfo(selectedValue);
         picLINK(selectedValue);
         printerCode(selectedValue);
-        sendtoNC(selectedValue);
+        //sendtoNC(selectedValue);
       });
     })
     .catch(error => console.error('Error fetching sub-dropdown options:', error));
@@ -241,10 +241,11 @@ function fetchSubDropdownData(selectedValue) {
 
 //this function sends request to nc cutter's pC
 function sendtoNC(selectedValue){
+  const currentSebanggo = document.getElementById('sub-dropdown').value;
   const machineName = document.getElementById('hidden設備').value;
-  //window.alert(machineName + selectedValue);
+  //window.alert(machineName + currentSebanggo);
   let pcName = "DESKTOP-V36G1SK-2";
-  const url = `http://${machineName}.local:5000/request?filename=${selectedValue}.pce`; //change to 
+  const url = `http://${machineName}.local:5000/request?filename=${currentSebanggo}.pce`; //change to 
     
     // Open a new tab with the desired URL
     const newTab = window.open(url, '_blank');
@@ -253,9 +254,11 @@ function sendtoNC(selectedValue){
     setTimeout(() => {
       newTab.close();
     }, 5000);
-
-
 }
+document.getElementById('sendtoNC').addEventListener('click', sendtoNC);
+
+
+
 
 //This is a listener for the QR Code Button
 document.getElementById('scan-button').addEventListener('click', function() {
