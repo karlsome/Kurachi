@@ -1,59 +1,108 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Camera Capture and Highlight Text</title>
+    <title>Scan Lot Number</title>
     <style>
-        #photo {
-            cursor: crosshair;
-            position: relative;
-        }
-        .highlight {
-            position: absolute;
-            border: 2px solid #000;
-            pointer-events: none; /* Prevent the highlight box from interfering with mouse events */
-        }
-        .camera {
-            position: relative;
-            display: inline-block;
-        }
         #highlightBox {
+            position: absolute;
+            border: 2px dashed red;
             display: none;
         }
+        #myModal {
+            display: none;
+            position: fixed;
+            z-index: 1;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgb(0,0,0);
+            background-color: rgba(0,0,0,0.4);
+            padding-top: 60px;
+        }
+        .modal-content {
+            background-color: #fefefe;
+            margin: 5% auto;
+            padding: 20px;
+            border: 1px solid #888;
+            width: 80%;
+        }
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+        }
+        .close:hover,
+        .close:focus {
+            color: black;
+            text-decoration: none;
+            cursor: pointer;
+        }
     </style>
-    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
 </head>
 <body>
-    <div class="camera">
-        <video id="video" width="320" height="240" autoplay></video>
-        <div id="highlightBox" class="highlight"></div>
-        <button id="capture">Capture</button>
+    <button id="scan-lot">Scan Lot Number</button>
+    <div id="myModal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <video id="video" autoplay></video>
+            <div id="highlightBox"></div>
+            <button id="capture">Capture</button>
+            <canvas id="canvas" style="display: none;"></canvas>
+            <img id="photo" style="display: none;">
+            <br>
+            <label for="ocr-result">OCR Result:</label>
+            <input type="text" id="ocr-result" readonly>
+            <br>
+            <label for="manual-input">Corrected Text:</label>
+            <input type="text" id="manual-input">
+            <button id="save-correction">Save Correction</button>
+        </div>
     </div>
-    <canvas id="canvas" style="display:none;"></canvas>
-    <img id="photo" alt="Captured Image" draggable="false">
+    <input type="text" id="材料ロット">
+
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2.1.1"></script>
     <script>
         const video = document.getElementById('video');
         const canvas = document.getElementById('canvas');
         const photo = document.getElementById('photo');
         const captureButton = document.getElementById('capture');
         const highlightBox = document.getElementById('highlightBox');
-
-        navigator.mediaDevices.getUserMedia({ video: true })
-            .then(stream => {
-                video.srcObject = stream;
-            })
-            .catch(err => {
-                console.error("Error accessing the camera: ", err);
-            });
-
-        const highlightBoxSize = {
-            width: 100,
-            height: 30
-        };
+        const modal = document.getElementById('myModal');
+        const span = document.getElementsByClassName('close')[0];
+        const ocrResultInput = document.getElementById('ocr-result');
+        const manualInput = document.getElementById('manual-input');
+        const saveCorrectionButton = document.getElementById('save-correction');
+        
+        const highlightBoxSize = { width: 80, height: 20 };
 
         highlightBox.style.width = `${highlightBoxSize.width}px`;
         highlightBox.style.height = `${highlightBoxSize.height}px`;
+
+        document.getElementById('scan-lot').addEventListener('click', () => {
+            modal.style.display = 'block';
+            navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+                .then(stream => {
+                    video.srcObject = stream;
+                })
+                .catch(err => {
+                    console.error("Error accessing the camera: ", err);
+                });
+        });
+
+        span.onclick = () => {
+            modal.style.display = 'none';
+            video.srcObject.getTracks().forEach(track => track.stop()); // Stop the camera
+        };
+
+        window.onclick = event => {
+            if (event.target == modal) {
+                modal.style.display = 'none';
+                video.srcObject.getTracks().forEach(track => track.stop()); // Stop the camera
+            }
+        };
 
         video.addEventListener('loadedmetadata', () => {
             highlightBox.style.left = `${(video.offsetWidth - highlightBoxSize.width) / 2}px`;
@@ -61,7 +110,9 @@
             highlightBox.style.display = 'block';
         });
 
-        captureButton.addEventListener('click', () => {
+        captureButton.addEventListener('click', event => {
+            event.preventDefault(); // Prevent the form from submitting
+
             const context = canvas.getContext('2d');
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
@@ -88,18 +139,36 @@
 
             const selectionData = selectionCanvas.toDataURL('image/png');
 
-            // Use Tesseract.js to extract text from the selected area
             Tesseract.recognize(
                 selectionData,
                 'eng',
-                {
-                    logger: m => console.log(m)
-                }
+                { logger: m => console.log(m) }
             ).then(({ data: { text } }) => {
-                alert(text); // Display the extracted text in a pop-up window
-                localStorage.setItem('scannedText', text); // Save the text in local storage
-                window.close(); // Close the overlay window
+                ocrResultInput.value = text; // Display the extracted text in the input field
+                document.getElementById('材料ロット').value = text; // Set the input value
+                modal.style.display = 'none';
+                video.srcObject.getTracks().forEach(track => track.stop()); // Stop the camera
+
+                // Load stored corrections and compare
+                const corrections = JSON.parse(localStorage.getItem('ocrCorrections') || '{}');
+                if (corrections[text]) {
+                    manualInput.value = corrections[text];
+                } else {
+                    manualInput.value = '';
+                }
             });
+        });
+
+        saveCorrectionButton.addEventListener('click', () => {
+            const originalText = ocrResultInput.value;
+            const correctedText = manualInput.value;
+            if (originalText && correctedText) {
+                // Save the correction
+                const corrections = JSON.parse(localStorage.getItem('ocrCorrections') || '{}');
+                corrections[originalText] = correctedText;
+                localStorage.setItem('ocrCorrections', JSON.stringify(corrections));
+                alert('Correction saved!');
+            }
         });
     </script>
 </body>

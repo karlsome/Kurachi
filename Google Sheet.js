@@ -245,7 +245,7 @@ function sendtoNC(selectedValue){
   const machineName = document.getElementById('hidden設備').value;
   //window.alert(machineName + currentSebanggo);
   let pcName = "DESKTOP-V36G1SK-2";
-  const url = `http://${machineName}.local:5000/request?filename=${currentSebanggo}.pce`; //change to 
+  const url = `http://${machineName}:5000/request?filename=${currentSebanggo}.pce`; //change to 
     
     // Open a new tab with the desired URL
     const newTab = window.open(url, '_blank');
