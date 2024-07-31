@@ -311,7 +311,8 @@ function SubDropdownChange(selectedValue) {
 
 // suggestion for worker name
 document.addEventListener('DOMContentLoaded', function () {
-  fetch(`${workerURL}?division=${filterValue}`)
+  const selectedFactory = document.getElementById('hidden工場').value;
+  fetch(`${workerURL}?division=${selectedFactory}`)
     .then(response => response.json())
     .then(data => {
       const datalist = document.getElementById('machine-operator-suggestions');
@@ -328,7 +329,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
 // suggestion for kensa name
 document.addEventListener('DOMContentLoaded', function () {
-  fetch(`${workerURL}?division=${filterValue}`)
+  const selectedFactory = document.getElementById('hidden工場').value;
+  fetch(`${workerURL}?division=${selectedFactory}`)
     .then(response => response.json())
     .then(data => {
       const datalist = document.getElementById('kensa-name-suggestions');
