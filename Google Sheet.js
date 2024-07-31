@@ -387,6 +387,8 @@ const RLInput = document.getElementById('R-L');
 const materialInput = document.getElementById('material');
 const materialCodeInput = document.getElementById('material-code');
 const materialColorInput = document.getElementById('material-color');
+
+// global variable for ip address input container
 const ipInput = document.getElementById('ipInfo');
 
 
