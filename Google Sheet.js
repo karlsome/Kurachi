@@ -249,9 +249,10 @@ function sendtoNC(selectedValue){
   const currentSebanggo = document.getElementById('sub-dropdown').value;
   const machineName = document.getElementById('hidden設備').value;
   //window.alert(machineName + currentSebanggo);
+
   //let pcName = "DESKTOP-V36G1SK-2";
   const url = `http://${ipAddress}:5000/request?filename=${currentSebanggo}.pce`; //change to 
-    
+ 
     // Open a new tab with the desired URL
     const newTab = window.open(url, '_blank');
     
