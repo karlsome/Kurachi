@@ -13,6 +13,9 @@ const picURL = 'https://script.google.com/macros/s/AKfycbwHUW1ia8hNZG-ljsguNq8K4
 //link for printer master database
 const printerCodeURL = 'https://script.google.com/macros/s/AKfycbxP9j_KH4fRe4io777vD-pnt9BQH9IwiS4JRrbsw8DkoDCfaAcdHeH7pbIWIy2ue_8jcQ/exec';
 
+//link for ip address database
+const ipURL = 'https://script.google.com/macros/s/AKfycbyC6-KiT3xwGiahhzhB-L-OOL8ufG0WqnT5mjEelGBKGnbiqVAS6qjT78FlzBUHqTn3Gg/exec';
+
 
 
 const form = document.forms['contact-form']
@@ -232,6 +235,7 @@ function fetchSubDropdownData(selectedValue) {
         materialColorInfo(selectedValue);
         picLINK(selectedValue);
         printerCode(selectedValue);
+        getIP();
         //sendtoNC(selectedValue);
       });
     })
@@ -241,11 +245,12 @@ function fetchSubDropdownData(selectedValue) {
 
 //this function sends request to nc cutter's pC
 function sendtoNC(selectedValue){
+  const ipAddress = document.getElementById('ipInfo').value;
   const currentSebanggo = document.getElementById('sub-dropdown').value;
   const machineName = document.getElementById('hidden設備').value;
   //window.alert(machineName + currentSebanggo);
-  let pcName = "DESKTOP-V36G1SK-2";
-  const url = `http://${machineName}.local:5000/request?filename=${currentSebanggo}.pce`; //change to 
+  //let pcName = "DESKTOP-V36G1SK-2";
+  const url = `http://${ipAddress}:5000/request?filename=${currentSebanggo}.pce`; //change to 
     
     // Open a new tab with the desired URL
     const newTab = window.open(url, '_blank');
@@ -381,6 +386,28 @@ const RLInput = document.getElementById('R-L');
 const materialInput = document.getElementById('material');
 const materialCodeInput = document.getElementById('material-code');
 const materialColorInput = document.getElementById('material-color');
+const ipInput = document.getElementById('ipInfo');
+
+
+
+// Function to fetch ip address
+function getIP() {
+  const machineName = document.getElementById('hidden設備').value;
+  fetch(`${ipURL}?filter=${machineName}`)
+    .then(response => {
+      if (!response.ok) {
+        throw new Error('Network response was not ok ' + response.statusText);
+      }
+      return response.text();
+    })
+    .then(data => {
+      const cleanedData = data.replace(/"/g, '');
+      ipInput.value = cleanedData;
+    })
+    .catch(error => {
+      console.error('Error:', error);
+    });
+}
 
 
 
@@ -515,6 +542,7 @@ function materialColorInfo(headerValue) {
 
 // Function to get link from Google Drive
 function picLINK(headerValue) {
+  
   fetch(`${picURL}?link=${headerValue}`)
     .then(response => {
       if (!response.ok) {
