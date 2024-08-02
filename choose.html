@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Google Sheets Data</title>
+    <style>
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 8px 12px;
+            border: 1px solid #ccc;
+        }
+        th {
+            background-color: #f4f4f4;
+        }
+        tr {
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <h1>Google Sheets Data</h1>
+    <table id="data-table">
+        <thead>
+            <tr>
+                <!-- Table headers will be inserted here dynamically -->
+            </tr>
+        </thead>
+        <tbody>
+            <!-- Table rows will be inserted here dynamically -->
+        </tbody>
+    </table>
+
+    <script>
+        const scriptURL = 'https://script.google.com/macros/s/AKfycby-_1ZH5JUXYJk4qzSUVEekfJM5F4QG7qTys67uwXFm2p9q2O_SI1HnqEDzjQnSx30J/exec';  // Replace with your actual web app URL
+
+        fetch(scriptURL)
+            .then(response => response.json())
+            .then(data => {
+                const headers = data[2];  // Assuming the headers are in the 3rd row (index 2)
+                const table = document.getElementById('data-table');
+                const thead = table.querySelector('thead tr');
+                const tbody = table.querySelector('tbody');
+
+                // Create table headers
+                headers.forEach(header => {
+                    const th = document.createElement('th');
+                    th.textContent = header;
+                    thead.appendChild(th);
+                });
+
+                // Create table rows
+                data.slice(3).forEach(row => {
+                    const tr = document.createElement('tr');
+
+                    row.forEach((cell, index) => {
+                        const td = document.createElement('td');
+                        td.textContent = cell;
+                        tr.appendChild(td);
+                    });
+
+                    tr.addEventListener('click', () => {
+                        const queryParams = headers.map((header, index) => 
+                            `${encodeURIComponent(header)}=${encodeURIComponent(row[index])}`
+                        ).join('&');
+
+                        window.location.href = `kensaOnly.html?${queryParams}`;
+                        
+                    });
+
+                    tbody.appendChild(tr);
+                });
+            })
+            .catch(error => console.error('Error fetching data:', error));
+    </script>
+</body>
+</html>
