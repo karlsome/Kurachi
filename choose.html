@@ -35,6 +35,7 @@
     </table>
 
     <script>
+        
         const scriptURL = 'https://script.google.com/macros/s/AKfycby-_1ZH5JUXYJk4qzSUVEekfJM5F4QG7qTys67uwXFm2p9q2O_SI1HnqEDzjQnSx30J/exec';  // Replace with your actual web app URL
 
         fetch(scriptURL)
@@ -53,7 +54,7 @@
                 });
 
                 // Create table rows
-                data.slice(3).forEach(row => {
+                data.slice(3).forEach((row, rowIndex) => {
                     const tr = document.createElement('tr');
 
                     row.forEach((cell, index) => {
@@ -67,14 +68,16 @@
                             `${encodeURIComponent(header)}=${encodeURIComponent(row[index])}`
                         ).join('&');
 
-                        window.location.href = `kensaOnly.html?${queryParams}`;
-                        
+                        // Include row number in the query parameters
+                        const rowNumber = rowIndex + 4; // Adjusting index to match row number in the sheet
+                        window.location.href = `kensaOnly.html?${queryParams}&row=${rowNumber}`;
                     });
 
                     tbody.appendChild(tr);
                 });
             })
             .catch(error => console.error('Error fetching data:', error));
+
     </script>
 </body>
 </html>

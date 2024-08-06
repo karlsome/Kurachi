@@ -102,7 +102,8 @@
                 const kensaCard = document.createElement('div');
                 kensaCard.classList.add('card');
                 kensaCard.addEventListener('click', () => {
-                    window.location.href = `choose.html`; //put kensa html here
+                    //window.location.href = `choose.html?filter=${filterValue}`; //kojo is passed through filterValue
+                    window.location.href = `choose.html`;
                 });
 
                 const kensaImg = document.createElement('img');
@@ -111,7 +112,7 @@
 
                 const kensaLabel = document.createElement('div');
                 kensaLabel.classList.add('label');
-                kensaLabel.textContent = 'Kensa Only';
+                kensaLabel.textContent = '検査のみ';
 
                 kensaCard.appendChild(kensaImg);
                 kensaCard.appendChild(kensaLabel);

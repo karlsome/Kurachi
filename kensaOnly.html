@@ -20,44 +20,40 @@
             <label>
                 設備: <input type="text" name="設備" id="dropdown>
             </label><br>
-            <input type="hidden" name="設備" id="hidden設備">
+            <input type="hidden" name="設備" id="hidden設備" disabled>
             <input type="hidden" name="工場" id="hidden工場">
             <input type="hidden" name="printerCode" id="printerCode">
             <input type="hidden" name="検査STATUS" id="検査STATUS" value="false">
             <input type="hidden" name="ipInfo" id="ipInfo" value="false">
 
-            <input id="sub-dropdown" name="背番号"> </input>
+            <input id="sub-dropdown" name="背番号" disabled> </input>
             <!-- options will be populated dynamically based on the selected value of #dropdown -->
             
 
-            <!-- QR code button -->
-            <button id="scan-button" type="button">Scan 背番号</button>
-            <br>
-            <br>
-            <button id="sendtoNC" type="button">Send to Machine</button>
+            
             
             
             <label for="Machine Operator">Machine Operator:</label>
-            <input list="machine-operator-suggestions" placeholder="Worker's Name" id="Machine Operator" name="Machine Operator">
+            <input list="machine-operator-suggestions" placeholder="Worker's Name" id="Machine Operator" name="Machine Operator" disabled>
             <datalist id="machine-operator-suggestions"></datalist>
             <br>
             <label for="Process Quantity">Process Quantity:</label>
-            <input type="text" name="Process Quantity" id="Process Quantity" placeholder="Process Quantity">
+            <input type="text" name="Process Quantity" id="Process Quantity" placeholder="Process Quantity" disabled>
             <br>
             <label for="Lot No.">Date:</label>
-            <input type="date" name="Lot No." id="Lot No." placeholder="Date" onfocus="setDefaultDate(this)">
+            <input type="date" name="Lot No." id="Lot No." placeholder="Date" onfocus="setDefaultDate(this)" disabled>
             <br>
             <label for="Start Time">Start Time:</label>
-            <input type="time" name="Start Time" id="Start Time" placeholder="Time Start" onfocus="setDefaultTime(this)">
+            <input type="time" name="Start Time" id="Start Time" placeholder="Time Start" onfocus="setDefaultTime(this)" disabled>
             <br>
             <label for="End Time">End Time:</label>
-            <input type="time" name="End Time" id="End Time" placeholder="Time End" onfocus="setDefaultTime(this)">
+            <input type="time" name="End Time" id="End Time" placeholder="Time End" onfocus="setDefaultTime(this)" disabled>
             <br>
 
 
             <label for="材料ロット">材料ロット:</label>
-        <button id="scan-lot" type="button">Scan ロット</button>
-        <input type="text" name="材料ロット" id="材料ロット" placeholder="Material Lot">
+        
+        <input type="text" name="材料ロット" id="材料ロット" placeholder="Material Lot" disabled>
         <br>
 
         <!-- The Modal -->
@@ -76,45 +72,10 @@
             <br>
 
 
-            <textarea name="Comments1" rows="5" placeholder="Enter Comments"></textarea>
+            <textarea name="Comments1" rows="5" placeholder="Enter Comments"></textarea disabled>
             <br>
 
-            <!-- This code is for the checklist -->
-            <div>
-                <h4>Checklist</h4>
-                    <div class="checklist-item">
-                        <input type="checkbox" id="confirm-shape" name="confirm-shape">
-                        <label for="confirm-shape">Confirm Shape</label>
-                    </div>
-                    <div class="checklist-item">
-                        <input type="checkbox" id="confirm-material" name="confirm-material">
-                        <label for="confirm-material">Confirm Material</label>
-                    </div>
-                    <div class="checklist-item">
-                        <input type="checkbox" id="confirm-color" name="confirm-color">
-                        <label for="confirm-color">Confirm Color</label>
-                    </div>
-                    <div class="checklist-item">
-                        <input type="checkbox" id="confirm-pin-holes" name="confirm-pin-holes">
-                        <label for="confirm-pin-holes">Confirm Pin Holes</label>
-                    </div>
-                    <div class="checklist-item">
-                        <input type="checkbox" id="confirm-cutting-condition" name="confirm-cutting-condition">
-                        <label for="confirm-cutting-condition">Confirm Cutting Condition</label>
-                    </div>
-                    <div class="checklist-item">
-                        <input type="checkbox" id="confirm-product-number" name="confirm-product-number">
-                        <label for="confirm-product-number">Confirm Product Number</label>
-                    </div>
-                    <div class="checklist-item">
-                        <input type="checkbox" id="confirm-filename" name="confirm-filename">
-                        <label for="confirm-filename">Confirm Filename</label>
-                    </div>
-                    <div class="checklist-item">
-                        <input type="checkbox" id="confirm-sewing-line" name="confirm-sewing-line">
-                        <label for="confirm-sewing-line">Confirm Sewing Line</label>
-                    </div>
-            </div>
+            
     </div>
 
     
@@ -243,7 +204,8 @@
             <br>
                     
             <textarea name="Comments2" rows="5" placeholder="Enter Comments" disabled></textarea>
-            <input type="submit" value="Submit" id="submit">
+            <input type="hidden" name="row" value="25"> <!-- Ensure this hidden input holds the row number -->
+            <button type="button" onclick="updateData()">Update</button>
             <br>
         </div>
 
@@ -289,6 +251,64 @@
     <script src="kensa backend.js"></script>
     
     <script>
+        // function getQueryParams() {
+        //     const params = {};
+        //     const queryString = window.location.search.slice(1);
+        //     const pairs = queryString.split('&');
+        //     pairs.forEach(pair => {
+        //         const [key, value] = pair.split('=');
+        //         params[decodeURIComponent(key)] = decodeURIComponent(value);
+        //     });
+        //     return params;
+        // }
+
+        // document.addEventListener('DOMContentLoaded', () => {
+        //     const params = getQueryParams();
+        //     const form = document.getElementById('kensa-form');
+        //     for (const [key, value] of Object.entries(params)) {
+        //         const input = form.elements.namedItem(key);
+        //         if (input) {
+        //             input.value = value;
+        //         }
+        //     }
+        // });
+
+        // function updateData() {
+        //     const form = document.getElementById('kensa-form');
+        //     const formData = new FormData(form);
+        //     const params = new URLSearchParams();
+
+        //     // Append form data to URLSearchParams object
+        //     for (const pair of formData.entries()) {
+        //         params.append(pair[0], pair[1]);
+        //     }
+
+        //     // Ensure the row number is included in the query parameters
+        //     const rowNumber = params.get('row');
+        //     if (!rowNumber) {
+        //         alert('Row number is missing!');
+        //         return;
+        //     }
+
+        //     fetch('https://script.google.com/macros/s/AKfycby-_1ZH5JUXYJk4qzSUVEekfJM5F4QG7qTys67uwXFm2p9q2O_SI1HnqEDzjQnSx30J/exec', {
+        //         method: 'POST',
+        //         headers: {
+        //             'Content-Type': 'application/x-www-form-urlencoded'
+        //         },
+        //         body: params.toString()
+        //     })
+        //     .then(response => response.json())
+        //     .then(data => {
+        //         if (data.result === 'success') {
+        //             alert('Data updated successfully!');
+        //         } else {
+        //             alert('Error: ' + data.error);
+        //         }
+        //     })
+        //     .catch(error => console.error('Error:', error));
+        // }
+
+        // Function to get query parameters from the URL
         function getQueryParams() {
             const params = {};
             const queryString = window.location.search.slice(1);
@@ -300,6 +320,7 @@
             return params;
         }
 
+        // Event listener to populate the form with query parameters on DOMContentLoaded
         document.addEventListener('DOMContentLoaded', () => {
             const params = getQueryParams();
             const form = document.getElementById('kensa-form');
@@ -310,6 +331,46 @@
                 }
             }
         });
+
+        // Function to update data in the Google Sheet
+        function updateData() {
+            const form = document.getElementById('kensa-form');
+            const formData = new FormData(form);
+            const params = new URLSearchParams();
+
+            // Append form data to URLSearchParams object
+            for (const pair of formData.entries()) {
+                params.append(pair[0], pair[1]);
+            }
+
+            // Ensure the row number is included in the query parameters
+            const rowNumber = params.get('row');
+            if (!rowNumber) {
+                alert('Row number is missing!');
+                return;
+            }
+
+            // Fetch request to update the data
+            fetch('https://script.google.com/macros/s/AKfycby-_1ZH5JUXYJk4qzSUVEekfJM5F4QG7qTys67uwXFm2p9q2O_SI1HnqEDzjQnSx30J/exec', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: params.toString()
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.result === 'success') {
+                    alert('Data updated successfully!');
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            })
+            .catch(error => console.error('Error:', error));
+        }
+
+
+
     </script>
 </body>
 </html>

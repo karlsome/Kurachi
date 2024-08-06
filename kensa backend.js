@@ -18,38 +18,37 @@ const ipURL = 'https://script.google.com/macros/s/AKfycbyC6-KiT3xwGiahhzhB-L-OOL
 
 
 
-const form = document.forms['contact-form']
-const filterValue = '倉知'; // put division here
+// const form = document.forms['contact-form']
+// const filterValue = '倉知'; // put division here
 
-// when submit form is pressed
-form.addEventListener('submit', e => {
-  e.preventDefault()
-  fetch(scriptURL, { method: 'POST', body: new FormData(form), mode: 'no-cors' })
-    .then(response => alert("Thank you! your form is submitted successfully."))
-    .then(() => { window.location.reload(); })
-    .catch(error => console.error('Error!', error.message))
-})
+// // when submit form is pressed
+// form.addEventListener('update', e => {
+//   e.preventDefault()
+//   fetch(scriptURL, { method: 'POST', body: new FormData(form), mode: 'no-cors' })
+//     .then(response => alert("Thank you! your form is submitted successfully."))
+//     .then(() => { window.location.reload(); })
+//     .catch(error => console.error('Error!', error.message))
+// })
 
 
- //when checkbox is checked
- function toggleInputs() {  
-  var isChecked = document.getElementById('enable-inputs').checked;  
-  var inputs = document.querySelectorAll('#Kensa\\ Name, #KDate, #KStart\\ Time, #KEnd\\ Time,.plus-btn,.minus-btn, textarea[name="Comments2"], input[type="submit"],#在庫');  
-  inputs.forEach(function(input) {  
-      input.disabled = !isChecked;  
-  });  
+function toggleInputs() {
+  var isChecked = document.getElementById('enable-inputs').checked;
+  var inputs = document.querySelectorAll('#Kensa\\ Name, #KDate, #KStart\\ Time, #KEnd\\ Time, .plus-btn, .minus-btn, textarea[name="Comments2"], input[type="submit"], #在庫');
+  inputs.forEach(function(input) {
+    input.disabled = !isChecked;
+  });
 
-  // Enable all inputs inside the counter container when the checkbox is checked  
-  if (isChecked) {  
-      var counterInputs = document.querySelectorAll('.counter-container input');  
-      counterInputs.forEach(function(input) {  
-          input.disabled = false;  
-      });
-      // Set hidden input value to "TRUE"
-      document.getElementById('検査STATUS').value = "TRUE";
+  // Enable all inputs inside the counter container when the checkbox is checked
+  if (isChecked) {
+    var counterInputs = document.querySelectorAll('.counter-container input');
+    counterInputs.forEach(function(input) {
+      input.disabled = false;
+    });
+    // Set hidden input value to "TRUE"
+    document.getElementById('検査STATUS').value = "TRUE";
   } else {
-      // Set hidden input value to "false"
-      document.getElementById('検査STATUS').value = "false";
+    // Set hidden input value to "false"
+    document.getElementById('検査STATUS').value = "false";
   }
 }
 
@@ -71,20 +70,7 @@ const highlightBoxSize = {
 highlightBox.style.width = `${highlightBoxSize.width}px`;
 highlightBox.style.height = `${highlightBoxSize.height}px`;
 
-document.getElementById('scan-lot').addEventListener('click', () => {
-    modal.style.display = 'block';
-    navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: "environment" 
-        }
-    })
-    .then(stream => {
-        video.srcObject = stream;
-    })
-    .catch(err => {
-        console.error("Error accessing the camera: ", err);
-    });
-});
+
 
 span.onclick = () => {
     modal.style.display = 'none';
@@ -208,6 +194,9 @@ function LoadList(selectedValue) {
 
 document.addEventListener('DOMContentLoaded', function () {
     const currentSebango = document.getElementById('sub-dropdown').value;
+    const enableInputsCheckbox = document.getElementById('enable-inputs');
+    const checkboxValue = document.getElementById('検査STATUS').value;
+
     productNumberInfo(currentSebango);
         modelInfo(currentSebango);
         shapeInfo(currentSebango);
@@ -217,6 +206,20 @@ document.addEventListener('DOMContentLoaded', function () {
         materialColorInfo(currentSebango);
         picLINK(currentSebango);
         printerCode(currentSebango);
+        
+        
+
+        if (checkboxValue === "true") {
+          enableInputsCheckbox.checked = true;
+        } else {
+          enableInputsCheckbox.checked = false;
+        }
+
+        toggleInputs();
+
+        // Add event listener to the checkbox to toggle inputs on change
+        enableInputsCheckbox.addEventListener('change', toggleInputs);
+
 });
 
 // Function to fetch and populate the second dropdown
@@ -261,46 +264,11 @@ function fetchSubDropdownData(selectedValue) {
 }
 
 
-//this function sends request to nc cutter's pC
-function sendtoNC(selectedValue){
-  const ipAddress = document.getElementById('ipInfo').value;
-  const currentSebanggo = document.getElementById('sub-dropdown').value;
-  const machineName = document.getElementById('hidden設備').value;
-  //window.alert(machineName + currentSebanggo);
-
-  //let pcName = "DESKTOP-V36G1SK-2";
-  const url = `http://${ipAddress}:5000/request?filename=${currentSebanggo}.pce`; //change to 
- 
-    // Open a new tab with the desired URL
-    const newTab = window.open(url, '_blank');
-    
-    // Set a timer to close the new tab after a delay (e.g., 1 seconds)
-    setTimeout(() => {
-      newTab.close();
-    }, 5000);
-}
-document.getElementById('sendtoNC').addEventListener('click', sendtoNC);
 
 
 
 
-//This is a listener for the QR Code Button
-document.getElementById('scan-button').addEventListener('click', function() {
-  //pops up window using popup.html
-  const popup = window.open('popup.html', 'QR Scanner', 'width=400,height=300');
-  
-  window.addEventListener('message', function(event) {
-      if (event.origin === window.location.origin) {
-          
-          // event.data is the QR code value which is stored inside BarcodeValue
-          var BarcodeValue = event.data;
-          console.log(`QR Code detected: ${BarcodeValue}`);
-          
-          SubDropdownChange(BarcodeValue);
 
-      }
-  });
-});
 
 function SubDropdownChange(selectedValue) {
   fetch(`${dbURL}?filterE=${selectedValue}`)
