@@ -19,6 +19,10 @@
         tr {
             cursor: pointer;
         }
+        .red {
+            background-color: red;
+            color: white;
+        }
     </style>
 </head>
 <body>
@@ -35,11 +39,18 @@
     </table>
 
     <script>
+        // Get URL parameters
+        const urlParams = new URLSearchParams(window.location.search);
         
+        // Get the value of the 'selected' parameter or default to 'none' if not found
+        const filterValue = urlParams.get('selected') || 'none';
+        
+        // URL of the Google Apps Script web app
         const scriptURL = 'https://script.google.com/macros/s/AKfycby-_1ZH5JUXYJk4qzSUVEekfJM5F4QG7qTys67uwXFm2p9q2O_SI1HnqEDzjQnSx30J/exec';  // Replace with your actual web app URL
 
+        // Fetch data from the Google Apps Script web app
         fetch(scriptURL)
-            .then(response => response.json())
+            .then(response => response.json())  // Parse the JSON response
             .then(data => {
                 const headers = data[2];  // Assuming the headers are in the 3rd row (index 2)
                 const table = document.getElementById('data-table');
@@ -53,31 +64,39 @@
                     thead.appendChild(th);
                 });
 
-                // Create table rows
+                // Create table rows with filter
                 data.slice(3).forEach((row, rowIndex) => {
-                    const tr = document.createElement('tr');
+                    // Check if column J (index 9) matches filterValue and column AI (index 34) is "false"
+                    if (row[9] === filterValue && row[34] === false) {
+                        const tr = document.createElement('tr');
 
-                    row.forEach((cell, index) => {
-                        const td = document.createElement('td');
-                        td.textContent = cell;
-                        tr.appendChild(td);
-                    });
+                        // Create cells for the row
+                        row.forEach((cell, index) => {
+                            const td = document.createElement('td');
+                            td.textContent = cell;
+                            if (index === 34) {  // If this is the cell for column AI (index 34)
+                                td.classList.add('red');  // Add the 'red' class to it
+                            }
+                            tr.appendChild(td);
+                        });
 
-                    tr.addEventListener('click', () => {
-                        const queryParams = headers.map((header, index) => 
-                            `${encodeURIComponent(header)}=${encodeURIComponent(row[index])}`
-                        ).join('&');
+                        // Add click event listener to the row
+                        tr.addEventListener('click', () => {
+                            const queryParams = headers.map((header, index) => 
+                                `${encodeURIComponent(header)}=${encodeURIComponent(row[index])}`
+                            ).join('&');
 
-                        // Include row number in the query parameters
-                        const rowNumber = rowIndex + 4; // Adjusting index to match row number in the sheet
-                        window.location.href = `kensaOnly.html?${queryParams}&row=${rowNumber}`;
-                    });
+                            // Include row number in the query parameters
+                            const rowNumber = rowIndex + 4; // Adjusting index to match row number in the sheet
+                            window.location.href = `kensaOnly.html?${queryParams}&row=${rowNumber}`;
+                        });
 
-                    tbody.appendChild(tr);
+                        // Append the row to the table body
+                        tbody.appendChild(tr);
+                    }
                 });
             })
-            .catch(error => console.error('Error fetching data:', error));
-
+            .catch(error => console.error('Error fetching data:', error));  // Log any errors
     </script>
 </body>
 </html>

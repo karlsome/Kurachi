@@ -102,8 +102,8 @@
                 const kensaCard = document.createElement('div');
                 kensaCard.classList.add('card');
                 kensaCard.addEventListener('click', () => {
-                    //window.location.href = `choose.html?filter=${filterValue}`; //kojo is passed through filterValue
-                    window.location.href = `choose.html`;
+                    window.location.href = `choose.html?selected=${filterValue}`; //kojo is passed through filterValue
+                    //window.location.href = `choose.html`;
                 });
 
                 const kensaImg = document.createElement('img');
