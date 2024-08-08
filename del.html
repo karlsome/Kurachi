@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Offline Form Submission</title>
+</head>
+<body>
+    <form id="myForm">
+        <input type="text" name="Comments1" placeholder="Your Name">
+        <input type="email" name="Comments2" placeholder="Your Email">
+        <button type="submit">Submit</button>
+    </form>
+
+    <script>
+        const form = document.getElementById('myForm');
+        const scriptURL = 'https://script.google.com/macros/s/AKfycby-_1ZH5JUXYJk4qzSUVEekfJM5F4QG7qTys67uwXFm2p9q2O_SI1HnqEDzjQnSx30J/exec';
+
+        form.addEventListener('submit', function(event) {
+            event.preventDefault();
+            const formData = new FormData(form);
+            const data = {};
+            formData.forEach((value, key) => {
+                data[key] = value;
+            });
+
+            if (navigator.onLine) {
+                sendDataToServer([data]);
+            } else {
+                saveDataLocally(data);
+            }
+        });
+
+        window.addEventListener('online', function() {
+            const savedData = JSON.parse(localStorage.getItem('formDataArray') || '[]');
+            if (savedData.length > 0) {
+                sendDataToServer(savedData);
+            }
+        });
+
+        function saveDataLocally(data) {
+            let formDataArray = JSON.parse(localStorage.getItem('formDataArray') || '[]');
+            formDataArray.push(data);
+            localStorage.setItem('formDataArray', JSON.stringify(formDataArray));
+            alert('You are offline. Data has been saved locally.');
+            window.location.reload();
+        }
+
+        function sendDataToServer(dataArray) {
+            dataArray.forEach(data => {
+                fetch(scriptURL, { 
+                    method: 'POST', 
+                    body: new URLSearchParams(data), 
+                    mode: 'no-cors' 
+                })
+                .then(() => {
+                    // Remove the submitted data from localStorage
+                    let formDataArray = JSON.parse(localStorage.getItem('formDataArray') || '[]');
+                    formDataArray = formDataArray.filter(savedData => JSON.stringify(savedData) !== JSON.stringify(data));
+                    localStorage.setItem('formDataArray', JSON.stringify(formDataArray));
+                })
+                .catch(error => {
+                    console.error('Error sending data:', error);
+                });
+            });
+            
+            alert('All offline data sent successfully!');
+            window.location.reload();
+        }
+    </script>
+</body>
+</html>

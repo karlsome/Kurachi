@@ -29,6 +29,57 @@ form.addEventListener('submit', e => {
     .then(() => { window.location.reload(); })
     .catch(error => console.error('Error!', error.message))
 })
+// form.addEventListener('submit', function(event) {
+//   event.preventDefault();
+//   const formData = new FormData(form);
+//   const data = {};
+//   formData.forEach((value, key) => {
+//       data[key] = value;
+//   });
+
+//   if (navigator.onLine) {
+//       sendDataToServer([data]);
+//   } else {
+//       saveDataLocally(data);
+//   }
+// });
+
+// window.addEventListener('online', function() {
+//   const savedData = JSON.parse(localStorage.getItem('formDataArray') || '[]');
+//   if (savedData.length > 0) {
+//       sendDataToServer(savedData);
+//   }
+// });
+
+// function saveDataLocally(data) {
+//   let formDataArray = JSON.parse(localStorage.getItem('formDataArray') || '[]');
+//   formDataArray.push(data);
+//   localStorage.setItem('formDataArray', JSON.stringify(formDataArray));
+//   alert('You are offline. Data has been saved locally.');
+//   window.location.reload();
+// }
+
+// function sendDataToServer(dataArray) {
+//   dataArray.forEach(data => {
+//       fetch(scriptURL, { 
+//           method: 'POST', 
+//           body: new URLSearchParams(data), 
+//           mode: 'no-cors' 
+//       })
+//       .then(() => {
+//           // Remove the submitted data from localStorage
+//           let formDataArray = JSON.parse(localStorage.getItem('formDataArray') || '[]');
+//           formDataArray = formDataArray.filter(savedData => JSON.stringify(savedData) !== JSON.stringify(data));
+//           localStorage.setItem('formDataArray', JSON.stringify(formDataArray));
+//       })
+//       .catch(error => {
+//           console.error('Error sending data:', error);
+//       });
+//   });
+  
+//   alert('All offline data sent successfully!');
+//   window.location.reload();
+// }
 
 
  //when checkbox is checked
