@@ -320,10 +320,14 @@
             return params;
         }
 
+        let KOJO = "";
         // Event listener to populate the form with query parameters on DOMContentLoaded
         document.addEventListener('DOMContentLoaded', () => {
             const params = getQueryParams();
             const form = document.getElementById('kensa-form');
+            const filterValue = params['filterValue']; //filterValue is received here <- sent from choose.html
+            console.log(filterValue);
+            KOJO = filterValue;
             for (const [key, value] of Object.entries(params)) {
                 const input = form.elements.namedItem(key);
                 if (input) {
@@ -362,10 +366,13 @@
             .then(data => {
                 if (data.result === 'success') {
                     alert('Data updated successfully!');
+                    
                 } else {
                     alert('Error: ' + data.error);
                 }
             })
+            .then(() => { window.location.href = `choose.html?selected=${KOJO}`; })
+            
             .catch(error => console.error('Error:', error));
         }
 
