@@ -288,6 +288,13 @@ function fetchSubDropdownData(selectedValue) {
         picLINK(selectedValue);
         printerCode(selectedValue);
         getIP();
+        if (selectedValue == "C78" || selectedValue == "C79") {
+          showVideo('rikeshidown');
+
+        } 
+        //else {
+        //   showVideo('rikeshiup');
+        // }
         //sendtoNC(selectedValue);
       });
     })
@@ -353,6 +360,7 @@ function SubDropdownChange(selectedValue) {
         materialColorInfo(subDropdown.value);
         picLINK(subDropdown.value);
         printerCode(selectedValue);
+        
         
     })
     .catch(error => console.error('Error fetching sub-dropdown options:', error));
@@ -728,4 +736,49 @@ function printerCode(headerValue) {
       newTab.close();
     }, 5000); // 5000 milliseconds = 5 seconds
   });
+
+
+// script.js
+
+function showVideo(videoToShowId) {
+  const videoContainer = document.getElementById('videoContainer');
+  const videoToShow = document.getElementById(videoToShowId);
+  const allVideos = document.querySelectorAll('.video-element');
+
+  // Hide all video elements and pause them
+  allVideos.forEach(video => {
+    video.classList.add('hidden');
+    video.classList.remove('active-video'); // Remove active-video class
+    video.pause();
+    video.currentTime = 0;
+  });
+
+  // Show the video container and the specific video
+  videoContainer.classList.remove('hidden');
+  videoToShow.classList.remove('hidden');
+  videoToShow.classList.add('active-video'); // Add active-video class
+
+  // Autoplay the video
+  videoToShow.play();
+
+  // Automatically hide the video container after 6 seconds
+  setTimeout(closeVideoPopup, 6000);
+}
+
+
+function closeVideoPopup() {
+  const videoContainer = document.getElementById('videoContainer');
+  const allVideos = document.querySelectorAll('.video-element');
+
+  // Hide the video container and all videos
+  videoContainer.classList.add('hidden');
+  allVideos.forEach(video => {
+    video.classList.add('hidden');
+    video.pause();
+    video.currentTime = 0;
+  });
+}
+
+
+
 

@@ -314,3 +314,73 @@ nav a:hover {
 #highlightBox {
     display: none;
 }
+
+
+/* styles.css */
+
+/* Initially hide the video container */
+#videoContainer.hidden {
+    display: none;
+}
+
+/* Style the video popup with a larger size */
+.video-popup {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    /* background-color: rgba(0, 0, 0, 0.8); */
+    padding: 20px;
+    border-radius: 8px;
+    z-index: 1000;
+    width: 80%;
+    max-width: 800px;
+    height: 60%;
+    max-height: 450px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+  
+  
+  
+
+/* Close button style */
+.close-btn {
+    position: absolute;
+    top: 5px;
+    right: 10px;
+    background: none;
+    border: none;
+    font-size: 24px;
+    color: white;
+    cursor: pointer;
+}
+
+.video-element.hidden {
+    visibility: hidden;
+    opacity: 0;
+  }
+  
+  .video-element:not(.hidden) {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+  
+  .video-element:not(.active-video) {
+    visibility: hidden;
+    opacity: 0;
+  }
+  
+  
+
+/* Show the video element when it's not hidden */
+#videoContainer:not(.hidden) .video-element {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+
+

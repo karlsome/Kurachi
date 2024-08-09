@@ -22,6 +22,8 @@
             <input type="hidden" name="検査STATUS" id="検査STATUS" value="false">
             <input type="hidden" name="ipInfo" id="ipInfo" value="false">
 
+           
+
             <select id="sub-dropdown" name="背番号">  
             <!-- options will be populated dynamically based on the selected value of #dropdown -->
             </select>
@@ -30,6 +32,25 @@
             <button id="scan-button" type="button">Scan 背番号</button>
             <br>
             <br>
+            
+            <div id="videoContainer" class="hidden">
+              <div class="video-popup">
+                <button class="close-btn" onclick="closeVideoPopup()">×</button>
+                <video id="rikeshidown" class="video-element hidden" controls>
+                  <source src="src/Rikeshi down.mp4" type="video/mp4">
+                  Your browser does not support the video tag.
+                </video>
+                <video id="rikeshiup" class="video-element hidden" controls>
+                  <source src="src/Rikeshi UP.mp4" type="video/mp4">
+                  Your browser does not support the video tag.
+                </video>
+              </div>
+            </div>
+            
+
+
+
+
             <button id="sendtoNC" type="button">Send to Machine</button>
             
             
