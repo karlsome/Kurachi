@@ -6,6 +6,10 @@
     font-size: 18px;
 }
 
+html {
+    overscroll-behavior: none;
+  }
+
 body {
     min-height: 100vh;
     display: flex;
@@ -13,6 +17,7 @@ body {
     justify-content: center;
     margin: 0;
     padding: 20px;
+    overscroll-behavior: none;
 }
 
 .container {

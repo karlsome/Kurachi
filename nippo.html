@@ -55,20 +55,20 @@
             <button id="sendtoNC" type="button">Send to Machine</button>
             
             
-            <label for="Machine Operator">Machine Operator:</label>
+            <label for="Machine Operator">作業者:</label>
             <input list="machine-operator-suggestions" placeholder="Worker's Name" id="Machine Operator" name="Machine Operator">
             <datalist id="machine-operator-suggestions"></datalist>
             <br>
-            <label for="Process Quantity">Process Quantity:</label>
+            <label for="Process Quantity">加工数（良品）:</label>
             <input type="text" name="Process Quantity" id="Process Quantity" placeholder="Process Quantity">
             <br>
-            <label for="Lot No.">Date:</label>
+            <label for="Lot No.">加工日:</label>
             <input type="date" name="Lot No." id="Lot No." placeholder="Date" onfocus="setDefaultDate(this)">
             <br>
-            <label for="Start Time">Start Time:</label>
+            <label for="Start Time">加工開始時間:</label>
             <input type="time" name="Start Time" id="Start Time" placeholder="Time Start" onfocus="setDefaultTime(this)">
             <br>
-            <label for="End Time">End Time:</label>
+            <label for="End Time">加工終了時間:</label>
             <input type="time" name="End Time" id="End Time" placeholder="Time End" onfocus="setDefaultTime(this)">
             <br>
 
@@ -152,17 +152,17 @@
 
 
 
-    <label for="Kensa Name">Kensa Name:</label>
+    <label for="Kensa Name">検査者:</label>
     <input list="kensa-name-suggestions" placeholder="Kensa Name" id="Kensa Name" name="Kensa Name" type="text" disabled>
     <datalist id="kensa-name-suggestions"></datalist>
     <br>
-    <label for="KDate">KDate:</label>
+    <label for="KDate">検査日付:</label>
     <input type="date" name="KDate" id="KDate" placeholder="KDate" onfocus="setDefaultDate(this)" disabled>
     <br>
-    <label for="KStart Time">KTime Start:</label>
+    <label for="KStart Time">検査開始時間:</label>
     <input type="time" name="KStart Time" id="KStart Time" placeholder="KTime Start" onfocus="setDefaultTime(this)" disabled>
     <br>
-    <label for="KEnd Time">KTime End:</label>
+    <label for="KEnd Time">検査終了時間:</label>
     <input type="time" name="KEnd Time" id="KEnd Time" placeholder="KTime End" onfocus="setDefaultTime(this)" disabled>
     <br>
 
@@ -252,12 +252,12 @@
         </div>
         <br><br><br><br>
         <div id="total-container">
-            <label for="total">TOTAL Quantity:</label>
+            <label for="total">良品合計(TOTAL):</label>
             <input readonly id="total" value="0" type="number" name="Final Quantity">
         </div>
             </div>
             <label for="在庫">スペア:</label>
-            <input type="text" name="在庫" id="在庫" placeholder="スペア" disabled>
+            <input type="text" name="在庫" id="在庫" placeholder="Spare" disabled>
             <br>
                     
             <textarea name="Comments2" rows="5" placeholder="Enter Comments" disabled></textarea>
