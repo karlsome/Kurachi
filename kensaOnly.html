@@ -251,62 +251,6 @@
     <script src="kensa backend.js"></script>
     
     <script>
-        // function getQueryParams() {
-        //     const params = {};
-        //     const queryString = window.location.search.slice(1);
-        //     const pairs = queryString.split('&');
-        //     pairs.forEach(pair => {
-        //         const [key, value] = pair.split('=');
-        //         params[decodeURIComponent(key)] = decodeURIComponent(value);
-        //     });
-        //     return params;
-        // }
-
-        // document.addEventListener('DOMContentLoaded', () => {
-        //     const params = getQueryParams();
-        //     const form = document.getElementById('kensa-form');
-        //     for (const [key, value] of Object.entries(params)) {
-        //         const input = form.elements.namedItem(key);
-        //         if (input) {
-        //             input.value = value;
-        //         }
-        //     }
-        // });
-
-        // function updateData() {
-        //     const form = document.getElementById('kensa-form');
-        //     const formData = new FormData(form);
-        //     const params = new URLSearchParams();
-
-        //     // Append form data to URLSearchParams object
-        //     for (const pair of formData.entries()) {
-        //         params.append(pair[0], pair[1]);
-        //     }
-
-        //     // Ensure the row number is included in the query parameters
-        //     const rowNumber = params.get('row');
-        //     if (!rowNumber) {
-        //         alert('Row number is missing!');
-        //         return;
-        //     }
-
-        //     fetch('https://script.google.com/macros/s/AKfycby-_1ZH5JUXYJk4qzSUVEekfJM5F4QG7qTys67uwXFm2p9q2O_SI1HnqEDzjQnSx30J/exec', {
-        //         method: 'POST',
-        //         headers: {
-        //             'Content-Type': 'application/x-www-form-urlencoded'
-        //         },
-        //         body: params.toString()
-        //     })
-        //     .then(response => response.json())
-        //     .then(data => {
-        //         if (data.result === 'success') {
-        //             alert('Data updated successfully!');
-        //         } else {
-        //             alert('Error: ' + data.error);
-        //         }
-        //     })
-        //     .catch(error => console.error('Error:', error));
-        // }
 
         // Function to get query parameters from the URL
         function getQueryParams() {

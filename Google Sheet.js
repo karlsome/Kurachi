@@ -276,7 +276,10 @@ function fetchSubDropdownData(selectedValue) {
       });
 
       // Add event listener to the second dropdown to alert the selected value
+      // selectedValue is Sebanggo
+      
       subDropdown.addEventListener('change', function () {
+        const rikeshiInput2 = document.getElementById('rikeshi');
         const selectedValue = this.value;
         productNumberInfo(selectedValue);
         modelInfo(selectedValue);
@@ -287,14 +290,9 @@ function fetchSubDropdownData(selectedValue) {
         materialColorInfo(selectedValue);
         picLINK(selectedValue);
         printerCode(selectedValue);
+        getRikeshi(selectedValue);
         getIP();
-        if (selectedValue == "C78" || selectedValue == "C79") {
-          showVideo('rikeshidown');
-
-        } 
-        //else {
-        //   showVideo('rikeshiup');
-        // }
+        
         //sendtoNC(selectedValue);
       });
     })
@@ -449,6 +447,7 @@ const RLInput = document.getElementById('R-L');
 const materialInput = document.getElementById('material');
 const materialCodeInput = document.getElementById('material-code');
 const materialColorInput = document.getElementById('material-color');
+const rikeshiInput = document.getElementById('rikeshi');
 
 // global variable for ip address input container
 const ipInput = document.getElementById('ipInfo');
@@ -604,6 +603,27 @@ function materialColorInfo(headerValue) {
 
 
 
+// Function to fetch rikeshi up or down color info
+function getRikeshi(headerValue) {
+  fetch(`${dbURL}?rikeshi=${headerValue}`)
+    .then(response => {
+      if (!response.ok) {
+        throw new Error('Network response was not ok ' + response.statusText);
+      }
+      return response.text();
+    })
+    .then(data => {
+      const cleanedData = data.replace(/"/g, '');
+      rikeshiInput.value = cleanedData;
+      sendtoShowVideo(cleanedData);
+    })
+    .catch(error => {
+      console.error('Error:', error);
+    });
+}
+
+
+
 
 // Function to get link from Google Drive
 function picLINK(headerValue) {
@@ -637,7 +657,7 @@ function updateImageSrc(link) {
 
 
 
-
+//this function calculates time cycle = total / time (seconds/piece)
 function calculateTotalTime() {
   const kStartTime = document.getElementById("KStart Time").value;
   const kEndTime = document.getElementById("KEnd Time").value;
@@ -738,7 +758,21 @@ function printerCode(headerValue) {
   });
 
 
-// script.js
+
+//this function is just to send value of showVideo which is either rikeshidown or up
+function sendtoShowVideo(rikeshivalue){
+  
+      if (rikeshivalue == "下") {
+        showVideo('rikeshidown');
+      } 
+      else if (rikeshivalue == "上") {
+        showVideo('rikeshiup');
+      }
+}
+
+
+
+// this code is to show video either up or down rikeshi
 
 function showVideo(videoToShowId) {
   const videoContainer = document.getElementById('videoContainer');
@@ -761,12 +795,14 @@ function showVideo(videoToShowId) {
   // Autoplay the video
   videoToShow.play();
 
-  // Automatically hide the video container after 6 seconds
-  setTimeout(closeVideoPopup, 6000);
+  // Automatically hide the video container after 4 seconds
+  setTimeout(closeVideoPopup, 4000);
 }
 
 
 function closeVideoPopup() {
+  window.alert("CONFIRM RELEASE PAPER DIRECTION");
+  window.alert("離型紙セット確認する事");
   const videoContainer = document.getElementById('videoContainer');
   const allVideos = document.querySelectorAll('.video-element');
 
