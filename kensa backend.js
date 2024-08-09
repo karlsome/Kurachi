@@ -18,17 +18,7 @@ const ipURL = 'https://script.google.com/macros/s/AKfycbyC6-KiT3xwGiahhzhB-L-OOL
 
 
 
-// const form = document.forms['contact-form']
-// const filterValue = '倉知'; // put division here
 
-// // when submit form is pressed
-// form.addEventListener('update', e => {
-//   e.preventDefault()
-//   fetch(scriptURL, { method: 'POST', body: new FormData(form), mode: 'no-cors' })
-//     .then(response => alert("Thank you! your form is submitted successfully."))
-//     .then(() => { window.location.reload(); })
-//     .catch(error => console.error('Error!', error.message))
-// })
 
 
 function toggleInputs() {
@@ -141,7 +131,7 @@ function setDefaultTime(input) {
   const hours = String(now.getHours()).padStart(2, '0');
   const minutes = String(now.getMinutes()).padStart(2, '0');
   input.value = `${hours}:${minutes}`;
-  calculateTotalTime();
+  //calculateTotalTime();
 }
 
 // when date is pressed
@@ -575,6 +565,26 @@ function calculateTotalTime() {
       document.getElementById("totalTime").value = totalTime.toFixed(2);
       
       
+  } else if (startTime && endTime){
+    
+    const start = new Date(`1970-01-01T${startTime}:00Z`);
+    const end = new Date(`1970-01-01T${endTime}:00Z`);
+
+    
+    const diff = (end - start) / 3600000; // Difference in hours
+
+    const totalTime = 0 + diff;
+    
+
+    const diffInSeconds = (end - start) / 1000; // Difference in seconds
+    const cycleTime = (diffInSeconds) / quantity; // Cycle time in seconds
+
+    // Display results
+    document.getElementById("cycleTime").value = cycleTime.toFixed(2);
+
+    document.getElementById("totalTime").value = totalTime.toFixed(2);
+
+
   }
 
 }

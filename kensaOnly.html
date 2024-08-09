@@ -338,6 +338,7 @@
 
         // Function to update data in the Google Sheet
         function updateData() {
+            calculateTotalTime();
             const form = document.getElementById('kensa-form');
             const formData = new FormData(form);
             const params = new URLSearchParams();
