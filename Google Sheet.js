@@ -292,11 +292,36 @@ function fetchSubDropdownData(selectedValue) {
         printerCode(selectedValue);
         getRikeshi(selectedValue);
         getIP();
+        updateSheetStatus();
+
         
         //sendtoNC(selectedValue);
       });
     })
     .catch(error => console.error('Error fetching sub-dropdown options:', error));
+}
+
+function updateSheetStatus(){
+  fetch('https://script.google.com/macros/s/AKfycbwbL30hlX9nBlQH4dwxlbdxSM5kJtgtNEQJQInA1mgXlEhYJxFHykZkdXV38deR6P83Ow/exec', {
+    method: 'POST',
+    mode: 'no-cors',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded'
+    },
+    body: new URLSearchParams({
+      'current': 'BM03',
+      'machine': 'OZNC01'
+    })
+  })
+  .then(response => response.text())
+  .then(data => {
+    console.log(data);
+  })
+  .catch(error => {
+    console.error('Error:', error);
+  });
+  
+
 }
 
 
