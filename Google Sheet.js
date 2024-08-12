@@ -16,71 +16,24 @@ const printerCodeURL = 'https://script.google.com/macros/s/AKfycbxP9j_KH4fRe4io7
 //link for ip address database
 const ipURL = 'https://script.google.com/macros/s/AKfycbyC6-KiT3xwGiahhzhB-L-OOL8ufG0WqnT5mjEelGBKGnbiqVAS6qjT78FlzBUHqTn3Gg/exec';
 
+const googleSheetLiveStatusURL = 'https://script.google.com/macros/s/AKfycbwbL30hlX9nBlQH4dwxlbdxSM5kJtgtNEQJQInA1mgXlEhYJxFHykZkdXV38deR6P83Ow/exec';
 
-
+const blank = " ";
 const form = document.forms['contact-form']
 const filterValue = '倉知'; // put division here
 
+
 // when submit form is pressed
 form.addEventListener('submit', e => {
+  const currentMachine = document.getElementById("hidden設備").value;
   e.preventDefault();
   calculateTotalTime();
   fetch(scriptURL, { method: 'POST', body: new FormData(form), mode: 'no-cors' })
     .then(response => alert("Thank you! your form is submitted successfully."))
+    .then(()=> {updateSheetStatus(blank,currentMachine);})
     .then(() => { window.location.reload(); })
     .catch(error => console.error('Error!', error.message))
 })
-// form.addEventListener('submit', function(event) {
-//   event.preventDefault();
-//   const formData = new FormData(form);
-//   const data = {};
-//   formData.forEach((value, key) => {
-//       data[key] = value;
-//   });
-
-//   if (navigator.onLine) {
-//       sendDataToServer([data]);
-//   } else {
-//       saveDataLocally(data);
-//   }
-// });
-
-// window.addEventListener('online', function() {
-//   const savedData = JSON.parse(localStorage.getItem('formDataArray') || '[]');
-//   if (savedData.length > 0) {
-//       sendDataToServer(savedData);
-//   }
-// });
-
-// function saveDataLocally(data) {
-//   let formDataArray = JSON.parse(localStorage.getItem('formDataArray') || '[]');
-//   formDataArray.push(data);
-//   localStorage.setItem('formDataArray', JSON.stringify(formDataArray));
-//   alert('You are offline. Data has been saved locally.');
-//   window.location.reload();
-// }
-
-// function sendDataToServer(dataArray) {
-//   dataArray.forEach(data => {
-//       fetch(scriptURL, { 
-//           method: 'POST', 
-//           body: new URLSearchParams(data), 
-//           mode: 'no-cors' 
-//       })
-//       .then(() => {
-//           // Remove the submitted data from localStorage
-//           let formDataArray = JSON.parse(localStorage.getItem('formDataArray') || '[]');
-//           formDataArray = formDataArray.filter(savedData => JSON.stringify(savedData) !== JSON.stringify(data));
-//           localStorage.setItem('formDataArray', JSON.stringify(formDataArray));
-//       })
-//       .catch(error => {
-//           console.error('Error sending data:', error);
-//       });
-//   });
-  
-//   alert('All offline data sent successfully!');
-//   window.location.reload();
-// }
 
 
  //when checkbox is checked
@@ -235,6 +188,7 @@ if (selectedValue) {
   document.getElementById('hidden設備').value = selectedValue;
   document.getElementById('hidden工場').value = selectedFactory;
   LoadList(selectedValue);
+  
 }
 
 
@@ -279,8 +233,8 @@ function fetchSubDropdownData(selectedValue) {
       // selectedValue is Sebanggo
       
       subDropdown.addEventListener('change', function () {
-        const rikeshiInput2 = document.getElementById('rikeshi');
         const selectedValue = this.value;
+        const machineName = document.getElementById("hidden設備").value;
         productNumberInfo(selectedValue);
         modelInfo(selectedValue);
         shapeInfo(selectedValue);
@@ -292,7 +246,7 @@ function fetchSubDropdownData(selectedValue) {
         printerCode(selectedValue);
         getRikeshi(selectedValue);
         getIP();
-        updateSheetStatus();
+        updateSheetStatus(selectedValue,machineName);
 
         
         //sendtoNC(selectedValue);
@@ -301,16 +255,16 @@ function fetchSubDropdownData(selectedValue) {
     .catch(error => console.error('Error fetching sub-dropdown options:', error));
 }
 
-function updateSheetStatus(){
-  fetch('https://script.google.com/macros/s/AKfycbwbL30hlX9nBlQH4dwxlbdxSM5kJtgtNEQJQInA1mgXlEhYJxFHykZkdXV38deR6P83Ow/exec', {
+function updateSheetStatus(selectedValue,machineName){
+  fetch(googleSheetLiveStatusURL, {
     method: 'POST',
     mode: 'no-cors',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded'
     },
     body: new URLSearchParams({
-      'current': 'BM03',
-      'machine': 'OZNC01'
+      'current': selectedValue,
+      'machine': machineName
     })
   })
   .then(response => response.text())
