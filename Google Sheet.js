@@ -1,4 +1,4 @@
-// link for final report
+// link for final report (html data)
 const scriptURL = 'https://script.google.com/macros/s/AKfycby-_1ZH5JUXYJk4qzSUVEekfJM5F4QG7qTys67uwXFm2p9q2O_SI1HnqEDzjQnSx30J/exec'
 
 // link for database (nakaya -> main)
@@ -18,43 +18,159 @@ const ipURL = 'https://script.google.com/macros/s/AKfycbyC6-KiT3xwGiahhzhB-L-OOL
 
 const googleSheetLiveStatusURL = 'https://script.google.com/macros/s/AKfycbwbL30hlX9nBlQH4dwxlbdxSM5kJtgtNEQJQInA1mgXlEhYJxFHykZkdXV38deR6P83Ow/exec';
 
+
+
 const blank = " ";
 const form = document.forms['contact-form']
 const filterValue = '倉知'; // put division here
 
 
+
+// function to reset everything then reloads the page
+function resetForm() {
+    // Clear all form inputs
+    const inputs = document.querySelectorAll("input, select, textarea");
+    inputs.forEach(input => {
+      input.value = '';
+    });
+
+    // Clear counters
+    for (let i = 1; i <= 12; i++) {
+      localStorage.removeItem(`counter-${i}`);
+      const counterElement = document.getElementById(`counter-${i}`);
+      if (counterElement) {
+        counterElement.value = '0'; // Reset the counter display to 0
+      }
+    }
+
+    // Clear checkbox state and other specific items
+    localStorage.removeItem('enable-inputs-checkbox');
+    localStorage.removeItem('検査STATUS');
+
+    // Uncheck the checkbox and disable inputs
+    const checkbox = document.getElementById('enable-inputs');
+    if (checkbox) {
+      checkbox.checked = false;
+      toggleInputs(); // Reuse the existing toggleInputs function to disable the inputs
+    }
+
+    // Remove all other form-related local storage items
+    inputs.forEach(input => {
+      localStorage.removeItem(input.name);
+    });
+
+    // reload the page 
+    window.location.reload();
+}
+
 // when submit form is pressed
 form.addEventListener('submit', e => {
-  const currentMachine = document.getElementById("hidden設備").value;
-  e.preventDefault();
-  calculateTotalTime();
-  fetch(scriptURL, { method: 'POST', body: new FormData(form), mode: 'no-cors' })
+  const currentMachine = document.getElementById("hidden設備").value; // i need the current machine name
+  e.preventDefault(); // prevent submit
+  calculateTotalTime(); // this calculates the cycle time and total time
+  fetch(scriptURL, { method: 'POST', body: new FormData(form), mode: 'no-cors' }) // pakyu cors policy
     .then(response => alert("Thank you! your form is submitted successfully."))
-    .then(()=> {updateSheetStatus(blank,currentMachine);})
+    .then(()=> {updateSheetStatus(blank,currentMachine);}) // this code updates the current status on TV (this updates as blank)
     .then(() => { window.location.reload(); })
     .catch(error => console.error('Error!', error.message))
 })
 
 
+//this function waits for reload then this madapaka will save to local
+// this will prevent deleting everything on accidental refresh
+document.addEventListener("DOMContentLoaded", function() {
+  // Save input to localStorage
+  const inputs = document.querySelectorAll("input, select, textarea");
+  
+  
+  inputs.forEach(input => {
+      // Load saved data
+      if (localStorage.getItem(input.name)) {
+          input.value = localStorage.getItem(input.name);
+          updateTotal();
+      }
+
+      // Save data on change
+      input.addEventListener("input", function() {
+          updateTotal();
+          localStorage.setItem(input.name, input.value);
+      });
+  });
+
+  // Clear localStorage on form submission
+  document.querySelector("form").addEventListener("submit", function() {
+      inputs.forEach(input => {
+          localStorage.removeItem(input.name);
+      });
+      // Remove specific items from localStorage that are not cleared by the above loop because pakyu thats why
+      localStorage.removeItem('counter-1');
+      localStorage.removeItem('counter-2');
+      localStorage.removeItem('counter-3');
+      localStorage.removeItem('counter-4');
+      localStorage.removeItem('counter-5');
+      localStorage.removeItem('counter-6');
+      localStorage.removeItem('counter-7');
+      localStorage.removeItem('counter-8');
+      localStorage.removeItem('counter-9');
+      localStorage.removeItem('counter-10');
+      localStorage.removeItem('counter-11');
+      localStorage.removeItem('counter-12');
+      localStorage.removeItem('enable-inputs-checkbox');
+      localStorage.removeItem('検査STATUS');
+  });
+});
+
+
  //when checkbox is checked
  function toggleInputs() {  
-  var isChecked = document.getElementById('enable-inputs').checked;  
-  var inputs = document.querySelectorAll('#Kensa\\ Name, #KDate, #KStart\\ Time, #KEnd\\ Time,.plus-btn,.minus-btn, textarea[name="Comments2"], input[type="submit"],#在庫');  
+    var isChecked = document.getElementById('enable-inputs').checked;  
+    var inputs = document.querySelectorAll('#Kensa\\ Name, #KDate, #KStart\\ Time, #KEnd\\ Time,.plus-btn,.minus-btn, textarea[name="Comments2"], input[type="submit"],#在庫');  
+    inputs.forEach(function(input) {  
+        input.disabled = !isChecked;  
+    });  
+
+    // Enable all inputs inside the counter container when the checkbox is checked  
+    if (isChecked) {  
+        var counterInputs = document.querySelectorAll('.counter-container input');  
+        counterInputs.forEach(function(input) {  
+            input.disabled = false;  
+        });
+        // Set hidden input value to "TRUE"
+        document.getElementById('検査STATUS').value = "TRUE";
+    } else {
+        // Set hidden input value to "false"
+        document.getElementById('検査STATUS').value = "false";
+    }
+    //save to local
+    localStorage.setItem('enable-inputs-checkbox', isChecked);
+    localStorage.setItem('検査STATUS', document.getElementById('検査STATUS').value);
+}
+
+//function to load from local to checkbox
+function loadInputState() {
+  // Retrieve the checkbox state from local storage
+  var isChecked = localStorage.getItem('enable-inputs-checkbox') === 'true';
+  
+  // Set the checkbox state
+  document.getElementById('enable-inputs').checked = isChecked;
+
+  // Retrieve the stored status value
+  var storedStatus = localStorage.getItem('検査STATUS');
+  if (storedStatus) {
+      document.getElementById('検査STATUS').value = storedStatus;
+  }
+
+  // Enable/disable inputs based on the checkbox state
+  var inputs = document.querySelectorAll('#Kensa\\ Name, #KDate, #KStart\\ Time, #KEnd\\ Time,.plus-btn,.minus-btn, textarea[name="Comments2"], input[type="submit"],#在庫');
   inputs.forEach(function(input) {  
       input.disabled = !isChecked;  
-  });  
+  });
 
-  // Enable all inputs inside the counter container when the checkbox is checked  
-  if (isChecked) {  
-      var counterInputs = document.querySelectorAll('.counter-container input');  
+  if (isChecked) {
+      var counterInputs = document.querySelectorAll('.counter-container input');
       counterInputs.forEach(function(input) {  
           input.disabled = false;  
       });
-      // Set hidden input value to "TRUE"
-      document.getElementById('検査STATUS').value = "TRUE";
-  } else {
-      // Set hidden input value to "false"
-      document.getElementById('検査STATUS').value = "false";
   }
 }
 
@@ -159,8 +275,11 @@ function setDefaultTime(input) {
   const now = new Date();
   const hours = String(now.getHours()).padStart(2, '0');
   const minutes = String(now.getMinutes()).padStart(2, '0');
-  input.value = `${hours}:${minutes}`;
-  //calculateTotalTime();
+  const timeValue = `${hours}:${minutes}`;
+  input.value = timeValue;
+
+  // Save the time to local storage beyatch
+  localStorage.setItem(input.id, timeValue);
 }
 
 // when date is pressed
@@ -169,7 +288,11 @@ function setDefaultDate(input) {
   const year = now.getFullYear();
   const month = String(now.getMonth() + 1).padStart(2, '0');
   const day = String(now.getDate()).padStart(2, '0');
-  input.value = `${year}-${month}-${day}`;
+  const dateValue = `${year}-${month}-${day}`;
+  input.value = dateValue;
+
+  // Save the date to local storage yeahh
+  localStorage.setItem(input.id, dateValue);
 }
 
 
@@ -187,27 +310,12 @@ if (selectedValue) {
   document.getElementById('checkboxLabel').textContent = selectedFactory+"検査";
   document.getElementById('hidden設備').value = selectedValue;
   document.getElementById('hidden工場').value = selectedFactory;
-  LoadList(selectedValue);
+  fetchSubDropdownData(selectedValue);
   
 }
 
 
-
-
-// for the dynamic dropdown list (machine list)
-function LoadList(selectedValue) {
-    
-       var dropdown = selectedValue;
-          
-      // Fetch and populate the second dropdown based on the initial value of the first dropdown
-      const initialSelectedValue = dropdown;
-      
-      fetchSubDropdownData(initialSelectedValue);
-}
-
-
-
-// Function to fetch and populate the second dropdown
+// Function to fetch and populate the second dropdown (id = sub-dropdown sebanggo)
 function fetchSubDropdownData(selectedValue) {
   fetch(`${dbURL}?filterE=${selectedValue}`)
     .then(response => response.json())
@@ -228,6 +336,15 @@ function fetchSubDropdownData(selectedValue) {
         opt.textContent = option;
         subDropdown.appendChild(opt);
       });
+
+      // Restore the previously selected value from local storage
+      const savedValue = localStorage.getItem('背番号');
+      if (savedValue) {
+        subDropdown.value = savedValue;
+        SubDropdownChange(savedValue);  
+        loadCounterValues();  
+        loadInputState();
+      }
 
       // Add event listener to the second dropdown to alert the selected value
       // selectedValue is Sebanggo
@@ -325,6 +442,7 @@ function SubDropdownChange(selectedValue) {
     .then(response => response.json())
     .then(data => {
       const subDropdown = document.getElementById('sub-dropdown');
+      const machineName = document.getElementById("hidden設備").value;
       
       subDropdown.value = selectedValue;
       
@@ -337,6 +455,9 @@ function SubDropdownChange(selectedValue) {
         materialColorInfo(subDropdown.value);
         picLINK(subDropdown.value);
         printerCode(selectedValue);
+        getRikeshi(selectedValue);
+        getIP();
+        updateSheetStatus(selectedValue,machineName);
         
         
     })
@@ -382,11 +503,15 @@ document.addEventListener('DOMContentLoaded', function () {
 
 
 //function for plus minus button
-// Function for plus minus button
 function incrementCounter(counterId) {
   const counterElement = document.getElementById(`counter-${counterId}`);
   let currentValue = parseInt(counterElement.value, 10);
-  counterElement.value = currentValue + 1;
+  currentValue += 1;
+  counterElement.value = currentValue;
+
+  // Save the updated value to local storage
+  localStorage.setItem(`counter-${counterId}`, currentValue);
+
   updateTotal();
 }
 
@@ -394,10 +519,35 @@ function decrementCounter(counterId) {
   const counterElement = document.getElementById(`counter-${counterId}`);
   let currentValue = parseInt(counterElement.value, 10);
   if (currentValue > 0) {
-    counterElement.value = currentValue - 1;
+    currentValue -= 1;
+    counterElement.value = currentValue;
+
+    // Save the updated value to local storage
+    localStorage.setItem(`counter-${counterId}`, currentValue);
+
     updateTotal();
   }
 }
+
+// this function puts back the values from storage to input values
+function loadCounterValues() {
+  const counterElements = document.querySelectorAll('[id^="counter-"]');
+  counterElements.forEach(counterElement => {
+    const counterId = counterElement.id.split('-')[1];
+    const savedValue = localStorage.getItem(`counter-${counterId}`);
+    
+    if (savedValue !== null) {
+      counterElement.value = savedValue;
+    } else {
+      counterElement.value = 0; // Default value if nothing is saved
+    }
+  });
+
+  // Optionally, you may want to update the total after loading the values
+  updateTotal();
+}
+
+
 
 function updateTotal() {
   let ngTotal = 0;
