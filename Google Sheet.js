@@ -99,6 +99,7 @@ document.addEventListener("DOMContentLoaded", function() {
 
   // Clear localStorage on form submission
   document.querySelector("form").addEventListener("submit", function() {
+    checkInternetConnection();
       inputs.forEach(input => {
           localStorage.removeItem(input.name);
       });
@@ -119,6 +120,76 @@ document.addEventListener("DOMContentLoaded", function() {
       localStorage.removeItem('検査STATUS');
   });
 });
+
+
+
+//offline saving
+// Function to save form data to localStorage if the internet is gone
+function saveFormData() {
+  const inputs = document.querySelectorAll("input, select, textarea");
+  const submission = {};
+
+  inputs.forEach(input => {
+    submission[input.name] = input.value;
+  });
+
+  // Store the form submission with a unique key
+  const timestamp = new Date().getTime();
+  localStorage.setItem(`offline-submission-${timestamp}`, JSON.stringify(submission));
+}
+
+// Function to submit all stored data when the internet is back
+function submitStoredData() {
+  const keys = Object.keys(localStorage).filter(key => key.startsWith('offline-submission-'));
+
+  if (keys.length > 0) {
+    let submissionCount = 0;
+
+    keys.forEach((key, index) => {
+      const storedData = JSON.parse(localStorage.getItem(key));
+
+      const formData = new FormData();
+      Object.entries(storedData).forEach(([name, value]) => {
+        formData.append(name, value);
+      });
+
+      // Submit the form data to the Google Sheets script
+      fetch(scriptURL, { method: 'POST', body: formData, mode: 'no-cors' })
+        .then(() => {
+          // Remove the successfully submitted entry from localStorage
+          localStorage.removeItem(key);
+          submissionCount++;
+          
+          // After the last item is submitted, alert the user
+          if (submissionCount === keys.length) {
+            alert(`${submissionCount} saved form(s) have been submitted successfully!`);
+            window.location.reload(); // Reload the page to start fresh
+          }
+        })
+        .catch(error => console.error('Error submitting stored data:', error));
+    });
+  } else {
+    alert("No saved forms to submit!");
+  }
+}
+
+// Function to check if the internet connection is available
+function checkInternetConnection() {
+  if (navigator.onLine) {
+    submitStoredData();
+  } else {
+    saveFormData();
+    alert("Internet is offline. Your data is saved and will be submitted when the connection is restored.");
+    // Instead of reloading, just reset the form fields
+    document.querySelector("form").reset();
+  }
+}
+
+//listener if page is back online to submit forms
+window.addEventListener('online', checkInternetConnection); // Try to submit when the internet connection is restored
+
+
+
 
 
  //when checkbox is checked
