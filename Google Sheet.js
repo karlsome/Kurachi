@@ -81,6 +81,8 @@ form.addEventListener('submit', e => {
 document.addEventListener("DOMContentLoaded", function() {
   // Save input to localStorage
   const inputs = document.querySelectorAll("input, select, textarea");
+  const savedValue = localStorage.getItem('背番号');
+  SubDropdownChange(savedValue);
   
   
   inputs.forEach(input => {
@@ -185,7 +187,7 @@ function checkInternetConnection() {
   }
 }
 
-//listener if page is back online to submit forms
+//listener if page is back online to submit local forms
 window.addEventListener('online', checkInternetConnection); // Try to submit when the internet connection is restored
 
 
@@ -232,7 +234,7 @@ function loadInputState() {
   }
 
   // Enable/disable inputs based on the checkbox state
-  var inputs = document.querySelectorAll('#Kensa\\ Name, #KDate, #KStart\\ Time, #KEnd\\ Time,.plus-btn,.minus-btn, textarea[name="Comments2"], input[type="submit"],#在庫');
+  var inputs = document.querySelectorAll('#Kensa\\ Name, #KDate, #KStart\\ Time, #KEnd\\ Time,.plus-btn,.minus-btn, textarea[name="Comments2"],#在庫');
   inputs.forEach(function(input) {  
       input.disabled = !isChecked;  
   });
@@ -386,62 +388,132 @@ if (selectedValue) {
 }
 
 
-// Function to fetch and populate the second dropdown (id = sub-dropdown sebanggo)
+// //this is old dropdown function
+// // Function to fetch and populate the second dropdown (id = sub-dropdown sebanggo)
+// function fetchSubDropdownData(selectedValue) {
+//   fetch(`${dbURL}?filterE=${selectedValue}`)
+//     .then(response => response.json())
+//     .then(data => {
+//       const subDropdown = document.getElementById('sub-dropdown');
+//       subDropdown.innerHTML = ''; // Clear the existing options
+      
+//       // Add a default blank option
+//       const defaultOption = document.createElement('option');
+//       defaultOption.value = '';
+//       defaultOption.textContent = '';
+//       subDropdown.appendChild(defaultOption);
+
+//       // Populate the second dropdown
+//       data.forEach(option => {
+//         const opt = document.createElement('option');
+//         opt.value = option;
+//         opt.textContent = option;
+//         subDropdown.appendChild(opt);
+//       });
+
+//       // Restore the previously selected value from local storage
+//       const savedValue = localStorage.getItem('背番号');
+//       if (savedValue) {
+//         subDropdown.value = savedValue;
+//         SubDropdownChange(savedValue);  
+//         loadCounterValues();  
+//         loadInputState();
+//       }
+
+//       // Add event listener to the second dropdown to alert the selected value
+//       // selectedValue is Sebanggo
+      
+//       subDropdown.addEventListener('change', function () {
+//         const selectedValue = this.value;
+//         const machineName = document.getElementById("hidden設備").value;
+//         productNumberInfo(selectedValue);
+//         modelInfo(selectedValue);
+//         shapeInfo(selectedValue);
+//         RLInfo(selectedValue);
+//         materialInfo(selectedValue);
+//         materialCodeInfo(selectedValue);
+//         materialColorInfo(selectedValue);
+//         picLINK(selectedValue);
+//         printerCode(selectedValue);
+//         getRikeshi(selectedValue);
+//         getIP();
+//         updateSheetStatus(selectedValue,machineName);
+
+        
+//         //sendtoNC(selectedValue);
+//       });
+//     })
+//     .catch(error => console.error('Error fetching sub-dropdown options:', error));
+// }
+
+
+// this is new dropdown function (populate list)  <-- need to fix this code (dropdown save locally)
 function fetchSubDropdownData(selectedValue) {
+  const subDropdown = document.getElementById('sub-dropdown');
+
+  function populateDropdown(options) {
+    subDropdown.innerHTML = ''; 
+
+    const defaultOption = document.createElement('option');
+    defaultOption.value = '';
+    defaultOption.textContent = '';
+    subDropdown.appendChild(defaultOption);
+
+    options.forEach(option => {
+      const opt = document.createElement('option');
+      opt.value = option;
+      opt.textContent = option;
+      subDropdown.appendChild(opt);
+    });
+
+    const savedValue = localStorage.getItem('背番号');
+    if (savedValue) {
+      subDropdown.value = savedValue;
+      //SubDropdownChange(savedValue);
+      loadCounterValues();
+      loadInputState();
+    }
+
+    subDropdown.addEventListener('change', function () {
+      const selectedValue = this.value;
+      const machineName = document.getElementById("hidden設備").value;
+      productNumberInfo(selectedValue);
+      modelInfo(selectedValue);
+      shapeInfo(selectedValue);
+      RLInfo(selectedValue);
+      materialInfo(selectedValue);
+      materialCodeInfo(selectedValue);
+      materialColorInfo(selectedValue);
+      picLINK(selectedValue);
+      printerCode(selectedValue);
+      getRikeshi(selectedValue);
+      getIP();
+      updateSheetStatus(selectedValue, machineName);
+    });
+  }
+
+  const savedOptions = localStorage.getItem('dropdown-options');
+  if (savedOptions) {
+    populateDropdown(JSON.parse(savedOptions));
+  }
+
   fetch(`${dbURL}?filterE=${selectedValue}`)
     .then(response => response.json())
     .then(data => {
-      const subDropdown = document.getElementById('sub-dropdown');
-      subDropdown.innerHTML = ''; // Clear the existing options
-      
-      // Add a default blank option
-      const defaultOption = document.createElement('option');
-      defaultOption.value = '';
-      defaultOption.textContent = '';
-      subDropdown.appendChild(defaultOption);
-
-      // Populate the second dropdown
-      data.forEach(option => {
-        const opt = document.createElement('option');
-        opt.value = option;
-        opt.textContent = option;
-        subDropdown.appendChild(opt);
-      });
-
-      // Restore the previously selected value from local storage
-      const savedValue = localStorage.getItem('背番号');
-      if (savedValue) {
-        subDropdown.value = savedValue;
-        SubDropdownChange(savedValue);  
-        loadCounterValues();  
-        loadInputState();
-      }
-
-      // Add event listener to the second dropdown to alert the selected value
-      // selectedValue is Sebanggo
-      
-      subDropdown.addEventListener('change', function () {
-        const selectedValue = this.value;
-        const machineName = document.getElementById("hidden設備").value;
-        productNumberInfo(selectedValue);
-        modelInfo(selectedValue);
-        shapeInfo(selectedValue);
-        RLInfo(selectedValue);
-        materialInfo(selectedValue);
-        materialCodeInfo(selectedValue);
-        materialColorInfo(selectedValue);
-        picLINK(selectedValue);
-        printerCode(selectedValue);
-        getRikeshi(selectedValue);
-        getIP();
-        updateSheetStatus(selectedValue,machineName);
-
-        
-        //sendtoNC(selectedValue);
-      });
+      localStorage.setItem('dropdown-options', JSON.stringify(data));
+      populateDropdown(data);
     })
-    .catch(error => console.error('Error fetching sub-dropdown options:', error));
+    .catch(error => {
+      console.error('Error fetching sub-dropdown options:', error);
+      if (!savedOptions) {
+        alert("No internet connection and no saved options available.");
+      }
+    });
 }
+
+
+
+
 
 function updateSheetStatus(selectedValue,machineName){
   fetch(googleSheetLiveStatusURL, {
