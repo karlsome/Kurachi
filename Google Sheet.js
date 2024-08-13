@@ -16,6 +16,8 @@ const printerCodeURL = 'https://script.google.com/macros/s/AKfycbxP9j_KH4fRe4io7
 //link for ip address database
 const ipURL = 'https://script.google.com/macros/s/AKfycbyC6-KiT3xwGiahhzhB-L-OOL8ufG0WqnT5mjEelGBKGnbiqVAS6qjT78FlzBUHqTn3Gg/exec';
 
+
+//link for live status (google sheets live status)
 const googleSheetLiveStatusURL = 'https://script.google.com/macros/s/AKfycbwbL30hlX9nBlQH4dwxlbdxSM5kJtgtNEQJQInA1mgXlEhYJxFHykZkdXV38deR6P83Ow/exec';
 
 
@@ -514,7 +516,7 @@ function fetchSubDropdownData(selectedValue) {
 
 
 
-
+// this function sends the post command to google sheet live status
 function updateSheetStatus(selectedValue,machineName){
   fetch(googleSheetLiveStatusURL, {
     method: 'POST',
@@ -580,6 +582,8 @@ document.getElementById('scan-button').addEventListener('click', function() {
   });
 });
 
+
+// this function basically just refreshes the information area
 function SubDropdownChange(selectedValue) {
   fetch(`${dbURL}?filterE=${selectedValue}`)
     .then(response => response.json())
@@ -692,6 +696,7 @@ function loadCounterValues() {
 
 
 
+// this updates the total quantity
 function updateTotal() {
   let ngTotal = 0;
   for (let i = 1; i <= 12; i++) {
@@ -877,6 +882,7 @@ function materialColorInfo(headerValue) {
 
 // Function to fetch rikeshi up or down color info
 function getRikeshi(headerValue) {
+  const rikeshiInfo = document.getElementById("rikeshitext");
   fetch(`${dbURL}?rikeshi=${headerValue}`)
     .then(response => {
       if (!response.ok) {
@@ -887,6 +893,7 @@ function getRikeshi(headerValue) {
     .then(data => {
       const cleanedData = data.replace(/"/g, '');
       rikeshiInput.value = cleanedData;
+      rikeshiInfo.textContent = cleanedData;
       sendtoShowVideo(cleanedData);
     })
     .catch(error => {
@@ -922,9 +929,6 @@ function updateImageSrc(link) {
   const imageElement = document.getElementById('dynamicImage');
   imageElement.src = `${link}&sz=s4000`; // this code puts the fetched link to the html picture div
 }
-
-
-
 
 
 
@@ -983,6 +987,8 @@ function calculateTotalTime() {
 
 }
 
+
+
 //this function is from index.html
 function navigateTo(location) {
   window.location.href = `machine.html?selected=${location}`;
@@ -1012,6 +1018,7 @@ function printerCode(headerValue) {
 }
 
 //This visits a new page to print that shit
+// print label from brothers printer
   document.getElementById('printLabel').addEventListener('click', function(event) {
     // Prevent the form from submitting
     event.preventDefault();
