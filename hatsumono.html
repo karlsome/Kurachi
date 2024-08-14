@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="src/favicon2.png">
+    <title>初物チェック</title>
+</head>
+<body>
+    <h1>Checklist</h1>
+    <div class="checklist-item">
+        <input type="checkbox" id="checkall">
+        <label for="checkall">Check All / 全チェック</label>
+    </div>
+    <div class="checklist-item">
+        <input type="checkbox" id="confirm-shape" name="CONFIRM SHAPE">
+        <label for="confirm-shape">Confirm Shape / 形状確認</label>
+    </div>
+    <div class="checklist-item">
+        <input type="checkbox" id="confirm-material" name="CONFIRM MATERIAL">
+        <label for="confirm-material">Confirm Material / 材料確認</label>
+    </div>
+    <div class="checklist-item">
+        <input type="checkbox" id="confirm-color" name="CONFIRM COLOR">
+        <label for="confirm-color">Confirm Color / 色確認</label>
+    </div>
+    <div class="checklist-item">
+        <input type="checkbox" id="confirm-pin-holes" name="CONFIRM PIN HOLE">
+        <label for="confirm-pin-holes">Confirm Pin Holes / ピン穴確認</label>
+    </div>
+    <div class="checklist-item">
+        <input type="checkbox" id="confirm-cutting-condition" name="CONFIRM CUTTING CONDITION">
+        <label for="confirm-cutting-condition">Confirm Cutting Condition / 切れ不足確認</label>
+    </div>
+    <div class="checklist-item">
+        <input type="checkbox" id="confirm-product-number" name="CONFIRM PRODUCT NUMBER">
+        <label for="confirm-product-number">Confirm Product Number / 品番背番号確認</label>
+    </div>
+    <div class="checklist-item">
+        <input type="checkbox" id="confirm-filename" name="CONFIRM FILE NAME">
+        <label for="confirm-filename">Confirm Filename / ファイル名確認</label>
+    </div>
+    <div class="checklist-item">
+        <input type="checkbox" id="confirm-sewing-line" name="CONFIRM SEWING LINE">
+        <label for="confirm-sewing-line">Confirm Sewing Line / 縫製機確認</label>
+    </div>
+    <br>
+    
+    <button id="takePhotoBtn">Take Photo</button>
+    <br><br><br><br>
+    <button id="okBtn">OK</button>
+    
+</body>
+
+<script>
+    // Function to get query parameters
+    function getQueryParam(param) {
+        const urlParams = new URLSearchParams(window.location.search);
+        return urlParams.get(param);
+    }
+
+    // Get selected values from query parameters
+    const selectedSebanggo = getQueryParam('sebanggo');
+    const selectedFactory = getQueryParam('kojo');
+    console.log(selectedSebanggo, selectedFactory);
+
+    // Flag to track if a photo has been taken
+    let photoTaken = false;
+
+    // Function to get the checkbox values
+    function getCheckboxValues() {
+        const checkboxes = document.querySelectorAll('.checklist-item input[type="checkbox"]');
+        const values = {};
+
+        checkboxes.forEach(checkbox => {
+            values[checkbox.name] = checkbox.checked;
+        });
+
+        return values;
+    }
+
+
+    // Add event listener for the "Take Photo" button
+    document.getElementById('takePhotoBtn').addEventListener('click', function() {
+        // Simulate photo-taking logic here
+        photoTaken = true;
+        console.log("Photo has been taken");
+    });
+
+
+
+    
+
+    // Add event listener for OK button
+    document.getElementById('okBtn').addEventListener('click', function() {
+        if (!photoTaken) {
+            alert("Please take a photo first / 初物写真撮ってください");
+            return;
+        }
+
+        const checkboxValues = getCheckboxValues();
+        console.log(checkboxValues);
+        
+        // Example: Send data back to the parent window
+        window.opener.postMessage(checkboxValues, window.location.origin);
+
+        // Close the popup window (optional)
+        window.close();
+    });
+
+    // Check/Uncheck all checkboxes when "Check All" is clicked
+    document.getElementById('checkall').addEventListener('change', function() {
+        const checkboxes = document.querySelectorAll('.checklist-item input[type="checkbox"]');
+        checkboxes.forEach(checkbox => {
+            checkbox.checked = this.checked;
+        });
+    });
+
+</script>
+
+</html>

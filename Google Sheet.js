@@ -377,15 +377,18 @@ function getQueryParam(param) {
   return urlParams.get(param);
 }
 
-const selectedValue = getQueryParam('selected');
+const selectedMachine = getQueryParam('selected');
 const selectedFactory = getQueryParam('filter');
-if (selectedValue) {
-  document.getElementById('dropdown').textContent = selectedValue;
+const hatsumono = getQueryParam('kensastatus');
+
+if (selectedMachine) {
+  document.getElementById('dropdown').textContent = selectedMachine;
   document.getElementById('nippoTitle').textContent = selectedFactory+"日報";
   document.getElementById('checkboxLabel').textContent = selectedFactory+"検査";
-  document.getElementById('hidden設備').value = selectedValue;
+  document.getElementById('hidden設備').value = selectedMachine;
   document.getElementById('hidden工場').value = selectedFactory;
-  fetchSubDropdownData(selectedValue);
+  fetchSubDropdownData(selectedMachine);
+  
   
 }
 
@@ -583,15 +586,17 @@ document.getElementById('scan-button').addEventListener('click', function() {
 });
 
 
-// this function basically just refreshes the information area
+// this function basically just refreshes the information area and sets the sub-dropdown value to current sebanggo
 function SubDropdownChange(selectedValue) {
+  const subDropdown = document.getElementById('sub-dropdown');
+  subDropdown.value = selectedValue;
   fetch(`${dbURL}?filterE=${selectedValue}`)
     .then(response => response.json())
     .then(data => {
-      const subDropdown = document.getElementById('sub-dropdown');
+      
       const machineName = document.getElementById("hidden設備").value;
       
-      subDropdown.value = selectedValue;
+      
       
         productNumberInfo(subDropdown.value);
         modelInfo(subDropdown.value);
@@ -1096,4 +1101,30 @@ function closeVideoPopup() {
 
 
 
+//This is a listener for the hatsumono Button
+document.getElementById('hatsumonoButton').addEventListener('click', function(event) {
+  event.preventDefault();
+  const currentSebanggo = document.getElementById('sub-dropdown').value;
+  if (!currentSebanggo){
+      window.alert("Please select product first / 背番号選んでください");
+      return;
+  }
 
+  //opens the hatsumono.html and passess the sebanggo and kojo values
+  const popup = window.open(`hatsumono.html?sebanggo=${encodeURIComponent(currentSebanggo)}&kojo=${encodeURIComponent(selectedFactory)}`, 'QR Scanner', 'width=700,height=700');
+
+  window.addEventListener('message', function(event) {
+      if (event.origin === window.location.origin) {
+          var hatsumonoStatus = event.data;
+          console.log(`HatsumonoStatus: ${hatsumonoStatus}`);
+
+          // Update hidden inputs based on the received data
+          for (const [key, value] of Object.entries(hatsumonoStatus)) {
+              const input = document.getElementById(key.toLowerCase().replace(/\s+/g, '-'));
+              if (input) {
+                  input.value = value;
+              }
+          }
+      }
+  });
+});

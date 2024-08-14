@@ -20,8 +20,18 @@
             <input type="hidden" name="工場" id="hidden工場">
             <input type="hidden" name="printerCode" id="printerCode">
             <input type="hidden" name="検査STATUS" id="検査STATUS" value="false">
-            <input type="hidden" name="ipInfo" id="ipInfo" value="false">
-            <input type="hidden" name="rikeshi" id="rikeshi" value="false">
+            <input type="hidden" name="ipInfo" id="ipInfo">
+            <input type="hidden" name="rikeshi" id="rikeshi">
+
+            <!-- for hatusmonoStatus -->
+            <input type="hidden" name="CONFIRM SHAPE" id="confirm-shape" value="false">
+            <input type="hidden" name="CONFIRM MATERIAL" id="confirm-material" value="false">
+            <input type="hidden" name="CONFIRM COLOR" id="confirm-color" value="false">
+            <input type="hidden" name="CONFIRM PIN HOLE" id="confirm-pin-hole" value="false">
+            <input type="hidden" name="CONFIRM CUTTING CONDITION" id="confirm-cutting-condition" value="false">
+            <input type="hidden" name="CONFIRM PRODUCT NUMBER" id="confirm-product-number" value="false">
+            <input type="hidden" name="CONFIRM FILE NAME" id="confirm-file-name" value="false">
+            <input type="hidden" name="CONFIRM SEWING LINE" id="confirm-sewing-line" value="false">
 
            
 
@@ -98,7 +108,21 @@
             <br>
 
             <!-- This code is for the checklist -->
-            <div>
+             <br>
+             <br>
+             <br>
+             <br>
+             <label>初物チェック: </label>
+             <label id="hatsumonoLabel">False</label>
+             <button id="hatsumonoButton"　type="button">Check 1st Cycle</button>
+             <br>
+             <br>
+             <br>
+             <br>
+             <label>最後物チェック: </label>
+             <label id="atomonoLabel">False</label>
+             <button id="atomonoButton">Check Last Cycle</button>
+            <!-- <div>
                 <h4>Checklist</h4>
                     <div class="checklist-item">
                         <input type="checkbox" id="confirm-shape" name="confirm-shape">
@@ -132,7 +156,7 @@
                         <input type="checkbox" id="confirm-sewing-line" name="confirm-sewing-line">
                         <label for="confirm-sewing-line">Confirm Sewing Line</label>
                     </div>
-            </div>
+            </div> -->
     </div>
 
     
