@@ -67,6 +67,14 @@ function resetForm() {
 
 // when submit form is pressed
 form.addEventListener('submit', e => {
+  const hatsumonoStatus = document.getElementById("hatsumonoLabel").textContent;
+  const atomonoStatus = document.getElementById("atomonoLabel").textContent;
+  if (hatsumonoStatus === "FALSE" || atomonoStatus === "FALSE") {
+    window.alert("Please do the checklist / 初物後物チェックください");
+    e.preventDefault(); // Prevent form submission if validation fails
+    return; // Exit the function to prevent further execution
+  }
+  
   const currentMachine = document.getElementById("hidden設備").value; // i need the current machine name
   e.preventDefault(); // prevent submit
   calculateTotalTime(); // this calculates the cycle time and total time
@@ -103,6 +111,13 @@ document.addEventListener("DOMContentLoaded", function() {
 
   // Clear localStorage on form submission
   document.querySelector("form").addEventListener("submit", function() {
+    const hatsumonoStatus = document.getElementById("hatsumonoLabel").textContent;
+    const atomonoStatus = document.getElementById("atomonoLabel").textContent;
+    if (hatsumonoStatus === "FALSE" || atomonoStatus === "FALSE") {
+      window.alert("Please do the checklist / 初物後物チェックください");
+      e.preventDefault(); // Prevent form submission if validation fails
+      return; // Exit the function to prevent further execution
+    }
     checkInternetConnection();
       inputs.forEach(input => {
           localStorage.removeItem(input.name);
@@ -1129,4 +1144,34 @@ document.getElementById('hatsumonoButton').addEventListener('click', function(ev
       }
   });
   document.getElementById("hatsumonoLabel").textContent = "OK";
+});
+
+//This is a listener for the hatsumono Button
+document.getElementById('atomonoButton').addEventListener('click', function(event) {
+  event.preventDefault();
+  const currentSebanggo = document.getElementById('sub-dropdown').value;
+  const currentWorker = document.getElementById('Machine Operator').value;
+  if (!currentSebanggo){
+      window.alert("Please select product first / 背番号選んでください");
+      return;
+  }
+
+  //opens the hatsumono.html and passess the sebanggo and kojo values
+  const popup = window.open(`hatsumono.html?sebanggo=${encodeURIComponent(currentSebanggo)}&kojo=${encodeURIComponent(selectedFactory)}&worker=${encodeURIComponent(currentWorker)}`, 'QR Scanner', 'width=700,height=700');
+
+  window.addEventListener('message', function(event) {
+      if (event.origin === window.location.origin) {
+          var hatsumonoStatus = event.data;
+          console.log(`atomonoStatus: ${hatsumonoStatus}`);
+
+          // Update hidden inputs based on the received data
+          for (const [key, value] of Object.entries(hatsumonoStatus)) {
+              const input = document.getElementById(key.toLowerCase().replace(/\s+/g, '-'));
+              if (input) {
+                  input.value = value;
+              }
+          }
+      }
+  });
+  document.getElementById("atomonoLabel").textContent = "OK";
 });
