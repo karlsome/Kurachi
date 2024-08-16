@@ -1105,13 +1105,14 @@ function closeVideoPopup() {
 document.getElementById('hatsumonoButton').addEventListener('click', function(event) {
   event.preventDefault();
   const currentSebanggo = document.getElementById('sub-dropdown').value;
+  const currentWorker = document.getElementById('Machine Operator').value;
   if (!currentSebanggo){
       window.alert("Please select product first / 背番号選んでください");
       return;
   }
 
   //opens the hatsumono.html and passess the sebanggo and kojo values
-  const popup = window.open(`hatsumono.html?sebanggo=${encodeURIComponent(currentSebanggo)}&kojo=${encodeURIComponent(selectedFactory)}`, 'QR Scanner', 'width=700,height=700');
+  const popup = window.open(`hatsumono.html?sebanggo=${encodeURIComponent(currentSebanggo)}&kojo=${encodeURIComponent(selectedFactory)}&worker=${encodeURIComponent(currentWorker)}`, 'QR Scanner', 'width=700,height=700');
 
   window.addEventListener('message', function(event) {
       if (event.origin === window.location.origin) {
@@ -1127,4 +1128,5 @@ document.getElementById('hatsumonoButton').addEventListener('click', function(ev
           }
       }
   });
+  document.getElementById("hatsumonoLabel").textContent = "OK";
 });

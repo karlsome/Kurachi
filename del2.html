@@ -347,14 +347,14 @@ function isTokenValid() {
         uploadPhoto().then(() => {
         // Wait for 6 seconds (6000 milliseconds) before closing the window
         setTimeout(() => {
-            //window.close();
+            window.close();
         }, 100);
         }).catch((error) => {
             console.error('Upload failed:', error);
             // Optionally, handle the error or notify the user
             // Wait 6 seconds even if the upload fails
             setTimeout(() => {
-                //window.close();
+                window.close();
             }, 1000);
         });
     });

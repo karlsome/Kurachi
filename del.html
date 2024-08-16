@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="src/favicon2.png">
+    <title>初物チェック</title>
+</head>
+<body>
+    <h1>Checklist</h1>
+    
+    <div class="checklist-item">
+        <input type="checkbox" id="checkall">
+        <label for="checkall">Check All / 全チェック</label>
+    </div>
+    <div class="checklist-item">
+        <input type="checkbox" id="confirm-shape" name="CONFIRM SHAPE">
+        <label for="confirm-shape">Confirm Shape / 形状確認</label>
+    </div>
+    <div class="checklist-item">
+        <input type="checkbox" id="confirm-material" name="CONFIRM MATERIAL">
+        <label for="confirm-material">Confirm Material / 材料確認</label>
+    </div>
+    <div class="checklist-item">
+        <input type="checkbox" id="confirm-color" name="CONFIRM COLOR">
+        <label for="confirm-color">Confirm Color / 色確認</label>
+    </div>
+    <div class="checklist-item">
+        <input type="checkbox" id="confirm-pin-holes" name="CONFIRM PIN HOLE">
+        <label for="confirm-pin-holes">Confirm Pin Holes / ピン穴確認</label>
+    </div>
+    <div class="checklist-item">
+        <input type="checkbox" id="confirm-cutting-condition" name="CONFIRM CUTTING CONDITION">
+        <label for="confirm-cutting-condition">Confirm Cutting Condition / 切れ不足確認</label>
+    </div>
+    <div class="checklist-item">
+        <input type="checkbox" id="confirm-product-number" name="CONFIRM PRODUCT NUMBER">
+        <label for="confirm-product-number">Confirm Product Number / 品番背番号確認</label>
+    </div>
+    <div class="checklist-item">
+        <input type="checkbox" id="confirm-filename" name="CONFIRM FILE NAME">
+        <label for="confirm-filename">Confirm Filename / ファイル名確認</label>
+    </div>
+    <div class="checklist-item">
+        <input type="checkbox" id="confirm-sewing-line" name="CONFIRM SEWING LINE">
+        <label for="confirm-sewing-line">Confirm Sewing Line / 縫製機確認</label>
+    </div>
+    <br>
+    
+    <button id="takePhotoBtn">Take Photo</button>
+    <br><br>
+    <img id="photoPreview" src="" alt="Photo Preview" style="display:none; width: 320px; height: 240px;">
+    <br><br>
+    <button id="okBtn">OK</button>
+    
+</body>
+
+<script>
+    // Function to get query parameters
+    function getQueryParam(param) {
+        const urlParams = new URLSearchParams(window.location.search);
+        return urlParams.get(param);
+    }
+
+    // Get selected values from query parameters
+    const selectedSebanggo = getQueryParam('sebanggo');
+    const selectedFactory = getQueryParam('kojo');
+    console.log(selectedSebanggo, selectedFactory);
+
+    // Flag to track if a photo has been taken
+    let photoTaken = false;
+    let capturedImage = null;
+
+    // Function to get the checkbox values
+    function getCheckboxValues() {
+        const checkboxes = document.querySelectorAll('.checklist-item input[type="checkbox"]');
+        const values = {};
+
+        checkboxes.forEach(checkbox => {
+            values[checkbox.name] = checkbox.checked;
+        });
+
+        return values;
+    }
+
+    // Open the capture image popup
+    document.getElementById('takePhotoBtn').addEventListener('click', function() {
+        window.open('captureImage.html', 'Capture Image', 'width=700,height=700');
+    });
+
+    // Handle the message from the popup window
+    window.addEventListener('message', function(event) {
+        if (event.origin === window.location.origin) {
+            const data = event.data;
+            if (data.image) {
+                const photoPreview = document.getElementById('photoPreview');
+                photoPreview.src = data.image;
+                photoPreview.style.display = 'block';
+                capturedImage = data.image;
+                photoTaken = true;
+            }
+        }
+    });
+
+    // // Upload photo to Google Drive
+    // async function uploadPhoto() {
+        
+    // }
+    
+    
+        const clientId = '926593631760-lqek78nb2m7m07teln6vlrk5sk5b221k.apps.googleusercontent.com';
+        const clientSecret = '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';
+        const redirectUri = 'https://developers.google.com/oauthplayground';
+        const scope = 'https://www.googleapis.com/auth/drive.file';
+        const refreshToken = '1//04IRJPSBdFZ3UCgYIARAAGAQSNwF-L9IrowCF_WW4Xlsa9dg6u3NzdRVO_R7V2j_VoptozRmGjUKzjJ4Tqv2yQl61pn3fNLFTcd0';
+        const accessToken = 'ya29.a0AcM612yvmbvicaqX9x18d0EQqqvuvgoEsljYRvpYtUepu_7u29Zp8d9zEkFDgrUrc3RpYiV3Ss2JyGyeZl7l_dDMjuJ7EAKtOkPr2YJ6AKAClW09KsmFiXJLLEI1T9WNc33yQa3nlDd3WJbTUHifUOUaJ3hYX-2_-AaCgYKAe4SARISFQHGX2MiRmmy-ndk2L4u-oldQJAVyQ0169';
+        const apiKey = 'AIzaSyBJNA4Z_OOm6bq91NyUPLNY73Im3Cey-Gw';
+        const folderId = '17xRK14t9Nih3BGXZ-vZ82iUArLFWqnOA';
+
+        
+
+        // Open the capture image popup
+        document.getElementById('takePhotoBtn').addEventListener('click', function() {
+            window.open('captureImage.html', 'Capture Image', 'width=700,height=700');
+        });
+
+        // Handle the message from the popup window
+        window.addEventListener('message', function(event) {
+            if (event.origin === window.location.origin) {
+                const data = event.data;
+                if (data.image) {
+                    const photoPreview = document.getElementById('photoPreview');
+                    photoPreview.src = data.image;
+                    photoPreview.style.display = 'block';
+                    capturedImage = data.image;
+                }
+            }
+        });
+
+        // Upload photo function
+        async function uploadPhoto() {
+    if (!capturedImage) {
+        alert("No image captured! Please take a photo.");
+        return;
+    }
+
+    // Get the image data
+    const imageData = await fetch(capturedImage)
+        .then(response => response.blob());
+
+    const metadata = {
+        'name': 'checklist_photo_' + new Date().toISOString() + '.jpg',
+        'mimeType': 'image/jpeg',
+        'parents': [folderId]
+    };
+
+    const uploadUrl = `https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&key=${apiKey}`;
+
+    // Create a boundary string for the multipart request
+    const boundary = '-------314159265358979323846';
+
+    // Create the multipart body
+    const body = `--${boundary}\r\n` +
+        'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
+        JSON.stringify(metadata) + '\r\n' +
+        `--${boundary}\r\n` +
+        'Content-Type: image/jpeg\r\n\r\n' +
+        await imageData.arrayBuffer() + '\r\n' +
+        `--${boundary}--`;
+
+    try {
+        // Send the POST request with the image data
+        const response = await fetch(uploadUrl, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Content-Type': `multipart/related; boundary=${boundary}`
+            },
+            body: body
+        });
+
+        if (!response.ok) {
+            throw new Error(`Upload failed with status ${response.status}`);
+        }
+
+        console.log('Photo uploaded successfully!');
+    } catch (error) {
+        console.error('Error uploading photo:', error);
+    }
+}
+  
+
+
+    // Add event listener for OK button
+    document.getElementById('okBtn').addEventListener('click', function() {
+        if (!photoTaken) {
+            alert("Please take a photo first / 初物写真撮ってください");
+            return;
+        }
+
+        const checkboxValues = getCheckboxValues();
+        console.log(checkboxValues);
+
+        // Example: Send data back to the parent window
+        window.opener.postMessage(checkboxValues, window.location.origin);
+
+        // Upload the photo and then close the window
+        uploadPhoto();
+    });
+
+    // Check/Uncheck all checkboxes when "Check All" is clicked
+    document.getElementById('checkall').addEventListener('change', function() {
+        const checkboxes = document.querySelectorAll('.checklist-item input[type="checkbox"]');
+        checkboxes.forEach(checkbox => {
+            checkbox.checked = this.checked;
+        });
+    });
+
+    
+
+</script>
+
+</html>
