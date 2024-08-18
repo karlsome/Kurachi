@@ -1116,22 +1116,22 @@ function closeVideoPopup() {
 
 
 
-//This is a listener for the hatsumono Button
+// Listener for the hatsumono Button
 document.getElementById('hatsumonoButton').addEventListener('click', function(event) {
   event.preventDefault();
   const currentSebanggo = document.getElementById('sub-dropdown').value;
   const currentWorker = document.getElementById('Machine Operator').value;
-  if (!currentSebanggo){
+  const buttonValue = "hatsumono";
+  if (!currentSebanggo) {
       window.alert("Please select product first / 背番号選んでください");
       return;
   }
 
-  //opens the hatsumono.html and passess the sebanggo and kojo values
-  const popup = window.open(`hatsumono.html?sebanggo=${encodeURIComponent(currentSebanggo)}&kojo=${encodeURIComponent(selectedFactory)}&worker=${encodeURIComponent(currentWorker)}`, 'QR Scanner', 'width=700,height=700');
+  const popup = window.open(`hatsumono.html?sebanggo=${encodeURIComponent(currentSebanggo)}&kojo=${encodeURIComponent(selectedFactory)}&buttonValue=${encodeURIComponent(buttonValue)}&worker=${encodeURIComponent(currentWorker)}`, 'QR Scanner', 'width=700,height=700');
 
   window.addEventListener('message', function(event) {
       if (event.origin === window.location.origin) {
-          var hatsumonoStatus = event.data;
+          const hatsumonoStatus = event.data;
           console.log(`HatsumonoStatus: ${hatsumonoStatus}`);
 
           // Update hidden inputs based on the received data
@@ -1141,37 +1141,31 @@ document.getElementById('hatsumonoButton').addEventListener('click', function(ev
                   input.value = value;
               }
           }
+          document.getElementById("hatsumonoLabel").textContent = "OK";
       }
   });
-  document.getElementById("hatsumonoLabel").textContent = "OK";
 });
 
-//This is a listener for the hatsumono Button
+// Listener for the atomono Button
 document.getElementById('atomonoButton').addEventListener('click', function(event) {
   event.preventDefault();
   const currentSebanggo = document.getElementById('sub-dropdown').value;
   const currentWorker = document.getElementById('Machine Operator').value;
-  if (!currentSebanggo){
+  const buttonValue = "atomono";
+  if (!currentSebanggo) {
       window.alert("Please select product first / 背番号選んでください");
       return;
   }
 
-  //opens the hatsumono.html and passess the sebanggo and kojo values
-  const popup = window.open(`hatsumono.html?sebanggo=${encodeURIComponent(currentSebanggo)}&kojo=${encodeURIComponent(selectedFactory)}&worker=${encodeURIComponent(currentWorker)}`, 'QR Scanner', 'width=700,height=700');
+  const popup = window.open(`hatsumono.html?sebanggo=${encodeURIComponent(currentSebanggo)}&kojo=${encodeURIComponent(selectedFactory)}&buttonValue=${encodeURIComponent(buttonValue)}&worker=${encodeURIComponent(currentWorker)}`, 'QR Scanner', 'width=700,height=700');
 
   window.addEventListener('message', function(event) {
       if (event.origin === window.location.origin) {
-          var hatsumonoStatus = event.data;
-          console.log(`atomonoStatus: ${hatsumonoStatus}`);
+          const atomonoStatus = event.data;
+          console.log(`AtomonoStatus: ${atomonoStatus}`);
 
-          // Update hidden inputs based on the received data
-          for (const [key, value] of Object.entries(hatsumonoStatus)) {
-              const input = document.getElementById(key.toLowerCase().replace(/\s+/g, '-'));
-              if (input) {
-                  input.value = value;
-              }
-          }
+          // Since no checkbox data is expected, just update the label
+          document.getElementById("atomonoLabel").textContent = "OK";
       }
   });
-  document.getElementById("atomonoLabel").textContent = "OK";
 });
