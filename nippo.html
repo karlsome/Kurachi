@@ -66,26 +66,26 @@
             
             
             <label for="Machine Operator">作業者:</label>
-            <input list="machine-operator-suggestions" placeholder="Worker's Name" id="Machine Operator" name="Machine Operator">
+            <input list="machine-operator-suggestions" placeholder="Worker's Name" id="Machine Operator" name="Machine Operator" required>
             <datalist id="machine-operator-suggestions"></datalist>
             <br>
             <label for="Process Quantity">加工数（良品）+ NG:</label>
-            <input type="text" name="Process Quantity" id="Process Quantity" placeholder="Process Quantity">
+            <input type="text" name="Process Quantity" id="Process Quantity" placeholder="Process Quantity" required>
             <br>
             <label for="Lot No.">加工日:</label>
-            <input type="date" name="Lot No." id="Lot No." placeholder="Date" onfocus="setDefaultDate(this)">
+            <input type="date" name="Lot No." id="Lot No." placeholder="Date" onfocus="setDefaultDate(this)" required>
             <br>
             <label for="Start Time">加工開始時間:</label>
-            <input type="time" name="Start Time" id="Start Time" placeholder="Time Start" onfocus="setDefaultTime(this)">
+            <input type="time" name="Start Time" id="Start Time" placeholder="Time Start" onfocus="setDefaultTime(this)" required>
             <br>
             <label for="End Time">加工終了時間:</label>
-            <input type="time" name="End Time" id="End Time" placeholder="Time End" onfocus="setDefaultTime(this)">
+            <input type="time" name="End Time" id="End Time" placeholder="Time End" onfocus="setDefaultTime(this)" required>
             <br>
 
 
             <label for="材料ロット">材料ロット:</label>
         <button id="scan-lot" type="button">Scan ロット</button>
-        <input type="text" name="材料ロット" id="材料ロット" placeholder="Material Lot">
+        <input type="text" name="材料ロット" id="材料ロット" placeholder="Material Lot" required>
         <br>
 
         <!-- The Modal -->
