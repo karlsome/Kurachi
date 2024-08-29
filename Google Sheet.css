@@ -170,6 +170,11 @@ label {
     color: white;
 }
 
+input:invalid {
+    border: 2px solid red;
+    color: red;
+}
+
 NGlabel {
     display: block;
     margin-bottom: 5px;
