@@ -536,6 +536,7 @@ function fetchSubDropdownData(selectedValue) {
 
 // this function sends the post command to google sheet live status
 function updateSheetStatus(selectedValue,machineName){
+  const selectedFactory = document.getElementById('hidden工場').value;
   fetch(googleSheetLiveStatusURL, {
     method: 'POST',
     mode: 'no-cors',
@@ -544,7 +545,8 @@ function updateSheetStatus(selectedValue,machineName){
     },
     body: new URLSearchParams({
       'current': selectedValue,
-      'machine': machineName
+      'machine': machineName,
+      'factory': selectedFactory
     })
   })
   .then(response => response.text())
