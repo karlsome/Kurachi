@@ -613,22 +613,23 @@ function SubDropdownChange(selectedValue) {
       
       const machineName = document.getElementById("hidden設備").value;
       
-      
-      
-        productNumberInfo(subDropdown.value);
-        modelInfo(subDropdown.value);
-        shapeInfo(subDropdown.value);
-        RLInfo(subDropdown.value);
-        materialInfo(subDropdown.value);
-        materialCodeInfo(subDropdown.value);
-        materialColorInfo(subDropdown.value);
-        picLINK(subDropdown.value);
-        printerCode(selectedValue);
+      // Ensure getRikeshi is only called once
+      if (!isRikeshiPlaying) {
         getRikeshi(selectedValue);
-        getIP();
-        updateSheetStatus(selectedValue,machineName);
-        
-        
+        isRikeshiPlaying = true;
+      }
+      
+      productNumberInfo(subDropdown.value);
+      modelInfo(subDropdown.value);
+      shapeInfo(subDropdown.value);
+      RLInfo(subDropdown.value);
+      materialInfo(subDropdown.value);
+      materialCodeInfo(subDropdown.value);
+      materialColorInfo(subDropdown.value);
+      picLINK(subDropdown.value);
+      printerCode(selectedValue);
+      getIP();
+      updateSheetStatus(selectedValue, machineName);
     })
     .catch(error => console.error('Error fetching sub-dropdown options:', error));
 }
@@ -915,7 +916,12 @@ function getRikeshi(headerValue) {
     .then(data => {
       const cleanedData = data.replace(/"/g, '');
       rikeshiInput.value = cleanedData;
-      rikeshiInfo.textContent = cleanedData;
+      if (cleanedData == "上"){
+        rikeshiInfo.textContent = cleanedData + " - Release paper UP";
+      } else if (cleanedData == "下"){
+        rikeshiInfo.textContent = cleanedData + " - Release paper DOWN";
+      }
+      
       sendtoShowVideo(cleanedData);
     })
     .catch(error => {
@@ -1075,6 +1081,9 @@ function sendtoShowVideo(rikeshivalue){
 
 // this code is to show video either up or down rikeshi
 
+let videoTimeout;
+let isRikeshiPlaying = false; // Flag to check if rikeshi.mp4 is already playing
+
 function showVideo(videoToShowId) {
   const videoContainer = document.getElementById('videoContainer');
   const videoToShow = document.getElementById(videoToShowId);
@@ -1083,7 +1092,7 @@ function showVideo(videoToShowId) {
   // Hide all video elements and pause them
   allVideos.forEach(video => {
     video.classList.add('hidden');
-    video.classList.remove('active-video'); // Remove active-video class
+    video.classList.remove('active-video');
     video.pause();
     video.currentTime = 0;
   });
@@ -1091,15 +1100,18 @@ function showVideo(videoToShowId) {
   // Show the video container and the specific video
   videoContainer.classList.remove('hidden');
   videoToShow.classList.remove('hidden');
-  videoToShow.classList.add('active-video'); // Add active-video class
+  videoToShow.classList.add('active-video');
+
+  // Set playback speed to 1.8x
+  videoToShow.playbackRate = 1.8;
 
   // Autoplay the video
   videoToShow.play();
 
-  // Automatically hide the video container after 4 seconds
-  setTimeout(closeVideoPopup, 4000);
+  // Clear any existing timeout and set a new one
+  clearTimeout(videoTimeout);
+  videoTimeout = setTimeout(closeVideoPopup, 4000);
 }
-
 
 function closeVideoPopup() {
   window.alert("CONFIRM RELEASE PAPER DIRECTION");
@@ -1114,6 +1126,9 @@ function closeVideoPopup() {
     video.pause();
     video.currentTime = 0;
   });
+
+  // Reset the flag
+  isRikeshiPlaying = false;
 }
 
 
