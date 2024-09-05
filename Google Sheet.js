@@ -1050,10 +1050,11 @@ function printerCode(headerValue) {
   document.getElementById('printLabel').addEventListener('click', function(event) {
     // Prevent the form from submitting
     event.preventDefault();
+    const ipAddress = document.getElementById('ipInfo').value;
     
     // Get the value of the hidden input field
     const printerCode = document.getElementById('printerCode').value;
-    const url = `http://raspberrypi.local:5000/print?text=${printerCode}`;
+    const url = `http://${ipAddress}:5001/print?text=${printerCode}`; //no need for raspberry pi anymore
     
     // Open a new tab with the desired URL
     const newTab = window.open(url, '_blank');
