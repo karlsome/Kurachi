@@ -25,6 +25,9 @@ const googleSheetLiveStatusURL = 'https://script.google.com/macros/s/AKfycbwbL30
 const blank = " ";
 const form = document.forms['contact-form']
 const filterValue = '倉知'; // put division here
+let sendtoNCButtonisPressed = false; // this global variable is to check if sendtoNC button is pressed or not
+
+
 
 
 
@@ -48,6 +51,7 @@ function resetForm() {
     // Clear checkbox state and other specific items
     localStorage.removeItem('enable-inputs-checkbox');
     localStorage.removeItem('検査STATUS');
+    localStorage.removeItem('sendtoNCButtonisPressed');
 
     // Uncheck the checkbox and disable inputs
     const checkbox = document.getElementById('enable-inputs');
@@ -137,6 +141,8 @@ document.addEventListener("DOMContentLoaded", function() {
       localStorage.removeItem('counter-12');
       localStorage.removeItem('enable-inputs-checkbox');
       localStorage.removeItem('検査STATUS');
+      localStorage.removeItem('sendtoNCButtonisPressed');
+      
   });
 });
 
@@ -509,6 +515,11 @@ function fetchSubDropdownData(selectedValue) {
       getRikeshi(selectedValue);
       getIP();
       updateSheetStatus(selectedValue, machineName);
+      //this is for the pop up for sendtomachine button
+      sendtoNCButtonisPressed = false;
+      localStorage.setItem('sendtoNCButtonisPressed', 'false');
+      popupShown = false;
+      checkValue();
     });
   }
 
@@ -563,6 +574,8 @@ function updateSheetStatus(selectedValue,machineName){
 
 //this function sends request to nc cutter's pC
 function sendtoNC(selectedValue){
+  sendtoNCButtonisPressed = true;
+  localStorage.setItem('sendtoNCButtonisPressed', 'true');
   const ipAddress = document.getElementById('ipInfo').value;
   const currentSebanggo = document.getElementById('sub-dropdown').value;
   const machineName = document.getElementById('hidden設備').value;
@@ -1187,3 +1200,70 @@ document.getElementById('atomonoButton').addEventListener('click', function(even
       }
   });
 });
+
+// this function waits for 1 mins to see if send to NC button is pressed, if not it will pop up and force the user to send to machine
+var popupShown = false;
+var audio = new Audio('src/alert.mp3');
+audio.loop = true; // Set the audio to loop
+
+// Function to show the popup
+function showPopup() {
+    if (!popupShown) {
+        // Create the popup elements
+        var popup = document.createElement('div');
+        popup.style.position = 'fixed';
+        popup.style.top = '50%';
+        popup.style.left = '50%';
+        popup.style.transform = 'translate(-50%, -50%)';
+        popup.style.padding = '20px';
+        popup.style.backgroundColor = 'white';
+        popup.style.border = '1px solid black';
+        popup.style.zIndex = '1000';
+
+        var message = document.createElement('p');
+        message.textContent = 'Please press "send to machine" button! GAGO! / "send to machine" ボタンを押してください';
+        popup.appendChild(message);
+
+        var button = document.createElement('button');
+        button.textContent = 'Send to Machine';
+        button.onclick = function() {
+            sendtoNCButtonisPressed = true;
+            localStorage.setItem('sendtoNCButtonisPressed', 'true'); // Store the value in local storage
+            sendtoNC(); // Call the sendtoNC function
+            console.log("sendtoNC function called");
+            document.body.removeChild(popup);
+            audio.pause(); // Stop the audio
+            audio.currentTime = 0; // Reset the audio to the beginning
+        };
+        popup.appendChild(button);
+
+        document.body.appendChild(popup);
+        popupShown = true; // Set the flag to true after showing the popup
+        audio.play(); // Play the audio
+    }
+}
+
+// Function to check the value every 1 minute
+function checkValue() {
+    var interval = setInterval(function() {
+        console.log("selectedFactory: " + selectedFactory);
+        if (selectedFactory !== "小瀬") {
+          return; // Skip the check if selectedFactory is not "小瀬"
+        }
+        if (localStorage.getItem('sendtoNCButtonisPressed') === null) {
+          return; // Skip the check if the key is not present in local storage
+        }
+        var sendtoNCButtonisPressed = localStorage.getItem('sendtoNCButtonisPressed') === 'true'; // Retrieve the value from local storage
+        if (sendtoNCButtonisPressed) {
+            clearInterval(interval); // Stop checking if the value is true
+        } else {
+            showPopup();
+        }
+    }, 60000); // 60000 milliseconds = 1 minute
+}
+
+// Run the checkValue function when the page loads
+window.onload = checkValue;
+
+
+      
