@@ -1259,7 +1259,7 @@ function checkValue() {
         } else {
             showPopup();
         }
-    }, 60000); // 60000 milliseconds = 1 minute
+    }, 30000); // 30000 milliseconds =  30milliseconds
 }
 
 // Run the checkValue function when the page loads
