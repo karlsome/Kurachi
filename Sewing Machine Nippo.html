@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>縫製機チェックリスト</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap');
+
+        body {
+            font-family: 'Poppins', sans-serif;
+            margin: 0;
+            background-color: #f5f5f5;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        .container {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            align-items: center;
+            gap: 20px;
+            padding: 20px;
+            flex-grow: 1;
+        }
+        .form-group {
+            width: 45%;
+            box-sizing: border-box;
+            padding: 10px;
+            background-color: #fff;
+            border: 1px solid #ccc;
+            border-radius: 10px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        input[type="text"], input[type="date"], select, input[type="checkbox"] {
+            width: 100%;
+            padding: 8px;
+            box-sizing: border-box;
+        }
+        .save-button {
+            background-color: red;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            cursor: pointer;
+            width: 100%;
+            box-sizing: border-box;
+            border-radius: 10px;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .save-button:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+        }
+    </style>
+</head>
+<body>
+    <h1 class="centered">縫製機チェックリスト / Sewing Checklist</h1>
+    <div class="container">
+        <div class="form-group">
+            <label for="date">日付 / Date</label>
+            <input type="date" id="date" name="date" value="<?php echo date('Y-m-d'); ?>">
+        </div>
+        <div class="form-group">
+            <label for="lock-shikan">紙管カギ / Lock for Shikan</label>
+            <input type="checkbox" id="lock-shikan" name="lock-shikan">
+        </div>
+        <div class="form-group">
+            <label for="clamp-position">セット位置 / Clamp Position</label>
+            <input type="checkbox" id="clamp-position" name="clamp-position">
+        </div>
+        <div class="form-group">
+            <label for="material-confirm">材料確認 / Confirm the Material</label>
+            <input type="checkbox" id="material-confirm" name="material-confirm">
+        </div>
+        <div class="form-group">
+            <label for="material-color-confirm">材料色確認 / Confirm Material Color</label>
+            <input type="checkbox" id="material-color-confirm" name="material-color-confirm">
+        </div>
+        <div class="form-group">
+            <label for="upper-thread-code">上糸確認</label>
+            <input type="text" id="upper-thread-code" name="upper-thread-code">
+        </div>
+        <div class="form-group">
+            <label for="lower-thread-code">下糸確認</label>
+            <input type="text" id="lower-thread-code" name="lower-thread-code">
+        </div>
+        <div class="form-group">
+            <label for="sewing-tension-value">テンション確認</label>
+            <input type="text" id="sewing-tension-value" name="sewing-tension-value">
+        </div>
+        <div class="form-group">
+            <label for="left-thread-length">左糸長さ</label>
+            <input type="text" id="left-thread-length" name="left-thread-length">
+        </div>
+        <div class="form-group">
+            <label for="right-thread-length">右糸長さ</label>
+            <input type="text" id="right-thread-length" name="right-thread-length">
+        </div>
+        <div class="form-group">
+            <label for="table-distance">テーブル距離</label>
+            <input type="text" id="table-distance" name="table-distance">
+        </div>
+        <div class="form-group">
+            <label for="pen-color">ペン色</label>
+            <input type="text" id="pen-color" name="pen-color">
+        </div>
+        <div class="form-group">
+            <label for="thread-set-confirm">糸セット確認 / Sewing Thread Set Confirm</label>
+            <input type="checkbox" id="thread-set-confirm" name="thread-set-confirm">
+        </div>
+        <button class="save-button">保存</button>
+    </div>
+</body>
+</html>
