@@ -1209,19 +1209,24 @@ async function sendCommand(command) {
   const ipAddress = document.getElementById('ipInfo').value;
   const url = `http://${ipAddress}:5000/control?command=${encodeURIComponent(command)}`;
   
-  // Create an invisible iframe
-  const iframe = document.createElement('iframe');
-  iframe.style.display = 'none';
-  iframe.src = url;
+  // Get the existing hidden iframe or create one if it doesn't exist
+  let iframe = document.getElementById('hiddenIframe');
+  if (!iframe) {
+    iframe = document.createElement('iframe');
+    iframe.id = 'hiddenIframe';
+    iframe.style.display = 'none'; // Make the iframe invisible
+    document.body.appendChild(iframe);
+  }
 
-  // Append the iframe to the body
-  document.body.appendChild(iframe);
+  // Set the iframe source to the URL
+  iframe.src = url;
 
   // Remove the iframe after 2 seconds
   setTimeout(() => {
-      document.body.removeChild(iframe);
-  }, 2000);
+      iframe.src = ''; // Clear the iframe source
+  }, 1000);
 }
+
 
 
 
