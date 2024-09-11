@@ -573,26 +573,50 @@ function updateSheetStatus(selectedValue,machineName){
 
 
 //this function sends request to nc cutter's pC
-function sendtoNC(selectedValue){
-  sendCommand("off"); // this is for arduino (emergency button)
+function sendtoNC(selectedValue) {
+  sendCommand("off"); // this is for Arduino (emergency button)
   sendtoNCButtonisPressed = true;
   localStorage.setItem('sendtoNCButtonisPressed', 'true');
+  
   const ipAddress = document.getElementById('ipInfo').value;
   const currentSebanggo = document.getElementById('sub-dropdown').value;
   const machineName = document.getElementById('hidden設備').value;
-  //window.alert(machineName + currentSebanggo);
+  const url = `http://${ipAddress}:5000/request?filename=${encodeURIComponent(currentSebanggo)}.pce`; // Encode the filename
 
-  //let pcName = "DESKTOP-V36G1SK-2";
-  const url = `http://${ipAddress}:5000/request?filename=${currentSebanggo}.pce`; //change to 
- 
-    // Open a new tab with the desired URL
-    const newTab = window.open(url, '_blank');
-    
-    // Set a timer to close the new tab after a delay (e.g., 1 seconds)
-    setTimeout(() => {
-      newTab.close();
-    }, 5000);
+  // Create an invisible iframe
+  const iframe = document.createElement('iframe');
+  iframe.style.display = 'none';
+  iframe.src = url;
+
+  // Append the iframe to the body
+  document.body.appendChild(iframe);
+
+  // Remove the iframe after 5 seconds
+  setTimeout(() => {
+    document.body.removeChild(iframe);
+  }, 5000);
 }
+
+// function sendtoNC(selectedValue){
+//   sendCommand("off"); // this is for arduino (emergency button)
+//   sendtoNCButtonisPressed = true;
+//   localStorage.setItem('sendtoNCButtonisPressed', 'true');
+//   const ipAddress = document.getElementById('ipInfo').value;
+//   const currentSebanggo = document.getElementById('sub-dropdown').value;
+//   const machineName = document.getElementById('hidden設備').value;
+//   //window.alert(machineName + currentSebanggo);
+
+//   //let pcName = "DESKTOP-V36G1SK-2";
+//   const url = `http://${ipAddress}:5000/request?filename=${currentSebanggo}.pce`; //change to 
+ 
+//     // Open a new tab with the desired URL
+//     const newTab = window.open(url, '_blank');
+    
+//     // Set a timer to close the new tab after a delay (e.g., 1 seconds)
+//     setTimeout(() => {
+//       newTab.close();
+//     }, 5000);
+// }
 document.getElementById('sendtoNC').addEventListener('click', sendtoNC);
 
 
@@ -1061,23 +1085,47 @@ function printerCode(headerValue) {
 
 //This visits a new page to print that shit
 // print label from brothers printer
-  document.getElementById('printLabel').addEventListener('click', function(event) {
-    // Prevent the form from submitting
-    event.preventDefault();
-    const ipAddress = document.getElementById('ipInfo').value;
+document.getElementById('printLabel').addEventListener('click', function(event) {
+  // Prevent the form from submitting
+  event.preventDefault();
+  
+  const ipAddress = document.getElementById('ipInfo').value;
+  
+  // Get the value of the hidden input field
+  const printerCode = document.getElementById('printerCode').value;
+  const url = `http://${ipAddress}:5001/print?text=${encodeURIComponent(printerCode)}`;
+
+  // Create an invisible iframe
+  const iframe = document.createElement('iframe');
+  iframe.style.display = 'none';
+  iframe.src = url;
+
+  // Append the iframe to the body
+  document.body.appendChild(iframe);
+
+  // Remove the iframe after 5 seconds
+  setTimeout(() => {
+      document.body.removeChild(iframe);
+  }, 5000); // 5000 milliseconds = 5 seconds
+});
+
+  // document.getElementById('printLabel').addEventListener('click', function(event) {
+  //   // Prevent the form from submitting
+  //   event.preventDefault();
+  //   const ipAddress = document.getElementById('ipInfo').value;
     
-    // Get the value of the hidden input field
-    const printerCode = document.getElementById('printerCode').value;
-    const url = `http://${ipAddress}:5001/print?text=${printerCode}`; //no need for raspberry pi anymore
+  //   // Get the value of the hidden input field
+  //   const printerCode = document.getElementById('printerCode').value;
+  //   const url = `http://${ipAddress}:5001/print?text=${printerCode}`; //no need for raspberry pi anymore
     
-    // Open a new tab with the desired URL
-    const newTab = window.open(url, '_blank');
+  //   // Open a new tab with the desired URL
+  //   const newTab = window.open(url, '_blank');
     
-    // Set a timer to close the new tab after a delay (e.g., 1 seconds)
-    setTimeout(() => {
-      newTab.close();
-    }, 5000); // 5000 milliseconds = 5 seconds
-  });
+  //   // Set a timer to close the new tab after a delay (e.g., 1 seconds)
+  //   setTimeout(() => {
+  //     newTab.close();
+  //   }, 5000); // 5000 milliseconds = 5 seconds
+  // });
 
 
 
@@ -1203,28 +1251,25 @@ document.getElementById('atomonoButton').addEventListener('click', function(even
 });
 
 //this function is for ARDUINO command (command value should be "on" or "off")
-function sendCommand(command) {
+async function sendCommand(command) {
   const ipAddress = document.getElementById('ipInfo').value;
-  fetch(`http://${ipAddress}:5000/control`, {
-      method: 'POST',
-      headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: 'command=' + encodeURIComponent(command)
-  })
-  .then(response => {
-      if (!response.ok) {
-          throw new Error('Network response was not ok');
-      }
-      return response.json();
-  })
-  .then(data => {
-      console.log('Success:', data);
-  })
-  .catch(error => {
-      console.error('Error:', error);
-  });
+  const url = `http://${ipAddress}:5000/control?command=${encodeURIComponent(command)}`;
+  
+  // Create an invisible iframe
+  const iframe = document.createElement('iframe');
+  iframe.style.display = 'none';
+  iframe.src = url;
+
+  // Append the iframe to the body
+  document.body.appendChild(iframe);
+
+  // Remove the iframe after 2 seconds
+  setTimeout(() => {
+      document.body.removeChild(iframe);
+  }, 2000);
 }
+
+
 
 
 // this function waits for 1 mins to see if send to NC button is pressed, if not it will pop up and force the user to send to machine
@@ -1234,6 +1279,9 @@ audio.loop = true; // Set the audio to loop
 
 // Function to show the popup
 function showPopup() {
+    sendCommand('on');
+    console.log("LED on");
+  
     if (!popupShown) {
         // Create the popup elements
         var popup = document.createElement('div');
@@ -1247,7 +1295,6 @@ function showPopup() {
         popup.style.zIndex = '1000';
 
         var message = document.createElement('p');
-        sendCommand("on");
         message.textContent = 'Please press "send to machine" button! GAGO! / "send to machine" ボタンを押してください';
         popup.appendChild(message);
 
@@ -1272,6 +1319,7 @@ function showPopup() {
 
 // Function to check the value every 1 minute
 function checkValue() {
+  
     var interval = setInterval(function() {
         console.log("selectedFactory: " + selectedFactory);
         if (selectedFactory !== "小瀬") {
@@ -1281,11 +1329,13 @@ function checkValue() {
           return; // Skip the check if the key is not present in local storage
         }
         var sendtoNCButtonisPressed = localStorage.getItem('sendtoNCButtonisPressed') === 'true'; // Retrieve the value from local storage
+
         if (sendtoNCButtonisPressed) {
             clearInterval(interval); // Stop checking if the value is true
            
         } else {
-            showPopup();
+          
+          showPopup();
         }
     }, 30000); // 30000 milliseconds =  30 seconds
 }

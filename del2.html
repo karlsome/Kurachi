@@ -9,16 +9,29 @@
     <button onclick="sendCommand('off')">Turn Off</button>
 
     <script>
+        // function sendCommand(command) {
+        //     fetch('http://192.168.3.50:5000/control', {
+        //         method: 'POST',
+        //         mode:"no-cors",
+        //         headers: {
+        //             'Content-Type': 'application/x-www-form-urlencoded',
+        //         },
+        //         body: 'command=' + command
+        //     });
+        // }
+
         function sendCommand(command) {
-            fetch('http://192.168.3.50:5000/control', {
-                method: 'POST',
-                mode:"no-cors",
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                },
-                body: 'command=' + command
-            });
+        const url = `http://192.168.3.50:5000/control?command=${encodeURIComponent(command)}`;
+        const newWindow = window.open(url, '_blank', 'width=100,height=100,left=-1000,top=-1000');
+
+        // Close the window after 2 seconds
+        setTimeout(() => {
+            if (newWindow) {
+                newWindow.close();
+            }
+        }, 1000);
         }
+
     </script>
 </body>
 </html>
