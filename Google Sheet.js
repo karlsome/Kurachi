@@ -544,7 +544,7 @@ function fetchSubDropdownData(selectedValue) {
 
 
 
-
+//LIVE STATUS function
 // this function sends the post command to google sheet live status
 function updateSheetStatus(selectedValue,machineName){
   const selectedFactory = document.getElementById('hidden工場').value;
@@ -574,6 +574,7 @@ function updateSheetStatus(selectedValue,machineName){
 
 //this function sends request to nc cutter's pC
 function sendtoNC(selectedValue){
+  sendCommand("off"); // this is for arduino (emergency button)
   sendtoNCButtonisPressed = true;
   localStorage.setItem('sendtoNCButtonisPressed', 'true');
   const ipAddress = document.getElementById('ipInfo').value;
@@ -1201,6 +1202,31 @@ document.getElementById('atomonoButton').addEventListener('click', function(even
   });
 });
 
+//this function is for ARDUINO command (command value should be "on" or "off")
+function sendCommand(command) {
+  const ipAddress = document.getElementById('ipInfo').value;
+  fetch(`http://${ipAddress}:5000/control`, {
+      method: 'POST',
+      headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: 'command=' + encodeURIComponent(command)
+  })
+  .then(response => {
+      if (!response.ok) {
+          throw new Error('Network response was not ok');
+      }
+      return response.json();
+  })
+  .then(data => {
+      console.log('Success:', data);
+  })
+  .catch(error => {
+      console.error('Error:', error);
+  });
+}
+
+
 // this function waits for 1 mins to see if send to NC button is pressed, if not it will pop up and force the user to send to machine
 var popupShown = false;
 var audio = new Audio('src/alert.mp3');
@@ -1221,6 +1247,7 @@ function showPopup() {
         popup.style.zIndex = '1000';
 
         var message = document.createElement('p');
+        sendCommand("on");
         message.textContent = 'Please press "send to machine" button! GAGO! / "send to machine" ボタンを押してください';
         popup.appendChild(message);
 
@@ -1256,10 +1283,11 @@ function checkValue() {
         var sendtoNCButtonisPressed = localStorage.getItem('sendtoNCButtonisPressed') === 'true'; // Retrieve the value from local storage
         if (sendtoNCButtonisPressed) {
             clearInterval(interval); // Stop checking if the value is true
+           
         } else {
             showPopup();
         }
-    }, 30000); // 30000 milliseconds =  30milliseconds
+    }, 30000); // 30000 milliseconds =  30 seconds
 }
 
 // Run the checkValue function when the page loads
