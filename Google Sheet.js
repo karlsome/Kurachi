@@ -1071,12 +1071,14 @@ function printerCode(headerValue) {
     const url = `http://${ipAddress}:5001/print?text=${printerCode}`; //no need for raspberry pi anymore
     
     // Open a new tab with the desired URL
-    const newTab = window.open(url, '_blank');
-    
-    // Set a timer to close the new tab after a delay (e.g., 1 seconds)
-    setTimeout(() => {
-      newTab.close();
-    }, 5000); // 5000 milliseconds = 5 seconds
+    const newWindow = window.open(url, '_blank', 'width=100,height=100,left=-1000,top=-1000');
+
+        // Close the window after 5 seconds
+        setTimeout(() => {
+            if (newWindow) {
+                newWindow.close();
+            }
+        }, 5000);
   });
 
 
