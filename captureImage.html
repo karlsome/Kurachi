@@ -9,33 +9,40 @@
     <h1>Capture Image</h1>
     <video id="video" width="640" height="480" autoplay></video>
     <button id="captureBtn">Capture Photo</button>
-    <button id="toggleCameraBtn">Switch Camera</button>
     <canvas id="canvas" width="640" height="480" style="display:none;"></canvas>
 
     <script>
         let capturedImage = null;
-        let currentFacingMode = 'environment'; // Default to back camera
 
         async function startCamera() {
             const video = document.getElementById('video');
-            
+
+            // Function to detect if the device is mobile
+            function isMobileDevice() {
+                return /Mobi|Android/i.test(navigator.userAgent);
+            }
+
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({
                     video: {
-                        facingMode: currentFacingMode // Toggle between 'environment' and 'user'
+                        facingMode: isMobileDevice() ? { exact: 'environment' } : 'user' // Rear camera on mobile, front camera on laptop
                     }
                 });
                 video.srcObject = stream;
             } catch (error) {
                 console.error('Error accessing the camera:', error);
+                // Optional: fallback logic for handling errors (e.g., try to access the front camera)
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({
+                        video: { facingMode: 'user' } // Fallback to front camera
+                    });
+                    video.srcObject = stream;
+                } catch (fallbackError) {
+                    console.error('Error accessing the front camera as a fallback:', fallbackError);
+                    // Handle the error or notify the user
+                }
             }
         }
-
-        // Toggle between front and back camera
-        document.getElementById('toggleCameraBtn').addEventListener('click', function() {
-            currentFacingMode = currentFacingMode === 'environment' ? 'user' : 'environment';
-            startCamera(); // Restart the camera with the new facing mode
-        });
 
         // Capture the photo and send it to the parent window
         document.getElementById('captureBtn').addEventListener('click', function() {
