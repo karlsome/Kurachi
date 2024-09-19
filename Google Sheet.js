@@ -520,6 +520,7 @@ function fetchSubDropdownData(selectedValue) {
       localStorage.setItem('sendtoNCButtonisPressed', 'false');
       popupShown = false;
       checkValue();
+      printerName();
     });
   }
 
@@ -644,6 +645,7 @@ function SubDropdownChange(selectedValue) {
       printerCode(selectedValue);
       getIP();
       updateSheetStatus(selectedValue, machineName);
+      printerName();
     })
     .catch(error => console.error('Error fetching sub-dropdown options:', error));
 }
@@ -1059,16 +1061,40 @@ function printerCode(headerValue) {
     });
 }
 
+//function to fetch printer name
+function printerName() {
+  const printerHostname = document.getElementById('printerHostname');
+  const machineName = document.getElementById("hidden設備").value;
+  fetch(`${printerCodeURL}?printerName=${machineName}`)
+    .then(response => {
+      if (!response.ok) {
+        throw new Error('Network response was not ok ' + response.statusText);
+      }
+      return response.text();
+    })
+    .then(data => {
+      // Remove square brackets and double quotes
+      const cleanedData = data.replace(/^[\["]+|[\]"]+$/g, '');
+      console.log("printerName: " + cleanedData);
+      printerHostname.value = cleanedData;
+    })
+    .catch(error => {
+      console.error('Error:', error);
+    });
+}
+
 //This visits a new page to print that shit
 // print label from brothers printer
   document.getElementById('printLabel').addEventListener('click', function(event) {
     // Prevent the form from submitting
     event.preventDefault();
     const ipAddress = document.getElementById('ipInfo').value;
+    const printerHostname = document.getElementById('printerHostname').value;
     
     // Get the value of the hidden input field
     const printerCode = document.getElementById('printerCode').value;
-    const url = `http://${ipAddress}:5001/print?text=${printerCode}`; //no need for raspberry pi anymore
+    console.log("printerhostname: " + printerHostname);
+    const url = `http://${ipAddress}:5001/print?text=${printerCode}&hostname=${printerHostname}`; //no need for raspberry pi anymore
     
     // Open a new tab with the desired URL
     const newWindow = window.open(url, '_blank', 'width=100,height=100,left=-1000,top=-1000');
