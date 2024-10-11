@@ -8,7 +8,7 @@
 </head>
 <body>
     <div id="reader" style="width:300px;height:300px;"></div>
-    <script>
+    <!-- <script>
         window.addEventListener('load', function() {
             const html5QrCode = new Html5Qrcode("reader");
             html5QrCode.start(
@@ -20,6 +20,37 @@
                 qrCodeMessage => {
                     alert(`QR Code detected: ${qrCodeMessage}`);
                     window.opener.postMessage(qrCodeMessage, "*"); // Send message to parent window
+                    html5QrCode.stop().then(ignore => {
+                        window.close(); // Close the popup window
+                    }).catch(err => {
+                        // Stop failed, handle it.
+                    });
+                },
+                errorMessage => {
+                    // parse error, ignore it.
+                }
+            ).catch(err => {
+                // Start failed, handle it.
+            });
+        });
+    </script> -->
+    <script>
+        window.addEventListener('load', function() {
+            const html5QrCode = new Html5Qrcode("reader");
+            const queryString = window.location.search;
+            const urlParams = new URLSearchParams(queryString);
+            const source = urlParams.get('source');  // "scan" or "kanban"
+            
+            html5QrCode.start(
+                { facingMode: "environment" }, // Use rear camera
+                {
+                    fps: 10, // Sets the framerate to 10 scans per second
+                    qrbox: { width: 250, height: 250 } // Sets the scanning box dimensions
+                },
+                qrCodeMessage => {
+                    //alert(`QR Code detected: ${qrCodeMessage}`);
+                    // Send both the QR code and the source back to the parent
+                    window.opener.postMessage(qrCodeMessage, "*");
                     html5QrCode.stop().then(ignore => {
                         window.close(); // Close the popup window
                     }).catch(err => {

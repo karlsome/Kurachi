@@ -433,5 +433,15 @@ nav a:hover {
     height: 100%;
 }
 
+/* Add a CSS class for the flashing red background */
+.flash-red {
+    animation: flash 1s infinite;
+  }
+
+  @keyframes flash {
+    0% { background-color: white; }
+    50% { background-color: red; }
+    100% { background-color: white; }
+  }
 
 

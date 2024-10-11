@@ -52,6 +52,8 @@ function resetForm() {
     localStorage.removeItem('enable-inputs-checkbox');
     localStorage.removeItem('検査STATUS');
     localStorage.removeItem('sendtoNCButtonisPressed');
+    localStorage.removeItem('hatsumonoLabel');
+    localStorage.removeItem('atomonoLabel');
 
     // Uncheck the checkbox and disable inputs
     const checkbox = document.getElementById('enable-inputs');
@@ -97,6 +99,18 @@ document.addEventListener("DOMContentLoaded", function() {
   const inputs = document.querySelectorAll("input, select, textarea");
   const savedValue = localStorage.getItem('背番号');
   SubDropdownChange(savedValue);
+
+  // Restore hatsumonoLabel text from localStorage if available
+  const hatsumonoLabelValue = localStorage.getItem("hatsumonoLabel");
+  if (hatsumonoLabelValue) {
+    document.getElementById("hatsumonoLabel").textContent = hatsumonoLabelValue;
+  }
+
+  // Restore atomonoLabel text from localStorage if available
+  const atomonoLabelValue = localStorage.getItem("atomonoLabel");
+  if (atomonoLabelValue) {
+    document.getElementById("atomonoLabel").textContent = atomonoLabelValue;
+  }
   
   
   inputs.forEach(input => {
@@ -142,6 +156,8 @@ document.addEventListener("DOMContentLoaded", function() {
       localStorage.removeItem('enable-inputs-checkbox');
       localStorage.removeItem('検査STATUS');
       localStorage.removeItem('sendtoNCButtonisPressed');
+      localStorage.removeItem('hatsumonoLabel');
+      localStorage.removeItem('atomonoLabel');
       
   });
 });
@@ -414,64 +430,6 @@ if (selectedMachine) {
 }
 
 
-// //this is old dropdown function
-// // Function to fetch and populate the second dropdown (id = sub-dropdown sebanggo)
-// function fetchSubDropdownData(selectedValue) {
-//   fetch(`${dbURL}?filterE=${selectedValue}`)
-//     .then(response => response.json())
-//     .then(data => {
-//       const subDropdown = document.getElementById('sub-dropdown');
-//       subDropdown.innerHTML = ''; // Clear the existing options
-      
-//       // Add a default blank option
-//       const defaultOption = document.createElement('option');
-//       defaultOption.value = '';
-//       defaultOption.textContent = '';
-//       subDropdown.appendChild(defaultOption);
-
-//       // Populate the second dropdown
-//       data.forEach(option => {
-//         const opt = document.createElement('option');
-//         opt.value = option;
-//         opt.textContent = option;
-//         subDropdown.appendChild(opt);
-//       });
-
-//       // Restore the previously selected value from local storage
-//       const savedValue = localStorage.getItem('背番号');
-//       if (savedValue) {
-//         subDropdown.value = savedValue;
-//         SubDropdownChange(savedValue);  
-//         loadCounterValues();  
-//         loadInputState();
-//       }
-
-//       // Add event listener to the second dropdown to alert the selected value
-//       // selectedValue is Sebanggo
-      
-//       subDropdown.addEventListener('change', function () {
-//         const selectedValue = this.value;
-//         const machineName = document.getElementById("hidden設備").value;
-//         productNumberInfo(selectedValue);
-//         modelInfo(selectedValue);
-//         shapeInfo(selectedValue);
-//         RLInfo(selectedValue);
-//         materialInfo(selectedValue);
-//         materialCodeInfo(selectedValue);
-//         materialColorInfo(selectedValue);
-//         picLINK(selectedValue);
-//         printerCode(selectedValue);
-//         getRikeshi(selectedValue);
-//         getIP();
-//         updateSheetStatus(selectedValue,machineName);
-
-        
-//         //sendtoNC(selectedValue);
-//       });
-//     })
-//     .catch(error => console.error('Error fetching sub-dropdown options:', error));
-// }
-
 
 // this is new dropdown function (populate list)  <-- need to fix this code (dropdown save locally)
 function fetchSubDropdownData(selectedValue) {
@@ -521,6 +479,7 @@ function fetchSubDropdownData(selectedValue) {
       popupShown = false;
       checkValue();
       printerName();
+      getBox(selectedValue);
     });
   }
 
@@ -582,6 +541,10 @@ function sendtoNC(selectedValue){
   const currentSebanggo = document.getElementById('sub-dropdown').value;
   const machineName = document.getElementById('hidden設備').value;
   //window.alert(machineName + currentSebanggo);
+  if (!currentSebanggo) {
+    window.alert("Please select product first / 背番号選んでください");
+    return;
+  }
 
   //let pcName = "DESKTOP-V36G1SK-2";
   const url = `http://${ipAddress}:5000/request?filename=${currentSebanggo}.pce`; //change to 
@@ -599,29 +562,305 @@ document.getElementById('sendtoNC').addEventListener('click', sendtoNC);
 
 
 
-//This is a listener for the QR Code Button
-document.getElementById('scan-button').addEventListener('click', function() {
-  //pops up window using popup.html
-  const popup = window.open('popup.html', 'QR Scanner', 'width=400,height=300');
-  
-  window.addEventListener('message', function(event) {
-      if (event.origin === window.location.origin) {
-          
-          // event.data is the QR code value which is stored inside BarcodeValue
-          var BarcodeValue = event.data;
-          console.log(`QR Code detected: ${BarcodeValue}`);
-          
-          SubDropdownChange(BarcodeValue);
 
+
+
+// // listener for the QR Code Button (scan-button)
+// document.getElementById('scan-button').addEventListener('click', function() {
+  
+//   // Open popup window for QR scanning with an identifier for "scan-button"
+//   const popup = window.open('popup.html?source=scan', 'QR Scanner', 'width=400,height=300');
+
+//   // Listen for the message event specific to "scan-button"
+//   window.addEventListener('message', function handleScanButton(event) {
+//     // Ensure the event is from the same origin
+//     if (event.origin === window.location.origin) {
+//       const BarcodeValue = event.data;
+//       console.log(`QR Code detected: ${BarcodeValue}`);
+
+//       const subDropdown = document.getElementById('sub-dropdown');
+//       if (subDropdown && subDropdown.value !== BarcodeValue) {
+//         resetForm();
+//         sendtoNCButtonisPressed = false;
+//         localStorage.setItem("sendtoNCButtonisPressed",'false');
+//         checkValue();    
+//       }
+    
+//       SubDropdownChange(BarcodeValue);
+//       // Delay the page reload after successful QR code processing
+//       setTimeout(() => {
+//         window.location.reload();
+//       }, 500);
+    
+      
+      
+//       // Remove the event listener after handling
+//       window.removeEventListener('message', handleScanButton);
+//     }
+//   });
+// });
+
+// // listener for the QR Code Button (scan-button)
+// document.getElementById('scan-button').addEventListener('click', function() {
+  
+//   // Open popup window for QR scanning with an identifier for "scan-button"
+//   const popup = window.open('popup.html?source=scan', 'QR Scanner', 'width=400,height=300');
+
+//   // Listen for the message event specific to "scan-button"
+//   window.addEventListener('message', function handleScanButton(event) {
+//     // Ensure the event is from the same origin
+//     if (event.origin === window.location.origin) {
+//       const BarcodeValue = event.data;
+//       console.log(`QR Code detected: ${BarcodeValue}`);
+
+//       const subDropdown = document.getElementById('sub-dropdown');
+
+//       // Check if there's an existing product loaded in the sub-dropdown and it differs from the scanned QR code
+//       if (subDropdown && subDropdown.value !== "" && subDropdown.value !== BarcodeValue) {
+//           // If the user cancels the prompt, flash the screen red and play the alarm sound
+//           const alertSound = document.getElementById('alert-sound');
+//           if (alertSound) {
+//             alertSound.play().then(() => {
+//               console.log("Sound is playing");
+  
+//               // Flash the page red immediately before the alert
+//               document.body.classList.add('flash-red');
+  
+//               // Delay the alert to let the flash animation start
+//               setTimeout(() => {
+//                 // Show alert message
+//                 window.alert("Different product detected! Please save form before changing. / 異なる製品が検出されました。保存してください！");
+  
+//                 // Stop the sound after the user closes the alert
+//                 alertSound.pause();
+//                 alertSound.currentTime = 0; // Reset sound to the beginning
+  
+//                 // Stop flashing after 3 seconds (from the time the alert started)
+//                 setTimeout(() => {
+//                   document.body.classList.remove('flash-red');
+//                 }, 3000);
+//               }, 50);  // Small delay before showing the alert, allowing the animation to start
+//             }).catch(function(error) {
+//               console.error("Failed to play sound:", error);
+//             });
+//           } else {
+//             console.error("Alert sound not found");
+//           }
+
+//           // Stop further processing after the alert
+//           window.removeEventListener('message', handleScanButton);
+//           return;
+        
+//       }
+
+//       if (subDropdown && subDropdown.value !== BarcodeValue) {
+//         resetForm();
+//         sendtoNCButtonisPressed = false;
+//         localStorage.setItem("sendtoNCButtonisPressed",'false');
+//         checkValue();    
+//       }
+    
+//       // Process the QR code and update the sub-dropdown
+//       SubDropdownChange(BarcodeValue);
+//       // Delay the page reload after successful QR code processing
+//       setTimeout(() => {
+//         window.location.reload();
+//       }, 500);
+
+//       // Remove the event listener after handling
+//       window.removeEventListener('message', handleScanButton);
+//     }
+//   });
+// });
+
+// listener for the QR Code Button (scan-button)
+document.getElementById('scan-button').addEventListener('click', function() {
+  
+  // Open popup window for QR scanning with an identifier for "scan-button"
+  const popup = window.open('popup.html?source=scan', 'QR Scanner', 'width=400,height=300');
+
+  // Listen for the message event specific to "scan-button"
+  window.addEventListener('message', function handleScanButton(event) {
+    // Ensure the event is from the same origin
+    if (event.origin === window.location.origin) {
+      const BarcodeValue = event.data;
+      console.log(`QR Code detected: ${BarcodeValue}`);
+
+      const subDropdown = document.getElementById('sub-dropdown');
+
+      // Check if there's an existing product loaded in the sub-dropdown and it differs from the scanned QR code
+      if (subDropdown && subDropdown.value !== "" && subDropdown.value !== BarcodeValue) {
+          // If the user cancels the prompt, flash the screen red and play the alarm sound
+          const alertSound = document.getElementById('alert-sound');
+          if (alertSound) {
+            alertSound.play().then(() => {
+              console.log("Sound is playing");
+  
+              // Flash the page red immediately before the alert
+              document.body.classList.add('flash-red');
+  
+              // Delay the alert to let the flash animation start
+              setTimeout(() => {
+                // Show alert message
+                window.alert("Different product detected! Please save form before changing. / 異なる製品が検出されました。保存してください！");
+  
+                // Stop the sound after the user closes the alert
+                alertSound.pause();
+                alertSound.currentTime = 0; // Reset sound to the beginning
+  
+                // Stop flashing after 3 seconds (from the time the alert started)
+                setTimeout(() => {
+                  document.body.classList.remove('flash-red');
+                }, 3000);
+              }, 50);  // Small delay before showing the alert, allowing the animation to start
+            }).catch(function(error) {
+              console.error("Failed to play sound:", error);
+            });
+          } else {
+            console.error("Alert sound not found");
+          }
+
+          // Stop further processing after the alert
+          window.removeEventListener('message', handleScanButton);
+          return;
+        
       }
+
+      // Only reset form and reload if the QR code is different from sub-dropdown value
+      if (subDropdown && subDropdown.value !== BarcodeValue) {
+        resetForm();
+        sendtoNCButtonisPressed = false;
+        localStorage.setItem("sendtoNCButtonisPressed",'false');
+        checkValue();    
+
+        // Process the QR code and update the sub-dropdown
+        SubDropdownChange(BarcodeValue);
+        // Delay the page reload after successful QR code processing
+        setTimeout(() => {
+          window.location.reload();
+        }, 500);
+      } else {
+        console.log("QR code is the same as sub-dropdown value, no reload needed.");
+      }
+
+      // Remove the event listener after handling
+      window.removeEventListener('message', handleScanButton);
+    }
   });
 });
+
+
+
+
+// listener for KANBAN QR scanner button (sendtoQty button)
+document.getElementById('sendtoQty').addEventListener('click', function() {
+  // Open popup window for QR scanning with an identifier for "sendtoQty"
+  const popup = window.open('popup.html?source=kanban', 'QR Scanner', 'width=400,height=300');
+
+  // Listen for the message event specific to "sendtoQty"
+  window.addEventListener('message', function handleSendtoQty(event) {
+    // Ensure the event is from the same origin
+    if (event.origin === window.location.origin) {
+      const BarcodeValue = event.data;
+      console.log(`QR Code detected: ${BarcodeValue}`);
+
+      // Set the scanned QR code data to the "scannedKanban" input field
+      const scannedKanbanInput = document.getElementById('scannedKanban');
+      if (scannedKanbanInput) {
+        scannedKanbanInput.value = BarcodeValue;
+      }
+
+      // Check if the value of the scanned QR code matches the value of the dropdown
+      const subDropdown = document.getElementById('sub-dropdown');
+      if (subDropdown && subDropdown.value !== BarcodeValue) {
+        // Play the alert sound before showing the alert
+        const alertSound = document.getElementById('alert-sound');
+        if (alertSound) {
+          alertSound.play().then(() => {
+            console.log("Sound is playing");
+
+            // Flash the page red immediately before the alert
+            document.body.classList.add('flash-red');
+
+            // Delay the alert to let the flash animation start
+            setTimeout(() => {
+              // Show alert message
+              window.alert("Wrong Kanban / 看板間違い");
+
+              // Stop the sound after the user closes the alert
+              alertSound.pause();
+              alertSound.currentTime = 0; // Reset sound to the beginning
+
+              // Stop flashing after 3 seconds (from the time the alert started)
+              setTimeout(() => {
+                document.body.classList.remove('flash-red');
+              }, 3000);
+            }, 50);  // Small delay before showing the alert, allowing the animation to start
+          }).catch(function(error) {
+            console.error("Failed to play sound:", error);
+          });
+        } else {
+          console.error("Alert sound not found");
+        }
+
+        window.removeEventListener('message', handleSendtoQty); // Stop further processing
+        return;
+      }
+
+      // Get the value of "boxqty" and add it to the "Process Quantity" input field
+      const boxQtyInput = document.getElementById('boxqty');
+      const processQtyInput = document.getElementById('ProcessQuantity');
+      
+      if (boxQtyInput && processQtyInput) {
+        const boxQtyValue = parseInt(boxQtyInput.value) || 0;
+        const processQtyValue = parseInt(processQtyInput.value) || 0;
+
+        // Add the values together and set it to "Process Quantity"
+        processQtyInput.value = processQtyValue + boxQtyValue;
+        localStorage.setItem("Process Quantity", processQtyInput.value);
+        updateTotal();
+        
+        // Alert user about success
+        window.alert("1 box added successfully / 1箱が正常に追加されました");
+
+        // Call the print function here
+        runPrintFunction();
+      }
+
+      // Remove the event listener after handling
+      window.removeEventListener('message', handleSendtoQty);
+    }
+  });
+});
+
+
+// Function to handle printing
+function runPrintFunction() {
+  const ipAddress = document.getElementById('ipInfo').value;
+  const printerHostname = document.getElementById('printerHostname').value;
+
+  // Get the value of the hidden input field
+  const printerCode = document.getElementById('printerCode').value;
+  console.log("printerhostname: " + printerHostname);
+  const url = `http://${ipAddress}:5001/print?text=${printerCode}&hostname=${printerHostname}`; //no need for raspberry pi anymore
+
+  // Open a new tab with the desired URL
+  const newWindow = window.open(url, '_blank', 'width=100,height=100,left=-1000,top=-1000');
+
+  // Close the window after 5 seconds
+  setTimeout(() => {
+    if (newWindow) {
+      newWindow.close();
+    }
+  }, 5000);
+}
 
 
 // this function basically just refreshes the information area and sets the sub-dropdown value to current sebanggo
 function SubDropdownChange(selectedValue) {
   const subDropdown = document.getElementById('sub-dropdown');
   subDropdown.value = selectedValue;
+  localStorage.setItem('背番号',selectedValue);
   fetch(`${dbURL}?filterE=${selectedValue}`)
     .then(response => response.json())
     .then(data => {
@@ -646,6 +885,8 @@ function SubDropdownChange(selectedValue) {
       getIP();
       updateSheetStatus(selectedValue, machineName);
       printerName();
+      getBox(selectedValue);
+      checkValue();
     })
     .catch(error => console.error('Error fetching sub-dropdown options:', error));
 }
@@ -744,13 +985,13 @@ function updateTotal() {
   }
   document.getElementById('NG total').value = ngTotal;
   
-  const processQuantity = parseInt(document.getElementById('Process Quantity').value, 10) || 0;
+  const processQuantity = parseInt(document.getElementById('ProcessQuantity').value, 10) || 0;
   const totalQuantity = processQuantity - ngTotal;
   document.getElementById('total').value = totalQuantity;
 }
 
 // Add event listener to process quantity input
-document.getElementById('Process Quantity').addEventListener('input', updateTotal);
+document.getElementById('ProcessQuantity').addEventListener('input', updateTotal);
 
 
 
@@ -764,6 +1005,7 @@ const materialInput = document.getElementById('material');
 const materialCodeInput = document.getElementById('material-code');
 const materialColorInput = document.getElementById('material-color');
 const rikeshiInput = document.getElementById('rikeshi');
+const boxInput = document.getElementById('boxqty');
 
 // global variable for ip address input container
 const ipInput = document.getElementById('ipInfo');
@@ -945,6 +1187,23 @@ function getRikeshi(headerValue) {
     });
 }
 
+//function to get box value
+function getBox(headerValue) {
+  fetch(`${dbURL}?box=${headerValue}`)
+    .then(response => {
+      if (!response.ok) {
+        throw new Error('Network response was not ok ' + response.statusText);
+      }
+      return response.text();
+    })
+    .then(data => {
+      const cleanedData = data.replace(/"/g, '');
+      boxInput.value = cleanedData;
+    })
+    .catch(error => {
+      console.error('Error:', error);
+    });
+}
 
 
 
@@ -983,7 +1242,7 @@ function calculateTotalTime() {
   const kEndTime = document.getElementById("KEnd Time").value;
   const startTime = document.getElementById("Start Time").value;
   const endTime = document.getElementById("End Time").value;
-  const quantity = document.getElementById("Process Quantity").value;
+  const quantity = document.getElementById("ProcessQuantity").value;
 
 
   if (kStartTime && kEndTime && startTime && endTime) {
@@ -1086,8 +1345,13 @@ function printerName() {
 //This visits a new page to print that shit
 // print label from brothers printer
   document.getElementById('printLabel').addEventListener('click', function(event) {
+    const currentSebanggo = document.getElementById('sub-dropdown').value;
     // Prevent the form from submitting
     event.preventDefault();
+    if (!currentSebanggo) {
+      window.alert("Please select product first / 背番号選んでください");
+      return;
+    }
     const ipAddress = document.getElementById('ipInfo').value;
     const printerHostname = document.getElementById('printerHostname').value;
     
@@ -1202,6 +1466,7 @@ document.getElementById('hatsumonoButton').addEventListener('click', function(ev
               }
           }
           document.getElementById("hatsumonoLabel").textContent = "OK";
+          localStorage.setItem("hatsumonoLabel","OK");
       }
   });
 });
@@ -1226,6 +1491,7 @@ document.getElementById('atomonoButton').addEventListener('click', function(even
 
           // Since no checkbox data is expected, just update the label
           document.getElementById("atomonoLabel").textContent = "OK";
+          localStorage.setItem("atomonoLabel","OK");
       }
   });
 });

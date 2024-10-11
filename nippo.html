@@ -24,6 +24,9 @@
             <input type="hidden" name="rikeshi" id="rikeshi">
             <input type="hidden" name="printerHostname" id="printerHostname">
             <iframe id="hiddenIframe" style="display:none;"></iframe>
+            <input type="hidden" name="boxqty" id="boxqty">
+            <input type="hidden" name="scannedKanban" id="scannedKanban">
+            <audio id="alert-sound" src="src/alert.mp3" preload="auto"></audio>
 
             <!-- for hatusmonoStatus -->
             <input type="hidden" name="CONFIRM SHAPE" id="confirm-shape" value="false">
@@ -34,6 +37,7 @@
             <input type="hidden" name="CONFIRM PRODUCT NUMBER" id="confirm-product-number" value="false">
             <input type="hidden" name="CONFIRM FILE NAME" id="confirm-file-name" value="false">
             <input type="hidden" name="CONFIRM SEWING LINE" id="confirm-sewing-line" value="false">
+            
 
            
 
@@ -70,10 +74,11 @@
             <label for="Machine Operator">作業者:</label>
             <input list="machine-operator-suggestions" placeholder="Worker's Name" id="Machine Operator" name="Machine Operator" required>
             <datalist id="machine-operator-suggestions"></datalist>
-            <br>
+            <br><br>
             <label for="Process Quantity">加工数（良品）+ NG:</label>
-            <input type="text" name="Process Quantity" id="Process Quantity" placeholder="Process Quantity" required>
-            <br>
+            <input type="text" name="Process Quantity" id="ProcessQuantity" placeholder="Process Quantity" required>
+            <button id="sendtoQty" type="button">1 box completed</button>
+            <br><br>
             <label for="Lot No.">加工日:</label>
             <input type="date" name="Lot No." id="Lot No." placeholder="Date" onfocus="setDefaultDate(this)" required>
             <br>
@@ -265,13 +270,7 @@
             <button class="plus-btn" type="button" onclick="incrementCounter(12)" disabled>+</button>  
             <input readonly id="counter-12" value="0" type="number" name="その他">  
             <button class="minus-btn" type="button" onclick="decrementCounter(12)" disabled>-</button>  
-        </div>
-        <div id="counter-box-13" class="counter-box">  
-            <label for="counter-13">その他</label>
-            <button class="plus-btn" type="button" onclick="incrementCounter(12)" disabled>+</button>  
-            <input readonly id="counter-12" value="0" type="number" name="その他">  
-            <button class="minus-btn" type="button" onclick="decrementCounter(12)" disabled>-</button>  
-        </div>   
+        </div>  
     </div>
 
 
