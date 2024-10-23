@@ -14,10 +14,11 @@
                 <a href="index.html">工場</a>
                 <a href="machine.html">設備</a>
             </nav>
-            <h4 id = "nippoTitle">倉知日報</h4>
+            <h4 id = "nippoTitle">天徳日報</h4>
             <label>設備:</label><label name="設備" id="dropdown"></label>
             <input type="hidden" name="設備" id="hidden設備">
-            <input type="hidden" name="工場" id="hidden工場">
+            <input type="hidden" name="工場2" id="hidden工場">
+            <input type="hidden" name="工場" id="selected工場">
             <input type="hidden" name="printerCode" id="printerCode">
             <input type="hidden" name="検査STATUS" id="検査STATUS" value="false">
             <input type="hidden" name="ipInfo" id="ipInfo">
@@ -26,6 +27,7 @@
             <iframe id="hiddenIframe" style="display:none;"></iframe>
             <input type="hidden" name="boxqty" id="boxqty">
             <input type="hidden" name="scannedKanban" id="scannedKanban">
+            <input type="hidden" name="tracking QR" id="tracking-QR">
             <audio id="alert-sound" src="src/alert.mp3" preload="auto"></audio>
 
             <!-- for hatusmonoStatus -->
@@ -49,6 +51,14 @@
             <button id="scan-button" type="button">Scan 背番号</button>
             <br>
             <br>
+            <label for="process">Select Process:</label>
+            <select id="process" name="process">
+                <option value=" "></option>
+                <option value="kensa">検査のみ</option>
+                <option value="SRS">SRSのみ</option>
+                <option value="Slit">スリットのみ</option>
+                <option value="SRS-Slit">SRS + スリット</option>
+            </select>
             
             <div id="videoContainer" class="hidden">
               <div class="video-popup">
@@ -65,10 +75,6 @@
             </div>
             
 
-
-
-
-            <button id="sendtoNC" type="button">Send to Machine</button>
             
             
             <label for="Machine Operator">作業者:</label>
@@ -140,12 +146,11 @@
     <h4>
         <label>
             <input type="checkbox" id="enable-inputs" onclick="toggleInputs()"> 
-            <span id="checkboxLabel">倉知検査</span>
+            <span id="checkboxLabel">天徳検査</span>
         </label>
     </h4>
     <!-- this is the printLabel button -->
-    <button id="printLabel" type="button">Print Label</button>
-
+    
 
 
     <label for="Kensa Name">検査者:</label>
@@ -276,7 +281,7 @@
                 <div class="image-container">
                     <img id="dynamicImage" src="" alt="Image Description">
                 </div>
-                <label>離型紙: </label><label name="rikeshitext" id="rikeshitext" value=""></label>
+                <label>SRS コード: </label><label name="SRScode" id="SRScode" value=""></label>
                 <label>Product Number:</label>
                 <input readonly id="product-number" value="" name="品番"> 
                 <label>Model:</label>
@@ -310,7 +315,7 @@
 
 
     </div>
-    <script src="Google Sheet.js"></script>
+    <script src="tentoku.js"></script>
     <script src="html5-qrcode.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
 </body>

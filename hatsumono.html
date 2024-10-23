@@ -13,10 +13,7 @@
         <button class="signout">Sign Out</button>
     </div> -->
     
-    <div class="checklist-item">
-        <input type="checkbox" id="checkall">
-        <label for="checkall">Check All / 全チェック</label>
-    </div>
+    
     <div class="checklist-item">
         <input type="checkbox" id="confirm-shape" name="CONFIRM SHAPE">
         <label for="confirm-shape">Confirm Shape / 形状確認</label>
@@ -454,13 +451,14 @@
     //     });
     // });
 
+    //uncomment if you want checkall
     // Check/Uncheck all checkboxes when "Check All" is clicked
-    document.getElementById('checkall').addEventListener('change', function() {
-        const checkboxes = document.querySelectorAll('.checklist-item input[type="checkbox"]');
-        checkboxes.forEach(checkbox => {
-            checkbox.checked = this.checked;
-        });
-    });
+    // document.getElementById('checkall').addEventListener('change', function() {
+    //     const checkboxes = document.querySelectorAll('.checklist-item input[type="checkbox"]');
+    //     checkboxes.forEach(checkbox => {
+    //         checkbox.checked = this.checked;
+    //     });
+    // });
 
     
 

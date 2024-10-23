@@ -3,6 +3,7 @@ const scriptURL = 'https://script.google.com/macros/s/AKfycby-_1ZH5JUXYJk4qzSUVE
 
 // link for database (nakaya -> main)
 const dbURL = 'https://script.google.com/macros/s/AKfycbwBzPZgoNiUK_ez3AzK5FXFr8_AsmdBjCWGzulG3eh0cryirgVxtMzIF4ehh98QYdkpUg/exec';
+//const dbURL = 'https://script.google.com/macros/s/AKfycbz7c9FCfX5ExpxSBBqKm87PePym4KzvCfDcH2zEL9oL/dev';
 
 // link for worker database
 const workerURL = 'https://script.google.com/macros/s/AKfycbxw4KtgqhSTVI4TKfQuT642LyvnkvYBQSh3IHaWc1GGI--89abQp0bUff-x8-rELeS_VQ/exec';
@@ -1035,7 +1036,8 @@ function getIP() {
 
 // Function to fetch product info
 function productNumberInfo(headerValue) {
-  fetch(`${dbURL}?productNumber=${headerValue}`)
+  const factoryValue = document.getElementById('hidden工場').value; // Get the factory value
+  fetch(`${dbURL}?productNumber=${headerValue}&factory=${factoryValue}`)
     .then(response => {
       if (!response.ok) {
         throw new Error('Network response was not ok ' + response.statusText);
@@ -1053,7 +1055,8 @@ function productNumberInfo(headerValue) {
 
 // Function to fetch model info
 function modelInfo(headerValue) {
-  fetch(`${dbURL}?model=${headerValue}`)
+  const factoryValue = document.getElementById('hidden工場').value; // Get the factory value
+  fetch(`${dbURL}?model=${headerValue}&factory=${factoryValue}`)
     .then(response => {
       if (!response.ok) {
         throw new Error('Network response was not ok ' + response.statusText);
@@ -1071,7 +1074,8 @@ function modelInfo(headerValue) {
 
 // Function to fetch shape info
 function shapeInfo(headerValue) {
-  fetch(`${dbURL}?shape=${headerValue}`)
+  const factoryValue = document.getElementById('hidden工場').value; // Get the factory value
+  fetch(`${dbURL}?shape=${headerValue}&factory=${factoryValue}`)
     .then(response => {
       if (!response.ok) {
         throw new Error('Network response was not ok ' + response.statusText);
@@ -1089,7 +1093,8 @@ function shapeInfo(headerValue) {
 
 // Function to fetch R-L info
 function RLInfo(headerValue) {
-  fetch(`${dbURL}?rl=${headerValue}`)
+  const factoryValue = document.getElementById('hidden工場').value; // Get the factory value
+  fetch(`${dbURL}?rl=${headerValue}&factory=${factoryValue}`)
     .then(response => {
       if (!response.ok) {
         throw new Error('Network response was not ok ' + response.statusText);
@@ -1107,7 +1112,8 @@ function RLInfo(headerValue) {
 
 // Function to fetch material info
 function materialInfo(headerValue) {
-  fetch(`${dbURL}?material=${headerValue}`)
+  const factoryValue = document.getElementById('hidden工場').value; // Get the factory value
+  fetch(`${dbURL}?material=${headerValue}&factory=${factoryValue}`)
     .then(response => {
       if (!response.ok) {
         throw new Error('Network response was not ok ' + response.statusText);
@@ -1125,7 +1131,8 @@ function materialInfo(headerValue) {
 
 // Function to fetch material code info
 function materialCodeInfo(headerValue) {
-  fetch(`${dbURL}?materialcode=${headerValue}`)
+  const factoryValue = document.getElementById('hidden工場').value; // Get the factory value
+  fetch(`${dbURL}?materialcode=${headerValue}&factory=${factoryValue}`)
     .then(response => {
       if (!response.ok) {
         throw new Error('Network response was not ok ' + response.statusText);
@@ -1143,7 +1150,8 @@ function materialCodeInfo(headerValue) {
 
 // Function to fetch material color info
 function materialColorInfo(headerValue) {
-  fetch(`${dbURL}?materialcolor=${headerValue}`)
+  const factoryValue = document.getElementById('hidden工場').value; // Get the factory value
+  fetch(`${dbURL}?materialcolor=${headerValue}&factory=${factoryValue}`)
     .then(response => {
       if (!response.ok) {
         throw new Error('Network response was not ok ' + response.statusText);
@@ -1163,8 +1171,9 @@ function materialColorInfo(headerValue) {
 
 // Function to fetch rikeshi up or down color info
 function getRikeshi(headerValue) {
+  const factoryValue = document.getElementById('hidden工場').value; // Get the factory value
   const rikeshiInfo = document.getElementById("rikeshitext");
-  fetch(`${dbURL}?rikeshi=${headerValue}`)
+  fetch(`${dbURL}?rikeshi=${headerValue}&factory=${factoryValue}`)
     .then(response => {
       if (!response.ok) {
         throw new Error('Network response was not ok ' + response.statusText);
@@ -1189,7 +1198,8 @@ function getRikeshi(headerValue) {
 
 //function to get box value
 function getBox(headerValue) {
-  fetch(`${dbURL}?box=${headerValue}`)
+  const factoryValue = document.getElementById('hidden工場').value; // Get the factory value
+  fetch(`${dbURL}?box=${headerValue}&factory=${factoryValue}`)
     .then(response => {
       if (!response.ok) {
         throw new Error('Network response was not ok ' + response.statusText);

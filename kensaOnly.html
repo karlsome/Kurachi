@@ -15,7 +15,7 @@
                 <a href="machine.html">設備</a>
             </nav>
             <h1>検査のみ</h1>
-            <h4 id = "nippoTitle">倉知日報</h4>
+            <h4 id = "nippoTitle">日報</h4>
             
             <label>
                 設備: <input type="text" name="設備" id="dropdown>
@@ -25,6 +25,8 @@
             <input type="hidden" name="printerCode" id="printerCode">
             <input type="hidden" name="検査STATUS" id="検査STATUS" value="false">
             <input type="hidden" name="ipInfo" id="ipInfo" value="false">
+            <input type="hidden" name="tracking QR" id="tracking-QR">
+
 
             <!-- kensa hatsumono status variables -->
             <input type="hidden" name="CONFIRM SHAPE" id="confirm-shape" value="false">
@@ -37,6 +39,7 @@
             <input type="hidden" name="CONFIRM SEWING LINE" id="confirm-sewing-line" value="false">
 
             <input id="sub-dropdown" name="背番号" disabled> </input>
+            <input id="process" name="process" readonly> </input>
             <!-- options will be populated dynamically based on the selected value of #dropdown -->
             
 
@@ -214,7 +217,7 @@
             <br>
                     
             <textarea name="Comments2" rows="5" placeholder="Enter Comments" disabled></textarea>
-            <input type="hidden" name="row" value="25"> <!-- Ensure this hidden input holds the row number -->
+            <input type="hidden" name="row" value=""> <!-- Ensure this hidden input holds the row number -->
             <button type="button" onclick="updateData()">Update</button>
             <br>
         </div>
@@ -292,6 +295,11 @@
 
         // Function to update data in the Google Sheet
         function updateData() {
+            const enableInputsCheckbox = document.getElementById("enable-inputs"); // Checkbox element
+            if (!enableInputsCheckbox.checked) {
+                window.alert("you cant update if there is no data");
+                return;
+            }
             calculateTotalTime();
             const form = document.getElementById('kensa-form');
             const formData = new FormData(form);

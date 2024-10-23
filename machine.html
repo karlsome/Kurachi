@@ -8,7 +8,7 @@
     <title>設備</title>
 </head>
 <body>
-    <h1 class="centered">自動日報 v3.0</h1>
+    <h1 class="centered">FREYA SYSTEM v3.9</h1>
     <nav>
         <a href="index.html">
             <img src="src/logo.png" alt="Logo">
@@ -35,33 +35,89 @@
             .then(data => {
                 const containers = document.getElementById('containers');
                 
-                data.forEach((list, index) => {
-                    const card = document.createElement('div');
-                    card.classList.add('card');
-                    card.addEventListener('click', () => {
-                        window.location.href = `nippo.html?selected=${list}&filter=${filterValue}`;
+                // If filterValue is '天徳', display S1 to S6 options
+                if (filterValue === '天徳') {
+                    const sNames = ['S1', 'S2', 'S4', 'S5', 'S6', 'スリットテーブル'];
+                    sNames.forEach((sName) => {
+                        const card = document.createElement('div');
+                        card.classList.add('card');
+                        card.addEventListener('click', () => {
+                            window.location.href = `tentoku.html?selected=${sName}&filter=第二工場&kojo=${filterValue}`;
+                        });
+
+                        const img = document.createElement('img');
+                        img.src = `src/machines/${sName}.jpg`; // Adjust your image paths if needed
+                        img.alt = sName;
+
+                        const label = document.createElement('div');
+                        label.classList.add('label');
+                        label.textContent = sName;
+                        label.addEventListener('click', (event) => {
+                            event.stopPropagation();
+                            window.location.href = `tentoku.html?selected=${sName}&filter=第二工場&kojo=${filterValue}`;
+                        });
+
+                        card.appendChild(img);
+                        card.appendChild(label);
+                        containers.appendChild(card);
                     });
+                } 
+                // If filterValue is '第二工場', display SRS1 to SRS5 options
+                else if (filterValue === '第二工場') {
+                    const srsNames = ['SRS1', 'SRS2', 'SRS3', 'SRS4', 'SRS5'];
+                    srsNames.forEach((srsName) => {
+                        const card = document.createElement('div');
+                        card.classList.add('card');
+                        card.addEventListener('click', () => {
+                            window.location.href = `tentoku.html?selected=${srsName}&filter=${filterValue}&kojo=${filterValue}`;
+                        });
 
-                    const img = document.createElement('img');
-                    if (list === "自動プレス機") {
-                        img.src = `src/machines/jido.jpg`;
-                    } else {
-                        img.src = `src/machines/${list}.jpg`;
-                    }
-                    img.alt = list;
+                        const img = document.createElement('img');
+                        img.src = `src/machines/${srsName}.jpg`; // Adjust your image paths if needed
+                        img.alt = srsName;
 
-                    const label = document.createElement('div');
-                    label.classList.add('label');
-                    label.textContent = list;
-                    label.addEventListener('click', (event) => {
-                        event.stopPropagation();
-                        window.location.href = `nippo.html?selected=${list}&filter=${filterValue}`;
+                        const label = document.createElement('div');
+                        label.classList.add('label');
+                        label.textContent = srsName;
+                        label.addEventListener('click', (event) => {
+                            event.stopPropagation();
+                            window.location.href = `tentoku.html?selected=${srsName}&filter=${filterValue}&kojo=${filterValue}`;
+                        });
+
+                        card.appendChild(img);
+                        card.appendChild(label);
+                        containers.appendChild(card);
                     });
+                } else {
+                    // Normal case, display cards based on fetched data
+                    data.forEach((list, index) => {
+                        const card = document.createElement('div');
+                        card.classList.add('card');
+                        card.addEventListener('click', () => {
+                            window.location.href = `nippo.html?selected=${list}&filter=${filterValue}`;
+                        });
 
-                    card.appendChild(img);
-                    card.appendChild(label);
-                    containers.appendChild(card);
-                });
+                        const img = document.createElement('img');
+                        if (list === "自動プレス機") {
+                            img.src = `src/machines/jido.jpg`;
+                        } else {
+                            img.src = `src/machines/${list}.jpg`;
+                        }
+                        img.alt = list;
+
+                        const label = document.createElement('div');
+                        label.classList.add('label');
+                        label.textContent = list;
+                        label.addEventListener('click', (event) => {
+                            event.stopPropagation();
+                            window.location.href = `nippo.html?selected=${list}&filter=${filterValue}`;
+                        });
+
+                        card.appendChild(img);
+                        card.appendChild(label);
+                        containers.appendChild(card);
+                    });
+                }
 
                 // Add the additional card for QR code scanning
                 const qrCard = document.createElement('div');
