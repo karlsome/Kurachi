@@ -101,7 +101,7 @@
         <input type="text" name="材料ロット" id="材料ロット" placeholder="Material Lot" required>
         <br>
 
-        <!-- The Modal -->
+        <!-- what modal is this???? -->
         <div id="myModal" class="modal">
             <div class="modal-content">
                 <span class="close">&times;</span>
@@ -114,6 +114,41 @@
                 <img id="photo" alt="Captured Image" draggable="false">
             </div>
         </div>
+
+        <!-- Alert modal instead of window.alert -->
+        <div id="customAlertModal" class="modal" style="display:none;">
+        <div class="modal-content">
+            <span class="close-button" id="closeModalButton">&times;</span>
+            <p id="customAlertText">Wrong Kanban / 看板間違い</p>
+        </div>
+        </div>
+
+        <div id="scanAlertModal" class="modal" style="display:none;">
+        <div class="modal-content">
+            <span class="close-button" id="closeScanModalButton">&times;</span>
+            <p id="scanAlertText">Different product detected! Please save form before changing. / 異なる製品が検出されました。保存してください！</p>
+        </div>
+        </div>
+
+        <!-- QR Code Scanner Modal -->
+        <div id="qrScannerModal" class="modal" style="display:none;">
+            <div class="modal-content">
+            <span class="close-button" id="closeScannerModalButton">&times;</span>
+            <h3>Scan QR Code</h3>
+            <video id="video" width="300" height="225" style="border: 1px solid black;"></video>
+            <canvas id="canvas" style="display:none;"></canvas>
+            </div>
+        </div>
+        
+        <!-- The custom alert modal when product mismatch happens -->
+        <div id="scanAlertModal" class="modal" style="display:none;">
+            <div class="modal-content">
+            <span class="close-button" id="closeScanModalButton">&times;</span>
+            <p id="scanAlertText">Different product detected! Please save form before changing. / 異なる製品が検出されました。保存してください！</p>
+            </div>
+        </div>
+
+
             <br>
 
 
@@ -317,6 +352,7 @@
     </div>
     <script src="tentoku.js"></script>
     <script src="html5-qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr/dist/jsQR.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
 </body>
 </html>
