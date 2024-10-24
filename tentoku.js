@@ -992,6 +992,23 @@ document.getElementById('scan-button').addEventListener('click', function() {
 // });
 
 document.getElementById('sendtoQty').addEventListener('click', function() {
+  const subDropdown = document.getElementById('sub-dropdown');
+
+  // Check if the sub-dropdown is blank or null
+  if (!subDropdown || subDropdown.value === "") {
+      // Show alert to the user if sub-dropdown is empty
+      const customAlertModal = document.getElementById('customAlertModal');
+      document.getElementById('customAlertText').innerText = "背番号選んでください。 / Please Scan QR 背番号 first";
+      customAlertModal.style.display = 'block';
+
+      // Close the alert modal after a few seconds
+      setTimeout(() => {
+          customAlertModal.style.display = 'none';
+      }, 2000);
+
+      return; // Stop further execution if sub-dropdown is blank
+  }
+
   const qrScannerModal = document.getElementById('qrScannerModal');
   const html5QrCode = new Html5Qrcode("qrReader");
 
@@ -1015,7 +1032,6 @@ document.getElementById('sendtoQty').addEventListener('click', function() {
           }
 
           // Check if the value of the scanned QR code matches the value of the dropdown
-          const subDropdown = document.getElementById('sub-dropdown');
           if (subDropdown && subDropdown.value !== qrCodeMessage) {
               const alertSound = document.getElementById('alert-sound');
               if (alertSound) {
