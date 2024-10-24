@@ -823,7 +823,7 @@ document.getElementById('scan-button').addEventListener('click', function() {
 });
 
 
-
+// this is the original sendtoQty code
 // // listener for KANBAN QR scanner button (sendtoQty button)
 // document.getElementById('sendtoQty').addEventListener('click', function() {
 //   // Open popup window for QR scanning with an identifier for "sendtoQty"
@@ -905,92 +905,6 @@ document.getElementById('scan-button').addEventListener('click', function() {
 
 
 
-
-// document.getElementById('sendtoQty').addEventListener('click', function() {
-//   // Open popup window for QR scanning with an identifier for "sendtoQty"
-//   const popup = window.open('popup.html?source=kanban', 'QR Scanner', 'width=400,height=300');
-
-//   // Listen for the message event specific to "sendtoQty"
-//   window.addEventListener('message', function handleSendtoQty(event) {
-//     // Ensure the event is from the same origin
-//     if (event.origin === window.location.origin) {
-//       const BarcodeValue = event.data;
-//       console.log(`QR Code detected: ${BarcodeValue}`);
-
-//       // Set the scanned QR code data to the "scannedKanban" input field
-//       const scannedKanbanInput = document.getElementById('scannedKanban');
-//       if (scannedKanbanInput) {
-//         scannedKanbanInput.value = BarcodeValue;
-//       }
-
-//       // Check if the value of the scanned QR code matches the value of the dropdown
-//       const subDropdown = document.getElementById('sub-dropdown');
-//       if (subDropdown && subDropdown.value !== BarcodeValue) {
-//         // Play the alert sound before showing the alert
-//         const alertSound = document.getElementById('alert-sound');
-//         if (alertSound) {
-//           alertSound.play().then(() => {
-//             console.log("Sound is playing");
-
-//             // Flash the page red immediately before the custom alert
-//             document.body.classList.add('flash-red');
-
-//             // Show custom alert modal instead of window.alert
-//             const customAlertModal = document.getElementById('customAlertModal');
-//             customAlertModal.style.display = 'block';
-            
-//             // Close modal and reset after user clicks close button
-//             const closeModalButton = document.getElementById('closeModalButton');
-//             closeModalButton.onclick = function() {
-//               customAlertModal.style.display = 'none';
-//               alertSound.pause();
-//               alertSound.currentTime = 0; // Reset sound to the beginning
-
-//               // Stop flashing after closing the modal
-//               document.body.classList.remove('flash-red');
-//             };
-
-//           }).catch(function(error) {
-//             console.error("Failed to play sound:", error);
-//           });
-//         } else {
-//           console.error("Alert sound not found");
-//         }
-
-//         window.removeEventListener('message', handleSendtoQty); // Stop further processing
-//         return;
-//       }
-
-//       // Get the value of "boxqty" and add it to the "Process Quantity" input field
-//       const boxQtyInput = document.getElementById('boxqty');
-//       const processQtyInput = document.getElementById('ProcessQuantity');
-      
-//       if (boxQtyInput && processQtyInput) {
-//         const boxQtyValue = parseInt(boxQtyInput.value) || 0;
-//         const processQtyValue = parseInt(processQtyInput.value) || 0;
-
-//         // Add the values together and set it to "Process Quantity"
-//         processQtyInput.value = processQtyValue + boxQtyValue;
-//         localStorage.setItem("Process Quantity", processQtyInput.value);
-//         updateTotal();
-        
-//         // Alert user about success
-//         const successModal = document.getElementById('customAlertModal');
-//         document.getElementById('customAlertText').innerText = "1 box added successfully / 1箱が正常に追加されました";
-//         successModal.style.display = 'block';
-
-//         // Close the success modal after a few seconds
-//         setTimeout(() => {
-//           successModal.style.display = 'none';
-//         }, 2000);
-//       }
-
-//       // Remove the event listener after handling
-//       window.removeEventListener('message', handleSendtoQty);
-//     }
-//   });
-// });
-
 document.getElementById('sendtoQty').addEventListener('click', function() {
   const subDropdown = document.getElementById('sub-dropdown');
 
@@ -1033,38 +947,43 @@ document.getElementById('sendtoQty').addEventListener('click', function() {
 
           // Check if the value of the scanned QR code matches the value of the dropdown
           if (subDropdown && subDropdown.value !== qrCodeMessage) {
-              const alertSound = document.getElementById('alert-sound');
-              if (alertSound) {
-                  alertSound.play().then(() => {
-                      console.log("Sound is playing");
+              // Stop the QR scanner and close the modal immediately
+              html5QrCode.stop().then(() => {
+                  qrScannerModal.style.display = 'none';
 
-                      // Stop QR scanning and close the modal
-                      html5QrCode.stop().then(() => {
-                          qrScannerModal.style.display = 'none';
-                      }).catch(err => {
-                          console.error("Failed to stop scanning:", err);
+                  // After stopping the QR scanner and closing the modal, proceed with the alert
+                  const alertSound = document.getElementById('alert-sound');
+                  if (alertSound) {
+                      alertSound.play().then(() => {
+                          console.log("Sound is playing");
+
+                          // Flash the page red immediately before the custom alert
+                          document.body.classList.add('flash-red');
+
+                          // Show custom alert modal instead of window.alert
+                          const customAlertModal = document.getElementById('customAlertModal');
+                          customAlertModal.style.display = 'block';
+                          
+                          // Close modal and reset after user clicks close button
+                          const closeModalButton = document.getElementById('closeModalButton');
+                          closeModalButton.onclick = function() {
+                              customAlertModal.style.display = 'none';
+                              alertSound.pause();
+                              alertSound.currentTime = 0; // Reset sound to the beginning
+
+                              // Stop flashing after closing the modal
+                              document.body.classList.remove('flash-red');
+                          };
+
+                      }).catch(function(error) {
+                          console.error("Failed to play sound:", error);
                       });
-
-                      // Flash the page red and show the alert
-                      document.body.classList.add('flash-red');
-                      const customAlertModal = document.getElementById('customAlertModal');
-                      customAlertModal.style.display = 'block';
-                      
-                      // Close modal and reset after user clicks close button
-                      const closeModalButton = document.getElementById('closeModalButton');
-                      closeModalButton.onclick = function() {
-                          customAlertModal.style.display = 'none';
-                          alertSound.pause();
-                          alertSound.currentTime = 0; // Reset sound to the beginning
-                          document.body.classList.remove('flash-red');
-                      };
-
-                  }).catch(function(error) {
-                      console.error("Failed to play sound:", error);
-                  });
-              } else {
-                  console.error("Alert sound not found");
-              }
+                  } else {
+                      console.error("Alert sound not found");
+                  }
+              }).catch(err => {
+                  console.error("Failed to stop scanning:", err);
+              });
 
               return; // Stop further processing if the QR code doesn't match
           }
