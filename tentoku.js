@@ -652,79 +652,174 @@ function updateSheetStatus(selectedValue,machineName){
 
 
 
-document.getElementById('scan-button').addEventListener('click', function() {
+// document.getElementById('scan-button').addEventListener('click', function() {
   
-  // Open popup window for QR scanning with an identifier for "scan-button"
-  const popup = window.open('popup.html?source=scan', 'QR Scanner', 'width=400,height=300');
+//   // Open popup window for QR scanning with an identifier for "scan-button"
+//   const popup = window.open('popup.html?source=scan', 'QR Scanner', 'width=400,height=300');
 
-  // Listen for the message event specific to "scan-button"
-  window.addEventListener('message', function handleScanButton(event) {
-    // Ensure the event is from the same origin
-    if (event.origin === window.location.origin) {
-      const BarcodeValue = event.data;
-      console.log(`QR Code detected: ${BarcodeValue}`);
+//   // Listen for the message event specific to "scan-button"
+//   window.addEventListener('message', function handleScanButton(event) {
+//     // Ensure the event is from the same origin
+//     if (event.origin === window.location.origin) {
+//       const BarcodeValue = event.data;
+//       console.log(`QR Code detected: ${BarcodeValue}`);
 
-      const subDropdown = document.getElementById('sub-dropdown');
+//       const subDropdown = document.getElementById('sub-dropdown');
 
-      // Check if there's an existing product loaded in the sub-dropdown and it differs from the scanned QR code
-      if (subDropdown && subDropdown.value !== "" && subDropdown.value !== BarcodeValue) {
-          // If the scanned QR code doesn't match, flash the screen red and play the alarm sound
-          const alertSound = document.getElementById('alert-sound');
-          if (alertSound) {
-            alertSound.play().then(() => {
-              console.log("Sound is playing");
+//       // Check if there's an existing product loaded in the sub-dropdown and it differs from the scanned QR code
+//       if (subDropdown && subDropdown.value !== "" && subDropdown.value !== BarcodeValue) {
+//           // If the scanned QR code doesn't match, flash the screen red and play the alarm sound
+//           const alertSound = document.getElementById('alert-sound');
+//           if (alertSound) {
+//             alertSound.play().then(() => {
+//               console.log("Sound is playing");
   
-              // Flash the page red immediately before the custom alert
-              document.body.classList.add('flash-red');
+//               // Flash the page red immediately before the custom alert
+//               document.body.classList.add('flash-red');
 
-              // Show custom alert modal instead of window.alert
-              const scanAlertModal = document.getElementById('scanAlertModal');
-              scanAlertModal.style.display = 'block';
+//               // Show custom alert modal instead of window.alert
+//               const scanAlertModal = document.getElementById('scanAlertModal');
+//               scanAlertModal.style.display = 'block';
               
-              // Close modal and reset after user clicks close button
-              const closeScanModalButton = document.getElementById('closeScanModalButton');
-              closeScanModalButton.onclick = function() {
-                scanAlertModal.style.display = 'none';
-                alertSound.pause();
-                alertSound.currentTime = 0; // Reset sound to the beginning
+//               // Close modal and reset after user clicks close button
+//               const closeScanModalButton = document.getElementById('closeScanModalButton');
+//               closeScanModalButton.onclick = function() {
+//                 scanAlertModal.style.display = 'none';
+//                 alertSound.pause();
+//                 alertSound.currentTime = 0; // Reset sound to the beginning
 
-                // Stop flashing after closing the modal
-                document.body.classList.remove('flash-red');
-              };
+//                 // Stop flashing after closing the modal
+//                 document.body.classList.remove('flash-red');
+//               };
 
-            }).catch(function(error) {
-              console.error("Failed to play sound:", error);
-            });
-          } else {
-            console.error("Alert sound not found");
+//             }).catch(function(error) {
+//               console.error("Failed to play sound:", error);
+//             });
+//           } else {
+//             console.error("Alert sound not found");
+//           }
+
+//           // Stop further processing after the alert
+//           window.removeEventListener('message', handleScanButton);
+//           return;
+        
+//       }
+
+//       // Only reset form and reload if the QR code is different from sub-dropdown value
+//       if (subDropdown && subDropdown.value !== BarcodeValue) {
+//         resetForm();
+//         sendtoNCButtonisPressed = false;
+//         localStorage.setItem("sendtoNCButtonisPressed",'false');   
+
+//         // Process the QR code and update the sub-dropdown
+//         SubDropdownChange(BarcodeValue);
+//         // Delay the page reload after successful QR code processing
+//         setTimeout(() => {
+//           window.location.reload();
+//         }, 500);
+//       } else {
+//         console.log("QR code is the same as sub-dropdown value, no reload needed.");
+//       }
+
+//       // Remove the event listener after handling
+//       window.removeEventListener('message', handleScanButton);
+//     }
+//   });
+// });
+
+document.getElementById('scan-button').addEventListener('click', function() {
+  const qrScannerModal = document.getElementById('qrScannerModal');
+  const html5QrCode = new Html5Qrcode("qrReader");
+  
+  // Show the modal
+  qrScannerModal.style.display = 'block';
+
+  // Start QR code scanning when the modal is displayed
+  html5QrCode.start(
+      { facingMode: "environment" }, // Use rear camera
+      {
+          fps: 10, // Sets the framerate to 10 scans per second
+          qrbox: { width: 250, height: 250 } // Sets the scanning box dimensions
+      },
+      qrCodeMessage => {
+          console.log(`QR Code detected: ${qrCodeMessage}`);
+
+          const subDropdown = document.getElementById('sub-dropdown');
+
+          // If a wrong Kanban QR code is detected
+          if (subDropdown && subDropdown.value !== "" && subDropdown.value !== qrCodeMessage) {
+              const alertSound = document.getElementById('alert-sound');
+              if (alertSound) {
+                  // Play sound and show alert
+                  alertSound.play().then(() => {
+                      // Stop the QR scanner and close the modal
+                      html5QrCode.stop().then(() => {
+                          qrScannerModal.style.display = 'none';
+                      }).catch(err => {
+                          console.error("Failed to stop scanning:", err);
+                      });
+
+                      // Flash the screen red and show the alert
+                      document.body.classList.add('flash-red');
+                      const scanAlertModal = document.getElementById('scanAlertModal');
+                      scanAlertModal.style.display = 'block';
+
+                      const closeScanModalButton = document.getElementById('closeScanModalButton');
+                      closeScanModalButton.onclick = function() {
+                          scanAlertModal.style.display = 'none';
+                          alertSound.pause();
+                          alertSound.currentTime = 0; // Reset sound
+                          document.body.classList.remove('flash-red');
+                      };
+                  }).catch(function(error) {
+                      console.error("Failed to play sound:", error);
+                  });
+              }
+              return;
           }
 
-          // Stop further processing after the alert
-          window.removeEventListener('message', handleScanButton);
-          return;
-        
+          // If QR code is valid, process and close the scanner
+          if (subDropdown && subDropdown.value !== qrCodeMessage) {
+              resetForm();
+              SubDropdownChange(qrCodeMessage);
+              setTimeout(() => {
+                  window.location.reload();
+              }, 500);
+
+              // Stop the QR scanner and close the modal
+              html5QrCode.stop().then(() => {
+                  qrScannerModal.style.display = 'none';
+              }).catch(err => {
+                  console.error("Failed to stop scanning:", err);
+              });
+          }
+      },
+      errorMessage => {
+          // Handle scanning errors here
       }
-
-      // Only reset form and reload if the QR code is different from sub-dropdown value
-      if (subDropdown && subDropdown.value !== BarcodeValue) {
-        resetForm();
-        sendtoNCButtonisPressed = false;
-        localStorage.setItem("sendtoNCButtonisPressed",'false');   
-
-        // Process the QR code and update the sub-dropdown
-        SubDropdownChange(BarcodeValue);
-        // Delay the page reload after successful QR code processing
-        setTimeout(() => {
-          window.location.reload();
-        }, 500);
-      } else {
-        console.log("QR code is the same as sub-dropdown value, no reload needed.");
-      }
-
-      // Remove the event listener after handling
-      window.removeEventListener('message', handleScanButton);
-    }
+  ).catch(err => {
+      console.error("Failed to start scanning:", err);
   });
+
+  // Close modal when the close button is clicked
+  document.getElementById('closeQRScannerModal').onclick = function() {
+      html5QrCode.stop().then(() => {
+          qrScannerModal.style.display = 'none';
+      }).catch(err => {
+          console.error("Failed to stop scanning:", err);
+      });
+  };
+
+  // Close modal if the user clicks outside the modal content
+  window.onclick = function(event) {
+      if (event.target == qrScannerModal) {
+          html5QrCode.stop().then(() => {
+              qrScannerModal.style.display = 'none';
+          }).catch(err => {
+              console.error("Failed to stop scanning:", err);
+          });
+      }
+  };
 });
 
 
@@ -811,89 +906,210 @@ document.getElementById('scan-button').addEventListener('click', function() {
 
 
 
-document.getElementById('sendtoQty').addEventListener('click', function() {
-  // Open popup window for QR scanning with an identifier for "sendtoQty"
-  const popup = window.open('popup.html?source=kanban', 'QR Scanner', 'width=400,height=300');
+// document.getElementById('sendtoQty').addEventListener('click', function() {
+//   // Open popup window for QR scanning with an identifier for "sendtoQty"
+//   const popup = window.open('popup.html?source=kanban', 'QR Scanner', 'width=400,height=300');
 
-  // Listen for the message event specific to "sendtoQty"
-  window.addEventListener('message', function handleSendtoQty(event) {
-    // Ensure the event is from the same origin
-    if (event.origin === window.location.origin) {
-      const BarcodeValue = event.data;
-      console.log(`QR Code detected: ${BarcodeValue}`);
+//   // Listen for the message event specific to "sendtoQty"
+//   window.addEventListener('message', function handleSendtoQty(event) {
+//     // Ensure the event is from the same origin
+//     if (event.origin === window.location.origin) {
+//       const BarcodeValue = event.data;
+//       console.log(`QR Code detected: ${BarcodeValue}`);
 
-      // Set the scanned QR code data to the "scannedKanban" input field
-      const scannedKanbanInput = document.getElementById('scannedKanban');
-      if (scannedKanbanInput) {
-        scannedKanbanInput.value = BarcodeValue;
-      }
+//       // Set the scanned QR code data to the "scannedKanban" input field
+//       const scannedKanbanInput = document.getElementById('scannedKanban');
+//       if (scannedKanbanInput) {
+//         scannedKanbanInput.value = BarcodeValue;
+//       }
 
-      // Check if the value of the scanned QR code matches the value of the dropdown
-      const subDropdown = document.getElementById('sub-dropdown');
-      if (subDropdown && subDropdown.value !== BarcodeValue) {
-        // Play the alert sound before showing the alert
-        const alertSound = document.getElementById('alert-sound');
-        if (alertSound) {
-          alertSound.play().then(() => {
-            console.log("Sound is playing");
+//       // Check if the value of the scanned QR code matches the value of the dropdown
+//       const subDropdown = document.getElementById('sub-dropdown');
+//       if (subDropdown && subDropdown.value !== BarcodeValue) {
+//         // Play the alert sound before showing the alert
+//         const alertSound = document.getElementById('alert-sound');
+//         if (alertSound) {
+//           alertSound.play().then(() => {
+//             console.log("Sound is playing");
 
-            // Flash the page red immediately before the custom alert
-            document.body.classList.add('flash-red');
+//             // Flash the page red immediately before the custom alert
+//             document.body.classList.add('flash-red');
 
-            // Show custom alert modal instead of window.alert
-            const customAlertModal = document.getElementById('customAlertModal');
-            customAlertModal.style.display = 'block';
+//             // Show custom alert modal instead of window.alert
+//             const customAlertModal = document.getElementById('customAlertModal');
+//             customAlertModal.style.display = 'block';
             
-            // Close modal and reset after user clicks close button
-            const closeModalButton = document.getElementById('closeModalButton');
-            closeModalButton.onclick = function() {
-              customAlertModal.style.display = 'none';
-              alertSound.pause();
-              alertSound.currentTime = 0; // Reset sound to the beginning
+//             // Close modal and reset after user clicks close button
+//             const closeModalButton = document.getElementById('closeModalButton');
+//             closeModalButton.onclick = function() {
+//               customAlertModal.style.display = 'none';
+//               alertSound.pause();
+//               alertSound.currentTime = 0; // Reset sound to the beginning
 
-              // Stop flashing after closing the modal
-              document.body.classList.remove('flash-red');
-            };
+//               // Stop flashing after closing the modal
+//               document.body.classList.remove('flash-red');
+//             };
 
-          }).catch(function(error) {
-            console.error("Failed to play sound:", error);
-          });
-        } else {
-          console.error("Alert sound not found");
-        }
+//           }).catch(function(error) {
+//             console.error("Failed to play sound:", error);
+//           });
+//         } else {
+//           console.error("Alert sound not found");
+//         }
 
-        window.removeEventListener('message', handleSendtoQty); // Stop further processing
-        return;
-      }
+//         window.removeEventListener('message', handleSendtoQty); // Stop further processing
+//         return;
+//       }
 
-      // Get the value of "boxqty" and add it to the "Process Quantity" input field
-      const boxQtyInput = document.getElementById('boxqty');
-      const processQtyInput = document.getElementById('ProcessQuantity');
+//       // Get the value of "boxqty" and add it to the "Process Quantity" input field
+//       const boxQtyInput = document.getElementById('boxqty');
+//       const processQtyInput = document.getElementById('ProcessQuantity');
       
-      if (boxQtyInput && processQtyInput) {
-        const boxQtyValue = parseInt(boxQtyInput.value) || 0;
-        const processQtyValue = parseInt(processQtyInput.value) || 0;
+//       if (boxQtyInput && processQtyInput) {
+//         const boxQtyValue = parseInt(boxQtyInput.value) || 0;
+//         const processQtyValue = parseInt(processQtyInput.value) || 0;
 
-        // Add the values together and set it to "Process Quantity"
-        processQtyInput.value = processQtyValue + boxQtyValue;
-        localStorage.setItem("Process Quantity", processQtyInput.value);
-        updateTotal();
+//         // Add the values together and set it to "Process Quantity"
+//         processQtyInput.value = processQtyValue + boxQtyValue;
+//         localStorage.setItem("Process Quantity", processQtyInput.value);
+//         updateTotal();
         
-        // Alert user about success
-        const successModal = document.getElementById('customAlertModal');
-        document.getElementById('customAlertText').innerText = "1 box added successfully / 1箱が正常に追加されました";
-        successModal.style.display = 'block';
+//         // Alert user about success
+//         const successModal = document.getElementById('customAlertModal');
+//         document.getElementById('customAlertText').innerText = "1 box added successfully / 1箱が正常に追加されました";
+//         successModal.style.display = 'block';
 
-        // Close the success modal after a few seconds
-        setTimeout(() => {
-          successModal.style.display = 'none';
-        }, 2000);
+//         // Close the success modal after a few seconds
+//         setTimeout(() => {
+//           successModal.style.display = 'none';
+//         }, 2000);
+//       }
+
+//       // Remove the event listener after handling
+//       window.removeEventListener('message', handleSendtoQty);
+//     }
+//   });
+// });
+
+document.getElementById('sendtoQty').addEventListener('click', function() {
+  const qrScannerModal = document.getElementById('qrScannerModal');
+  const html5QrCode = new Html5Qrcode("qrReader");
+
+  // Show the modal for QR scanning
+  qrScannerModal.style.display = 'block';
+
+  // Start QR code scanning
+  html5QrCode.start(
+      { facingMode: "environment" }, // Use rear camera
+      {
+          fps: 10, // Sets the framerate to 10 scans per second
+          qrbox: { width: 250, height: 250 } // Sets the scanning box dimensions
+      },
+      qrCodeMessage => {
+          console.log(`QR Code detected: ${qrCodeMessage}`);
+
+          // Set the scanned QR code data to the "scannedKanban" input field
+          const scannedKanbanInput = document.getElementById('scannedKanban');
+          if (scannedKanbanInput) {
+              scannedKanbanInput.value = qrCodeMessage;
+          }
+
+          // Check if the value of the scanned QR code matches the value of the dropdown
+          const subDropdown = document.getElementById('sub-dropdown');
+          if (subDropdown && subDropdown.value !== qrCodeMessage) {
+              const alertSound = document.getElementById('alert-sound');
+              if (alertSound) {
+                  alertSound.play().then(() => {
+                      console.log("Sound is playing");
+
+                      // Stop QR scanning and close the modal
+                      html5QrCode.stop().then(() => {
+                          qrScannerModal.style.display = 'none';
+                      }).catch(err => {
+                          console.error("Failed to stop scanning:", err);
+                      });
+
+                      // Flash the page red and show the alert
+                      document.body.classList.add('flash-red');
+                      const customAlertModal = document.getElementById('customAlertModal');
+                      customAlertModal.style.display = 'block';
+                      
+                      // Close modal and reset after user clicks close button
+                      const closeModalButton = document.getElementById('closeModalButton');
+                      closeModalButton.onclick = function() {
+                          customAlertModal.style.display = 'none';
+                          alertSound.pause();
+                          alertSound.currentTime = 0; // Reset sound to the beginning
+                          document.body.classList.remove('flash-red');
+                      };
+
+                  }).catch(function(error) {
+                      console.error("Failed to play sound:", error);
+                  });
+              } else {
+                  console.error("Alert sound not found");
+              }
+
+              return; // Stop further processing if the QR code doesn't match
+          }
+
+          // If QR code is valid, process and update quantities
+          const boxQtyInput = document.getElementById('boxqty');
+          const processQtyInput = document.getElementById('ProcessQuantity');
+          
+          if (boxQtyInput && processQtyInput) {
+              const boxQtyValue = parseInt(boxQtyInput.value) || 0;
+              const processQtyValue = parseInt(processQtyInput.value) || 0;
+
+              // Add the values together and set it to "Process Quantity"
+              processQtyInput.value = processQtyValue + boxQtyValue;
+              localStorage.setItem("Process Quantity", processQtyInput.value);
+              updateTotal();
+              
+              // Alert user about success
+              const successModal = document.getElementById('customAlertModal');
+              document.getElementById('customAlertText').innerText = "1 box added successfully / 1箱が正常に追加されました";
+              successModal.style.display = 'block';
+
+              // Close the success modal after a few seconds
+              setTimeout(() => {
+                  successModal.style.display = 'none';
+              }, 2000);
+
+              // Stop QR scanning and close the modal after successful operation
+              html5QrCode.stop().then(() => {
+                  qrScannerModal.style.display = 'none';
+              }).catch(err => {
+                  console.error("Failed to stop scanning:", err);
+              });
+          }
+      },
+      errorMessage => {
+          // Handle scanning errors here
       }
-
-      // Remove the event listener after handling
-      window.removeEventListener('message', handleSendtoQty);
-    }
+  ).catch(err => {
+      console.error("Failed to start scanning:", err);
   });
+
+  // Close modal when the close button is clicked
+  document.getElementById('closeQRScannerModal').onclick = function() {
+      html5QrCode.stop().then(() => {
+          qrScannerModal.style.display = 'none';
+      }).catch(err => {
+          console.error("Failed to stop scanning:", err);
+      });
+  };
+
+  // Close modal if the user clicks outside the modal content
+  window.onclick = function(event) {
+      if (event.target == qrScannerModal) {
+          html5QrCode.stop().then(() => {
+              qrScannerModal.style.display = 'none';
+          }).catch(err => {
+              console.error("Failed to stop scanning:", err);
+          });
+      }
+  };
 });
 
 
