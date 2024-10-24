@@ -764,7 +764,7 @@ document.getElementById('sendtoQty').addEventListener('click', function() {
             // Delay the alert to let the flash animation start
             setTimeout(() => {
               // Show alert message
-              window.alert("Wrong Kanban / 看板間違い");
+              //window.alert("Wrong Kanban / 看板間違い");
 
               // Stop the sound after the user closes the alert
               alertSound.pause();
@@ -800,7 +800,7 @@ document.getElementById('sendtoQty').addEventListener('click', function() {
         updateTotal();
         
         // Alert user about success
-        window.alert("1 box added successfully / 1箱が正常に追加されました");
+        //window.alert("1 box added successfully / 1箱が正常に追加されました");
 
       }
 
