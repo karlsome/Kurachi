@@ -4,6 +4,22 @@
     <link rel="stylesheet" href="Google Sheet.css">
     <link rel="icon" type="image/png" href="src/favicon2.png">
     <title>自動日報(倉知)</title>
+    <style>
+    .process-section {
+        display: none; /* Hide all sections by default */
+        margin-top: 20px;
+        padding: 15px;
+        border: 4px solid #ddd;
+        border-radius: 5px;
+    }
+    
+    .process-section h3 {
+        color: white; /* Set the title text to white */
+        background-color: #333; /* Optional: add a background color for contrast */
+        padding: 5px; /* Optional: add padding around the text */
+        border-radius: 3px; /* Optional: round the title background corners */
+    }
+</style>
 </head>
 <body>
     <!-- this code is for process -->
@@ -39,6 +55,16 @@
             <input type="hidden" name="CONFIRM PRODUCT NUMBER" id="confirm-product-number" value="false">
             <input type="hidden" name="CONFIRM FILE NAME" id="confirm-file-name" value="false">
             <input type="hidden" name="CONFIRM SEWING LINE" id="confirm-sewing-line" value="false">
+
+            <!-- SRS hatsumono status variables -->
+            <input type="hidden" id="confirm-type" name="CONFIRM TYPE" value="false">
+            <input type="hidden" id="confirm-appearance" name="CONFIRM APPEARANCE" value="false">
+            <input type="hidden" id="confirm-text-misalignment" name="CONFIRM TEXT MISALIGNMENT" value="false">
+            <input type="hidden" id="confirm-position-misalignment" name="CONFIRM POSITION MISALIGNMENT" value="false">
+
+            <!-- helper for initial value of total -->
+            <input type="hidden" id="initialBTotal" value="0">
+            <input type="hidden" id="initialCTotal" value="0">
             
 
            
@@ -51,34 +77,22 @@
             <button id="scan-button" type="button">Scan 背番号</button>
             <br>
             <br>
-            <label for="process">Select Process:</label>
-            <select id="process" name="process">
-                <option value=" "></option>
-                <option value="kensa">検査のみ</option>
-                <option value="SRS">SRSのみ</option>
-                <option value="Slit">スリットのみ</option>
-                <option value="SRS-Slit">SRS + スリット</option>
-            </select>
-            
-            <div id="videoContainer" class="hidden">
-              <div class="video-popup">
-                <button class="close-btn" onclick="closeVideoPopup()">×</button>
-                <video id="rikeshidown" class="video-element hidden" controls>
-                  <source src="src/Rikeshi down.mp4" type="video/mp4">
-                  Your browser does not support the video tag.
-                </video>
-                <video id="rikeshiup" class="video-element hidden" controls>
-                  <source src="src/Rikeshi UP.mp4" type="video/mp4">
-                  Your browser does not support the video tag.
-                </video>
-              </div>
-            </div>
-            
 
-            
-            
-            <label for="Machine Operator">作業者:</label>
-            <input list="machine-operator-suggestions" placeholder="Worker's Name" id="Machine Operator" name="Machine Operator" required>
+
+    <label for="process">Select Process Workflow:</label>
+    <select id="process" name="process" onchange="updateProcessSections()">
+        <option value="A-D">Cutting - Kensa (A - D)</option>
+        <option value="A-B-C-D">Cutting - Slit - SRS - Kensa (A - B - C - D)</option>
+        <option value="A-B-D">Cutting - Slit - Kensa (A - B - D)</option>
+        <option value="A-C-D">Cutting - SRS - Kensa (A - C - D)</option>
+        <!-- Add more workflows as needed -->
+    </select>
+
+    <!-- Cutting Section (A) -->
+    <div id="sectionA" class="process-section">
+        <h3>Section A - Cutting</h3>
+        <label for="Machine Operator">作業者:</label>
+            <input list="machine-operator-suggestions" placeholder="Worker's Name" id="Machine Operator" name="Machine Operator" >
             <datalist id="machine-operator-suggestions"></datalist>
             <br><br>
             <label for="Process Quantity">加工数（良品）+ NG:</label>
@@ -89,16 +103,16 @@
             <input type="date" name="Lot No." id="Lot No." placeholder="Date" onfocus="setDefaultDate(this)" required>
             <br>
             <label for="Start Time">加工開始時間:</label>
-            <input type="time" name="Start Time" id="Start Time" placeholder="Time Start" onfocus="setDefaultTime(this)" required>
+            <input type="time" name="Start Time" id="Start Time" placeholder="Time Start" onfocus="setDefaultTime(this)" >
             <br>
             <label for="End Time">加工終了時間:</label>
-            <input type="time" name="End Time" id="End Time" placeholder="Time End" onfocus="setDefaultTime(this)" required>
+            <input type="time" name="End Time" id="End Time" placeholder="Time End" onfocus="setDefaultTime(this)" >
             <br>
 
 
             <label for="材料ロット">裁断加工ロット:</label>
         <button id="scan-lot" type="button">Scan ロット</button>
-        <input type="text" name="材料ロット" id="材料ロット" placeholder="Material Lot" required>
+        <input type="text" name="材料ロット" id="材料ロット" placeholder="Material Lot" >
         <br>
 
         <!-- what modal is this???? -->
@@ -123,12 +137,6 @@
         </div>
         </div>
 
-        <div id="scanAlertModal" class="modal" style="display:none;">
-        <div class="modal-content">
-            <span class="close-button" id="closeScanModalButton">&times;</span>
-            <p id="scanAlertText">Different product detected! Please save form before changing. / 異なる製品が検出されました。保存してください！</p>
-        </div>
-        </div>
 
         <!-- QR Code Scanner Modal -->
         <div id="qrScannerModal" class="modal">
@@ -166,9 +174,126 @@
              <br>
              <br>
              <br>
-             <label>最後物チェック: </label>
-             <label id="atomonoLabel">FALSE</label>
-             <button id="atomonoButton">Check Last Cycle</button>
+            
+    </div>
+
+    <!-- Slit Section (B) -->
+    <!-- Slit Section (B) -->
+    <!-- Slit Section (B) -->
+    <div id="sectionB" class="process-section">
+        <h3>Section B - Slit</h3>
+        <label for="slit Operator Name">作業者:</label>
+        <input list="machine-operator-suggestions" placeholder="Worker's Name" id="slit Operator Name" name="slit Operator Name">
+        <datalist id="machine-operator-suggestions"></datalist>
+        <br><br>
+        <label for="slit Quantity">加工数（良品）+ NG:</label>
+        <input type="text" name="slit Quantity" id="slit Quantity" placeholder="slit Quantity">
+        <br><br>
+        <label for="slit Date">加工日:</label>
+        <input type="date" name="slit Date" id="slit Date" placeholder="Date" onfocus="setDefaultDate(this)">
+        <br>
+        <label for="slit Time Start">加工開始時間:</label>
+        <input type="time" name="slit Time Start" id="slit Time Start" placeholder="Time Start" onfocus="setDefaultTime(this)">
+        <br>
+        <label for="slit Time End">加工終了時間:</label>
+        <input type="time" name="slit Time End" id="slit Time End" placeholder="Time End" onfocus="setDefaultTime(this)">
+        <br>
+        <div id="counter-box-18" class="counter-box">  
+            <label for="counter-18">Slit NG</label>
+            <button class="plus-btn" type="button" onclick="incrementCounter(18)" >+</button>  
+            <input readonly id="counter-18" value="0" type="number" name="slit-NG">  
+            <button class="minus-btn" type="button" onclick="decrementCounter(18)" >-</button>  
+        </div>
+         
+        
+    </div>
+
+
+
+
+    <!-- SRS Section (C) -->
+    <div id="sectionC" class="process-section">
+        <h3>Section C - SRS</h3>
+        <label for="SRS Operator Name">作業者:</label>
+        <input list="machine-operator-suggestions" placeholder="Worker's Name" id="SRS Operator Name" name="SRS Operator Name">
+        <datalist id="machine-operator-suggestions"></datalist>
+        <br><br>
+        <label for="SRS Quantity">加工数（良品）+ NG:</label>
+        <input type="text" name="SRS Quantity" id="SRSQuantity" placeholder="SRS Quantity">
+        <br><br>
+        <label for="SRS Date">加工日:</label>
+        <input type="date" name="SRS Date" id="SRS Date" placeholder="Date" onfocus="setDefaultDate(this)">
+        <br>
+        <label for="SRS Time Start">加工開始時間:</label>
+        <input type="time" name="SRS Time Start" id="SRS Time Start" placeholder="Time Start" onfocus="setDefaultTime(this)">
+        <br>
+        <label for="SRS Time End">加工終了時間:</label>
+        <input type="time" name="SRS Time End" id="SRS Time End" placeholder="Time End" onfocus="setDefaultTime(this)">
+        <br>
+        <label for="SRS code">SRS コード:</label>
+        <input type="text" name="SRS code" id="SRS code" placeholder="SRS code">
+        <br>
+        <br>
+        <label>SRS初物チェック: </label>
+             <label id="SRShatsumonoLabel">FALSE</label>
+             <button id="SRShatsumonoButton" type="button">SRS Checklist</button>
+        <div id="counter-box-13" class="counter-box"> 
+            <label for="counter-13">1</label>
+            <button class="plus-btn" type="button" onclick="incrementCounter(13)" >+</button>  
+            <input readonly id="counter-13" value="0" type="number" name="13">  
+            <button class="minus-btn" type="button" onclick="decrementCounter(13)" >-</button>  
+        </div>  
+        <div id="counter-box-14" class="counter-box">  
+            <label for="counter-14">2</label>
+            <button class="plus-btn" type="button" onclick="incrementCounter(14)" >+</button>  
+            <input readonly id="counter-14" value="0" type="number" name="14">  
+            <button class="minus-btn" type="button" onclick="decrementCounter(14)" >-</button>  
+        </div>  
+        <div id="counter-box-15" class="counter-box">  
+            <label for="counter-15">3</label>
+            <button class="plus-btn" type="button" onclick="incrementCounter(15)" >+</button>  
+            <input readonly id="counter-15" value="0" type="number" name="15">  
+            <button class="minus-btn" type="button" onclick="decrementCounter(15)" >-</button>  
+        </div>  
+        <div id="counter-box-16" class="counter-box">  
+            <label for="counter-16">4</label>
+            <button class="plus-btn" type="button" onclick="incrementCounter(16)" >+</button>  
+            <input readonly id="counter-16" value="0" type="number" name="16">  
+            <button class="minus-btn" type="button" onclick="decrementCounter(16)" >-</button>  
+        </div>
+        <div id="counter-box-17" class="counter-box">  
+            <label for="counter-17">その他</label>
+            <button class="plus-btn" type="button" onclick="incrementCounter(17)" >+</button>  
+            <input readonly id="counter-17" value="0" type="number" name="SRS検査その他">  
+            <button class="minus-btn" type="button" onclick="decrementCounter(17)" >-</button>  
+        </div>
+        <label>①くっつき・めくれ、②シワ、③転写位置ズレ、④転写不良</label>
+        
+        
+        
+    </div>
+
+    
+
+            
+            <div id="videoContainer" class="hidden">
+              <div class="video-popup">
+                <button class="close-btn" onclick="closeVideoPopup()">×</button>
+                <video id="rikeshidown" class="video-element hidden" controls>
+                  <source src="src/Rikeshi down.mp4" type="video/mp4">
+                  Your browser does not support the video tag.
+                </video>
+                <video id="rikeshiup" class="video-element hidden" controls>
+                  <source src="src/Rikeshi UP.mp4" type="video/mp4">
+                  Your browser does not support the video tag.
+                </video>
+              </div>
+            </div>
+            
+
+            
+            
+            
     </div>
 
     
@@ -205,75 +330,75 @@
     <div class="counter-container">  
         <div id="counter-box-1" class="counter-box"> 
             <label for="counter-1">1</label>
-            <button class="plus-btn" type="button" onclick="incrementCounter(1)" disabled>+</button>  
+            <button class="plus-btn" type="button" onclick="incrementCounter(1)" >+</button>  
             <input readonly id="counter-1" value="0" type="number" name="1">  
-            <button class="minus-btn" type="button" onclick="decrementCounter(1)" disabled>-</button>  
+            <button class="minus-btn" type="button" onclick="decrementCounter(1)" >-</button>  
         </div>  
         <div id="counter-box-2" class="counter-box">  
             <label for="counter-2">2</label>
-            <button class="plus-btn" type="button" onclick="incrementCounter(2)" disabled>+</button>  
+            <button class="plus-btn" type="button" onclick="incrementCounter(2)" >+</button>  
             <input readonly id="counter-2" value="0" type="number" name="2">  
-            <button class="minus-btn" type="button" onclick="decrementCounter(2)" disabled>-</button>  
+            <button class="minus-btn" type="button" onclick="decrementCounter(2)" >-</button>  
         </div>  
         <div id="counter-box-3" class="counter-box">  
             <label for="counter-3">3</label>
-            <button class="plus-btn" type="button" onclick="incrementCounter(3)" disabled>+</button>  
+            <button class="plus-btn" type="button" onclick="incrementCounter(3)" >+</button>  
             <input readonly id="counter-3" value="0" type="number" name="3">  
-            <button class="minus-btn" type="button" onclick="decrementCounter(3)" disabled>-</button>  
+            <button class="minus-btn" type="button" onclick="decrementCounter(3)" >-</button>  
         </div>  
         <div id="counter-box-4" class="counter-box">  
             <label for="counter-4">4</label>
-            <button class="plus-btn" type="button" onclick="incrementCounter(4)" disabled>+</button>  
+            <button class="plus-btn" type="button" onclick="incrementCounter(4)" >+</button>  
             <input readonly id="counter-4" value="0" type="number" name="4">  
-            <button class="minus-btn" type="button" onclick="decrementCounter(4)" disabled>-</button>  
+            <button class="minus-btn" type="button" onclick="decrementCounter(4)" >-</button>  
         </div>  
         <div id="counter-box-5" class="counter-box">  
             <label for="counter-5">5</label>
-            <button class="plus-btn" type="button" onclick="incrementCounter(5)" disabled>+</button>  
+            <button class="plus-btn" type="button" onclick="incrementCounter(5)" >+</button>  
             <input readonly id="counter-5" value="0" type="number" name="5">  
-            <button class="minus-btn" type="button" onclick="decrementCounter(5)" disabled>-</button>  
+            <button class="minus-btn" type="button" onclick="decrementCounter(5)" >-</button>  
         </div>  
         <div id="counter-box-6" class="counter-box">  
             <label for="counter-6">6</label>
-            <button class="plus-btn" type="button" onclick="incrementCounter(6)" disabled>+</button>  
+            <button class="plus-btn" type="button" onclick="incrementCounter(6)" >+</button>  
             <input readonly id="counter-6" value="0" type="number" name="6">  
-            <button class="minus-btn" type="button" onclick="decrementCounter(6)" disabled>-</button>  
+            <button class="minus-btn" type="button" onclick="decrementCounter(6)" >-</button>  
         </div>  
         <div id="counter-box-7" class="counter-box">  
             <label for="counter-7">7</label>
-            <button class="plus-btn" type="button" onclick="incrementCounter(7)" disabled>+</button>  
+            <button class="plus-btn" type="button" onclick="incrementCounter(7)" >+</button>  
             <input readonly id="counter-7" value="0" type="number" name="7">  
-            <button class="minus-btn" type="button" onclick="decrementCounter(7)" disabled>-</button>  
+            <button class="minus-btn" type="button" onclick="decrementCounter(7)" >-</button>  
         </div>  
         <div id="counter-box-8" class="counter-box">  
             <label for="counter-8">8</label>
-            <button class="plus-btn" type="button" onclick="incrementCounter(8)" disabled>+</button>  
+            <button class="plus-btn" type="button" onclick="incrementCounter(8)" >+</button>  
             <input readonly id="counter-8" value="0" type="number" name="8">  
-            <button class="minus-btn" type="button" onclick="decrementCounter(8)" disabled>-</button>  
+            <button class="minus-btn" type="button" onclick="decrementCounter(8)" >-</button>  
         </div>  
         <div id="counter-box-9" class="counter-box">  
             <label for="counter-9">9</label>
-            <button class="plus-btn" type="button" onclick="incrementCounter(9)" disabled>+</button>  
+            <button class="plus-btn" type="button" onclick="incrementCounter(9)" >+</button>  
             <input readonly id="counter-9" value="0" type="number" name="9">  
-            <button class="minus-btn" type="button" onclick="decrementCounter(9)" disabled>-</button>  
+            <button class="minus-btn" type="button" onclick="decrementCounter(9)" >-</button>  
         </div>  
         <div id="counter-box-10" class="counter-box">  
             <label for="counter-10">10</label>
-            <button class="plus-btn" type="button" onclick="incrementCounter(10)" disabled>+</button>  
+            <button class="plus-btn" type="button" onclick="incrementCounter(10)" >+</button>  
             <input readonly id="counter-10" value="0" type="number" name="10">  
-            <button class="minus-btn" type="button" onclick="decrementCounter(10)" disabled>-</button>  
+            <button class="minus-btn" type="button" onclick="decrementCounter(10)" >-</button>  
         </div>  
         <div id="counter-box-11" class="counter-box">  
             <label for="counter-11">11</label>
-            <button class="plus-btn" type="button" onclick="incrementCounter(11)" disabled>+</button>  
+            <button class="plus-btn" type="button" onclick="incrementCounter(11)" >+</button>  
             <input readonly id="counter-11" value="0" type="number" name="11">  
-            <button class="minus-btn" type="button" onclick="decrementCounter(11)" disabled>-</button>  
+            <button class="minus-btn" type="button" onclick="decrementCounter(11)" >-</button>  
         </div>  
         <div id="counter-box-12" class="counter-box">  
             <label for="counter-12">その他</label>
-            <button class="plus-btn" type="button" onclick="incrementCounter(12)" disabled>+</button>  
+            <button class="plus-btn" type="button" onclick="incrementCounter(12)" >+</button>  
             <input readonly id="counter-12" value="0" type="number" name="その他">  
-            <button class="minus-btn" type="button" onclick="decrementCounter(12)" disabled>-</button>  
+            <button class="minus-btn" type="button" onclick="decrementCounter(12)">-</button>  
         </div>  
     </div>
 

@@ -144,6 +144,26 @@ textarea {
     transition: background-color 0.3s; /* Smooth transition */
 }
 
+#SRShatsumonoButton:hover {
+    background-color: #45a049; /* Darker green on hover */
+}
+
+#SRShatsumonoButton {
+    background-color: #f63310; /* Green background */
+    border: none; /* Remove borders */
+    color: white; /* White text */
+    padding: 15px 32px; /* Some padding */
+    text-align: center; /* Centered text */
+    text-decoration: none; /* Remove underline */
+    display: inline-block; /* Get it to line up properly */
+    font-size: 16px; /* Increase font size */
+    margin: 4px 2px; /* Some space around */
+    cursor: pointer; /* Pointer/hand icon */
+    border-radius: 8px; /* Rounded corners */
+    transition: background-color 0.3s; /* Smooth transition */
+}
+
+
 #printLabel {
     background-color: #4CAF50; /* Green background */
     border: none; /* Remove borders */
@@ -444,4 +464,28 @@ nav a:hover {
     100% { background-color: white; }
   }
 
+/* Flashing red background for wrong kanban alert */
+.modal-content.flash-red {
+    animation: flash 1s infinite alternate;
+}
 
+/* Keyframes for flashing effect */
+@keyframes flash {
+    0% { background-color: #fefefe; color: black; } /* Normal background and text color */
+    50% { background-color: red; color: white; } /* Red background and white text */
+    100% { background-color: #fefefe; color: black; }
+}
+
+/* Close button styling */
+.close-button {
+    position: absolute;
+    top: 5px;
+    right: 10px;
+    color: black;
+    font-size: 24px;
+    font-weight: bold;
+    cursor: pointer;
+}
+.close-button:hover {
+    color: red;
+}

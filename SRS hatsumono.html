@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="src/favicon2.png">
+    <title>初物チェック</title>
+</head>
+<body>
+    <h1>SRS Checklist</h1>
+   
+    
+    <div class="checklist-item">
+        <input type="checkbox" id="confirm-type" name="CONFIRM TYPE">
+        <label for="confirm-type">種類 / CONFIRM TYPE</label>
+    </div>
+    <div class="checklist-item">
+        <input type="checkbox" id="confirm-appearance" name="CONFIRM APPEARANCE">
+        <label for="confirm-appearance">外観 / CONFIRM APPEARANCE</label>
+    </div>
+    <div class="checklist-item">
+        <input type="checkbox" id="confirm-text-misalignment" name="CONFIRM TEXT MISALIGNMENT">
+        <label for="confirm-text-misalignment">文字ズレ / CONFIRM TEXT MISALIGNMENT</label>
+    </div>
+    <div class="checklist-item">
+        <input type="checkbox" id="confirm-position-misalignment" name="CONFIRM POSITION MISALIGNMENT">
+        <label for="confirm-position-misalignment">位置ズレ / CONFIRM POSITION MISALIGNMENT</label>
+    </div>
+    <br>
+    
+    <button id="takePhotoBtn">Take Photo</button>
+    <br><br>
+    <img id="photoPreview" src="" alt="Photo Preview" style="display:none; width: 320px; height: 240px;">
+    <br><br>
+    <!-- <button id="okBtn">OK</button> -->
+    <button id="asBtn">OK</button>
+    <label id="uploading"></label>
+
+    
+</body>
+<script async defer src="https://apis.google.com/js/api.js"></script>
+<script async defer src="https://accounts.google.com/gsi/client"></script>
+<script>
+    // Function to get query parameters
+    function getQueryParam(param) {
+        const urlParams = new URLSearchParams(window.location.search);
+        return urlParams.get(param);
+    }
+
+    // Get selected values from query parameters
+    const selectedSebanggo = getQueryParam('sebanggo');
+    const selectedFactory = getQueryParam('kojo');
+    const selectedWorker = getQueryParam('worker');
+    const buttonValue = getQueryParam('buttonValue');
+    const currentDate = new Date().toISOString().split('T')[0].replace(/-/g, ''); // Format date as YYYYMMDD
+    console.log(selectedSebanggo, selectedFactory, selectedWorker, buttonValue);
+
+    // Flag to track if a photo has been taken
+    let photoTaken = false;
+    let capturedImage = null;
+
+    // Function to get the checkbox values
+    function getCheckboxValues() {
+        const checkboxes = document.querySelectorAll('.checklist-item input[type="checkbox"]');
+        const values = {};
+
+        checkboxes.forEach(checkbox => {
+            values[checkbox.name] = checkbox.checked;
+        });
+
+        return values;
+    }
+
+    // Open the capture image popup
+    document.getElementById('takePhotoBtn').addEventListener('click', function() {
+        window.open('captureImage.html', 'Capture Image', 'width=700,height=700');
+    });
+
+    // Handle the message from the popup window
+    window.addEventListener('message', function(event) {
+        if (event.origin === window.location.origin) {
+            const data = event.data;
+            if (data.image) {
+                const photoPreview = document.getElementById('photoPreview');
+                photoPreview.src = data.image;
+                photoPreview.style.display = 'block';
+                capturedImage = data.image;
+                photoTaken = true;
+            }
+        }
+    });
+
+
+
+    //this is working upload function
+    function uploadPhotou() {
+    const photoPreview = document.getElementById('photoPreview');
+    if (!photoPreview.src) {
+        console.error("No photo preview available");
+        return;
+    }
+
+    // Convert the image to a blob
+    fetch(photoPreview.src)
+        .then(response => response.blob())
+        .then(blob => {
+            const reader = new FileReader();
+            reader.onloadend = function() {
+                const base64data = reader.result.split(',')[1]; // Get the base64 encoded string
+                
+                const formData = new FormData();
+                formData.append('imageBlob', base64data);
+                formData.append('fileName', `${selectedSebanggo}_${currentDate}_${selectedWorker}_${selectedFactory}_SRS.jpg`);
+                formData.append('mimeType', blob.type);
+                formData.append('selectedFactory', selectedFactory);
+
+                // Send the blob to Apps Script via POST request
+                fetch('https://script.google.com/macros/s/AKfycbxDWa2RTdI2_aHBgzq9GA9GtQx5MrwqaRnW4F26VZdoptwJ1Pg_Enr_xI3vw1t7WHYbTw/exec', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.text())  // Fetch raw text response
+                .then(text => {
+                    console.log('Raw response:', text); // Log the raw response
+                    try {
+                        const data = JSON.parse(text); // Attempt to parse JSON
+                        if (data.status === 'success') {
+                            console.log('File uploaded successfully: ' + data.fileUrl);
+                        } else {
+                            console.error('Upload failed: ' + data.message);
+                        }
+                    } catch (error) {
+                        console.error('Error parsing JSON:', error);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error uploading file: ', error);
+                });
+            };
+            reader.readAsDataURL(blob);
+        })
+        .catch(error => console.error('Error converting image to blob: ', error));
+    }
+
+
+    //when "OK" button is pressed
+    const uploadLabel = document.getElementById("uploading");
+    document.getElementById('asBtn').addEventListener('click', async function() {
+        if (!photoTaken) {
+            alert("Please take a photo first / 初物写真撮ってください");
+            return;
+        }
+        uploadLabel.textContent = "Uploading... Please Wait";
+        
+        if (buttonValue === "SRShatsumono") {
+            const checkboxValues = getCheckboxValues();
+            console.log(checkboxValues);
+
+            // Send checkbox data back to the parent window
+            window.opener.postMessage(checkboxValues, window.location.origin);
+        } 
+
+        try {
+        await uploadPhotou();
+        // Wait for 6 seconds (6000 milliseconds) before closing the window
+        setTimeout(() => {
+            window.close();
+        }, 3000);
+    } catch (error) {
+        console.error('Upload failed:', error);
+        // Optionally, handle the error or notify the user
+        setTimeout(() => {
+            window.close();
+        }, 3000);
+    }
+    });
+        
+
+
+
+    
+
+</script>
+
+</html>
