@@ -20,26 +20,25 @@ const ipURL = 'https://script.google.com/macros/s/AKfycbyC6-KiT3xwGiahhzhB-L-OOL
 
 
 
-
 function toggleInputs() {
   var isChecked = document.getElementById('enable-inputs').checked;
-  var inputs = document.querySelectorAll('#Kensa\\ Name, #KDate, #KStart\\ Time, #KEnd\\ Time, .plus-btn, .minus-btn, textarea[name="Comments2"], input[type="submit"], #在庫');
+  
+  // Enable or disable specific inputs based on the checkbox status
+  var inputs = document.querySelectorAll('#Kensa\\ Name, #KDate, #KStart\\ Time, #KEnd\\ Time, textarea[name="Comments2"], input[type="submit"], #在庫');
   inputs.forEach(function(input) {
     input.disabled = !isChecked;
   });
 
-  // Enable all inputs inside the counter container when the checkbox is checked
-  if (isChecked) {
-    var counterInputs = document.querySelectorAll('.counter-container input');
-    counterInputs.forEach(function(input) {
-      input.disabled = false;
-    });
-    // Set hidden input value to "TRUE"
-    document.getElementById('検査STATUS').value = "TRUE";
-  } else {
-    // Set hidden input value to "false"
-    document.getElementById('検査STATUS').value = "false";
+  // Enable or disable plus and minus buttons for counters 1 to 12 based on the checkbox status
+  for (let i = 1; i <= 12; i++) {
+    var plusBtn = document.querySelector(`#counter-box-${i} .plus-btn`);
+    var minusBtn = document.querySelector(`#counter-box-${i} .minus-btn`);
+    if (plusBtn) plusBtn.disabled = !isChecked;
+    if (minusBtn) minusBtn.disabled = !isChecked;
   }
+
+  // Update the hidden input value based on checkbox status
+  document.getElementById('検査STATUS').value = isChecked ? "TRUE" : "false";
 }
 
 
@@ -338,21 +337,124 @@ function decrementCounter(counterId) {
   }
 }
 
-function updateTotal() {
-  let ngTotal = 0;
-  for (let i = 1; i <= 12; i++) {
-    const counterElement = document.getElementById(`counter-${i}`);
-    ngTotal += parseInt(counterElement.value, 10);
-  }
-  document.getElementById('NG total').value = ngTotal;
+// function updateTotal() {
+//   let ngTotal = 0;
+//   for (let i = 1; i <= 12; i++) {
+//     const counterElement = document.getElementById(`counter-${i}`);
+//     ngTotal += parseInt(counterElement.value, 10);
+//   }
+//   document.getElementById('NG total').value = ngTotal;
   
-  const processQuantity = parseInt(document.getElementById('Process Quantity').value, 10) || 0;
-  const totalQuantity = processQuantity - ngTotal;
+//   const processQuantity = parseInt(document.getElementById('Process Quantity').value, 10) || 0;
+//   const totalQuantity = processQuantity - ngTotal;
+//   document.getElementById('total').value = totalQuantity;
+// }
+
+// // Add event listener to process quantity input
+// document.getElementById('Process Quantity').addEventListener('input', updateTotal);
+
+
+function updateTotal() {
+  // Retrieve the current process type from the input field
+  const processType = document.getElementById('process').value;
+
+  // Get quantities for each process stage (A, B, C)
+  const aQuantity = parseInt(document.getElementById('Process Quantity').value, 10) || 0;
+  const bQuantityInput = document.getElementById('slit Quantity');
+  const cQuantityInput = document.getElementById('SRSQuantity');
+
+  // Define NG totals for each stage
+  let dNgTotal = 0;
+  let cNgTotal = 0;
+  let bNgTotal = 0;
+  let totalNg = 0; // Total NG across all counters
+
+  // Calculate D NG total (counters 1 - 12) and accumulate in totalNg
+  for (let i = 1; i <= 12; i++) {
+      const counterElement = document.getElementById(`counter-${i}`);
+      const counterValue = parseInt(counterElement.value, 10) || 0;
+      dNgTotal += counterValue;
+      totalNg += counterValue;
+  }
+
+  // Calculate C NG total (counters 13 - 17) and accumulate in totalNg
+  for (let i = 13; i <= 17; i++) {
+      const counterElement = document.getElementById(`counter-${i}`);
+      const counterValue = parseInt(counterElement.value, 10) || 0;
+      cNgTotal += counterValue;
+      totalNg += counterValue;
+  }
+
+  // Calculate B NG total (counter 18) and accumulate in totalNg
+  const bNgCounter = document.getElementById('counter-18');
+  bNgTotal = parseInt(bNgCounter.value, 10) || 0;
+  totalNg += bNgTotal;
+
+  // Update the NG total input with the calculated total NG
+  document.getElementById('NG total').value = totalNg;
+
+  // Initialize totalQuantity based on the process and each stage’s logic
+  let totalQuantity;
+
+  // Start from A stage, then proceed based on the active process type
+  if (processType === 'A-D') {
+      // Only A and D stages
+      totalQuantity = aQuantity - dNgTotal;
+  } else if (processType === 'A-B-D') {
+      // If we're processing B (slit), initialize B with the initial value from A and dynamically update visible B quantity
+      const initialBTotal = document.getElementById('initialBTotal');
+      if (initialBTotal.value == 0) {
+          // Set the initial value for B only once (when it's zero)
+          initialBTotal.value = aQuantity;
+      }
+      bQuantityInput.value = initialBTotal.value - bNgTotal;  // Show B quantity after B NG deductions
+      totalQuantity = bQuantityInput.value - dNgTotal;
+  } else if (processType === 'A-C-D') {
+      // If processing C (SRS), initialize C with the initial value from A and dynamically update visible C quantity
+      const initialCTotal = document.getElementById('initialCTotal');
+      if (initialCTotal.value == 0) {
+          // Set the initial value for C only once (when it's zero)
+          initialCTotal.value = aQuantity;
+      }
+      cQuantityInput.value = initialCTotal.value - cNgTotal;  // Show C quantity after C NG deductions
+      totalQuantity = cQuantityInput.value - dNgTotal;
+  } else if (processType === 'A-B-C-D') {
+      // If processing B, initialize with A's initial value and dynamically update B quantity
+      const initialBTotal = document.getElementById('initialBTotal');
+      if (initialBTotal.value == 0) {
+          initialBTotal.value = aQuantity;  // Set once when B is processed first
+      }
+      bQuantityInput.value = initialBTotal.value - bNgTotal;  // Show B quantity after B NG deductions
+
+      // Update C's initial quantity based on the latest B quantity
+      const initialCTotal = document.getElementById('initialCTotal');
+      initialCTotal.value = bQuantityInput.value;  // Set C's initial total to the latest B total after B NG deductions
+      cQuantityInput.value = initialCTotal.value - cNgTotal;  // Show C quantity after C NG deductions
+
+      // Final calculation for D
+      totalQuantity = cQuantityInput.value - dNgTotal;
+  } else {
+      // Default case if processType is not recognized
+      totalQuantity = aQuantity;
+      console.warn(`Unrecognized process type: ${processType}`);
+  }
+
+  // Display the calculated total quantity
   document.getElementById('total').value = totalQuantity;
 }
 
-// Add event listener to process quantity input
+// Add event listeners for dynamic updating of each stage quantity and process type
 document.getElementById('Process Quantity').addEventListener('input', updateTotal);
+document.getElementById('slit Quantity').addEventListener('input', updateTotal);
+document.getElementById('SRSQuantity').addEventListener('input', updateTotal);
+document.getElementById('process').addEventListener('input', updateTotal);
+
+// Add listeners to each NG counter to dynamically update total when changed
+for (let i = 1; i <= 18; i++) {
+  document.getElementById(`counter-${i}`).addEventListener('input', updateTotal);
+}
+document.addEventListener("DOMContentLoaded", updateTotal);
+
 
 
 
@@ -376,7 +478,8 @@ const ipInput = document.getElementById('ipInfo');
 
 // Function to fetch product info
 function productNumberInfo(headerValue) {
-  fetch(`${dbURL}?productNumber=${headerValue}`)
+  const factoryValue = document.getElementById('hidden工場').value; // Get the factory value
+  fetch(`${dbURL}?productNumber=${headerValue}&factory=${factoryValue}`)
     .then(response => {
       if (!response.ok) {
         throw new Error('Network response was not ok ' + response.statusText);
@@ -386,6 +489,7 @@ function productNumberInfo(headerValue) {
     .then(data => {
       const cleanedData = data.replace(/"/g, '');
       productNumberInput.value = cleanedData;
+      localStorage.setItem("product-number",cleanedData);
     })
     .catch(error => {
       console.error('Error:', error);
@@ -394,7 +498,8 @@ function productNumberInfo(headerValue) {
 
 // Function to fetch model info
 function modelInfo(headerValue) {
-  fetch(`${dbURL}?model=${headerValue}`)
+  const factoryValue = document.getElementById('hidden工場').value; // Get the factory value
+  fetch(`${dbURL}?model=${headerValue}&factory=${factoryValue}`)
     .then(response => {
       if (!response.ok) {
         throw new Error('Network response was not ok ' + response.statusText);
@@ -412,7 +517,8 @@ function modelInfo(headerValue) {
 
 // Function to fetch shape info
 function shapeInfo(headerValue) {
-  fetch(`${dbURL}?shape=${headerValue}`)
+  const factoryValue = document.getElementById('hidden工場').value; // Get the factory value
+  fetch(`${dbURL}?shape=${headerValue}&factory=${factoryValue}`)
     .then(response => {
       if (!response.ok) {
         throw new Error('Network response was not ok ' + response.statusText);
@@ -430,7 +536,8 @@ function shapeInfo(headerValue) {
 
 // Function to fetch R-L info
 function RLInfo(headerValue) {
-  fetch(`${dbURL}?rl=${headerValue}`)
+  const factoryValue = document.getElementById('hidden工場').value; // Get the factory value
+  fetch(`${dbURL}?rl=${headerValue}&factory=${factoryValue}`)
     .then(response => {
       if (!response.ok) {
         throw new Error('Network response was not ok ' + response.statusText);
@@ -448,7 +555,8 @@ function RLInfo(headerValue) {
 
 // Function to fetch material info
 function materialInfo(headerValue) {
-  fetch(`${dbURL}?material=${headerValue}`)
+  const factoryValue = document.getElementById('hidden工場').value; // Get the factory value
+  fetch(`${dbURL}?material=${headerValue}&factory=${factoryValue}`)
     .then(response => {
       if (!response.ok) {
         throw new Error('Network response was not ok ' + response.statusText);
@@ -466,7 +574,8 @@ function materialInfo(headerValue) {
 
 // Function to fetch material code info
 function materialCodeInfo(headerValue) {
-  fetch(`${dbURL}?materialcode=${headerValue}`)
+  const factoryValue = document.getElementById('hidden工場').value; // Get the factory value
+  fetch(`${dbURL}?materialcode=${headerValue}&factory=${factoryValue}`)
     .then(response => {
       if (!response.ok) {
         throw new Error('Network response was not ok ' + response.statusText);
@@ -484,7 +593,8 @@ function materialCodeInfo(headerValue) {
 
 // Function to fetch material color info
 function materialColorInfo(headerValue) {
-  fetch(`${dbURL}?materialcolor=${headerValue}`)
+  const factoryValue = document.getElementById('hidden工場').value; // Get the factory value
+  fetch(`${dbURL}?materialcolor=${headerValue}&factory=${factoryValue}`)
     .then(response => {
       if (!response.ok) {
         throw new Error('Network response was not ok ' + response.statusText);
@@ -635,3 +745,140 @@ function printerCode(headerValue) {
     }, 5000); // 5000 milliseconds = 5 seconds
   });
 
+  
+  
+// this is for dynamic process selection
+  function updateProcessSections() {
+    // Hide all sections initially
+    const sections = ["sectionA", "sectionB", "sectionC"];
+    sections.forEach(section => document.getElementById(section).style.display = "none");
+  
+    // Get the selected workflow
+    const workflow = document.getElementById("process").value;
+    let lastProcess = document.getElementById("Last Process").value;
+    if (lastProcess === "" || lastProcess === null) {
+        lastProcess = "A";
+    }
+    console.log("last process: "+lastProcess);
+  
+    // Display sections based on the selected workflow
+    if (workflow === "A-D") {
+        document.getElementById("sectionA").style.display = "block"; // Cutting
+        
+    } else if (workflow === "A-B-C-D") {
+        document.getElementById("sectionA").style.display = "block"; // Cutting
+        document.getElementById("sectionB").style.display = "block"; // Slit
+        document.getElementById("sectionC").style.display = "block"; // SRS
+        
+    } else if (workflow === "A-B-D") {
+        document.getElementById("sectionA").style.display = "block"; // Cutting
+        document.getElementById("sectionB").style.display = "block"; // Slit
+        
+    } else if (workflow === "A-C-D") {
+        document.getElementById("sectionA").style.display = "block"; // Cutting
+        document.getElementById("sectionC").style.display = "block"; // SRS
+        
+    }
+    // Set readonly inputs for B and C based on last process
+    updateReadonlySections(workflow, lastProcess);
+    console.log("last process: "+lastProcess, "workflow: " + workflow);
+  }
+// Initialize sections display when the page loads
+document.addEventListener("DOMContentLoaded", updateProcessSections);
+
+
+
+
+// Function to set the specified section's inputs and buttons to read-only/disabled
+function setSectionReadonly(sectionId, readonly) {
+  const section = document.getElementById(sectionId);
+  if (section) {
+      const inputs = section.querySelectorAll("input");
+      const buttons = section.querySelectorAll("button");
+
+      inputs.forEach(input => {
+          input.readOnly = readonly;
+
+          // Disable onfocus event for date and time inputs if readonly
+          if (readonly && (input.type === "date" || input.type === "time")) {
+              input.onfocus = null;
+          }
+
+          // If section is editable, re-enable onfocus events for date and time inputs
+          else if (!readonly && (input.type === "date" || input.type === "time")) {
+              input.onfocus = function() {
+                  if (input.type === "date") setDefaultDate(this);
+                  if (input.type === "time") setDefaultTime(this);
+              };
+          }
+      });
+
+      // Disable buttons if readonly, enable otherwise
+      buttons.forEach(button => {
+          button.disabled = readonly;
+      });
+  }
+}
+
+// Function to update readonly status based on workflow and last process
+function updateReadonlySections(workflow, lastProcess) {
+  // Always leave section A editable, so only reset sections B and C
+  setSectionReadonly("sectionB", false);
+  setSectionReadonly("sectionC", false);
+
+  // Apply readonly based on the last process for each workflow, skipping A
+  if (workflow === "A-B-C-D") {
+      if (lastProcess === "B") {
+          setSectionReadonly("sectionB", true);
+      } else if (lastProcess === "C") {
+          setSectionReadonly("sectionB", true);
+          setSectionReadonly("sectionC", true);
+      }
+  } else if (workflow === "A-B-D") {
+      if (lastProcess === "B") {
+          setSectionReadonly("sectionB", true);
+      }
+  } else if (workflow === "A-C-D") {
+      if (lastProcess === "C") {
+          setSectionReadonly("sectionC", true);
+      }
+  }
+}
+
+// Initialize sections display and readonly settings when the page loads
+document.addEventListener("DOMContentLoaded", updateProcessSections);
+
+
+
+// Listener for the SRShatsumono Button
+document.getElementById('SRShatsumonoButton').addEventListener('click', function(event) {
+  event.preventDefault();
+  const currentKojo = document.getElementById("hidden工場").value;
+  const currentSebanggo = document.getElementById('sub-dropdown').value;
+  const currentWorker = document.getElementById('SRS Operator Name').value;
+  const buttonValue = "SRShatsumono";
+  if (!currentSebanggo) {
+      window.alert("Please select product first / 背番号選んでください");
+      return;
+  }
+
+  const popup = window.open(`SRS hatsumono.html?sebanggo=${encodeURIComponent(currentSebanggo)}&kojo=${encodeURIComponent(currentKojo)}&buttonValue=${encodeURIComponent(buttonValue)}&worker=${encodeURIComponent(currentWorker)}`, 'QR Scanner', 'width=700,height=700');
+
+  window.addEventListener('message', function(event) {
+      if (event.origin === window.location.origin) {
+          const hatsumonoStatus = event.data;
+          console.log(`SRSHatsumonoStatus: ${hatsumonoStatus}`);
+
+          // Update hidden inputs based on the received data
+          for (const [key, value] of Object.entries(hatsumonoStatus)) {
+              const input = document.getElementById(key.toLowerCase().replace(/\s+/g, '-'));
+              console.log(input + " " + value);
+              if (input) {
+                  input.value = value;
+              }
+          }
+          document.getElementById("SRShatsumonoLabel").textContent = "OK";
+          localStorage.setItem("SRShatsumonoLabel","OK");
+      }
+  });
+});

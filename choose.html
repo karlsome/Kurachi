@@ -92,12 +92,77 @@
     </table>
 
     <script>
+        // // Get URL parameters
+        // const urlParams = new URLSearchParams(window.location.search);
+        
+        // // Get the value of the 'selected' parameter or default to 'none' if not found
+        // const filterValue = urlParams.get('selected') || 'none';
+        
+        // // URL of the Google Apps Script web app
+        // const scriptURL = 'https://script.google.com/macros/s/AKfycby-_1ZH5JUXYJk4qzSUVEekfJM5F4QG7qTys67uwXFm2p9q2O_SI1HnqEDzjQnSx30J/exec';  // Replace with your actual web app URL
+
+        // // Data storage variable for later QR code matching
+        // let sheetData = [];
+
+        // // Fetch data from the Google Apps Script web app
+        // fetch(scriptURL)
+        //     .then(response => response.json())  // Parse the JSON response
+        //     .then(data => {
+        //         const headers = data[2];  // Assuming the headers are in the 3rd row (index 2)
+        //         const table = document.getElementById('data-table');
+        //         const thead = table.querySelector('thead tr');
+        //         const tbody = table.querySelector('tbody');
+
+        //         // Store data for later QR matching
+        //         sheetData = data;
+
+        //         // Create table headers
+        //         headers.forEach(header => {
+        //             const th = document.createElement('th');
+        //             th.textContent = header;
+        //             thead.appendChild(th);
+        //         });
+
+        //         // Create table rows with filter
+        //         data.slice(3).forEach((row, rowIndex) => {
+        //             // Check if column J (index 9) matches filterValue and column AI (index 34) is "false"
+        //             if (row[9] === filterValue && row[39] === false) {
+        //                 const tr = document.createElement('tr');
+
+        //                 // Create cells for the row
+        //                 row.forEach((cell, index) => {
+        //                     const td = document.createElement('td');
+        //                     td.textContent = cell;
+        //                     if (index === 39) {  // If this is the cell for column AI (index 34)
+        //                         td.classList.add('red');  // Add the 'red' class to it
+        //                     }
+        //                     tr.appendChild(td);
+        //                 });
+
+        //                 // Add click event listener to the row
+        //                 tr.addEventListener('click', () => {
+        //                     const queryParams = headers.map((header, index) => 
+        //                         `${encodeURIComponent(header)}=${encodeURIComponent(row[index])}`
+        //                     ).join('&');
+
+        //                     // Include row number in the query parameters
+        //                     const rowNumber = rowIndex + 4; // Adjusting index to match row number in the sheet
+        //                     window.location.href = `kensaOnly.html?${queryParams}&row=${rowNumber}&filterValue=${filterValue}`; // i passed the value of rowNumber and filterValue. filterValue is KOJO name
+        //                 });
+
+        //                 // Append the row to the table body
+        //                 tbody.appendChild(tr);
+        //             }
+        //         });
+        //     })
+        //     .catch(error => console.error('Error fetching data:', error));  // Log any errors
+        // Get URL parameters
         // Get URL parameters
         const urlParams = new URLSearchParams(window.location.search);
-        
+
         // Get the value of the 'selected' parameter or default to 'none' if not found
         const filterValue = urlParams.get('selected') || 'none';
-        
+
         // URL of the Google Apps Script web app
         const scriptURL = 'https://script.google.com/macros/s/AKfycby-_1ZH5JUXYJk4qzSUVEekfJM5F4QG7qTys67uwXFm2p9q2O_SI1HnqEDzjQnSx30J/exec';  // Replace with your actual web app URL
 
@@ -123,17 +188,23 @@
                     thead.appendChild(th);
                 });
 
+                // Define the list of 工場 names to show if filterValue is "天徳"
+                const specialKojoList = ["天徳", "第一工場", "倉知", "小瀬", "第二工場"];
+
                 // Create table rows with filter
                 data.slice(3).forEach((row, rowIndex) => {
-                    // Check if column J (index 9) matches filterValue and column AI (index 34) is "false"
-                    if (row[9] === filterValue && row[34] === false) {
-                        const tr = document.createElement('tr');
+                    const kojoValue = row[9];  // Assume column J (index 9) contains the 工場 name
+                    const statusValue = row[39];  // Assume column AI (index 39) is the status
 
+                    // Condition for "天徳": include rows for 天徳, 第一工場, 倉知, 小瀬 with status "false"
+                    if (filterValue === "天徳" && specialKojoList.includes(kojoValue) && statusValue === false) {
+                        const tr = document.createElement('tr');
+                        
                         // Create cells for the row
                         row.forEach((cell, index) => {
                             const td = document.createElement('td');
                             td.textContent = cell;
-                            if (index === 34) {  // If this is the cell for column AI (index 34)
+                            if (index === 39) {  // If this is the cell for column AI (index 39)
                                 td.classList.add('red');  // Add the 'red' class to it
                             }
                             tr.appendChild(td);
@@ -147,7 +218,35 @@
 
                             // Include row number in the query parameters
                             const rowNumber = rowIndex + 4; // Adjusting index to match row number in the sheet
-                            window.location.href = `kensaOnly.html?${queryParams}&row=${rowNumber}&filterValue=${filterValue}`; // i passed the value of rowNumber and filterValue. filterValue is KOJO name
+                            window.location.href = `kensaOnly.html?${queryParams}&row=${rowNumber}&filterValue=${filterValue}`;
+                        });
+
+                        // Append the row to the table body
+                        tbody.appendChild(tr);
+                    } 
+                    // Condition for other values: show rows matching filterValue with status "false"
+                    else if (kojoValue === filterValue && statusValue === false) {
+                        const tr = document.createElement('tr');
+
+                        // Create cells for the row
+                        row.forEach((cell, index) => {
+                            const td = document.createElement('td');
+                            td.textContent = cell;
+                            if (index === 39) {  // If this is the cell for column AI (index 39)
+                                td.classList.add('red');  // Add the 'red' class to it
+                            }
+                            tr.appendChild(td);
+                        });
+
+                        // Add click event listener to the row
+                        tr.addEventListener('click', () => {
+                            const queryParams = headers.map((header, index) => 
+                                `${encodeURIComponent(header)}=${encodeURIComponent(row[index])}`
+                            ).join('&');
+
+                            // Include row number in the query parameters
+                            const rowNumber = rowIndex + 4; // Adjusting index to match row number in the sheet
+                            window.location.href = `kensaOnly.html?${queryParams}&row=${rowNumber}&filterValue=${filterValue}`;
                         });
 
                         // Append the row to the table body
@@ -172,7 +271,7 @@
                     // Find the matching row based on the QR code value, and check if row[9] matches filterValue and row[34] is false
                     const trackingQRIndex = sheetData[2].indexOf("tracking QR");  // Find the index of the "tracking QR" column
                     const matchingRow = sheetData.slice(3).find(row => 
-                        row[trackingQRIndex] === scannedQRValue && row[9] === filterValue && row[34] === false
+                        row[trackingQRIndex] === scannedQRValue && row[9] === filterValue && row[39] === false
                     );
 
                     if (matchingRow) {

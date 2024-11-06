@@ -4,6 +4,25 @@
     <link rel="stylesheet" href="Google Sheet.css">
     <link rel="icon" type="image/png" href="src/favicon2.png">
     <title>検査のみ</title>
+    <style>
+        .process-section {
+            display: none; /* Hide all sections by default */
+            margin-top: 20px;
+            padding: 15px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+        }
+        
+        .process-section h3 {
+            color: white; /* Set the title text to white */
+            background-color: #c10606; /* Optional: add a background color for contrast */
+            padding: 5px; /* Optional: add padding around the text */
+            border-radius: 3px; /* Optional: round the title background corners */
+        }
+
+        /* Basic modal styling */
+
+    </style>
 </head>
 <body>
     <!-- this code is for process -->
@@ -26,6 +45,9 @@
             <input type="hidden" name="検査STATUS" id="検査STATUS" value="false">
             <input type="hidden" name="ipInfo" id="ipInfo" value="false">
             <input type="hidden" name="tracking QR" id="tracking-QR">
+            <input type="hidden" name="Last Process" id="Last Process" value="A">
+            <audio id="alert-sound" src="src/alert.mp3" preload="auto"></audio>
+            
 
 
             <!-- kensa hatsumono status variables -->
@@ -38,55 +60,185 @@
             <input type="hidden" name="CONFIRM FILE NAME" id="confirm-file-name" value="false">
             <input type="hidden" name="CONFIRM SEWING LINE" id="confirm-sewing-line" value="false">
 
+            <!-- SRS hatsumono status variables -->
+            <input type="hidden" id="confirm-type" name="CONFIRM TYPE" value="false">
+            <input type="hidden" id="confirm-appearance" name="CONFIRM APPEARANCE" value="false">
+            <input type="hidden" id="confirm-text-misalignment" name="CONFIRM TEXT MISALIGNMENT" value="false">
+            <input type="hidden" id="confirm-position-misalignment" name="CONFIRM POSITION MISALIGNMENT" value="false">
+
+            <!-- helper for initial value of total (total quantity minus NG) -->
+            <input type="hidden" id="initialBTotal" value="0">
+            <input type="hidden" id="initialCTotal" value="0">
+
+
+
+
             <input id="sub-dropdown" name="背番号" disabled> </input>
             <input id="process" name="process" readonly> </input>
             <!-- options will be populated dynamically based on the selected value of #dropdown -->
             
 
-            
-            
-            
+            <!-- Cutting Section (A) -->
+    <div id="sectionA" class="process-section">
+        <h3>Section A - Cutting</h3>
             <label for="Machine Operator">Machine Operator:</label>
-            <input list="machine-operator-suggestions" placeholder="Worker's Name" id="Machine Operator" name="Machine Operator" disabled>
-            <datalist id="machine-operator-suggestions"></datalist>
-            <br>
-            <label for="Process Quantity">Process Quantity:</label>
-            <input type="text" name="Process Quantity" id="Process Quantity" placeholder="Process Quantity">
-            <br>
-            <label for="Lot No.">Date:</label>
-            <input type="date" name="Lot No." id="Lot No." placeholder="Date" onfocus="setDefaultDate(this)" disabled>
-            <br>
-            <label for="Start Time">Start Time:</label>
-            <input type="time" name="Start Time" id="Start Time" placeholder="Time Start" onfocus="setDefaultTime(this)" disabled>
-            <br>
-            <label for="End Time">End Time:</label>
-            <input type="time" name="End Time" id="End Time" placeholder="Time End" onfocus="setDefaultTime(this)" disabled>
-            <br>
+                <input list="machine-operator-suggestions" placeholder="Worker's Name" id="Machine Operator" name="Machine Operator" disabled>
+                <datalist id="machine-operator-suggestions"></datalist>
+                <br>
+                <label for="Process Quantity">Process Quantity:</label>
+                <input type="text" name="Process Quantity" id="Process Quantity" placeholder="Process Quantity">
+                <br>
+                <label for="Lot No.">Date:</label>
+                <input type="date" name="Lot No." id="Lot No." placeholder="Date" onfocus="setDefaultDate(this)" disabled>
+                <br>
+                <label for="Start Time">Start Time:</label>
+                <input type="time" name="Start Time" id="Start Time" placeholder="Time Start" onfocus="setDefaultTime(this)" disabled>
+                <br>
+                <label for="End Time">End Time:</label>
+                <input type="time" name="End Time" id="End Time" placeholder="Time End" onfocus="setDefaultTime(this)" disabled>
+                <br>
 
 
-            <label for="材料ロット">材料ロット:</label>
-        
-        <input type="text" name="材料ロット" id="材料ロット" placeholder="Material Lot" disabled>
-        <br>
+                <label for="材料ロット">材料ロット:</label>
+            
+            <input type="text" name="材料ロット" id="材料ロット" placeholder="Material Lot" readonly>
+            <br>
 
-        <!-- The Modal -->
-        <div id="myModal" class="modal">
-            <div class="modal-content">
-                <span class="close">&times;</span>
-                <div class="camera">
-                    <video id="video" width="520" height="440" autoplay playsinline></video>
-                    <div id="highlightBox" class="highlight"></div>
-                    <button id="capture" type="button">Capture</button>
+            <!-- The Modal -->
+            <div id="myModal" class="modal">
+                <div class="modal-content">
+                    <span class="close">&times;</span>
+                    <div class="camera">
+                        <video id="video" width="520" height="440" autoplay playsinline></video>
+                        <div id="highlightBox" class="highlight"></div>
+                        <button id="capture" type="button">Capture</button>
+                    </div>
+                    <canvas id="canvas" style="display:none;"></canvas>
+                    <img id="photo" alt="Captured Image" draggable="false">
                 </div>
-                <canvas id="canvas" style="display:none;"></canvas>
-                <img id="photo" alt="Captured Image" draggable="false">
             </div>
+            <!-- QR Code Scanner Modal -->
+            <div id="qrScannerModal" class="modal">
+                <div class="modal-content">
+                    <span class="close" id="closeQRScannerModal">&times;</span>
+                    <h3>Scan QR Code</h3>
+                    <div id="qrReader" style="width: 300px; height: 300px;"></div>
+                </div>
+            </div>
+
+            <!-- Flashing red modal for wrong kanban alert -->
+            <div id="wrongKanbanModal" class="modal">
+                <div class="modal-content flash-red">
+                    <span class="close-button" id="closeWrongKanbanModal">&times;</span>
+                    <p id="wrongKanbanText">Wrong kanban / 看板まちがい</p>
+                </div>
+            </div>
+
+<!-- Audio element for looping alert sound -->
+<audio id="alert-sound" src="src/alert.mp3" preload="auto" loop></audio>
+
+<!-- Audio element for alert sound -->
+<audio id="alert-sound" src="src/alert.mp3" preload="auto" loop></audio>
+                <br>
+                <button></button>
+    </div>
+
+    <!-- Slit Section (B) -->
+    <div id="sectionB" class="process-section">
+        <h3>Section B - Slit</h3>
+        <label for="slit Operator Name">作業者:</label>
+        <input list="machine-operator-suggestions" placeholder="Worker's Name" id="slit Operator Name" name="slit Operator Name">
+        <datalist id="machine-operator-suggestions"></datalist>
+        <br><br>
+        <label for="slit Quantity">加工数（良品）+ NG:</label>
+        <input type="text" name="slit Quantity" id="slit Quantity" placeholder="slit Quantity">
+        <br><br>
+        <label for="slit-Date">加工日:</label>
+        <input type="date" name="slit-Date" id="slit-Date" placeholder="Date" onfocus="setDefaultDate(this)">
+        <br>
+        <label for="slit-Time Start">加工開始時間:</label>
+        <input type="time" name="slit-Time Start" id="slit-Time Start" placeholder="Time Start" onfocus="setDefaultTime(this)">
+        <br>
+        <label for="slit-Time End">加工終了時間:</label>
+        <input type="time" name="slit-Time End" id="slit-Time End" placeholder="Time End" onfocus="setDefaultTime(this)">
+        <br>
+        <div id="counter-box-18" class="counter-box">  
+            <label for="counter-18">Slit NG</label>
+            <button class="plus-btn" type="button" onclick="incrementCounter(18)" >+</button>  
+            <input readonly id="counter-18" value="0" type="number" name="slit-NG">  
+            <button class="minus-btn" type="button" onclick="decrementCounter(18)" >-</button>  
         </div>
-            <br>
+        <br>
+        <button type="button" onclick="updateSlit()">Update Slit</button>
+        <br>
+    </div>
 
+    <!-- SRS Section (C) -->
+    <div id="sectionC" class="process-section">
+        <h3>Section C - SRS</h3>
+        <label for="SRS Operator Name">作業者:</label>
+        <input list="machine-operator-suggestions" placeholder="Worker's Name" id="SRS Operator Name" name="SRS Operator Name">
+        <datalist id="machine-operator-suggestions"></datalist>
+        <br><br>
+        <label for="SRS Quantity">加工数（良品）+ NG:</label>
+        <input type="text" name="SRS Quantity" id="SRSQuantity" placeholder="SRS Quantity">
+        <br><br>
+        <label for="SRS Date">加工日:</label>
+        <input type="date" name="SRS Date" id="SRS Date" placeholder="Date" onfocus="setDefaultDate(this)">
+        <br>
+        <label for="SRS Time Start">加工開始時間:</label>
+        <input type="time" name="SRS Time Start" id="SRS Time Start" placeholder="Time Start" onfocus="setDefaultTime(this)">
+        <br>
+        <label for="SRS Time End">加工終了時間:</label>
+        <input type="time" name="SRS Time End" id="SRS Time End" placeholder="Time End" onfocus="setDefaultTime(this)">
+        <br>
+        <label for="SRS code">SRS コード:</label>
+        <input type="text" name="SRS code" id="SRS code" placeholder="SRS code">
+        <br>
+        <br>
+        <label>SRS初物チェック: </label>
+             <label id="SRShatsumonoLabel">FALSE</label>
+             <button id="SRShatsumonoButton" type="button">SRS Checklist</button>
 
-            <textarea name="Comments1" rows="5" placeholder="Enter Comments"></textarea disabled>
-            <br>
+        <div id="counter-box-13" class="counter-box"> 
+            <label for="counter-13">1</label>
+            <button class="plus-btn" type="button" onclick="incrementCounter(13)" >+</button>  
+            <input readonly id="counter-13" value="0" type="number" name="13">  
+            <button class="minus-btn" type="button" onclick="decrementCounter(13)" >-</button>  
+        </div>  
+        <div id="counter-box-14" class="counter-box">  
+            <label for="counter-14">2</label>
+            <button class="plus-btn" type="button" onclick="incrementCounter(14)" >+</button>  
+            <input readonly id="counter-14" value="0" type="number" name="14">  
+            <button class="minus-btn" type="button" onclick="decrementCounter(14)" >-</button>  
+        </div>  
+        <div id="counter-box-15" class="counter-box">  
+            <label for="counter-15">3</label>
+            <button class="plus-btn" type="button" onclick="incrementCounter(15)" >+</button>  
+            <input readonly id="counter-15" value="0" type="number" name="15">  
+            <button class="minus-btn" type="button" onclick="decrementCounter(15)" >-</button>  
+        </div>  
+        <div id="counter-box-16" class="counter-box">  
+            <label for="counter-16">4</label>
+            <button class="plus-btn" type="button" onclick="incrementCounter(16)" >+</button>  
+            <input readonly id="counter-16" value="0" type="number" name="16">  
+            <button class="minus-btn" type="button" onclick="decrementCounter(16)" >-</button>  
+        </div>
+        <div id="counter-box-17" class="counter-box">  
+            <label for="counter-17">その他</label>
+            <button class="plus-btn" type="button" onclick="incrementCounter(17)" >+</button>  
+            <input readonly id="counter-17" value="0" type="number" name="SRS検査その他">  
+            <button class="minus-btn" type="button" onclick="decrementCounter(17)" >-</button>  
+        </div>
+        <label>①くっつき・めくれ、②シワ、③転写位置ズレ、④転写不良</label>
+        
+        <br>
+        <button type="button" onclick="updateSRS()">Update SRS</button>
+        <br>
+    </div>
+            
+            
+            
 
             
     </div>
@@ -127,73 +279,73 @@
         <div id="counter-box-1" class="counter-box"> 
             <label for="counter-1">1</label>
             <button class="plus-btn" type="button" onclick="incrementCounter(1)" disabled>+</button>  
-            <input readonly id="counter-1" value="0" type="number" name="1" disabled>  
+            <input readonly id="counter-1" value="0" type="number" name="1" >  
             <button class="minus-btn" type="button" onclick="decrementCounter(1)" disabled>-</button>  
         </div>  
         <div id="counter-box-2" class="counter-box">  
             <label for="counter-2">2</label>
             <button class="plus-btn" type="button" onclick="incrementCounter(2)" disabled>+</button>  
-            <input readonly id="counter-2" value="0" type="number" name="2" disabled>  
+            <input readonly id="counter-2" value="0" type="number" name="2" >  
             <button class="minus-btn" type="button" onclick="decrementCounter(2)" disabled>-</button>  
         </div>  
         <div id="counter-box-3" class="counter-box">  
             <label for="counter-3">3</label>
             <button class="plus-btn" type="button" onclick="incrementCounter(3)" disabled>+</button>  
-            <input readonly id="counter-3" value="0" type="number" name="3" disabled>  
+            <input readonly id="counter-3" value="0" type="number" name="3" >  
             <button class="minus-btn" type="button" onclick="decrementCounter(3)" disabled>-</button>  
         </div>  
         <div id="counter-box-4" class="counter-box">  
             <label for="counter-4">4</label>
             <button class="plus-btn" type="button" onclick="incrementCounter(4)" disabled>+</button>  
-            <input readonly id="counter-4" value="0" type="number" name="4" disabled>  
+            <input readonly id="counter-4" value="0" type="number" name="4" >  
             <button class="minus-btn" type="button" onclick="decrementCounter(4)" disabled>-</button>  
         </div>  
         <div id="counter-box-5" class="counter-box">  
             <label for="counter-5">5</label>
             <button class="plus-btn" type="button" onclick="incrementCounter(5)" disabled>+</button>  
-            <input readonly id="counter-5" value="0" type="number" name="5" disabled>  
+            <input readonly id="counter-5" value="0" type="number" name="5" >  
             <button class="minus-btn" type="button" onclick="decrementCounter(5)" disabled>-</button>  
         </div>  
         <div id="counter-box-6" class="counter-box">  
             <label for="counter-6">6</label>
             <button class="plus-btn" type="button" onclick="incrementCounter(6)" disabled>+</button>  
-            <input readonly id="counter-6" value="0" type="number" name="6" disabled>  
+            <input readonly id="counter-6" value="0" type="number" name="6" >  
             <button class="minus-btn" type="button" onclick="decrementCounter(6)" disabled>-</button>  
         </div>  
         <div id="counter-box-7" class="counter-box">  
             <label for="counter-7">7</label>
             <button class="plus-btn" type="button" onclick="incrementCounter(7)" disabled>+</button>  
-            <input readonly id="counter-7" value="0" type="number" name="7" disabled>  
+            <input readonly id="counter-7" value="0" type="number" name="7" >  
             <button class="minus-btn" type="button" onclick="decrementCounter(7)" disabled>-</button>  
         </div>  
         <div id="counter-box-8" class="counter-box">  
             <label for="counter-8">8</label>
             <button class="plus-btn" type="button" onclick="incrementCounter(8)" disabled>+</button>  
-            <input readonly id="counter-8" value="0" type="number" name="8" disabled>  
+            <input readonly id="counter-8" value="0" type="number" name="8" >  
             <button class="minus-btn" type="button" onclick="decrementCounter(8)" disabled>-</button>  
         </div>  
         <div id="counter-box-9" class="counter-box">  
             <label for="counter-9">9</label>
             <button class="plus-btn" type="button" onclick="incrementCounter(9)" disabled>+</button>  
-            <input readonly id="counter-9" value="0" type="number" name="9" disabled>  
+            <input readonly id="counter-9" value="0" type="number" name="9" >  
             <button class="minus-btn" type="button" onclick="decrementCounter(9)" disabled>-</button>  
         </div>  
         <div id="counter-box-10" class="counter-box">  
             <label for="counter-10">10</label>
             <button class="plus-btn" type="button" onclick="incrementCounter(10)" disabled>+</button>  
-            <input readonly id="counter-10" value="0" type="number" name="10" disabled>  
+            <input readonly id="counter-10" value="0" type="number" name="10" >  
             <button class="minus-btn" type="button" onclick="decrementCounter(10)" disabled>-</button>  
         </div>  
         <div id="counter-box-11" class="counter-box">  
             <label for="counter-11">11</label>
             <button class="plus-btn" type="button" onclick="incrementCounter(11)" disabled>+</button>  
-            <input readonly id="counter-11" value="0" type="number" name="11" disabled>  
+            <input readonly id="counter-11" value="0" type="number" name="11" >  
             <button class="minus-btn" type="button" onclick="decrementCounter(11)" disabled>-</button>  
         </div>  
         <div id="counter-box-12" class="counter-box">  
             <label for="counter-12">12</label>
             <button class="plus-btn" type="button" onclick="incrementCounter(12)" disabled>+</button>  
-            <input readonly id="counter-12" value="0" type="number" name="その他" disabled>  
+            <input readonly id="counter-12" value="0" type="number" name="その他" >  
             <button class="minus-btn" type="button" onclick="decrementCounter(12)" disabled>-</button>  
         </div>  
     </div>
@@ -218,7 +370,7 @@
                     
             <textarea name="Comments2" rows="5" placeholder="Enter Comments" disabled></textarea>
             <input type="hidden" name="row" value=""> <!-- Ensure this hidden input holds the row number -->
-            <button type="button" onclick="updateData()">Update</button>
+            <button type="button" onclick="updateData()">Update 検査</button>
             <br>
         </div>
 
@@ -294,12 +446,448 @@
         });
 
         // Function to update data in the Google Sheet
+        // function updateData() {
+        //     const enableInputsCheckbox = document.getElementById("enable-inputs"); // Checkbox element
+        //     if (!enableInputsCheckbox.checked) {
+        //         window.alert("you cant update if there is no data");
+        //         return;
+        //     }
+        //     calculateTotalTime();
+        //     const form = document.getElementById('kensa-form');
+        //     const formData = new FormData(form);
+        //     const params = new URLSearchParams();
+
+        //     // Append form data to URLSearchParams object
+        //     for (const pair of formData.entries()) {
+        //         params.append(pair[0], pair[1]);
+        //     }
+
+        //     // Ensure the row number is included in the query parameters
+        //     const rowNumber = params.get('row');
+        //     if (!rowNumber) {
+        //         alert('Row number is missing!');
+        //         return;
+        //     }
+
+        //     // Fetch request to update the data
+        //     fetch('https://script.google.com/macros/s/AKfycby-_1ZH5JUXYJk4qzSUVEekfJM5F4QG7qTys67uwXFm2p9q2O_SI1HnqEDzjQnSx30J/exec', {
+        //         method: 'POST',
+        //         headers: {
+        //             'Content-Type': 'application/x-www-form-urlencoded'
+        //         },
+        //         body: params.toString()
+        //     })
+        //     .then(response => response.json())
+        //     .then(data => {
+        //         if (data.result === 'success') {
+        //             alert('Data updated successfully!');
+                    
+        //         } else {
+        //             alert('Error: ' + data.error);
+        //         }
+        //     })
+        //     .then(() => { window.location.href = `choose.html?selected=${KOJO}`; })
+            
+        //     .catch(error => console.error('Error:', error));
+        // }
+
+        
+
+
+        // // Function to update data in the Google Sheet with QR validation and wrong kanban alert
+        // function updateData() {
+        //     const enableInputsCheckbox = document.getElementById("enable-inputs"); // Checkbox element
+        //     const currentKojo = document.getElementById("hidden工場");
+            
+
+
+        //     if (!enableInputsCheckbox.checked) {
+        //         alert("You can't update if there is no data");
+        //         return;
+        //     }
+
+        //     const subDropdown = document.getElementById('sub-dropdown');
+        //     if (!subDropdown || subDropdown.value === "") {
+        //         alert("No kanban selected. Please scan a kanban first.");
+        //         return;
+        //     }
+
+        //     // Access the alert sound element and preload it in silent mode
+        //     const alertSound = document.getElementById('alert-sound');
+        //     if (alertSound) {
+        //         alertSound.muted = true; // Mute initially to preload
+        //         alertSound.loop = false; // Disable looping
+        //         alertSound.load(); // Preload the audio file
+        //     }
+
+        //     // Show QR scanner modal
+        //     const qrScannerModal = document.getElementById('qrScannerModal');
+        //     const html5QrCode = new Html5Qrcode("qrReader");
+
+        //     // Display the modal for QR scanning
+        //     qrScannerModal.style.display = 'block';
+
+        //     // Start QR code scanning for validation
+        //     html5QrCode.start(
+        //         { facingMode: "environment" }, // Use rear camera
+        //         {
+        //             fps: 10, // Sets the framerate to 10 scans per second
+        //             qrbox: { width: 250, height: 250 } // Sets the scanning box dimensions
+        //         },
+        //         qrCodeMessage => {
+        //             console.log(`QR Code detected: ${qrCodeMessage}`);
+
+        //             // Check if the scanned QR code matches the sub-dropdown value
+        //             if (qrCodeMessage === subDropdown.value) {
+        //                 // Stop the QR scanner and close the modal
+        //                 html5QrCode.stop().then(() => {
+        //                     qrScannerModal.style.display = 'none';
+
+        //                     // Proceed to update Google Sheets data
+        //                     calculateTotalTime();
+        //                     const form = document.getElementById('kensa-form');
+        //                     const formData = new FormData(form);
+        //                     const params = new URLSearchParams();
+
+        //                     // Append form data to URLSearchParams object
+        //                     for (const pair of formData.entries()) {
+        //                         params.append(pair[0], pair[1]);
+        //                     }
+
+        //                     // Ensure the row number is included in the query parameters
+        //                     const rowNumber = params.get('row');
+        //                     if (!rowNumber) {
+        //                         alert('Row number is missing!');
+        //                         return;
+        //                     }
+
+        //                     // Fetch request to update the data
+        //                     fetch('https://script.google.com/macros/s/AKfycby-_1ZH5JUXYJk4qzSUVEekfJM5F4QG7qTys67uwXFm2p9q2O_SI1HnqEDzjQnSx30J/exec', {
+        //                         method: 'POST',
+        //                         headers: {
+        //                             'Content-Type': 'application/x-www-form-urlencoded'
+        //                         },
+        //                         body: params.toString()
+        //                     })
+        //                     .then(response => response.json())
+        //                     .then(data => {
+        //                         if (data.result === 'success') {
+        //                             alert('Data updated successfully!');
+        //                         } else {
+        //                             alert('Error: ' + data.error);
+        //                         }
+        //                     })
+        //                     .then(() => { window.location.href = `choose.html?selected=${KOJO}`; })
+        //                     .catch(error => console.error('Error:', error));
+        //                 }).catch(err => {
+        //                     console.error("Failed to stop scanning:", err);
+        //                 });
+        //             } else {
+        //                 // Wrong kanban detected: play alert sound audibly and show error modal
+        //                 html5QrCode.stop().then(() => {
+        //                     qrScannerModal.style.display = 'none';
+
+        //                     if (alertSound) {
+        //                         alertSound.muted = false; // Unmute sound for alert
+        //                         alertSound.volume = 1; // Set full volume
+        //                         alertSound.play().catch(error => console.error("Failed to play alert sound:", error));
+        //                     }
+
+        //                     // Show the flashing red modal with alert sound
+        //                     showWrongKanbanAlert();
+        //                 }).catch(err => {
+        //                     console.error("Failed to stop scanning:", err);
+        //                 });
+        //             }
+        //         }
+        //     ).catch(err => {
+        //         console.error("Failed to start scanning:", err);
+        //     });
+
+        //     // Close modal when the close button is clicked
+        //     document.getElementById('closeQRScannerModal').onclick = function() {
+        //         html5QrCode.stop().then(() => {
+        //             qrScannerModal.style.display = 'none';
+        //         }).catch(err => {
+        //             console.error("Failed to stop scanning:", err);
+        //         });
+        //     };
+
+        //     // Close modal if the user clicks outside the modal content
+        //     window.onclick = function(event) {
+        //         if (event.target == qrScannerModal) {
+        //             html5QrCode.stop().then(() => {
+        //                 qrScannerModal.style.display = 'none';
+        //             }).catch(err => {
+        //                 console.error("Failed to stop scanning:", err);
+        //             });
+        //         }
+        //     };
+        // }
+
+        // // Function to show flashing red modal with alert sound for wrong kanban
+        // function showWrongKanbanAlert() {
+        //     const wrongKanbanModal = document.getElementById('wrongKanbanModal');
+        //     const alertSound = document.getElementById('alert-sound');
+
+        //     // Show the modal and play the alert sound
+        //     wrongKanbanModal.style.display = 'block';
+        //     alertSound.muted = false; // Ensure sound is unmuted
+        //     alertSound.volume = 1; // Set volume to audible level
+        //     alertSound.play().catch(error => console.error("Failed to play alert sound:", error));
+
+        //     // Close modal and stop sound when the close button is clicked
+        //     const closeWrongKanbanModal = document.getElementById('closeWrongKanbanModal');
+        //     closeWrongKanbanModal.onclick = function() {
+        //         closeWrongKanban();
+        //     };
+
+        //     // Close modal and stop sound if the user clicks outside the modal content
+        //     window.onclick = function(event) {
+        //         if (event.target == wrongKanbanModal) {
+        //             closeWrongKanban();
+        //         }
+        //     };
+        // }
+
+        // // Function to close the wrong kanban modal and stop the sound
+        // function closeWrongKanban() {
+        //     const wrongKanbanModal = document.getElementById('wrongKanbanModal');
+        //     const alertSound = document.getElementById('alert-sound');
+            
+        //     wrongKanbanModal.style.display = 'none';
+        //     alertSound.pause();
+        //     alertSound.currentTime = 0; // Reset sound to the beginning
+        // }
+
+        // Function to update data in the Google Sheet with QR validation and wrong kanban alert
         function updateData() {
             const enableInputsCheckbox = document.getElementById("enable-inputs"); // Checkbox element
+            const currentKojo = document.getElementById("hidden工場").value;
+
             if (!enableInputsCheckbox.checked) {
-                window.alert("you cant update if there is no data");
+                alert("You can't update if there is no data");
                 return;
             }
+
+            const subDropdown = document.getElementById('sub-dropdown');
+            if (!subDropdown || subDropdown.value === "") {
+                alert("No kanban selected. Please scan a kanban first.");
+                return;
+            }
+
+            // Access the alert sound element and preload it in silent mode
+            const alertSound = document.getElementById('alert-sound');
+            if (alertSound) {
+                alertSound.muted = true; // Mute initially to preload
+                alertSound.loop = false; // Disable looping
+                alertSound.load(); // Preload the audio file
+            }
+
+            // Check if currentKojo is "天徳". If not, skip QR scanning and update directly
+            if (currentKojo !== "天徳") {
+                // Directly update Google Sheets without scanning
+                updateGoogleSheetData();
+                return;
+            }
+
+            // If currentKojo is "天徳", proceed with QR scanning
+            const qrScannerModal = document.getElementById('qrScannerModal');
+            const html5QrCode = new Html5Qrcode("qrReader");
+
+            // Display the modal for QR scanning
+            qrScannerModal.style.display = 'block';
+
+            // Start QR code scanning for validation
+            html5QrCode.start(
+                { facingMode: "environment" }, // Use rear camera
+                {
+                    fps: 10, // Sets the framerate to 10 scans per second
+                    qrbox: { width: 250, height: 250 } // Sets the scanning box dimensions
+                },
+                qrCodeMessage => {
+                    console.log(`QR Code detected: ${qrCodeMessage}`);
+
+                    // Check if the scanned QR code matches the sub-dropdown value
+                    if (qrCodeMessage === subDropdown.value) {
+                        // Stop the QR scanner and close the modal
+                        html5QrCode.stop().then(() => {
+                            qrScannerModal.style.display = 'none';
+                            // Proceed to update Google Sheets data
+                            updateGoogleSheetData();
+                        }).catch(err => {
+                            console.error("Failed to stop scanning:", err);
+                        });
+                    } else {
+                        // Wrong kanban detected: play alert sound audibly and show error modal
+                        html5QrCode.stop().then(() => {
+                            qrScannerModal.style.display = 'none';
+
+                            if (alertSound) {
+                                alertSound.muted = false; // Unmute sound for alert
+                                alertSound.volume = 1; // Set full volume
+                                alertSound.play().catch(error => console.error("Failed to play alert sound:", error));
+                            }
+
+                            // Show the flashing red modal with alert sound
+                            showWrongKanbanAlert();
+                        }).catch(err => {
+                            console.error("Failed to stop scanning:", err);
+                        });
+                    }
+                }
+            ).catch(err => {
+                console.error("Failed to start scanning:", err);
+            });
+
+            // Close modal when the close button is clicked
+            document.getElementById('closeQRScannerModal').onclick = function() {
+                html5QrCode.stop().then(() => {
+                    qrScannerModal.style.display = 'none';
+                }).catch(err => {
+                    console.error("Failed to stop scanning:", err);
+                });
+            };
+
+            // Close modal if the user clicks outside the modal content
+            window.onclick = function(event) {
+                if (event.target == qrScannerModal) {
+                    html5QrCode.stop().then(() => {
+                        qrScannerModal.style.display = 'none';
+                    }).catch(err => {
+                        console.error("Failed to stop scanning:", err);
+                    });
+                }
+            };
+        }
+
+        // Function to proceed with updating Google Sheets data directly
+        function updateGoogleSheetData() {
+            const currentKojo = document.getElementById("hidden工場").value;
+            calculateTotalTime();
+            const form = document.getElementById('kensa-form');
+            const formData = new FormData(form);
+            const params = new URLSearchParams();
+
+            // Append form data to URLSearchParams object
+            for (const pair of formData.entries()) {
+                params.append(pair[0], pair[1]);
+            }
+
+            // Ensure the row number is included in the query parameters
+            const rowNumber = params.get('row');
+            if (!rowNumber) {
+                alert('Row number is missing!');
+                return;
+            }
+
+            // Fetch request to update the data
+            fetch('https://script.google.com/macros/s/AKfycby-_1ZH5JUXYJk4qzSUVEekfJM5F4QG7qTys67uwXFm2p9q2O_SI1HnqEDzjQnSx30J/exec', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: params.toString()
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.result === 'success') {
+                    alert('Data updated successfully!');
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            })
+            .then(() => { window.location.href = `choose.html?selected=${currentKojo}`; })
+            .catch(error => console.error('Error:', error));
+        }
+
+        // Function to show flashing red modal with alert sound for wrong kanban
+        function showWrongKanbanAlert() {
+            const wrongKanbanModal = document.getElementById('wrongKanbanModal');
+            const alertSound = document.getElementById('alert-sound');
+
+            // Show the modal and play the alert sound
+            wrongKanbanModal.style.display = 'block';
+            alertSound.muted = false; // Ensure sound is unmuted
+            alertSound.volume = 1; // Set volume to audible level
+            alertSound.play().catch(error => console.error("Failed to play alert sound:", error));
+
+            // Close modal and stop sound when the close button is clicked
+            const closeWrongKanbanModal = document.getElementById('closeWrongKanbanModal');
+            closeWrongKanbanModal.onclick = function() {
+                closeWrongKanban();
+            };
+
+            // Close modal and stop sound if the user clicks outside the modal content
+            window.onclick = function(event) {
+                if (event.target == wrongKanbanModal) {
+                    closeWrongKanban();
+                }
+            };
+        }
+
+        // Function to close the wrong kanban modal and stop the sound
+        function closeWrongKanban() {
+            const wrongKanbanModal = document.getElementById('wrongKanbanModal');
+            const alertSound = document.getElementById('alert-sound');
+            
+            wrongKanbanModal.style.display = 'none';
+            alertSound.pause();
+            alertSound.currentTime = 0; // Reset sound to the beginning
+        }
+
+
+        
+        //Function to update SRS data in the Google Sheet SRS
+        function updateSRS() {
+            document.getElementById("Last Process").value = "C";
+            
+            calculateTotalTime();
+            const form = document.getElementById('kensa-form');
+            const formData = new FormData(form);
+            const params = new URLSearchParams();
+
+            // Append form data to URLSearchParams object
+            for (const pair of formData.entries()) {
+                params.append(pair[0], pair[1]);
+            }
+
+            // Ensure the row number is included in the query parameters
+            const rowNumber = params.get('row');
+            if (!rowNumber) {
+                alert('Row number is missing!');
+                return;
+            }
+
+            // Fetch request to update the data
+            fetch('https://script.google.com/macros/s/AKfycby-_1ZH5JUXYJk4qzSUVEekfJM5F4QG7qTys67uwXFm2p9q2O_SI1HnqEDzjQnSx30J/exec', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: params.toString()
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.result === 'success') {
+                    alert('Data updated successfully!');
+                    
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            })
+            .then(() => { window.location.href = `choose.html?selected=${KOJO}`; })
+            
+            .catch(error => console.error('Error:', error));
+        }
+
+
+        
+
+        // Function to update slit data in the Google Sheet SRS
+        function updateSlit() {
+            document.getElementById("Last Process").value = "B";
+            
             calculateTotalTime();
             const form = document.getElementById('kensa-form');
             const formData = new FormData(form);
@@ -342,5 +930,8 @@
 
 
     </script>
+    <script src="html5-qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr/dist/jsQR.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
 </body>
 </html>
