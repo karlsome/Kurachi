@@ -80,6 +80,14 @@
     <!-- QR Scan Button -->
     <button class="qr-scan-button" id="qr-scan">Scan QR Code</button>
 
+    <!-- Modal Structure -->
+    <div id="qrModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8);">
+        <div style="position:relative; width:400px; height:300px; margin:auto; top:15%; background:white; padding:20px;">
+            <span id="closeModal" style="cursor:pointer; position:absolute; top:10px; right:10px;">&times;</span>
+            <div id="qrScannerContainer"></div>
+        </div>
+    </div>
+
     <table id="data-table">
         <thead>
             <tr>
@@ -257,42 +265,100 @@
             .catch(error => console.error('Error fetching data:', error));  // Log any errors
 
 
-        // QR Scan Button functionality
+        // // QR Scan Button functionality
+        // document.getElementById('qr-scan').addEventListener('click', function() {
+        //     // Open QR code scanner popup
+        //     const popup = window.open('popup.html?source=trackingQR', 'QR Scanner', 'width=400,height=300');
+
+        //     // Listen for the message event when the QR code is scanned
+        //     window.addEventListener('message', function handleQRScan(event) {
+        //         if (event.origin === window.location.origin) {
+        //             const scannedQRValue = event.data;
+        //             console.log(`Scanned QR Code: ${scannedQRValue}`);
+
+        //             // Find the matching row based on the QR code value, and check if row[9] matches filterValue and row[34] is false
+        //             const trackingQRIndex = sheetData[2].indexOf("tracking QR");  // Find the index of the "tracking QR" column
+        //             const matchingRow = sheetData.slice(3).find(row => 
+        //                 row[trackingQRIndex] === scannedQRValue && row[9] === filterValue && row[39] === false
+        //             );
+
+        //             if (matchingRow) {
+        //                 // Construct query params from the matching row data
+        //                 const queryParams = sheetData[2].map((header, index) => 
+        //                     `${encodeURIComponent(header)}=${encodeURIComponent(matchingRow[index])}`
+        //                 ).join('&');
+
+        //                 // Redirect to the details page with the matching row's data
+        //                 const rowNumber = sheetData.indexOf(matchingRow) + 1;  // Adjust row number
+        //                 window.location.href = `kensaOnly.html?${queryParams}&row=${rowNumber}&filterValue=${filterValue}`;
+        //             } else {
+        //                 // If no match found, alert the user
+        //                 window.alert("Product not found / 製品が見つかりませんでした");
+        //             }
+
+        //             // Clean up event listener after handling
+        //             window.removeEventListener('message', handleQRScan);
+        //         }
+        //     });
+        // });
+
         document.getElementById('qr-scan').addEventListener('click', function() {
-            // Open QR code scanner popup
-            const popup = window.open('popup.html?source=trackingQR', 'QR Scanner', 'width=400,height=300');
+        // Open the modal
+        const modal = document.getElementById('qrModal');
+        modal.style.display = 'block';
 
-            // Listen for the message event when the QR code is scanned
-            window.addEventListener('message', function handleQRScan(event) {
-                if (event.origin === window.location.origin) {
-                    const scannedQRValue = event.data;
-                    console.log(`Scanned QR Code: ${scannedQRValue}`);
+        // Initialize the QR code scanner
+        const qrScannerContainer = document.getElementById('qrScannerContainer');
+        const html5QrCode = new Html5Qrcode("qrScannerContainer");
 
-                    // Find the matching row based on the QR code value, and check if row[9] matches filterValue and row[34] is false
-                    const trackingQRIndex = sheetData[2].indexOf("tracking QR");  // Find the index of the "tracking QR" column
-                    const matchingRow = sheetData.slice(3).find(row => 
-                        row[trackingQRIndex] === scannedQRValue && row[9] === filterValue && row[39] === false
-                    );
+        // Start the QR code scanner
+        html5QrCode.start(
+            { facingMode: "environment" }, // Use rear camera
+            {
+                fps: 10,    // Scans per second
+                qrbox: 250  // QR code scanning box size
+            },
+            qrCodeMessage => {
+                console.log(`Scanned QR Code: ${qrCodeMessage}`);
 
-                    if (matchingRow) {
-                        // Construct query params from the matching row data
-                        const queryParams = sheetData[2].map((header, index) => 
-                            `${encodeURIComponent(header)}=${encodeURIComponent(matchingRow[index])}`
-                        ).join('&');
+                // Find the matching row based on the QR code value
+                const trackingQRIndex = sheetData[2].indexOf("tracking QR"); // Find the index of the "tracking QR" column
+                const matchingRow = sheetData.slice(3).find(row => 
+                    row[trackingQRIndex] === qrCodeMessage && row[39] === false
+                );
 
-                        // Redirect to the details page with the matching row's data
-                        const rowNumber = sheetData.indexOf(matchingRow) + 1;  // Adjust row number
-                        window.location.href = `kensaOnly.html?${queryParams}&row=${rowNumber}&filterValue=${filterValue}`;
-                    } else {
-                        // If no match found, alert the user
-                        window.alert("Product not found / 製品が見つかりませんでした");
-                    }
+                if (matchingRow) {
+                    // Construct query params from the matching row data
+                    const queryParams = sheetData[2].map((header, index) => 
+                        `${encodeURIComponent(header)}=${encodeURIComponent(matchingRow[index])}`
+                    ).join('&');
 
-                    // Clean up event listener after handling
-                    window.removeEventListener('message', handleQRScan);
+                    // Redirect to the details page with the matching row's data
+                    const rowNumber = sheetData.indexOf(matchingRow) + 1;  // Adjust row number
+                    window.location.href = `kensaOnly.html?${queryParams}&row=${rowNumber}&filterValue=${filterValue}`;
+                } else {
+                    // If no match found, alert the user
+                    window.alert("Product not found / 製品が見つかりませんでした");
                 }
-            });
+
+                // Stop the QR scanner and close the modal after scanning
+                html5QrCode.stop().then(() => {
+                    modal.style.display = 'none';
+                }).catch(err => console.log("Failed to stop QR scanner:", err));
+            }
+            
+        ).catch(err => console.log("Failed to start QR scanner:", err));
+
+        // Close modal when the close button is clicked
+        document.getElementById('closeModal').addEventListener('click', function() {
+            modal.style.display = 'none';
+            html5QrCode.stop().catch(err => console.log("Failed to stop QR scanner:", err));
         });
+    });
+
+        
     </script>
+    <script src="html5-qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr/dist/jsQR.js"></script>
 </body>
 </html>

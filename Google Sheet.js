@@ -122,52 +122,112 @@ document.addEventListener("DOMContentLoaded", function() {
 });
 
 // this is new submit button function
-// when submit form is pressed
+// // when submit form is pressed
+// form.addEventListener('submit', e => {
+//   const hatsumonoStatus = document.getElementById("hatsumonoLabel").textContent;
+//   const atomonoStatus = document.getElementById("atomonoLabel").textContent;
+  
+//   const enableInputsCheckbox = document.getElementById("enable-inputs"); // Checkbox element
+
+//   // Validation: hatsumono/atomono and process must be valid
+//   if (hatsumonoStatus === "FALSE" || atomonoStatus === "FALSE") {
+//     window.alert("Please do the checklist / 初物後物チェックください");
+//     e.preventDefault(); // Prevent form submission if validation fails
+//     return; // Exit the function to prevent further execution
+//   }
+
+  
+
+//   // If the checkbox is checked, no need to scan QR
+//   if (enableInputsCheckbox.checked) {
+//     // Directly submit the form without scanning QR
+//     e.preventDefault(); // Prevent form submission temporarily
+//     submitForm(); // Call the submit function directly
+//   } else {
+//     // If the checkbox is unchecked, scan the QR code
+//     e.preventDefault(); // Prevent form submission temporarily to scan QR code first
+//     const popup = window.open('popup.html?source=trackingQR', 'QR Scanner', 'width=400,height=300');
+
+//     // Listen for the QR code scanner result
+//     window.addEventListener('message', function handleTrackingQR(event) {
+//       if (event.origin === window.location.origin) {
+//         const trackingQRValue = event.data;
+//         const trackingQRInput = document.getElementById('tracking-QR');
+
+//         // Ensure trackingQR is set and valid
+//         if (trackingQRInput && trackingQRValue && trackingQRValue.trim() !== "") {
+//           trackingQRInput.value = trackingQRValue;
+//           console.log(`Tracking QR scanned: ${trackingQRValue}`);
+          
+//           // Now, allow the form to submit
+//           window.removeEventListener('message', handleTrackingQR);
+//           submitForm(); // Call a separate function to handle the actual form submission
+//         } else {
+//           // Alert the user if no QR code is scanned
+//           window.alert("Please scan the tracking QR code / 追跡QRコードをスキャンしてください");
+//           window.removeEventListener('message', handleTrackingQR); // Clean up the event listener
+//         }
+//       }
+//     });
+//   }
+// });
 form.addEventListener('submit', e => {
   const hatsumonoStatus = document.getElementById("hatsumonoLabel").textContent;
   const atomonoStatus = document.getElementById("atomonoLabel").textContent;
-  
   const enableInputsCheckbox = document.getElementById("enable-inputs"); // Checkbox element
 
   // Validation: hatsumono/atomono and process must be valid
   if (hatsumonoStatus === "FALSE" || atomonoStatus === "FALSE") {
     window.alert("Please do the checklist / 初物後物チェックください");
-    e.preventDefault(); // Prevent form submission if validation fails
-    return; // Exit the function to prevent further execution
+    e.preventDefault();
+    return;
   }
 
-  
-
-  // If the checkbox is checked, no need to scan QR
+  // If the checkbox is checked, submit form directly without scanning QR
   if (enableInputsCheckbox.checked) {
-    // Directly submit the form without scanning QR
-    e.preventDefault(); // Prevent form submission temporarily
-    submitForm(); // Call the submit function directly
+    e.preventDefault();
+    submitForm();
   } else {
     // If the checkbox is unchecked, scan the QR code
-    e.preventDefault(); // Prevent form submission temporarily to scan QR code first
-    const popup = window.open('popup.html?source=trackingQR', 'QR Scanner', 'width=400,height=300');
+    e.preventDefault();
 
-    // Listen for the QR code scanner result
-    window.addEventListener('message', function handleTrackingQR(event) {
-      if (event.origin === window.location.origin) {
-        const trackingQRValue = event.data;
+    // Open the modal
+    const modal = document.getElementById('qrModal');
+    modal.style.display = 'block';
+
+    // Initialize the QR code scanner
+    const qrScannerContainer = document.getElementById('qrScannerContainer');
+    const html5QrCode = new Html5Qrcode("qrScannerContainer");
+
+    // Start QR code scanning
+    html5QrCode.start(
+      { facingMode: "environment" },
+      { fps: 10, qrbox: 250 },
+      qrCodeMessage => {
         const trackingQRInput = document.getElementById('tracking-QR');
 
         // Ensure trackingQR is set and valid
-        if (trackingQRInput && trackingQRValue && trackingQRValue.trim() !== "") {
-          trackingQRInput.value = trackingQRValue;
-          console.log(`Tracking QR scanned: ${trackingQRValue}`);
-          
+        if (trackingQRInput && qrCodeMessage && qrCodeMessage.trim() !== "") {
+          trackingQRInput.value = qrCodeMessage;
+          console.log(`Tracking QR scanned: ${qrCodeMessage}`);
+
+          // Stop the QR scanner and close the modal after scanning
+          html5QrCode.stop().then(() => {
+            modal.style.display = 'none';
+          }).catch(err => console.log("Failed to stop QR scanner:", err));
+
           // Now, allow the form to submit
-          window.removeEventListener('message', handleTrackingQR);
-          submitForm(); // Call a separate function to handle the actual form submission
+          submitForm();
         } else {
-          // Alert the user if no QR code is scanned
           window.alert("Please scan the tracking QR code / 追跡QRコードをスキャンしてください");
-          window.removeEventListener('message', handleTrackingQR); // Clean up the event listener
         }
       }
+    ).catch(err => console.log("Failed to start QR scanner:", err));
+
+    // Close modal when the close button is clicked
+    document.getElementById('closeModal').addEventListener('click', function() {
+      modal.style.display = 'none';
+      html5QrCode.stop().catch(err => console.log("Failed to stop QR scanner:", err));
     });
   }
 });
