@@ -254,6 +254,7 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
     const Time_end = document.getElementById('End Time').value;
     const 設備 = document.getElementById('process').value;
     const Cycle_Time = parseFloat(document.getElementById('cycleTime').value) || 0;
+    const 製造ロット = document.getElementById('製造ロット').value;
 
     // Check if 背番号 is selected
     if (!背番号) {
@@ -311,6 +312,7 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
       }, {}),
       Total_NG,
       Cycle_Time,
+      製造ロット,
     };
 
     console.log('Data to save to kensaDB:', formData);
