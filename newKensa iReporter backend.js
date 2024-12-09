@@ -280,7 +280,7 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
     console.log('Data to save to kensaDB:', formData);
 
     // Save to kensaDB
-    const saveResponse = await fetch('${serverURL}/submitToKensaDBiReporter', {
+    const saveResponse = await fetch(`${serverURL}/submitToKensaDBiReporter`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(formData),
