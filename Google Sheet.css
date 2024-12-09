@@ -474,7 +474,27 @@ nav a:hover {
     0% { background-color: #fefefe; color: black; } /* Normal background and text color */
     50% { background-color: red; color: white; } /* Red background and white text */
     100% { background-color: #fefefe; color: black; }
+
+
 }
+
+.flash-green {
+    animation: flash-green 0.5s;
+  }
+  
+@keyframes flash-green {
+from {
+    background-color: lightgreen;
+}
+to {
+    background-color: transparent;
+}
+}
+
+#boxCountDisplay {
+    text-align: center;
+    font-size: 18px;
+  }
 
 /* Close button styling */
 .close-button {
@@ -489,3 +509,4 @@ nav a:hover {
 .close-button:hover {
     color: red;
 }
+

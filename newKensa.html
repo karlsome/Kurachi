@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <link rel="stylesheet" href="Google Sheet.css">
+    <link rel="icon" type="image/png" href="src/favicon2.png">
+    <title>自動日報(倉知)</title>
+    
+</head>
+<body>
+    <!-- this code is for process -->
+     
+<div class="kensacontainer">
+    <form method="post" action="" name="contact-form">
+    <h4 id = "nippoTitle">検査日報</h4>
+
+    <input type="hidden" name="設備" id="hidden設備">
+            <input type="hidden" name="工場2" id="hidden工場">
+            <input type="hidden" name="工場" id="selected工場" value="天徳">
+            <input type="hidden" name="printerCode" id="printerCode">
+            <input type="hidden" name="検査STATUS" id="検査STATUS" value="false">
+            <input type="hidden" name="ipInfo" id="ipInfo">
+            <input type="hidden" name="rikeshi" id="rikeshi">
+            <input type="hidden" name="printerHostname" id="printerHostname">
+            <iframe id="hiddenIframe" style="display:none;"></iframe>
+            <input type="hidden" name="boxqty" id="boxqty">
+            <input type="hidden" name="scannedKanban" id="scannedKanban">
+            <input type="hidden" name="tracking QR" id="tracking-QR">
+            <input type="hidden" name="Last Process" id="Last Process" value="A">
+            <input type="hidden" name="Process_Status" id="Process_Status">
+            <audio id="alert-sound" src="src/alert.mp3" preload="auto"></audio>
+
+            <!-- for hatusmonoStatus -->
+            <input type="hidden" name="CONFIRM SHAPE" id="confirm-shape" value="false">
+            <input type="hidden" name="CONFIRM MATERIAL" id="confirm-material" value="false">
+            <input type="hidden" name="CONFIRM COLOR" id="confirm-color" value="false">
+            <input type="hidden" name="CONFIRM PIN HOLE" id="confirm-pin-hole" value="false">
+            <input type="hidden" name="CONFIRM CUTTING CONDITION" id="confirm-cutting-condition" value="false">
+            <input type="hidden" name="CONFIRM PRODUCT NUMBER" id="confirm-product-number" value="false">
+            <input type="hidden" name="CONFIRM FILE NAME" id="confirm-file-name" value="false">
+            <input type="hidden" name="CONFIRM SEWING LINE" id="confirm-sewing-line" value="false">
+
+            <!-- SRS hatsumono status variables -->
+            <input type="hidden" id="confirm-type" name="CONFIRM TYPE" value="false">
+            <input type="hidden" id="confirm-appearance" name="CONFIRM APPEARANCE" value="false">
+            <input type="hidden" id="confirm-text-misalignment" name="CONFIRM TEXT MISALIGNMENT" value="false">
+            <input type="hidden" id="confirm-position-misalignment" name="CONFIRM POSITION MISALIGNMENT" value="false">
+
+            <!-- helper for initial value of total -->
+            <input type="hidden" id="initialBTotal" value="0">
+            <input type="hidden" id="initialCTotal" value="0">
+            
+
+            
+            <label for="Remaining_Quantity" id="rqLabel">Remaining Quantity</label>
+            <input readonly name="Remaining_Quantity" id="Remaining_Quantity">
+            <br><br>
+
+            <input readonly id="sub-dropdown" name="背番号">  
+            <!-- options will be populated dynamically based on the selected value of #dropdown -->
+            </select>
+
+            <!-- QR code button -->
+            <button id="scan-button" type="button">Scan 背番号</button>
+            <br>
+            <br>
+
+            <label for="process">検査テーブル名:</label>
+            <select id="process" name="設備">
+                <option value="検査テーブル 1">検査テーブル 1</option>
+                <option value="検査テーブル 2">検査テーブル 2</option>
+                <option value="検査テーブル 3">検査テーブル 3</option>
+                <option value="検査テーブル 4">検査テーブル 4</option>
+                <option value="検査テーブル 5">検査テーブル 5</option>
+            </select>
+
+
+    
+        <!-- Alert modal instead of window.alert -->
+        <div id="customAlertModal" class="modal" style="display:none;">
+            <div class="modal-content">
+                <span class="close-button" id="closeModalButton">&times;</span>
+                <p id="customAlertText">Wrong Kanban / 看板間違い</p>
+            </div>
+            </div>
+    
+    
+            <!-- QR Code Scanner Modal -->
+            <div id="qrScannerModal" class="modal">
+                <div class="modal-content">
+                    <span class="close" id="closeQRScannerModal">&times;</span>
+                    <h3>Scan QR Code</h3>
+                    <div id="qrReader" style="width: 300px; height: 300px;"></div>
+                </div>
+            </div>
+            
+            <!-- The custom alert modal when product mismatch happens -->
+            <div id="scanAlertModal" class="modal" style="display:none;">
+                <div class="modal-content">
+                <span class="close-button" id="closeScanModalButton">&times;</span>
+                <p id="scanAlertText">Different product detected! Please save form before changing. / 異なる製品が検出されました。保存してください！</p>
+                </div>
+            </div>
+        
+
+
+            <input list="machine-operator-suggestions" placeholder="Worker's Name" id="Machine Operator" name="Worker_Name" required>
+            <datalist id="machine-operator-suggestions"></datalist>
+            <br><br>
+            <label for="Process Quantity">加工数（良品）+ NG:</label>
+            <input type="text" name="Process Quantity" id="ProcessQuantity" placeholder="Process Quantity" required>
+            
+            <br><br>
+            <label for="Lot No.">加工日:</label>
+            <input type="date" name="Date" id="Lot No." placeholder="Date" onfocus="setDefaultDate(this)" required>
+            <br>
+            <label for="Start Time">加工開始時間:</label>
+            <input type="time" name="Time_start" id="Start Time" placeholder="Time Start" onfocus="setDefaultTime(this)" >
+            <br>
+            <label for="End Time">加工終了時間:</label>
+            <input type="time" name="Time_end" id="End Time" placeholder="Time End" onfocus="setDefaultTime(this)" >
+            <br>
+
+    <!-- these are for the buttons numbers -->
+    <div class="counter-container">  
+        <div id="counter-box-1" class="counter-box"> 
+            <label for="counter-1">1</label>
+            <button class="plus-btn" type="button" onclick="incrementCounter(1)" >+</button>  
+            <input readonly id="counter-1" value="0" type="number" name="1">  
+            <button class="minus-btn" type="button" onclick="decrementCounter(1)" >-</button>  
+        </div>  
+        <div id="counter-box-2" class="counter-box">  
+            <label for="counter-2">2</label>
+            <button class="plus-btn" type="button" onclick="incrementCounter(2)" >+</button>  
+            <input readonly id="counter-2" value="0" type="number" name="2">  
+            <button class="minus-btn" type="button" onclick="decrementCounter(2)" >-</button>  
+        </div>  
+        <div id="counter-box-3" class="counter-box">  
+            <label for="counter-3">3</label>
+            <button class="plus-btn" type="button" onclick="incrementCounter(3)" >+</button>  
+            <input readonly id="counter-3" value="0" type="number" name="3">  
+            <button class="minus-btn" type="button" onclick="decrementCounter(3)" >-</button>  
+        </div>  
+        <div id="counter-box-4" class="counter-box">  
+            <label for="counter-4">4</label>
+            <button class="plus-btn" type="button" onclick="incrementCounter(4)" >+</button>  
+            <input readonly id="counter-4" value="0" type="number" name="4">  
+            <button class="minus-btn" type="button" onclick="decrementCounter(4)" >-</button>  
+        </div>  
+        <div id="counter-box-5" class="counter-box">  
+            <label for="counter-5">5</label>
+            <button class="plus-btn" type="button" onclick="incrementCounter(5)" >+</button>  
+            <input readonly id="counter-5" value="0" type="number" name="5">  
+            <button class="minus-btn" type="button" onclick="decrementCounter(5)" >-</button>  
+        </div>  
+        <div id="counter-box-6" class="counter-box">  
+            <label for="counter-6">6</label>
+            <button class="plus-btn" type="button" onclick="incrementCounter(6)" >+</button>  
+            <input readonly id="counter-6" value="0" type="number" name="6">  
+            <button class="minus-btn" type="button" onclick="decrementCounter(6)" >-</button>  
+        </div>  
+        <div id="counter-box-7" class="counter-box">  
+            <label for="counter-7">7</label>
+            <button class="plus-btn" type="button" onclick="incrementCounter(7)" >+</button>  
+            <input readonly id="counter-7" value="0" type="number" name="7">  
+            <button class="minus-btn" type="button" onclick="decrementCounter(7)" >-</button>  
+        </div>  
+        <div id="counter-box-8" class="counter-box">  
+            <label for="counter-8">8</label>
+            <button class="plus-btn" type="button" onclick="incrementCounter(8)" >+</button>  
+            <input readonly id="counter-8" value="0" type="number" name="8">  
+            <button class="minus-btn" type="button" onclick="decrementCounter(8)" >-</button>  
+        </div>  
+        <div id="counter-box-9" class="counter-box">  
+            <label for="counter-9">9</label>
+            <button class="plus-btn" type="button" onclick="incrementCounter(9)" >+</button>  
+            <input readonly id="counter-9" value="0" type="number" name="9">  
+            <button class="minus-btn" type="button" onclick="decrementCounter(9)" >-</button>  
+        </div>  
+        <div id="counter-box-10" class="counter-box">  
+            <label for="counter-10">10</label>
+            <button class="plus-btn" type="button" onclick="incrementCounter(10)" >+</button>  
+            <input readonly id="counter-10" value="0" type="number" name="10">  
+            <button class="minus-btn" type="button" onclick="decrementCounter(10)" >-</button>  
+        </div>  
+        <div id="counter-box-11" class="counter-box">  
+            <label for="counter-11">11</label>
+            <button class="plus-btn" type="button" onclick="incrementCounter(11)" >+</button>  
+            <input readonly id="counter-11" value="0" type="number" name="11">  
+            <button class="minus-btn" type="button" onclick="decrementCounter(11)" >-</button>  
+        </div>  
+        <div id="counter-box-12" class="counter-box">  
+            <label for="counter-12">その他</label>
+            <button class="plus-btn" type="button" onclick="incrementCounter(12)" >+</button>  
+            <input readonly id="counter-12" value="0" type="number" name="その他">  
+            <button class="minus-btn" type="button" onclick="decrementCounter(12)">-</button>  
+        </div>  
+    </div>
+
+
+    <!-- this displays the total furyo a -->
+    <div class="counter-container">
+        <!-- Add the total display element -->
+        <div id="NG_container">
+            <NGlabel for="Total_NG">NG Quantity:</label>
+            <input readonly id="Total_NG" value="0" type="number" name="検査NG">
+        </div>
+        <br><br><br><br>
+        <div id="total-container">
+            <label for="total">良品合計(TOTAL):</label>
+            <input readonly id="total" value="0" type="number" name="Final Quantity">
+        </div>
+            </div>
+            <label for="在庫">スペア:</label>
+            <input type="text" name="在庫" id="在庫" placeholder="Spare" >
+            <br>
+                    
+            <textarea name="Comments2" rows="5" placeholder="Enter Comments" ></textarea>
+            <input type="submit" value="Submit" id="submit">
+            <br>
+            <br>
+            <br>
+            <br>
+            <br>
+            <br>
+            <button type="button" onclick="resetForm()">Reset</button>
+        </div>
+    
+
+    
+
+            
+           
+            
+
+            
+            
+            
+    </div>
+
+    
+
+    
+
+
+    
+    
+
+        
+    
+
+        <!-- this is for the informations -->
+        <div class="container">
+            <div class = "container">
+                <div class="image-container">
+                    <img id="dynamicImage" src="" alt="Image Description">
+                </div>
+                <!-- <label>SRS コード: </label><label name="SRScode" id="SRScode" value=""></label> -->
+                <label name="送りピッチ" id="送りピッチ" value=""></label>
+                
+                <label>Unique ID:</label>
+                <input readonly id="uniqueID" value="" name="uniqueID"> 
+                <label>Product Number:</label>
+                <input readonly id="product-number" value="" name="品番"> 
+                <label>Model:</label>
+                <input readonly id="model" value="" >
+                <label>Shape:</label>
+                <input readonly id="shape" value="">
+                <label>R/L:</label>
+                <input readonly id="R-L" value="">
+                <label>Material:</label>
+                <input readonly id="material" value="">
+                <label>Material Code:</label>
+                <input readonly id="material-code" value="">
+                <label>Material Color:</label>
+                <input readonly id="material-color" value="">
+                <label>型番:</label>
+                <input readonly id="kataban" value="">
+                <br>
+                <label>Total Time (in hours):</label>
+                <input readonly id="totalTime" value="0" name="Total Time">
+                <br>
+                <label>Cycle Time:</label>
+                <input readonly id="cycleTime" value="0" name="Cycle Time">
+                <br>
+
+            </div>
+        </div>
+    
+    </form>
+
+
+
+        
+
+
+    </div>
+    
+    <script src="newKensa backend.js"></script>
+    <script src="html5-qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr/dist/jsQR.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
+</body>
+</html>

@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <link rel="stylesheet" href="Google Sheet.css">
+    <link rel="icon" type="image/png" href="src/favicon2.png">
+    <title>自動日報(倉知)</title>
+    
+</head>
+<body>
+    <!-- this code is for process -->
+    <div class="container">        
+        <form method="post" action="" name="contact-form">
+            <nav>
+                <a href="index.html">Home</a>
+                <a href="index.html">工場</a>
+                <a href="machine.html">設備</a>
+            </nav>
+            <h4 id = "nippoTitle">第二工場日報</h4>
+            
+            <input type="hidden" name="設備" id="hidden設備">
+            <input type="hidden" name="工場2" id="hidden工場">
+            <input type="hidden" name="工場" id="selected工場" value="第二工場">
+            <input type="hidden" name="printerCode" id="printerCode">
+            <input type="hidden" name="検査STATUS" id="検査STATUS" value="false">
+            <input type="hidden" name="ipInfo" id="ipInfo">
+            <input type="hidden" name="rikeshi" id="rikeshi">
+            <input type="hidden" name="printerHostname" id="printerHostname">
+            <iframe id="hiddenIframe" style="display:none;"></iframe>
+            <input type="hidden" name="boxqty" id="boxqty">
+            <input type="hidden" name="scannedKanban" id="scannedKanban">
+            <input type="hidden" name="tracking QR" id="tracking-QR">
+            <input type="hidden" name="Last Process" id="Last Process" value="A">
+            <input type="hidden" name="Remaining_Quantity" id="Remaining_Quantity">
+            <input type="hidden" name="Process_Status" id="Process_Status">
+            <audio id="alert-sound" src="src/alert.mp3" preload="auto"></audio>
+
+            <!-- for hatusmonoStatus -->
+            <input type="hidden" name="CONFIRM SHAPE" id="confirm-shape" value="false">
+            <input type="hidden" name="CONFIRM MATERIAL" id="confirm-material" value="false">
+            <input type="hidden" name="CONFIRM COLOR" id="confirm-color" value="false">
+            <input type="hidden" name="CONFIRM PIN HOLE" id="confirm-pin-hole" value="false">
+            <input type="hidden" name="CONFIRM CUTTING CONDITION" id="confirm-cutting-condition" value="false">
+            <input type="hidden" name="CONFIRM PRODUCT NUMBER" id="confirm-product-number" value="false">
+            <input type="hidden" name="CONFIRM FILE NAME" id="confirm-file-name" value="false">
+            <input type="hidden" name="CONFIRM SEWING LINE" id="confirm-sewing-line" value="false">
+
+            <!-- SRS hatsumono status variables -->
+            <input type="hidden" id="confirm-type" name="CONFIRM TYPE" value="false">
+            <input type="hidden" id="confirm-appearance" name="CONFIRM APPEARANCE" value="false">
+            <input type="hidden" id="confirm-text-misalignment" name="CONFIRM TEXT MISALIGNMENT" value="false">
+            <input type="hidden" id="confirm-position-misalignment" name="CONFIRM POSITION MISALIGNMENT" value="false">
+
+            <!-- helper for initial value of total -->
+            <input type="hidden" id="initialBTotal" value="0">
+            <input type="hidden" id="initialCTotal" value="0">
+            
+           
+
+            <select id="sub-dropdown" name="背番号">  
+            <!-- options will be populated dynamically based on the selected value of #dropdown -->
+            </select>
+
+            <!-- QR code button -->
+            <button id="scan-button" type="button">Scan 背番号</button>
+            <br>
+            <br>
+
+
+    
+
+    <!-- Cutting Section (A) -->
+    <div id="sectionA" class="process-section">
+
+        <label for="process">設備名:</label>
+        <select id="process" name="設備">
+            <!-- setsubi machines should be generated here -->
+        </select>
+        
+        <label for="Machine Operator">作業者:</label>
+            <input list="machine-operator-suggestions" placeholder="Worker's Name" id="Machine Operator" name="Worker_Name" required>
+            <datalist id="machine-operator-suggestions"></datalist>
+            <br><br>
+            <label for="Process Quantity">加工数（良品）+ NG:</label>
+            <input type="text" name="Process Quantity" id="ProcessQuantity" placeholder="Process Quantity" required>
+            
+            <br><br>
+            <label for="Lot No.">加工日:</label>
+            <input type="date" name="Date" id="Lot No." placeholder="Date" onfocus="setDefaultDate(this)" required>
+            <br>
+            <label for="Start Time">加工開始時間:</label>
+            <input type="time" name="Time_start" id="Start Time" placeholder="Time Start" onfocus="setDefaultTime(this)" >
+            <br>
+            <label for="End Time">加工終了時間:</label>
+            <input type="time" name="Time_end" id="End Time" placeholder="Time End" onfocus="setDefaultTime(this)" >
+            <br>
+
+
+            <label for="材料ロット">材料ロット:</label>
+            <button id="scan-lot" type="button">Scan ロット</button>
+            <input type="text" name="材料ロット" id="材料ロット" placeholder="Material Lot" >
+            <br>
+
+        <!-- what modal is this???? -->
+        <div id="myModal" class="modal">
+            <div class="modal-content">
+                <span class="close">&times;</span>
+                <div class="camera">
+                    <video id="video" width="520" height="440" autoplay playsinline></video>
+                    <div id="highlightBox" class="highlight"></div>
+                    <button id="capture" type="button">Capture</button>
+                </div>
+                <canvas id="canvas" style="display:none;"></canvas>
+                <img id="photo" alt="Captured Image" draggable="false">
+            </div>
+        </div>
+
+        <!-- Alert modal instead of window.alert -->
+        <div id="customAlertModal" class="modal" style="display:none;">
+        <div class="modal-content">
+            <span class="close-button" id="closeModalButton">&times;</span>
+            <p id="customAlertText">Wrong Kanban / 看板間違い</p>
+        </div>
+        </div>
+
+
+        <!-- QR Code Scanner Modal -->
+        <div id="qrScannerModal" class="modal">
+            <div class="modal-content">
+                <span class="close" id="closeQRScannerModal">&times;</span>
+                <h3>Scan QR Code</h3>
+                <ul id="qrCodeList"></ul>
+                <div id="qrReader" style="width: 300px; height: 300px;"></div>
+            </div>
+        </div>
+        
+        <!-- The custom alert modal when product mismatch happens -->
+        <div id="scanAlertModal" class="modal" style="display:none;">
+            <div class="modal-content">
+            <span class="close-button" id="closeScanModalButton">&times;</span>
+            <p id="scanAlertText">Different product detected! Please save form before changing. / 異なる製品が検出されました。保存してください！</p>
+            </div>
+        </div>
+
+
+        <div id="boxSelectionModal" class="modal">
+            <div class="modal-content">
+                <span class="close" id="closeBoxSelectionModal">&times;</span>
+                <h2>Select Number of QR Codes</h2>
+                <div class="box-count-controls">
+                    <button id="decreaseBoxCount">-</button>
+                    <span id="boxCountDisplay">1</span>
+                    <button id="increaseBoxCount">+</button>
+                </div>
+                <button id="confirmBoxCount">Confirm</button>
+            </div>
+        </div>
+          
+
+
+            <div id="counter-box-18" class="counter-box">  
+                <label for="counter-18">疵引不良</label>
+                <button class="plus-btn" type="button" onclick="incrementCounter(18)" >+</button>  
+                <input readonly id="counter-18" value="0" type="number" name="疵引不良">  
+                <button class="minus-btn" type="button" onclick="decrementCounter(18)" >-</button>  
+            </div>
+            <div id="counter-box-19" class="counter-box">  
+                <label for="counter-19">加工不良</label>
+                <button class="plus-btn" type="button" onclick="incrementCounter(19)" >+</button>  
+                <input readonly id="counter-19" value="0" type="number" name="加工不良">  
+                <button class="minus-btn" type="button" onclick="decrementCounter(19)" >-</button>  
+            </div>
+            <div id="counter-box-20" class="counter-box">  
+                <label for="counter-20">その他:</label>
+                <button class="plus-btn" type="button" onclick="incrementCounter(20)" >+</button>  
+                <input readonly id="counter-20" value="0" type="number" name="その他">  
+                <button class="minus-btn" type="button" onclick="decrementCounter(20)" >-</button>  
+            </div>
+            <br>
+            <div id="NG-container">
+                <NGlabel for="Total_NG">NG Quantity:</label>
+                <input readonly id="Total_NG" value="0" type="number" name="Total_NG">
+            </div>
+            <br><br>
+            <div id="total-container">
+                <label for="total">良品合計(TOTAL):</label>
+                <input readonly id="total" value="0" type="number" name="Final Quantity">
+            </div>
+                </div>
+                <label for="spare">スペア:</label>
+                <input type="text" name="spare" id="spare" placeholder="Spare" >
+                <br>
+
+            <br>
+
+
+            <textarea name="Comments1" rows="5" placeholder="Enter Comments"></textarea>
+            <br>
+
+            <!-- This code is for the checklist -->
+             <br>
+             <br>
+             <br>
+             <br>
+             <label>初物チェック: </label>
+             <label id="hatsumonoLabel">FALSE</label>
+             <button id="hatsumonoButton" type="button">Check 1st Cycle</button>
+             <br>
+             <br>
+             <label>メーカラベル: </label>
+             <label id="makerLabel">FALSE</label>
+             <button id="makerLabelButton" type="button">写真撮影</button>
+             <br>
+             <br>
+             <input type="submit" value="Submit" id="submit">
+            <br>
+            <br>
+            <br>
+            <br>
+            <br>
+            <br>
+            <button type="button" onclick="resetForm()">Reset</button>
+            
+    </div>
+
+    
+
+    
+
+            
+           
+            
+
+            
+            
+            
+    </div>
+
+    
+
+    
+
+
+    
+    
+
+        
+    
+
+        <!-- this is for the informations -->
+        <div class="container">
+            <div class = "container">
+                <div class="image-container">
+                    <img id="dynamicImage" src="" alt="Image Description">
+                </div>
+                <!-- <label>SRS コード: </label><label name="SRScode" id="SRScode" value=""></label> -->
+                <label name="送りピッチ" id="送りピッチ" value=""></label>
+                <!-- <label>Unique ID:</label> -->
+                <!-- <label>Unique ID:</label> -->
+                <!-- <input readonly id="uniqueID" value="" name="uniqueID">  -->
+                <label>Product Number:</label>
+                <input readonly id="product-number" value="" name="品番"> 
+                <label>Model:</label>
+                <input readonly id="model" value="" >
+                <label>Shape:</label>
+                <input readonly id="shape" value="">
+                <label>R/L:</label>
+                <input readonly id="R-L" value="">
+                <label>Material:</label>
+                <input readonly id="material" value="">
+                <label>Material Code:</label>
+                <input readonly id="material-code" value="">
+                <label>Material Color:</label>
+                <input readonly id="material-color" value="">
+                <label>型番:</label>
+                <input readonly id="kataban" value="">
+                <br>
+                <label>Total Time (in hours):</label>
+                <input readonly id="totalTime" value="0" name="Total Time">
+                <br>
+                <label>Cycle Time:</label>
+                <input readonly id="cycleTime" value="0" name="Cycle Time">
+                <br>
+
+            </div>
+        </div>
+    
+    </form>
+
+
+
+        
+
+
+    </div>
+    
+    <script src="Press Cutting.js"></script>
+    <script src="html5-qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr/dist/jsQR.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
+</body>
+</html>
