@@ -32,6 +32,19 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 
+function getQueryParam(param) {
+  const urlParams = new URLSearchParams(window.location.search);
+  return urlParams.get(param);
+}
+const selectedFactory = getQueryParam('filter');
+if (selectedFactory){
+  document.getElementById('selected工場').value = selectedFactory;
+  console.log("kojo changed to: " + selectedFactory);
+}
+
+
+
+
 
 //blanks the info page
 function blankInfo() {

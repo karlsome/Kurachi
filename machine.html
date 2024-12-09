@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!-- <!DOCTYPE html>
 <html lang="en">
 <head>
     <link rel="stylesheet" href="floating card.css">
@@ -29,41 +29,136 @@
         
         const label1 = document.getElementById('label1');
         label1.textContent = filterValue + "の設備選んでください:"; // Set the text content of the h1 element
+
+        if (filterValue === '天徳') {
+                const containers = document.getElementById('containers');
+
+                // Create card for スリット
+                const slitCard = document.createElement('div');
+                slitCard.classList.add('card');
+                slitCard.addEventListener('click', () => {
+                    console.log("スリット clicked, no action taken.");
+                });
+
+                const slitImg = document.createElement('img');
+                slitImg.src = 'src/machines/slit.jpg'; // Adjust the path to your image
+                slitImg.alt = 'スリット';
+
+                const slitLabel = document.createElement('div');
+                slitLabel.classList.add('label');
+                slitLabel.textContent = 'スリット';
+
+                slitCard.appendChild(slitImg);
+                slitCard.appendChild(slitLabel);
+                containers.appendChild(slitCard);
+
+                // Create card for SRS
+                const srsCard = document.createElement('div');
+                srsCard.classList.add('card');
+                srsCard.addEventListener('click', () => {
+                    console.log("SRS clicked, no action taken.");
+                });
+
+                const srsImg = document.createElement('img');
+                srsImg.src = 'src/machines/srs.jpg'; // Adjust the path to your image
+                srsImg.alt = 'SRS';
+
+                const srsLabel = document.createElement('div');
+                srsLabel.classList.add('label');
+                srsLabel.textContent = 'SRS';
+
+                srsCard.appendChild(srsImg);
+                srsCard.appendChild(srsLabel);
+                containers.appendChild(srsCard);
+
+                // Create card for 検査
+                const kensaCard = document.createElement('div');
+                kensaCard.classList.add('card');
+                kensaCard.addEventListener('click', () => {
+                    window.location.href = `newKensa iReporter.html?filter=${filterValue}`;
+                });
+
+                const kensaImg = document.createElement('img');
+                kensaImg.src = 'src/machines/kensa.jpg'; // Adjust the path to your image
+                kensaImg.alt = '検査';
+
+                const kensaLabel = document.createElement('div');
+                kensaLabel.classList.add('label');
+                kensaLabel.textContent = '検査';
+
+                kensaCard.appendChild(kensaImg);
+                kensaCard.appendChild(kensaLabel);
+                containers.appendChild(kensaCard);
+            }
         
         fetch(`${dbURL}?filter=${filterValue}`)
             .then(response => response.json())
             .then(data => {
                 const containers = document.getElementById('containers');
                 
-                // If filterValue is '天徳', display S1 to S6 options
-                if (filterValue === '天徳') {
-                    const sNames = ['S1', 'S2', 'S4', 'S5', 'S6', '検査テーブル'];
-                    sNames.forEach((sName) => {
-                        const card = document.createElement('div');
-                        card.classList.add('card');
-                        card.addEventListener('click', () => {
-                            window.location.href = `tentoku.html?selected=${sName}&filter=第二工場&kojo=${filterValue}`;
-                        });
+                // If filterValue is '天徳', 
+            //     if (filterValue === '天徳') {
+            //     const containers = document.getElementById('containers');
 
-                        const img = document.createElement('img');
-                        img.src = `src/machines/${sName}.jpg`; // Adjust your image paths if needed
-                        img.alt = sName;
+            //     // Create card for スリット
+            //     const slitCard = document.createElement('div');
+            //     slitCard.classList.add('card');
+            //     slitCard.addEventListener('click', () => {
+            //         console.log("スリット clicked, no action taken.");
+            //     });
 
-                        const label = document.createElement('div');
-                        label.classList.add('label');
-                        label.textContent = sName;
-                        label.addEventListener('click', (event) => {
-                            event.stopPropagation();
-                            window.location.href = `tentoku.html?selected=${sName}&filter=第二工場&kojo=${filterValue}`;
-                        });
+            //     const slitImg = document.createElement('img');
+            //     slitImg.src = 'src/machines/slit.jpg'; // Adjust the path to your image
+            //     slitImg.alt = 'スリット';
 
-                        card.appendChild(img);
-                        card.appendChild(label);
-                        containers.appendChild(card);
-                    });
-                } 
+            //     const slitLabel = document.createElement('div');
+            //     slitLabel.classList.add('label');
+            //     slitLabel.textContent = 'スリット';
+
+            //     slitCard.appendChild(slitImg);
+            //     slitCard.appendChild(slitLabel);
+            //     containers.appendChild(slitCard);
+
+            //     // Create card for SRS
+            //     const srsCard = document.createElement('div');
+            //     srsCard.classList.add('card');
+            //     srsCard.addEventListener('click', () => {
+            //         console.log("SRS clicked, no action taken.");
+            //     });
+
+            //     const srsImg = document.createElement('img');
+            //     srsImg.src = 'src/machines/srs.jpg'; // Adjust the path to your image
+            //     srsImg.alt = 'SRS';
+
+            //     const srsLabel = document.createElement('div');
+            //     srsLabel.classList.add('label');
+            //     srsLabel.textContent = 'SRS';
+
+            //     srsCard.appendChild(srsImg);
+            //     srsCard.appendChild(srsLabel);
+            //     containers.appendChild(srsCard);
+
+            //     // Create card for 検査
+            //     const kensaCard = document.createElement('div');
+            //     kensaCard.classList.add('card');
+            //     kensaCard.addEventListener('click', () => {
+            //         window.location.href = `newKensa iReporter.html?filter=${filterValue}`;
+            //     });
+
+            //     const kensaImg = document.createElement('img');
+            //     kensaImg.src = 'src/machines/kensa.jpg'; // Adjust the path to your image
+            //     kensaImg.alt = '検査';
+
+            //     const kensaLabel = document.createElement('div');
+            //     kensaLabel.classList.add('label');
+            //     kensaLabel.textContent = '検査';
+
+            //     kensaCard.appendChild(kensaImg);
+            //     kensaCard.appendChild(kensaLabel);
+            //     containers.appendChild(kensaCard);
+            // }
                 // If filterValue is '第二工場', display SRS1 to SRS5 options
-                else if (filterValue === '第二工場') {
+                if (filterValue === '第二工場') {
                     const srsNames = ['SRS1', 'SRS2', 'SRS3', 'SRS4', 'SRS5'];
                     srsNames.forEach((srsName) => {
                         const card = document.createElement('div');
@@ -175,6 +270,190 @@
                 containers.appendChild(kensaCard);
             })
             .catch(error => console.error('Error fetching data:', error));
+    </script>
+</body>
+</html> -->
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <link rel="stylesheet" href="floating card.css">
+    <link rel="icon" type="image/png" href="src/favicon2.png">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>設備</title>
+</head>
+<body>
+    <h1 class="centered">FREYA SYSTEM v3.9</h1>
+    <nav>
+        <a href="index.html">
+            <img src="src/logo.png" alt="Logo">
+        </a>
+        <a href="index.html">工場</a>
+        <a href="machine.html">設備</a>
+    </nav>
+    <div class="main-content">
+        <h1 id="label1"></h1>
+        <div id="containers" class="container"></div>
+    </div>
+
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const filterValue = urlParams.get('selected') || 'none';  // Default to 'none' if no parameter is found
+        const dbURL = 'https://script.google.com/macros/s/AKfycbwBzPZgoNiUK_ez3AzK5FXFr8_AsmdBjCWGzulG3eh0cryirgVxtMzIF4ehh98QYdkpUg/exec';  // Replace with your actual database URL
+        const label1 = document.getElementById('label1');
+        label1.textContent = filterValue + "の設備選んでください:"; // Set the text content of the h1 element
+
+        if (filterValue === '天徳') {
+            const containers = document.getElementById('containers');
+
+            // Create card for スリット
+            const slitCard = document.createElement('div');
+            slitCard.classList.add('card');
+            slitCard.addEventListener('click', () => {
+                console.log("スリット clicked, no action taken.");
+            });
+
+            const slitImg = document.createElement('img');
+            slitImg.src = 'src/machines/slit.jpg'; // Adjust the path to your image
+            slitImg.alt = 'スリット';
+
+            const slitLabel = document.createElement('div');
+            slitLabel.classList.add('label');
+            slitLabel.textContent = 'スリット';
+
+            slitCard.appendChild(slitImg);
+            slitCard.appendChild(slitLabel);
+            containers.appendChild(slitCard);
+
+            // Create card for SRS
+            const srsCard = document.createElement('div');
+            srsCard.classList.add('card');
+            srsCard.addEventListener('click', () => {
+                console.log("SRS clicked, no action taken.");
+            });
+
+            const srsImg = document.createElement('img');
+            srsImg.src = 'src/machines/srs.jpg'; // Adjust the path to your image
+            srsImg.alt = 'SRS';
+
+            const srsLabel = document.createElement('div');
+            srsLabel.classList.add('label');
+            srsLabel.textContent = 'SRS';
+
+            srsCard.appendChild(srsImg);
+            srsCard.appendChild(srsLabel);
+            containers.appendChild(srsCard);
+
+            // Create card for 検査
+            const kensaCard = document.createElement('div');
+            kensaCard.classList.add('card');
+            kensaCard.addEventListener('click', () => {
+                window.location.href = `newKensa iReporter.html?filter=${filterValue}`;
+            });
+
+            const kensaImg = document.createElement('img');
+            kensaImg.src = 'src/machines/kensa.jpg'; // Adjust the path to your image
+            kensaImg.alt = '検査';
+
+            const kensaLabel = document.createElement('div');
+            kensaLabel.classList.add('label');
+            kensaLabel.textContent = '検査';
+
+            kensaCard.appendChild(kensaImg);
+            kensaCard.appendChild(kensaLabel);
+            containers.appendChild(kensaCard);
+        } else {
+            fetch(`${dbURL}?filter=${filterValue}`)
+                .then(response => response.json())
+                .then(data => {
+                    const containers = document.getElementById('containers');
+                    
+                    // Normal case, display cards based on fetched data
+                    data.forEach((list) => {
+                        const card = document.createElement('div');
+                        card.classList.add('card');
+                        card.addEventListener('click', () => {
+                            window.location.href = `nippo.html?selected=${list}&filter=${filterValue}`;
+                        });
+
+                        const img = document.createElement('img');
+                        if (list === "自動プレス機") {
+                            img.src = `src/machines/jido.jpg`;
+                        } else {
+                            img.src = `src/machines/${list}.jpg`;
+                        }
+                        img.alt = list;
+
+                        const label = document.createElement('div');
+                        label.classList.add('label');
+                        label.textContent = list;
+                        label.addEventListener('click', (event) => {
+                            event.stopPropagation();
+                            window.location.href = `nippo.html?selected=${list}&filter=${filterValue}`;
+                        });
+
+                        card.appendChild(img);
+                        card.appendChild(label);
+                        containers.appendChild(card);
+                    });
+
+                    // Add the additional card for QR code scanning
+                    const qrCard = document.createElement('div');
+                    qrCard.classList.add('card');
+                    qrCard.addEventListener('click', () => {
+                        const popup = window.open('popup.html', 'QR Scanner', 'width=400,height=300');
+
+                        window.addEventListener('message', function(event) {
+                            if (event.origin === window.location.origin) {
+                                const BarcodeValue = event.data;
+                                console.log(`QR Code detected: ${BarcodeValue}`);
+
+                                // Check if the scanned value is in the list
+                                if (data.includes(BarcodeValue)) {
+                                    // Redirect to nippo.html with the QR code value as filter
+                                    window.location.href = `nippo.html?selected=${BarcodeValue}&filter=${filterValue}`;
+                                } else {
+                                    alert('Invalid QR Code');
+                                }
+                            }
+                        });
+                    });
+
+                    const qrImg = document.createElement('img');
+                    qrImg.src = 'src/qr-code.png';  // Path to your QR code image
+                    qrImg.alt = 'QR Code Scanner';
+
+                    const qrLabel = document.createElement('div');
+                    qrLabel.classList.add('label');
+                    qrLabel.textContent = 'Scan Machine!';
+
+                    qrCard.appendChild(qrImg);
+                    qrCard.appendChild(qrLabel);
+                    containers.appendChild(qrCard);
+
+                    // Add the additional card for Kensa Only
+                    const kensaOnlyCard = document.createElement('div');
+                    kensaOnlyCard.classList.add('card');
+                    kensaOnlyCard.addEventListener('click', () => {
+                        window.location.href = `choose.html?selected=${filterValue}`;
+                    });
+
+                    const kensaImg = document.createElement('img');
+                    kensaImg.src = 'src/machines/kensa.jpg';  // Path to your Kensa image
+                    kensaImg.alt = '検査のみ';
+
+                    const kensaLabel = document.createElement('div');
+                    kensaLabel.classList.add('label');
+                    kensaLabel.textContent = '検査のみ';
+
+                    kensaOnlyCard.appendChild(kensaImg);
+                    kensaOnlyCard.appendChild(kensaLabel);
+                    containers.appendChild(kensaOnlyCard);
+                })
+                .catch(error => console.error('Error fetching data:', error));
+        }
     </script>
 </body>
 </html>
