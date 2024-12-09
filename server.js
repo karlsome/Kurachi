@@ -164,7 +164,10 @@ app.post('/submitToKensaDBiReporter', async (req, res) => {
       'Cycle_Time',
     ];
 
-    const missingFields = requiredFields.filter((field) => !formData[field]);
+    const missingFields = requiredFields.filter(
+      (field) => formData[field] === undefined || formData[field] === null
+    );
+    
     if (missingFields.length > 0) {
       return res.status(400).json({
         error: `Missing required fields: ${missingFields.join(', ')}`,
