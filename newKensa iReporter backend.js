@@ -230,6 +230,17 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
   event.preventDefault(); // Prevent default form submission behavior
   updateCycleTime();
 
+  const alertSound = document.getElementById('alert-sound');
+  const scanAlertModal = document.getElementById('scanAlertModal');
+  const scanAlertText = document.getElementById('scanAlertText');
+
+  // Preload the alert sound without playing it
+  if (alertSound) {
+    alertSound.muted = true; // Mute initially to preload
+    alertSound.loop = false; // Disable looping
+    alertSound.load(); // Preload the audio file
+  }
+
   try {
     // Get form data
     const 品番 = document.getElementById('product-number').value;
@@ -244,6 +255,35 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
     const 設備 = document.getElementById('process').value;
     const Cycle_Time = parseFloat(document.getElementById('cycleTime').value) || 0;
 
+    // Check if 背番号 is selected
+    if (!背番号) {
+      // Show alert modal
+      scanAlertText.innerText = '背番号が必要です。 / Sebanggo is required.';
+      scanAlertModal.style.display = 'block';
+
+      // Play alert sound
+      if (alertSound) {
+        alertSound.muted = false; // Unmute to alert user
+        alertSound.volume = 1; // Set full volume
+        alertSound.play().catch(error => console.error('Failed to play alert sound:', error));
+      }
+
+      // Add blinking red background
+      document.body.classList.add('flash-red');
+
+      // Close modal on button click
+      const closeScanModalButton = document.getElementById('closeScanModalButton');
+      closeScanModalButton.onclick = function () {
+        scanAlertModal.style.display = 'none';
+        alertSound.pause();
+        alertSound.currentTime = 0; // Reset sound to the beginning
+        alertSound.muted = true; // Mute again for next time
+        document.body.classList.remove('flash-red');
+      };
+
+      return; // Stop the submission process
+    }
+
     // Get the values of the counters
     const counters = Array.from({ length: 12 }, (_, i) => {
       const counter = document.getElementById(`counter-${i + 1}`);
@@ -252,10 +292,6 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
 
     // Calculate Total_NG
     const Total_NG = counters.reduce((sum, count) => sum + count, 0);
-
-    
-
-
 
     // Prepare data for saving to kensaDB
     const formData = {
@@ -292,13 +328,47 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
     }
 
     console.log('Form data saved to kensaDB successfully.');
-    alert('Form submitted and current count updated successfully.');
+
+    // Show success modal with blinking green background
+    scanAlertText.innerText = 'Form submitted successfully / 保存しました';
+    scanAlertModal.style.display = 'block';
+    document.body.classList.add('flash-green');
+
+    // Reload the page after closing the modal
+    const closeScanModalButton = document.getElementById('closeScanModalButton');
+    closeScanModalButton.onclick = function () {
+      scanAlertModal.style.display = 'none';
+      document.body.classList.remove('flash-green');
+      window.location.reload();
+    };
   } catch (error) {
     console.error('Error during submission:', error);
-    alert('An error occurred. Please try again.');
+
+    // Show error modal with blinking red background
+    scanAlertText.innerText = 'An error occurred. Please try again.';
+    scanAlertModal.style.display = 'block';
+
+    // Play alert sound
+    if (alertSound) {
+      alertSound.muted = false;
+      alertSound.volume = 1;
+      alertSound.play().catch(error => console.error('Failed to play alert sound:', error));
+    }
+
+    // Add blinking red background
+    document.body.classList.add('flash-red');
+
+    // Close modal on button click
+    const closeScanModalButton = document.getElementById('closeScanModalButton');
+    closeScanModalButton.onclick = function () {
+      scanAlertModal.style.display = 'none';
+      alertSound.pause();
+      alertSound.currentTime = 0;
+      alertSound.muted = true;
+      document.body.classList.remove('flash-red');
+    };
   }
 });
-
 
 
 

@@ -161,6 +161,7 @@ app.post('/submitToKensaDBiReporter', async (req, res) => {
       '設備',
       'Counters',
       'Total_NG',
+      '製造ロット',
       'Cycle_Time',
     ];
 
