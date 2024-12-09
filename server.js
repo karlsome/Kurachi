@@ -152,6 +152,7 @@ app.post('/submitToKensaDBiReporter', async (req, res) => {
       '品番',
       '背番号',
       'Total',
+      '工場',
       'Worker_Name',
       'Process_Quantity',
       'Remaining_Quantity',

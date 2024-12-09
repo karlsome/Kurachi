@@ -244,6 +244,7 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
   try {
     // Get form data
     const 品番 = document.getElementById('product-number').value;
+    const 工場 = document.getElementById('selected工場').value;
     const 背番号 = document.getElementById('sub-dropdown').value;
     const Total = parseInt(document.getElementById('total').value, 10) || 0;
     const Worker_Name = document.getElementById('Machine Operator').value;
@@ -298,6 +299,7 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
     const formData = {
       品番,
       背番号,
+      工場,
       Total,
       Worker_Name,
       Process_Quantity,
