@@ -1,4 +1,4 @@
-
+const serverURL = "https://kurachi.onrender.com";
 
 
 
@@ -6,7 +6,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const subDropdown = document.getElementById('sub-dropdown');
 
   // Fetch 背番号 list from the server
-  fetch('http://localhost:3000/getSeBanggoList')
+  fetch(`${serverURL}/getSeBanggoList`)
       .then(response => response.json())
       .then(data => {
           // Clear existing options
@@ -65,7 +65,7 @@ async function fetchProductDetails() {
   }
 
   try {
-    const response = await fetch(`http://localhost:3000/getProductDetails?serialNumber=${encodeURIComponent(serialNumber)}&factory=${encodeURIComponent(factory)}`);
+    const response = await fetch(`${serverURL}/getProductDetails?serialNumber=${encodeURIComponent(serialNumber)}&factory=${encodeURIComponent(factory)}`);
     if (response.ok) {
       const data = await response.json();
 
@@ -142,7 +142,7 @@ document.addEventListener("DOMContentLoaded", async function() {
 
   if (selectedFactory) {
     try {
-      const response = await fetch(`http://localhost:3000/getWorkerNames?selectedFactory=${encodeURIComponent(selectedFactory)}`);
+      const response = await fetch(`${serverURL}/getWorkerNames?selectedFactory=${encodeURIComponent(selectedFactory)}`);
       if (!response.ok) throw new Error("Failed to fetch worker names");
 
       const workerNames = await response.json();
@@ -280,7 +280,7 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
     console.log('Data to save to kensaDB:', formData);
 
     // Save to kensaDB
-    const saveResponse = await fetch('http://localhost:3000/submitToKensaDBiReporter', {
+    const saveResponse = await fetch('${serverURL}/submitToKensaDBiReporter', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(formData),
