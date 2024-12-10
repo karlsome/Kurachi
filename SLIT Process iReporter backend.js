@@ -1,4 +1,5 @@
 const serverURL = "https://kurachi.onrender.com";
+//const serverURL = "http://localhost:3000";
 
 
 // this code will ping the Render website for inactivity
@@ -247,9 +248,22 @@ document.getElementById('ProcessQuantity').addEventListener('input', updateTotal
 
 
 
-// Submit Button Logic
+// Submit Button for new slit Process
 document.querySelector('form[name="contact-form"]').addEventListener('submit', async (event) => {
   event.preventDefault(); // Prevent default form submission behavior
+  updateCycleTime();
+
+  const alertSound = document.getElementById('alert-sound');
+  const scanAlertModal = document.getElementById('scanAlertModal');
+  const scanAlertText = document.getElementById('scanAlertText');
+
+  // Preload the alert sound without playing it
+  if (alertSound) {
+    alertSound.muted = true; // Mute initially to preload
+    alertSound.loop = false; // Disable looping
+    alertSound.load(); // Preload the audio file
+  }
+
 
   try {
     // Get form data
@@ -269,6 +283,45 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
     const Comment = document.querySelector('textarea[name="Comments1"]').value;
     const 工場 = document.getElementById('selected工場').value;
     const Process_Quantity = parseInt(document.getElementById('ProcessQuantity').value, 10) || 0;
+    const Cycle_Time = parseFloat(document.getElementById('cycleTime').value) || 0;
+    const 製造ロット = document.getElementById('製造ロット').value;
+
+    // Check if 背番号 is selected
+    if (!背番号) {
+      // Show alert modal
+      scanAlertText.innerText = '背番号が必要です。 / Sebanggo is required.';
+      scanAlertModal.style.display = 'block';
+
+      // Play alert sound
+      if (alertSound) {
+        alertSound.muted = false; // Unmute to alert user
+        alertSound.volume = 1; // Set full volume
+        alertSound.play().catch(error => console.error('Failed to play alert sound:', error));
+      }
+
+      // Add blinking red background
+      document.body.classList.add('flash-red');
+
+      // Close modal on button click
+      const closeScanModalButton = document.getElementById('closeScanModalButton');
+      closeScanModalButton.onclick = function () {
+        scanAlertModal.style.display = 'none';
+        alertSound.pause();
+        alertSound.currentTime = 0; // Reset sound to the beginning
+        alertSound.muted = true; // Mute again for next time
+        document.body.classList.remove('flash-red');
+      };
+
+      return; // Stop the submission process
+    }
+
+    // Get the values of the counters
+    const counters = Array.from({ length: 12 }, (_, i) => {
+      const counter = document.getElementById(`counter-${i + 1}`);
+      return parseInt(counter?.value || 0, 10);
+    });
+
+    
 
     // Prepare data for saving to slitDB
     const formData = {
@@ -284,15 +337,17 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
       加工不良,
       その他,
       Total_NG,
+      Cycle_Time,
+      製造ロット,
       Spare,
       Comment,
       工場,
       Process_Quantity,
     };
 
-    console.log('Data to save to slitDB:', formData);
+    console.log('Data to save to kensaDB:', formData);
 
-    // Save to slitDB
+    // Save to kensaDB
     const saveResponse = await fetch(`${serverURL}/submitToSlitDBiReporter`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -300,17 +355,53 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
     });
 
     if (!saveResponse.ok) {
-      throw new Error('Failed to save data to slitDB');
+      const errorData = await saveResponse.json();
+      throw new Error(errorData.error || 'Failed to save data to kensaDB');
     }
 
-    console.log('Form data saved to slitDB successfully.');
-    alert("Saved Successfully / 保存しました");
+    console.log('Form data saved to kensaDB successfully.');
 
+    // Show success modal with blinking green background
+    scanAlertText.innerText = 'Form submitted successfully / 保存しました';
+    scanAlertModal.style.display = 'block';
+    document.body.classList.add('flash-green');
+
+    // Reload the page after closing the modal
+    const closeScanModalButton = document.getElementById('closeScanModalButton');
+    closeScanModalButton.onclick = function () {
+      scanAlertModal.style.display = 'none';
+      document.body.classList.remove('flash-green');
+      window.location.reload();
+    };
   } catch (error) {
     console.error('Error during submission:', error);
-    alert('An error occurred. Please try again.');
+
+    // Show error modal with blinking red background
+    scanAlertText.innerText = 'An error occurred. Please try again.';
+    scanAlertModal.style.display = 'block';
+
+    // Play alert sound
+    if (alertSound) {
+      alertSound.muted = false;
+      alertSound.volume = 1;
+      alertSound.play().catch(error => console.error('Failed to play alert sound:', error));
+    }
+
+    // Add blinking red background
+    document.body.classList.add('flash-red');
+
+    // Close modal on button click
+    const closeScanModalButton = document.getElementById('closeScanModalButton');
+    closeScanModalButton.onclick = function () {
+      scanAlertModal.style.display = 'none';
+      alertSound.pause();
+      alertSound.currentTime = 0;
+      alertSound.muted = true;
+      document.body.classList.remove('flash-red');
+    };
   }
 });
+
 
 
 

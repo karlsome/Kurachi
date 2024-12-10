@@ -199,7 +199,7 @@ app.post('/submitToSlitDBiReporter', async (req, res) => {
     await client.connect();
 
     const database = client.db('submittedDB');
-    const kensaDB = database.collection('slitDB');
+    const slitDB = database.collection('slitDB');
     const formData = req.body;
 
     // Validate required fields
@@ -234,19 +234,19 @@ app.post('/submitToSlitDBiReporter', async (req, res) => {
       });
     }
 
-    // Insert form data into kensaDB
-    const result = await kensaDB.insertOne(formData);
+    // Insert form data into slitDB
+    const result = await slitDB.insertOne(formData);
     if (!result.insertedId) {
-      throw new Error('Failed to save data to kensaDB');
+      throw new Error('Failed to save data to slitDB');
     }
 
     res.status(201).json({
-      message: 'Data successfully saved to kensaDB',
+      message: 'Data successfully saved to slitDB',
       insertedId: result.insertedId,
     });
   } catch (error) {
-    console.error('Error saving data to kensaDB:', error);
-    res.status(500).json({ error: 'Error saving data to kensaDB' });
+    console.error('Error saving data to slitDB:', error);
+    res.status(500).json({ error: 'Error saving data to slitDB' });
   }
 });
 
