@@ -17,6 +17,17 @@ function pingServer() {
 }
 setInterval(pingServer, interval);
 
+//this code listens to incoming parameters passed
+function getQueryParam(param) {
+  const urlParams = new URLSearchParams(window.location.search);
+  return urlParams.get(param);
+}
+const selectedFactory = getQueryParam('filter');
+if (selectedFactory){
+  document.getElementById('selected工場').value = selectedFactory;
+  console.log("kojo changed to: " + selectedFactory);
+}
+
 
 
 
@@ -49,23 +60,6 @@ document.addEventListener('DOMContentLoaded', () => {
       })
       .catch(error => console.error('Error fetching 背番号 list:', error));
 });
-
-
-
-//this code listens to incoming parameters passed
-function getQueryParam(param) {
-  const urlParams = new URLSearchParams(window.location.search);
-  return urlParams.get(param);
-}
-const selectedFactory = getQueryParam('filter');
-if (selectedFactory){
-  document.getElementById('selected工場').value = selectedFactory;
-  console.log("kojo changed to: " + selectedFactory);
-}
-
-
-
-
 
 //blanks the info page
 function blankInfo() {
@@ -227,21 +221,13 @@ function updateTotal() {
   const processQuantity = parseInt(document.getElementById('ProcessQuantity').value, 10) || 0;
 
   // Get the values of the counters
-  const counter1 = parseInt(document.getElementById('counter-1').value, 10) || 0;
-  const counter2 = parseInt(document.getElementById('counter-2').value, 10) || 0;
-  const counter3 = parseInt(document.getElementById('counter-3').value, 10) || 0;
-  const counter4 = parseInt(document.getElementById('counter-4').value, 10) || 0;
-  const counter5 = parseInt(document.getElementById('counter-5').value, 10) || 0;
-  const counter6 = parseInt(document.getElementById('counter-6').value, 10) || 0;
-  const counter7 = parseInt(document.getElementById('counter-7').value, 10) || 0;
-  const counter8 = parseInt(document.getElementById('counter-8').value, 10) || 0;
-  const counter9 = parseInt(document.getElementById('counter-9').value, 10) || 0;
-  const counter10 = parseInt(document.getElementById('counter-10').value, 10) || 0;
-  const counter11 = parseInt(document.getElementById('counter-11').value, 10) || 0;
-  const counter12 = parseInt(document.getElementById('counter-12').value, 10) || 0;
+  const counter18 = parseInt(document.getElementById('counter-18').value, 10) || 0;
+  const counter19 = parseInt(document.getElementById('counter-19').value, 10) || 0;
+  const counter20 = parseInt(document.getElementById('counter-20').value, 10) || 0;
+  
 
   // Calculate Total_NG
-  const totalNG = counter1+counter2+counter3+counter4+counter5+counter6+counter7+counter8+counter9+counter10+counter11+counter12;
+  const totalNG = counter18 + counter19 + counter20;
 
   // Update the Total_NG field
   document.getElementById('Total_NG').value = totalNG;
@@ -259,159 +245,74 @@ document.getElementById('ProcessQuantity').addEventListener('input', updateTotal
 
 
 
-// Submit Button for new Kensa Process
+
+
+// Submit Button Logic
 document.querySelector('form[name="contact-form"]').addEventListener('submit', async (event) => {
   event.preventDefault(); // Prevent default form submission behavior
-  updateCycleTime();
-
-  const alertSound = document.getElementById('alert-sound');
-  const scanAlertModal = document.getElementById('scanAlertModal');
-  const scanAlertText = document.getElementById('scanAlertText');
-
-  // Preload the alert sound without playing it
-  if (alertSound) {
-    alertSound.muted = true; // Mute initially to preload
-    alertSound.loop = false; // Disable looping
-    alertSound.load(); // Preload the audio file
-  }
 
   try {
     // Get form data
     const 品番 = document.getElementById('product-number').value;
-    const 工場 = document.getElementById('selected工場').value;
     const 背番号 = document.getElementById('sub-dropdown').value;
     const Total = parseInt(document.getElementById('total').value, 10) || 0;
     const Worker_Name = document.getElementById('Machine Operator').value;
-    const Process_Quantity = parseInt(document.getElementById('ProcessQuantity').value, 10) || 0;
-    const Remaining_Quantity = Total;
     const Date = document.getElementById('Lot No.').value;
     const Time_start = document.getElementById('Start Time').value;
     const Time_end = document.getElementById('End Time').value;
     const 設備 = document.getElementById('process').value;
-    const Cycle_Time = parseFloat(document.getElementById('cycleTime').value) || 0;
-    const 製造ロット = document.getElementById('製造ロット').value;
-    const Comment = document.querySelector('textarea[name="Comments1"]').value;
+    const 疵引不良 = parseInt(document.getElementById('counter-18').value, 10) || 0;
+    const 加工不良 = parseInt(document.getElementById('counter-19').value, 10) || 0;
+    const その他 = parseInt(document.getElementById('counter-20').value, 10) || 0;
+    const Total_NG = parseInt(document.getElementById('Total_NG').value, 10) || 0;
     const Spare = parseInt(document.getElementById('spare').value, 10) || 0;
+    const Comment = document.querySelector('textarea[name="Comments1"]').value;
+    const 工場 = document.getElementById('selected工場').value;
+    const Process_Quantity = parseInt(document.getElementById('ProcessQuantity').value, 10) || 0;
 
-
-    // Check if 背番号 is selected
-    if (!背番号) {
-      // Show alert modal
-      scanAlertText.innerText = '背番号が必要です。 / Sebanggo is required.';
-      scanAlertModal.style.display = 'block';
-
-      // Play alert sound
-      if (alertSound) {
-        alertSound.muted = false; // Unmute to alert user
-        alertSound.volume = 1; // Set full volume
-        alertSound.play().catch(error => console.error('Failed to play alert sound:', error));
-      }
-
-      // Add blinking red background
-      document.body.classList.add('flash-red');
-
-      // Close modal on button click
-      const closeScanModalButton = document.getElementById('closeScanModalButton');
-      closeScanModalButton.onclick = function () {
-        scanAlertModal.style.display = 'none';
-        alertSound.pause();
-        alertSound.currentTime = 0; // Reset sound to the beginning
-        alertSound.muted = true; // Mute again for next time
-        document.body.classList.remove('flash-red');
-      };
-
-      return; // Stop the submission process
-    }
-
-    // Get the values of the counters
-    const counters = Array.from({ length: 12 }, (_, i) => {
-      const counter = document.getElementById(`counter-${i + 1}`);
-      return parseInt(counter?.value || 0, 10);
-    });
-
-    // Calculate Total_NG
-    const Total_NG = counters.reduce((sum, count) => sum + count, 0);
-
-    // Prepare data for saving to kensaDB
+    // Prepare data for saving to slitDB
     const formData = {
       品番,
       背番号,
-      工場,
       Total,
       Worker_Name,
-      Process_Quantity,
-      Remaining_Quantity,
       Date,
       Time_start,
       Time_end,
       設備,
-      Counters: counters.reduce((acc, val, idx) => {
-        acc[`counter-${idx + 1}`] = val; // Dynamically add counters
-        return acc;
-      }, {}),
+      疵引不良,
+      加工不良,
+      その他,
       Total_NG,
-      Cycle_Time,
-      製造ロット,
-      Comment,
       Spare,
+      Comment,
+      工場,
+      Process_Quantity,
     };
 
-    console.log('Data to save to kensaDB:', formData);
+    console.log('Data to save to slitDB:', formData);
 
-    // Save to kensaDB
-    const saveResponse = await fetch(`${serverURL}/submitToKensaDBiReporter`, {
+    // Save to slitDB
+    const saveResponse = await fetch(`${serverURL}/submitToSlitDBiReporter`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(formData),
     });
 
     if (!saveResponse.ok) {
-      const errorData = await saveResponse.json();
-      throw new Error(errorData.error || 'Failed to save data to kensaDB');
+      throw new Error('Failed to save data to slitDB');
     }
 
-    console.log('Form data saved to kensaDB successfully.');
+    console.log('Form data saved to slitDB successfully.');
+    alert("Saved Successfully / 保存しました");
 
-    // Show success modal with blinking green background
-    scanAlertText.innerText = 'Form submitted successfully / 保存しました';
-    scanAlertModal.style.display = 'block';
-    document.body.classList.add('flash-green');
-
-    // Reload the page after closing the modal
-    const closeScanModalButton = document.getElementById('closeScanModalButton');
-    closeScanModalButton.onclick = function () {
-      scanAlertModal.style.display = 'none';
-      document.body.classList.remove('flash-green');
-      window.location.reload();
-    };
   } catch (error) {
     console.error('Error during submission:', error);
-
-    // Show error modal with blinking red background
-    scanAlertText.innerText = 'An error occurred. Please try again.';
-    scanAlertModal.style.display = 'block';
-
-    // Play alert sound
-    if (alertSound) {
-      alertSound.muted = false;
-      alertSound.volume = 1;
-      alertSound.play().catch(error => console.error('Failed to play alert sound:', error));
-    }
-
-    // Add blinking red background
-    document.body.classList.add('flash-red');
-
-    // Close modal on button click
-    const closeScanModalButton = document.getElementById('closeScanModalButton');
-    closeScanModalButton.onclick = function () {
-      scanAlertModal.style.display = 'none';
-      alertSound.pause();
-      alertSound.currentTime = 0;
-      alertSound.muted = true;
-      document.body.classList.remove('flash-red');
-    };
+    alert('An error occurred. Please try again.');
   }
 });
+
+
 
 
 
@@ -437,8 +338,6 @@ function updateCycleTime() {
     document.getElementById("cycleTime").value = cycleTime.toFixed(2);
   }
 }
-
-
 
 
 //scan BUtton javascript
@@ -552,6 +451,8 @@ style.innerHTML = `
 }
 `;
 document.head.appendChild(style);
+
+
 
 
 // function to reset everything then reloads the page

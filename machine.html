@@ -312,7 +312,7 @@
             const slitCard = document.createElement('div');
             slitCard.classList.add('card');
             slitCard.addEventListener('click', () => {
-                console.log("スリット clicked, no action taken.");
+                window.location.href = `SLIT Process iReporter.html?filter=${filterValue}`;
             });
 
             const slitImg = document.createElement('img');

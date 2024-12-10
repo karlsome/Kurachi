@@ -193,6 +193,64 @@ app.post('/submitToKensaDBiReporter', async (req, res) => {
 });
 
 
+// New route to submit data to slitDB
+app.post('/submitToSlitDBiReporter', async (req, res) => {
+  try {
+    await client.connect();
+
+    const database = client.db('submittedDB');
+    const kensaDB = database.collection('slitDB');
+    const formData = req.body;
+
+    // Validate required fields
+    const requiredFields = [
+      '品番',
+      '背番号',
+      'Total',
+      '工場',
+      'Worker_Name',
+      'Process_Quantity',
+      'Date',
+      'Time_start',
+      'Time_end',
+      '設備',
+      '疵引不良',
+      '加工不良',
+      'その他',
+      'Total_NG',
+      'Spare',
+      'Comment',
+      '製造ロット',
+      'Cycle_Time',
+    ];
+
+    const missingFields = requiredFields.filter(
+      (field) => formData[field] === undefined || formData[field] === null
+    );
+    
+    if (missingFields.length > 0) {
+      return res.status(400).json({
+        error: `Missing required fields: ${missingFields.join(', ')}`,
+      });
+    }
+
+    // Insert form data into kensaDB
+    const result = await kensaDB.insertOne(formData);
+    if (!result.insertedId) {
+      throw new Error('Failed to save data to kensaDB');
+    }
+
+    res.status(201).json({
+      message: 'Data successfully saved to kensaDB',
+      insertedId: result.insertedId,
+    });
+  } catch (error) {
+    console.error('Error saving data to kensaDB:', error);
+    res.status(500).json({ error: 'Error saving data to kensaDB' });
+  }
+});
+
+
 
 ///////////////////////////////////////////
 //END of iREPORTER ROUTE
