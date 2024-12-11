@@ -291,7 +291,7 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
     const Cycle_Time = parseFloat(document.getElementById('cycleTime').value) || 0;
     const 製造ロット = document.getElementById('製造ロット').value;
     const Comment = document.querySelector('textarea[name="Comments1"]').value;
-    const Spare = parseInt(document.getElementById('spare').value, 10) || 0;
+    const Spare = parseInt(document.getElementById('在庫').value, 10) || 0;
 
 
     // Check if 背番号 is selected
