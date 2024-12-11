@@ -305,6 +305,30 @@
         const label1 = document.getElementById('label1');
         label1.textContent = filterValue + "の設備選んでください:"; // Set the text content of the h1 element
 
+        const serverURL = "https://kurachi.onrender.com";
+        //const serverURL = "http://localhost:3000";
+
+        // this code will ping the Render website for inactivity
+        const interval = 30000; // 30 seconds
+        function pingServer() {
+        fetch(`${serverURL}/getSeBanggoList`)
+            .then((response) => {
+            if (!response.ok) {
+                throw new Error(`HTTP error! Status: ${response.status}`);
+            }
+            console.log(
+                `Pinged at ${new Date().toISOString()}: Status Code ${response.status}`
+            );
+            })
+            .catch((error) => {
+            console.error(
+                `Error pinging at ${new Date().toISOString()}:`,
+                error.message
+            );
+            });
+        }
+        setInterval(pingServer, interval);
+
         if (filterValue === '天徳') {
             const containers = document.getElementById('containers');
 
