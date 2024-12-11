@@ -28,6 +28,7 @@ function getQueryParam(param) {
 const selectedFactory = getQueryParam('filter');
 if (selectedFactory){
   document.getElementById('selected工場').value = selectedFactory;
+  document.getElementById('nippoTitle').textContent=selectedFactory + "プレス日報";
   console.log("kojo changed to: " + selectedFactory);
 }
 
