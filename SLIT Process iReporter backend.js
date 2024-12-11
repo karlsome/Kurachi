@@ -255,9 +255,7 @@ document
   .addEventListener("input", updateTotal);
 
 // Submit Button for new slit Process
-document
-  .querySelector('form[name="contact-form"]')
-  .addEventListener("submit", async (event) => {
+document.querySelector('form[name="contact-form"]').addEventListener("submit", async (event) => {
     event.preventDefault(); // Prevent default form submission behavior
     updateCycleTime();
 
@@ -392,7 +390,8 @@ document
       closeScanModalButton.onclick = function () {
         scanAlertModal.style.display = "none";
         document.body.classList.remove("flash-green");
-        window.location.reload();
+        //window.location.reload();
+        resetForm();
       };
     } catch (error) {
       console.error("Error during submission:", error);
