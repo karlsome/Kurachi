@@ -1,11 +1,9 @@
-
-
-if (process.env.NODE_ENV !== 'production') {
-  require('dotenv').config();
+if (process.env.NODE_ENV !== "production") {
+  require("dotenv").config();
 }
-const express = require('express');
-const cors = require('cors');  // Import CORS
-const { MongoClient, ServerApiVersion } = require('mongodb');
+const express = require("express");
+const cors = require("cors"); // Import CORS
+const { MongoClient, ServerApiVersion } = require("mongodb");
 
 const app = express();
 const port = 3000;
@@ -20,19 +18,19 @@ const client = new MongoClient(uri, {
     version: ServerApiVersion.v1,
     strict: true,
     deprecationErrors: true,
-  }
+  },
 });
 
 //get setsubi list from mongodb
-app.get('/getSetsubiList', async (req, res) => {
+app.get("/getSetsubiList", async (req, res) => {
   try {
     await client.connect();
     const database = client.db("Sasaki_Coating_MasterDB");
     const collection = database.collection("setsubiList");
 
     const factory = req.query.factory;
-    const query = { "工場": factory };
-    const projection = { "設備": 1, _id: 0 };
+    const query = { 工場: factory };
+    const projection = { 設備: 1, _id: 0 };
 
     const result = await collection.find(query).project(projection).toArray();
     res.json(result);
@@ -43,45 +41,44 @@ app.get('/getSetsubiList', async (req, res) => {
 });
 
 //get sebanggo from mongoDB
-app.get('/getSetsubiByProcess', async (req, res) => {
-    try {
-      await client.connect();
-      const database = client.db("Sasaki_Coating_MasterDB");
-      const collection = database.collection("setsubiList");
-  
-      let process = req.query.process;  // The process to search for
-  
-      if (!process) {
-        return res.status(400).send("Process parameter is required");
-      }
-  
-      // Escape special regex characters in the process value
-      process = process.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // Escapes special characters
-  
-      // Create a regex pattern to match the `process` value as part of a comma-separated list
-      const query = { 
-        出来る設備: { 
-          $regex: new RegExp(`(^|,\\s*)${process}(,|$)`, 'i')  // Match the `process` value between commas or at the start/end of the string
-        }
-      };
-  
-      const projection = { 背番号: 1, _id: 0 };  // Only return the `背番号` field
-  
-      const result = await collection.find(query).project(projection).toArray();
-      res.json(result);  // Send back the array of `背番号`
-    } catch (error) {
-      console.error("Error retrieving data:", error);
-      res.status(500).send("Error retrieving data");
-    }
-  });
+app.get("/getSetsubiByProcess", async (req, res) => {
+  try {
+    await client.connect();
+    const database = client.db("Sasaki_Coating_MasterDB");
+    const collection = database.collection("setsubiList");
 
+    let process = req.query.process; // The process to search for
+
+    if (!process) {
+      return res.status(400).send("Process parameter is required");
+    }
+
+    // Escape special regex characters in the process value
+    process = process.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); // Escapes special characters
+
+    // Create a regex pattern to match the `process` value as part of a comma-separated list
+    const query = {
+      出来る設備: {
+        $regex: new RegExp(`(^|,\\s*)${process}(,|$)`, "i"), // Match the `process` value between commas or at the start/end of the string
+      },
+    };
+
+    const projection = { 背番号: 1, _id: 0 }; // Only return the `背番号` field
+
+    const result = await collection.find(query).project(projection).toArray();
+    res.json(result); // Send back the array of `背番号`
+  } catch (error) {
+    console.error("Error retrieving data:", error);
+    res.status(500).send("Error retrieving data");
+  }
+});
 
 ///////////////////////////////////////////
 //iREPORTER ROUTE
 ///////////////////////////////////
-  //this route will fetch every sebanggo
-  // Route to fetch all 背番号 from masterDB
-app.get('/getSeBanggoList', async (req, res) => {
+//this route will fetch every sebanggo
+// Route to fetch all 背番号 from masterDB
+app.get("/getSeBanggoList", async (req, res) => {
   try {
     await client.connect();
     const database = client.db("Sasaki_Coating_MasterDB");
@@ -91,7 +88,7 @@ app.get('/getSeBanggoList', async (req, res) => {
     const result = await collection.find({}).project(projection).toArray();
 
     // Map the results to an array of 背番号
-    const seBanggoList = result.map(item => item.背番号);
+    const seBanggoList = result.map((item) => item.背番号);
 
     res.json(seBanggoList);
   } catch (error) {
@@ -101,7 +98,7 @@ app.get('/getSeBanggoList', async (req, res) => {
 });
 
 // New route to search for 背番号 in masterDB
-app.post('/searchSebanggo', async (req, res) => {
+app.post("/searchSebanggo", async (req, res) => {
   try {
     await client.connect();
     const database = client.db("Sasaki_Coating_MasterDB");
@@ -121,8 +118,8 @@ app.post('/searchSebanggo', async (req, res) => {
     }
 
     // Check for 工場 value "NFH" and prioritize results
-    const nfhEntry = results.find(entry => entry.工場 === "NFH");
-    const notNfhEntry = results.find(entry => entry.工場 !== "NFH");
+    const nfhEntry = results.find((entry) => entry.工場 === "NFH");
+    const notNfhEntry = results.find((entry) => entry.工場 !== "NFH");
 
     if (nfhEntry) {
       return res.json(nfhEntry);
@@ -137,128 +134,233 @@ app.post('/searchSebanggo', async (req, res) => {
   }
 });
 
-
-// New route to submit data to kensaDB
-app.post('/submitToKensaDBiReporter', async (req, res) => {
+// iReporter route to submit data to kensaDB
+app.post("/submitToKensaDBiReporter", async (req, res) => {
   try {
     await client.connect();
 
-    const database = client.db('submittedDB');
-    const kensaDB = database.collection('kensaDB');
+    const database = client.db("submittedDB");
+    const kensaDB = database.collection("kensaDB");
     const formData = req.body;
 
     // Validate required fields
     const requiredFields = [
-      '品番',
-      '背番号',
-      'Total',
-      '工場',
-      'Worker_Name',
-      'Process_Quantity',
-      'Remaining_Quantity',
-      'Date',
-      'Time_start',
-      'Time_end',
-      '設備',
-      'Counters',
-      'Total_NG',
-      '製造ロット',
-      'Cycle_Time',
+      "品番",
+      "背番号",
+      "Total",
+      "工場",
+      "Worker_Name",
+      "Process_Quantity",
+      "Remaining_Quantity",
+      "Date",
+      "Time_start",
+      "Time_end",
+      "設備",
+      "Counters",
+      "Total_NG",
+      "製造ロット",
+      "Cycle_Time",
     ];
 
     const missingFields = requiredFields.filter(
       (field) => formData[field] === undefined || formData[field] === null
     );
-    
+
     if (missingFields.length > 0) {
       return res.status(400).json({
-        error: `Missing required fields: ${missingFields.join(', ')}`,
+        error: `Missing required fields: ${missingFields.join(", ")}`,
       });
     }
 
     // Insert form data into kensaDB
     const result = await kensaDB.insertOne(formData);
     if (!result.insertedId) {
-      throw new Error('Failed to save data to kensaDB');
+      throw new Error("Failed to save data to kensaDB");
     }
 
     res.status(201).json({
-      message: 'Data successfully saved to kensaDB',
+      message: "Data successfully saved to kensaDB",
       insertedId: result.insertedId,
     });
   } catch (error) {
-    console.error('Error saving data to kensaDB:', error);
-    res.status(500).json({ error: 'Error saving data to kensaDB' });
+    console.error("Error saving data to kensaDB:", error);
+    res.status(500).json({ error: "Error saving data to kensaDB" });
   }
 });
 
-
-// New route to submit data to slitDB
-app.post('/submitToSlitDBiReporter', async (req, res) => {
+// iReporter route to submit data to slitDB
+app.post("/submitToSlitDBiReporter", async (req, res) => {
   try {
     await client.connect();
 
-    const database = client.db('submittedDB');
-    const slitDB = database.collection('slitDB');
+    const database = client.db("submittedDB");
+    const slitDB = database.collection("slitDB");
     const formData = req.body;
 
     // Validate required fields
     const requiredFields = [
-      '品番',
-      '背番号',
-      'Total',
-      '工場',
-      'Worker_Name',
-      'Process_Quantity',
-      'Date',
-      'Time_start',
-      'Time_end',
-      '設備',
-      '疵引不良',
-      '加工不良',
-      'その他',
-      'Total_NG',
-      'Spare',
-      'Comment',
-      '製造ロット',
-      'Cycle_Time',
+      "品番",
+      "背番号",
+      "Total",
+      "工場",
+      "Worker_Name",
+      "Process_Quantity",
+      "Date",
+      "Time_start",
+      "Time_end",
+      "設備",
+      "疵引不良",
+      "加工不良",
+      "その他",
+      "Total_NG",
+      "Spare",
+      "Comment",
+      "製造ロット",
+      "Cycle_Time",
     ];
 
     const missingFields = requiredFields.filter(
       (field) => formData[field] === undefined || formData[field] === null
     );
-    
+
     if (missingFields.length > 0) {
       return res.status(400).json({
-        error: `Missing required fields: ${missingFields.join(', ')}`,
+        error: `Missing required fields: ${missingFields.join(", ")}`,
       });
     }
 
     // Insert form data into slitDB
     const result = await slitDB.insertOne(formData);
     if (!result.insertedId) {
-      throw new Error('Failed to save data to slitDB');
+      throw new Error("Failed to save data to slitDB");
     }
 
     res.status(201).json({
-      message: 'Data successfully saved to slitDB',
+      message: "Data successfully saved to slitDB",
       insertedId: result.insertedId,
     });
   } catch (error) {
-    console.error('Error saving data to slitDB:', error);
-    res.status(500).json({ error: 'Error saving data to slitDB' });
+    console.error("Error saving data to slitDB:", error);
+    res.status(500).json({ error: "Error saving data to slitDB" });
   }
 });
 
+// iReporter route to submit data to SRSDB
+app.post("/submitToSRSDBiReporter", async (req, res) => {
+  try {
+    await client.connect();
 
+    const database = client.db("submittedDB");
+    const SRSDB = database.collection("SRSDB");
+    const formData = req.body;
+
+    // Validate required fields
+    const requiredFields = [
+      "品番",
+      "背番号",
+      "Total",
+      "工場",
+      "Worker_Name",
+      "Process_Quantity",
+      "Date",
+      "Time_start",
+      "Time_end",
+      "設備",
+      "SRSコード",
+      "くっつき・めくれ",
+      "シワ",
+      "転写位置ズレ",
+      "転写不良",
+      "その他",
+      "SRS_Total_NG",
+      "Spare",
+      "Comment",
+      "製造ロット",
+      "Cycle_Time",
+    ];
+
+    const missingFields = requiredFields.filter(
+      (field) => formData[field] === undefined || formData[field] === null
+    );
+
+    if (missingFields.length > 0) {
+      return res.status(400).json({
+        error: `Missing required fields: ${missingFields.join(", ")}`,
+      });
+    }
+
+    // Insert form data into SRSDB
+    const result = await SRSDB.insertOne(formData);
+    if (!result.insertedId) {
+      throw new Error("Failed to save data to slitDB");
+    }
+
+    res.status(201).json({
+      message: "Data successfully saved to slitDB",
+      insertedId: result.insertedId,
+    });
+  } catch (error) {
+    console.error("Error saving data to slitDB:", error);
+    res.status(500).json({ error: "Error saving data to slitDB" });
+  }
+});
+
+// This is for SRS LH
+// Route to fetch all 背番号 with R/L = "LH" from masterDB
+app.get("/getSeBanggoListLH", async (req, res) => {
+  try {
+    await client.connect();
+    const database = client.db("Sasaki_Coating_MasterDB");
+    const collection = database.collection("masterDB");
+
+    // Query to find documents where R/L = "LH"
+    const query = { "R/L": "LH", SRS: "有り" };
+    const projection = { 背番号: 1, _id: 0 }; // Only fetch the 背番号 field
+
+    // Fetch matching documents
+    const result = await collection.find(query).project(projection).toArray();
+
+    // Map the results to an array of 背番号
+    const seBanggoListLH = result.map((item) => item.背番号);
+
+    res.json(seBanggoListLH); // Send the list as JSON
+  } catch (error) {
+    console.error("Error retrieving 背番号 list for LH:", error);
+    res.status(500).send("Error retrieving 背番号 list for LH");
+  }
+});
+
+//This is for SRS RSH
+// Route to fetch all 背番号 with R/L = "RH" from masterDB
+app.get("/getSeBanggoListRH", async (req, res) => {
+  try {
+    await client.connect();
+    const database = client.db("Sasaki_Coating_MasterDB");
+    const collection = database.collection("masterDB");
+
+    // Query to find documents where R/L = "LH"
+    const query = { "R/L": "RH", SRS: "有り" };
+    const projection = { 背番号: 1, _id: 0 }; // Only fetch the 背番号 field
+
+    // Fetch matching documents
+    const result = await collection.find(query).project(projection).toArray();
+
+    // Map the results to an array of 背番号
+    const seBanggoListLH = result.map((item) => item.背番号);
+
+    res.json(seBanggoListLH); // Send the list as JSON
+  } catch (error) {
+    console.error("Error retrieving 背番号 list for RH:", error);
+    res.status(500).send("Error retrieving 背番号 list for RH");
+  }
+});
 
 ///////////////////////////////////////////
 //END of iREPORTER ROUTE
 ///////////////////////////////////
 
-
 // Get product info from MongoDB (parameters are kojo and sebanggo)
-app.get('/getProductDetails', async (req, res) => {
+app.get("/getProductDetails", async (req, res) => {
   try {
     await client.connect();
 
@@ -268,14 +370,16 @@ app.get('/getProductDetails', async (req, res) => {
 
     // Get values from the query parameters
     const serialNumber = req.query.serialNumber; // 背番号 value from sub-dropdown
-    const factory = req.query.factory;          // 工場 value from hidden input
+    const factory = req.query.factory; // 工場 value from hidden input
 
     if (!serialNumber) {
       return res.status(400).send("Serial number is required");
     }
 
     // Check for duplicates of `背番号`
-    const duplicateCount = await masterCollection.countDocuments({ 背番号: serialNumber });
+    const duplicateCount = await masterCollection.countDocuments({
+      背番号: serialNumber,
+    });
 
     // Query to match documents based on presence of duplicates
     let query;
@@ -298,7 +402,7 @@ app.get('/getProductDetails', async (req, res) => {
         送りピッチ: 1,
         型番: 1,
         _id: 0,
-      }
+      },
     });
 
     // Query pictureDB for additional info
@@ -321,56 +425,52 @@ app.get('/getProductDetails', async (req, res) => {
 
     // Send the combined result as JSON
     res.json(combinedResult);
-
   } catch (error) {
     console.error("Error retrieving product details:", error);
     res.status(500).send("Error retrieving product details");
   }
 });
 
-
-
-
-
-
-  //get worker name
-  app.get('/getWorkerNames', async (req, res) => {
-    try {
-      await client.connect();
-      const database = client.db("Sasaki_Coating_MasterDB");
-      const collection = database.collection("workerDB");
-  
-      // Get the factory value from the query parameters
-      const selectedFactory = req.query.selectedFactory; // HTML value of id="selected工場"
-  
-      if (!selectedFactory) {
-        return res.status(400).send("Factory is required");
-      }
-  
-      // Find workers where `部署` contains the selected factory
-      const workers = await collection.find(
-        { 部署: { $regex: new RegExp(`(^|,)${selectedFactory}(,|$)`) } }, 
-        { projection: { Name: 1, _id: 0 } } // Retrieve only the "Name" field
-      ).toArray();
-  
-      if (workers.length === 0) {
-        return res.status(404).send("No matching workers found for the selected factory");
-      }
-  
-      // Send the list of worker names as JSON
-      res.json(workers.map(worker => worker.Name));
-  
-    } catch (error) {
-      console.error("Error retrieving worker names:", error);
-      res.status(500).send("Error retrieving worker names");
-    }
-  });
-
-
-  // Route to handle form submission for pressDB
-app.post('/submitPressData', async (req, res) => {
+//get worker name
+app.get("/getWorkerNames", async (req, res) => {
   try {
-    console.log('Raw Request Body:', req.body); // Debug the incoming request body
+    await client.connect();
+    const database = client.db("Sasaki_Coating_MasterDB");
+    const collection = database.collection("workerDB");
+
+    // Get the factory value from the query parameters
+    const selectedFactory = req.query.selectedFactory; // HTML value of id="selected工場"
+
+    if (!selectedFactory) {
+      return res.status(400).send("Factory is required");
+    }
+
+    // Find workers where `部署` contains the selected factory
+    const workers = await collection
+      .find(
+        { 部署: { $regex: new RegExp(`(^|,)${selectedFactory}(,|$)`) } },
+        { projection: { Name: 1, _id: 0 } } // Retrieve only the "Name" field
+      )
+      .toArray();
+
+    if (workers.length === 0) {
+      return res
+        .status(404)
+        .send("No matching workers found for the selected factory");
+    }
+
+    // Send the list of worker names as JSON
+    res.json(workers.map((worker) => worker.Name));
+  } catch (error) {
+    console.error("Error retrieving worker names:", error);
+    res.status(500).send("Error retrieving worker names");
+  }
+});
+
+// Route to handle form submission for pressDB
+app.post("/submitPressData", async (req, res) => {
+  try {
+    console.log("Raw Request Body:", req.body); // Debug the incoming request body
 
     await client.connect();
     const database = client.db("submittedDB");
@@ -398,7 +498,7 @@ app.post('/submitPressData', async (req, res) => {
       Process_Quantity,
       その他,
       Cycle_Time,
-      Process_Status
+      Process_Status,
     } = req.body;
 
     // Construct the document to insert into pressDB
@@ -422,7 +522,7 @@ app.post('/submitPressData', async (req, res) => {
       Process_Quantity: parseInt(Process_Quantity, 10),
       その他: parseInt(その他, 10),
       Cycle_Time: parseFloat(Cycle_Time),
-      Process_Status
+      Process_Status,
     };
 
     // Insert into pressDB
@@ -441,11 +541,13 @@ app.post('/submitPressData', async (req, res) => {
         slitDB_Remaining_Quantity: 0,
         SRSDB_Remaining_Quantity: 0,
         pressDB_Date: new Date(dateField),
-        ScannedQR
+        ScannedQR,
       });
     } else {
       // If entry exists, update pressDB_Remaining_Quantity
-      const updatedPressDBQuantity = (currentCountEntry.pressDB_Remaining_Quantity || 0) + parseInt(Total, 10);
+      const updatedPressDBQuantity =
+        (currentCountEntry.pressDB_Remaining_Quantity || 0) +
+        parseInt(Total, 10);
 
       await currentCountDB.updateOne(
         { uniqueID },
@@ -454,8 +556,8 @@ app.post('/submitPressData', async (req, res) => {
             pressDB_Remaining_Quantity: updatedPressDBQuantity, // Add Total to existing Remaining Quantity
             pressDB_Date: new Date(dateField), // Update Date field
             品番,
-            ScannedQR
-          }
+            ScannedQR,
+          },
         }
       );
     }
@@ -467,46 +569,39 @@ app.post('/submitPressData', async (req, res) => {
   }
 });
 
+//Route to check if processing
+app.post("/checkQRStatus", async (req, res) => {
+  try {
+    const { ScannedQR } = req.body;
 
-
-
-  //Route to check if processing 
-  app.post('/checkQRStatus', async (req, res) => {
-    try {
-      const { ScannedQR } = req.body;
-  
-      if (!ScannedQR) {
-        return res.status(400).json({ error: 'ScannedQR is required' });
-      }
-  
-      console.log(`Checking QR status for: ${ScannedQR}`); // Debug log
-  
-      await client.connect();
-      const database = client.db("submittedDB");
-      const collection = database.collection("pressDB");
-  
-      // Check if ScannedQR exists with Process_Status = "processing"
-      const existingEntry = await collection.findOne({
-        ScannedQR,
-        Process_Status: "processing"
-      });
-  
-      console.log(`Query Result:`, existingEntry); // Log query result
-  
-      if (existingEntry) {
-        return res.json({ isProcessing: true });
-      }
-  
-      return res.json({ isProcessing: false });
-    } catch (error) {
-      console.error("Error checking QR status:", error);
-      res.status(500).send("Error checking QR status");
+    if (!ScannedQR) {
+      return res.status(400).json({ error: "ScannedQR is required" });
     }
-  });
 
-  
+    console.log(`Checking QR status for: ${ScannedQR}`); // Debug log
 
+    await client.connect();
+    const database = client.db("submittedDB");
+    const collection = database.collection("pressDB");
 
+    // Check if ScannedQR exists with Process_Status = "processing"
+    const existingEntry = await collection.findOne({
+      ScannedQR,
+      Process_Status: "processing",
+    });
+
+    console.log(`Query Result:`, existingEntry); // Log query result
+
+    if (existingEntry) {
+      return res.json({ isProcessing: true });
+    }
+
+    return res.json({ isProcessing: false });
+  } catch (error) {
+    console.error("Error checking QR status:", error);
+    res.status(500).send("Error checking QR status");
+  }
+});
 
 ///////////////////////////////
 // SRS ROUTE
@@ -514,7 +609,7 @@ app.post('/submitPressData', async (req, res) => {
 
 // SRS scan-button
 //this route is to check if slit is ari, therefore get value from slit remaining qty else pressDB
-app.post('/processSRS', async (req, res) => {
+app.post("/processSRS", async (req, res) => {
   try {
     const { ScannedQR } = req.body;
 
@@ -530,16 +625,28 @@ app.post('/processSRS', async (req, res) => {
     const currentCountDB = submittedDB.collection("currentCountDB");
 
     // Step 1: Find the row in pressDB with ScannedQR and Process_Status = "processing"
-    const pressEntry = await pressDB.findOne({ ScannedQR, Process_Status: "processing" });
+    const pressEntry = await pressDB.findOne({
+      ScannedQR,
+      Process_Status: "processing",
+    });
 
     if (!pressEntry) {
-      return res.status(404).json({ error: "QR not found or not in processing state in pressDB" });
+      return res
+        .status(404)
+        .json({ error: "QR not found or not in processing state in pressDB" });
     }
 
-    const { 背番号, Remaining_Quantity: pressRemainingQuantity, uniqueID, Date } = pressEntry;
+    const {
+      背番号,
+      Remaining_Quantity: pressRemainingQuantity,
+      uniqueID,
+      Date,
+    } = pressEntry;
 
     // Step 2: Check masterDB for the 背番号
-    const masterDB = client.db("Sasaki_Coating_MasterDB").collection("masterDB");
+    const masterDB = client
+      .db("Sasaki_Coating_MasterDB")
+      .collection("masterDB");
     const masterEntry = await masterDB.findOne({ 背番号 });
 
     if (!masterEntry) {
@@ -549,7 +656,9 @@ app.post('/processSRS', async (req, res) => {
     const { SRS, SLIT } = masterEntry;
 
     if (!SRS || SRS === "無し") {
-      return res.status(400).json({ error: "This product is not for SRS process" });
+      return res
+        .status(400)
+        .json({ error: "This product is not for SRS process" });
     }
 
     // Step 3: Handle SLIT and SRS logic
@@ -576,7 +685,10 @@ app.post('/processSRS', async (req, res) => {
         const { slitDB_Remaining_Quantity } = currentCountEntry;
 
         if (slitDB_Remaining_Quantity === 0) {
-          return res.status(400).json({ error: "No remaining quantity in slitDB. Please process slits first." });
+          return res.status(400).json({
+            error:
+              "No remaining quantity in slitDB. Please process slits first.",
+          });
         }
 
         return res.json({
@@ -590,7 +702,9 @@ app.post('/processSRS', async (req, res) => {
         const { pressDB_Remaining_Quantity } = currentCountEntry;
         // Check Remaining_Quantity in pressDB
         if (pressDB_Remaining_Quantity === 0) {
-          return res.status(400).json({ error: "No remaining quantity in pressDB. Process completed." });
+          return res.status(400).json({
+            error: "No remaining quantity in pressDB. Process completed.",
+          });
         }
 
         return res.json({
@@ -603,27 +717,34 @@ app.post('/processSRS', async (req, res) => {
     }
 
     // Handle unexpected cases
-    return res.status(400).json({ error: "Invalid process configuration for SRS" });
+    return res
+      .status(400)
+      .json({ error: "Invalid process configuration for SRS" });
   } catch (error) {
     console.error("Error processing SRS QR:", error);
     res.status(500).send("Error processing SRS QR.");
   }
 });
 
-
-
-
 // This route submits data to SRSDB and updates the value of currentCountDB
-app.post('/submitToSRSDB', async (req, res) => {
+app.post("/submitToSRSDB", async (req, res) => {
   try {
     const formData = req.body;
-    const { uniqueID, Total, SRS_Total_NG, 設備, ScannedQR, Date,Worker_Name } = formData;
+    const {
+      uniqueID,
+      Total,
+      SRS_Total_NG,
+      設備,
+      ScannedQR,
+      Date,
+      Worker_Name,
+    } = formData;
 
     await client.connect();
-    const database = client.db('submittedDB');
-    const SRSDB = database.collection('SRSDB');
-    const currentCountDB = database.collection('currentCountDB');
-    const deductionLogDB = database.collection('deduction_LogDB'); // Deduction Log collection
+    const database = client.db("submittedDB");
+    const SRSDB = database.collection("SRSDB");
+    const currentCountDB = database.collection("currentCountDB");
+    const deductionLogDB = database.collection("deduction_LogDB"); // Deduction Log collection
 
     // Step 1: Insert the new record into SRSDB
     const result = await SRSDB.insertOne(formData);
@@ -632,14 +753,21 @@ app.post('/submitToSRSDB', async (req, res) => {
     const currentCountEntry = await currentCountDB.findOne({ uniqueID });
 
     if (!currentCountEntry) {
-      return res.status(404).json({ error: "UniqueID not found in currentCountDB" });
+      return res
+        .status(404)
+        .json({ error: "UniqueID not found in currentCountDB" });
     }
 
-    const { slitDB_Remaining_Quantity, pressDB_Remaining_Quantity } = currentCountEntry;
+    const { slitDB_Remaining_Quantity, pressDB_Remaining_Quantity } =
+      currentCountEntry;
 
     // Step 3: Determine which quantity to update based on SLIT status
-    const masterDB = client.db("Sasaki_Coating_MasterDB").collection("masterDB");
-    const masterEntry = await masterDB.findOne({ 背番号: currentCountEntry.背番号 });
+    const masterDB = client
+      .db("Sasaki_Coating_MasterDB")
+      .collection("masterDB");
+    const masterEntry = await masterDB.findOne({
+      背番号: currentCountEntry.背番号,
+    });
 
     if (!masterEntry) {
       return res.status(404).json({ error: "背番号 not found in masterDB" });
@@ -654,8 +782,8 @@ app.post('/submitToSRSDB', async (req, res) => {
     const now = new global.Date();
     const deductionData = {
       uniqueID,
-      Date: now.toISOString().split('T')[0], // YYYY-MM-DD
-      Time: now.toTimeString().split(' ')[0], // HH:mm:ss
+      Date: now.toISOString().split("T")[0], // YYYY-MM-DD
+      Time: now.toTimeString().split(" ")[0], // HH:mm:ss
       Name: Worker_Name, // Replace with the appropriate worker name if needed
       Log: `Total:${Total}, SRS_Total_NG:${SRS_Total_NG} from ${設備 || "N/A"}`,
     };
@@ -670,9 +798,9 @@ app.post('/submitToSRSDB', async (req, res) => {
       // Calculate remaining quantity for slitDB
       updatedRemainingQuantity = await calculateRemainingQuantity(
         database,
-        'slitDB',
-        'Total',
-        'slitDB_deduction_Qty',
+        "slitDB",
+        "Total",
+        "slitDB_deduction_Qty",
         uniqueID
       );
 
@@ -692,9 +820,9 @@ app.post('/submitToSRSDB', async (req, res) => {
       // Calculate remaining quantity for pressDB
       updatedRemainingQuantity = await calculateRemainingQuantity(
         database,
-        'pressDB',
-        'Total',
-        'pressDB_deduction_Qty',
+        "pressDB",
+        "Total",
+        "pressDB_deduction_Qty",
         uniqueID
       );
 
@@ -711,9 +839,9 @@ app.post('/submitToSRSDB', async (req, res) => {
     // Step 4: Calculate and update the remaining quantity for SRSDB
     const updatedSRSQuantity = await calculateRemainingQuantity(
       database,
-      'SRSDB',
-      'Total',
-      'SRSDB_deduction_Qty',
+      "SRSDB",
+      "Total",
+      "SRSDB_deduction_Qty",
       uniqueID
     );
 
@@ -726,7 +854,10 @@ app.post('/submitToSRSDB', async (req, res) => {
       }
     );
 
-    res.status(201).json({ insertedId: result.insertedId, message: "Form submitted and updated successfully" });
+    res.status(201).json({
+      insertedId: result.insertedId,
+      message: "Form submitted and updated successfully",
+    });
   } catch (error) {
     console.error("Error saving to SRSDB:", error);
     res.status(500).send("Error saving to SRSDB");
@@ -736,20 +867,39 @@ app.post('/submitToSRSDB', async (req, res) => {
 /**
  * Helper function to calculate remaining quantity
  */
-async function calculateRemainingQuantity(database, collectionName, totalField, deductionField, uniqueID) {
-  const totalAggregation = await database.collection(collectionName).aggregate([
-    { $match: { uniqueID } },
-    { $group: { _id: "$uniqueID", total: { $sum: `$${totalField}` } } },
-  ]).toArray();
+async function calculateRemainingQuantity(
+  database,
+  collectionName,
+  totalField,
+  deductionField,
+  uniqueID
+) {
+  const totalAggregation = await database
+    .collection(collectionName)
+    .aggregate([
+      { $match: { uniqueID } },
+      { $group: { _id: "$uniqueID", total: { $sum: `$${totalField}` } } },
+    ])
+    .toArray();
 
-  const totalInserted = totalAggregation.length > 0 ? totalAggregation[0].total : 0;
+  const totalInserted =
+    totalAggregation.length > 0 ? totalAggregation[0].total : 0;
 
-  const deductionAggregation = await database.collection('deduction_LogDB').aggregate([
-    { $match: { uniqueID } },
-    { $group: { _id: "$uniqueID", totalDeducted: { $sum: `$${deductionField}` } } },
-  ]).toArray();
+  const deductionAggregation = await database
+    .collection("deduction_LogDB")
+    .aggregate([
+      { $match: { uniqueID } },
+      {
+        $group: {
+          _id: "$uniqueID",
+          totalDeducted: { $sum: `$${deductionField}` },
+        },
+      },
+    ])
+    .toArray();
 
-  const totalDeducted = deductionAggregation.length > 0 ? deductionAggregation[0].totalDeducted : 0;
+  const totalDeducted =
+    deductionAggregation.length > 0 ? deductionAggregation[0].totalDeducted : 0;
 
   return totalInserted - totalDeducted;
 }
@@ -761,7 +911,7 @@ async function calculateRemainingQuantity(database, collectionName, totalField, 
 //////////////////////////////////
 //slit process scan-button route
 // Process SLIT
-app.post('/processSLIT', async (req, res) => {
+app.post("/processSLIT", async (req, res) => {
   try {
     const { ScannedQR } = req.body;
 
@@ -777,18 +927,23 @@ app.post('/processSLIT', async (req, res) => {
     const currentCountDB = submittedDB.collection("currentCountDB");
 
     // Step 1: Find the row in pressDB with ScannedQR and Process_Status = "processing"
-    const pressEntry = await pressDB.findOne({ ScannedQR, Process_Status: "processing" });
+    const pressEntry = await pressDB.findOne({
+      ScannedQR,
+      Process_Status: "processing",
+    });
 
     if (!pressEntry) {
-      return res.status(404).json({ error: "QR not found or not in processing state in pressDB" });
+      return res
+        .status(404)
+        .json({ error: "QR not found or not in processing state in pressDB" });
     }
 
     const { 背番号, Remaining_Quantity, uniqueID, Date } = pressEntry; // Include Date field
 
-
-
     // Step 2: Check masterDB for the 背番号
-    const masterDB = client.db("Sasaki_Coating_MasterDB").collection("masterDB");
+    const masterDB = client
+      .db("Sasaki_Coating_MasterDB")
+      .collection("masterDB");
     const masterEntry = await masterDB.findOne({ 背番号 });
 
     if (!masterEntry) {
@@ -822,7 +977,10 @@ app.post('/processSLIT', async (req, res) => {
     }
 
     if (currentCountEntry.pressDB_Remaining_Quantity === 0) {
-      return res.status(400).json({ error: "No remaining quantity in pressDB. Please check press process first." });
+      return res.status(400).json({
+        error:
+          "No remaining quantity in pressDB. Please check press process first.",
+      });
     }
     // Step 4: Return the required details
     return res.json({
@@ -839,20 +997,19 @@ app.post('/processSLIT', async (req, res) => {
   }
 });
 
-
-
 // Submit to slitDB and update currentCountDB and deduction_LogDB
-app.post('/submitToSlitDB', async (req, res) => {
+app.post("/submitToSlitDB", async (req, res) => {
   try {
     const formData = req.body;
-    const { uniqueID, Total, Total_NG, ScannedQR, Date, Worker_Name, 設備 } = formData;
+    const { uniqueID, Total, Total_NG, ScannedQR, Date, Worker_Name, 設備 } =
+      formData;
 
     await client.connect();
-    const database = client.db('submittedDB');
-    const slitDB = database.collection('slitDB');
-    const pressDB = database.collection('pressDB');
-    const currentCountDB = database.collection('currentCountDB');
-    const deductionLogDB = database.collection('deduction_LogDB'); // New collection
+    const database = client.db("submittedDB");
+    const slitDB = database.collection("slitDB");
+    const pressDB = database.collection("pressDB");
+    const currentCountDB = database.collection("currentCountDB");
+    const deductionLogDB = database.collection("deduction_LogDB"); // New collection
 
     // Step 1: Insert the new record into slitDB
     const result = await slitDB.insertOne(formData);
@@ -862,53 +1019,67 @@ app.post('/submitToSlitDB', async (req, res) => {
     const deductionData = {
       uniqueID,
       pressDB_deduction_Qty: Total + Total_NG, // Deduction quantity for pressDB
-      Date: now.toISOString().split('T')[0], // Extracts the date (YYYY-MM-DD)
-      Time: now.toTimeString().split(' ')[0], // Extracts the time (HH:mm:ss)
+      Date: now.toISOString().split("T")[0], // Extracts the date (YYYY-MM-DD)
+      Time: now.toTimeString().split(" ")[0], // Extracts the time (HH:mm:ss)
       Name: Worker_Name,
       Log: `Total:${Total}, Total_NG:${Total_NG} from ${設備}`,
     };
     await deductionLogDB.insertOne(deductionData);
 
     // Step 3: Calculate the total "Total" value from pressDB for this uniqueID
-    const pressAggregation = await pressDB.aggregate([
-      { $match: { uniqueID } },
-      { $group: { _id: "$uniqueID", totalPress: { $sum: "$Total" } } },
-    ]).toArray();
+    const pressAggregation = await pressDB
+      .aggregate([
+        { $match: { uniqueID } },
+        { $group: { _id: "$uniqueID", totalPress: { $sum: "$Total" } } },
+      ])
+      .toArray();
 
     if (pressAggregation.length === 0) {
-      return res.status(404).json({ error: "No records found in pressDB for this uniqueID" });
+      return res
+        .status(404)
+        .json({ error: "No records found in pressDB for this uniqueID" });
     }
 
     const totalPress = pressAggregation[0].totalPress;
 
     // Step 4: Calculate the updated slitDB_Remaining_Quantity for this uniqueID
-    const slitAggregation = await slitDB.aggregate([
-      { $match: { uniqueID } },
-      { $group: { _id: "$uniqueID", totalInserted: { $sum: "$Total" } } },
-    ]).toArray();
+    const slitAggregation = await slitDB
+      .aggregate([
+        { $match: { uniqueID } },
+        { $group: { _id: "$uniqueID", totalInserted: { $sum: "$Total" } } },
+      ])
+      .toArray();
 
     if (slitAggregation.length === 0) {
-      return res.status(404).json({ error: "No records found in slitDB for this uniqueID" });
+      return res
+        .status(404)
+        .json({ error: "No records found in slitDB for this uniqueID" });
     }
 
     const totalSlitInserted = slitAggregation[0].totalInserted;
 
     // Step 5: Calculate total deductions for slitDB and pressDB
-    const deductionAggregation = await deductionLogDB.aggregate([
-      { $match: { uniqueID } },
-      {
-        $group: {
-          _id: "$uniqueID",
-          totalPressDeducted: { $sum: "$pressDB_deduction_Qty" },
-          totalSlitDeducted: { $sum: "$slitDB_deduction_Qty" },
+    const deductionAggregation = await deductionLogDB
+      .aggregate([
+        { $match: { uniqueID } },
+        {
+          $group: {
+            _id: "$uniqueID",
+            totalPressDeducted: { $sum: "$pressDB_deduction_Qty" },
+            totalSlitDeducted: { $sum: "$slitDB_deduction_Qty" },
+          },
         },
-      },
-    ]).toArray();
+      ])
+      .toArray();
 
     const totalPressDeducted =
-      deductionAggregation.length > 0 ? deductionAggregation[0].totalPressDeducted : 0;
+      deductionAggregation.length > 0
+        ? deductionAggregation[0].totalPressDeducted
+        : 0;
     const totalSlitDeducted =
-      deductionAggregation.length > 0 ? deductionAggregation[0].totalSlitDeducted : 0;
+      deductionAggregation.length > 0
+        ? deductionAggregation[0].totalSlitDeducted
+        : 0;
 
     // Corrected calculation for pressDB_Remaining_Quantity
     const pressDB_Remaining_Quantity = totalPress - totalPressDeducted;
@@ -923,7 +1094,9 @@ app.post('/submitToSlitDB', async (req, res) => {
     const currentCountEntry = await currentCountDB.findOne({ uniqueID });
 
     if (!currentCountEntry) {
-      return res.status(404).json({ error: "UniqueID not found in currentCountDB" });
+      return res
+        .status(404)
+        .json({ error: "UniqueID not found in currentCountDB" });
     }
 
     await currentCountDB.updateOne(
@@ -938,21 +1111,22 @@ app.post('/submitToSlitDB', async (req, res) => {
       }
     );
 
-    res.status(201).json({ insertedId: result.insertedId, message: 'Form submitted and updated successfully' });
+    res.status(201).json({
+      insertedId: result.insertedId,
+      message: "Form submitted and updated successfully",
+    });
   } catch (error) {
-    console.error('Error processing submitToSlitDB:', error);
-    res.status(500).send('Error processing submission to slitDB');
+    console.error("Error processing submitToSlitDB:", error);
+    res.status(500).send("Error processing submission to slitDB");
   }
 });
-
-
 
 ////////////////////
 //KENSA route
 ////////////////////
 
 // Kensa scan-button
-app.post('/processKensa', async (req, res) => {
+app.post("/processKensa", async (req, res) => {
   try {
     const { ScannedQR } = req.body;
 
@@ -968,31 +1142,35 @@ app.post('/processKensa', async (req, res) => {
     const currentCountDB = submittedDB.collection("currentCountDB");
 
     // Step 1: Find the row in pressDB with ScannedQR and Process_Status = "processing"
-    const pressEntry = await pressDB.findOne({ ScannedQR, Process_Status: "processing" });
+    const pressEntry = await pressDB.findOne({
+      ScannedQR,
+      Process_Status: "processing",
+    });
 
     if (!pressEntry) {
-      return res.status(404).json({ error: "QR not found or not in processing state in pressDB" });
+      return res
+        .status(404)
+        .json({ error: "QR not found or not in processing state in pressDB" });
     }
 
     const { 背番号, uniqueID } = pressEntry;
 
     // Step 2: Check masterDB for the 背番号
-    const masterDB = client.db("Sasaki_Coating_MasterDB").collection("masterDB");
+    const masterDB = client
+      .db("Sasaki_Coating_MasterDB")
+      .collection("masterDB");
     const masterEntries = await masterDB.findOne({ 背番号 });
-    
 
     if (masterEntries.length === 0) {
       return res.status(404).json({ error: "背番号 not found in masterDB" });
     }
 
-    
-
     const { SLIT, SRS } = masterEntries;
-    
+
     console.log(`SRS from DB: '${masterEntries.SRS}'`);
     console.log(`SLIT from DB: '${masterEntries.SLIT}'`);
     console.log(`Type of SRS: ${typeof masterEntries.SRS}`);
-    console.log(`Type of SLIT: ${typeof masterEntries.SLIT}`);  
+    console.log(`Type of SLIT: ${typeof masterEntries.SLIT}`);
 
     // Step 3: Determine source and remaining quantity
     let Remaining_Quantity = 0;
@@ -1003,65 +1181,77 @@ app.post('/processKensa', async (req, res) => {
       const currentCountEntry = await currentCountDB.findOne({ uniqueID });
 
       if (!currentCountEntry) {
-        return res.status(400).json({ error: "No current count data found for SRS." });
+        return res
+          .status(400)
+          .json({ error: "No current count data found for SRS." });
       }
 
       const { SRSDB_Remaining_Quantity } = currentCountEntry;
 
       if (SRSDB_Remaining_Quantity === 0) {
-        return res.status(400).json({ error: "No remaining quantity in SRSDB. Process completed." });
+        return res.status(400).json({
+          error: "No remaining quantity in SRSDB. Process completed.",
+        });
       }
 
       Remaining_Quantity = SRSDB_Remaining_Quantity;
       source = "SRSDB";
-
     } else if (SLIT === "有り" && (!SRS || SRS === "無し")) {
       // Use slitDB_Remaining_Quantity
       const currentCountEntry = await currentCountDB.findOne({ uniqueID });
 
       if (!currentCountEntry) {
-        return res.status(400).json({ error: "No current count data found for SLIT." });
+        return res
+          .status(400)
+          .json({ error: "No current count data found for SLIT." });
       }
 
       const { slitDB_Remaining_Quantity } = currentCountEntry;
 
       if (slitDB_Remaining_Quantity === 0) {
-        return res.status(400).json({ error: "No remaining quantity in SLITDB. Process completed." });
+        return res.status(400).json({
+          error: "No remaining quantity in SLITDB. Process completed.",
+        });
       }
 
       Remaining_Quantity = slitDB_Remaining_Quantity;
       source = "slitDB";
-
     } else if ((!SLIT || SLIT === "無し") && SRS === "有り") {
       // Use SRSDB_Remaining_Quantity
       const currentCountEntry = await currentCountDB.findOne({ uniqueID });
 
       if (!currentCountEntry) {
-        return res.status(400).json({ error: "No current count data found for SRS." });
+        return res
+          .status(400)
+          .json({ error: "No current count data found for SRS." });
       }
 
       const { SRSDB_Remaining_Quantity } = currentCountEntry;
 
       if (SRSDB_Remaining_Quantity === 0) {
-        return res.status(400).json({ error: "No remaining quantity in SRSDB. Process completed." });
+        return res.status(400).json({
+          error: "No remaining quantity in SRSDB. Process completed.",
+        });
       }
 
       Remaining_Quantity = SRSDB_Remaining_Quantity;
       source = "SRSDB";
-
     } else if ((!SLIT || SLIT === "無し") && (!SRS || SRS === "無し")) {
       // Use pressDB_Remaining_Quantity
       const currentCountEntryPress = await currentCountDB.findOne({ uniqueID });
       if (currentCountEntryPress === 0) {
-        return res.status(400).json({ error: "No remaining quantity in pressDB. Process completed." });
+        return res.status(400).json({
+          error: "No remaining quantity in pressDB. Process completed.",
+        });
       }
       const { pressDB_Remaining_Quantity } = currentCountEntryPress;
 
       Remaining_Quantity = pressDB_Remaining_Quantity;
       source = "pressDB";
-
     } else {
-      return res.status(400).json({ error: "Invalid process configuration for Kensa" });
+      return res
+        .status(400)
+        .json({ error: "Invalid process configuration for Kensa" });
     }
 
     return res.json({
@@ -1076,33 +1266,40 @@ app.post('/processKensa', async (req, res) => {
   }
 });
 
-
-
-
 // Submit data to kensaDB and update currentCountDB
-app.post('/submitToKensaDB', async (req, res) => {
+app.post("/submitToKensaDB", async (req, res) => {
   try {
     const formData = req.body;
-    const { uniqueID, Total, 設備, Total_NG, ScannedQR, Date, Worker_Name } = formData;
+    const { uniqueID, Total, 設備, Total_NG, ScannedQR, Date, Worker_Name } =
+      formData;
 
     await client.connect();
-    const database = client.db('submittedDB');
-    const kensaDB = database.collection('kensaDB');
-    const currentCountDB = database.collection('currentCountDB');
-    const pressDB = database.collection('pressDB'); // Add pressDB collection
-    const deductionLogDB = database.collection('deduction_LogDB'); // Deduction Log collection
+    const database = client.db("submittedDB");
+    const kensaDB = database.collection("kensaDB");
+    const currentCountDB = database.collection("currentCountDB");
+    const pressDB = database.collection("pressDB"); // Add pressDB collection
+    const deductionLogDB = database.collection("deduction_LogDB"); // Deduction Log collection
 
     // Step 1: Insert the new record into kensaDB
     const result = await kensaDB.insertOne(formData);
 
     // Step 2: Aggregate total process quantity in kensaDB
-    const kensaAggregation = await kensaDB.aggregate([
-      { $match: { uniqueID } },
-      { $group: { _id: "$uniqueID", totalProcessQuantity: { $sum: "$Total" } } },
-    ]).toArray();
+    const kensaAggregation = await kensaDB
+      .aggregate([
+        { $match: { uniqueID } },
+        {
+          $group: {
+            _id: "$uniqueID",
+            totalProcessQuantity: { $sum: "$Total" },
+          },
+        },
+      ])
+      .toArray();
 
     if (kensaAggregation.length === 0) {
-      return res.status(404).json({ error: "No records found in kensaDB for this uniqueID" });
+      return res
+        .status(404)
+        .json({ error: "No records found in kensaDB for this uniqueID" });
     }
 
     const totalKensaProcessed = kensaAggregation[0].totalProcessQuantity;
@@ -1111,15 +1308,24 @@ app.post('/submitToKensaDB', async (req, res) => {
     const currentCountEntry = await currentCountDB.findOne({ uniqueID });
 
     if (!currentCountEntry) {
-      return res.status(404).json({ error: "UniqueID not found in currentCountDB" });
+      return res
+        .status(404)
+        .json({ error: "UniqueID not found in currentCountDB" });
     }
 
-    const { SRSDB_Remaining_Quantity, slitDB_Remaining_Quantity, pressDB_Remaining_Quantity } =
-      currentCountEntry;
+    const {
+      SRSDB_Remaining_Quantity,
+      slitDB_Remaining_Quantity,
+      pressDB_Remaining_Quantity,
+    } = currentCountEntry;
 
     // Step 4: Fetch the masterDB entry for SRS and SLIT checks
-    const masterDB = client.db('Sasaki_Coating_MasterDB').collection('masterDB');
-    const masterEntry = await masterDB.findOne({ 背番号: currentCountEntry.背番号 });
+    const masterDB = client
+      .db("Sasaki_Coating_MasterDB")
+      .collection("masterDB");
+    const masterEntry = await masterDB.findOne({
+      背番号: currentCountEntry.背番号,
+    });
 
     if (!masterEntry) {
       return res.status(404).json({ error: "背番号 not found in masterDB" });
@@ -1134,19 +1340,21 @@ app.post('/submitToKensaDB', async (req, res) => {
     const now = new global.Date();
     const deductionData = {
       uniqueID,
-      Date: now.toISOString().split('T')[0], // YYYY-MM-DD
-      Time: now.toTimeString().split(' ')[0], // HH:mm:ss
+      Date: now.toISOString().split("T")[0], // YYYY-MM-DD
+      Time: now.toTimeString().split(" ")[0], // HH:mm:ss
       Name: Worker_Name, // Replace with appropriate worker name if needed
       Log: `Total:${Total}, Total_NG:${Total_NG} from ${設備}`,
     };
 
     // Step 5: Backward checking and deduction logic
-    if (SRS === '有り') {
+    if (SRS === "有り") {
       // Deduct from SRSDB_Remaining_Quantity
       const updatedSRSQuantity = SRSDB_Remaining_Quantity - deductionQty;
 
       if (updatedSRSQuantity < 0) {
-        return res.status(400).json({ error: "Not enough quantity in SRSDB to process this submission" });
+        return res.status(400).json({
+          error: "Not enough quantity in SRSDB to process this submission",
+        });
       }
 
       deductionData.SRSDB_deduction_Qty = deductionQty;
@@ -1161,12 +1369,14 @@ app.post('/submitToKensaDB', async (req, res) => {
           },
         }
       );
-    } else if (SLIT === '有り') {
+    } else if (SLIT === "有り") {
       // Deduct from slitDB_Remaining_Quantity
       const updatedSlitQuantity = slitDB_Remaining_Quantity - deductionQty;
 
       if (updatedSlitQuantity < 0) {
-        return res.status(400).json({ error: "Not enough quantity in slitDB to process this submission" });
+        return res.status(400).json({
+          error: "Not enough quantity in slitDB to process this submission",
+        });
       }
 
       deductionData.slitDB_deduction_Qty = deductionQty;
@@ -1186,7 +1396,9 @@ app.post('/submitToKensaDB', async (req, res) => {
       const updatedPressQuantity = pressDB_Remaining_Quantity - deductionQty;
 
       if (updatedPressQuantity < 0) {
-        return res.status(400).json({ error: "Not enough quantity in pressDB to process this submission" });
+        return res.status(400).json({
+          error: "Not enough quantity in pressDB to process this submission",
+        });
       }
 
       deductionData.pressDB_deduction_Qty = deductionQty;
@@ -1228,27 +1440,30 @@ app.post('/submitToKensaDB', async (req, res) => {
       );
     }
 
-    res.status(201).json({ insertedId: result.insertedId, message: "Form submitted and updated successfully" });
+    res.status(201).json({
+      insertedId: result.insertedId,
+      message: "Form submitted and updated successfully",
+    });
   } catch (error) {
     console.error("Error saving to kensaDB:", error);
     res.status(500).send("Error saving to kensaDB");
   }
 });
 
-
-
 // THis code updates remaining quantity
 //update Remaining_Quantity column for either slitDB or pressDB
-app.post('/updateRemainingQuantity', async (req, res) => {
+app.post("/updateRemainingQuantity", async (req, res) => {
   try {
     const { source, Remaining_Quantity, uniqueID } = req.body;
 
     if (!source || !uniqueID) {
-      return res.status(400).json({ error: 'Source and uniqueID are required' });
+      return res
+        .status(400)
+        .json({ error: "Source and uniqueID are required" });
     }
 
     await client.connect();
-    const database = client.db('submittedDB');
+    const database = client.db("submittedDB");
     const collection = database.collection(source); // Either slitDB or pressDB
 
     // Update the Remaining_Quantity for the matching uniqueID
@@ -1259,16 +1474,19 @@ app.post('/updateRemainingQuantity', async (req, res) => {
 
     if (result.matchedCount === 0) {
       console.log(`UniqueID ${uniqueID} not found in ${source}`);
-      return res.status(404).json({ error: `UniqueID ${uniqueID} not found in ${source}` });
+      return res
+        .status(404)
+        .json({ error: `UniqueID ${uniqueID} not found in ${source}` });
     }
 
-    res.status(200).json({ message: 'Remaining Quantity updated successfully' });
+    res
+      .status(200)
+      .json({ message: "Remaining Quantity updated successfully" });
   } catch (error) {
-    console.error('Error updating Remaining Quantity:', error);
-    res.status(500).send('Error updating Remaining Quantity');
+    console.error("Error updating Remaining Quantity:", error);
+    res.status(500).send("Error updating Remaining Quantity");
   }
 });
-
 
 app.listen(port, () => {
   console.log(`Server is running at http://localhost:${port}`);

@@ -331,7 +331,7 @@
             const srsCard = document.createElement('div');
             srsCard.classList.add('card');
             srsCard.addEventListener('click', () => {
-                console.log("SRS clicked, no action taken.");
+                window.location.href = `SRS Process iReporter.html?filter=${filterValue}`;
             });
 
             const srsImg = document.createElement('img');
