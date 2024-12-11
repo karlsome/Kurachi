@@ -1,5 +1,5 @@
-const serverURL = "https://kurachi.onrender.com";
-//const serverURL = "http://localhost:3000";
+//const serverURL = "https://kurachi.onrender.com";
+const serverURL = "http://localhost:3000";
 
 // this code will ping the Render website for inactivity
 const interval = 30000; // 30 seconds
@@ -33,12 +33,14 @@ if (selectedFactory) {
   console.log("kojo changed to: " + selectedFactory);
 }
 
-// gets all the sebanggo list
+
+
+// get sebanggo list for SLIT only
 document.addEventListener("DOMContentLoaded", () => {
   const subDropdown = document.getElementById("sub-dropdown");
 
   // Fetch 背番号 list from the server
-  fetch(`${serverURL}/getSeBanggoList`)
+  fetch(`${serverURL}/getSeBanggoListSLIT`)
     .then((response) => response.json())
     .then((data) => {
       // Clear existing options

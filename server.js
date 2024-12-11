@@ -77,6 +77,8 @@ app.get("/getSetsubiByProcess", async (req, res) => {
 //iREPORTER ROUTE
 ///////////////////////////////////
 //this route will fetch every sebanggo
+
+
 // Route to fetch all 背番号 from masterDB
 app.get("/getSeBanggoList", async (req, res) => {
   try {
@@ -188,6 +190,8 @@ app.post("/submitToKensaDBiReporter", async (req, res) => {
   }
 });
 
+
+
 // iReporter route to submit data to slitDB
 app.post("/submitToSlitDBiReporter", async (req, res) => {
   try {
@@ -244,6 +248,8 @@ app.post("/submitToSlitDBiReporter", async (req, res) => {
     res.status(500).json({ error: "Error saving data to slitDB" });
   }
 });
+
+
 
 // iReporter route to submit data to SRSDB
 app.post("/submitToSRSDBiReporter", async (req, res) => {
@@ -305,6 +311,8 @@ app.post("/submitToSRSDBiReporter", async (req, res) => {
   }
 });
 
+
+
 // This is for SRS LH
 // Route to fetch all 背番号 with R/L = "LH" from masterDB
 app.get("/getSeBanggoListLH", async (req, res) => {
@@ -340,6 +348,32 @@ app.get("/getSeBanggoListRH", async (req, res) => {
 
     // Query to find documents where R/L = "LH"
     const query = { "R/L": "RH", SRS: "有り" };
+    const projection = { 背番号: 1, _id: 0 }; // Only fetch the 背番号 field
+
+    // Fetch matching documents
+    const result = await collection.find(query).project(projection).toArray();
+
+    // Map the results to an array of 背番号
+    const seBanggoListLH = result.map((item) => item.背番号);
+
+    res.json(seBanggoListLH); // Send the list as JSON
+  } catch (error) {
+    console.error("Error retrieving 背番号 list for RH:", error);
+    res.status(500).send("Error retrieving 背番号 list for RH");
+  }
+});
+
+
+//This route is to get sebanggo list for SLIT only
+//fetch sebanggo list where slit = 有り
+app.get("/getSeBanggoListSLIT", async (req, res) => {
+  try {
+    await client.connect();
+    const database = client.db("Sasaki_Coating_MasterDB");
+    const collection = database.collection("masterDB");
+
+    // Query to find documents where R/L = "LH"
+    const query = { SLIT: "有り" };
     const projection = { 背番号: 1, _id: 0 }; // Only fetch the 背番号 field
 
     // Fetch matching documents
