@@ -483,9 +483,8 @@ function updateTotal() {
 }
 
 // Attach updateTotal to relevant events
-document
-  .getElementById("ProcessQuantity")
-  .addEventListener("input", updateTotal);
+document.getElementById("ProcessQuantity").addEventListener("input", updateTotal);
+document.getElementById("ProcessQuantityRH").addEventListener("input", updateTotal);
 
 // Submit Button for SRS Process LH
 document.querySelector('form[name="LH-form"]').addEventListener("submit", async (event) => {
