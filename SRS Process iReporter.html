@@ -504,19 +504,28 @@
         <br />
 
         <label for="processRH">設備名:</label>
-        <input readonly id="processRH" name="設備RH" />
+        <select id="processRH" name="設備RH">
+          <option value="S1">S1</option>
+          <option value="S2">S2</option>
+          <option value="S4">S4</option>
+          <option value="S5">S5</option>
+          <option value="S6">S6</option>
+        </select>
+        
         <label for="Machine OperatorRH">作業者 :</label>
         <input
-          readonly
           id="Machine OperatorRH"
           name="Worker_NameRH"
           placeholder="Worker's Name"
+          list="machine-operator-suggestionsRH"
+          required
         />
+        <datalist id="machine-operator-suggestionsRH"></datalist>
+        <br /><br />
 
         <!-- Cutting Section (A) -->
         <div id="sectionARH" class="process-section">
-          <datalist id="machine-operator-suggestionsRH"></datalist>
-          <br /><br />
+          
           <label for="Process QuantityRH">加工数（良品）+ NG:</label>
           <input
             type="text"

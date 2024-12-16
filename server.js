@@ -451,6 +451,34 @@ app.get("/getSeBanggoListSLIT", async (req, res) => {
   }
 });
 
+
+//for press 工場 = value passed
+//fetch sebanggo for press
+app.get("/getSeBanggoListPress", async (req, res) => {
+  try {
+    await client.connect();
+    const database = client.db("Sasaki_Coating_MasterDB");
+    const collection = database.collection("masterDB");
+
+    let 工場 = req.query.工場; // The process to search for
+
+    // Query to find documents where 工場 is 工場value"
+    const query = { 工場: 工場 };
+    const projection = { 背番号: 1, _id: 0 }; // Only fetch the 背番号 field
+
+    // Fetch matching documents
+    const result = await collection.find(query).project(projection).toArray();
+
+    // Map the results to an array of 背番号
+    const seBanggoList = result.map((item) => item.背番号);
+
+    res.json(seBanggoList); // Send the list as JSON
+  } catch (error) {
+    console.error("Error retrieving 背番号 list for Press:", error);
+    res.status(500).send("Error retrieving 背番号 list for Press");
+  }
+});
+
 ///////////////////////////////////////////
 //END of iREPORTER ROUTE
 ///////////////////////////////////

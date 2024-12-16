@@ -79,12 +79,12 @@ async function fetchSetsubiList() {
 // this function fetches sebanggo list
 async function fetchSebanggo() {
   // Get the selected process from the process dropdown
-  const process = document.getElementById("process").value;
+  const 工場 = document.getElementById("selected工場").value;
   blankInfo();
 
   try {
     // Fetch 背番号 values from the server based on the selected process
-    const response = await fetch(`${serverURL}/getSetsubiByProcess?process=${encodeURIComponent(process)}`);
+    const response = await fetch(`${serverURL}/getSeBanggoListPress?工場=${encodeURIComponent(工場)}`);
     const data = await response.json();
 
     // Get the sub-dropdown element
@@ -102,8 +102,8 @@ async function fetchSebanggo() {
     // Populate the sub-dropdown with new options based on the 背番号 values
     data.forEach(item => {
       const option = document.createElement("option");
-      option.value = item.背番号;
-      option.textContent = item.背番号;
+      option.value = item;
+      option.textContent = item;
       subDropdown.appendChild(option);
     });
 
@@ -116,8 +116,6 @@ async function fetchSebanggo() {
 
 // Call fetchSetsubiList when the page loads
 document.addEventListener("DOMContentLoaded", fetchSetsubiList);
-// Also call fetchSebanggo when a new process is selected
-document.getElementById("process").addEventListener("change", fetchSebanggo);
 
 //blanks the info page
 function blankInfo() {

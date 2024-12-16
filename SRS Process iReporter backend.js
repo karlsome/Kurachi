@@ -55,6 +55,8 @@ WorkerName.addEventListener("input", () => {
   WorkerNameRH.value = WorkerName.value;
 });
 
+
+
 //blanks the info page
 function blankInfo() {
   // Clear the value of the label with id "SRScode"
@@ -382,6 +384,7 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 
 //Get worker list
+
 document.addEventListener("DOMContentLoaded", async function () {
   const selectedFactory = document.getElementById("selected工場").value;
 
@@ -396,12 +399,20 @@ document.addEventListener("DOMContentLoaded", async function () {
 
       const workerNames = await response.json();
       const dataList = document.getElementById("machine-operator-suggestions");
+      const dataListRH = document.getElementById("machine-operator-suggestionsRH");
       dataList.innerHTML = ""; // Clear any existing options
+      dataListRH.innerHTML = ""; // Clear any existing options
 
       workerNames.forEach((name) => {
-        const option = document.createElement("option");
-        option.value = name;
-        dataList.appendChild(option);
+        // Create option for dataList
+        const option1 = document.createElement("option");
+        option1.value = name;
+        dataList.appendChild(option1);
+
+        // Create a separate option for dataListRH
+        const option2 = document.createElement("option");
+        option2.value = name;
+        dataListRH.appendChild(option2);
       });
     } catch (error) {
       console.error("Error fetching worker names:", error);
