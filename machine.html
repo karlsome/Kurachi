@@ -429,6 +429,46 @@
         kensaCard.appendChild(kensaImg);
         kensaCard.appendChild(kensaLabel);
         containers.appendChild(kensaCard);
+    } else if (filterValue === '第二工場') {
+        const containers = document.getElementById('containers');
+
+        // Create card for プレス加工
+        const pressCard = document.createElement('div');
+        pressCard.classList.add('card');
+        pressCard.addEventListener('click', () => {
+            window.location.href = `Press Cutting iReporter.html?filter=${filterValue}`;
+        });
+
+        const pressImg = document.createElement('img');
+        pressImg.src = 'src/machines/MANAS.jpg'; // Adjust the path to your image
+        pressImg.alt = 'プレス加工';
+
+        const pressLabel = document.createElement('div');
+        pressLabel.classList.add('label');
+        pressLabel.textContent = 'プレス加工';
+
+        pressCard.appendChild(pressImg);
+        pressCard.appendChild(pressLabel);
+        containers.appendChild(pressCard);
+
+        // Create card for 検査
+        const kensaCard = document.createElement('div');
+        kensaCard.classList.add('card');
+        kensaCard.addEventListener('click', () => {
+            window.location.href = `newKensa iReporter.html?filter=${filterValue}`;
+        });
+
+        const kensaImg = document.createElement('img');
+        kensaImg.src = 'src/machines/kensa.jpg'; // Adjust the path to your image
+        kensaImg.alt = '検査';
+
+        const kensaLabel = document.createElement('div');
+        kensaLabel.classList.add('label');
+        kensaLabel.textContent = '検査';
+
+        kensaCard.appendChild(kensaImg);
+        kensaCard.appendChild(kensaLabel);
+        containers.appendChild(kensaCard);
     } 
         
         
