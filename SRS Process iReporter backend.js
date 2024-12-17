@@ -71,8 +71,7 @@ function blankInfo() {
 }
 
 
-
-//Clears The LH form
+// Clears The LH form
 function clearForm() {
   // Get all input elements within the LH form
   const form = document.querySelector('form[name="LH-form"]');
@@ -94,7 +93,8 @@ function clearForm() {
       input.type === "text" ||
       input.type === "number" ||
       input.type === "date" ||
-      input.type === "time"
+      input.type === "time" ||
+      input.tagName.toLowerCase() === "textarea"
     ) {
       input.value = ""; // Reset value
     }
@@ -102,6 +102,12 @@ function clearForm() {
       input.checked = false; // Uncheck checkboxes and radio buttons
     }
   });
+
+  // Explicitly clear the Comments1 textarea
+  const commentsTextarea = form.querySelector('textarea[name="Comments1"]');
+  if (commentsTextarea) {
+    commentsTextarea.value = ""; // Clear its value
+  }
 
   // Reset the counters to 0
   counters.forEach((counterId) => {
@@ -123,7 +129,7 @@ function clearForm() {
     dynamicImage.style.display = "none"; // Hide the image
   }
 
-  console.log("LH form cleared successfully.");
+  console.log("LH form cleared successfully, including Comments1 textarea.");
 }
 
 
@@ -151,7 +157,8 @@ function clearFormRH() {
       input.type === "text" ||
       input.type === "number" ||
       input.type === "date" ||
-      input.type === "time"
+      input.type === "time" ||
+      input.tagName.toLowerCase() === "textarea"
     ) {
       input.value = ""; // Reset value
     }
@@ -159,6 +166,12 @@ function clearFormRH() {
       input.checked = false; // Uncheck checkboxes and radio buttons
     }
   });
+
+  // Explicitly clear the Comments2 textarea
+  const commentsTextarea = form.querySelector('textarea[name="Comments2"]');
+  if (commentsTextarea) {
+    commentsTextarea.value = ""; // Clear its value
+  }
 
   // Reset the counters to 0
   counters.forEach((counterId) => {
@@ -180,7 +193,7 @@ function clearFormRH() {
     dynamicImage.style.display = "none"; // Hide the image
   }
 
-  console.log("RH form cleared successfully.");
+  console.log("RH form cleared successfully, including Comments2 textarea.");
 }
 
 
@@ -857,6 +870,8 @@ document.querySelector('form[name="RH-form"]').addEventListener("submit", async 
       };
     }
   });
+
+
 
 //Updates cycle Time value
 function updateCycleTime() {
