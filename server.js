@@ -525,6 +525,7 @@ app.get("/getProductDetails", async (req, res) => {
         色: 1,
         送りピッチ: 1,
         型番: 1,
+        収容数: 1,
         _id: 0,
       },
     });

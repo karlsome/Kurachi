@@ -89,6 +89,13 @@ function clearForm() {
   // Clear all input fields and textareas
   inputs.forEach((input) => {
     if (
+      input.type === "hidden" &&
+      input.id === "selected工場" // Skip the hidden input with this ID
+    ) {
+      return; // Do nothing for this specific input
+    }
+
+    if (
       input.type === "hidden" ||
       input.type === "text" ||
       input.type === "number" ||
@@ -130,6 +137,7 @@ function clearForm() {
   }
 
   console.log("LH form cleared successfully, including Comments1 textarea.");
+  console.log(selectedFactory);
 }
 
 
@@ -152,6 +160,13 @@ function clearFormRH() {
 
   // Clear all input fields and textareas
   inputs.forEach((input) => {
+    if (
+      input.type === "hidden" &&
+      input.id === "selected工場" // Skip the hidden input with this ID
+    ) {
+      return; // Do nothing for this specific input
+    }
+
     if (
       input.type === "hidden" ||
       input.type === "text" ||
@@ -194,6 +209,7 @@ function clearFormRH() {
   }
 
   console.log("RH form cleared successfully, including Comments2 textarea.");
+  console.log(selectedFactory);
 }
 
 

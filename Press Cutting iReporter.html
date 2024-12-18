@@ -32,6 +32,7 @@
             <input type="hidden" name="Last Process" id="Last Process" value="A">
             <input type="hidden" name="Remaining_Quantity" id="Remaining_Quantity">
             <input type="hidden" name="Process_Status" id="Process_Status">
+            <input type="hidden" name="収容数" id="収容数" value = "">
             <audio id="alert-sound" src="src/alert.mp3" preload="auto"></audio>
 
             <!-- for hatusmonoStatus -->
@@ -64,6 +65,8 @@
             <button id="scan-button" type="button">Scan 背番号</button>
             <br>
             <br>
+            <button id="print" type="button" onclick="printLabel()"> Print Label </button>
+
 
 
     
@@ -86,7 +89,8 @@
             <br><br>
             <label for="Lot No.">加工日:</label>
             <input type="date" name="Date" id="Lot No." placeholder="Date" onfocus="setDefaultDate(this)" required>
-            <br>
+            <input type="number" name="Labelextension" id="Labelextension"> </input>
+            <br><br>
             <label for="Start Time">加工開始時間:</label>
             <input type="time" name="Time_start" id="Start Time" placeholder="Time Start" onfocus="setDefaultTime(this)" required>
             <br>
