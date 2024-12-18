@@ -673,7 +673,7 @@ function printLabel() {
   const 品番 = document.getElementById("product-number").value;
   const 車型 = document.getElementById("model").value;
   const 収容数 = document.getElementById("収容数").value;
-  const 背番号 = document.getElementById("product-number").value;
+  const 背番号 = document.getElementById("sub-dropdown").value;
   
   const R_L = document.getElementById("R-L").value;
   const 材料 = document.getElementById("material").value;
