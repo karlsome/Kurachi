@@ -20,6 +20,7 @@ setInterval(pingServer, interval);
 
 
 
+
 // gets all the sebanggo list
 document.addEventListener('DOMContentLoaded', () => {
   const subDropdown = document.getElementById('sub-dropdown');
@@ -28,6 +29,9 @@ document.addEventListener('DOMContentLoaded', () => {
   fetch(`${serverURL}/getSeBanggoList`)
       .then(response => response.json())
       .then(data => {
+          // Sort the 背番号 list alphabetically
+          data.sort((a, b) => a.localeCompare(b, 'ja')); // 'ja' for Japanese sorting if needed
+
           // Clear existing options
           subDropdown.innerHTML = '';
 
@@ -49,7 +53,6 @@ document.addEventListener('DOMContentLoaded', () => {
       })
       .catch(error => console.error('Error fetching 背番号 list:', error));
 });
-
 
 
 //this code listens to incoming parameters passed

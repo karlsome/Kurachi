@@ -43,6 +43,7 @@ document.addEventListener("DOMContentLoaded", () => {
   fetch(`${serverURL}/getSeBanggoListSLIT`)
     .then((response) => response.json())
     .then((data) => {
+      data.sort((a, b) => a.localeCompare(b, 'ja')); // 'ja' for Japanese sorting if needed alphabetically
       // Clear existing options
       subDropdown.innerHTML = "";
 
