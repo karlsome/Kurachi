@@ -626,7 +626,8 @@ function printLabel() {
 
   // Smooth Print URL scheme
   const filename = "sample6.lbx"; // Ensure this matches the local file name
-  const size = "RollW62RB";
+  //const size = "RollW62RB";
+  const size = "RollW62";
   const copies = 1;
   const url =
     `brotherwebprint://print?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent(size)}&copies=${encodeURIComponent(copies)}` +
