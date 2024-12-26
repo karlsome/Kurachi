@@ -613,9 +613,10 @@ function printLabel() {
   const R_L = document.getElementById("R-L").value;
   const 材料 = document.getElementById("material").value;
   const 色 = document.getElementById("material-color").value;
-  const 品番収容数 = 品番 + "," + 収容数;
+  const 品番収容数 = `${品番},${収容数}`;
   const extension = document.getElementById("Labelextension").value;
   const Date2 = document.getElementById('Lot No.').value;
+  console.log(R_L);
 
   if (extension){
      Date = Date2 + " - " + extension;
@@ -624,8 +625,7 @@ function printLabel() {
   }
 
   // Smooth Print URL scheme
-  const filename = "sample4.lbx"; // Ensure this matches the local file name
-  ///storage/emulated/0/Download/sample2.lbx
+  const filename = "sample6.lbx"; // Ensure this matches the local file name
   const size = "RollW62RB";
   const copies = 1;
   const url =
@@ -634,11 +634,11 @@ function printLabel() {
     `&text_車型=${encodeURIComponent(車型)}` +
     `&text_収容数=${encodeURIComponent(収容数)}` +
     `&text_背番号=${encodeURIComponent(背番号)}` +
-    `&text_R/L=${encodeURIComponent(R_L)}` +
+    `&text_RL=${encodeURIComponent(R_L)}` +
     `&text_材料=${encodeURIComponent(材料)}` +
     `&text_色=${encodeURIComponent(色)}` +
     `&text_DateT=${encodeURIComponent(Date)}` +
-    `&barcode_[品番][Comma][収容数]=${encodeURIComponent(品番収容数)}`;
+    `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
   console.log(Date);
   // Redirect to Smooth Print
   window.location.href = url;
