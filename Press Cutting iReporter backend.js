@@ -42,6 +42,7 @@ async function fetchSetsubiList() {
     // Fetch data for the process dropdown
     const response = await fetch(`${serverURL}/getSetsubiList?factory=${encodeURIComponent(factory)}`);
     const data = await response.json();
+    
 
     // Get unique values of `設備`
     const uniqueSetsubi = [...new Set(data.map(item => item.設備))];
@@ -86,6 +87,7 @@ async function fetchSebanggo() {
     // Fetch 背番号 values from the server based on the selected process
     const response = await fetch(`${serverURL}/getSeBanggoListPress?工場=${encodeURIComponent(工場)}`);
     const data = await response.json();
+    data.sort((a, b) => a.localeCompare(b, 'ja')); // 'ja' for Japanese sorting if needed // sort alphabetically
 
     // Get the sub-dropdown element
     const subDropdown = document.getElementById("sub-dropdown");
