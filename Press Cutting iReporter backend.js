@@ -3,6 +3,53 @@ const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
 
 
+// Select all input, select, and button elements
+const inputs = document.querySelectorAll('input, select, button,textarea');
+const selected工場 = document.getElementById('selected工場').value; // Get the current factory value
+const pageName = location.pathname.split('/').pop(); // Get the current HTML file name
+const uniquePrefix = `${pageName}_${selected工場}_`;
+
+// Save the value of each input to localStorage on change
+inputs.forEach(input => {
+    input.addEventListener('input', () => {
+        const key = `${pageName}_${selected工場}_${input.id || input.name}`; // Prefix key with pageName and selected工場
+        if (key) {
+            localStorage.setItem(key, input.value);
+        }
+    });
+
+    if (input.type === 'checkbox' || input.type === 'radio') {
+        input.addEventListener('change', () => {
+            const key = `${pageName}_${selected工場}_${input.id || input.name}`;
+            if (key) {
+                localStorage.setItem(key, input.checked); // Save checkbox/radio state
+            }
+        });
+    }
+});
+
+
+// Restore the values of input fields from localStorage on page load
+document.addEventListener('DOMContentLoaded', () => {
+    inputs.forEach(input => {
+        const key = `${pageName}_${selected工場}_${input.id || input.name}`;
+        if (key) {
+            const savedValue = localStorage.getItem(key);
+            if (savedValue !== null) {
+                if (input.type === 'checkbox' || input.type === 'radio') {
+                    input.checked = savedValue === 'true'; // Restore checkbox/radio state
+                } else {
+                    input.value = savedValue; // Restore other input types
+                }
+            }
+        }
+    });
+});
+
+
+
+
+
 // this code will ping the Render website for inactivity
 const interval = 30000; // 30 seconds
 function pingServer() {
@@ -38,7 +85,7 @@ if (selectedFactory){
 async function fetchSetsubiList() {
   const factory = document.getElementById("selected工場").value;
   
-  if (factory === '肥田瀬') {
+  if (factory === '肥田瀬' || factory ==='第二工場') {
     disableInputs();
     console.log("this is runned");
   }
@@ -142,6 +189,31 @@ function blankInfo() {
 
 
 
+// this function is to disable or enable input fields
+function disableInputs() {
+  inputs.forEach(input => {
+      if (
+          input.id !== 'scan-button' && 
+          input.id !== 'sub-dropdown' && 
+          input.id !== 'reset-button' // Specifically exclude the reset button
+      ) {
+          input.disabled = true;
+      }
+  });
+}
+
+
+function enableInputs() {
+  inputs.forEach(input => {
+      if (input.id !== 'sub-dropdown') { // Keep sub-dropdown enabled
+          input.disabled = false;
+      }
+  });
+}
+
+
+
+//for the info section
 async function fetchProductDetails() {
   enableInputs();
   const serialNumber = document.getElementById("sub-dropdown").value;
@@ -199,19 +271,26 @@ document.getElementById("sub-dropdown").addEventListener("change", fetchProductD
 
 
 // when time is pressed
+// Set current time as default when time is pressed
 function setDefaultTime(input) {
+  
+
   const now = new Date();
   const hours = String(now.getHours()).padStart(2, '0');
   const minutes = String(now.getMinutes()).padStart(2, '0');
   const timeValue = `${hours}:${minutes}`;
   input.value = timeValue;
 
-  // Save the time to local storage beyatch
-  localStorage.setItem(input.id, timeValue);
+  // Save the time to local storage with unique prefix
+  localStorage.setItem(`${uniquePrefix}${input.id}`, timeValue);
 }
 
+
+
 // When date is pressed or on page load, set current date as default
+// Set current date as default when date is pressed or on page load
 function setDefaultDate(input) {
+
   const now = new Date();
   const year = now.getFullYear();
   const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -219,8 +298,8 @@ function setDefaultDate(input) {
   const dateValue = `${year}-${month}-${day}`;
   input.value = dateValue;
 
-  // Save the date to local storage
-  localStorage.setItem(input.id, dateValue);
+  // Save the date to local storage with unique prefix
+  localStorage.setItem(`${uniquePrefix}${input.id}`, dateValue);
 }
 
 // Set current date as default on page load
@@ -228,6 +307,7 @@ document.addEventListener("DOMContentLoaded", function() {
   const dateInput = document.getElementById("Lot No.");
   setDefaultDate(dateInput);
 });
+
 
 
 //Get worker list
@@ -257,30 +337,39 @@ document.addEventListener("DOMContentLoaded", async function() {
 
 //function for plus minus button
 function incrementCounter(counterId) {
+  const selected工場 = document.getElementById('selected工場').value; // Get the current factory value
+  const pageName = location.pathname.split('/').pop(); // Get the current HTML file name
+  const uniquePrefix = `${pageName}_${selected工場}_`; // Unique prefix for this page and factory
+
   const counterElement = document.getElementById(`counter-${counterId}`);
   let currentValue = parseInt(counterElement.value, 10);
   currentValue += 1;
   counterElement.value = currentValue;
 
-  // Save the updated value to local storage
-  localStorage.setItem(`counter-${counterId}`, currentValue);
+  // Save the updated value to local storage with the unique prefix
+  localStorage.setItem(`${uniquePrefix}counter-${counterId}`, currentValue);
 
   updateTotal();
 }
 
 function decrementCounter(counterId) {
+  const selected工場 = document.getElementById('selected工場').value; // Get the current factory value
+  const pageName = location.pathname.split('/').pop(); // Get the current HTML file name
+  const uniquePrefix = `${pageName}_${selected工場}_`; // Unique prefix for this page and factory
+
   const counterElement = document.getElementById(`counter-${counterId}`);
   let currentValue = parseInt(counterElement.value, 10);
   if (currentValue > 0) {
-    currentValue -= 1;
-    counterElement.value = currentValue;
+      currentValue -= 1;
+      counterElement.value = currentValue;
 
-    // Save the updated value to local storage
-    localStorage.setItem(`counter-${counterId}`, currentValue);
+      // Save the updated value to local storage with the unique prefix
+      localStorage.setItem(`${uniquePrefix}counter-${counterId}`, currentValue);
 
-    updateTotal();
+      updateTotal();
   }
 }
+
 
 function updateTotal() {
   // Get the value of Process Quantity
@@ -486,149 +575,9 @@ function updateCycleTime() {
 
 
 // //this is a new scan-button code. instead of using windows.alert, it uses modal so that it wont leave the webpage
-// document.getElementById('scan-button').addEventListener('click', function() {
-//   const qrScannerModal = document.getElementById('qrScannerModal');
-//   const html5QrCode = new Html5Qrcode("qrReader");
-//   const alertSound = document.getElementById('alert-sound');
 
-//   // Preload the alert sound without playing it
-//   if (alertSound) {
-//       alertSound.muted = true; // Mute initially to preload
-//       alertSound.loop = false; // Disable looping
-//       alertSound.load(); // Preload the audio file
-//   }
-
-//   // Show the modal
-//   qrScannerModal.style.display = 'block';
-
-//   // Start QR code scanning when the modal is displayed
-//   html5QrCode.start(
-//       { facingMode: "environment" },
-//       {
-//           fps: 10,
-//           qrbox: { width: 250, height: 250 }
-//       },
-//       qrCodeMessage => {
-//           const subDropdown = document.getElementById('sub-dropdown');
-//           const options = [...subDropdown.options].map(option => option.value);
-
-//           // Check if the scanned QR code does NOT exist in the dropdown options
-//           if (!options.includes(qrCodeMessage)) {
-//               const scanAlertModal = document.getElementById('scanAlertModal');
-//               document.getElementById('scanAlertText').innerText = "背番号が存在しません。 / Sebanggo does not exist.";
-//               scanAlertModal.style.display = 'block';
-
-//               if (alertSound) {
-//                   alertSound.muted = false; // Unmute to alert user
-//                   alertSound.volume = 1; // Set full volume
-//                   alertSound.play().catch(error => console.error("Failed to play alert sound:", error));
-//               }
-
-//               document.body.classList.add('flash-red');
-
-//               const closeScanModalButton = document.getElementById('closeScanModalButton');
-//               closeScanModalButton.onclick = function () {
-//                   scanAlertModal.style.display = 'none';
-//                   alertSound.pause();
-//                   alertSound.currentTime = 0; // Reset sound to the beginning
-//                   alertSound.muted = true; // Mute again for next time
-//                   document.body.classList.remove('flash-red');
-//               };
-
-//               html5QrCode.stop().then(() => {
-//                   qrScannerModal.style.display = 'none';
-//               }).catch(err => {
-//                   console.error("Failed to stop scanning:", err);
-//               });
-
-//               return;
-//           }
-
-//           // If a wrong Kanban QR code is detected
-//           if (subDropdown && subDropdown.value !== "" && subDropdown.value !== qrCodeMessage) {
-//               html5QrCode.stop().then(() => {
-//                   qrScannerModal.style.display = 'none';
-
-//                   if (alertSound) {
-//                       alertSound.muted = false;
-//                       alertSound.volume = 1;
-//                       alertSound.play().catch(error => console.error("Failed to play alert sound:", error));
-//                   }
-
-//                   document.body.classList.add('flash-red');
-//                   const scanAlertModal = document.getElementById('scanAlertModal');
-//                   scanAlertModal.style.display = 'block';
-
-//                   const closeScanModalButton = document.getElementById('closeScanModalButton');
-//                   closeScanModalButton.onclick = function() {
-//                       scanAlertModal.style.display = 'none';
-//                       alertSound.pause();
-//                       alertSound.currentTime = 0;
-//                       alertSound.muted = true;
-//                       document.body.classList.remove('flash-red');
-//                   };
-//               }).catch(err => {
-//                   console.error("Failed to stop scanning:", err);
-//               });
-
-//               return;
-//           }
-
-//           // If QR code is the same as the sub-dropdown value, close the scanner
-//           if (subDropdown && subDropdown.value === qrCodeMessage) {
-//               html5QrCode.stop().then(() => {
-//                   qrScannerModal.style.display = 'none';
-//               }).catch(err => {
-//                   console.error("Failed to stop scanning:", err);
-//               });
-
-//               return;
-//           }
-
-//           // If QR code is valid but different, process and close the scanner
-//           if (subDropdown && subDropdown.value !== qrCodeMessage) {
-//               // resetForm();
-//               subDropdown.value = qrCodeMessage;
-//               fetchProductDetails();
-              
-//               // setTimeout(() => {
-//               //     window.location.reload();
-//               // }, 500);
-
-//               html5QrCode.stop().then(() => {
-//                   qrScannerModal.style.display = 'none';
-//               }).catch(err => {
-//                   console.error("Failed to stop scanning:", err);
-//               });
-//           }
-//       },
-//       errorMessage => {
-//           // Handle scanning errors here
-//       }
-//   ).catch(err => {
-//       console.error("Failed to start scanning:", err);
-//   });
-
-//   document.getElementById('closeQRScannerModal').onclick = function() {
-//       html5QrCode.stop().then(() => {
-//           qrScannerModal.style.display = 'none';
-//       }).catch(err => {
-//           console.error("Failed to stop scanning:", err);
-//       });
-//   };
-
-//   window.onclick = function(event) {
-//       if (event.target == qrScannerModal) {
-//           html5QrCode.stop().then(() => {
-//               qrScannerModal.style.display = 'none';
-//           }).catch(err => {
-//               console.error("Failed to stop scanning:", err);
-//           });
-//       }
-//   };
-// });
-
-
+// Start QR code scanning when the modal is displayed
+let firstScanValue = null;
 
 document.getElementById('scan-button').addEventListener('click', function () {
   const qrScannerModal = document.getElementById('qrScannerModal');
@@ -671,27 +620,28 @@ document.getElementById('scan-button').addEventListener('click', function () {
       };
   }
 
-  // Start QR code scanning when the modal is displayed
-  let firstScanValue = null;
+  
 
   html5QrCode.start(
+    
       { facingMode: "environment" },
       {
           fps: 10,
           qrbox: { width: 250, height: 250 }
       },
       qrCodeMessage => {
+        console.log("first scan: " + firstScanValue);
           const options = [...subDropdown.options].map(option => option.value);
 
           // Logic for "肥田瀬"工場
-          if (selected工場 === "肥田瀬") {
+          if (selected工場 === "肥田瀬" || selected工場 === '第二工場') {
               if (!firstScanValue) {
                   // First scan
                   if (options.includes(qrCodeMessage)) {
                       firstScanValue = qrCodeMessage; // Store the first scan value
                       window.alert("First QR code scanned successfully. Please scan the TOMSON BOARD. / 最初のQRコードが正常にスキャンされました。トムソンボードをスキャンしてください。");
                   } else {
-                      window.alert("背番号が存在しません。 / Sebanggo does not exist.");
+                      showAlert("背番号が存在しません。 / Sebanggo does not exist.");
                       html5QrCode.stop().then(() => {
                           qrScannerModal.style.display = 'none';
                       }).catch(err => {
@@ -773,80 +723,80 @@ document.getElementById('scan-button').addEventListener('click', function () {
 
 
 
+// // function to reset everything then reloads the page
+// function resetForm() {
+//   // Clear all form inputs
+//   const inputs = document.querySelectorAll("input, select, textarea");
+//   inputs.forEach(input => {
+//     input.value = '';
+//   });
 
+//   // Clear counters
+//   for (let i = 1; i <= 18; i++) {
+//     localStorage.removeItem(`counter-${i}`);
+//     const counterElement = document.getElementById(`counter-${i}`);
+//     if (counterElement) {
+//       counterElement.value = '0'; // Reset the counter display to 0
+//     }
+//   }
 
+//   // Clear checkbox state and other specific items
+//   localStorage.removeItem('enable-inputs-checkbox');
+//   localStorage.removeItem('検査STATUS');
+//   localStorage.removeItem('sendtoNCButtonisPressed');
+//   localStorage.removeItem('hatsumonoLabel');
+//   localStorage.removeItem('atomonoLabel');
+//   localStorage.removeItem("product-number");
+//   localStorage.removeItem('process');
+//   localStorage.removeItem("SRShatsumonoLabel");
 
+//   // Uncheck the checkbox and disable inputs
+//   const checkbox = document.getElementById('enable-inputs');
+//   if (checkbox) {
+//     checkbox.checked = false;
+//     toggleInputs(); // Reuse the existing toggleInputs function to disable the inputs
+//   }
 
+//   // Remove all other form-related local storage items
+//   inputs.forEach(input => {
+//     localStorage.removeItem(input.name);
+//   });
 
+//   // reload the page 
+//   window.location.reload();
+// }
 
-
-
-const inputs = document.querySelectorAll('input, select, button');
-
-
-function disableInputs() {
-  inputs.forEach(input => {
-      if (input.id !== 'scan-button' && input.id !== 'sub-dropdown') { // Exclude the scan button and sub-dropdown
-          input.disabled = true;
-      }
-  });
-}
-
-function enableInputs() {
-  inputs.forEach(input => {
-      if (input.id !== 'sub-dropdown') { // Keep sub-dropdown enabled
-          input.disabled = false;
-      }
-  });
-}
-
-
-
-
-
-
-// function to reset everything then reloads the page
+// Function to reset everything and reload the page
 function resetForm() {
-  // Clear all form inputs
-  const inputs = document.querySelectorAll("input, select, textarea");
+  const uniquePrefix = `${pageName}_${selected工場}_`;
+  // Remove unprefixed keys
+  // ['Lot No.', 'Start Time', 'End Time', 'counter-18', 'counter-19', 'counter-20'].forEach(key => {
+  //     localStorage.removeItem(key);
+  // });
+
+  // Clear all form inputs with unique prefix
+  const inputs = document.querySelectorAll('input, select, textarea');
   inputs.forEach(input => {
-    input.value = '';
+      const key = `${uniquePrefix}${input.id || input.name}`;
+      localStorage.removeItem(key);
+      input.value = ''; // Reset input value
   });
 
-  // Clear counters
-  for (let i = 1; i <= 18; i++) {
-    localStorage.removeItem(`counter-${i}`);
-    const counterElement = document.getElementById(`counter-${i}`);
-    if (counterElement) {
-      counterElement.value = '0'; // Reset the counter display to 0
-    }
+  // Clear counters with unique prefix
+  for (let i = 18; i <= 20; i++) {
+      const key = `${uniquePrefix}counter-${i}`;
+      localStorage.removeItem(key);
+      const counterElement = document.getElementById(`counter-${i}`);
+      if (counterElement) {
+          counterElement.value = '0'; // Reset counter display
+      }
   }
 
-  // Clear checkbox state and other specific items
-  localStorage.removeItem('enable-inputs-checkbox');
-  localStorage.removeItem('検査STATUS');
-  localStorage.removeItem('sendtoNCButtonisPressed');
-  localStorage.removeItem('hatsumonoLabel');
-  localStorage.removeItem('atomonoLabel');
-  localStorage.removeItem("product-number");
-  localStorage.removeItem('process');
-  localStorage.removeItem("SRShatsumonoLabel");
-
-  // Uncheck the checkbox and disable inputs
-  const checkbox = document.getElementById('enable-inputs');
-  if (checkbox) {
-    checkbox.checked = false;
-    toggleInputs(); // Reuse the existing toggleInputs function to disable the inputs
-  }
-
-  // Remove all other form-related local storage items
-  inputs.forEach(input => {
-    localStorage.removeItem(input.name);
-  });
-
-  // reload the page 
+  // Reload the page
   window.location.reload();
 }
+
+
 
 
 
