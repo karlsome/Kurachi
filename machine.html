@@ -429,7 +429,27 @@
         kensaCard.appendChild(kensaImg);
         kensaCard.appendChild(kensaLabel);
         containers.appendChild(kensaCard);
-    } else if (filterValue === '第二工場') {
+
+        // Create card for 肥田瀬QRスキャナー
+        const hidaseCard = document.createElement('div');
+        hidaseCard.classList.add('card');
+        hidaseCard.addEventListener('click', () => {
+            window.location.href = `hidase labelprinter.html?filter=${filterValue}`;
+        });
+
+        const hidaseImg = document.createElement('img');
+        hidaseImg.src = 'src/qr-code.png'; // Adjust the path to your image
+        hidaseImg.alt = '肥田瀬QRスキャナー';
+
+        const hidaseLabel = document.createElement('div');
+        hidaseLabel.classList.add('label');
+        hidaseLabel.textContent = '肥田瀬QRスキャナー';
+
+        hidaseCard.appendChild(hidaseImg);
+        hidaseCard.appendChild(hidaseLabel);
+        containers.appendChild(hidaseCard);
+    }
+ else if (filterValue === '第二工場') {
         const containers = document.getElementById('containers');
 
         // Create card for プレス加工
