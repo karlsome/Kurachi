@@ -483,6 +483,60 @@ app.get("/getSeBanggoListPress", async (req, res) => {
 //END of iREPORTER ROUTE
 ///////////////////////////////////
 
+
+
+
+////////////////////////////////
+//HIDASE LABEL PRINTER ROUTE////
+///////////////////////////////
+
+
+// Route to fetch all 背番号 from the correct collection
+app.get("/getSeBanggoListH", async (req, res) => {
+  try {
+    await client.connect();
+    const database = client.db("Sasaki_Coating_MasterDB");
+    const collection = database.collection("hidaseTemporary"); // Corrected collection name
+
+    const projection = { 品番: 1, _id: 0 }; // Assuming 背番号 refers to 品番
+    const result = await collection.find({}).project(projection).toArray();
+
+    // Map the results to an array of 品番
+    const seBanggoList = result.map((item) => item.品番);
+
+    res.json(seBanggoList);
+  } catch (error) {
+    console.error("Error retrieving 品番 list:", error);
+    res.status(500).send("Error retrieving 品番 list");
+  }
+});
+
+
+app.get("/getCapacityBySeBanggo", async (req, res) => {
+  try {
+    const seBanggo = req.query.seBanggo;
+
+    await client.connect();
+    const database = client.db("Sasaki_Coating_MasterDB");
+    const collection = database.collection("hidaseTemporary");
+
+    const result = await collection.find({ 品番: seBanggo }).toArray();
+
+    res.json(result.map((item) => ({ 収容数: item.収容数 })));
+  } catch (error) {
+    console.error("Error retrieving 収容数:", error);
+    res.status(500).send("Error retrieving 収容数");
+  }
+});
+
+
+
+
+
+
+
+
+
 // Get product info from MongoDB (parameters are kojo and sebanggo)
 app.get("/getProductDetails", async (req, res) => {
   try {
