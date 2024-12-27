@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Brother Smooth Print Example</title>
+</head>
+<body>
+    <h1>Brother Smooth Print Example</h1>
+    <form id="printForm">
+        <label for="品番">品番: <input type="text" id="品番" name="品番" placeholder="Enter 品番"></label><br>
+        <label for="車型">車型: <input type="text" id="車型" name="車型" placeholder="Enter 車型"></label><br>
+        <label for="収容数">収容数: <input type="number" id="収容数" name="収容数" placeholder="Enter 収容数"></label><br>
+        <label for="背番号">背番号: <input type="text" id="背番号" name="背番号" placeholder="Enter 背番号"></label><br>
+        <label for="R_L">R/L: <input type="text" id="R_L" name="R_L" placeholder="Enter R/L"></label><br>
+        <label for="材料">材料: <input type="text" id="材料" name="材料" placeholder="Enter 材料"></label><br>
+        <label for="色">色: <input type="text" id="色" name="色" placeholder="Enter 色"></label><br>
+        <label for="品番収容数">[品番][Comma][収容数]: <input type="text" id="品番収容数" name="品番収容数" placeholder="Enter [品番][Comma][収容数]"></label><br>
+        <button type="button" onclick="printLabel()">Print</button>
+    </form>
+
+    <script>
+
+        //this code will print out dynamic based on template
+        function printLabel() {
+            // Retrieve dynamic values from the form
+            const 品番 = document.getElementById('品番').value;
+            const 車型 = document.getElementById('車型').value;
+            const 収容数 = document.getElementById('収容数').value;
+            const 背番号 = document.getElementById('背番号').value;
+            const R_L = document.getElementById('R_L').value;
+            const 材料 = document.getElementById('材料').value;
+            const 色 = document.getElementById('色').value;
+            const 品番収容数 = document.getElementById('品番収容数').value;
+
+            // Ensure all fields are filled
+            if (!品番 || !車型 || !収容数 || !背番号 || !R_L || !材料 || !色 || !品番収容数) {
+                alert('Please fill in all fields.');
+                return;
+            }
+
+            // Smooth Print URL scheme
+            const filename = "sample layout.lbx"; // Ensure this matches the local file name
+            const url = `brotherwebprint://print?filename=${encodeURIComponent(filename)}&size=RollW62RB&copies=1` +
+                        `&text_品番=${encodeURIComponent(品番)}` +
+                        `&text_車型=${encodeURIComponent(車型)}` +
+                        `&text_収容数=${encodeURIComponent(収容数)}` +
+                        `&text_背番号=${encodeURIComponent(背番号)}` +
+                        `&text_R/L=${encodeURIComponent(R_L)}` +
+                        `&text_材料=${encodeURIComponent(材料)}` +
+                        `&text_色=${encodeURIComponent(色)}` +
+                        `&barcode_[品番][Comma][収容数]=${encodeURIComponent(品番収容数)}`;
+
+            // Redirect to Smooth Print
+            window.location.href = url;
+        }
+    </script>
+</body>
+</html>

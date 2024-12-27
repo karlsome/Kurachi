@@ -1,7 +1,79 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <link rel="stylesheet" href="Google Sheet.css">
+    <style>
+        /* General reset for body */
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f9;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+        }
+
+        /* Main container styling */
+        .kensacontainer {
+            width: 80%;
+            max-width: 600px;
+            background: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+            margin: 20px auto;
+            border: 1px solid #ddd;
+        }
+
+        /* Card-like button styling */
+        button, select, input {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            border: 1px solid #ccc;
+            font-size: 1rem;
+        }
+
+        /* Modal styling */
+        .modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .modal-content {
+            width: 90%;
+            max-width: 500px;
+            background-color: #fff;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+            text-align: center;
+        }
+
+        /* Close button styling */
+        .close-button {
+            float: right;
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #aaa;
+            cursor: pointer;
+        }
+
+        .close-button:hover {
+            color: #000;
+        }
+    </style>
+
     <link rel="icon" type="image/png" href="src/favicon2.png">
     <title>自動日報(倉知)</title>
     
@@ -9,7 +81,7 @@
 <body>
     <!-- this code is for process -->
      
-<div class="kensacontainer">
+<section class="kensacontainer">
     
     <h4 id = "nippoTitle">肥田瀬QRスキャナー</h4>
 
@@ -70,34 +142,30 @@
 
             
 
-
-    
-            <div id="modal" class="modal" style="display: none;">
-  <div class="modal-content">
-    <span id="modal-close" class="close-button">&times;</span>
-    <h3>Choose a 収容数</h3>
-    <div id="modal-options"></div>
-    <button id="modal-submit" type="button">Submit</button>
-  </div>
+<!-- Modals -->
+<div id="modal" class="modal">
+    <div class="modal-content">
+        <span id="modal-close" class="close-button">&times;</span>
+        <h3>Choose a 収容数</h3>
+        <div id="modal-options"></div>
+        <button id="modal-submit" type="button">Submit</button>
+    </div>
 </div>
 
-        <!-- Alert modal instead of window.alert -->
-        <div id="customAlertModal" class="modal" style="display:none;">
-            <div class="modal-content">
-                <span class="close-button" id="closeModalButton">&times;</span>
-                <p id="customAlertText">Wrong Kanban / 看板間違い</p>
-            </div>
-            </div>
-    
-    
-            <!-- QR Code Scanner Modal -->
-            <div id="qrScannerModal" class="modal">
-                <div class="modal-content">
-                    <span class="close" id="closeQRScannerModal">&times;</span>
-                    <h3>Scan QR Code</h3>
-                    <div id="qrReader" style="width: 300px; height: 300px;"></div>
-                </div>
-            </div>
+<div id="customAlertModal" class="modal">
+    <div class="modal-content">
+        <span id="closeModalButton" class="close-button">&times;</span>
+        <p id="customAlertText">Wrong Kanban / 看板間違い</p>
+    </div>
+</div>
+
+<div id="qrScannerModal" class="modal">
+    <div class="modal-content">
+        <span id="closeQRScannerModal" class="close-button">&times;</span>
+        <h3>Scan QR Code</h3>
+        <div id="qrReader" style="width: 300px; height: 300px;"></div>
+    </div>
+</div>
             
             <!-- The custom alert modal when product mismatch happens -->
             <div id="scanAlertModal" class="modal" style="display:none;">
@@ -126,7 +194,7 @@
         
 
 
-    </div>
+</section>
     
     <script src="hidase labelprinter.js"></script>
     <script src="html5-qrcode.min.js"></script>
