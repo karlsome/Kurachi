@@ -14,7 +14,7 @@
           <a href="index.html">工場</a>
           <a href="machine.html">設備</a>
         </nav>
-        <h4 id="nippoTitle">SRS-LH日報</h4>
+        <h4 id="nippoTitle">SRS-LH FORM</h4>
 
         <input type="hidden" name="設備" id="hidden設備" />
         <input type="hidden" name="工場2" id="hidden工場" />
@@ -119,7 +119,7 @@
         </select>
 
         <!-- QR code button -->
-        <button id="scan-button" type="button">Scan LH 背番号</button>
+        <button id="scan-button" type="button">Scan LH QR</button>
 
         <div class="image-container">
           <img id="dynamicImage" src="" alt="Image Description" />
@@ -139,7 +139,7 @@
         <br />
         <br />
 
-        <label for="process">設備名:</label>
+        <label for="process">SRS Table Name:</label>
         <select id="process" name="設備">
           <option value="S1">S1</option>
           <option value="S2">S2</option>
@@ -178,6 +178,7 @@
 
         <!-- Cutting Section (A) -->
         <div id="sectionA" class="process-section">
+          <label for="Machine Operator">Operator Name :</label>
           <input
             list="machine-operator-suggestions"
             placeholder="Worker's Name"
@@ -187,7 +188,7 @@
           />
           <datalist id="machine-operator-suggestions"></datalist>
           <br /><br />
-          <label for="Process Quantity">加工数（良品）+ NG:</label>
+          <label for="Process Quantity">Process Quantity (including defects):</label>
           <input
             type="text"
             name="Process Quantity"
@@ -196,7 +197,7 @@
             required
           />
 
-          <label for="製造ロット">製造ロット:</label>
+          <label for="製造ロット">Cutting Lot.No.:</label>
           <input
             type="text"
             name="製造ロット"
@@ -205,7 +206,7 @@
             required
           />
 
-          <label for="Lot No.">加工日:</label>
+          <label for="Lot No.">Date:</label>
           <input
             type="date"
             name="Date"
@@ -215,7 +216,7 @@
             required
           />
           <br />
-          <label for="Start Time">加工開始時間:</label>
+          <label for="Start Time">Time Start:</label>
           <input
             type="time"
             name="Time_start"
@@ -225,7 +226,7 @@
             required
           />
           <br />
-          <label for="End Time">加工終了時間:</label>
+          <label for="End Time">Time End:</label>
           <input
             type="time"
             name="Time_end"
@@ -235,7 +236,7 @@
             required
           />
           <br />
-          <label for="SRS code">シールロット:</label>
+          <label for="SRS code">SRS Seal code:</label>
           <input
             type="text"
             name="SRS code"
@@ -245,13 +246,14 @@
           />
           <br />
           <br />
-          <label>初物チェック: </label>
+          <label>Confirm 1st Cycle: </label>
           <label id="hatsumonoLabel">FALSE</label>
           <button id="hatsumonoButton" type="button">Check 1st Cycle</button>
           <img id="hatsumonoPic" src="" alt="hatsumonoPic" style="display:none; width: 320px; height: 240px;">
           <br>
           <br>
 
+          <h4>DEFECTS</h4>
 
           <div id="counter-box-13" class="counter-box">
             <label for="counter-13">1</label>
@@ -368,8 +370,8 @@
               -
             </button>
           </div>
-          <label>①くっつき・めくれ、②シワ、③転写位置ズレ、④転写不良、⑤文字欠け</label>
-
+          <label>① Sticking/Peeling, ② Wrinkles, ③ Transfer Misalignment, ④ Transfer Defect, ⑤ Missing Characters</label>
+          <br><br>
           <div id="NG-container">
             <label for="Total_NG">NG Quantity:</label>
             <input
@@ -382,7 +384,7 @@
           </div>
           <br /><br />
           <div id="total-container">
-            <label for="total">良品合計(TOTAL):</label>
+            <label for="total">TOTAL:</label>
             <input
               readonly
               id="total"
@@ -420,7 +422,7 @@
     <div class="container">
       <form method="post" action="" name="RH-form">
         <br /><br /><br />
-        <h4 id="nippoTitleRH">SRS-RH日報</h4>
+        <h4 id="nippoTitleRH">SRS-RH FORM</h4>
 
         <!-- for hatsumonoStatus -->
         <input
@@ -507,7 +509,7 @@
         </select>
 
         <!-- QR code button -->
-        <button id="scan-buttonRH" type="button">Scan RH 背番号</button>
+        <button id="scan-buttonRH" type="button">Scan RH QR</button>
 
         <div class="image-container">
           <img id="dynamicImageRH" src="" alt="Image Description" />
@@ -527,7 +529,7 @@
         <br />
         <br />
 
-        <label for="processRH">設備名:</label>
+        <label for="processRH">SRS Table Name:</label>
         <select id="processRH" name="設備RH">
           <option value="S1">S1</option>
           <option value="S2">S2</option>
@@ -536,7 +538,7 @@
           <option value="S6">S6</option>
         </select>
         
-        <label for="Machine OperatorRH">作業者 :</label>
+        <label for="Machine OperatorRH">Operator Name :</label>
         <input
           id="Machine OperatorRH"
           name="Worker_NameRH"
@@ -550,7 +552,7 @@
         <!-- Cutting Section (A) -->
         <div id="sectionARH" class="process-section">
           
-          <label for="Process QuantityRH">加工数（良品）+ NG:</label>
+          <label for="Process QuantityRH">Process Quantity (including defects):</label>
           <input
             type="text"
             name="Process QuantityRH"
@@ -558,7 +560,7 @@
             placeholder="Process Quantity"
             required
           />
-          <label for="製造ロット">製造ロット:</label>
+          <label for="製造ロット">Cutting Lot.No.:</label>
           <input
             type="text"
             name="製造ロットRH"
@@ -567,7 +569,7 @@
             required
           />
 
-          <label for="Lot No.RH">加工日:</label>
+          <label for="Lot No.RH">Date:</label>
           <input
             type="date"
             name="DateRH"
@@ -577,7 +579,7 @@
             required
           />
           <br />
-          <label for="Start TimeRH">加工開始時間:</label>
+          <label for="Start TimeRH">Time Start:</label>
           <input
             type="time"
             name="Time_startRH"
@@ -587,7 +589,7 @@
             required
           />
           <br />
-          <label for="End TimeRH">加工終了時間:</label>
+          <label for="End TimeRH">Time End:</label>
           <input
             type="time"
             name="Time_endRH"
@@ -597,7 +599,7 @@
             required
           />
           <br />
-          <label for="SRS codeRH">シールロット:</label>
+          <label for="SRS codeRH">SRS Seal Code:</label>
           <input
             type="text"
             name="SRS codeRH"
@@ -607,14 +609,14 @@
           />
           <br />
           <br />
-          <label>初物チェックRH: </label>
+          <label>Confirm 1st Cycle RH: </label>
           <label id="hatsumonoLabelRH">FALSE</label>
           <button id="hatsumonoButtonRH" type="button">Check 1st Cycle</button>
           <img id="hatsumonoPicRH" src="" alt="hatsumonoPicRH" style="display:none; width: 320px; height: 240px;">
           <br>
           <br>
 
-
+          <h4>DEFECTS</h4>
           <div id="counter-box-18" class="counter-box">
             <label for="counter-18">1</label>
             <button
@@ -753,8 +755,9 @@
               -
             </button>
           </div>
-          <label>①くっつき・めくれ、②シワ、③転写位置ズレ、④転写不良、⑤文字欠け</label>
+          <label>① Sticking/Peeling, ② Wrinkles, ③ Transfer Misalignment, ④ Transfer Defect, ⑤ Missing Characters</label>
 
+          <br><br><br>
           <div id="NG-containerRH">
             <label for="Total_NGRH">NG Quantity:</label>
             <input
@@ -767,7 +770,7 @@
           </div>
           <br /><br />
           <div id="total-containerRH">
-            <label for="totalRH">良品合計(TOTAL):</label>
+            <label for="totalRH">TOTAL:</label>
             <input
               readonly
               id="totalRH"

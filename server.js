@@ -460,10 +460,14 @@ app.get("/getSeBanggoListPress", async (req, res) => {
     const database = client.db("Sasaki_Coating_MasterDB");
     const collection = database.collection("masterDB");
 
-    let 工場 = req.query.工場; // The process to search for
+    let 工場 = req.query.工場; // Retrieve the 工場 value from the query
 
-    // Query to find documents where 工場 is 工場value"
-    const query = { 工場: 工場 };
+    // Check if 工場 is "小瀬" or "倉知"
+    const query =
+      工場 === "小瀬" || 工場 === "倉知"
+        ? { 工場: { $in: ["小瀬", "倉知"] } } // Combine values for 小瀬 and 倉知
+        : { 工場 }; // Otherwise, match the specific 工場 value
+
     const projection = { 背番号: 1, _id: 0 }; // Only fetch the 背番号 field
 
     // Fetch matching documents

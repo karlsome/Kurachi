@@ -267,7 +267,40 @@ document.head.appendChild(style);
 
 
 
-//Print label using "Smooth Print" app for mobile devices
+// //Print label using "Smooth Print" app for mobile devices
+// function printLabel() {
+//   // Retrieve dynamic values from the form
+//   const 品番 = document.getElementById("product-number").value;
+//   const 収容数 = document.getElementById("収容数").value;
+//   const R_L = document.getElementById("R-L").value;
+//   const 品番収容数 = `${品番},${収容数}`;
+//   const extension = document.getElementById("Labelextension").value;
+//   const Date2 = document.getElementById('Lot No.').value;
+//   console.log(R_L);
+
+//   if (extension){
+//      Date = Date2 + " - " + extension;
+//   } else {
+//     Date = Date2;
+//   }
+
+//   // Smooth Print URL scheme
+//   const filename = "hidaselabel5.lbx"; // Ensure this matches the local file name
+//   //const size = "RollW62RB";
+//   const size = "RollW62";
+//   const copies = 1;
+//   const url =
+//     `brotherwebprint://print?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent(size)}&copies=${encodeURIComponent(copies)}` +
+//     `&text_品番=${encodeURIComponent(品番)}` +
+//     `&text_収容数=${encodeURIComponent(収容数)}` +
+//     `&text_DateT=${encodeURIComponent(Date)}` +
+//     `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
+//   console.log(Date);
+//   // Redirect to Smooth Print
+//   window.location.href = url;
+// }
+
+// Print label using "Smooth Print" app for mobile devices
 function printLabel() {
   // Retrieve dynamic values from the form
   const 品番 = document.getElementById("product-number").value;
@@ -276,26 +309,152 @@ function printLabel() {
   const 品番収容数 = `${品番},${収容数}`;
   const extension = document.getElementById("Labelextension").value;
   const Date2 = document.getElementById('Lot No.').value;
+  let Date;
   console.log(R_L);
 
-  if (extension){
-     Date = Date2 + " - " + extension;
+  if (extension) {
+    Date = Date2 + " - " + extension;
   } else {
     Date = Date2;
   }
 
-  // Smooth Print URL scheme
-  const filename = "hidaselabel5.lbx"; // Ensure this matches the local file name
-  //const size = "RollW62RB";
-  const size = "RollW62";
-  const copies = 1;
-  const url =
-    `brotherwebprint://print?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent(size)}&copies=${encodeURIComponent(copies)}` +
-    `&text_品番=${encodeURIComponent(品番)}` +
-    `&text_収容数=${encodeURIComponent(収容数)}` +
-    `&text_DateT=${encodeURIComponent(Date)}` +
-    `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
-  console.log(Date);
-  // Redirect to Smooth Print
-  window.location.href = url;
+  // Show modal to choose BOX or Product
+  const modal = document.createElement('div');
+  modal.classList.add('modal');
+  modal.style.display = 'flex';
+  modal.style.position = 'fixed';
+  modal.style.top = '50%';
+  modal.style.left = '50%';
+  modal.style.transform = 'translate(-50%, -50%)';
+  modal.style.flexDirection = 'column';
+  modal.style.justifyContent = 'center';
+  modal.style.alignItems = 'center';
+  modal.style.padding = '30px';
+  modal.style.backgroundColor = 'white';
+  modal.style.boxShadow = '0 0 15px rgba(0, 0, 0, 0.5)';
+  modal.style.borderRadius = '10px';
+
+  const message = document.createElement('p');
+  message.innerText = 'Choose label type: For BOX / 外用 or For Product / 製品用';
+  message.style.fontSize = '20px';
+  message.style.textAlign = 'center';
+  message.style.marginBottom = '20px';
+  modal.appendChild(message);
+
+  const buttonBox = document.createElement('button');
+  buttonBox.innerText = 'For BOX / 外用';
+  buttonBox.style.margin = '10px';
+  buttonBox.style.padding = '10px 20px';
+  buttonBox.style.fontSize = '16px';
+  buttonBox.style.cursor = 'pointer';
+  buttonBox.style.borderRadius = '5px';
+  buttonBox.onclick = () => {
+    showCopiesPrompt('hidaselabel5.lbx');
+    document.body.removeChild(modal);
+  };
+  modal.appendChild(buttonBox);
+
+  const buttonProduct = document.createElement('button');
+  buttonProduct.innerText = 'For Product / 製品用';
+  buttonProduct.style.margin = '10px';
+  buttonProduct.style.padding = '10px 20px';
+  buttonProduct.style.fontSize = '16px';
+  buttonProduct.style.cursor = 'pointer';
+  buttonProduct.style.borderRadius = '5px';
+  buttonProduct.onclick = () => {
+    showCopiesPrompt('hidaselabel6inner.lbx');
+    document.body.removeChild(modal);
+  };
+  modal.appendChild(buttonProduct);
+
+  document.body.appendChild(modal);
+
+  function showCopiesPrompt(filename) {
+    // Create copies prompt modal
+    const copiesModal = document.createElement('div');
+    copiesModal.classList.add('modal');
+    copiesModal.style.display = 'flex';
+    copiesModal.style.position = 'fixed';
+    copiesModal.style.top = '50%';
+    copiesModal.style.left = '50%';
+    copiesModal.style.transform = 'translate(-50%, -50%)';
+    copiesModal.style.flexDirection = 'column';
+    copiesModal.style.justifyContent = 'center';
+    copiesModal.style.alignItems = 'center';
+    copiesModal.style.padding = '30px';
+    copiesModal.style.backgroundColor = 'white';
+    copiesModal.style.boxShadow = '0 0 15px rgba(0, 0, 0, 0.5)';
+    copiesModal.style.borderRadius = '10px';
+
+    let copies = 1;
+
+    const copiesMessage = document.createElement('p');
+    copiesMessage.innerText = 'Select number of copies:';
+    copiesMessage.style.fontSize = '20px';
+    copiesMessage.style.textAlign = 'center';
+    copiesMessage.style.marginBottom = '20px';
+    copiesModal.appendChild(copiesMessage);
+
+    const copiesDisplay = document.createElement('div');
+    copiesDisplay.style.display = 'flex';
+    copiesDisplay.style.alignItems = 'center';
+    copiesDisplay.style.marginBottom = '20px';
+
+    const minusButton = document.createElement('button');
+    minusButton.innerText = '-';
+    minusButton.style.margin = '10px';
+    minusButton.style.padding = '10px';
+    minusButton.style.fontSize = '16px';
+    minusButton.onclick = () => {
+      if (copies > 1) {
+        copies--;
+        copiesValue.innerText = copies;
+      }
+    };
+    copiesDisplay.appendChild(minusButton);
+
+    const copiesValue = document.createElement('span');
+    copiesValue.innerText = copies;
+    copiesValue.style.fontSize = '20px';
+    copiesValue.style.margin = '0 10px';
+    copiesDisplay.appendChild(copiesValue);
+
+    const plusButton = document.createElement('button');
+    plusButton.innerText = '+';
+    plusButton.style.margin = '10px';
+    plusButton.style.padding = '10px';
+    plusButton.style.fontSize = '16px';
+    plusButton.onclick = () => {
+      copies++;
+      copiesValue.innerText = copies;
+    };
+    copiesDisplay.appendChild(plusButton);
+
+    copiesModal.appendChild(copiesDisplay);
+
+    const confirmButton = document.createElement('button');
+    confirmButton.innerText = 'Confirm';
+    confirmButton.style.margin = '10px';
+    confirmButton.style.padding = '10px 20px';
+    confirmButton.style.fontSize = '16px';
+    confirmButton.style.cursor = 'pointer';
+    confirmButton.style.borderRadius = '5px';
+    confirmButton.onclick = () => {
+      console.log(品番,収容数,Date);
+      // Smooth Print URL scheme
+      const url =
+        `brotherwebprint://print?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent("RollW62")}&copies=${encodeURIComponent(copies)}` +
+        `&text_品番=${encodeURIComponent(品番)}` +
+        `&text_収容数=${encodeURIComponent(収容数)}` +
+        `&text_DateT=${encodeURIComponent(Date)}` +
+        `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
+      console.log(Date);
+      // Redirect to Smooth Print
+      window.location.href = url;
+      document.body.removeChild(copiesModal);
+    };
+    copiesModal.appendChild(confirmButton);
+
+    document.body.appendChild(copiesModal);
+  }
 }

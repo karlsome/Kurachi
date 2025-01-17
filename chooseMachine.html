@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <link rel="stylesheet" href="floating card.css">
+    <link rel="icon" type="image/png" href="src/favicon2.png">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Choose Machine</title>
+</head>
+<body>
+    <h1 class="centered">Choose Machine for NC加工</h1>
+    <div class="main-content">
+        <div id="machine-container" class="container"></div>
+    </div>
+
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const filterValue = urlParams.get('filter') || 'none'; // Get the filter value from URL
+
+        const machineContainer = document.getElementById('machine-container');
+
+        // List of machines based on filter value
+        let machines = [];
+
+        if (filterValue === '小瀬') {
+            machines = ["OZNC01", "OZNC02", "OZNC03", "OZNC04", "OZNC05", "OZNC06", "OZNC07", "OZNC08"];
+        } else if (filterValue === 'SCNA') {
+            machines = ["AOL1", "AOL2", "AOL3", "AOL4", "AOL5"];
+        } else {
+            const warning = document.createElement('div');
+            warning.classList.add('warning');
+            warning.textContent = "INVALID SOURCE, PLEASE CONTACT MANAGEMENT";
+            warning.style.textAlign = 'center';
+            warning.style.fontSize = '20px';
+            warning.style.color = 'red';
+            machineContainer.appendChild(warning);
+        }
+
+        // Dynamically create machine cards if machines list is not empty
+        if (machines.length > 0) {
+            machines.forEach(machine => {
+                const card = document.createElement('div');
+                card.classList.add('card');
+
+                card.addEventListener('click', () => {
+                    // Redirect to the DCP iReporter page with filter and machine values
+                    window.location.href = `DCP iReporter.html?filter=${filterValue}&machine=${machine}`;
+                });
+
+                const img = document.createElement('img');
+                img.src = 'src/machines/NCC01.jpg'; // Placeholder image for all machines
+                img.alt = machine;
+
+                const label = document.createElement('div');
+                label.classList.add('label');
+                label.textContent = machine;
+
+                card.appendChild(img);
+                card.appendChild(label);
+                machineContainer.appendChild(card);
+            });
+        }
+    </script>
+</body>
+</html>

@@ -1,21 +1,98 @@
 const serverURL = "https://kurachi.onrender.com";
+//const serverURL = "http://localhost:3000";
 
 
-// this code will ping the Render website for inactivity
-const interval = 30000; // 30 seconds
-function pingServer() {
-  fetch(`${serverURL}/getSeBanggoList`)
-    .then(response => {
-      if (!response.ok) {
-        throw new Error(`HTTP error! Status: ${response.status}`);
-      }
-      console.log(`Pinged at ${new Date().toISOString()}: Status Code ${response.status}`);
-    })
-    .catch(error => {
-      console.error(`Error pinging at ${new Date().toISOString()}:`, error.message);
-    });
+//this code listens to incoming parameters passed
+function getQueryParam(param) {
+  const urlParams = new URLSearchParams(window.location.search);
+  return urlParams.get(param);
 }
-setInterval(pingServer, interval);
+const selectedFactory = getQueryParam('filter');
+if (selectedFactory){
+  document.getElementById('selected工場').value = selectedFactory;
+  console.log("kojo changed to: " + selectedFactory);
+}
+
+
+// Select all input, select, and button elements
+const inputs = document.querySelectorAll('input, select, button,textarea');
+const selected工場 = document.getElementById('selected工場').value; // Get the current factory value
+const pageName = location.pathname.split('/').pop(); // Get the current HTML file name
+const uniquePrefix = `${pageName}_${selected工場}_`;
+
+// Save the value of each input to localStorage on change
+inputs.forEach(input => {
+    input.addEventListener('input', () => {
+        const key = `${uniquePrefix}${input.id || input.name}`; // Prefix key with pageName and selected工場
+        if (key) {
+            localStorage.setItem(key, input.value);
+        }
+    });
+
+    if (input.type === 'checkbox' || input.type === 'radio') {
+        input.addEventListener('change', () => {
+            const key = `${uniquePrefix}${input.id || input.name}`;
+            if (key) {
+                localStorage.setItem(key, input.checked); // Save checkbox/radio state
+            }
+        });
+    }
+});
+
+
+// Restore the values of input fields from localStorage on page load
+document.addEventListener('DOMContentLoaded', () => {
+  const inputs = document.querySelectorAll('input, select, button, textarea'); // Get all input elements
+  const pageName = location.pathname.split('/').pop(); // Get the current HTML file name
+  const selected工場 = document.getElementById('selected工場')?.value; // Get the selected工場 value
+  const processElement = document.getElementById("process");
+
+  if (!selected工場) {
+      console.error("Selected 工場 is not set or found.");
+      return;
+  }
+
+  // Loop through all keys in localStorage
+  Object.keys(localStorage).forEach(key => {
+      // Check if the key belongs to the current HTML file and selected工場
+      if (key.startsWith(`${uniquePrefix}`)) {
+          const savedValue = localStorage.getItem(key);
+
+          if (savedValue !== null) {
+              // Match each input with its respective localStorage key
+              inputs.forEach(input => {
+                  const inputKey = `${uniquePrefix}${input.id || input.name}`;
+                  if (inputKey === key) {
+                      if (input.type === 'checkbox' || input.type === 'radio') {
+                          input.checked = savedValue === 'true'; // Restore checkbox/radio state
+                      } else if (input.tagName === 'SELECT') {
+                          // For select elements, wait for options to populate
+                          setTimeout(() => {
+                              if ([...input.options].some(option => option.value === savedValue)) {
+                                  input.value = savedValue; // Restore select value
+                                  console.log(`Restored ${input.id || input.name}:`, savedValue);
+                                  fetchProductDetails(); // for info
+                                  updateTotal(); // for total value
+                              } else {
+                                  console.error(`Option '${savedValue}' not found in select '${input.id || input.name}'.`);
+                              }
+                          }, 1000); // Adjust delay if options are populated dynamically
+                      } else {
+                          input.value = savedValue; // Restore value for text, hidden, and other inputs
+                      }
+                  }
+              });
+          }
+      }
+  });
+
+  // Log the restored value for debugging (Optional)
+  if (processElement) {
+      console.log('Process value after restoration:', processElement.value); // Debugging the restored process value
+  }
+});
+
+
 
 
 
@@ -54,17 +131,6 @@ document.addEventListener('DOMContentLoaded', () => {
       .catch(error => console.error('Error fetching 背番号 list:', error));
 });
 
-
-//this code listens to incoming parameters passed
-function getQueryParam(param) {
-  const urlParams = new URLSearchParams(window.location.search);
-  return urlParams.get(param);
-}
-const selectedFactory = getQueryParam('filter');
-if (selectedFactory){
-  document.getElementById('selected工場').value = selectedFactory;
-  console.log("kojo changed to: " + selectedFactory);
-}
 
 
 
@@ -143,19 +209,26 @@ document.getElementById("sub-dropdown").addEventListener("change", fetchProductD
 
 
 // when time is pressed
+// Set current time as default when time is pressed
 function setDefaultTime(input) {
+  
+
   const now = new Date();
   const hours = String(now.getHours()).padStart(2, '0');
   const minutes = String(now.getMinutes()).padStart(2, '0');
   const timeValue = `${hours}:${minutes}`;
   input.value = timeValue;
 
-  // Save the time to local storage beyatch
-  localStorage.setItem(input.id, timeValue);
+  // Save the time to local storage with unique prefix
+  localStorage.setItem(`${uniquePrefix}${input.id}`, timeValue);
 }
 
+
+
 // When date is pressed or on page load, set current date as default
+// Set current date as default when date is pressed or on page load
 function setDefaultDate(input) {
+
   const now = new Date();
   const year = now.getFullYear();
   const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -163,8 +236,8 @@ function setDefaultDate(input) {
   const dateValue = `${year}-${month}-${day}`;
   input.value = dateValue;
 
-  // Save the date to local storage
-  localStorage.setItem(input.id, dateValue);
+  // Save the date to local storage with unique prefix
+  localStorage.setItem(`${uniquePrefix}${input.id}`, dateValue);
 }
 
 // Set current date as default on page load
@@ -199,28 +272,31 @@ document.addEventListener("DOMContentLoaded", async function() {
 });
 
 
-//function for plus minus button
+// Function for the plus button
 function incrementCounter(counterId) {
   const counterElement = document.getElementById(`counter-${counterId}`);
-  let currentValue = parseInt(counterElement.value, 10);
+  let currentValue = parseInt(counterElement.value, 10) || 0; // Default to 0 if value is invalid
   currentValue += 1;
   counterElement.value = currentValue;
 
-  // Save the updated value to local storage
-  localStorage.setItem(`counter-${counterId}`, currentValue);
+  // Save the updated value to localStorage
+  const uniquePrefix = `${pageName}_${selected工場}_`; // Ensure unique key based on page and 工場
+  localStorage.setItem(`${uniquePrefix}counter-${counterId}`, currentValue);
 
   updateTotal();
 }
 
+// Function for the minus button
 function decrementCounter(counterId) {
   const counterElement = document.getElementById(`counter-${counterId}`);
-  let currentValue = parseInt(counterElement.value, 10);
+  let currentValue = parseInt(counterElement.value, 10) || 0; // Default to 0 if value is invalid
   if (currentValue > 0) {
     currentValue -= 1;
     counterElement.value = currentValue;
 
-    // Save the updated value to local storage
-    localStorage.setItem(`counter-${counterId}`, currentValue);
+    // Save the updated value to localStorage
+    const uniquePrefix = `${pageName}_${selected工場}_`; // Ensure unique key based on page and 工場
+    localStorage.setItem(`${uniquePrefix}counter-${counterId}`, currentValue);
 
     updateTotal();
   }
@@ -558,75 +634,201 @@ style.innerHTML = `
 document.head.appendChild(style);
 
 
-// function to reset everything then reloads the page
+
+
+// Function to reset everything and reload the page
 function resetForm() {
-  // Clear all form inputs
-  const inputs = document.querySelectorAll("input, select, textarea");
+  const uniquePrefix = `${pageName}_${selected工場}_`;
+  const excludedInputs = ['process']; // IDs or names of inputs to exclude from reset
+
+  // Clear all form inputs with unique prefix except excluded ones
+  const inputs = document.querySelectorAll('input, select, textarea');
   inputs.forEach(input => {
-    input.value = '';
+      const key = `${uniquePrefix}${input.id || input.name}`;
+      if (!excludedInputs.includes(input.id) && !excludedInputs.includes(input.name)) {
+          localStorage.removeItem(key);
+          input.value = ''; // Reset input value
+      }
   });
 
-  // Clear counters
-  for (let i = 1; i <= 18; i++) {
-    localStorage.removeItem(`counter-${i}`);
-    const counterElement = document.getElementById(`counter-${i}`);
-    if (counterElement) {
-      counterElement.value = '0'; // Reset the counter display to 0
-    }
+  // Clear counters with unique prefix
+  for (let i = 18; i <= 20; i++) {
+      const key = `${uniquePrefix}counter-${i}`;
+      localStorage.removeItem(key);
+      const counterElement = document.getElementById(`counter-${i}`);
+      if (counterElement) {
+          counterElement.value = '0'; // Reset counter display
+      }
   }
 
-  // Clear checkbox state and other specific items
-  localStorage.removeItem('enable-inputs-checkbox');
-  localStorage.removeItem('検査STATUS');
-  localStorage.removeItem('sendtoNCButtonisPressed');
-  localStorage.removeItem('hatsumonoLabel');
-  localStorage.removeItem('atomonoLabel');
-  localStorage.removeItem("product-number");
-  localStorage.removeItem('process');
-  localStorage.removeItem("SRShatsumonoLabel");
-
-  // Uncheck the checkbox and disable inputs
-  const checkbox = document.getElementById('enable-inputs');
-  if (checkbox) {
-    checkbox.checked = false;
-    toggleInputs(); // Reuse the existing toggleInputs function to disable the inputs
-  }
-
-  // Remove all other form-related local storage items
-  inputs.forEach(input => {
-    localStorage.removeItem(input.name);
-  });
-
-  // reload the page 
+  // Reload the page
   window.location.reload();
 }
 
 
-//Print label using "Smooth Print" app for mobile devices
+
+
+// Print label using "Smooth Print" app for mobile devices
 function printLabel() {
-  // Retrieve dynamic values from the form
+  const alertSound = document.getElementById('alert-sound');
+  const scanAlertModal = document.getElementById('scanAlertModal');
+  const scanAlertText = document.getElementById('scanAlertText');
+  const 背番号 = document.getElementById("sub-dropdown").value;
+
+  // Preload the alert sound without playing it
+  if (alertSound) {
+    alertSound.muted = true; // Mute initially to preload
+    alertSound.loop = false; // Disable looping
+    alertSound.load(); // Preload the audio file
+  }
+
+  // Check if 背番号 is selected
+  if (!背番号) {
+    // Show alert modal
+    scanAlertText.innerText = '背番号が必要です。 / Sebanggo is required.';
+    scanAlertModal.style.display = 'block';
+
+    // Play alert sound
+    if (alertSound) {
+      alertSound.muted = false; // Unmute to alert user
+      alertSound.volume = 1; // Set full volume
+      alertSound.play().catch(error => console.error('Failed to play alert sound:', error));
+    }
+
+    // Add blinking red background
+    document.body.classList.add('flash-red');
+
+    // Close modal on button click
+    const closeScanModalButton = document.getElementById('closeScanModalButton');
+    closeScanModalButton.onclick = function () {
+      scanAlertModal.style.display = 'none';
+      alertSound.pause();
+      alertSound.currentTime = 0; // Reset sound to the beginning
+      alertSound.muted = true; // Mute again for next time
+      document.body.classList.remove('flash-red');
+    };
+
+    return; // Stop the submission process
+  }
+
+  // List of 背番号 values requiring 収容数 selection
+  const specialValues = ["P05K", "P06K", "P07K", "P08K", "P13K", "P14K", "P15K", "P16K", "UFS5", "UFS6", "UFS7", "UFS8", "URB5", "URB6", "URB7", "URB8"];
+
+  // Check if 背番号 matches special values
+  if (specialValues.includes(背番号)) {
+    // Create and show a modal for 収容数 selection
+    const modal = document.createElement('div');
+    modal.classList.add('modal');
+    modal.style.display = 'flex';
+    modal.style.position = 'fixed';
+    modal.style.top = '50%';
+    modal.style.left = '50%';
+    modal.style.transform = 'translate(-50%, -50%)';
+    modal.style.flexDirection = 'column';
+    modal.style.justifyContent = 'center';
+    modal.style.alignItems = 'center';
+    modal.style.padding = '30px';
+    modal.style.backgroundColor = 'white';
+    modal.style.boxShadow = '0 0 15px rgba(0, 0, 0, 0.5)';
+    modal.style.borderRadius = '10px';
+
+    const message = document.createElement('p');
+    message.innerText = '収容数を選んでください / Please choose the value for Quantity';
+    message.style.fontSize = '24px';
+    message.style.textAlign = 'center';
+    message.style.marginBottom = '20px';
+    modal.appendChild(message);
+
+    const button50 = document.createElement('button');
+    button50.innerText = '50';
+    button50.style.margin = '10px';
+    button50.style.padding = '15px 30px';
+    button50.style.fontSize = '20px';
+    button50.style.cursor = 'pointer';
+    button50.style.borderRadius = '5px';
+    button50.onclick = () => {
+      redirectWith収容数(50);
+    };
+    modal.appendChild(button50);
+
+    const button100 = document.createElement('button');
+    button100.innerText = '100';
+    button100.style.margin = '10px';
+    button100.style.padding = '15px 30px';
+    button100.style.fontSize = '20px';
+    button100.style.cursor = 'pointer';
+    button100.style.borderRadius = '5px';
+    button100.onclick = () => {
+      redirectWith収容数(100);
+    };
+    modal.appendChild(button100);
+
+    const button200 = document.createElement('button');
+    button200.innerText = '200';
+    button200.style.margin = '10px';
+    button200.style.padding = '15px 30px';
+    button200.style.fontSize = '20px';
+    button200.style.cursor = 'pointer';
+    button200.style.borderRadius = '5px';
+    button200.onclick = () => {
+      redirectWith収容数(200);
+    };
+    modal.appendChild(button200);
+
+    document.body.appendChild(modal);
+
+    function redirectWith収容数(value) {
+      document.body.removeChild(modal); // Remove modal
+
+      // Retrieve dynamic values from the form
+      const 品番 = document.getElementById("product-number").value;
+      const 車型 = document.getElementById("model").value;
+      const R_L = document.getElementById("R-L").value;
+      const 材料 = document.getElementById("material").value;
+      const 色 = document.getElementById("material-color").value;
+      const extension = document.getElementById("Labelextension").value;
+      const Date2 = document.getElementById('Lot No.').value;
+      const 品番収容数 = `${品番},${value}`;
+
+      const Date = extension ? `${Date2} - ${extension}` : Date2;
+
+      // Smooth Print URL scheme
+      const filename = "sample6.lbx"; // Ensure this matches the local file name
+      const size = "RollW62";
+      const copies = 1;
+      const url =
+        `brotherwebprint://print?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent(size)}&copies=${encodeURIComponent(copies)}` +
+        `&text_品番=${encodeURIComponent(品番)}` +
+        `&text_車型=${encodeURIComponent(車型)}` +
+        `&text_収容数=${encodeURIComponent(value)}` +
+        `&text_背番号=${encodeURIComponent(背番号)}` +
+        `&text_RL=${encodeURIComponent(R_L)}` +
+        `&text_材料=${encodeURIComponent(材料)}` +
+        `&text_色=${encodeURIComponent(色)}` +
+        `&text_DateT=${encodeURIComponent(Date)}` +
+        `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
+
+      console.log(Date);
+      window.location.href = url; // Redirect to Smooth Print
+    }
+
+    return; // Stop the submission process until user chooses 収容数
+  }
+
+  // Default process for other 背番号 values
   const 品番 = document.getElementById("product-number").value;
   const 車型 = document.getElementById("model").value;
   const 収容数 = document.getElementById("収容数").value;
-  const 背番号 = document.getElementById("sub-dropdown").value;
-  
   const R_L = document.getElementById("R-L").value;
   const 材料 = document.getElementById("material").value;
   const 色 = document.getElementById("material-color").value;
-  const 品番収容数 = `${品番},${収容数}`;
   const extension = document.getElementById("Labelextension").value;
   const Date2 = document.getElementById('Lot No.').value;
-  console.log(R_L);
+  const 品番収容数 = `${品番},${収容数}`;
 
-  if (extension){
-     Date = Date2 + " - " + extension;
-  } else {
-    Date = Date2;
-  }
+  const Date = extension ? `${Date2} - ${extension}` : Date2;
 
-  // Smooth Print URL scheme
-  const filename = "sample6.lbx"; // Ensure this matches the local file name
-  //const size = "RollW62RB";
+  const filename = "sample6.lbx";
   const size = "RollW62";
   const copies = 1;
   const url =
@@ -640,7 +842,7 @@ function printLabel() {
     `&text_色=${encodeURIComponent(色)}` +
     `&text_DateT=${encodeURIComponent(Date)}` +
     `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
+
   console.log(Date);
-  // Redirect to Smooth Print
   window.location.href = url;
 }
