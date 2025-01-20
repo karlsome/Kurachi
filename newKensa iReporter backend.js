@@ -463,6 +463,7 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
       scanAlertModal.style.display = 'none';
       document.body.classList.remove('flash-green');
       window.location.reload();
+      resetForm();
     };
   } catch (error) {
     console.error('Error during submission:', error);
