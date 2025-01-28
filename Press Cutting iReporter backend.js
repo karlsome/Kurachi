@@ -291,6 +291,7 @@ async function fetchProductDetails() {
       document.getElementById("kataban").value = data.型番 || "";
       document.getElementById("収容数").value = data.収容数 || "";
       document.getElementById("送りピッチ").textContent = "送りピッチ: " + data.送りピッチ || "";
+      document.getElementById("SRS").value = data.SRS || "";
 
       
       
@@ -892,91 +893,6 @@ function resetForm() {
 
 
 
-// //Print label using "Smooth Print" app for mobile devices
-// function printLabel() {
-  
-//   const alertSound = document.getElementById('alert-sound');
-//   const scanAlertModal = document.getElementById('scanAlertModal');
-//   const scanAlertText = document.getElementById('scanAlertText');
-//   const 背番号 = document.getElementById("sub-dropdown").value;
-  
-
-//   // Preload the alert sound without playing it
-//   if (alertSound) {
-//     alertSound.muted = true; // Mute initially to preload
-//     alertSound.loop = false; // Disable looping
-//     alertSound.load(); // Preload the audio file
-//   }
-
-//   // Check if 背番号 is selected
-//   if (!背番号) {
-//     // Show alert modal
-//     scanAlertText.innerText = '背番号が必要です。 / Sebanggo is required.';
-//     scanAlertModal.style.display = 'block';
-
-//     // Play alert sound
-//     if (alertSound) {
-//       alertSound.muted = false; // Unmute to alert user
-//       alertSound.volume = 1; // Set full volume
-//       alertSound.play().catch(error => console.error('Failed to play alert sound:', error));
-//     }
-
-//     // Add blinking red background
-//     document.body.classList.add('flash-red');
-
-//     // Close modal on button click
-//     const closeScanModalButton = document.getElementById('closeScanModalButton');
-//     closeScanModalButton.onclick = function () {
-//       scanAlertModal.style.display = 'none';
-//       alertSound.pause();
-//       alertSound.currentTime = 0; // Reset sound to the beginning
-//       alertSound.muted = true; // Mute again for next time
-//       document.body.classList.remove('flash-red');
-//     };
-
-//     return; // Stop the submission process
-//   }
-//   // Retrieve dynamic values from the form
-//   const 品番 = document.getElementById("product-number").value;
-//   const 車型 = document.getElementById("model").value;
-//   const 収容数 = document.getElementById("収容数").value;
-  
-//   const R_L = document.getElementById("R-L").value;
-//   const 材料 = document.getElementById("material").value;
-//   const 色 = document.getElementById("material-color").value;
-//   const 品番収容数 = `${品番},${収容数}`;
-//   const extension = document.getElementById("Labelextension").value;
-//   const Date2 = document.getElementById('Lot No.').value;
-//   console.log(R_L);
-
-//   if (extension){
-//      Date = Date2 + " - " + extension;
-//   } else {
-//     Date = Date2;
-//   }
-
-//   // Smooth Print URL scheme
-//   const filename = "sample6.lbx"; // Ensure this matches the local file name
-//   // const size = "RollW62RB";
-//   const size = "RollW62";
-//   const copies = 1;
-//   const url =
-//     `brotherwebprint://print?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent(size)}&copies=${encodeURIComponent(copies)}` +
-//     `&text_品番=${encodeURIComponent(品番)}` +
-//     `&text_車型=${encodeURIComponent(車型)}` +
-//     `&text_収容数=${encodeURIComponent(収容数)}` +
-//     `&text_背番号=${encodeURIComponent(背番号)}` +
-//     `&text_RL=${encodeURIComponent(R_L)}` +
-//     `&text_材料=${encodeURIComponent(材料)}` +
-//     `&text_色=${encodeURIComponent(色)}` +
-//     `&text_DateT=${encodeURIComponent(Date)}` +
-//     `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
-//   console.log(Date);
-//   // Redirect to Smooth Print
-//   window.location.href = url;
-// }
-
-
 // Print label using "Smooth Print" app for mobile devices
 function printLabel() {
   const alertSound = document.getElementById('alert-sound');
@@ -1098,11 +1014,17 @@ function printLabel() {
       const extension = document.getElementById("Labelextension").value;
       const Date2 = document.getElementById('Lot No.').value;
       const 品番収容数 = `${品番},${value}`;
+      const SRS = document.getElementById("SRS").value;
+      let filename = "";
 
       const Date = extension ? `${Date2} - ${extension}` : Date2;
 
       // Smooth Print URL scheme
-      const filename = "sample6.lbx"; // Ensure this matches the local file name
+      if (SRS === "有り"){
+          filename = "SRS3.lbx";
+      } else {
+        filename = "sample6.lbx";
+      }
       const size = "RollW62";
       const copies = 1;
       const url =
@@ -1134,10 +1056,17 @@ function printLabel() {
   const extension = document.getElementById("Labelextension").value;
   const Date2 = document.getElementById('Lot No.').value;
   const 品番収容数 = `${品番},${収容数}`;
+  const SRS = document.getElementById("SRS").value;
+  let filename = "";
 
   const Date = extension ? `${Date2} - ${extension}` : Date2;
 
-  const filename = "sample6.lbx";
+  if (SRS === "有り"){
+     filename = "SRS3.lbx";
+  } else {
+    filename = "sample6.lbx";
+  }
+  
   const size = "RollW62";
   const copies = 1;
   const url =

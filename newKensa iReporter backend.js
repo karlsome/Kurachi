@@ -219,6 +219,7 @@ async function fetchProductDetails() {
       document.getElementById("kataban").value = data.型番 || "";
       document.getElementById("送りピッチ").textContent = "送りピッチ: " + data.送りピッチ || "";
       document.getElementById("収容数").value = data.収容数 || "";
+      document.getElementById("SRS").value = data.SRS || "";
 
       
       if (data.htmlWebsite) {
@@ -826,11 +827,17 @@ function printLabel() {
       const extension = document.getElementById("Labelextension").value;
       const Date2 = document.getElementById('Lot No.').value;
       const 品番収容数 = `${品番},${value}`;
+      const SRS = document.getElementById("SRS").value;
+      let filename = "";
 
       const Date = extension ? `${Date2} - ${extension}` : Date2;
 
       // Smooth Print URL scheme
-      const filename = "sample6.lbx"; // Ensure this matches the local file name
+      if (SRS === "有り"){
+          filename = "SRS3.lbx";
+      } else {
+        filename = "sample6.lbx";
+      }
       const size = "RollW62";
       const copies = 1;
       const url =
@@ -862,10 +869,17 @@ function printLabel() {
   const extension = document.getElementById("Labelextension").value;
   const Date2 = document.getElementById('Lot No.').value;
   const 品番収容数 = `${品番},${収容数}`;
+  const SRS = document.getElementById("SRS").value;
+  let filename = "";
 
   const Date = extension ? `${Date2} - ${extension}` : Date2;
 
-  const filename = "sample6.lbx";
+  if (SRS === "有り"){
+     filename = "SRS3.lbx";
+  } else {
+    filename = "sample6.lbx";
+  }
+  
   const size = "RollW62";
   const copies = 1;
   const url =
