@@ -1,5 +1,5 @@
-const serverURL = "https://kurachi.onrender.com";
-//const serverURL = "http://localhost:3000";
+//const serverURL = "https://kurachi.onrender.com";
+const serverURL = "http://localhost:3000";
 
 
 //this code listens to incoming parameters passed
@@ -98,37 +98,73 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 
-// gets all the sebanggo list
+// // gets all the sebanggo list
+// document.addEventListener('DOMContentLoaded', () => {
+//   const subDropdown = document.getElementById('sub-dropdown');
+
+//   // Fetch 背番号 list from the server
+//   fetch(`${serverURL}/getSeBanggoList`)
+//       .then(response => response.json())
+//       .then(data => {
+//           // Sort the 背番号 list alphabetically
+//           data.sort((a, b) => a.localeCompare(b, 'ja')); // 'ja' for Japanese sorting if needed
+
+//           // Clear existing options
+//           subDropdown.innerHTML = '';
+
+//           // Add a default "Select 背番号" option
+//           const defaultOption = document.createElement('option');
+//           defaultOption.value = '';
+//           defaultOption.textContent = 'Select 背番号';
+//           defaultOption.disabled = true; // Make it non-selectable
+//           defaultOption.selected = true; // Make it the default selection
+//           subDropdown.appendChild(defaultOption);
+
+//           // Populate options dynamically
+//           data.forEach(seBanggo => {
+//               const option = document.createElement('option');
+//               option.value = seBanggo;
+//               option.textContent = seBanggo;
+//               subDropdown.appendChild(option);
+//           });
+//       })
+//       .catch(error => console.error('Error fetching 背番号 list:', error));
+// });
+
+// Gets all the 背番号 list
 document.addEventListener('DOMContentLoaded', () => {
   const subDropdown = document.getElementById('sub-dropdown');
 
   // Fetch 背番号 list from the server
   fetch(`${serverURL}/getSeBanggoList`)
-      .then(response => response.json())
-      .then(data => {
-          // Sort the 背番号 list alphabetically
-          data.sort((a, b) => a.localeCompare(b, 'ja')); // 'ja' for Japanese sorting if needed
+    .then(response => response.json())
+    .then(data => {
+      // Remove duplicates by creating a Set and converting it back to an array
+      const uniqueData = [...new Set(data)];
 
-          // Clear existing options
-          subDropdown.innerHTML = '';
+      // Sort the unique 背番号 list alphabetically
+      uniqueData.sort((a, b) => a.localeCompare(b, 'ja')); // 'ja' for Japanese sorting if needed
 
-          // Add a default "Select 背番号" option
-          const defaultOption = document.createElement('option');
-          defaultOption.value = '';
-          defaultOption.textContent = 'Select 背番号';
-          defaultOption.disabled = true; // Make it non-selectable
-          defaultOption.selected = true; // Make it the default selection
-          subDropdown.appendChild(defaultOption);
+      // Clear existing options
+      subDropdown.innerHTML = '';
 
-          // Populate options dynamically
-          data.forEach(seBanggo => {
-              const option = document.createElement('option');
-              option.value = seBanggo;
-              option.textContent = seBanggo;
-              subDropdown.appendChild(option);
-          });
-      })
-      .catch(error => console.error('Error fetching 背番号 list:', error));
+      // Add a default "Select 背番号" option
+      const defaultOption = document.createElement('option');
+      defaultOption.value = '';
+      defaultOption.textContent = 'Select 背番号';
+      defaultOption.disabled = true; // Make it non-selectable
+      defaultOption.selected = true; // Make it the default selection
+      subDropdown.appendChild(defaultOption);
+
+      // Populate options dynamically
+      uniqueData.forEach(seBanggo => {
+        const option = document.createElement('option');
+        option.value = seBanggo;
+        option.textContent = seBanggo;
+        subDropdown.appendChild(option);
+      });
+    })
+    .catch(error => console.error('Error fetching 背番号 list:', error));
 });
 
 

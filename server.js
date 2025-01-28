@@ -541,6 +541,79 @@ app.get("/getCapacityBySeBanggo", async (req, res) => {
 
 
 
+// // Get product info from MongoDB (parameters are kojo and sebanggo)
+// app.get("/getProductDetails", async (req, res) => {
+//   try {
+//     await client.connect();
+
+//     // Query masterDB for product details
+//     const masterDatabase = client.db("Sasaki_Coating_MasterDB");
+//     const masterCollection = masterDatabase.collection("masterDB");
+
+//     // Get values from the query parameters
+//     const serialNumber = req.query.serialNumber; // 背番号 value from sub-dropdown
+//     const factory = req.query.factory; // 工場 value from hidden input
+
+//     if (!serialNumber) {
+//       return res.status(400).send("Serial number is required");
+//     }
+
+//     // Check for duplicates of `背番号`
+//     const duplicateCount = await masterCollection.countDocuments({
+//       背番号: serialNumber,
+//     });
+
+//     // Query to match documents based on presence of duplicates
+//     let query;
+//     if (duplicateCount > 1) {
+//       query = { 背番号: serialNumber, 工場: factory };
+//     } else {
+//       query = { 背番号: serialNumber };
+//     }
+
+//     // Find the matching document in masterDB
+//     const productDetails = await masterCollection.findOne(query, {
+//       projection: {
+//         品番: 1,
+//         モデル: 1,
+//         形状: 1,
+//         "R/L": 1,
+//         材料: 1,
+//         材料背番号: 1,
+//         色: 1,
+//         送りピッチ: 1,
+//         型番: 1,
+//         収容数: 1,
+//         _id: 0,
+//       },
+//     });
+
+//     // Query pictureDB for additional info
+//     const pictureCollection = masterDatabase.collection("pictureDB");
+//     const pictureDetails = await pictureCollection.findOne(
+//       { 背番号: serialNumber },
+//       { projection: { "html website": 1, _id: 0 } }
+//     );
+
+//     // Combine results
+//     const combinedResult = {
+//       ...productDetails,
+//       htmlWebsite: pictureDetails ? pictureDetails["html website"] : null, // Include html website if found
+//     };
+
+//     // If no document is found in masterDB, return an empty response
+//     if (!productDetails) {
+//       return res.status(404).send("No matching product found");
+//     }
+
+//     // Send the combined result as JSON
+//     res.json(combinedResult);
+//   } catch (error) {
+//     console.error("Error retrieving product details:", error);
+//     res.status(500).send("Error retrieving product details");
+//   }
+// });
+
 // Get product info from MongoDB (parameters are kojo and sebanggo)
 app.get("/getProductDetails", async (req, res) => {
   try {
@@ -566,7 +639,13 @@ app.get("/getProductDetails", async (req, res) => {
     // Query to match documents based on presence of duplicates
     let query;
     if (duplicateCount > 1) {
-      query = { 背番号: serialNumber, 工場: factory };
+      if (factory === "天徳" || factory === "第二工場") {
+        // Treat 天徳 and 第二工場 as the same factory
+        query = { 背番号: serialNumber, 工場: { $in: ["天徳", "第二工場"] } };
+      } else {
+        // Standard duplicate handling
+        query = { 背番号: serialNumber, 工場: factory };
+      }
     } else {
       query = { 背番号: serialNumber };
     }
@@ -613,6 +692,9 @@ app.get("/getProductDetails", async (req, res) => {
     res.status(500).send("Error retrieving product details");
   }
 });
+
+
+
 
 //get worker name
 app.get("/getWorkerNames", async (req, res) => {

@@ -427,7 +427,69 @@ function clearFormRH() {
 
 
 
-// gets all the sebanggo list
+// // gets all the sebanggo list
+// document.addEventListener("DOMContentLoaded", () => {
+//   const subDropdown = document.getElementById("sub-dropdown");
+
+//   // Fetch 背番号 list from the server
+//   fetch(`${serverURL}/getSeBanggoListLH`)
+//     .then((response) => response.json())
+//     .then((data) => {
+//       // Clear existing options
+//       subDropdown.innerHTML = "";
+
+//       // Add a default "Select 背番号" option
+//       const defaultOption = document.createElement("option");
+//       defaultOption.value = "";
+//       defaultOption.textContent = "Select 背番号";
+//       defaultOption.disabled = true; // Make it non-selectable
+//       defaultOption.selected = true; // Make it the default selection
+//       subDropdown.appendChild(defaultOption);
+
+//       // Populate options dynamically
+//       data.forEach((seBanggo) => {
+//         const option = document.createElement("option");
+//         option.value = seBanggo;
+//         option.textContent = seBanggo;
+//         subDropdown.appendChild(option);
+//       });
+//     })
+//     .catch((error) => console.error("Error fetching 背番号 list:", error));
+// });
+
+// // gets all the sebanggo list for RH
+// document.addEventListener("DOMContentLoaded", () => {
+//   const subDropdownRH = document.getElementById("sub-dropdownRH");
+
+//   // Fetch 背番号 list from the server
+//   fetch(`${serverURL}/getSeBanggoListRH`)
+//     .then((response) => response.json())
+//     .then((data) => {
+//       // Clear existing options
+//       subDropdownRH.innerHTML = "";
+
+//       // Add a default "Select 背番号" option
+//       const defaultOption = document.createElement("option");
+//       defaultOption.value = "";
+//       defaultOption.textContent = "Select 背番号";
+//       defaultOption.disabled = true; // Make it non-selectable
+//       defaultOption.selected = true; // Make it the default selection
+//       subDropdownRH.appendChild(defaultOption);
+
+//       // Populate options dynamically
+//       data.forEach((seBanggo) => {
+//         const option = document.createElement("option");
+//         option.value = seBanggo;
+//         option.textContent = seBanggo;
+//         subDropdownRH.appendChild(option);
+//       });
+//     })
+//     .catch((error) =>
+//       console.error("Error fetching 背番号 list for RH:", error)
+//     );
+// });
+
+// gets all the 背番号 list for LH
 document.addEventListener("DOMContentLoaded", () => {
   const subDropdown = document.getElementById("sub-dropdown");
 
@@ -446,6 +508,9 @@ document.addEventListener("DOMContentLoaded", () => {
       defaultOption.selected = true; // Make it the default selection
       subDropdown.appendChild(defaultOption);
 
+      // Sort the data alphabetically
+      data.sort((a, b) => a.localeCompare(b, 'ja')); // Using localeCompare for Japanese sorting
+
       // Populate options dynamically
       data.forEach((seBanggo) => {
         const option = document.createElement("option");
@@ -457,7 +522,7 @@ document.addEventListener("DOMContentLoaded", () => {
     .catch((error) => console.error("Error fetching 背番号 list:", error));
 });
 
-// gets all the sebanggo list for RH
+// gets all the 背番号 list for RH
 document.addEventListener("DOMContentLoaded", () => {
   const subDropdownRH = document.getElementById("sub-dropdownRH");
 
@@ -476,6 +541,9 @@ document.addEventListener("DOMContentLoaded", () => {
       defaultOption.selected = true; // Make it the default selection
       subDropdownRH.appendChild(defaultOption);
 
+      // Sort the data alphabetically
+      data.sort((a, b) => a.localeCompare(b, 'ja')); // Using localeCompare for Japanese sorting
+
       // Populate options dynamically
       data.forEach((seBanggo) => {
         const option = document.createElement("option");
@@ -488,6 +556,7 @@ document.addEventListener("DOMContentLoaded", () => {
       console.error("Error fetching 背番号 list for RH:", error)
     );
 });
+
 
 // THis fetch details for LH
 async function fetchProductDetails() {
