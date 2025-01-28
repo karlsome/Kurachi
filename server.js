@@ -663,6 +663,8 @@ app.get("/getProductDetails", async (req, res) => {
         送りピッチ: 1,
         型番: 1,
         収容数: 1,
+        SRS: 1,
+        SLIT: 1,
         _id: 0,
       },
     });
