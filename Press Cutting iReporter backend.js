@@ -1022,6 +1022,8 @@ function printLabel() {
       // Smooth Print URL scheme
       if (SRS === "有り"){
           filename = "SRS3.lbx";
+      } else if (背番号 === "NC2"){
+          filename = "NC21.lbx"
       } else {
         filename = "sample6.lbx";
       }
@@ -1062,7 +1064,9 @@ function printLabel() {
   const Date = extension ? `${Date2} - ${extension}` : Date2;
 
   if (SRS === "有り"){
-     filename = "SRS3.lbx";
+    filename = "SRS3.lbx";
+  } else if (背番号 === "NC2"){
+      filename = "NC21.lbx"
   } else {
     filename = "sample6.lbx";
   }
