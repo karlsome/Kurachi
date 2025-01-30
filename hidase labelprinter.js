@@ -458,3 +458,19 @@ function printLabel() {
     document.body.appendChild(copiesModal);
   }
 }
+
+
+document.addEventListener('DOMContentLoaded', () => {
+  const subDropdown = document.getElementById('sub-dropdown');
+  const reprintButton = document.getElementById('reprint-button'); // Reprint button
+
+  // Event listener for reprint button
+  reprintButton.addEventListener('click', () => {
+    const selectedSeBanggo = subDropdown.value;
+    if (selectedSeBanggo) {
+      handleSeBanggoChange(selectedSeBanggo); // Re-trigger the selection process
+    } else {
+      alert('Please select a 品番 first.');
+    }
+  });
+});
