@@ -1762,7 +1762,7 @@ app.post('/query', async (req, res) => {
   const client = new MongoClient(uri);
   try {
     await client.connect();
-    const database = client.db("SubmittedDB");
+    const database = client.db("submittedDB");
     const collection = database.collection(collectionName);
 
     // Run the query
