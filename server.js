@@ -1755,6 +1755,26 @@ app.post("/updateRemainingQuantity", async (req, res) => {
   }
 });
 
+// this is for BUDIBASE
+app.post('/query', async (req, res) => {
+  const { collectionName, query } = req.body;
+  
+  const client = new MongoClient(uri);
+  try {
+    await client.connect();
+    const database = client.db("SubmittedDB");
+    const collection = database.collection(collectionName);
+
+    // Run the query
+    const results = await collection.find(query).toArray();
+    res.json(results);
+  } catch (error) {
+    res.status(500).send({ error: error.toString() });
+  } finally {
+    await client.close();
+  }
+});
+
 app.listen(port, () => {
   console.log(`Server is running at http://localhost:${port}`);
 });
