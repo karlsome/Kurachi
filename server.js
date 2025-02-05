@@ -1755,11 +1755,10 @@ app.post("/updateRemainingQuantity", async (req, res) => {
   }
 });
 
-// this is for BUDIBASE
+
 app.post('/query', async (req, res) => {
   const { collectionName, query } = req.body;
   
-  const client = new MongoClient(uri);
   try {
     await client.connect();
     const database = client.db("submittedDB");
