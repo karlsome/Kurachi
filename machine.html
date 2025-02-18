@@ -31,26 +31,7 @@
         const serverURL = "https://kurachi.onrender.com";
         //const serverURL = "http://localhost:3000";
 
-        // this code will ping the Render website for inactivity
-        const interval = 30000; // 30 seconds
-        function pingServer() {
-        fetch(`${serverURL}/getSeBanggoList`)
-            .then((response) => {
-            if (!response.ok) {
-                throw new Error(`HTTP error! Status: ${response.status}`);
-            }
-            console.log(
-                `Pinged at ${new Date().toISOString()}: Status Code ${response.status}`
-            );
-            })
-            .catch((error) => {
-            console.error(
-                `Error pinging at ${new Date().toISOString()}:`,
-                error.message
-            );
-            });
-        }
-        setInterval(pingServer, interval);
+        
 
         if (filterValue === '天徳') {
             const containers = document.getElementById('containers');
@@ -193,6 +174,25 @@
         pressCard.appendChild(pressImg);
         pressCard.appendChild(pressLabel);
         containers.appendChild(pressCard);
+
+        // Create card for スリット
+        const slitCard = document.createElement('div');
+        slitCard.classList.add('card');
+        slitCard.addEventListener('click', () => {
+            window.location.href = `SLIT Process iReporter.html?filter=${filterValue}`;
+        });
+
+        const slitImg = document.createElement('img');
+        slitImg.src = 'src/machines/slit.jpg'; // Adjust the path to your image
+        slitImg.alt = 'スリット';
+
+        const slitLabel = document.createElement('div');
+        slitLabel.classList.add('label');
+        slitLabel.textContent = 'スリット';
+
+        slitCard.appendChild(slitImg);
+        slitCard.appendChild(slitLabel);
+        containers.appendChild(slitCard);
 
         // Create card for 検査
         const kensaCard = document.createElement('div');
