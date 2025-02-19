@@ -1795,10 +1795,12 @@ app.post("/saveScannedQRData", async (req, res) => {
           return res.status(400).json({ error: "No scanned data or name provided" });
       }
 
-      // Get current date and time
-      const now = new Date();
-      const formattedDate = now.toISOString().split("T")[0]; // YYYY-MM-DD format
-      const formattedTime = now.toTimeString().split(" ")[0]; // HH:MM:SS format
+       // ✅ Get current date and Japan time (JST)
+       const now = new Date();
+       now.setHours(now.getHours() + 9); // ✅ Convert UTC to JST
+ 
+       const formattedDate = now.toISOString().split("T")[0]; // YYYY-MM-DD format
+       const formattedTime = now.toTimeString().split(" ")[0]; // HH:MM:SS format
 
       // Transform scanned data by fetching `背番号`
       const structuredData = await Promise.all(
