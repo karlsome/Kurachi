@@ -1774,6 +1774,69 @@ app.post('/query', async (req, res) => {
   }
 });
 
+
+
+///////////////////////////////
+/////THis is for the Inventory app react js
+////////////////////////////////////
+
+// Route to save scanned QR data to MongoDB
+app.post("/saveScannedQRData", async (req, res) => {
+  try {
+      await client.connect();
+
+      const database = client.db("submittedDB"); // Use the existing database
+      const inventoryDB = database.collection("inventoryDB"); // Collection to store inventory data
+      const masterDB = client.db("Sasaki_Coating_MasterDB").collection("masterDB"); // Collection to fetch 背番号
+
+      const { scannedBy, scannedResults } = req.body; // ✅ Include name from frontend
+
+      if (!scannedBy || !scannedResults || scannedResults.length === 0) {
+          return res.status(400).json({ error: "No scanned data or name provided" });
+      }
+
+      // Get current date and time
+      const now = new Date();
+      const formattedDate = now.toISOString().split("T")[0]; // YYYY-MM-DD format
+      const formattedTime = now.toTimeString().split(" ")[0]; // HH:MM:SS format
+
+      // Transform scanned data by fetching `背番号`
+      const structuredData = await Promise.all(
+          scannedResults.map(async (record) => {
+              const { productName, quantity } = record;
+
+              // Find the corresponding 背番号 from masterDB
+              const masterRecord = await masterDB.findOne({ 品番: productName });
+
+              return {
+                  品番: productName,
+                  背番号: masterRecord ? masterRecord.背番号 : "-", // If not found, set to "-"
+                  Date: formattedDate,
+                  Time: formattedTime,
+                  Quantity: parseInt(quantity, 10) || 0,
+                  ScannedBy: scannedBy, // ✅ Now saving the name
+              };
+          })
+      );
+
+      // Insert data into inventoryDB
+      const result = await inventoryDB.insertMany(structuredData);
+
+      res.status(201).json({
+          message: "Scanned data saved successfully!",
+          insertedCount: result.insertedCount,
+      });
+  } catch (error) {
+      console.error("Error saving scanned QR data:", error);
+      res.status(500).json({ error: "Error saving scanned QR data" });
+  }
+});
+
+
+
+
+/////END OF INVENTORY///////////////
+
 app.listen(port, () => {
   console.log(`Server is running at http://localhost:${port}`);
 });
