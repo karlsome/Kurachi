@@ -2,6 +2,9 @@
 //link for ip address database
 const ipURL = 'https://script.google.com/macros/s/AKfycbyC6-KiT3xwGiahhzhB-L-OOL8ufG0WqnT5mjEelGBKGnbiqVAS6qjT78FlzBUHqTn3Gg/exec';
 
+// link for pictures database
+const picURL = 'https://script.google.com/macros/s/AKfycbwHUW1ia8hNZG-ljsguNq8K4LTPVnB6Ng_GLXIHmtJTdUgGGd2WoiQo9ToF-7PvcJh9bA/exec';
+
 
 //link for live status (google sheets live status)
 const googleSheetLiveStatusURL = 'https://script.google.com/macros/s/AKfycbwbL30hlX9nBlQH4dwxlbdxSM5kJtgtNEQJQInA1mgXlEhYJxFHykZkdXV38deR6P83Ow/exec';
@@ -288,26 +291,62 @@ async function fetchProductDetails() {
 
       
       
-      if (data.htmlWebsite) {
-        dynamicImage.src = data.htmlWebsite; // Set the image source to the retrieved URL
-        dynamicImage.alt = "Product Image"; // Optional: Set the alt text
-        dynamicImage.style.display = "block"; // Ensure the image is visible
-      } else {
-        dynamicImage.src = ""; // Clear the image source if no URL is available
-        dynamicImage.alt = "No Image Available"; // Optional: Set fallback alt text
-        dynamicImage.style.display = "none"; // Hide the image if no URL is available
-      }
+      // if (data.htmlWebsite) {
+      //   dynamicImage.src = data.htmlWebsite; // Set the image source to the retrieved URL
+      //   dynamicImage.alt = "Product Image"; // Optional: Set the alt text
+      //   dynamicImage.style.display = "block"; // Ensure the image is visible
+      // } else {
+      //   dynamicImage.src = ""; // Clear the image source if no URL is available
+      //   dynamicImage.alt = "No Image Available"; // Optional: Set fallback alt text
+      //   dynamicImage.style.display = "none"; // Hide the image if no URL is available
+      // }
     } else {
       console.error("No matching product found.");
     }
   } catch (error) {
     console.error("Error fetching product details:", error);
   }
+  picLINK(serialNumber);
 }
 
 // Call fetchProductDetails when a new 背番号 is selected
 document.getElementById("sub-dropdown").addEventListener("change", fetchProductDetails);
 document.getElementById("sub-dropdown").addEventListener("change", NCPresstoFalse);
+
+
+
+// Function to get link from Google Drive
+function picLINK(headerValue) {
+  
+
+  fetch(`${picURL}?link=${headerValue}`)
+    .then(response => {
+      if (!response.ok) {
+        throw new Error('Network response was not ok ' + response.statusText);
+      }
+      return response.text(); // Use .json() if your API returns JSON
+    })
+    .then(data => {
+      const cleanedData = data.replace(/"/g, ''); // Remove unnecessary quotes
+      updateImageSrc(cleanedData);
+      //console.log("image: " + cleanedData);
+    })
+    .catch(error => {
+      console.error('Error:', error);
+    });
+}
+
+// Function to update the image src attribute
+function updateImageSrc(link) {
+  const imageElement = document.getElementById('dynamicImage');
+
+  if (imageElement) {
+    imageElement.src = `${link}&sz=s4000`; // Ensure valid URL structure
+  } else {
+    console.error("Error: Image element not found!");
+  }
+}
+
 
 //simple function to set ncbuttonisPressed = false
 function NCPresstoFalse(){
