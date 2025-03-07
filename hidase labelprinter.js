@@ -2,21 +2,21 @@
 const serverURL = "https://kurachi.onrender.com";
 
 
-// this code will ping the Render website for inactivity
-const interval = 30000; // 30 seconds
-function pingServer() {
-  fetch(`${serverURL}/getSeBanggoList`)
-    .then(response => {
-      if (!response.ok) {
-        throw new Error(`HTTP error! Status: ${response.status}`);
-      }
-      console.log(`Pinged at ${new Date().toISOString()}: Status Code ${response.status}`);
-    })
-    .catch(error => {
-      console.error(`Error pinging at ${new Date().toISOString()}:`, error.message);
-    });
-}
-setInterval(pingServer, interval);
+// // this code will ping the Render website for inactivity
+// const interval = 30000; // 30 seconds
+// function pingServer() {
+//   fetch(`${serverURL}/getSeBanggoList`)
+//     .then(response => {
+//       if (!response.ok) {
+//         throw new Error(`HTTP error! Status: ${response.status}`);
+//       }
+//       console.log(`Pinged at ${new Date().toISOString()}: Status Code ${response.status}`);
+//     })
+//     .catch(error => {
+//       console.error(`Error pinging at ${new Date().toISOString()}:`, error.message);
+//     });
+// }
+// setInterval(pingServer, interval);
 
 
 
@@ -152,102 +152,230 @@ document.addEventListener("DOMContentLoaded", function() {
 });
 
 
-//scan BUtton javascript
-document.getElementById('scan-button').addEventListener('click', function () {
-  const qrScannerModal = document.getElementById('qrScannerModal');
-  const scanAlertModal = document.getElementById('scanAlertModal');
-  const scanAlertText = document.getElementById('scanAlertText');
-  const html5QrCode = new Html5Qrcode("qrReader");
-  const alertSound = document.getElementById('alert-sound');
+// //scan BUtton javascript
+// document.getElementById('scan-button').addEventListener('click', function () {
+//   const qrScannerModal = document.getElementById('qrScannerModal');
+//   const scanAlertModal = document.getElementById('scanAlertModal');
+//   const scanAlertText = document.getElementById('scanAlertText');
+//   const html5QrCode = new Html5Qrcode("qrReader");
+//   const alertSound = document.getElementById('alert-sound');
 
-  // Preload the alert sound without playing it
-  if (alertSound) {
-      alertSound.muted = true; // Mute initially to preload
-      alertSound.loop = false; // Disable looping
-      alertSound.load(); // Preload the audio file
+//   // Preload the alert sound without playing it
+//   if (alertSound) {
+//       alertSound.muted = true; // Mute initially to preload
+//       alertSound.loop = false; // Disable looping
+//       alertSound.load(); // Preload the audio file
+//   }
+
+//   // Show the modal
+//   qrScannerModal.style.display = 'block';
+
+//   // Start QR code scanning
+//   html5QrCode.start(
+//       { facingMode: "environment" },
+//       {
+//           fps: 10,
+//           qrbox: { width: 250, height: 250 }
+//       },
+//       async qrCodeMessage => {
+//           const subDropdown = document.getElementById('sub-dropdown');
+//           const options = [...subDropdown.options].map(option => option.value);
+
+//           console.log("Scanned QR Code:", qrCodeMessage);
+
+//           // Check if the scanned QR code does NOT exist in the dropdown options
+//           if (!options.includes(qrCodeMessage)) {
+//               // Display error modal
+//               scanAlertText.innerText = "背番号が存在しません。 / Sebanggo does not exist.";
+//               scanAlertModal.style.display = 'block';
+
+//               // Play alert sound
+//               if (alertSound) {
+//                   alertSound.muted = false; // Unmute to alert user
+//                   alertSound.volume = 1; // Set full volume
+//                   alertSound.play().catch(error => console.error("Failed to play alert sound:", error));
+//               }
+
+//               // Add blinking red background
+//               document.body.classList.add('flash-red');
+
+//               const closeScanModalButton = document.getElementById('closeScanModalButton');
+//               closeScanModalButton.onclick = function () {
+//                   scanAlertModal.style.display = 'none';
+//                   alertSound.pause();
+//                   alertSound.currentTime = 0; // Reset sound to the beginning
+//                   alertSound.muted = true; // Mute again for next time
+//                   document.body.classList.remove('flash-red');
+//               };
+
+//               // Stop QR scanning
+//               html5QrCode.stop().then(() => {
+//                   qrScannerModal.style.display = 'none';
+//               }).catch(err => console.error("Failed to stop scanning:", err));
+
+//               return;
+//           }
+
+//           // If QR code matches an option, set the dropdown value and close scanner
+//           if (subDropdown && subDropdown.value !== qrCodeMessage) {
+//               subDropdown.value = qrCodeMessage;
+//               handleSeBanggoChange(qrCodeMessage);
+
+//               html5QrCode.stop().then(() => {
+//                   qrScannerModal.style.display = 'none';
+//               }).catch(err => console.error("Failed to stop scanning:", err));
+
+//               return;
+//           }
+//       }
+//   ).catch(err => {
+//       console.error("Failed to start scanning:", err);
+//   });
+
+//   // Close the QR scanner modal
+//   document.getElementById('closeQRScannerModal').onclick = function () {
+//       html5QrCode.stop().then(() => {
+//           qrScannerModal.style.display = 'none';
+//       }).catch(err => console.error("Failed to stop scanning:", err));
+//   };
+
+//   // Close scanner if user clicks outside the modal
+//   window.onclick = function (event) {
+//       if (event.target == qrScannerModal) {
+//           html5QrCode.stop().then(() => {
+//               qrScannerModal.style.display = 'none';
+//           }).catch(err => console.error("Failed to stop scanning:", err));
+//       }
+//   };
+// });
+
+// Scan Button Listener
+document.getElementById('scan-button').addEventListener('click', function () {
+  const scanPromptModal = document.createElement('div');
+  scanPromptModal.id = 'scanPromptModal';
+  scanPromptModal.innerHTML = `
+      <div class="modal-content">
+          <p>Scan now...</p>
+          <button id="cancelScan">Cancel</button>
+      </div>
+  `;
+  scanPromptModal.style.position = 'fixed';
+  scanPromptModal.style.top = '50%';
+  scanPromptModal.style.left = '50%';
+  scanPromptModal.style.transform = 'translate(-50%, -50%)';
+  scanPromptModal.style.backgroundColor = 'white';
+  scanPromptModal.style.padding = '20px';
+  scanPromptModal.style.boxShadow = '0 0 10px rgba(0, 0, 0, 0.5)';
+  scanPromptModal.style.borderRadius = '10px';
+  scanPromptModal.style.textAlign = 'center';
+  scanPromptModal.style.zIndex = '1000';
+
+  document.body.appendChild(scanPromptModal);
+
+  window.focus(); // Ensure key events are captured
+
+  let scannedCode = '';
+
+  function handleKeydown(event) {
+      if (event.key === 'Enter' && scannedCode.length > 0) {
+        console.log("✅ Enter pressed. Closing modal...");
+          cleanup(); // 🚀 Closes modal before processing
+          processScannedCode(scannedCode);
+      } else if (event.key.length === 1) {
+          scannedCode += event.key; // Collect characters
+      }
   }
 
-  // Show the modal
-  qrScannerModal.style.display = 'block';
+  function processScannedCode(qrCodeMessage) {
+      const subDropdown = document.getElementById('sub-dropdown');
+      const options = [...subDropdown.options].map(option => option.value);
+      const scanAlertModal = document.getElementById('scanAlertModal');
+      const scanAlertText = document.getElementById('scanAlertText');
+      const alertSound = document.getElementById('alert-sound');
 
-  // Start QR code scanning
-  html5QrCode.start(
-      { facingMode: "environment" },
-      {
-          fps: 10,
-          qrbox: { width: 250, height: 250 }
-      },
-      async qrCodeMessage => {
-          const subDropdown = document.getElementById('sub-dropdown');
-          const options = [...subDropdown.options].map(option => option.value);
+      console.log("Scanned QR Code:", qrCodeMessage);
 
-          console.log("Scanned QR Code:", qrCodeMessage);
+      if (!options.includes(qrCodeMessage)) {
+          scanAlertText.innerText = "背番号が存在しません。 / Sebanggo does not exist.";
+          scanAlertModal.style.display = 'block';
 
-          // Check if the scanned QR code does NOT exist in the dropdown options
-          if (!options.includes(qrCodeMessage)) {
-              // Display error modal
-              scanAlertText.innerText = "背番号が存在しません。 / Sebanggo does not exist.";
-              scanAlertModal.style.display = 'block';
-
-              // Play alert sound
-              if (alertSound) {
-                  alertSound.muted = false; // Unmute to alert user
-                  alertSound.volume = 1; // Set full volume
-                  alertSound.play().catch(error => console.error("Failed to play alert sound:", error));
-              }
-
-              // Add blinking red background
-              document.body.classList.add('flash-red');
-
-              const closeScanModalButton = document.getElementById('closeScanModalButton');
-              closeScanModalButton.onclick = function () {
-                  scanAlertModal.style.display = 'none';
-                  alertSound.pause();
-                  alertSound.currentTime = 0; // Reset sound to the beginning
-                  alertSound.muted = true; // Mute again for next time
-                  document.body.classList.remove('flash-red');
-              };
-
-              // Stop QR scanning
-              html5QrCode.stop().then(() => {
-                  qrScannerModal.style.display = 'none';
-              }).catch(err => console.error("Failed to stop scanning:", err));
-
-              return;
+          if (alertSound) {
+              alertSound.muted = false;
+              alertSound.volume = 1;
+              alertSound.play().catch(error => console.error("Failed to play alert sound:", error));
           }
 
-          // If QR code matches an option, set the dropdown value and close scanner
-          if (subDropdown && subDropdown.value !== qrCodeMessage) {
-              subDropdown.value = qrCodeMessage;
-              handleSeBanggoChange(qrCodeMessage);
+          document.body.classList.add('flash-red');
 
-              html5QrCode.stop().then(() => {
-                  qrScannerModal.style.display = 'none';
-              }).catch(err => console.error("Failed to stop scanning:", err));
+          document.getElementById('closeScanModalButton').onclick = function () {
+              scanAlertModal.style.display = 'none';
+              alertSound.pause();
+              alertSound.currentTime = 0;
+              alertSound.muted = true;
+              document.body.classList.remove('flash-red');
+          };
 
-              return;
-          }
+          return;
       }
-  ).catch(err => {
-      console.error("Failed to start scanning:", err);
-  });
 
-  // Close the QR scanner modal
-  document.getElementById('closeQRScannerModal').onclick = function () {
-      html5QrCode.stop().then(() => {
-          qrScannerModal.style.display = 'none';
-      }).catch(err => console.error("Failed to stop scanning:", err));
-  };
-
-  // Close scanner if user clicks outside the modal
-  window.onclick = function (event) {
-      if (event.target == qrScannerModal) {
-          html5QrCode.stop().then(() => {
-              qrScannerModal.style.display = 'none';
-          }).catch(err => console.error("Failed to stop scanning:", err));
+      // If QR code is valid, set dropdown
+      if (subDropdown && subDropdown.value !== qrCodeMessage) {
+          subDropdown.value = qrCodeMessage;
+          handleSeBanggoChange(qrCodeMessage);
       }
-  };
+  }
+
+  function cleanup() {
+    console.log("🔥 Cleanup called: Attempting to remove scan modal...");
+
+    document.removeEventListener('keydown', handleKeydown);
+
+    let modal = document.getElementById('scanPromptModal');
+    if (modal) {
+        console.log("✅ Scan modal found. Removing it...");
+        
+        // Try to remove it
+        modal.remove(); 
+        
+        setTimeout(() => {
+            modal = document.getElementById('scanPromptModal');
+            if (modal) {
+                console.error("⚠️ Scan modal STILL EXISTS! Applying full removal...");
+
+                // Force removal with parentNode
+                modal.parentNode?.removeChild(modal);
+
+                // Set forced styles to ensure it's gone
+                modal.style.display = 'none';
+                modal.style.visibility = 'hidden';
+                modal.style.opacity = '0';
+                modal.style.pointerEvents = 'none';
+
+                // Empty its content
+                modal.innerHTML = '';
+
+                // Final removal attempt
+                modal.replaceWith(modal.cloneNode(true));
+            } else {
+                console.log("✅ Scan modal fully removed.");
+            }
+        }, 50);
+    } else {
+        console.warn("⚠️ Scan modal not found in DOM.");
+    }
+  }
+
+  // Cancel button functionality
+  document.getElementById('cancelScan').addEventListener('click', cleanup);
+
+  scannedCode = ''; // Reset scanned input
+  document.addEventListener('keydown', handleKeydown);
 });
+
+
+
+
+
 
 // CSS for blinking red background
 const style = document.createElement('style');
@@ -299,6 +427,7 @@ document.head.appendChild(style);
 //   // Redirect to Smooth Print
 //   window.location.href = url;
 // }
+
 
 // Print label using "Smooth Print" app for mobile devices
 function printLabel() {

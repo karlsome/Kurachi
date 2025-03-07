@@ -391,7 +391,7 @@ nav a:hover {
 
 /* Modal styles for scan lot button */
 /* Modal styles */
-.modal {
+/* .modal {
     display: none;
     position: fixed;
     z-index: 1;
@@ -422,7 +422,84 @@ nav a:hover {
     color: black;
     text-decoration: none;
     cursor: pointer;
+} */
+
+/* Modal Overlay */
+.modal {
+    display: none;
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 90%;
+    max-width: 500px;
+    background: white;
+    border-radius: 10px;
+    padding: 20px;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+    text-align: center;
+    z-index: 10000;
 }
+
+/* Close Button */
+.close-button {
+    position: absolute;
+    top: 10px;
+    right: 15px;
+    font-size: 20px;
+    font-weight: bold;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: #333;
+}
+
+.close-button:hover {
+    color: red;
+}
+
+/* Modal Title */
+.modal h3 {
+    margin-bottom: 10px;
+    font-size: 22px;
+    color: #333;
+}
+
+/* Quantity selection buttons */
+.modal-option {
+    display: inline-block;
+    margin: 10px;
+    padding: 10px 15px;
+    border-radius: 5px;
+    border: 1px solid #007BFF;
+    background-color: #007BFF;
+    color: white;
+    font-size: 18px;
+    cursor: pointer;
+    transition: background 0.3s ease;
+}
+
+.modal-option:hover {
+    background-color: #0056b3;
+}
+
+/* Submit button */
+#modal-submit {
+    margin-top: 15px;
+    padding: 10px 20px;
+    font-size: 18px;
+    border-radius: 5px;
+    border: none;
+    background-color: #28a745;
+    color: white;
+    cursor: pointer;
+    transition: background 0.3s ease;
+}
+
+#modal-submit:hover {
+    background-color: #218838;
+}
+
 #photo {
     cursor: crosshair;
     position: relative;
@@ -563,4 +640,5 @@ to {
 .close-button:hover {
     color: red;
 }
+
 
