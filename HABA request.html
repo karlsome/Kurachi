@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>自動日報(倉知)</title>
+    <link rel="icon" type="image/png" href="src/favicon2.png">
+    <link rel="stylesheet" href="HABA request CSS.css"> <!-- Link to external CSS -->
+</head>
+<body>
+    <div class="container">
+        <h1>ラベルプリンター</h1>
+        <!-- QR Scan Option Modal -->
+        <div id="scanOptionModal" class="modal">
+            <div class="modal-content">
+                <h2>Choose Scan Method</h2>
+                <button class="btn" onclick="startCameraScanner()">📷 カメラ用</button>
+                <button class="btn" onclick="startBluetoothScanner()">🛜🖲️ ブルースス スキャナー</button>
+                <button class="btn btn-close" onclick="document.getElementById('scanOptionModal').style.display='none'">Cancel</button>
+            </div>
+        </div>
+
+        <!-- Camera QR Scanner Modal -->
+        <div id="qrScannerModal" class="modal">
+            <div class="modal-content">
+                <h2>Scan QR Code</h2>
+                <div id="qrReader"></div>
+                <button class="btn btn-close" id="closeQRScannerModal">Close</button>
+            </div>
+        </div>
+
+        <!-- Bluetooth Scanner Listening Modal -->
+        <div id="bluetoothScannerModal" class="modal">
+            <div class="modal-content">
+                <h2>QR スキャンお待ち中 (Waiting for SCAN)...</h2>
+                <p>スキャンしてください。Scan QR Now!</p>
+                <button class="btn btn-close" onclick="document.getElementById('bluetoothScannerModal').style.display='none'">Cancel</button>
+            </div>
+        </div>
+
+        <!-- Scan Error Modal -->
+        <div id="scanAlertModal" class="modal">
+            <div class="modal-content">
+                <h2>Error</h2>
+                <p id="scanAlertText"></p>
+                <button class="btn btn-close" id="closeScanModalButton">Close</button>
+            </div>
+        </div>
+
+        
+        <div class="form-group">
+            <label for="sub-dropdown">背番号:</label>
+            <select id="sub-dropdown" name="背番号"></select>
+        </div>
+
+        <button id="scan-button" class="btn">📷 Scan 背番号</button>
+
+        <div class="form-group">
+            <label for="Lot No.">日付 (Date):</label>
+            <input type="date" id="Lot No." name="Date" onfocus="setDefaultDate(this)" required>
+        </div>
+
+        <div class="form-group">
+            <label for="Labelextension">ラベル拡張 (Label Extension):</label>
+            <input type="number" id="Labelextension" name="Labelextension">
+        </div>
+
+        <button id="print" class="btn btn-print" onclick="printLabel()">🖨 Print Label</button>
+
+        <div class="image-container">
+            <img id="dynamicImage" src="" alt="Image Preview">
+        </div>
+        <button type="button" onclick="resetForm()">Reset</button>
+
+        <div class="form-group">
+            <label>製品番号 (Product Number):</label>
+            <input readonly id="product-number" name="品番">
+        </div>
+
+        <div class="form-group">
+            <label>モデル (Model):</label>
+            <input readonly id="model">
+        </div>
+
+        <div class="form-group">
+            <label>形状 (Shape):</label>
+            <input readonly id="shape">
+        </div>
+
+        <div class="form-group">
+            <label>R/L:</label>
+            <input readonly id="R-L">
+        </div>
+
+        <div class="form-group">
+            <label>材質 (Material):</label>
+            <input readonly id="material">
+        </div>
+
+        <div class="form-group">
+            <label>材質コード (Material Code):</label>
+            <input readonly id="material-code">
+        </div>
+
+        <div class="form-group">
+            <label>材質の色 (Material Color):</label>
+            <input readonly id="material-color">
+        </div>
+
+        <div class="form-group">
+            <label>型番 (Kataban):</label>
+            <input readonly id="kataban">
+        </div>
+
+        <div class="form-group">
+            <label>総作業時間 (Total Time in hours):</label>
+            <input readonly id="totalTime" value="0" name="Total Time">
+        </div>
+
+        <div class="form-group">
+            <label>サイクルタイム (Cycle Time):</label>
+            <input readonly id="cycleTime" value="0" name="Cycle Time">
+        </div>
+    </div>
+    
+    <!-- Hidden fields -->
+    <input type="hidden" name="設備" id="hidden設備">
+    <input type="hidden" name="工場2" id="hidden工場">
+    <input type="hidden" name="工場" id="selected工場" value="天徳">
+    <input type="hidden" name="printerCode" id="printerCode">
+    <input type="hidden" name="検査STATUS" id="検査STATUS" value="false">
+    <input type="hidden" name="ipInfo" id="ipInfo">
+    <input type="hidden" name="rikeshi" id="rikeshi">
+    <input type="hidden" name="printerHostname" id="printerHostname">
+    <iframe id="hiddenIframe" style="display:none;"></iframe>
+    <input type="hidden" name="収容数" id="収容数" value = "">
+    <label name="送りピッチ" id="送りピッチ" value=""></label>
+    <input type="hidden" name="SRS" id="SRS" value = "">
+    <audio id="alert-sound" src="src/alert.mp3" preload="auto"></audio>
+
+    <script src="HABA request backend.js"></script>
+    <script src="html5-qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr/dist/jsQR.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
+</body>
+</html>

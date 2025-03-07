@@ -212,7 +212,27 @@
         kensaCard.appendChild(kensaImg);
         kensaCard.appendChild(kensaLabel);
         containers.appendChild(kensaCard);
-    } 
+
+        // Create card for 第二工場 QRスキャナー (NEW)
+        const qrCard = document.createElement('div');
+        qrCard.classList.add('card');
+        qrCard.addEventListener('click', () => {
+            window.location.href = `HABA request.html?filter=${filterValue}`;
+        });
+
+        const qrImg = document.createElement('img');
+        qrImg.src = 'src/qr-code.png'; // Adjust the path to your QR image
+        qrImg.alt = '第二工場 QRスキャナー';
+
+        const qrLabel = document.createElement('div');
+        qrLabel.classList.add('label');
+        qrLabel.textContent = '第二工場 QRスキャナー';
+
+        qrCard.appendChild(qrImg);
+        qrCard.appendChild(qrLabel);
+        containers.appendChild(qrCard);
+    }
+
     else if (filterValue === '倉知') {
         const containers = document.getElementById('containers');
 
