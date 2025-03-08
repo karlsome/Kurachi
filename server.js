@@ -1862,25 +1862,28 @@ app.post("/saveScannedQRData", async (req, res) => {
 //   .then((data) => console.log("Query Results:", data))
 //   .catch((error) => console.error("Error:", error));
 
-app.post("/query", async (req, res) => {
+app.post('/query', async (req, res) => {
+  const { dbName, collectionName, query, aggregation } = req.body;
+  
   try {
     await client.connect();
-
-    const { dbName, collectionName, query, projection } = req.body;
-
-    if (!dbName || !collectionName || !query) {
-      return res.status(400).json({ error: "Database name, collection name, and query are required." });
-    }
-
-    const database = client.db(dbName); // Dynamically select DB
+    const database = client.db(dbName);
     const collection = database.collection(collectionName);
 
-    const results = await collection.find(query).project(projection || {}).toArray();
+    let results;
+
+    if (aggregation) {
+      // Run aggregation pipeline
+      results = await collection.aggregate(aggregation).toArray();
+    } else {
+      // Run a normal query
+      results = await collection.find(query).toArray();
+    }
 
     res.json(results);
   } catch (error) {
-    console.error("Error executing dynamic query:", error);
-    res.status(500).send("Error executing dynamic query.");
+    console.error("Error executing query:", error);
+    res.status(500).json({ error: "Error executing query" });
   }
 });
 
