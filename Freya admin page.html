@@ -1,0 +1,1783 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Factory Management System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              primary: "#0EA5E9",
+              secondary: "#64748B",
+            },
+            borderRadius: {
+              none: "0px",
+              sm: "4px",
+              DEFAULT: "8px",
+              md: "12px",
+              lg: "16px",
+              xl: "20px",
+              "2xl": "24px",
+              "3xl": "32px",
+              full: "9999px",
+              button: "8px",
+            },
+          },
+        },
+      };
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Pacifico&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://cdn.jsdelivr.net/npm/remixicon@4.5.0/fonts/remixicon.css"
+      rel="stylesheet"
+    />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.5.0/echarts.min.js"></script>
+    <style>
+      :where([class^="ri-"])::before { content: "\f3c2"; }
+      .process-status-normal { background-color: rgba(34, 197, 94, 0.1); color: rgb(34, 197, 94); }
+      .process-status-warning { background-color: rgba(234, 179, 8, 0.1); color: rgb(234, 179, 8); }
+      .process-status-critical { background-color: rgba(239, 68, 68, 0.1); color: rgb(239, 68, 68); }
+      .process-status-maintenance { background-color: rgba(59, 130, 246, 0.1); color: rgb(59, 130, 246); }
+    </style>
+  </head>
+  <body class="bg-gray-50">
+    <div class="flex h-screen">
+      <aside class="w-64 bg-white border-r border-gray-200 flex flex-col">
+        <div class="p-4 border-b border-gray-200">
+          <!-- <h1 class="text-2xl font-['Arial']">Sasaki Coating</h1> -->
+          <a href="index.html">
+            <img src="src/black.png" alt="Logo">
+          </a>
+        </div>
+        <nav class="flex-1 overflow-y-auto p-4">
+          <div class="space-y-2">
+            <button
+              class="flex items-center w-full p-2 text-gray-900 rounded-button bg-gray-100"
+            >
+              <i
+                class="ri-dashboard-line w-5 h-5 flex items-center justify-center"
+              ></i>
+              <span class="ml-3">Dashboard</span>
+            </button>
+            <button
+              class="flex items-center w-full p-2 text-gray-600 rounded-button hover:bg-gray-100"
+            >
+              <i
+                class="ri-building-line w-5 h-5 flex items-center justify-center"
+              ></i>
+              <span class="ml-3">Factories</span>
+            </button>
+            <button
+              class="flex items-center w-full p-2 text-gray-600 rounded-button hover:bg-gray-100"
+            >
+              <i
+                class="ri-settings-line w-5 h-5 flex items-center justify-center"
+              ></i>
+              <span class="ml-3">Processes</span>
+            </button>
+            <button
+              class="flex items-center w-full p-2 text-gray-600 rounded-button hover:bg-gray-100"
+            >
+              <i
+                class="ri-notification-line w-5 h-5 flex items-center justify-center"
+              ></i>
+              <span class="ml-3">Notifications</span>
+            </button>
+            <button
+              class="flex items-center w-full p-2 text-gray-600 rounded-button hover:bg-gray-100"
+            >
+              <i
+                class="ri-line-chart-line w-5 h-5 flex items-center justify-center"
+              ></i>
+              <span class="ml-3">Analytics</span>
+            </button>
+            <button
+              class="flex items-center w-full p-2 text-gray-600 rounded-button hover:bg-gray-100"
+            >
+              <i
+                class="ri-user-settings-line w-5 h-5 flex items-center justify-center"
+              ></i>
+              <span class="ml-3">User Management</span>
+            </button>
+            <button
+              class="flex items-center w-full p-2 text-gray-600 rounded-button hover:bg-gray-100"
+            >
+              <i
+                class="ri-checkbox-line w-5 h-5 flex items-center justify-center"
+              ></i>
+              <span class="ml-3">Approvals</span>
+              <span
+                class="ml-auto bg-red-500 text-white text-xs px-2 py-0.5 rounded-full"
+                >12</span
+              >
+            </button>
+          </div>
+        </nav>
+      </aside>
+      <main class="flex-1 flex flex-col overflow-hidden">
+        <header class="bg-white border-b border-gray-200 p-4">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center flex-1 max-w-lg">
+              <div class="relative w-full">
+                <input
+                  type="text"
+                  placeholder="Search..."
+                  class="w-full pl-10 pr-4 py-2 rounded-button border-none bg-gray-100"
+                />
+                <i
+                  class="ri-search-line absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4 flex items-center justify-center"
+                ></i>
+              </div>
+            </div>
+            <div class="flex items-center space-x-4">
+              <button
+                class="relative p-2 text-gray-600 hover:bg-gray-100 rounded-button"
+              >
+                <i
+                  class="ri-notification-3-line w-5 h-5 flex items-center justify-center"
+                ></i>
+                <span
+                  class="absolute top-0 right-0 w-2 h-2 bg-red-500 rounded-full"
+                ></span>
+              </button>
+              <div class="relative">
+                <button
+                  id="profileButton"
+                  class="flex items-center space-x-2 p-2 hover:bg-gray-100 rounded-button"
+                >
+                  <img
+                    src="https://readdy.ai/api/search-image?query=professional headshot of a middle aged business man wearing a suit, high quality photo realistic&width=32&height=32&seq=1&orientation=squarish"
+                    class="w-8 h-8 rounded-full"
+                    alt="Profile"
+                  />
+                  <span class="text-sm font-medium">Karlsome</span>
+                </button>
+                <div
+                  id="profileDropdown"
+                  class="hidden absolute right-0 mt-2 w-56 bg-white rounded-lg shadow-lg border border-gray-200 py-2 z-50"
+                >
+                  <a
+                    href="#"
+                    class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                  >
+                    <i
+                      class="ri-user-line w-5 h-5 flex items-center justify-center mr-2"
+                    ></i>
+                    My Profile
+                  </a>
+                  <a
+                    href="#"
+                    class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                  >
+                    <i
+                      class="ri-settings-3-line w-5 h-5 flex items-center justify-center mr-2"
+                    ></i>
+                    Account Settings
+                  </a>
+                  <a
+                    href="#"
+                    class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                  >
+                    <i
+                      class="ri-equalizer-line w-5 h-5 flex items-center justify-center mr-2"
+                    ></i>
+                    Preferences
+                  </a>
+                  <a
+                    href="#"
+                    class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                  >
+                    <i
+                      class="ri-question-line w-5 h-5 flex items-center justify-center mr-2"
+                    ></i>
+                    Help & Support
+                  </a>
+                  <div class="border-t border-gray-200 my-1"></div>
+                  <a
+                    href="#"
+                    class="flex items-center px-4 py-2 text-sm text-red-600 hover:bg-gray-100"
+                  >
+                    <i
+                      class="ri-logout-box-line w-5 h-5 flex items-center justify-center mr-2"
+                    ></i>
+                    Sign Out
+                  </a>
+                </div>
+              </div>
+              <script>
+                document.addEventListener("DOMContentLoaded", function () {
+                  const profileButton = document.getElementById("profileButton");
+                  const profileDropdown = document.getElementById("profileDropdown");
+                  profileButton.addEventListener("click", function (e) {
+                    e.stopPropagation();
+                    profileDropdown.classList.toggle("hidden");
+                  });
+                  document.addEventListener("click", function (e) {
+                    if (!profileDropdown.contains(e.target)) {
+                      profileDropdown.classList.add("hidden");
+                    }
+                  });
+                });
+              </script>
+            </div>
+          </div>
+        </header>
+        <div class="flex-1 overflow-auto p-6">
+          <div class="mb-6">
+            <h2 class="text-2xl font-semibold mb-4">Factory Overview</h2>
+            <div class="grid grid-cols-3 gap-6">
+              <div id="factoryCards"></div>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-6 mb-6">
+            <div class="bg-white p-6 rounded-lg shadow">
+              <h3 class="text-lg font-semibold mb-4">Process Performance</h3>
+              <div id="processChart" class="h-80"></div>
+            </div>
+            <div class="bg-white p-6 rounded-lg shadow">
+              <h3 class="text-lg font-semibold mb-4">Efficiency Trends</h3>
+              <div id="efficiencyChart" class="h-80"></div>
+            </div>
+          </div>
+          <div class="bg-white rounded-lg shadow">
+            <div class="p-6">
+              <h3 class="text-lg font-semibold mb-4">Recent Notifications</h3>
+              <div id="notifications" class="space-y-4"></div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+    <script>
+      const mockData = {
+        approvals: [
+          {
+            id: 1,
+            type: "Daily Inspection",
+            factory: "North America Factory",
+            date: "2025-03-07",
+            inspector: "Michael Chen",
+            status: "pending",
+            details: "Regular daily inspection of production line A",
+            leaderApproval: null,
+            divisionApproval: null,
+          },
+          {
+            id: 2,
+            type: "Daily Inspection",
+            factory: "Europe Factory",
+            date: "2025-03-07",
+            inspector: "Sarah Miller",
+            status: "leader_approved",
+            details: "Quality check on new equipment installation",
+            leaderApproval: {
+              approver: "James Wilson",
+              date: "2025-03-07",
+              comments: "All standards met",
+            },
+            divisionApproval: null,
+          },
+          {
+            id: 3,
+            type: "Weekly Summary",
+            factory: "Asia Factory",
+            date: "2025-03-01",
+            inspector: "David Zhang",
+            status: "completed",
+            details: "Weekly inspection summary for production lines B and C",
+            leaderApproval: {
+              approver: "Emily Brown",
+              date: "2025-03-02",
+              comments: "Approved with minor suggestions",
+            },
+            divisionApproval: {
+              approver: "Robert Johnson",
+              date: "2025-03-03",
+              comments: "Excellent work this week",
+            },
+          },
+        ],
+        factories: [
+          {
+            id: 1,
+            name: "SCNA",
+            location: "Indianapolis, USA",
+            status: "normal",
+            performance: 95,
+          },
+          {
+            id: 2,
+            name: "第一工場",
+            location: "関市",
+            status: "warning",
+            performance: 82,
+          },
+          {
+            id: 3,
+            name: "第二工場",
+            location: "Shanghai, China",
+            status: "normal",
+            performance: 91,
+          },
+          {
+            id: 4,
+            name: "肥田瀬",
+            location: "Sao Paulo, Brazil",
+            status: "critical",
+            performance: 68,
+          },
+          {
+            id: 5,
+            name: "倉知",
+            location: "倉知2511-1",
+            status: "maintenance",
+            performance: 75,
+          },
+          {
+            id: 6,
+            name: "小瀬",
+            location: "Johannesburg, SA",
+            status: "normal",
+            performance: 88,
+          },
+          {
+            id: 7,
+            name: "NFH",
+            location: "広島",
+            status: "normal",
+            performance: 88,
+          },
+        ],
+        notifications: [
+          {
+            id: 1,
+            type: "critical",
+            message: "Press machine failure at Europe Factory",
+            time: "10 minutes ago",
+          },
+          {
+            id: 2,
+            type: "warning",
+            message: "SRS process efficiency below threshold at Asia Factory",
+            time: "25 minutes ago",
+          },
+          {
+            id: 3,
+            type: "normal",
+            message: "Maintenance completed at Australia Factory",
+            time: "1 hour ago",
+          },
+          {
+            id: 4,
+            type: "warning",
+            message: "Quality inspection alert at South America Factory",
+            time: "2 hours ago",
+          },
+        ],
+      };
+      function renderFactoryCards() {
+        const container = document.getElementById("factoryCards");
+        mockData.factories.forEach((factory) => {
+          const card = document.createElement("div");
+          card.className = "bg-white p-6 rounded-lg shadow";
+          card.innerHTML = `
+      <div class="flex justify-between items-start mb-4">
+      <div>
+      <h4 class="font-semibold">${factory.name}</h4>
+      <p class="text-sm text-gray-500">${factory.location}</p>
+      </div>
+      <span class="process-status-${factory.status} text-xs px-2 py-1 rounded-full">${factory.status.charAt(0).toUpperCase() + factory.status.slice(1)}</span>
+      </div>
+      <div class="flex items-end justify-between">
+      <div>
+      <p class="text-sm text-gray-500">Performance</p>
+      <p class="text-2xl font-semibold">${factory.performance}%</p>
+      </div>
+      <button class="text-primary hover:text-primary/80 text-sm !rounded-button">View Details</button>
+      </div>
+      `;
+          container.appendChild(card);
+        });
+      }
+      function renderNotifications() {
+        const container = document.getElementById("notifications");
+        mockData.notifications.forEach((notification) => {
+          const div = document.createElement("div");
+          div.className = `flex items-start p-4 ${notification.type === "critical" ? "bg-red-50" : notification.type === "warning" ? "bg-yellow-50" : "bg-blue-50"} rounded-lg`;
+          div.innerHTML = `
+      <i class="ri-notification-3-line w-5 h-5 flex items-center justify-center ${notification.type === "critical" ? "text-red-500" : notification.type === "warning" ? "text-yellow-500" : "text-blue-500"}"></i>
+      <div class="ml-3 flex-1">
+      <p class="text-sm font-medium text-gray-900">${notification.message}</p>
+      <p class="text-sm text-gray-500">${notification.time}</p>
+      </div>
+      <button class="ml-4 text-gray-400 hover:text-gray-500">
+      <i class="ri-close-line w-5 h-5 flex items-center justify-center"></i>
+      </button>
+      `;
+          container.appendChild(div);
+        });
+      }
+      function initCharts() {
+        const processChart = echarts.init(document.getElementById("processChart"));
+        const efficiencyChart = echarts.init(
+          document.getElementById("efficiencyChart"),
+        );
+        const processOption = {
+          animation: false,
+          tooltip: {
+            trigger: "axis",
+            backgroundColor: "rgba(255, 255, 255, 0.9)",
+            borderColor: "#e5e7eb",
+            textStyle: { color: "#1f2937" },
+          },
+          legend: {
+            data: ["Press", "Slit", "SRS", "Inspection"],
+            bottom: 0,
+          },
+          grid: {
+            top: 10,
+            right: 10,
+            bottom: 30,
+            left: 30,
+            containLabel: true,
+          },
+          xAxis: {
+            type: "category",
+            data: ["Mon", "Tue", "Wed", "Thu", "Fri"],
+          },
+          yAxis: {
+            type: "value",
+          },
+          series: [
+            {
+              name: "Press",
+              type: "line",
+              smooth: true,
+              data: [90, 85, 95, 88, 93],
+              color: "rgba(87, 181, 231, 1)",
+              areaStyle: {
+                color: {
+                  type: "linear",
+                  x: 0,
+                  y: 0,
+                  x2: 0,
+                  y2: 1,
+                  colorStops: [
+                    {
+                      offset: 0,
+                      color: "rgba(87, 181, 231, 0.2)",
+                    },
+                    {
+                      offset: 1,
+                      color: "rgba(87, 181, 231, 0)",
+                    },
+                  ],
+                },
+              },
+            },
+            {
+              name: "Slit",
+              type: "line",
+              smooth: true,
+              data: [85, 90, 82, 87, 89],
+              color: "rgba(141, 211, 199, 1)",
+              areaStyle: {
+                color: {
+                  type: "linear",
+                  x: 0,
+                  y: 0,
+                  x2: 0,
+                  y2: 1,
+                  colorStops: [
+                    {
+                      offset: 0,
+                      color: "rgba(141, 211, 199, 0.2)",
+                    },
+                    {
+                      offset: 1,
+                      color: "rgba(141, 211, 199, 0)",
+                    },
+                  ],
+                },
+              },
+            },
+            {
+              name: "SRS",
+              type: "line",
+              smooth: true,
+              data: [92, 88, 91, 85, 90],
+              color: "rgba(251, 191, 114, 1)",
+              areaStyle: {
+                color: {
+                  type: "linear",
+                  x: 0,
+                  y: 0,
+                  x2: 0,
+                  y2: 1,
+                  colorStops: [
+                    {
+                      offset: 0,
+                      color: "rgba(251, 191, 114, 0.2)",
+                    },
+                    {
+                      offset: 1,
+                      color: "rgba(251, 191, 114, 0)",
+                    },
+                  ],
+                },
+              },
+            },
+            {
+              name: "Inspection",
+              type: "line",
+              smooth: true,
+              data: [88, 92, 86, 90, 85],
+              color: "rgba(252, 141, 98, 1)",
+              areaStyle: {
+                color: {
+                  type: "linear",
+                  x: 0,
+                  y: 0,
+                  x2: 0,
+                  y2: 1,
+                  colorStops: [
+                    {
+                      offset: 0,
+                      color: "rgba(252, 141, 98, 0.2)",
+                    },
+                    {
+                      offset: 1,
+                      color: "rgba(252, 141, 98, 0)",
+                    },
+                  ],
+                },
+              },
+            },
+          ],
+        };
+        const efficiencyOption = {
+          animation: false,
+          tooltip: {
+            trigger: "axis",
+            backgroundColor: "rgba(255, 255, 255, 0.9)",
+            borderColor: "#e5e7eb",
+            textStyle: { color: "#1f2937" },
+          },
+          grid: {
+            top: 10,
+            right: 10,
+            bottom: 30,
+            left: 30,
+            containLabel: true,
+          },
+          xAxis: {
+            type: "category",
+            data: [
+              "North America",
+              "Europe",
+              "Asia",
+              "South America",
+              "Australia",
+              "Africa",
+            ],
+          },
+          yAxis: {
+            type: "value",
+          },
+          series: [
+            {
+              data: [95, 82, 91, 68, 75, 88],
+              type: "bar",
+              color: "rgba(87, 181, 231, 1)",
+              barWidth: "60%",
+              itemStyle: {
+                borderRadius: [4, 4, 0, 0],
+              },
+            },
+          ],
+        };
+        processChart.setOption(processOption);
+        efficiencyChart.setOption(efficiencyOption);
+        window.addEventListener("resize", () => {
+          processChart.resize();
+          efficiencyChart.resize();
+        });
+      }
+      document.addEventListener("DOMContentLoaded", () => {
+        renderFactoryCards();
+        renderNotifications();
+        initCharts();
+      });
+      const approvalsPage = `
+      <div class="p-6">
+      <div class="flex justify-between items-center mb-6">
+      <h2 class="text-2xl font-semibold">Inspection Approvals</h2>
+      <div class="flex space-x-4">
+      <button class="flex items-center px-4 py-2 bg-white border border-gray-200 rounded-button hover:bg-gray-50">
+      <i class="ri-filter-3-line w-5 h-5 flex items-center justify-center mr-2"></i>
+      Filter
+      </button>
+      <button class="flex items-center px-4 py-2 bg-primary text-white rounded-button hover:bg-primary/90">
+      <i class="ri-add-line w-5 h-5 flex items-center justify-center mr-2"></i>
+      New Inspection
+      </button>
+      </div>
+      </div>
+      <div class="bg-white rounded-lg shadow overflow-hidden">
+      <div class="flex items-center p-4 border-b border-gray-200 bg-gray-50">
+      <div class="flex-1 grid grid-cols-6 gap-4">
+      <div class="font-medium">Type</div>
+      <div class="font-medium">Factory</div>
+      <div class="font-medium">Inspector</div>
+      <div class="font-medium">Date</div>
+      <div class="font-medium">Status</div>
+      <div class="font-medium">Actions</div>
+      </div>
+      </div>
+      <div id="approvalsList" class="divide-y divide-gray-200">
+      </div>
+      </div>
+      </div>
+      `;
+      function renderApprovals() {
+        const container = document.getElementById("approvalsList");
+        if (!container) return;
+        mockData.approvals.forEach((approval) => {
+          const div = document.createElement("div");
+          div.className = "flex items-center p-4 hover:bg-gray-50";
+          let statusClass = "";
+          let statusText = "";
+          switch (approval.status) {
+            case "pending":
+              statusClass = "bg-yellow-100 text-yellow-800";
+              statusText = "Pending Leader Approval";
+              break;
+            case "leader_approved":
+              statusClass = "bg-blue-100 text-blue-800";
+              statusText = "Pending Division Approval";
+              break;
+            case "completed":
+              statusClass = "bg-green-100 text-green-800";
+              statusText = "Completed";
+              break;
+          }
+          div.innerHTML = `
+      <div class="flex-1 grid grid-cols-6 gap-4">
+      <div class="flex items-center">
+      <i class="ri-clipboard-line w-5 h-5 flex items-center justify-center mr-2 text-gray-400"></i>
+      <span>${approval.type}</span>
+      </div>
+      <div>${approval.factory}</div>
+      <div>${approval.inspector}</div>
+      <div>${approval.date}</div>
+      <div>
+      <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusClass}">
+      ${statusText}
+      </span>
+      </div>
+      <div class="flex items-center space-x-2">
+      <button onclick="viewApproval(${approval.id})" class="p-2 text-gray-600 hover:bg-gray-100 rounded-button">
+      <i class="ri-eye-line w-5 h-5 flex items-center justify-center"></i>
+      </button>
+      ${
+        approval.status === "pending" || approval.status === "leader_approved"
+          ? `
+      <button onclick="approveInspection(${approval.id})" class="p-2 text-primary hover:bg-blue-50 rounded-button">
+      <i class="ri-checkbox-circle-line w-5 h-5 flex items-center justify-center"></i>
+      </button>
+      `
+          : ""
+      }
+      <button onclick="downloadReport(${approval.id})" class="p-2 text-gray-600 hover:bg-gray-100 rounded-button">
+      <i class="ri-download-line w-5 h-5 flex items-center justify-center"></i>
+      </button>
+      </div>
+      </div>
+      `;
+          container.appendChild(div);
+        });
+      }
+      function viewApproval(id) {
+        const approval = mockData.approvals.find((a) => a.id === id);
+        if (!approval) return;
+        const modal = document.createElement("div");
+        modal.className =
+          "fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50";
+        modal.innerHTML = `
+      <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-auto">
+      <div class="flex justify-between items-center p-6 border-b border-gray-200">
+      <h3 class="text-lg font-semibold">Inspection Details</h3>
+      <button onclick="this.closest('.fixed').remove()" class="text-gray-400 hover:text-gray-500">
+      <i class="ri-close-line w-6 h-6 flex items-center justify-center"></i>
+      </button>
+      </div>
+      <div class="p-6 space-y-4">
+      <div class="grid grid-cols-2 gap-4">
+      <div>
+      <p class="text-sm text-gray-500">Type</p>
+      <p class="font-medium">${approval.type}</p>
+      </div>
+      <div>
+      <p class="text-sm text-gray-500">Factory</p>
+      <p class="font-medium">${approval.factory}</p>
+      </div>
+      <div>
+      <p class="text-sm text-gray-500">Inspector</p>
+      <p class="font-medium">${approval.inspector}</p>
+      </div>
+      <div>
+      <p class="text-sm text-gray-500">Date</p>
+      <p class="font-medium">${approval.date}</p>
+      </div>
+      </div>
+      <div>
+      <p class="text-sm text-gray-500">Details</p>
+      <p class="mt-1">${approval.details}</p>
+      </div>
+      ${
+        approval.leaderApproval
+          ? `
+      <div class="border-t border-gray-200 pt-4">
+      <p class="text-sm text-gray-500">Leader Approval</p>
+      <div class="mt-2">
+      <p class="font-medium">${approval.leaderApproval.approver}</p>
+      <p class="text-sm text-gray-500">${approval.leaderApproval.date}</p>
+      <p class="mt-1">${approval.leaderApproval.comments}</p>
+      </div>
+      </div>
+      `
+          : ""
+      }
+      ${
+        approval.divisionApproval
+          ? `
+      <div class="border-t border-gray-200 pt-4">
+      <p class="text-sm text-gray-500">Division Approval</p>
+      <div class="mt-2">
+      <p class="font-medium">${approval.divisionApproval.approver}</p>
+      <p class="text-sm text-gray-500">${approval.divisionApproval.date}</p>
+      <p class="mt-1">${approval.divisionApproval.comments}</p>
+      </div>
+      </div>
+      `
+          : ""
+      }
+      </div>
+      </div>
+      `;
+        document.body.appendChild(modal);
+      }
+      function approveInspection(id) {
+        const approval = mockData.approvals.find((a) => a.id === id);
+        if (!approval) return;
+        const modal = document.createElement("div");
+        modal.className =
+          "fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50";
+        modal.innerHTML = `
+      <div class="bg-white rounded-lg shadow-xl w-full max-w-lg">
+      <div class="flex justify-between items-center p-6 border-b border-gray-200">
+      <h3 class="text-lg font-semibold">Approve Inspection</h3>
+      <button onclick="this.closest('.fixed').remove()" class="text-gray-400 hover:text-gray-500">
+      <i class="ri-close-line w-6 h-6 flex items-center justify-center"></i>
+      </button>
+      </div>
+      <div class="p-6">
+      <div class="mb-4">
+      <label class="block text-sm font-medium text-gray-700 mb-2">Comments</label>
+      <textarea id="approvalComments" rows="4" class="w-full border-gray-200 rounded-button"></textarea>
+      </div>
+      <div class="flex justify-end space-x-4">
+      <button onclick="this.closest('.fixed').remove()" class="px-4 py-2 border border-gray-200 rounded-button hover:bg-gray-50">
+      Cancel
+      </button>
+      <button onclick="submitApproval(${id})" class="px-4 py-2 bg-primary text-white rounded-button hover:bg-primary/90">
+      Approve
+      </button>
+      </div>
+      </div>
+      </div>
+      `;
+        document.body.appendChild(modal);
+      }
+      function submitApproval(id) {
+        const comments = document.getElementById("approvalComments").value;
+        const approval = mockData.approvals.find((a) => a.id === id);
+        if (approval.status === "pending") {
+          approval.status = "leader_approved";
+          approval.leaderApproval = {
+            approver: "James Wilson",
+            date: "2025-03-07",
+            comments: comments,
+          };
+        } else if (approval.status === "leader_approved") {
+          approval.status = "completed";
+          approval.divisionApproval = {
+            approver: "Robert Johnson",
+            date: "2025-03-07",
+            comments: comments,
+          };
+        }
+        document.querySelector(".fixed").remove();
+        const approvalsList = document.getElementById("approvalsList");
+        approvalsList.innerHTML = "";
+        renderApprovals();
+      }
+      function downloadReport(id) {
+        const notification = document.createElement("div");
+        notification.className =
+          "fixed bottom-4 right-4 bg-gray-800 text-white px-6 py-3 rounded-lg shadow-lg z-50";
+        notification.innerHTML = "Report download started...";
+        document.body.appendChild(notification);
+        setTimeout(() => notification.remove(), 3000);
+      }
+      const mockUsers = {
+        currentUser: {
+          id: 1,
+          name: "John Anderson",
+          role: "admin",
+          email: "john.anderson@company.com",
+          department: "IT",
+          avatar:
+            "https://readdy.ai/api/search-image?query=professional headshot of a middle aged business man wearing a suit, high quality photo realistic&width=32&height=32&seq=1&orientation=squarish",
+        },
+        users: [
+          {
+            id: 1,
+            name: "John Anderson",
+            role: "admin",
+            email: "john.anderson@company.com",
+            department: "IT",
+            status: "active",
+            lastActive: "2025-03-07 09:30:00",
+            avatar:
+              "https://readdy.ai/api/search-image?query=professional headshot of a middle aged business man wearing a suit, high quality photo realistic&width=32&height=32&seq=1&orientation=squarish",
+          },
+          {
+            id: 2,
+            name: "Sarah Miller",
+            role: "leader",
+            email: "sarah.miller@company.com",
+            department: "Production",
+            status: "active",
+            lastActive: "2025-03-07 10:15:00",
+            avatar:
+              "https://public.readdy.ai/ai/img_res/9f2d437fc18e477dd915514f8dc2a12b.jpg",
+          },
+          {
+            id: 3,
+            name: "Michael Chen",
+            role: "normal",
+            email: "michael.chen@company.com",
+            department: "Quality Control",
+            status: "active",
+            lastActive: "2025-03-07 08:45:00",
+            avatar:
+              "https://public.readdy.ai/ai/img_res/e29b10744bc06ee37bc5716838cd0b74.jpg",
+          },
+        ],
+      };
+      const analyticsData = {
+        productionVolume: {
+          totalOutput: {
+            daily: 12500,
+            weekly: 87500,
+            monthly: 375000,
+          },
+          byProcess: {
+            Press: 13000,
+            Slit: 12800,
+            SRS: 12600,
+            Inspection: 12500,
+          },
+          byFactory: {
+            "North America": 85000,
+            Europe: 72000,
+            Asia: 80000,
+            "South America": 45000,
+            Australia: 48000,
+            Africa: 45000,
+          },
+        },
+        efficiency: {
+          cycleTime: {
+            Press: { avg: 45, min: 40, max: 55 },
+            Slit: { avg: 30, min: 25, max: 40 },
+            SRS: { avg: 60, min: 50, max: 75 },
+            Inspection: { avg: 15, min: 10, max: 25 },
+          },
+          throughput: {
+            Press: 80,
+            Slit: 120,
+            SRS: 60,
+            Inspection: 240,
+          },
+          downtime: {
+            "Machine Breakdown": 120,
+            Maintenance: 240,
+            "Material Shortage": 60,
+            "Setup Time": 90,
+          },
+          utilization: {
+            Press: 92,
+            Slit: 88,
+            SRS: 85,
+            Inspection: 95,
+          },
+        },
+        quality: {
+          defectRate: 3.2,
+          defectDistribution: {
+            Press: 35,
+            Slit: 25,
+            SRS: 30,
+            Inspection: 10,
+          },
+          defectTypes: {
+            "Surface Defects": 40,
+            "Dimensional Error": 25,
+            "Material Defects": 20,
+            Other: 15,
+          },
+          firstPassYield: {
+            Press: 95,
+            Slit: 93,
+            SRS: 92,
+            Inspection: 97,
+          },
+        },
+      };
+      const analyticsPage = `
+      <div class="p-6">
+      <div class="flex justify-between items-center mb-6">
+      <h2 class="text-2xl font-semibold">Analytics Overview</h2>
+      <div class="flex space-x-4">
+      <button class="flex items-center px-4 py-2 bg-white border border-gray-200 rounded-button hover:bg-gray-50">
+      <i class="ri-download-line w-5 h-5 flex items-center justify-center mr-2"></i>
+      Export Report
+      </button>
+      <button class="flex items-center px-4 py-2 bg-white border border-gray-200 rounded-button hover:bg-gray-50">
+      <i class="ri-calendar-line w-5 h-5 flex items-center justify-center mr-2"></i>
+      Last 30 Days
+      </button>
+      </div>
+      </div>
+      <div class="grid grid-cols-3 gap-6 mb-6">
+      <div class="bg-white p-6 rounded-lg shadow">
+      <div class="flex justify-between items-start mb-4">
+      <div>
+      <h3 class="text-lg font-semibold">Total Output</h3>
+      <p class="text-sm text-gray-500">Monthly production volume</p>
+      </div>
+      <span class="text-green-500 text-sm">+5.2%</span>
+      </div>
+      <p class="text-3xl font-bold">${analyticsData.productionVolume.totalOutput.monthly.toLocaleString()}</p>
+      <div class="mt-4">
+      <div class="flex justify-between text-sm mb-1">
+      <span class="text-gray-500">Daily Average</span>
+      <span class="font-medium">${analyticsData.productionVolume.totalOutput.daily.toLocaleString()}</span>
+      </div>
+      <div class="flex justify-between text-sm">
+      <span class="text-gray-500">Weekly Total</span>
+      <span class="font-medium">${analyticsData.productionVolume.totalOutput.weekly.toLocaleString()}</span>
+      </div>
+      </div>
+      </div>
+      <div class="bg-white p-6 rounded-lg shadow">
+      <div class="flex justify-between items-start mb-4">
+      <div>
+      <h3 class="text-lg font-semibold">Average Defect Rate</h3>
+      <p class="text-sm text-gray-500">Across all processes</p>
+      </div>
+      <span class="text-red-500 text-sm">+0.8%</span>
+      </div>
+      <p class="text-3xl font-bold">${analyticsData.quality.defectRate}%</p>
+      <div class="mt-4">
+      <div class="flex justify-between text-sm mb-1">
+      <span class="text-gray-500">First Pass Yield</span>
+      <span class="font-medium">${Object.values(analyticsData.quality.firstPassYield).reduce((a, b) => a + b, 0) / 4}%</span>
+      </div>
+      <div class="flex justify-between text-sm">
+      <span class="text-gray-500">Quality Target</span>
+      <span class="font-medium">2.5%</span>
+      </div>
+      </div>
+      </div>
+      <div class="bg-white p-6 rounded-lg shadow">
+      <div class="flex justify-between items-start mb-4">
+      <div>
+      <h3 class="text-lg font-semibold">Overall Equipment Effectiveness</h3>
+      <p class="text-sm text-gray-500">Average across all processes</p>
+      </div>
+      <span class="text-green-500 text-sm">+2.1%</span>
+      </div>
+      <p class="text-3xl font-bold">${Object.values(analyticsData.efficiency.utilization).reduce((a, b) => a + b, 0) / 4}%</p>
+      <div class="mt-4">
+      <div class="flex justify-between text-sm mb-1">
+      <span class="text-gray-500">Total Downtime</span>
+      <span class="font-medium">${Object.values(analyticsData.efficiency.downtime).reduce((a, b) => a + b, 0)} min</span>
+      </div>
+      <div class="flex justify-between text-sm">
+      <span class="text-gray-500">Target OEE</span>
+      <span class="font-medium">95%</span>
+      </div>
+      </div>
+      </div>
+      </div>
+      <div class="grid grid-cols-2 gap-6 mb-6">
+      <div class="bg-white p-6 rounded-lg shadow">
+      <h3 class="text-lg font-semibold mb-4">Production by Process</h3>
+      <div id="productionByProcess" class="h-80"></div>
+      </div>
+      <div class="bg-white p-6 rounded-lg shadow">
+      <h3 class="text-lg font-semibold mb-4">Factory Comparison</h3>
+      <div id="factoryComparison" class="h-80"></div>
+      </div>
+      </div>
+      <div class="grid grid-cols-2 gap-6 mb-6">
+      <div class="bg-white p-6 rounded-lg shadow">
+      <h3 class="text-lg font-semibold mb-4">Cycle Time Analysis</h3>
+      <div id="cycleTimeChart" class="h-80"></div>
+      </div>
+      <div class="bg-white p-6 rounded-lg shadow">
+      <h3 class="text-lg font-semibold mb-4">Defect Distribution</h3>
+      <div id="defectChart" class="h-80"></div>
+      </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-6 mb-6">
+      <div class="bg-white p-6 rounded-lg shadow">
+      <h3 class="text-lg font-semibold mb-4">Machine Utilization Heatmap</h3>
+      <div id="utilizationHeatmap" class="h-80"></div>
+      </div>
+      <div class="bg-white p-6 rounded-lg shadow">
+      <h3 class="text-lg font-semibold mb-4">Downtime Analysis</h3>
+      <div id="downtimeChart" class="h-80"></div>
+      </div>
+      </div>
+
+      <div class="bg-white rounded-lg shadow overflow-hidden">
+      <div class="p-6 border-b border-gray-200">
+      <h3 class="text-lg font-semibold">Detailed Performance Metrics</h3>
+      </div>
+      <div class="overflow-x-auto">
+      <table class="w-full">
+      <thead class="bg-gray-50">
+      <tr>
+      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Factory</th>
+      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Production Volume</th>
+      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Defect Rate</th>
+      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cycle Time</th>
+      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">OEE</th>
+      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Trend</th>
+      </tr>
+      </thead>
+      <tbody class="bg-white divide-y divide-gray-200" id="metricsTable">
+      </tbody>
+      </table>
+      </div>
+      </div>
+      </div>
+      `;
+      const userManagementPage = `
+      <div class="p-6">
+      <div class="flex justify-between items-center mb-6">
+      <h2 class="text-2xl font-semibold">User Management</h2>
+      ${
+        mockUsers.currentUser.role === "admin"
+          ? `
+      <button onclick="showAddUserModal()" class="flex items-center px-4 py-2 bg-primary text-white rounded-button hover:bg-primary/90">
+      <i class="ri-user-add-line w-5 h-5 flex items-center justify-center mr-2"></i>
+      Add Member
+      </button>
+      `
+          : ""
+      }
+      </div>
+      <div class="bg-white rounded-lg shadow overflow-hidden">
+      <div class="flex items-center p-4 border-b border-gray-200 bg-gray-50">
+      <div class="flex-1 grid grid-cols-7 gap-4">
+      <div class="font-medium">User</div>
+      <div class="font-medium">Role</div>
+      <div class="font-medium">Email</div>
+      <div class="font-medium">Department</div>
+      <div class="font-medium">Status</div>
+      <div class="font-medium">Last Active</div>
+      <div class="font-medium">Actions</div>
+      </div>
+      </div>
+      <div id="usersList" class="divide-y divide-gray-200"></div>
+      </div>
+      </div>
+      `;
+      function renderUsers() {
+        const container = document.getElementById("usersList");
+        if (!container) return;
+        mockUsers.users.forEach((user) => {
+          const div = document.createElement("div");
+          div.className = "flex items-center p-4 hover:bg-gray-50";
+          const roleColors = {
+            admin: "bg-purple-100 text-purple-800",
+            leader: "bg-blue-100 text-blue-800",
+            normal: "bg-gray-100 text-gray-800",
+          };
+          div.innerHTML = `
+      <div class="flex-1 grid grid-cols-7 gap-4">
+      <div class="flex items-center">
+      <img src="${user.avatar}" class="w-8 h-8 rounded-full mr-3" alt="${user.name}">
+      <span class="font-medium">${user.name}</span>
+      </div>
+      <div>
+      <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${roleColors[user.role]}">
+      ${user.role.charAt(0).toUpperCase() + user.role.slice(1)}
+      </span>
+      </div>
+      <div class="text-gray-600">${user.email}</div>
+      <div>${user.department}</div>
+      <div>
+      <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${user.status === "active" ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-800"}">
+      ${user.status.charAt(0).toUpperCase() + user.status.slice(1)}
+      </span>
+      </div>
+      <div class="text-gray-600">${user.lastActive}</div>
+      <div class="flex items-center space-x-2">
+      ${
+        mockUsers.currentUser.role === "admin"
+          ? `
+      <button onclick="editUser(${user.id})" class="p-2 text-gray-600 hover:bg-gray-100 rounded-button">
+      <i class="ri-edit-line w-5 h-5 flex items-center justify-center"></i>
+      </button>
+      <button onclick="deleteUser(${user.id})" class="p-2 text-red-600 hover:bg-red-50 rounded-button">
+      <i class="ri-delete-bin-line w-5 h-5 flex items-center justify-center"></i>
+      </button>
+      `
+          : `
+      <button onclick="viewUser(${user.id})" class="p-2 text-gray-600 hover:bg-gray-100 rounded-button">
+      <i class="ri-eye-line w-5 h-5 flex items-center justify-center"></i>
+      </button>
+      `
+      }
+      </div>
+      </div>
+      `;
+          container.appendChild(div);
+        });
+      }
+      function showAddUserModal() {
+        const modal = document.createElement("div");
+        modal.className =
+          "fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50";
+        modal.innerHTML = `
+      <div class="bg-white rounded-lg shadow-xl w-full max-w-lg">
+      <div class="flex justify-between items-center p-6 border-b border-gray-200">
+      <h3 class="text-lg font-semibold">Add New Member</h3>
+      <button onclick="this.closest('.fixed').remove()" class="text-gray-400 hover:text-gray-500">
+      <i class="ri-close-line w-6 h-6 flex items-center justify-center"></i>
+      </button>
+      </div>
+      <div class="p-6">
+      <form id="addUserForm" class="space-y-4">
+      <div>
+      <label class="block text-sm font-medium text-gray-700 mb-2">Name</label>
+      <input type="text" required class="w-full border border-gray-200 rounded-button p-2">
+      </div>
+      <div>
+      <label class="block text-sm font-medium text-gray-700 mb-2">Email</label>
+      <input type="email" required class="w-full border border-gray-200 rounded-button p-2">
+      </div>
+      <div>
+      <label class="block text-sm font-medium text-gray-700 mb-2">Role</label>
+      <select required class="w-full border border-gray-200 rounded-button p-2 pr-8">
+      <option value="normal">Normal</option>
+      <option value="leader">Leader</option>
+      <option value="admin">Admin</option>
+      </select>
+      </div>
+      <div>
+      <label class="block text-sm font-medium text-gray-700 mb-2">Department</label>
+      <input type="text" required class="w-full border border-gray-200 rounded-button p-2">
+      </div>
+      <div class="flex justify-end space-x-4 mt-6">
+      <button type="button" onclick="this.closest('.fixed').remove()"
+      class="px-4 py-2 border border-gray-200 rounded-button hover:bg-gray-50">
+      Cancel
+      </button>
+      <button type="submit"
+      class="px-4 py-2 bg-primary text-white rounded-button hover:bg-primary/90">
+      Add Member
+      </button>
+      </div>
+      </form>
+      </div>
+      </div>
+      `;
+        document.body.appendChild(modal);
+        document.getElementById("addUserForm").addEventListener("submit", (e) => {
+          e.preventDefault();
+          const notification = document.createElement("div");
+          notification.className =
+            "fixed bottom-4 right-4 bg-green-800 text-white px-6 py-3 rounded-lg shadow-lg z-50";
+          notification.innerHTML = "New member added successfully!";
+          document.body.appendChild(notification);
+          modal.remove();
+          setTimeout(() => notification.remove(), 3000);
+        });
+      }
+      function editUser(id) {
+        const user = mockUsers.users.find((u) => u.id === id);
+        if (!user) return;
+        const modal = document.createElement("div");
+        modal.className =
+          "fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50";
+        modal.innerHTML = `
+      <div class="bg-white rounded-lg shadow-xl w-full max-w-lg">
+      <div class="flex justify-between items-center p-6 border-b border-gray-200">
+      <h3 class="text-lg font-semibold">Edit Member</h3>
+      <button onclick="this.closest('.fixed').remove()" class="text-gray-400 hover:text-gray-500">
+      <i class="ri-close-line w-6 h-6 flex items-center justify-center"></i>
+      </button>
+      </div>
+      <div class="p-6">
+      <form id="editUserForm" class="space-y-4">
+      <div>
+      <label class="block text-sm font-medium text-gray-700 mb-2">Name</label>
+      <input type="text" value="${user.name}" required class="w-full border border-gray-200 rounded-button p-2">
+      </div>
+      <div>
+      <label class="block text-sm font-medium text-gray-700 mb-2">Email</label>
+      <input type="email" value="${user.email}" required class="w-full border border-gray-200 rounded-button p-2">
+      </div>
+      <div>
+      <label class="block text-sm font-medium text-gray-700 mb-2">Role</label>
+      <select required class="w-full border border-gray-200 rounded-button p-2 pr-8">
+      <option value="normal" ${user.role === "normal" ? "selected" : ""}>Normal</option>
+      <option value="leader" ${user.role === "leader" ? "selected" : ""}>Leader</option>
+      <option value="admin" ${user.role === "admin" ? "selected" : ""}>Admin</option>
+      </select>
+      </div>
+      <div>
+      <label class="block text-sm font-medium text-gray-700 mb-2">Department</label>
+      <input type="text" value="${user.department}" required class="w-full border border-gray-200 rounded-button p-2">
+      </div>
+      <div class="flex justify-end space-x-4 mt-6">
+      <button type="button" onclick="this.closest('.fixed').remove()"
+      class="px-4 py-2 border border-gray-200 rounded-button hover:bg-gray-50">
+      Cancel
+      </button>
+      <button type="submit"
+      class="px-4 py-2 bg-primary text-white rounded-button hover:bg-primary/90">
+      Save Changes
+      </button>
+      </div>
+      </form>
+      </div>
+      </div>
+      `;
+        document.body.appendChild(modal);
+        document.getElementById("editUserForm").addEventListener("submit", (e) => {
+          e.preventDefault();
+          const notification = document.createElement("div");
+          notification.className =
+            "fixed bottom-4 right-4 bg-green-800 text-white px-6 py-3 rounded-lg shadow-lg z-50";
+          notification.innerHTML = "User information updated successfully!";
+          document.body.appendChild(notification);
+          modal.remove();
+          setTimeout(() => notification.remove(), 3000);
+        });
+      }
+      function deleteUser(id) {
+        const user = mockUsers.users.find((u) => u.id === id);
+        if (!user) return;
+        const modal = document.createElement("div");
+        modal.className =
+          "fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50";
+        modal.innerHTML = `
+      <div class="bg-white rounded-lg shadow-xl w-full max-w-md">
+      <div class="p-6">
+      <div class="flex items-center justify-center w-12 h-12 rounded-full bg-red-100 mx-auto">
+      <i class="ri-error-warning-line text-red-600 w-6 h-6 flex items-center justify-center"></i>
+      </div>
+      <div class="mt-4 text-center">
+      <h3 class="text-lg font-semibold text-gray-900">Delete User</h3>
+      <p class="mt-2 text-gray-600">Are you sure you want to delete ${user.name}? This action cannot be undone.</p>
+      </div>
+      <div class="flex justify-center space-x-4 mt-6">
+      <button onclick="this.closest('.fixed').remove()"
+      class="px-4 py-2 border border-gray-200 rounded-button hover:bg-gray-50">
+      Cancel
+      </button>
+      <button onclick="confirmDelete(${user.id})"
+      class="px-4 py-2 bg-red-600 text-white rounded-button hover:bg-red-700">
+      Delete
+      </button>
+      </div>
+      </div>
+      </div>
+      `;
+        document.body.appendChild(modal);
+      }
+      function confirmDelete(id) {
+        document.querySelector(".fixed").remove();
+        const notification = document.createElement("div");
+        notification.className =
+          "fixed bottom-4 right-4 bg-green-800 text-white px-6 py-3 rounded-lg shadow-lg z-50";
+        notification.innerHTML = "User deleted successfully!";
+        document.body.appendChild(notification);
+        setTimeout(() => notification.remove(), 3000);
+      }
+      function viewUser(id) {
+        const user = mockUsers.users.find((u) => u.id === id);
+        if (!user) return;
+        const modal = document.createElement("div");
+        modal.className =
+          "fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50";
+        modal.innerHTML = `
+      <div class="bg-white rounded-lg shadow-xl w-full max-w-lg">
+      <div class="flex justify-between items-center p-6 border-b border-gray-200">
+      <h3 class="text-lg font-semibold">User Details</h3>
+      <button onclick="this.closest('.fixed').remove()" class="text-gray-400 hover:text-gray-500">
+      <i class="ri-close-line w-6 h-6 flex items-center justify-center"></i>
+      </button>
+      </div>
+      <div class="p-6">
+      <div class="flex items-center mb-6">
+      <img src="${user.avatar}" class="w-16 h-16 rounded-full mr-4" alt="${user.name}">
+      <div>
+      <h4 class="text-xl font-semibold">${user.name}</h4>
+      <p class="text-gray-600">${user.email}</p>
+      </div>
+      </div>
+      <div class="grid grid-cols-2 gap-4">
+      <div>
+      <p class="text-sm text-gray-500">Role</p>
+      <p class="font-medium">${user.role.charAt(0).toUpperCase() + user.role.slice(1)}</p>
+      </div>
+      <div>
+      <p class="text-sm text-gray-500">Department</p>
+      <p class="font-medium">${user.department}</p>
+      </div>
+      <div>
+      <p class="text-sm text-gray-500">Status</p>
+      <p class="font-medium">${user.status.charAt(0).toUpperCase() + user.status.slice(1)}</p>
+      </div>
+      <div>
+      <p class="text-sm text-gray-500">Last Active</p>
+      <p class="font-medium">${user.lastActive}</p>
+      </div>
+      </div>
+      </div>
+      </div>
+      `;
+        document.body.appendChild(modal);
+      }
+      function initAnalyticsCharts() {
+        const productionByProcess = echarts.init(
+          document.getElementById("productionByProcess"),
+        );
+        const factoryComparison = echarts.init(
+          document.getElementById("factoryComparison"),
+        );
+        const cycleTimeChart = echarts.init(
+          document.getElementById("cycleTimeChart"),
+        );
+        const defectChart = echarts.init(document.getElementById("defectChart"));
+        const utilizationHeatmap = echarts.init(
+          document.getElementById("utilizationHeatmap"),
+        );
+        const downtimeChart = echarts.init(document.getElementById("downtimeChart"));
+        productionByProcess.setOption({
+          animation: false,
+          tooltip: {
+            trigger: "axis",
+            backgroundColor: "rgba(255, 255, 255, 0.9)",
+            borderColor: "#e5e7eb",
+            textStyle: { color: "#1f2937" },
+          },
+          legend: {
+            data: ["Output", "Throughput"],
+            bottom: 0,
+          },
+          grid: {
+            top: 10,
+            right: 10,
+            bottom: 30,
+            left: 30,
+            containLabel: true,
+          },
+          xAxis: {
+            type: "category",
+            data: Object.keys(analyticsData.productionVolume.byProcess),
+          },
+          yAxis: {
+            type: "value",
+          },
+          series: [
+            {
+              name: "Output",
+              type: "bar",
+              data: Object.values(analyticsData.productionVolume.byProcess),
+              color: "rgba(87, 181, 231, 1)",
+              barWidth: "30%",
+              itemStyle: {
+                borderRadius: [4, 4, 0, 0],
+              },
+            },
+            {
+              name: "Throughput",
+              type: "line",
+              data: Object.values(analyticsData.efficiency.throughput),
+              color: "rgba(141, 211, 199, 1)",
+              smooth: true,
+            },
+          ],
+        });
+        factoryComparison.setOption({
+          animation: false,
+          tooltip: {
+            trigger: "axis",
+            backgroundColor: "rgba(255, 255, 255, 0.9)",
+            borderColor: "#e5e7eb",
+            textStyle: { color: "#1f2937" },
+          },
+          grid: {
+            top: 10,
+            right: 10,
+            bottom: 30,
+            left: 30,
+            containLabel: true,
+          },
+          xAxis: {
+            type: "category",
+            data: Object.keys(analyticsData.productionVolume.byFactory),
+          },
+          yAxis: {
+            type: "value",
+          },
+          series: [
+            {
+              data: Object.values(analyticsData.productionVolume.byFactory),
+              type: "bar",
+              color: "rgba(87, 181, 231, 1)",
+              barWidth: "60%",
+              itemStyle: {
+                borderRadius: [4, 4, 0, 0],
+              },
+            },
+          ],
+        });
+        cycleTimeChart.setOption({
+          animation: false,
+          tooltip: {
+            trigger: "axis",
+            backgroundColor: "rgba(255, 255, 255, 0.9)",
+            borderColor: "#e5e7eb",
+            textStyle: { color: "#1f2937" },
+          },
+          legend: {
+            data: ["Average", "Min", "Max"],
+            bottom: 0,
+          },
+          grid: {
+            top: 10,
+            right: 10,
+            bottom: 30,
+            left: 30,
+            containLabel: true,
+          },
+          xAxis: {
+            type: "category",
+            data: Object.keys(analyticsData.efficiency.cycleTime),
+          },
+          yAxis: {
+            type: "value",
+          },
+          series: [
+            {
+              name: "Average",
+              type: "bar",
+              data: Object.values(analyticsData.efficiency.cycleTime).map(
+                (t) => t.avg,
+              ),
+              color: "rgba(87, 181, 231, 1)",
+              barWidth: "30%",
+              itemStyle: {
+                borderRadius: [4, 4, 0, 0],
+              },
+            },
+            {
+              name: "Min",
+              type: "line",
+              data: Object.values(analyticsData.efficiency.cycleTime).map(
+                (t) => t.min,
+              ),
+              color: "rgba(141, 211, 199, 1)",
+              smooth: true,
+            },
+            {
+              name: "Max",
+              type: "line",
+              data: Object.values(analyticsData.efficiency.cycleTime).map(
+                (t) => t.max,
+              ),
+              color: "rgba(251, 191, 114, 1)",
+              smooth: true,
+            },
+          ],
+        });
+        defectChart.setOption({
+          animation: false,
+          tooltip: {
+            trigger: "item",
+            backgroundColor: "rgba(255, 255, 255, 0.9)",
+            borderColor: "#e5e7eb",
+            textStyle: { color: "#1f2937" },
+          },
+          legend: {
+            orient: "vertical",
+            right: 10,
+            top: "center",
+          },
+          series: [
+            {
+              type: "pie",
+              radius: ["40%", "70%"],
+              avoidLabelOverlap: false,
+              itemStyle: {
+                borderRadius: 4,
+              },
+              label: {
+                show: false,
+              },
+              emphasis: {
+                label: {
+                  show: true,
+                  formatter: "{b}: {c}%",
+                },
+              },
+              data: Object.entries(analyticsData.quality.defectTypes).map(
+                ([name, value]) => ({
+                  name,
+                  value,
+                  itemStyle: {
+                    color:
+                      name === "Surface Defects"
+                        ? "rgba(87, 181, 231, 1)"
+                        : name === "Dimensional Error"
+                          ? "rgba(141, 211, 199, 1)"
+                          : name === "Material Defects"
+                            ? "rgba(251, 191, 114, 1)"
+                            : "rgba(252, 141, 98, 1)",
+                  },
+                }),
+              ),
+            },
+          ],
+        });
+        utilizationHeatmap.setOption({
+          animation: false,
+          tooltip: {
+            position: "top",
+            backgroundColor: "rgba(255, 255, 255, 0.9)",
+            borderColor: "#e5e7eb",
+            textStyle: { color: "#1f2937" },
+          },
+          grid: {
+            top: 10,
+            right: 10,
+            bottom: 30,
+            left: 60,
+            containLabel: true,
+          },
+          xAxis: {
+            type: "category",
+            data: ["00:00", "04:00", "08:00", "12:00", "16:00", "20:00"],
+            splitArea: {
+              show: true,
+            },
+          },
+          yAxis: {
+            type: "category",
+            data: ["Press", "Slit", "SRS", "Inspection"],
+            splitArea: {
+              show: true,
+            },
+          },
+          visualMap: {
+            min: 0,
+            max: 100,
+            calculable: true,
+            orient: "horizontal",
+            left: "center",
+            bottom: 0,
+            inRange: {
+              color: ["#f3f4f6", "rgba(87, 181, 231, 1)"],
+            },
+          },
+          series: [
+            {
+              type: "heatmap",
+              data: [
+                [0, 0, 85],
+                [0, 1, 90],
+                [0, 2, 88],
+                [0, 3, 92],
+                [0, 4, 95],
+                [0, 5, 87],
+                [1, 0, 83],
+                [1, 1, 88],
+                [1, 2, 91],
+                [1, 3, 87],
+                [1, 4, 86],
+                [1, 5, 82],
+                [2, 0, 89],
+                [2, 1, 92],
+                [2, 2, 90],
+                [2, 3, 85],
+                [2, 4, 88],
+                [2, 5, 86],
+                [3, 0, 92],
+                [3, 1, 95],
+                [3, 2, 93],
+                [3, 3, 91],
+                [3, 4, 90],
+                [3, 5, 89],
+              ],
+              label: {
+                show: true,
+                formatter: function (params) {
+                  return params.data[2] + "%";
+                },
+              },
+              emphasis: {
+                itemStyle: {
+                  shadowBlur: 10,
+                  shadowColor: "rgba(0, 0, 0, 0.5)",
+                },
+              },
+            },
+          ],
+        });
+
+        downtimeChart.setOption({
+          animation: false,
+          tooltip: {
+            trigger: "item",
+            backgroundColor: "rgba(255, 255, 255, 0.9)",
+            borderColor: "#e5e7eb",
+            textStyle: { color: "#1f2937" },
+          },
+          legend: {
+            bottom: 0,
+          },
+          series: [
+            {
+              type: "pie",
+              radius: ["40%", "70%"],
+              avoidLabelOverlap: false,
+              itemStyle: {
+                borderRadius: 4,
+              },
+              label: {
+                show: true,
+                formatter: "{b}: {c}min",
+              },
+              data: Object.entries(analyticsData.efficiency.downtime).map(
+                ([name, value], index) => ({
+                  name,
+                  value,
+                  itemStyle: {
+                    color: [
+                      "rgba(87, 181, 231, 1)",
+                      "rgba(141, 211, 199, 1)",
+                      "rgba(251, 191, 114, 1)",
+                      "rgba(252, 141, 98, 1)",
+                    ][index],
+                  },
+                }),
+              ),
+            },
+          ],
+        });
+
+        const metricsTable = document.getElementById("metricsTable");
+        if (metricsTable) {
+          Object.entries(analyticsData.productionVolume.byFactory).forEach(
+            ([factory, volume]) => {
+              const tr = document.createElement("tr");
+              const trend = Math.random() > 0.5 ? "up" : "down";
+              tr.innerHTML = `
+      <td class="px-6 py-4 whitespace-nowrap">
+      <div class="text-sm font-medium text-gray-900">${factory}</div>
+      </td>
+      <td class="px-6 py-4 whitespace-nowrap">
+      <div class="text-sm text-gray-900">${volume.toLocaleString()}</div>
+      </td>
+      <td class="px-6 py-4 whitespace-nowrap">
+      <div class="text-sm text-gray-900">${(Math.random() * 5).toFixed(1)}%</div>
+      </td>
+      <td class="px-6 py-4 whitespace-nowrap">
+      <div class="text-sm text-gray-900">${Math.floor(Math.random() * 20 + 40)} min</div>
+      </td>
+      <td class="px-6 py-4 whitespace-nowrap">
+      <div class="text-sm text-gray-900">${Math.floor(Math.random() * 10 + 85)}%</div>
+      </td>
+      <td class="px-6 py-4 whitespace-nowrap">
+      <span class="${trend === "up" ? "text-green-600" : "text-red-600"}">
+      <i class="ri-arrow-${trend}-line w-5 h-5 flex items-center justify-center"></i>
+      </span>
+      </td>
+      `;
+              metricsTable.appendChild(tr);
+            },
+          );
+        }
+
+        window.addEventListener("resize", () => {
+          productionByProcess.resize();
+          factoryComparison.resize();
+          cycleTimeChart.resize();
+          defectChart.resize();
+          utilizationHeatmap.resize();
+          downtimeChart.resize();
+        });
+      }
+      document.addEventListener("DOMContentLoaded", () => {
+        renderFactoryCards();
+        renderNotifications();
+        initCharts();
+        const navButtons = document.querySelectorAll("nav button");
+        const mainContent = document.querySelector("main > div.flex-1");
+        navButtons.forEach((button) => {
+          button.addEventListener("click", () => {
+            navButtons.forEach((btn) => {
+              btn.classList.remove("bg-gray-100", "text-gray-900");
+              btn.classList.add("text-gray-600");
+            });
+            button.classList.add("bg-gray-100", "text-gray-900");
+            button.classList.remove("text-gray-600");
+            const buttonText = button.querySelector("span").textContent;
+            if (buttonText === "Approvals") {
+              mainContent.innerHTML = approvalsPage;
+              renderApprovals();
+            } else if (buttonText === "Dashboard") {
+              location.reload();
+            } else if (buttonText === "Analytics") {
+              mainContent.innerHTML = analyticsPage;
+              initAnalyticsCharts();
+            } else if (buttonText === "User Management") {
+              mainContent.innerHTML = userManagementPage;
+              renderUsers();
+            }
+          });
+        });
+      });
+    </script>
+  </body>
+</html>

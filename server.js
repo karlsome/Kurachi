@@ -1842,6 +1842,50 @@ app.post("/saveScannedQRData", async (req, res) => {
 
 /////END OF INVENTORY///////////////
 
+// Dynamic query. the parameters needed are 1. DB Name, Collection Name, JSON Query
+
+// copy paste this:
+
+// fetch("https://your-api-url.com/query", {
+//   method: "POST",
+//   headers: {
+//     "Content-Type": "application/json",
+//   },
+//   body: JSON.stringify({
+//     dbName: "Sasaki_Coating_MasterDB", // Select the DB dynamically
+//     collectionName: "masterDB", // The collection to query
+//     query: { 工場: "NFH" }, // Dynamic query
+//     projection: { 品番: 1, 背番号: 1, _id: 0 }, // Optional fields to return
+//   }),
+// })
+//   .then((response) => response.json())
+//   .then((data) => console.log("Query Results:", data))
+//   .catch((error) => console.error("Error:", error));
+
+app.post("/query", async (req, res) => {
+  try {
+    await client.connect();
+
+    const { dbName, collectionName, query, projection } = req.body;
+
+    if (!dbName || !collectionName || !query) {
+      return res.status(400).json({ error: "Database name, collection name, and query are required." });
+    }
+
+    const database = client.db(dbName); // Dynamically select DB
+    const collection = database.collection(collectionName);
+
+    const results = await collection.find(query).project(projection || {}).toArray();
+
+    res.json(results);
+  } catch (error) {
+    console.error("Error executing dynamic query:", error);
+    res.status(500).send("Error executing dynamic query.");
+  }
+});
+
+
+
 app.listen(port, () => {
   console.log(`Server is running at http://localhost:${port}`);
 });
