@@ -1862,10 +1862,39 @@ app.post("/saveScannedQRData", async (req, res) => {
 //   .then((data) => console.log("Query Results:", data))
 //   .catch((error) => console.error("Error:", error));
 
-app.post('/query', async (req, res) => {
+// app.post('/query', async (req, res) => {
+//   const { dbName, collectionName, query, aggregation } = req.body;
+  
+//   try {
+//     await client.connect();
+//     const database = client.db(dbName);
+//     const collection = database.collection(collectionName);
+
+//     let results;
+
+//     if (aggregation) {
+//       // Run aggregation pipeline
+//       results = await collection.aggregate(aggregation).toArray();
+//     } else {
+//       // Run a normal query
+//       results = await collection.find(query).toArray();
+//     }
+
+//     res.json(results);
+//     console.log(results);
+//   } catch (error) {
+//     console.error("Error executing query:", error);
+//     res.status(500).json({ error: "Error executing query" });
+//   }
+// });
+
+app.post('/queries', async (req, res) => {
+  console.log("🟢 Received POST request to /query");
   const { dbName, collectionName, query, aggregation } = req.body;
   
   try {
+    console.log("Received Request:", { dbName, collectionName, query, aggregation });
+
     await client.connect();
     const database = client.db(dbName);
     const collection = database.collection(collectionName);
@@ -1873,13 +1902,14 @@ app.post('/query', async (req, res) => {
     let results;
 
     if (aggregation) {
-      // Run aggregation pipeline
+      console.log("Running Aggregation Pipeline...");
       results = await collection.aggregate(aggregation).toArray();
     } else {
-      // Run a normal query
+      console.log("Running Find Query...");
       results = await collection.find(query).toArray();
     }
 
+    console.log("Query Results:", JSON.stringify(results, null, 2)); // Logs formatted JSON data
     res.json(results);
   } catch (error) {
     console.error("Error executing query:", error);
