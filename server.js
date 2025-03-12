@@ -453,7 +453,7 @@ app.get("/getSeBanggoListSLIT", async (req, res) => {
 
 
 //for press 工場 = value passed
-//fetch sebanggo for press
+//fetch sebanggo-only for press
 app.get("/getSeBanggoListPress", async (req, res) => {
   try {
     await client.connect();
@@ -482,6 +482,37 @@ app.get("/getSeBanggoListPress", async (req, res) => {
     res.status(500).send("Error retrieving 背番号 list for Press");
   }
 });
+
+
+
+//fetch sebango and hinbang
+app.get("/getSeBanggoListPressAndHinban", async (req, res) => {
+  try {
+    await client.connect();
+    const database = client.db("Sasaki_Coating_MasterDB");
+    const collection = database.collection("masterDB");
+
+    let 工場 = req.query.工場; // Retrieve the 工場 value from the query
+
+    // Check if 工場 is "小瀬" or "倉知"
+    const query =
+      工場 === "小瀬" || 工場 === "倉知"
+        ? { 工場: { $in: ["小瀬", "倉知"] } } // Combine values for 小瀬 and 倉知
+        : { 工場 }; // Otherwise, match the specific 工場 value
+
+    const projection = { 背番号: 1, 品番: 1, _id: 0 }; // Fetch both 背番号 and 品番
+
+    // Fetch matching documents
+    const result = await collection.find(query).project(projection).toArray();
+
+    res.json(result); // Send the list as JSON
+  } catch (error) {
+    console.error("Error retrieving 背番号 and 品番 list for Press:", error);
+    res.status(500).send("Error retrieving 背番号 and 品番 list for Press");
+  }
+});
+
+
 
 ///////////////////////////////////////////
 //END of iREPORTER ROUTE
@@ -535,13 +566,7 @@ app.get("/getCapacityBySeBanggo", async (req, res) => {
 
 
 
-
-
-
-
-
-
-// // Get product info from MongoDB (parameters are kojo and sebanggo)
+// Get product info from MongoDB (parameters are kojo and sebanggo)
 // app.get("/getProductDetails", async (req, res) => {
 //   try {
 //     await client.connect();
@@ -566,7 +591,13 @@ app.get("/getCapacityBySeBanggo", async (req, res) => {
 //     // Query to match documents based on presence of duplicates
 //     let query;
 //     if (duplicateCount > 1) {
-//       query = { 背番号: serialNumber, 工場: factory };
+//       if (factory === "天徳" || factory === "第二工場") {
+//         // Treat 天徳 and 第二工場 as the same factory
+//         query = { 背番号: serialNumber, 工場: { $in: ["天徳", "第二工場"] } };
+//       } else {
+//         // Standard duplicate handling
+//         query = { 背番号: serialNumber, 工場: factory };
+//       }
 //     } else {
 //       query = { 背番号: serialNumber };
 //     }
@@ -584,6 +615,8 @@ app.get("/getCapacityBySeBanggo", async (req, res) => {
 //         送りピッチ: 1,
 //         型番: 1,
 //         収容数: 1,
+//         SRS: 1,
+//         SLIT: 1,
 //         _id: 0,
 //       },
 //     });
@@ -614,16 +647,14 @@ app.get("/getCapacityBySeBanggo", async (req, res) => {
 //   }
 // });
 
-// Get product info from MongoDB (parameters are kojo and sebanggo)
+//getting product details using sebanggo or hinban
 app.get("/getProductDetails", async (req, res) => {
   try {
     await client.connect();
 
-    // Query masterDB for product details
     const masterDatabase = client.db("Sasaki_Coating_MasterDB");
     const masterCollection = masterDatabase.collection("masterDB");
 
-    // Get values from the query parameters
     const serialNumber = req.query.serialNumber; // 背番号 value from sub-dropdown
     const factory = req.query.factory; // 工場 value from hidden input
 
@@ -632,26 +663,22 @@ app.get("/getProductDetails", async (req, res) => {
     }
 
     // Check for duplicates of `背番号`
-    const duplicateCount = await masterCollection.countDocuments({
-      背番号: serialNumber,
-    });
+    let duplicateCount = await masterCollection.countDocuments({ 背番号: serialNumber });
 
-    // Query to match documents based on presence of duplicates
+    // Determine query conditions
     let query;
     if (duplicateCount > 1) {
       if (factory === "天徳" || factory === "第二工場") {
-        // Treat 天徳 and 第二工場 as the same factory
         query = { 背番号: serialNumber, 工場: { $in: ["天徳", "第二工場"] } };
       } else {
-        // Standard duplicate handling
         query = { 背番号: serialNumber, 工場: factory };
       }
     } else {
       query = { 背番号: serialNumber };
     }
 
-    // Find the matching document in masterDB
-    const productDetails = await masterCollection.findOne(query, {
+    // Search for product details using 背番号
+    let productDetails = await masterCollection.findOne(query, {
       projection: {
         品番: 1,
         モデル: 1,
@@ -669,7 +696,33 @@ app.get("/getProductDetails", async (req, res) => {
       },
     });
 
-    // Query pictureDB for additional info
+    // If no match in 背番号, try searching in 品番 instead
+    if (!productDetails) {
+      productDetails = await masterCollection.findOne({ 品番: serialNumber }, {
+        projection: {
+          品番: 1,
+          モデル: 1,
+          形状: 1,
+          "R/L": 1,
+          材料: 1,
+          材料背番号: 1,
+          色: 1,
+          送りピッチ: 1,
+          型番: 1,
+          収容数: 1,
+          SRS: 1,
+          SLIT: 1,
+          _id: 0,
+        },
+      });
+    }
+
+    // If still no match, return 404
+    if (!productDetails) {
+      return res.status(404).send("No matching product found");
+    }
+
+    // Query pictureDB for additional info using 背番号
     const pictureCollection = masterDatabase.collection("pictureDB");
     const pictureDetails = await pictureCollection.findOne(
       { 背番号: serialNumber },
@@ -679,21 +732,16 @@ app.get("/getProductDetails", async (req, res) => {
     // Combine results
     const combinedResult = {
       ...productDetails,
-      htmlWebsite: pictureDetails ? pictureDetails["html website"] : null, // Include html website if found
+      htmlWebsite: pictureDetails ? pictureDetails["html website"] : null,
     };
 
-    // If no document is found in masterDB, return an empty response
-    if (!productDetails) {
-      return res.status(404).send("No matching product found");
-    }
-
-    // Send the combined result as JSON
     res.json(combinedResult);
   } catch (error) {
     console.error("Error retrieving product details:", error);
     res.status(500).send("Error retrieving product details");
   }
 });
+
 
 
 

@@ -73,6 +73,8 @@
 
 
     
+            
+    
 
     <!-- Cutting Section (A) -->
     <div id="sectionA" class="process-section">
@@ -112,6 +114,38 @@
             <br>
 
         <!-- what modal is this???? -->
+
+        <!-- Bluetooth Scanner Modal -->
+        <div id="bluetoothScannerModal" class="modal">
+            <div class="modal-content">
+                <span id="closeBluetoothScannerModal" class="close-button">&times;</span>
+                <h3 id="bluetoothScannerText">Listening for Bluetooth Scanner...</h3>
+                <p id="bluetoothScannerInstruction">Please scan the first QR code (Sebanggo).</p>
+            </div>
+        </div>
+        
+
+         <!-- Scanner Selection Modal -->
+        <div id="scannerSelectionModal" class="modal">
+            <div class="modal-content">
+                <span class="close-button" onclick="document.getElementById('scannerSelectionModal').style.display='none'">&times;</span>
+                <h3>Select Scanner Type</h3>
+                <button id="selectCamera" type="button">📷 Use Camera Scanner</button>
+                <button id="selectBluetooth" type="button">🔵 Use Bluetooth Scanner</button>
+            </div>
+        </div>
+
+
+        <div id="modal" class="modal">
+            <div class="modal-content">
+                <span id="modal-close" class="close-button">&times;</span>
+                <h3>Choose a 収容数</h3>
+                <div id="modal-options"></div>
+                
+            </div>
+        </div>
+
+
         <div id="myModal" class="modal">
             <div class="modal-content">
                 <span class="close">&times;</span>

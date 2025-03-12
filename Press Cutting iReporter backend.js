@@ -185,16 +185,66 @@ async function fetchSetsubiList() {
 
 
 // this function fetches sebanggo list
+// async function fetchSebanggo() {
+//   // Get the selected process from the process dropdown
+//   const 工場 = document.getElementById("selected工場").value;
+//   blankInfo();
+
+//   try {
+//     // Fetch 背番号 values from the server based on the selected process
+//     const response = await fetch(`${serverURL}/getSeBanggoListPress?工場=${encodeURIComponent(工場)}`);
+//     const data = await response.json();
+//     data.sort((a, b) => a.localeCompare(b, 'ja')); // 'ja' for Japanese sorting if needed // sort alphabetically
+
+//     // Get the sub-dropdown element
+//     const subDropdown = document.getElementById("sub-dropdown");
+
+//     // Clear any existing options in the sub-dropdown
+//     subDropdown.innerHTML = "";
+
+//     // Add a blank option at the top
+//     const blankOption = document.createElement("option");
+//     blankOption.value = "";
+//     blankOption.textContent = "Select 背番号";
+//     subDropdown.appendChild(blankOption);
+
+//     // Populate the sub-dropdown with new options based on the 背番号 values
+//     data.forEach(item => {
+//       const option = document.createElement("option");
+//       option.value = item;
+//       option.textContent = item;
+//       subDropdown.appendChild(option);
+//     });
+
+//     console.log("Sub-dropdown populated with 背番号 options:", data);
+    
+//   } catch (error) {
+//     console.error("Error fetching 背番号 data:", error);
+//   }
+// }
+
+// // Call fetchSetsubiList when the page loads
+// document.addEventListener("DOMContentLoaded", fetchSetsubiList);
+
+// Function to fetch 背番号 and 品番 list
 async function fetchSebanggo() {
-  // Get the selected process from the process dropdown
+  // Get the selected 工場 from the dropdown
   const 工場 = document.getElementById("selected工場").value;
   blankInfo();
 
   try {
-    // Fetch 背番号 values from the server based on the selected process
-    const response = await fetch(`${serverURL}/getSeBanggoListPress?工場=${encodeURIComponent(工場)}`);
+    // Fetch 背番号 and 品番 values from the server
+    const response = await fetch(`${serverURL}/getSeBanggoListPressAndHinban?工場=${encodeURIComponent(工場)}`);
     const data = await response.json();
-    data.sort((a, b) => a.localeCompare(b, 'ja')); // 'ja' for Japanese sorting if needed // sort alphabetically
+    console.log(data);
+
+    // Separate 背番号 and 品番 into different arrays
+    const sebanggoList = data.map(item => item.背番号).filter(Boolean); // Remove null/undefined
+    const hinbanList = data.map(item => item.品番).filter(Boolean); // Remove null/undefined
+
+    // Sort both lists alphabetically
+    sebanggoList.sort((a, b) => a.localeCompare(b, 'ja')); // 'ja' for Japanese sorting
+    hinbanList.sort((a, b) => a.localeCompare(b, 'ja'));
 
     // Get the sub-dropdown element
     const subDropdown = document.getElementById("sub-dropdown");
@@ -205,26 +255,43 @@ async function fetchSebanggo() {
     // Add a blank option at the top
     const blankOption = document.createElement("option");
     blankOption.value = "";
-    blankOption.textContent = "Select 背番号";
+    blankOption.textContent = "Select 背番号 / 品番";
     subDropdown.appendChild(blankOption);
 
-    // Populate the sub-dropdown with new options based on the 背番号 values
-    data.forEach(item => {
+    // Populate the sub-dropdown with 背番号 values first
+    sebanggoList.forEach(sebanggo => {
       const option = document.createElement("option");
-      option.value = item;
-      option.textContent = item;
+      option.value = sebanggo;
+      option.textContent = sebanggo;
       subDropdown.appendChild(option);
     });
 
-    console.log("Sub-dropdown populated with 背番号 options:", data);
-    
+    // Add a separator (optional)
+    if (hinbanList.length > 0) {
+      const separatorOption = document.createElement("option");
+      separatorOption.disabled = true; // Make it unselectable
+      separatorOption.textContent = "------ 品番 ------";
+      subDropdown.appendChild(separatorOption);
+    }
+
+    // Populate the sub-dropdown with 品番 values at the bottom
+    hinbanList.forEach(hinban => {
+      const option = document.createElement("option");
+      option.value = hinban;
+      option.textContent = hinban;
+      subDropdown.appendChild(option);
+    });
+
+    console.log("Sub-dropdown populated with 背番号 and 品番 options:", { sebanggoList, hinbanList });
+
   } catch (error) {
-    console.error("Error fetching 背番号 data:", error);
+    console.error("Error fetching 背番号 and 品番 data:", error);
   }
 }
 
 // Call fetchSetsubiList when the page loads
 document.addEventListener("DOMContentLoaded", fetchSetsubiList);
+
 
 //blanks the info page
 function blankInfo() {
@@ -251,7 +318,9 @@ function disableInputs() {
           input.id !== 'scan-button' && 
           input.id !== 'sub-dropdown' && 
           input.id !== 'process' && 
-          input.id !== 'reset-button' // Specifically exclude the reset button
+          input.id !== 'reset-button'&& // Specifically exclude the reset button
+          input.id !== "selectBluetooth"&&
+          input.id !== "selectCamera"
       ) {
           input.disabled = true;
       }
@@ -722,172 +791,6 @@ function updateCycleTime() {
 }
 
 
-//QR code for tomson Board
-// //this is a new scan-button code. instead of using windows.alert, it uses modal so that it wont leave the webpage
-// document.addEventListener('DOMContentLoaded', () => {
-//   const subDropdown = document.getElementById('sub-dropdown');
-//   // Restore the value of `firstScanValue` from the hidden input after the DOM is fully loaded
-//   let firstScanValue = document.getElementById("firstScanValue").value;
-//   let secondScanValue = document.getElementById("secondScanValue").value;
-//   console.log("Initial firstScanValue:", firstScanValue); // Debugging to verify restoration
-//   console.log("Initial secondScanValue:", secondScanValue); // Debugging to verify restoration
-//   if (subDropdown && firstScanValue && secondScanValue){
-//     setTimeout(() => {
-//       subDropdown.value = firstScanValue; // Set sub-dropdown to the first scan value
-//       fetchProductDetails(); // Fetch product details
-//     },1000);
-//   }
-
-//   // Start QR code scanning when the modal is displayed
-//   document.getElementById('scan-button').addEventListener('click', function () {
-//     // Check if firstScanValue already exists and alert the user
-//     if (firstScanValue) {
-//         window.alert("Please scan the TOMSON BOARD. / 最初のQRコードが正常にスキャンされました。トムソンボードをスキャンしてください。");
-//     }
-//       const qrScannerModal = document.getElementById('qrScannerModal');
-//       const html5QrCode = new Html5Qrcode("qrReader");
-//       const alertSound = document.getElementById('alert-sound');
-//       const selected工場 = document.getElementById('selected工場').value;
-//       const subDropdown = document.getElementById('sub-dropdown');
-
-//       // Preload the alert sound without playing it
-//       if (alertSound) {
-//           alertSound.muted = true; // Mute initially to preload
-//           alertSound.loop = false; // Disable looping
-//           alertSound.load(); // Preload the audio file
-//       }
-
-//       // Show the modal
-//       qrScannerModal.style.display = 'block';
-
-//       // Helper function to handle alert modal display
-//       function showAlert(message) {
-//           const scanAlertModal = document.getElementById('scanAlertModal');
-//           document.getElementById('scanAlertText').innerText = message;
-//           scanAlertModal.style.display = 'block';
-
-//           if (alertSound) {
-//               alertSound.muted = false; // Unmute to alert user
-//               alertSound.volume = 1; // Set full volume
-//               alertSound.play().catch(error => console.error("Failed to play alert sound:", error));
-//           }
-
-//           document.body.classList.add('flash-red');
-
-//           const closeScanModalButton = document.getElementById('closeScanModalButton');
-//           closeScanModalButton.onclick = function () {
-//               scanAlertModal.style.display = 'none';
-//               alertSound.pause();
-//               alertSound.currentTime = 0; // Reset sound to the beginning
-//               alertSound.muted = true; // Mute again for next time
-//               document.body.classList.remove('flash-red');
-//           };
-//       }
-
-//       html5QrCode.start(
-//           { facingMode: "environment" },
-//           {
-//               fps: 10,
-//               qrbox: { width: 250, height: 250 }
-//           },
-//           qrCodeMessage => {
-//               console.log("first scan: " + firstScanValue); // Debugging the current value of firstScanValue
-//               const options = [...subDropdown.options].map(option => option.value);
-
-//               // Logic for "肥田瀬"工場
-//               if (selected工場 === "肥田瀬" || selected工場 === '第二工場') {
-//                   if (!firstScanValue) {
-//                       // First scan
-//                       if (options.includes(qrCodeMessage)) {
-//                           firstScanValue = qrCodeMessage; // Store the first scan value
-//                           const key = `${uniquePrefix}firstScanValue`; // Construct the localStorage key
-//                           localStorage.setItem(key, firstScanValue); // Save to localStorage
-//                           window.alert("First QR code scanned successfully. Please scan the TOMSON BOARD. / 最初のQRコードが正常にスキャンされました。トムソンボードをスキャンしてください。");
-//                           console.log("first is " + firstScanValue);
-//                       } else {
-//                           showAlert("背番号が存在しません。 / Sebanggo does not exist.");
-//                           html5QrCode.stop().then(() => {
-//                               qrScannerModal.style.display = 'none';
-//                           }).catch(err => {
-//                               console.error("Failed to stop scanning:", err);
-//                           });
-//                       }
-//                   } else {
-//                       // Second scan
-//                       const expectedSecondValue = `${firstScanValue}-B`;
-//                       if (qrCodeMessage === expectedSecondValue) {
-//                           //store second value to storage
-//                           const key = `${uniquePrefix}secondScanValue`; // Construct the localStorage key
-//                           localStorage.setItem(key, expectedSecondValue); // Save to localStorage
-//                           // Process and close the scanner
-//                           subDropdown.value = firstScanValue; // Set sub-dropdown to the first scan value
-//                           fetchProductDetails(); // Fetch product details
-//                           html5QrCode.stop().then(() => {
-//                               qrScannerModal.style.display = 'none';
-//                           }).catch(err => {
-//                               console.error("Failed to stop scanning:", err);
-//                           });
-//                       } else {
-//                           showAlert(`Second QR code does not match the expected value (${expectedSecondValue}).`);
-//                           html5QrCode.stop().then(() => {
-//                               qrScannerModal.style.display = 'none';
-//                           }).catch(err => {
-//                               console.error("Failed to stop scanning:", err);
-//                           });
-//                       }
-//                   }
-//               } else {
-//                   // Default logic for other 工場
-//                   if (!options.includes(qrCodeMessage)) {
-//                       showAlert("背番号が存在しません。 / Sebanggo does not exist.");
-//                       html5QrCode.stop().then(() => {
-//                           qrScannerModal.style.display = 'none';
-//                       }).catch(err => {
-//                           console.error("Failed to stop scanning:", err);
-//                       });
-//                   } else if (subDropdown.value !== "" && subDropdown.value !== qrCodeMessage) {
-//                       showAlert("Different product detected! Please save the form before changing. / 異なる製品が検出されました。保存してください！");
-//                       html5QrCode.stop().then(() => {
-//                           qrScannerModal.style.display = 'none';
-//                       }).catch(err => {
-//                           console.error("Failed to stop scanning:", err);
-//                       });
-//                   } else {
-//                       // Process the QR code
-//                       subDropdown.value = qrCodeMessage;
-//                       fetchProductDetails();
-//                       html5QrCode.stop().then(() => {
-//                           qrScannerModal.style.display = 'none';
-//                       }).catch(err => {
-//                           console.error("Failed to stop scanning:", err);
-//                       });
-//                   }
-//               }
-//           }
-//       ).catch(err => {
-//           console.error("Failed to start scanning:", err);
-//       });
-
-//       document.getElementById('closeQRScannerModal').onclick = function () {
-//           html5QrCode.stop().then(() => {
-//               qrScannerModal.style.display = 'none';
-//           }).catch(err => {
-//               console.error("Failed to stop scanning:", err);
-//           });
-//       };
-
-//       window.onclick = function (event) {
-//           if (event.target == qrScannerModal) {
-//               html5QrCode.stop().then(() => {
-//                   qrScannerModal.style.display = 'none';
-//               }).catch(err => {
-//                   console.error("Failed to stop scanning:", err);
-//               });
-//           }
-//       };
-//   });
-// });
-
 // Global function to check process conditions
 function checkProcessCondition() {
   const subDropdown = document.getElementById('sub-dropdown');
@@ -914,15 +817,347 @@ function checkProcessCondition() {
   }
 }
 
+
+
+
+
+// // scan sebanggo button
+// document.addEventListener('DOMContentLoaded', () => {
+//   const subDropdown = document.getElementById('sub-dropdown');
+//   const processDropdown = document.getElementById("process");
+//   let firstScanValue = document.getElementById("firstScanValue").value;
+//   let secondScanValue = document.getElementById("secondScanValue").value;
+//   const selected工場 = document.getElementById("selected工場").value;
+  
+
+//   console.log("Initial firstScanValue:", firstScanValue);
+//   console.log("Initial secondScanValue:", secondScanValue);
+  
+//   if (subDropdown && firstScanValue && secondScanValue) {
+//     setTimeout(() => {
+//       subDropdown.value = firstScanValue;
+//       fetchProductDetails();
+//     }, 1000);
+//   }
+
+//   // Run checkProcessCondition() once on page load
+//   checkProcessCondition();
+
+//   // Add event listener to "process" dropdown
+//   processDropdown.addEventListener("change", checkProcessCondition);
+
+
+
+
+//   // This is the scan sebanggo button
+//   document.getElementById('scan-button').addEventListener('click', function () {
+//     if (firstScanValue) {
+//       window.alert("Please scan the TOMSON BOARD. / 最初のQRコードが正常にスキャンされました。トムソンボードをスキャンしてください。");
+//     }
+
+//     const qrScannerModal = document.getElementById('qrScannerModal');
+//     const html5QrCode = new Html5Qrcode("qrReader");
+//     const alertSound = document.getElementById('alert-sound');
+
+//     if (alertSound) {
+//       alertSound.muted = true;
+//       alertSound.loop = false;
+//       alertSound.load();
+//     }
+
+//     qrScannerModal.style.display = 'block';
+
+//     function showAlert(message) {
+//       const scanAlertModal = document.getElementById('scanAlertModal');
+//       document.getElementById('scanAlertText').innerText = message;
+//       scanAlertModal.style.display = 'block';
+
+//       if (alertSound) {
+//         alertSound.muted = false;
+//         alertSound.volume = 1;
+//         alertSound.play().catch(error => console.error("Failed to play alert sound:", error));
+//       }
+
+//       document.body.classList.add('flash-red');
+
+//       document.getElementById('closeScanModalButton').onclick = function () {
+//         scanAlertModal.style.display = 'none';
+//         alertSound.pause();
+//         alertSound.currentTime = 0;
+//         alertSound.muted = true;
+//         document.body.classList.remove('flash-red');
+//       };
+//     }
+    
+//     html5QrCode.start(
+//       { facingMode: "environment" },
+//       { fps: 10, qrbox: { width: 250, height: 250 } },
+//       qrCodeMessage => {
+//         console.log("First scan: " + firstScanValue);
+//         const options = [...subDropdown.options].map(option => option.value);
+//         const processValue = processDropdown.value;
+
+//         if (!firstScanValue) {
+//           if (options.includes(qrCodeMessage)) {
+//             firstScanValue = qrCodeMessage;
+//             localStorage.setItem(`${uniquePrefix}firstScanValue`, firstScanValue);
+//             // **Set the scanned value inside the sub-dropdown**
+//             subDropdown.value = firstScanValue;
+//             console.log("Sub-dropdown updated with first scan:", subDropdown.value);
+//             fetchProductDetails();
+//             window.alert("First QR code scanned successfully. Please scan the TOMSON BOARD.");
+//           } else {
+//             showAlert("背番号が存在しません。 / Sebanggo does not exist.");
+//             html5QrCode.stop().then(() => { qrScannerModal.style.display = 'none'; });
+//           }
+//         } else {
+//           fetchProductDetails();
+//           // Get expected second QR value based on model, shape, R-L
+//           const expectedModel = document.getElementById("model").value;
+//           const expectedShape = document.getElementById("shape").value;
+//           const expectedRL = document.getElementById("R-L").value;
+//           const expectedSecondValue = `${expectedModel},${expectedShape},${expectedRL}`;
+//           console.log("need this: "+ expectedSecondValue);
+
+//           if (qrCodeMessage === expectedSecondValue) {
+//             secondScanValue = expectedSecondValue;
+//             localStorage.setItem(`${uniquePrefix}secondScanValue`, secondScanValue);
+//             subDropdown.value = firstScanValue;
+//             enableInputs();
+//             html5QrCode.stop().then(() => { qrScannerModal.style.display = 'none'; });
+//           } else {
+//             showAlert(`Second QR code does not match the expected value (${expectedSecondValue}).`);
+//             html5QrCode.stop().then(() => { qrScannerModal.style.display = 'none'; });
+//           }
+//         }
+//       }
+//     ).catch(err => {
+//       console.error("Failed to start scanning:", err);
+//     });
+
+//     document.getElementById('closeQRScannerModal').onclick = function () {
+//       html5QrCode.stop().then(() => {
+//         qrScannerModal.style.display = 'none';
+//       });
+//     };
+
+//     window.onclick = function (event) {
+//       if (event.target == qrScannerModal) {
+//         html5QrCode.stop().then(() => {
+//           qrScannerModal.style.display = 'none';
+//         });
+//       }
+//     };
+//   });
+// });
+
+
+// //temporary
+// document.addEventListener('DOMContentLoaded', () => {
+//   const subDropdown = document.getElementById('sub-dropdown');
+//   const processDropdown = document.getElementById("process");
+//   let firstScanValue = localStorage.getItem(`${uniquePrefix}firstScanValue`);
+//   let secondScanValue = localStorage.getItem(`${uniquePrefix}secondScanValue`);
+//   let storedScannerChoice = localStorage.getItem(`${uniquePrefix}scannerChoice`);
+//   const selected工場 = document.getElementById("selected工場").value;
+
+//   console.log("Initial firstScanValue:", firstScanValue);
+//   console.log("Initial secondScanValue:", secondScanValue);
+//   console.log("Stored Scanner Choice:", storedScannerChoice);
+
+//   if (subDropdown && firstScanValue && secondScanValue) {
+//       setTimeout(() => {
+//           subDropdown.value = firstScanValue;
+//           fetchProductDetails();
+//       }, 1000);
+//   }
+
+//   checkProcessCondition();
+//   processDropdown.addEventListener("change", checkProcessCondition);
+
+//   // Scan button click event
+//   document.getElementById('scan-button').addEventListener('click', function () {
+//       if (storedScannerChoice && firstScanValue && !secondScanValue) {
+//           // If scanner choice exists and first scan is done, skip selection
+//           if (storedScannerChoice === "bluetooth") {
+//               startBluetoothScanner();
+//           } else {
+//               startCameraScanner();
+//           }
+//       } else {
+//           // Show scanner selection modal
+//           const scannerSelectionModal = document.getElementById('scannerSelectionModal');
+//           scannerSelectionModal.style.display = 'block';
+
+//           document.getElementById('selectCamera').onclick = function () {
+//               localStorage.setItem(`${uniquePrefix}scannerChoice`, "camera");
+//               scannerSelectionModal.style.display = 'none';
+//               startCameraScanner();
+//           };
+
+//           document.getElementById('selectBluetooth').onclick = function () {
+//               localStorage.setItem(`${uniquePrefix}scannerChoice`, "bluetooth");
+//               scannerSelectionModal.style.display = 'none';
+//               startBluetoothScanner();
+//           };
+
+//           window.onclick = function (event) {
+//               if (event.target == scannerSelectionModal) {
+//                   scannerSelectionModal.style.display = 'none';
+//               }
+//           };
+//       }
+//   });
+
+//   // Function to start the Camera Scanner
+//   function startCameraScanner() {
+//       if (firstScanValue) {
+//           window.alert("Please scan the TOMSON BOARD. / 最初のQRコードが正常にスキャンされました。トムソンボードをスキャンしてください。");
+//       }
+
+//       const qrScannerModal = document.getElementById('qrScannerModal');
+//       const html5QrCode = new Html5Qrcode("qrReader");
+//       const alertSound = document.getElementById('alert-sound');
+
+//       if (alertSound) {
+//           alertSound.muted = true;
+//           alertSound.loop = false;
+//           alertSound.load();
+//       }
+
+//       qrScannerModal.style.display = 'block';
+
+//       html5QrCode.start(
+//           { facingMode: "environment" },
+//           { fps: 10, qrbox: { width: 250, height: 250 } },
+//           qrCodeMessage => handleScannedData(qrCodeMessage, html5QrCode, qrScannerModal)
+//       ).catch(err => {
+//           console.error("Failed to start scanning:", err);
+//       });
+
+//       document.getElementById('closeQRScannerModal').onclick = function () {
+//           html5QrCode.stop().then(() => {
+//               qrScannerModal.style.display = 'none';
+//           });
+//       };
+
+//       window.onclick = function (event) {
+//           if (event.target == qrScannerModal) {
+//               html5QrCode.stop().then(() => {
+//                   qrScannerModal.style.display = 'none';
+//               });
+//           }
+//       };
+//   }
+
+//   // Function to start the Bluetooth Scanner (Listens for Keyboard Input)
+//   function startBluetoothScanner() {
+//       const bluetoothModal = document.getElementById("bluetoothScannerModal");
+//       const bluetoothScannerText = document.getElementById("bluetoothScannerText");
+//       const bluetoothScannerInstruction = document.getElementById("bluetoothScannerInstruction");
+
+//       let scannerInput = document.getElementById("scannerInput");
+//       if (!scannerInput) {
+//           scannerInput = document.createElement("input");
+//           scannerInput.setAttribute("type", "text");
+//           scannerInput.setAttribute("id", "scannerInput");
+//           scannerInput.style.position = "absolute";
+//           scannerInput.style.opacity = "0";
+//           document.body.appendChild(scannerInput);
+//       }
+
+//       scannerInput.value = "";
+//       scannerInput.focus();
+
+//       let scanStage = firstScanValue ? 2 : 1;
+
+//       bluetoothModal.style.display = "block";
+//       if (scanStage === 1) {
+//           bluetoothScannerText.innerText = "Listening for Bluetooth Scanner...";
+//           bluetoothScannerInstruction.innerText = "Please scan the first QR code (Sebanggo).";
+//       } else {
+//           bluetoothScannerText.innerText = "First scan found!";
+//           bluetoothScannerInstruction.innerText = "Now, scan the TOMSON BOARD.";
+//       }
+
+//       function closeModal() {
+//           bluetoothModal.style.display = "none";
+//           document.removeEventListener("keydown", handleScan);
+//       }
+
+//       function handleScan(event) {
+//           if (event.key === "Enter") {
+//               const scannedValue = scannerInput.value.trim();
+//               scannerInput.value = "";
+//               console.log("Scanned Value:", scannedValue);
+
+//               if (scanStage === 1) {
+//                   const options = [...subDropdown.options].map(option => option.value);
+//                   console.log("Dropdown Options:", options);
+
+//                   if (options.includes(scannedValue)) {
+//                       firstScanValue = scannedValue;
+//                       localStorage.setItem(`${uniquePrefix}firstScanValue`, firstScanValue);
+//                       localStorage.setItem(`${uniquePrefix}scannerChoice`, "bluetooth");
+//                       subDropdown.value = firstScanValue;
+//                       fetchProductDetails();
+
+//                       bluetoothScannerText.innerText = "First QR scanned successfully!";
+//                       bluetoothScannerInstruction.innerText = "Now, scan the TOMSON BOARD.";
+//                       scanStage = 2;
+//                   } else {
+//                       showAlert("背番号が存在しません。 / Sebanggo does not exist.");
+//                       localStorage.removeItem(`${uniquePrefix}scannerChoice`);
+//                       closeModal();
+//                   }
+//               } else if (scanStage === 2) {
+//                   const expectedModel = document.getElementById("model").value;
+//                   const expectedShape = document.getElementById("shape").value;
+//                   const expectedRL = document.getElementById("R-L").value;
+//                   const expectedSecondValue = `${expectedModel},${expectedShape},${expectedRL}`;
+
+//                   console.log("Expected Tomson Board QR:", expectedSecondValue);
+
+//                   if (scannedValue === expectedSecondValue) {
+//                       localStorage.setItem(`${uniquePrefix}secondScanValue`, expectedSecondValue);
+//                       localStorage.removeItem(`${uniquePrefix}scannerChoice`);
+//                       enableInputs();
+
+//                       setTimeout(closeModal, 1000);
+//                   } else {
+//                       showAlert(`Second QR code does not match the expected value (${expectedSecondValue}).`);
+//                       localStorage.removeItem(`${uniquePrefix}scannerChoice`);
+//                       closeModal();
+//                   }
+//               }
+//           }
+//       }
+
+//       scannerInput.focus();
+//       document.addEventListener("keydown", handleScan);
+
+//       window.onclick = function (event) {
+//           if (event.target === bluetoothModal) {
+//               closeModal();
+//           }
+//       };
+
+//       document.getElementById("closeBluetoothScannerModal").onclick = closeModal;
+//   }
+// });
+
+
+//temporary scan button
 document.addEventListener('DOMContentLoaded', () => {
   const subDropdown = document.getElementById('sub-dropdown');
   const processDropdown = document.getElementById("process");
-  let firstScanValue = document.getElementById("firstScanValue").value;
-  let secondScanValue = document.getElementById("secondScanValue").value;
-  const selected工場 = document.getElementById("selected工場").value;
+  let firstScanValue = localStorage.getItem(`${uniquePrefix}firstScanValue`) || "";
+  let secondScanValue = localStorage.getItem(`${uniquePrefix}secondScanValue`) || "";
+  let lastScanMethod = localStorage.getItem(`${uniquePrefix}scannerChoice`) || ""; // Empty if not set
 
   console.log("Initial firstScanValue:", firstScanValue);
   console.log("Initial secondScanValue:", secondScanValue);
+  console.log("Last scan method:", lastScanMethod);
 
   if (subDropdown && firstScanValue && secondScanValue) {
     setTimeout(() => {
@@ -931,92 +1166,193 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 1000);
   }
 
-  // Run checkProcessCondition() once on page load
   checkProcessCondition();
-
-  // Add event listener to "process" dropdown
+    // Add event listener to "process" dropdown
   processDropdown.addEventListener("change", checkProcessCondition);
 
-  document.getElementById('scan-button').addEventListener('click', function () {
-    if (firstScanValue) {
-      window.alert("Please scan the TOMSON BOARD. / 最初のQRコードが正常にスキャンされました。トムソンボードをスキャンしてください。");
+  // Open Scanner Selection Modal
+  function openScannerSelectionModal() {
+    document.getElementById('scannerSelectionModal').style.display = 'block';
+  }
+
+  function closeScannerSelectionModal() {
+    document.getElementById('scannerSelectionModal').style.display = 'none';
+  }
+
+
+//   function handleQRScan(qrCodeMessage) {
+//     console.log("Scanned QR (Raw):", qrCodeMessage);
+
+//     if (!firstScanValue) {
+//         // If a comma is present in the first scan, take only the part before it
+//         let cleanedQR = qrCodeMessage.includes(",") ? qrCodeMessage.split(",")[0] : qrCodeMessage;
+//         console.log("First Scan Processed QR:", cleanedQR);
+
+//         const options = [...subDropdown.options].map(option => option.value);
+
+//         if (options.includes(cleanedQR)) {
+//             firstScanValue = cleanedQR;
+//             localStorage.setItem(`${uniquePrefix}firstScanValue`, firstScanValue);
+//             subDropdown.value = firstScanValue;
+//             localStorage.setItem(`${uniquePrefix}sub-dropdown`, firstScanValue);
+        
+//             fetchProductDetails();
+//             window.alert("First QR code scanned successfully. Please scan the TOMSON BOARD.");
+//         } else {
+//             showAlert("背番号が存在しません。 / Sebanggo does not exist.");
+//         }
+//     } else {
+//         // Second scan: Use the full value as is
+//         console.log("Second Scan Processed QR:", qrCodeMessage);
+//         fetchProductDetails();
+
+//         const expectedModel = document.getElementById("model").value;
+//         const expectedShape = document.getElementById("shape").value;
+//         const expectedRL = document.getElementById("R-L").value;
+//         const expectedSecondValue = `${expectedModel},${expectedShape},${expectedRL}`;
+//         console.log("Expected Tomson Board QR:", expectedSecondValue);
+
+//         if (qrCodeMessage === expectedSecondValue) {
+//             secondScanValue = expectedSecondValue;
+//             localStorage.setItem(`${uniquePrefix}secondScanValue`, secondScanValue);
+//             subDropdown.value = firstScanValue;
+//             enableInputs();
+
+//             // ✅ Both scans are done, delete scanner choice
+//             localStorage.removeItem(`${uniquePrefix}scannerChoice`);
+//             // ✅ Close the modal based on the last scanning method
+//             if (lastScanMethod === "bluetooth") {
+//               document.getElementById('bluetoothScannerModal').style.display = 'none';
+//           } else {
+//               document.getElementById('qrScannerModal').style.display = 'none';
+//           }
+//         } else {
+//             showAlert(`Second QR code does not match the expected value (${expectedSecondValue}).`);
+//         }
+//     }
+// }
+function handleQRScan(qrCodeMessage) {
+  console.log("Scanned QR (Raw):", qrCodeMessage);
+
+  const factoryValue = document.getElementById("selected工場")?.value || "";
+  const processValue = document.getElementById("process")?.value || "";
+
+  // ✅ Check if factory is "NFH" and process is "RLC" BEFORE scanning
+  const isNFH_RLC = factoryValue === "NFH" && processValue === "RLC";
+  console.log(`Factory: ${factoryValue}, Process: ${processValue}, NFH + RLC Condition: ${isNFH_RLC}`);
+
+  // ✅ If NFH + RLC, mark second scan as skipped BEFORE scanning
+  if (isNFH_RLC) {
+      console.log("NFH + RLC detected before scanning. Second scan will be skipped.");
+      localStorage.setItem(`${uniquePrefix}secondScanValue`, "SKIPPED");
+  }
+
+  if (!firstScanValue) {
+      // ✅ If a comma is present in the first scan, take only the part before it
+      let cleanedQR = qrCodeMessage.includes(",") ? qrCodeMessage.split(",")[0] : qrCodeMessage;
+      console.log("First Scan Processed QR:", cleanedQR);
+
+      const options = [...subDropdown.options].map(option => option.value);
+
+      if (options.includes(cleanedQR)) {
+          firstScanValue = cleanedQR;
+          localStorage.setItem(`${uniquePrefix}firstScanValue`, firstScanValue);
+          subDropdown.value = firstScanValue;
+          localStorage.setItem(`${uniquePrefix}sub-dropdown`, firstScanValue);
+
+          fetchProductDetails();
+          
+
+          // ✅ If NFH + RLC, enable inputs and close modal immediately
+          if (isNFH_RLC) {
+              enableInputs();
+              console.log("Skipping second scan. Inputs enabled.");
+              
+              // Close modal immediately
+              if (lastScanMethod === "bluetooth") {
+                  document.getElementById('bluetoothScannerModal').style.display = 'none';
+              } else {
+                  document.getElementById('qrScannerModal').style.display = 'none';
+              }
+          } else {
+              window.alert("Please scan the TOMSON BOARD.");
+          }
+      } else {
+          showAlert("背番号が存在しません。 / Sebanggo does not exist.");
+      }
+  } else if (!isNFH_RLC) { // ✅ Second scan only required if NOT NFH + RLC
+      console.log("Second Scan Processed QR:", qrCodeMessage);
+      fetchProductDetails();
+
+      const expectedModel = document.getElementById("model").value;
+      const expectedShape = document.getElementById("shape").value;
+      const expectedRL = document.getElementById("R-L").value;
+      const expectedSecondValue = `${expectedModel},${expectedShape},${expectedRL}`;
+      console.log("Expected Tomson Board QR:", expectedSecondValue);
+
+      if (qrCodeMessage === expectedSecondValue) {
+          secondScanValue = expectedSecondValue;
+          localStorage.setItem(`${uniquePrefix}secondScanValue`, secondScanValue);
+          subDropdown.value = firstScanValue;
+          enableInputs();
+
+          // ✅ Both scans are done, delete scanner choice
+          localStorage.removeItem(`${uniquePrefix}scannerChoice`);
+
+          // ✅ Close the modal based on the last scanning method
+          if (lastScanMethod === "bluetooth") {
+              document.getElementById('bluetoothScannerModal').style.display = 'none';
+          } else {
+              document.getElementById('qrScannerModal').style.display = 'none';
+          }
+      } else {
+          showAlert(`Second QR code does not match the expected value (${expectedSecondValue}).`);
+      }
+  }
+}
+
+
+
+
+
+  // 🔹 Bluetooth Scanner Handling (Keyboard Input Mode)
+  document.addEventListener('keydown', (event) => {
+    if (lastScanMethod === "bluetooth") {
+        if (!window.scannedBluetoothCode) {
+            window.scannedBluetoothCode = ""; // Initialize if not set
+        }
+
+        // Check for valid characters (A-Z, a-z, 0-9)
+        if (/^[a-zA-Z0-9\-,.]$/.test(event.key)) {
+            window.scannedBluetoothCode += event.key; // Accumulate valid characters
+        }
+
+        // When Enter is pressed, finalize the scanned value
+        if (event.key === "Enter") {
+            let cleanedQR = window.scannedBluetoothCode.replace(/Shift/g, ''); // Remove unwanted "Shift" text
+            console.log("Final Scanned QR:", cleanedQR);
+
+            handleQRScan(cleanedQR); // Process the cleaned QR code
+            window.scannedBluetoothCode = ""; // Reset for next scan
+        }
     }
+});
+
+
+  function startCameraScanner() {
+    lastScanMethod = "camera";
+    localStorage.setItem(`${uniquePrefix}scannerChoice`, lastScanMethod);
+    closeScannerSelectionModal();
 
     const qrScannerModal = document.getElementById('qrScannerModal');
     const html5QrCode = new Html5Qrcode("qrReader");
-    const alertSound = document.getElementById('alert-sound');
-
-    if (alertSound) {
-      alertSound.muted = true;
-      alertSound.loop = false;
-      alertSound.load();
-    }
-
     qrScannerModal.style.display = 'block';
-
-    function showAlert(message) {
-      const scanAlertModal = document.getElementById('scanAlertModal');
-      document.getElementById('scanAlertText').innerText = message;
-      scanAlertModal.style.display = 'block';
-
-      if (alertSound) {
-        alertSound.muted = false;
-        alertSound.volume = 1;
-        alertSound.play().catch(error => console.error("Failed to play alert sound:", error));
-      }
-
-      document.body.classList.add('flash-red');
-
-      document.getElementById('closeScanModalButton').onclick = function () {
-        scanAlertModal.style.display = 'none';
-        alertSound.pause();
-        alertSound.currentTime = 0;
-        alertSound.muted = true;
-        document.body.classList.remove('flash-red');
-      };
-    }
 
     html5QrCode.start(
       { facingMode: "environment" },
-      { fps: 10, qrbox: { width: 250, height: 250 } },
+      { fps: 10, qrbox: { width: 300, height: 300 } },
       qrCodeMessage => {
-        console.log("First scan: " + firstScanValue);
-        const options = [...subDropdown.options].map(option => option.value);
-        const processValue = processDropdown.value;
-
-        if (!firstScanValue) {
-          if (options.includes(qrCodeMessage)) {
-            firstScanValue = qrCodeMessage;
-            localStorage.setItem(`${uniquePrefix}firstScanValue`, firstScanValue);
-            // **Set the scanned value inside the sub-dropdown**
-            subDropdown.value = firstScanValue;
-            console.log("Sub-dropdown updated with first scan:", subDropdown.value);
-            fetchProductDetails();
-            window.alert("First QR code scanned successfully. Please scan the TOMSON BOARD.");
-          } else {
-            showAlert("背番号が存在しません。 / Sebanggo does not exist.");
-            html5QrCode.stop().then(() => { qrScannerModal.style.display = 'none'; });
-          }
-        } else {
-          fetchProductDetails();
-          // Get expected second QR value based on model, shape, R-L
-          const expectedModel = document.getElementById("model").value;
-          const expectedShape = document.getElementById("shape").value;
-          const expectedRL = document.getElementById("R-L").value;
-          const expectedSecondValue = `${expectedModel},${expectedShape},${expectedRL}`;
-          console.log("need this: "+ expectedSecondValue);
-
-          if (qrCodeMessage === expectedSecondValue) {
-            secondScanValue = expectedSecondValue;
-            localStorage.setItem(`${uniquePrefix}secondScanValue`, secondScanValue);
-            subDropdown.value = firstScanValue;
-            enableInputs();
-            html5QrCode.stop().then(() => { qrScannerModal.style.display = 'none'; });
-          } else {
-            showAlert(`Second QR code does not match the expected value (${expectedSecondValue}).`);
-            html5QrCode.stop().then(() => { qrScannerModal.style.display = 'none'; });
-          }
-        }
+        handleQRScan(qrCodeMessage);
       }
     ).catch(err => {
       console.error("Failed to start scanning:", err);
@@ -1027,16 +1363,85 @@ document.addEventListener('DOMContentLoaded', () => {
         qrScannerModal.style.display = 'none';
       });
     };
+  }
 
-    window.onclick = function (event) {
-      if (event.target == qrScannerModal) {
-        html5QrCode.stop().then(() => {
-          qrScannerModal.style.display = 'none';
-        });
-      }
-    };
-  });
+  function startBluetoothScanner() {
+    lastScanMethod = "bluetooth";
+    localStorage.setItem(`${uniquePrefix}scannerChoice`, lastScanMethod);
+    closeScannerSelectionModal();
+
+    const bluetoothScannerModal = document.getElementById('bluetoothScannerModal');
+    bluetoothScannerModal.style.display = 'block';
+    document.getElementById('bluetoothScannerInstruction').textContent = 
+      firstScanValue ? "Please scan the TOMSON BOARD QR code." : "Please scan the first QR code (Sebanggo).";
+  }
+
+  // 🔹 Scan Button Click (Opens modal if first scan is missing)
+  document.getElementById('scan-button').addEventListener('click', function () {
+    const factoryValue = document.getElementById("selected工場")?.value || "";
+    const processValue = document.getElementById("process")?.value || "";
+
+    // ✅ Check if NFH + RLC when scan button is clicked
+    const isNFH_RLC = factoryValue === "NFH" && processValue === "RLC";
+    console.log(`Scan Button Clicked - Factory: ${factoryValue}, Process: ${processValue}, NFH + RLC Condition: ${isNFH_RLC}`);
+
+    // ✅ If NFH + RLC, mark second scan as skipped BEFORE scanning
+    if (isNFH_RLC) {
+        console.log("NFH + RLC detected before scanning. Second scan will be skipped.");
+        localStorage.setItem(`${uniquePrefix}secondScanValue`, "SKIPPED");
+    }
+
+    if (firstScanValue && !secondScanValue) {
+        // If first scan is done, auto-select the last used method
+        if (lastScanMethod === "bluetooth") {
+            startBluetoothScanner();
+        } else {
+            startCameraScanner();
+        }
+    } else {
+        // Ask the user to choose scanning method
+        openScannerSelectionModal();
+    }
 });
+
+
+  // Attach event listeners to modal buttons
+  document.getElementById('selectCamera').addEventListener('click', startCameraScanner);
+  document.getElementById('selectBluetooth').addEventListener('click', startBluetoothScanner);
+
+  // 🔹 Auto-switch to last used scanning method if first scan is done
+  if (firstScanValue && !secondScanValue) {
+    if (lastScanMethod === "bluetooth") {
+      startBluetoothScanner();
+    } else {
+      startCameraScanner();
+    }
+  }
+
+  // 🔹 Close Bluetooth Modal
+  document.getElementById('closeBluetoothScannerModal').addEventListener('click', () => {
+    document.getElementById('bluetoothScannerModal').style.display = 'none';
+  });
+
+  // 🔹 Close Selection Modal on Outside Click
+  window.onclick = function(event) {
+    const scannerSelectionModal = document.getElementById('scannerSelectionModal');
+    const bluetoothScannerModal = document.getElementById('bluetoothScannerModal');
+    if (event.target == scannerSelectionModal) {
+      closeScannerSelectionModal();
+    }
+    if (event.target == bluetoothScannerModal) {
+      bluetoothScannerModal.style.display = 'none';
+    }
+  };
+
+});
+
+
+
+
+
+
 
 
 
@@ -1085,6 +1490,8 @@ function resetForm() {
       console.log(`Reset image ${image.id || image.name}`);
   });
 
+  localStorage.removeItem(`${uniquePrefix}scannerChoice`); // clear choice
+
   // Reload the page
   window.location.reload();
 }
@@ -1099,6 +1506,11 @@ function printLabel() {
   const scanAlertModal = document.getElementById('scanAlertModal');
   const scanAlertText = document.getElementById('scanAlertText');
   const 背番号 = document.getElementById("sub-dropdown").value;
+  
+  if (selectedFactory === "肥田瀬"){
+    printLabelHidase();
+    return;
+  }
 
   // Preload the alert sound without playing it
   if (alertSound) {
@@ -1288,6 +1700,185 @@ function printLabel() {
   console.log(Date);
   window.location.href = url;
 }
+
+
+// Hidase style print label
+function printLabelHidase() {
+  const selectedSeBanggo = document.getElementById("product-number").value;
+  const selectedFactory = document.getElementById("selected工場").value;
+
+  if (selectedFactory !== "肥田瀬") {
+    console.warn("Not in 肥田瀬 factory. Printing normally...");
+    return;
+  }
+
+  fetch(`${serverURL}/getCapacityBySeBanggo?seBanggo=${selectedSeBanggo}`)
+    .then(response => response.json())
+    .then(data => {
+      if (data.length > 1) {
+        // Multiple capacity options exist, show selection modal
+        showCapacitySelectionModal(data);
+      } else if (data.length === 1) {
+        // Only one capacity, auto-select and proceed
+        document.getElementById('収容数').value = data[0].収容数;
+        showLabelTypeSelection();
+      } else {
+        alert('No data found for the selected 品番');
+      }
+    })
+    .catch(error => console.error('Error fetching 収容数:', error));
+}
+
+// Show modal to let user choose a 収容数 (uses existing #modal)
+function showCapacitySelectionModal(data) {
+  const modal = document.getElementById("modal");
+  const modalOptions = document.getElementById("modal-options");
+  const modalCloseButton = document.getElementById("modal-close");
+
+  // Clear previous options
+  modalOptions.innerHTML = '<p>収容数を選んでください / Please choose the quantity:</p>';
+
+  data.forEach((item) => {
+    const option = document.createElement('button');
+    option.classList.add('modal-option');
+    option.textContent = `収容数: ${item.収容数}`;
+    option.dataset.value = item.収容数;
+    option.onclick = (e) => {
+      document.getElementById('収容数').value = e.target.dataset.value;
+      modal.style.display = "none";
+      showLabelTypeSelection();
+    };
+    modalOptions.appendChild(option);
+  });
+
+  modal.style.display = "block";
+
+  // Close modal on close button click
+  modalCloseButton.onclick = () => {
+    modal.style.display = "none";
+  };
+}
+
+// Show modal to choose between BOX or PRODUCT label (uses existing #modal)
+function showLabelTypeSelection() {
+  const modal = document.getElementById("modal");
+  const modalOptions = document.getElementById("modal-options");
+  const modalCloseButton = document.getElementById("modal-close");
+
+  // Update modal content
+  modalOptions.innerHTML = '<p>Choose label type: For BOX / 外用 or For Product / 製品用</p>';
+
+  const buttonBox = document.createElement('button');
+  buttonBox.innerText = 'For BOX / 外用';
+  buttonBox.onclick = () => {
+    modal.style.display = "none";
+    showCopiesPrompt('hidaselabel5.lbx');
+  };
+
+  const buttonProduct = document.createElement('button');
+  buttonProduct.innerText = 'For Product / 製品用';
+  buttonProduct.onclick = () => {
+    modal.style.display = "none";
+    showCopiesPrompt('hidaselabel6inner.lbx');
+  };
+
+  modalOptions.appendChild(buttonBox);
+  modalOptions.appendChild(buttonProduct);
+
+  modal.style.display = "block";
+
+  // Close modal on close button click
+  modalCloseButton.onclick = () => {
+    modal.style.display = "none";
+  };
+}
+
+// Show modal to select number of copies and print (uses existing #modal)
+function showCopiesPrompt(filename) {
+  const 品番 = document.getElementById("product-number").value;
+  const 収容数 = document.getElementById("収容数").value;
+  const R_L = document.getElementById("R-L").value;
+  const 品番収容数 = `${品番},${収容数}`;
+  const extension = document.getElementById("Labelextension").value;
+  const Date2 = document.getElementById('Lot No.').value;
+  let Date = extension ? `${Date2} - ${extension}` : Date2;
+
+  const modal = document.getElementById("modal");
+  const modalOptions = document.getElementById("modal-options");
+  const modalCloseButton = document.getElementById("modal-close");
+
+  modalOptions.innerHTML = '<p>Select number of copies:</p>';
+
+  let copies = 1;
+  const copiesDisplay = document.createElement('div');
+  copiesDisplay.style.display = 'flex';
+  copiesDisplay.style.alignItems = 'center';
+  copiesDisplay.style.marginBottom = '20px';
+
+  const minusButton = document.createElement('button');
+  minusButton.innerText = '-';
+  minusButton.type = "button"; // Prevents form submission
+  minusButton.onclick = (event) => {
+    event.preventDefault(); // Stops form submission
+    if (copies > 1) {
+      copies--;
+      copiesValue.innerText = copies;
+    }
+  };
+
+  const copiesValue = document.createElement('span');
+  copiesValue.innerText = copies;
+  copiesValue.style.margin = '0 10px';
+
+  const plusButton = document.createElement('button');
+  plusButton.innerText = '+';
+  plusButton.type = "button"; // Prevents form submission
+  plusButton.onclick = (event) => {
+    event.preventDefault(); // Stops form submission
+    copies++;
+    copiesValue.innerText = copies;
+  };
+
+  copiesDisplay.appendChild(minusButton);
+  copiesDisplay.appendChild(copiesValue);
+  copiesDisplay.appendChild(plusButton);
+  modalOptions.appendChild(copiesDisplay);
+
+  const confirmButton = document.createElement('button');
+  confirmButton.innerText = 'Confirm';
+  confirmButton.type = "button"; // Prevents form submission
+  confirmButton.onclick = () => {
+    const url =
+      `brotherwebprint://print?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent("RollW62")}&copies=${encodeURIComponent(copies)}` +
+      `&text_品番=${encodeURIComponent(品番)}` +
+      `&text_収容数=${encodeURIComponent(収容数)}` +
+      `&text_DateT=${encodeURIComponent(Date)}` +
+      `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
+
+    console.log("Printing:", url);
+    window.location.href = url;
+    modal.style.display = "none";
+  };
+
+  modalOptions.appendChild(confirmButton);
+
+  modal.style.display = "block";
+
+  // Close modal on close button click
+  modalCloseButton.onclick = () => {
+    modal.style.display = "none";
+  };
+}
+
+
+
+
+
+
+
+
+
+
 
 
 
