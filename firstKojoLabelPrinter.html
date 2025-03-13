@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>自動日報(倉知)</title>
+    <link rel="icon" type="image/png" href="src/favicon2.png">
+    <link rel="stylesheet" href="firstKojoLabelPrinter.css"> <!-- Link to external CSS -->
+</head>
+<body>
+    <div class="container">
+        <h1>ラベルプリンター</h1>
+        <!-- QR Scan Option Modal -->
+        <div id="scanOptionModal" class="modal">
+            <div class="modal-content">
+                <h2>Choose Scan Method</h2>
+                <button class="btn" onclick="startCameraScanner()">📷 カメラ用</button>
+                <button class="btn" onclick="startBluetoothScanner()">🛜🖲️ ブルースス スキャナー</button>
+                <button class="btn btn-close" onclick="document.getElementById('scanOptionModal').style.display='none'">Cancel</button>
+            </div>
+        </div>
+
+        <!-- Camera QR Scanner Modal -->
+        <div id="qrScannerModal" class="modal">
+            <div class="modal-content">
+                <h2>Scan QR Code</h2>
+                <div id="qrReader"></div>
+                <button class="btn btn-close" id="closeQRScannerModal">Close</button>
+            </div>
+        </div>
+
+        <!-- Bluetooth Scanner Listening Modal -->
+        <div id="bluetoothScannerModal" class="modal">
+            <div class="modal-content">
+                <h2>QR スキャンお待ち中 (Waiting for SCAN)...</h2>
+                <p>スキャンしてください。Scan QR Now!</p>
+                <button class="btn btn-close" onclick="document.getElementById('bluetoothScannerModal').style.display='none'">Cancel</button>
+            </div>
+        </div>
+
+        <!-- Scan Error Modal -->
+        <div id="scanAlertModal" class="modal">
+            <div class="modal-content">
+                <h2>Error</h2>
+                <p id="scanAlertText"></p>
+                <button class="btn btn-close" id="closeScanModalButton">Close</button>
+            </div>
+        </div>
+
+        
+        <div class="form-group">
+            <label for="sub-dropdown">背番号:</label>
+            <select id="sub-dropdown" name="背番号"></select>
+        </div>
+
+        <button id="scan-button" class="btn">📷 Scan 日報</button>
+
+        <div class="form-group">
+            <label for="Lot No.">日付 (Date):</label>
+            <input type="date" id="Lot No." name="Date" onfocus="setDefaultDate(this)" required>
+        </div>        
+
+        <button id="print" class="btn btn-print" onclick="printLabel()">🖨 Print Label</button>
+
+        <div class="image-container">
+            <img id="dynamicImage" src="" alt="Image Preview">
+        </div>
+        <button type="button" onclick="resetForm()">Reset</button>
+
+
+        <div class="form-group">
+            <label for="Status">STATUS:</label>
+            <input readonly id="status" name="背番号"></select>
+        </div>
+
+
+        <div class="form-group">
+            <label>材料背番号 (Product Code):</label>
+            <input readonly id="材料背番号" name="品番">
+        </div>
+
+        <div class="form-group">
+            <label for="product-name">品名 (Product Number):</label>
+            <input readonly id="品名" name="品名">
+        </div>
+
+        <div class="form-group">
+            <label>材料(Material):</label>
+            <input readonly id="material">
+        </div>
+
+
+        <div class="form-group">
+            <label>材料の色 (Material Color):</label>
+            <input readonly id="material-color">
+        </div>
+
+        
+    
+    <!-- Hidden fields -->
+    <input type="hidden" name="設備" id="hidden設備">
+    <input type="hidden" name="工場2" id="hidden工場">
+    <input type="hidden" name="工場" id="selected工場" value="第一工場">
+    <input type="hidden" name="printerCode" id="printerCode">
+    <input type="hidden" name="検査STATUS" id="検査STATUS" value="false">
+    <input type="hidden" name="ipInfo" id="ipInfo">
+    <input type="hidden" name="rikeshi" id="rikeshi">
+    <input type="hidden" name="printerHostname" id="printerHostname">
+    <iframe id="hiddenIframe" style="display:none;"></iframe>
+    <input type="hidden" name="収容数" id="収容数" value = "">
+    <label name="送りピッチ" id="送りピッチ" value=""></label>
+    <input type="hidden" name="SRS" id="SRS" value = "">
+    <audio id="alert-sound" src="src/alert.mp3" preload="auto"></audio>
+    <input type="hidden" id="Labelextension" name="Labelextension" value="1">
+    <input type="hidden" id="length" name="length" value="50">
+    <input type="hidden" id="order" name="order">
+
+    <script src="firstKojoLabelPrinter.js"></script>
+    <script src="html5-qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr/dist/jsQR.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
+</body>
+</html>
