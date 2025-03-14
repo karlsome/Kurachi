@@ -341,7 +341,7 @@ function enableInputs() {
 //for the info section
 async function fetchProductDetails() {
   checkProcessCondition();
-  //enableInputs(); // delete if production
+  enableInputs(); // delete if production
   
   
   const serialNumber = document.getElementById("sub-dropdown").value;

@@ -339,7 +339,7 @@ document.addEventListener("DOMContentLoaded", function() {
 
 
 
-
+//scan Button
 document.getElementById('scan-button').addEventListener('click', function () {
   const scanOptionModal = document.getElementById('scanOptionModal');
   scanOptionModal.style.display = 'block';
