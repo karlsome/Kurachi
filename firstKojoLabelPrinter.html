@@ -47,6 +47,38 @@
             </div>
         </div>
 
+        <!-- Print Confirmation Modal -->
+        <div id="printConfirmationModal" class="modal">
+            <div class="modal-content">
+                <h2>Print Confirmation</h2>
+                <p>How many labels do you want to print?</p>
+                <div class="quantity-selector">
+                    <button class="btn" onclick="decrementPrintTimes()">-</button>
+                    <span id="printTimesDisplay">1</span>
+                    <button class="btn" onclick="incrementPrintTimes()">+</button>
+                </div>
+                <button class="btn btn-confirm" onclick="confirmPrint()">Print</button>
+                <button class="btn btn-close" onclick="document.getElementById('printConfirmationModal').style.display='none'">Cancel</button>
+            </div>
+        </div>
+
+        <!-- Printing Status Modal -->
+        <div id="printingStatusModal" class="modal">
+            <div class="modal-content">
+                <h2>Printing...</h2>
+                <p>Please wait while the labels are being printed.</p>
+            </div>
+        </div>
+
+        <!-- Print Completion Modal -->
+        <div id="printCompletionModal" class="modal">
+            <div class="modal-content">
+                <h2>Print Complete</h2>
+                <p>All labels have been printed successfully.</p>
+                <button class="btn btn-close" onclick="document.getElementById('printCompletionModal').style.display='none'">Close</button>
+            </div>
+        </div>
+
         
         <div class="form-group">
             <label for="sub-dropdown">背番号:</label>
@@ -114,6 +146,8 @@
     <input type="hidden" id="Labelextension" name="Labelextension" value="1">
     <input type="hidden" id="length" name="length" value="50">
     <input type="hidden" id="order" name="order">
+    <input type="hidden" id="printTimes" name="printTimes" value="1">
+
 
     <script src="firstKojoLabelPrinter.js"></script>
     <script src="html5-qrcode.min.js"></script>
