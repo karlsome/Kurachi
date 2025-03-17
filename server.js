@@ -1936,12 +1936,45 @@ app.post("/saveScannedQRData", async (req, res) => {
 //   }
 // });
 
-app.post('/queries', async (req, res) => {
-  console.log("🟢 Received POST request to /query");
-  const { dbName, collectionName, query, aggregation } = req.body;
+
+
+// app.post('/queries', async (req, res) => {
+//   console.log("🟢 Received POST request to /query");
+//   const { dbName, collectionName, query, aggregation } = req.body;
   
+//   try {
+//     console.log("Received Request:", { dbName, collectionName, query, aggregation });
+
+//     await client.connect();
+//     const database = client.db(dbName);
+//     const collection = database.collection(collectionName);
+
+//     let results;
+
+//     if (aggregation) {
+//       console.log("Running Aggregation Pipeline...");
+//       results = await collection.aggregate(aggregation).toArray();
+//     } else {
+//       console.log("Running Find Query...");
+//       results = await collection.find(query).toArray();
+//     }
+
+//     console.log("Query Results:", JSON.stringify(results, null, 2)); // Logs formatted JSON data
+//     res.json(results);
+//   } catch (error) {
+//     console.error("Error executing query:", error);
+//     res.status(500).json({ error: "Error executing query" });
+//   }
+// });
+
+
+//Dynamic query where it can receive query, aggregation pipeline, insertData and updateData
+app.post('/queries', async (req, res) => {
+  console.log("🟢 Received POST request to /queries");
+  const { dbName, collectionName, query, aggregation, insertData, update } = req.body;
+
   try {
-    console.log("Received Request:", { dbName, collectionName, query, aggregation });
+    console.log("Received Request:", { dbName, collectionName, query, aggregation, insertData, update });
 
     await client.connect();
     const database = client.db(dbName);
@@ -1949,21 +1982,42 @@ app.post('/queries', async (req, res) => {
 
     let results;
 
+    if (insertData) {
+      // 🔵 INSERT logic
+      console.log("🔵 Inserting data into MongoDB...");
+      const insertResult = await collection.insertMany(insertData);
+      console.log(`✅ Successfully inserted ${insertResult.insertedCount} records.`);
+      res.json({ message: "Data inserted successfully", insertedCount: insertResult.insertedCount });
+      return;
+    }
+
+    if (update) {
+      // 🔵 UPDATE logic (update existing document)
+      console.log("🟠 Updating MongoDB document...");
+      const updateResult = await collection.updateOne(query, update);
+      console.log(`✅ Successfully updated ${updateResult.modifiedCount} records.`);
+      res.json({ message: "Data updated successfully", modifiedCount: updateResult.modifiedCount });
+      return;
+    }
+
     if (aggregation) {
-      console.log("Running Aggregation Pipeline...");
+      // 🔵 Aggregation Query
+      console.log("🔵 Running Aggregation Pipeline...");
       results = await collection.aggregate(aggregation).toArray();
     } else {
-      console.log("Running Find Query...");
+      // 🔵 Find Query
+      console.log("🔵 Running Find Query...");
       results = await collection.find(query).toArray();
     }
 
-    console.log("Query Results:", JSON.stringify(results, null, 2)); // Logs formatted JSON data
+    console.log("✅ Query Results:", JSON.stringify(results, null, 2));
     res.json(results);
   } catch (error) {
-    console.error("Error executing query:", error);
+    console.error("❌ Error executing query:", error);
     res.status(500).json({ error: "Error executing query" });
   }
 });
+
 
 
 

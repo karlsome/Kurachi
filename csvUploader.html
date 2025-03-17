@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第一工場材料CSVアップロード</title>
+    <style>
+        /* General Reset */
+        body, h2, input, button, table {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        /* Page Styling */
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f3faf4;
+            text-align: center;
+            padding: 20px;
+            overflow-x: auto; /* Allow horizontal scrolling */
+        }
+
+        .container {
+            background: #033a5f;
+            padding: 20px;
+            max-width: 90%;
+            margin: auto;
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.3);
+            border-radius: 10px;
+            border: 2px solid #0174b3;
+        }
+
+        h2 {
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 15px;
+            color: #ffffff;
+        }
+
+        .input-file {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #0174b3;
+            border-radius: 5px;
+            font-size: 16px;
+            background-color: #ffffff;
+            color: #002b46;
+            margin-bottom: 10px;
+        }
+
+        .btn {
+            display: inline-block;
+            background-color: #0174b3;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            font-size: 16px;
+            font-weight: bold;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: 0.3s;
+            width: 100%;
+        }
+
+        .btn:hover {
+            background-color: #025f8c;
+        }
+
+        .table-container {
+            max-width: 100%;
+            overflow-x: auto;
+            margin-top: 20px;
+        }
+
+        table {
+            width: auto; /* Expand table based on content */
+            border-collapse: collapse;
+            background-color: white;
+            margin: auto;
+            min-width: 100%;
+        }
+
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            white-space: nowrap;
+            text-align: left;
+            color: black; /* Ensure text is visible */
+        }
+
+        th {
+            background-color: #0174b3;
+            color: white;
+            position: sticky;
+            top: 0;
+            z-index: 2;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>第一工場材料CSVアップロード</h2>
+        <input type="file" id="csvFile" accept=".csv" class="input-file">
+        <button class="btn" onclick="handleFile()">プレビュー</button>
+        <div class="table-container">
+            <table id="previewTable" border="1" style="display:none;"></table>
+        </div>
+        <button id="insertButton" class="btn" onclick="insertData()" style="display:none; margin-top: 20px;">データを挿入</button>
+    </div>
+    <script src="csvUploader.js"></script>
+</body>
+</html>
