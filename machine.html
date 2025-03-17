@@ -274,7 +274,7 @@
         kensaCard.appendChild(kensaLabel);
         containers.appendChild(kensaCard);
     } 
-    else if (filterValue === '第一工場') {
+        else if (filterValue === '第一工場') {
         const containers = document.getElementById('containers');
 
         // Create card for Laser加工
@@ -314,7 +314,46 @@
         kensaCard.appendChild(kensaImg);
         kensaCard.appendChild(kensaLabel);
         containers.appendChild(kensaCard);
-    } 
+
+        // Create card for 粘着
+        const nenchakuCard = document.createElement('div');
+        nenchakuCard.classList.add('card');
+        nenchakuCard.addEventListener('click', () => {
+            window.location.href = `firstKojoLabelPrinter.html?filter=${filterValue}`;
+        });
+
+        const nenchakuImg = document.createElement('img');
+        nenchakuImg.src = 'src/machines/nenchaku.jpg'; // Adjust the path to your image
+        nenchakuImg.alt = '粘着';
+
+        const nenchakuLabel = document.createElement('div');
+        nenchakuLabel.classList.add('label');
+        nenchakuLabel.textContent = '粘着';
+
+        nenchakuCard.appendChild(nenchakuImg);
+        nenchakuCard.appendChild(nenchakuLabel);
+        containers.appendChild(nenchakuCard);
+
+        // Create card for CSVアップロード
+        const csvCard = document.createElement('div');
+        csvCard.classList.add('card');
+        csvCard.addEventListener('click', () => {
+            window.location.href = `csvUploader.html?filter=${filterValue}`;
+        });
+
+        const csvImg = document.createElement('img');
+        csvImg.src = 'src/machines/csv.jpg'; // Adjust the path to your image
+        csvImg.alt = 'CSVアップロード';
+
+        const csvLabel = document.createElement('div');
+        csvLabel.classList.add('label');
+        csvLabel.textContent = 'CSVアップロード';
+
+        csvCard.appendChild(csvImg);
+        csvCard.appendChild(csvLabel);
+        containers.appendChild(csvCard);
+    }
+
     else if (filterValue === 'SCNA') {
         const containers = document.getElementById('containers');
 

@@ -62,13 +62,15 @@
             </div>
         </div>
 
-        <!-- Printing Status Modal -->
+       <!-- Printing Status Modal -->
         <div id="printingStatusModal" class="modal">
             <div class="modal-content">
                 <h2>Printing...</h2>
                 <p>Please wait while the labels are being printed.</p>
+                <button id="cancelPrintButton" class="btn btn-danger">Cancel Printing</button>
             </div>
         </div>
+
 
         <!-- Print Completion Modal -->
         <div id="printCompletionModal" class="modal">
@@ -102,8 +104,15 @@
 
         <div class="form-group">
             <label for="Status">STATUS:</label>
-            <input readonly id="status" name="背番号"></select>
+            <input readonly id="status" name="status"></select>
         </div>
+
+        <div class="form-group">
+            <label for="printStatus">印刷進捗 (Print Progress):</label>
+            <input readonly id="printStatus" name="printStatus">
+        </div>
+        
+
 
 
         <div class="form-group">
