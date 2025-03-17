@@ -435,45 +435,6 @@ function startBluetoothScanner() {
 }
 
 
-// // Handle scanned QR code (Both Camera & Bluetooth)
-// function handleScannedQR(qrCodeMessage) {
-//   const subDropdown = document.getElementById('sub-dropdown');
-//   const options = [...subDropdown.options].map(option => option.value);
-//   const scanAlertModal = document.getElementById('scanAlertModal');
-//   const scanAlertText = document.getElementById('scanAlertText');
-//   const alertSound = document.getElementById('alert-sound');
-
-//   console.log("Scanned QR Code:", qrCodeMessage);
-
-//   if (!options.includes(qrCodeMessage)) {
-//       scanAlertText.innerText = "背番号が存在しません。 / Sebanggo does not exist.";
-//       scanAlertModal.style.display = 'block';
-
-//       if (alertSound) {
-//           alertSound.muted = false;
-//           alertSound.volume = 1;
-//           alertSound.play().catch(error => console.error("Failed to play alert sound:", error));
-//       }
-
-//       document.body.classList.add('flash-red');
-
-//       document.getElementById('closeScanModalButton').onclick = function () {
-//           scanAlertModal.style.display = 'none';
-//           alertSound.pause();
-//           alertSound.currentTime = 0;
-//           alertSound.muted = true;
-//           document.body.classList.remove('flash-red');
-//       };
-
-//       return;
-//   }
-
-//   if (subDropdown && subDropdown.value !== qrCodeMessage) {
-//       subDropdown.value = qrCodeMessage;
-//       localStorage.setItem(`${uniquePrefix}sub-dropdown`, qrCodeMessage);
-//       fetchProductDetails();
-//   }
-// }
 
 // Handle scanned QR code (Both Camera & Bluetooth)
 async function handleScannedQR(qrCodeMessage) {
@@ -547,6 +508,25 @@ async function handleScannedQR(qrCodeMessage) {
 
           if (data.length === 0) {
             console.log("No matching request found in materialRequestDB.");
+            scanAlertText.innerText = "Request not found in materialRequestDB.";
+            scanAlertModal.style.display = 'block';
+
+            if (alertSound) {
+                alertSound.muted = false;
+                alertSound.volume = 1;
+                alertSound.play().catch(error => console.error("Failed to play alert sound:", error));
+            }
+
+            document.body.classList.add('flash-red');
+
+            document.getElementById('closeScanModalButton').onclick = function () {
+                scanAlertModal.style.display = 'none';
+                alertSound.pause();
+                alertSound.currentTime = 0;
+                alertSound.muted = true;
+                document.body.classList.remove('flash-red');
+            };
+
             return;
           }
 
@@ -560,10 +540,25 @@ async function handleScannedQR(qrCodeMessage) {
 
           if (!isNaN(生産数) && !isNaN(length) && length > 0) {
             const rollTimes = 生産数 / length;
-            console.log("Desired roll times:", rollTimes);
-          } else {
+            const roundedRollTimes = Math.ceil(rollTimes); // Round up to the next whole number
+            console.log("Desired roll times:", roundedRollTimes);
+        
+            // Set order value divided by 10 to the hidden input field
+            const orderInput = document.getElementById("order");
+            if (orderInput) {
+                orderInput.value = order / 10;
+                console.log("Set hidden order value:", orderInput.value);
+            }
+        
+            // Set rounded roll times to the hidden input field
+            const printTimesInput = document.getElementById("printTimes");
+            if (printTimesInput) {
+                printTimesInput.value = roundedRollTimes;
+                console.log("Set hidden printTimes value:", printTimesInput.value);
+            }
+        } else {
             console.error("Invalid 生産数 or length value.");
-          }
+        }
         } else {
           console.error("Error fetching request details:", response.statusText);
         }
@@ -582,7 +577,6 @@ window.onclick = function (event) {
       document.getElementById('bluetoothScannerModal').style.display = 'none';
   }
 };
-
 
 
 
@@ -797,7 +791,182 @@ function resetForm() {
 //   localStorage.setItem(storageKey, JSON.stringify(storedData));
 // }
 
-//this is new printing
+
+
+// //this is new printing
+// // Show print confirmation modal
+// function showPrintConfirmationModal() {
+//   const subDropdown = document.getElementById('sub-dropdown');
+//   const selectedValue = subDropdown.value;
+//   const scanAlertModal = document.getElementById('scanAlertModal');
+//   const scanAlertText = document.getElementById('scanAlertText');
+//   const alertSound = document.getElementById('alert-sound');
+
+//   if (!selectedValue) {
+//       scanAlertText.innerText = '背番号が必要です。 / Sebanggo is required.';
+//       scanAlertModal.style.display = 'block';
+
+//       if (alertSound) {
+//           alertSound.muted = false;
+//           alertSound.volume = 1;
+//           alertSound.play().catch(error => console.error("Failed to play alert sound:", error));
+//       }
+
+//       document.body.classList.add('flash-red');
+
+//       document.getElementById('closeScanModalButton').onclick = function () {
+//           scanAlertModal.style.display = 'none';
+//           alertSound.pause();
+//           alertSound.currentTime = 0;
+//           alertSound.muted = true;
+//           document.body.classList.remove('flash-red');
+//       };
+
+//       return;
+//   }
+
+//   const printTimes = document.getElementById('printTimes').value;
+//   document.getElementById('printTimesDisplay').innerText = printTimes;
+//   document.getElementById('printConfirmationModal').style.display = 'block';
+// }
+
+// // Increment print times
+// function incrementPrintTimes() {
+//   const printTimesInput = document.getElementById('printTimes');
+//   let printTimes = parseInt(printTimesInput.value, 10);
+//   printTimes++;
+//   printTimesInput.value = printTimes;
+//   document.getElementById('printTimesDisplay').innerText = printTimes;
+// }
+
+// // Decrement print times
+// function decrementPrintTimes() {
+//   const printTimesInput = document.getElementById('printTimes');
+//   let printTimes = parseInt(printTimesInput.value, 10);
+//   if (printTimes > 1) {
+//       printTimes--;
+//       printTimesInput.value = printTimes;
+//       document.getElementById('printTimesDisplay').innerText = printTimes;
+//   }
+// }
+
+// // Confirm print
+// function confirmPrint() {
+//   document.getElementById('printConfirmationModal').style.display = 'none';
+//   document.getElementById('printingStatusModal').style.display = 'block';
+//   printLabel();
+// }
+
+// // Modify the printLabel function to use the printTimes value and handle printing one at a time
+// async function printLabel() {
+//   const alertSound = document.getElementById('alert-sound');
+//   const scanAlertModal = document.getElementById('scanAlertModal');
+//   const scanAlertText = document.getElementById('scanAlertText');
+//   const selectedFactory = document.getElementById("selected工場").value;
+//   const 背番号 = document.getElementById("材料背番号").value;
+//   const 品番 = document.getElementById("品名").value;
+//   const 色 = document.getElementById("material-color").value;
+//   const length = document.getElementById("length").value;
+//   const order = document.getElementById("order").value;
+//   const copies = parseInt(document.getElementById("printTimes").value) || 1; // Number of copies
+
+//   // Log each value
+//   console.log("Selected Factory:", selectedFactory);
+//   console.log("背番号:", 背番号);
+//   console.log("品番:", 品番);
+//   console.log("色:", 色);
+//   console.log("Length:", length);
+//   console.log("Order:", order);
+//   console.log("Copies:", copies);
+
+//   // Use the global uniquePrefix
+//   const storageKey = `${uniquePrefix}${品番}`;
+
+//   // Get current date in yyMMdd format
+//   const originalDate = document.getElementById('Lot No.').value;
+//   const dateParts = originalDate.split("-");
+//   const currentDate = `${dateParts[0].slice(-2)}${dateParts[1]}${dateParts[2]}`; // Extract last 2 digits of year
+
+//   // Check if 背番号 is selected
+//   if (!背番号) {
+//       scanAlertText.innerText = '背番号が必要です。 / Sebanggo is required.';
+//       scanAlertModal.style.display = 'block';
+//       return;
+//   }
+
+//   // Get stored tracker data
+//   let storedData = JSON.parse(localStorage.getItem(storageKey)) || { date: currentDate, extension: 0 };
+
+//   // Reset extension if date changes
+//   if (storedData.date !== currentDate) {
+//       storedData = { date: currentDate, extension: 0 };
+//   }
+
+//   // Process multiple copies one at a time
+//   for (let i = 1; i <= copies; i++) {
+//       storedData.extension++; // Increment extension per print
+//       const extension = storedData.extension;
+//       const DateWithExtension = `${currentDate}-${extension}`;
+
+//       const 品番収容数 = `${背番号},${DateWithExtension},${length}`;
+//       console.log("label QR Value:", 品番収容数);
+
+//       let filename = "";
+//       if (typeof SRS !== "undefined" && SRS === "有り") {
+//           filename = "SRS3.lbx";
+//       } else if (背番号 === "NC2") {
+//           filename = "NC21.lbx";
+//       } else {
+//           filename = "firstkojo3.lbx";
+//       }
+
+//       const size = "RollW62";
+
+//       // Generate print URL
+//       const url =
+//           `http://localhost:8088/print?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent(size)}&copies=1` +
+//           `&text_品番=${encodeURIComponent(品番)}` +
+//           `&text_背番号=${encodeURIComponent(背番号)}` +
+//           `&text_収容数=${encodeURIComponent(order)}` +
+//           `&text_色=${encodeURIComponent(色)}` +
+//           `&text_DateT=${encodeURIComponent(DateWithExtension)}` +
+//           `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
+//           console.log ("To print: " + 品番,背番号, order,copies, DateWithExtension,barcode);
+
+//       try {
+//           const response = await fetch(url);
+//           const responseText = await response.text(); // Get response as text
+
+//           // Check for success or error message in XML response
+//           if (responseText.includes("<result>SUCCESS</result>")) {
+//               console.log("Print Success");
+//           } else if (responseText.includes("PrinterStatusErrorCoverOpen")) {
+//               console.error("Printer Error: Cover is open.");
+//               break;
+//           } else {
+//               console.error("Unknown Printer Error:", responseText);
+//               break;
+//           }
+//       } catch (error) {
+//           console.error("Failed to print:", error);
+//           break;
+//       }
+      
+//   }
+  
+
+//   // Save updated tracker to local storage
+//   localStorage.setItem(storageKey, JSON.stringify(storedData));
+
+//   // Hide printing status modal and show print completion modal
+//   document.getElementById('printingStatusModal').style.display = 'none';
+//   document.getElementById('printCompletionModal').style.display = 'block';
+// }
+
+// // Attach the showPrintConfirmationModal function to the print button
+// document.getElementById('print').addEventListener('click', showPrintConfirmationModal);
+
+
 // Show print confirmation modal
 function showPrintConfirmationModal() {
   const subDropdown = document.getElementById('sub-dropdown');
@@ -829,6 +998,7 @@ function showPrintConfirmationModal() {
       return;
   }
 
+  // Set the default print times value
   const printTimes = document.getElementById('printTimes').value;
   document.getElementById('printTimesDisplay').innerText = printTimes;
   document.getElementById('printConfirmationModal').style.display = 'block';
@@ -854,18 +1024,122 @@ function decrementPrintTimes() {
   }
 }
 
-// Confirm print
+// When user confirms print
 function confirmPrint() {
   document.getElementById('printConfirmationModal').style.display = 'none';
   document.getElementById('printingStatusModal').style.display = 'block';
+  
+  // Call the print function only after confirmation
   printLabel();
 }
 
-// Modify the printLabel function to use the printTimes value and handle printing one at a time
+
+// // Modify printLabel function to print one at a time, wait for success, and timeout after 7 seconds
+// async function printLabel() {
+//   const alertSound = document.getElementById('alert-sound');
+//   const scanAlertModal = document.getElementById('scanAlertModal');
+//   const scanAlertText = document.getElementById('scanAlertText');
+//   const printingStatusModal = document.getElementById('printingStatusModal');
+//   const selectedFactory = document.getElementById("selected工場").value;
+//   const 背番号 = document.getElementById("材料背番号").value;
+//   const 品番 = document.getElementById("品名").value;
+//   const 色 = document.getElementById("material-color").value;
+//   const length = document.getElementById("length").value;
+//   const order = document.getElementById("order").value;
+//   const copies = parseInt(document.getElementById("printTimes").value) || 1; // Number of copies
+
+//   console.log("Starting print process for", copies, "copies...");
+
+//   if (!背番号) {
+//       showPrintError('背番号が必要です。 / Sebanggo is required.');
+//       return;
+//   }
+
+//   const storageKey = `${uniquePrefix}${品番}`;
+
+//   // Get current date in yyMMdd format
+//   const originalDate = document.getElementById('Lot No.').value;
+//   const dateParts = originalDate.split("-");
+//   const currentDate = `${dateParts[0].slice(-2)}${dateParts[1]}${dateParts[2]}`; // Extract last 2 digits of year
+
+//   let storedData = JSON.parse(localStorage.getItem(storageKey)) || { date: currentDate, extension: 0 };
+
+//   if (storedData.date !== currentDate) {
+//       storedData = { date: currentDate, extension: 0 };
+//   }
+
+//   // Show printing status modal before starting
+//   printingStatusModal.style.display = 'block';
+
+//   for (let i = 1; i <= copies; i++) {
+//       storedData.extension++;
+//       const extension = storedData.extension;
+//       const DateWithExtension = `${currentDate}-${extension}`;
+
+//       const 品番収容数 = `${背番号},${DateWithExtension},${length}`;
+//       console.log(`Printing copy ${i} of ${copies}:`, 品番収容数);
+
+//       let filename = "";
+//       if (typeof SRS !== "undefined" && SRS === "有り") {
+//           filename = "SRS3.lbx";
+//       } else if (背番号 === "NC2") {
+//           filename = "NC21.lbx";
+//       } else {
+//           filename = "firstkojo3.lbx";
+//       }
+
+//       const size = "RollW62";
+
+//       const url =
+//           `http://localhost:8088/print?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent(size)}&copies=1` +
+//           `&text_品番=${encodeURIComponent(品番)}` +
+//           `&text_背番号=${encodeURIComponent(背番号)}` +
+//           `&text_収容数=${encodeURIComponent(order)}` +
+//           `&text_色=${encodeURIComponent(色)}` +
+//           `&text_DateT=${encodeURIComponent(DateWithExtension)}` +
+//           `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
+
+//       console.log("Sending print request:", url);
+
+//       try {
+//           const response = await Promise.race([
+//               fetch(url).then(res => res.text()), // Fetch the print request
+//               new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout: No response from printer")), 7000)) // 7s timeout
+//           ]);
+
+//           if (response.includes("<result>SUCCESS</result>")) {
+//               console.log(`Print ${i} of ${copies} successful.`);
+//           } else if (response.includes("PrinterStatusErrorCoverOpen")) {
+//               showPrintError("Printer Error: Cover is open.");
+//               return; // Stop further printing
+//           } else {
+//               showPrintError("Printing failed. Please check the printer.");
+//               return; // Stop further printing
+//           }
+
+//           // Short delay before sending the next print job
+//           await new Promise(resolve => setTimeout(resolve, 2000));
+
+//       } catch (error) {
+//           showPrintError("Printing failed. No response from printer.");
+//           return; // Stop further printing
+//       }
+//   }
+
+//   localStorage.setItem(storageKey, JSON.stringify(storedData));
+
+//   // Hide printing status modal and show success message
+//   printingStatusModal.style.display = 'none';
+//   console.log("All copies printed successfully.");
+//   document.getElementById('printCompletionModal').style.display = 'block';
+// }
+
+// Modify printLabel function to print one at a time, wait for success, timeout after 7 seconds, then update MongoDB
 async function printLabel() {
   const alertSound = document.getElementById('alert-sound');
   const scanAlertModal = document.getElementById('scanAlertModal');
   const scanAlertText = document.getElementById('scanAlertText');
+  const printingStatusModal = document.getElementById('printingStatusModal');
   const selectedFactory = document.getElementById("selected工場").value;
   const 背番号 = document.getElementById("材料背番号").value;
   const 品番 = document.getElementById("品名").value;
@@ -874,7 +1148,13 @@ async function printLabel() {
   const order = document.getElementById("order").value;
   const copies = parseInt(document.getElementById("printTimes").value) || 1; // Number of copies
 
-  // Use the global uniquePrefix
+  console.log("Starting print process for", copies, "copies...");
+
+  if (!背番号) {
+      showPrintError('背番号が必要です。 / Sebanggo is required.');
+      return;
+  }
+
   const storageKey = `${uniquePrefix}${品番}`;
 
   // Get current date in yyMMdd format
@@ -882,29 +1162,22 @@ async function printLabel() {
   const dateParts = originalDate.split("-");
   const currentDate = `${dateParts[0].slice(-2)}${dateParts[1]}${dateParts[2]}`; // Extract last 2 digits of year
 
-  // Check if 背番号 is selected
-  if (!背番号) {
-      scanAlertText.innerText = '背番号が必要です。 / Sebanggo is required.';
-      scanAlertModal.style.display = 'block';
-      return;
-  }
-
-  // Get stored tracker data
   let storedData = JSON.parse(localStorage.getItem(storageKey)) || { date: currentDate, extension: 0 };
 
-  // Reset extension if date changes
   if (storedData.date !== currentDate) {
       storedData = { date: currentDate, extension: 0 };
   }
 
-  // Process multiple copies one at a time
+  // Show printing status modal before starting
+  printingStatusModal.style.display = 'block';
+
   for (let i = 1; i <= copies; i++) {
-      storedData.extension++; // Increment extension per print
+      storedData.extension++;
       const extension = storedData.extension;
       const DateWithExtension = `${currentDate}-${extension}`;
 
       const 品番収容数 = `${背番号},${DateWithExtension},${length}`;
-      console.log("label QR Value:", 品番収容数);
+      console.log(`Printing copy ${i} of ${copies}:`, 品番収容数);
 
       let filename = "";
       if (typeof SRS !== "undefined" && SRS === "有り") {
@@ -917,7 +1190,6 @@ async function printLabel() {
 
       const size = "RollW62";
 
-      // Generate print URL
       const url =
           `http://localhost:8088/print?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent(size)}&copies=1` +
           `&text_品番=${encodeURIComponent(品番)}` +
@@ -927,33 +1199,139 @@ async function printLabel() {
           `&text_DateT=${encodeURIComponent(DateWithExtension)}` +
           `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
 
-      try {
-          const response = await fetch(url);
-          const responseText = await response.text(); // Get response as text
+      console.log("Sending print request:", url);
 
-          // Check for success or error message in XML response
-          if (responseText.includes("<result>SUCCESS</result>")) {
-              console.log("Print Success");
-          } else if (responseText.includes("PrinterStatusErrorCoverOpen")) {
-              console.error("Printer Error: Cover is open.");
-              break;
+      try {
+          const response = await Promise.race([
+              fetch(url).then(res => res.text()), // Fetch the print request
+              new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout: No response from printer")), 7000)) // 7s timeout
+          ]);
+
+          if (response.includes("<result>SUCCESS</result>")) {
+              console.log(`Print ${i} of ${copies} successful.`);
+          } else if (response.includes("PrinterStatusErrorCoverOpen")) {
+              showPrintError("Printer Error: Cover is open.");
+              return; // Stop further printing
           } else {
-              console.error("Unknown Printer Error:", responseText);
-              break;
+              showPrintError("Printing failed. Please check the printer.");
+              return; // Stop further printing
           }
+
+          // Short delay before sending the next print job
+          await new Promise(resolve => setTimeout(resolve, 2000));
+
       } catch (error) {
-          console.error("Failed to print:", error);
-          break;
+          showPrintError("Printing failed. No response from printer.");
+          return; // Stop further printing
       }
   }
 
-  // Save updated tracker to local storage
   localStorage.setItem(storageKey, JSON.stringify(storedData));
 
-  // Hide printing status modal and show print completion modal
-  document.getElementById('printingStatusModal').style.display = 'none';
+  // Step 2: Update MongoDB after successful print
+  console.log("All copies printed successfully. Now updating MongoDB...");
+  await updateMongoDB(品番, currentDate);
+
+  // Hide printing status modal and show success message
+  printingStatusModal.style.display = 'none';
+  console.log("All copies printed successfully.");
   document.getElementById('printCompletionModal').style.display = 'block';
 }
 
-// Attach the showPrintConfirmationModal function to the print button
-document.getElementById('print').addEventListener('click', showPrintConfirmationModal);
+// Function to handle print errors with sound, blinking, and closing status modal
+function showPrintError(errorMessage) {
+  const scanAlertModal = document.getElementById('scanAlertModal');
+  const scanAlertText = document.getElementById('scanAlertText');
+  const alertSound = document.getElementById('alert-sound');
+  const printingStatusModal = document.getElementById('printingStatusModal');
+
+  // Close printing status modal
+  printingStatusModal.style.display = 'none';
+
+  scanAlertText.innerText = errorMessage;
+  scanAlertModal.style.display = 'block';
+
+  if (alertSound) {
+      alertSound.muted = false;
+      alertSound.volume = 1;
+      alertSound.play().catch(error => console.error("Failed to play alert sound:", error));
+  }
+
+  // Add red blinking effect
+  document.body.classList.add('flash-red');
+
+  document.getElementById('closeScanModalButton').onclick = function () {
+      scanAlertModal.style.display = 'none';
+      alertSound.pause();
+      alertSound.currentTime = 0;
+      alertSound.muted = true;
+      document.body.classList.remove('flash-red');
+  };
+}
+
+
+// Function to update MongoDB after successful print using /queries
+async function updateMongoDB(品番, currentDate) {
+  const now = new Date();
+  const hours = String(now.getHours()).padStart(2, '0');
+  const minutes = String(now.getMinutes()).padStart(2, '0');
+  const seconds = String(now.getSeconds()).padStart(2, '0');
+  const currentTime = `${hours}${minutes}${seconds}`; // HHmmss format
+
+  const queryPayload = {
+      dbName: "submittedDB",
+      collectionName: "materialRequestDB",
+      query: {
+          "品番": 品番,
+          "納期": currentDate
+      }
+  };
+
+  try {
+      // Step 1: Check if the document exists
+      const response = await fetch(`${serverURL}/queries`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(queryPayload)
+      });
+
+      if (!response.ok) {
+          console.error("MongoDB query failed:", response.statusText);
+          return;
+      }
+
+      const data = await response.json();
+
+      if (data.length === 0) {
+          console.log(`No matching document found for 品番: ${品番} and 納期: ${currentDate}.`);
+          return;
+      }
+
+      // Step 2: Use /queries to update the document
+      const updatePayload = {
+          dbName: "submittedDB",
+          collectionName: "materialRequestDB",
+          query: {
+              "品番": 品番,
+              "納期": currentDate
+          },
+          update: [
+              { "$set": { "STATUS": "Completed", "DateofCreation": currentDate, "TimeofCreation": currentTime } }
+          ]
+      };
+
+      const updateResponse = await fetch(`${serverURL}/queries`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(updatePayload)
+      });
+
+      if (updateResponse.ok) {
+          console.log(`✅ MongoDB update successful for 品番: ${品番}`);
+      } else {
+          console.error("❌ MongoDB update failed:", updateResponse.statusText);
+      }
+  } catch (error) {
+      console.error("❌ Error updating MongoDB:", error);
+  }
+}
