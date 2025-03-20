@@ -152,6 +152,25 @@
         hidaseCard.appendChild(hidaseImg);
         hidaseCard.appendChild(hidaseLabel);
         containers.appendChild(hidaseCard);
+
+        // Create card for 在庫スキャン
+        const stockScanCard = document.createElement('div');
+        stockScanCard.classList.add('card');
+        stockScanCard.addEventListener('click', () => {
+            window.location.href = `https://karlsome.github.io/InventorySystem?factoryValue=${filterValue}`;
+        });
+
+        const stockScanImg = document.createElement('img');
+        stockScanImg.src = 'src/machines/scanner.jpg'; // Adjust the path to your image
+        stockScanImg.alt = '在庫スキャン';
+
+        const stockScanLabel = document.createElement('div');
+        stockScanLabel.classList.add('label');
+        stockScanLabel.textContent = '在庫スキャン';
+
+        stockScanCard.appendChild(stockScanImg);
+        stockScanCard.appendChild(stockScanLabel);
+        containers.appendChild(stockScanCard);
     }
     else if (filterValue === '第二工場') {
         const containers = document.getElementById('containers');
