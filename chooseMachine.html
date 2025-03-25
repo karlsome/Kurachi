@@ -25,7 +25,7 @@
         if (filterValue === '小瀬') {
             machines = ["OZNC01", "OZNC02", "OZNC03", "OZNC04", "OZNC05", "OZNC06", "OZNC07", "OZNC08"];
         } else if (filterValue === 'SCNA') {
-            machines = ["AOL1", "AOL2", "AOL3", "AOL4", "AOL5"];
+            machines = ["AOL-1", "AOL-2", "AOL-3", "AOL-4", "AOL-5"];
         } else {
             const warning = document.createElement('div');
             warning.classList.add('warning');
@@ -39,26 +39,27 @@
         // Dynamically create machine cards if machines list is not empty
         if (machines.length > 0) {
             machines.forEach(machine => {
-                const card = document.createElement('div');
-                card.classList.add('card');
+            const card = document.createElement('div');
+            card.classList.add('card');
 
-                card.addEventListener('click', () => {
-                    // Redirect to the DCP iReporter page with filter and machine values
-                    window.location.href = `DCP iReporter.html?filter=${filterValue}&machine=${machine}`;
-                });
-
-                const img = document.createElement('img');
-                img.src = 'src/machines/NCC01.jpg'; // Placeholder image for all machines
-                img.alt = machine;
-
-                const label = document.createElement('div');
-                label.classList.add('label');
-                label.textContent = machine;
-
-                card.appendChild(img);
-                card.appendChild(label);
-                machineContainer.appendChild(card);
+            card.addEventListener('click', () => {
+                // Redirect to the appropriate page based on the filter value
+                const destination = (filterValue === 'SCNA') ? 'SCNA DCP.html' : 'DCP iReporter.html';
+                window.location.href = `${destination}?filter=${filterValue}&machine=${machine}`;
             });
+
+            const img = document.createElement('img');
+            img.src = 'src/machines/NCC01.jpg'; // Placeholder image for all machines
+            img.alt = machine;
+
+            const label = document.createElement('div');
+            label.classList.add('label');
+            label.textContent = machine;
+
+            card.appendChild(img);
+            card.appendChild(label);
+            machineContainer.appendChild(card);
+        });
         }
     </script>
 </body>

@@ -2091,3 +2091,13 @@ function uploadPhotou() {
       .catch((error) => console.error(`Error converting image to blob for ${label}: `, error));
   });
 }
+
+//for dynamic process link from nav
+document.addEventListener("DOMContentLoaded", function () {
+  const selectedFactory = document.getElementById("selected工場")?.value;
+  const processLink = document.getElementById("process-link");
+
+  if (selectedFactory && processLink) {
+    processLink.href = `machine.html?selected=${encodeURIComponent(selectedFactory)}`;
+  }
+});

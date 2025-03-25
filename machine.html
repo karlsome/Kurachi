@@ -376,11 +376,11 @@
     else if (filterValue === 'SCNA') {
         const containers = document.getElementById('containers');
 
-        // Create card for プレス加工
+        // Create card for DCP
         const pressCard = document.createElement('div');
         pressCard.classList.add('card');
         pressCard.addEventListener('click', () => {
-            window.location.href = `Press Cutting iReporter English.html?filter=${filterValue}`;
+            window.location.href = `chooseMachine.html?filter=${filterValue}`;
         });
 
         const pressImg = document.createElement('img');
