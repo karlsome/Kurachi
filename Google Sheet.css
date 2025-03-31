@@ -642,3 +642,11 @@ to {
 }
 
 
+/* Center alignment for the number input and buttons in modal */
+.modal-copies-control {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    margin-bottom: 20px;
+}

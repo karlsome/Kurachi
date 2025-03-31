@@ -1794,6 +1794,7 @@ function showLabelTypeSelection() {
 }
 
 // Show modal to select number of copies and print (uses existing #modal)
+//Hidase style choose quantity of print
 function showCopiesPrompt(filename) {
   const 品番 = document.getElementById("product-number").value;
   const 収容数 = document.getElementById("収容数").value;
@@ -1809,45 +1810,69 @@ function showCopiesPrompt(filename) {
 
   modalOptions.innerHTML = '<p>Select number of copies:</p>';
 
-  let copies = 1;
+  // Wrapper for input and buttons
   const copiesDisplay = document.createElement('div');
-  copiesDisplay.style.display = 'flex';
-  copiesDisplay.style.alignItems = 'center';
-  copiesDisplay.style.marginBottom = '20px';
+  copiesDisplay.className = 'modal-copies-control';
 
+  // Minus Button
   const minusButton = document.createElement('button');
   minusButton.innerText = '-';
-  minusButton.type = "button"; // Prevents form submission
+  minusButton.type = "button";
   minusButton.onclick = (event) => {
-    event.preventDefault(); // Stops form submission
-    if (copies > 1) {
-      copies--;
-      copiesValue.innerText = copies;
+    event.preventDefault();
+    const current = parseInt(copiesInput.value, 10) || 1;
+    if (current > 1) {
+      copiesInput.value = current - 1;
     }
   };
 
-  const copiesValue = document.createElement('span');
-  copiesValue.innerText = copies;
-  copiesValue.style.margin = '0 10px';
+  // Input field
+  const copiesInput = document.createElement('input');
+  copiesInput.type = 'number';
+  copiesInput.min = '1';
+  copiesInput.step = '1';
+  copiesInput.value = '1';
+  copiesInput.style.width = '60px';
+  copiesInput.style.textAlign = 'center';
 
-  const plusButton = document.createElement('button');
-  plusButton.innerText = '+';
-  plusButton.type = "button"; // Prevents form submission
-  plusButton.onclick = (event) => {
-    event.preventDefault(); // Stops form submission
-    copies++;
-    copiesValue.innerText = copies;
+  // Prevent invalid input (non-integer, negatives, etc.)
+  copiesInput.oninput = () => {
+    let value = copiesInput.value;
+    if (!/^\d+$/.test(value)) {
+      copiesInput.value = value.replace(/\D/g, '');
+    }
+    if (copiesInput.value === '' || parseInt(copiesInput.value, 10) < 1) {
+      copiesInput.value = '1';
+    }
   };
 
+  // Plus Button
+  const plusButton = document.createElement('button');
+  plusButton.innerText = '+';
+  plusButton.type = "button";
+  plusButton.onclick = (event) => {
+    event.preventDefault();
+    const current = parseInt(copiesInput.value, 10) || 1;
+    copiesInput.value = current + 1;
+  };
+
+  // Append controls
   copiesDisplay.appendChild(minusButton);
-  copiesDisplay.appendChild(copiesValue);
+  copiesDisplay.appendChild(copiesInput);
   copiesDisplay.appendChild(plusButton);
   modalOptions.appendChild(copiesDisplay);
 
+  // Confirm Button
   const confirmButton = document.createElement('button');
   confirmButton.innerText = 'Confirm';
-  confirmButton.type = "button"; // Prevents form submission
+  confirmButton.type = "button";
   confirmButton.onclick = () => {
+    const copies = parseInt(copiesInput.value, 10);
+    if (isNaN(copies) || copies < 1) {
+      alert('Please enter a valid number of copies (integer > 0)');
+      return;
+    }
+
     const url =
       `brotherwebprint://print?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent("RollW62")}&copies=${encodeURIComponent(copies)}` +
       `&text_品番=${encodeURIComponent(品番)}` +
@@ -1864,11 +1889,11 @@ function showCopiesPrompt(filename) {
 
   modal.style.display = "block";
 
-  // Close modal on close button click
   modalCloseButton.onclick = () => {
     modal.style.display = "none";
   };
 }
+
 
 
 
