@@ -514,53 +514,69 @@ function printLabel() {
     copiesModal.style.backgroundColor = 'white';
     copiesModal.style.boxShadow = '0 0 15px rgba(0, 0, 0, 0.5)';
     copiesModal.style.borderRadius = '10px';
-
+  
     let copies = 1;
-
+  
     const copiesMessage = document.createElement('p');
     copiesMessage.innerText = 'Select number of copies:';
     copiesMessage.style.fontSize = '20px';
     copiesMessage.style.textAlign = 'center';
     copiesMessage.style.marginBottom = '20px';
     copiesModal.appendChild(copiesMessage);
-
+  
     const copiesDisplay = document.createElement('div');
     copiesDisplay.style.display = 'flex';
     copiesDisplay.style.alignItems = 'center';
     copiesDisplay.style.marginBottom = '20px';
-
+  
     const minusButton = document.createElement('button');
     minusButton.innerText = '-';
     minusButton.style.margin = '10px';
     minusButton.style.padding = '10px';
     minusButton.style.fontSize = '16px';
     minusButton.onclick = () => {
-      if (copies > 1) {
-        copies--;
-        copiesValue.innerText = copies;
+      let value = parseInt(copiesInput.value) || 1;
+      if (value > 1) {
+        value--;
+        copies = value;
+        copiesInput.value = value;
       }
     };
     copiesDisplay.appendChild(minusButton);
-
-    const copiesValue = document.createElement('span');
-    copiesValue.innerText = copies;
-    copiesValue.style.fontSize = '20px';
-    copiesValue.style.margin = '0 10px';
-    copiesDisplay.appendChild(copiesValue);
-
+  
+    const copiesInput = document.createElement('input');
+    copiesInput.type = 'number';
+    copiesInput.value = copies;
+    copiesInput.min = 1;
+    copiesInput.style.fontSize = '20px';
+    copiesInput.style.width = '60px';
+    copiesInput.style.textAlign = 'center';
+    copiesInput.oninput = () => {
+      let value = parseInt(copiesInput.value);
+      if (isNaN(value) || value < 1) {
+        copies = 1;
+        copiesInput.value = 1;
+      } else {
+        copies = value;
+      }
+    };
+    copiesDisplay.appendChild(copiesInput);
+  
     const plusButton = document.createElement('button');
     plusButton.innerText = '+';
     plusButton.style.margin = '10px';
     plusButton.style.padding = '10px';
     plusButton.style.fontSize = '16px';
     plusButton.onclick = () => {
-      copies++;
-      copiesValue.innerText = copies;
+      let value = parseInt(copiesInput.value) || 1;
+      value++;
+      copies = value;
+      copiesInput.value = value;
     };
     copiesDisplay.appendChild(plusButton);
-
+  
     copiesModal.appendChild(copiesDisplay);
-
+  
     const confirmButton = document.createElement('button');
     confirmButton.innerText = 'Confirm';
     confirmButton.style.margin = '10px';
@@ -569,21 +585,24 @@ function printLabel() {
     confirmButton.style.cursor = 'pointer';
     confirmButton.style.borderRadius = '5px';
     confirmButton.onclick = () => {
-      console.log(品番,収容数,Date);
-      // Smooth Print URL scheme
+      let finalCopies = parseInt(copiesInput.value);
+      if (isNaN(finalCopies) || finalCopies < 1) {
+        alert("Please enter a valid number of copies (1 or more).");
+        return;
+      }
+  
       const url =
-        `brotherwebprint://print?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent("RollW62")}&copies=${encodeURIComponent(copies)}` +
+        `brotherwebprint://print?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent("RollW62")}&copies=${encodeURIComponent(finalCopies)}` +
         `&text_品番=${encodeURIComponent(品番)}` +
         `&text_収容数=${encodeURIComponent(収容数)}` +
         `&text_DateT=${encodeURIComponent(Date)}` +
         `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
-      console.log(Date);
-      // Redirect to Smooth Print
+  
       window.location.href = url;
       document.body.removeChild(copiesModal);
     };
     copiesModal.appendChild(confirmButton);
-
+  
     document.body.appendChild(copiesModal);
   }
 }
