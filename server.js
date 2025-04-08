@@ -526,7 +526,7 @@ app.get("/getSeBanggoListPressAndHinban", async (req, res) => {
 ///////////////////////////////
 
 
-// Route to fetch all 背番号 from the correct collection
+// Route to fetch all 背番号 from the hidaseTemporary collection
 app.get("/getSeBanggoListH", async (req, res) => {
   try {
     await client.connect();
