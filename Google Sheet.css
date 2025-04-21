@@ -441,6 +441,18 @@ nav a:hover {
     z-index: 10000;
 }
 
+.modal-content {
+    margin: auto;
+    padding: 20px 30px;
+    background: white;
+    width: fit-content;
+    min-width: 260px;
+    text-align: center;
+    border-radius: 8px;
+    font-size: 16px;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+  }
+
 /* Close Button */
 .close-button {
     position: absolute;

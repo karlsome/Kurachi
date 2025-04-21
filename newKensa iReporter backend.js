@@ -99,76 +99,111 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 
-
-
-// // gets all the sebanggo list
+// // Gets all the 背番号 list
 // document.addEventListener('DOMContentLoaded', () => {
 //   const subDropdown = document.getElementById('sub-dropdown');
 
 //   // Fetch 背番号 list from the server
 //   fetch(`${serverURL}/getSeBanggoList`)
-//       .then(response => response.json())
-//       .then(data => {
-//           // Sort the 背番号 list alphabetically
-//           data.sort((a, b) => a.localeCompare(b, 'ja')); // 'ja' for Japanese sorting if needed
+//     .then(response => response.json())
+//     .then(data => {
+//       // Remove duplicates by creating a Set and converting it back to an array
+//       const uniqueData = [...new Set(data)];
 
-//           // Clear existing options
-//           subDropdown.innerHTML = '';
+//       // Sort the unique 背番号 list alphabetically
+//       uniqueData.sort((a, b) => a.localeCompare(b, 'ja')); // 'ja' for Japanese sorting if needed
 
-//           // Add a default "Select 背番号" option
-//           const defaultOption = document.createElement('option');
-//           defaultOption.value = '';
-//           defaultOption.textContent = 'Select 背番号';
-//           defaultOption.disabled = true; // Make it non-selectable
-//           defaultOption.selected = true; // Make it the default selection
-//           subDropdown.appendChild(defaultOption);
+//       // Clear existing options
+//       subDropdown.innerHTML = '';
 
-//           // Populate options dynamically
-//           data.forEach(seBanggo => {
-//               const option = document.createElement('option');
-//               option.value = seBanggo;
-//               option.textContent = seBanggo;
-//               subDropdown.appendChild(option);
-//           });
-//       })
-//       .catch(error => console.error('Error fetching 背番号 list:', error));
+//       // Add a default "Select 背番号" option
+//       const defaultOption = document.createElement('option');
+//       defaultOption.value = '';
+//       defaultOption.textContent = 'Select 背番号';
+//       defaultOption.disabled = true; // Make it non-selectable
+//       defaultOption.selected = true; // Make it the default selection
+//       subDropdown.appendChild(defaultOption);
+
+//       // Populate options dynamically
+//       uniqueData.forEach(seBanggo => {
+//         const option = document.createElement('option');
+//         option.value = seBanggo;
+//         option.textContent = seBanggo;
+//         subDropdown.appendChild(option);
+//       });
+//     })
+//     .catch(error => console.error('Error fetching 背番号 list:', error));
 // });
 
-// Gets all the 背番号 list
-document.addEventListener('DOMContentLoaded', () => {
-  const subDropdown = document.getElementById('sub-dropdown');
+// Function to fetch 背番号 and 品番 from the server
+// using dynamic api on the server.js
+async function fetchSebanggoAndHinban() {
+  const subDropdown = document.getElementById("sub-dropdown");
 
-  // Fetch 背番号 list from the server
-  fetch(`${serverURL}/getSeBanggoList`)
-    .then(response => response.json())
-    .then(data => {
-      // Remove duplicates by creating a Set and converting it back to an array
-      const uniqueData = [...new Set(data)];
+  // Clear dropdown before populating
+  subDropdown.innerHTML = "";
 
-      // Sort the unique 背番号 list alphabetically
-      uniqueData.sort((a, b) => a.localeCompare(b, 'ja')); // 'ja' for Japanese sorting if needed
+  // Add default option
+  const defaultOption = document.createElement("option");
+  defaultOption.value = "";
+  defaultOption.textContent = "Select 背番号 / 品番";
+  defaultOption.disabled = true;
+  defaultOption.selected = true;
+  subDropdown.appendChild(defaultOption);
 
-      // Clear existing options
-      subDropdown.innerHTML = '';
+  try {
+    const response = await fetch(`${serverURL}/queries`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        dbName: "Sasaki_Coating_MasterDB",
+        collectionName: "masterDB",
+        query: {},
+        projection: { 背番号: 1, 品番: 1, _id: 0 },
+      }),
+    });
 
-      // Add a default "Select 背番号" option
-      const defaultOption = document.createElement('option');
-      defaultOption.value = '';
-      defaultOption.textContent = 'Select 背番号';
-      defaultOption.disabled = true; // Make it non-selectable
-      defaultOption.selected = true; // Make it the default selection
-      subDropdown.appendChild(defaultOption);
+    const data = await response.json();
 
-      // Populate options dynamically
-      uniqueData.forEach(seBanggo => {
-        const option = document.createElement('option');
-        option.value = seBanggo;
-        option.textContent = seBanggo;
-        subDropdown.appendChild(option);
-      });
-    })
-    .catch(error => console.error('Error fetching 背番号 list:', error));
-});
+    // Extract 背番号 and 品番
+    const sebanggoList = [...new Set(data.map((item) => item.背番号).filter(Boolean))];
+    const hinbanList = [...new Set(data.map((item) => item.品番).filter(Boolean))];
+
+    // Sort alphabetically (Japanese)
+    sebanggoList.sort((a, b) => a.localeCompare(b, "ja"));
+    hinbanList.sort((a, b) => a.localeCompare(b, "ja"));
+
+    // Populate 背番号 options
+    sebanggoList.forEach((sebanggo) => {
+      const option = document.createElement("option");
+      option.value = sebanggo;
+      option.textContent = sebanggo;
+      subDropdown.appendChild(option);
+    });
+
+    // Add separator
+    if (hinbanList.length > 0) {
+      const separatorOption = document.createElement("option");
+      separatorOption.textContent = "------ 品番 ------";
+      separatorOption.disabled = true;
+      subDropdown.appendChild(separatorOption);
+    }
+
+    // Populate 品番 options
+    hinbanList.forEach((hinban) => {
+      const option = document.createElement("option");
+      option.value = hinban;
+      option.textContent = hinban;
+      subDropdown.appendChild(option);
+    });
+
+    console.log("Dropdown populated with 背番号 and 品番");
+  } catch (error) {
+    console.error("Error fetching data:", error);
+  }
+}
+
+document.addEventListener("DOMContentLoaded", fetchSebanggoAndHinban);
 
 
 
@@ -193,57 +228,170 @@ function blankInfo() {
 
 
 
+// async function fetchProductDetails() {
+//   const serialNumber = document.getElementById("sub-dropdown").value;
+//   const factory = document.getElementById("selected工場").value;
+//   // Update the dynamicImage src attribute with the retrieved htmlWebsite value
+//   const dynamicImage = document.getElementById("dynamicImage");
+//   dynamicImage.src = "";
+
+//   if (!serialNumber) {
+//     console.error("Please select a valid 背番号.");
+//     blankInfo();
+//     return;
+//   }
+
+//   try {
+//     const response = await fetch(`${serverURL}/getProductDetails?serialNumber=${encodeURIComponent(serialNumber)}&factory=${encodeURIComponent(factory)}`);
+//     if (response.ok) {
+//       const data = await response.json();
+
+//       // Populate the HTML fields with the retrieved data
+//       document.getElementById("product-number").value = data.品番 || "";
+//       document.getElementById("model").value = data.モデル || "";
+//       document.getElementById("shape").value = data.形状 || "";
+//       document.getElementById("R-L").value = data["R/L"] || "";
+//       document.getElementById("material").value = data.材料 || "";
+//       document.getElementById("material-code").value = data.材料背番号 || "";
+//       document.getElementById("material-color").value = data.色 || "";
+//       document.getElementById("kataban").value = data.型番 || "";
+//       document.getElementById("送りピッチ").textContent = "送りピッチ: " + data.送りピッチ || "";
+//       document.getElementById("収容数").value = data.収容数 || "";
+//       document.getElementById("SRS").value = data.SRS || "";
+
+      
+//       // if (data.htmlWebsite) {
+//       //   dynamicImage.src = data.htmlWebsite; // Set the image source to the retrieved URL
+//       //   dynamicImage.alt = "Product Image"; // Optional: Set the alt text
+//       //   dynamicImage.style.display = "block"; // Ensure the image is visible
+//       // } else {
+//       //   dynamicImage.src = ""; // Clear the image source if no URL is available
+//       //   dynamicImage.alt = "No Image Available"; // Optional: Set fallback alt text
+//       //   dynamicImage.style.display = "none"; // Hide the image if no URL is available
+//       // }
+//     } else {
+//       console.error("No matching product found.");
+//     }
+//   } catch (error) {
+//     console.error("Error fetching product details:", error);
+//   }
+//   picLINK(serialNumber);
+// }
+
+// // Call fetchProductDetails when a new 背番号 is selected
+// document.getElementById("sub-dropdown").addEventListener("change", fetchProductDetails);
+
+
+//new function to fetch product details
+// this function fetches product details based on the selected 背番号 or 品番
+// it uses dynamic API on the server.js
 async function fetchProductDetails() {
-  const serialNumber = document.getElementById("sub-dropdown").value;
+  const subDropdown = document.getElementById("sub-dropdown");
+  const serialNumber = subDropdown.value;
   const factory = document.getElementById("selected工場").value;
-  // Update the dynamicImage src attribute with the retrieved htmlWebsite value
   const dynamicImage = document.getElementById("dynamicImage");
   dynamicImage.src = "";
 
   if (!serialNumber) {
-    console.error("Please select a valid 背番号.");
+    console.error("Please select a valid 背番号 or 品番.");
     blankInfo();
     return;
   }
 
   try {
-    const response = await fetch(`${serverURL}/getProductDetails?serialNumber=${encodeURIComponent(serialNumber)}&factory=${encodeURIComponent(factory)}`);
-    if (response.ok) {
-      const data = await response.json();
+    // Step 1: Query by 背番号
+    let response = await fetch(`${serverURL}/queries`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        dbName: "Sasaki_Coating_MasterDB",
+        collectionName: "masterDB",
+        query: { 背番号: serialNumber },
+      }),
+    });
 
-      // Populate the HTML fields with the retrieved data
-      document.getElementById("product-number").value = data.品番 || "";
-      document.getElementById("model").value = data.モデル || "";
-      document.getElementById("shape").value = data.形状 || "";
-      document.getElementById("R-L").value = data["R/L"] || "";
-      document.getElementById("material").value = data.材料 || "";
-      document.getElementById("material-code").value = data.材料背番号 || "";
-      document.getElementById("material-color").value = data.色 || "";
-      document.getElementById("kataban").value = data.型番 || "";
-      document.getElementById("送りピッチ").textContent = "送りピッチ: " + data.送りピッチ || "";
-      document.getElementById("収容数").value = data.収容数 || "";
-      document.getElementById("SRS").value = data.SRS || "";
+    let result = await response.json();
 
-      
-      // if (data.htmlWebsite) {
-      //   dynamicImage.src = data.htmlWebsite; // Set the image source to the retrieved URL
-      //   dynamicImage.alt = "Product Image"; // Optional: Set the alt text
-      //   dynamicImage.style.display = "block"; // Ensure the image is visible
-      // } else {
-      //   dynamicImage.src = ""; // Clear the image source if no URL is available
-      //   dynamicImage.alt = "No Image Available"; // Optional: Set fallback alt text
-      //   dynamicImage.style.display = "none"; // Hide the image if no URL is available
-      // }
-    } else {
-      console.error("No matching product found.");
+    // Step 2: If no result, try search by 品番
+    if (!result || result.length === 0) {
+      const hinbanRes = await fetch(`${serverURL}/queries`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          dbName: "Sasaki_Coating_MasterDB",
+          collectionName: "masterDB",
+          query: { 品番: serialNumber },
+        }),
+      });
+
+      const hinbanData = await hinbanRes.json();
+
+      if (hinbanData.length > 0) {
+        const matchedEntry = hinbanData[0];
+
+        // Update dropdown to show 背番号 instead
+        if (matchedEntry.背番号) {
+          subDropdown.value = matchedEntry.背番号;
+        }
+
+        result = [matchedEntry];
+      }
     }
+
+    // Step 3: Still no result? Show error and exit
+    if (!result || result.length === 0) {
+      console.error("No matching product found.");
+      return;
+    }
+
+    const product = result[0]; // First matching document
+
+    // Step 4: Fetch picture if available
+    const pictureRes = await fetch(`${serverURL}/queries`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        dbName: "Sasaki_Coating_MasterDB",
+        collectionName: "pictureDB",
+        query: { 背番号: product.背番号 || serialNumber },
+        projection: { "html website": 1, _id: 0 },
+      }),
+    });
+
+    const pictureData = await pictureRes.json();
+    const htmlWebsite = pictureData.length > 0 ? pictureData[0]["html website"] : "";
+
+    // Step 5: Populate fields
+    document.getElementById("product-number").value = product.品番 || "";
+    document.getElementById("model").value = product.モデル || "";
+    document.getElementById("shape").value = product.形状 || "";
+    document.getElementById("R-L").value = product["R/L"] || "";
+    document.getElementById("material").value = product.材料 || "";
+    document.getElementById("material-code").value = product.材料背番号 || "";
+    document.getElementById("material-color").value = product.色 || "";
+    document.getElementById("kataban").value = product.型番 || "";
+    document.getElementById("送りピッチ").textContent = "送りピッチ: " + (product.送りピッチ || "");
+    document.getElementById("収容数").value = product.収容数 || "";
+    document.getElementById("SRS").value = product.SRS || "";
+
+    // Set dynamic image
+    if (htmlWebsite) {
+      dynamicImage.src = htmlWebsite;
+      dynamicImage.alt = "Product Image";
+      dynamicImage.style.display = "block";
+    } else {
+      dynamicImage.src = "";
+      dynamicImage.alt = "No Image Available";
+      dynamicImage.style.display = "none";
+    }
+
+    // Optional: update image based on 背番号
+    picLINK(product.背番号 || serialNumber);
   } catch (error) {
     console.error("Error fetching product details:", error);
   }
-  picLINK(serialNumber);
 }
 
-// Call fetchProductDetails when a new 背番号 is selected
 document.getElementById("sub-dropdown").addEventListener("change", fetchProductDetails);
 
 
@@ -596,114 +744,237 @@ function updateCycleTime() {
 
 
 
-//scan BUtton javascript
-document.getElementById('scan-button').addEventListener('click', function () {
-  const qrScannerModal = document.getElementById('qrScannerModal');
-  const scanAlertModal = document.getElementById('scanAlertModal');
-  const scanAlertText = document.getElementById('scanAlertText');
-  const html5QrCode = new Html5Qrcode("qrReader");
-  const alertSound = document.getElementById('alert-sound');
+// //scan BUtton javascript
+// document.getElementById('scan-button').addEventListener('click', function () {
+//   const qrScannerModal = document.getElementById('qrScannerModal');
+//   const scanAlertModal = document.getElementById('scanAlertModal');
+//   const scanAlertText = document.getElementById('scanAlertText');
+//   const html5QrCode = new Html5Qrcode("qrReader");
+//   const alertSound = document.getElementById('alert-sound');
 
-  // Preload the alert sound without playing it
-  if (alertSound) {
-      alertSound.muted = true; // Mute initially to preload
-      alertSound.loop = false; // Disable looping
-      alertSound.load(); // Preload the audio file
-  }
+//   // Preload the alert sound without playing it
+//   if (alertSound) {
+//       alertSound.muted = true; // Mute initially to preload
+//       alertSound.loop = false; // Disable looping
+//       alertSound.load(); // Preload the audio file
+//   }
 
-  // Show the modal
-  qrScannerModal.style.display = 'block';
+//   // Show the modal
+//   qrScannerModal.style.display = 'block';
 
-  // Start QR code scanning
-  html5QrCode.start(
-      { facingMode: "environment" },
-      {
-          fps: 10,
-          qrbox: { width: 250, height: 250 }
-      },
-      async qrCodeMessage => {
-          const subDropdown = document.getElementById('sub-dropdown');
-          const options = [...subDropdown.options].map(option => option.value);
+//   // Start QR code scanning
+//   html5QrCode.start(
+//       { facingMode: "environment" },
+//       {
+//           fps: 10,
+//           qrbox: { width: 250, height: 250 }
+//       },
+//       async qrCodeMessage => {
+//           const subDropdown = document.getElementById('sub-dropdown');
+//           const options = [...subDropdown.options].map(option => option.value);
 
-          console.log("Scanned QR Code:", qrCodeMessage);
+//           console.log("Scanned QR Code:", qrCodeMessage);
 
-          // Check if the scanned QR code does NOT exist in the dropdown options
-          if (!options.includes(qrCodeMessage)) {
-              // Display error modal
-              scanAlertText.innerText = "背番号が存在しません。 / Sebanggo does not exist.";
-              scanAlertModal.style.display = 'block';
+//           // Check if the scanned QR code does NOT exist in the dropdown options
+//           if (!options.includes(qrCodeMessage)) {
+//               // Display error modal
+//               scanAlertText.innerText = "背番号が存在しません。 / Sebanggo does not exist.";
+//               scanAlertModal.style.display = 'block';
 
-              // Play alert sound
-              if (alertSound) {
-                  alertSound.muted = false; // Unmute to alert user
-                  alertSound.volume = 1; // Set full volume
-                  alertSound.play().catch(error => console.error("Failed to play alert sound:", error));
-              }
+//               // Play alert sound
+//               if (alertSound) {
+//                   alertSound.muted = false; // Unmute to alert user
+//                   alertSound.volume = 1; // Set full volume
+//                   alertSound.play().catch(error => console.error("Failed to play alert sound:", error));
+//               }
 
-              // Add blinking red background
-              document.body.classList.add('flash-red');
+//               // Add blinking red background
+//               document.body.classList.add('flash-red');
 
-              const closeScanModalButton = document.getElementById('closeScanModalButton');
-              closeScanModalButton.onclick = function () {
-                  scanAlertModal.style.display = 'none';
-                  alertSound.pause();
-                  alertSound.currentTime = 0; // Reset sound to the beginning
-                  alertSound.muted = true; // Mute again for next time
-                  document.body.classList.remove('flash-red');
-              };
+//               const closeScanModalButton = document.getElementById('closeScanModalButton');
+//               closeScanModalButton.onclick = function () {
+//                   scanAlertModal.style.display = 'none';
+//                   alertSound.pause();
+//                   alertSound.currentTime = 0; // Reset sound to the beginning
+//                   alertSound.muted = true; // Mute again for next time
+//                   document.body.classList.remove('flash-red');
+//               };
 
-              // Stop QR scanning
-              html5QrCode.stop().then(() => {
-                  qrScannerModal.style.display = 'none';
-              }).catch(err => console.error("Failed to stop scanning:", err));
+//               // Stop QR scanning
+//               html5QrCode.stop().then(() => {
+//                   qrScannerModal.style.display = 'none';
+//               }).catch(err => console.error("Failed to stop scanning:", err));
 
-              return;
-          }
+//               return;
+//           }
 
-          // If QR code matches an option, set the dropdown value and close scanner
-          if (subDropdown && subDropdown.value !== qrCodeMessage) {
-              subDropdown.value = qrCodeMessage;
-              fetchProductDetails();
+//           // If QR code matches an option, set the dropdown value and close scanner
+//           if (subDropdown && subDropdown.value !== qrCodeMessage) {
+//               subDropdown.value = qrCodeMessage;
+//               fetchProductDetails();
 
-              html5QrCode.stop().then(() => {
-                  qrScannerModal.style.display = 'none';
-              }).catch(err => console.error("Failed to stop scanning:", err));
+//               html5QrCode.stop().then(() => {
+//                   qrScannerModal.style.display = 'none';
+//               }).catch(err => console.error("Failed to stop scanning:", err));
 
-              return;
-          }
-      }
-  ).catch(err => {
-      console.error("Failed to start scanning:", err);
-  });
+//               return;
+//           }
+//       }
+//   ).catch(err => {
+//       console.error("Failed to start scanning:", err);
+//   });
 
-  // Close the QR scanner modal
-  document.getElementById('closeQRScannerModal').onclick = function () {
-      html5QrCode.stop().then(() => {
-          qrScannerModal.style.display = 'none';
-      }).catch(err => console.error("Failed to stop scanning:", err));
-  };
+//   // Close the QR scanner modal
+//   document.getElementById('closeQRScannerModal').onclick = function () {
+//       html5QrCode.stop().then(() => {
+//           qrScannerModal.style.display = 'none';
+//       }).catch(err => console.error("Failed to stop scanning:", err));
+//   };
 
-  // Close scanner if user clicks outside the modal
-  window.onclick = function (event) {
-      if (event.target == qrScannerModal) {
-          html5QrCode.stop().then(() => {
-              qrScannerModal.style.display = 'none';
-          }).catch(err => console.error("Failed to stop scanning:", err));
-      }
-  };
+//   // Close scanner if user clicks outside the modal
+//   window.onclick = function (event) {
+//       if (event.target == qrScannerModal) {
+//           html5QrCode.stop().then(() => {
+//               qrScannerModal.style.display = 'none';
+//           }).catch(err => console.error("Failed to stop scanning:", err));
+//       }
+//   };
+// });
+
+
+
+let lastScanMethod = null; // Tracks whether using camera or bluetooth
+let html5QrCode = null;    // Global reference to camera scanner
+window.scannedBluetoothCode = ""; // Buffer for Bluetooth scans
+
+// Show scan method selection modal
+document.getElementById('scan-button').addEventListener('click', () => {
+  document.getElementById('scanMethodModal').style.display = 'block';
 });
 
-// CSS for blinking red background
+// Use camera option
+document.getElementById("useCameraScan").addEventListener("click", (e) => {
+  e.preventDefault(); // <- prevent form submission
+  lastScanMethod = "camera";
+  document.getElementById("scanMethodModal").style.display = "none";
+  startCameraScanner();
+});
+
+// Use Bluetooth scanner option
+document.getElementById("useBluetoothScan").addEventListener("click", (e) => {
+  e.preventDefault(); // <- prevent form submission
+  lastScanMethod = "bluetooth";
+  document.getElementById("scanMethodModal").style.display = "none";
+  // Show waiting modal
+  document.getElementById("bluetoothWaitModal").style.display = "block";
+});
+
+// Close scan method modal
+document.getElementById("closeScanMethodModal").addEventListener("click", (e) => {
+  e.preventDefault(); // <- prevent form submission
+  document.getElementById("scanMethodModal").style.display = "none";
+});
+
+// Bluetooth scanner input handler
+document.addEventListener('keydown', (event) => {
+  if (lastScanMethod === "bluetooth") {
+    if (/^[a-zA-Z0-9\-.,]$/.test(event.key)) {
+      window.scannedBluetoothCode += event.key;
+    }
+    if (event.key === "Enter") {
+      const cleanedQR = window.scannedBluetoothCode.replace(/Shift/g, '');
+      console.log("Final Scanned QR (Bluetooth):", cleanedQR);
+      handleQRScan(cleanedQR);
+      window.scannedBluetoothCode = "";
+    }
+  }
+});
+
+// Handles QR scan for both methods
+function handleQRScan(qrCodeMessage) {
+  
+  const subDropdown = document.getElementById("sub-dropdown");
+  const options = [...subDropdown.options].map(option => option.value);
+  const scanAlertModal = document.getElementById("scanAlertModal");
+  const scanAlertText = document.getElementById("scanAlertText");
+  const alertSound = document.getElementById("alert-sound");
+  // Hide Bluetooth waiting modal if it's open
+  document.getElementById("bluetoothWaitModal").style.display = "none";
+  
+
+  if (!options.includes(qrCodeMessage)) {
+    scanAlertText.innerText = "背番号が存在しません。 / Sebanggo does not exist.";
+    scanAlertModal.style.display = "block";
+
+    if (alertSound) {
+      alertSound.muted = false;
+      alertSound.volume = 1;
+      alertSound.play().catch(err => console.error("Failed to play alert:", err));
+    }
+
+    document.body.classList.add("flash-red");
+
+    document.getElementById("closeScanModalButton").onclick = () => {
+      scanAlertModal.style.display = "none";
+      alertSound.pause();
+      alertSound.currentTime = 0;
+      alertSound.muted = true;
+      document.body.classList.remove("flash-red");
+    };
+
+    return;
+  }
+
+  if (subDropdown && subDropdown.value !== qrCodeMessage) {
+    subDropdown.value = qrCodeMessage;
+    fetchProductDetails();
+  }
+
+  if (lastScanMethod === "camera" && html5QrCode) {
+    html5QrCode.stop().then(() => {
+      document.getElementById("qrScannerModal").style.display = "none";
+    }).catch(err => console.error("Failed to stop scanning:", err));
+  }
+}
+
+// Starts the camera scanner
+function startCameraScanner() {
+  html5QrCode = new Html5Qrcode("qrReader");
+  const qrScannerModal = document.getElementById("qrScannerModal");
+  qrScannerModal.style.display = "block";
+
+  html5QrCode.start(
+    { facingMode: "environment" },
+    { fps: 10, qrbox: { width: 250, height: 250 } },
+    qrMessage => {
+      console.log("Camera Scanned QR:", qrMessage);
+      handleQRScan(qrMessage);
+    }
+  ).catch(err => console.error("Failed to start camera scan:", err));
+
+  document.getElementById("closeQRScannerModal").onclick = () => {
+    html5QrCode.stop().then(() => {
+      qrScannerModal.style.display = "none";
+    }).catch(err => console.error("Failed to stop scanner:", err));
+  };
+
+  window.onclick = function (event) {
+    if (event.target === qrScannerModal) {
+      html5QrCode.stop().then(() => {
+        qrScannerModal.style.display = "none";
+      }).catch(err => console.error("Failed to stop scanner:", err));
+    }
+  };
+}
+
+// Red background blinking animation
 const style = document.createElement('style');
 style.innerHTML = `
 .flash-red {
   animation: flash-red 1s infinite;
 }
-
 @keyframes flash-red {
-  50% {
-    background-color: red;
-  }
+  50% { background-color: red; }
 }
 `;
 document.head.appendChild(style);

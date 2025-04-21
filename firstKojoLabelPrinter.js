@@ -202,6 +202,7 @@ async function fetchProductDetails() {
   const factory = document.getElementById("selected工場").value;
   const dynamicImage = document.getElementById("dynamicImage");
   dynamicImage.src = ""; // Reset the image
+  
 
   if (!serialNumber) {
     console.error("Please select a valid 背番号.");
@@ -258,6 +259,7 @@ async function fetchProductDetails() {
 
   // Fetch and update product image separately
   picLINK(serialNumber);
+  handleScannedQR(serialNumber); // Call the function to handle scanned QR code
 }
 
 // Call fetchProductDetails when a new 背番号 is selected
@@ -448,6 +450,7 @@ async function handleScannedQR(qrCodeMessage) {
 
   console.log("Scanned QR Code:", qrCodeMessage);
 
+  // 1. Validate if the scanned value exists in dropdown options
   if (!options.includes(qrCodeMessage)) {
       scanAlertText.innerText = "背番号が存在しません。 / Sebanggo does not exist.";
       scanAlertModal.style.display = 'block';
@@ -470,7 +473,7 @@ async function handleScannedQR(qrCodeMessage) {
 
       return;
   }
-
+  // 2. Always update dropdown and fetch product details
   if (subDropdown && subDropdown.value !== qrCodeMessage) {
       subDropdown.value = qrCodeMessage;
       localStorage.setItem(`${uniquePrefix}sub-dropdown`, qrCodeMessage);
@@ -553,7 +556,8 @@ async function handleScannedQR(qrCodeMessage) {
           console.log("order: "+ order/10);
 
           if (!isNaN(生産数) && !isNaN(length) && length > 0) {
-            const rollTimes = 生産数 / length;
+            const rollTimes = (生産数 / length)/100; // Calculate roll times cm to meter
+            console.log("生産数:", 生産数, "length:", length, "roll times:", rollTimes);
             const roundedRollTimes = Math.ceil(rollTimes); // Round up to the next whole number
             console.log("Desired roll times:", roundedRollTimes);
         

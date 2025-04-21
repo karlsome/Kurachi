@@ -83,7 +83,12 @@
                 <option value="検査テーブル 12">検査テーブル 12</option>
             </select>
 
-
+            <!-- Bluetooth Wait Modal -->
+            <div id="bluetoothWaitModal" class="modal">
+                <div class="modal-content">
+                <p>Now waiting for Bluetooth scanner...</p>
+                </div>
+            </div>
     
         <!-- Alert modal instead of window.alert -->
         <div id="customAlertModal" class="modal" style="display:none;">
@@ -110,6 +115,19 @@
                 <p id="scanAlertText">Different product detected! Please save form before changing. / 異なる製品が検出されました。保存してください！</p>
                 </div>
             </div>
+
+            <!-- Scan Method Modal -->
+            <div id="scanMethodModal" class="modal">
+                <div class="modal-content">
+                <h3>Choose Scan Method</h3>
+                <button id="useCameraScan" type="button">Use Camera / カメラ用</button>
+                <button id="useBluetoothScan" type="button">Use Bluetooth Scanner / ブルスーススキャン</button>
+                <br><br>
+                <button id="closeScanMethodModal" type="button" >Cancel</button>
+                </div>
+            </div>     
+
+            
         
 
 

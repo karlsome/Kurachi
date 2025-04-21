@@ -338,88 +338,219 @@ function enableInputs() {
 
 
 
-//for the info section
+// //for the info section
+// async function fetchProductDetails() {
+//   checkProcessCondition();
+//   enableInputs(); // delete if production
+  
+  
+//   const serialNumber = document.getElementById("sub-dropdown").value;
+//   const factory = document.getElementById("selected工場").value;
+//   // Update the dynamicImage src attribute with the retrieved htmlWebsite value
+//   const dynamicImage = document.getElementById("dynamicImage");
+//   dynamicImage.src = "";
+
+  
+
+//   if (!serialNumber) {
+//     console.error("Please select a valid 背番号.");
+//     blankInfo();
+//     return;
+//   }
+
+
+//   try {
+//     const response = await fetch(`${serverURL}/getProductDetails?serialNumber=${encodeURIComponent(serialNumber)}&factory=${encodeURIComponent(factory)}`);
+//     if (response.ok) {
+//       const data = await response.json();
+
+//       // Populate the HTML fields with the retrieved data
+//       document.getElementById("product-number").value = data.品番 || "";
+//       document.getElementById("model").value = data.モデル || "";
+//       document.getElementById("shape").value = data.形状 || "";
+//       document.getElementById("R-L").value = data["R/L"] || "";
+//       document.getElementById("material").value = data.材料 || "";
+//       document.getElementById("material-code").value = data.材料背番号 || "";
+//       document.getElementById("material-color").value = data.色 || "";
+//       document.getElementById("kataban").value = data.型番 || "";
+//       document.getElementById("収容数").value = data.収容数 || "";
+//       document.getElementById("送りピッチ").textContent = "送りピッチ: " + data.送りピッチ || "";
+//       document.getElementById("SRS").value = data.SRS || "";
+
+      
+//       //imagepart
+//       // if (data.htmlWebsite) {
+//       //   dynamicImage.src = data.htmlWebsite; // Set the image source to the retrieved URL
+//       //   dynamicImage.alt = "Product Image"; // Optional: Set the alt text
+//       //   dynamicImage.style.display = "block"; // Ensure the image is visible
+//       // } else {
+//       //   dynamicImage.src = ""; // Clear the image source if no URL is available
+//       //   dynamicImage.alt = "No Image Available"; // Optional: Set fallback alt text
+//       //   dynamicImage.style.display = "none"; // Hide the image if no URL is available
+//       // }
+      
+//     } else {
+//       console.error("No matching product found.");
+//     }
+//   } catch (error) {
+//     console.error("Error fetching product details:", error);
+//   }
+//   picLINK(serialNumber);
+// }
+
+// // Call fetchProductDetails when a new 背番号 is selected
+// document.getElementById("sub-dropdown").addEventListener("change", fetchProductDetails);
+
 async function fetchProductDetails() {
   checkProcessCondition();
-  enableInputs(); // delete if production
-  
-  
-  const serialNumber = document.getElementById("sub-dropdown").value;
+  enableInputs(); // Delete this in production
+
+  const subDropdown = document.getElementById("sub-dropdown");
+  const serialNumber = subDropdown.value;
   const factory = document.getElementById("selected工場").value;
-  // Update the dynamicImage src attribute with the retrieved htmlWebsite value
   const dynamicImage = document.getElementById("dynamicImage");
   dynamicImage.src = "";
 
-  
-
   if (!serialNumber) {
-    console.error("Please select a valid 背番号.");
+    console.error("Please select a valid 背番号 or 品番.");
     blankInfo();
     return;
   }
 
-
   try {
-    const response = await fetch(`${serverURL}/getProductDetails?serialNumber=${encodeURIComponent(serialNumber)}&factory=${encodeURIComponent(factory)}`);
-    if (response.ok) {
-      const data = await response.json();
+    // Step 1: Try query by 背番号
+    let response = await fetch(`${serverURL}/queries`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        dbName: "Sasaki_Coating_MasterDB",
+        collectionName: "masterDB",
+        query: { 背番号: serialNumber },
+      }),
+    });
 
-      // Populate the HTML fields with the retrieved data
-      document.getElementById("product-number").value = data.品番 || "";
-      document.getElementById("model").value = data.モデル || "";
-      document.getElementById("shape").value = data.形状 || "";
-      document.getElementById("R-L").value = data["R/L"] || "";
-      document.getElementById("material").value = data.材料 || "";
-      document.getElementById("material-code").value = data.材料背番号 || "";
-      document.getElementById("material-color").value = data.色 || "";
-      document.getElementById("kataban").value = data.型番 || "";
-      document.getElementById("収容数").value = data.収容数 || "";
-      document.getElementById("送りピッチ").textContent = "送りピッチ: " + data.送りピッチ || "";
-      document.getElementById("SRS").value = data.SRS || "";
+    let result = await response.json();
 
-      
-      //imagepart
-      // if (data.htmlWebsite) {
-      //   dynamicImage.src = data.htmlWebsite; // Set the image source to the retrieved URL
-      //   dynamicImage.alt = "Product Image"; // Optional: Set the alt text
-      //   dynamicImage.style.display = "block"; // Ensure the image is visible
-      // } else {
-      //   dynamicImage.src = ""; // Clear the image source if no URL is available
-      //   dynamicImage.alt = "No Image Available"; // Optional: Set fallback alt text
-      //   dynamicImage.style.display = "none"; // Hide the image if no URL is available
-      // }
-      
-    } else {
-      console.error("No matching product found.");
+    // Step 2: If not found, try query by 品番
+    if (!result || result.length === 0) {
+      const altRes = await fetch(`${serverURL}/queries`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          dbName: "Sasaki_Coating_MasterDB",
+          collectionName: "masterDB",
+          query: { 品番: serialNumber },
+        }),
+      });
+
+      const altResult = await altRes.json();
+
+      if (altResult.length > 0) {
+        const matched = altResult[0];
+        if (matched.背番号) {
+          subDropdown.value = matched.背番号; // Update dropdown to 背番号
+        }
+        result = [matched];
+      }
     }
+
+    // Step 3: Still no result
+    if (!result || result.length === 0) {
+      console.error("No matching product found.");
+      blankInfo();
+      return;
+    }
+
+    const product = result[0];
+
+    // Step 4: Fetch image (html website)
+    const pictureRes = await fetch(`${serverURL}/queries`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        dbName: "Sasaki_Coating_MasterDB",
+        collectionName: "pictureDB",
+        query: { 背番号: product.背番号 || serialNumber },
+        projection: { "html website": 1, _id: 0 },
+      }),
+    });
+
+    const pictureData = await pictureRes.json();
+    const htmlWebsite = pictureData.length > 0 ? pictureData[0]["html website"] : "";
+
+    // Step 5: Populate fields
+    document.getElementById("product-number").value = product.品番 || "";
+    document.getElementById("model").value = product.モデル || "";
+    document.getElementById("shape").value = product.形状 || "";
+    document.getElementById("R-L").value = product["R/L"] || "";
+    document.getElementById("material").value = product.材料 || "";
+    document.getElementById("material-code").value = product.材料背番号 || "";
+    document.getElementById("material-color").value = product.色 || "";
+    document.getElementById("kataban").value = product.型番 || "";
+    document.getElementById("収容数").value = product.収容数 || "";
+    document.getElementById("送りピッチ").textContent = "送りピッチ: " + (product.送りピッチ || "");
+    document.getElementById("SRS").value = product.SRS || "";
+
+    // Step 6: Set image if available
+    if (htmlWebsite) {
+      dynamicImage.src = htmlWebsite;
+      dynamicImage.alt = "Product Image";
+      dynamicImage.style.display = "block";
+    } else {
+      dynamicImage.src = "";
+      dynamicImage.alt = "No Image Available";
+      dynamicImage.style.display = "none";
+    }
+
+    // Optional: use for fallback or other image logic
+    picLINK(product.背番号 || serialNumber, product.品番);
   } catch (error) {
     console.error("Error fetching product details:", error);
   }
-  picLINK(serialNumber);
 }
 
-// Call fetchProductDetails when a new 背番号 is selected
+// Trigger on change
 document.getElementById("sub-dropdown").addEventListener("change", fetchProductDetails);
 
 
-// Function to get link from Google Drive
-function picLINK(headerValue) {
-  
-
-  fetch(`${picURL}?link=${headerValue}`)
-    .then(response => {
-      if (!response.ok) {
-        throw new Error('Network response was not ok ' + response.statusText);
+// Function to fetch image link from Google Sheets
+function picLINK(背番号, 品番 = null) {
+  // Try 背番号 first
+  fetchImageFromSheet(背番号)
+    .then(link => {
+      if (!link || link.includes("not found")) {
+        // Try 品番 as fallback
+        if (品番) {
+          return fetchImageFromSheet(品番);
+        } else {
+          throw new Error("Image not found and no 品番 to fallback.");
+        }
       }
-      return response.text(); // Use .json() if your API returns JSON
+      return link;
     })
-    .then(data => {
-      const cleanedData = data.replace(/"/g, ''); // Remove unnecessary quotes
-      updateImageSrc(cleanedData);
-      //console.log("image: " + cleanedData);
+    .then(finalLink => {
+      if (finalLink && !finalLink.includes("not found")) {
+        updateImageSrc(finalLink);
+      } else {
+        console.warn("No valid image link found for 背番号 or 品番.");
+      }
     })
     .catch(error => {
-      console.error('Error:', error);
+      console.error("Image loading error:", error);
+    });
+}
+
+// Helper function to call the App Script API
+function fetchImageFromSheet(headerValue) {
+  return fetch(`${picURL}?link=${headerValue}`)
+    .then(response => {
+      if (!response.ok) {
+        throw new Error("Network error: " + response.statusText);
+      }
+      return response.text();
+    })
+    .then(data => {
+      return data.replace(/"/g, ''); // Clean the returned URL
     });
 }
 
@@ -1759,6 +1890,141 @@ function showCapacitySelectionModal(data) {
   };
 }
 
+// // Show modal to choose between BOX or PRODUCT label (uses existing #modal)
+// function showLabelTypeSelection() {
+//   const modal = document.getElementById("modal");
+//   const modalOptions = document.getElementById("modal-options");
+//   const modalCloseButton = document.getElementById("modal-close");
+
+//   // Update modal content
+//   modalOptions.innerHTML = '<p>Choose label type: For BOX / 外用 or For Product / 製品用</p>';
+
+//   const buttonBox = document.createElement('button');
+//   buttonBox.innerText = 'For BOX / 外用';
+//   buttonBox.onclick = () => {
+//     modal.style.display = "none";
+//     showCopiesPrompt('hidaselabel5.lbx');
+//   };
+
+//   const buttonProduct = document.createElement('button');
+//   buttonProduct.innerText = 'For Product / 製品用';
+//   buttonProduct.onclick = () => {
+//     modal.style.display = "none";
+//     showCopiesPrompt('hidaselabel6inner.lbx');
+//   };
+
+//   modalOptions.appendChild(buttonBox);
+//   modalOptions.appendChild(buttonProduct);
+
+//   modal.style.display = "block";
+
+//   // Close modal on close button click
+//   modalCloseButton.onclick = () => {
+//     modal.style.display = "none";
+//   };
+// }
+
+// // Show modal to select number of copies and print (uses existing #modal)
+// //Hidase style choose quantity of print
+// function showCopiesPrompt(filename) {
+//   const 品番 = document.getElementById("product-number").value;
+//   const 収容数 = document.getElementById("収容数").value;
+//   const R_L = document.getElementById("R-L").value;
+//   const 品番収容数 = `${品番},${収容数}`;
+//   const extension = document.getElementById("Labelextension").value;
+//   const Date2 = document.getElementById('Lot No.').value;
+//   let Date = extension ? `${Date2} - ${extension}` : Date2;
+
+//   const modal = document.getElementById("modal");
+//   const modalOptions = document.getElementById("modal-options");
+//   const modalCloseButton = document.getElementById("modal-close");
+
+//   modalOptions.innerHTML = '<p>Select number of copies:</p>';
+
+//   // Wrapper for input and buttons
+//   const copiesDisplay = document.createElement('div');
+//   copiesDisplay.className = 'modal-copies-control';
+
+//   // Minus Button
+//   const minusButton = document.createElement('button');
+//   minusButton.innerText = '-';
+//   minusButton.type = "button";
+//   minusButton.onclick = (event) => {
+//     event.preventDefault();
+//     const current = parseInt(copiesInput.value, 10) || 1;
+//     if (current > 1) {
+//       copiesInput.value = current - 1;
+//     }
+//   };
+
+//   // Input field
+//   const copiesInput = document.createElement('input');
+//   copiesInput.type = 'number';
+//   copiesInput.min = '1';
+//   copiesInput.step = '1';
+//   copiesInput.value = '1';
+//   copiesInput.style.width = '60px';
+//   copiesInput.style.textAlign = 'center';
+
+//   // Prevent invalid input (non-integer, negatives, etc.)
+//   copiesInput.oninput = () => {
+//     let value = copiesInput.value;
+//     if (!/^\d+$/.test(value)) {
+//       copiesInput.value = value.replace(/\D/g, '');
+//     }
+//     if (copiesInput.value === '' || parseInt(copiesInput.value, 10) < 1) {
+//       copiesInput.value = '1';
+//     }
+//   };
+
+//   // Plus Button
+//   const plusButton = document.createElement('button');
+//   plusButton.innerText = '+';
+//   plusButton.type = "button";
+//   plusButton.onclick = (event) => {
+//     event.preventDefault();
+//     const current = parseInt(copiesInput.value, 10) || 1;
+//     copiesInput.value = current + 1;
+//   };
+
+//   // Append controls
+//   copiesDisplay.appendChild(minusButton);
+//   copiesDisplay.appendChild(copiesInput);
+//   copiesDisplay.appendChild(plusButton);
+//   modalOptions.appendChild(copiesDisplay);
+
+//   // Confirm Button
+//   const confirmButton = document.createElement('button');
+//   confirmButton.innerText = 'Confirm';
+//   confirmButton.type = "button";
+//   confirmButton.onclick = () => {
+//     const copies = parseInt(copiesInput.value, 10);
+//     if (isNaN(copies) || copies < 1) {
+//       alert('Please enter a valid number of copies (integer > 0)');
+//       return;
+//     }
+
+//     const url =
+//       `brotherwebprint://print?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent("RollW62")}&copies=${encodeURIComponent(copies)}` +
+//       `&text_品番=${encodeURIComponent(品番)}` +
+//       `&text_収容数=${encodeURIComponent(収容数)}` +
+//       `&text_DateT=${encodeURIComponent(Date)}` +
+//       `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
+
+//     console.log("Printing:", url);
+//     window.location.href = url;
+//     modal.style.display = "none";
+//   };
+
+//   modalOptions.appendChild(confirmButton);
+
+//   modal.style.display = "block";
+
+//   modalCloseButton.onclick = () => {
+//     modal.style.display = "none";
+//   };
+// }
+
 // Show modal to choose between BOX or PRODUCT label (uses existing #modal)
 function showLabelTypeSelection() {
   const modal = document.getElementById("modal");
@@ -1772,14 +2038,14 @@ function showLabelTypeSelection() {
   buttonBox.innerText = 'For BOX / 外用';
   buttonBox.onclick = () => {
     modal.style.display = "none";
-    showCopiesPrompt('hidaselabel5.lbx');
+    showCopiesPrompt('hidaselabel5.lbx', false); // Pass `false` to indicate no modification
   };
 
   const buttonProduct = document.createElement('button');
   buttonProduct.innerText = 'For Product / 製品用';
   buttonProduct.onclick = () => {
     modal.style.display = "none";
-    showCopiesPrompt('hidaselabel6inner.lbx');
+    showCopiesPrompt('hidaselabel6inner.lbx', true); // Pass `true` to indicate modification
   };
 
   modalOptions.appendChild(buttonBox);
@@ -1794,15 +2060,22 @@ function showLabelTypeSelection() {
 }
 
 // Show modal to select number of copies and print (uses existing #modal)
-//Hidase style choose quantity of print
-function showCopiesPrompt(filename) {
-  const 品番 = document.getElementById("product-number").value;
+// Hidase style choose quantity of print
+function showCopiesPrompt(filename, modifyHinban) {
+  let 品番 = document.getElementById("product-number").value;
   const 収容数 = document.getElementById("収容数").value;
   const R_L = document.getElementById("R-L").value;
-  const 品番収容数 = `${品番},${収容数}`;
   const extension = document.getElementById("Labelextension").value;
   const Date2 = document.getElementById('Lot No.').value;
-  let Date = extension ? `${Date2} - ${extension}` : Date2;
+  const selectedFactory = document.getElementById("selected工場").value;
+
+  // Apply special condition for 肥田瀬 and 品番 "146696-5630ESH-5"
+  if (selectedFactory === "肥田瀬" && 品番 === "146696-5630ESH-5" && modifyHinban) {
+    品番 = "146696-5630"; // Remove "ESH-5" for Product / 製品用
+  }
+
+  const 品番収容数 = `${品番},${収容数}`;
+  const Date = extension ? `${Date2} - ${extension}` : Date2;
 
   const modal = document.getElementById("modal");
   const modalOptions = document.getElementById("modal-options");
@@ -1893,7 +2166,6 @@ function showCopiesPrompt(filename) {
     modal.style.display = "none";
   };
 }
-
 
 
 
