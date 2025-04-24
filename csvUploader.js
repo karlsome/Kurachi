@@ -38,7 +38,10 @@ function processCSV(csvData) {
                 "人員数": row["人員数"],
                 "加工条件管理番号": row["加工条件管理番号"],
                 "品番": row["品番"],
-                "納期": row["納期"]
+                "納期": row["納期"],
+                "材料品番": row["材料品番"],
+                "作業日": row["作業日"],
+                "材料背番号": row["ラベル品番"],
             };
             data.push(formattedRow);
         }

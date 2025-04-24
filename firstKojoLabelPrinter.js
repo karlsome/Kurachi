@@ -74,7 +74,7 @@ document.addEventListener('DOMContentLoaded', () => {
                               if ([...input.options].some(option => option.value === savedValue)) {
                                   input.value = savedValue; // Restore select value
                                   console.log(`Restored ${input.id || input.name}:`, savedValue);
-                                  fetchProductDetails(); // for info
+                                  handleScannedQR(savedValue); // Call the function to handle scanned QR code
                                   
                               } else {
                                   console.error(`Option '${savedValue}' not found in select '${input.id || input.name}'.`);
@@ -97,19 +97,100 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 
-//FETCH values for sub-dropdown
+// //FETCH values for sub-dropdown
+// document.addEventListener('DOMContentLoaded', async () => {
+//   const subDropdown = document.getElementById('sub-dropdown');
+
+//   // Define the query payload
+//   const queryPayload = {
+//     dbName: "submittedDB",
+//     collectionName: "materialRequestDB",
+//     aggregation: [
+//       {
+//         "$project": {
+//           "品番": 1,
+//           "材料背番号": 1,
+//           "_id": 0
+//         }
+//       }
+//     ]
+//   };
+
+//   try {
+//     const response = await fetch(`${serverURL}/queries`, {
+//       method: "POST",
+//       headers: {
+//         "Content-Type": "application/json",
+//       },
+//       body: JSON.stringify(queryPayload),
+//     });
+
+//     if (!response.ok) {
+//       throw new Error("Failed to fetch data");
+//     }
+
+//     const data = await response.json();
+
+//     // Extract unique and sorted lists
+//     const unique材料背番号 = [...new Set(data.map(item => item.材料背番号))].sort((a, b) => a.localeCompare(b, 'ja'));
+//     // Filter out 品番 values starting with "Z"
+//     const unique品名 = [...new Set(data
+//       .map(item => item.品番)
+//       .filter(品番 => !品番.startsWith("Z")))]
+//       .sort((a, b) => a.localeCompare(b, 'ja'));
+
+//     // Clear existing options
+//     subDropdown.innerHTML = '';
+
+//     // Add a default "Select an option" choice
+//     const defaultOption = document.createElement('option');
+//     defaultOption.value = '';
+//     defaultOption.textContent = 'Select 材料背番号 or 品名';
+//     defaultOption.disabled = true;
+//     defaultOption.selected = true;
+//     subDropdown.appendChild(defaultOption);
+
+//     // Add 材料背番号 options first
+//     unique材料背番号.forEach(材料背番号 => {
+//       const option = document.createElement('option');
+//       option.value = 材料背番号;
+//       option.textContent = 材料背番号;
+//       subDropdown.appendChild(option);
+//     });
+
+//     // Add a separator for 品名 (optional)
+//     if (unique品名.length > 0) {
+//       const separator = document.createElement('option');
+//       separator.disabled = true;
+//       separator.textContent = '── 品名一覧 ──'; // "List of Product Names"
+//       subDropdown.appendChild(separator);
+//     }
+
+//     // Add 品名 options next
+//     unique品名.forEach(品名 => {
+//       const option = document.createElement('option');
+//       option.value = 品名;
+//       option.textContent = 品名;
+//       subDropdown.appendChild(option);
+//     });
+
+//   } catch (error) {
+//     console.error('Error fetching data:', error);
+//   }
+// });
+
+
+// FETCH values for sub-dropdown (品番 only)
 document.addEventListener('DOMContentLoaded', async () => {
   const subDropdown = document.getElementById('sub-dropdown');
 
-  // Define the query payload
   const queryPayload = {
-    dbName: "Sasaki_Coating_MasterDB",
-    collectionName: "materialDB",
+    dbName: "submittedDB",
+    collectionName: "materialRequestDB",
     aggregation: [
       {
         "$project": {
-          "品名": 1,
-          "材料背番号": 1,
+          "品番": 1,
           "_id": 0
         }
       }
@@ -125,56 +206,36 @@ document.addEventListener('DOMContentLoaded', async () => {
       body: JSON.stringify(queryPayload),
     });
 
-    if (!response.ok) {
-      throw new Error("Failed to fetch data");
-    }
+    if (!response.ok) throw new Error("Failed to fetch data");
 
     const data = await response.json();
 
-    // Extract unique and sorted lists
-    const unique材料背番号 = [...new Set(data.map(item => item.材料背番号))].sort((a, b) => a.localeCompare(b, 'ja'));
-    const unique品名 = [...new Set(data.map(item => item.品名))].sort((a, b) => a.localeCompare(b, 'ja'));
+    // Get only unique 品番 that do not start with "Z"
+    const unique品番 = [...new Set(
+      data.map(item => item.品番).filter(品番 => 品番 && !品番.startsWith("Z"))
+    )].sort((a, b) => a.localeCompare(b, 'ja'));
 
-    // Clear existing options
+    // Clear and rebuild dropdown
     subDropdown.innerHTML = '';
 
-    // Add a default "Select an option" choice
     const defaultOption = document.createElement('option');
     defaultOption.value = '';
-    defaultOption.textContent = 'Select 材料背番号 or 品名';
+    defaultOption.textContent = '品番を選択 / Select 品番';
     defaultOption.disabled = true;
     defaultOption.selected = true;
     subDropdown.appendChild(defaultOption);
 
-    // Add 材料背番号 options first
-    unique材料背番号.forEach(材料背番号 => {
+    unique品番.forEach(品番 => {
       const option = document.createElement('option');
-      option.value = 材料背番号;
-      option.textContent = 材料背番号;
-      subDropdown.appendChild(option);
-    });
-
-    // Add a separator for 品名 (optional)
-    if (unique品名.length > 0) {
-      const separator = document.createElement('option');
-      separator.disabled = true;
-      separator.textContent = '── 品名一覧 ──'; // "List of Product Names"
-      subDropdown.appendChild(separator);
-    }
-
-    // Add 品名 options next
-    unique品名.forEach(品名 => {
-      const option = document.createElement('option');
-      option.value = 品名;
-      option.textContent = 品名;
+      option.value = 品番;
+      option.textContent = 品番;
       subDropdown.appendChild(option);
     });
 
   } catch (error) {
-    console.error('Error fetching data:', error);
+    console.error('Error fetching 品番 list:', error);
   }
 });
-
 
 
 
@@ -197,74 +258,161 @@ function blankInfo() {
 
 
 
-async function fetchProductDetails() {
-  const serialNumber = document.getElementById("sub-dropdown").value;
-  const factory = document.getElementById("selected工場").value;
-  const dynamicImage = document.getElementById("dynamicImage");
-  dynamicImage.src = ""; // Reset the image
+// async function fetchProductDetails() {
+//   const serialNumber = document.getElementById("sub-dropdown").value;
+//   const factory = document.getElementById("selected工場").value;
+//   const dynamicImage = document.getElementById("dynamicImage");
+//   dynamicImage.src = ""; // Reset the image
   
 
-  if (!serialNumber) {
+//   if (!serialNumber) {
+//     console.error("Please select a valid 背番号.");
+//     blankInfo();
+//     return;
+//   }
+
+//   // Define the query payload
+//   const queryPayload = {
+//     dbName: "Sasaki_Coating_MasterDB",
+//     collectionName: "materialDB",
+//     query: {
+//       "$or": [
+//         { "材料品番": serialNumber }, // Match if serialNumber is a 品名
+//         { "材料背番号": serialNumber } // Match if serialNumber is a 材料背番号
+//       ]
+//     }
+//   };
+
+//   try {
+//     const response = await fetch(`${serverURL}/queries`, {
+//       method: "POST",
+//       headers: {
+//         "Content-Type": "application/json",
+//       },
+//       body: JSON.stringify(queryPayload),
+//     });
+
+//     if (response.ok) {
+//       const data = await response.json();
+
+//       if (data.length === 0) {
+//         console.error("No matching product found.");
+//         blankInfo();
+//         return;
+//       }
+
+//       const product = data[0]; // Assuming we get only one matching product
+
+//       // Populate the HTML fields with the retrieved data
+//       document.getElementById("品名").value = product.品名 || "";
+//       document.getElementById("材料背番号").value = product.材料背番号 || "";
+//       document.getElementById("材料品番").value = product.材料品番 || "";
+//       document.getElementById("material").value = product.材料 || "";
+//       document.getElementById("material-color").value = product.色 || "";
+//       document.getElementById("length").value = product.length || "";
+//     } else {
+//       console.error("Error fetching product details:", response.statusText);
+//       blankInfo();
+//     }
+//   } catch (error) {
+//     console.error("Error fetching product details:", error);
+//     blankInfo();
+//   }
+
+//   // Fetch and update product image separately
+//   picLINK(serialNumber);
+//   handleScannedQR(serialNumber); // Call the function to handle scanned QR code
+// }
+
+// // Call fetchProductDetails when a new 背番号 is selected
+// document.getElementById("sub-dropdown").addEventListener("change", fetchProductDetails);
+
+async function fetchProductDetails() {
+  const selectedValue = document.getElementById("sub-dropdown").value;
+  const dynamicImage = document.getElementById("dynamicImage");
+  dynamicImage.src = ""; // Reset image
+
+  if (!selectedValue) {
     console.error("Please select a valid 背番号.");
     blankInfo();
     return;
   }
 
-  // Define the query payload
-  const queryPayload = {
-    dbName: "Sasaki_Coating_MasterDB",
-    collectionName: "materialDB",
-    query: {
-      "$or": [
-        { "品名": serialNumber }, // Match if serialNumber is a 品名
-        { "材料背番号": serialNumber } // Match if serialNumber is a 材料背番号
-      ]
-    }
-  };
-
   try {
-    const response = await fetch(`${serverURL}/queries`, {
+    // Step 1: Lookup only by 品番
+    const lookupPayload = {
+      dbName: "submittedDB",
+      collectionName: "materialRequestDB",
+      query: { "品番": selectedValue }
+    };
+
+    const lookupResponse = await fetch(`${serverURL}/queries`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(queryPayload),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(lookupPayload),
     });
 
-    if (response.ok) {
-      const data = await response.json();
+    if (!lookupResponse.ok) throw new Error("Failed to fetch from materialRequestDB");
 
-      if (data.length === 0) {
-        console.error("No matching product found.");
-        blankInfo();
-        return;
-      }
+    const lookupData = await lookupResponse.json();
 
-      const product = data[0]; // Assuming we get only one matching product
-
-      // Populate the HTML fields with the retrieved data
-      document.getElementById("品名").value = product.品名 || "";
-      document.getElementById("材料背番号").value = product.材料背番号 || "";
-      document.getElementById("material").value = product.材料 || "";
-      document.getElementById("material-color").value = product.色 || "";
-      document.getElementById("length").value = product.length || "";
-    } else {
-      console.error("Error fetching product details:", response.statusText);
+    if (!Array.isArray(lookupData) || lookupData.length === 0) {
+      console.warn("品番 not found in materialRequestDB:", selectedValue);
       blankInfo();
+      return;
     }
+
+    const exactMatch = lookupData[0];
+    const matched材料品番 = exactMatch.材料品番;
+    const matched品番 = exactMatch.品番;
+
+    // Step 2: Query materialDB
+    const productQueryPayload = {
+      dbName: "Sasaki_Coating_MasterDB",
+      collectionName: "materialDB",
+      query: { "材料品番": matched材料品番 }
+    };
+
+    const productResponse = await fetch(`${serverURL}/queries`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(productQueryPayload),
+    });
+
+    if (!productResponse.ok) throw new Error("Failed to fetch from materialDB");
+
+    const productData = await productResponse.json();
+
+    if (!productData || productData.length === 0) {
+      console.warn("材料品番 not found in materialDB:", matched材料品番);
+      blankInfo();
+      return;
+    }
+
+    const product = productData[0];
+
+    // Populate form
+    document.getElementById("品名").value = matched品番 || "";
+    document.getElementById("材料背番号").value = product.材料背番号 || "";
+    document.getElementById("材料品番").value = product.材料品番 || "";
+    document.getElementById("material").value = product.材料 || "";
+    document.getElementById("material-color").value = product.色 || "";
+    document.getElementById("length").value = product.length || "";
+
+    // Load image
+    picLINK(selectedValue);
   } catch (error) {
-    console.error("Error fetching product details:", error);
+    console.error("Error in fetchProductDetails:", error);
     blankInfo();
   }
-
-  // Fetch and update product image separately
-  picLINK(serialNumber);
-  handleScannedQR(serialNumber); // Call the function to handle scanned QR code
 }
 
-// Call fetchProductDetails when a new 背番号 is selected
-document.getElementById("sub-dropdown").addEventListener("change", fetchProductDetails);
-
+// Attach event listener to sub-dropdown
+document.getElementById("sub-dropdown").addEventListener("change", () => {
+  const selectedValue = document.getElementById("sub-dropdown").value;
+  handleScannedQR(selectedValue); // Treat dropdown selection like a QR scan
+  console.log("Selected value from dropdown:", selectedValue);
+});
 
 
 // Function to get link from Google Drive
@@ -439,153 +587,311 @@ function startBluetoothScanner() {
 
 
 
-// Handle scanned QR code (Both Camera & Bluetooth)
+// // Handle scanned QR code (Both Camera & Bluetooth)
+// async function handleScannedQR(qrCodeMessage) {
+//   const subDropdown = document.getElementById('sub-dropdown');
+//   const options = [...subDropdown.options].map(option => option.value);
+//   const scanAlertModal = document.getElementById('scanAlertModal');
+//   const scanAlertText = document.getElementById('scanAlertText');
+//   const alertSound = document.getElementById('alert-sound');
+//   const statusInput = document.getElementById("status"); // Status input field
+
+//   console.log("Scanned QR Code:", qrCodeMessage);
+
+//   // 1. Validate if the scanned value exists in dropdown options
+//   if (!options.includes(qrCodeMessage)) {
+//       scanAlertText.innerText = "背番号が存在しません。 / Sebanggo does not exist.";
+//       scanAlertModal.style.display = 'block';
+
+//       if (alertSound) {
+//           alertSound.muted = false;
+//           alertSound.volume = 1;
+//           alertSound.play().catch(error => console.error("Failed to play alert sound:", error));
+//       }
+
+//       document.body.classList.add('flash-red');
+
+//       document.getElementById('closeScanModalButton').onclick = function () {
+//           scanAlertModal.style.display = 'none';
+//           alertSound.pause();
+//           alertSound.currentTime = 0;
+//           alertSound.muted = true;
+//           document.body.classList.remove('flash-red');
+//       };
+
+//       return;
+//   }
+//   // 2. Always update dropdown and fetch product details
+//   if (subDropdown && subDropdown.value !== qrCodeMessage) {
+//       subDropdown.value = qrCodeMessage;
+//       localStorage.setItem(`${uniquePrefix}sub-dropdown`, qrCodeMessage);
+//       await fetchProductDetails();
+//       console.log("code came through: " + qrCodeMessage);
+//       // Get the current date in yyMMdd format
+//       const now = new Date();
+//       const year = String(now.getFullYear()).slice(-2);
+//       const month = String(now.getMonth() + 1).padStart(2, '0');
+//       const day = String(now.getDate()).padStart(2, '0');
+//       const currentDate = `${year}${month}${day}`;
+
+//       // Get the 材料品番 value from the fetched product details
+//       const 材料品番 = document.getElementById("材料品番").value;
+
+//       // Define the query payload for materialRequestDB
+//       const queryPayload = {
+//         dbName: "submittedDB",
+//         collectionName: "materialRequestDB",
+//         query: {
+//           "材料品番": 材料品番,
+//           "作業日": currentDate
+//         }
+//       };
+
+//       try {
+//         const response = await fetch(`${serverURL}/queries`, {
+//           method: "POST",
+//           headers: {
+//             "Content-Type": "application/json",
+//           },
+//           body: JSON.stringify(queryPayload),
+//         });
+
+//         if (response.ok) {
+//           const data = await response.json();
+
+//           if (data.length === 0) {
+//             console.log("No matching request found in materialRequestDB.");
+//             scanAlertText.innerText = "Request not found in materialRequestDB.";
+//             scanAlertModal.style.display = 'block';
+
+//             if (alertSound) {
+//                 alertSound.muted = false;
+//                 alertSound.volume = 1;
+//                 alertSound.play().catch(error => console.error("Failed to play alert sound:", error));
+//             }
+
+//             document.body.classList.add('flash-red');
+
+//             document.getElementById('closeScanModalButton').onclick = function () {
+//                 scanAlertModal.style.display = 'none';
+//                 alertSound.pause();
+//                 alertSound.currentTime = 0;
+//                 alertSound.muted = true;
+//                 document.body.classList.remove('flash-red');
+//             };
+
+//             return;
+//           }
+
+//           const request = data[0]; // Assuming we get only one matching request
+
+//           // 🔵 Update STATUS field in the UI
+//           if (statusInput) {
+//               if (!request.STATUS || request.STATUS.trim() === "") {
+//                   statusInput.value = "加工中"; // If STATUS is blank
+//               } else if (request.STATUS === "Completed") {
+//                   statusInput.value = "完了"; // If STATUS is "Completed"
+//               } else {
+//                   statusInput.value = request.STATUS; // Any other unexpected STATUS
+//               }
+//               console.log("Updated STATUS:", statusInput.value);
+//           }
+
+//           // Calculate the desired roll times
+//           const 生産数 = parseInt(request.生産数, 10);
+//           const length = parseInt(document.getElementById("length").value, 10);
+//           const order = parseInt(request.生産順番, 10);
+//           console.log("order: "+ order/10);
+
+//           //put 品番 from request into the input field
+//           const 品番Input = request.品番;
+//           const 品番InputField = document.getElementById("品名");
+//           if (品番InputField) {
+//               品番InputField.value = 品番Input;
+//               console.log("Set 品番 input value:", 品番Input);
+//           }
+
+//           if (!isNaN(生産数) && !isNaN(length) && length > 0) {
+//             const rollTimes = (生産数 / length)/100; // Calculate roll times cm to meter
+//             console.log("生産数:", 生産数, "length:", length, "roll times:", rollTimes);
+//             const roundedRollTimes = Math.ceil(rollTimes); // Round up to the next whole number
+//             console.log("Desired roll times:", roundedRollTimes);
+        
+//             // Set order value divided by 10 to the hidden input field
+//             const orderInput = document.getElementById("order");
+//             if (orderInput) {
+//                 orderInput.value = order / 10;
+//                 console.log("Set hidden order value:", orderInput.value);
+//             }
+        
+//             // Set rounded roll times to the hidden input field
+//             const printTimesInput = document.getElementById("printTimes");
+//             if (printTimesInput) {
+//                 printTimesInput.value = roundedRollTimes;
+//                 console.log("Set hidden printTimes value:", printTimesInput.value);
+//             }
+//         } else {
+//             console.error("Invalid 生産数 or length value.");
+//         }
+//         } else {
+//           console.error("Error fetching request details:", response.statusText);
+//         }
+//       } catch (error) {
+//         console.error("Error fetching request details:", error);
+//       }
+//   }
+// }
+
+
+let isHandlingScan = false;
+
 async function handleScannedQR(qrCodeMessage) {
+  if (isHandlingScan) return; // Prevent re-entry
+  isHandlingScan = true;
+
   const subDropdown = document.getElementById('sub-dropdown');
   const options = [...subDropdown.options].map(option => option.value);
   const scanAlertModal = document.getElementById('scanAlertModal');
   const scanAlertText = document.getElementById('scanAlertText');
   const alertSound = document.getElementById('alert-sound');
-  const statusInput = document.getElementById("status"); // Status input field
+  const statusInput = document.getElementById("status");
 
   console.log("Scanned QR Code:", qrCodeMessage);
 
-  // 1. Validate if the scanned value exists in dropdown options
-  if (!options.includes(qrCodeMessage)) {
+  try {
+    // Step 1: Validate if scanned value exists in dropdown options
+    if (!options.includes(qrCodeMessage)) {
       scanAlertText.innerText = "背番号が存在しません。 / Sebanggo does not exist.";
       scanAlertModal.style.display = 'block';
 
       if (alertSound) {
-          alertSound.muted = false;
-          alertSound.volume = 1;
-          alertSound.play().catch(error => console.error("Failed to play alert sound:", error));
+        alertSound.muted = false;
+        alertSound.volume = 1;
+        alertSound.play().catch(error => console.error("Failed to play alert sound:", error));
       }
 
       document.body.classList.add('flash-red');
-
       document.getElementById('closeScanModalButton').onclick = function () {
-          scanAlertModal.style.display = 'none';
-          alertSound.pause();
-          alertSound.currentTime = 0;
-          alertSound.muted = true;
-          document.body.classList.remove('flash-red');
+        scanAlertModal.style.display = 'none';
+        alertSound.pause();
+        alertSound.currentTime = 0;
+        alertSound.muted = true;
+        document.body.classList.remove('flash-red');
       };
-
       return;
-  }
-  // 2. Always update dropdown and fetch product details
-  if (subDropdown && subDropdown.value !== qrCodeMessage) {
+    }
+
+    // Step 2: Set dropdown value only if it's different
+    if (subDropdown.value !== qrCodeMessage) {
       subDropdown.value = qrCodeMessage;
       localStorage.setItem(`${uniquePrefix}sub-dropdown`, qrCodeMessage);
-      await fetchProductDetails();
+    }
 
-      // Get the current date in yyMMdd format
-      const now = new Date();
-      const year = String(now.getFullYear()).slice(-2);
-      const month = String(now.getMonth() + 1).padStart(2, '0');
-      const day = String(now.getDate()).padStart(2, '0');
-      const currentDate = `${year}${month}${day}`;
+    // Step 3: Always fetch product details
+    await fetchProductDetails();
+    console.log("code came through:", qrCodeMessage);
 
-      // Get the 品名 value from the fetched product details
-      const 品名 = document.getElementById("品名").value;
+    // Step 4: Fetch 作業日-based data
+    const now = new Date();
+    const year = String(now.getFullYear()).slice(-2);
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const currentDate = `${year}${month}${day}`;
 
-      // Define the query payload for materialRequestDB
-      const queryPayload = {
-        dbName: "submittedDB",
-        collectionName: "materialRequestDB",
-        query: {
-          "品番": 品名,
-          "納期": currentDate
-        }
-      };
+    const 品番 = document.getElementById("品名").value;
 
-      try {
-        const response = await fetch(`${serverURL}/queries`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(queryPayload),
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-
-          if (data.length === 0) {
-            console.log("No matching request found in materialRequestDB.");
-            scanAlertText.innerText = "Request not found in materialRequestDB.";
-            scanAlertModal.style.display = 'block';
-
-            if (alertSound) {
-                alertSound.muted = false;
-                alertSound.volume = 1;
-                alertSound.play().catch(error => console.error("Failed to play alert sound:", error));
-            }
-
-            document.body.classList.add('flash-red');
-
-            document.getElementById('closeScanModalButton').onclick = function () {
-                scanAlertModal.style.display = 'none';
-                alertSound.pause();
-                alertSound.currentTime = 0;
-                alertSound.muted = true;
-                document.body.classList.remove('flash-red');
-            };
-
-            return;
-          }
-
-          const request = data[0]; // Assuming we get only one matching request
-
-          // 🔵 Update STATUS field in the UI
-          if (statusInput) {
-              if (!request.STATUS || request.STATUS.trim() === "") {
-                  statusInput.value = "加工中"; // If STATUS is blank
-              } else if (request.STATUS === "Completed") {
-                  statusInput.value = "完了"; // If STATUS is "Completed"
-              } else {
-                  statusInput.value = request.STATUS; // Any other unexpected STATUS
-              }
-              console.log("Updated STATUS:", statusInput.value);
-          }
-
-          // Calculate the desired roll times
-          const 生産数 = parseInt(request.生産数, 10);
-          const length = parseInt(document.getElementById("length").value, 10);
-          const order = parseInt(request.生産順番, 10);
-          console.log("order: "+ order/10);
-
-          if (!isNaN(生産数) && !isNaN(length) && length > 0) {
-            const rollTimes = (生産数 / length)/100; // Calculate roll times cm to meter
-            console.log("生産数:", 生産数, "length:", length, "roll times:", rollTimes);
-            const roundedRollTimes = Math.ceil(rollTimes); // Round up to the next whole number
-            console.log("Desired roll times:", roundedRollTimes);
-        
-            // Set order value divided by 10 to the hidden input field
-            const orderInput = document.getElementById("order");
-            if (orderInput) {
-                orderInput.value = order / 10;
-                console.log("Set hidden order value:", orderInput.value);
-            }
-        
-            // Set rounded roll times to the hidden input field
-            const printTimesInput = document.getElementById("printTimes");
-            if (printTimesInput) {
-                printTimesInput.value = roundedRollTimes;
-                console.log("Set hidden printTimes value:", printTimesInput.value);
-            }
-        } else {
-            console.error("Invalid 生産数 or length value.");
-        }
-        } else {
-          console.error("Error fetching request details:", response.statusText);
-        }
-      } catch (error) {
-        console.error("Error fetching request details:", error);
+    const queryPayload = {
+      dbName: "submittedDB",
+      collectionName: "materialRequestDB",
+      query: {
+        "品番": 品番,
+        "作業日": currentDate
       }
+    };
+
+    const response = await fetch(`${serverURL}/queries`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(queryPayload),
+    });
+
+    if (!response.ok) throw new Error("Failed to fetch request details");
+
+    const data = await response.json();
+
+    if (data.length === 0) {
+      scanAlertText.innerText = "Request not found in materialRequestDB.";
+      scanAlertModal.style.display = 'block';
+
+      if (alertSound) {
+        alertSound.muted = false;
+        alertSound.volume = 1;
+        alertSound.play().catch(error => console.error("Failed to play alert sound:", error));
+      }
+
+      document.body.classList.add('flash-red');
+      document.getElementById('closeScanModalButton').onclick = function () {
+        scanAlertModal.style.display = 'none';
+        alertSound.pause();
+        alertSound.currentTime = 0;
+        alertSound.muted = true;
+        document.body.classList.remove('flash-red');
+      };
+      return;
+    }
+
+    const request = data[0];
+
+    // Step 5: Update status field
+    if (statusInput) {
+      if (!request.STATUS || request.STATUS.trim() === "") {
+        statusInput.value = "加工中";
+      } else if (request.STATUS === "Completed") {
+        statusInput.value = "完了";
+      } else {
+        statusInput.value = request.STATUS;
+      }
+      console.log("Updated STATUS:", statusInput.value);
+    }
+
+    // Step 6: Roll time calculation
+    const 生産数 = parseInt(request.生産数, 10);
+    const length = parseInt(document.getElementById("length").value, 10);
+    const order = parseInt(request.生産順番, 10);
+
+    if (!isNaN(生産数) && !isNaN(length) && length > 0) {
+      const rollTimes = (生産数 / length) / 100; //cm to meter
+      console.log("生産数:", 生産数, "length:", length, "roll times:", rollTimes);
+      const roundedRollTimes = Math.ceil(rollTimes);
+
+      const orderInput = document.getElementById("order");
+      if (orderInput) {
+        orderInput.value = order / 10;
+        console.log("Set hidden order value:", orderInput.value);
+      }
+
+      const printTimesInput = document.getElementById("printTimes");
+      if (printTimesInput) {
+        printTimesInput.value = roundedRollTimes;
+        console.log("Set hidden printTimes value:", printTimesInput.value);
+      }
+    } else {
+      console.error("Invalid 生産数 or length for roll time calculation.");
+    }
+
+    // Step 7: Update 品名 with latest from request
+    const 品番InputField = document.getElementById("品名");
+    if (品番InputField) {
+      品番InputField.value = request.品番;
+      console.log("Set 品番 input value:", request.品番);
+    }
+
+  } catch (error) {
+    console.error("Error in handleScannedQR:", error);
+  } finally {
+    isHandlingScan = false; //Release the lock
   }
 }
-
 
 
 
