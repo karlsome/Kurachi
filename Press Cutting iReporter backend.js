@@ -337,70 +337,8 @@ function enableInputs() {
 }
 
 
-
-// //for the info section
-// async function fetchProductDetails() {
-//   checkProcessCondition();
-//   enableInputs(); // delete if production
-  
-  
-//   const serialNumber = document.getElementById("sub-dropdown").value;
-//   const factory = document.getElementById("selected工場").value;
-//   // Update the dynamicImage src attribute with the retrieved htmlWebsite value
-//   const dynamicImage = document.getElementById("dynamicImage");
-//   dynamicImage.src = "";
-
-  
-
-//   if (!serialNumber) {
-//     console.error("Please select a valid 背番号.");
-//     blankInfo();
-//     return;
-//   }
-
-
-//   try {
-//     const response = await fetch(`${serverURL}/getProductDetails?serialNumber=${encodeURIComponent(serialNumber)}&factory=${encodeURIComponent(factory)}`);
-//     if (response.ok) {
-//       const data = await response.json();
-
-//       // Populate the HTML fields with the retrieved data
-//       document.getElementById("product-number").value = data.品番 || "";
-//       document.getElementById("model").value = data.モデル || "";
-//       document.getElementById("shape").value = data.形状 || "";
-//       document.getElementById("R-L").value = data["R/L"] || "";
-//       document.getElementById("material").value = data.材料 || "";
-//       document.getElementById("material-code").value = data.材料背番号 || "";
-//       document.getElementById("material-color").value = data.色 || "";
-//       document.getElementById("kataban").value = data.型番 || "";
-//       document.getElementById("収容数").value = data.収容数 || "";
-//       document.getElementById("送りピッチ").textContent = "送りピッチ: " + data.送りピッチ || "";
-//       document.getElementById("SRS").value = data.SRS || "";
-
-      
-//       //imagepart
-//       // if (data.htmlWebsite) {
-//       //   dynamicImage.src = data.htmlWebsite; // Set the image source to the retrieved URL
-//       //   dynamicImage.alt = "Product Image"; // Optional: Set the alt text
-//       //   dynamicImage.style.display = "block"; // Ensure the image is visible
-//       // } else {
-//       //   dynamicImage.src = ""; // Clear the image source if no URL is available
-//       //   dynamicImage.alt = "No Image Available"; // Optional: Set fallback alt text
-//       //   dynamicImage.style.display = "none"; // Hide the image if no URL is available
-//       // }
-      
-//     } else {
-//       console.error("No matching product found.");
-//     }
-//   } catch (error) {
-//     console.error("Error fetching product details:", error);
-//   }
-//   picLINK(serialNumber);
-// }
-
-// // Call fetchProductDetails when a new 背番号 is selected
-// document.getElementById("sub-dropdown").addEventListener("change", fetchProductDetails);
-
+// function to fetch product details
+// This function fetches product details based on 背番号 or 品番
 async function fetchProductDetails() {
   checkProcessCondition();
   enableInputs(); // Delete this in production
@@ -463,20 +401,9 @@ async function fetchProductDetails() {
 
     const product = result[0];
 
-    // Step 4: Fetch image (html website)
-    const pictureRes = await fetch(`${serverURL}/queries`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        dbName: "Sasaki_Coating_MasterDB",
-        collectionName: "pictureDB",
-        query: { 背番号: product.背番号 || serialNumber },
-        projection: { "html website": 1, _id: 0 },
-      }),
-    });
-
-    const pictureData = await pictureRes.json();
-    const htmlWebsite = pictureData.length > 0 ? pictureData[0]["html website"] : "";
+    // Step 4: (Removed pictureDB fetch)
+    // Use only picLINK for image handling now
+    picLINK(product.背番号 || serialNumber, product.品番);
 
     // Step 5: Populate fields
     document.getElementById("product-number").value = product.品番 || "";
@@ -490,20 +417,6 @@ async function fetchProductDetails() {
     document.getElementById("収容数").value = product.収容数 || "";
     document.getElementById("送りピッチ").textContent = "送りピッチ: " + (product.送りピッチ || "");
     document.getElementById("SRS").value = product.SRS || "";
-
-    // Step 6: Set image if available
-    if (htmlWebsite) {
-      dynamicImage.src = htmlWebsite;
-      dynamicImage.alt = "Product Image";
-      dynamicImage.style.display = "block";
-    } else {
-      dynamicImage.src = "";
-      dynamicImage.alt = "No Image Available";
-      dynamicImage.style.display = "none";
-    }
-
-    // Optional: use for fallback or other image logic
-    picLINK(product.背番号 || serialNumber, product.品番);
   } catch (error) {
     console.error("Error fetching product details:", error);
   }
@@ -554,12 +467,17 @@ function fetchImageFromSheet(headerValue) {
     });
 }
 
-// Function to update the image src attribute
+
 function updateImageSrc(link) {
   const imageElement = document.getElementById('dynamicImage');
 
   if (imageElement) {
-    imageElement.src = `${link}&sz=s4000`; // Ensure valid URL structure
+    // Clean redirect-based URL
+    const cleanedLink = link.replace(/.*\/d\/(.*?)\/.*/, 'https://drive.google.com/uc?export=view&id=$1');
+
+    imageElement.src = cleanedLink;
+    imageElement.alt = "Product Image";
+    imageElement.style.display = "block";
   } else {
     console.error("Error: Image element not found!");
   }
