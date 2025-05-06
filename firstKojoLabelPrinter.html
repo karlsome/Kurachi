@@ -95,6 +95,7 @@
         </div>        
 
         <button id="print" class="btn btn-print" onclick="showPrintConfirmationModal()">🖨 Print Label</button>
+        
 
         <div class="image-container">
             <img id="dynamicImage" src="" alt="Image Preview">
@@ -136,7 +137,19 @@
             <input readonly id="material-color">
         </div>
 
+        <div id="reprintModal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <span id="closeReprintModal" class="close">&times;</span>
+                <h3>Reprint Label</h3>
+                <label for="suffixSelector">Select Lot No. Suffix:</label>
+                <select id="suffixSelector"></select>
+                <button id="confirmReprintButton">Reprint This Label</button>
+            </div>
+        </div>
+
         
+
+        <button id="reprintButton">🔄 Reprint Label / 再印刷</button>    
     
     <!-- Hidden fields -->
     <input type="hidden" name="設備" id="hidden設備">

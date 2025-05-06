@@ -1178,106 +1178,216 @@ function confirmPrint() {
 
 
 // Modify printLabel function to print one at a time, wait for success, timeout after 7 seconds, then update MongoDB
+// async function printLabel() {
+//   const alertSound = document.getElementById('alert-sound');
+//   const scanAlertModal = document.getElementById('scanAlertModal');
+//   const scanAlertText = document.getElementById('scanAlertText');
+//   const printingStatusModal = document.getElementById('printingStatusModal');
+//   const selectedFactory = document.getElementById("selected工場").value;
+//   const 背番号 = document.getElementById("材料背番号").value;
+//   const 品番 = document.getElementById("品名").value;
+//   const 色 = document.getElementById("material-color").value;
+//   const length = document.getElementById("length").value;
+//   const order = document.getElementById("order").value;
+//   const copies = parseInt(document.getElementById("printTimes").value) || 1; // Number of copies
+
+//   console.log("Starting print process for", copies, "copies...");
+
+//   if (!背番号) {
+//       showPrintError('背番号が必要です。 / Sebanggo is required.');
+//       return;
+//   }
+
+//   const storageKey = `${uniquePrefix}${品番}`;
+
+//   // Get current date in yyMMdd format
+//   const originalDate = document.getElementById('Lot No.').value;
+//   const dateParts = originalDate.split("-");
+//   const currentDate = `${dateParts[0].slice(-2)}${dateParts[1]}${dateParts[2]}`; // Extract last 2 digits of year
+
+//   let storedData = JSON.parse(localStorage.getItem(storageKey)) || { date: currentDate, extension: 0 };
+
+//   if (storedData.date !== currentDate) {
+//       storedData = { date: currentDate, extension: 0 };
+//   }
+
+//   // Show printing status modal before starting
+//   printingStatusModal.style.display = 'block';
+
+//   for (let i = 1; i <= copies; i++) {
+//       storedData.extension++;
+//       const extension = storedData.extension;
+//       const DateWithExtension = `${currentDate}-${extension}`;
+
+//       const 品番収容数 = `${背番号},${DateWithExtension},${length}`;
+//       console.log(`Printing copy ${i} of ${copies}:`, 品番収容数);
+
+//       let filename = "";
+//       if (typeof SRS !== "undefined" && SRS === "有り") {
+//           filename = "SRS3.lbx";
+//       } else if (背番号 === "NC2") {
+//           filename = "NC21.lbx";
+//       } else {
+//           filename = "firstkojo3.lbx";
+//       }
+
+//       const size = "RollW62";
+
+//       const url =
+//           `http://localhost:8088/print?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent(size)}&copies=1` +
+//           `&text_品番=${encodeURIComponent(品番)}` +
+//           `&text_背番号=${encodeURIComponent(背番号)}` +
+//           `&text_収容数=${encodeURIComponent(order)}` +
+//           `&text_色=${encodeURIComponent(色)}` +
+//           `&text_DateT=${encodeURIComponent(DateWithExtension)}` +
+//           `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
+
+//       console.log("Sending print request:", url);
+
+//       try {
+//           const response = await Promise.race([
+//               fetch(url).then(res => res.text()), // Fetch the print request
+//               new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout: No response from printer")), 7000)) // 7s timeout
+//           ]);
+
+//           if (response.includes("<result>SUCCESS</result>")) {
+//               console.log(`Print ${i} of ${copies} successful.`);
+//           } else if (response.includes("PrinterStatusErrorCoverOpen")) {
+//               showPrintError("Printer Error: Cover is open.");
+//               return; // Stop further printing
+//           } else {
+//               showPrintError("Printing failed. Please check the printer.");
+//               return; // Stop further printing
+//           }
+
+//           // Short delay before sending the next print job
+//           await new Promise(resolve => setTimeout(resolve, 2000));
+
+//       } catch (error) {
+//           showPrintError("Printing failed. No response from printer.");
+//           return; // Stop further printing
+//       }
+//   }
+
+//   localStorage.setItem(storageKey, JSON.stringify(storedData));
+
+//   // Step 2: Update MongoDB after successful print
+//   console.log("All copies printed successfully. Now updating MongoDB...");
+//   await updateMongoDB(品番, currentDate);
+
+//   // Hide printing status modal and show success message
+//   printingStatusModal.style.display = 'none';
+//   console.log("All copies printed successfully.");
+//   document.getElementById('printCompletionModal').style.display = 'block';
+// }
+
 async function printLabel() {
   const alertSound = document.getElementById('alert-sound');
   const scanAlertModal = document.getElementById('scanAlertModal');
   const scanAlertText = document.getElementById('scanAlertText');
   const printingStatusModal = document.getElementById('printingStatusModal');
-  const selectedFactory = document.getElementById("selected工場").value;
   const 背番号 = document.getElementById("材料背番号").value;
   const 品番 = document.getElementById("品名").value;
   const 色 = document.getElementById("material-color").value;
   const length = document.getElementById("length").value;
   const order = document.getElementById("order").value;
-  const copies = parseInt(document.getElementById("printTimes").value) || 1; // Number of copies
-
-  console.log("Starting print process for", copies, "copies...");
+  const copies = parseInt(document.getElementById("printTimes").value) || 1;
 
   if (!背番号) {
-      showPrintError('背番号が必要です。 / Sebanggo is required.');
-      return;
+    showPrintError('背番号が必要です。 / Sebanggo is required.');
+    return;
   }
 
   const storageKey = `${uniquePrefix}${品番}`;
-
-  // Get current date in yyMMdd format
   const originalDate = document.getElementById('Lot No.').value;
   const dateParts = originalDate.split("-");
-  const currentDate = `${dateParts[0].slice(-2)}${dateParts[1]}${dateParts[2]}`; // Extract last 2 digits of year
+  const currentDate = `${dateParts[0].slice(-2)}${dateParts[1]}${dateParts[2]}`;
 
   let storedData = JSON.parse(localStorage.getItem(storageKey)) || { date: currentDate, extension: 0 };
 
   if (storedData.date !== currentDate) {
-      storedData = { date: currentDate, extension: 0 };
+    storedData = { date: currentDate, extension: 0 };
   }
 
   // Show printing status modal before starting
   printingStatusModal.style.display = 'block';
 
+  // Detect device
+  const ua = navigator.userAgent.toLowerCase();
+  const isIOS = /iphone|ipad|ipod/.test(ua);
+  const isAndroid = /android/.test(ua);
+
   for (let i = 1; i <= copies; i++) {
-      storedData.extension++;
-      const extension = storedData.extension;
-      const DateWithExtension = `${currentDate}-${extension}`;
+    storedData.extension++;
+    const extension = storedData.extension;
+    const lotNo = `${currentDate}-${extension}`;
+    const 品番収容数 = `${背番号},${lotNo},${length}`;
 
-      const 品番収容数 = `${背番号},${DateWithExtension},${length}`;
-      console.log(`Printing copy ${i} of ${copies}:`, 品番収容数);
+    let filename = "";
+    if (typeof SRS !== "undefined" && SRS === "有り") {
+      filename = "SRS3.lbx";
+    } else if (背番号 === "NC2") {
+      filename = "NC21.lbx";
+    } else {
+      filename = "firstkojo3.lbx";
+    }
 
-      let filename = "";
-      if (typeof SRS !== "undefined" && SRS === "有り") {
-          filename = "SRS3.lbx";
-      } else if (背番号 === "NC2") {
-          filename = "NC21.lbx";
-      } else {
-          filename = "firstkojo3.lbx";
-      }
+    let url = "";
 
-      const size = "RollW62";
+    if (isIOS) {
+      url = `brotherwebprint://print?filename=${encodeURIComponent(filename)}&size=RollW62&copies=1` +
+            `&text_品番=${encodeURIComponent(品番)}` +
+            `&text_背番号=${encodeURIComponent(背番号)}` +
+            `&text_収容数=${encodeURIComponent(order)}` +
+            `&text_色=${encodeURIComponent(色)}` +
+            `&text_DateT=${encodeURIComponent(lotNo)}` +
+            `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
 
-      const url =
-          `http://localhost:8088/print?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent(size)}&copies=1` +
-          `&text_品番=${encodeURIComponent(品番)}` +
-          `&text_背番号=${encodeURIComponent(背番号)}` +
-          `&text_収容数=${encodeURIComponent(order)}` +
-          `&text_色=${encodeURIComponent(色)}` +
-          `&text_DateT=${encodeURIComponent(DateWithExtension)}` +
-          `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
+      console.log(`[iOS] Sending print via URL scheme:`, url);
+      window.location.href = url; // iOS: Launch Brother app
+    } else {
+      url = `http://localhost:8088/print?filename=${encodeURIComponent(filename)}&size=RollW62&copies=1` +
+            `&text_品番=${encodeURIComponent(品番)}` +
+            `&text_背番号=${encodeURIComponent(背番号)}` +
+            `&text_収容数=${encodeURIComponent(order)}` +
+            `&text_色=${encodeURIComponent(色)}` +
+            `&text_DateT=${encodeURIComponent(lotNo)}` +
+            `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
 
-      console.log("Sending print request:", url);
+      console.log("[Android/Desktop] Sending print request:", url);
 
       try {
-          const response = await Promise.race([
-              fetch(url).then(res => res.text()), // Fetch the print request
-              new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout: No response from printer")), 7000)) // 7s timeout
-          ]);
+        const response = await Promise.race([
+          fetch(url).then(res => res.text()),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout: No response from printer")), 7000))
+        ]);
 
-          if (response.includes("<result>SUCCESS</result>")) {
-              console.log(`Print ${i} of ${copies} successful.`);
-          } else if (response.includes("PrinterStatusErrorCoverOpen")) {
-              showPrintError("Printer Error: Cover is open.");
-              return; // Stop further printing
-          } else {
-              showPrintError("Printing failed. Please check the printer.");
-              return; // Stop further printing
-          }
+        if (response.includes("<result>SUCCESS</result>")) {
+          console.log(`Print ${i} of ${copies} successful.`);
+        } else if (response.includes("PrinterStatusErrorCoverOpen")) {
+          showPrintError("Printer Error: Cover is open.");
+          return;
+        } else {
+          showPrintError("Printing failed. Please check the printer.");
+          return;
+        }
 
-          // Short delay before sending the next print job
-          await new Promise(resolve => setTimeout(resolve, 2000));
-
+        await new Promise(resolve => setTimeout(resolve, 2000));
       } catch (error) {
-          showPrintError("Printing failed. No response from printer.");
-          return; // Stop further printing
+        showPrintError("Printing failed. No response from printer.");
+        return;
       }
+    }
   }
 
   localStorage.setItem(storageKey, JSON.stringify(storedData));
 
-  // Step 2: Update MongoDB after successful print
-  console.log("All copies printed successfully. Now updating MongoDB...");
-  await updateMongoDB(品番, currentDate);
+  if (!isIOS) {
+    console.log("Updating MongoDB after Android/Desktop printing...");
+    await updateMongoDB(品番, currentDate);
+  }
 
-  // Hide printing status modal and show success message
   printingStatusModal.style.display = 'none';
-  console.log("All copies printed successfully.");
   document.getElementById('printCompletionModal').style.display = 'block';
 }
 
@@ -1386,4 +1496,108 @@ async function updateMongoDB(品番, currentDate) {
 
 
 
+
+// Reprint modal functionality
+// Open modal on button click
+// Device detection helper
+function isIOSDevice() {
+  const ua = navigator.userAgent.toLowerCase();
+  return /iphone|ipad|ipod/.test(ua);
+}
+
+// Open modal on button click
+document.getElementById('reprintButton').addEventListener('click', () => {
+  const 品番 = document.getElementById("品名").value;
+  const storageKey = `${uniquePrefix}${品番}`;
+  const lotSuffixSelect = document.getElementById('suffixSelector');
+  const reprintModal = document.getElementById('reprintModal');
+
+  lotSuffixSelect.innerHTML = ""; // Clear previous entries
+
+  const storedData = JSON.parse(localStorage.getItem(storageKey));
+  if (storedData && storedData.extension && storedData.date) {
+    for (let i = 1; i <= storedData.extension; i++) {
+      const suffix = `${storedData.date}-${i}`;
+      const option = document.createElement('option');
+      option.value = suffix;
+      option.textContent = `${storedData.date}- ${i}`;
+      lotSuffixSelect.appendChild(option);
+    }
+    reprintModal.style.display = 'block';
+  } else {
+    alert("No previous labels found for this 品番.");
+  }
+});
+
+// Close modal
+document.getElementById('closeReprintModal').addEventListener('click', () => {
+  document.getElementById('reprintModal').style.display = 'none';
+});
+
+// Confirm and execute reprint
+document.getElementById('confirmReprintButton').addEventListener('click', async () => {
+  const selectedSuffix = document.getElementById('suffixSelector').value;
+  const 背番号 = document.getElementById("材料背番号").value;
+  const 品番 = document.getElementById("品名").value;
+  const 色 = document.getElementById("material-color").value;
+  const length = document.getElementById("length").value;
+  const order = document.getElementById("order").value;
+
+  const 品番収容数 = `${背番号},${selectedSuffix},${length}`;
+  const isIOS = isIOSDevice();
+
+  let filename = "";
+  if (typeof SRS !== "undefined" && SRS === "有り") {
+    filename = "SRS3.lbx";
+  } else if (背番号 === "NC2") {
+    filename = "NC21.lbx";
+  } else {
+    filename = "firstkojo3.lbx";
+  }
+
+  const size = "RollW62";
+
+  if (isIOS) {
+    const url =
+      `brotherwebprint://print?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent(size)}&copies=1` +
+      `&text_品番=${encodeURIComponent(品番)}` +
+      `&text_背番号=${encodeURIComponent(背番号)}` +
+      `&text_収容数=${encodeURIComponent(order)}` +
+      `&text_色=${encodeURIComponent(色)}` +
+      `&text_DateT=${encodeURIComponent(selectedSuffix)}` +
+      `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
+
+    console.log("[iOS] Reprinting label:", url);
+    window.location.href = url;
+
+  } else {
+    const url =
+      `http://localhost:8088/print?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent(size)}&copies=1` +
+      `&text_品番=${encodeURIComponent(品番)}` +
+      `&text_背番号=${encodeURIComponent(背番号)}` +
+      `&text_収容数=${encodeURIComponent(order)}` +
+      `&text_色=${encodeURIComponent(色)}` +
+      `&text_DateT=${encodeURIComponent(selectedSuffix)}` +
+      `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
+
+    console.log("[Android/Desktop] Reprinting label:", url);
+
+    try {
+      const response = await Promise.race([
+        fetch(url).then(res => res.text()),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout: No response from printer")), 7000))
+      ]);
+
+      if (response.includes("<result>SUCCESS</result>")) {
+        alert("✅ Reprint successful.");
+      } else {
+        alert("❌ Reprint failed: Printer error.");
+      }
+    } catch (err) {
+      alert("❌ Reprint failed: No response from printer.");
+    }
+  }
+
+  document.getElementById('reprintModal').style.display = 'none';
+});
 

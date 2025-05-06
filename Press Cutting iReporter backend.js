@@ -1751,62 +1751,63 @@ function printLabel() {
 }
 
 
-// Hidase style print label
-function printLabelHidase() {
-  const selectedSeBanggo = document.getElementById("product-number").value;
-  const selectedFactory = document.getElementById("selected工場").value;
+// // Hidase style print label
+// function printLabelHidase() {
+//   const selectedSeBanggo = document.getElementById("product-number").value;
+//   const selectedFactory = document.getElementById("selected工場").value;
 
-  if (selectedFactory !== "肥田瀬") {
-    console.warn("Not in 肥田瀬 factory. Printing normally...");
-    return;
-  }
+//   if (selectedFactory !== "肥田瀬") {
+//     console.warn("Not in 肥田瀬 factory. Printing normally...");
+//     return;
+//   }
 
-  fetch(`${serverURL}/getCapacityBySeBanggo?seBanggo=${selectedSeBanggo}`)
-    .then(response => response.json())
-    .then(data => {
-      if (data.length > 1) {
-        // Multiple capacity options exist, show selection modal
-        showCapacitySelectionModal(data);
-      } else if (data.length === 1) {
-        // Only one capacity, auto-select and proceed
-        document.getElementById('収容数').value = data[0].収容数;
-        showLabelTypeSelection();
-      } else {
-        alert('No data found for the selected 品番');
-      }
-    })
-    .catch(error => console.error('Error fetching 収容数:', error));
-}
+//   fetch(`${serverURL}/getCapacityBySeBanggo?seBanggo=${selectedSeBanggo}`)
+//     .then(response => response.json())
+//     .then(data => {
+//       if (data.length > 1) {
+//         // Multiple capacity options exist, show selection modal
+//         showCapacitySelectionModal(data);
+//       } else if (data.length === 1) {
+//         // Only one capacity, auto-select and proceed
+//         document.getElementById('収容数').value = data[0].収容数;
+//         showLabelTypeSelection();
+//       } else {
+//         alert('No data found for the selected 品番');
+//       }
+//     })
+//     .catch(error => console.error('Error fetching 収容数:', error));
+// }
 
-// Show modal to let user choose a 収容数 (uses existing #modal)
-function showCapacitySelectionModal(data) {
-  const modal = document.getElementById("modal");
-  const modalOptions = document.getElementById("modal-options");
-  const modalCloseButton = document.getElementById("modal-close");
+// // Show modal to let user choose a 収容数 (uses existing #modal)
+// function showCapacitySelectionModal(data) {
+//   const modal = document.getElementById("modal");
+//   const modalOptions = document.getElementById("modal-options");
+//   const modalCloseButton = document.getElementById("modal-close");
 
-  // Clear previous options
-  modalOptions.innerHTML = '<p>収容数を選んでください / Please choose the quantity:</p>';
+//   // Clear previous options
+//   modalOptions.innerHTML = '<p>収容数を選んでください / Please choose the quantity:</p>';
 
-  data.forEach((item) => {
-    const option = document.createElement('button');
-    option.classList.add('modal-option');
-    option.textContent = `収容数: ${item.収容数}`;
-    option.dataset.value = item.収容数;
-    option.onclick = (e) => {
-      document.getElementById('収容数').value = e.target.dataset.value;
-      modal.style.display = "none";
-      showLabelTypeSelection();
-    };
-    modalOptions.appendChild(option);
-  });
+//   data.forEach((item) => {
+//     const option = document.createElement('button');
+//     option.classList.add('modal-option');
+//     option.textContent = `収容数: ${item.収容数}`;
+//     option.dataset.value = item.収容数;
+//     option.onclick = (e) => {
+//       document.getElementById('収容数').value = e.target.dataset.value;
+//       modal.style.display = "none";
+//       showLabelTypeSelection();
+//     };
+//     modalOptions.appendChild(option);
+//   });
 
-  modal.style.display = "block";
+//   modal.style.display = "block";
 
-  // Close modal on close button click
-  modalCloseButton.onclick = () => {
-    modal.style.display = "none";
-  };
-}
+//   // Close modal on close button click
+//   modalCloseButton.onclick = () => {
+//     modal.style.display = "none";
+//   };
+// }
+
 
 // // Show modal to choose between BOX or PRODUCT label (uses existing #modal)
 // function showLabelTypeSelection() {
@@ -1821,14 +1822,14 @@ function showCapacitySelectionModal(data) {
 //   buttonBox.innerText = 'For BOX / 外用';
 //   buttonBox.onclick = () => {
 //     modal.style.display = "none";
-//     showCopiesPrompt('hidaselabel5.lbx');
+//     showCopiesPrompt('hidaselabel5.lbx', false); // Pass `false` to indicate no modification
 //   };
 
 //   const buttonProduct = document.createElement('button');
 //   buttonProduct.innerText = 'For Product / 製品用';
 //   buttonProduct.onclick = () => {
 //     modal.style.display = "none";
-//     showCopiesPrompt('hidaselabel6inner.lbx');
+//     showCopiesPrompt('hidaselabel6inner.lbx', true); // Pass `true` to indicate modification
 //   };
 
 //   modalOptions.appendChild(buttonBox);
@@ -1843,15 +1844,22 @@ function showCapacitySelectionModal(data) {
 // }
 
 // // Show modal to select number of copies and print (uses existing #modal)
-// //Hidase style choose quantity of print
-// function showCopiesPrompt(filename) {
-//   const 品番 = document.getElementById("product-number").value;
+// // Hidase style choose quantity of print
+// function showCopiesPrompt(filename, modifyHinban) {
+//   let 品番 = document.getElementById("product-number").value;
 //   const 収容数 = document.getElementById("収容数").value;
 //   const R_L = document.getElementById("R-L").value;
-//   const 品番収容数 = `${品番},${収容数}`;
 //   const extension = document.getElementById("Labelextension").value;
 //   const Date2 = document.getElementById('Lot No.').value;
-//   let Date = extension ? `${Date2} - ${extension}` : Date2;
+//   const selectedFactory = document.getElementById("selected工場").value;
+
+//   // Apply special condition for 肥田瀬 and 品番 "146696-5630ESH-5"
+//   if (selectedFactory === "肥田瀬" && 品番 === "146696-5630ESH-5" && modifyHinban) {
+//     品番 = "146696-5630"; // Remove "ESH-5" for Product / 製品用
+//   }
+
+//   const 品番収容数 = `${品番},${収容数}`;
+//   const Date = extension ? `${Date2} - ${extension}` : Date2;
 
 //   const modal = document.getElementById("modal");
 //   const modalOptions = document.getElementById("modal-options");
@@ -1943,151 +1951,139 @@ function showCapacitySelectionModal(data) {
 //   };
 // }
 
-// Show modal to choose between BOX or PRODUCT label (uses existing #modal)
-function showLabelTypeSelection() {
-  const modal = document.getElementById("modal");
-  const modalOptions = document.getElementById("modal-options");
-  const modalCloseButton = document.getElementById("modal-close");
 
-  // Update modal content
-  modalOptions.innerHTML = '<p>Choose label type: For BOX / 外用 or For Product / 製品用</p>';
 
-  const buttonBox = document.createElement('button');
-  buttonBox.innerText = 'For BOX / 外用';
-  buttonBox.onclick = () => {
-    modal.style.display = "none";
-    showCopiesPrompt('hidaselabel5.lbx', false); // Pass `false` to indicate no modification
-  };
-
-  const buttonProduct = document.createElement('button');
-  buttonProduct.innerText = 'For Product / 製品用';
-  buttonProduct.onclick = () => {
-    modal.style.display = "none";
-    showCopiesPrompt('hidaselabel6inner.lbx', true); // Pass `true` to indicate modification
-  };
-
-  modalOptions.appendChild(buttonBox);
-  modalOptions.appendChild(buttonProduct);
-
-  modal.style.display = "block";
-
-  // Close modal on close button click
-  modalCloseButton.onclick = () => {
-    modal.style.display = "none";
-  };
-}
-
-// Show modal to select number of copies and print (uses existing #modal)
-// Hidase style choose quantity of print
-function showCopiesPrompt(filename, modifyHinban) {
-  let 品番 = document.getElementById("product-number").value;
-  const 収容数 = document.getElementById("収容数").value;
-  const R_L = document.getElementById("R-L").value;
-  const extension = document.getElementById("Labelextension").value;
-  const Date2 = document.getElementById('Lot No.').value;
+async function printLabelHidase() {
   const selectedFactory = document.getElementById("selected工場").value;
+  const 品番Raw = document.getElementById("product-number").value;
 
-  // Apply special condition for 肥田瀬 and 品番 "146696-5630ESH-5"
-  if (selectedFactory === "肥田瀬" && 品番 === "146696-5630ESH-5" && modifyHinban) {
-    品番 = "146696-5630"; // Remove "ESH-5" for Product / 製品用
+  if (selectedFactory !== "肥田瀬") {
+    console.warn("Not in 肥田瀬 factory. Printing normally...");
+    return;
   }
 
-  const 品番収容数 = `${品番},${収容数}`;
-  const Date = extension ? `${Date2} - ${extension}` : Date2;
+  try {
+    const response = await fetch(`${serverURL}/getCapacityBySeBanggo?seBanggo=${encodeURIComponent(品番Raw)}`);
+    const data = await response.json();
 
-  const modal = document.getElementById("modal");
-  const modalOptions = document.getElementById("modal-options");
-  const modalCloseButton = document.getElementById("modal-close");
-
-  modalOptions.innerHTML = '<p>Select number of copies:</p>';
-
-  // Wrapper for input and buttons
-  const copiesDisplay = document.createElement('div');
-  copiesDisplay.className = 'modal-copies-control';
-
-  // Minus Button
-  const minusButton = document.createElement('button');
-  minusButton.innerText = '-';
-  minusButton.type = "button";
-  minusButton.onclick = (event) => {
-    event.preventDefault();
-    const current = parseInt(copiesInput.value, 10) || 1;
-    if (current > 1) {
-      copiesInput.value = current - 1;
-    }
-  };
-
-  // Input field
-  const copiesInput = document.createElement('input');
-  copiesInput.type = 'number';
-  copiesInput.min = '1';
-  copiesInput.step = '1';
-  copiesInput.value = '1';
-  copiesInput.style.width = '60px';
-  copiesInput.style.textAlign = 'center';
-
-  // Prevent invalid input (non-integer, negatives, etc.)
-  copiesInput.oninput = () => {
-    let value = copiesInput.value;
-    if (!/^\d+$/.test(value)) {
-      copiesInput.value = value.replace(/\D/g, '');
-    }
-    if (copiesInput.value === '' || parseInt(copiesInput.value, 10) < 1) {
-      copiesInput.value = '1';
-    }
-  };
-
-  // Plus Button
-  const plusButton = document.createElement('button');
-  plusButton.innerText = '+';
-  plusButton.type = "button";
-  plusButton.onclick = (event) => {
-    event.preventDefault();
-    const current = parseInt(copiesInput.value, 10) || 1;
-    copiesInput.value = current + 1;
-  };
-
-  // Append controls
-  copiesDisplay.appendChild(minusButton);
-  copiesDisplay.appendChild(copiesInput);
-  copiesDisplay.appendChild(plusButton);
-  modalOptions.appendChild(copiesDisplay);
-
-  // Confirm Button
-  const confirmButton = document.createElement('button');
-  confirmButton.innerText = 'Confirm';
-  confirmButton.type = "button";
-  confirmButton.onclick = () => {
-    const copies = parseInt(copiesInput.value, 10);
-    if (isNaN(copies) || copies < 1) {
-      alert('Please enter a valid number of copies (integer > 0)');
+    if (data.length === 0) {
+      alert("No data found for the selected 品番");
       return;
     }
 
-    const url =
-      `brotherwebprint://print?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent("RollW62")}&copies=${encodeURIComponent(copies)}` +
-      `&text_品番=${encodeURIComponent(品番)}` +
-      `&text_収容数=${encodeURIComponent(収容数)}` +
-      `&text_DateT=${encodeURIComponent(Date)}` +
-      `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
+    let lowValue = data[0].収容数;
+    let highValue = data[0].収容数;
 
-    console.log("Printing:", url);
-    window.location.href = url;
-    modal.style.display = "none";
-  };
+    if (data.length > 1) {
+      const values = data.map(item => parseInt(item.収容数, 10));
+      lowValue = Math.min(...values);
+      highValue = Math.max(...values);
+    }
 
-  modalOptions.appendChild(confirmButton);
+    showHidaseLabelButtons({
+      品番: 品番Raw,
+      収容数Low: lowValue,
+      収容数High: highValue
+    });
 
-  modal.style.display = "block";
-
-  modalCloseButton.onclick = () => {
-    modal.style.display = "none";
-  };
+  } catch (error) {
+    console.error('Error fetching 収容数:', error);
+  }
 }
 
+function showHidaseLabelButtons({ 品番, 収容数Low, 収容数High }) {
+  const container = document.getElementById("hidase-label-buttons");
+  container.innerHTML = ''; // Clear old buttons
 
+  const extension = document.getElementById("Labelextension").value;
+  const dateRaw = document.getElementById('Lot No.').value;
+  const date = extension ? `${dateRaw} - ${extension}` : dateRaw;
 
+  // Create BOX button
+  const boxButton = document.createElement('button');
+  boxButton.innerText = `Print BOX Label / 外用 (${収容数High})`;
+  boxButton.onclick = () => {
+    printHidaseLabel({
+      品番,
+      収容数: 収容数High,
+      filename: 'hidaselabel5.lbx',
+      modifyHinban: false,
+      date
+    });
+  };
 
+  // Create PRODUCT button
+  const productButton = document.createElement('button');
+  productButton.innerText = `Print Product Label / 製品用 (${収容数Low})`;
+  productButton.onclick = () => {
+    printHidaseLabel({
+      品番,
+      収容数: 収容数Low,
+      filename: 'hidaselabel6inner.lbx',
+      modifyHinban: true,
+      date
+    });
+  };
+
+  container.appendChild(boxButton);
+  container.appendChild(productButton);
+}
+
+async function printHidaseLabel({ 品番, 収容数, filename, modifyHinban, date }) {
+  const selectedFactory = document.getElementById("selected工場").value;
+
+  // Special Hinban modification
+  if (selectedFactory === "肥田瀬" && 品番 === "146696-5630ESH-5" && modifyHinban) {
+    品番 = "146696-5630";
+  }
+
+  const 品番収容数 = `${品番},${収容数}`;
+  const size = "RollW62";
+
+  const url =
+    `http://localhost:8088/print?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent(size)}&copies=1` +
+    `&text_品番=${encodeURIComponent(品番)}` +
+    `&text_収容数=${encodeURIComponent(収容数)}` +
+    `&text_DateT=${encodeURIComponent(date)}` +
+    `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
+
+  console.log("Sending print request:", url);
+
+  try {
+    const response = await Promise.race([
+      fetch(url).then(res => res.text()),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout after 7 seconds")), 7000))
+    ]);
+
+    if (response.includes("<result>SUCCESS</result>")) {
+      console.log("Print success.");
+      flashGreen(); // Blink green on success
+    } else {
+      alert("Printing failed. Check printer status.");
+    }
+  } catch (error) {
+    alert("Error: " + error.message);
+  }
+}
+
+// Function to flash the background green
+function flashGreen() {
+  const body = document.body;
+
+  // Remove class if it already exists to restart animation
+  body.classList.remove("flash-green");
+
+  // Trigger reflow to reset the animation
+  void body.offsetWidth;
+
+  // Add the class to start animation
+  body.classList.add("flash-green");
+
+  // Optional: remove class after animation ends
+  setTimeout(() => {
+    body.classList.remove("flash-green");
+  }, 500); // match the duration of your animation
+}
 
 
 
