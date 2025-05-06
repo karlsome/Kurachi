@@ -2001,6 +2001,7 @@ function showHidaseLabelButtons({ 品番, 収容数Low, 収容数High }) {
 
   // Create BOX button
   const boxButton = document.createElement('button');
+  boxButton.type = "button"; // Prevent form submission
   boxButton.innerText = `Print BOX Label / 外用 (${収容数High})`;
   boxButton.onclick = () => {
     printHidaseLabel({
@@ -2014,6 +2015,7 @@ function showHidaseLabelButtons({ 品番, 収容数Low, 収容数High }) {
 
   // Create PRODUCT button
   const productButton = document.createElement('button');
+  productButton.type = "button"; // Prevent form submission
   productButton.innerText = `Print Product Label / 製品用 (${収容数Low})`;
   productButton.onclick = () => {
     printHidaseLabel({
@@ -2029,6 +2031,8 @@ function showHidaseLabelButtons({ 品番, 収容数Low, 収容数High }) {
   container.appendChild(productButton);
 }
 
+
+// Function to print the label using Smooth Print
 async function printHidaseLabel({ 品番, 収容数, filename, modifyHinban, date }) {
   const selectedFactory = document.getElementById("selected工場").value;
 
@@ -2040,8 +2044,13 @@ async function printHidaseLabel({ 品番, 収容数, filename, modifyHinban, dat
   const 品番収容数 = `${品番},${収容数}`;
   const size = "RollW62";
 
+  // Determine base URL depending on platform
+  const baseURL = isIOS()
+    ? "brotherwebprint://print"
+    : "http://localhost:8088/print";
+
   const url =
-    `http://localhost:8088/print?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent(size)}&copies=1` +
+    `${baseURL}?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent(size)}&copies=1` +
     `&text_品番=${encodeURIComponent(品番)}` +
     `&text_収容数=${encodeURIComponent(収容数)}` +
     `&text_DateT=${encodeURIComponent(date)}` +
@@ -2049,6 +2058,13 @@ async function printHidaseLabel({ 品番, 収容数, filename, modifyHinban, dat
 
   console.log("Sending print request:", url);
 
+  // On iOS, use location.href to launch brotherwebprint
+  if (isIOS()) {
+    window.location.href = url;
+    return;
+  }
+
+  // Android or desktop: use fetch to send request
   try {
     const response = await Promise.race([
       fetch(url).then(res => res.text()),
@@ -2057,7 +2073,7 @@ async function printHidaseLabel({ 品番, 収容数, filename, modifyHinban, dat
 
     if (response.includes("<result>SUCCESS</result>")) {
       console.log("Print success.");
-      flashGreen(); // Blink green on success
+      flashGreen();
     } else {
       alert("Printing failed. Check printer status.");
     }
@@ -2312,3 +2328,11 @@ document.addEventListener("DOMContentLoaded", function () {
     processLink.href = `machine.html?selected=${encodeURIComponent(selectedFactory)}`;
   }
 });
+
+function isIOS() {
+  return /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+}
+
+function isAndroid() {
+  return /Android/.test(navigator.userAgent);
+}
