@@ -4,6 +4,7 @@ if (process.env.NODE_ENV !== "production") {
 const express = require("express");
 const cors = require("cors"); // Import CORS
 const { MongoClient, ServerApiVersion } = require("mongodb");
+const { ObjectId } = require("mongodb");
 
 const app = express();
 const port = 3000;
@@ -1938,12 +1939,15 @@ app.post("/saveScannedQRData", async (req, res) => {
 
 
 
+
+
+// // Dynamic query where it can receive query, aggregation pipeline, insertData and updateData
 // app.post('/queries', async (req, res) => {
-//   console.log("🟢 Received POST request to /query");
-//   const { dbName, collectionName, query, aggregation } = req.body;
-  
+//   console.log("🟢 Received POST request to /queries");
+//   const { dbName, collectionName, query, aggregation, insertData, update, delete: deleteFlag, username } = req.body;
+
 //   try {
-//     console.log("Received Request:", { dbName, collectionName, query, aggregation });
+//     console.log("Received Request:", { dbName, collectionName, query, aggregation, insertData, update, deleteFlag, username });
 
 //     await client.connect();
 //     const database = client.db(dbName);
@@ -1951,30 +1955,85 @@ app.post("/saveScannedQRData", async (req, res) => {
 
 //     let results;
 
+//     if (insertData) {
+//       // 🔵 INSERT logic
+//       console.log("🔵 Inserting data into MongoDB...");
+//       const insertResult = await collection.insertMany(insertData);
+//       console.log(`✅ Successfully inserted ${insertResult.insertedCount} records.`);
+//       res.json({ message: "Data inserted successfully", insertedCount: insertResult.insertedCount });
+//       return;
+//     }
+
+//     if (update) {
+//       // 🟠 UPDATE logic
+//       console.log("🟠 Updating MongoDB document...");
+//       const updateResult = await collection.updateOne(query, update);
+//       console.log(`✅ Successfully updated ${updateResult.modifiedCount} records.`);
+//       res.json({ message: "Data updated successfully", modifiedCount: updateResult.modifiedCount });
+//       return;
+//     }
+
+//     if (deleteFlag) {
+//       // 🔴 ARCHIVE instead of DELETE
+//       if (!username) {
+//         res.status(400).json({ error: "Username is required when attempting to delete (archive) data." });
+//         return;
+//       }
+
+//       console.log(`🔴 User "${username}" requested to archive matching documents...`);
+
+//       const docsToArchive = await collection.find(query).toArray();
+
+//       if (docsToArchive.length === 0) {
+//         res.json({ message: "No documents found to archive." });
+//         return;
+//       }
+
+//       const archiveCollection = database.collection(`${collectionName}_archives`);
+//       const archivedDocs = docsToArchive.map(doc => ({
+//         ...doc,
+//         _originalId: doc._id,
+//         deletedBy: username,
+//         deletedAt: new Date(),
+//       }));
+
+//       await archiveCollection.insertMany(archivedDocs);
+//       const deleteResult = await collection.deleteMany(query);
+
+//       console.log(`✅ Archived ${archivedDocs.length} docs by "${username}" and deleted ${deleteResult.deletedCount} from original.`);
+//       res.json({
+//         message: "Documents archived instead of deleted.",
+//         archivedCount: archivedDocs.length,
+//         deletedFromOriginal: deleteResult.deletedCount,
+//         archivedBy: username
+//       });
+//       return;
+//     }
+
 //     if (aggregation) {
-//       console.log("Running Aggregation Pipeline...");
+//       // 🔵 Aggregation Query
+//       console.log("🔵 Running Aggregation Pipeline...");
 //       results = await collection.aggregate(aggregation).toArray();
 //     } else {
-//       console.log("Running Find Query...");
+//       // 🔵 Find Query
+//       console.log("🔵 Running Find Query...");
 //       results = await collection.find(query).toArray();
 //     }
 
-//     console.log("Query Results:", JSON.stringify(results, null, 2)); // Logs formatted JSON data
+//     console.log("✅ Query Results:", JSON.stringify(results, null, 2));
 //     res.json(results);
 //   } catch (error) {
-//     console.error("Error executing query:", error);
+//     console.error("❌ Error executing query:", error);
 //     res.status(500).json({ error: "Error executing query" });
-//   }
+//   } 
 // });
 
-
-//Dynamic query where it can receive query, aggregation pipeline, insertData and updateData
 app.post('/queries', async (req, res) => {
   console.log("🟢 Received POST request to /queries");
-  const { dbName, collectionName, query, aggregation, insertData, update } = req.body;
+  const { dbName, collectionName, query, aggregation, insertData, update, delete: deleteFlag, username } = req.body;
 
   try {
-    console.log("Received Request:", { dbName, collectionName, query, aggregation, insertData, update });
+    console.log("Received Request:", { dbName, collectionName, query, aggregation, insertData, update, deleteFlag, username });
 
     await client.connect();
     const database = client.db(dbName);
@@ -1992,11 +2051,57 @@ app.post('/queries', async (req, res) => {
     }
 
     if (update) {
-      // 🔵 UPDATE logic (update existing document)
+      // 🟠 UPDATE logic
       console.log("🟠 Updating MongoDB document...");
       const updateResult = await collection.updateOne(query, update);
       console.log(`✅ Successfully updated ${updateResult.modifiedCount} records.`);
       res.json({ message: "Data updated successfully", modifiedCount: updateResult.modifiedCount });
+      return;
+    }
+
+    if (deleteFlag) {
+      // 🔴 ARCHIVE instead of DELETE
+      if (!username) {
+        res.status(400).json({ error: "Username is required when attempting to delete (archive) data." });
+        return;
+      }
+
+      // ✅ Convert _id to ObjectId if necessary
+      if (query && query._id && typeof query._id === "string") {
+        try {
+          query._id = new ObjectId(query._id);
+        } catch (err) {
+          return res.status(400).json({ error: "Invalid _id format for deletion." });
+        }
+      }
+
+      console.log(`🔴 User "${username}" requested to archive matching documents...`);
+
+      const docsToArchive = await collection.find(query).toArray();
+
+      if (docsToArchive.length === 0) {
+        res.json({ message: "No documents found to archive." });
+        return;
+      }
+
+      const archiveCollection = database.collection(`${collectionName}_archives`);
+      const archivedDocs = docsToArchive.map(doc => ({
+        ...doc,
+        _originalId: doc._id,
+        deletedBy: username,
+        deletedAt: new Date(),
+      }));
+
+      await archiveCollection.insertMany(archivedDocs);
+      const deleteResult = await collection.deleteMany(query);
+
+      console.log(`✅ Archived ${archivedDocs.length} docs by "${username}" and deleted ${deleteResult.deletedCount} from original.`);
+      res.json({
+        message: "Documents archived instead of deleted.",
+        archivedCount: archivedDocs.length,
+        deletedFromOriginal: deleteResult.deletedCount,
+        archivedBy: username
+      });
       return;
     }
 
@@ -2015,8 +2120,10 @@ app.post('/queries', async (req, res) => {
   } catch (error) {
     console.error("❌ Error executing query:", error);
     res.status(500).json({ error: "Error executing query" });
-  }
+  } 
 });
+
+
 
 // For Inventory app
 app.post('/inventoryChat', async (req, res) => {
@@ -2045,6 +2152,110 @@ app.post('/inventoryChat', async (req, res) => {
     }
   } catch (error) {
     res.status(500).json({ message: 'Internal server error', error: error.message });
+  }
+});
+
+
+const bcrypt = require("bcryptjs");
+
+// Login endpoint
+app.post("/login", async (req, res) => {
+  const { username, password } = req.body;
+
+  try {
+    await client.connect();
+    const db = client.db("Sasaki_Coating_MasterDB");
+    const users = db.collection("users");
+
+    const user = await users.findOne({ username });
+    if (!user) {
+      return res.status(401).json({ error: "User not found" });
+    }
+
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
+
+    res.json({ username: user.username, role: user.role });
+  } catch (err) {
+    console.error("Login error:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+
+app.post("/createUser", async (req, res) => {
+  const { firstName, lastName, email, username, password, role } = req.body;
+
+  // Validate all required fields
+  if (!firstName || !lastName || !email || !username || !password || !role) {
+    return res.status(400).json({ error: "All fields are required" });
+  }
+  
+
+  try {
+    await client.connect();
+    const db = client.db("Sasaki_Coating_MasterDB");
+    const users = db.collection("users");
+
+    // Check if username already exists
+    const existing = await users.findOne({ username });
+    if (existing) return res.status(400).json({ error: "Username already exists" });
+
+    // Hash the password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Insert full user object
+    await users.insertOne({
+      firstName,
+      lastName,
+      email,
+      username,
+      password: hashedPassword,
+      role
+    });
+    console.log("Received new user:", req.body);
+
+    res.json({ message: "User created successfully" });
+  } catch (err) {
+    console.error("Error creating user:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+app.post("/updateUser", async (req, res) => {
+  const { userId, firstName, lastName, email, role } = req.body;
+
+  if (!userId || !role) {
+    return res.status(400).json({ error: "User ID and role are required" });
+  }
+
+  try {
+    await client.connect();
+    const db = client.db("Sasaki_Coating_MasterDB");
+    const users = db.collection("users");
+
+    const updateFields = {
+      ...(firstName && { firstName }),
+      ...(lastName && { lastName }),
+      ...(email && { email }),
+      ...(role && { role })
+    };
+
+    const result = await users.updateOne(
+      { _id: new ObjectId(userId) },
+      { $set: updateFields }
+    );
+
+    if (result.modifiedCount === 0) {
+      return res.status(404).json({ error: "User not found or no changes made" });
+    }
+
+    res.json({ message: "User updated successfully" });
+  } catch (err) {
+    console.error("Error updating user:", err);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
