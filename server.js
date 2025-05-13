@@ -2,6 +2,7 @@ if (process.env.NODE_ENV !== "production") {
   require("dotenv").config();
 }
 const express = require("express");
+const bodyParser = require('body-parser');
 const cors = require("cors"); // Import CORS
 const { MongoClient, ServerApiVersion } = require("mongodb");
 const { ObjectId } = require("mongodb");
@@ -9,9 +10,16 @@ const { ObjectId } = require("mongodb");
 const app = express();
 const port = 3000;
 
+
+
+
+
 // Enable CORS for all requests
 app.use(cors());
-app.use(express.json()); // Middleware to parse JSON bodies
+//app.use(express.json()); // Middleware to parse JSON bodies
+
+app.use(express.json({ limit: '50mb' })); // or higher if needed
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 const uri = process.env.MONGODB_URI;
 const client = new MongoClient(uri, {
@@ -21,6 +29,59 @@ const client = new MongoClient(uri, {
     deprecationErrors: true,
   },
 });
+
+
+
+
+//Firebase Storage
+const admin = require('firebase-admin');
+
+// Option 1: Using the entire private key from an environment variable
+const serviceAccount = {
+  type: 'service_account',
+  project_id: process.env.FIREBASE_PROJECT_ID,
+  private_key: process.env.FIREBASE_PRIVATE_KEY ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n') : undefined, // Handle escaped newlines
+  client_email: process.env.FIREBASE_CLIENT_EMAIL,
+  client_id: process.env.FIREBASE_CLIENT_ID,
+  auth_uri: 'https://accounts.google.com/o/oauth2/auth',
+  token_uri: 'https://oauth2.googleapis.com/token',
+  auth_provider_x509_cert_url: 'https://www.googleapis.com/oauth2/v1/certs',
+  client_x509_cert_url: process.env.FIREBASE_CLIENT_X509_CERT_URL,
+};
+
+if (serviceAccount.private_key && serviceAccount.client_email) {
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+    databaseURL: `https://${process.env.FIREBASE_PROJECT_ID}.firebaseio.com`, // Optional: If you use Realtime Database
+    storageBucket: process.env.FIREBASE_STORAGE_BUCKET, // Optional: If you use Firebase Storage
+  });
+  console.log('Firebase Admin SDK initialized successfully!');
+} else if (process.env.FIREBASE_CREDENTIAL_PATH) {
+  // Option 2: Using the path to the service account key JSON file
+  admin.initializeApp({
+    credential: admin.credential.cert(process.env.FIREBASE_CREDENTIAL_PATH),
+    databaseURL: `https://${process.env.FIREBASE_PROJECT_ID}.firebaseio.com`, // Optional
+    storageBucket: process.env.FIREBASE_STORAGE_BUCKET, // Optional
+  });
+  console.log('Firebase Admin SDK initialized successfully using credential path!');
+} else {
+  console.error('Firebase Admin SDK initialization failed. Ensure either FIREBASE_PRIVATE_KEY and FIREBASE_CLIENT_EMAIL or FIREBASE_CREDENTIAL_PATH are set in your .env file.');
+}
+
+// Now you can access Firebase services via the 'admin' object
+// For example, to access the Firestore database:
+const fdb = admin.firestore();
+
+
+
+// Or Firebase Storage:
+const storage = admin.storage();
+
+
+
+
+
+
 
 //get setsubi list from mongodb
 app.get("/getSetsubiList", async (req, res) => {
@@ -139,7 +200,110 @@ app.post("/searchSebanggo", async (req, res) => {
 
 
 
-// iReporter route to submit data to pressDB
+// // iReporter route to submit data to pressDB
+// app.post("/submitTopressDBiReporter", async (req, res) => {
+//   try {
+//     await client.connect();
+
+//     const database = client.db("submittedDB");
+//     const pressDB = database.collection("pressDB");
+//     const formData = req.body;
+
+//     // Validate required fields
+//     const requiredFields = [
+//       "品番",
+//       "背番号",
+//       "設備",
+//       "Total",
+//       "工場",
+//       "Worker_Name",
+//       "Process_Quantity",
+//       "Date",
+//       "Time_start",
+//       "Time_end",
+//       "材料ロット",
+//       "疵引不良",
+//       "加工不良",
+//       "その他",
+//       "Total_NG",
+//       "Spare",
+//       "Comment",
+//       "Cycle_Time",
+//     ];
+
+//     const missingFields = requiredFields.filter(
+//       (field) => formData[field] === undefined || formData[field] === null
+//     );
+
+//     if (missingFields.length > 0) {
+//       return res.status(400).json({
+//         error: `Missing required fields: ${missingFields.join(", ")}`,
+//       });
+//     }
+
+//     // Insert form data into pressDB
+//     const result = await pressDB.insertOne(formData);
+//     if (!result.insertedId) {
+//       throw new Error("Failed to save data to slitDB");
+//     }
+
+//     res.status(201).json({
+//       message: "Data successfully saved to pressDB",
+//       insertedId: result.insertedId,
+//     });
+//   } catch (error) {
+//     console.error("Error saving data to pressDB:", error);
+//     res.status(500).json({ error: "Error saving data to pressDB" });
+//   }
+// });
+
+// app.post("/submitTopressDBiReporter", async (req, res) => {
+//   try {
+//     await client.connect();
+
+//     const database = client.db("submittedDB");
+//     const pressDB = database.collection("pressDB");
+//     const formData = req.body;
+
+//     // Extract and remove images array from formData
+//     const images = formData.images || [];
+//     delete formData.images;
+
+//     // Upload each image and store its download URL in appropriate fields
+//     const uploadedImages = {};
+
+//     for (const img of images) {
+//       const buffer = Buffer.from(img.base64, 'base64');
+//       const fileName = `${img.sebanggo}_${img.date}_${img.worker}_${img.factory}_${img.machine}_${img.label}.jpg`;
+//       const file = admin.storage().bucket().file(`CycleCheck/${img.factory}/${fileName}`);
+
+//       await file.save(buffer, {
+//         metadata: { contentType: 'image/jpeg' },
+//         public: true,
+//       });
+
+//       const publicUrl = `https://storage.googleapis.com/${file.bucket.name}/${file.name}`;
+
+//       if (img.label === '初物チェック') uploadedImages["初物チェック画像"] = publicUrl;
+//       if (img.label === '終物チェック') uploadedImages["終物チェック画像"] = publicUrl;
+//       if (img.label === '材料ラベル') uploadedImages["材料ラベル画像"] = publicUrl;
+//     }
+
+//     // Merge the image URLs into formData
+//     Object.assign(formData, uploadedImages);
+
+//     const result = await pressDB.insertOne(formData);
+
+//     res.status(201).json({
+//       message: "Data and images successfully saved to pressDB",
+//       insertedId: result.insertedId,
+//     });
+//   } catch (error) {
+//     console.error("Error saving data to pressDB:", error);
+//     res.status(500).json({ error: "Error saving data to pressDB" });
+//   }
+//});
+
 app.post("/submitTopressDBiReporter", async (req, res) => {
   try {
     await client.connect();
@@ -148,46 +312,55 @@ app.post("/submitTopressDBiReporter", async (req, res) => {
     const pressDB = database.collection("pressDB");
     const formData = req.body;
 
-    // Validate required fields
-    const requiredFields = [
-      "品番",
-      "背番号",
-      "設備",
-      "Total",
-      "工場",
-      "Worker_Name",
-      "Process_Quantity",
-      "Date",
-      "Time_start",
-      "Time_end",
-      "材料ロット",
-      "疵引不良",
-      "加工不良",
-      "その他",
-      "Total_NG",
-      "Spare",
-      "Comment",
-      "Cycle_Time",
-    ];
+    // Extract and remove base64 image data
+    const images = formData.images || [];
+    delete formData.images;
 
-    const missingFields = requiredFields.filter(
-      (field) => formData[field] === undefined || formData[field] === null
-    );
+    const labelToField = {
+      "初物チェック": "初物チェック画像",
+      "終物チェック": "終物チェック画像",
+      "材料ラベル": "材料ラベル画像",
+    };
 
-    if (missingFields.length > 0) {
-      return res.status(400).json({
-        error: `Missing required fields: ${missingFields.join(", ")}`,
+    // Upload each image and store its URL directly into the formData object
+    for (const img of images) {
+      if (!img.base64 || !img.label) continue;
+
+      const buffer = Buffer.from(img.base64, 'base64');
+      const fileName = `${img.sebanggo}_${img.date}_${img.worker}_${img.factory}_${img.machine}_${img.label}.jpg`;
+      const filePath = `CycleCheck/${img.factory}/${fileName}`;
+      const file = admin.storage().bucket().file(filePath);
+
+      // await file.save(buffer, {
+      //   metadata: { contentType: 'image/jpeg' },
+      //   public: true,
+      // });
+
+      // const publicUrl = `https://storage.googleapis.com/${file.bucket.name}/${file.name}`;
+       // Use a random token or constant token (example below)
+      const downloadToken = "masterDBToken69";
+
+      await file.save(buffer, {
+        metadata: {
+          contentType: "image/jpeg",
+          metadata: {
+            firebaseStorageDownloadTokens: downloadToken
+          }
+        }
       });
+
+      // ✅ Firebase-style URL (supports preview/download with token)
+      const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${file.bucket.name}/o/${encodeURIComponent(file.name)}?alt=media&token=${downloadToken}`;
+
+      // Use predefined field name or fallback
+      const fieldName = labelToField[img.label] || `${img.label}画像`;
+      formData[fieldName] = publicUrl;
     }
 
-    // Insert form data into pressDB
     const result = await pressDB.insertOne(formData);
-    if (!result.insertedId) {
-      throw new Error("Failed to save data to slitDB");
-    }
 
     res.status(201).json({
-      message: "Data successfully saved to pressDB",
+      message: "Data and images successfully saved to pressDB",
       insertedId: result.insertedId,
     });
   } catch (error) {
@@ -195,7 +368,6 @@ app.post("/submitTopressDBiReporter", async (req, res) => {
     res.status(500).json({ error: "Error saving data to pressDB" });
   }
 });
-
 
 
 
@@ -2259,6 +2431,188 @@ app.post("/updateUser", async (req, res) => {
   }
 });
 
+
+
+
+
+
+app.post('/saveImageURL', async (req, res) => {
+  const { imageUrl, label, factory, machine, worker, date, sebanggo } = req.body;
+
+  try {
+    await client.connect();
+    const database = client.db("submittedDB"); // Use the correct DB name as a string
+    const imageUploads = database.collection('imageUploads'); // Correct reference to the collection
+
+    await imageUploads.insertOne({
+      imageUrl,
+      label,
+      factory,
+      machine,
+      worker,
+      date,
+      sebanggo,
+      uploadedAt: new Date()
+    });
+
+    res.json({ status: 'success' });
+  } catch (err) {
+    console.error("Error saving image URL:", err);
+    res.status(500).json({ status: 'error', error: err.message });
+  }
+});
+
+
+//updates masterDB
+app.post("/updateMasterRecord", async (req, res) => {
+  const { recordId, updates, username } = req.body;
+
+  if (!recordId || !updates || !username) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+
+  try {
+    await client.connect();
+    const db = client.db("Sasaki_Coating_MasterDB");
+    const masterColl = db.collection("masterDB");
+    const logColl = db.collection("masterDB_Log");
+
+    const objectId = new ObjectId(recordId);
+
+    // Fetch old record
+    const oldRecord = await masterColl.findOne({ _id: objectId });
+    if (!oldRecord) {
+      return res.status(404).json({ error: "Record not found" });
+    }
+
+    // Perform update
+    const updateResult = await masterColl.updateOne(
+      { _id: objectId },
+      { $set: updates }
+    );
+
+    if (updateResult.modifiedCount === 0) {
+      return res.status(304).json({ message: "No changes made" });
+    }
+
+    // Log the change
+    await logColl.insertOne({
+      _id: new ObjectId(),
+      masterId: objectId,
+      username,
+      timestamp: new Date(Date.now() + 9 * 60 * 60 * 1000), // JST = UTC + 9 hours
+      oldData: oldRecord,
+      newData: updates
+    });
+
+    res.json({ success: true, modifiedCount: updateResult.modifiedCount });
+  } catch (err) {
+    console.error("Update failed:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+
+//this uploads or updates the image in the masterDB mongoDB
+app.post("/uploadMasterImage", async (req, res) => {
+  const { base64, label, recordId, username } = req.body;
+
+  if (!base64 || !recordId || !username) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+
+  try {
+    await client.connect();
+    const db = client.db("Sasaki_Coating_MasterDB");
+    const masterDB = db.collection("masterDB");
+    const logColl = db.collection("masterDB_Log");
+
+    const objectId = new ObjectId(recordId);
+    const oldRecord = await masterDB.findOne({ _id: objectId });
+
+    if (!oldRecord) {
+      return res.status(404).json({ error: "Record not found" });
+    }
+
+    const 品番 = oldRecord["品番"] || "unknownPart";
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const fileName = `${品番}.jpg`;
+    const filePath = `masterImage/${fileName}`;
+    const file = admin.storage().bucket().file(filePath);
+
+    const buffer = Buffer.from(base64, "base64");
+
+    // Use a random token or constant token (example below)
+    const downloadToken = "masterDBToken69";
+
+    await file.save(buffer, {
+      metadata: {
+        contentType: "image/jpeg",
+        metadata: {
+          firebaseStorageDownloadTokens: downloadToken
+        }
+      }
+    });
+
+    // ✅ Firebase-style URL (supports preview/download with token)
+    const firebaseUrl = `https://firebasestorage.googleapis.com/v0/b/${file.bucket.name}/o/${encodeURIComponent(file.name)}?alt=media&token=${downloadToken}`;
+
+    // Update masterDB document
+    await masterDB.updateOne({ _id: objectId }, { $set: { imageURL: firebaseUrl } });
+
+    // Log the update
+    await logColl.insertOne({
+      _id: new ObjectId(),
+      masterId: objectId,
+      username,
+      timestamp: new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" })),
+      oldData: oldRecord,
+      newData: { imageURL: firebaseUrl }
+    });
+
+    res.json({ message: "Image uploaded and record updated", imageURL: firebaseUrl });
+  } catch (error) {
+    console.error("Error uploading master image:", error);
+    res.status(500).json({ error: "Error uploading image" });
+  }
+});
+
+//inserts data to masterDB
+app.post("/submitToMasterDB", async (req, res) => {
+  const { data, username } = req.body;
+
+  if (!data || !username) {
+    return res.status(400).json({ error: "Missing data or username" });
+  }
+
+  try {
+    await client.connect();
+    const db = client.db("Sasaki_Coating_MasterDB");
+    const masterDB = db.collection("masterDB");
+    const logColl = db.collection("masterDB_Log");
+
+    // Insert the data
+    const result = await masterDB.insertOne(data);
+
+    // Log the insert
+    await logColl.insertOne({
+      _id: new ObjectId(),
+      masterId: result.insertedId,
+      action: "insert",
+      username,
+      timestamp: new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" })),
+      newData: data
+    });
+
+    res.status(201).json({
+      message: "Data inserted and logged successfully",
+      insertedId: result.insertedId,
+    });
+  } catch (error) {
+    console.error("Error inserting to masterDB:", error);
+    res.status(500).json({ error: "Error inserting to masterDB" });
+  }
+});
 
 
 app.listen(port, () => {
