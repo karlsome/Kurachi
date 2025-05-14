@@ -7,6 +7,8 @@ const picURL = 'https://script.google.com/macros/s/AKfycbwHUW1ia8hNZG-ljsguNq8K4
 
 
 
+
+
 //this code listens to incoming parameters passed
 function getQueryParam(param) {
   const urlParams = new URLSearchParams(window.location.search);
@@ -53,6 +55,7 @@ inputs.forEach(input => {
 
 // Restore the values of input fields, images, and textContent from localStorage on page load
 document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('uploadingModal').style.display = 'none'; // this turns off the uploading modal
   const inputs = document.querySelectorAll('input, select, button, textarea'); // Get all input elements
   const images = document.querySelectorAll('img'); // Get all <img> elements
   const textElements = document.querySelectorAll('[id]'); // Get all elements with an ID
@@ -638,183 +641,196 @@ function showAlert(message) {
 }
 
 
-// Submit Button
+
+
+
+// // Submit Button
+// document.querySelector('form[name="contact-form"]').addEventListener('submit', async (event) => {
+//   event.preventDefault();
+//   // Show uploading modal
+//   document.getElementById('uploadingModal').style.display = 'flex';
+
+//   const alertSound = document.getElementById('alert-sound');
+//   const scanAlertModal = document.getElementById('scanAlertModal');
+//   const scanAlertText = document.getElementById('scanAlertText');
+
+//   try {
+//     const hatsumono = document.getElementById("hatsumonoLabel").textContent;
+//     const atomono = document.getElementById("atomonoLabel").textContent;
+
+//     if (hatsumono === "FALSE" || atomono === "FALSE") {
+//       showAlert("初物/終物確認してください / Please do Hatsumono and Atomono");
+//       return;
+//     }
+
+//     updateCycleTime();
+
+//     const formData = {
+//       品番: document.getElementById('product-number').value,
+//       背番号: document.getElementById('sub-dropdown').value,
+//       設備: document.getElementById('process').value,
+//       Total: parseInt(document.getElementById('total').value, 10) || 0,
+//       工場: document.getElementById('selected工場').value,
+//       Worker_Name: document.getElementById('Machine Operator').value,
+//       Process_Quantity: parseInt(document.getElementById('ProcessQuantity').value, 10) || 0,
+//       Date: document.getElementById('Lot No.').value,
+//       Time_start: document.getElementById('Start Time').value,
+//       Time_end: document.getElementById('End Time').value,
+//       材料ロット: document.getElementById('材料ロット').value,
+//       疵引不良: parseInt(document.getElementById('counter-18').value, 10) || 0,
+//       加工不良: parseInt(document.getElementById('counter-19').value, 10) || 0,
+//       その他: parseInt(document.getElementById('counter-20').value, 10) || 0,
+//       Total_NG: parseInt(document.getElementById('Total_NG').value, 10) || 0,
+//       Spare: parseInt(document.getElementById('spare').value, 10) || 0,
+//       Comment: document.querySelector('textarea[name="Comments1"]').value,
+//       Cycle_Time: parseFloat(document.getElementById('cycleTime').value) || 0,
+//       ショット数: parseInt(document.getElementById('shot').value, 10) || 0,
+//     };
+
+//     if (!formData.背番号) {
+//       showAlert('背番号が必要です。 / Sebanggo is required.');
+//       return;
+//     }
+
+//     // Collect base64 images
+//     formData.images = await collectImagesForUpload();
+
+//     // Submit form data
+//     const response = await fetch(`${serverURL}/submitTopressDBiReporter`, {
+//       method: 'POST',
+//       headers: { 'Content-Type': 'application/json' },
+//       body: JSON.stringify(formData),
+//     });
+
+//     if (!response.ok) {
+//       const errorData = await response.json();
+//       throw new Error(errorData.error || 'Failed to save data');
+//     }
+
+//     // Success handling
+//     scanAlertText.innerText = 'Form submitted successfully / 保存しました';
+//     scanAlertModal.style.display = 'block';
+//     document.body.classList.add('flash-green');
+
+//     document.getElementById('closeScanModalButton').onclick = function () {
+//       scanAlertModal.style.display = 'none';
+//       document.body.classList.remove('flash-green');
+//       // Hide uploading modal after success
+//       document.getElementById('uploadingModal').style.display = 'none';
+//       window.location.reload();
+//       resetForm();
+//     };
+
+//   } catch (error) {
+//     document.getElementById('uploadingModal').style.display = 'none';
+//     console.error('Submission error:', error);
+//     showAlert('An error occurred. Please try again.');
+//   }
+// });
+
+
+//Submit Button
 document.querySelector('form[name="contact-form"]').addEventListener('submit', async (event) => {
-  const hatsumono = document.getElementById("hatsumonoLabel").textContent;
-  const atomono = document.getElementById("atomonoLabel").textContent;
-  event.preventDefault(); // Prevent default form submission behavior
-
-  //check if hatsumono is done
-  if (hatsumono === "FALSE" || atomono === "FALSE"){
-    showAlert("初物/終物確認してください / Please do Hatsumono and Atomono");
-    return;
-
-  }
-
-  updateCycleTime();
+  event.preventDefault();
+  document.getElementById('uploadingModal').style.display = 'flex';
 
   const alertSound = document.getElementById('alert-sound');
   const scanAlertModal = document.getElementById('scanAlertModal');
   const scanAlertText = document.getElementById('scanAlertText');
 
-  // Preload the alert sound without playing it
-  if (alertSound) {
-    alertSound.muted = true; // Mute initially to preload
-    alertSound.loop = false; // Disable looping
-    alertSound.load(); // Preload the audio file
-  }
-
-  
-
   try {
-    // Get form data
-    const 品番 = document.getElementById('product-number').value;
-    const 工場 = document.getElementById('selected工場').value;
-    const 背番号 = document.getElementById('sub-dropdown').value;
-    const Total = parseInt(document.getElementById('total').value, 10) || 0;
-    const Worker_Name = document.getElementById('Machine Operator').value;
-    const Process_Quantity = parseInt(document.getElementById('ProcessQuantity').value, 10) || 0;
-    const Date = document.getElementById('Lot No.').value;
-    const Time_start = document.getElementById('Start Time').value;
-    const Time_end = document.getElementById('End Time').value;
-    const 設備 = document.getElementById('process').value;
-    const Cycle_Time = parseFloat(document.getElementById('cycleTime').value) || 0;
-    const 材料ロット = document.getElementById('材料ロット').value;
-    const Comment = document.querySelector('textarea[name="Comments1"]').value;
-    const Spare = parseInt(document.getElementById('spare').value, 10) || 0;
-    const 疵引不良 = parseInt(document.getElementById('counter-18').value, 10) || 0;
-    const 加工不良 = parseInt(document.getElementById('counter-19').value, 10) || 0;
-    const その他 = parseInt(document.getElementById('counter-20').value, 10) || 0;
-    const Total_NG = parseInt(document.getElementById('Total_NG').value, 10) || 0;
-    const ショット数 = parseInt(document.getElementById('shot').value, 10) || 0;
+    const hatsumono = document.getElementById("hatsumonoLabel").textContent;
+    const atomono = document.getElementById("atomonoLabel").textContent;
 
-    // Check if 背番号 is selected
-    if (!背番号) {
-      // Show alert modal
-      scanAlertText.innerText = '背番号が必要です。 / Sebanggo is required.';
-      scanAlertModal.style.display = 'block';
-
-      // Play alert sound
-      if (alertSound) {
-        alertSound.muted = false; // Unmute to alert user
-        alertSound.volume = 1; // Set full volume
-        alertSound.play().catch((error) => console.error('Failed to play alert sound:', error));
-      }
-
-      // Add blinking red background
-      document.body.classList.add('flash-red');
-
-      // Close modal on button click
-      const closeScanModalButton = document.getElementById('closeScanModalButton');
-      closeScanModalButton.onclick = function () {
-        scanAlertModal.style.display = 'none';
-        alertSound.pause();
-        alertSound.currentTime = 0; // Reset sound to the beginning
-        alertSound.muted = true; // Mute again for next time
-        document.body.classList.remove('flash-red');
-      };
-
-      return; // Stop the submission process
+    if (hatsumono === "FALSE" || atomono === "FALSE") {
+      showAlert("初物/終物確認してください / Please do Hatsumono and Atomono");
+      document.getElementById('uploadingModal').style.display = 'none';
+      return;
     }
 
-    // Prepare data for saving to pressDB
+    updateCycleTime();
+
     const formData = {
-      品番,
-      背番号,
-      設備,
-      Total,
-      工場,
-      Worker_Name,
-      Process_Quantity,
-      Date,
-      Time_start,
-      Time_end,
-      材料ロット,
-      疵引不良,
-      加工不良,
-      その他,
-      Total_NG,
-      Spare,
-      Comment,
-      Cycle_Time,
-      ショット数,
+      品番: document.getElementById('product-number').value,
+      背番号: document.getElementById('sub-dropdown').value,
+      設備: document.getElementById('process').value,
+      Total: parseInt(document.getElementById('total').value, 10) || 0,
+      工場: document.getElementById('selected工場').value,
+      Worker_Name: document.getElementById('Machine Operator').value,
+      Process_Quantity: parseInt(document.getElementById('ProcessQuantity').value, 10) || 0,
+      Date: document.getElementById('Lot No.').value,
+      Time_start: document.getElementById('Start Time').value,
+      Time_end: document.getElementById('End Time').value,
+      材料ロット: document.getElementById('材料ロット').value,
+      疵引不良: parseInt(document.getElementById('counter-18').value, 10) || 0,
+      加工不良: parseInt(document.getElementById('counter-19').value, 10) || 0,
+      その他: parseInt(document.getElementById('counter-20').value, 10) || 0,
+      Total_NG: parseInt(document.getElementById('Total_NG').value, 10) || 0,
+      Spare: parseInt(document.getElementById('spare').value, 10) || 0,
+      Comment: document.querySelector('textarea[name="Comments1"]').value,
+      Cycle_Time: parseFloat(document.getElementById('cycleTime').value) || 0,
+      ショット数: parseInt(document.getElementById('shot').value, 10) || 0,
     };
 
-    console.log('Data to save to pressDB:', formData);
+    if (!formData.背番号) {
+      showAlert('背番号が必要です。 / Sebanggo is required.');
+      document.getElementById('uploadingModal').style.display = 'none';
+      return;
+    }
 
-    // Save to pressDB
-    const saveResponse = await fetch(`${serverURL}/submitTopressDBiReporter`, {
+    //  Generate uniqueID for duplication check
+    formData.uniqueID = `${formData.背番号}_${formData.Date}_${formData.Time_start}_${formData.Worker_Name}_${formData.設備}`;
+
+    //  Check for duplicate on server first
+    const duplicateCheck = await fetch(`${serverURL}/query`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        collectionName: "pressDB",
+        query: { uniqueID: formData.uniqueID }
+      })
+    });
+
+    const duplicateResult = await duplicateCheck.json();
+
+    if (duplicateResult.length > 0) {
+      document.getElementById('uploadingModal').style.display = 'none';
+      showAlert("この作業は既に登録されています。 / This record has already been submitted.");
+      return;
+    }
+
+    // Collect base64 images
+    formData.images = await collectImagesForUpload();
+
+    const response = await fetch(`${serverURL}/submitTopressDBiReporter`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(formData),
     });
 
-    if (!saveResponse.ok) {
-      const errorData = await saveResponse.json();
-      throw new Error(errorData.error || 'Failed to save data to pressDB');
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Failed to save data');
     }
 
-    console.log('Form data saved to pressDB successfully.');
-
-    // Run uploadPhotou() after saving data
-    try {
-      await uploadPhotou();
-
-      // Wait for 3 seconds before showing success message and closing
-      setTimeout(() => {
-        // Show success modal with blinking green background
-        scanAlertText.innerText = 'Form submitted successfully / 保存しました';
-        scanAlertModal.style.display = 'block';
-        document.body.classList.add('flash-green');
-
-        const closeScanModalButton = document.getElementById('closeScanModalButton');
-        closeScanModalButton.onclick = function () {
-          scanAlertModal.style.display = 'none';
-          document.body.classList.remove('flash-green');
-          window.location.reload();
-          resetForm();
-        };
-      }, 3000);
-    } catch (error) {
-      console.error('Upload failed:', error);
-
-      // Show error message and close window after 3 seconds
-      scanAlertText.innerText = 'Upload failed. Please try again.';
-      scanAlertModal.style.display = 'block';
-      setTimeout(() => {
-        scanAlertModal.style.display = 'none';
-        window.close();
-      }, 3000);
-    }
-  } catch (error) {
-    console.error('Error during submission:', error);
-
-    // Show error modal with blinking red background
-    scanAlertText.innerText = 'An error occurred. Please try again.';
+    scanAlertText.innerText = 'Form submitted successfully / 保存しました';
     scanAlertModal.style.display = 'block';
+    document.body.classList.add('flash-green');
 
-    // Play alert sound
-    if (alertSound) {
-      alertSound.muted = false;
-      alertSound.volume = 1;
-      alertSound.play().catch((error) => console.error('Failed to play alert sound:', error));
-    }
-
-    // Add blinking red background
-    document.body.classList.add('flash-red');
-
-    // Close modal on button click
-    const closeScanModalButton = document.getElementById('closeScanModalButton');
-    closeScanModalButton.onclick = function () {
+    document.getElementById('closeScanModalButton').onclick = function () {
       scanAlertModal.style.display = 'none';
-      alertSound.pause();
-      alertSound.currentTime = 0;
-      alertSound.muted = true;
-      document.body.classList.remove('flash-red');
+      document.body.classList.remove('flash-green');
+      document.getElementById('uploadingModal').style.display = 'none';
+      window.location.reload();
+      resetForm();
     };
+
+  } catch (error) {
+    document.getElementById('uploadingModal').style.display = 'none';
+    console.error('Submission error:', error);
+    showAlert('An error occurred. Please try again.');
   }
 });
-
 
 
 
@@ -1598,7 +1614,15 @@ function printLabel() {
   }
 
   // List of 背番号 values requiring 収容数 selection
-  const specialValues = ["P05K", "P06K", "P07K", "P08K", "P13K", "P14K", "P15K", "P16K", "UFS5", "UFS6", "UFS7", "UFS8", "URB5", "URB6", "URB7", "URB8"];
+  const specialValues = [
+  "E701", "E702", "E703", "E704", "E705", "E706", "E707", "E708",
+  "MDLB", "MDLS", "MDRB", "MDRS",
+  "P01K", "P02K", "P03K", "P04K", "P05K", "P06K", "P07K", "P08K",
+  "P09K", "P10K", "P11K", "P12K", "P13K", "P14K", "P15K", "P16K",
+  "P17K", "P18K", "P19K", "P20K",
+  "UFS1", "UFS2", "UFS3", "UFS4", "UFS5", "UFS6", "UFS7", "UFS8",
+  "URB1", "URB2", "URB3", "URB4", "URB5", "URB6", "URB7", "URB8"
+  ];
 
   // Check if 背番号 matches special values
   if (specialValues.includes(背番号)) {
@@ -2189,135 +2213,181 @@ window.addEventListener('message', function (event) {
 
 
 
-
-//Upload Photo Function
-// //this is working upload function
+// // Upload Photo Function for multiple images
 // function uploadPhotou() {
 //   const selectedSebanggo = document.getElementById("sub-dropdown").value;
 //   const currentDate = document.getElementById("Lot No.").value;
 //   const selectedWorker = document.getElementById("Machine Operator").value;
 //   const selectedFactory = document.getElementById("selected工場").value;
-//   const photoPreview = document.getElementById('photoPreview').value;
+//   const selectedMachine = document.getElementById("process").value;
 
+//   // Mapping of images to their respective IDs
+//   const imageMappings = [
+//     { imgId: 'hatsumonoPic', label: '初物チェック' },
+//     { imgId: 'atomonoPic', label: '終物チェック' },
+//     { imgId: '材料ラベル', label: '材料ラベル' },
+//   ];
 
-//   if (!photoPreview.src) {
-//       console.error("No photo preview available");
+//   imageMappings.forEach(({ imgId, label }) => {
+//     const photoPreview = document.getElementById(imgId);
+
+//     if (!photoPreview || !photoPreview.src) {
+//       console.error(`No photo preview available for ${label}`);
 //       return;
-//   }
+//     }
 
-//   // Convert the image to a blob
-//   fetch(photoPreview.src)
+//     // Convert the image to a blob
+//     fetch(photoPreview.src)
 //       .then(response => response.blob())
 //       .then(blob => {
-//           const reader = new FileReader();
-//           reader.onloadend = function() {
-//               const base64data = reader.result.split(',')[1]; // Get the base64 encoded string
-              
-//               const formData = new FormData();
-//               formData.append('imageBlob', base64data);
-//               formData.append('fileName', `${selectedSebanggo}_${currentDate}_${selectedWorker}_${selectedFactory}.jpg`);
-//               formData.append('mimeType', blob.type);
-//               formData.append('selectedFactory', selectedFactory);
+//         const reader = new FileReader();
+//         reader.onloadend = function () {
+//           const base64data = reader.result.split(',')[1]; // Get the base64 encoded string
 
-//               // Send the blob to Apps Script via POST request
-//               fetch('https://script.google.com/macros/s/AKfycbxDWa2RTdI2_aHBgzq9GA9GtQx5MrwqaRnW4F26VZdoptwJ1Pg_Enr_xI3vw1t7WHYbTw/exec', {
-//                   method: 'POST',
-//                   body: formData
-//               })
-//               .then(response => response.text())  // Fetch raw text response
-//               .then(text => {
-//                   console.log('Raw response:', text); // Log the raw response
-//                   try {
-//                       const data = JSON.parse(text); // Attempt to parse JSON
-//                       if (data.status === 'success') {
-//                           console.log('File uploaded successfully: ' + data.fileUrl);
-//                       } else {
-//                           console.error('Upload failed: ' + data.message);
-//                       }
-//                   } catch (error) {
-//                       console.error('Error parsing JSON:', error);
-//                   }
-//               })
-//               .catch(error => {
-//                   console.error('Error uploading file: ', error);
-//               });
-//           };
-//           reader.readAsDataURL(blob);
+//           const formData = new FormData();
+//           formData.append('imageBlob', base64data);
+//           formData.append(
+//             'fileName',
+//             `${selectedSebanggo}_${currentDate}_${selectedWorker}_${selectedFactory}_${selectedMachine}_${label}.jpg`
+//           );
+//           formData.append('mimeType', blob.type);
+//           formData.append('selectedFactory', selectedFactory);
+
+//           // Send the blob to Apps Script via POST request
+//           fetch(
+//             'https://script.google.com/macros/s/AKfycbxDWa2RTdI2_aHBgzq9GA9GtQx5MrwqaRnW4F26VZdoptwJ1Pg_Enr_xI3vw1t7WHYbTw/exec',
+//             {
+//               method: 'POST',
+//               body: formData,
+//             }
+//           )
+//             .then((response) => response.text()) // Fetch raw text response
+//             .then((text) => {
+//               console.log(`Raw response for ${label}:`, text); // Log the raw response
+//               try {
+//                 const data = JSON.parse(text); // Attempt to parse JSON
+//                 if (data.status === 'success') {
+//                   console.log(`File uploaded successfully for ${label}: ` + data.fileUrl);
+//                 } else {
+//                   console.error(`Upload failed for ${label}: ` + data.message);
+//                 }
+//               } catch (error) {
+//                 console.error(`Error parsing JSON for ${label}:`, error);
+//               }
+//             })
+//             .catch((error) => {
+//               console.error(`Error uploading file for ${label}: `, error);
+//             });
+//         };
+//         reader.readAsDataURL(blob);
 //       })
-//       .catch(error => console.error('Error converting image to blob: ', error));
-//   }
+//       .catch((error) => console.error(`Error converting image to blob for ${label}: `, error));
+//   });
+// }
 
-// Upload Photo Function for multiple images
-function uploadPhotou() {
+     
+async function uploadPhotou() {
   const selectedSebanggo = document.getElementById("sub-dropdown").value;
   const currentDate = document.getElementById("Lot No.").value;
   const selectedWorker = document.getElementById("Machine Operator").value;
   const selectedFactory = document.getElementById("selected工場").value;
   const selectedMachine = document.getElementById("process").value;
 
-  // Mapping of images to their respective IDs
   const imageMappings = [
     { imgId: 'hatsumonoPic', label: '初物チェック' },
     { imgId: 'atomonoPic', label: '終物チェック' },
     { imgId: '材料ラベル', label: '材料ラベル' },
   ];
 
-  imageMappings.forEach(({ imgId, label }) => {
+  const uploadedImageURLs = {};
+
+  for (const { imgId, label } of imageMappings) {
     const photoPreview = document.getElementById(imgId);
+    if (!photoPreview || !photoPreview.src) continue;
 
-    if (!photoPreview || !photoPreview.src) {
-      console.error(`No photo preview available for ${label}`);
-      return;
+    const response = await fetch(photoPreview.src);
+    const blob = await response.blob();
+    const fileName = `${selectedSebanggo}_${currentDate}_${selectedWorker}_${selectedFactory}_${selectedMachine}_${label}.jpg`;
+
+    const { ref, uploadBytes, getDownloadURL } = await import("https://www.gstatic.com/firebasejs/11.7.1/firebase-storage.js");
+    const storageRef = ref(window.firebaseStorage, `firstCycleCheck/${selectedFactory}/${fileName}`);
+
+    try {
+      const snapshot = await uploadBytes(storageRef, blob);
+      const downloadURL = await getDownloadURL(snapshot.ref);
+
+      uploadedImageURLs[label] = downloadURL;
+
+      // Optionally save to a separate imageUploads collection
+      await fetch(`${serverURL}/saveImageURL`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageUrl: downloadURL,
+          label,
+          factory: selectedFactory,
+          machine: selectedMachine,
+          worker: selectedWorker,
+          date: currentDate,
+          sebanggo: selectedSebanggo
+        })
+      });
+    } catch (error) {
+      console.error(`Failed to upload ${label}`, error);
     }
+  }
 
-    // Convert the image to a blob
-    fetch(photoPreview.src)
-      .then(response => response.blob())
-      .then(blob => {
-        const reader = new FileReader();
-        reader.onloadend = function () {
-          const base64data = reader.result.split(',')[1]; // Get the base64 encoded string
+  return uploadedImageURLs;
+}
 
-          const formData = new FormData();
-          formData.append('imageBlob', base64data);
-          formData.append(
-            'fileName',
-            `${selectedSebanggo}_${currentDate}_${selectedWorker}_${selectedFactory}_${selectedMachine}_${label}.jpg`
-          );
-          formData.append('mimeType', blob.type);
-          formData.append('selectedFactory', selectedFactory);
 
-          // Send the blob to Apps Script via POST request
-          fetch(
-            'https://script.google.com/macros/s/AKfycbxDWa2RTdI2_aHBgzq9GA9GtQx5MrwqaRnW4F26VZdoptwJ1Pg_Enr_xI3vw1t7WHYbTw/exec',
-            {
-              method: 'POST',
-              body: formData,
-            }
-          )
-            .then((response) => response.text()) // Fetch raw text response
-            .then((text) => {
-              console.log(`Raw response for ${label}:`, text); // Log the raw response
-              try {
-                const data = JSON.parse(text); // Attempt to parse JSON
-                if (data.status === 'success') {
-                  console.log(`File uploaded successfully for ${label}: ` + data.fileUrl);
-                } else {
-                  console.error(`Upload failed for ${label}: ` + data.message);
-                }
-              } catch (error) {
-                console.error(`Error parsing JSON for ${label}:`, error);
-              }
-            })
-            .catch((error) => {
-              console.error(`Error uploading file for ${label}: `, error);
-            });
-        };
-        reader.readAsDataURL(blob);
-      })
-      .catch((error) => console.error(`Error converting image to blob for ${label}: `, error));
+async function collectImagesForUpload() {
+  const selectedSebanggo = document.getElementById("sub-dropdown").value;
+  const currentDate = document.getElementById("Lot No.").value;
+  const selectedWorker = document.getElementById("Machine Operator").value;
+  const selectedFactory = document.getElementById("selected工場").value;
+  const selectedMachine = document.getElementById("process").value;
+
+  const imageMappings = [
+    { imgId: 'hatsumonoPic', label: '初物チェック' },
+    { imgId: 'atomonoPic', label: '終物チェック' },
+    { imgId: '材料ラベル', label: '材料ラベル' },
+  ];
+
+  const imagesToUpload = [];
+
+  for (const { imgId, label } of imageMappings) {
+    const photoPreview = document.getElementById(imgId);
+    if (!photoPreview || !photoPreview.src) continue;
+
+    const response = await fetch(photoPreview.src);
+    const blob = await response.blob();
+    const base64Data = await blobToBase64(blob);
+
+    imagesToUpload.push({
+      base64: base64Data,
+      label,
+      factory: selectedFactory,
+      machine: selectedMachine,
+      worker: selectedWorker,
+      date: currentDate,
+      sebanggo: selectedSebanggo,
+    });
+  }
+
+  return imagesToUpload;
+}
+
+// Utility to convert blob to base64
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
   });
 }
+
 
 //for dynamic process link from nav
 document.addEventListener("DOMContentLoaded", function () {
