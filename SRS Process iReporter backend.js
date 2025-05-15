@@ -561,11 +561,60 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 
-// THis fetch details for LH
+// // THis fetch details for LH
+// async function fetchProductDetails() {
+//   const serialNumber = document.getElementById("sub-dropdown").value;
+//   const factory = document.getElementById("selected工場").value;
+//   // Update the dynamicImage src attribute with the retrieved htmlWebsite value
+//   const dynamicImage = document.getElementById("dynamicImage");
+//   dynamicImage.src = "";
+
+//   if (!serialNumber) {
+//     console.error("Please select a valid 背番号.");
+//     blankInfo();
+//     return;
+//   }
+
+//   try {
+//     const response = await fetch(
+//       `${serverURL}/getProductDetails?serialNumber=${encodeURIComponent(
+//         serialNumber
+//       )}&factory=${encodeURIComponent(factory)}`
+//     );
+//     if (response.ok) {
+//       const data = await response.json();
+
+//       // Populate the HTML fields with the retrieved data
+//       document.getElementById("product-number").value = data.品番 || "";
+//       document.getElementById("model").value = data.モデル || "";
+//       document.getElementById("shape").value = data.形状 || "";
+//       document.getElementById("R-L").value = data["R/L"] || "";
+
+//       // if (data.htmlWebsite) {
+//       //   dynamicImage.src = data.htmlWebsite; // Set the image source to the retrieved URL
+//       //   dynamicImage.alt = "Product Image"; // Optional: Set the alt text
+//       //   dynamicImage.style.display = "block"; // Ensure the image is visible
+//       // } else {
+//       //   dynamicImage.src = ""; // Clear the image source if no URL is available
+//       //   dynamicImage.alt = "No Image Available"; // Optional: Set fallback alt text
+//       //   dynamicImage.style.display = "none"; // Hide the image if no URL is available
+//       // }
+//     } else {
+//       console.error("No matching product found.");
+//     }
+//   } catch (error) {
+//     console.error("Error fetching product details:", error);
+//   }
+//   picLINK(serialNumber);
+// }
+
+// // Call fetchProductDetails when a new 背番号 is selected
+// document.getElementById("sub-dropdown").addEventListener("change", fetchProductDetails);
+
+// This fetches details for LH using /queries and displays imageURL
 async function fetchProductDetails() {
   const serialNumber = document.getElementById("sub-dropdown").value;
   const factory = document.getElementById("selected工場").value;
-  // Update the dynamicImage src attribute with the retrieved htmlWebsite value
   const dynamicImage = document.getElementById("dynamicImage");
   dynamicImage.src = "";
 
@@ -576,39 +625,74 @@ async function fetchProductDetails() {
   }
 
   try {
-    const response = await fetch(
-      `${serverURL}/getProductDetails?serialNumber=${encodeURIComponent(
-        serialNumber
-      )}&factory=${encodeURIComponent(factory)}`
-    );
-    if (response.ok) {
-      const data = await response.json();
+    // Step 1: Try by 背番号
+    let response = await fetch(`${serverURL}/queries`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        dbName: "Sasaki_Coating_MasterDB",
+        collectionName: "masterDB",
+        query: { 背番号: serialNumber }
+      }),
+    });
 
-      // Populate the HTML fields with the retrieved data
-      document.getElementById("product-number").value = data.品番 || "";
-      document.getElementById("model").value = data.モデル || "";
-      document.getElementById("shape").value = data.形状 || "";
-      document.getElementById("R-L").value = data["R/L"] || "";
+    let result = await response.json();
 
-      // if (data.htmlWebsite) {
-      //   dynamicImage.src = data.htmlWebsite; // Set the image source to the retrieved URL
-      //   dynamicImage.alt = "Product Image"; // Optional: Set the alt text
-      //   dynamicImage.style.display = "block"; // Ensure the image is visible
-      // } else {
-      //   dynamicImage.src = ""; // Clear the image source if no URL is available
-      //   dynamicImage.alt = "No Image Available"; // Optional: Set fallback alt text
-      //   dynamicImage.style.display = "none"; // Hide the image if no URL is available
-      // }
-    } else {
-      console.error("No matching product found.");
+    // Step 2: Try by 品番 if needed
+    if (!result || result.length === 0) {
+      const altRes = await fetch(`${serverURL}/queries`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          dbName: "Sasaki_Coating_MasterDB",
+          collectionName: "masterDB",
+          query: { 品番: serialNumber }
+        }),
+      });
+
+      const altResult = await altRes.json();
+
+      if (altResult.length > 0) {
+        const matched = altResult[0];
+        if (matched.背番号) {
+          document.getElementById("sub-dropdown").value = matched.背番号;
+        }
+        result = [matched];
+      }
     }
+
+    // Step 3: Still nothing
+    if (!result || result.length === 0) {
+      console.error("No matching product found.");
+      blankInfo();
+      return;
+    }
+
+    const data = result[0];
+
+    // Populate fields for LH
+    document.getElementById("product-number").value = data.品番 || "";
+    document.getElementById("model").value = data.モデル || "";
+    document.getElementById("shape").value = data.形状 || "";
+    document.getElementById("R-L").value = data["R/L"] || "";
+
+    // Set image if available
+    if (data.imageURL) {
+      dynamicImage.src = data.imageURL;
+      dynamicImage.alt = "Product Image";
+      dynamicImage.style.display = "block";
+    } else {
+      dynamicImage.src = "";
+      dynamicImage.alt = "No Image Available";
+      dynamicImage.style.display = "none";
+    }
+
   } catch (error) {
     console.error("Error fetching product details:", error);
   }
-  picLINK(serialNumber);
 }
 
-// Call fetchProductDetails when a new 背番号 is selected
+// Attach event listener
 document.getElementById("sub-dropdown").addEventListener("change", fetchProductDetails);
 
 
@@ -644,10 +728,59 @@ function updateImageSrc(link) {
   }
 }
 
+
+// async function fetchProductDetailsRH() {
+//   const serialNumber = document.getElementById("sub-dropdownRH").value;
+//   const factory = document.getElementById("selected工場").value;
+//   // Update the dynamicImageRH src attribute with the retrieved htmlWebsite value
+//   const dynamicImageRH = document.getElementById("dynamicImageRH");
+//   dynamicImageRH.src = "";
+
+//   if (!serialNumber) {
+//     console.error("Please select a valid 背番号 (RH).");
+//     blankInfoRH();
+//     return;
+//   }
+
+//   try {
+//     const response = await fetch(
+//       `${serverURL}/getProductDetails?serialNumber=${encodeURIComponent(
+//         serialNumber
+//       )}&factory=${encodeURIComponent(factory)}`
+//     );
+//     if (response.ok) {
+//       const data = await response.json();
+
+//       // Populate the RH HTML fields with the retrieved data
+//       document.getElementById("product-numberRH").value = data.品番 || "";
+//       document.getElementById("modelRH").value = data.モデル || "";
+//       document.getElementById("shapeRH").value = data.形状 || "";
+//       document.getElementById("R-LRH").value = data["R/L"] || "";
+
+//       // if (data.htmlWebsite) {
+//       //   dynamicImageRH.src = data.htmlWebsite; // Set the image source to the retrieved URL
+//       //   dynamicImageRH.alt = "Product Image RH"; // Optional: Set the alt text
+//       //   dynamicImageRH.style.display = "block"; // Ensure the image is visible
+//       // } else {
+//       //   dynamicImageRH.src = ""; // Clear the image source if no URL is available
+//       //   dynamicImageRH.alt = "No Image Available RH"; // Optional: Set fallback alt text
+//       //   dynamicImageRH.style.display = "none"; // Hide the image if no URL is available
+//       // }
+//     } else {
+//       console.error("No matching product found for RH.");
+//     }
+//   } catch (error) {
+//     console.error("Error fetching product details (RH):", error);
+//   }
+//   picLINKRH(serialNumber);
+// }
+
+// // Call fetchProductDetailsRH when a new 背番号 (RH) is selected
+// document.getElementById("sub-dropdownRH").addEventListener("change", fetchProductDetailsRH);
+
 async function fetchProductDetailsRH() {
   const serialNumber = document.getElementById("sub-dropdownRH").value;
   const factory = document.getElementById("selected工場").value;
-  // Update the dynamicImageRH src attribute with the retrieved htmlWebsite value
   const dynamicImageRH = document.getElementById("dynamicImageRH");
   dynamicImageRH.src = "";
 
@@ -658,41 +791,75 @@ async function fetchProductDetailsRH() {
   }
 
   try {
-    const response = await fetch(
-      `${serverURL}/getProductDetails?serialNumber=${encodeURIComponent(
-        serialNumber
-      )}&factory=${encodeURIComponent(factory)}`
-    );
-    if (response.ok) {
-      const data = await response.json();
+    // Step 1: Try query by 背番号
+    let response = await fetch(`${serverURL}/queries`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        dbName: "Sasaki_Coating_MasterDB",
+        collectionName: "masterDB",
+        query: { 背番号: serialNumber }
+      }),
+    });
 
-      // Populate the RH HTML fields with the retrieved data
-      document.getElementById("product-numberRH").value = data.品番 || "";
-      document.getElementById("modelRH").value = data.モデル || "";
-      document.getElementById("shapeRH").value = data.形状 || "";
-      document.getElementById("R-LRH").value = data["R/L"] || "";
+    let result = await response.json();
 
-      // if (data.htmlWebsite) {
-      //   dynamicImageRH.src = data.htmlWebsite; // Set the image source to the retrieved URL
-      //   dynamicImageRH.alt = "Product Image RH"; // Optional: Set the alt text
-      //   dynamicImageRH.style.display = "block"; // Ensure the image is visible
-      // } else {
-      //   dynamicImageRH.src = ""; // Clear the image source if no URL is available
-      //   dynamicImageRH.alt = "No Image Available RH"; // Optional: Set fallback alt text
-      //   dynamicImageRH.style.display = "none"; // Hide the image if no URL is available
-      // }
-    } else {
-      console.error("No matching product found for RH.");
+    // Step 2: Try query by 品番 if 背番号 not found
+    if (!result || result.length === 0) {
+      const altRes = await fetch(`${serverURL}/queries`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          dbName: "Sasaki_Coating_MasterDB",
+          collectionName: "masterDB",
+          query: { 品番: serialNumber }
+        }),
+      });
+
+      const altResult = await altRes.json();
+
+      if (altResult.length > 0) {
+        const matched = altResult[0];
+        if (matched.背番号) {
+          document.getElementById("sub-dropdownRH").value = matched.背番号;
+        }
+        result = [matched];
+      }
     }
+
+    // Step 3: No result at all
+    if (!result || result.length === 0) {
+      console.error("No matching product found for RH.");
+      blankInfoRH();
+      return;
+    }
+
+    const data = result[0];
+
+    // Step 4: Populate RH fields
+    document.getElementById("product-numberRH").value = data.品番 || "";
+    document.getElementById("modelRH").value = data.モデル || "";
+    document.getElementById("shapeRH").value = data.形状 || "";
+    document.getElementById("R-LRH").value = data["R/L"] || "";
+
+    // Step 5: Set RH image if available
+    if (data.imageURL) {
+      dynamicImageRH.src = data.imageURL;
+      dynamicImageRH.alt = "Product Image RH";
+      dynamicImageRH.style.display = "block";
+    } else {
+      dynamicImageRH.src = "";
+      dynamicImageRH.alt = "No Image Available RH";
+      dynamicImageRH.style.display = "none";
+    }
+
   } catch (error) {
     console.error("Error fetching product details (RH):", error);
   }
-  picLINKRH(serialNumber);
 }
 
-// Call fetchProductDetailsRH when a new 背番号 (RH) is selected
+// Event listener for RH product selection
 document.getElementById("sub-dropdownRH").addEventListener("change", fetchProductDetailsRH);
-
 
 // Function to get link from Google Drive
 function picLINKRH(headerValue) {

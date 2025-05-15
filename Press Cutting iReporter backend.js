@@ -340,8 +340,95 @@ function enableInputs() {
 }
 
 
-// function to fetch product details
-// This function fetches product details based on 背番号 or 品番
+// // function to fetch product details
+// // This function fetches product details based on 背番号 or 品番
+// async function fetchProductDetails() {
+//   checkProcessCondition();
+//   enableInputs(); // Delete this in production
+
+//   const subDropdown = document.getElementById("sub-dropdown");
+//   const serialNumber = subDropdown.value;
+//   const factory = document.getElementById("selected工場").value;
+//   const dynamicImage = document.getElementById("dynamicImage");
+//   dynamicImage.src = "";
+
+//   if (!serialNumber) {
+//     console.error("Please select a valid 背番号 or 品番.");
+//     blankInfo();
+//     return;
+//   }
+
+//   try {
+//     // Step 1: Try query by 背番号
+//     let response = await fetch(`${serverURL}/queries`, {
+//       method: "POST",
+//       headers: { "Content-Type": "application/json" },
+//       body: JSON.stringify({
+//         dbName: "Sasaki_Coating_MasterDB",
+//         collectionName: "masterDB",
+//         query: { 背番号: serialNumber },
+//       }),
+//     });
+
+//     let result = await response.json();
+
+//     // Step 2: If not found, try query by 品番
+//     if (!result || result.length === 0) {
+//       const altRes = await fetch(`${serverURL}/queries`, {
+//         method: "POST",
+//         headers: { "Content-Type": "application/json" },
+//         body: JSON.stringify({
+//           dbName: "Sasaki_Coating_MasterDB",
+//           collectionName: "masterDB",
+//           query: { 品番: serialNumber },
+//         }),
+//       });
+
+//       const altResult = await altRes.json();
+
+//       if (altResult.length > 0) {
+//         const matched = altResult[0];
+//         if (matched.背番号) {
+//           subDropdown.value = matched.背番号; // Update dropdown to 背番号
+//         }
+//         result = [matched];
+//       }
+//     }
+
+//     // Step 3: Still no result
+//     if (!result || result.length === 0) {
+//       console.error("No matching product found.");
+//       blankInfo();
+//       return;
+//     }
+
+//     const product = result[0];
+
+//     // Step 4: (Removed pictureDB fetch)
+//     // Use only picLINK for image handling now
+//     picLINK(product.背番号 || serialNumber, product.品番);
+
+//     // Step 5: Populate fields
+//     document.getElementById("product-number").value = product.品番 || "";
+//     document.getElementById("model").value = product.モデル || "";
+//     document.getElementById("shape").value = product.形状 || "";
+//     document.getElementById("R-L").value = product["R/L"] || "";
+//     document.getElementById("material").value = product.材料 || "";
+//     document.getElementById("material-code").value = product.材料背番号 || "";
+//     document.getElementById("material-color").value = product.色 || "";
+//     document.getElementById("kataban").value = product.型番 || "";
+//     document.getElementById("収容数").value = product.収容数 || "";
+//     document.getElementById("送りピッチ").textContent = "送りピッチ: " + (product.送りピッチ || "");
+//     document.getElementById("SRS").value = product.SRS || "";
+//   } catch (error) {
+//     console.error("Error fetching product details:", error);
+//   }
+// }
+
+// // Trigger on change
+// document.getElementById("sub-dropdown").addEventListener("change", fetchProductDetails);
+
+// Function to fetch product details based on 背番号 or 品番
 async function fetchProductDetails() {
   checkProcessCondition();
   enableInputs(); // Delete this in production
@@ -404,11 +491,18 @@ async function fetchProductDetails() {
 
     const product = result[0];
 
-    // Step 4: (Removed pictureDB fetch)
-    // Use only picLINK for image handling now
-    picLINK(product.背番号 || serialNumber, product.品番);
+    // Step 4: Display image from imageURL (Firebase)
+    if (product.imageURL) {
+      dynamicImage.src = product.imageURL;
+      dynamicImage.alt = "Product Image";
+      dynamicImage.style.display = "block";
+    } else {
+      dynamicImage.src = "";
+      dynamicImage.alt = "No Image Available";
+      dynamicImage.style.display = "none";
+    }
 
-    // Step 5: Populate fields
+    // Step 5: Populate product fields
     document.getElementById("product-number").value = product.品番 || "";
     document.getElementById("model").value = product.モデル || "";
     document.getElementById("shape").value = product.形状 || "";
@@ -420,6 +514,7 @@ async function fetchProductDetails() {
     document.getElementById("収容数").value = product.収容数 || "";
     document.getElementById("送りピッチ").textContent = "送りピッチ: " + (product.送りピッチ || "");
     document.getElementById("SRS").value = product.SRS || "";
+
   } catch (error) {
     console.error("Error fetching product details:", error);
   }
