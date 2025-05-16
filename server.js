@@ -2357,41 +2357,105 @@ app.post("/login", async (req, res) => {
 });
 
 
-app.post("/createUser", async (req, res) => {
-  const { firstName, lastName, email, username, password, role } = req.body;
 
-  // Validate all required fields
-  if (!firstName || !lastName || !email || !username || !password || !role) {
-    return res.status(400).json({ error: "All fields are required" });
+//FREYA ACESS BACKEND
+app.post("/loginCustomer", async (req, res) => {
+  const { username, password } = req.body;
+
+  try {
+    await client.connect();
+
+    const globalDB = client.db("Sasaki_Coating_MasterDB");
+    const masterUser = await globalDB.collection("masterUsers").findOne({ username });
+
+    // 1️⃣ MasterUser login
+    if (masterUser) {
+      const passwordMatch = await bcrypt.compare(password, masterUser.password);
+      if (!passwordMatch) return res.status(401).json({ error: "Invalid password" });
+
+      const today = new Date();
+      const validUntil = new Date(masterUser.validUntil);
+      if (today > validUntil) return res.status(403).json({ error: "Account expired. Contact support." });
+
+      return res.status(200).json({
+        username: masterUser.username,
+        role: masterUser.role,
+        dbName: masterUser.dbName
+      });
+    }
+
+    // 2️⃣ Sub-user login (loop all master users)
+    const allMasterUsers = await globalDB.collection("masterUsers").find({}).toArray();
+
+    for (const mu of allMasterUsers) {
+      const customerDB = client.db(mu.dbName);
+      const subUser = await customerDB.collection("users").findOne({ username });
+
+      if (subUser) {
+        // Check password
+        const passwordMatch = await bcrypt.compare(password, subUser.password);
+        if (!passwordMatch) return res.status(401).json({ error: "Invalid password" });
+
+        // Check if master account is valid
+        const today = new Date();
+        const validUntil = new Date(mu.validUntil);
+        if (today > validUntil) return res.status(403).json({ error: "Account expired. Contact support." });
+
+        return res.status(200).json({
+          username: subUser.username,
+          role: subUser.role,
+          dbName: mu.dbName,
+          masterUsername: mu.username
+        });
+      }
+    }
+
+    // Not found
+    return res.status(401).json({ error: "Account not found" });
+
+  } catch (err) {
+    console.error("Login error:", err);
+    res.status(500).json({ error: "Internal server error" });
   }
-  
+});
+
+app.post("/createUser", async (req, res) => {
+  const { firstName, lastName, email, username, password, dbName, validUntil } = req.body;
+
+  // Validate required fields
+  if (!firstName || !lastName || !email || !username || !password || !dbName) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
 
   try {
     await client.connect();
     const db = client.db("Sasaki_Coating_MasterDB");
-    const users = db.collection("users");
+    const masterUsers = db.collection("masterUsers");
 
     // Check if username already exists
-    const existing = await users.findOne({ username });
+    const existing = await masterUsers.findOne({ username });
     if (existing) return res.status(400).json({ error: "Username already exists" });
 
-    // Hash the password
+    // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Insert full user object
-    await users.insertOne({
+    // Insert master user
+    await masterUsers.insertOne({
       firstName,
       lastName,
       email,
       username,
       password: hashedPassword,
-      role
+      role: "masterUser",
+      dbName,
+      validUntil: validUntil ? new Date(validUntil) : null,
+      createdAt: new Date()
     });
-    console.log("Received new user:", req.body);
 
-    res.json({ message: "User created successfully" });
+    console.log("✅ New master user created:", username);
+    res.json({ message: "Master user created successfully" });
   } catch (err) {
-    console.error("Error creating user:", err);
+    console.error("❌ Error creating master user:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -2432,9 +2496,407 @@ app.post("/updateUser", async (req, res) => {
 });
 
 
+//FREYA ACESS BACKEND END
 
 
 
+//FREYA CUSTOMER ACCESS BACKEND
+// ✅ Add this route to your customer backend
+
+
+
+app.post("/customerGetDeviceStats", async (req, res) => {
+  const { dbName } = req.body;
+
+  if (!dbName) {
+    return res.status(400).json({ error: "Missing dbName" });
+  }
+
+  try {
+    await client.connect();
+    const db = client.db(dbName);
+    const submittedDB = db.collection("submittedDB");
+
+    const stats = await submittedDB.aggregate([
+      { $match: { deviceId: { $exists: true, $ne: "" } } },
+      {
+        $group: {
+          _id: "$deviceId",
+          total: { $sum: "$quantity" },
+          totalNG: { $sum: "$NG" }
+        }
+      },
+      {
+        $project: {
+          deviceId: "$_id",
+          total: 1,
+          totalNG: 1,
+          defectRate: {
+            $cond: [
+              { $eq: ["$total", 0] },
+              0,
+              { $round: [{ $multiply: [{ $divide: ["$totalNG", "$total"] }, 100] }, 2] }
+            ]
+          }
+        }
+      }
+    ]).toArray();
+
+    res.status(200).json(stats);
+  } catch (error) {
+    console.error("Error fetching device stats:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+app.post("/customerUploadMasterImage", async (req, res) => {
+  const { base64, recordId, username, dbName } = req.body;
+
+  if (!base64 || !recordId || !username || !dbName) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+
+  try {
+    await client.connect();
+    const db = client.db(dbName);
+    const masterDB = db.collection("masterDB");
+
+    const objectId = new ObjectId(recordId);
+    const oldRecord = await masterDB.findOne({ _id: objectId });
+
+    if (!oldRecord) {
+      return res.status(404).json({ error: "Record not found" });
+    }
+
+    const 品番 = oldRecord["品番"] || "unknownPart";
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const fileName = `${品番}_${timestamp}.jpg`;
+    const filePath = `${dbName}/masterImages/${fileName}`;
+    const file = admin.storage().bucket().file(filePath);
+
+    const buffer = Buffer.from(base64, "base64");
+    const downloadToken = "customerMasterImageToken"; // Or generate UUID
+
+    await file.save(buffer, {
+      metadata: {
+        contentType: "image/jpeg",
+        metadata: {
+          firebaseStorageDownloadTokens: downloadToken
+        }
+      }
+    });
+
+    const firebaseUrl = `https://firebasestorage.googleapis.com/v0/b/${file.bucket.name}/o/${encodeURIComponent(file.name)}?alt=media&token=${downloadToken}`;
+
+    // Update imageURL in customer masterDB
+    await masterDB.updateOne({ _id: objectId }, { $set: { imageURL: firebaseUrl } });
+
+    res.json({ message: "Customer image uploaded successfully", imageURL: firebaseUrl });
+  } catch (error) {
+    console.error("Error uploading customer master image:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Get users for customer database
+app.post("/customerGetUsers", async (req, res) => {
+  const { dbName, role } = req.body;
+  console.log("Received request to get users:", { dbName, role });
+
+  if (!dbName) {
+    return res.status(400).json({ error: "Missing dbName" });
+  }
+
+  if (!["admin", "masterUser"].includes(role)) {
+    return res.status(403).json({ error: "Access denied" });
+  }
+
+  try {
+    await client.connect();
+    const db = client.db(dbName);
+    const users = db.collection("users");
+
+    const result = await users.find({}, { projection: { password: 0 } }).toArray(); // hide password
+    res.status(200).json(result);
+  } catch (error) {
+    console.error("Error fetching users:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+
+app.post("/customerGetMasterDB", async (req, res) => {
+  const { dbName, role } = req.body;
+
+  if (!dbName) {
+    return res.status(400).json({ error: "Missing dbName" });
+  }
+
+  // Optional: protect access
+  if (role && !["admin", "masterUser", "班長"].includes(role)) {
+    return res.status(403).json({ error: "Access denied" });
+  }
+
+  try {
+    await client.connect();
+    const db = client.db(dbName);
+    const masterDB = db.collection("masterDB");
+
+    const allDocs = await masterDB.find({}).toArray();
+    res.status(200).json(allDocs);
+  } catch (error) {
+    console.error("Error fetching customer masterDB:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+
+
+app.post("/customerInsertMasterDB", async (req, res) => {
+  const { data, role, dbName, username } = req.body;
+
+  if (!data || !dbName || !username) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+
+  if (!["admin", "masterUser"].includes(role)) {
+    return res.status(403).json({ error: "Access denied" });
+  }
+
+  try {
+    await client.connect();
+    const db = client.db(dbName);
+    const masterDB = db.collection("masterDB");
+
+    const result = await masterDB.insertOne(data);
+
+    res.status(201).json({
+      message: "Data inserted into customer masterDB",
+      insertedId: result.insertedId
+    });
+  } catch (error) {
+    console.error("Error inserting to customer masterDB:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+app.post("/customerInsertSubmittedDB", async (req, res) => {
+  const { data, collectionName, role, dbName, username } = req.body;
+
+  if (!data || !dbName || !collectionName || !username) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+
+  if (!["admin", "masterUser"].includes(role)) {
+    return res.status(403).json({ error: "Access denied" });
+  }
+
+  try {
+    await client.connect();
+    const db = client.db(dbName);
+    const targetCollection = db.collection(collectionName);
+
+    const result = await targetCollection.insertOne(data);
+
+    res.status(201).json({
+      message: "Data inserted into customer submittedDB",
+      insertedId: result.insertedId
+    });
+  } catch (error) {
+    console.error("Error inserting to customer submittedDB:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+app.post("/customerCreateUser", async (req, res) => {
+  const { firstName, lastName, email, username, password, role, dbName, creatorRole } = req.body;
+
+  if (!firstName || !lastName || !email || !username || !password || !role || !dbName || !creatorRole) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+
+  if (!["admin", "masterUser"].includes(creatorRole)) {
+    return res.status(403).json({ error: "Access denied" });
+  }
+
+  try {
+    await client.connect();
+    const db = client.db(dbName);
+    const users = db.collection("users");
+
+    const existing = await users.findOne({ username });
+    if (existing) return res.status(400).json({ error: "Username already exists" });
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    await users.insertOne({
+      firstName,
+      lastName,
+      email,
+      username,
+      password: hashedPassword,
+      role,
+      createdAt: new Date()
+    });
+
+    res.status(201).json({ message: "User created successfully" });
+  } catch (error) {
+    console.error("Error creating customer user:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+app.post("/customerUpdateMasterDB", async (req, res) => {
+  const { recordId, updateData, role, dbName, username } = req.body;
+
+  if (!recordId || !updateData || !dbName || !username) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+
+  if (!["admin", "masterUser"].includes(role)) {
+    return res.status(403).json({ error: "Access denied" });
+  }
+
+  try {
+    await client.connect();
+    const db = client.db(dbName);
+    const masterDB = db.collection("masterDB");
+
+    const result = await masterDB.updateOne(
+      { _id: new ObjectId(recordId) },
+      { $set: updateData }
+    );
+
+    res.status(200).json({
+      message: "Customer masterDB record updated",
+      modifiedCount: result.modifiedCount
+    });
+  } catch (error) {
+    console.error("Error updating masterDB:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+
+app.post("/customerDeleteMasterDB", async (req, res) => {
+  const { recordId, role, dbName, username } = req.body;
+
+  if (!recordId || !dbName || !username) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+
+  if (!["admin", "masterUser"].includes(role)) {
+    return res.status(403).json({ error: "Access denied" });
+  }
+
+  try {
+    await client.connect();
+    const db = client.db(dbName);
+    const masterDB = db.collection("masterDB");
+
+    const result = await masterDB.deleteOne({ _id: new ObjectId(recordId) });
+
+    res.status(200).json({
+      message: "Customer masterDB record deleted",
+      deletedCount: result.deletedCount
+    });
+  } catch (error) {
+    console.error("Error deleting from masterDB:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+app.post("/customerUpdateRecord", async (req, res) => {
+  const { recordId, updateData, dbName, collectionName, role, username } = req.body;
+
+  if (!recordId || !updateData || !dbName || !collectionName || !username) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+
+  if (!["admin", "masterUser"].includes(role)) {
+    return res.status(403).json({ error: "Access denied" });
+  }
+
+  try {
+    await client.connect();
+    const db = client.db(dbName);
+    const collection = db.collection(collectionName);
+
+    const result = await collection.updateOne(
+      { _id: new ObjectId(recordId) },
+      { $set: updateData }
+    );
+
+    res.status(200).json({
+      message: `Record updated in ${collectionName}`,
+      modifiedCount: result.modifiedCount
+    });
+  } catch (error) {
+    console.error("Error updating record:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+app.post("/customerDeleteUser", async (req, res) => {
+  const { recordId, dbName, role, username } = req.body;
+
+  if (!recordId || !dbName || !username) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+
+  if (!["admin", "masterUser"].includes(role)) {
+    return res.status(403).json({ error: "Access denied" });
+  }
+
+  try {
+    await client.connect();
+    const db = client.db(dbName);
+    const users = db.collection("users");
+
+    const result = await users.deleteOne({ _id: new ObjectId(recordId) });
+
+    res.status(200).json({
+      message: "User record deleted",
+      deletedCount: result.deletedCount
+    });
+  } catch (error) {
+    console.error("Error deleting user:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+app.post("/customerBulkDelete", async (req, res) => {
+  const { recordIds, dbName, collectionName, role, username } = req.body;
+
+  if (!recordIds || !Array.isArray(recordIds) || !dbName || !collectionName || !username) {
+    return res.status(400).json({ error: "Missing required fields or invalid input" });
+  }
+
+  if (!["admin", "masterUser"].includes(role)) {
+    return res.status(403).json({ error: "Access denied" });
+  }
+
+  try {
+    await client.connect();
+    const db = client.db(dbName);
+    const collection = db.collection(collectionName);
+
+    const objectIds = recordIds.map(id => new ObjectId(id));
+    const result = await collection.deleteMany({ _id: { $in: objectIds } });
+
+    res.status(200).json({
+      message: `Bulk delete from ${collectionName} completed`,
+      deletedCount: result.deletedCount
+    });
+  } catch (error) {
+    console.error("Error in bulk delete:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+
+
+//FREYA CUSTOMER ACCESS BACKEND END
 
 app.post('/saveImageURL', async (req, res) => {
   const { imageUrl, label, factory, machine, worker, date, sebanggo } = req.body;
