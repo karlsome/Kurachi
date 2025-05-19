@@ -986,20 +986,66 @@ const buttonMappings = [
     imgId: 'atomonoPic',
     labelText: '終物チェック',
   },
-  
+  {
+    buttonId: 'makerLabelButton',
+    labelId: 'makerLabel',
+    imgId: '材料ラベル',
+    labelText: '材料ラベル',
+  },
 ];
 
-let currentButtonId = null; // Track the button that triggered the popup
+let currentButtonId = null;
 
-// Add event listeners for all buttons
 buttonMappings.forEach(({ buttonId }) => {
   const button = document.getElementById(buttonId);
-
   button.addEventListener('click', () => {
-    currentButtonId = buttonId; // Set the current button ID
+    const subDropdown = document.getElementById('sub-dropdown');
+    const selectedValue = subDropdown?.value;
+
+    if (!selectedValue) {
+      // Trigger modal message instead of alert
+      const scanAlertModal = document.getElementById('scanAlertModal');
+      const scanAlertText = document.getElementById('scanAlertText');
+      const alertSound = document.getElementById('alert-sound');
+
+      scanAlertText.innerText = '背番号を選択してください / Please select a Sebanggo first.';
+      scanAlertModal.style.display = 'block';
+
+      // Flash body and sub-dropdown
+      document.body.classList.add('flash-red');
+      subDropdown.classList.add('flash-red-border');
+
+      // Play alert sound
+      if (alertSound) {
+        alertSound.muted = false;
+        alertSound.volume = 1;
+        alertSound.play().catch(err => console.error("Failed to play sound:", err));
+      }
+
+      // Set modal close behavior
+      const closeScanModalButton = document.getElementById('closeScanModalButton');
+      closeScanModalButton.onclick = function () {
+        scanAlertModal.style.display = 'none';
+        document.body.classList.remove('flash-red');
+        subDropdown.classList.remove('flash-red-border');
+
+        if (alertSound) {
+          alertSound.pause();
+          alertSound.currentTime = 0;
+          alertSound.muted = true;
+        }
+      };
+
+      return; // stop further action
+    }
+
+    // If value is selected, proceed
+    currentButtonId = buttonId;
     window.open('captureImage.html', 'Capture Image', 'width=900,height=900');
   });
 });
+
+
 
 // Handle the message from the popup window
 window.addEventListener('message', function (event) {
@@ -1341,6 +1387,7 @@ function uploadPhotou() {
 // });
 
 //Submit Button
+// Submit Button
 document.getElementById('submit').addEventListener('click', async (event) => {
   event.preventDefault();
   updateCycleTime();
@@ -1357,11 +1404,12 @@ document.getElementById('submit').addEventListener('click', async (event) => {
   // Show loading modal
   uploadingModal.style.display = 'flex';
 
-  if (hatsumono === "FALSE" || atomono === "FALSE") {
-    uploadingModal.style.display = 'none';
-    showAlert("初物/終物確認してください / Please do Hatsumono and Atomono");
-    return;
-  }
+  const makerPic = document.getElementById('材料ラベル');
+if (!makerPic || !makerPic.src || makerPic.style.display === 'none') {
+  uploadingModal.style.display = 'none';
+  showAlert("材料ラベルの写真を撮影してください / Please capture the 材料ラベル image");
+  return;
+}
 
   try {
     const 品番 = document.getElementById('product-number').value;
@@ -1404,32 +1452,27 @@ document.getElementById('submit').addEventListener('click', async (event) => {
       return;
     }
 
+    // Upload images and map to data
+    const uploadedImages = await collectImagesForUpload();
     const pressDBData = {
-      品番,
-      背番号,
-      設備,
-      Total: Total_PressDB,
-      工場,
-      Worker_Name,
-      Process_Quantity,
-      Date,
-      Time_start,
-      Time_end,
-      材料ロット,
-      疵引不良,
-      加工不良,
-      その他,
-      Total_NG,
-      Spare,
-      Comment,
-      Cycle_Time,
-      ショット数, 
+      品番, 背番号, 設備, Total: Total_PressDB, 工場,
+      Worker_Name, Process_Quantity, Date, Time_start, Time_end,
+      材料ロット, 疵引不良, 加工不良, その他, Total_NG,
+      Spare, Comment, Cycle_Time, ショット数
     };
 
-    // Add base64 images (初物 + 終物 only)
-    pressDBData.images = (await collectImagesForUpload()).filter(img =>
-      img.label === "初物チェック" || img.label === "終物チェック"
-    );
+    uploadedImages.forEach(img => {
+      if (img.label === "初物チェック") {
+        pressDBData["初物チェック画像"] = img.url;
+      } else if (img.label === "終物チェック") {
+        pressDBData["終物チェック画像"] = img.url;
+      } else if (img.label === "材料ラベル") {
+        pressDBData["材料ラベル画像"] = img.url;
+      }
+    });
+
+    // Attach base64 for backend processing
+    pressDBData.images = uploadedImages;
 
     const pressDBResponse = await fetch(`${serverURL}/submitTopressDBiReporter`, {
       method: 'POST',
@@ -1442,7 +1485,7 @@ document.getElementById('submit').addEventListener('click', async (event) => {
       throw new Error(errorData.error || 'Failed to save data to pressDB');
     }
 
-    // Submit to kensaDB if toggle is on
+    // Optionally submit to kensaDB
     if (isToggleChecked) {
       const counters = Array.from({ length: 12 }, (_, i) => {
         const counter = document.getElementById(`counter-${i + 1}`);
@@ -1453,26 +1496,15 @@ document.getElementById('submit').addEventListener('click', async (event) => {
       const Total_KensaDB = Total_PressDB - Total_NG_Kensa;
 
       const kensaDBData = {
-        品番,
-        背番号,
-        工場,
-        Total: Total_KensaDB,
-        Worker_Name,
-        Process_Quantity,
-        Remaining_Quantity: Total_PressDB,
-        Date,
-        Time_start,
-        Time_end,
-        設備,
+        品番, 背番号, 工場, Total: Total_KensaDB, Worker_Name,
+        Process_Quantity, Remaining_Quantity: Total_PressDB, Date,
+        Time_start, Time_end, 設備, Cycle_Time, 製造ロット: 材料ロット,
+        Comment, Spare,
         Counters: counters.reduce((acc, val, i) => {
           acc[`counter-${i + 1}`] = val;
           return acc;
         }, {}),
-        Total_NG: Total_NG_Kensa,
-        Cycle_Time,
-        製造ロット: 材料ロット,
-        Comment,
-        Spare,
+        Total_NG: Total_NG_Kensa
       };
 
       const kensaDBResponse = await fetch(`${serverURL}/submitToKensaDBiReporter`, {
@@ -1521,8 +1553,7 @@ document.getElementById('submit').addEventListener('click', async (event) => {
   }
 });
 
-
-
+// Image Collection with Base64 + Metadata
 async function collectImagesForUpload() {
   const selectedSebanggo = document.getElementById("sub-dropdown").value;
   const currentDate = document.getElementById("Lot No.").value;
@@ -1533,7 +1564,7 @@ async function collectImagesForUpload() {
   const imageMappings = [
     { imgId: 'hatsumonoPic', label: '初物チェック' },
     { imgId: 'atomonoPic', label: '終物チェック' },
-    // Removed 材料ラベル
+    { imgId: '材料ラベル', label: '材料ラベル' }
   ];
 
   const imagesToUpload = [];
@@ -1553,14 +1584,14 @@ async function collectImagesForUpload() {
       machine: selectedMachine,
       worker: selectedWorker,
       date: currentDate,
-      sebanggo: selectedSebanggo,
+      sebanggo: selectedSebanggo
     });
   }
 
   return imagesToUpload;
 }
 
-// Utility to convert blob to base64
+// Blob to base64 conversion
 function blobToBase64(blob) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -1569,9 +1600,6 @@ function blobToBase64(blob) {
     reader.readAsDataURL(blob);
   });
 }
-
-
-
 
 
 

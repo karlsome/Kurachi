@@ -1,24 +1,22 @@
+// This is the COMBINED version of `server.js` with all `masterUserServer.js` routes ported into it.
+// Nothing from `masterUserServer.js` is lost — everything is now under the same server, same Express instance.
+// The port used will still be 3000 (same as original `server.js`) unless you change it below.
+
 if (process.env.NODE_ENV !== "production") {
   require("dotenv").config();
 }
+
 const express = require("express");
 const bodyParser = require('body-parser');
-const cors = require("cors"); // Import CORS
-const { MongoClient, ServerApiVersion } = require("mongodb");
-const { ObjectId } = require("mongodb");
+const cors = require("cors");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
+const bcrypt = require("bcryptjs");
 
 const app = express();
 const port = 3000;
 
-
-
-
-
-// Enable CORS for all requests
 app.use(cors());
-//app.use(express.json()); // Middleware to parse JSON bodies
-
-app.use(express.json({ limit: '50mb' })); // or higher if needed
+app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 const uri = process.env.MONGODB_URI;
@@ -30,7 +28,163 @@ const client = new MongoClient(uri, {
   },
 });
 
+const DB_NAME = "Sasaki_Coating_MasterDB";
 
+// Routes
+app.get("/", (req, res) => {
+  res.send("✅ Master User Server is running");
+});
+
+// Fetch all master users
+app.get("/masterUsers", async (req, res) => {
+  try {
+    await client.connect();
+    const db = client.db(DB_NAME);
+    const users = await db.collection("masterUsers").find().toArray();
+    res.json(users);
+  } catch (error) {
+    console.error("Error fetching master users:", error);
+    res.status(500).send("Server error");
+  }
+});
+
+
+// Create master user
+app.post("/createMasterUser", async (req, res) => {
+  const { username, password, company, email, validUntil, dbName } = req.body;
+
+  if (!username || !password || !company || !email || !validUntil || !dbName) {
+    return res.status(400).json({ error: "All fields are required" });
+  }
+
+  try {
+    await client.connect();
+    const normalizedUsername = username.trim().toLowerCase();
+
+    const masterDB = client.db("Sasaki_Coating_MasterDB");
+    const masterUsers = masterDB.collection("masterUsers");
+
+    // Check if username already exists in master users
+    const existsInMaster = await masterUsers.findOne({
+      $or: [
+        { username: normalizedUsername },
+        { subUsernames: normalizedUsername }
+      ]
+    });
+
+    if (existsInMaster) {
+      return res.status(400).json({ error: "Username already exists (master level)" });
+    }
+
+    // Check if username exists in any customer DB
+    const dbs = await client.db().admin().listDatabases();
+    for (const db of dbs.databases) {
+      if (["admin", "local", "config", "Sasaki_Coating_MasterDB"].includes(db.name)) continue;
+      const userCol = client.db(db.name).collection("users");
+      const existsInCustomer = await userCol.findOne({ username: normalizedUsername });
+      if (existsInCustomer) {
+        return res.status(400).json({ error: "Username already exists in a customer database" });
+      }
+    }
+
+    // Check if dbName already exists
+    const existingDb = dbs.databases.find(db => db.name === dbName);
+    if (existingDb) return res.status(400).json({ error: "Database name already exists" });
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    await masterUsers.insertOne({
+      username: normalizedUsername,
+      password: hashedPassword,
+      company,
+      email,
+      validUntil: new Date(validUntil),
+      dbName,
+      role: "masterUser",
+      subUsernames: [],
+      createdAt: new Date()
+    });
+
+    const customerDB = client.db(dbName);
+    await customerDB.createCollection("masterDB");
+    await customerDB.createCollection("submittedDB");
+    await customerDB.createCollection("logs");
+    await customerDB.createCollection("indexes");
+
+    await customerDB.collection("logs").insertOne({
+      action: "database initialized",
+      by: normalizedUsername,
+      timestamp: new Date(),
+    });
+
+    res.status(201).json({ message: "Master user and customer DB created successfully" });
+  } catch (err) {
+    console.error("Error creating master user:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+app.post("/updateMasterUser", async (req, res) => {
+  const { id, company, email, validUntil, dbName, devices } = req.body;
+
+  if (!id) return res.status(400).json({ error: "Missing ID" });
+
+  try {
+    await client.connect();
+    const db = client.db("Sasaki_Coating_MasterDB"); // Or your actual DB
+    const masterUsers = db.collection("masterUsers");
+
+    const updateData = {
+      company,
+      email,
+      validUntil: validUntil ? new Date(validUntil) : null,
+      dbName
+    };
+
+    // Include devices array only if it exists
+    if (Array.isArray(devices)) {
+      updateData.devices = devices;
+    }
+
+    const result = await masterUsers.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: updateData }
+    );
+
+    if (result.modifiedCount === 0) {
+      return res.status(404).json({ error: "User not updated" });
+    }
+
+    res.status(200).json({ message: "Master user updated" });
+  } catch (error) {
+    console.error("Error updating master user:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Delete master user
+app.post("/deleteMasterUser", async (req, res) => {
+  const { id } = req.body;
+  if (!id) return res.status(400).send("Missing ID");
+
+  try {
+    await client.connect();
+    const db = client.db(DB_NAME);
+    const coll = db.collection("masterUsers");
+    const result = await coll.deleteOne({ _id: new ObjectId(id) });
+    res.json({ deleted: result.deletedCount });
+  } catch (err) {
+    console.error("Delete error:", err);
+    res.status(500).send("Error deleting user");
+  }
+});
+
+////////////////////////////////////////////
+// ⬆⬆⬆ END of MASTER USER ROUTES
+////////////////////////////////////////////
+
+// 👇 Place all your existing `server.js` routes below this line (they are already present in your current file)
+// Make sure you merge and paste it correctly under the existing `app.listen(port...)`
 
 
 //Firebase Storage
@@ -436,7 +590,43 @@ app.post("/submitToSlitDBiReporter", async (req, res) => {
     const slitDB = database.collection("slitDB");
     const formData = req.body;
 
-    // Validate required fields
+    // 🔽 Extract and remove base64 image data
+    const images = formData.images || [];
+    delete formData.images;
+
+    const labelToField = {
+      "初物チェック": "初物チェック画像"
+      // You can add others here like:
+      // "終物チェック": "終物チェック画像",
+      // "材料ラベル": "材料ラベル画像",
+    };
+
+    for (const img of images) {
+      if (!img.base64 || !img.label) continue;
+
+      const buffer = Buffer.from(img.base64, 'base64');
+      const fileName = `${img.sebanggo}_${img.date}_${img.worker}_${img.factory}_${img.machine}_${img.label}.jpg`;
+      const filePath = `CycleCheck/${img.factory}/${fileName}`;
+      const file = admin.storage().bucket().file(filePath);
+
+      const downloadToken = "masterDBToken69";
+
+      await file.save(buffer, {
+        metadata: {
+          contentType: "image/jpeg",
+          metadata: {
+            firebaseStorageDownloadTokens: downloadToken
+          }
+        }
+      });
+
+      const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${file.bucket.name}/o/${encodeURIComponent(file.name)}?alt=media&token=${downloadToken}`;
+
+      const fieldName = labelToField[img.label] || `${img.label}画像`;
+      formData[fieldName] = publicUrl;
+    }
+
+    // ✅ Validate required fields
     const requiredFields = [
       "品番",
       "背番号",
@@ -455,7 +645,7 @@ app.post("/submitToSlitDBiReporter", async (req, res) => {
       "Spare",
       "Comment",
       "製造ロット",
-      "Cycle_Time",
+      "Cycle_Time"
     ];
 
     const missingFields = requiredFields.filter(
@@ -464,19 +654,15 @@ app.post("/submitToSlitDBiReporter", async (req, res) => {
 
     if (missingFields.length > 0) {
       return res.status(400).json({
-        error: `Missing required fields: ${missingFields.join(", ")}`,
+        error: `Missing required fields: ${missingFields.join(", ")}`
       });
     }
 
-    // Insert form data into slitDB
     const result = await slitDB.insertOne(formData);
-    if (!result.insertedId) {
-      throw new Error("Failed to save data to slitDB");
-    }
 
     res.status(201).json({
-      message: "Data successfully saved to slitDB",
-      insertedId: result.insertedId,
+      message: "Data and images successfully saved to slitDB",
+      insertedId: result.insertedId
     });
   } catch (error) {
     console.error("Error saving data to slitDB:", error);
@@ -487,6 +673,65 @@ app.post("/submitToSlitDBiReporter", async (req, res) => {
 
 
 // iReporter route to submit data to SRSDB
+// app.post("/submitToSRSDBiReporter", async (req, res) => {
+//   try {
+//     await client.connect();
+
+//     const database = client.db("submittedDB");
+//     const SRSDB = database.collection("SRSDB");
+//     const formData = req.body;
+
+//     // Validate required fields
+//     const requiredFields = [
+//       "品番",
+//       "背番号",
+//       "Total",
+//       "工場",
+//       "Worker_Name",
+//       "Process_Quantity",
+//       "Date",
+//       "Time_start",
+//       "Time_end",
+//       "設備",
+//       "SRSコード",
+//       "くっつき・めくれ",
+//       "シワ",
+//       "転写位置ズレ",
+//       "転写不良",
+//       "その他",
+//       "SRS_Total_NG",
+//       "Spare",
+//       "Comment",
+//       "製造ロット",
+//       "Cycle_Time",
+//     ];
+
+//     const missingFields = requiredFields.filter(
+//       (field) => formData[field] === undefined || formData[field] === null
+//     );
+
+//     if (missingFields.length > 0) {
+//       return res.status(400).json({
+//         error: `Missing required fields: ${missingFields.join(", ")}`,
+//       });
+//     }
+
+//     // Insert form data into SRSDB
+//     const result = await SRSDB.insertOne(formData);
+//     if (!result.insertedId) {
+//       throw new Error("Failed to save data to slitDB");
+//     }
+
+//     res.status(201).json({
+//       message: "Data successfully saved to slitDB",
+//       insertedId: result.insertedId,
+//     });
+//   } catch (error) {
+//     console.error("Error saving data to slitDB:", error);
+//     res.status(500).json({ error: "Error saving data to slitDB" });
+//   }
+// });
+
 app.post("/submitToSRSDBiReporter", async (req, res) => {
   try {
     await client.connect();
@@ -495,57 +740,51 @@ app.post("/submitToSRSDBiReporter", async (req, res) => {
     const SRSDB = database.collection("SRSDB");
     const formData = req.body;
 
-    // Validate required fields
-    const requiredFields = [
-      "品番",
-      "背番号",
-      "Total",
-      "工場",
-      "Worker_Name",
-      "Process_Quantity",
-      "Date",
-      "Time_start",
-      "Time_end",
-      "設備",
-      "SRSコード",
-      "くっつき・めくれ",
-      "シワ",
-      "転写位置ズレ",
-      "転写不良",
-      "その他",
-      "SRS_Total_NG",
-      "Spare",
-      "Comment",
-      "製造ロット",
-      "Cycle_Time",
-    ];
+    // Handle base64 images
+    const images = formData.images || [];
+    delete formData.images;
 
-    const missingFields = requiredFields.filter(
-      (field) => formData[field] === undefined || formData[field] === null
-    );
+    const labelToField = {
+      "初物チェック": "初物チェック画像",
+      // Add more labels if needed
+    };
 
-    if (missingFields.length > 0) {
-      return res.status(400).json({
-        error: `Missing required fields: ${missingFields.join(", ")}`,
+    for (const img of images) {
+      if (!img.base64 || !img.label) continue;
+
+      const buffer = Buffer.from(img.base64, 'base64');
+      const fileName = `${img.sebanggo}_${img.date}_${img.worker}_${img.factory}_${img.machine}_${img.label}.jpg`;
+      const filePath = `CycleCheck/SRS/${fileName}`;
+      const file = admin.storage().bucket().file(filePath);
+
+      const downloadToken = "masterDBToken69";
+
+      await file.save(buffer, {
+        metadata: {
+          contentType: "image/jpeg",
+          metadata: {
+            firebaseStorageDownloadTokens: downloadToken
+          }
+        }
       });
+
+      const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${file.bucket.name}/o/${encodeURIComponent(file.name)}?alt=media&token=${downloadToken}`;
+      const fieldName = labelToField[img.label] || `${img.label}画像`;
+
+      formData[fieldName] = publicUrl;
     }
 
-    // Insert form data into SRSDB
     const result = await SRSDB.insertOne(formData);
-    if (!result.insertedId) {
-      throw new Error("Failed to save data to slitDB");
-    }
 
     res.status(201).json({
-      message: "Data successfully saved to slitDB",
+      message: "Data and images successfully saved to SRSDB",
       insertedId: result.insertedId,
     });
   } catch (error) {
-    console.error("Error saving data to slitDB:", error);
-    res.status(500).json({ error: "Error saving data to slitDB" });
+    console.error("Error saving data to SRSDB:", error);
+    res.status(500).json({ error: "Error saving data to SRSDB" });
   }
 });
-
 
 
 // This is for SRS LH
@@ -2328,8 +2567,6 @@ app.post('/inventoryChat', async (req, res) => {
 });
 
 
-const bcrypt = require("bcryptjs");
-
 // Login endpoint
 app.post("/login", async (req, res) => {
   const { username, password } = req.body;
@@ -2708,8 +2945,19 @@ app.post("/customerInsertSubmittedDB", async (req, res) => {
   }
 });
 
+
+
 app.post("/customerCreateUser", async (req, res) => {
-  const { firstName, lastName, email, username, password, role, dbName, creatorRole } = req.body;
+  const {
+    firstName,
+    lastName,
+    email,
+    username,
+    password,
+    role,
+    dbName,
+    creatorRole
+  } = req.body;
 
   if (!firstName || !lastName || !email || !username || !password || !role || !dbName || !creatorRole) {
     return res.status(400).json({ error: "Missing required fields" });
@@ -2721,23 +2969,60 @@ app.post("/customerCreateUser", async (req, res) => {
 
   try {
     await client.connect();
-    const db = client.db(dbName);
-    const users = db.collection("users");
 
-    const existing = await users.findOne({ username });
-    if (existing) return res.status(400).json({ error: "Username already exists" });
+    const normalizedUsername = username.trim().toLowerCase();
 
+    const customerDB = client.db(dbName);
+    const masterDB = client.db("Sasaki_Coating_MasterDB");
+
+    const users = customerDB.collection("users");
+    const masterUsers = masterDB.collection("masterUsers");
+
+    // 1. Check in customer DB
+    const existingInCustomer = await users.findOne({ username: normalizedUsername });
+    if (existingInCustomer) {
+      return res.status(400).json({ error: "Username already exists in this customer database" });
+    }
+
+    // 2. Check in masterUsers (username or subUsernames)
+    const conflictInMaster = await masterUsers.findOne({
+      $or: [
+        { username: normalizedUsername },
+        { subUsernames: normalizedUsername }
+      ]
+    });
+    if (conflictInMaster) {
+      return res.status(400).json({ error: "Username already exists in a master account" });
+    }
+
+    // 3. Check across all other customer DBs
+    const dbs = await client.db().admin().listDatabases();
+    for (const db of dbs.databases) {
+      if (["admin", "local", "config", "Sasaki_Coating_MasterDB", dbName].includes(db.name)) continue;
+      const userCol = client.db(db.name).collection("users");
+      const existsElsewhere = await userCol.findOne({ username: normalizedUsername });
+      if (existsElsewhere) {
+        return res.status(400).json({ error: "Username already exists in another customer company" });
+      }
+    }
+
+    // 4. Insert user in customer DB
     const hashedPassword = await bcrypt.hash(password, 10);
-
     await users.insertOne({
       firstName,
       lastName,
       email,
-      username,
+      username: normalizedUsername,
       password: hashedPassword,
       role,
       createdAt: new Date()
     });
+
+    // 5. Track sub-user in masterUsers
+    await masterUsers.updateOne(
+      { dbName },
+      { $addToSet: { subUsernames: normalizedUsername } }
+    );
 
     res.status(201).json({ message: "User created successfully" });
   } catch (error) {
@@ -2745,6 +3030,7 @@ app.post("/customerCreateUser", async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
+
 
 app.post("/customerUpdateMasterDB", async (req, res) => {
   const { recordId, updateData, role, dbName, username } = req.body;
@@ -3078,5 +3364,5 @@ app.post("/submitToMasterDB", async (req, res) => {
 
 
 app.listen(port, () => {
-  console.log(`Server is running at http://localhost:${port}`);
+  console.log(`✅ Combined server is running at http://localhost:${port}`);
 });

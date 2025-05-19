@@ -67,6 +67,7 @@ inputs.forEach(input => {
 
 // Restore the values of input fields, images, and textContent from localStorage on page load
 document.addEventListener('DOMContentLoaded', () => {
+  uploadingModal.style.display = 'none';
   getIP(); // ip address for machine
   const inputs = document.querySelectorAll('input, select, button, textarea'); // Get all input elements
   const images = document.querySelectorAll('img'); // Get all <img> elements
@@ -255,11 +256,68 @@ function blankInfo() {
 }
 
 
-//for the info section
+// //for the info section
+// async function fetchProductDetails() {
+//   const serialNumber = document.getElementById("sub-dropdown").value;
+//   const factory = document.getElementById("selected工場").value;
+//   // Update the dynamicImage src attribute with the retrieved htmlWebsite value
+//   const dynamicImage = document.getElementById("dynamicImage");
+//   dynamicImage.src = "";
+
+//   if (!serialNumber) {
+//     console.error("Please select a valid 背番号.");
+//     blankInfo();
+//     return;
+//   }
+
+//   try {
+//     const response = await fetch(`${serverURL}/getProductDetails?serialNumber=${encodeURIComponent(serialNumber)}&factory=${encodeURIComponent(factory)}`);
+//     if (response.ok) {
+//       const data = await response.json();
+
+//       // Populate the HTML fields with the retrieved data
+//       document.getElementById("product-number").value = data.品番 || "";
+//       document.getElementById("model").value = data.モデル || "";
+//       document.getElementById("shape").value = data.形状 || "";
+//       document.getElementById("R-L").value = data["R/L"] || "";
+//       document.getElementById("material").value = data.材料 || "";
+//       document.getElementById("material-code").value = data.材料背番号 || "";
+//       document.getElementById("material-color").value = data.色 || "";
+//       document.getElementById("kataban").value = data.型番 || "";
+//       document.getElementById("収容数").value = data.収容数 || "";
+//       document.getElementById("送りピッチ").textContent = "rolldist: " + data.送りピッチ || "";
+//       document.getElementById("SRS").value = data.SRS || "";
+      
+      
+
+      
+      
+//       // if (data.htmlWebsite) {
+//       //   dynamicImage.src = data.htmlWebsite; // Set the image source to the retrieved URL
+//       //   dynamicImage.alt = "Product Image"; // Optional: Set the alt text
+//       //   dynamicImage.style.display = "block"; // Ensure the image is visible
+//       // } else {
+//       //   dynamicImage.src = ""; // Clear the image source if no URL is available
+//       //   dynamicImage.alt = "No Image Available"; // Optional: Set fallback alt text
+//       //   dynamicImage.style.display = "none"; // Hide the image if no URL is available
+//       // }
+//     } else {
+//       console.error("No matching product found.");
+//     }
+//   } catch (error) {
+//     console.error("Error fetching product details:", error);
+//   }
+//   picLINK(serialNumber);
+// }
+
+// // Call fetchProductDetails when a new 背番号 is selected
+// document.getElementById("sub-dropdown").addEventListener("change", fetchProductDetails);
+// document.getElementById("sub-dropdown").addEventListener("change", NCPresstoFalse);
+
+
 async function fetchProductDetails() {
   const serialNumber = document.getElementById("sub-dropdown").value;
   const factory = document.getElementById("selected工場").value;
-  // Update the dynamicImage src attribute with the retrieved htmlWebsite value
   const dynamicImage = document.getElementById("dynamicImage");
   dynamicImage.src = "";
 
@@ -270,48 +328,84 @@ async function fetchProductDetails() {
   }
 
   try {
-    const response = await fetch(`${serverURL}/getProductDetails?serialNumber=${encodeURIComponent(serialNumber)}&factory=${encodeURIComponent(factory)}`);
-    if (response.ok) {
-      const data = await response.json();
+    // Step 1: Try query by 背番号
+    let response = await fetch(`${serverURL}/queries`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        dbName: "Sasaki_Coating_MasterDB",
+        collectionName: "masterDB",
+        query: { 背番号: serialNumber }
+      }),
+    });
 
-      // Populate the HTML fields with the retrieved data
-      document.getElementById("product-number").value = data.品番 || "";
-      document.getElementById("model").value = data.モデル || "";
-      document.getElementById("shape").value = data.形状 || "";
-      document.getElementById("R-L").value = data["R/L"] || "";
-      document.getElementById("material").value = data.材料 || "";
-      document.getElementById("material-code").value = data.材料背番号 || "";
-      document.getElementById("material-color").value = data.色 || "";
-      document.getElementById("kataban").value = data.型番 || "";
-      document.getElementById("収容数").value = data.収容数 || "";
-      document.getElementById("送りピッチ").textContent = "rolldist: " + data.送りピッチ || "";
-      document.getElementById("SRS").value = data.SRS || "";
-      
-      
+    let result = await response.json();
 
-      
-      
-      // if (data.htmlWebsite) {
-      //   dynamicImage.src = data.htmlWebsite; // Set the image source to the retrieved URL
-      //   dynamicImage.alt = "Product Image"; // Optional: Set the alt text
-      //   dynamicImage.style.display = "block"; // Ensure the image is visible
-      // } else {
-      //   dynamicImage.src = ""; // Clear the image source if no URL is available
-      //   dynamicImage.alt = "No Image Available"; // Optional: Set fallback alt text
-      //   dynamicImage.style.display = "none"; // Hide the image if no URL is available
-      // }
-    } else {
-      console.error("No matching product found.");
+    // Step 2: If not found, try query by 品番
+    if (!result || result.length === 0) {
+      const altRes = await fetch(`${serverURL}/queries`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          dbName: "Sasaki_Coating_MasterDB",
+          collectionName: "masterDB",
+          query: { 品番: serialNumber }
+        }),
+      });
+
+      const altResult = await altRes.json();
+
+      if (altResult.length > 0) {
+        const matched = altResult[0];
+        if (matched.背番号) {
+          document.getElementById("sub-dropdown").value = matched.背番号;
+        }
+        result = [matched];
+      }
     }
+
+    // Step 3: Still no result
+    if (!result || result.length === 0) {
+      console.error("No matching product found.");
+      blankInfo();
+      return;
+    }
+
+    const data = result[0];
+
+    // Populate fields
+    document.getElementById("product-number").value = data.品番 || "";
+    document.getElementById("model").value = data.モデル || "";
+    document.getElementById("shape").value = data.形状 || "";
+    document.getElementById("R-L").value = data["R/L"] || "";
+    document.getElementById("material").value = data.材料 || "";
+    document.getElementById("material-code").value = data.材料背番号 || "";
+    document.getElementById("material-color").value = data.色 || "";
+    document.getElementById("kataban").value = data.型番 || "";
+    document.getElementById("収容数").value = data.収容数 || "";
+    document.getElementById("送りピッチ").textContent = "送りピッチ: " + (data.送りピッチ || "");
+    document.getElementById("SRS").value = data.SRS || "";
+
+    // Set image
+    if (data.imageURL) {
+      dynamicImage.src = data.imageURL;
+      dynamicImage.alt = "Product Image";
+      dynamicImage.style.display = "block";
+    } else {
+      dynamicImage.src = "";
+      dynamicImage.alt = "No Image Available";
+      dynamicImage.style.display = "none";
+    }
+
   } catch (error) {
     console.error("Error fetching product details:", error);
   }
-  picLINK(serialNumber);
 }
 
-// Call fetchProductDetails when a new 背番号 is selected
+// Trigger when 背番号 is selected
 document.getElementById("sub-dropdown").addEventListener("change", fetchProductDetails);
 document.getElementById("sub-dropdown").addEventListener("change", NCPresstoFalse);
+
 
 
 
@@ -904,6 +998,7 @@ function printLabel() {
 
 
 
+
 // Take photo hatsumono and atomono and label
 // Mapping of buttons to labels and images
 const buttonMappings = [
@@ -925,20 +1020,60 @@ const buttonMappings = [
     imgId: '材料ラベル',
     labelText: '材料ラベル',
   },
-  
 ];
 
-let currentButtonId = null; // Track the button that triggered the popup
+let currentButtonId = null;
 
-// Add event listeners for all buttons
 buttonMappings.forEach(({ buttonId }) => {
   const button = document.getElementById(buttonId);
-
   button.addEventListener('click', () => {
-    currentButtonId = buttonId; // Set the current button ID
+    const subDropdown = document.getElementById('sub-dropdown');
+    const selectedValue = subDropdown?.value;
+
+    if (!selectedValue) {
+      // Trigger modal message instead of alert
+      const scanAlertModal = document.getElementById('scanAlertModal');
+      const scanAlertText = document.getElementById('scanAlertText');
+      const alertSound = document.getElementById('alert-sound');
+
+      scanAlertText.innerText = '背番号を選択してください / Please select a Sebanggo first.';
+      scanAlertModal.style.display = 'block';
+
+      // Flash body and sub-dropdown
+      document.body.classList.add('flash-red');
+      subDropdown.classList.add('flash-red-border');
+
+      // Play alert sound
+      if (alertSound) {
+        alertSound.muted = false;
+        alertSound.volume = 1;
+        alertSound.play().catch(err => console.error("Failed to play sound:", err));
+      }
+
+      // Set modal close behavior
+      const closeScanModalButton = document.getElementById('closeScanModalButton');
+      closeScanModalButton.onclick = function () {
+        scanAlertModal.style.display = 'none';
+        document.body.classList.remove('flash-red');
+        subDropdown.classList.remove('flash-red-border');
+
+        if (alertSound) {
+          alertSound.pause();
+          alertSound.currentTime = 0;
+          alertSound.muted = true;
+        }
+      };
+
+      return; // stop further action
+    }
+
+    // If value is selected, proceed
+    currentButtonId = buttonId;
     window.open('captureImage.html', 'Capture Image', 'width=900,height=900');
   });
 });
+
+
 
 // Handle the message from the popup window
 window.addEventListener('message', function (event) {
@@ -1055,34 +1190,253 @@ function uploadPhotou() {
 
 
 
-// Submit Button
+// // Submit Button
+// document.getElementById('submit').addEventListener('click', async (event) => {
+//   event.preventDefault(); // Prevent default form submission
+//   updateCycleTime();
+//   const hatsumono = document.getElementById("hatsumonoLabel").textContent;
+//   const atomono = document.getElementById("atomonoLabel").textContent;
+
+//   const isToggleChecked = document.getElementById('enable-inputs').checked;
+
+//   const alertSound = document.getElementById('alert-sound');
+//   const scanAlertModal = document.getElementById('scanAlertModal');
+//   const scanAlertText = document.getElementById('scanAlertText');
+
+//   // Preload the alert sound without playing it
+//   if (alertSound) {
+//     alertSound.muted = true; // Mute initially to preload
+//     alertSound.loop = false; // Disable looping
+//     alertSound.load(); // Preload the audio file
+//   }
+
+//   // Check if hatsumono and atomono are done
+//   if (hatsumono === "FALSE" || atomono === "FALSE") {
+//     showAlert("初物/終物確認してください / Please do Hatsumono and Atomono");
+//     return;
+//   }
+
+//   try {
+//     // Extract common data
+//     const 品番 = document.getElementById('product-number').value;
+//     const 背番号 = document.getElementById('sub-dropdown').value;
+//     const 工場 = document.getElementById('selected工場').value;
+//     const 設備 = document.getElementById('process').value;
+//     const Process_Quantity = parseInt(document.getElementById('ProcessQuantity').value, 10) || 0;
+//     const 疵引不良 = parseInt(document.getElementById('counter-18').value, 10) || 0;
+//     const 加工不良 = parseInt(document.getElementById('counter-19').value, 10) || 0;
+//     const その他 = parseInt(document.getElementById('counter-20').value, 10) || 0;
+//     const Total_NG = 疵引不良 + 加工不良 + その他;
+//     const Total_PressDB = Process_Quantity - Total_NG; // Total for pressDB
+//     const Worker_Name = document.getElementById('Machine Operator').value;
+//     const Date = document.getElementById('Lot No.').value;
+//     const Time_start = document.getElementById('Start Time').value;
+//     const Time_end = document.getElementById('End Time').value;
+//     const 材料ロット = document.getElementById('材料ロット').value;
+//     const Spare = parseInt(document.getElementById('在庫').value, 10) || 0;
+//     const Comment = document.querySelector('textarea[name="Comments1"]').value;
+//     const Cycle_Time = parseFloat(document.getElementById('cycleTime').value) || 0;
+
+//     // Check if 背番号 is selected
+//     if (!背番号) {
+//       // Show alert modal
+//       scanAlertText.innerText = '背番号が必要です。 / Sebanggo is required.';
+//       scanAlertModal.style.display = 'block';
+
+//       // Play alert sound
+//       if (alertSound) {
+//         alertSound.muted = false; // Unmute to alert user
+//         alertSound.volume = 1; // Set full volume
+//         alertSound.play().catch(error => console.error('Failed to play alert sound:', error));
+//       }
+
+//       // Add blinking red background
+//       document.body.classList.add('flash-red');
+
+//       // Close modal on button click
+//       const closeScanModalButton = document.getElementById('closeScanModalButton');
+//       closeScanModalButton.onclick = function () {
+//         scanAlertModal.style.display = 'none';
+//         alertSound.pause();
+//         alertSound.currentTime = 0; // Reset sound to the beginning
+//         alertSound.muted = true; // Mute again for next time
+//         document.body.classList.remove('flash-red');
+//       };
+
+//       return; // Stop the submission process
+//     }
+
+//     // Data for pressDB
+//     const pressDBData = {
+//       品番,
+//       背番号,
+//       設備,
+//       Total: Total_PressDB,
+//       工場,
+//       Worker_Name,
+//       Process_Quantity,
+//       Date,
+//       Time_start,
+//       Time_end,
+//       材料ロット,
+//       疵引不良,
+//       加工不良,
+//       その他,
+//       Total_NG,
+//       Spare,
+//       Comment,
+//       Cycle_Time,
+//     };
+
+//     console.log('PressDB Data:', pressDBData);
+
+//     // Save to pressDB
+//     const pressDBResponse = await fetch(`${serverURL}/submitTopressDBiReporter`, {
+//       method: 'POST',
+//       headers: { 'Content-Type': 'application/json' },
+//       body: JSON.stringify(pressDBData),
+//     });
+
+//     if (!pressDBResponse.ok) {
+//       const errorData = await pressDBResponse.json();
+//       throw new Error(errorData.error || 'Failed to save data to pressDB');
+//     }
+//     console.log('Data saved to pressDB successfully.');
+
+//     // Run uploadPhotou() after saving data
+//     try {
+//       await uploadPhotou();
+
+//       // Wait for 3 seconds before showing success message and closing
+//       setTimeout(() => {
+//         // Show success modal with blinking green background
+//         scanAlertText.innerText = 'Form submitted successfully / 保存しました';
+//         scanAlertModal.style.display = 'block';
+//         document.body.classList.add('flash-green');
+
+//         const closeScanModalButton = document.getElementById('closeScanModalButton');
+//         closeScanModalButton.onclick = function () {
+//           scanAlertModal.style.display = 'none';
+//           document.body.classList.remove('flash-green');
+//           window.location.reload();
+//           resetForm();
+//         };
+//       }, 3000);
+//     } catch (error) {
+//       console.error('Upload failed:', error);
+
+//       // Show error message and close window after 3 seconds
+//       scanAlertText.innerText = 'Upload failed. Please try again.';
+//       scanAlertModal.style.display = 'block';
+//       setTimeout(() => {
+//         scanAlertModal.style.display = 'none';
+//         window.close();
+//       }, 3000);
+//     }
+
+//     if (isToggleChecked) {
+//       // Data for kensaDB
+//       const counters = Array.from({ length: 12 }, (_, i) => {
+//         const counter = document.getElementById(`counter-${i + 1}`);
+//         return parseInt(counter?.value || 0, 10);
+//       });
+
+//       // Calculate Total_NG as the sum of counters 1 to 12
+//       const Total_NG_Kensa = counters.reduce((sum, count) => sum + count, 0);
+
+//       // Total for kensaDB
+//       const Total_KensaDB = Total_PressDB - Total_NG_Kensa;
+
+//       const kensaDBData = {
+//         品番,
+//         背番号,
+//         工場,
+//         Total: Total_KensaDB,
+//         Worker_Name,
+//         Process_Quantity,
+//         Remaining_Quantity: Total_PressDB,
+//         Date,
+//         Time_start,
+//         Time_end,
+//         設備,
+//         Counters: counters.reduce((acc, val, idx) => {
+//           acc[`counter-${idx + 1}`] = val; // Dynamically add counters
+//           return acc;
+//         }, {}),
+//         Total_NG: Total_NG_Kensa,
+//         Cycle_Time,
+//         製造ロット: 材料ロット,
+//         Comment,
+//         Spare,
+//       };
+
+//       console.log('KensaDB Data:', kensaDBData);
+
+//       // Save to kensaDB
+//       const kensaDBResponse = await fetch(`${serverURL}/submitToKensaDBiReporter`, {
+//         method: 'POST',
+//         headers: { 'Content-Type': 'application/json' },
+//         body: JSON.stringify(kensaDBData),
+//       });
+
+//       if (!kensaDBResponse.ok) {
+//         const errorData = await kensaDBResponse.json();
+//         throw new Error(errorData.error || 'Failed to save data to kensaDB');
+//       }
+//       console.log('Data saved to kensaDB successfully.');
+//     }
+//   } catch (error) {
+//     console.error('Error during submission:', error);
+
+//     // Show error modal
+//     scanAlertText.innerText = 'An error occurred. Please try again.';
+//     scanAlertModal.style.display = 'block';
+
+//     // Play alert sound
+//     if (alertSound) {
+//       alertSound.muted = false;
+//       alertSound.volume = 1;
+//       alertSound.play().catch(error => console.error('Failed to play alert sound:', error));
+//     }
+
+//     // Add blinking red background
+//     document.body.classList.add('flash-red');
+
+//     // Close modal after error
+//     const closeScanModalButton = document.getElementById('closeScanModalButton');
+//     closeScanModalButton.onclick = function () {
+//       scanAlertModal.style.display = 'none';
+//       alertSound.pause();
+//       alertSound.currentTime = 0;
+//       alertSound.muted = true;
+//       document.body.classList.remove('flash-red');
+//     };
+//   }
+// });
+
 document.getElementById('submit').addEventListener('click', async (event) => {
-  event.preventDefault(); // Prevent default form submission
+  event.preventDefault();
   updateCycleTime();
+
   const hatsumono = document.getElementById("hatsumonoLabel").textContent;
   const atomono = document.getElementById("atomonoLabel").textContent;
-
   const isToggleChecked = document.getElementById('enable-inputs').checked;
 
   const alertSound = document.getElementById('alert-sound');
   const scanAlertModal = document.getElementById('scanAlertModal');
   const scanAlertText = document.getElementById('scanAlertText');
+  const uploadingModal = document.getElementById('uploadingModal');
 
-  // Preload the alert sound without playing it
-  if (alertSound) {
-    alertSound.muted = true; // Mute initially to preload
-    alertSound.loop = false; // Disable looping
-    alertSound.load(); // Preload the audio file
-  }
+  // Show loading modal
+  uploadingModal.style.display = 'flex';
 
-  // Check if hatsumono and atomono are done
   if (hatsumono === "FALSE" || atomono === "FALSE") {
+    uploadingModal.style.display = 'none';
     showAlert("初物/終物確認してください / Please do Hatsumono and Atomono");
     return;
   }
 
   try {
-    // Extract common data
     const 品番 = document.getElementById('product-number').value;
     const 背番号 = document.getElementById('sub-dropdown').value;
     const 工場 = document.getElementById('selected工場').value;
@@ -1092,7 +1446,7 @@ document.getElementById('submit').addEventListener('click', async (event) => {
     const 加工不良 = parseInt(document.getElementById('counter-19').value, 10) || 0;
     const その他 = parseInt(document.getElementById('counter-20').value, 10) || 0;
     const Total_NG = 疵引不良 + 加工不良 + その他;
-    const Total_PressDB = Process_Quantity - Total_NG; // Total for pressDB
+    const Total_PressDB = Process_Quantity - Total_NG;
     const Worker_Name = document.getElementById('Machine Operator').value;
     const Date = document.getElementById('Lot No.').value;
     const Time_start = document.getElementById('Start Time').value;
@@ -1101,37 +1455,28 @@ document.getElementById('submit').addEventListener('click', async (event) => {
     const Spare = parseInt(document.getElementById('在庫').value, 10) || 0;
     const Comment = document.querySelector('textarea[name="Comments1"]').value;
     const Cycle_Time = parseFloat(document.getElementById('cycleTime').value) || 0;
+    const ショット数 = parseInt(document.getElementById('shot').value, 10) || 0;
 
-    // Check if 背番号 is selected
     if (!背番号) {
-      // Show alert modal
+      uploadingModal.style.display = 'none';
       scanAlertText.innerText = '背番号が必要です。 / Sebanggo is required.';
       scanAlertModal.style.display = 'block';
-
-      // Play alert sound
       if (alertSound) {
-        alertSound.muted = false; // Unmute to alert user
-        alertSound.volume = 1; // Set full volume
-        alertSound.play().catch(error => console.error('Failed to play alert sound:', error));
+        alertSound.muted = false;
+        alertSound.volume = 1;
+        alertSound.play().catch(console.error);
       }
-
-      // Add blinking red background
       document.body.classList.add('flash-red');
-
-      // Close modal on button click
-      const closeScanModalButton = document.getElementById('closeScanModalButton');
-      closeScanModalButton.onclick = function () {
+      document.getElementById('closeScanModalButton').onclick = function () {
         scanAlertModal.style.display = 'none';
         alertSound.pause();
-        alertSound.currentTime = 0; // Reset sound to the beginning
-        alertSound.muted = true; // Mute again for next time
+        alertSound.currentTime = 0;
+        alertSound.muted = true;
         document.body.classList.remove('flash-red');
       };
-
-      return; // Stop the submission process
+      return;
     }
 
-    // Data for pressDB
     const pressDBData = {
       品番,
       背番号,
@@ -1151,11 +1496,39 @@ document.getElementById('submit').addEventListener('click', async (event) => {
       Spare,
       Comment,
       Cycle_Time,
+      ショット数,
     };
 
-    console.log('PressDB Data:', pressDBData);
+    // Collect image data
+    const images = [];
 
-    // Save to pressDB
+    const imageMappings = [
+      { id: 'hatsumonoPic', label: '初物チェック' },
+      { id: 'atomonoPic', label: '終物チェック' },
+      { id: '材料ラベル', label: '材料ラベル' }
+    ];
+
+    for (const { id, label } of imageMappings) {
+      const img = document.getElementById(id);
+      if (img && img.src) {
+        const response = await fetch(img.src);
+        const blob = await response.blob();
+        const base64 = await blobToBase64(blob);
+        images.push({
+          base64,
+          label,
+          factory: 工場,
+          machine: 設備,
+          worker: Worker_Name,
+          date: Date,
+          sebanggo: 背番号,
+        });
+      }
+    }
+
+    pressDBData.images = images;
+
+    // Submit to pressDB with images
     const pressDBResponse = await fetch(`${serverURL}/submitTopressDBiReporter`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1166,50 +1539,15 @@ document.getElementById('submit').addEventListener('click', async (event) => {
       const errorData = await pressDBResponse.json();
       throw new Error(errorData.error || 'Failed to save data to pressDB');
     }
-    console.log('Data saved to pressDB successfully.');
 
-    // Run uploadPhotou() after saving data
-    try {
-      await uploadPhotou();
-
-      // Wait for 3 seconds before showing success message and closing
-      setTimeout(() => {
-        // Show success modal with blinking green background
-        scanAlertText.innerText = 'Form submitted successfully / 保存しました';
-        scanAlertModal.style.display = 'block';
-        document.body.classList.add('flash-green');
-
-        const closeScanModalButton = document.getElementById('closeScanModalButton');
-        closeScanModalButton.onclick = function () {
-          scanAlertModal.style.display = 'none';
-          document.body.classList.remove('flash-green');
-          window.location.reload();
-          resetForm();
-        };
-      }, 3000);
-    } catch (error) {
-      console.error('Upload failed:', error);
-
-      // Show error message and close window after 3 seconds
-      scanAlertText.innerText = 'Upload failed. Please try again.';
-      scanAlertModal.style.display = 'block';
-      setTimeout(() => {
-        scanAlertModal.style.display = 'none';
-        window.close();
-      }, 3000);
-    }
-
+    // ✅ Submit to kensaDB if toggle is ON
     if (isToggleChecked) {
-      // Data for kensaDB
       const counters = Array.from({ length: 12 }, (_, i) => {
         const counter = document.getElementById(`counter-${i + 1}`);
         return parseInt(counter?.value || 0, 10);
       });
 
-      // Calculate Total_NG as the sum of counters 1 to 12
-      const Total_NG_Kensa = counters.reduce((sum, count) => sum + count, 0);
-
-      // Total for kensaDB
+      const Total_NG_Kensa = counters.reduce((sum, val) => sum + val, 0);
       const Total_KensaDB = Total_PressDB - Total_NG_Kensa;
 
       const kensaDBData = {
@@ -1224,8 +1562,8 @@ document.getElementById('submit').addEventListener('click', async (event) => {
         Time_start,
         Time_end,
         設備,
-        Counters: counters.reduce((acc, val, idx) => {
-          acc[`counter-${idx + 1}`] = val; // Dynamically add counters
+        Counters: counters.reduce((acc, val, i) => {
+          acc[`counter-${i + 1}`] = val;
           return acc;
         }, {}),
         Total_NG: Total_NG_Kensa,
@@ -1235,9 +1573,6 @@ document.getElementById('submit').addEventListener('click', async (event) => {
         Spare,
       };
 
-      console.log('KensaDB Data:', kensaDBData);
-
-      // Save to kensaDB
       const kensaDBResponse = await fetch(`${serverURL}/submitToKensaDBiReporter`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1248,28 +1583,34 @@ document.getElementById('submit').addEventListener('click', async (event) => {
         const errorData = await kensaDBResponse.json();
         throw new Error(errorData.error || 'Failed to save data to kensaDB');
       }
-      console.log('Data saved to kensaDB successfully.');
     }
+
+    // ✅ Final Success Handling
+    setTimeout(() => {
+      uploadingModal.style.display = 'none';
+      scanAlertText.innerText = 'Form submitted successfully / 保存しました';
+      scanAlertModal.style.display = 'block';
+      document.body.classList.add('flash-green');
+      document.getElementById('closeScanModalButton').onclick = function () {
+        scanAlertModal.style.display = 'none';
+        document.body.classList.remove('flash-green');
+        window.location.reload();
+        resetForm();
+      };
+    }, 3000);
+
   } catch (error) {
     console.error('Error during submission:', error);
-
-    // Show error modal
+    uploadingModal.style.display = 'none';
     scanAlertText.innerText = 'An error occurred. Please try again.';
     scanAlertModal.style.display = 'block';
-
-    // Play alert sound
     if (alertSound) {
       alertSound.muted = false;
       alertSound.volume = 1;
-      alertSound.play().catch(error => console.error('Failed to play alert sound:', error));
+      alertSound.play().catch(console.error);
     }
-
-    // Add blinking red background
     document.body.classList.add('flash-red');
-
-    // Close modal after error
-    const closeScanModalButton = document.getElementById('closeScanModalButton');
-    closeScanModalButton.onclick = function () {
+    document.getElementById('closeScanModalButton').onclick = function () {
       scanAlertModal.style.display = 'none';
       alertSound.pause();
       alertSound.currentTime = 0;
@@ -1278,6 +1619,16 @@ document.getElementById('submit').addEventListener('click', async (event) => {
     };
   }
 });
+
+// 🔁 Utility: Convert Blob to Base64
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
 
 
 
@@ -1648,7 +1999,7 @@ function showPopup() {
       popup.style.zIndex = '1000';
 
       var message = document.createElement('p');
-      message.textContent = 'Please press "send to machine" button! GAGO! / "send to machine" ボタンを押してください';
+      message.textContent = 'Please press "send to machine" button! / "send to machine" ボタンを押してください';
       popup.appendChild(message);
 
       var button = document.createElement('button');
@@ -1680,9 +2031,7 @@ function showPopup() {
 function checkValue() {
   var interval = setInterval(function () {
       console.log("selectedFactory: " + selectedFactory);
-      if (selectedFactory !== "小瀬") {
-          return; // Skip the check if selectedFactory is not "小瀬"
-      }
+    
 
       const selected工場 = document.getElementById('selected工場').value; // Get the current factory value
       const pageName = location.pathname.split('/').pop(); // Get the current HTML file name

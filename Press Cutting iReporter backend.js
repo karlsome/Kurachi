@@ -2253,17 +2253,58 @@ const buttonMappings = [
   },
 ];
 
-let currentButtonId = null; // Track the button that triggered the popup
+let currentButtonId = null;
 
-// Add event listeners for all buttons
 buttonMappings.forEach(({ buttonId }) => {
   const button = document.getElementById(buttonId);
-
   button.addEventListener('click', () => {
-    currentButtonId = buttonId; // Set the current button ID
+    const subDropdown = document.getElementById('sub-dropdown');
+    const selectedValue = subDropdown?.value;
+
+    if (!selectedValue) {
+      // Trigger modal message instead of alert
+      const scanAlertModal = document.getElementById('scanAlertModal');
+      const scanAlertText = document.getElementById('scanAlertText');
+      const alertSound = document.getElementById('alert-sound');
+
+      scanAlertText.innerText = '背番号を選択してください / Please select a Sebanggo first.';
+      scanAlertModal.style.display = 'block';
+
+      // Flash body and sub-dropdown
+      document.body.classList.add('flash-red');
+      subDropdown.classList.add('flash-red-border');
+
+      // Play alert sound
+      if (alertSound) {
+        alertSound.muted = false;
+        alertSound.volume = 1;
+        alertSound.play().catch(err => console.error("Failed to play sound:", err));
+      }
+
+      // Set modal close behavior
+      const closeScanModalButton = document.getElementById('closeScanModalButton');
+      closeScanModalButton.onclick = function () {
+        scanAlertModal.style.display = 'none';
+        document.body.classList.remove('flash-red');
+        subDropdown.classList.remove('flash-red-border');
+
+        if (alertSound) {
+          alertSound.pause();
+          alertSound.currentTime = 0;
+          alertSound.muted = true;
+        }
+      };
+
+      return; // stop further action
+    }
+
+    // If value is selected, proceed
+    currentButtonId = buttonId;
     window.open('captureImage.html', 'Capture Image', 'width=900,height=900');
   });
 });
+
+
 
 // Handle the message from the popup window
 window.addEventListener('message', function (event) {

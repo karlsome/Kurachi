@@ -1,6 +1,12 @@
 const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
 
+// Select all input, select, and button elements
+const inputs = document.querySelectorAll('input, select, button,textarea');
+const selected工場 = document.getElementById('selected工場').value; // Get the current factory value
+const pageName = location.pathname.split('/').pop(); // Get the current HTML file name
+const uniquePrefix = `${pageName}_${selected工場}_`;
+
 // link for pictures database
 const picURL = 'https://script.google.com/macros/s/AKfycbwHUW1ia8hNZG-ljsguNq8K4LTPVnB6Ng_GLXIHmtJTdUgGGd2WoiQo9ToF-7PvcJh9bA/exec';
 
@@ -41,6 +47,7 @@ if (selectedFactory) {
 
 // get sebanggo list for SLIT only
 document.addEventListener("DOMContentLoaded", () => {
+  uploadingModal.style.display = 'none';
   const subDropdown = document.getElementById("sub-dropdown");
 
   // Fetch 背番号 list from the server
@@ -86,6 +93,106 @@ function blankInfo() {
   document.getElementById("送りピッチ").value = "";
 }
 
+
+
+
+// Save the value of each input to localStorage on change
+inputs.forEach(input => {
+    input.addEventListener('input', () => {
+        const key = `${uniquePrefix}${input.id || input.name}`; // Prefix key with pageName and selected工場
+        if (key) {
+            localStorage.setItem(key, input.value);
+        }
+    });
+
+    if (input.type === 'checkbox' || input.type === 'radio') {
+        input.addEventListener('change', () => {
+            const key = `${uniquePrefix}${input.id || input.name}`;
+            if (key) {
+                localStorage.setItem(key, input.checked); // Save checkbox/radio state
+            }
+        });
+    }
+});
+
+
+
+// Restore the values of input fields, images, and textContent from localStorage on page load
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('uploadingModal').style.display = 'none'; // this turns off the uploading modal
+  const inputs = document.querySelectorAll('input, select, button, textarea'); // Get all input elements
+  const images = document.querySelectorAll('img'); // Get all <img> elements
+  const textElements = document.querySelectorAll('[id]'); // Get all elements with an ID
+  const pageName = location.pathname.split('/').pop(); // Get the current HTML file name
+  const selected工場 = document.getElementById('selected工場')?.value; // Get the selected 工場 value
+  const processElement = document.getElementById("process");
+
+  if (!selected工場) {
+      console.error("Selected 工場 is not set or found.");
+      return;
+  }
+
+  // Loop through all keys in localStorage
+  Object.keys(localStorage).forEach(key => {
+      // Check if the key belongs to the current HTML file and selected 工場
+      if (key.startsWith(`${uniquePrefix}`)) {
+          const savedValue = localStorage.getItem(key);
+
+          if (savedValue !== null) {
+              // Match each input with its respective localStorage key
+              inputs.forEach(input => {
+                  const inputKey = `${uniquePrefix}${input.id || input.name}`;
+                  if (inputKey === key) {
+                      if (input.type === 'checkbox' || input.type === 'radio') {
+                          input.checked = savedValue === 'true'; // Restore checkbox/radio state
+                      } else if (input.tagName === 'SELECT') {
+                          // For select elements, wait for options to populate
+                          setTimeout(() => {
+                              if ([...input.options].some(option => option.value === savedValue)) {
+                                  input.value = savedValue; // Restore select value
+                                  console.log(`Restored ${input.id || input.name}:`, savedValue);
+                                  fetchProductDetails();
+                              } else {
+                                  console.error(`Option '${savedValue}' not found in select '${input.id || input.name}'.`);
+                              }
+                          }, 2000); // Adjust delay if options are populated dynamically
+                          
+                      } else {
+                          input.value = savedValue; // Restore value for text, hidden, and other inputs
+                      }
+                  }
+              });
+
+              // Restore textContent dynamically for all elements with IDs
+              textElements.forEach(element => {
+                  const textKey = `${uniquePrefix}${element.id}.textContent`;
+                  if (key === textKey) {
+                      element.textContent = savedValue; // Restore textContent
+                      console.log(`Restored textContent for ${element.id}:`, savedValue);
+                  }
+              });
+
+              // Restore image sources dynamically
+              images.forEach(image => {
+                  const imageKey = `${uniquePrefix}${image.id || image.name}.src`;
+                  if (key === imageKey) {
+                      image.src = savedValue; // Restore the image source
+                      image.style.display = 'block'; // Ensure the image is visible
+                      console.log(`Restored ${image.id || image.name} image src:`, savedValue);
+                  }
+              });
+              updateTotal();
+              
+          }
+      }
+  });
+  
+
+  // Log the restored value for debugging (Optional)
+  if (processElement) {
+      console.log('Process value after restoration:', processElement.value); // Debugging the restored process value
+  }
+});
 
 
 // async function fetchProductDetails() {
@@ -383,179 +490,346 @@ document
   .getElementById("ProcessQuantity")
   .addEventListener("input", updateTotal);
 
+
+
 // Submit Button for new slit Process
+// document.querySelector('form[name="contact-form"]').addEventListener("submit", async (event) => {
+//     event.preventDefault(); // Prevent default form submission behavior
+//     updateCycleTime();
+
+//     const alertSound = document.getElementById("alert-sound");
+//     const scanAlertModal = document.getElementById("scanAlertModal");
+//     const scanAlertText = document.getElementById("scanAlertText");
+
+//     // Preload the alert sound without playing it
+//     if (alertSound) {
+//       alertSound.muted = true; // Mute initially to preload
+//       alertSound.loop = false; // Disable looping
+//       alertSound.load(); // Preload the audio file
+//     }
+
+//     try {
+//       // Get form data
+//       const 品番 = document.getElementById("product-number").value;
+//       const 背番号 = document.getElementById("sub-dropdown").value;
+//       const Total = parseInt(document.getElementById("total").value, 10) || 0;
+//       const Worker_Name = document.getElementById("Machine Operator").value;
+//       const Date = document.getElementById("Lot No.").value;
+//       const Time_start = document.getElementById("Start Time").value;
+//       const Time_end = document.getElementById("End Time").value;
+//       const 設備 = document.getElementById("process").value;
+//       const 疵引不良 =
+//         parseInt(document.getElementById("counter-18").value, 10) || 0;
+//       const 加工不良 =
+//         parseInt(document.getElementById("counter-19").value, 10) || 0;
+//       const その他 =
+//         parseInt(document.getElementById("counter-20").value, 10) || 0;
+//       const Total_NG =
+//         parseInt(document.getElementById("Total_NG").value, 10) || 0;
+//       const Spare = parseInt(document.getElementById("spare").value, 10) || 0;
+//       const Comment = document.querySelector(
+//         'textarea[name="Comments1"]'
+//       ).value;
+//       const 工場 = document.getElementById("selected工場").value;
+//       const Process_Quantity =
+//         parseInt(document.getElementById("ProcessQuantity").value, 10) || 0;
+//       const Cycle_Time =
+//         parseFloat(document.getElementById("cycleTime").value) || 0;
+//       const 製造ロット = document.getElementById("製造ロット").value;
+
+//       // Check if 背番号 is selected
+//       if (!背番号) {
+//         // Show alert modal
+//         scanAlertText.innerText = "背番号が必要です。 / Sebanggo is required.";
+//         scanAlertModal.style.display = "block";
+
+//         // Play alert sound
+//         if (alertSound) {
+//           alertSound.muted = false; // Unmute to alert user
+//           alertSound.volume = 1; // Set full volume
+//           alertSound
+//             .play()
+//             .catch((error) =>
+//               console.error("Failed to play alert sound:", error)
+//             );
+//         }
+
+//         // Add blinking red background
+//         document.body.classList.add("flash-red");
+
+//         // Close modal on button click
+//         const closeScanModalButton = document.getElementById(
+//           "closeScanModalButton"
+//         );
+//         closeScanModalButton.onclick = function () {
+//           scanAlertModal.style.display = "none";
+//           alertSound.pause();
+//           alertSound.currentTime = 0; // Reset sound to the beginning
+//           alertSound.muted = true; // Mute again for next time
+//           document.body.classList.remove("flash-red");
+//         };
+
+//         return; // Stop the submission process
+//       }
+
+//       // Get the values of the counters
+//       const counters = Array.from({ length: 12 }, (_, i) => {
+//         const counter = document.getElementById(`counter-${i + 1}`);
+//         return parseInt(counter?.value || 0, 10);
+//       });
+
+//       // Prepare data for saving to slitDB
+//       const formData = {
+//         品番,
+//         背番号,
+//         Total,
+//         Worker_Name,
+//         Date,
+//         Time_start,
+//         Time_end,
+//         設備,
+//         疵引不良,
+//         加工不良,
+//         その他,
+//         Total_NG,
+//         Cycle_Time,
+//         製造ロット,
+//         Spare,
+//         Comment,
+//         工場,
+//         Process_Quantity,
+//       };
+
+//       console.log("Data to save to kensaDB:", formData);
+
+//       // Save to kensaDB
+//       const saveResponse = await fetch(`${serverURL}/submitToSlitDBiReporter`, {
+//         method: "POST",
+//         headers: { "Content-Type": "application/json" },
+//         body: JSON.stringify(formData),
+//       });
+
+//       if (!saveResponse.ok) {
+//         const errorData = await saveResponse.json();
+//         throw new Error(errorData.error || "Failed to save data to kensaDB");
+//       }
+
+//       console.log("Form data saved to kensaDB successfully.");
+
+//       // Show success modal with blinking green background
+//       scanAlertText.innerText = "Form submitted successfully / 保存しました";
+//       scanAlertModal.style.display = "block";
+//       document.body.classList.add("flash-green");
+
+//       // Reload the page after closing the modal
+//       const closeScanModalButton = document.getElementById(
+//         "closeScanModalButton"
+//       );
+//       closeScanModalButton.onclick = function () {
+//         scanAlertModal.style.display = "none";
+//         document.body.classList.remove("flash-green");
+//         //window.location.reload();
+//         resetForm();
+//       };
+//     } catch (error) {
+//       console.error("Error during submission:", error);
+
+//       // Show error modal with blinking red background
+//       scanAlertText.innerText = "An error occurred. Please try again.";
+//       scanAlertModal.style.display = "block";
+
+//       // Play alert sound
+//       if (alertSound) {
+//         alertSound.muted = false;
+//         alertSound.volume = 1;
+//         alertSound
+//           .play()
+//           .catch((error) =>
+//             console.error("Failed to play alert sound:", error)
+//           );
+//       }
+
+//       // Add blinking red background
+//       document.body.classList.add("flash-red");
+
+//       // Close modal on button click
+//       const closeScanModalButton = document.getElementById(
+//         "closeScanModalButton"
+//       );
+//       closeScanModalButton.onclick = function () {
+//         scanAlertModal.style.display = "none";
+//         alertSound.pause();
+//         alertSound.currentTime = 0;
+//         alertSound.muted = true;
+//         document.body.classList.remove("flash-red");
+//       };
+//     }
+//   });
+
+
 document.querySelector('form[name="contact-form"]').addEventListener("submit", async (event) => {
-    event.preventDefault(); // Prevent default form submission behavior
-    updateCycleTime();
+  event.preventDefault();
+  updateCycleTime();
 
-    const alertSound = document.getElementById("alert-sound");
-    const scanAlertModal = document.getElementById("scanAlertModal");
-    const scanAlertText = document.getElementById("scanAlertText");
+  const alertSound = document.getElementById("alert-sound");
+  const scanAlertModal = document.getElementById("scanAlertModal");
+  const scanAlertText = document.getElementById("scanAlertText");
+  const uploadingModal = document.getElementById("uploadingModal");
 
-    // Preload the alert sound without playing it
-    if (alertSound) {
-      alertSound.muted = true; // Mute initially to preload
-      alertSound.loop = false; // Disable looping
-      alertSound.load(); // Preload the audio file
-    }
+  // Preload the alert sound
+  if (alertSound) {
+    alertSound.muted = true;
+    alertSound.loop = false;
+    alertSound.load();
+  }
 
-    try {
-      // Get form data
-      const 品番 = document.getElementById("product-number").value;
-      const 背番号 = document.getElementById("sub-dropdown").value;
-      const Total = parseInt(document.getElementById("total").value, 10) || 0;
-      const Worker_Name = document.getElementById("Machine Operator").value;
-      const Date = document.getElementById("Lot No.").value;
-      const Time_start = document.getElementById("Start Time").value;
-      const Time_end = document.getElementById("End Time").value;
-      const 設備 = document.getElementById("process").value;
-      const 疵引不良 =
-        parseInt(document.getElementById("counter-18").value, 10) || 0;
-      const 加工不良 =
-        parseInt(document.getElementById("counter-19").value, 10) || 0;
-      const その他 =
-        parseInt(document.getElementById("counter-20").value, 10) || 0;
-      const Total_NG =
-        parseInt(document.getElementById("Total_NG").value, 10) || 0;
-      const Spare = parseInt(document.getElementById("spare").value, 10) || 0;
-      const Comment = document.querySelector(
-        'textarea[name="Comments1"]'
-      ).value;
-      const 工場 = document.getElementById("selected工場").value;
-      const Process_Quantity =
-        parseInt(document.getElementById("ProcessQuantity").value, 10) || 0;
-      const Cycle_Time =
-        parseFloat(document.getElementById("cycleTime").value) || 0;
-      const 製造ロット = document.getElementById("製造ロット").value;
+  // Show loading modal
+  uploadingModal.style.display = 'flex';
 
-      // Check if 背番号 is selected
-      if (!背番号) {
-        // Show alert modal
-        scanAlertText.innerText = "背番号が必要です。 / Sebanggo is required.";
-        scanAlertModal.style.display = "block";
+  try {
+    const 品番 = document.getElementById("product-number").value;
+    const 背番号 = document.getElementById("sub-dropdown").value;
+    const Total = parseInt(document.getElementById("total").value, 10) || 0;
+    const Worker_Name = document.getElementById("Machine Operator").value;
+    const Date = document.getElementById("Lot No.").value;
+    const Time_start = document.getElementById("Start Time").value;
+    const Time_end = document.getElementById("End Time").value;
+    const 設備 = document.getElementById("process").value;
+    const 疵引不良 = parseInt(document.getElementById("counter-18").value, 10) || 0;
+    const 加工不良 = parseInt(document.getElementById("counter-19").value, 10) || 0;
+    const その他 = parseInt(document.getElementById("counter-20").value, 10) || 0;
+    const Total_NG = parseInt(document.getElementById("Total_NG").value, 10) || 0;
+    const Spare = parseInt(document.getElementById("spare").value, 10) || 0;
+    const Comment = document.querySelector('textarea[name="Comments1"]').value;
+    const 工場 = document.getElementById("selected工場").value;
+    const Process_Quantity = parseInt(document.getElementById("ProcessQuantity").value, 10) || 0;
+    const Cycle_Time = parseFloat(document.getElementById("cycleTime").value) || 0;
+    const 製造ロット = document.getElementById("製造ロット").value;
 
-        // Play alert sound
-        if (alertSound) {
-          alertSound.muted = false; // Unmute to alert user
-          alertSound.volume = 1; // Set full volume
-          alertSound
-            .play()
-            .catch((error) =>
-              console.error("Failed to play alert sound:", error)
-            );
-        }
-
-        // Add blinking red background
-        document.body.classList.add("flash-red");
-
-        // Close modal on button click
-        const closeScanModalButton = document.getElementById(
-          "closeScanModalButton"
-        );
-        closeScanModalButton.onclick = function () {
-          scanAlertModal.style.display = "none";
-          alertSound.pause();
-          alertSound.currentTime = 0; // Reset sound to the beginning
-          alertSound.muted = true; // Mute again for next time
-          document.body.classList.remove("flash-red");
-        };
-
-        return; // Stop the submission process
-      }
-
-      // Get the values of the counters
-      const counters = Array.from({ length: 12 }, (_, i) => {
-        const counter = document.getElementById(`counter-${i + 1}`);
-        return parseInt(counter?.value || 0, 10);
-      });
-
-      // Prepare data for saving to slitDB
-      const formData = {
-        品番,
-        背番号,
-        Total,
-        Worker_Name,
-        Date,
-        Time_start,
-        Time_end,
-        設備,
-        疵引不良,
-        加工不良,
-        その他,
-        Total_NG,
-        Cycle_Time,
-        製造ロット,
-        Spare,
-        Comment,
-        工場,
-        Process_Quantity,
-      };
-
-      console.log("Data to save to kensaDB:", formData);
-
-      // Save to kensaDB
-      const saveResponse = await fetch(`${serverURL}/submitToSlitDBiReporter`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
-      });
-
-      if (!saveResponse.ok) {
-        const errorData = await saveResponse.json();
-        throw new Error(errorData.error || "Failed to save data to kensaDB");
-      }
-
-      console.log("Form data saved to kensaDB successfully.");
-
-      // Show success modal with blinking green background
-      scanAlertText.innerText = "Form submitted successfully / 保存しました";
-      scanAlertModal.style.display = "block";
-      document.body.classList.add("flash-green");
-
-      // Reload the page after closing the modal
-      const closeScanModalButton = document.getElementById(
-        "closeScanModalButton"
-      );
-      closeScanModalButton.onclick = function () {
-        scanAlertModal.style.display = "none";
-        document.body.classList.remove("flash-green");
-        //window.location.reload();
-        resetForm();
-      };
-    } catch (error) {
-      console.error("Error during submission:", error);
-
-      // Show error modal with blinking red background
-      scanAlertText.innerText = "An error occurred. Please try again.";
+    if (!背番号) {
+      uploadingModal.style.display = 'none';
+      scanAlertText.innerText = "背番号が必要です。 / Sebanggo is required.";
       scanAlertModal.style.display = "block";
 
-      // Play alert sound
       if (alertSound) {
         alertSound.muted = false;
         alertSound.volume = 1;
-        alertSound
-          .play()
-          .catch((error) =>
-            console.error("Failed to play alert sound:", error)
-          );
+        alertSound.play().catch(console.error);
       }
 
-      // Add blinking red background
       document.body.classList.add("flash-red");
-
-      // Close modal on button click
-      const closeScanModalButton = document.getElementById(
-        "closeScanModalButton"
-      );
-      closeScanModalButton.onclick = function () {
+      document.getElementById("closeScanModalButton").onclick = function () {
         scanAlertModal.style.display = "none";
         alertSound.pause();
         alertSound.currentTime = 0;
         alertSound.muted = true;
         document.body.classList.remove("flash-red");
       };
+      return;
     }
+
+    const formData = {
+      品番,
+      背番号,
+      Total,
+      Worker_Name,
+      Date,
+      Time_start,
+      Time_end,
+      設備,
+      疵引不良,
+      加工不良,
+      その他,
+      Total_NG,
+      Cycle_Time,
+      製造ロット,
+      Spare,
+      Comment,
+      工場,
+      Process_Quantity,
+    };
+
+    // 🟡 Add image data for 初物チェック if available
+    const hatsumonoPic = document.getElementById("hatsumonoPic");
+    const images = [];
+
+    if (hatsumonoPic && hatsumonoPic.src) {
+      const response = await fetch(hatsumonoPic.src);
+      const blob = await response.blob();
+      const base64Data = await blobToBase64(blob);
+
+      images.push({
+        base64: base64Data,
+        label: "初物チェック",
+        factory: 工場,
+        machine: 設備,
+        worker: Worker_Name,
+        date: Date,
+        sebanggo: 背番号,
+      });
+    }
+
+    // Attach images array to formData
+    formData.images = images;
+
+    // 🔽 Send to slitDB
+    const saveResponse = await fetch(`${serverURL}/submitToSlitDBiReporter`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(formData),
+    });
+
+    if (!saveResponse.ok) {
+      const errorData = await saveResponse.json();
+      throw new Error(errorData.error || "Failed to save data to slitDB");
+    }
+
+    uploadingModal.style.display = 'none';
+    scanAlertText.innerText = "Form submitted successfully / 保存しました";
+    scanAlertModal.style.display = "block";
+    document.body.classList.add("flash-green");
+
+    document.getElementById("closeScanModalButton").onclick = function () {
+      scanAlertModal.style.display = "none";
+      document.body.classList.remove("flash-green");
+      resetForm();
+    };
+  } catch (error) {
+    console.error("Error during submission:", error);
+
+    uploadingModal.style.display = 'none';
+    scanAlertText.innerText = "An error occurred. Please try again.";
+    scanAlertModal.style.display = "block";
+
+    if (alertSound) {
+      alertSound.muted = false;
+      alertSound.volume = 1;
+      alertSound.play().catch(console.error);
+    }
+
+    document.body.classList.add("flash-red");
+    document.getElementById("closeScanModalButton").onclick = function () {
+      scanAlertModal.style.display = "none";
+      alertSound.pause();
+      alertSound.currentTime = 0;
+      alertSound.muted = true;
+      document.body.classList.remove("flash-red");
+    };
+  }
+});
+
+// Utility: Convert Blob to Base64
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
   });
+}
+
+
+
 
 //Updates cycle Time value
 function updateCycleTime() {
@@ -712,45 +986,154 @@ style.innerHTML = `
 `;
 document.head.appendChild(style);
 
-// function to reset everything then reloads the page
+
+
+// Function to reset everything and reload the page
 function resetForm() {
-  // Clear all form inputs
-  const inputs = document.querySelectorAll("input, select, textarea");
-  inputs.forEach((input) => {
-    input.value = "";
+  const excludedInputs = ['process']; // IDs or names of inputs to exclude from reset
+
+  // Clear all form inputs with unique prefix except excluded ones
+  const inputs = document.querySelectorAll('input, select, textarea');
+  inputs.forEach(input => {
+      const key = `${uniquePrefix}${input.id || input.name}`;
+      if (!excludedInputs.includes(input.id) && !excludedInputs.includes(input.name)) {
+          localStorage.removeItem(key);
+          input.value = ''; // Reset input value
+      }
   });
 
-  // Clear counters
-  for (let i = 1; i <= 18; i++) {
-    localStorage.removeItem(`counter-${i}`);
-    const counterElement = document.getElementById(`counter-${i}`);
-    if (counterElement) {
-      counterElement.value = "0"; // Reset the counter display to 0
-    }
+  // Clear counters with unique prefix
+  for (let i = 18; i <= 20; i++) {
+      const key = `${uniquePrefix}counter-${i}`;
+      localStorage.removeItem(key);
+      const counterElement = document.getElementById(`counter-${i}`);
+      if (counterElement) {
+          counterElement.value = '0'; // Reset counter display
+      }
   }
 
-  // Clear checkbox state and other specific items
-  localStorage.removeItem("enable-inputs-checkbox");
-  localStorage.removeItem("検査STATUS");
-  localStorage.removeItem("sendtoNCButtonisPressed");
-  localStorage.removeItem("hatsumonoLabel");
-  localStorage.removeItem("atomonoLabel");
-  localStorage.removeItem("product-number");
-  localStorage.removeItem("process");
-  localStorage.removeItem("SRShatsumonoLabel");
-
-  // Uncheck the checkbox and disable inputs
-  const checkbox = document.getElementById("enable-inputs");
-  if (checkbox) {
-    checkbox.checked = false;
-    toggleInputs(); // Reuse the existing toggleInputs function to disable the inputs
-  }
-
-  // Remove all other form-related local storage items
-  inputs.forEach((input) => {
-    localStorage.removeItem(input.name);
+  // Reset all textContent elements
+  const textContentElements = document.querySelectorAll('[id]'); // Select all elements with an ID
+  textContentElements.forEach(element => {
+      const textKey = `${uniquePrefix}${element.id}.textContent`;
+      if (localStorage.getItem(textKey)) {
+          localStorage.removeItem(textKey); // Remove from localStorage
+          element.textContent = ''; // Reset to default empty textContent
+          console.log(`Reset textContent for element with ID: ${element.id}`);
+      }
   });
 
-  // reload the page
+  // Reset all <img> elements
+  const images = document.querySelectorAll('img'); // Get all <img> elements
+  images.forEach(image => {
+      const imageKey = `${uniquePrefix}${image.id || image.name}.src`;
+      localStorage.removeItem(imageKey); // Remove image source from localStorage
+      image.src = ''; // Reset the image source
+      image.style.display = 'none'; // Hide the image
+      console.log(`Reset image ${image.id || image.name}`);
+  });
+
+  localStorage.removeItem(`${uniquePrefix}scannerChoice`); // clear choice
+
+  // Reload the page
   window.location.reload();
 }
+
+
+// Only handle 初物チェック (hatsumono)
+const buttonMappings = [
+  {
+    buttonId: 'hatsumonoButton',
+    labelId: 'hatsumonoLabel',
+    imgId: 'hatsumonoPic',
+    labelText: '初物チェック',
+  },
+];
+
+let currentButtonId = null;
+
+buttonMappings.forEach(({ buttonId }) => {
+  const button = document.getElementById(buttonId);
+  button.addEventListener('click', () => {
+    const subDropdown = document.getElementById('sub-dropdown');
+    const selectedValue = subDropdown?.value;
+
+    if (!selectedValue) {
+      const scanAlertModal = document.getElementById('scanAlertModal');
+      const scanAlertText = document.getElementById('scanAlertText');
+      const alertSound = document.getElementById('alert-sound');
+
+      scanAlertText.innerText = '背番号を選択してください / Please select a Sebanggo first.';
+      scanAlertModal.style.display = 'block';
+
+      document.body.classList.add('flash-red');
+      subDropdown.classList.add('flash-red-border');
+
+      if (alertSound) {
+        alertSound.muted = false;
+        alertSound.volume = 1;
+        alertSound.play().catch(err => console.error("Failed to play sound:", err));
+      }
+
+      const closeScanModalButton = document.getElementById('closeScanModalButton');
+      closeScanModalButton.onclick = function () {
+        scanAlertModal.style.display = 'none';
+        document.body.classList.remove('flash-red');
+        subDropdown.classList.remove('flash-red-border');
+
+        if (alertSound) {
+          alertSound.pause();
+          alertSound.currentTime = 0;
+          alertSound.muted = true;
+        }
+      };
+
+      return;
+    }
+
+    // Continue to capture image
+    currentButtonId = buttonId;
+    window.open('captureImage.html', 'Capture Image', 'width=900,height=900');
+  });
+});
+
+
+// Handle the message from the popup window
+window.addEventListener('message', function (event) {
+  if (event.origin === window.location.origin) {
+    const data = event.data;
+
+    if (data.image && currentButtonId) {
+      // Find the mapping for the current button
+      const mapping = buttonMappings.find(({ buttonId }) => buttonId === currentButtonId);
+
+      if (mapping) {
+        const { labelId, imgId } = mapping;
+
+        // Update photo preview
+        const photoPreview = document.getElementById(imgId);
+        photoPreview.src = data.image;
+        photoPreview.style.display = 'block';
+
+        // Update the associated label to TRUE
+        const label = document.getElementById(labelId);
+        label.textContent = 'TRUE';
+
+        // Save label textContent to localStorage
+        const labelKey = `${uniquePrefix}${labelId}.textContent`;
+        localStorage.setItem(labelKey, label.textContent);
+
+        // Save image source to localStorage
+        const photoPreviewKey = `${uniquePrefix}${imgId}.src`;
+        localStorage.setItem(photoPreviewKey, photoPreview.src);
+
+        console.log(
+          `Saved ${labelId}: ${label.textContent} and ${imgId} image: ${photoPreview.src} to localStorage.`
+        );
+      }
+
+      // Reset the current button ID after processing
+      currentButtonId = null;
+    }
+  }
+});

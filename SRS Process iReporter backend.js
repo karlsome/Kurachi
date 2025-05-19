@@ -4,26 +4,7 @@ const serverURL = "https://kurachi.onrender.com";
 // link for pictures database
 const picURL = 'https://script.google.com/macros/s/AKfycbwHUW1ia8hNZG-ljsguNq8K4LTPVnB6Ng_GLXIHmtJTdUgGGd2WoiQo9ToF-7PvcJh9bA/exec';
 
-// this code will ping the Render website for inactivity
-const interval = 60000; // 30 seconds
-function pingServer() {
-  fetch(`${serverURL}/getSeBanggoList`)
-    .then((response) => {
-      if (!response.ok) {
-        throw new Error(`HTTP error! Status: ${response.status}`);
-      }
-      console.log(
-        `Pinged at ${new Date().toISOString()}: Status Code ${response.status}`
-      );
-    })
-    .catch((error) => {
-      console.error(
-        `Error pinging at ${new Date().toISOString()}:`,
-        error.message
-      );
-    });
-}
-setInterval(pingServer, interval);
+
 
 //this code listens to incoming parameters passed
 function getQueryParam(param) {
@@ -113,6 +94,7 @@ inputs.forEach(input => {
 
 // Restore the values of input fields, images, and textContent from localStorage on page load
 document.addEventListener('DOMContentLoaded', () => {
+  uploadingModal.style.display = "none";
   const inputs = document.querySelectorAll('input, select, button, textarea'); // Get all input elements
   const images = document.querySelectorAll('img'); // Get all <img> elements
   const textElements = document.querySelectorAll('[id]'); // Get all elements with an ID
@@ -1047,56 +1029,52 @@ document.getElementById("ProcessQuantityRH").addEventListener("input", updateTot
 
 // // Submit Button for SRS Process LH
 // document.querySelector('form[name="LH-form"]').addEventListener("submit", async (event) => {
-//     event.preventDefault(); // Prevent default form submission behavior
-//     updateCycleTime();
+//   event.preventDefault(); // Prevent default form submission behavior
+//   updateCycleTime();
 
-//     const alertSound = document.getElementById("alert-sound");
-//     const scanAlertModal = document.getElementById("scanAlertModal");
-//     const scanAlertText = document.getElementById("scanAlertText");
+//   const alertSound = document.getElementById("alert-sound");
+//   const scanAlertModal = document.getElementById("scanAlertModal");
+//   const scanAlertText = document.getElementById("scanAlertText");
 
-//     // Preload the alert sound without playing it
-//     if (alertSound) {
+//   // Preload the alert sound without playing it
+//   if (alertSound) {
 //       alertSound.muted = true; // Mute initially to preload
 //       alertSound.loop = false; // Disable looping
 //       alertSound.load(); // Preload the audio file
-//     }
-//     try {
+//   }
+
+//   try {
 //       // Check if Hatsumono is FALSE
 //       const hatsumonoLabel = document.getElementById("hatsumonoLabel");
 //       if (hatsumonoLabel && hatsumonoLabel.textContent === "FALSE") {
-//         // Show alert modal
-//         scanAlertText.innerText = "初物-LH 確認してください / Please do Hatsumono in LH";
-//         scanAlertModal.style.display = "block";
+//           // Show alert modal
+//           scanAlertText.innerText = "初物-LH 確認してください / Please do Hatsumono in LH";
+//           scanAlertModal.style.display = "block";
 
-//         // Play alert sound
-//         if (alertSound) {
-//           alertSound.muted = false; // Unmute to alert user
-//           alertSound.volume = 1; // Set full volume
-//           alertSound
-//             .play()
-//             .catch((error) =>
-//               console.error("Failed to play alert sound:", error)
-//             );
-//         }
+//           // Play alert sound
+//           if (alertSound) {
+//               alertSound.muted = false; // Unmute to alert user
+//               alertSound.volume = 1; // Set full volume
+//               alertSound.play().catch((error) =>
+//                   console.error("Failed to play alert sound:", error)
+//               );
+//           }
 
-//         // Add blinking red background
-//         document.body.classList.add("flash-red");
+//           // Add blinking red background
+//           document.body.classList.add("flash-red");
 
-//         // Close modal on button click
-//         const closeScanModalButton = document.getElementById(
-//           "closeScanModalButton"
-//         );
-//         closeScanModalButton.onclick = function () {
-//           scanAlertModal.style.display = "none";
-//           alertSound.pause();
-//           alertSound.currentTime = 0; // Reset sound to the beginning
-//           alertSound.muted = true; // Mute again for next time
-//           document.body.classList.remove("flash-red");
-//         };
+//           // Close modal on button click
+//           const closeScanModalButton = document.getElementById("closeScanModalButton");
+//           closeScanModalButton.onclick = function () {
+//               scanAlertModal.style.display = "none";
+//               alertSound.pause();
+//               alertSound.currentTime = 0; // Reset sound to the beginning
+//               alertSound.muted = true; // Mute again for next time
+//               document.body.classList.remove("flash-red");
+//           };
 
-//         return; // Stop the submission process
+//           return; // Stop the submission process
 //       }
-
 
 //       // Get form data
 //       const 品番 = document.getElementById("product-number").value;
@@ -1104,576 +1082,742 @@ document.getElementById("ProcessQuantityRH").addEventListener("input", updateTot
 //       const Total = parseInt(document.getElementById("total").value, 10) || 0;
 //       const 工場 = document.getElementById("selected工場").value;
 //       const Worker_Name = document.getElementById("Machine Operator").value;
-//       const Process_Quantity =
-//         parseInt(document.getElementById("ProcessQuantity").value, 10) || 0;
+//       const Process_Quantity = parseInt(document.getElementById("ProcessQuantity").value, 10) || 0;
 //       const Date = document.getElementById("Lot No.").value;
 //       const Time_start = document.getElementById("Start Time").value;
 //       const Time_end = document.getElementById("End Time").value;
 //       const 設備 = document.getElementById("process").value;
 //       const SRSCode = document.getElementById("SRS code").value;
+
 //       // Counters
-//       const counter13 =
-//         parseInt(document.getElementById("counter-13").value, 10) || 0;
-//       const counter14 =
-//         parseInt(document.getElementById("counter-14").value, 10) || 0;
-//       const counter15 =
-//         parseInt(document.getElementById("counter-15").value, 10) || 0;
-//       const counter16 =
-//         parseInt(document.getElementById("counter-16").value, 10) || 0;
-//       const counter17 =
-//         parseInt(document.getElementById("counter-17").value, 10) || 0;
+//       const counter13 = parseInt(document.getElementById("counter-13").value, 10) || 0;
+//       const counter14 = parseInt(document.getElementById("counter-14").value, 10) || 0;
+//       const counter15 = parseInt(document.getElementById("counter-15").value, 10) || 0;
+//       const counter16 = parseInt(document.getElementById("counter-16").value, 10) || 0;
+//       const counter17 = parseInt(document.getElementById("counter-17").value, 10) || 0;
 //       const counter23 = parseInt(document.getElementById("counter-23").value, 10) || 0; // LH 5
 
 //       // SRS_Total_NG Calculation
-//       const SRS_Total_NG =
-//         counter13 + counter14 + counter15 + counter16 + counter17 + counter23;
+//       const SRS_Total_NG = counter13 + counter14 + counter15 + counter16 + counter17 + counter23;
 //       const Spare = parseInt(document.getElementById("spare").value, 10) || 0;
-//       const Comment = document.querySelector(
-//         'textarea[name="Comments1"]'
-//       ).value;
+//       const Comment = document.querySelector('textarea[name="Comments1"]').value;
 //       const 製造ロット = document.getElementById("製造ロット").value;
-//       const Cycle_Time =
-//         parseFloat(document.getElementById("cycleTime").value) || 0;
+//       const Cycle_Time = parseFloat(document.getElementById("cycleTime").value) || 0;
 
 //       // Check if 背番号 is selected
 //       if (!背番号) {
-//         // Show alert modal
-//         scanAlertText.innerText = "背番号が必要です。 / Sebanggo is required.";
-//         scanAlertModal.style.display = "block";
+//           // Show alert modal
+//           scanAlertText.innerText = "背番号が必要です。 / Sebanggo is required.";
+//           scanAlertModal.style.display = "block";
 
-//         // Play alert sound
-//         if (alertSound) {
-//           alertSound.muted = false; // Unmute to alert user
-//           alertSound.volume = 1; // Set full volume
-//           alertSound
-//             .play()
-//             .catch((error) =>
-//               console.error("Failed to play alert sound:", error)
-//             );
-//         }
+//           // Play alert sound
+//           if (alertSound) {
+//               alertSound.muted = false; // Unmute to alert user
+//               alertSound.volume = 1; // Set full volume
+//               alertSound.play().catch((error) =>
+//                   console.error("Failed to play alert sound:", error)
+//               );
+//           }
 
-//         // Add blinking red background
-//         document.body.classList.add("flash-red");
+//           // Add blinking red background
+//           document.body.classList.add("flash-red");
 
-//         // Close modal on button click
-//         const closeScanModalButton = document.getElementById(
-//           "closeScanModalButton"
-//         );
-//         closeScanModalButton.onclick = function () {
-//           scanAlertModal.style.display = "none";
-//           alertSound.pause();
-//           alertSound.currentTime = 0; // Reset sound to the beginning
-//           alertSound.muted = true; // Mute again for next time
-//           document.body.classList.remove("flash-red");
-//         };
+//           // Close modal on button click
+//           const closeScanModalButton = document.getElementById("closeScanModalButton");
+//           closeScanModalButton.onclick = function () {
+//               scanAlertModal.style.display = "none";
+//               alertSound.pause();
+//               alertSound.currentTime = 0; // Reset sound to the beginning
+//               alertSound.muted = true; // Mute again for next time
+//               document.body.classList.remove("flash-red");
+//           };
 
-//         return; // Stop the submission process
+//           return; // Stop the submission process
 //       }
 
 //       // Prepare data for saving to SRSDB
 //       const formData = {
-//         品番,
-//         背番号,
-//         Total,
-//         工場,
-//         Worker_Name,
-//         Process_Quantity,
-//         Date,
-//         Time_start,
-//         Time_end,
-//         設備,
-//         SRSコード: SRSCode,
-//         "くっつき・めくれ": counter13,
-//         シワ: counter14,
-//         転写位置ズレ: counter15,
-//         転写不良: counter16,
-//         文字欠け: counter23,
-//         その他: counter17,
-//         SRS_Total_NG,
-//         Spare,
-//         Comment,
-//         製造ロット,
-//         Cycle_Time,
+//           品番,
+//           背番号,
+//           Total,
+//           工場,
+//           Worker_Name,
+//           Process_Quantity,
+//           Date,
+//           Time_start,
+//           Time_end,
+//           設備,
+//           SRSコード: SRSCode,
+//           "くっつき・めくれ": counter13,
+//           シワ: counter14,
+//           転写位置ズレ: counter15,
+//           転写不良: counter16,
+//           文字欠け: counter23,
+//           その他: counter17,
+//           SRS_Total_NG,
+//           Spare,
+//           Comment,
+//           製造ロット,
+//           Cycle_Time,
 //       };
 
 //       console.log("Data to save to SRSDB:", formData);
 
 //       // Save to SRSDB
 //       const saveResponse = await fetch(`${serverURL}/submitToSRSDBiReporter`, {
-//         method: "POST",
-//         headers: { "Content-Type": "application/json" },
-//         body: JSON.stringify(formData),
+//           method: "POST",
+//           headers: { "Content-Type": "application/json" },
+//           body: JSON.stringify(formData),
 //       });
 
 //       if (!saveResponse.ok) {
-//         throw new Error("Failed to save data to SRSDB");
+//           throw new Error("Failed to save data to SRSDB");
 //       }
 
 //       console.log("Form data saved to SRSDB successfully.");
-      
-//       // Show success modal with blinking green background
-//       scanAlertText.innerText = "Form submitted successfully / 保存しました";
-//       scanAlertModal.style.display = "block";
-//       document.body.classList.add("flash-green");
 
-//       // Reload the page after closing the modal
-//       const closeScanModalButton = document.getElementById(
-//         "closeScanModalButton"
-//       );
-//       closeScanModalButton.onclick = function () {
-//         scanAlertModal.style.display = "none";
-//         document.body.classList.remove("flash-green");
-//         //window.location.reload();
-//         clearForm();
-//       };
-//     } catch (error) {
+//       // Run uploadPhotou() after saving data
+//       try {
+//           await uploadPhotou();
+
+//           // Show success modal with blinking green background
+//           scanAlertText.innerText = "Form and photo submitted successfully / 保存しました";
+//           scanAlertModal.style.display = "block";
+//           document.body.classList.add("flash-green");
+
+//           const closeScanModalButton = document.getElementById("closeScanModalButton");
+//           closeScanModalButton.onclick = function () {
+//               scanAlertModal.style.display = "none";
+//               document.body.classList.remove("flash-green");
+//               clearForm();
+//           };
+//       } catch (error) {
+//           console.error("Photo upload failed:", error);
+
+//           // Show photo upload error message
+//           scanAlertText.innerText = "Photo upload failed. Please try again.";
+//           scanAlertModal.style.display = "block";
+//           setTimeout(() => {
+//               scanAlertModal.style.display = "none";
+//           }, 3000);
+//       }
+//   } catch (error) {
 //       console.error("Error during submission:", error);
 
-//       // Show error modal with blinking red background
-//       scanAlertText.innerText = "An error occurred. Please try again.";
+//       // Show MongoDB upload error modal
+//       scanAlertText.innerText = "An error occurred while submitting the form. Please try again.";
 //       scanAlertModal.style.display = "block";
 
 //       // Play alert sound
 //       if (alertSound) {
-//         alertSound.muted = false;
-//         alertSound.volume = 1;
-//         alertSound
-//           .play()
-//           .catch((error) =>
-//             console.error("Failed to play alert sound:", error)
+//           alertSound.muted = false;
+//           alertSound.volume = 1;
+//           alertSound.play().catch((error) =>
+//               console.error("Failed to play alert sound:", error)
 //           );
 //       }
 
-//       // Add blinking red background
 //       document.body.classList.add("flash-red");
 
-//       // Close modal on button click
-//       const closeScanModalButton = document.getElementById(
-//         "closeScanModalButton"
-//       );
+//       const closeScanModalButton = document.getElementById("closeScanModalButton");
 //       closeScanModalButton.onclick = function () {
-//         scanAlertModal.style.display = "none";
-//         alertSound.pause();
-//         alertSound.currentTime = 0;
-//         alertSound.muted = true;
-//         document.body.classList.remove("flash-red");
+//           scanAlertModal.style.display = "none";
+//           alertSound.pause();
+//           alertSound.currentTime = 0;
+//           alertSound.muted = true;
+//           document.body.classList.remove("flash-red");
 //       };
-//     }
-//   });
+//   }
+// });
 
 // Submit Button for SRS Process LH
 document.querySelector('form[name="LH-form"]').addEventListener("submit", async (event) => {
-  event.preventDefault(); // Prevent default form submission behavior
+  event.preventDefault();
   updateCycleTime();
 
   const alertSound = document.getElementById("alert-sound");
   const scanAlertModal = document.getElementById("scanAlertModal");
   const scanAlertText = document.getElementById("scanAlertText");
+  const uploadingModal = document.getElementById("uploadingModal");
 
-  // Preload the alert sound without playing it
   if (alertSound) {
-      alertSound.muted = true; // Mute initially to preload
-      alertSound.loop = false; // Disable looping
-      alertSound.load(); // Preload the audio file
+    alertSound.muted = true;
+    alertSound.loop = false;
+    alertSound.load();
   }
 
   try {
-      // Check if Hatsumono is FALSE
-      const hatsumonoLabel = document.getElementById("hatsumonoLabel");
-      if (hatsumonoLabel && hatsumonoLabel.textContent === "FALSE") {
-          // Show alert modal
-          scanAlertText.innerText = "初物-LH 確認してください / Please do Hatsumono in LH";
-          scanAlertModal.style.display = "block";
+    // Show uploading modal
+    uploadingModal.style.display = "flex";
 
-          // Play alert sound
-          if (alertSound) {
-              alertSound.muted = false; // Unmute to alert user
-              alertSound.volume = 1; // Set full volume
-              alertSound.play().catch((error) =>
-                  console.error("Failed to play alert sound:", error)
-              );
-          }
-
-          // Add blinking red background
-          document.body.classList.add("flash-red");
-
-          // Close modal on button click
-          const closeScanModalButton = document.getElementById("closeScanModalButton");
-          closeScanModalButton.onclick = function () {
-              scanAlertModal.style.display = "none";
-              alertSound.pause();
-              alertSound.currentTime = 0; // Reset sound to the beginning
-              alertSound.muted = true; // Mute again for next time
-              document.body.classList.remove("flash-red");
-          };
-
-          return; // Stop the submission process
-      }
-
-      // Get form data
-      const 品番 = document.getElementById("product-number").value;
-      const 背番号 = document.getElementById("sub-dropdown").value;
-      const Total = parseInt(document.getElementById("total").value, 10) || 0;
-      const 工場 = document.getElementById("selected工場").value;
-      const Worker_Name = document.getElementById("Machine Operator").value;
-      const Process_Quantity = parseInt(document.getElementById("ProcessQuantity").value, 10) || 0;
-      const Date = document.getElementById("Lot No.").value;
-      const Time_start = document.getElementById("Start Time").value;
-      const Time_end = document.getElementById("End Time").value;
-      const 設備 = document.getElementById("process").value;
-      const SRSCode = document.getElementById("SRS code").value;
-
-      // Counters
-      const counter13 = parseInt(document.getElementById("counter-13").value, 10) || 0;
-      const counter14 = parseInt(document.getElementById("counter-14").value, 10) || 0;
-      const counter15 = parseInt(document.getElementById("counter-15").value, 10) || 0;
-      const counter16 = parseInt(document.getElementById("counter-16").value, 10) || 0;
-      const counter17 = parseInt(document.getElementById("counter-17").value, 10) || 0;
-      const counter23 = parseInt(document.getElementById("counter-23").value, 10) || 0; // LH 5
-
-      // SRS_Total_NG Calculation
-      const SRS_Total_NG = counter13 + counter14 + counter15 + counter16 + counter17 + counter23;
-      const Spare = parseInt(document.getElementById("spare").value, 10) || 0;
-      const Comment = document.querySelector('textarea[name="Comments1"]').value;
-      const 製造ロット = document.getElementById("製造ロット").value;
-      const Cycle_Time = parseFloat(document.getElementById("cycleTime").value) || 0;
-
-      // Check if 背番号 is selected
-      if (!背番号) {
-          // Show alert modal
-          scanAlertText.innerText = "背番号が必要です。 / Sebanggo is required.";
-          scanAlertModal.style.display = "block";
-
-          // Play alert sound
-          if (alertSound) {
-              alertSound.muted = false; // Unmute to alert user
-              alertSound.volume = 1; // Set full volume
-              alertSound.play().catch((error) =>
-                  console.error("Failed to play alert sound:", error)
-              );
-          }
-
-          // Add blinking red background
-          document.body.classList.add("flash-red");
-
-          // Close modal on button click
-          const closeScanModalButton = document.getElementById("closeScanModalButton");
-          closeScanModalButton.onclick = function () {
-              scanAlertModal.style.display = "none";
-              alertSound.pause();
-              alertSound.currentTime = 0; // Reset sound to the beginning
-              alertSound.muted = true; // Mute again for next time
-              document.body.classList.remove("flash-red");
-          };
-
-          return; // Stop the submission process
-      }
-
-      // Prepare data for saving to SRSDB
-      const formData = {
-          品番,
-          背番号,
-          Total,
-          工場,
-          Worker_Name,
-          Process_Quantity,
-          Date,
-          Time_start,
-          Time_end,
-          設備,
-          SRSコード: SRSCode,
-          "くっつき・めくれ": counter13,
-          シワ: counter14,
-          転写位置ズレ: counter15,
-          転写不良: counter16,
-          文字欠け: counter23,
-          その他: counter17,
-          SRS_Total_NG,
-          Spare,
-          Comment,
-          製造ロット,
-          Cycle_Time,
-      };
-
-      console.log("Data to save to SRSDB:", formData);
-
-      // Save to SRSDB
-      const saveResponse = await fetch(`${serverURL}/submitToSRSDBiReporter`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(formData),
-      });
-
-      if (!saveResponse.ok) {
-          throw new Error("Failed to save data to SRSDB");
-      }
-
-      console.log("Form data saved to SRSDB successfully.");
-
-      // Run uploadPhotou() after saving data
-      try {
-          await uploadPhotou();
-
-          // Show success modal with blinking green background
-          scanAlertText.innerText = "Form and photo submitted successfully / 保存しました";
-          scanAlertModal.style.display = "block";
-          document.body.classList.add("flash-green");
-
-          const closeScanModalButton = document.getElementById("closeScanModalButton");
-          closeScanModalButton.onclick = function () {
-              scanAlertModal.style.display = "none";
-              document.body.classList.remove("flash-green");
-              clearForm();
-          };
-      } catch (error) {
-          console.error("Photo upload failed:", error);
-
-          // Show photo upload error message
-          scanAlertText.innerText = "Photo upload failed. Please try again.";
-          scanAlertModal.style.display = "block";
-          setTimeout(() => {
-              scanAlertModal.style.display = "none";
-          }, 3000);
-      }
-  } catch (error) {
-      console.error("Error during submission:", error);
-
-      // Show MongoDB upload error modal
-      scanAlertText.innerText = "An error occurred while submitting the form. Please try again.";
+    // Check if Hatsumono is FALSE
+    const hatsumonoLabel = document.getElementById("hatsumonoLabel");
+    if (hatsumonoLabel && hatsumonoLabel.textContent === "FALSE") {
+      uploadingModal.style.display = "none";
+      scanAlertText.innerText = "初物-LH 確認してください / Please do Hatsumono in LH";
       scanAlertModal.style.display = "block";
 
-      // Play alert sound
       if (alertSound) {
-          alertSound.muted = false;
-          alertSound.volume = 1;
-          alertSound.play().catch((error) =>
-              console.error("Failed to play alert sound:", error)
-          );
+        alertSound.muted = false;
+        alertSound.volume = 1;
+        alertSound.play().catch((error) =>
+          console.error("Failed to play alert sound:", error)
+        );
       }
 
       document.body.classList.add("flash-red");
 
       const closeScanModalButton = document.getElementById("closeScanModalButton");
       closeScanModalButton.onclick = function () {
-          scanAlertModal.style.display = "none";
-          alertSound.pause();
-          alertSound.currentTime = 0;
-          alertSound.muted = true;
-          document.body.classList.remove("flash-red");
+        scanAlertModal.style.display = "none";
+        alertSound.pause();
+        alertSound.currentTime = 0;
+        alertSound.muted = true;
+        document.body.classList.remove("flash-red");
       };
+
+      return;
+    }
+
+    // Collect form data
+    const 品番 = document.getElementById("product-number").value;
+    const 背番号 = document.getElementById("sub-dropdown").value;
+    const Total = parseInt(document.getElementById("total").value, 10) || 0;
+    const 工場 = document.getElementById("selected工場").value;
+    const Worker_Name = document.getElementById("Machine Operator").value;
+    const Process_Quantity = parseInt(document.getElementById("ProcessQuantity").value, 10) || 0;
+    const Date = document.getElementById("Lot No.").value;
+    const Time_start = document.getElementById("Start Time").value;
+    const Time_end = document.getElementById("End Time").value;
+    const 設備 = document.getElementById("process").value;
+    const SRSCode = document.getElementById("SRS code").value;
+
+    const counter13 = parseInt(document.getElementById("counter-13").value, 10) || 0;
+    const counter14 = parseInt(document.getElementById("counter-14").value, 10) || 0;
+    const counter15 = parseInt(document.getElementById("counter-15").value, 10) || 0;
+    const counter16 = parseInt(document.getElementById("counter-16").value, 10) || 0;
+    const counter17 = parseInt(document.getElementById("counter-17").value, 10) || 0;
+    const counter23 = parseInt(document.getElementById("counter-23").value, 10) || 0;
+
+    const SRS_Total_NG = counter13 + counter14 + counter15 + counter16 + counter17 + counter23;
+    const Spare = parseInt(document.getElementById("spare").value, 10) || 0;
+    const Comment = document.querySelector('textarea[name="Comments1"]').value;
+    const 製造ロット = document.getElementById("製造ロット").value;
+    const Cycle_Time = parseFloat(document.getElementById("cycleTime").value) || 0;
+
+    if (!背番号) {
+      uploadingModal.style.display = "none";
+      scanAlertText.innerText = "背番号が必要です。 / Sebanggo is required.";
+      scanAlertModal.style.display = "block";
+
+      if (alertSound) {
+        alertSound.muted = false;
+        alertSound.volume = 1;
+        alertSound.play().catch((error) =>
+          console.error("Failed to play alert sound:", error)
+        );
+      }
+
+      document.body.classList.add("flash-red");
+
+      const closeScanModalButton = document.getElementById("closeScanModalButton");
+      closeScanModalButton.onclick = function () {
+        scanAlertModal.style.display = "none";
+        alertSound.pause();
+        alertSound.currentTime = 0;
+        alertSound.muted = true;
+        document.body.classList.remove("flash-red");
+      };
+
+      return;
+    }
+
+    const formData = {
+      品番,
+      背番号,
+      Total,
+      工場,
+      Worker_Name,
+      Process_Quantity,
+      Date,
+      Time_start,
+      Time_end,
+      設備,
+      SRSコード: SRSCode,
+      "くっつき・めくれ": counter13,
+      シワ: counter14,
+      転写位置ズレ: counter15,
+      転写不良: counter16,
+      文字欠け: counter23,
+      その他: counter17,
+      SRS_Total_NG,
+      Spare,
+      Comment,
+      製造ロット,
+      Cycle_Time,
+    };
+
+    // Collect base64 image data (like 初物)
+    formData.images = await collectImagesForUploadLH();
+
+    const saveResponse = await fetch(`${serverURL}/submitToSRSDBiReporter`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(formData),
+    });
+
+    if (!saveResponse.ok) {
+      throw new Error("Failed to save data to SRSDB");
+    }
+
+    scanAlertText.innerText = "Form and photo submitted successfully / 保存しました";
+    scanAlertModal.style.display = "block";
+    document.body.classList.add("flash-green");
+
+    const closeScanModalButton = document.getElementById("closeScanModalButton");
+    closeScanModalButton.onclick = function () {
+      scanAlertModal.style.display = "none";
+      document.body.classList.remove("flash-green");
+      uploadingModal.style.display = "none";
+      clearForm(); // or resetForm()
+    };
+
+  } catch (error) {
+    console.error("Error during submission:", error);
+
+    uploadingModal.style.display = "none";
+    scanAlertText.innerText = "An error occurred while submitting the form. Please try again.";
+    scanAlertModal.style.display = "block";
+
+    if (alertSound) {
+      alertSound.muted = false;
+      alertSound.volume = 1;
+      alertSound.play().catch((error) =>
+        console.error("Failed to play alert sound:", error)
+      );
+    }
+
+    document.body.classList.add("flash-red");
+
+    const closeScanModalButton = document.getElementById("closeScanModalButton");
+    closeScanModalButton.onclick = function () {
+      scanAlertModal.style.display = "none";
+      alertSound.pause();
+      alertSound.currentTime = 0;
+      alertSound.muted = true;
+      document.body.classList.remove("flash-red");
+    };
   }
 });
 
 
+async function collectImagesForUploadLH() {
+  const imagesToUpload = [];
+
+  const imgElement = document.getElementById("hatsumonoPic");
+  if (imgElement && imgElement.src.startsWith("data:image")) {
+    const base64 = imgElement.src.replace(/^data:image\/jpeg;base64,|^data:image\/png;base64,/, "");
+    if (base64) {
+      imagesToUpload.push({
+        base64,
+        label: "初物チェック",
+        sebanggo: document.getElementById("sub-dropdown")?.value || "",
+        date: document.getElementById("Lot No.")?.value || "",
+        worker: document.getElementById("Machine Operator")?.value || "",
+        factory: document.getElementById("selected工場")?.value || "",
+        machine: document.getElementById("process")?.value || "",
+      });
+    }
+  }
+
+  return imagesToUpload;
+}
 
 
-// Submit Button for SRS Process (RH)
+
+// // Submit Button for SRS Process (RH)
+// // Submit Button for SRS Process (RH)
+// document.querySelector('form[name="RH-form"]').addEventListener("submit", async (event) => {
+//   event.preventDefault(); // Prevent default form submission behavior
+
+//   // Add cycle time calculation logic if needed
+//   updateCycleTimeRH();
+
+//   const alertSound = document.getElementById("alert-sound");
+//   const scanAlertModal = document.getElementById("scanAlertModal");
+//   const scanAlertText = document.getElementById("scanAlertText");
+
+//   // Preload the alert sound without playing it
+//   if (alertSound) {
+//       alertSound.muted = true; // Mute initially to preload
+//       alertSound.loop = false; // Disable looping
+//       alertSound.load(); // Preload the audio file
+//   }
+
+//   try {
+//       // Check if HatsumonoRH is FALSE
+//       const hatsumonoLabelRH = document.getElementById("hatsumonoLabelRH");
+//       if (hatsumonoLabelRH && hatsumonoLabelRH.textContent === "FALSE") {
+//           // Show alert modal
+//           scanAlertText.innerText = "初物-RH 確認してください / Please do Hatsumono in RH";
+//           scanAlertModal.style.display = "block";
+
+//           // Play alert sound
+//           if (alertSound) {
+//               alertSound.muted = false; // Unmute to alert user
+//               alertSound.volume = 1; // Set full volume
+//               alertSound.play().catch((error) =>
+//                   console.error("Failed to play alert sound:", error)
+//               );
+//           }
+
+//           // Add blinking red background
+//           document.body.classList.add("flash-red");
+
+//           // Close modal on button click
+//           const closeScanModalButton = document.getElementById("closeScanModalButton");
+//           closeScanModalButton.onclick = function () {
+//               scanAlertModal.style.display = "none";
+//               alertSound.pause();
+//               alertSound.currentTime = 0; // Reset sound to the beginning
+//               alertSound.muted = true; // Mute again for next time
+//               document.body.classList.remove("flash-red");
+//           };
+
+//           return; // Stop the submission process
+//       }
+
+//       // Get form data
+//       const 品番 = document.getElementById("product-numberRH").value;
+//       const 背番号 = document.getElementById("sub-dropdownRH").value;
+//       const Total = parseInt(document.getElementById("totalRH").value, 10) || 0;
+//       const 工場 = document.getElementById("selected工場").value;
+//       const Worker_Name = document.getElementById("Machine OperatorRH").value;
+//       const Process_Quantity = parseInt(document.getElementById("ProcessQuantityRH").value, 10) || 0;
+//       const Date = document.getElementById("Lot No.RH").value;
+//       const Time_start = document.getElementById("Start TimeRH").value;
+//       const Time_end = document.getElementById("End TimeRH").value;
+//       const 設備 = document.getElementById("processRH").value;
+//       const SRSCode = document.getElementById("SRS codeRH").value;
+
+//       // Counters
+//       const counter18 = parseInt(document.getElementById("counter-18").value, 10) || 0;
+//       const counter19 = parseInt(document.getElementById("counter-19").value, 10) || 0;
+//       const counter20 = parseInt(document.getElementById("counter-20").value, 10) || 0;
+//       const counter21 = parseInt(document.getElementById("counter-21").value, 10) || 0;
+//       const counter22 = parseInt(document.getElementById("counter-22").value, 10) || 0;
+//       const counter24 = parseInt(document.getElementById("counter-24").value, 10) || 0; // LH 5
+
+//       // SRS_Total_NG Calculation
+//       const SRS_Total_NG = counter18 + counter19 + counter20 + counter21 + counter22 + counter24;
+//       const Spare = parseInt(document.getElementById("spareRH").value, 10) || 0;
+//       const Comment = document.querySelector('textarea[name="Comments2"]').value;
+//       const 製造ロット = document.getElementById("製造ロットRH").value;
+//       const Cycle_Time = parseFloat(document.getElementById("cycleTimeRH").value) || 0;
+
+//       // Check if 背番号 is selected
+//       if (!背番号) {
+//           // Show alert modal
+//           scanAlertText.innerText = "背番号が必要です。 / Sebanggo is required.";
+//           scanAlertModal.style.display = "block";
+
+//           // Play alert sound
+//           if (alertSound) {
+//               alertSound.muted = false; // Unmute to alert user
+//               alertSound.volume = 1; // Set full volume
+//               alertSound.play().catch((error) =>
+//                   console.error("Failed to play alert sound:", error)
+//               );
+//           }
+
+//           // Add blinking red background
+//           document.body.classList.add("flash-red");
+
+//           // Close modal on button click
+//           const closeScanModalButton = document.getElementById("closeScanModalButton");
+//           closeScanModalButton.onclick = function () {
+//               scanAlertModal.style.display = "none";
+//               alertSound.pause();
+//               alertSound.currentTime = 0; // Reset sound to the beginning
+//               alertSound.muted = true; // Mute again for next time
+//               document.body.classList.remove("flash-red");
+//           };
+
+//           return; // Stop the submission process
+//       }
+
+//       // Prepare data for saving to SRSDB
+//       const formData = {
+//           品番,
+//           背番号,
+//           Total,
+//           工場,
+//           Worker_Name,
+//           Process_Quantity,
+//           Date,
+//           Time_start,
+//           Time_end,
+//           設備,
+//           SRSコード: SRSCode,
+//           "くっつき・めくれ": counter18,
+//           シワ: counter19,
+//           転写位置ズレ: counter20,
+//           転写不良: counter21,
+//           文字欠け: counter24,
+//           その他: counter22,
+//           SRS_Total_NG,
+//           Spare,
+//           Comment,
+//           製造ロット,
+//           Cycle_Time,
+//       };
+
+//       console.log("Data to save to SRSDB:", formData);
+
+//       // Save to SRSDB
+//       const saveResponse = await fetch(`${serverURL}/submitToSRSDBiReporter`, {
+//           method: "POST",
+//           headers: { "Content-Type": "application/json" },
+//           body: JSON.stringify(formData),
+//       });
+
+//       if (!saveResponse.ok) {
+//           throw new Error("Failed to save data to SRSDB");
+//       }
+
+//       console.log("Form data saved to SRSDB successfully.");
+
+//       // Run uploadPhotouRH() after saving data
+//       try {
+//           await uploadPhotouRH();
+//           console.log("Photo uploaded to Google Drive successfully.");
+
+//           // Show success modal
+//           scanAlertText.innerText = "Form and photo submitted successfully / 保存しました";
+//           scanAlertModal.style.display = "block";
+//           document.body.classList.add("flash-green");
+
+//           const closeScanModalButton = document.getElementById("closeScanModalButton");
+//           closeScanModalButton.onclick = function () {
+//               scanAlertModal.style.display = "none";
+//               document.body.classList.remove("flash-green");
+//               clearFormRH();
+//           };
+//       } catch (error) {
+//           console.error("Photo upload failed:", error);
+
+//           // Show photo upload error message
+//           scanAlertText.innerText = "Photo upload failed. Please try again.";
+//           scanAlertModal.style.display = "block";
+//           setTimeout(() => {
+//               scanAlertModal.style.display = "none";
+//           }, 3000);
+//       }
+//   } catch (error) {
+//       console.error("Error during submission:", error);
+
+//       // Show MongoDB upload error modal
+//       scanAlertText.innerText = "An error occurred while submitting the form. Please try again.";
+//       scanAlertModal.style.display = "block";
+
+//       // Play alert sound
+//       if (alertSound) {
+//           alertSound.muted = false;
+//           alertSound.volume = 1;
+//           alertSound.play().catch((error) =>
+//               console.error("Failed to play alert sound:", error)
+//           );
+//       }
+
+//       document.body.classList.add("flash-red");
+
+//       const closeScanModalButton = document.getElementById("closeScanModalButton");
+//       closeScanModalButton.onclick = function () {
+//           scanAlertModal.style.display = "none";
+//           alertSound.pause();
+//           alertSound.currentTime = 0;
+//           alertSound.muted = true;
+//           document.body.classList.remove("flash-red");
+//       };
+//   }
+// });
+
 // Submit Button for SRS Process (RH)
 document.querySelector('form[name="RH-form"]').addEventListener("submit", async (event) => {
-  event.preventDefault(); // Prevent default form submission behavior
+  event.preventDefault();
 
-  // Add cycle time calculation logic if needed
   updateCycleTimeRH();
 
   const alertSound = document.getElementById("alert-sound");
   const scanAlertModal = document.getElementById("scanAlertModal");
   const scanAlertText = document.getElementById("scanAlertText");
+  const uploadingModal = document.getElementById("uploadingModal");
 
-  // Preload the alert sound without playing it
   if (alertSound) {
-      alertSound.muted = true; // Mute initially to preload
-      alertSound.loop = false; // Disable looping
-      alertSound.load(); // Preload the audio file
+    alertSound.muted = true;
+    alertSound.loop = false;
+    alertSound.load();
   }
 
   try {
-      // Check if HatsumonoRH is FALSE
-      const hatsumonoLabelRH = document.getElementById("hatsumonoLabelRH");
-      if (hatsumonoLabelRH && hatsumonoLabelRH.textContent === "FALSE") {
-          // Show alert modal
-          scanAlertText.innerText = "初物-RH 確認してください / Please do Hatsumono in RH";
-          scanAlertModal.style.display = "block";
+    // Show uploading modal
+    uploadingModal.style.display = "flex";
 
-          // Play alert sound
-          if (alertSound) {
-              alertSound.muted = false; // Unmute to alert user
-              alertSound.volume = 1; // Set full volume
-              alertSound.play().catch((error) =>
-                  console.error("Failed to play alert sound:", error)
-              );
-          }
-
-          // Add blinking red background
-          document.body.classList.add("flash-red");
-
-          // Close modal on button click
-          const closeScanModalButton = document.getElementById("closeScanModalButton");
-          closeScanModalButton.onclick = function () {
-              scanAlertModal.style.display = "none";
-              alertSound.pause();
-              alertSound.currentTime = 0; // Reset sound to the beginning
-              alertSound.muted = true; // Mute again for next time
-              document.body.classList.remove("flash-red");
-          };
-
-          return; // Stop the submission process
-      }
-
-      // Get form data
-      const 品番 = document.getElementById("product-numberRH").value;
-      const 背番号 = document.getElementById("sub-dropdownRH").value;
-      const Total = parseInt(document.getElementById("totalRH").value, 10) || 0;
-      const 工場 = document.getElementById("selected工場").value;
-      const Worker_Name = document.getElementById("Machine OperatorRH").value;
-      const Process_Quantity = parseInt(document.getElementById("ProcessQuantityRH").value, 10) || 0;
-      const Date = document.getElementById("Lot No.RH").value;
-      const Time_start = document.getElementById("Start TimeRH").value;
-      const Time_end = document.getElementById("End TimeRH").value;
-      const 設備 = document.getElementById("processRH").value;
-      const SRSCode = document.getElementById("SRS codeRH").value;
-
-      // Counters
-      const counter18 = parseInt(document.getElementById("counter-18").value, 10) || 0;
-      const counter19 = parseInt(document.getElementById("counter-19").value, 10) || 0;
-      const counter20 = parseInt(document.getElementById("counter-20").value, 10) || 0;
-      const counter21 = parseInt(document.getElementById("counter-21").value, 10) || 0;
-      const counter22 = parseInt(document.getElementById("counter-22").value, 10) || 0;
-      const counter24 = parseInt(document.getElementById("counter-24").value, 10) || 0; // LH 5
-
-      // SRS_Total_NG Calculation
-      const SRS_Total_NG = counter18 + counter19 + counter20 + counter21 + counter22 + counter24;
-      const Spare = parseInt(document.getElementById("spareRH").value, 10) || 0;
-      const Comment = document.querySelector('textarea[name="Comments2"]').value;
-      const 製造ロット = document.getElementById("製造ロットRH").value;
-      const Cycle_Time = parseFloat(document.getElementById("cycleTimeRH").value) || 0;
-
-      // Check if 背番号 is selected
-      if (!背番号) {
-          // Show alert modal
-          scanAlertText.innerText = "背番号が必要です。 / Sebanggo is required.";
-          scanAlertModal.style.display = "block";
-
-          // Play alert sound
-          if (alertSound) {
-              alertSound.muted = false; // Unmute to alert user
-              alertSound.volume = 1; // Set full volume
-              alertSound.play().catch((error) =>
-                  console.error("Failed to play alert sound:", error)
-              );
-          }
-
-          // Add blinking red background
-          document.body.classList.add("flash-red");
-
-          // Close modal on button click
-          const closeScanModalButton = document.getElementById("closeScanModalButton");
-          closeScanModalButton.onclick = function () {
-              scanAlertModal.style.display = "none";
-              alertSound.pause();
-              alertSound.currentTime = 0; // Reset sound to the beginning
-              alertSound.muted = true; // Mute again for next time
-              document.body.classList.remove("flash-red");
-          };
-
-          return; // Stop the submission process
-      }
-
-      // Prepare data for saving to SRSDB
-      const formData = {
-          品番,
-          背番号,
-          Total,
-          工場,
-          Worker_Name,
-          Process_Quantity,
-          Date,
-          Time_start,
-          Time_end,
-          設備,
-          SRSコード: SRSCode,
-          "くっつき・めくれ": counter18,
-          シワ: counter19,
-          転写位置ズレ: counter20,
-          転写不良: counter21,
-          文字欠け: counter24,
-          その他: counter22,
-          SRS_Total_NG,
-          Spare,
-          Comment,
-          製造ロット,
-          Cycle_Time,
-      };
-
-      console.log("Data to save to SRSDB:", formData);
-
-      // Save to SRSDB
-      const saveResponse = await fetch(`${serverURL}/submitToSRSDBiReporter`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(formData),
-      });
-
-      if (!saveResponse.ok) {
-          throw new Error("Failed to save data to SRSDB");
-      }
-
-      console.log("Form data saved to SRSDB successfully.");
-
-      // Run uploadPhotouRH() after saving data
-      try {
-          await uploadPhotouRH();
-          console.log("Photo uploaded to Google Drive successfully.");
-
-          // Show success modal
-          scanAlertText.innerText = "Form and photo submitted successfully / 保存しました";
-          scanAlertModal.style.display = "block";
-          document.body.classList.add("flash-green");
-
-          const closeScanModalButton = document.getElementById("closeScanModalButton");
-          closeScanModalButton.onclick = function () {
-              scanAlertModal.style.display = "none";
-              document.body.classList.remove("flash-green");
-              clearFormRH();
-          };
-      } catch (error) {
-          console.error("Photo upload failed:", error);
-
-          // Show photo upload error message
-          scanAlertText.innerText = "Photo upload failed. Please try again.";
-          scanAlertModal.style.display = "block";
-          setTimeout(() => {
-              scanAlertModal.style.display = "none";
-          }, 3000);
-      }
-  } catch (error) {
-      console.error("Error during submission:", error);
-
-      // Show MongoDB upload error modal
-      scanAlertText.innerText = "An error occurred while submitting the form. Please try again.";
+    // Check if HatsumonoRH is FALSE
+    const hatsumonoLabelRH = document.getElementById("hatsumonoLabelRH");
+    if (hatsumonoLabelRH && hatsumonoLabelRH.textContent === "FALSE") {
+      uploadingModal.style.display = "none";
+      scanAlertText.innerText = "初物-RH 確認してください / Please do Hatsumono in RH";
       scanAlertModal.style.display = "block";
 
-      // Play alert sound
       if (alertSound) {
-          alertSound.muted = false;
-          alertSound.volume = 1;
-          alertSound.play().catch((error) =>
-              console.error("Failed to play alert sound:", error)
-          );
+        alertSound.muted = false;
+        alertSound.volume = 1;
+        alertSound.play().catch(err => console.error("Failed to play alert sound:", err));
       }
 
       document.body.classList.add("flash-red");
 
-      const closeScanModalButton = document.getElementById("closeScanModalButton");
-      closeScanModalButton.onclick = function () {
-          scanAlertModal.style.display = "none";
-          alertSound.pause();
-          alertSound.currentTime = 0;
-          alertSound.muted = true;
-          document.body.classList.remove("flash-red");
+      document.getElementById("closeScanModalButton").onclick = function () {
+        scanAlertModal.style.display = "none";
+        alertSound.pause();
+        alertSound.currentTime = 0;
+        alertSound.muted = true;
+        document.body.classList.remove("flash-red");
       };
+
+      return;
+    }
+
+    // Gather form data
+    const formData = {
+      品番: document.getElementById("product-numberRH").value,
+      背番号: document.getElementById("sub-dropdownRH").value,
+      Total: parseInt(document.getElementById("totalRH").value, 10) || 0,
+      工場: document.getElementById("selected工場").value,
+      Worker_Name: document.getElementById("Machine OperatorRH").value,
+      Process_Quantity: parseInt(document.getElementById("ProcessQuantityRH").value, 10) || 0,
+      Date: document.getElementById("Lot No.RH").value,
+      Time_start: document.getElementById("Start TimeRH").value,
+      Time_end: document.getElementById("End TimeRH").value,
+      設備: document.getElementById("processRH").value,
+      SRSコード: document.getElementById("SRS codeRH").value,
+      "くっつき・めくれ": parseInt(document.getElementById("counter-18").value, 10) || 0,
+      シワ: parseInt(document.getElementById("counter-19").value, 10) || 0,
+      転写位置ズレ: parseInt(document.getElementById("counter-20").value, 10) || 0,
+      転写不良: parseInt(document.getElementById("counter-21").value, 10) || 0,
+      文字欠け: parseInt(document.getElementById("counter-24").value, 10) || 0,
+      その他: parseInt(document.getElementById("counter-22").value, 10) || 0,
+      SRS_Total_NG:
+        (parseInt(document.getElementById("counter-18").value, 10) || 0) +
+        (parseInt(document.getElementById("counter-19").value, 10) || 0) +
+        (parseInt(document.getElementById("counter-20").value, 10) || 0) +
+        (parseInt(document.getElementById("counter-21").value, 10) || 0) +
+        (parseInt(document.getElementById("counter-22").value, 10) || 0) +
+        (parseInt(document.getElementById("counter-24").value, 10) || 0),
+      Spare: parseInt(document.getElementById("spareRH").value, 10) || 0,
+      Comment: document.querySelector('textarea[name="Comments2"]').value,
+      製造ロット: document.getElementById("製造ロットRH").value,
+      Cycle_Time: parseFloat(document.getElementById("cycleTimeRH").value) || 0,
+    };
+
+    // Validate Sebanggo
+    if (!formData.背番号) {
+      uploadingModal.style.display = "none";
+      scanAlertText.innerText = "背番号が必要です。 / Sebanggo is required.";
+      scanAlertModal.style.display = "block";
+
+      if (alertSound) {
+        alertSound.muted = false;
+        alertSound.volume = 1;
+        alertSound.play().catch(err => console.error("Failed to play alert sound:", err));
+      }
+
+      document.body.classList.add("flash-red");
+
+      document.getElementById("closeScanModalButton").onclick = function () {
+        scanAlertModal.style.display = "none";
+        alertSound.pause();
+        alertSound.currentTime = 0;
+        alertSound.muted = true;
+        document.body.classList.remove("flash-red");
+      };
+
+      return;
+    }
+
+    // 🔁 Attach base64 image data
+    formData.images = await collectImagesForUploadRH();
+
+    // Submit form + image to backend
+    const saveResponse = await fetch(`${serverURL}/submitToSRSDBiReporter`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(formData),
+    });
+
+    if (!saveResponse.ok) {
+      throw new Error("Failed to save data to SRSDB");
+    }
+
+    // ✅ Success feedback
+    scanAlertText.innerText = "Form and photo submitted successfully / 保存しました";
+    scanAlertModal.style.display = "block";
+    document.body.classList.add("flash-green");
+
+    document.getElementById("closeScanModalButton").onclick = function () {
+      scanAlertModal.style.display = "none";
+      document.body.classList.remove("flash-green");
+      uploadingModal.style.display = "none";
+      clearFormRH();
+    };
+
+  } catch (error) {
+    console.error("Submission error:", error);
+
+    uploadingModal.style.display = "none";
+    scanAlertText.innerText = "An error occurred while submitting the form. Please try again.";
+    scanAlertModal.style.display = "block";
+
+    if (alertSound) {
+      alertSound.muted = false;
+      alertSound.volume = 1;
+      alertSound.play().catch(err => console.error("Failed to play alert sound:", err));
+    }
+
+    document.body.classList.add("flash-red");
+
+    document.getElementById("closeScanModalButton").onclick = function () {
+      scanAlertModal.style.display = "none";
+      alertSound.pause();
+      alertSound.currentTime = 0;
+      alertSound.muted = true;
+      document.body.classList.remove("flash-red");
+    };
   }
 });
 
+async function collectImagesForUploadRH() {
+  const imagesToUpload = [];
+
+  const imgElement = document.getElementById("hatsumonoPicRH");
+  if (imgElement && imgElement.src.startsWith("data:image")) {
+    const base64 = imgElement.src.replace(/^data:image\/jpeg;base64,|^data:image\/png;base64,/, "");
+    if (base64) {
+      imagesToUpload.push({
+        base64,
+        label: "初物チェック",
+        sebanggo: document.getElementById("sub-dropdownRH")?.value || "",
+        date: document.getElementById("Lot No.RH")?.value || "",
+        worker: document.getElementById("Machine OperatorRH")?.value || "",
+        factory: document.getElementById("selected工場")?.value || "",
+        machine: document.getElementById("processRH")?.value || "",
+      });
+    }
+  }
+
+  return imagesToUpload;
+}
 
 
 //Updates cycle Time value
