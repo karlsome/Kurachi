@@ -166,9 +166,23 @@ async function populateSubDropdown() {
       body: JSON.stringify(queryPayload),
     });
     if (!response.ok) throw new Error(`Failed to fetch 品番 list: ${response.statusText}`);
-    const data = await response.json();
-    
-    const unique品番 = data.map(item => item.品番).filter(品番 => 品番 && !品番.startsWith("Z"));
+    const text = await response.text();
+let data;
+try {
+    data = JSON.parse(text);
+} catch (err) {
+    console.error("Failed to parse response JSON:", text);
+    showModalAlert("サーバーからのデータ取得でエラーが発生しました。", true);
+    return;
+}
+
+if (!Array.isArray(data)) {
+    console.error("Unexpected response structure:", data);
+    showModalAlert("品番データが無効です。", true);
+    return;
+}
+
+const unique品番 = data.map(item => item.品番).filter(品番 => 品番 && !品番.startsWith("Z"));
 
     subDropdown.innerHTML = ''; 
     const defaultOption = document.createElement('option');
