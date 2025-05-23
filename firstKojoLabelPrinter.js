@@ -139,7 +139,6 @@ function restoreValuesFromLocalStorage() {
 
 
 // === Dropdown Population ===
-
 async function populateSubDropdown() {
   const subDropdown = document.getElementById('sub-dropdown');
   if (!subDropdown) {
@@ -151,8 +150,7 @@ async function populateSubDropdown() {
     dbName: "submittedDB",
     collectionName: "materialRequestDB",
     aggregation: [
-      // REMOVED: { $match: { STATUS: { $ne: "Completed" } } }, 
-      // Now it will fetch all 品番 regardless of STATUS
+      // { $match: { STATUS: { $ne: "Completed" } } }, // REMOVED: Now shows all items
       { $group: { _id: "$品番" } }, 
       { $sort: { _id: 1 } }, 
       { $project: { "品番": "$_id", "_id": 0 } }
@@ -166,23 +164,9 @@ async function populateSubDropdown() {
       body: JSON.stringify(queryPayload),
     });
     if (!response.ok) throw new Error(`Failed to fetch 品番 list: ${response.statusText}`);
-    const text = await response.text();
-let data;
-try {
-    data = JSON.parse(text);
-} catch (err) {
-    console.error("Failed to parse response JSON:", text);
-    showModalAlert("サーバーからのデータ取得でエラーが発生しました。", true);
-    return;
-}
-
-if (!Array.isArray(data)) {
-    console.error("Unexpected response structure:", data);
-    showModalAlert("品番データが無効です。", true);
-    return;
-}
-
-const unique品番 = data.map(item => item.品番).filter(品番 => 品番 && !品番.startsWith("Z"));
+    const data = await response.json();
+    
+    const unique品番 = data.map(item => item.品番).filter(品番 => 品番 && !品番.startsWith("Z"));
 
     subDropdown.innerHTML = ''; 
     const defaultOption = document.createElement('option');
@@ -255,7 +239,12 @@ async function fetchProductDetails() {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(requestQueryPayload),
     });
     if (!requestResponse.ok) throw new Error(`materialRequestDB fetch failed: ${requestResponse.statusText}`);
+    
     const requestData = await requestResponse.json();
+    if (!Array.isArray(requestData)) {
+        console.error("Received non-array requestData:", requestData);
+        throw new Error("Invalid data format received for material request.");
+    }
     
     const request = requestData.length > 0 ? requestData[0] : null;
     let matched材料品番 = request ? request.材料品番 : null;
@@ -270,7 +259,11 @@ async function fetchProductDetails() {
         });
         if (anyRequestResponse.ok) {
             const anyRequestData = await anyRequestResponse.json();
-            if (anyRequestData.length > 0 && anyRequestData[0].材料品番) matched材料品番 = anyRequestData[0].材料品番;
+            if (Array.isArray(anyRequestData) && anyRequestData.length > 0 && anyRequestData[0].材料品番) {
+                matched材料品番 = anyRequestData[0].材料品番;
+            } else if (!Array.isArray(anyRequestData)){
+                 console.error("Received non-array anyRequestData:", anyRequestData);
+            }
         }
     }
 
@@ -287,9 +280,14 @@ async function fetchProductDetails() {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(materialQueryPayload),
     });
     if (!materialResponse.ok) throw new Error(`materialDB fetch failed: ${materialResponse.statusText}`);
+    
     const materialData = await materialResponse.json();
+    if (!Array.isArray(materialData)) {
+        console.error("Received non-array materialData:", materialData);
+        throw new Error("Invalid data format received for material details.");
+    }
 
-    if (!materialData || materialData.length === 0) {
+    if (materialData.length === 0) { 
       showModalAlert(`材料DBに詳細が見つかりません。材料品番: ${matched材料品番}`, true);
       picLINK(selected品番Value); 
       return;
@@ -554,21 +552,18 @@ function showPrintConfirmationModal() {
   }
 
   if(printTimesDisplay && printTimesInput && targetCountInput && printConfirmationModal && currentPrintedEl) {
-    const targetForCompletion = parseInt(targetCountInput.value, 10);
+    const targetForCompletion = parseInt(targetCountInput.value, 10); 
     const currentPrinted = parseInt(currentPrintedEl.value.split(' / ')[0], 10) || 0;
     
-    let defaultPrintQty = 1; // Default to 1 if no specific calculation is met
+    let defaultPrintQty = 1; 
 
     if (!isNaN(targetForCompletion) && targetForCompletion > 0) {
         defaultPrintQty = targetForCompletion - currentPrinted;
-        if (defaultPrintQty <= 0) {
-            defaultPrintQty = targetForCompletion; // If already met or exceeded, default to printing the full target amount again
-                                        // Or, you might want to default to 1 if the intention is just one more.
-                                        // For "print all remaining", this makes sense if target is the goal.
+        if (defaultPrintQty <= 0) { 
+            defaultPrintQty = targetForCompletion; 
         }
     }
-    // Ensure defaultPrintQty is at least 1
-    defaultPrintQty = Math.max(1, defaultPrintQty);
+    defaultPrintQty = Math.max(1, defaultPrintQty); 
 
 
     printTimesInput.value = defaultPrintQty;
@@ -819,7 +814,7 @@ if (reprintButton) {
             console.error("Reprint modal elements not found.");
             return;
         }
-        // Reset button state
+        
         confirmReprintBtn.disabled = false;
         confirmReprintBtn.textContent = 'Reprint This Label';
 
@@ -894,10 +889,7 @@ if(confirmReprintButton) {
                     `&text_収容数=${encodeURIComponent(orderVal)}&text_色=${encodeURIComponent(色)}` +
                     `&text_DateT=${encodeURIComponent(selectedSuffix)}&barcode_barcode=${encodeURIComponent(barcodeFullValue)}`;
                 window.location.href = url;
-                // For iOS, we assume it will work or user handles it.
-                // No direct feedback loop here after redirecting.
-                // We might show a generic "Reprint initiated" message before redirect.
-                 setTimeout(() => { // Give a moment for URL scheme to launch
+                 setTimeout(() => { 
                     showModalAlert("再印刷を開始しました。Brotherアプリを確認してください。", false, 3000);
                  }, 500);
 
@@ -1149,7 +1141,6 @@ document.addEventListener('DOMContentLoaded', () => {
             showModalAlert(`最大${MAX_PICTURES}枚に達しました。(Reached max ${MAX_PICTURES} pictures.)`, false);
             closeCamera(); 
         }
-        // else: Keep camera open for more pictures if not maxed out
     }
 
     function renderThumbnails() {
