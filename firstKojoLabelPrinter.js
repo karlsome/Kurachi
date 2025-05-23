@@ -972,10 +972,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const factoryParam = getQueryParam('filter');
     const factorySelect = document.getElementById('selected工場');
-    if (factoryParam && factorySelect) {
-        let optionExists = [...factorySelect.options].some(opt => opt.value === factoryParam);
+    if (factoryParam && factorySelect && factorySelect.tagName === "SELECT" && factorySelect.options) {
+        const optionExists = Array.from(factorySelect.options).some(opt => opt.value === factoryParam);
         if (optionExists) factorySelect.value = factoryParam;
         updateUniquePrefix(); 
+    } else {
+        console.warn("Factory select dropdown not ready or missing options. Skipping factoryParam prefill.");
     }
 
     // ✅ Only restore after sub-dropdown is filled
