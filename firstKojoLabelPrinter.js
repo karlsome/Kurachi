@@ -97,7 +97,7 @@ function setupInputSaving() {
 }
 
 // === Restore Values on Page Load ===
-function restoreValuesFromLocalStorage() {
+async function restoreValuesFromLocalStorage() {
     updateUniquePrefix(); 
     const inputs = document.querySelectorAll('input, select, textarea');
     Object.keys(localStorage).forEach(fullKey => {
@@ -122,6 +122,10 @@ function restoreValuesFromLocalStorage() {
             });
         }
     });
+
+    // ✅ Wait for dropdown to be populated first
+    await populateSubDropdown();
+
     const restoredSubDropdownValue = getFromLocalStorage('sub-dropdown');
     const subDropdown = document.getElementById('sub-dropdown');
     if (subDropdown && restoredSubDropdownValue) {
@@ -969,34 +973,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     const factoryParam = getQueryParam('filter');
     const factorySelect = document.getElementById('selected工場');
     if (factoryParam && factorySelect) {
-        let optionExists = false;
-        for (let i = 0; i < factorySelect.options.length; i++) {
-            if (factorySelect.options[i].value === factoryParam) {
-                optionExists = true;
-                break;
-            }
-        }
-        if (optionExists) {
-            factorySelect.value = factoryParam;
-        } else {
-            console.warn(`Factory parameter "${factoryParam}" not found in select options. Using default.`);
-        }
+        let optionExists = [...factorySelect.options].some(opt => opt.value === factoryParam);
+        if (optionExists) factorySelect.value = factoryParam;
         updateUniquePrefix(); 
-    } else if (factorySelect) {
-        currentSelectedKojo = factorySelect.value; 
-        updateUniquePrefix();
-    } else {
-        console.warn("selected工場 element not found.");
     }
 
-    await populateSubDropdown(); 
-    restoreValuesFromLocalStorage(); 
+    // ✅ Only restore after sub-dropdown is filled
+    await restoreValuesFromLocalStorage(); 
 
     const lotNoInput = document.getElementById('Lot No.');
-    if (lotNoInput) { 
-        setDefaultDate(lotNoInput); 
-    }
-    
+    if (lotNoInput) setDefaultDate(lotNoInput); 
+
     const subDropdown = document.getElementById('sub-dropdown');
     if (subDropdown) {
         subDropdown.addEventListener("change", () => {
