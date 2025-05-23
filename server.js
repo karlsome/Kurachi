@@ -523,6 +523,152 @@ app.post("/submitTopressDBiReporter", async (req, res) => {
   }
 });
 
+// Presumed at the top of your server.js:
+// const express = require("express");
+// const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb"); // ObjectId needed if you query by _id
+// const admin = require('firebase-admin'); // For Firebase Storage
+// const client = new MongoClient(uri, ...); // Your MongoDB client
+// admin.initializeApp({ /* your firebase config */ });
+// const bodyParser = require('body-parser'); // If not already used
+// app.use(bodyParser.json({ limit: '10mb' })); // Increase limit for base64 images
+
+app.post('/logPrintAndUpdateMaterialRequest', async (req, res) => {
+    console.log("🟢 POST /logPrintAndUpdateMaterialRequest received");
+    const {
+        品番, // Used in query
+        作業日, // Used in query
+        numJustPrinted,
+        printLogEntry, // { timestamp, lotNumbers, count, printedBy, factory, machine }
+        lastPrintTimestamp,
+        imagesToUpload, // Array of { base64, label, 品番ForFilename, dateForFilename, ... }
+        targetProductionCountForStatusUpdate
+    } = req.body;
+
+    if (!品番 || !作業日 || numJustPrinted === undefined) {
+        return res.status(400).json({ 
+            status: "error", 
+            message: "Missing required fields: 品番, 作業日, or numJustPrinted." 
+        });
+    }
+
+    try {
+        // await client.connect(); // Manage connection as per your setup
+        const database = client.db("submittedDB"); // Hardcoded as per your frontend
+        const collection = database.collection("materialRequestDB"); // Hardcoded
+
+        const query = { "品番": 品番, "作業日": 作業日 };
+        
+        let updateDoc = {
+            $inc: { "TotalLabelsPrintedForOrder": numJustPrinted },
+            $set: { "LastPrintTimestamp": new Date(lastPrintTimestamp) }, // Ensure it's a Date object
+            $push: { "PrintLog": { ...printLogEntry, timestamp: new Date(printLogEntry.timestamp) } }
+        };
+
+        // 1. Handle Image Uploads to Firebase Storage
+        let uploadedImageURLs = [];
+        if (imagesToUpload && imagesToUpload.length > 0) {
+            console.log(`🔵 Uploading ${imagesToUpload.length} images to Firebase...`);
+            const bucket = admin.storage().bucket(); // Get your default bucket
+
+            for (const imgData of imagesToUpload) {
+                if (!imgData.base64 || !imgData.label) {
+                    console.warn("Skipping image due to missing base64 or label", imgData.label);
+                    continue;
+                }
+                try {
+                    const buffer = Buffer.from(imgData.base64, 'base64');
+                    // Construct a more robust filename
+                    const safe品番 = (imgData.品番ForFilename || 'unknown品番').replace(/[^a-zA-Z0-9-_]/g, '_');
+                    const safe作業日 = (imgData.dateForFilename || 'unknownDate').replace(/[^a-zA-Z0-9-_]/g, '_');
+                    const safeFactory = (imgData.factoryForFilename || 'unknownFactory').replace(/[^a-zA-Z0-9-_]/g, '_');
+                    
+                    const fileName = `materialLabels/${safeFactory}/${safe品番}_${safe作業日}_${imgData.timestampForFilename}_${imgData.label.replace(/[^a-zA-Z0-9-_]/g, '_')}.jpg`;
+                    
+                    const file = bucket.file(fileName);
+                    const downloadToken = "materialLabelToken_" + Date.now() + "_" + Math.random().toString(36).substring(2, 15);
+
+                    await file.save(buffer, {
+                        metadata: {
+                            contentType: 'image/jpeg',
+                            metadata: { firebaseStorageDownloadTokens: downloadToken }
+                        },
+                        // public: true, // Optional: if you want direct public access without token
+                    });
+                    // Construct URL with token
+                    const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(fileName)}?alt=media&token=${downloadToken}`;
+                    uploadedImageURLs.push(publicUrl);
+                    console.log(`✅ Image uploaded: ${publicUrl}`);
+                } catch (uploadError) {
+                    console.error(`Error uploading one image to Firebase (label: ${imgData.label}):`, uploadError);
+                    // Continue with other images, or decide to fail the whole request
+                }
+            }
+            if (uploadedImageURLs.length > 0) {
+                updateDoc.$addToSet = { MaterialLabelImageURLs: { $each: uploadedImageURLs } };
+            }
+        }
+
+        // 2. Perform the main MongoDB update
+        console.log("🟠 Updating MongoDB document with query:", query, "and updateDoc:", JSON.stringify(updateDoc, null, 2));
+        const updateResult = await collection.updateOne(query, updateDoc, { upsert: false }); // Consider upsert:true if the doc might not exist but should be created
+        
+        console.log(`✅ Main update result: matchedCount: ${updateResult.matchedCount}, modifiedCount: ${updateResult.modifiedCount}, upsertedId: ${updateResult.upsertedId}`);
+
+        if (updateResult.matchedCount === 0 && !updateResult.upsertedId) {
+             // If no document was matched and nothing was upserted, it means the target document for update wasn't found.
+             // This could happen if the 品番 and 作業日 combination doesn't exist.
+             // If upsert was true, this path wouldn't be hit if it created a new doc.
+            console.warn("Target document not found for update, and upsert was false or failed to match.");
+            // Decide on response: maybe it's an error, or maybe it's okay if an upsert was intended but didn't happen.
+            // For now, let's assume it's an issue if no match and no upsert.
+            return res.status(404).json({ 
+                status: "not_found", 
+                message: "Target document not found for update. No changes made to print counts or logs." 
+            });
+        }
+        
+        let finalStatus = "in_progress";
+        let newTotalPrinted = 0;
+
+        // 3. Fetch the updated document to check TotalLabelsPrintedForOrder
+        const updatedDoc = await collection.findOne(query);
+        if (updatedDoc) {
+            newTotalPrinted = updatedDoc.TotalLabelsPrintedForOrder || 0;
+            if (targetProductionCountForStatusUpdate > 0 && newTotalPrinted >= targetProductionCountForStatusUpdate) {
+                if (updatedDoc.STATUS !== "Completed") { // Only update if not already completed
+                    console.log(`🔵 Target production count met (${newTotalPrinted}/${targetProductionCountForStatusUpdate}). Updating STATUS to Completed.`);
+                    await collection.updateOne(query, { $set: { STATUS: "Completed", CompletionTimestamp: new Date() } });
+                    finalStatus = "completed";
+                } else {
+                    finalStatus = "completed"; // Already was completed
+                    console.log("🔵 Target production count met, but STATUS was already Completed.");
+                }
+            } else {
+                 finalStatus = updatedDoc.STATUS || "加工中"; // Keep existing status or default
+            }
+        } else {
+            console.warn("Could not retrieve document after update to check status. This should not happen if update was successful.");
+        }
+
+
+        res.json({
+            status: "success",
+            message: "Print logged and material request updated successfully.",
+            modifiedCount: updateResult.modifiedCount,
+            matchedCount: updateResult.matchedCount,
+            upsertedId: updateResult.upsertedId,
+            imageUploadCount: uploadedImageURLs.length,
+            finalDocStatus: finalStatus,
+            newTotalPrintedCount: newTotalPrinted // Send back the new total
+        });
+
+    } catch (error) {
+        console.error("❌ Error in /logPrintAndUpdateMaterialRequest:", error);
+        res.status(500).json({ status: "error", message: "Error processing print log and update.", details: error.message });
+    } 
+    // finally { /* Handle client connection closing if necessary */ }
+});
+
 
 
 // iReporter route to submit data to kensaDB
@@ -2349,10 +2495,7 @@ app.post("/saveScannedQRData", async (req, res) => {
 // });
 
 
-
-
-
-// // Dynamic query where it can receive query, aggregation pipeline, insertData and updateData
+// // Dynamic query. the parameters needed are 1. DB Name, Collection Name, JSON Query
 // app.post('/queries', async (req, res) => {
 //   console.log("🟢 Received POST request to /queries");
 //   const { dbName, collectionName, query, aggregation, insertData, update, delete: deleteFlag, username } = req.body;
@@ -2389,6 +2532,15 @@ app.post("/saveScannedQRData", async (req, res) => {
 //       if (!username) {
 //         res.status(400).json({ error: "Username is required when attempting to delete (archive) data." });
 //         return;
+//       }
+
+//       // ✅ Convert _id to ObjectId if necessary
+//       if (query && query._id && typeof query._id === "string") {
+//         try {
+//           query._id = new ObjectId(query._id);
+//         } catch (err) {
+//           return res.status(400).json({ error: "Invalid _id format for deletion." });
+//         }
 //       }
 
 //       console.log(`🔴 User "${username}" requested to archive matching documents...`);
@@ -2439,66 +2591,92 @@ app.post("/saveScannedQRData", async (req, res) => {
 //   } 
 // });
 
+// Ensure this is at the top of your server.js with other requires:
+// const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
+// const client = new MongoClient(uri, { ... }); // Your MongoDB client initialization
+
 app.post('/queries', async (req, res) => {
   console.log("🟢 Received POST request to /queries");
-  const { dbName, collectionName, query, aggregation, insertData, update, delete: deleteFlag, username } = req.body;
+  // Destructure query from req.body to modify it if needed
+  let { dbName, collectionName, query, aggregation, insertData, update, delete: deleteFlag, username } = req.body;
 
   try {
-    console.log("Received Request:", { dbName, collectionName, query, aggregation, insertData, update, deleteFlag, username });
+    // Log the initial request for debugging
+    // console.log("Initial Request Body:", JSON.parse(JSON.stringify(req.body)));
 
-    await client.connect();
+    // CENTRALIZED ObjectId CONVERSION for query._id
+    // This should happen before update or delete operations that rely on _id
+    if (query && query._id && typeof query._id === "string") {
+      console.log(`Attempting to convert query._id: ${query._id} to ObjectId`);
+      try {
+        query._id = new ObjectId(query._id); // Modify the query object directly
+        console.log(`Successfully converted query._id to:`, query._id);
+      } catch (err) {
+        console.error("Error converting query._id to ObjectId:", err.message);
+        // If _id is invalid, it's a bad request for operations targeting a specific document by _id
+        return res.status(400).json({ error: "Invalid _id format provided in query." });
+      }
+    }
+
+    // Ensure client is connected (if you manage connections per request)
+    // If you have a global connection, this might not be needed here.
+    // await client.connect(); 
+
     const database = client.db(dbName);
     const collection = database.collection(collectionName);
 
-    let results;
+    // Log the potentially modified query (with ObjectId) before operations
+    // console.log("Processed Query (after potential ObjectId conversion):", query);
 
     if (insertData) {
-      // 🔵 INSERT logic
       console.log("🔵 Inserting data into MongoDB...");
-      const insertResult = await collection.insertMany(insertData);
-      console.log(`✅ Successfully inserted ${insertResult.insertedCount} records.`);
-      res.json({ message: "Data inserted successfully", insertedCount: insertResult.insertedCount });
+      // Handle both single document and array of documents for insertion
+      const insertResult = Array.isArray(insertData) ? await collection.insertMany(insertData) : await collection.insertOne(insertData);
+      const insertedCount = insertResult.insertedCount || (insertResult.insertedId ? 1 : 0);
+      console.log(`✅ Successfully inserted ${insertedCount} records.`);
+      res.json({ message: "Data inserted successfully", insertedCount: insertedCount, insertedId: insertResult.insertedId });
       return;
     }
 
     if (update) {
       // 🟠 UPDATE logic
-      console.log("🟠 Updating MongoDB document...");
+      // query._id should now be an ObjectId if it was provided as a string
+      console.log("🟠 Updating MongoDB document with query:", query, "and update:", update);
       const updateResult = await collection.updateOne(query, update);
-      console.log(`✅ Successfully updated ${updateResult.modifiedCount} records.`);
-      res.json({ message: "Data updated successfully", modifiedCount: updateResult.modifiedCount });
+      console.log(`✅ Update result: matchedCount: ${updateResult.matchedCount}, modifiedCount: ${updateResult.modifiedCount}`);
+      
+      if (updateResult.matchedCount === 0) {
+          // This is the specific condition for "not found"
+          return res.status(404).json({ message: "更新対象のデータが見つかりませんでした。", modifiedCount: 0, matchedCount: 0 });
+      }
+      res.json({ message: "Data updated successfully", modifiedCount: updateResult.modifiedCount, matchedCount: updateResult.matchedCount });
       return;
     }
 
     if (deleteFlag) {
-      // 🔴 ARCHIVE instead of DELETE
+      // 🔴 ARCHIVE (or delete) logic
+      // query._id is already an ObjectId if it was provided, due to the centralized conversion
       if (!username) {
-        res.status(400).json({ error: "Username is required when attempting to delete (archive) data." });
-        return;
+        return res.status(400).json({ error: "Username is required when attempting to delete (archive) data." });
       }
-
-      // ✅ Convert _id to ObjectId if necessary
-      if (query && query._id && typeof query._id === "string") {
-        try {
-          query._id = new ObjectId(query._id);
-        } catch (err) {
-          return res.status(400).json({ error: "Invalid _id format for deletion." });
-        }
-      }
-
-      console.log(`🔴 User "${username}" requested to archive matching documents...`);
-
+      console.log(`🔴 User "${username}" requested to archive/delete matching documents with query:`, query);
+      
+      // Example for archiving:
       const docsToArchive = await collection.find(query).toArray();
 
       if (docsToArchive.length === 0) {
-        res.json({ message: "No documents found to archive." });
+        console.log("No documents found to archive/delete for query:", query);
+        res.json({ message: "No documents found to archive/delete." });
         return;
       }
-
-      const archiveCollection = database.collection(`${collectionName}_archives`);
+      
+      const archiveCollectionName = `${collectionName}_archives`;
+      console.log(`Archiving to collection: ${archiveCollectionName}`);
+      const archiveCollection = database.collection(archiveCollectionName);
+      
       const archivedDocs = docsToArchive.map(doc => ({
         ...doc,
-        _originalId: doc._id,
+        _originalId: doc._id, // _id is already an ObjectId here
         deletedBy: username,
         deletedAt: new Date(),
       }));
@@ -2508,7 +2686,7 @@ app.post('/queries', async (req, res) => {
 
       console.log(`✅ Archived ${archivedDocs.length} docs by "${username}" and deleted ${deleteResult.deletedCount} from original.`);
       res.json({
-        message: "Documents archived instead of deleted.",
+        message: "Documents archived successfully.",
         archivedCount: archivedDocs.length,
         deletedFromOriginal: deleteResult.deletedCount,
         archivedBy: username
@@ -2517,22 +2695,34 @@ app.post('/queries', async (req, res) => {
     }
 
     if (aggregation) {
-      // 🔵 Aggregation Query
-      console.log("🔵 Running Aggregation Pipeline...");
-      results = await collection.aggregate(aggregation).toArray();
-    } else {
-      // 🔵 Find Query
-      console.log("🔵 Running Find Query...");
-      results = await collection.find(query).toArray();
+      console.log("🔵 Running Aggregation Pipeline with pipeline:", aggregation);
+      const results = await collection.aggregate(aggregation).toArray();
+      console.log(`✅ Aggregation Results Count: ${results.length}`);
+      res.json(results);
+      return;
     }
-
-    console.log("✅ Query Results:", JSON.stringify(results, null, 2));
+    
+    // Default to find if no other operation specified
+    console.log("🔵 Running Find Query with query:", query);
+    const results = await collection.find(query).toArray();
+    console.log(`✅ Find Query Results Count: ${results.length}`);
+    // console.log("✅ Query Results (Find):", JSON.stringify(results, null, 2)); // Can be verbose
     res.json(results);
+
   } catch (error) {
-    console.error("❌ Error executing query:", error);
-    res.status(500).json({ error: "Error executing query" });
+    console.error("❌ Error executing query in /queries route:", error);
+    res.status(500).json({ error: "Error executing query", details: error.message });
   } 
+  // finally {
+  //   // If you are managing MongoDB client connections per request, uncomment to close.
+  //   // Otherwise, if you have a global client, it's typically closed when the app shuts down.
+  //   // if (client && client.topology && client.topology.isConnected()) {
+  //   //   await client.close();
+  //   //   console.log("MongoDB client connection closed.");
+  //   // }
+  // }
 });
+
 
 
 
@@ -2551,6 +2741,77 @@ app.post('/inventoryChat', async (req, res) => {
       },
       body: new URLSearchParams({
         body: message
+      })
+    });
+
+    if (response.ok) {
+      const result = await response.json();
+      res.status(200).json({ message: 'Message sent successfully', result });
+    } else {
+      const errorText = await response.text();
+      res.status(response.status).json({ message: 'Failed to send message', error: errorText });
+    }
+  } catch (error) {
+    res.status(500).json({ message: 'Internal server error', error: error.message });
+  }
+});
+
+//Chatwork API endpoint to get contacts
+app.get('/chatworkContacts', async (req, res) => {
+  const apiKey = process.env.CHATWORK_API_KEY;
+  const url = 'https://api.chatwork.com/v2/contacts';
+
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'X-ChatWorkToken': apiKey
+      }
+    });
+
+    if (response.ok) {
+      const contacts = await response.json();
+      res.status(200).json({ message: 'Contacts retrieved successfully', contacts });
+    } else {
+      const errorText = await response.text();
+      res.status(response.status).json({ message: 'Failed to retrieve contacts', error: errorText });
+    }
+  } catch (error) {
+    res.status(500).json({ message: 'Internal server error', error: error.message });
+  }
+});
+
+
+//Chatwork API endpoint to send messages
+app.post('/chatWorkSend', async (req, res) => {
+  const { account_id, messageBody } = req.body;
+  const apiKey = process.env.CHATWORK_API_KEY;
+
+  try {
+    await client.connect(); // ✅ Use shared MongoDB client
+
+    const db = client.db("Sasaki_Coating_MasterDB");
+    const chatWorkDB = db.collection("chatWorkDB");
+
+    const contact = await chatWorkDB.findOne({ account_id: Number(account_id) });
+
+    if (!contact) {
+      return res.status(404).json({ message: 'Account ID not found in database' });
+    }
+
+    const { room_id, name } = contact;
+
+    const chatworkURL = `https://api.chatwork.com/v2/rooms/${room_id}/messages`;
+    const formattedMessage = `[To:${account_id}]${name}\n${messageBody}`;
+
+    const response = await fetch(chatworkURL, {
+      method: 'POST',
+      headers: {
+        'X-ChatWorkToken': apiKey,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: new URLSearchParams({
+        body: formattedMessage
       })
     });
 

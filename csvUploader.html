@@ -6,7 +6,7 @@
     <title>第一工場材料CSVアップロード</title>
     <style>
         /* General Reset */
-        body, h2, input, button, table {
+        body, h2, h3, input, button, table, ul, p, label {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
@@ -18,25 +18,26 @@
             background-color: #f3faf4;
             text-align: center;
             padding: 20px;
-            overflow-x: auto; /* Allow horizontal scrolling */
         }
 
         .container {
             background: #033a5f;
             padding: 20px;
-            max-width: 90%;
+            max-width: 90%; 
             margin: auto;
             box-shadow: 0 0 15px rgba(0, 0, 0, 0.3);
             border-radius: 10px;
             border: 2px solid #0174b3;
         }
 
-        h2 {
-            font-size: 24px;
+        h2, h3 { 
             font-weight: bold;
             margin-bottom: 15px;
-            color: #ffffff;
+            color: #ffffff; 
         }
+        h2 { font-size: 24px; }
+        h3 { font-size: 20px; }
+
 
         .input-file {
             width: 100%;
@@ -59,9 +60,13 @@
             font-weight: bold;
             border-radius: 5px;
             cursor: pointer;
-            transition: 0.3s;
-            width: 100%;
+            transition: background-color 0.3s;
         }
+
+        .btn-full-width {
+             width: 100%;
+        }
+
 
         .btn:hover {
             background-color: #025f8c;
@@ -69,45 +74,290 @@
 
         .table-container {
             max-width: 100%;
-            overflow-x: auto;
+            overflow-x: auto; 
             margin-top: 20px;
+            background-color: white; 
+            border-radius: 5px;
         }
 
-        table {
-            width: auto; /* Expand table based on content */
+        table { /* General table styling, applies to previewTable and nokiResultsTable */
+            width: 100%; /* Make tables use full width of their container */
             border-collapse: collapse;
-            background-color: white;
             margin: auto;
-            min-width: 100%;
         }
 
-        th, td {
+        table th, table td {
             border: 1px solid #ddd;
             padding: 8px;
             white-space: nowrap;
             text-align: left;
-            color: black; /* Ensure text is visible */
+            color: black; 
         }
 
-        th {
+        table th {
             background-color: #0174b3;
             color: white;
             position: sticky;
             top: 0;
-            z-index: 2;
+            z-index: 2; /* Ensure preview table headers are sticky if its container scrolls */
         }
+
+        /* Styles for Edit Data Section */
+        .edit-section-container {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 2px solid #0174b3;
+        }
+        
+        .search-form-group {
+            margin-bottom: 20px;
+            background-color: rgba(255, 255, 255, 0.1); 
+            padding: 15px;
+            border-radius: 5px;
+            text-align: left; /* Align label and inputs to the left */
+            display: flex; /* For better alignment of items */
+            align-items: center; /* Vertically align items */
+            flex-wrap: wrap; /* Allow wrapping on smaller screens */
+        }
+
+        .search-form-group label {
+            color: #ffffff;
+            margin-right: 10px;
+            font-weight: bold;
+        }
+
+        .search-form-group input[type="date"] {
+            padding: 8px 10px;
+            border: 1px solid #0174b3;
+            border-radius: 5px;
+            font-size: 16px;
+            color: #002b46;
+            background-color: #ffffff;
+            margin-right: 5px;
+            height: 40px; 
+            vertical-align: middle;
+            flex-grow: 0; /* Don't grow */
+        }
+        .search-form-group #nokiDateInput { 
+             /* Using .input-file for consistency, but override width */
+            width: 110px; /* Enough for YYMMDD and a bit of padding */
+            padding: 8px 10px;
+            border: 1px solid #0174b3;
+            border-radius: 5px;
+            font-size: 16px;
+            background-color: #e9ecef; /* Readonly indication */
+            color: #002b46;
+            margin-right: 10px;
+            height: 40px;
+            vertical-align: middle;
+            flex-grow: 0;
+        }
+        .search-form-group .btn { /* Search button */
+            width: auto; 
+            padding: 10px 15px; 
+            height: 40px;
+            vertical-align: middle;
+            flex-grow: 0;
+        }
+
+
+        #nokiResultsContainer {
+            margin-top: 10px; 
+            background-color: rgba(255, 255, 255, 0.1); 
+            padding: 15px;
+            border-radius: 5px;
+            text-align: left;
+        }
+        #nokiResultsContainer h3 { 
+             color: #ffffff; 
+             margin-bottom: 10px;
+        }
+
+        #nokiResultsTableHost {
+            max-height: 400px; 
+            overflow: auto; /* For both vertical and horizontal scroll */
+            border: 1px solid #0174b3;
+            background-color: #ffffff;
+            border-radius: 4px; 
+            margin-top: 10px;
+        }
+
+        #nokiResultsTable { /* Specific to results table, inherits general table styles */
+            min-width: 800px; /* Example: ensure a minimum width */
+        }
+
+        #nokiResultsTable th,
+        #nokiResultsTable td {
+            /* Inherits general table th, td styles */
+            font-size: 0.9em; 
+        }
+
+        #nokiResultsTable th {
+            /* Inherits general table th styles, already sticky */
+            z-index: 1; /* Lower z-index than preview table if they could overlap, but they are in different containers */
+        }
+        #nokiResultsTable tbody tr:hover {
+            background-color: #e9f5fd !important; 
+        }
+        #nokiResultsTable tbody tr {
+            cursor: pointer;
+        }
+        #noNokiResults {
+            color: #ffffff; 
+            padding: 10px 0;
+            text-align: center; /* Center "no results" message */
+        }
+
+
+        /* Sidebar Styles */
+        .sidebar {
+          height: 100%;
+          width: 0; 
+          position: fixed;
+          z-index: 1000; 
+          top: 0;
+          right: 0;
+          background-color: #f8f9fa; 
+          overflow-x: hidden;
+          transition: width 0.4s ease-out; 
+          padding-top: 20px;
+          border-left: 1px solid #dee2e6;
+          box-shadow: -3px 0 8px rgba(0,0,0,0.1);
+        }
+
+        .sidebar .closebtn {
+          position: absolute;
+          top: 15px;
+          right: 25px;
+          font-size: 30px;
+          line-height: 1;
+          text-decoration: none;
+          color: #6c757d;
+        }
+        .sidebar .closebtn:hover {
+            color: #343a40;
+        }
+
+        .sidebar > h3 { 
+            padding: 0 25px 15px 25px;
+            margin-top: 20px;
+            margin-bottom: 10px; 
+            border-bottom: 1px solid #e9ecef;
+            color: #033a5f; 
+            text-align: left;
+        }
+        
+        #editFormContainer {
+            padding: 0 25px; 
+            max-height: calc(100vh - 160px); 
+            overflow-y: auto;
+            text-align: left;
+        }
+
+        #editFormContainer .form-group-sidebar {
+            margin-bottom: 12px; 
+            font-size: 14px; 
+            color: #212529;
+        }
+
+        #editFormContainer .form-group-sidebar label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500; 
+        }
+
+        #editFormContainer .form-group-sidebar input[type="text"],
+        #editFormContainer .form-group-sidebar input[type="number"],
+        #editFormContainer .form-group-sidebar input[type="date"] {
+            width: 100%;
+            padding: 9px 12px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            box-sizing: border-box;
+            font-size: 14px;
+            background-color: #ffffff;
+            color: #495057;
+        }
+
+        #editFormContainer .form-group-sidebar input:read-only {
+            background-color: #e9ecef; 
+            cursor: not-allowed;
+            color: #6c757d;
+        }
+        
+        .sidebar-button-bar {
+        padding: 15px 25px; 
+        border-top: 1px solid #e9ecef; 
+        background-color: #f8f9fa; 
+        /* REMOVE: position: absolute; */
+        /* REMOVE: bottom: 0; */
+        /* REMOVE: left: 0; */
+        width: 100%; /* Still useful to span the width if sidebar has padding */
+        box-sizing: border-box;
+        text-align: right; 
+        margin-top: 24px; /* This creates the "3 spaces". Adjust 24px as needed (e.g., 1.5em) */
+    }
+
+
+        .sidebar .btn { 
+            width: auto; 
+            margin-left: 10px; 
+        }
+        .sidebar .btn-confirm { 
+            background-color: #28a745; 
+        }
+        .sidebar .btn-confirm:hover {
+            background-color: #218838;
+        }
+        .sidebar .btn-close-action { 
+            background-color: #6c757d; 
+        }
+        .sidebar .btn-close-action:hover {
+            background-color: #5a6268;
+        }
+
     </style>
 </head>
 <body>
     <div class="container">
         <h2>第一工場材料CSVアップロード</h2>
         <input type="file" id="csvFile" accept=".csv" class="input-file">
-        <button class="btn" onclick="handleFile()">プレビュー</button>
+        <button class="btn btn-full-width" onclick="handleFile()">プレビュー</button>
         <div class="table-container">
-            <table id="previewTable" border="1" style="display:none;"></table>
+            <table id="previewTable" style="display:none;"></table> </div>
+        <button id="insertButton" class="btn btn-full-width" onclick="insertData()" style="display:none; margin-top: 20px;">データを挿入</button>
+    
+        <div class="edit-section-container">
+            <h2>既存データの編集</h2>
+    
+            <div class="search-form-group">
+                <label for="nokiDateCalendarInput">作業日:</label>
+                <input type="date" id="nokiDateCalendarInput">
+                <input type="text" id="nokiDateInput" placeholder="YYMMDD" readonly> <button id="fetchByNokiButton" class="btn">検索</button>
+            </div>
+    
+            <div id="nokiResultsContainer">
+                <h3>検索結果:</h3>
+                <div id="nokiResultsTableHost">
+                    </div>
+                <p id="noNokiResults" style="display:none;">該当するデータは見つかりませんでした。</p>
+            </div>
+        </div> </div> <div id="editSidebar" class="sidebar">
+        <a href="javascript:void(0)" class="closebtn" id="closeEditSidebarBtn">&times;</a>
+        <h3>レコード編集</h3>
+        <div id="editFormContainer">
+            </div>
+        <input type="hidden" id="editRecordId">
+        <div class="sidebar-button-bar">
+            <button id="sidebarEditButton" class="btn">編集</button>
+            <button id="sidebarSaveButton" class="btn btn-confirm" style="display:none;">保存</button>
+            <button id="sidebarCancelButton" class="btn btn-close-action" style="display:none;">キャンセル</button>
         </div>
-        <button id="insertButton" class="btn" onclick="insertData()" style="display:none; margin-top: 20px;">データを挿入</button>
     </div>
+
     <script src="csvUploader.js"></script>
 </body>
 </html>
+
+</div>
+
