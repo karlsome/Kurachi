@@ -1,1603 +1,1186 @@
+// === Global Variables and Initial Setup ===
 const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
-
-// link for pictures database
 const picURL = 'https://script.google.com/macros/s/AKfycbwHUW1ia8hNZG-ljsguNq8K4LTPVnB6Ng_GLXIHmtJTdUgGGd2WoiQo9ToF-7PvcJh9bA/exec';
 
+let isHandlingScan = false; // Global flag to prevent re-entrant scan handling
+let pageName = ''; // To be set on DOMContentLoaded
+let currentSelectedKojo = ''; // To be set on DOMContentLoaded
+let uniquePrefix = ''; // To be set on DOMContentLoaded
 
-//this code listens to incoming parameters passed
+// Function to update uniquePrefix when factory selection might change
+function updateUniquePrefix() {
+    pageName = location.pathname.split('/').pop() || 'unknownPage';
+    const kojoEl = document.getElementById('selected工場');
+    currentSelectedKojo = kojoEl ? kojoEl.value : 'unknownKojo';
+    uniquePrefix = `${pageName}_${currentSelectedKojo}_`;
+}
+
+
+// === Utility Functions ===
 function getQueryParam(param) {
   const urlParams = new URLSearchParams(window.location.search);
   return urlParams.get(param);
 }
-const selectedFactory = getQueryParam('filter');
-if (selectedFactory){
-  document.getElementById('selected工場').value = selectedFactory;
-  console.log("kojo changed to: " + selectedFactory);
+
+function showModalAlert(message, isError = true, duration = null) {
+    const scanAlertModal = document.getElementById('scanAlertModal');
+    const scanAlertText = document.getElementById('scanAlertText');
+    const alertSound = document.getElementById('alert-sound');
+    const modalTitle = scanAlertModal ? scanAlertModal.querySelector('h2') : null;
+    const closeButton = document.getElementById('closeScanModalButton');
+
+
+    if(scanAlertModal && scanAlertText && modalTitle && closeButton) {
+        modalTitle.textContent = isError ? 'エラー (Error)' : '情報 (Info)';
+        scanAlertText.innerText = message;
+        scanAlertModal.style.display = 'block';
+        
+        if (isError && alertSound) {
+            alertSound.muted = false;
+            alertSound.volume = 1;
+            alertSound.play().catch(error => console.error("Failed to play alert sound:", error));
+            document.body.classList.add('flash-red');
+        }
+
+        const closeAction = () => {
+            scanAlertModal.style.display = 'none';
+            if (isError && alertSound) {
+                alertSound.pause();
+                alertSound.currentTime = 0;
+                alertSound.muted = true;
+                document.body.classList.remove('flash-red');
+            }
+        };
+
+        closeButton.onclick = closeAction;
+
+        if (duration && typeof duration === 'number' && duration > 0) {
+            setTimeout(() => {
+                // Only close if the modal is still visible (user might have closed it manually)
+                if (scanAlertModal.style.display === 'block') {
+                    closeAction();
+                }
+            }, duration);
+        }
+
+    } else {
+        alert(message); 
+        console.warn("Modal elements not found for showModalAlert. IDs: scanAlertModal, scanAlertText, alert-sound, closeScanModalButton, h2 within modal.");
+    }
 }
 
 
-// Select all input, select, and button elements
-const inputs = document.querySelectorAll('input, select, button,textarea');
-const selected工場 = document.getElementById('selected工場').value; // Get the current factory value
-const pageName = location.pathname.split('/').pop(); // Get the current HTML file name
-const uniquePrefix = `${pageName}_${selected工場}_`;
+// === Local Storage Management ===
+function saveToLocalStorage(key, value) {
+    if (key && uniquePrefix) { 
+        localStorage.setItem(uniquePrefix + key, value);
+    }
+}
+function getFromLocalStorage(key) {
+    return uniquePrefix ? localStorage.getItem(uniquePrefix + key) : null;
+}
+function removeFromLocalStorage(key) {
+    if (uniquePrefix && key) localStorage.removeItem(uniquePrefix + key);
+}
 
-// Save the value of each input to localStorage on change
-inputs.forEach(input => {
-    input.addEventListener('input', () => {
-        const key = `${uniquePrefix}${input.id || input.name}`; // Prefix key with pageName and selected工場
-        if (key) {
-            localStorage.setItem(key, input.value);
+// === Event Listeners for Input Saving ===
+function setupInputSaving() {
+    const inputs = document.querySelectorAll('input, select, textarea');
+    inputs.forEach(input => {
+        const eventType = (input.type === 'checkbox' || input.type === 'radio') ? 'change' : 'input';
+        input.addEventListener(eventType, () => {
+            const valueToSave = (input.type === 'checkbox' || input.type === 'radio') ? input.checked : input.value;
+            saveToLocalStorage(input.id || input.name, valueToSave);
+        });
+    });
+}
+
+// === Restore Values on Page Load ===
+function restoreValuesFromLocalStorage() {
+    updateUniquePrefix(); 
+    const inputs = document.querySelectorAll('input, select, textarea');
+    Object.keys(localStorage).forEach(fullKey => {
+        if (fullKey.startsWith(uniquePrefix)) {
+            const savedValue = localStorage.getItem(fullKey);
+            const inputKeyWithoutPrefix = fullKey.substring(uniquePrefix.length);
+            
+            inputs.forEach(input => {
+                if ((input.id && input.id === inputKeyWithoutPrefix) || (input.name && input.name === inputKeyWithoutPrefix)) {
+                    if (input.type === 'checkbox' || input.type === 'radio') {
+                        input.checked = savedValue === 'true';
+                    } else if (input.tagName === 'SELECT') {
+                        setTimeout(() => { 
+                            if ([...input.options].some(option => option.value === savedValue)) {
+                                input.value = savedValue;
+                            }
+                        }, 50); 
+                    } else {
+                        input.value = savedValue;
+                    }
+                }
+            });
         }
     });
-
-    if (input.type === 'checkbox' || input.type === 'radio') {
-        input.addEventListener('change', () => {
-            const key = `${uniquePrefix}${input.id || input.name}`;
-            if (key) {
-                localStorage.setItem(key, input.checked); // Save checkbox/radio state
+    const restoredSubDropdownValue = getFromLocalStorage('sub-dropdown');
+    const subDropdown = document.getElementById('sub-dropdown');
+    if (subDropdown && restoredSubDropdownValue) {
+        if ([...subDropdown.options].some(opt => opt.value === restoredSubDropdownValue)) {
+            subDropdown.value = restoredSubDropdownValue;
+            if (typeof handleScannedQR === 'function') {
+                 handleScannedQR(restoredSubDropdownValue); 
             }
-        });
+        } else {
+            console.warn(`Restored value "${restoredSubDropdownValue}" no longer in sub-dropdown. Clearing.`);
+            removeFromLocalStorage('sub-dropdown'); 
+        }
     }
-});
+}
 
 
-// Restore the values of input fields from localStorage on page load
-document.addEventListener('DOMContentLoaded', () => {
-  const inputs = document.querySelectorAll('input, select, button, textarea'); // Get all input elements
-  const pageName = location.pathname.split('/').pop(); // Get the current HTML file name
-  const selected工場 = document.getElementById('selected工場')?.value; // Get the selected工場 value
-  const processElement = document.getElementById("process");
+// === Dropdown Population ===
 
-  if (!selected工場) {
-      console.error("Selected 工場 is not set or found.");
+async function populateSubDropdown() {
+  const subDropdown = document.getElementById('sub-dropdown');
+  if (!subDropdown) {
+      console.error("sub-dropdown element not found.");
       return;
   }
-
-  // Loop through all keys in localStorage
-  Object.keys(localStorage).forEach(key => {
-      // Check if the key belongs to the current HTML file and selected工場
-      if (key.startsWith(`${uniquePrefix}`)) {
-          const savedValue = localStorage.getItem(key);
-
-          if (savedValue !== null) {
-              // Match each input with its respective localStorage key
-              inputs.forEach(input => {
-                  const inputKey = `${uniquePrefix}${input.id || input.name}`;
-                  if (inputKey === key) {
-                      if (input.type === 'checkbox' || input.type === 'radio') {
-                          input.checked = savedValue === 'true'; // Restore checkbox/radio state
-                      } else if (input.tagName === 'SELECT') {
-                          // For select elements, wait for options to populate
-                          setTimeout(() => {
-                              if ([...input.options].some(option => option.value === savedValue)) {
-                                  input.value = savedValue; // Restore select value
-                                  console.log(`Restored ${input.id || input.name}:`, savedValue);
-                                  handleScannedQR(savedValue); // Call the function to handle scanned QR code
-                                  
-                              } else {
-                                  console.error(`Option '${savedValue}' not found in select '${input.id || input.name}'.`);
-                              }
-                          }, 1000); // Adjust delay if options are populated dynamically
-                      } else {
-                          input.value = savedValue; // Restore value for text, hidden, and other inputs
-                      }
-                  }
-              });
-          }
-      }
-  });
-
-  // Log the restored value for debugging (Optional)
-  if (processElement) {
-      console.log('Process value after restoration:', processElement.value); // Debugging the restored process value
-  }
-});
-
-
-
-// //FETCH values for sub-dropdown
-// document.addEventListener('DOMContentLoaded', async () => {
-//   const subDropdown = document.getElementById('sub-dropdown');
-
-//   // Define the query payload
-//   const queryPayload = {
-//     dbName: "submittedDB",
-//     collectionName: "materialRequestDB",
-//     aggregation: [
-//       {
-//         "$project": {
-//           "品番": 1,
-//           "材料背番号": 1,
-//           "_id": 0
-//         }
-//       }
-//     ]
-//   };
-
-//   try {
-//     const response = await fetch(`${serverURL}/queries`, {
-//       method: "POST",
-//       headers: {
-//         "Content-Type": "application/json",
-//       },
-//       body: JSON.stringify(queryPayload),
-//     });
-
-//     if (!response.ok) {
-//       throw new Error("Failed to fetch data");
-//     }
-
-//     const data = await response.json();
-
-//     // Extract unique and sorted lists
-//     const unique材料背番号 = [...new Set(data.map(item => item.材料背番号))].sort((a, b) => a.localeCompare(b, 'ja'));
-//     // Filter out 品番 values starting with "Z"
-//     const unique品名 = [...new Set(data
-//       .map(item => item.品番)
-//       .filter(品番 => !品番.startsWith("Z")))]
-//       .sort((a, b) => a.localeCompare(b, 'ja'));
-
-//     // Clear existing options
-//     subDropdown.innerHTML = '';
-
-//     // Add a default "Select an option" choice
-//     const defaultOption = document.createElement('option');
-//     defaultOption.value = '';
-//     defaultOption.textContent = 'Select 材料背番号 or 品名';
-//     defaultOption.disabled = true;
-//     defaultOption.selected = true;
-//     subDropdown.appendChild(defaultOption);
-
-//     // Add 材料背番号 options first
-//     unique材料背番号.forEach(材料背番号 => {
-//       const option = document.createElement('option');
-//       option.value = 材料背番号;
-//       option.textContent = 材料背番号;
-//       subDropdown.appendChild(option);
-//     });
-
-//     // Add a separator for 品名 (optional)
-//     if (unique品名.length > 0) {
-//       const separator = document.createElement('option');
-//       separator.disabled = true;
-//       separator.textContent = '── 品名一覧 ──'; // "List of Product Names"
-//       subDropdown.appendChild(separator);
-//     }
-
-//     // Add 品名 options next
-//     unique品名.forEach(品名 => {
-//       const option = document.createElement('option');
-//       option.value = 品名;
-//       option.textContent = 品名;
-//       subDropdown.appendChild(option);
-//     });
-
-//   } catch (error) {
-//     console.error('Error fetching data:', error);
-//   }
-// });
-
-
-// FETCH values for sub-dropdown (品番 only)
-document.addEventListener('DOMContentLoaded', async () => {
-  const subDropdown = document.getElementById('sub-dropdown');
 
   const queryPayload = {
     dbName: "submittedDB",
     collectionName: "materialRequestDB",
     aggregation: [
-      {
-        "$project": {
-          "品番": 1,
-          "_id": 0
-        }
-      }
+      // REMOVED: { $match: { STATUS: { $ne: "Completed" } } }, 
+      // Now it will fetch all 品番 regardless of STATUS
+      { $group: { _id: "$品番" } }, 
+      { $sort: { _id: 1 } }, 
+      { $project: { "品番": "$_id", "_id": 0 } }
     ]
   };
 
   try {
-    const response = await fetch(`${serverURL}/queries`, {
+    const response = await fetch(`${serverURL}/queries`, { 
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(queryPayload),
     });
-
-    if (!response.ok) throw new Error("Failed to fetch data");
-
+    if (!response.ok) throw new Error(`Failed to fetch 品番 list: ${response.statusText}`);
     const data = await response.json();
+    
+    const unique品番 = data.map(item => item.品番).filter(品番 => 品番 && !品番.startsWith("Z"));
 
-    // Get only unique 品番 that do not start with "Z"
-    const unique品番 = [...new Set(
-      data.map(item => item.品番).filter(品番 => 品番 && !品番.startsWith("Z"))
-    )].sort((a, b) => a.localeCompare(b, 'ja'));
-
-    // Clear and rebuild dropdown
-    subDropdown.innerHTML = '';
-
+    subDropdown.innerHTML = ''; 
     const defaultOption = document.createElement('option');
     defaultOption.value = '';
     defaultOption.textContent = '品番を選択 / Select 品番';
     defaultOption.disabled = true;
     defaultOption.selected = true;
     subDropdown.appendChild(defaultOption);
-
     unique品番.forEach(品番 => {
       const option = document.createElement('option');
       option.value = 品番;
       option.textContent = 品番;
       subDropdown.appendChild(option);
     });
-
   } catch (error) {
-    console.error('Error fetching 品番 list:', error);
+    console.error('Error populating 品番 dropdown:', error);
+    showModalAlert("品番リストの読み込みに失敗しました。", true);
   }
-});
+}
 
-
-
-
-
-
-//blanks the info page
+// === Product Details Fetching ===
 function blankInfo() {
-  // Clear the value of the label with id "SRScode"
-  //document.getElementById("SRScode").textContent = "";
-
-  // Clear the values of all input fields
   document.getElementById("材料背番号").value = "";
   document.getElementById("status").value = "";
   document.getElementById("品名").value = "";
   document.getElementById("material").value = "";
   document.getElementById("material-color").value = "";
+  document.getElementById("length").value = "50"; 
+  document.getElementById("order").value = "";
+  document.getElementById("printTimes").value = "1";
+  const printTimesDisplay = document.getElementById("printTimesDisplay");
+  if (printTimesDisplay) printTimesDisplay.innerText = "1";
+  document.getElementById("printStatus").value = "0 / 0";
+  document.getElementById("targetProductionCount").value = "0";
+  document.getElementById("SRS").value = "無し";
+  const dynamicImage = document.getElementById("dynamicImage");
+  if (dynamicImage) {
+    dynamicImage.src = "";
+    dynamicImage.style.display = 'none';
+  }
+  if(window.clearTakenPictures && typeof window.clearTakenPictures === 'function') {
+      window.clearTakenPictures();
+  }
 }
-
-
-
-
-// async function fetchProductDetails() {
-//   const serialNumber = document.getElementById("sub-dropdown").value;
-//   const factory = document.getElementById("selected工場").value;
-//   const dynamicImage = document.getElementById("dynamicImage");
-//   dynamicImage.src = ""; // Reset the image
-  
-
-//   if (!serialNumber) {
-//     console.error("Please select a valid 背番号.");
-//     blankInfo();
-//     return;
-//   }
-
-//   // Define the query payload
-//   const queryPayload = {
-//     dbName: "Sasaki_Coating_MasterDB",
-//     collectionName: "materialDB",
-//     query: {
-//       "$or": [
-//         { "材料品番": serialNumber }, // Match if serialNumber is a 品名
-//         { "材料背番号": serialNumber } // Match if serialNumber is a 材料背番号
-//       ]
-//     }
-//   };
-
-//   try {
-//     const response = await fetch(`${serverURL}/queries`, {
-//       method: "POST",
-//       headers: {
-//         "Content-Type": "application/json",
-//       },
-//       body: JSON.stringify(queryPayload),
-//     });
-
-//     if (response.ok) {
-//       const data = await response.json();
-
-//       if (data.length === 0) {
-//         console.error("No matching product found.");
-//         blankInfo();
-//         return;
-//       }
-
-//       const product = data[0]; // Assuming we get only one matching product
-
-//       // Populate the HTML fields with the retrieved data
-//       document.getElementById("品名").value = product.品名 || "";
-//       document.getElementById("材料背番号").value = product.材料背番号 || "";
-//       document.getElementById("材料品番").value = product.材料品番 || "";
-//       document.getElementById("material").value = product.材料 || "";
-//       document.getElementById("material-color").value = product.色 || "";
-//       document.getElementById("length").value = product.length || "";
-//     } else {
-//       console.error("Error fetching product details:", response.statusText);
-//       blankInfo();
-//     }
-//   } catch (error) {
-//     console.error("Error fetching product details:", error);
-//     blankInfo();
-//   }
-
-//   // Fetch and update product image separately
-//   picLINK(serialNumber);
-//   handleScannedQR(serialNumber); // Call the function to handle scanned QR code
-// }
-
-// // Call fetchProductDetails when a new 背番号 is selected
-// document.getElementById("sub-dropdown").addEventListener("change", fetchProductDetails);
 
 async function fetchProductDetails() {
-  const selectedValue = document.getElementById("sub-dropdown").value;
-  const dynamicImage = document.getElementById("dynamicImage");
-  dynamicImage.src = ""; // Reset image
+  const selected品番Value = document.getElementById("sub-dropdown").value; 
+  blankInfo(); 
 
-  if (!selectedValue) {
-    console.error("Please select a valid 背番号.");
-    blankInfo();
+  if (!selected品番Value) {
     return;
   }
+  
+  document.getElementById("品名").value = selected品番Value; 
+  saveToLocalStorage('品名', selected品番Value);
+
+  const today = new Date();
+  const yearToday = String(today.getFullYear()).slice(-2);
+  const monthToday = String(today.getMonth() + 1).padStart(2, '0');
+  const dayToday = String(today.getDate()).padStart(2, '0');
+  const sagyoubiForQuery = `${yearToday}${monthToday}${dayToday}`;
 
   try {
-    // Step 1: Lookup only by 品番
-    const lookupPayload = {
+    const requestQueryPayload = {
       dbName: "submittedDB",
       collectionName: "materialRequestDB",
-      query: { "品番": selectedValue }
+      query: { "品番": selected品番Value, "作業日": sagyoubiForQuery }
     };
-
-    const lookupResponse = await fetch(`${serverURL}/queries`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(lookupPayload),
+    const requestResponse = await fetch(`${serverURL}/queries`, { 
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(requestQueryPayload),
     });
+    if (!requestResponse.ok) throw new Error(`materialRequestDB fetch failed: ${requestResponse.statusText}`);
+    const requestData = await requestResponse.json();
+    
+    const request = requestData.length > 0 ? requestData[0] : null;
+    let matched材料品番 = request ? request.材料品番 : null;
 
-    if (!lookupResponse.ok) throw new Error("Failed to fetch from materialRequestDB");
-
-    const lookupData = await lookupResponse.json();
-
-    if (!Array.isArray(lookupData) || lookupData.length === 0) {
-      console.warn("品番 not found in materialRequestDB:", selectedValue);
-      blankInfo();
-      return;
+    if (!matched材料品番 && (!request || requestData.length === 0) ) { 
+        const anyRequestQuery = {
+            dbName: "submittedDB", collectionName: "materialRequestDB", 
+            aggregation: [ {$match: {"品番": selected品番Value}}, {$sort: {"作業日": -1}}, {$limit: 1}, {$project: {"材料品番":1, "_id":0}} ]
+        };
+        const anyRequestResponse = await fetch(`${serverURL}/queries`, { 
+            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(anyRequestQuery),
+        });
+        if (anyRequestResponse.ok) {
+            const anyRequestData = await anyRequestResponse.json();
+            if (anyRequestData.length > 0 && anyRequestData[0].材料品番) matched材料品番 = anyRequestData[0].材料品番;
+        }
     }
 
-    const exactMatch = lookupData[0];
-    const matched材料品番 = exactMatch.材料品番;
-    const matched品番 = exactMatch.品番;
-
-    // Step 2: Query materialDB
-    const productQueryPayload = {
-      dbName: "Sasaki_Coating_MasterDB",
-      collectionName: "materialDB",
-      query: { "材料品番": matched材料品番 }
+    if (!matched材料品番) {
+        showModalAlert(`材料品番が見つかりませんでした。品番: ${selected品番Value}`, false);
+        picLINK(selected品番Value); 
+        return;
+    }
+    
+    const materialQueryPayload = {
+      dbName: "Sasaki_Coating_MasterDB", collectionName: "materialDB", query: { "材料品番": matched材料品番 }
     };
-
-    const productResponse = await fetch(`${serverURL}/queries`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(productQueryPayload),
+    const materialResponse = await fetch(`${serverURL}/queries`, { 
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(materialQueryPayload),
     });
+    if (!materialResponse.ok) throw new Error(`materialDB fetch failed: ${materialResponse.statusText}`);
+    const materialData = await materialResponse.json();
 
-    if (!productResponse.ok) throw new Error("Failed to fetch from materialDB");
-
-    const productData = await productResponse.json();
-
-    if (!productData || productData.length === 0) {
-      console.warn("材料品番 not found in materialDB:", matched材料品番);
-      blankInfo();
+    if (!materialData || materialData.length === 0) {
+      showModalAlert(`材料DBに詳細が見つかりません。材料品番: ${matched材料品番}`, true);
+      picLINK(selected品番Value); 
       return;
     }
+    const material = materialData[0];
 
-    const product = productData[0];
+    document.getElementById("材料背番号").value = material.材料背番号 || "";
+    document.getElementById("材料品番").value = material.材料品番 || "";
+    document.getElementById("material").value = material.材料 || "";
+    document.getElementById("material-color").value = material.色 || "";
+    const materialLength = parseInt(material.length, 10) || 50; 
+    document.getElementById("length").value = materialLength;
+    document.getElementById("SRS").value = material.SRS === "有り" ? "有り" : "無し";
 
-    // Populate form
-    document.getElementById("品名").value = matched品番 || "";
-    document.getElementById("材料背番号").value = product.材料背番号 || "";
-    document.getElementById("材料品番").value = product.材料品番 || "";
-    document.getElementById("material").value = product.材料 || "";
-    document.getElementById("material-color").value = product.色 || "";
-    document.getElementById("length").value = product.length || "";
+    if (request) {
+        const statusInput = document.getElementById("status");
+        if (!request.STATUS || request.STATUS.trim() === "" || request.STATUS === "加工中") {
+             statusInput.value = "加工中";
+        } else if (request.STATUS === "Completed") {
+            statusInput.value = "完了";
+        } else {
+            statusInput.value = request.STATUS;
+        }
 
-    // Load image
-    picLINK(selectedValue);
+        const orderNum = parseInt(request.生産順番, 10);
+        const orderValForLabelText = !isNaN(orderNum) ? Math.floor(orderNum / 10) : "";
+        document.getElementById("order").value = orderValForLabelText;
+        
+        const 生産数 = parseInt(request.生産数, 10); 
+        let targetForCompletion = 0; 
+
+        if (!isNaN(生産数) && !isNaN(materialLength) && materialLength > 0) {
+            const rollTimes = (生産数 / materialLength) / 100; 
+            targetForCompletion = Math.ceil(rollTimes);
+            console.log("生産数:", 生産数, "length:", materialLength, "Calculated rollTimes (target):", targetForCompletion);
+        } else {
+            console.warn("Invalid 生産数 or length for roll time calculation. Defaulting target to 0.");
+        }
+        
+        document.getElementById("targetProductionCount").value = targetForCompletion;
+
+        const currentPrints = parseInt(request.TotalLabelsPrintedForOrder, 10) || 0;
+        document.getElementById("printStatus").value = `${currentPrints} / ${targetForCompletion}`;
+        console.log(`Current prints: ${currentPrints}, Target for completion (from RollTimes): ${targetForCompletion}`);
+        
+    } else {
+        document.getElementById("status").value = "本日リクエストなし";
+        document.getElementById("printStatus").value = `0 / 0`;
+        document.getElementById("targetProductionCount").value = "0";
+        document.getElementById("order").value = ""; 
+    }
+    picLINK(selected品番Value); 
   } catch (error) {
     console.error("Error in fetchProductDetails:", error);
-    blankInfo();
+    showModalAlert(`製品詳細の取得エラー: ${error.message}`, true);
   }
 }
 
-// Attach event listener to sub-dropdown
-document.getElementById("sub-dropdown").addEventListener("change", () => {
-  const selectedValue = document.getElementById("sub-dropdown").value;
-  handleScannedQR(selectedValue); // Treat dropdown selection like a QR scan
-  console.log("Selected value from dropdown:", selectedValue);
-});
 
-
-// Function to get link from Google Drive
 function picLINK(headerValue) {
-  
-
+  if (!headerValue) return;
   fetch(`${picURL}?link=${headerValue}`)
     .then(response => {
-      if (!response.ok) {
-        throw new Error('Network response was not ok ' + response.statusText);
-      }
-      return response.text(); // Use .json() if your API returns JSON
+      if (!response.ok) throw new Error('Pic link fetch error: ' + response.statusText);
+      return response.text();
     })
     .then(data => {
-      const cleanedData = data.replace(/"/g, ''); // Remove unnecessary quotes
+      const cleanedData = data.replace(/"/g, ''); 
       updateImageSrc(cleanedData);
-      //console.log("image: " + cleanedData);
     })
-    .catch(error => {
-      console.error('Error:', error);
+    .catch(error => console.error('Error fetching image link:', error));
+}
+
+function updateImageSrc(link) {
+  const imageElement = document.getElementById('dynamicImage');
+  if (imageElement) {
+    if (link && link !== "No Image Link Found" && link.toLowerCase() !== "not found") { 
+        imageElement.src = `${link}&sz=s4000`; 
+        imageElement.style.display = 'block';
+    } else {
+        imageElement.src = "";
+        imageElement.style.display = 'none';
+    }
+  }
+}
+
+// === Date/Time Utilities ===
+function setDefaultDate(input) {
+  if (input && !input.value) { 
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    input.value = `${year}-${month}-${day}`;
+    saveToLocalStorage(input.id || input.name, input.value);
+  }
+}
+
+// === Scan Handling ===
+const scanButton = document.getElementById('scan-button');
+if (scanButton) {
+    scanButton.addEventListener('click', () => {
+        const scanOptionModal = document.getElementById('scanOptionModal');
+        if (scanOptionModal) scanOptionModal.style.display = 'block';
     });
 }
 
-// Function to update the image src attribute
-function updateImageSrc(link) {
-  const imageElement = document.getElementById('dynamicImage');
 
-  if (imageElement) {
-    imageElement.src = `${link}&sz=s4000`; // Ensure valid URL structure
-  } else {
-    console.error("Error: Image element not found!");
-  }
-}
-
-
-
-
-// when time is pressed
-// Set current time as default when time is pressed
-function setDefaultTime(input) {
-  
-
-  const now = new Date();
-  const hours = String(now.getHours()).padStart(2, '0');
-  const minutes = String(now.getMinutes()).padStart(2, '0');
-  const timeValue = `${hours}:${minutes}`;
-  input.value = timeValue;
-
-  // Save the time to local storage with unique prefix
-  localStorage.setItem(`${uniquePrefix}${input.id}`, timeValue);
-}
-
-
-
-// When date is pressed or on page load, set current date as default
-// Set current date as default when date is pressed or on page load
-function setDefaultDate(input) {
-
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  const dateValue = `${year}-${month}-${day}`;
-  input.value = dateValue;
-
-  // Save the date to local storage with unique prefix
-  localStorage.setItem(`${uniquePrefix}${input.id}`, dateValue);
-}
-
-// Set current date as default on page load
-document.addEventListener("DOMContentLoaded", function() {
-  const dateInput = document.getElementById("Lot No.");
-  setDefaultDate(dateInput);
-});
-
-
-
-//scan Button
-document.getElementById('scan-button').addEventListener('click', function () {
-  const scanOptionModal = document.getElementById('scanOptionModal');
-  scanOptionModal.style.display = 'block';
-});
-
-// Function to start the camera-based QR scanner
 function startCameraScanner() {
   const qrScannerModal = document.getElementById('qrScannerModal');
-  const scanAlertModal = document.getElementById('scanAlertModal');
-  const scanAlertText = document.getElementById('scanAlertText');
-  const alertSound = document.getElementById('alert-sound');
-
-  const html5QrCode = new Html5Qrcode("qrReader");
-
-  // Preload alert sound
-  if (alertSound) {
-      alertSound.muted = true;
-      alertSound.loop = false;
-      alertSound.load();
+  const qrReaderDiv = document.getElementById('qrReader');
+  if (!qrReaderDiv || !qrScannerModal) {
+      showModalAlert("QRリーダーまたはモーダル要素が見つかりません。", true);
+      return;
   }
-
-  // Hide option modal & show scanner
-  document.getElementById('scanOptionModal').style.display = 'none';
+  const html5QrCode = new Html5Qrcode("qrReader");
+  const scanOptionModal = document.getElementById('scanOptionModal');
+  if(scanOptionModal) scanOptionModal.style.display = 'none';
   qrScannerModal.style.display = 'block';
 
   html5QrCode.start(
       { facingMode: "environment" },
       { fps: 10, qrbox: { width: 250, height: 250 } },
-      async qrCodeMessage => {
-          handleScannedQR(qrCodeMessage);
+      qrCodeMessage => {
           html5QrCode.stop().then(() => {
-              qrScannerModal.style.display = 'none';
-          }).catch(err => console.error("Failed to stop scanning:", err));
+              if(qrScannerModal) qrScannerModal.style.display = 'none';
+          }).catch(err => console.error("Error stopping camera QR scanner:", err));
+          if (typeof handleScannedQR === 'function') handleScannedQR(qrCodeMessage);
       }
-  ).catch(err => console.error("Failed to start scanning:", err));
-
-  document.getElementById('closeQRScannerModal').onclick = function () {
-      html5QrCode.stop().then(() => {
-          qrScannerModal.style.display = 'none';
-      }).catch(err => console.error("Failed to stop scanning:", err));
-  };
+  ).catch(err => {
+      console.error("Failed to start QR scanning:", err);
+      showModalAlert("QRスキャナーの起動に失敗しました。", true);
+      if(qrScannerModal) qrScannerModal.style.display = 'none';
+  });
+  const closeQRModalButton = document.getElementById('closeQRScannerModal');
+    if(closeQRModalButton) {
+        closeQRModalButton.onclick = () => {
+            html5QrCode.stop().then(() => {
+                if(qrScannerModal) qrScannerModal.style.display = 'none';
+            }).catch(err => console.error("Error stopping camera QR scanner on close:", err));
+        };
+    }
 }
 
-// Function to start Bluetooth Scanner (Keyboard Input Mode)
+let bluetoothInputBuffer = "";
+let bluetoothScannerTimeout = null;
+
+function handleBluetoothKeyDown(event) {
+    if (event.key === "Enter") {
+        event.preventDefault(); 
+        if (bluetoothInputBuffer.trim() !== "") {
+            let cleanedQR = bluetoothInputBuffer.trim().replace(/\(/g, "*");
+            console.log("Bluetooth Scanned QR Code:", cleanedQR);
+            if (typeof handleScannedQR === 'function') handleScannedQR(cleanedQR);
+        }
+        stopBluetoothScannerListening(); 
+    } else if (event.key.length === 1) { 
+        bluetoothInputBuffer += event.key;
+    } else if (event.key === "Tab" && bluetoothInputBuffer.trim() !== "") {
+        event.preventDefault();
+        let cleanedQR = bluetoothInputBuffer.trim().replace(/\(/g, "*");
+        console.log("Bluetooth Scanned QR Code (via Tab):", cleanedQR);
+        if (typeof handleScannedQR === 'function') handleScannedQR(cleanedQR);
+        stopBluetoothScannerListening();
+    }
+
+    if (bluetoothScannerTimeout) clearTimeout(bluetoothScannerTimeout);
+    if (bluetoothInputBuffer.length > 0) { 
+        bluetoothScannerTimeout = setTimeout(() => {
+            if (bluetoothInputBuffer.trim() !== "") { 
+                console.log("Bluetooth scanner input timed out, processing buffer:", bluetoothInputBuffer);
+                let cleanedQR = bluetoothInputBuffer.trim().replace(/\(/g, "*");
+                if (typeof handleScannedQR === 'function') handleScannedQR(cleanedQR);
+            }
+            stopBluetoothScannerListening(); 
+        }, 1000); 
+    }
+}
+
 function startBluetoothScanner() {
   const bluetoothScannerModal = document.getElementById('bluetoothScannerModal');
-  bluetoothScannerModal.style.display = 'block';
-  document.getElementById('scanOptionModal').style.display = 'none';
-
-  let qrInputBuffer = ""; // Buffer for storing keyboard input
-
-  function handleKeydown(event) {
-    // Ignore non-character keys (e.g., Shift, Ctrl, Alt, Arrow keys, etc.)
-    if (event.key.length === 1) {
-        qrInputBuffer += event.key; // Append only valid characters
-    }
-
-    // If Enter is pressed, process the scanned QR code
-    if (event.key === "Enter") {
-        if (qrInputBuffer.trim() !== "") {
-            // Replace "(" with "*"
-            let cleanedQR = qrInputBuffer.trim().replace(/\(/g, "*");
-
-            console.log("Captured QR Code:", cleanedQR);
-            handleScannedQR(cleanedQR);
-            
-            // Reset buffer and close modal
-            qrInputBuffer = "";
-            bluetoothScannerModal.style.display = 'none';
-
-            // Remove event listener after scanning
-            document.removeEventListener("keydown", handleKeydown);
-        }
-    }
+  const scanOptionModal = document.getElementById('scanOptionModal');
+  if(scanOptionModal) scanOptionModal.style.display = 'none';
+  if(bluetoothScannerModal) bluetoothScannerModal.style.display = 'block';
+  bluetoothInputBuffer = ""; 
+  document.addEventListener("keydown", handleBluetoothKeyDown);
+  console.log("Bluetooth scanner listening started...");
+}
+function stopBluetoothScannerListening() {
+    document.removeEventListener("keydown", handleBluetoothKeyDown);
+    if (bluetoothScannerTimeout) clearTimeout(bluetoothScannerTimeout);
+    bluetoothInputBuffer = "";
+    const bluetoothScannerModal = document.getElementById('bluetoothScannerModal');
+    if(bluetoothScannerModal) bluetoothScannerModal.style.display = 'none';
+    console.log("Bluetooth scanner listening stopped.");
 }
 
-
-  // Start listening for keyboard input
-  document.addEventListener("keydown", handleKeydown);
-
-  // Close modal if user clicks outside or presses ESC
-  window.onclick = function (event) {
-      if (event.target == bluetoothScannerModal) {
-          bluetoothScannerModal.style.display = 'none';
-          document.removeEventListener("keydown", handleKeydown);
-      }
-  };
-
-  document.getElementById("closeBluetoothScannerModal").onclick = function () {
-      bluetoothScannerModal.style.display = 'none';
-      document.removeEventListener("keydown", handleKeydown);
-  };
-}
-
-
-
-// // Handle scanned QR code (Both Camera & Bluetooth)
-// async function handleScannedQR(qrCodeMessage) {
-//   const subDropdown = document.getElementById('sub-dropdown');
-//   const options = [...subDropdown.options].map(option => option.value);
-//   const scanAlertModal = document.getElementById('scanAlertModal');
-//   const scanAlertText = document.getElementById('scanAlertText');
-//   const alertSound = document.getElementById('alert-sound');
-//   const statusInput = document.getElementById("status"); // Status input field
-
-//   console.log("Scanned QR Code:", qrCodeMessage);
-
-//   // 1. Validate if the scanned value exists in dropdown options
-//   if (!options.includes(qrCodeMessage)) {
-//       scanAlertText.innerText = "背番号が存在しません。 / Sebanggo does not exist.";
-//       scanAlertModal.style.display = 'block';
-
-//       if (alertSound) {
-//           alertSound.muted = false;
-//           alertSound.volume = 1;
-//           alertSound.play().catch(error => console.error("Failed to play alert sound:", error));
-//       }
-
-//       document.body.classList.add('flash-red');
-
-//       document.getElementById('closeScanModalButton').onclick = function () {
-//           scanAlertModal.style.display = 'none';
-//           alertSound.pause();
-//           alertSound.currentTime = 0;
-//           alertSound.muted = true;
-//           document.body.classList.remove('flash-red');
-//       };
-
-//       return;
-//   }
-//   // 2. Always update dropdown and fetch product details
-//   if (subDropdown && subDropdown.value !== qrCodeMessage) {
-//       subDropdown.value = qrCodeMessage;
-//       localStorage.setItem(`${uniquePrefix}sub-dropdown`, qrCodeMessage);
-//       await fetchProductDetails();
-//       console.log("code came through: " + qrCodeMessage);
-//       // Get the current date in yyMMdd format
-//       const now = new Date();
-//       const year = String(now.getFullYear()).slice(-2);
-//       const month = String(now.getMonth() + 1).padStart(2, '0');
-//       const day = String(now.getDate()).padStart(2, '0');
-//       const currentDate = `${year}${month}${day}`;
-
-//       // Get the 材料品番 value from the fetched product details
-//       const 材料品番 = document.getElementById("材料品番").value;
-
-//       // Define the query payload for materialRequestDB
-//       const queryPayload = {
-//         dbName: "submittedDB",
-//         collectionName: "materialRequestDB",
-//         query: {
-//           "材料品番": 材料品番,
-//           "作業日": currentDate
-//         }
-//       };
-
-//       try {
-//         const response = await fetch(`${serverURL}/queries`, {
-//           method: "POST",
-//           headers: {
-//             "Content-Type": "application/json",
-//           },
-//           body: JSON.stringify(queryPayload),
-//         });
-
-//         if (response.ok) {
-//           const data = await response.json();
-
-//           if (data.length === 0) {
-//             console.log("No matching request found in materialRequestDB.");
-//             scanAlertText.innerText = "Request not found in materialRequestDB.";
-//             scanAlertModal.style.display = 'block';
-
-//             if (alertSound) {
-//                 alertSound.muted = false;
-//                 alertSound.volume = 1;
-//                 alertSound.play().catch(error => console.error("Failed to play alert sound:", error));
-//             }
-
-//             document.body.classList.add('flash-red');
-
-//             document.getElementById('closeScanModalButton').onclick = function () {
-//                 scanAlertModal.style.display = 'none';
-//                 alertSound.pause();
-//                 alertSound.currentTime = 0;
-//                 alertSound.muted = true;
-//                 document.body.classList.remove('flash-red');
-//             };
-
-//             return;
-//           }
-
-//           const request = data[0]; // Assuming we get only one matching request
-
-//           // 🔵 Update STATUS field in the UI
-//           if (statusInput) {
-//               if (!request.STATUS || request.STATUS.trim() === "") {
-//                   statusInput.value = "加工中"; // If STATUS is blank
-//               } else if (request.STATUS === "Completed") {
-//                   statusInput.value = "完了"; // If STATUS is "Completed"
-//               } else {
-//                   statusInput.value = request.STATUS; // Any other unexpected STATUS
-//               }
-//               console.log("Updated STATUS:", statusInput.value);
-//           }
-
-//           // Calculate the desired roll times
-//           const 生産数 = parseInt(request.生産数, 10);
-//           const length = parseInt(document.getElementById("length").value, 10);
-//           const order = parseInt(request.生産順番, 10);
-//           console.log("order: "+ order/10);
-
-//           //put 品番 from request into the input field
-//           const 品番Input = request.品番;
-//           const 品番InputField = document.getElementById("品名");
-//           if (品番InputField) {
-//               品番InputField.value = 品番Input;
-//               console.log("Set 品番 input value:", 品番Input);
-//           }
-
-//           if (!isNaN(生産数) && !isNaN(length) && length > 0) {
-//             const rollTimes = (生産数 / length)/100; // Calculate roll times cm to meter
-//             console.log("生産数:", 生産数, "length:", length, "roll times:", rollTimes);
-//             const roundedRollTimes = Math.ceil(rollTimes); // Round up to the next whole number
-//             console.log("Desired roll times:", roundedRollTimes);
-        
-//             // Set order value divided by 10 to the hidden input field
-//             const orderInput = document.getElementById("order");
-//             if (orderInput) {
-//                 orderInput.value = order / 10;
-//                 console.log("Set hidden order value:", orderInput.value);
-//             }
-        
-//             // Set rounded roll times to the hidden input field
-//             const printTimesInput = document.getElementById("printTimes");
-//             if (printTimesInput) {
-//                 printTimesInput.value = roundedRollTimes;
-//                 console.log("Set hidden printTimes value:", printTimesInput.value);
-//             }
-//         } else {
-//             console.error("Invalid 生産数 or length value.");
-//         }
-//         } else {
-//           console.error("Error fetching request details:", response.statusText);
-//         }
-//       } catch (error) {
-//         console.error("Error fetching request details:", error);
-//       }
-//   }
-// }
-
-
-let isHandlingScan = false;
 
 async function handleScannedQR(qrCodeMessage) {
-  if (isHandlingScan) return; // Prevent re-entry
+  if (isHandlingScan) {
+    console.warn("Scan handling already in progress. Ignoring new scan:", qrCodeMessage);
+    return;
+  }
   isHandlingScan = true;
+  console.log("Handling Scanned QR:", qrCodeMessage);
 
   const subDropdown = document.getElementById('sub-dropdown');
+  if (!subDropdown) {
+      console.error("sub-dropdown not found");
+      isHandlingScan = false;
+      return;
+  }
+  
+  if (subDropdown.options.length <= 1 || ![...subDropdown.options].map(o => o.value).includes(qrCodeMessage)) {
+      console.log("Populating dropdown or scanned value not found, re-populating...");
+      await populateSubDropdown(); 
+  }
   const options = [...subDropdown.options].map(option => option.value);
-  const scanAlertModal = document.getElementById('scanAlertModal');
-  const scanAlertText = document.getElementById('scanAlertText');
-  const alertSound = document.getElementById('alert-sound');
-  const statusInput = document.getElementById("status");
 
-  console.log("Scanned QR Code:", qrCodeMessage);
 
   try {
-    // Step 1: Validate if scanned value exists in dropdown options
     if (!options.includes(qrCodeMessage)) {
-      scanAlertText.innerText = "背番号が存在しません。 / Sebanggo does not exist.";
-      scanAlertModal.style.display = 'block';
-
-      if (alertSound) {
-        alertSound.muted = false;
-        alertSound.volume = 1;
-        alertSound.play().catch(error => console.error("Failed to play alert sound:", error));
-      }
-
-      document.body.classList.add('flash-red');
-      document.getElementById('closeScanModalButton').onclick = function () {
-        scanAlertModal.style.display = 'none';
-        alertSound.pause();
-        alertSound.currentTime = 0;
-        alertSound.muted = true;
-        document.body.classList.remove('flash-red');
-      };
+      showModalAlert(`品番 "${qrCodeMessage}" はリストにありません。(品番 "${qrCodeMessage}" is not in the list.)`, true);
+      isHandlingScan = false;
       return;
     }
-
-    // Step 2: Set dropdown value only if it's different
     if (subDropdown.value !== qrCodeMessage) {
       subDropdown.value = qrCodeMessage;
-      localStorage.setItem(`${uniquePrefix}sub-dropdown`, qrCodeMessage);
+      saveToLocalStorage('sub-dropdown', qrCodeMessage);
     }
-
-    // Step 3: Always fetch product details
-    await fetchProductDetails();
-    console.log("code came through:", qrCodeMessage);
-
-    // Step 4: Fetch 作業日-based data
-    const now = new Date();
-    const year = String(now.getFullYear()).slice(-2);
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
-    const currentDate = `${year}${month}${day}`;
-
-    const 品番 = document.getElementById("品名").value;
-
-    const queryPayload = {
-      dbName: "submittedDB",
-      collectionName: "materialRequestDB",
-      query: {
-        "品番": 品番,
-        "作業日": currentDate
-      }
-    };
-
-    const response = await fetch(`${serverURL}/queries`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(queryPayload),
-    });
-
-    if (!response.ok) throw new Error("Failed to fetch request details");
-
-    const data = await response.json();
-
-    if (data.length === 0) {
-      scanAlertText.innerText = "Request not found in materialRequestDB.";
-      scanAlertModal.style.display = 'block';
-
-      if (alertSound) {
-        alertSound.muted = false;
-        alertSound.volume = 1;
-        alertSound.play().catch(error => console.error("Failed to play alert sound:", error));
-      }
-
-      document.body.classList.add('flash-red');
-      document.getElementById('closeScanModalButton').onclick = function () {
-        scanAlertModal.style.display = 'none';
-        alertSound.pause();
-        alertSound.currentTime = 0;
-        alertSound.muted = true;
-        document.body.classList.remove('flash-red');
-      };
-      return;
-    }
-
-    const request = data[0];
-
-    // Step 5: Update status field
-    if (statusInput) {
-      if (!request.STATUS || request.STATUS.trim() === "") {
-        statusInput.value = "加工中";
-      } else if (request.STATUS === "Completed") {
-        statusInput.value = "完了";
-      } else {
-        statusInput.value = request.STATUS;
-      }
-      console.log("Updated STATUS:", statusInput.value);
-    }
-
-    // Step 6: Roll time calculation
-    const 生産数 = parseInt(request.生産数, 10);
-    const length = parseInt(document.getElementById("length").value, 10);
-    const order = parseInt(request.生産順番, 10);
-
-    if (!isNaN(生産数) && !isNaN(length) && length > 0) {
-      const rollTimes = (生産数 / length) / 100; //cm to meter
-      console.log("生産数:", 生産数, "length:", length, "roll times:", rollTimes);
-      const roundedRollTimes = Math.ceil(rollTimes);
-
-      const orderInput = document.getElementById("order");
-      if (orderInput) {
-        orderInput.value = order / 10;
-        console.log("Set hidden order value:", orderInput.value);
-      }
-
-      const printTimesInput = document.getElementById("printTimes");
-      if (printTimesInput) {
-        printTimesInput.value = roundedRollTimes;
-        console.log("Set hidden printTimes value:", printTimesInput.value);
-      }
-    } else {
-      console.error("Invalid 生産数 or length for roll time calculation.");
-    }
-
-    // Step 7: Update 品名 with latest from request
-    const 品番InputField = document.getElementById("品名");
-    if (品番InputField) {
-      品番InputField.value = request.品番;
-      console.log("Set 品番 input value:", request.品番);
-    }
-
+    await fetchProductDetails(); 
   } catch (error) {
     console.error("Error in handleScannedQR:", error);
+    showModalAlert(`スキャン処理エラー: ${error.message}`, true);
   } finally {
-    isHandlingScan = false; //Release the lock
+    isHandlingScan = false;
   }
 }
 
-
-
-// Function to reset everything and reload the page
-function resetForm() {
-  const uniquePrefix = `${pageName}_${selected工場}_`;
-  const excludedInputs = ['process']; // IDs or names of inputs to exclude from reset
-
-  // Clear all form inputs with unique prefix except excluded ones
-  const inputs = document.querySelectorAll('input, select, textarea');
-  inputs.forEach(input => {
-      const key = `${uniquePrefix}${input.id || input.name}`;
-      if (!excludedInputs.includes(input.id) && !excludedInputs.includes(input.name)) {
-          localStorage.removeItem(key);
-          input.value = ''; // Reset input value
-      }
-  });
-
-  // Clear counters with unique prefix
-  for (let i = 18; i <= 20; i++) {
-      const key = `${uniquePrefix}counter-${i}`;
-      localStorage.removeItem(key);
-      const counterElement = document.getElementById(`counter-${i}`);
-      if (counterElement) {
-          counterElement.value = '0'; // Reset counter display
-      }
-  }
-
-  // Reload the page
-  window.location.reload();
-}
-
-
-
-//this is default printing
-// // Print label using "Smooth Print" app for mobile devices
-// function printLabel() {
-//   const alertSound = document.getElementById('alert-sound');
-//   const scanAlertModal = document.getElementById('scanAlertModal');
-//   const scanAlertText = document.getElementById('scanAlertText');
-//   const selectedFactory = document.getElementById("selected工場").value;
-//   const 背番号 =  document.getElementById("材料背番号").value;
-
-//   // Preload the alert sound without playing it
-//   if (alertSound) {
-//     alertSound.muted = true; // Mute initially to preload
-//     alertSound.loop = false; // Disable looping
-//     alertSound.load(); // Preload the audio file
-//   }
-
-//   // Check if 背番号 is selected
-//   if (!背番号) {
-//     // Show alert modal
-//     scanAlertText.innerText = '背番号が必要です。 / Sebanggo is required.';
-//     scanAlertModal.style.display = 'block';
-
-//     // Play alert sound
-//     if (alertSound) {
-//       alertSound.muted = false; // Unmute to alert user
-//       alertSound.volume = 1; // Set full volume
-//       alertSound.play().catch(error => console.error('Failed to play alert sound:', error));
-//     }
-
-//     // Add blinking red background
-//     document.body.classList.add('flash-red');
-
-//     // Close modal on button click
-//     const closeScanModalButton = document.getElementById('closeScanModalButton');
-//     closeScanModalButton.onclick = function () {
-//       scanAlertModal.style.display = 'none';
-//       alertSound.pause();
-//       alertSound.currentTime = 0; // Reset sound to the beginning
-//       alertSound.muted = true; // Mute again for next time
-//       document.body.classList.remove('flash-red');
-//     };
-
-//     return; // Stop the submission process
-//   }
-
- 
-
-//   // Default process for other 背番号 values]
-//   // Convert yyyy-mm-dd to yymmdd format
-//   const originalDate = document.getElementById('Lot No.').value;
-//   const dateParts = originalDate.split("-");
-//   const Date2 = `${dateParts[0].slice(-2)}${dateParts[1]}${dateParts[2]}`; // Extract last 2 digits of year
-//   const 品番 = document.getElementById("品名").value;
-//   const 色 = document.getElementById("material-color").value;
-//   const extension = document.getElementById("Labelextension").value;
-//   const length = document.getElementById("length").value;
-//   const order = document.getElementById("order").value;
-
-//   const Date = extension ? `${Date2}-${extension}` : Date2;
-
-//   const 品番収容数 = `${背番号},${Date2}-${extension},${length}`; //barcode value
-//   console.log("label QR Value: " + 品番収容数);
-
-  
-//   let filename = "";
-
-  
-
-//   if (SRS === "有り"){
-//     filename = "SRS3.lbx";
-//   } else if (背番号 === "NC2"){
-//       filename = "NC21.lbx"
-//   } else {
-//     filename = "firstkojo3.lbx";
-//   }
-  
-//   const size = "RollW62";
-//   const copies = 1;
-//   const url =
-//     `brotherwebprint://print?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent(size)}&copies=${encodeURIComponent(copies)}` +
-//     `&text_品番=${encodeURIComponent(品番)}` +
-//     `&text_背番号=${encodeURIComponent(背番号)}` +
-//     `&text_収容数=${encodeURIComponent(order)}` +
-//     `&text_色=${encodeURIComponent(色)}` +
-//     `&text_DateT=${encodeURIComponent(Date)}` +
-//     `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
-
-//   console.log("lot number: " + Date);
-//   window.location.href = url;
-// }
-
-
-//This is the perfect printing
-// // Print label using "Smooth Print" app for mobile devices
-// async function printLabel() {
-//   const alertSound = document.getElementById('alert-sound');
-//   const scanAlertModal = document.getElementById('scanAlertModal');
-//   const scanAlertText = document.getElementById('scanAlertText');
-//   const selectedFactory = document.getElementById("selected工場").value;
-//   const 背番号 = document.getElementById("材料背番号").value;
-//   const 品番 = document.getElementById("品名").value;
-//   const 色 = document.getElementById("material-color").value;
-//   const length = document.getElementById("length").value;
-//   const order = document.getElementById("order").value;
-//   const copies = parseInt(document.getElementById("Labelextension").value) || 1; // Number of copies
-
-//   // Use the global uniquePrefix
-//   const storageKey = `${uniquePrefix}${品番}`;
-
-//   // Get current date in yyMMdd format
-//   const originalDate = document.getElementById('Lot No.').value;
-//   const dateParts = originalDate.split("-");
-//   const currentDate = `${dateParts[0].slice(-2)}${dateParts[1]}${dateParts[2]}`; // Extract last 2 digits of year
-
-//   // Check if 背番号 is selected
-//   if (!背番号) {
-//       scanAlertText.innerText = '背番号が必要です。 / Sebanggo is required.';
-//       scanAlertModal.style.display = 'block';
-//       return;
-//   }
-
-//   // Get stored tracker data
-//   let storedData = JSON.parse(localStorage.getItem(storageKey)) || { date: currentDate, extension: 0 };
-
-//   // Reset extension if date changes
-//   if (storedData.date !== currentDate) {
-//       storedData = { date: currentDate, extension: 0 };
-//   }
-
-//   // Process multiple copies
-//   for (let i = 1; i <= copies; i++) {
-//       storedData.extension++; // Increment extension per print
-//       const extension = storedData.extension;
-//       const DateWithExtension = `${currentDate}-${extension}`;
-
-//       const 品番収容数 = `${背番号},${DateWithExtension},${length}`;
-//       console.log("label QR Value:", 品番収容数);
-
-//       let filename = "";
-//       if (typeof SRS !== "undefined" && SRS === "有り") {
-//           filename = "SRS3.lbx";
-//       } else if (背番号 === "NC2") {
-//           filename = "NC21.lbx";
-//       } else {
-//           filename = "firstkojo3.lbx";
-//       }
-
-//       const size = "RollW62";
-
-//       // Generate print URL
-//       const url =
-//           `http://localhost:8088/print?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent(size)}&copies=1` +
-//           `&text_品番=${encodeURIComponent(品番)}` +
-//           `&text_背番号=${encodeURIComponent(背番号)}` +
-//           `&text_収容数=${encodeURIComponent(order)}` +
-//           `&text_色=${encodeURIComponent(色)}` +
-//           `&text_DateT=${encodeURIComponent(DateWithExtension)}` +
-//           `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
-
-//       try {
-//           const response = await fetch(url);
-//           const responseText = await response.text(); // Get response as text
-
-//           // Check for success or error message in XML response
-//           if (responseText.includes("<result>SUCCESS</result>")) {
-//               console.log("Print Success");
-//           } else if (responseText.includes("PrinterStatusErrorCoverOpen")) {
-//               console.error("Printer Error: Cover is open.");
-//           } else {
-//               console.error("Unknown Printer Error:", responseText);
-//           }
-//       } catch (error) {
-//           console.error("Failed to print:", error);
-//       }
-//   }
-
-//   // Save updated tracker to local storage
-//   localStorage.setItem(storageKey, JSON.stringify(storedData));
-// }
-
-
-
-
-
-// Show print confirmation modal
+// === Print Logic ===
 function showPrintConfirmationModal() {
-  const subDropdown = document.getElementById('sub-dropdown');
-  const selectedValue = subDropdown.value;
-  const scanAlertModal = document.getElementById('scanAlertModal');
-  const scanAlertText = document.getElementById('scanAlertText');
-  const alertSound = document.getElementById('alert-sound');
+  const selectedValue = document.getElementById('sub-dropdown')?.value;
+  const statusValue = document.getElementById('status')?.value;
+  const printTimesDisplay = document.getElementById('printTimesDisplay');
+  const printTimesInput = document.getElementById('printTimes');
+  const targetCountInput = document.getElementById('targetProductionCount');
+  const printConfirmationModal = document.getElementById('printConfirmationModal');
+  const currentPrintedEl = document.getElementById("printStatus");
+
 
   if (!selectedValue) {
-      scanAlertText.innerText = '背番号が必要です。 / Sebanggo is required.';
-      scanAlertModal.style.display = 'block';
-
-      if (alertSound) {
-          alertSound.muted = false;
-          alertSound.volume = 1;
-          alertSound.play().catch(error => console.error("Failed to play alert sound:", error));
-      }
-
-      document.body.classList.add('flash-red');
-
-      document.getElementById('closeScanModalButton').onclick = function () {
-          scanAlertModal.style.display = 'none';
-          alertSound.pause();
-          alertSound.currentTime = 0;
-          alertSound.muted = true;
-          document.body.classList.remove('flash-red');
-      };
-
-      return;
+    showModalAlert('品番を選択してください。(Please select a 品番.)', true);
+    return;
   }
-
-  // Set the default print times value
-  const printTimes = document.getElementById('printTimes').value;
-  document.getElementById('printTimesDisplay').innerText = printTimes;
-  document.getElementById('printConfirmationModal').style.display = 'block';
-}
-
-// Increment print times
-function incrementPrintTimes() {
-  const printTimesInput = document.getElementById('printTimes');
-  let printTimes = parseInt(printTimesInput.value, 10);
-  printTimes++;
-  printTimesInput.value = printTimes;
-  document.getElementById('printTimesDisplay').innerText = printTimes;
-}
-
-// Decrement print times
-function decrementPrintTimes() {
-  const printTimesInput = document.getElementById('printTimes');
-  let printTimes = parseInt(printTimesInput.value, 10);
-  if (printTimes > 1) {
-      printTimes--;
-      printTimesInput.value = printTimes;
-      document.getElementById('printTimesDisplay').innerText = printTimes;
+  if (statusValue === "完了" || statusValue === "Completed") {
+    showModalAlert('この品番は既に完了しています。印刷はできません。(This item is already completed. Printing not allowed.)', false);
+    return;
   }
-}
-
-// When user confirms print
-function confirmPrint() {
-  document.getElementById('printConfirmationModal').style.display = 'none';
-  document.getElementById('printingStatusModal').style.display = 'block';
-  
-  // Call the print function only after confirmation
-  printLabel();
-}
-
-
-// Modify printLabel function to print one at a time, wait for success, timeout after 7 seconds, then update MongoDB
-// async function printLabel() {
-//   const alertSound = document.getElementById('alert-sound');
-//   const scanAlertModal = document.getElementById('scanAlertModal');
-//   const scanAlertText = document.getElementById('scanAlertText');
-//   const printingStatusModal = document.getElementById('printingStatusModal');
-//   const selectedFactory = document.getElementById("selected工場").value;
-//   const 背番号 = document.getElementById("材料背番号").value;
-//   const 品番 = document.getElementById("品名").value;
-//   const 色 = document.getElementById("material-color").value;
-//   const length = document.getElementById("length").value;
-//   const order = document.getElementById("order").value;
-//   const copies = parseInt(document.getElementById("printTimes").value) || 1; // Number of copies
-
-//   console.log("Starting print process for", copies, "copies...");
-
-//   if (!背番号) {
-//       showPrintError('背番号が必要です。 / Sebanggo is required.');
-//       return;
-//   }
-
-//   const storageKey = `${uniquePrefix}${品番}`;
-
-//   // Get current date in yyMMdd format
-//   const originalDate = document.getElementById('Lot No.').value;
-//   const dateParts = originalDate.split("-");
-//   const currentDate = `${dateParts[0].slice(-2)}${dateParts[1]}${dateParts[2]}`; // Extract last 2 digits of year
-
-//   let storedData = JSON.parse(localStorage.getItem(storageKey)) || { date: currentDate, extension: 0 };
-
-//   if (storedData.date !== currentDate) {
-//       storedData = { date: currentDate, extension: 0 };
-//   }
-
-//   // Show printing status modal before starting
-//   printingStatusModal.style.display = 'block';
-
-//   for (let i = 1; i <= copies; i++) {
-//       storedData.extension++;
-//       const extension = storedData.extension;
-//       const DateWithExtension = `${currentDate}-${extension}`;
-
-//       const 品番収容数 = `${背番号},${DateWithExtension},${length}`;
-//       console.log(`Printing copy ${i} of ${copies}:`, 品番収容数);
-
-//       let filename = "";
-//       if (typeof SRS !== "undefined" && SRS === "有り") {
-//           filename = "SRS3.lbx";
-//       } else if (背番号 === "NC2") {
-//           filename = "NC21.lbx";
-//       } else {
-//           filename = "firstkojo3.lbx";
-//       }
-
-//       const size = "RollW62";
-
-//       const url =
-//           `http://localhost:8088/print?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent(size)}&copies=1` +
-//           `&text_品番=${encodeURIComponent(品番)}` +
-//           `&text_背番号=${encodeURIComponent(背番号)}` +
-//           `&text_収容数=${encodeURIComponent(order)}` +
-//           `&text_色=${encodeURIComponent(色)}` +
-//           `&text_DateT=${encodeURIComponent(DateWithExtension)}` +
-//           `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
-
-//       console.log("Sending print request:", url);
-
-//       try {
-//           const response = await Promise.race([
-//               fetch(url).then(res => res.text()), // Fetch the print request
-//               new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout: No response from printer")), 7000)) // 7s timeout
-//           ]);
-
-//           if (response.includes("<result>SUCCESS</result>")) {
-//               console.log(`Print ${i} of ${copies} successful.`);
-//           } else if (response.includes("PrinterStatusErrorCoverOpen")) {
-//               showPrintError("Printer Error: Cover is open.");
-//               return; // Stop further printing
-//           } else {
-//               showPrintError("Printing failed. Please check the printer.");
-//               return; // Stop further printing
-//           }
-
-//           // Short delay before sending the next print job
-//           await new Promise(resolve => setTimeout(resolve, 2000));
-
-//       } catch (error) {
-//           showPrintError("Printing failed. No response from printer.");
-//           return; // Stop further printing
-//       }
-//   }
-
-//   localStorage.setItem(storageKey, JSON.stringify(storedData));
-
-//   // Step 2: Update MongoDB after successful print
-//   console.log("All copies printed successfully. Now updating MongoDB...");
-//   await updateMongoDB(品番, currentDate);
-
-//   // Hide printing status modal and show success message
-//   printingStatusModal.style.display = 'none';
-//   console.log("All copies printed successfully.");
-//   document.getElementById('printCompletionModal').style.display = 'block';
-// }
-
-async function printLabel() {
-  const alertSound = document.getElementById('alert-sound');
-  const scanAlertModal = document.getElementById('scanAlertModal');
-  const scanAlertText = document.getElementById('scanAlertText');
-  const printingStatusModal = document.getElementById('printingStatusModal');
-  const 背番号 = document.getElementById("材料背番号").value;
-  const 品番 = document.getElementById("品名").value;
-  const 色 = document.getElementById("material-color").value;
-  const length = document.getElementById("length").value;
-  const order = document.getElementById("order").value;
-  const copies = parseInt(document.getElementById("printTimes").value) || 1;
-
-  if (!背番号) {
-    showPrintError('背番号が必要です。 / Sebanggo is required.');
+   if (statusValue === "本日リクエストなし") {
+    showModalAlert('本日の作業リクエストがありません。印刷はできません。(No work request for today. Printing not allowed.)', false);
     return;
   }
 
-  const storageKey = `${uniquePrefix}${品番}`;
-  const originalDate = document.getElementById('Lot No.').value;
-  const dateParts = originalDate.split("-");
-  const currentDate = `${dateParts[0].slice(-2)}${dateParts[1]}${dateParts[2]}`;
+  if(printTimesDisplay && printTimesInput && targetCountInput && printConfirmationModal && currentPrintedEl) {
+    const targetForCompletion = parseInt(targetCountInput.value, 10);
+    const currentPrinted = parseInt(currentPrintedEl.value.split(' / ')[0], 10) || 0;
+    
+    let defaultPrintQty = 1; // Default to 1 if no specific calculation is met
 
-  let storedData = JSON.parse(localStorage.getItem(storageKey)) || { date: currentDate, extension: 0 };
+    if (!isNaN(targetForCompletion) && targetForCompletion > 0) {
+        defaultPrintQty = targetForCompletion - currentPrinted;
+        if (defaultPrintQty <= 0) {
+            defaultPrintQty = targetForCompletion; // If already met or exceeded, default to printing the full target amount again
+                                        // Or, you might want to default to 1 if the intention is just one more.
+                                        // For "print all remaining", this makes sense if target is the goal.
+        }
+    }
+    // Ensure defaultPrintQty is at least 1
+    defaultPrintQty = Math.max(1, defaultPrintQty);
 
-  if (storedData.date !== currentDate) {
-    storedData = { date: currentDate, extension: 0 };
+
+    printTimesInput.value = defaultPrintQty;
+    printTimesDisplay.innerText = defaultPrintQty;
+    saveToLocalStorage('printTimes', defaultPrintQty); 
+    printConfirmationModal.style.display = 'block';
+  } else {
+      console.error("One or more elements for print confirmation modal are missing.");
+      showModalAlert("印刷確認の準備に失敗しました。", true);
+  }
+}
+
+function incrementPrintTimes() {
+  const printTimesInput = document.getElementById('printTimes');
+  const printTimesDisplay = document.getElementById('printTimesDisplay');
+  if(!printTimesInput || !printTimesDisplay) return;
+
+  let currentCopies = parseInt(printTimesInput.value, 10) || 0;
+  currentCopies++;
+  printTimesInput.value = currentCopies;
+  printTimesDisplay.innerText = currentCopies;
+  saveToLocalStorage('printTimes', currentCopies);
+}
+
+function decrementPrintTimes() {
+  const printTimesInput = document.getElementById('printTimes');
+  const printTimesDisplay = document.getElementById('printTimesDisplay');
+  if(!printTimesInput || !printTimesDisplay) return;
+
+  let currentCopies = parseInt(printTimesInput.value, 10) || 1;
+  if (currentCopies > 1) currentCopies--;
+  printTimesInput.value = currentCopies;
+  printTimesDisplay.innerText = currentCopies;
+  saveToLocalStorage('printTimes', currentCopies);
+}
+
+function confirmPrint() {
+  const printConfirmationModal = document.getElementById('printConfirmationModal');
+  const printingStatusModal = document.getElementById('printingStatusModal');
+  if(printConfirmationModal) printConfirmationModal.style.display = 'none';
+  if(printingStatusModal) printingStatusModal.style.display = 'block';
+  if(typeof printLabel === 'function') printLabel();
+}
+
+async function printLabel() {
+  const printingStatusModal = document.getElementById('printingStatusModal');
+  const printCompletionModal = document.getElementById('printCompletionModal');
+  
+  const 材料背番号 = document.getElementById("材料背番号")?.value || "";
+  const 品番 = document.getElementById("品名")?.value; 
+  const 色 = document.getElementById("material-color")?.value || "";
+  const length = document.getElementById("length")?.value || "50";
+  const orderVal = document.getElementById("order")?.value || ""; 
+  const copiesToPrintNow = parseInt(document.getElementById("printTimes")?.value, 10) || 1;
+
+  if (!品番) { 
+    showModalAlert('品番が選択されていません。(Product Number is not selected.)', true);
+    if(printingStatusModal) printingStatusModal.style.display = 'none';
+    return;
+  }
+   if (!材料背番号 && 品番) {
+       console.warn("材料背番号 is missing, using 品番 for barcode part 1 if needed.");
+   }
+
+
+  const storageKey = `${uniquePrefix}${品番}_printData`; 
+  const lotDateInputElement = document.getElementById('Lot No.');
+  if (!lotDateInputElement) {
+      showModalAlert('日付入力フィールドが見つかりません。', true);
+      if(printingStatusModal) printingStatusModal.style.display = 'none';
+      return;
+  }
+  const lotDateInput = lotDateInputElement.value; 
+  const dateParts = lotDateInput.split("-");
+  if (dateParts.length < 3) {
+      showModalAlert('日付の形式が無効です。YYYY-MM-DD形式で入力してください。', true);
+      if(printingStatusModal) printingStatusModal.style.display = 'none';
+      return;
+  }
+  const sagyoubi_yyMMdd = `${dateParts[0].slice(-2)}${dateParts[1]}${dateParts[2]}`;
+
+  let printSessionData = JSON.parse(localStorage.getItem(storageKey)) || { date: sagyoubi_yyMMdd, extension: 0 };
+  if (printSessionData.date !== sagyoubi_yyMMdd) { 
+    printSessionData = { date: sagyoubi_yyMMdd, extension: 0 };
   }
 
-  // Show printing status modal before starting
-  printingStatusModal.style.display = 'block';
-
-  // Detect device
   const ua = navigator.userAgent.toLowerCase();
   const isIOS = /iphone|ipad|ipod/.test(ua);
-  const isAndroid = /android/.test(ua);
+  let printedLotNumbers = [];
+  let printSuccessCount = 0;
 
-  for (let i = 1; i <= copies; i++) {
-    storedData.extension++;
-    const extension = storedData.extension;
-    const lotNo = `${currentDate}-${extension}`;
-    const 品番収容数 = `${背番号},${lotNo},${length}`;
+  for (let i = 1; i <= copiesToPrintNow; i++) {
+    printSessionData.extension++;
+    const currentExtension = printSessionData.extension;
+    const currentLotNo = `${sagyoubi_yyMMdd}-${currentExtension}`;
+    printedLotNumbers.push(currentLotNo);
+
+    const barcodeValuePart1 = 材料背番号 || 品番; 
+    const barcodeFullValue = `${barcodeValuePart1},${currentLotNo},${length}`;
 
     let filename = "";
-    if (typeof SRS !== "undefined" && SRS === "有り") {
-      filename = "SRS3.lbx";
-    } else if (背番号 === "NC2") {
-      filename = "NC21.lbx";
-    } else {
-      filename = "firstkojo3.lbx";
-    }
+    const srsStatusElement = document.getElementById("SRS");
+    const srsStatus = srsStatusElement ? srsStatusElement.value : "無し";
 
+    if (srsStatus === "有り") filename = "SRS3.lbx";
+    else if (材料背番号 === "NC2") filename = "NC21.lbx"; 
+    else filename = "firstkojo3.lbx";
+    
     let url = "";
-
     if (isIOS) {
       url = `brotherwebprint://print?filename=${encodeURIComponent(filename)}&size=RollW62&copies=1` +
             `&text_品番=${encodeURIComponent(品番)}` +
-            `&text_背番号=${encodeURIComponent(背番号)}` +
-            `&text_収容数=${encodeURIComponent(order)}` +
+            `&text_背番号=${encodeURIComponent(材料背番号)}` + 
+            `&text_収容数=${encodeURIComponent(orderVal)}` + 
             `&text_色=${encodeURIComponent(色)}` +
-            `&text_DateT=${encodeURIComponent(lotNo)}` +
-            `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
-
-      console.log(`[iOS] Sending print via URL scheme:`, url);
-      window.location.href = url; // iOS: Launch Brother app
-    } else {
+            `&text_DateT=${encodeURIComponent(currentLotNo)}` +
+            `&barcode_barcode=${encodeURIComponent(barcodeFullValue)}`;
+      console.log(`[iOS] Attempting print via URL scheme: ${i}/${copiesToPrintNow}`);
+      window.location.href = url; 
+      printSuccessCount++; 
+      if (i < copiesToPrintNow) await new Promise(resolve => setTimeout(resolve, 3500)); 
+    } else { 
       url = `http://localhost:8088/print?filename=${encodeURIComponent(filename)}&size=RollW62&copies=1` +
             `&text_品番=${encodeURIComponent(品番)}` +
-            `&text_背番号=${encodeURIComponent(背番号)}` +
-            `&text_収容数=${encodeURIComponent(order)}` +
+            `&text_背番号=${encodeURIComponent(材料背番号)}` +
+            `&text_収容数=${encodeURIComponent(orderVal)}` +
             `&text_色=${encodeURIComponent(色)}` +
-            `&text_DateT=${encodeURIComponent(lotNo)}` +
-            `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
-
-      console.log("[Android/Desktop] Sending print request:", url);
-
+            `&text_DateT=${encodeURIComponent(currentLotNo)}` +
+            `&barcode_barcode=${encodeURIComponent(barcodeFullValue)}`;
+      console.log(`[Desktop/Android] Print ${i}/${copiesToPrintNow}:`, url);
       try {
         const response = await Promise.race([
           fetch(url).then(res => res.text()),
-          new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout: No response from printer")), 7000))
+          new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 7000))
         ]);
-
         if (response.includes("<result>SUCCESS</result>")) {
-          console.log(`Print ${i} of ${copies} successful.`);
-        } else if (response.includes("PrinterStatusErrorCoverOpen")) {
-          showPrintError("Printer Error: Cover is open.");
-          return;
+          console.log(`Print ${i} successful.`);
+          printSuccessCount++;
         } else {
-          showPrintError("Printing failed. Please check the printer.");
-          return;
+          throw new Error(response.includes("PrinterStatusErrorCoverOpen") ? "Printer Cover Open" : "Printer Error: " + response.substring(0, 100));
         }
-
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        if (i < copiesToPrintNow) await new Promise(resolve => setTimeout(resolve, 1500)); 
       } catch (error) {
-        showPrintError("Printing failed. No response from printer.");
-        return;
+        showModalAlert(`印刷エラー (${i}/${copiesToPrintNow}): ${error.message}`, true);
+        if(printingStatusModal) printingStatusModal.style.display = 'none';
+        localStorage.setItem(storageKey, JSON.stringify(printSessionData)); 
+        return; 
       }
     }
   }
 
-  localStorage.setItem(storageKey, JSON.stringify(storedData));
+  localStorage.setItem(storageKey, JSON.stringify(printSessionData)); 
 
-  if (!isIOS) {
-    console.log("Updating MongoDB after Android/Desktop printing...");
-    await updateMongoDB(品番, currentDate);
+  if (printSuccessCount > 0) {
+    const imagesToSubmit = (typeof window.getTakenPictures === 'function') ? window.getTakenPictures() : [];
+    await updateMongoDBAfterPrint(品番, sagyoubi_yyMMdd, printedLotNumbers, imagesToSubmit, printSuccessCount);
   }
 
-  printingStatusModal.style.display = 'none';
-  document.getElementById('printCompletionModal').style.display = 'block';
-}
-
-// Function to handle print errors with sound, blinking, and closing status modal
-function showPrintError(errorMessage) {
-  const scanAlertModal = document.getElementById('scanAlertModal');
-  const scanAlertText = document.getElementById('scanAlertText');
-  const alertSound = document.getElementById('alert-sound');
-  const printingStatusModal = document.getElementById('printingStatusModal');
-
-  // Close printing status modal
-  printingStatusModal.style.display = 'none';
-
-  scanAlertText.innerText = errorMessage;
-  scanAlertModal.style.display = 'block';
-
-  if (alertSound) {
-      alertSound.muted = false;
-      alertSound.volume = 1;
-      alertSound.play().catch(error => console.error("Failed to play alert sound:", error));
+  if(printingStatusModal) printingStatusModal.style.display = 'none';
+  if (printSuccessCount === copiesToPrintNow || (printSuccessCount > 0 && isIOS)) {
+    if(printCompletionModal) printCompletionModal.style.display = 'block';
+    if (isIOS && printSuccessCount < copiesToPrintNow) {
+        showModalAlert(`${printSuccessCount}件のラベル印刷を開始しました。(Initiated printing for ${printSuccessCount} labels. Please check Brother app for remaining.)`, false);
+    }
   }
-
-  // Add red blinking effect
-  document.body.classList.add('flash-red');
-
-  document.getElementById('closeScanModalButton').onclick = function () {
-      scanAlertModal.style.display = 'none';
-      alertSound.pause();
-      alertSound.currentTime = 0;
-      alertSound.muted = true;
-      document.body.classList.remove('flash-red');
-  };
+  if(typeof fetchProductDetails === 'function') await fetchProductDetails(); 
 }
 
-// Function to update MongoDB after successful print using /queries
-async function updateMongoDB(品番, currentDate) {
+
+async function updateMongoDBAfterPrint(品番, sagyoubi_yyMMdd, printedLotNumbersArray, imagesToUploadArray, numJustPrinted) {
   const now = new Date();
-  const hours = String(now.getHours()).padStart(2, '0');
-  const minutes = String(now.getMinutes()).padStart(2, '0');
-  const seconds = String(now.getSeconds()).padStart(2, '0');
-  const currentTime = `${hours}:${minutes}:${seconds}`; // HHmmss format
+  
+  const targetProdCountEl = document.getElementById('targetProductionCount');
+  const currentFactoryEl = document.getElementById('selected工場');
+  const currentMachineEl = document.getElementById('hidden設備');
+  const printStatusEl = document.getElementById('printStatus');
+  const statusEl = document.getElementById('status');
 
-  const queryPayload = {
-      dbName: "submittedDB",
-      collectionName: "materialRequestDB",
-      query: {
-          "品番": 品番,
-          "納期": currentDate
-      }
+  const targetForCompletion = targetProdCountEl ? (parseInt(targetProdCountEl.value, 10) || 0) : 0;
+  const currentFactory = currentFactoryEl ? currentFactoryEl.value : 'N/A';
+  const currentMachine = currentMachineEl ? currentMachineEl.value : "N/A"; 
+  const currentUser = "LabelPrinterUser"; // Placeholder
+
+  const payloadForBackend = {
+    品番: 品番,
+    作業日: sagyoubi_yyMMdd,
+    numJustPrinted: numJustPrinted,
+    printLogEntry: { 
+        timestamp: new Date().toISOString(), 
+        lotNumbers: printedLotNumbersArray, 
+        count: numJustPrinted,
+        printedBy: currentUser, 
+        factory: currentFactory, 
+        machine: currentMachine 
+    },
+    lastPrintTimestamp: new Date().toISOString(), 
+    imagesToUpload: imagesToUploadArray.length > 0 ? imagesToUploadArray.map(pic => ({
+        base64: pic.base64,
+        label: pic.label,
+        品番ForFilename: 品番,
+        dateForFilename: sagyoubi_yyMMdd, 
+        timestampForFilename: Date.now(), 
+        factoryForFilename: currentFactory,
+        machineForFilename: currentMachine
+    })) : [],
+    targetProductionCountForStatusUpdate: targetForCompletion, 
   };
 
   try {
-      // Step 1: Check if the document exists
-      const response = await fetch(`${serverURL}/queries`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(queryPayload)
-      });
+    const response = await fetch(`${serverURL}/logPrintAndUpdateMaterialRequest`, { 
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payloadForBackend)
+    });
+    const result = await response.json(); 
 
-      if (!response.ok) {
-          console.error("MongoDB query failed:", response.statusText);
-          return;
+    if (response.ok && result.status === "success") { 
+      showModalAlert(`ログと画像（あれば）がDBに送信されました。\n${numJustPrinted}枚印刷完了。\n最終ステータス: ${result.finalDocStatus || '確認中'}`, false);
+      if (window.clearTakenPictures && typeof window.clearTakenPictures === 'function') {
+          window.clearTakenPictures();
+      }
+      
+      const newTotalPrinted = result.newTotalPrintedCount !== undefined ? result.newTotalPrintedCount : 
+                              ((printStatusEl ? parseInt(printStatusEl.value.split(' / ')[0],10) : 0) || 0) + numJustPrinted;
+      
+      if(printStatusEl) printStatusEl.value = `${newTotalPrinted} / ${targetForCompletion}`; 
+      if (statusEl && (result.finalDocStatus === "completed" || (targetForCompletion > 0 && newTotalPrinted >= targetForCompletion))) {
+          statusEl.value = "完了";
       }
 
-      const data = await response.json();
-
-      if (data.length === 0) {
-          console.log(`No matching document found for 品番: ${品番} and 納期: ${currentDate}.`);
-          return;
-      }
-
-      // Step 2: Use /queries to update the document
-      const updatePayload = {
-          dbName: "submittedDB",
-          collectionName: "materialRequestDB",
-          query: {
-              "品番": 品番,
-              "納期": currentDate
-          },
-          update: {
-              "$set": {
-                  "STATUS": "Completed",
-                  "DateofCreation": currentDate,
-                  "TimeofCreation": currentTime
-              }
-          }
-      };
-
-      const updateResponse = await fetch(`${serverURL}/queries`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(updatePayload)
-      });
-
-      const updateResult = await updateResponse.json();
-
-      if (updateResponse.ok && updateResult.modifiedCount > 0) {
-          window.alert(`✅ MongoDB update successful for 品番: ${品番}`);
-      } else {
-          window.alert("❌ MongoDB update failed or no document modified:", updateResult);
-      }
+    } else {
+      throw new Error(result.message || result.error || "DB更新失敗 (DB update failed)");
+    }
   } catch (error) {
-      window.alert("❌ Error updating MongoDB:", error);
+    console.error("Error in updateMongoDBAfterPrint:", error);
+    showModalAlert(`DB更新エラー: ${error.message}`, true);
   }
 }
 
 
+// === Reprint Logic ===
+const reprintButton = document.getElementById('reprintButton');
+if (reprintButton) {
+    reprintButton.addEventListener('click', () => {
+        const reprintModal = document.getElementById('reprintModal');
+        const confirmReprintBtn = document.getElementById('confirmReprintButton');
+        if (!reprintModal || !confirmReprintBtn) {
+            console.error("Reprint modal elements not found.");
+            return;
+        }
+        // Reset button state
+        confirmReprintBtn.disabled = false;
+        confirmReprintBtn.textContent = 'Reprint This Label';
 
+        const 品番 = document.getElementById("品名")?.value;
+        if (!品番) {
+            showModalAlert("まず品番を選択してください。(Please select a 品番 first.)", true);
+            return;
+        }
+        const storageKey = `${uniquePrefix}${品番}_printData`;
+        const lotSuffixSelect = document.getElementById('suffixSelector');
+        
+        if (!lotSuffixSelect) return;
 
-// Reprint modal functionality
-// Open modal on button click
-// Device detection helper
-function isIOSDevice() {
-  const ua = navigator.userAgent.toLowerCase();
-  return /iphone|ipad|ipod/.test(ua);
+        lotSuffixSelect.innerHTML = ""; 
+        const storedData = JSON.parse(localStorage.getItem(storageKey));
+        if (storedData && storedData.extension && storedData.date) {
+            for (let i = 1; i <= storedData.extension; i++) {
+            const suffix = `${storedData.date}-${i}`;
+            const option = document.createElement('option');
+            option.value = suffix;
+            option.textContent = `${storedData.date} (ロット ${i})`;
+            lotSuffixSelect.appendChild(option);
+            }
+            if (lotSuffixSelect.options.length > 0) {
+                reprintModal.style.display = 'block';
+            } else {
+                showModalAlert("この品番の以前のラベル履歴はありません。(No previous label history for this 品番.)", false);
+            }
+        } else {
+            showModalAlert("この品番の以前のラベル履歴はありません。(No previous label history for this 品番.)", false);
+        }
+    });
+}
+const closeReprintModalButton = document.getElementById('closeReprintModal');
+if(closeReprintModalButton) {
+    closeReprintModalButton.addEventListener('click', () => {
+        const reprintModal = document.getElementById('reprintModal');
+        if(reprintModal) reprintModal.style.display = 'none';
+    });
+}
+const confirmReprintButton = document.getElementById('confirmReprintButton');
+if(confirmReprintButton) {
+    confirmReprintButton.addEventListener('click', async () => {
+        const selectedSuffix = document.getElementById('suffixSelector')?.value;
+        if (!selectedSuffix) {
+            showModalAlert("再印刷するロットを選択してください。(Please select a lot to reprint.)", true);
+            return;
+        }
+
+        confirmReprintButton.disabled = true;
+        confirmReprintButton.textContent = '再印刷中...';
+
+        const 材料背番号 = document.getElementById("材料背番号")?.value || "";
+        const 品番 = document.getElementById("品名")?.value;
+        const 色 = document.getElementById("material-color")?.value || "";
+        const length = document.getElementById("length")?.value || "50";
+        const orderVal = document.getElementById("order")?.value || "";
+        const barcodeValuePart1 = 材料背番号 || 品番;
+        const barcodeFullValue = `${barcodeValuePart1},${selectedSuffix},${length}`;
+        const isIOS = /iphone|ipad|ipod/.test(navigator.userAgent.toLowerCase());
+        let filename = "";
+        const srsStatus = document.getElementById("SRS")?.value;
+        if (srsStatus === "有り") filename = "SRS3.lbx";
+        else if (材料背番号 === "NC2") filename = "NC21.lbx";
+        else filename = "firstkojo3.lbx";
+        let url = "";
+
+        try {
+            if (isIOS) {
+                url = `brotherwebprint://print?filename=${encodeURIComponent(filename)}&size=RollW62&copies=1` +
+                    `&text_品番=${encodeURIComponent(品番)}&text_背番号=${encodeURIComponent(材料背番号)}` +
+                    `&text_収容数=${encodeURIComponent(orderVal)}&text_色=${encodeURIComponent(色)}` +
+                    `&text_DateT=${encodeURIComponent(selectedSuffix)}&barcode_barcode=${encodeURIComponent(barcodeFullValue)}`;
+                window.location.href = url;
+                // For iOS, we assume it will work or user handles it.
+                // No direct feedback loop here after redirecting.
+                // We might show a generic "Reprint initiated" message before redirect.
+                 setTimeout(() => { // Give a moment for URL scheme to launch
+                    showModalAlert("再印刷を開始しました。Brotherアプリを確認してください。", false, 3000);
+                 }, 500);
+
+            } else {
+                url = `http://localhost:8088/print?filename=${encodeURIComponent(filename)}&size=RollW62&copies=1` +
+                    `&text_品番=${encodeURIComponent(品番)}&text_背番号=${encodeURIComponent(材料背番号)}` +
+                    `&text_収容数=${encodeURIComponent(orderVal)}&text_色=${encodeURIComponent(色)}` +
+                    `&text_DateT=${encodeURIComponent(selectedSuffix)}&barcode_barcode=${encodeURIComponent(barcodeFullValue)}`;
+                
+                const response = await Promise.race([
+                    fetch(url).then(res => res.text()),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 7000))
+                ]);
+                if (response.includes("<result>SUCCESS</result>")) {
+                    showModalAlert("再印刷成功。(Reprint successful.)", false);
+                } else {
+                     showModalAlert("再印刷失敗：プリンターエラー。(Reprint failed: Printer error.)", true);
+                }
+            }
+        } catch (err) {
+            showModalAlert(`再印刷失敗：${err.message}.(Reprint failed: ${err.message}.)`, true);
+        } finally {
+            confirmReprintButton.disabled = false;
+            confirmReprintButton.textContent = 'Reprint This Label';
+            const reprintModal = document.getElementById('reprintModal');
+            if(reprintModal) reprintModal.style.display = 'none';
+        }
+    });
 }
 
-// Open modal on button click
-document.getElementById('reprintButton').addEventListener('click', () => {
-  const 品番 = document.getElementById("品名").value;
-  const storageKey = `${uniquePrefix}${品番}`;
-  const lotSuffixSelect = document.getElementById('suffixSelector');
-  const reprintModal = document.getElementById('reprintModal');
 
-  lotSuffixSelect.innerHTML = ""; // Clear previous entries
+// === Form Reset ===
+function resetForm() {
+  updateUniquePrefix(); 
+  const excludedInputs = ['selected工場']; 
 
-  const storedData = JSON.parse(localStorage.getItem(storageKey));
-  if (storedData && storedData.extension && storedData.date) {
-    for (let i = 1; i <= storedData.extension; i++) {
-      const suffix = `${storedData.date}-${i}`;
-      const option = document.createElement('option');
-      option.value = suffix;
-      option.textContent = `${storedData.date}- ${i}`;
-      lotSuffixSelect.appendChild(option);
-    }
-    reprintModal.style.display = 'block';
-  } else {
-    alert("No previous labels found for this 品番.");
-  }
-});
+  const inputsToReset = document.querySelectorAll('input, select, textarea');
+  inputsToReset.forEach(input => {
+      if (!excludedInputs.includes(input.id) && !excludedInputs.includes(input.name)) {
+          const key = input.id || input.name;
+          if (key) removeFromLocalStorage(key); 
 
-// Close modal
-document.getElementById('closeReprintModal').addEventListener('click', () => {
-  document.getElementById('reprintModal').style.display = 'none';
-});
-
-// Confirm and execute reprint
-document.getElementById('confirmReprintButton').addEventListener('click', async () => {
-  const selectedSuffix = document.getElementById('suffixSelector').value;
-  const 背番号 = document.getElementById("材料背番号").value;
-  const 品番 = document.getElementById("品名").value;
-  const 色 = document.getElementById("material-color").value;
-  const length = document.getElementById("length").value;
-  const order = document.getElementById("order").value;
-
-  const 品番収容数 = `${背番号},${selectedSuffix},${length}`;
-  const isIOS = isIOSDevice();
-
-  let filename = "";
-  if (typeof SRS !== "undefined" && SRS === "有り") {
-    filename = "SRS3.lbx";
-  } else if (背番号 === "NC2") {
-    filename = "NC21.lbx";
-  } else {
-    filename = "firstkojo3.lbx";
-  }
-
-  const size = "RollW62";
-
-  if (isIOS) {
-    const url =
-      `brotherwebprint://print?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent(size)}&copies=1` +
-      `&text_品番=${encodeURIComponent(品番)}` +
-      `&text_背番号=${encodeURIComponent(背番号)}` +
-      `&text_収容数=${encodeURIComponent(order)}` +
-      `&text_色=${encodeURIComponent(色)}` +
-      `&text_DateT=${encodeURIComponent(selectedSuffix)}` +
-      `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
-
-    console.log("[iOS] Reprinting label:", url);
-    window.location.href = url;
-
-  } else {
-    const url =
-      `http://localhost:8088/print?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent(size)}&copies=1` +
-      `&text_品番=${encodeURIComponent(品番)}` +
-      `&text_背番号=${encodeURIComponent(背番号)}` +
-      `&text_収容数=${encodeURIComponent(order)}` +
-      `&text_色=${encodeURIComponent(色)}` +
-      `&text_DateT=${encodeURIComponent(selectedSuffix)}` +
-      `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
-
-    console.log("[Android/Desktop] Reprinting label:", url);
-
-    try {
-      const response = await Promise.race([
-        fetch(url).then(res => res.text()),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout: No response from printer")), 7000))
-      ]);
-
-      if (response.includes("<result>SUCCESS</result>")) {
-        alert("✅ Reprint successful.");
-      } else {
-        alert("❌ Reprint failed: Printer error.");
+          if (input.tagName === 'SELECT' && input.options.length > 0) {
+              if (input.id === 'sub-dropdown' && input.options[0] && input.options[0].disabled) {
+                  input.selectedIndex = 0; 
+              } else if (input.options.length > 0) {
+                  input.selectedIndex = 0;
+              }
+          } else if (input.type === 'checkbox' || input.type === 'radio') {
+              input.checked = false;
+          } else if (input.type === 'date') {
+              // Handled by setDefaultDate if called after blankInfo
+          } else {
+              input.value = ''; 
+          }
       }
-    } catch (err) {
-      alert("❌ Reprint failed: No response from printer.");
-    }
-  }
+  });
+  
+  blankInfo(); 
+  const lotNoInput = document.getElementById('Lot No.');
+  if (lotNoInput) setDefaultDate(lotNoInput); 
 
-  document.getElementById('reprintModal').style.display = 'none';
+  const subDropdown = document.getElementById('sub-dropdown');
+  if (subDropdown && subDropdown.options.length > 0 && subDropdown.options[0]?.disabled) {
+      subDropdown.selectedIndex = 0; 
+  }
+  
+  console.log("Form reset executed.");
+}
+
+
+// === DOMContentLoaded Main Setup ===
+document.addEventListener('DOMContentLoaded', async () => {
+    updateUniquePrefix(); 
+    setupInputSaving();   
+
+    const factoryParam = getQueryParam('filter');
+    const factorySelect = document.getElementById('selected工場');
+    if (factoryParam && factorySelect) {
+        let optionExists = false;
+        for (let i = 0; i < factorySelect.options.length; i++) {
+            if (factorySelect.options[i].value === factoryParam) {
+                optionExists = true;
+                break;
+            }
+        }
+        if (optionExists) {
+            factorySelect.value = factoryParam;
+        } else {
+            console.warn(`Factory parameter "${factoryParam}" not found in select options. Using default.`);
+        }
+        updateUniquePrefix(); 
+    } else if (factorySelect) {
+        currentSelectedKojo = factorySelect.value; 
+        updateUniquePrefix();
+    } else {
+        console.warn("selected工場 element not found.");
+    }
+
+    await populateSubDropdown(); 
+    restoreValuesFromLocalStorage(); 
+
+    const lotNoInput = document.getElementById('Lot No.');
+    if (lotNoInput) { 
+        setDefaultDate(lotNoInput); 
+    }
+    
+    const subDropdown = document.getElementById('sub-dropdown');
+    if (subDropdown) {
+        subDropdown.addEventListener("change", () => {
+            const selectedValue = subDropdown.value;
+            if (selectedValue) {
+                saveToLocalStorage('sub-dropdown', selectedValue); 
+                if (typeof handleScannedQR === 'function') handleScannedQR(selectedValue); 
+            } else {
+                if (typeof blankInfo === 'function') blankInfo(); 
+            }
+        });
+    }
 });
 
+
+// === IMAGE CAPTURE FUNCTIONALITY ===
+document.addEventListener('DOMContentLoaded', () => {
+    const takePictureButton = document.getElementById('takePictureButton');
+    const cameraModal = document.getElementById('cameraModal');
+    const videoFeed = document.getElementById('videoFeed');
+    const captureCanvas = document.getElementById('captureCanvas');
+    const captureButton = document.getElementById('captureButton');
+    const closeCameraButton = document.getElementById('closeCameraButton');
+    const thumbnailsContainer = document.getElementById('thumbnailsContainer');
+    
+    const imagePreviewModal = document.getElementById('imagePreviewModal');
+    const fullPreviewImage = document.getElementById('fullPreviewImage');
+    const closeImagePreviewModal = document.getElementById('closeImagePreviewModal');
+
+    let stream = null;
+    let takenPictures = []; 
+    const MAX_PICTURES = 10;
+
+    if (takePictureButton) {
+        takePictureButton.addEventListener('click', openCamera);
+    } else { console.warn("takePictureButton not found"); }
+
+    if (closeCameraButton) {
+        closeCameraButton.addEventListener('click', closeCamera);
+    } else { console.warn("closeCameraButton not found"); }
+
+    if (captureButton) {
+        captureButton.addEventListener('click', takeSnapshot);
+    } else { console.warn("captureButton not found"); }
+    
+    if (closeImagePreviewModal) {
+        closeImagePreviewModal.onclick = function() {
+            if(imagePreviewModal) imagePreviewModal.style.display = "none";
+        }
+    } else { console.warn("closeImagePreviewModal not found"); }
+    
+    if (imagePreviewModal) { 
+        imagePreviewModal.addEventListener('click', function(event) { 
+            if (event.target == imagePreviewModal) { 
+                imagePreviewModal.style.display = "none";
+            }
+        });
+    }
+
+
+    async function openCamera() {
+        if (takenPictures.length >= MAX_PICTURES) {
+            showModalAlert(`最大${MAX_PICTURES}枚まで撮影できます。(You can take up to ${MAX_PICTURES} pictures.)`, false);
+            return;
+        }
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            showModalAlert("カメラ機能はこのブラウザではサポートされていません。(Camera features are not supported in this browser.)", true);
+            return;
+        }
+
+        const constraints = {
+            video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
+            audio: false
+        };
+
+        try {
+            stream = await navigator.mediaDevices.getUserMedia(constraints);
+        } catch (e) {
+            console.warn("Environment camera failed, trying user camera:", e);
+            constraints.video.facingMode = { ideal: "user" }; 
+            try {
+                stream = await navigator.mediaDevices.getUserMedia(constraints);
+            } catch (err) {
+                console.error("Error accessing camera: ", err);
+                showModalAlert("カメラにアクセスできませんでした。設定を確認してください。", true);
+                return;
+            }
+        }
+
+        if (stream && videoFeed && cameraModal && captureCanvas) {
+            videoFeed.srcObject = stream;
+            cameraModal.style.display = 'block';
+            videoFeed.onloadedmetadata = () => { 
+                captureCanvas.width = videoFeed.videoWidth;
+                captureCanvas.height = videoFeed.videoHeight;
+            };
+        } else {
+            console.error("Camera related DOM elements not found. VideoFeed:", videoFeed, "CameraModal:", cameraModal, "CaptureCanvas:", captureCanvas);
+            showModalAlert("カメラ表示要素の初期化に失敗しました。", true);
+        }
+    }
+
+    function closeCamera() {
+        if (stream) {
+            stream.getTracks().forEach(track => track.stop());
+        }
+        stream = null;
+        if(videoFeed) videoFeed.srcObject = null;
+        if(cameraModal) cameraModal.style.display = 'none';
+    }
+
+    function takeSnapshot() {
+        if (!stream || !captureCanvas || !videoFeed || !captureCanvas.getContext) {
+            console.error("Stream or canvas not ready for snapshot, or canvas context unavailable.");
+            closeCamera();
+            return;
+        }
+        if (takenPictures.length >= MAX_PICTURES) {
+            showModalAlert(`最大${MAX_PICTURES}枚までです。(Max ${MAX_PICTURES} pictures allowed.)`, false);
+            closeCamera();
+            return;
+        }
+        
+        const context = captureCanvas.getContext('2d');
+        if (!context) {
+            console.error("Failed to get 2D context from canvas.");
+            closeCamera();
+            return;
+        }
+        context.drawImage(videoFeed, 0, 0, captureCanvas.width, captureCanvas.height);
+        const imageDataURL = captureCanvas.toDataURL('image/jpeg', 0.8); 
+        
+        takenPictures.push({
+            base64: imageDataURL.split(',')[1], 
+            label: "材料ラベル" 
+        });
+        
+        renderThumbnails();
+        showModalAlert('写真が撮影されました。(Picture taken!)', false, 2000); // Brief confirmation
+
+        if (takenPictures.length >= MAX_PICTURES) {
+            showModalAlert(`最大${MAX_PICTURES}枚に達しました。(Reached max ${MAX_PICTURES} pictures.)`, false);
+            closeCamera(); 
+        }
+        // else: Keep camera open for more pictures if not maxed out
+    }
+
+    function renderThumbnails() {
+        if (!thumbnailsContainer) {
+            console.error("thumbnailsContainer not found");
+            return;
+        }
+        thumbnailsContainer.innerHTML = ''; 
+        takenPictures.forEach((picData, index) => {
+            const thumbItem = document.createElement('div');
+            thumbItem.className = 'thumbnail-item';
+            const img = document.createElement('img');
+            img.src = `data:image/jpeg;base64,${picData.base64}`; 
+            img.alt = `材料ラベル ${index + 1}`;
+            img.onclick = () => showFullPreview(`data:image/jpeg;base64,${picData.base64}`);
+            const removeBtn = document.createElement('button');
+            removeBtn.className = 'remove-img-btn';
+            removeBtn.innerHTML = '&times;'; 
+            removeBtn.onclick = (event) => {
+                event.stopPropagation(); 
+                removePicture(index);
+            };
+            thumbItem.appendChild(img);
+            thumbItem.appendChild(removeBtn);
+            thumbnailsContainer.appendChild(thumbItem);
+        });
+    }
+
+    function removePicture(indexToRemove) {
+        takenPictures.splice(indexToRemove, 1);
+        renderThumbnails();
+    }
+    
+    function showFullPreview(imageDataURL) {
+        if (fullPreviewImage && imagePreviewModal) {
+            fullPreviewImage.src = imageDataURL;
+            imagePreviewModal.style.display = 'flex'; 
+        } else {
+            console.error("Image preview modal elements (fullPreviewImage or imagePreviewModal) not found.");
+        }
+    }
+
+    window.getTakenPictures = function() { return takenPictures; }
+    window.clearTakenPictures = function() {
+        takenPictures = [];
+        if(thumbnailsContainer) renderThumbnails(); 
+    }
+});

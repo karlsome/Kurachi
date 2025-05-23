@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>自動日報(倉知)</title>
+    <title>自動日報(倉知) - 画像キャプチャ</title>
     <link rel="icon" type="image/png" href="src/favicon2.png">
-    <link rel="stylesheet" href="firstKojoLabelPrinter.css"> <!-- Link to external CSS -->
+    <link rel="stylesheet" href="firstKojoLabelPrinter.css">
+   
 </head>
 <body>
     <div class="container">
         <h1>ラベルプリンター</h1>
-        <!-- QR Scan Option Modal -->
         <div id="scanOptionModal" class="modal">
             <div class="modal-content">
                 <h2>Choose Scan Method</h2>
@@ -20,7 +20,6 @@
             </div>
         </div>
 
-        <!-- Camera QR Scanner Modal -->
         <div id="qrScannerModal" class="modal">
             <div class="modal-content">
                 <h2>Scan QR Code</h2>
@@ -29,16 +28,14 @@
             </div>
         </div>
 
-        <!-- Bluetooth Scanner Listening Modal -->
         <div id="bluetoothScannerModal" class="modal">
             <div class="modal-content">
                 <h2>QR スキャンお待ち中 (Waiting for SCAN)...</h2>
                 <p>スキャンしてください。Scan QR Now!</p>
-                <button class="btn btn-close" onclick="document.getElementById('bluetoothScannerModal').style.display='none'">Cancel</button>
+                <button class="btn btn-close" id="closeBluetoothScannerModal" onclick="document.getElementById('bluetoothScannerModal').style.display='none'; stopBluetoothScannerListening();">Cancel</button>
             </div>
         </div>
 
-        <!-- Scan Error Modal -->
         <div id="scanAlertModal" class="modal">
             <div class="modal-content">
                 <h2>Error</h2>
@@ -47,7 +44,6 @@
             </div>
         </div>
 
-        <!-- Print Confirmation Modal -->
         <div id="printConfirmationModal" class="modal">
             <div class="modal-content">
                 <h2>Print Confirmation</h2>
@@ -62,17 +58,15 @@
             </div>
         </div>
 
-       <!-- Printing Status Modal -->
-        <div id="printingStatusModal" class="modal">
+       <div id="printingStatusModal" class="modal">
             <div class="modal-content">
                 <h2>Printing...</h2>
                 <p>Please wait while the labels are being printed.</p>
-                <button id="cancelPrintButton" class="btn btn-danger">Cancel Printing</button>
+                <button id="cancelPrintButton" class="btn btn-danger" style="display:none;">Cancel Printing</button>
             </div>
         </div>
 
 
-        <!-- Print Completion Modal -->
         <div id="printCompletionModal" class="modal">
             <div class="modal-content">
                 <h2>Print Complete</h2>
@@ -94,28 +88,30 @@
             <input type="date" id="Lot No." name="Date" onfocus="setDefaultDate(this)" required>
         </div>        
 
+        <div class="image-capture-section">
+            <h3>材料ラベル写真 (Material Label Photos)</h3>
+            <button id="takePictureButton" class="btn">📷 材料ラベルを撮影</button>
+            <div class="thumbnails-container" id="thumbnailsContainer">
+                </div>
+        </div>
         <button id="print" class="btn btn-print" onclick="showPrintConfirmationModal()">🖨 Print Label</button>
         
-
         <div class="image-container">
-            <img id="dynamicImage" src="" alt="Image Preview">
+            <img id="dynamicImage" src="" alt="Image Preview" onerror="this.style.display='none'; this.onerror=null;">
         </div>
-        <button type="button" onclick="resetForm()">Reset</button>
+        <button type="button" class="resetbtn" onclick="resetForm()">Reset</button>
 
 
         <div class="form-group">
             <label for="Status">STATUS:</label>
-            <input readonly id="status" name="status"></select>
+            <input readonly id="status" name="status">
         </div>
 
         <div class="form-group">
             <label for="printStatus">印刷進捗 (Print Progress):</label>
-            <input readonly id="printStatus" name="printStatus">
+            <input readonly id="printStatus" name="printStatus" placeholder="0 / 0">
         </div>
         
-
-
-
         <div class="form-group">
             <label>材料背番号 (Product Code):</label>
             <input readonly id="材料背番号" name="品番">
@@ -143,15 +139,12 @@
                 <h3>Reprint Label</h3>
                 <label for="suffixSelector">Select Lot No. Suffix:</label>
                 <select id="suffixSelector"></select>
-                <button id="confirmReprintButton">Reprint This Label</button>
+                <button id="confirmReprintButton" class="btn">Reprint This Label</button>
             </div>
         </div>
-
         
-
-        <button id="reprintButton">🔄 Reprint Label / 再印刷</button>    
+        <button id="reprintButton" class="btn">🔄 Reprint Label / 再印刷</button>    
     
-    <!-- Hidden fields -->
     <input type="hidden" name="設備" id="hidden設備">
     <input type="hidden" name="工場2" id="hidden工場">
     <input type="hidden" name="工場" id="selected工場" value="第一工場">
@@ -162,14 +155,27 @@
     <input type="hidden" name="printerHostname" id="printerHostname">
     <iframe id="hiddenIframe" style="display:none;"></iframe>
     <input type="hidden" name="収容数" id="収容数" value = "">
-    <label name="送りピッチ" id="送りピッチ" value=""></label>
+    <label name="送りピッチ" id="送りピッチ" value="" style="display:none;"></label> 
     <input type="hidden" name="SRS" id="SRS" value = "">
     <audio id="alert-sound" src="src/alert.mp3" preload="auto"></audio>
     <input type="hidden" id="Labelextension" name="Labelextension" value="1">
     <input type="hidden" id="length" name="length" value="50">
-    <input type="hidden" id="order" name="order">
-    <input type="hidden" id="printTimes" name="printTimes" value="1">
-    <input type="hidden" id="材料品番" name="材料品番" value="">
+    <input type="hidden" id="order" name="order"> <input type="hidden" id="printTimes" name="printTimes" value="1"> <input type="hidden" id="材料品番" name="材料品番" value="">
+    <input type="hidden" id="targetProductionCount" name="targetProductionCount" value="0"> </div> <div id="cameraModal" class="modal">
+        <div class="modal-content">
+            <h2>カメラで撮影 (Take Picture with Camera)</h2>
+            <video id="videoFeed" autoplay playsinline></video>
+            <canvas id="captureCanvas" style="display:none;"></canvas>
+            <div style="display:flex; justify-content:space-between;">
+                <button id="captureButton" class="btn">撮影 (Capture)</button>
+                <button id="closeCameraButton" class="btn btn-close">閉じる (Close)</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="imagePreviewModal" class="modal" style="display: none;"> <span class="close-preview-btn" id="closeImagePreviewModal">&times;</span>
+        <img id="fullPreviewImage" src="" alt="Full Preview">
+    </div>
 
 
     <script src="firstKojoLabelPrinter.js"></script>
@@ -178,3 +184,6 @@
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
 </body>
 </html>
+
+
+
