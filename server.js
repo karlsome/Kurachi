@@ -2756,6 +2756,39 @@ app.post('/inventoryChat', async (req, res) => {
   }
 });
 
+
+
+// For Inventory app
+app.post('/tempChat', async (req, res) => {
+  const { message, roomId } = req.body;
+  const apiKey = process.env.CHATWORK_API_KEY;
+  const url = `https://api.chatwork.com/v2/rooms/${roomId}/messages`;
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'X-ChatWorkToken': apiKey,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: new URLSearchParams({
+        body: message
+      })
+    });
+
+    if (response.ok) {
+      const result = await response.json();
+      res.status(200).json({ message: 'Message sent successfully', result });
+    } else {
+      const errorText = await response.text();
+      res.status(response.status).json({ message: 'Failed to send message', error: errorText });
+    }
+  } catch (error) {
+    res.status(500).json({ message: 'Internal server error', error: error.message });
+  }
+});
+
+
 //Chatwork API endpoint to get contacts
 app.get('/chatworkContacts', async (req, res) => {
   const apiKey = process.env.CHATWORK_API_KEY;
