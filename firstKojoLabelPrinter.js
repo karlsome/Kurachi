@@ -701,7 +701,7 @@ async function printLabel() {
       try {
         const response = await Promise.race([
           fetch(url).then(res => res.text()),
-          new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 7000))
+          new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 700000))
         ]);
         if (response.includes("<result>SUCCESS</result>")) {
           console.log(`Print ${i} successful.`);
