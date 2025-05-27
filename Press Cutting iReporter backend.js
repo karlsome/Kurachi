@@ -1563,7 +1563,6 @@ function comparePartsConsideringBluetooth(expectedPart, scannedPart, isBluetooth
 
 // --- Updated section in handleQRScan ---
 // (Make sure the rest of handleQRScan and other functions are as per previous responses)
-
 async function handleQRScan(qrCodeMessage) {
     console.log("Scanned QR (Raw):", qrCodeMessage);
 
@@ -1571,12 +1570,11 @@ async function handleQRScan(qrCodeMessage) {
     const factoryValue = document.getElementById("selected工場")?.value || "";
     const processValue = document.getElementById("process")?.value || "";
     const isNFH_RLC = factoryValue === "NFH" && processValue === "RLC";
-    // Ensure lastScanMethod is correctly set and accessible here
-    // let lastScanMethod = localStorage.getItem(`${uniquePrefix}scannerChoice`) || "";
-
+    // Ensure lastScanMethod is up-to-date from localStorage or a global variable
+    // const currentLastScanMethod = localStorage.getItem(`${uniquePrefix}scannerChoice`) || lastScanMethod;
+    // Using the global lastScanMethod which is updated by startCameraScanner/startBluetoothScanner
 
     console.log(`Factory: ${factoryValue}, Process: ${processValue}, isNFH_RLC: ${isNFH_RLC}, Scan Method: ${lastScanMethod}`);
-
 
     if (!firstScanValue) { // ---- FIRST SCAN LOGIC ----
         let cleanedQR = qrCodeMessage.includes(",") ? qrCodeMessage.split(",")[0] : qrCodeMessage;
@@ -1590,56 +1588,80 @@ async function handleQRScan(qrCodeMessage) {
             subDropdown.value = firstScanValue;
             localStorage.setItem(`${uniquePrefix}sub-dropdown`, firstScanValue);
 
-            const detailsFetchedSuccessfully = await fetchProductDetails(); // Assume fetchProductDetails is async
+            // ---- MODIFICATION: Stop camera scanner immediately after first successful scan ----
+            if (lastScanMethod === "camera") {
+                if (html5QrCode && typeof html5QrCode.stop === "function") {
+                    try {
+                        await html5QrCode.stop(); // Stop the camera
+                        console.log("Camera scanner stopped after first successful scan.");
+                        const cameraModal = document.getElementById('qrScannerModal');
+                        if (cameraModal) cameraModal.style.display = 'none'; // Hide modal too
+                    } catch (err) {
+                        console.warn("Error stopping camera scanner after first scan (might be already stopped):", err);
+                        const cameraModal = document.getElementById('qrScannerModal');
+                        if (cameraModal) cameraModal.style.display = 'none'; // Still hide modal
+                    }
+                }
+                // For Bluetooth, the modal is typically still open, and input is processed on "Enter".
+                // The closeActiveScannerModal() will be called later if all scans complete or for NFH_RLC.
+            }
+            // ---- END MODIFICATION ----
+
+            const detailsFetchedSuccessfully = await fetchProductDetails();
 
             if (detailsFetchedSuccessfully) {
                 if (isNFH_RLC) {
                     secondScanValue = "SKIPPED";
                     localStorage.setItem(`${uniquePrefix}secondScanValue`, "SKIPPED");
-                    document.getElementById("secondScanValue").value = ""; // Or some indicator
+                    document.getElementById("secondScanValue").value = "";
                     enableInputs();
                     console.log("NFH + RLC: First scan successful. Second scan skipped. Inputs enabled.");
-                    closeActiveScannerModal();
-                } else {
-                    const alertMessage = "Please scan the TOMSON BOARD (Board Data QR).";
-                    const instructionElement = document.getElementById('bluetoothScannerInstruction');
-                    if (lastScanMethod === "bluetooth" && instructionElement && document.getElementById('bluetoothScannerModal').style.display === 'block') {
-                        instructionElement.textContent = alertMessage;
-                    } else {
-                        // For camera, or if BT modal not open, use alert
-                        window.alert(alertMessage);
+                    // No need to call closeActiveScannerModal() again if camera modal was already closed above.
+                    // Bluetooth modal would still be open if it was the method, close it.
+                    if (lastScanMethod === "bluetooth") {
+                        closeActiveScannerModal(); // Specifically for BT if it was open
                     }
+                } else {
+                    // Second scan is needed
                     disableInputs();
+                    const successMessage = "Success! Scan Tomson Board. / 成功！トムソンボードをスキャンしてください。";
+                    showSuccessPrompt(successMessage, 4000); // Show for 4 seconds
                 }
             } else {
-                showAlert("Failed to retrieve product data for the second scan. Please try the first scan again.");
+                showAlert("Failed to retrieve product data after first scan. Please try the first scan again.");
                 firstScanValue = "";
                 localStorage.removeItem(`${uniquePrefix}firstScanValue`);
                 document.getElementById("firstScanValue").value = "";
                 if (subDropdown) subDropdown.value = "";
-                blankInfo(); // Call blankInfo to clear all fields
+                blankInfo();
                 disableInputs();
             }
         } else {
             showAlert("背番号が存在しません。 / Sebanggo does not exist.");
-            firstScanValue = "";
+            firstScanValue = ""; // Reset so user can try first scan again
             localStorage.removeItem(`${uniquePrefix}firstScanValue`);
             document.getElementById("firstScanValue").value = "";
             blankInfo();
             disableInputs();
+            // If camera was scanning, it might be good to stop it here too if an invalid first QR was scanned
+            if (lastScanMethod === "camera" && html5QrCode && typeof html5QrCode.stop === "function") {
+                 try { await html5QrCode.stop(); console.log("Camera stopped due to invalid first QR."); } catch(e){}
+                 const cameraModal = document.getElementById('qrScannerModal');
+                 if (cameraModal) cameraModal.style.display = 'none';
+            }
         }
     } else if (secondScanValue !== "SKIPPED") { // ---- SECOND SCAN LOGIC ----
+        // (The rest of your second scan logic remains the same)
+        // ...
+        // ... ensure closeActiveScannerModal() is called upon successful second scan ...
         const expectedBoardDataQR_original = document.getElementById("expectedBoardDataQR") ? document.getElementById("expectedBoardDataQR").value : "";
         let scannedQrMessageForComparison = qrCodeMessage;
 
         console.log("Second Scan Processed QR (Raw from scanner):", `"${scannedQrMessageForComparison}"`);
         console.log("Expected Tomson Board QR (Original from DB):", `"${expectedBoardDataQR_original}"`);
 
-        if (!expectedBoardDataQR_original && !isNFH_RLC) { // If expected data is missing & not a skipped scan scenario
+        if (!expectedBoardDataQR_original && !isNFH_RLC) {
             showAlert("Error: Expected Board Data for the second scan is missing. Product details might not have loaded. Please try rescanning the first QR.");
-            // Optionally allow resetting to first scan:
-            // firstScanValue = ""; localStorage.removeItem(`${uniquePrefix}firstScanValue`); document.getElementById("firstScanValue").value = "";
-            // blankInfo(); disableInputs();
             return;
         }
 
@@ -1652,7 +1674,7 @@ async function handleQRScan(qrCodeMessage) {
             const scannedParts = scannedQrMessageForComparison.split(',');
 
             if (expectedParts.length === scannedParts.length) {
-                comparisonResult = true; // Assume true, set to false if any part mismatches
+                comparisonResult = true;
                 for (let i = 0; i < expectedParts.length; i++) {
                     if (!comparePartsConsideringBluetooth(expectedParts[i], scannedParts[i], true)) {
                         comparisonResult = false;
@@ -1664,43 +1686,44 @@ async function handleQRScan(qrCodeMessage) {
                 comparisonResult = false;
             }
         } else {
-            // Standard comparison for camera or other methods
             console.log("[Non-Bluetooth Mode] Applying direct comparison logic.");
             comparisonResult = (scannedQrMessageForComparison.trim() === expectedBoardDataQR_original.trim());
         }
 
         if (comparisonResult) {
-            secondScanValue = qrCodeMessage; // Store the RAW scanned value
+            secondScanValue = qrCodeMessage;
             localStorage.setItem(`${uniquePrefix}secondScanValue`, secondScanValue);
             document.getElementById("secondScanValue").value = secondScanValue;
             enableInputs();
             console.log("Second scan successful (comparison logic applied). Inputs enabled.");
-            localStorage.removeItem(`${uniquePrefix}scannerChoice`);
-            closeActiveScannerModal();
+            localStorage.removeItem(`${uniquePrefix}scannerChoice`); // Clear choice after successful sequence
+            closeActiveScannerModal(); // This will stop camera if it was used for 2nd scan
         } else {
             let alertMessage = `Second QR code does not match.`;
-            // For display in alert, create a "simplified" expected string if it was a Bluetooth scan
             let displayExpected = expectedBoardDataQR_original;
             if (isBluetoothScan) {
                 displayExpected = expectedBoardDataQR_original.split(',')
                     .map(part => {
                         const japaneseCharRegex = /[\u3040-\u309F\u30A0-\u30FF\uFF00-\uFFEF\u4E00-\u9FAF]/;
                         const matchInExpected = part.match(japaneseCharRegex);
-                        // If Japanese exists, take prefix; otherwise, take whole part.
                         return (matchInExpected && matchInExpected.index > -1) ? part.substring(0, matchInExpected.index) : part;
                     })
                     .join(',');
             }
             alertMessage += `\nScanned (raw): ${scannedQrMessageForComparison}\nExpected (effectively, for this scan type): ${displayExpected}`;
             showAlert(alertMessage);
+            // If camera was used for second scan and failed, stop it to allow user to re-evaluate/re-present QR
+            if (lastScanMethod === "camera") {
+                closeActiveScannerModal(); // This will stop the camera and hide modal
+                showAlert(alertMessage + "\n\nCamera stopped. Click 'Scan' to try the second scan again.");
+            }
         }
     } else {
         console.log("Scan handling: All scans appear complete or second was skipped.");
-        enableInputs(); // Should already be enabled, but good to confirm
+        enableInputs();
     }
-    checkProcessCondition(); // Re-evaluate overall state
+    checkProcessCondition();
 }
-
 // Ensure html5QrCode is declared in a scope accessible by this function
 // let html5QrCode; // If not already global or in a shared module scope
 
@@ -1896,6 +1919,39 @@ function closeActiveScannerModal() {
   };
 });
 
+
+function showSuccessPrompt(message, duration = 3500) {
+    const feedbackArea = document.getElementById('scan-feedback-area');
+    // NO SOUND for this success prompt
+
+    if (feedbackArea) {
+        feedbackArea.textContent = message;
+        // 1. Apply base success styles and make it visible
+        feedbackArea.className = 'feedback-success-base'; // Remove any other animation/type classes
+        feedbackArea.style.display = 'block';
+
+        // 2. Add the flash animation class
+        feedbackArea.classList.add('animate-flash-green');
+
+        // 3. Remove the animation class after it has played (0.5s)
+        //    This prevents the animation from re-triggering if other attributes change.
+        //    The element remains visible with .feedback-success-base style.
+        const animationDuration = 500; // Matches your 0.5s animation
+        setTimeout(() => {
+            if (feedbackArea.style.display === 'block') { // Only if still visible
+                feedbackArea.classList.remove('animate-flash-green');
+            }
+        }, animationDuration + 50); // Remove slightly after animation ends
+
+        // 4. Hide the entire message after the total specified duration
+        setTimeout(() => {
+            feedbackArea.style.display = 'none';
+            feedbackArea.className = ''; // Reset all classes
+        }, duration);
+    } else {
+        window.alert(message); // Fallback
+    }
+}
 
 
 

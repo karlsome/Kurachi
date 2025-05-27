@@ -662,3 +662,65 @@ to {
     gap: 10px;
     margin-bottom: 20px;
 }
+
+
+
+/* Your existing global styles */
+* {
+    box-sizing: border-box;
+    padding: 0;
+    margin: 0;
+    font-family: 'Poppins', sans-serif;
+    font-size: 22px; /* This is quite large for a base, ensure it's intended */
+}
+
+/* Base for the feedback popup */
+#scan-feedback-area { /* Make sure this ID matches your HTML element */
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 15px 25px;
+    border-radius: 8px;
+    /* font-size: 1.1em; /* Relative to parent, or set explicitly e.g., 20px */
+    font-weight: bold;
+    text-align: center;
+    z-index: 10001;
+    display: none; /* Hidden by default */
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    min-width: 300px; /* Or adjust as needed */
+    transition: opacity 0.3s ease-out; /* Optional: for smoother hide if you use opacity */
+}
+
+/* Base style for a success message (NO animation here) */
+.feedback-success-base {
+    /* display: block !important; /* JS will handle display: block */
+    color: #155724;         /* Dark green text */
+    background-color: #e6ffed; /* A pleasant, light green background */
+    border: 1px solid #c3e6cb;
+}
+
+/* Your existing flash-green animation class, perhaps renamed for clarity */
+.animate-flash-green {
+    animation: flash-green-animation 0.5s 1; /* Play once */
+}
+
+/* Your existing keyframes, adjusted to work with a base background */
+@keyframes flash-green-animation {
+  0% {
+    background-color: #a7f3d0; /* Brighter green for the flash start - will override .feedback-success-base BG */
+  }
+  100% {
+    background-color: #e6ffed; /* End on the base success background color */
+  }
+}
+
+/* Your existing error class, ensure it's styled and animated as you like */
+.feedback-error-flash {
+    /* display: block !important; /* JS will handle display: block */
+    color: #721c24;
+    background-color: #f8d7da;
+    border: 1px solid #f5c6cb;
+    /* Ensure you have your red flash animation defined and applied here if needed */
+    /* animation: redPulseAnimation 0.6s 2; */
+}
