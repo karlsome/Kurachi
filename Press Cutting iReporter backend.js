@@ -442,8 +442,8 @@ function enableInputs() {
 
 // Function to fetch product details based on 背番号 or 品番
 async function fetchProductDetails() {
-  // checkProcessCondition(); // Consider if this is needed here or better handled by the calling function's flow
-  // enableInputs(); // Delete this in production - Input enabling should be managed by the overall scan logic
+  // checkProcessCondition(); // Consider if this is needed here orc better handled by the calling function's flow
+  enableInputs(); // Delete this in production - Input enabling should be managed by the overall scan logic
 
   const subDropdown = document.getElementById("sub-dropdown");
   const serialNumber = subDropdown.value;
@@ -592,6 +592,8 @@ async function fetchProductDetails() {
     return false; // Indicate failure
   }
 }
+
+document.getElementById("sub-dropdown").addEventListener("change", fetchProductDetails);
 
 
 // Function to fetch image link from Google Sheets
@@ -1332,7 +1334,7 @@ function checkProcessCondition() {
             enableInputs();
           } else if (!firstScanActualValue || !secondScanActualValue) {
             console.log("Inputs disabled: Factory requires 2 QR scans (or first scan pending).");
-            disableInputs();
+            //disableInputs();
           } else {
             console.log("Inputs enabled: 2 QR scans completed.");
             enableInputs();
@@ -1623,7 +1625,7 @@ async function handleQRScan(qrCodeMessage) {
                     }
                 } else {
                     // Second scan is needed
-                    disableInputs();
+                    //disableInputs(); <- need to uncomment this if final
                     const successMessage = "Success! Scan Tomson Board. / 成功！トムソンボードをスキャンしてください。";
                     showSuccessPrompt(successMessage, 4000); // Show for 4 seconds
                 }
