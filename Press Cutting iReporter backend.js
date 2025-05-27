@@ -1117,7 +1117,7 @@ function handleQRScan(qrCodeMessage) {
         }
 
         // Check for valid characters (A-Z, a-z, 0-9)
-        if (/^[a-zA-Z0-9\-,._]$/.test(event.key)) {
+        if (/^[a-zA-Z0-9\-,._ ]$/.test(event.key)) {
             window.scannedBluetoothCode += event.key; // Accumulate valid characters
         }
 
