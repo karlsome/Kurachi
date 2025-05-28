@@ -364,8 +364,20 @@
                 <label>Cycle Time:</label>
                 <input readonly id="cycleTime" value="0" name="Cycle Time">
                 <br>
+                 
 
             </div>
+            <br><br><br>
+                <div class = "addKensa">   
+                    <button id="addKensaButton" type="button" onclick="AddKensa()">検査を追加</button>
+                </div>
+               <div class="kensaDropdown" style="display: none;">
+                    <label for="kensa-dropdown">検査名前 (Kensa Name optional):</label>
+                    <select id="kensa-dropdown" name="kensa-dropdown">
+                        </select>
+                    <br><br>
+                    <button id="kensa-reset-button" type="button" onclick="ResetKensaDropDown()">Reset kensa</button>
+                </div>  
         </div>
     
     </form>

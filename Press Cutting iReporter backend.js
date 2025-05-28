@@ -697,29 +697,96 @@ document.addEventListener("DOMContentLoaded", function() {
 
 
 //Get worker list
+// document.addEventListener("DOMContentLoaded", async function() {
+//   const selectedFactory = document.getElementById("selected工場").value;
+
+//   if (selectedFactory) {
+//     try {
+//       const response = await fetch(`${serverURL}/getWorkerNames?selectedFactory=${encodeURIComponent(selectedFactory)}`);
+//       if (!response.ok) throw new Error("Failed to fetch worker names");
+
+//       const workerNames = await response.json();
+//       const dataList = document.getElementById("machine-operator-suggestions");
+//       dataList.innerHTML = ""; // Clear any existing options
+
+//       workerNames.forEach(name => {
+//         const option = document.createElement("option");
+//         option.value = name;
+//         dataList.appendChild(option);
+//       });
+//     } catch (error) {
+//       console.error("Error fetching worker names:", error);
+//     }
+//   }
+// });
+
+//Get worker list
 document.addEventListener("DOMContentLoaded", async function() {
-  const selectedFactory = document.getElementById("selected工場").value;
+  // It's good practice to define serverURL if it's not already globally available.
+  // For this example, I'll assume it's defined elsewhere.
+  // const serverURL = "YOUR_SERVER_URL_HERE"; // Example: "http://localhost:3000" or "https://your-api.com"
+
+  const selectedFactoryInput = document.getElementById("selected工場");
+  const selectedFactory = selectedFactoryInput.value;
+
+  const machineOperatorDatalist = document.getElementById("machine-operator-suggestions");
+  const kensaDropdown = document.getElementById("kensa-dropdown");
+
+  // Clear previous options in case this function is called multiple times
+  machineOperatorDatalist.innerHTML = "";
+  kensaDropdown.innerHTML = "";
+
+  // Add a default/placeholder option for the kensa-dropdown
+  const defaultKensaOption = document.createElement("option");
+  defaultKensaOption.value = "";
+  defaultKensaOption.textContent = "作業者を選択"; // "Select Worker" or your preferred placeholder
+  kensaDropdown.appendChild(defaultKensaOption);
 
   if (selectedFactory) {
     try {
       const response = await fetch(`${serverURL}/getWorkerNames?selectedFactory=${encodeURIComponent(selectedFactory)}`);
-      if (!response.ok) throw new Error("Failed to fetch worker names");
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("Failed to fetch worker names. Status:", response.status, "Response:", errorText);
+        // Display a user-friendly error, e.g., by setting textContent of an error display element
+        // kensaDropdown.options[0].textContent = "作業者読込失敗"; // "Failed to load workers"
+        throw new Error(`Failed to fetch worker names. Status: ${response.status}`);
+      }
 
       const workerNames = await response.json();
-      const dataList = document.getElementById("machine-operator-suggestions");
-      dataList.innerHTML = ""; // Clear any existing options
 
-      workerNames.forEach(name => {
-        const option = document.createElement("option");
-        option.value = name;
-        dataList.appendChild(option);
-      });
+      if (workerNames && workerNames.length > 0) {
+        workerNames.forEach(name => {
+          // Populate the datalist for machine operator suggestions
+          const datalistOption = document.createElement("option");
+          datalistOption.value = name;
+          machineOperatorDatalist.appendChild(datalistOption);
+
+          // Populate the select dropdown for kensa-dropdown
+          const dropdownOption = document.createElement("option");
+          dropdownOption.value = name; // Set the value of the option
+          dropdownOption.textContent = name; // Set the display text of the option
+          kensaDropdown.appendChild(dropdownOption);
+        });
+      } else {
+        // Handle case where workerNames might be empty or undefined
+        console.warn("No worker names returned for the selected factory or an issue with the response format.");
+        // kensaDropdown.options[0].textContent = "作業者なし"; // "No workers available"
+      }
+
     } catch (error) {
-      console.error("Error fetching worker names:", error);
+      console.error("Error fetching or processing worker names:", error);
+      // Update placeholder to indicate error
+      // kensaDropdown.options[0].textContent = "作業者読込エラー"; // "Error loading workers"
     }
+  } else {
+    console.warn("Selected factory ('selected工場') is not set. Worker names will not be fetched.");
+    // Optionally, provide feedback in the dropdown if no factory is selected.
+    // The default "作業者を選択" might still be appropriate, or you could change it.
+    // kensaDropdown.options[0].textContent = "工場を選択してください"; // "Please select a factory"
   }
 });
-
 
 //function for plus minus button
 function incrementCounter(counterId) {
@@ -1334,7 +1401,7 @@ function checkProcessCondition() {
             enableInputs();
           } else if (!firstScanActualValue || !secondScanActualValue) {
             console.log("Inputs disabled: Factory requires 2 QR scans (or first scan pending).");
-            //disableInputs();
+            //disableInputs(); <- need to disable comment if production
           } else {
             console.log("Inputs enabled: 2 QR scans completed.");
             enableInputs();
@@ -2024,6 +2091,7 @@ function printLabel() {
   const scanAlertText = document.getElementById('scanAlertText');
   const 背番号 = document.getElementById("sub-dropdown").value;
   
+  
   if (selectedFactory === "肥田瀬"){
     printLabelHidase();
     return;
@@ -2432,6 +2500,8 @@ function printLabel() {
 async function printLabelHidase() {
   const selectedFactory = document.getElementById("selected工場").value;
   const 品番Raw = document.getElementById("product-number").value;
+  const kensaName = document.getElementById("kensa-dropdown").value;
+  console.log("kensaName:", kensaName);
 
   if (selectedFactory !== "肥田瀬") {
     console.warn("Not in 肥田瀬 factory. Printing normally...");
@@ -2483,7 +2553,7 @@ function showHidaseLabelButtons({ 品番, 収容数Low, 収容数High }) {
     printHidaseLabel({
       品番,
       収容数: 収容数High,
-      filename: 'hidaselabel5.lbx',
+      filename: 'hidaselabel6.lbx',
       modifyHinban: false,
       date
     });
@@ -2497,7 +2567,7 @@ function showHidaseLabelButtons({ 品番, 収容数Low, 収容数High }) {
     printHidaseLabel({
       品番,
       収容数: 収容数Low,
-      filename: 'hidaselabel6inner.lbx',
+      filename: 'hidaselabel7inner.lbx',
       modifyHinban: true,
       date
     });
@@ -2511,6 +2581,7 @@ function showHidaseLabelButtons({ 品番, 収容数Low, 収容数High }) {
 // Function to print the label using Smooth Print
 async function printHidaseLabel({ 品番, 収容数, filename, modifyHinban, date }) {
   const selectedFactory = document.getElementById("selected工場").value;
+  const kensaName = document.getElementById("kensa-dropdown").value;
 
   // Special Hinban modification
   if (selectedFactory === "肥田瀬" && 品番 === "146696-5630ESH-5" && modifyHinban) {
@@ -2530,6 +2601,7 @@ async function printHidaseLabel({ 品番, 収容数, filename, modifyHinban, dat
     `&text_品番=${encodeURIComponent(品番)}` +
     `&text_収容数=${encodeURIComponent(収容数)}` +
     `&text_DateT=${encodeURIComponent(date)}` +
+    `&text_kensa=${encodeURIComponent(kensaName)}` +
     `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
 
   console.log("Sending print request:", url);
@@ -2575,6 +2647,45 @@ function flashGreen() {
   setTimeout(() => {
     body.classList.remove("flash-green");
   }, 500); // match the duration of your animation
+}
+
+
+
+
+window.addEventListener("DOMContentLoaded", () => {
+  const savedKensa = localStorage.getItem(`${uniquePrefix}kensa-dropdown`);
+  const addKensaBtn = document.querySelector('.addKensa');
+  const kensaDropdownContainer = document.querySelector('.kensaDropdown');
+  const kensaDropdown = document.getElementById("kensa-dropdown");
+
+  if (savedKensa && savedKensa !== "") {
+    addKensaBtn.style.display = 'none';
+    kensaDropdownContainer.style.display = 'block';
+    if (kensaDropdown) kensaDropdown.value = savedKensa;
+  }
+});
+
+//function to reset kensa dropdown list
+function ResetKensaDropDown() {
+  const kensaDropdown = document.getElementById("kensa-dropdown");
+  
+  if (kensaDropdown) {
+    kensaDropdown.value = ""; // Reset to default
+    localStorage.removeItem(`${uniquePrefix}kensa-dropdown`); // Remove from localStorage
+    console.log("Kensa dropdown reset and localStorage cleared.");
+  } else {
+    console.warn("Kensa dropdown not found.");
+  }
+
+  // Optionally hide the dropdown again and show the "Add Kensa" button
+  document.querySelector('.kensaDropdown').style.display = 'none';
+  document.querySelector('.addKensa').style.display = 'block';
+}
+
+//function to add kensa dropdown
+function AddKensa(){
+    document.querySelector('.addKensa').style.display = 'none';
+    document.querySelector('.kensaDropdown').style.display = 'block';
 }
 
 
