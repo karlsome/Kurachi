@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>離型紙プリンター</title>
+    <link rel="icon" type="image/png" href="src/favicon2.png">
+    <link rel="stylesheet" href="firstKojoLabelPrinter.css">
+   
+</head>
+<body>
+    <div class="container">
+        <h1>離型紙プリンター</h1>
+        <div id="scanOptionModal" class="modal">
+            <div class="modal-content">
+                <h2>Choose Scan Method</h2>
+                <button class="btn" onclick="startCameraScanner()">📷 カメラ用</button>
+                <button class="btn" onclick="startBluetoothScanner()">🛜🖲️ ブルースス スキャナー</button>
+                <button class="btn btn-close" onclick="document.getElementById('scanOptionModal').style.display='none'">Cancel</button>
+            </div>
+        </div>
+        <select id="sub-dropdown" name="背番号">  
+                <!-- options will be populated dynamically based on the selected value of #dropdown -->
+        </select>
+
+        <div id="qrScannerModal" class="modal">
+            <div class="modal-content">
+                <h2>Scan QR Code</h2>
+                <div id="qrReader"></div>
+                <button class="btn btn-close" id="closeQRScannerModal">Close</button>
+            </div>
+        </div>
+
+        <div id="bluetoothScannerModal" class="modal">
+            <div class="modal-content">
+                <h2>QR スキャンお待ち中 (Waiting for SCAN)...</h2>
+                <p>スキャンしてください。Scan QR Now!</p>
+                <button class="btn btn-close" id="closeBluetoothScannerModal" onclick="document.getElementById('bluetoothScannerModal').style.display='none'; stopBluetoothScannerListening();">Cancel</button>
+            </div>
+        </div>
+
+        <div id="scanAlertModal" class="modal">
+            <div class="modal-content">
+                <h2>Error</h2>
+                <p id="scanAlertText"></p>
+                <button class="btn btn-close" id="closeScanModalButton">Close</button>
+            </div>
+        </div>
+
+        <div id="customAlertModal" class="modal">
+            <div class="modal-content">
+                <span id="closeModalButton" class="close-button">&times;</span>
+                <p id="customAlertText">Wrong Kanban / 看板間違い</p>
+            </div>
+        </div>
+
+        <div id="printConfirmationModal" class="modal">
+            <div class="modal-content">
+                <h2>Print Confirmation</h2>
+                <p>How many labels do you want to print?</p>
+                <div class="quantity-selector">
+                    <button class="btn" onclick="decrementPrintTimes()">-</button>
+                    <span id="printTimesDisplay">1</span>
+                    <button class="btn" onclick="incrementPrintTimes()">+</button>
+                </div>
+                <button class="btn btn-confirm" onclick="confirmPrint()">Print</button>
+                <button class="btn btn-close" onclick="document.getElementById('printConfirmationModal').style.display='none'">Cancel</button>
+            </div>
+        </div>
+
+       <div id="printingStatusModal" class="modal">
+            <div class="modal-content">
+                <h2>Printing...</h2>
+                <p>Please wait while the labels are being printed.</p>
+                <button id="cancelPrintButton" class="btn btn-danger" style="display:none;">Cancel Printing</button>
+            </div>
+        </div>
+
+
+        <div id="printCompletionModal" class="modal">
+            <div class="modal-content">
+                <h2>Print Complete</h2>
+                <p>All labels have been printed successfully.</p>
+                <button class="btn btn-close" onclick="document.getElementById('printCompletionModal').style.display='none'">Close</button>
+            </div>
+        </div>
+        
+        <button id="scan-button" class="btn">📷 Scan 日報</button>
+
+        <div class="form-group">
+            <label for="hinmokuMei">品目名:</label>
+            <input type="text" id="hinmokuMei" name="hinmokuMei" >
+        </div>
+
+        <div class="form-group">
+            <label for="shiyou">仕様:</label>
+            <input type="text" id="shiyou" name="shiyou" readonly>
+        </div>
+        
+        <button id="print" class="btn btn-print" onclick="printLabel()">🖨 Print Label</button>
+        
+        <button type="button" class="resetbtn" onclick="resetForm()">Reset</button>
+
+        <div id="reprintModal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <span id="closeReprintModal" class="close">&times;</span>
+                <h3>Reprint Label</h3>
+                <label for="suffixSelector">Select Lot No. Suffix:</label>
+                <select id="suffixSelector"></select>
+                <button id="confirmReprintButton" class="btn">Reprint This Label</button>
+            </div>
+        </div>
+           
+    
+        <iframe id="hiddenIframe" style="display:none;"></iframe>
+        <audio id="alert-sound" src="src/alert.mp3" preload="auto"></audio>
+    </div> 
+    
+    <div id="cameraModal" class="modal">
+        <div class="modal-content">
+            <h2>カメラで撮影 (Take Picture with Camera)</h2>
+            <video id="videoFeed" autoplay playsinline></video>
+            <canvas id="captureCanvas" style="display:none;"></canvas>
+            <div style="display:flex; justify-content:space-between;">
+                <button id="captureButton" class="btn">撮影 (Capture)</button>
+                <button id="closeCameraButton" class="btn btn-close">閉じる (Close)</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="imagePreviewModal" class="modal" style="display: none;"> <span class="close-preview-btn" id="closeImagePreviewModal">&times;</span>
+        <img id="fullPreviewImage" src="" alt="Full Preview">
+    </div>
+
+    <input type="hidden" name="selected工場" id="selected工場" value="第一工場">
+
+    <script src="rikeshiPrinter backend.js"></script>
+    <script src="html5-qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr/dist/jsQR.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
+</body>
+</html>

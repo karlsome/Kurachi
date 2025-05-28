@@ -315,7 +315,7 @@
         else if (filterValue === '第一工場') {
         const containers = document.getElementById('containers');
 
-        // Create card for Laser加工
+        // Create card for Laser加工 (Existing)
         const pressCard = document.createElement('div');
         pressCard.classList.add('card');
         pressCard.addEventListener('click', () => {
@@ -323,7 +323,7 @@
         });
 
         const pressImg = document.createElement('img');
-        pressImg.src = 'src/machines/ALC01.jpg'; // Adjust the path to your image
+        pressImg.src = 'src/machines/ALC01.jpg';
         pressImg.alt = 'レーザー加工';
 
         const pressLabel = document.createElement('div');
@@ -334,7 +334,7 @@
         pressCard.appendChild(pressLabel);
         containers.appendChild(pressCard);
 
-        // Create card for 検査
+        // Create card for 検査 (Existing)
         const kensaCard = document.createElement('div');
         kensaCard.classList.add('card');
         kensaCard.addEventListener('click', () => {
@@ -342,7 +342,7 @@
         });
 
         const kensaImg = document.createElement('img');
-        kensaImg.src = 'src/machines/kensa.jpg'; // Adjust the path to your image
+        kensaImg.src = 'src/machines/kensa.jpg';
         kensaImg.alt = '検査';
 
         const kensaLabel = document.createElement('div');
@@ -353,7 +353,7 @@
         kensaCard.appendChild(kensaLabel);
         containers.appendChild(kensaCard);
 
-        // Create card for 粘着
+        // Create card for 粘着 (Existing)
         const nenchakuCard = document.createElement('div');
         nenchakuCard.classList.add('card');
         nenchakuCard.addEventListener('click', () => {
@@ -361,7 +361,7 @@
         });
 
         const nenchakuImg = document.createElement('img');
-        nenchakuImg.src = 'src/machines/nenchaku.jpg'; // Adjust the path to your image
+        nenchakuImg.src = 'src/machines/nenchaku.jpg';
         nenchakuImg.alt = '粘着';
 
         const nenchakuLabel = document.createElement('div');
@@ -372,7 +372,7 @@
         nenchakuCard.appendChild(nenchakuLabel);
         containers.appendChild(nenchakuCard);
 
-        // Create card for CSVアップロード
+        // Create card for CSVアップロード (Existing)
         const csvCard = document.createElement('div');
         csvCard.classList.add('card');
         csvCard.addEventListener('click', () => {
@@ -380,7 +380,7 @@
         });
 
         const csvImg = document.createElement('img');
-        csvImg.src = 'src/machines/csv.jpg'; // Adjust the path to your image
+        csvImg.src = 'src/machines/csv.jpg';
         csvImg.alt = 'CSVアップロード';
 
         const csvLabel = document.createElement('div');
@@ -390,6 +390,27 @@
         csvCard.appendChild(csvImg);
         csvCard.appendChild(csvLabel);
         containers.appendChild(csvCard);
+
+        // === ADDED: Create card for Rikeshi Printer ===
+        const rikeshiCard = document.createElement('div');
+        rikeshiCard.classList.add('card');
+        rikeshiCard.addEventListener('click', () => {
+            window.location.href = `rikeshiPrinter.html?filter=${filterValue}`;
+        });
+
+        const rikeshiImg = document.createElement('img');
+        rikeshiImg.src = 'src/machines/rikeshi.png'; // Image path for Rikeshi printer
+        rikeshiImg.alt = '理計士プリンター'; // Alt text for the image
+
+        const rikeshiLabel = document.createElement('div');
+        rikeshiLabel.classList.add('label');
+        rikeshiLabel.textContent = '理計士プリンター'; // Label for the card
+
+        rikeshiCard.appendChild(rikeshiImg);
+        rikeshiCard.appendChild(rikeshiLabel);
+        containers.appendChild(rikeshiCard);
+        // === End of ADDED Rikeshi Printer card ===
+
     }
 
     else if (filterValue === 'SCNA') {
