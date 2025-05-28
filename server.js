@@ -2951,17 +2951,19 @@ app.post("/loginCustomer", async (req, res) => {
 });
 
 app.post("/createUser", async (req, res) => {
-  const { firstName, lastName, email, username, password, dbName, validUntil } = req.body;
+  const { firstName, lastName, email, username, password, role } = req.body;
 
   // Validate required fields
-  if (!firstName || !lastName || !email || !username || !password || !dbName) {
+  if (!firstName || !lastName || !email || !username || !password || !role) {
+    console.log("missing required fields!!!:", { firstName, lastName, email, username, password, role });
     return res.status(400).json({ error: "Missing required fields" });
+
   }
 
   try {
     await client.connect();
     const db = client.db("Sasaki_Coating_MasterDB");
-    const masterUsers = db.collection("masterUsers");
+    const masterUsers = db.collection("users");
 
     // Check if username already exists
     const existing = await masterUsers.findOne({ username });
@@ -2977,9 +2979,7 @@ app.post("/createUser", async (req, res) => {
       email,
       username,
       password: hashedPassword,
-      role: "masterUser",
-      dbName,
-      validUntil: validUntil ? new Date(validUntil) : null,
+      role,
       createdAt: new Date()
     });
 
@@ -2995,6 +2995,7 @@ app.post("/updateUser", async (req, res) => {
   const { userId, firstName, lastName, email, role } = req.body;
 
   if (!userId || !role) {
+    console.log("❌ Missing userId or role:", { userId, firstName, lastName, email, role });
     return res.status(400).json({ error: "User ID and role are required" });
   }
 
