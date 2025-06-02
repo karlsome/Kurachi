@@ -2085,15 +2085,277 @@ function resetForm() {
 
 
 // Print label using "Smooth Print" app for mobile devices
-function printLabel() {
+// function printLabel() {
+//   const alertSound = document.getElementById('alert-sound');
+//   const scanAlertModal = document.getElementById('scanAlertModal');
+//   const scanAlertText = document.getElementById('scanAlertText');
+//   const 背番号 = document.getElementById("sub-dropdown").value;
+  
+  
+//   if (selectedFactory === "肥田瀬"){
+//     printLabelHidase();
+//     return;
+//   }
+
+//   // Preload the alert sound without playing it
+//   if (alertSound) {
+//     alertSound.muted = true; // Mute initially to preload
+//     alertSound.loop = false; // Disable looping
+//     alertSound.load(); // Preload the audio file
+//   }
+
+//   // Check if 背番号 is selected
+//   if (!背番号) {
+//     // Show alert modal
+//     scanAlertText.innerText = '背番号が必要です。 / Sebanggo is required.';
+//     scanAlertModal.style.display = 'block';
+
+//     // Play alert sound
+//     if (alertSound) {
+//       alertSound.muted = false; // Unmute to alert user
+//       alertSound.volume = 1; // Set full volume
+//       alertSound.play().catch(error => console.error('Failed to play alert sound:', error));
+//     }
+
+//     // Add blinking red background
+//     document.body.classList.add('flash-red');
+
+//     // Close modal on button click
+//     const closeScanModalButton = document.getElementById('closeScanModalButton');
+//     closeScanModalButton.onclick = function () {
+//       scanAlertModal.style.display = 'none';
+//       alertSound.pause();
+//       alertSound.currentTime = 0; // Reset sound to the beginning
+//       alertSound.muted = true; // Mute again for next time
+//       document.body.classList.remove('flash-red');
+//     };
+
+//     return; // Stop the submission process
+//   }
+
+//   // List of 背番号 values requiring 収容数 selection
+//   const specialValues = [
+//   "E701", "E702", "E703", "E704", "E705", "E706", "E707", "E708",
+//   "MDLB", "MDLS", "MDRB", "MDRS",
+//   "P01K", "P02K", "P03K", "P04K", "P05K", "P06K", "P07K", "P08K",
+//   "P09K", "P10K", "P11K", "P12K", "P13K", "P14K", "P15K", "P16K",
+//   "P17K", "P18K", "P19K", "P20K",
+//   "UFS1", "UFS2", "UFS3", "UFS4", "UFS5", "UFS6", "UFS7", "UFS8",
+//   "URB1", "URB2", "URB3", "URB4", "URB5", "URB6", "URB7", "URB8"
+//   ];
+
+//   // Check if 背番号 matches special values
+//   if (specialValues.includes(背番号)) {
+//     // Create and show a modal for 収容数 selection
+//     const modal = document.createElement('div');
+//     modal.classList.add('modal');
+//     modal.style.display = 'flex';
+//     modal.style.position = 'fixed';
+//     modal.style.top = '50%';
+//     modal.style.left = '50%';
+//     modal.style.transform = 'translate(-50%, -50%)';
+//     modal.style.flexDirection = 'column';
+//     modal.style.justifyContent = 'center';
+//     modal.style.alignItems = 'center';
+//     modal.style.padding = '30px';
+//     modal.style.backgroundColor = 'white';
+//     modal.style.boxShadow = '0 0 15px rgba(0, 0, 0, 0.5)';
+//     modal.style.borderRadius = '10px';
+
+//     const message = document.createElement('p');
+//     message.innerText = '収容数を選んでください / Please choose the value for Quantity';
+//     message.style.fontSize = '24px';
+//     message.style.textAlign = 'center';
+//     message.style.marginBottom = '20px';
+//     modal.appendChild(message);
+
+//     const button50 = document.createElement('button');
+//     button50.innerText = '50';
+//     button50.style.margin = '10px';
+//     button50.style.padding = '15px 30px';
+//     button50.style.fontSize = '20px';
+//     button50.style.cursor = 'pointer';
+//     button50.style.borderRadius = '5px';
+//     button50.onclick = () => {
+//       redirectWith収容数(50);
+//     };
+//     modal.appendChild(button50);
+
+//     const button100 = document.createElement('button');
+//     button100.innerText = '100';
+//     button100.style.margin = '10px';
+//     button100.style.padding = '15px 30px';
+//     button100.style.fontSize = '20px';
+//     button100.style.cursor = 'pointer';
+//     button100.style.borderRadius = '5px';
+//     button100.onclick = () => {
+//       redirectWith収容数(100);
+//     };
+//     modal.appendChild(button100);
+
+//     const button200 = document.createElement('button');
+//     button200.innerText = '200';
+//     button200.style.margin = '10px';
+//     button200.style.padding = '15px 30px';
+//     button200.style.fontSize = '20px';
+//     button200.style.cursor = 'pointer';
+//     button200.style.borderRadius = '5px';
+//     button200.onclick = () => {
+//       redirectWith収容数(200);
+//     };
+//     modal.appendChild(button200);
+
+//     document.body.appendChild(modal);
+
+//     function redirectWith収容数(value) {
+//       document.body.removeChild(modal); // Remove modal
+
+//       // Retrieve dynamic values from the form
+//       const 品番 = document.getElementById("product-number").value;
+//       const 車型 = document.getElementById("model").value;
+//       const R_L = document.getElementById("R-L").value;
+//       const 材料 = document.getElementById("material").value;
+//       const 色 = document.getElementById("material-color").value;
+//       const extension = document.getElementById("Labelextension").value;
+//       const Date2 = document.getElementById('Lot No.').value;
+//       const 品番収容数 = `${品番},${value}`;
+//       const SRS = document.getElementById("SRS").value;
+//       let filename = "";
+
+//       const Date = extension ? `${Date2} - ${extension}` : Date2;
+
+//       // Smooth Print URL scheme
+//       if (SRS === "有り"){
+//           filename = "SRS3.lbx";
+//       } else if (背番号 === "NC2"){
+//           filename = "NC21.lbx"
+//       } else {
+//         filename = "sample6.lbx";
+//       }
+//       const size = "RollW62";
+//       const copies = 1;
+//       const url =
+//         `brotherwebprint://print?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent(size)}&copies=${encodeURIComponent(copies)}` +
+//         `&text_品番=${encodeURIComponent(品番)}` +
+//         `&text_車型=${encodeURIComponent(車型)}` +
+//         `&text_収容数=${encodeURIComponent(value)}` +
+//         `&text_背番号=${encodeURIComponent(背番号)}` +
+//         `&text_RL=${encodeURIComponent(R_L)}` +
+//         `&text_材料=${encodeURIComponent(材料)}` +
+//         `&text_色=${encodeURIComponent(色)}` +
+//         `&text_DateT=${encodeURIComponent(Date)}` +
+//         `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
+
+//       console.log(Date);
+//       window.location.href = url; // Redirect to Smooth Print
+//     }
+
+//     return; // Stop the submission process until user chooses 収容数
+//   }
+
+//   // Default process for other 背番号 values
+//   const 品番 = document.getElementById("product-number").value;
+//   const 車型 = document.getElementById("model").value;
+//   const 収容数 = document.getElementById("収容数").value;
+//   const R_L = document.getElementById("R-L").value;
+//   const 材料 = document.getElementById("material").value;
+//   const 色 = document.getElementById("material-color").value;
+//   const extension = document.getElementById("Labelextension").value;
+//   const Date2 = document.getElementById('Lot No.').value;
+//   const 品番収容数 = `${品番},${収容数}`;
+//   const SRS = document.getElementById("SRS").value;
+//   let filename = "";
+
+//   const Date = extension ? `${Date2} - ${extension}` : Date2;
+
+//   if (SRS === "有り"){
+//     filename = "SRS3.lbx";
+//   } else if (背番号 === "NC2"){
+//       filename = "NC21.lbx"
+//   } else {
+//     filename = "sample6.lbx";
+//   }
+  
+//   const size = "RollW62";
+//   const copies = 1;
+//   const url =
+//     `brotherwebprint://print?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent(size)}&copies=${encodeURIComponent(copies)}` +
+//     `&text_品番=${encodeURIComponent(品番)}` +
+//     `&text_車型=${encodeURIComponent(車型)}` +
+//     `&text_収容数=${encodeURIComponent(収容数)}` +
+//     `&text_背番号=${encodeURIComponent(背番号)}` +
+//     `&text_RL=${encodeURIComponent(R_L)}` +
+//     `&text_材料=${encodeURIComponent(材料)}` +
+//     `&text_色=${encodeURIComponent(色)}` +
+//     `&text_DateT=${encodeURIComponent(Date)}` +
+//     `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
+
+//   console.log(Date);
+//   window.location.href = url;
+// }
+
+
+// new label printing function with async/await and error handling
+// added 2TN4.lbx printing function
+async function printLabel() {
   const alertSound = document.getElementById('alert-sound');
   const scanAlertModal = document.getElementById('scanAlertModal');
   const scanAlertText = document.getElementById('scanAlertText');
   const 背番号 = document.getElementById("sub-dropdown").value;
-  
-  
-  if (selectedFactory === "肥田瀬"){
-    printLabelHidase();
+
+  // Function to check if the device is iOS
+  function isIOS() {
+    // More robust iOS detection
+    return [
+      'iPad Simulator',
+      'iPhone Simulator',
+      'iPod Simulator',
+      'iPad',
+      'iPhone',
+      'iPod'
+    ].includes(navigator.platform)
+    // iPad on iOS 13 detection
+    || (navigator.userAgent.includes("Mac") && "ontouchend" in document);
+  }
+
+  // Function to handle the actual printing (platform-dependent)
+  async function executePrint(url, isIOSDevice) {
+    if (isIOSDevice) {
+      window.location.href = url;
+    } else {
+      // Android or desktop: use fetch to send request
+      try {
+        const response = await Promise.race([
+          fetch(url).then(res => {
+            if (!res.ok) {
+              throw new Error(`HTTP error! status: ${res.status}`);
+            }
+            return res.text();
+          }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout after 7 seconds")), 7000))
+        ]);
+
+        if (response.includes("<result>SUCCESS</result>")) {
+          console.log("Print success.");
+          // flashGreen(); // Assuming you have a function like flashGreen()
+          alert("Print command sent successfully!"); // Or some other user feedback
+        } else {
+          console.error("Printing failed. Response:", response);
+          alert("Printing failed. Check printer status or server response: " + response);
+        }
+      } catch (error) {
+        console.error("Error sending print command:", error);
+        alert("Error sending print command: " + error.message);
+      }
+    }
+  }
+
+
+  if (typeof selectedFactory !== 'undefined' && selectedFactory === "肥田瀬") {
+    // Assuming printLabelHidase also needs to be async if it uses similar logic,
+    // or handle its own platform detection if different.
+    // For now, calling it directly. If it needs platform specific URL, it should be updated too.
+    printLabelHidase(); // Make sure printLabelHidase is defined
     return;
   }
 
@@ -2107,8 +2369,8 @@ function printLabel() {
   // Check if 背番号 is selected
   if (!背番号) {
     // Show alert modal
-    scanAlertText.innerText = '背番号が必要です。 / Sebanggo is required.';
-    scanAlertModal.style.display = 'block';
+    if (scanAlertText) scanAlertText.innerText = '背番号が必要です。 / Sebanggo is required.';
+    if (scanAlertModal) scanAlertModal.style.display = 'block';
 
     // Play alert sound
     if (alertSound) {
@@ -2122,35 +2384,53 @@ function printLabel() {
 
     // Close modal on button click
     const closeScanModalButton = document.getElementById('closeScanModalButton');
-    closeScanModalButton.onclick = function () {
-      scanAlertModal.style.display = 'none';
-      alertSound.pause();
-      alertSound.currentTime = 0; // Reset sound to the beginning
-      alertSound.muted = true; // Mute again for next time
-      document.body.classList.remove('flash-red');
-    };
-
+    if (closeScanModalButton) {
+        closeScanModalButton.onclick = function () {
+        if (scanAlertModal) scanAlertModal.style.display = 'none';
+        if (alertSound) {
+            alertSound.pause();
+            alertSound.currentTime = 0; // Reset sound to the beginning
+            alertSound.muted = true; // Mute again for next time
+        }
+        document.body.classList.remove('flash-red');
+        };
+    }
     return; // Stop the submission process
   }
 
   // List of 背番号 values requiring 収容数 selection
   const specialValues = [
-  "E701", "E702", "E703", "E704", "E705", "E706", "E707", "E708",
-  "MDLB", "MDLS", "MDRB", "MDRS",
-  "P01K", "P02K", "P03K", "P04K", "P05K", "P06K", "P07K", "P08K",
-  "P09K", "P10K", "P11K", "P12K", "P13K", "P14K", "P15K", "P16K",
-  "P17K", "P18K", "P19K", "P20K",
-  "UFS1", "UFS2", "UFS3", "UFS4", "UFS5", "UFS6", "UFS7", "UFS8",
-  "URB1", "URB2", "URB3", "URB4", "URB5", "URB6", "URB7", "URB8"
+    "E701", "E702", "E703", "E704", "E705", "E706", "E707", "E708",
+    "MDLB", "MDLS", "MDRB", "MDRS",
+    "P01K", "P02K", "P03K", "P04K", "P05K", "P06K", "P07K", "P08K",
+    "P09K", "P10K", "P11K", "P12K", "P13K", "P14K", "P15K", "P16K",
+    "P17K", "P18K", "P19K", "P20K",
+    "UFS1", "UFS2", "UFS3", "UFS4", "UFS5", "UFS6", "UFS7", "UFS8",
+    "URB1", "URB2", "URB3", "URB4", "URB5", "URB6", "URB7", "URB8"
   ];
 
-  // Check if 背番号 matches special values
+  // Function to determine filename based on 背番号 and SRS
+  function getFilename(currentSebanggo, currentSRS) {
+    const amPattern = /^AM0[1-9]$/; // Matches AM01 to AM09
+    if (amPattern.test(currentSebanggo)) {
+      return "2TN4.lbx";
+    } else if (currentSRS === "有り") {
+      return "SRS3.lbx";
+    } else if (currentSebanggo === "NC2") {
+      return "NC21.lbx";
+    } else {
+      return "sample6.lbx";
+    }
+  }
+
+  // Check if 背番号 matches special values that require quantity selection
   if (specialValues.includes(背番号)) {
     // Create and show a modal for 収容数 selection
     const modal = document.createElement('div');
     modal.classList.add('modal');
     modal.style.display = 'flex';
     modal.style.position = 'fixed';
+    modal.style.zIndex = '1000'; // Ensure modal is on top
     modal.style.top = '50%';
     modal.style.left = '50%';
     modal.style.transform = 'translate(-50%, -50%)';
@@ -2169,48 +2449,31 @@ function printLabel() {
     message.style.marginBottom = '20px';
     modal.appendChild(message);
 
-    const button50 = document.createElement('button');
-    button50.innerText = '50';
-    button50.style.margin = '10px';
-    button50.style.padding = '15px 30px';
-    button50.style.fontSize = '20px';
-    button50.style.cursor = 'pointer';
-    button50.style.borderRadius = '5px';
-    button50.onclick = () => {
-      redirectWith収容数(50);
+    const createButton = (value) => {
+      const button = document.createElement('button');
+      button.innerText = String(value);
+      button.style.margin = '10px';
+      button.style.padding = '15px 30px';
+      button.style.fontSize = '20px';
+      button.style.cursor = 'pointer';
+      button.style.borderRadius = '5px';
+      button.onclick = async () => {
+        await redirectWith収容数(value);
+      };
+      modal.appendChild(button);
     };
-    modal.appendChild(button50);
 
-    const button100 = document.createElement('button');
-    button100.innerText = '100';
-    button100.style.margin = '10px';
-    button100.style.padding = '15px 30px';
-    button100.style.fontSize = '20px';
-    button100.style.cursor = 'pointer';
-    button100.style.borderRadius = '5px';
-    button100.onclick = () => {
-      redirectWith収容数(100);
-    };
-    modal.appendChild(button100);
-
-    const button200 = document.createElement('button');
-    button200.innerText = '200';
-    button200.style.margin = '10px';
-    button200.style.padding = '15px 30px';
-    button200.style.fontSize = '20px';
-    button200.style.cursor = 'pointer';
-    button200.style.borderRadius = '5px';
-    button200.onclick = () => {
-      redirectWith収容数(200);
-    };
-    modal.appendChild(button200);
+    createButton(50);
+    createButton(100);
+    createButton(200);
 
     document.body.appendChild(modal);
 
-    function redirectWith収容数(value) {
-      document.body.removeChild(modal); // Remove modal
+    async function redirectWith収容数(selectedQuantity) {
+      if (document.body.contains(modal)) {
+          document.body.removeChild(modal);
+      }
 
-      // Retrieve dynamic values from the form
       const 品番 = document.getElementById("product-number").value;
       const 車型 = document.getElementById("model").value;
       const R_L = document.getElementById("R-L").value;
@@ -2218,42 +2481,39 @@ function printLabel() {
       const 色 = document.getElementById("material-color").value;
       const extension = document.getElementById("Labelextension").value;
       const Date2 = document.getElementById('Lot No.').value;
-      const 品番収容数 = `${品番},${value}`;
+      const 品番収容数 = `${品番},${selectedQuantity}`;
       const SRS = document.getElementById("SRS").value;
-      let filename = "";
+      
+      const filename = getFilename(背番号, SRS); // Use the helper function
 
-      const Date = extension ? `${Date2} - ${extension}` : Date2;
+      const DateStr = extension ? `${Date2} - ${extension}` : Date2; // Renamed 'Date' to 'DateStr' to avoid conflict
 
-      // Smooth Print URL scheme
-      if (SRS === "有り"){
-          filename = "SRS3.lbx";
-      } else if (背番号 === "NC2"){
-          filename = "NC21.lbx"
-      } else {
-        filename = "sample6.lbx";
-      }
+      const currentIsIOS = isIOS();
+      const baseURL = currentIsIOS
+        ? "brotherwebprint://print"
+        : "http://localhost:8088/print";
+
       const size = "RollW62";
       const copies = 1;
       const url =
-        `brotherwebprint://print?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent(size)}&copies=${encodeURIComponent(copies)}` +
+        `${baseURL}?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent(size)}&copies=${encodeURIComponent(copies)}` +
         `&text_品番=${encodeURIComponent(品番)}` +
         `&text_車型=${encodeURIComponent(車型)}` +
-        `&text_収容数=${encodeURIComponent(value)}` +
+        `&text_収容数=${encodeURIComponent(selectedQuantity)}` +
         `&text_背番号=${encodeURIComponent(背番号)}` +
         `&text_RL=${encodeURIComponent(R_L)}` +
         `&text_材料=${encodeURIComponent(材料)}` +
         `&text_色=${encodeURIComponent(色)}` +
-        `&text_DateT=${encodeURIComponent(Date)}` +
+        `&text_DateT=${encodeURIComponent(DateStr)}` +
         `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
 
-      console.log(Date);
-      window.location.href = url; // Redirect to Smooth Print
+      console.log("Sending print request (via modal):", url);
+      await executePrint(url, currentIsIOS);
     }
-
     return; // Stop the submission process until user chooses 収容数
   }
 
-  // Default process for other 背番号 values
+  // Default process for other 背番号 values (not in specialValues)
   const 品番 = document.getElementById("product-number").value;
   const 車型 = document.getElementById("model").value;
   const 収容数 = document.getElementById("収容数").value;
@@ -2264,22 +2524,20 @@ function printLabel() {
   const Date2 = document.getElementById('Lot No.').value;
   const 品番収容数 = `${品番},${収容数}`;
   const SRS = document.getElementById("SRS").value;
-  let filename = "";
-
-  const Date = extension ? `${Date2} - ${extension}` : Date2;
-
-  if (SRS === "有り"){
-    filename = "SRS3.lbx";
-  } else if (背番号 === "NC2"){
-      filename = "NC21.lbx"
-  } else {
-    filename = "sample6.lbx";
-  }
   
+  const filename = getFilename(背番号, SRS); // Use the helper function
+
+  const DateStr = extension ? `${Date2} - ${extension}` : Date2; // Renamed 'Date' to 'DateStr'
+
+  const currentIsIOS = isIOS();
+  const baseURL = currentIsIOS
+    ? "brotherwebprint://print"
+    : "http://localhost:8088/print";
+
   const size = "RollW62";
   const copies = 1;
   const url =
-    `brotherwebprint://print?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent(size)}&copies=${encodeURIComponent(copies)}` +
+    `${baseURL}?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent(size)}&copies=${encodeURIComponent(copies)}` +
     `&text_品番=${encodeURIComponent(品番)}` +
     `&text_車型=${encodeURIComponent(車型)}` +
     `&text_収容数=${encodeURIComponent(収容数)}` +
@@ -2287,213 +2545,14 @@ function printLabel() {
     `&text_RL=${encodeURIComponent(R_L)}` +
     `&text_材料=${encodeURIComponent(材料)}` +
     `&text_色=${encodeURIComponent(色)}` +
-    `&text_DateT=${encodeURIComponent(Date)}` +
+    `&text_DateT=${encodeURIComponent(DateStr)}` +
     `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
 
-  console.log(Date);
-  window.location.href = url;
+  console.log("Sending print request (default):", url);
+  await executePrint(url, currentIsIOS);
 }
 
 
-// // Hidase style print label
-// function printLabelHidase() {
-//   const selectedSeBanggo = document.getElementById("product-number").value;
-//   const selectedFactory = document.getElementById("selected工場").value;
-
-//   if (selectedFactory !== "肥田瀬") {
-//     console.warn("Not in 肥田瀬 factory. Printing normally...");
-//     return;
-//   }
-
-//   fetch(`${serverURL}/getCapacityBySeBanggo?seBanggo=${selectedSeBanggo}`)
-//     .then(response => response.json())
-//     .then(data => {
-//       if (data.length > 1) {
-//         // Multiple capacity options exist, show selection modal
-//         showCapacitySelectionModal(data);
-//       } else if (data.length === 1) {
-//         // Only one capacity, auto-select and proceed
-//         document.getElementById('収容数').value = data[0].収容数;
-//         showLabelTypeSelection();
-//       } else {
-//         alert('No data found for the selected 品番');
-//       }
-//     })
-//     .catch(error => console.error('Error fetching 収容数:', error));
-// }
-
-// // Show modal to let user choose a 収容数 (uses existing #modal)
-// function showCapacitySelectionModal(data) {
-//   const modal = document.getElementById("modal");
-//   const modalOptions = document.getElementById("modal-options");
-//   const modalCloseButton = document.getElementById("modal-close");
-
-//   // Clear previous options
-//   modalOptions.innerHTML = '<p>収容数を選んでください / Please choose the quantity:</p>';
-
-//   data.forEach((item) => {
-//     const option = document.createElement('button');
-//     option.classList.add('modal-option');
-//     option.textContent = `収容数: ${item.収容数}`;
-//     option.dataset.value = item.収容数;
-//     option.onclick = (e) => {
-//       document.getElementById('収容数').value = e.target.dataset.value;
-//       modal.style.display = "none";
-//       showLabelTypeSelection();
-//     };
-//     modalOptions.appendChild(option);
-//   });
-
-//   modal.style.display = "block";
-
-//   // Close modal on close button click
-//   modalCloseButton.onclick = () => {
-//     modal.style.display = "none";
-//   };
-// }
-
-
-// // Show modal to choose between BOX or PRODUCT label (uses existing #modal)
-// function showLabelTypeSelection() {
-//   const modal = document.getElementById("modal");
-//   const modalOptions = document.getElementById("modal-options");
-//   const modalCloseButton = document.getElementById("modal-close");
-
-//   // Update modal content
-//   modalOptions.innerHTML = '<p>Choose label type: For BOX / 外用 or For Product / 製品用</p>';
-
-//   const buttonBox = document.createElement('button');
-//   buttonBox.innerText = 'For BOX / 外用';
-//   buttonBox.onclick = () => {
-//     modal.style.display = "none";
-//     showCopiesPrompt('hidaselabel5.lbx', false); // Pass `false` to indicate no modification
-//   };
-
-//   const buttonProduct = document.createElement('button');
-//   buttonProduct.innerText = 'For Product / 製品用';
-//   buttonProduct.onclick = () => {
-//     modal.style.display = "none";
-//     showCopiesPrompt('hidaselabel6inner.lbx', true); // Pass `true` to indicate modification
-//   };
-
-//   modalOptions.appendChild(buttonBox);
-//   modalOptions.appendChild(buttonProduct);
-
-//   modal.style.display = "block";
-
-//   // Close modal on close button click
-//   modalCloseButton.onclick = () => {
-//     modal.style.display = "none";
-//   };
-// }
-
-// // Show modal to select number of copies and print (uses existing #modal)
-// // Hidase style choose quantity of print
-// function showCopiesPrompt(filename, modifyHinban) {
-//   let 品番 = document.getElementById("product-number").value;
-//   const 収容数 = document.getElementById("収容数").value;
-//   const R_L = document.getElementById("R-L").value;
-//   const extension = document.getElementById("Labelextension").value;
-//   const Date2 = document.getElementById('Lot No.').value;
-//   const selectedFactory = document.getElementById("selected工場").value;
-
-//   // Apply special condition for 肥田瀬 and 品番 "146696-5630ESH-5"
-//   if (selectedFactory === "肥田瀬" && 品番 === "146696-5630ESH-5" && modifyHinban) {
-//     品番 = "146696-5630"; // Remove "ESH-5" for Product / 製品用
-//   }
-
-//   const 品番収容数 = `${品番},${収容数}`;
-//   const Date = extension ? `${Date2} - ${extension}` : Date2;
-
-//   const modal = document.getElementById("modal");
-//   const modalOptions = document.getElementById("modal-options");
-//   const modalCloseButton = document.getElementById("modal-close");
-
-//   modalOptions.innerHTML = '<p>Select number of copies:</p>';
-
-//   // Wrapper for input and buttons
-//   const copiesDisplay = document.createElement('div');
-//   copiesDisplay.className = 'modal-copies-control';
-
-//   // Minus Button
-//   const minusButton = document.createElement('button');
-//   minusButton.innerText = '-';
-//   minusButton.type = "button";
-//   minusButton.onclick = (event) => {
-//     event.preventDefault();
-//     const current = parseInt(copiesInput.value, 10) || 1;
-//     if (current > 1) {
-//       copiesInput.value = current - 1;
-//     }
-//   };
-
-//   // Input field
-//   const copiesInput = document.createElement('input');
-//   copiesInput.type = 'number';
-//   copiesInput.min = '1';
-//   copiesInput.step = '1';
-//   copiesInput.value = '1';
-//   copiesInput.style.width = '60px';
-//   copiesInput.style.textAlign = 'center';
-
-//   // Prevent invalid input (non-integer, negatives, etc.)
-//   copiesInput.oninput = () => {
-//     let value = copiesInput.value;
-//     if (!/^\d+$/.test(value)) {
-//       copiesInput.value = value.replace(/\D/g, '');
-//     }
-//     if (copiesInput.value === '' || parseInt(copiesInput.value, 10) < 1) {
-//       copiesInput.value = '1';
-//     }
-//   };
-
-//   // Plus Button
-//   const plusButton = document.createElement('button');
-//   plusButton.innerText = '+';
-//   plusButton.type = "button";
-//   plusButton.onclick = (event) => {
-//     event.preventDefault();
-//     const current = parseInt(copiesInput.value, 10) || 1;
-//     copiesInput.value = current + 1;
-//   };
-
-//   // Append controls
-//   copiesDisplay.appendChild(minusButton);
-//   copiesDisplay.appendChild(copiesInput);
-//   copiesDisplay.appendChild(plusButton);
-//   modalOptions.appendChild(copiesDisplay);
-
-//   // Confirm Button
-//   const confirmButton = document.createElement('button');
-//   confirmButton.innerText = 'Confirm';
-//   confirmButton.type = "button";
-//   confirmButton.onclick = () => {
-//     const copies = parseInt(copiesInput.value, 10);
-//     if (isNaN(copies) || copies < 1) {
-//       alert('Please enter a valid number of copies (integer > 0)');
-//       return;
-//     }
-
-//     const url =
-//       `brotherwebprint://print?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent("RollW62")}&copies=${encodeURIComponent(copies)}` +
-//       `&text_品番=${encodeURIComponent(品番)}` +
-//       `&text_収容数=${encodeURIComponent(収容数)}` +
-//       `&text_DateT=${encodeURIComponent(Date)}` +
-//       `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
-
-//     console.log("Printing:", url);
-//     window.location.href = url;
-//     modal.style.display = "none";
-//   };
-
-//   modalOptions.appendChild(confirmButton);
-
-//   modal.style.display = "block";
-
-//   modalCloseButton.onclick = () => {
-//     modal.style.display = "none";
-//   };
-// }
 
 
 
