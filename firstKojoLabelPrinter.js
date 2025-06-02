@@ -612,46 +612,171 @@ function confirmPrint() {
   if(typeof printLabel === 'function') printLabel();
 }
 
+
+//this is good printing but not include logs per print
+// async function printLabel() {
+//   const printingStatusModal = document.getElementById('printingStatusModal');
+//   const printCompletionModal = document.getElementById('printCompletionModal');
+  
+//   const 材料背番号 = document.getElementById("材料背番号")?.value || "";
+//   const 品番 = document.getElementById("品名")?.value; 
+//   const 色 = document.getElementById("material-color")?.value || "";
+//   const length = document.getElementById("length")?.value || "50";
+//   const orderVal = document.getElementById("order")?.value || ""; 
+//   const copiesToPrintNow = parseInt(document.getElementById("printTimes")?.value, 10) || 1;
+
+//   if (!品番) { 
+//     showModalAlert('品番が選択されていません。(Product Number is not selected.)', true);
+//     if(printingStatusModal) printingStatusModal.style.display = 'none';
+//     return;
+//   }
+//    if (!材料背番号 && 品番) {
+//        console.warn("材料背番号 is missing, using 品番 for barcode part 1 if needed.");
+//    }
+
+
+//   const storageKey = `${uniquePrefix}${品番}_printData`; 
+//   const lotDateInputElement = document.getElementById('Lot No.');
+//   if (!lotDateInputElement) {
+//       showModalAlert('日付入力フィールドが見つかりません。', true);
+//       if(printingStatusModal) printingStatusModal.style.display = 'none';
+//       return;
+//   }
+//   const lotDateInput = lotDateInputElement.value; 
+//   const dateParts = lotDateInput.split("-");
+//   if (dateParts.length < 3) {
+//       showModalAlert('日付の形式が無効です。YYYY-MM-DD形式で入力してください。', true);
+//       if(printingStatusModal) printingStatusModal.style.display = 'none';
+//       return;
+//   }
+//   const sagyoubi_yyMMdd = `${dateParts[0].slice(-2)}${dateParts[1]}${dateParts[2]}`;
+
+//   let printSessionData = JSON.parse(localStorage.getItem(storageKey)) || { date: sagyoubi_yyMMdd, extension: 0 };
+//   if (printSessionData.date !== sagyoubi_yyMMdd) { 
+//     printSessionData = { date: sagyoubi_yyMMdd, extension: 0 };
+//   }
+
+//   const ua = navigator.userAgent.toLowerCase();
+//   const isIOS = /iphone|ipad|ipod/.test(ua);
+//   let printedLotNumbers = [];
+//   let printSuccessCount = 0;
+
+//   for (let i = 1; i <= copiesToPrintNow; i++) {
+//     printSessionData.extension++;
+//     const currentExtension = printSessionData.extension;
+//     const currentLotNo = `${sagyoubi_yyMMdd}-${currentExtension}`;
+//     printedLotNumbers.push(currentLotNo);
+
+//     const barcodeValuePart1 = 材料背番号 || 品番; 
+//     const barcodeFullValue = `${barcodeValuePart1},${currentLotNo},${length}`;
+
+//     let filename = "";
+//     const srsStatusElement = document.getElementById("SRS");
+//     const srsStatus = srsStatusElement ? srsStatusElement.value : "無し";
+
+//     if (srsStatus === "有り") filename = "SRS3.lbx";
+//     else if (材料背番号 === "NC2") filename = "NC21.lbx"; 
+//     else filename = "firstkojo3.lbx";
+    
+//     let url = "";
+//     if (isIOS) {
+//       url = `brotherwebprint://print?filename=${encodeURIComponent(filename)}&size=RollW62&copies=1` +
+//             `&text_品番=${encodeURIComponent(品番)}` +
+//             `&text_背番号=${encodeURIComponent(材料背番号)}` + 
+//             `&text_収容数=${encodeURIComponent(orderVal)}` + 
+//             `&text_色=${encodeURIComponent(色)}` +
+//             `&text_DateT=${encodeURIComponent(currentLotNo)}` +
+//             `&barcode_barcode=${encodeURIComponent(barcodeFullValue)}`;
+//       console.log(`[iOS] Attempting print via URL scheme: ${i}/${copiesToPrintNow}`);
+//       window.location.href = url; 
+//       printSuccessCount++; 
+//       if (i < copiesToPrintNow) await new Promise(resolve => setTimeout(resolve, 3500)); 
+//     } else { 
+//       url = `http://localhost:8088/print?filename=${encodeURIComponent(filename)}&size=RollW62&copies=1` +
+//             `&text_品番=${encodeURIComponent(品番)}` +
+//             `&text_背番号=${encodeURIComponent(材料背番号)}` +
+//             `&text_収容数=${encodeURIComponent(orderVal)}` +
+//             `&text_色=${encodeURIComponent(色)}` +
+//             `&text_DateT=${encodeURIComponent(currentLotNo)}` +
+//             `&barcode_barcode=${encodeURIComponent(barcodeFullValue)}`;
+//       console.log(`[Desktop/Android] Print ${i}/${copiesToPrintNow}:`, url);
+//       try {
+//         const response = await Promise.race([
+//           fetch(url).then(res => res.text()),
+//           new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 700000))
+//         ]);
+//         if (response.includes("<result>SUCCESS</result>")) {
+//           console.log(`Print ${i} successful.`);
+//           printSuccessCount++;
+//         } else {
+//           throw new Error(response.includes("PrinterStatusErrorCoverOpen") ? "Printer Cover Open" : "Printer Error: " + response.substring(0, 100));
+//         }
+//         if (i < copiesToPrintNow) await new Promise(resolve => setTimeout(resolve, 1500)); 
+//       } catch (error) {
+//         showModalAlert(`印刷エラー (${i}/${copiesToPrintNow}): ${error.message}`, true);
+//         if(printingStatusModal) printingStatusModal.style.display = 'none';
+//         localStorage.setItem(storageKey, JSON.stringify(printSessionData)); 
+//         return; 
+//       }
+//     }
+//   }
+
+//   localStorage.setItem(storageKey, JSON.stringify(printSessionData)); 
+
+//   if (printSuccessCount > 0) {
+//     const imagesToSubmit = (typeof window.getTakenPictures === 'function') ? window.getTakenPictures() : [];
+//     await updateMongoDBAfterPrint(品番, sagyoubi_yyMMdd, printedLotNumbers, imagesToSubmit, printSuccessCount);
+//   }
+
+//   if(printingStatusModal) printingStatusModal.style.display = 'none';
+//   if (printSuccessCount === copiesToPrintNow || (printSuccessCount > 0 && isIOS)) {
+//     if(printCompletionModal) printCompletionModal.style.display = 'block';
+//     if (isIOS && printSuccessCount < copiesToPrintNow) {
+//         showModalAlert(`${printSuccessCount}件のラベル印刷を開始しました。(Initiated printing for ${printSuccessCount} labels. Please check Brother app for remaining.)`, false);
+//     }
+//   }
+//   if(typeof fetchProductDetails === 'function') await fetchProductDetails(); 
+// }
+
+//added log per print to mongoDB
 async function printLabel() {
   const printingStatusModal = document.getElementById('printingStatusModal');
   const printCompletionModal = document.getElementById('printCompletionModal');
-  
+
   const 材料背番号 = document.getElementById("材料背番号")?.value || "";
-  const 品番 = document.getElementById("品名")?.value; 
+  const 品番 = document.getElementById("品名")?.value;
   const 色 = document.getElementById("material-color")?.value || "";
   const length = document.getElementById("length")?.value || "50";
-  const orderVal = document.getElementById("order")?.value || ""; 
+  const orderVal = document.getElementById("order")?.value || "";
   const copiesToPrintNow = parseInt(document.getElementById("printTimes")?.value, 10) || 1;
 
-  if (!品番) { 
+  if (!品番) {
     showModalAlert('品番が選択されていません。(Product Number is not selected.)', true);
-    if(printingStatusModal) printingStatusModal.style.display = 'none';
+    if (printingStatusModal) printingStatusModal.style.display = 'none';
     return;
   }
-   if (!材料背番号 && 品番) {
-       console.warn("材料背番号 is missing, using 品番 for barcode part 1 if needed.");
-   }
 
-
-  const storageKey = `${uniquePrefix}${品番}_printData`; 
+  const storageKey = `${uniquePrefix}${品番}_printData`;
   const lotDateInputElement = document.getElementById('Lot No.');
   if (!lotDateInputElement) {
-      showModalAlert('日付入力フィールドが見つかりません。', true);
-      if(printingStatusModal) printingStatusModal.style.display = 'none';
-      return;
+    showModalAlert('日付入力フィールドが見つかりません。', true);
+    if (printingStatusModal) printingStatusModal.style.display = 'none';
+    return;
   }
-  const lotDateInput = lotDateInputElement.value; 
+
+  const lotDateInput = lotDateInputElement.value;
   const dateParts = lotDateInput.split("-");
   if (dateParts.length < 3) {
-      showModalAlert('日付の形式が無効です。YYYY-MM-DD形式で入力してください。', true);
-      if(printingStatusModal) printingStatusModal.style.display = 'none';
-      return;
+    showModalAlert('日付の形式が無効です。YYYY-MM-DD形式で入力してください。', true);
+    if (printingStatusModal) printingStatusModal.style.display = 'none';
+    return;
   }
-  const sagyoubi_yyMMdd = `${dateParts[0].slice(-2)}${dateParts[1]}${dateParts[2]}`;
 
+  const sagyoubi_yyMMdd = `${dateParts[0].slice(-2)}${dateParts[1]}${dateParts[2]}`;
   let printSessionData = JSON.parse(localStorage.getItem(storageKey)) || { date: sagyoubi_yyMMdd, extension: 0 };
-  if (printSessionData.date !== sagyoubi_yyMMdd) { 
+  if (printSessionData.date !== sagyoubi_yyMMdd) {
     printSessionData = { date: sagyoubi_yyMMdd, extension: 0 };
+    localStorage.setItem(storageKey, JSON.stringify(printSessionData));
   }
 
   const ua = navigator.userAgent.toLowerCase();
@@ -664,147 +789,138 @@ async function printLabel() {
     const currentExtension = printSessionData.extension;
     const currentLotNo = `${sagyoubi_yyMMdd}-${currentExtension}`;
     printedLotNumbers.push(currentLotNo);
-
-    const barcodeValuePart1 = 材料背番号 || 品番; 
+    const barcodeValuePart1 = 材料背番号 || 品番;
     const barcodeFullValue = `${barcodeValuePart1},${currentLotNo},${length}`;
+    const srsStatus = document.getElementById("SRS")?.value;
+    let filename = srsStatus === "有り" ? "SRS3.lbx" : (材料背番号 === "NC2" ? "NC21.lbx" : "firstkojo3.lbx");
 
-    let filename = "";
-    const srsStatusElement = document.getElementById("SRS");
-    const srsStatus = srsStatusElement ? srsStatusElement.value : "無し";
-
-    if (srsStatus === "有り") filename = "SRS3.lbx";
-    else if (材料背番号 === "NC2") filename = "NC21.lbx"; 
-    else filename = "firstkojo3.lbx";
-    
-    let url = "";
     if (isIOS) {
-      url = `brotherwebprint://print?filename=${encodeURIComponent(filename)}&size=RollW62&copies=1` +
-            `&text_品番=${encodeURIComponent(品番)}` +
-            `&text_背番号=${encodeURIComponent(材料背番号)}` + 
-            `&text_収容数=${encodeURIComponent(orderVal)}` + 
-            `&text_色=${encodeURIComponent(色)}` +
-            `&text_DateT=${encodeURIComponent(currentLotNo)}` +
-            `&barcode_barcode=${encodeURIComponent(barcodeFullValue)}`;
-      console.log(`[iOS] Attempting print via URL scheme: ${i}/${copiesToPrintNow}`);
-      window.location.href = url; 
-      printSuccessCount++; 
-      if (i < copiesToPrintNow) await new Promise(resolve => setTimeout(resolve, 3500)); 
-    } else { 
-      url = `http://localhost:8088/print?filename=${encodeURIComponent(filename)}&size=RollW62&copies=1` +
-            `&text_品番=${encodeURIComponent(品番)}` +
-            `&text_背番号=${encodeURIComponent(材料背番号)}` +
-            `&text_収容数=${encodeURIComponent(orderVal)}` +
-            `&text_色=${encodeURIComponent(色)}` +
-            `&text_DateT=${encodeURIComponent(currentLotNo)}` +
-            `&barcode_barcode=${encodeURIComponent(barcodeFullValue)}`;
-      console.log(`[Desktop/Android] Print ${i}/${copiesToPrintNow}:`, url);
+      const url = `brotherwebprint://print?filename=${encodeURIComponent(filename)}&size=RollW62&copies=1` +
+        `&text_品番=${encodeURIComponent(品番)}&text_背番号=${encodeURIComponent(材料背番号)}` +
+        `&text_収容数=${encodeURIComponent(orderVal)}&text_色=${encodeURIComponent(色)}` +
+        `&text_DateT=${encodeURIComponent(currentLotNo)}&barcode_barcode=${encodeURIComponent(barcodeFullValue)}`;
+      window.location.href = url;
+      printSuccessCount++;
+      await new Promise(resolve => setTimeout(resolve, 3500));
+    } else {
+      const url = `http://localhost:8088/print?filename=${encodeURIComponent(filename)}&size=RollW62&copies=1` +
+        `&text_品番=${encodeURIComponent(品番)}&text_背番号=${encodeURIComponent(材料背番号)}` +
+        `&text_収容数=${encodeURIComponent(orderVal)}&text_色=${encodeURIComponent(色)}` +
+        `&text_DateT=${encodeURIComponent(currentLotNo)}&barcode_barcode=${encodeURIComponent(barcodeFullValue)}`;
       try {
         const response = await Promise.race([
           fetch(url).then(res => res.text()),
-          new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 700000))
+          new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 7000))
         ]);
         if (response.includes("<result>SUCCESS</result>")) {
-          console.log(`Print ${i} successful.`);
           printSuccessCount++;
+          localStorage.setItem(storageKey, JSON.stringify(printSessionData));
+
+          // ✅ Log to MongoDB immediately WITHOUT image
+          await updateMongoDBAfterPrint(品番, sagyoubi_yyMMdd, [currentLotNo], [], 1);
         } else {
           throw new Error(response.includes("PrinterStatusErrorCoverOpen") ? "Printer Cover Open" : "Printer Error: " + response.substring(0, 100));
         }
-        if (i < copiesToPrintNow) await new Promise(resolve => setTimeout(resolve, 1500)); 
+        await new Promise(resolve => setTimeout(resolve, 1500));
       } catch (error) {
         showModalAlert(`印刷エラー (${i}/${copiesToPrintNow}): ${error.message}`, true);
-        if(printingStatusModal) printingStatusModal.style.display = 'none';
-        localStorage.setItem(storageKey, JSON.stringify(printSessionData)); 
-        return; 
+        if (printingStatusModal) printingStatusModal.style.display = 'none';
+        return;
       }
     }
   }
 
-  localStorage.setItem(storageKey, JSON.stringify(printSessionData)); 
-
-  if (printSuccessCount > 0) {
+  // ✅ Upload images only if all prints succeeded and platform is Android
+  if (printSuccessCount === copiesToPrintNow) {
     const imagesToSubmit = (typeof window.getTakenPictures === 'function') ? window.getTakenPictures() : [];
-    await updateMongoDBAfterPrint(品番, sagyoubi_yyMMdd, printedLotNumbers, imagesToSubmit, printSuccessCount);
-  }
-
-  if(printingStatusModal) printingStatusModal.style.display = 'none';
-  if (printSuccessCount === copiesToPrintNow || (printSuccessCount > 0 && isIOS)) {
-    if(printCompletionModal) printCompletionModal.style.display = 'block';
-    if (isIOS && printSuccessCount < copiesToPrintNow) {
-        showModalAlert(`${printSuccessCount}件のラベル印刷を開始しました。(Initiated printing for ${printSuccessCount} labels. Please check Brother app for remaining.)`, false);
+    if (!isIOS && imagesToSubmit.length > 0) {
+      await updateMongoDBAfterPrint(品番, sagyoubi_yyMMdd, [], imagesToSubmit, 0);
     }
   }
-  if(typeof fetchProductDetails === 'function') await fetchProductDetails(); 
+
+  if (printingStatusModal) printingStatusModal.style.display = 'none';
+
+  if (printSuccessCount === copiesToPrintNow || (printSuccessCount > 0 && isIOS)) {
+    if (printCompletionModal) printCompletionModal.style.display = 'block';
+    if (isIOS && printSuccessCount < copiesToPrintNow) {
+      showModalAlert(`${printSuccessCount}件のラベル印刷を開始しました。(Initiated printing for ${printSuccessCount} labels. Please check Brother app for remaining.)`, false);
+    }
+  }
+
+  if (typeof fetchProductDetails === 'function') await fetchProductDetails();
 }
 
 
+
 async function updateMongoDBAfterPrint(品番, sagyoubi_yyMMdd, printedLotNumbersArray, imagesToUploadArray, numJustPrinted) {
-  const now = new Date();
-  
-  const targetProdCountEl = document.getElementById('targetProductionCount');
-  const currentFactoryEl = document.getElementById('selected工場');
-  const currentMachineEl = document.getElementById('hidden設備');
-  const printStatusEl = document.getElementById('printStatus');
-  const statusEl = document.getElementById('status');
+    const now = new Date();
+ 
+    const targetProdCountEl = document.getElementById('targetProductionCount');
+    const currentFactoryEl = document.getElementById('selected工場');
+    const currentMachineEl = document.getElementById('hidden設備');
+    const printStatusEl = document.getElementById('printStatus');
+    const statusEl = document.getElementById('status');
 
-  const targetForCompletion = targetProdCountEl ? (parseInt(targetProdCountEl.value, 10) || 0) : 0;
-  const currentFactory = currentFactoryEl ? currentFactoryEl.value : 'N/A';
-  const currentMachine = currentMachineEl ? currentMachineEl.value : "N/A"; 
-  const currentUser = "LabelPrinterUser"; // Placeholder
+    const targetForCompletion = targetProdCountEl ? (parseInt(targetProdCountEl.value, 10) || 0) : 0;
+    const currentFactory = currentFactoryEl ? currentFactoryEl.value : 'N/A';
+    const currentMachine = currentMachineEl ? currentMachineEl.value : "N/A"; 
+    const currentUser = "LabelPrinterUser"; // Placeholder
 
-  const payloadForBackend = {
-    品番: 品番,
-    作業日: sagyoubi_yyMMdd,
-    numJustPrinted: numJustPrinted,
-    printLogEntry: { 
-        timestamp: new Date().toISOString(), 
-        lotNumbers: printedLotNumbersArray, 
-        count: numJustPrinted,
-        printedBy: currentUser, 
-        factory: currentFactory, 
-        machine: currentMachine 
-    },
-    lastPrintTimestamp: new Date().toISOString(), 
-    imagesToUpload: imagesToUploadArray.length > 0 ? imagesToUploadArray.map(pic => ({
-        base64: pic.base64,
-        label: pic.label,
-        品番ForFilename: 品番,
-        dateForFilename: sagyoubi_yyMMdd, 
-        timestampForFilename: Date.now(), 
-        factoryForFilename: currentFactory,
-        machineForFilename: currentMachine
-    })) : [],
-    targetProductionCountForStatusUpdate: targetForCompletion, 
-  };
+    const payloadForBackend = {
+        品番: 品番,
+        作業日: sagyoubi_yyMMdd,
+        numJustPrinted: numJustPrinted,
+        printLogEntry: { 
+            timestamp: new Date().toISOString(), 
+            lotNumbers: printedLotNumbersArray, 
+            count: numJustPrinted,
+            printedBy: currentUser, 
+            factory: currentFactory, 
+            machine: currentMachine 
+        },
+        lastPrintTimestamp: new Date().toISOString(), 
+        imagesToUpload: imagesToUploadArray.length > 0 ? imagesToUploadArray.map(pic => ({
+            base64: pic.base64,
+            label: pic.label,
+            品番ForFilename: 品番,
+            dateForFilename: sagyoubi_yyMMdd, 
+            // ✅ FIX: Use the timestamp from when the picture was taken, instead of creating a new one.
+            timestampForFilename: pic.timestamp, 
+            factoryForFilename: currentFactory,
+            machineForFilename: currentMachine
+        })) : [],
+        targetProductionCountForStatusUpdate: targetForCompletion, 
+    };
 
-  try {
-    const response = await fetch(`${serverURL}/logPrintAndUpdateMaterialRequest`, { 
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payloadForBackend)
-    });
-    const result = await response.json(); 
+    try {
+        const response = await fetch(`${serverURL}/logPrintAndUpdateMaterialRequest`, { 
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payloadForBackend)
+        });
+        const result = await response.json(); 
 
-    if (response.ok && result.status === "success") { 
-      showModalAlert(`ログと画像（あれば）がDBに送信されました。\n${numJustPrinted}枚印刷完了。\n最終ステータス: ${result.finalDocStatus || '確認中'}`, false);
-      if (window.clearTakenPictures && typeof window.clearTakenPictures === 'function') {
-          window.clearTakenPictures();
-      }
-      
-      const newTotalPrinted = result.newTotalPrintedCount !== undefined ? result.newTotalPrintedCount : 
-                              ((printStatusEl ? parseInt(printStatusEl.value.split(' / ')[0],10) : 0) || 0) + numJustPrinted;
-      
-      if(printStatusEl) printStatusEl.value = `${newTotalPrinted} / ${targetForCompletion}`; 
-      if (statusEl && (result.finalDocStatus === "completed" || (targetForCompletion > 0 && newTotalPrinted >= targetForCompletion))) {
-          statusEl.value = "完了";
-      }
+        if (response.ok && result.status === "success") { 
+            showModalAlert(`ログと画像（あれば）がDBに送信されました。\n${numJustPrinted}枚印刷完了。\n最終ステータス: ${result.finalDocStatus || '確認中'}`, false);
+            if (window.clearTakenPictures && typeof window.clearTakenPictures === 'function') {
+                window.clearTakenPictures();
+            }
+         
+            const newTotalPrinted = result.newTotalPrintedCount !== undefined ? result.newTotalPrintedCount : 
+                                    ((printStatusEl ? parseInt(printStatusEl.value.split(' / ')[0],10) : 0) || 0) + numJustPrinted;
+         
+            if(printStatusEl) printStatusEl.value = `${newTotalPrinted} / ${targetForCompletion}`; 
+            if (statusEl && (result.finalDocStatus === "completed" || (targetForCompletion > 0 && newTotalPrinted >= targetForCompletion))) {
+                statusEl.value = "完了";
+            }
 
-    } else {
-      throw new Error(result.message || result.error || "DB更新失敗 (DB update failed)");
+        } else {
+            throw new Error(result.message || result.error || "DB更新失敗 (DB update failed)");
+        }
+    } catch (error) {
+        console.error("Error in updateMongoDBAfterPrint:", error);
+        showModalAlert(`DB更新エラー: ${error.message}`, true);
     }
-  } catch (error) {
-    console.error("Error in updateMongoDBAfterPrint:", error);
-    showModalAlert(`DB更新エラー: ${error.message}`, true);
-  }
 }
 
 
@@ -1098,39 +1214,41 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function takeSnapshot() {
-        if (!stream || !captureCanvas || !videoFeed || !captureCanvas.getContext) {
-            console.error("Stream or canvas not ready for snapshot, or canvas context unavailable.");
-            closeCamera();
-            return;
-        }
-        if (takenPictures.length >= MAX_PICTURES) {
-            showModalAlert(`最大${MAX_PICTURES}枚までです。(Max ${MAX_PICTURES} pictures allowed.)`, false);
-            closeCamera();
-            return;
-        }
-        
-        const context = captureCanvas.getContext('2d');
-        if (!context) {
-            console.error("Failed to get 2D context from canvas.");
-            closeCamera();
-            return;
-        }
-        context.drawImage(videoFeed, 0, 0, captureCanvas.width, captureCanvas.height);
-        const imageDataURL = captureCanvas.toDataURL('image/jpeg', 0.8); 
-        
-        takenPictures.push({
-            base64: imageDataURL.split(',')[1], 
-            label: "材料ラベル" 
-        });
-        
-        renderThumbnails();
-        showModalAlert('写真が撮影されました。(Picture taken!)', false, 2000); // Brief confirmation
-
-        if (takenPictures.length >= MAX_PICTURES) {
-            showModalAlert(`最大${MAX_PICTURES}枚に達しました。(Reached max ${MAX_PICTURES} pictures.)`, false);
-            closeCamera(); 
-        }
+    if (!stream || !captureCanvas || !videoFeed || !captureCanvas.getContext) {
+        console.error("Stream or canvas not ready for snapshot, or canvas context unavailable.");
+        closeCamera();
+        return;
     }
+    if (takenPictures.length >= MAX_PICTURES) {
+        showModalAlert(`最大${MAX_PICTURES}枚までです。(Max ${MAX_PICTURES} pictures allowed.)`, false);
+        closeCamera();
+        return;
+    }
+     
+    const context = captureCanvas.getContext('2d');
+    if (!context) {
+        console.error("Failed to get 2D context from canvas.");
+        closeCamera();
+        return;
+    }
+    context.drawImage(videoFeed, 0, 0, captureCanvas.width, captureCanvas.height);
+    const imageDataURL = captureCanvas.toDataURL('image/jpeg', 0.8); 
+     
+    // ✅ FIX: Added a unique timestamp at the moment of capture.
+    takenPictures.push({
+        base64: imageDataURL.split(',')[1], 
+        label: "材料ラベル",
+        timestamp: Date.now() // The unique timestamp is now part of the image data.
+    });
+     
+    renderThumbnails();
+    showModalAlert('写真が撮影されました。(Picture taken!)', false, 2000); // Brief confirmation
+
+    if (takenPictures.length >= MAX_PICTURES) {
+        showModalAlert(`最大${MAX_PICTURES}枚に達しました。(Reached max ${MAX_PICTURES} pictures.)`, false);
+        closeCamera(); 
+    }
+}
 
     function renderThumbnails() {
         if (!thumbnailsContainer) {
