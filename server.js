@@ -3477,6 +3477,99 @@ app.post("/customerBulkDelete", async (req, res) => {
 
 
 
+app.post('/fetchCustomerSubmittedLogs', async (req, res) => {
+    console.log("🟢 Received POST request to /fetchSubmittedLogs");
+    const { 
+        dbName, 
+        filters = {}, // Default to empty object if not provided
+        sort = { date: -1, time: -1 }, // Default sort
+        limit = 50,   // Default limit
+        skip = 0,     // Default skip
+        getTotalCount = false, // Flag to request total count
+        idsToFetch = [] // Array of _id strings to fetch specific documents
+    } = req.body;
+
+    if (!dbName) {
+        return res.status(400).json({ error: "dbName is required" });
+    }
+
+    try {
+        // await client.connect(); // Manage connection as per your full setup
+        const database = client.db(dbName);
+        const collection = database.collection('submittedDB');
+
+        let queryToExecute = filters;
+
+        // If specific IDs are requested, override other filters
+        if (idsToFetch && idsToFetch.length > 0) {
+            try {
+                queryToExecute = { 
+                    _id: { 
+                        $in: idsToFetch.map(idStr => {
+                            if (typeof idStr === 'string' && ObjectId.isValid(idStr)) {
+                                return new ObjectId(idStr);
+                            }
+                            // Log or handle invalid ID strings if necessary
+                            console.warn(`Invalid ObjectId string in idsToFetch: ${idStr}`);
+                            return idStr; // Or skip/throw error
+                        }) 
+                    } 
+                };
+                 console.log("Fetching specific IDs:", queryToExecute._id.$in);
+            } catch (e) {
+                console.error("Error converting one or more IDs in idsToFetch:", e);
+                return res.status(400).json({ error: "Invalid ID format in idsToFetch array."});
+            }
+        } else {
+            // Ensure date filters are handled correctly if they exist in `filters`
+            if (filters.date) {
+                // No specific conversion needed here if dates are already in ISO string format
+                // MongoDB can compare ISO date strings directly in many cases
+            }
+            // Ensure '品番' regex is handled if it exists
+            if (filters['品番'] && typeof filters['品番'].$regex === 'string') {
+                // The client should send the regex string and options correctly
+            }
+        }
+        
+        console.log("Executing query on submittedDB:", JSON.stringify(queryToExecute, null, 2));
+        console.log("Sort:", sort, "Limit:", limit, "Skip:", skip);
+
+        const findQuery = collection.find(queryToExecute)
+                                .sort(sort)
+                                .skip(skip)
+                                .limit(limit);
+        
+        const data = await findQuery.toArray();
+        let totalCount = 0;
+
+        if (getTotalCount) {
+            // If specific IDs were fetched, totalCount is just the number of IDs found
+            if (idsToFetch && idsToFetch.length > 0) {
+                totalCount = data.length; // Or could re-query with the ID list, but data.length is fine here
+            } else {
+                totalCount = await collection.countDocuments(filters);
+            }
+            console.log(`✅ Returning ${data.length} records, totalCount: ${totalCount}`);
+            return res.json({ data: data, totalCount: totalCount });
+        } else {
+            console.log(`✅ Returning ${data.length} records (no totalCount requested)`);
+            return res.json(data); // If totalCount not requested, just send data array
+        }
+
+    } catch (error) {
+        console.error("❌ Error in /fetchSubmittedLogs route:", error);
+        return res.status(500).json({ error: "Error fetching submitted logs", details: error.message });
+    }
+    // finally {
+    //     // if (client && client.topology && client.topology.isConnected()) {
+    //     //     await client.close();
+    //     // }
+    // }
+});
+
+
+
 //FREYA CUSTOMER ACCESS BACKEND END
 
 app.post('/saveImageURL', async (req, res) => {
