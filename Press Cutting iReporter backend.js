@@ -1704,7 +1704,7 @@ async function handleQRScan(qrCodeMessage) {
                     // Second scan is needed
                     //disableInputs(); <- need to uncomment this if final
                     const successMessage = "Success! Scan Tomson Board. / 成功！トムソンボードをスキャンしてください。";
-                    showSuccessPrompt(successMessage, 4000); // Show for 4 seconds
+                    //showSuccessPrompt(successMessage, 4000); // Show for 4 seconds
                 }
             } else {
                 showAlert("Failed to retrieve product data after first scan. Please try the first scan again.");
