@@ -3477,6 +3477,118 @@ app.post("/customerBulkDelete", async (req, res) => {
 
 
 
+
+app.post('/aggregateCustomerDashboardWidgetData', async (req, res) => {
+    console.log("🟢 Received POST request to /aggregateCustomerDashboardWidgetData");
+    const {
+        dbName,
+        collectionName = 'submittedDB', // Default to submittedDB
+        // queryConfig contains all details for this specific widget's data
+        queryConfig = { 
+            //deviceIdField: 'ユニークID', // Actual field name for device identifier
+            //deviceIdValue: 'DEVICE_XYZ_ID',
+            //dateField: '日付',          // Actual field name for date
+            //dateValue: 'YYYY-MM-DD',    // Today's date string
+            //sourceField: 'アクション',    // The field to analyze for the widget
+            //summaryType: 'percentageBreakdown', // e.g., sum, average, countUnique
+            //additionalFilters: {}     // Optional, e.g., { "LH/RH": "LH" }
+        }
+    } = req.body;
+
+    if (!dbName || !queryConfig || !queryConfig.deviceIdField || !queryConfig.deviceIdValue || !queryConfig.dateField || !queryConfig.dateValue || !queryConfig.sourceField || !queryConfig.summaryType) {
+        return res.status(400).json({ error: "Missing required fields in request (dbName or queryConfig details)." });
+    }
+
+    try {
+        const database = client.db(dbName);
+        const collection = database.collection(collectionName);
+
+        // Construct the base match stage
+        let matchStage = {
+            [queryConfig.deviceIdField]: queryConfig.deviceIdValue,
+            [queryConfig.dateField]: queryConfig.dateValue
+        };
+
+        if (queryConfig.additionalFilters && Object.keys(queryConfig.additionalFilters).length > 0) {
+            matchStage = { ...matchStage, ...queryConfig.additionalFilters };
+        }
+
+        const pipeline = [{ $match: matchStage }];
+        let results;
+
+        console.log(`Aggregating for widget: ${queryConfig.sourceField}, type: ${queryConfig.summaryType}`);
+        console.log("Initial match stage:", JSON.stringify(matchStage));
+
+        // Add aggregation stages based on summaryType
+        switch (queryConfig.summaryType) {
+            case 'sum':
+            case 'average':
+            case 'min':
+            case 'max':
+                pipeline.push({
+                    $group: {
+                        _id: null, // Group all matched documents
+                        value: { [`$${queryConfig.summaryType}`]: `$${queryConfig.sourceField}` }
+                    }
+                });
+                results = await collection.aggregate(pipeline).toArray();
+                // Result will be like [{ _id: null, value: X }] or []
+                break;
+            
+            case 'countRecords': // Counts records where the sourceField has a non-null value
+                 pipeline.push({ $match: { [queryConfig.sourceField]: { $exists: true, $ne: null, $ne: "" } } });
+                 pipeline.push({ $count: "value" });
+                 results = await collection.aggregate(pipeline).toArray();
+                 // Result will be like [{ value: X }] or []
+                break;
+
+            case 'countUnique':
+                pipeline.push({
+                    $match: { [queryConfig.sourceField]: { $exists: true, $ne: null } } // Ensure field exists for $addToSet
+                });
+                pipeline.push({
+                    $group: {
+                        _id: null,
+                        uniqueValues: { $addToSet: `$${queryConfig.sourceField}` }
+                    }
+                });
+                pipeline.push({
+                    $project: {
+                        _id: 0,
+                        value: { $size: "$uniqueValues" }
+                    }
+                });
+                results = await collection.aggregate(pipeline).toArray();
+                // Result will be like [{ value: X }] or []
+                break;
+
+            case 'percentageBreakdown': // Returns counts for each unique value
+                 pipeline.push({ $match: { [queryConfig.sourceField]: { $exists: true, $ne: null, $ne: "" } } });
+                 pipeline.push({
+                    $group: {
+                        _id: `$${queryConfig.sourceField}`, // Group by the source field's values
+                        count: { $sum: 1 }
+                    }
+                });
+                pipeline.push({ $sort: { _id: 1 } }); // Sort by the grouped value
+                results = await collection.aggregate(pipeline).toArray();
+                // Result will be like [{ _id: "ValueA", count: X }, { _id: "ValueB", count: Y }]
+                break;
+
+            default:
+                return res.status(400).json({ error: `Unsupported summaryType: ${queryConfig.summaryType}` });
+        }
+        
+        console.log(`✅ Aggregation results for ${queryConfig.sourceField}:`, results);
+        res.json(results);
+
+    } catch (error) {
+        console.error(`❌ Error in /aggregateDashboardWidgetData for ${queryConfig.sourceField}:`, error);
+        res.status(500).json({ error: "Error aggregating dashboard widget data", details: error.message });
+    }
+});
+
+
 app.post('/fetchCustomerSubmittedLogs', async (req, res) => {
     console.log("🟢 Received POST request to /fetchSubmittedLogs");
     const { 
@@ -3558,7 +3670,7 @@ app.post('/fetchCustomerSubmittedLogs', async (req, res) => {
         }
 
     } catch (error) {
-        console.error("❌ Error in /fetchSubmittedLogs route:", error);
+        console.error("❌ Error in /fetchCustomerSubmittedLogs route:", error);
         return res.status(500).json({ error: "Error fetching submitted logs", details: error.message });
     }
     // finally {
