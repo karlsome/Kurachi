@@ -441,156 +441,166 @@ function enableInputs() {
 // document.getElementById("sub-dropdown").addEventListener("change", fetchProductDetails);
 
 // Function to fetch product details based on 背番号 or 品番
+// Function to fetch product details based on 背番号 or 品番
 async function fetchProductDetails() {
-  // checkProcessCondition(); // Consider if this is needed here orc better handled by the calling function's flow
-  enableInputs(); // Delete this in production - Input enabling should be managed by the overall scan logic
+    // checkProcessCondition(); // Consider if this is needed here or better handled by the calling function's flow
+    enableInputs(); // Delete this in production - Input enabling should be managed by the overall scan logic
 
-  const subDropdown = document.getElementById("sub-dropdown");
-  const serialNumber = subDropdown.value;
-  const factory = document.getElementById("selected工場").value; // Keep if needed for other logic
-  const dynamicImage = document.getElementById("dynamicImage");
-  const expectedBoardDataInputElement = document.getElementById("expectedBoardDataQR"); // Get the element once
+    const subDropdown = document.getElementById("sub-dropdown");
+    const serialNumber = subDropdown.value;
+    const factory = document.getElementById("selected工場").value; // Keep if needed for other logic
+    const dynamicImage = document.getElementById("dynamicImage");
+    const expectedBoardDataInputElement = document.getElementById("expectedBoardDataQR"); // Get the element once
 
-  // Clear previous data first
-  blankInfo(); // Assuming blankInfo() clears all relevant product fields including expectedBoardDataQR
-  if (expectedBoardDataInputElement) {
-      expectedBoardDataInputElement.value = ""; // Explicitly clear here too
-  }
-  if (dynamicImage) {
-    dynamicImage.src = "";
-    dynamicImage.alt = "Loading image..."; // Or "No Image Available" initially
-    dynamicImage.style.display = "none";
-  }
-
-
-  if (!serialNumber) {
-    console.warn("[fetchProductDetails] No serialNumber (from sub-dropdown) selected.");
-    // blankInfo() was called above.
-    return false; // Indicate failure
-  }
-
-  console.log("[fetchProductDetails] Fetching for serialNumber:", serialNumber);
-
-  try {
-    // Step 1: Try query by 背番号
-    let response = await fetch(`${serverURL}/queries`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        dbName: "Sasaki_Coating_MasterDB",
-        collectionName: "masterDB",
-        query: { 背番号: serialNumber },
-      }),
-    });
-
-    let result = await response.json();
-    let querySource = "背番号";
-
-    // Step 2: If not found, try query by 品番
-    if (!result || result.length === 0) {
-      console.log("[fetchProductDetails] Not found by 背番号, trying by 品番:", serialNumber);
-      querySource = "品番";
-      response = await fetch(`${serverURL}/queries`, { // Re-assign response
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          dbName: "Sasaki_Coating_MasterDB",
-          collectionName: "masterDB",
-          query: { 品番: serialNumber },
-        }),
-      });
-      result = await response.json(); // Re-assign result
-
-      // If found by 品番 and that item has a 背番号, update the dropdown if desired.
-      // This part is tricky because if the first scan was a 品番 that also exists as a 背番号 for another item,
-      // it could cause confusion. For now, let's assume serialNumber from dropdown is the intended key.
-      // If found by 品番 and it's different from what's in dropdown but exists, maybe just use it.
-      // Original logic:
-      // if (altResult.length > 0) {
-      //   const matched = altResult[0];
-      //   if (matched.背番号) {
-      //     subDropdown.value = matched.背番号; // Update dropdown to 背番号
-      //   }
-      //   result = [matched];
-      // }
+    // Clear previous data first
+    blankInfo(); // Assuming blankInfo() clears all relevant product fields
+    if (expectedBoardDataInputElement) {
+        expectedBoardDataInputElement.value = ""; // Explicitly clear here too
     }
-
-    // Step 3: Still no result
-    if (!result || result.length === 0) {
-      console.error(`[fetchProductDetails] No matching product found by ${querySource} for:`, serialNumber);
-      // blankInfo() was called at the start.
-      return false; // Indicate failure
-    }
-
-    const product = result[0];
-    console.log("[fetchProductDetails] Product found:", product);
-
-    // Step 4: Display image from imageURL (Firebase)
     if (dynamicImage) {
-        if (product.imageURL) {
-            dynamicImage.src = product.imageURL;
-            dynamicImage.alt = "Product Image";
-            dynamicImage.style.display = "block";
-        } else {
-            dynamicImage.src = "";
-            dynamicImage.alt = "No Image Available";
-            dynamicImage.style.display = "none";
+        dynamicImage.src = "";
+        dynamicImage.alt = "Loading image...";
+        dynamicImage.style.display = "none";
+    }
+
+    if (!serialNumber) {
+        console.warn("[fetchProductDetails] No serialNumber (from sub-dropdown) selected.");
+        return false; // Indicate failure
+    }
+
+    console.log("[fetchProductDetails] Fetching for serialNumber:", serialNumber);
+
+    try {
+        // Step 1: Try query by 背番号
+        let response = await fetch(`${serverURL}/queries`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                dbName: "Sasaki_Coating_MasterDB",
+                collectionName: "masterDB",
+                query: { 背番号: serialNumber },
+            }),
+        });
+
+        let result = await response.json();
+        let querySource = "背番号";
+
+        // Step 2: If not found, try query by 品番
+        if (!result || result.length === 0) {
+            console.log("[fetchProductDetails] Not found by 背番号, trying by 品番:", serialNumber);
+            querySource = "品番";
+            response = await fetch(`${serverURL}/queries`, { // Re-assign response
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    dbName: "Sasaki_Coating_MasterDB",
+                    collectionName: "masterDB",
+                    query: { 品番: serialNumber },
+                }),
+            });
+            result = await response.json(); // Re-assign result
         }
-    }
 
+        // Step 3: Still no result
+        if (!result || result.length === 0) {
+            console.error(`[fetchProductDetails] No matching product found by ${querySource} for:`, serialNumber);
+            return false; // Indicate failure
+        }
 
-    // Step 5: Populate product fields
-    document.getElementById("product-number").value = product.品番 || "";
-    document.getElementById("model").value = product.モデル || "";
-    document.getElementById("shape").value = product.形状 || "";
-    document.getElementById("R-L").value = product["R/L"] || "";
-    document.getElementById("material").value = product.材料 || "";
-    document.getElementById("material-code").value = product.材料背番号 || "";
-    document.getElementById("material-color").value = product.色 || "";
-    document.getElementById("kataban").value = product.型番 || "";
-    document.getElementById("収容数").value = product.収容数 || "";
+        const product = result[0];
+        console.log("[fetchProductDetails] Product found:", product);
 
-    const 送りピッチElement = document.getElementById("送りピッチ");
-    if (送りピッチElement) {
-        送りピッチElement.textContent = "送りピッチ: " + (product.送りピッチ || "N/A");
-    }
-    document.getElementById("SRS").value = product.SRS || "";
+        // Step 4: Display image
+        if (dynamicImage) {
+            if (product.imageURL) {
+                dynamicImage.src = product.imageURL;
+                dynamicImage.alt = "Product Image";
+                dynamicImage.style.display = "block";
+            } else {
+                dynamicImage.src = "";
+                dynamicImage.alt = "No Image Available";
+                dynamicImage.style.display = "none";
+            }
+        }
 
+        // Step 5: Populate product fields
+        document.getElementById("product-number").value = product.品番 || "";
+        document.getElementById("model").value = product.モデル || "";
+        document.getElementById("shape").value = product.形状 || "";
+        document.getElementById("R-L").value = product["R/L"] || "";
+        document.getElementById("material").value = product.材料 || "";
+        document.getElementById("material-code").value = product.材料背番号 || "";
+        document.getElementById("material-color").value = product.色 || "";
+        document.getElementById("kataban").value = product.型番 || "";
+        document.getElementById("収容数").value = product.収容数 || "";
+        const 送りピッチElement = document.getElementById("送りピッチ");
+        if (送りピッチElement) {
+            送りピッチElement.textContent = "送りピッチ: " + (product.送りピッチ || "N/A");
+        }
+        document.getElementById("SRS").value = product.SRS || "";
 
-    // Step 6: Process and store boardData for the second QR scan
-    if (product.boardData && Array.isArray(product.boardData)) {
-        const boardDataString = product.boardData.join(',');
+        // Step 6: Process and store boardData for the second QR scan (HANDLES BOTH STRING AND ARRAY)
+        let boardDataStringForQR = null;
+
+        if (product.boardData) {
+            if (Array.isArray(product.boardData)) {
+                if (product.boardData.length > 0) {
+                    boardDataStringForQR = product.boardData.join(',');
+                    console.log("[fetchProductDetails] 'boardData' (Array type) processed to:", `"${boardDataStringForQR}"`);
+                } else {
+                    console.warn("[fetchProductDetails] 'boardData' is an empty array. Product:", product);
+                }
+            } else if (typeof product.boardData === 'string') {
+                if (product.boardData.trim() !== '') {
+                    boardDataStringForQR = product.boardData;
+                    console.log("[fetchProductDetails] 'boardData' (String type) used directly:", `"${boardDataStringForQR}"`);
+                } else {
+                    console.warn("[fetchProductDetails] 'boardData' is an empty string. Product:", product);
+                }
+            } else {
+                console.warn("[fetchProductDetails] 'boardData' exists but is neither a valid array nor a string. Product:", product);
+            }
+        } else {
+            console.warn("[fetchProductDetails] 'boardData' not found in product. Product:", product);
+        }
+
+        // Now set the input field and determine return value based on boardDataStringForQR
         if (expectedBoardDataInputElement) {
-            expectedBoardDataInputElement.value = boardDataString;
-            console.log("[fetchProductDetails] Successfully set hidden 'expectedBoardDataQR' to:", `"${boardDataString}"`);
-            // checkProcessCondition(); // Now that all data is loaded, check conditions.
-            // The calling function (handleQRScan) will decide whether to enable inputs.
-            return true; // Indicate success, boardData for QR is ready
+            if (boardDataStringForQR !== null) {
+                expectedBoardDataInputElement.value = boardDataStringForQR;
+                console.log("[fetchProductDetails] Successfully set hidden 'expectedBoardDataQR' to:", `"${boardDataStringForQR}"`);
+                return true; // Successfully prepared for QR comparison
+            } else {
+                // boardDataStringForQR is null (boardData was missing, empty, or invalid type)
+                expectedBoardDataInputElement.value = ""; // Ensure it's cleared
+                console.warn("[fetchProductDetails] 'expectedBoardDataQR' is cleared as 'boardData' was invalid/missing/empty.");
+
+                // Check if this is a fatal error for the function's purpose
+                const currentFactory = document.getElementById("selected工場")?.value;
+                const currentProcess = document.getElementById("process")?.value;
+                const isNFH_RLC_scenario = currentFactory === "NFH" && currentProcess === "RLC";
+
+                if (!isNFH_RLC_scenario) {
+                    // If a second scan is normally expected, and we couldn't get boardData,
+                    // this is a failure to prepare for that second scan.
+                    console.error("[fetchProductDetails] boardData is missing/invalid, and this is NOT an NFH+RLC scenario. Second scan preparation failed.");
+                    return false;
+                } else {
+                    // For NFH+RLC, the second scan is skipped. Missing boardData might be acceptable.
+                    // The function still successfully fetched the product's other details.
+                    console.log("[fetchProductDetails] boardData is missing/invalid, but this IS an NFH+RLC scenario. Returning true as product was fetched.");
+                    return true;
+                }
+            }
         } else {
             console.error("[fetchProductDetails] Critical: Hidden input 'expectedBoardDataQR' not found in DOM!");
-            // checkProcessCondition();
-            return false; // Indicate failure because we can't store the expected QR
+            return false; // Cannot proceed without the input field
         }
-    } else {
-        console.warn("[fetchProductDetails] boardData not found in product, not an array, or is empty. Product:", product);
-        if (expectedBoardDataInputElement) {
-            expectedBoardDataInputElement.value = ""; // Clear it if no valid boardData
-        }
-        // checkProcessCondition();
-        // For some processes, boardData might not be required for a second scan.
-        // However, if the overall logic in handleQRScan *expects* it for non-NFH+RLC,
-        // this should be treated as a state where the second scan cannot be validated.
-        // The calling function handleQRScan will decide if this is an error state.
-        // Let's return true if product was found, but log the warning.
-        // handleQRScan will then check if expectedBoardDataQR is empty.
-        return true; // Product was found, but boardData for QR might be missing.
-    }
 
-  } catch (error) {
-    console.error("[fetchProductDetails] Error during fetch operation or processing:", error);
-    // blankInfo() was called at the start.
-    return false; // Indicate failure
-  }
+    } catch (error) {
+        console.error("[fetchProductDetails] Error during fetch operation or processing:", error);
+        return false; // Indicate failure
+    }
 }
 
 document.getElementById("sub-dropdown").addEventListener("change", fetchProductDetails);
@@ -1864,7 +1874,7 @@ function closeActiveScannerModal() {
             event.preventDefault(); // Prevent form submission or other default Enter behavior
         } else if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
              // Accumulate printable characters, allow comma, dash, period, space, underscore
-            if (/^[a-zA-Z0-9\-,._ ]$/.test(event.key)) {
+            if (/^[a-zA-Z0-9\-,._ ()/]$/.test(event.key)) {
                 accumulatedBluetoothInput += event.key;
             }
         } else if (event.key === "Shift") {
