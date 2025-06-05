@@ -133,7 +133,29 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 
+//helper function to determine if a second scan is currently required based on factory and process
+function isSecondScanCurrentlyRequired(factory, process) {
+    // --- CONFIGURATION FLAG ---
+    // Set to false for TEMPORARY logic (only 第二工場 needs 2nd scan)
+    // Set to true for FULL future logic
+    const ENABLE_FULL_SECOND_SCAN_LOGIC = false; 
+    // --- END CONFIGURATION FLAG ---
 
+    if (ENABLE_FULL_SECOND_SCAN_LOGIC) {
+        // === FULL FUTURE LOGIC ===
+        if (factory === "第二工場") return true;
+        if (factory === "肥田瀬") return true;
+        if (factory === "SCNA") return true; // SCNA will require it
+        if (factory === "NFH" && process !== "RLC") return true;
+        
+        // Default for full logic: if not listed above, or if NFH and RLC, second scan is not required.
+        return false;
+    } else {
+        // === TEMPORARY LOGIC ===
+        // Only 第二工場 requires a second scan for now.
+        return factory === "第二工場";
+    }
+}
 
 
 
@@ -442,20 +464,191 @@ function enableInputs() {
 
 // Function to fetch product details based on 背番号 or 品番
 // Function to fetch product details based on 背番号 or 品番
+// async function fetchProductDetails() {
+//     //const currenFactory = document.getElementById("selected工場").value;
+//     // if(currenFactory === '第二工場') {
+//     //   checkProcessCondition(); // Consider if this is needed here or better handled by the calling function's flow
+
+//     // }
+//     // // checkProcessCondition(); // Consider if this is needed here or better handled by the calling function's flow
+
+//     // if (currenFactory !=="第二工場"){
+//     //   enableInputs(); // Delete this in production - Input enabling should be managed by the overall scan logic
+//     // }
+    
+
+//     const subDropdown = document.getElementById("sub-dropdown");
+//     const serialNumber = subDropdown.value;
+//     const factory = document.getElementById("selected工場").value; // Keep if needed for other logic
+//     const dynamicImage = document.getElementById("dynamicImage");
+//     const expectedBoardDataInputElement = document.getElementById("expectedBoardDataQR"); // Get the element once
+
+//     // Clear previous data first
+//     blankInfo(); // Assuming blankInfo() clears all relevant product fields
+//     if (expectedBoardDataInputElement) {
+//         expectedBoardDataInputElement.value = ""; // Explicitly clear here too
+//     }
+//     if (dynamicImage) {
+//         dynamicImage.src = "";
+//         dynamicImage.alt = "Loading image...";
+//         dynamicImage.style.display = "none";
+//     }
+
+//     if (!serialNumber) {
+//         console.warn("[fetchProductDetails] No serialNumber (from sub-dropdown) selected.");
+//         return false; // Indicate failure
+//     }
+
+//     console.log("[fetchProductDetails] Fetching for serialNumber:", serialNumber);
+
+//     try {
+//         // Step 1: Try query by 背番号
+//         let response = await fetch(`${serverURL}/queries`, {
+//             method: "POST",
+//             headers: { "Content-Type": "application/json" },
+//             body: JSON.stringify({
+//                 dbName: "Sasaki_Coating_MasterDB",
+//                 collectionName: "masterDB",
+//                 query: { 背番号: serialNumber },
+//             }),
+//         });
+
+//         let result = await response.json();
+//         let querySource = "背番号";
+
+//         // Step 2: If not found, try query by 品番
+//         if (!result || result.length === 0) {
+//             console.log("[fetchProductDetails] Not found by 背番号, trying by 品番:", serialNumber);
+//             querySource = "品番";
+//             response = await fetch(`${serverURL}/queries`, { // Re-assign response
+//                 method: "POST",
+//                 headers: { "Content-Type": "application/json" },
+//                 body: JSON.stringify({
+//                     dbName: "Sasaki_Coating_MasterDB",
+//                     collectionName: "masterDB",
+//                     query: { 品番: serialNumber },
+//                 }),
+//             });
+//             result = await response.json(); // Re-assign result
+//         }
+
+//         // Step 3: Still no result
+//         if (!result || result.length === 0) {
+//             console.error(`[fetchProductDetails] No matching product found by ${querySource} for:`, serialNumber);
+//             return false; // Indicate failure
+//         }
+
+//         const product = result[0];
+//         console.log("[fetchProductDetails] Product found:", product);
+
+//         // Step 4: Display image
+//         if (dynamicImage) {
+//             if (product.imageURL) {
+//                 dynamicImage.src = product.imageURL;
+//                 dynamicImage.alt = "Product Image";
+//                 dynamicImage.style.display = "block";
+//             } else {
+//                 dynamicImage.src = "";
+//                 dynamicImage.alt = "No Image Available";
+//                 dynamicImage.style.display = "none";
+//             }
+//         }
+
+//         // Step 5: Populate product fields
+//         document.getElementById("product-number").value = product.品番 || "";
+//         document.getElementById("model").value = product.モデル || "";
+//         document.getElementById("shape").value = product.形状 || "";
+//         document.getElementById("R-L").value = product["R/L"] || "";
+//         document.getElementById("material").value = product.材料 || "";
+//         document.getElementById("material-code").value = product.材料背番号 || "";
+//         document.getElementById("material-color").value = product.色 || "";
+//         document.getElementById("kataban").value = product.型番 || "";
+//         document.getElementById("収容数").value = product.収容数 || "";
+//         const 送りピッチElement = document.getElementById("送りピッチ");
+//         if (送りピッチElement) {
+//             送りピッチElement.textContent = "送りピッチ: " + (product.送りピッチ || "N/A");
+//         }
+//         document.getElementById("SRS").value = product.SRS || "";
+
+//         // Step 6: Process and store boardData for the second QR scan (HANDLES BOTH STRING AND ARRAY)
+//         let boardDataStringForQR = null;
+
+//         if (product.boardData) {
+//             if (Array.isArray(product.boardData)) {
+//                 if (product.boardData.length > 0) {
+//                     boardDataStringForQR = product.boardData.join(',');
+//                     console.log("[fetchProductDetails] 'boardData' (Array type) processed to:", `"${boardDataStringForQR}"`);
+//                 } else {
+//                     console.warn("[fetchProductDetails] 'boardData' is an empty array. Product:", product);
+//                 }
+//             } else if (typeof product.boardData === 'string') {
+//                 if (product.boardData.trim() !== '') {
+//                     boardDataStringForQR = product.boardData;
+//                     console.log("[fetchProductDetails] 'boardData' (String type) used directly:", `"${boardDataStringForQR}"`);
+//                 } else {
+//                     console.warn("[fetchProductDetails] 'boardData' is an empty string. Product:", product);
+//                 }
+//             } else {
+//                 console.warn("[fetchProductDetails] 'boardData' exists but is neither a valid array nor a string. Product:", product);
+//             }
+//         } else {
+//             console.warn("[fetchProductDetails] 'boardData' not found in product. Product:", product);
+//         }
+
+//         // Now set the input field and determine return value based on boardDataStringForQR
+//         if (expectedBoardDataInputElement) {
+//             if (boardDataStringForQR !== null) {
+//                 expectedBoardDataInputElement.value = boardDataStringForQR;
+//                 console.log("[fetchProductDetails] Successfully set hidden 'expectedBoardDataQR' to:", `"${boardDataStringForQR}"`);
+//                 return true; // Successfully prepared for QR comparison
+//             } else {
+//                 // boardDataStringForQR is null (boardData was missing, empty, or invalid type)
+//                 expectedBoardDataInputElement.value = ""; // Ensure it's cleared
+//                 console.warn("[fetchProductDetails] 'expectedBoardDataQR' is cleared as 'boardData' was invalid/missing/empty.");
+
+//                 // Check if this is a fatal error for the function's purpose
+//                 const currentFactory = document.getElementById("selected工場")?.value;
+//                 const currentProcess = document.getElementById("process")?.value;
+//                 const isNFH_RLC_scenario = currentFactory === "NFH" && currentProcess === "RLC";
+
+//                 if (!isNFH_RLC_scenario) {
+//                     // If a second scan is normally expected, and we couldn't get boardData,
+//                     // this is a failure to prepare for that second scan.
+//                     console.error("[fetchProductDetails] boardData is missing/invalid, and this is NOT an NFH+RLC scenario. Second scan preparation failed.");
+//                     return false;
+//                 } else {
+//                     // For NFH+RLC, the second scan is skipped. Missing boardData might be acceptable.
+//                     // The function still successfully fetched the product's other details.
+//                     console.log("[fetchProductDetails] boardData is missing/invalid, but this IS an NFH+RLC scenario. Returning true as product was fetched.");
+//                     return true;
+//                 }
+//             }
+//         } else {
+//             console.error("[fetchProductDetails] Critical: Hidden input 'expectedBoardDataQR' not found in DOM!");
+//             return false; // Cannot proceed without the input field
+//         }
+
+//     } catch (error) {
+//         console.error("[fetchProductDetails] Error during fetch operation or processing:", error);
+//         return false; // Indicate failure
+//     }
+// }
+
+// Function to fetch product details based on 背番号 or 品番
 async function fetchProductDetails() {
-    // checkProcessCondition(); // Consider if this is needed here or better handled by the calling function's flow
-    enableInputs(); // Delete this in production - Input enabling should be managed by the overall scan logic
+    // REMOVED initial checkProcessCondition and enableInputs calls for better central control.
+    // Let the calling functions (handleQRScan, DOMContentLoaded for restore) manage UI state updates
+    // after fetchProductDetails completes its primary job.
 
     const subDropdown = document.getElementById("sub-dropdown");
     const serialNumber = subDropdown.value;
-    const factory = document.getElementById("selected工場").value; // Keep if needed for other logic
+    // const factory = document.getElementById("selected工場").value; // 'factory' variable not used elsewhere in this scope
     const dynamicImage = document.getElementById("dynamicImage");
-    const expectedBoardDataInputElement = document.getElementById("expectedBoardDataQR"); // Get the element once
+    const expectedBoardDataInputElement = document.getElementById("expectedBoardDataQR");
 
-    // Clear previous data first
-    blankInfo(); // Assuming blankInfo() clears all relevant product fields
+    blankInfo();
     if (expectedBoardDataInputElement) {
-        expectedBoardDataInputElement.value = ""; // Explicitly clear here too
+        expectedBoardDataInputElement.value = "";
     }
     if (dynamicImage) {
         dynamicImage.src = "";
@@ -465,13 +658,18 @@ async function fetchProductDetails() {
 
     if (!serialNumber) {
         console.warn("[fetchProductDetails] No serialNumber (from sub-dropdown) selected.");
-        return false; // Indicate failure
+        // Since this function is often called from event listeners, ensure calling code handles 'false'
+        if (document.getElementById("selected工場").value === '第二工場' || isSecondScanCurrentlyRequired(document.getElementById("selected工場").value, document.getElementById("process")?.value)) {
+             // If a factory that might need 2 scans has its product details cleared due to no serial number,
+             // ensure inputs are disabled.
+             // disableInputs(); // Consider if disableInputs() is appropriate here or rely on checkProcessCondition
+        }
+        return false;
     }
 
     console.log("[fetchProductDetails] Fetching for serialNumber:", serialNumber);
 
     try {
-        // Step 1: Try query by 背番号
         let response = await fetch(`${serverURL}/queries`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -481,15 +679,13 @@ async function fetchProductDetails() {
                 query: { 背番号: serialNumber },
             }),
         });
-
         let result = await response.json();
         let querySource = "背番号";
 
-        // Step 2: If not found, try query by 品番
         if (!result || result.length === 0) {
             console.log("[fetchProductDetails] Not found by 背番号, trying by 品番:", serialNumber);
             querySource = "品番";
-            response = await fetch(`${serverURL}/queries`, { // Re-assign response
+            response = await fetch(`${serverURL}/queries`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -498,19 +694,17 @@ async function fetchProductDetails() {
                     query: { 品番: serialNumber },
                 }),
             });
-            result = await response.json(); // Re-assign result
+            result = await response.json();
         }
 
-        // Step 3: Still no result
         if (!result || result.length === 0) {
             console.error(`[fetchProductDetails] No matching product found by ${querySource} for:`, serialNumber);
-            return false; // Indicate failure
+            return false;
         }
 
         const product = result[0];
         console.log("[fetchProductDetails] Product found:", product);
 
-        // Step 4: Display image
         if (dynamicImage) {
             if (product.imageURL) {
                 dynamicImage.src = product.imageURL;
@@ -523,7 +717,6 @@ async function fetchProductDetails() {
             }
         }
 
-        // Step 5: Populate product fields
         document.getElementById("product-number").value = product.品番 || "";
         document.getElementById("model").value = product.モデル || "";
         document.getElementById("shape").value = product.形状 || "";
@@ -539,9 +732,7 @@ async function fetchProductDetails() {
         }
         document.getElementById("SRS").value = product.SRS || "";
 
-        // Step 6: Process and store boardData for the second QR scan (HANDLES BOTH STRING AND ARRAY)
         let boardDataStringForQR = null;
-
         if (product.boardData) {
             if (Array.isArray(product.boardData)) {
                 if (product.boardData.length > 0) {
@@ -564,42 +755,34 @@ async function fetchProductDetails() {
             console.warn("[fetchProductDetails] 'boardData' not found in product. Product:", product);
         }
 
-        // Now set the input field and determine return value based on boardDataStringForQR
         if (expectedBoardDataInputElement) {
             if (boardDataStringForQR !== null) {
                 expectedBoardDataInputElement.value = boardDataStringForQR;
                 console.log("[fetchProductDetails] Successfully set hidden 'expectedBoardDataQR' to:", `"${boardDataStringForQR}"`);
-                return true; // Successfully prepared for QR comparison
+                return true;
             } else {
-                // boardDataStringForQR is null (boardData was missing, empty, or invalid type)
-                expectedBoardDataInputElement.value = ""; // Ensure it's cleared
+                expectedBoardDataInputElement.value = "";
                 console.warn("[fetchProductDetails] 'expectedBoardDataQR' is cleared as 'boardData' was invalid/missing/empty.");
-
-                // Check if this is a fatal error for the function's purpose
+                
                 const currentFactory = document.getElementById("selected工場")?.value;
                 const currentProcess = document.getElementById("process")?.value;
-                const isNFH_RLC_scenario = currentFactory === "NFH" && currentProcess === "RLC";
 
-                if (!isNFH_RLC_scenario) {
-                    // If a second scan is normally expected, and we couldn't get boardData,
-                    // this is a failure to prepare for that second scan.
-                    console.error("[fetchProductDetails] boardData is missing/invalid, and this is NOT an NFH+RLC scenario. Second scan preparation failed.");
+                if (isSecondScanCurrentlyRequired(currentFactory, currentProcess)) {
+                    console.error(`[fetchProductDetails] boardData is missing/invalid, and a second scan IS required for Factory: ${currentFactory}, Process: ${currentProcess}. Preparation failed.`);
                     return false;
                 } else {
-                    // For NFH+RLC, the second scan is skipped. Missing boardData might be acceptable.
-                    // The function still successfully fetched the product's other details.
-                    console.log("[fetchProductDetails] boardData is missing/invalid, but this IS an NFH+RLC scenario. Returning true as product was fetched.");
+                    console.log(`[fetchProductDetails] boardData is missing/invalid, but a second scan is NOT currently required for Factory: ${currentFactory}, Process: ${currentProcess}. Returning true as product was fetched.`);
                     return true;
                 }
             }
         } else {
             console.error("[fetchProductDetails] Critical: Hidden input 'expectedBoardDataQR' not found in DOM!");
-            return false; // Cannot proceed without the input field
+            return false;
         }
 
     } catch (error) {
         console.error("[fetchProductDetails] Error during fetch operation or processing:", error);
-        return false; // Indicate failure
+        return false;
     }
 }
 
@@ -1382,49 +1565,95 @@ function updateCycleTime() {
 
 
 // Global function to check process conditions
+// function checkProcessCondition() {
+//   const subDropdown = document.getElementById('sub-dropdown'); // Ensure this ID is correct
+//   const processDropdown = document.getElementById("process");
+//   const selected工場Element = document.getElementById("selected工場"); // Get the element
+//   const selected工場 = selected工場Element ? selected工場Element.value : ""; // Get value if element exists
+//   const processValue = processDropdown ? processDropdown.value : "";
+//   const firstScanVal = localStorage.getItem(`${uniquePrefix}firstScanValue`) || document.getElementById("firstScanValue").value; // Check both localStorage and input
+//   const secondScanVal = localStorage.getItem(`${uniquePrefix}secondScanValue`) || document.getElementById("secondScanValue").value;
+
+//   // It's safer to check if elements exist before accessing their value
+//   const firstScanActualValue = document.getElementById("firstScanValue") ? document.getElementById("firstScanValue").value : "";
+//   const secondScanActualValue = document.getElementById("secondScanValue") ? document.getElementById("secondScanValue").value : "";
+
+
+//   if (
+//       (selected工場 === "肥田瀬" || selected工場 === "第二工場") ||
+//       (selected工場 === "NFH" && processValue !== "RLC")
+//   ) {
+//       // For these conditions, two scans are required.
+//       // Use the actual input field values for enabling/disabling.
+//       if (!firstScanActualValue || !secondScanActualValue || secondScanActualValue === "SKIPPED_PLACEHOLDER_FOR_NFH_RLC_FIRST_SCAN_UI") {
+//            // If NFH+RLC, secondScanValue might be "SKIPPED". Treat this as "not done" for disabling inputs
+//            // unless it's truly done.
+//            // Let's refine: if secondScanValue is "SKIPPED" (meaning NFH+RLC completed its one scan), inputs should be enabled.
+//           if (localStorage.getItem(`${uniquePrefix}secondScanValue`) === "SKIPPED") {
+//             console.log("Inputs enabled: NFH+RLC one scan completed.");
+//             enableInputs();
+//           } else if (!firstScanActualValue || !secondScanActualValue) {
+//             console.log("Inputs disabled: Factory requires 2 QR scans (or first scan pending).");
+//             //disableInputs(); <- need to disable comment if production
+//           } else {
+//             console.log("Inputs enabled: 2 QR scans completed.");
+//             enableInputs();
+//           }
+//       } else {
+//           console.log("Inputs enabled: 2 QR scans completed.");
+//           enableInputs();
+//       }
+//   } else {
+//       // This case is for NFH + RLC (one scan is enough) OR other factories not needing 2 scans.
+//       console.log("Factory/Process condition allows inputs to be enabled (e.g., NFH + RLC).");
+//       enableInputs();
+//   }
+// }
+
 function checkProcessCondition() {
-  const subDropdown = document.getElementById('sub-dropdown'); // Ensure this ID is correct
-  const processDropdown = document.getElementById("process");
-  const selected工場Element = document.getElementById("selected工場"); // Get the element
-  const selected工場 = selected工場Element ? selected工場Element.value : ""; // Get value if element exists
-  const processValue = processDropdown ? processDropdown.value : "";
-  const firstScanVal = localStorage.getItem(`${uniquePrefix}firstScanValue`) || document.getElementById("firstScanValue").value; // Check both localStorage and input
-  const secondScanVal = localStorage.getItem(`${uniquePrefix}secondScanValue`) || document.getElementById("secondScanValue").value;
+    const subDropdown = document.getElementById('sub-dropdown');
+    const processDropdown = document.getElementById("process");
+    const selected工場Element = document.getElementById("selected工場");
+    
+    const currentFactory = selected工場Element ? selected工場Element.value : "";
+    const currentProcess = processDropdown ? processDropdown.value : "";
+    
+    const firstScanActualValue = document.getElementById("firstScanValue") ? document.getElementById("firstScanValue").value : "";
+    // For secondScanActualValue, consider localStorage "SKIPPED" as "done" if only 1 scan is needed.
+    let secondScanConsideredDone = false;
+    const storedSecondScan = localStorage.getItem(`${uniquePrefix}secondScanValue`);
+    const inputSecondScan = document.getElementById("secondScanValue") ? document.getElementById("secondScanValue").value : "";
 
-  // It's safer to check if elements exist before accessing their value
-  const firstScanActualValue = document.getElementById("firstScanValue") ? document.getElementById("firstScanValue").value : "";
-  const secondScanActualValue = document.getElementById("secondScanValue") ? document.getElementById("secondScanValue").value : "";
+    if (storedSecondScan === "SKIPPED") {
+        secondScanConsideredDone = true;
+    } else if (inputSecondScan && inputSecondScan !== "SKIPPED_PLACEHOLDER_FOR_NFH_RLC_FIRST_SCAN_UI") { // Assuming you might use such a placeholder
+        secondScanConsideredDone = true;
+    }
 
 
-  if (
-      (selected工場 === "肥田瀬" || selected工場 === "第二工場") ||
-      (selected工場 === "NFH" && processValue !== "RLC")
-  ) {
-      // For these conditions, two scans are required.
-      // Use the actual input field values for enabling/disabling.
-      if (!firstScanActualValue || !secondScanActualValue || secondScanActualValue === "SKIPPED_PLACEHOLDER_FOR_NFH_RLC_FIRST_SCAN_UI") {
-           // If NFH+RLC, secondScanValue might be "SKIPPED". Treat this as "not done" for disabling inputs
-           // unless it's truly done.
-           // Let's refine: if secondScanValue is "SKIPPED" (meaning NFH+RLC completed its one scan), inputs should be enabled.
-          if (localStorage.getItem(`${uniquePrefix}secondScanValue`) === "SKIPPED") {
-            console.log("Inputs enabled: NFH+RLC one scan completed.");
+    if (isSecondScanCurrentlyRequired(currentFactory, currentProcess)) {
+        // --- This configuration REQUIRES TWO SCANS ---
+        // Inputs should be enabled only if both firstScanActualValue and a valid secondScanValue are present.
+        // (A "SKIPPED" value for secondScanValue means it wasn't actually scanned, so it's not 'done' in a 2-scan scenario)
+        const actualSecondScanValue = document.getElementById("secondScanValue").value; // Get the direct input value
+        if (firstScanActualValue && actualSecondScanValue && actualSecondScanValue !== "SKIPPED") { // Ensure second scan is not just the placeholder "SKIPPED"
+            console.log(`Inputs enabled: 2 QR scans completed for a 2-scan required process (Factory: ${currentFactory}, Process: ${currentProcess}).`);
             enableInputs();
-          } else if (!firstScanActualValue || !secondScanActualValue) {
-            console.log("Inputs disabled: Factory requires 2 QR scans (or first scan pending).");
-            //disableInputs(); <- need to disable comment if production
-          } else {
-            console.log("Inputs enabled: 2 QR scans completed.");
+        } else {
+            console.log(`Inputs disabled: 2 QR scans required, but not both completed yet (Factory: ${currentFactory}, Process: ${currentProcess}). First: '${firstScanActualValue}', Second: '${actualSecondScanValue}'`);
+             //disableInputs(); // UNCOMMENT FOR PRODUCTION
+        }
+    } else {
+        // --- This configuration requires ONLY ONE SCAN (or second is skipped) ---
+        // Inputs should be enabled if the first scan is done OR if second scan was marked as SKIPPED.
+        if (firstScanActualValue) { // If first scan is done, that's enough for a 1-scan process
+            console.log(`Inputs enabled: Single scan requirement met or second scan not needed (Factory: ${currentFactory}, Process: ${currentProcess}).`);
             enableInputs();
-          }
-      } else {
-          console.log("Inputs enabled: 2 QR scans completed.");
-          enableInputs();
-      }
-  } else {
-      // This case is for NFH + RLC (one scan is enough) OR other factories not needing 2 scans.
-      console.log("Factory/Process condition allows inputs to be enabled (e.g., NFH + RLC).");
-      enableInputs();
-  }
+        } else {
+            console.log(`Inputs disabled: First scan pending for a single-scan/skipped-second-scan process (Factory: ${currentFactory}, Process: ${currentProcess}).`);
+             //disableInputs(); // UNCOMMENT FOR PRODUCTION
+        }
+    }
 }
 
 
@@ -1689,22 +1918,43 @@ async function handleQRScan(qrCodeMessage) {
             const detailsFetchedSuccessfully = await fetchProductDetails();
 
             if (detailsFetchedSuccessfully) {
-                if (isNFH_RLC) {
+                // Get current factory and process to pass to the helper function
+                const currentFactoryForCheck = document.getElementById("selected工場")?.value || "";
+                const currentProcessForCheck = document.getElementById("process")?.value || "";
+
+                if (!isSecondScanCurrentlyRequired(currentFactoryForCheck, currentProcessForCheck)) {
+                    // If second scan is NOT required by current rules (temporary or future)
                     secondScanValue = "SKIPPED";
                     localStorage.setItem(`${uniquePrefix}secondScanValue`, "SKIPPED");
-                    document.getElementById("secondScanValue").value = "";
+                    document.getElementById("secondScanValue").value = ""; // Or a placeholder like "N/A"
                     enableInputs();
-                    console.log("NFH + RLC: First scan successful. Second scan skipped. Inputs enabled.");
-                    // No need to call closeActiveScannerModal() again if camera modal was already closed above.
-                    // Bluetooth modal would still be open if it was the method, close it.
-                    if (lastScanMethod === "bluetooth") {
-                        closeActiveScannerModal(); // Specifically for BT if it was open
+                    console.log(`Second scan SKIPPED based on current rules for Factory: ${currentFactoryForCheck}, Process: ${currentProcessForCheck}. Inputs enabled.`);
+                    
+                    // If Bluetooth modal was open and is the active method, close it as the sequence is done.
+                    if (lastScanMethod === "bluetooth" && document.getElementById('bluetoothScannerModal').style.display === 'block') {
+                        closeActiveScannerModal();
                     }
+                    // Camera modal would have already been closed after a successful first scan.
                 } else {
-                    // Second scan is needed
-                    //disableInputs(); <- need to uncomment this if final
-                    const successMessage = "Success! Scan Tomson Board. / 成功！トムソンボードをスキャンしてください。";
-                    //showSuccessPrompt(successMessage, 4000); // Show for 4 seconds
+                    // Second scan IS required by current rules
+                    const instructionMessage = "1st QR Success! Scan Tomson Board.\n成功！トムソンボードをスキャンしてください。";
+                    
+                    if (lastScanMethod === "bluetooth") {
+                        const instructionElement = document.getElementById('bluetoothScannerInstruction');
+                        const bluetoothModal = document.getElementById('bluetoothScannerModal');
+                        if (instructionElement && bluetoothModal && bluetoothModal.style.display === 'block') {
+                            instructionElement.textContent = instructionMessage;
+                            console.log("Updated Bluetooth scanner instruction for Tomson Board scan.");
+                        } else {
+                            console.warn("Bluetooth modal not visible or instruction element not found when trying to update for 2nd scan.");
+                            // Potentially show a general non-intrusive modal as a fallback
+                            // showInstructionModal(instructionMessage, 'info', 7000); // Example
+                        }
+                    } else { // Camera or other methods where a general prompt might be needed
+                        console.log("First scan success. Tomson board scan required. Prompting user (e.g. via general modal or relying on next scan action).");
+                        // If you had a general instruction modal like showInstructionModal we discussed, you could call it here.
+                        // showInstructionModal(instructionMessage, 'info', 7000); 
+                    }
                 }
             } else {
                 showAlert("Failed to retrieve product data after first scan. Please try the first scan again.");
@@ -1803,6 +2053,13 @@ async function handleQRScan(qrCodeMessage) {
     }
     checkProcessCondition();
 }
+
+
+
+
+
+
+
 // Ensure html5QrCode is declared in a scope accessible by this function
 // let html5QrCode; // If not already global or in a shared module scope
 
