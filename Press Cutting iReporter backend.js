@@ -2423,7 +2423,7 @@ async function printLabel() {
   function getFilename(currentSebanggo, currentSRS) {
     const amPattern = /^AM0[1-9]$/; // Matches AM01 to AM09
     if (amPattern.test(currentSebanggo)) {
-      return "2TN4.lbx";
+      return "2TN5.lbx";
     } else if (currentSRS === "有り") {
       return "SRS3.lbx";
     } else if (currentSebanggo === "NC2") {
