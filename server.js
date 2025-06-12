@@ -3028,7 +3028,44 @@ app.post("/updateUser", async (req, res) => {
 });
 
 
-//FREYA ACESS BACKEND END
+
+// New route for resetting user password
+app.post("/resetUserPassword", async (req, res) => {
+  const { userId, newPassword } = req.body;
+
+  if (!userId || !newPassword) {
+    return res.status(400).json({ error: "User ID and new password are required" });
+  }
+
+  try {
+    await client.connect();
+    const db = client.db("Sasaki_Coating_MasterDB");
+    const usersCollection = db.collection("users");
+
+    // Hash the new password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    const result = await usersCollection.updateOne(
+      { _id: new ObjectId(userId) },
+      { $set: { password: hashedPassword } }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    if (result.modifiedCount === 0) {
+      return res.status(200).json({ message: "Password is the same as the old one, no update needed." });
+    }
+
+    res.json({ message: "Password reset successfully" });
+  } catch (err) {
+    console.error("Error resetting user password:", err);
+    res.status(500).json({ error: "Internal server error during password reset." });
+  }
+});
+
+
+//FREYA ADMIN BACKEND END
 
 
 
