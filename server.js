@@ -2950,14 +2950,59 @@ app.post("/loginCustomer", async (req, res) => {
   }
 });
 
+// app.post("/createUser", async (req, res) => {
+//   const { firstName, lastName, email, username, password, role } = req.body;
+
+//   // Validate required fields
+//   if (!firstName || !lastName || !email || !username || !password || !role) {
+//     console.log("missing required fields!!!:", { firstName, lastName, email, username, password, role });
+//     return res.status(400).json({ error: "Missing required fields" });
+
+//   }
+
+//   try {
+//     await client.connect();
+//     const db = client.db("Sasaki_Coating_MasterDB");
+//     const masterUsers = db.collection("users");
+
+//     // Check if username already exists
+//     const existing = await masterUsers.findOne({ username });
+//     if (existing) return res.status(400).json({ error: "Username already exists" });
+
+//     // Hash password
+//     const hashedPassword = await bcrypt.hash(password, 10);
+
+//     // Insert master user
+//     await masterUsers.insertOne({
+//       firstName,
+//       lastName,
+//       email,
+//       username,
+//       password: hashedPassword,
+//       role,
+//       createdAt: new Date()
+//     });
+
+//     console.log("✅ New master user created:", username);
+//     res.json({ message: "Master user created successfully" });
+//   } catch (err) {
+//     console.error("❌ Error creating master user:", err);
+//     res.status(500).json({ error: "Internal server error" });
+//   }
+// });
+
 app.post("/createUser", async (req, res) => {
-  const { firstName, lastName, email, username, password, role } = req.body;
+  const { firstName, lastName, email, username, password, role, factory } = req.body;
 
   // Validate required fields
   if (!firstName || !lastName || !email || !username || !password || !role) {
-    console.log("missing required fields!!!:", { firstName, lastName, email, username, password, role });
+    console.log("missing required fields!!!:", { firstName, lastName, email, username, password, role, factory });
     return res.status(400).json({ error: "Missing required fields" });
+  }
 
+  // Validate factory for 班長 users
+  if (role === '班長' && !factory) {
+    return res.status(400).json({ error: "Factory is required for 班長 users" });
   }
 
   try {
@@ -2972,8 +3017,8 @@ app.post("/createUser", async (req, res) => {
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Insert master user
-    await masterUsers.insertOne({
+    // Prepare user data
+    const userData = {
       firstName,
       lastName,
       email,
@@ -2981,7 +3026,15 @@ app.post("/createUser", async (req, res) => {
       password: hashedPassword,
       role,
       createdAt: new Date()
-    });
+    };
+
+    // Add 工場 field for 班長 users
+    if (role === '班長' && factory) {
+      userData['工場'] = factory;
+    }
+
+    // Insert master user
+    await masterUsers.insertOne(userData);
 
     console.log("✅ New master user created:", username);
     res.json({ message: "Master user created successfully" });
@@ -2991,11 +3044,13 @@ app.post("/createUser", async (req, res) => {
   }
 });
 
+
+
 app.post("/updateUser", async (req, res) => {
-  const { userId, firstName, lastName, email, role } = req.body;
+  const { userId, firstName, lastName, email, role, factory } = req.body;
 
   if (!userId || !role) {
-    console.log("❌ Missing userId or role:", { userId, firstName, lastName, email, role });
+    console.log("❌ Missing userId or role:", { userId, firstName, lastName, email, role, factory });
     return res.status(400).json({ error: "User ID and role are required" });
   }
 
@@ -3011,9 +3066,34 @@ app.post("/updateUser", async (req, res) => {
       ...(role && { role })
     };
 
+    // Handle 工場 field for 班長 users
+    if (role === '班長') {
+      if (factory) {
+        // Store factory in 工場 field
+        // Support both string and array format for future multi-factory support
+        updateFields['工場'] = typeof factory === 'string' ? factory : factory;
+      } else {
+        // If no factory provided for 班長, this might be an error
+        console.warn("班長 user without factory assignment");
+      }
+    } else {
+      // Remove 工場 field for non-班長 users
+      updateFields['$unset'] = { '工場': "" };
+    }
+
+    // Handle unset separately if needed
+    let updateOperation = { $set: updateFields };
+    if (updateFields['$unset']) {
+      updateOperation = {
+        $set: { ...updateFields },
+        $unset: updateFields['$unset']
+      };
+      delete updateFields['$unset'];
+    }
+
     const result = await users.updateOne(
       { _id: new ObjectId(userId) },
-      { $set: updateFields }
+      updateOperation
     );
 
     if (result.modifiedCount === 0) {
@@ -3249,6 +3329,7 @@ app.post("/customerInsertMasterDB", async (req, res) => {
   }
 });
 
+
 app.post("/customerInsertSubmittedDB", async (req, res) => {
   const { data, collectionName, role, dbName, username } = req.body;
 
@@ -3424,6 +3505,8 @@ app.post("/customerDeleteMasterDB", async (req, res) => {
   }
 });
 
+
+
 app.post("/customerUpdateRecord", async (req, res) => {
   const { recordId, updateData, dbName, collectionName, role, username } = req.body;
 
@@ -3455,6 +3538,8 @@ app.post("/customerUpdateRecord", async (req, res) => {
   }
 });
 
+
+
 app.post("/customerDeleteUser", async (req, res) => {
   const { recordId, dbName, role, username } = req.body;
 
@@ -3482,6 +3567,8 @@ app.post("/customerDeleteUser", async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
+
+
 
 app.post("/customerBulkDelete", async (req, res) => {
   const { recordIds, dbName, collectionName, role, username } = req.body;
@@ -3512,6 +3599,43 @@ app.post("/customerBulkDelete", async (req, res) => {
   }
 });
 
+app.post("/customerResetUserPassword", async (req, res) => {
+  const { userId, newPassword, dbName, role, username } = req.body;
+
+  if (!userId || !newPassword || !dbName || !username) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+
+  if (!["admin", "masterUser"].includes(role)) {
+    return res.status(403).json({ error: "Access denied" });
+  }
+
+  try {
+    await client.connect();
+    const db = client.db(dbName);
+    const users = db.collection("users");
+
+    // Hash the new password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    const result = await users.updateOne(
+      { _id: new ObjectId(userId) },
+      { $set: { password: hashedPassword } }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    if (result.modifiedCount === 0) {
+      return res.status(200).json({ message: "Password is the same as the old one, no update needed." });
+    }
+
+    res.json({ message: "Password reset successfully" });
+  } catch (err) {
+    console.error("Error resetting customer user password:", err);
+    res.status(500).json({ error: "Internal server error during password reset." });
+  }
+});
 
 
 
