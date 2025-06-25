@@ -6,6 +6,174 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>設備</title>
+    <style>
+        .correction-card {
+            position: relative;
+            background-color: #ff4444 !important;
+            border: 2px solid #cc0000 !important;
+            box-shadow: 0 4px 12px rgba(255, 68, 68, 0.3) !important;
+        }
+        
+        .correction-card:hover {
+            background-color: #ff6666 !important;
+            transform: translateY(-8px) !important;
+        }
+        
+        .correction-badge {
+            position: absolute;
+            top: -8px;
+            right: -8px;
+            background-color: #ffffff;
+            color: #cc0000;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 14px;
+            border: 2px solid #cc0000;
+            z-index: 10;
+        }
+        
+        .correction-card .label {
+            color: white !important;
+            font-weight: bold;
+        }
+        
+        .correction-list-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+        }
+        
+        .correction-modal-content {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: white;
+            padding: 20px;
+            border-radius: 10px;
+            max-width: 90%;
+            max-height: 80%;
+            overflow-y: auto;
+            min-width: 600px;
+        }
+        
+        .correction-item {
+            border: 1px solid #ddd;
+            margin: 10px 0;
+            padding: 15px;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+        }
+        
+        .correction-item h4 {
+            margin: 0 0 10px 0;
+            color: #cc0000;
+        }
+        
+        .correction-detail {
+            margin: 5px 0;
+        }
+        
+        .correction-actions {
+            margin-top: 15px;
+        }
+        
+        .correct-btn {
+            background-color: #4CAF50;
+            color: white;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+        
+        .correct-btn:hover {
+            background-color: #45a049;
+        }
+        
+        .close-modal {
+            background-color: #f44336;
+            color: white;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            float: right;
+        }
+        
+        .close-modal:hover {
+            background-color: #da190b;
+        }
+        
+        .edit-form-field {
+            margin-bottom: 15px;
+        }
+        
+        .edit-form-field label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        
+        .edit-form-field input,
+        .edit-form-field select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        
+        .counter-section {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        
+        .counter-field {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+            min-width: 120px;
+        }
+        
+        .counter-field label {
+            font-weight: bold;
+            margin: 0;
+        }
+        
+        .counter-field input {
+            width: 60px;
+            text-align: center;
+        }
+
+        .border-red-500 {
+            border-color: #ef4444 !important;
+        }
+        
+        .text-red-500 {
+            color: #ef4444;
+        }
+        
+        .mt-2 {
+            margin-top: 0.5rem;
+        }
+    </style>
 </head>
 <body>
     <h1 class="centered">FREYA SYSTEM v3.9</h1>
@@ -21,652 +189,905 @@
         <div id="containers" class="container"></div>
     </div>
 
+    <!-- Correction List Modal -->
+    <div id="correctionModal" class="correction-list-modal">
+        <div class="correction-modal-content">
+            <h2>修正要求一覧</h2>
+            <div id="correctionList"></div>
+            <button class="close-modal" onclick="closeCorrectionModal()">閉じる</button>
+        </div>
+    </div>
+
+    <!-- Correction Edit Modal -->
+    <div id="correctionEditModal" class="correction-list-modal">
+        <div class="correction-modal-content">
+            <h2 id="editModalTitle">データ修正</h2>
+            <form id="correctionEditForm">
+                <div id="editFormFields"></div>
+                <div style="margin-top: 20px;">
+                    <div class="edit-form-field">
+                        <label for="correctionComment" style="color: #cc0000; font-weight: bold;">修正コメント (必須):</label>
+                        <textarea name="correctionComment" id="correctionComment" 
+                                  placeholder="何を変更したかを記入してください..." 
+                                  style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; min-height: 60px; resize: vertical;"
+                                  required></textarea>
+                        <div id="commentError" class="text-red-500 text-sm" style="display: none;">修正コメントは必須です</div>
+                    </div>
+                </div>
+                <div style="margin-top: 20px;">
+                    <button type="submit" class="correct-btn">修正を保存</button>
+                    <button type="button" class="close-modal" onclick="closeCorrectionEditModal()">キャンセル</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <script>
         const urlParams = new URLSearchParams(window.location.search);
-        const filterValue = urlParams.get('selected') || 'none';  // Default to 'none' if no parameter is found
-        const dbURL = 'https://script.google.com/macros/s/AKfycbwBzPZgoNiUK_ez3AzK5FXFr8_AsmdBjCWGzulG3eh0cryirgVxtMzIF4ehh98QYdkpUg/exec';  // Replace with your actual database URL
+        const filterValue = urlParams.get('selected') || 'none';
+        const dbURL = 'https://script.google.com/macros/s/AKfycbwBzPZgoNiUK_ez3AzK5FXFr8_AsmdBjCWGzulG3eh0cryirgVxtMzIF4ehh98QYdkpUg/exec';
         const label1 = document.getElementById('label1');
-        label1.textContent = filterValue + "の設備選んでください:"; // Set the text content of the h1 element
+        label1.textContent = filterValue + "の設備選んでください:";
 
         const serverURL = "https://kurachi.onrender.com";
         //const serverURL = "http://localhost:3000";
 
-        
-
-        if (filterValue === '天徳') {
-            const containers = document.getElementById('containers');
-
-            // Create card for スリット
-            const slitCard = document.createElement('div');
-            slitCard.classList.add('card');
-            slitCard.addEventListener('click', () => {
-                window.location.href = `SLIT Process iReporter.html?filter=${filterValue}`;
-            });
-
-            const slitImg = document.createElement('img');
-            slitImg.src = 'src/machines/slit.jpg'; // Adjust the path to your image
-            slitImg.alt = 'スリット';
-
-            const slitLabel = document.createElement('div');
-            slitLabel.classList.add('label');
-            slitLabel.textContent = 'スリット';
-
-            slitCard.appendChild(slitImg);
-            slitCard.appendChild(slitLabel);
-            containers.appendChild(slitCard);
-
-            // Create card for SRS
-            const srsCard = document.createElement('div');
-            srsCard.classList.add('card');
-            srsCard.addEventListener('click', () => {
-                window.location.href = `SRS Process iReporter.html?filter=${filterValue}`;
-            });
-
-            const srsImg = document.createElement('img');
-            srsImg.src = 'src/machines/srs.jpg'; // Adjust the path to your image
-            srsImg.alt = 'SRS';
-
-            const srsLabel = document.createElement('div');
-            srsLabel.classList.add('label');
-            srsLabel.textContent = 'SRS';
-
-            srsCard.appendChild(srsImg);
-            srsCard.appendChild(srsLabel);
-            containers.appendChild(srsCard);
-
-            // Create card for 検査
-            const kensaCard = document.createElement('div');
-            kensaCard.classList.add('card');
-            kensaCard.addEventListener('click', () => {
-                window.location.href = `newKensa iReporter.html?filter=${filterValue}`;
-            });
-
-            const kensaImg = document.createElement('img');
-            kensaImg.src = 'src/machines/kensa.jpg'; // Adjust the path to your image
-            kensaImg.alt = '検査';
-
-            const kensaLabel = document.createElement('div');
-            kensaLabel.classList.add('label');
-            kensaLabel.textContent = '検査';
-
-            kensaCard.appendChild(kensaImg);
-            kensaCard.appendChild(kensaLabel);
-            containers.appendChild(kensaCard);
-
-        } else if (filterValue === '肥田瀬') {
-        const containers = document.getElementById('containers');
-
-        // Create card for プレス加工
-        const pressCard = document.createElement('div');
-        pressCard.classList.add('card');
-        pressCard.addEventListener('click', () => {
-            window.location.href = `Press Cutting iReporter.html?filter=${filterValue}`;
-        });
-
-        const pressImg = document.createElement('img');
-        pressImg.src = 'src/machines/MANAS.jpg'; // Adjust the path to your image
-        pressImg.alt = 'プレス加工';
-
-        const pressLabel = document.createElement('div');
-        pressLabel.classList.add('label');
-        pressLabel.textContent = 'プレス加工';
-
-        pressCard.appendChild(pressImg);
-        pressCard.appendChild(pressLabel);
-        containers.appendChild(pressCard);
-
-        // Create card for 検査
-        const kensaCard = document.createElement('div');
-        kensaCard.classList.add('card');
-        kensaCard.addEventListener('click', () => {
-            window.location.href = `newKensa iReporter.html?filter=${filterValue}`;
-        });
-
-        const kensaImg = document.createElement('img');
-        kensaImg.src = 'src/machines/kensa.jpg'; // Adjust the path to your image
-        kensaImg.alt = '検査';
-
-        const kensaLabel = document.createElement('div');
-        kensaLabel.classList.add('label');
-        kensaLabel.textContent = '検査';
-
-        kensaCard.appendChild(kensaImg);
-        kensaCard.appendChild(kensaLabel);
-        containers.appendChild(kensaCard);
-
-        // Create card for 肥田瀬QRスキャナー
-        const hidaseCard = document.createElement('div');
-        hidaseCard.classList.add('card');
-        hidaseCard.addEventListener('click', () => {
-            window.location.href = `hidase labelprinter.html?filter=${filterValue}`;
-        });
-
-        const hidaseImg = document.createElement('img');
-        hidaseImg.src = 'src/qr-code.png'; // Adjust the path to your image
-        hidaseImg.alt = '肥田瀬QRスキャナー';
-
-        const hidaseLabel = document.createElement('div');
-        hidaseLabel.classList.add('label');
-        hidaseLabel.textContent = '肥田瀬QRスキャナー';
-
-        hidaseCard.appendChild(hidaseImg);
-        hidaseCard.appendChild(hidaseLabel);
-        containers.appendChild(hidaseCard);
-
-        // Create card for 在庫スキャン
-        const stockScanCard = document.createElement('div');
-        stockScanCard.classList.add('card');
-        stockScanCard.addEventListener('click', () => {
-            window.location.href = `https://karlsome.github.io/InventorySystem?factoryValue=${filterValue}`;
-        });
-
-        const stockScanImg = document.createElement('img');
-        stockScanImg.src = 'src/machines/scanner.jpg'; // Adjust the path to your image
-        stockScanImg.alt = '在庫スキャン';
-
-        const stockScanLabel = document.createElement('div');
-        stockScanLabel.classList.add('label');
-        stockScanLabel.textContent = '在庫スキャン';
-
-        stockScanCard.appendChild(stockScanImg);
-        stockScanCard.appendChild(stockScanLabel);
-        containers.appendChild(stockScanCard);
-    }
-    else if (filterValue === '第二工場') {
-        const containers = document.getElementById('containers');
-
-        // Create card for プレス加工
-        const pressCard = document.createElement('div');
-        pressCard.classList.add('card');
-        pressCard.addEventListener('click', () => {
-            window.location.href = `Press Cutting iReporter.html?filter=${filterValue}`;
-        });
-
-        const pressImg = document.createElement('img');
-        pressImg.src = 'src/machines/MANAS.jpg'; // Adjust the path to your image
-        pressImg.alt = 'プレス加工';
-
-        const pressLabel = document.createElement('div');
-        pressLabel.classList.add('label');
-        pressLabel.textContent = 'プレス加工';
-
-        pressCard.appendChild(pressImg);
-        pressCard.appendChild(pressLabel);
-        containers.appendChild(pressCard);
-
-        // Create card for スリット
-        const slitCard = document.createElement('div');
-        slitCard.classList.add('card');
-        slitCard.addEventListener('click', () => {
-            window.location.href = `SLIT Process iReporter.html?filter=${filterValue}`;
-        });
-
-        const slitImg = document.createElement('img');
-        slitImg.src = 'src/machines/slit.jpg'; // Adjust the path to your image
-        slitImg.alt = 'スリット';
-
-        const slitLabel = document.createElement('div');
-        slitLabel.classList.add('label');
-        slitLabel.textContent = 'スリット';
-
-        slitCard.appendChild(slitImg);
-        slitCard.appendChild(slitLabel);
-        containers.appendChild(slitCard);
-
-        // Create card for 検査
-        const kensaCard = document.createElement('div');
-        kensaCard.classList.add('card');
-        kensaCard.addEventListener('click', () => {
-            window.location.href = `newKensa iReporter.html?filter=${filterValue}`;
-        });
-
-        const kensaImg = document.createElement('img');
-        kensaImg.src = 'src/machines/kensa.jpg'; // Adjust the path to your image
-        kensaImg.alt = '検査';
-
-        const kensaLabel = document.createElement('div');
-        kensaLabel.classList.add('label');
-        kensaLabel.textContent = '検査';
-
-        kensaCard.appendChild(kensaImg);
-        kensaCard.appendChild(kensaLabel);
-        containers.appendChild(kensaCard);
-
-        // Create card for 第二工場 QRスキャナー (NEW)
-        const qrCard = document.createElement('div');
-        qrCard.classList.add('card');
-        qrCard.addEventListener('click', () => {
-            window.location.href = `HABA request.html?filter=${filterValue}`;
-        });
-
-        const qrImg = document.createElement('img');
-        qrImg.src = 'src/qr-code.png'; // Adjust the path to your QR image
-        qrImg.alt = '第二工場 QRスキャナー';
-
-        const qrLabel = document.createElement('div');
-        qrLabel.classList.add('label');
-        qrLabel.textContent = '第二工場 QRスキャナー';
-
-        qrCard.appendChild(qrImg);
-        qrCard.appendChild(qrLabel);
-        containers.appendChild(qrCard);
-    }
-
-    else if (filterValue === '倉知') {
-        const containers = document.getElementById('containers');
-
-        // Create card for プレス加工
-        const pressCard = document.createElement('div');
-        pressCard.classList.add('card');
-        pressCard.addEventListener('click', () => {
-            window.location.href = `Press Cutting iReporter.html?filter=${filterValue}`;
-        });
-
-        const pressImg = document.createElement('img');
-        pressImg.src = 'src/machines/NCC01.jpg'; // Adjust the path to your image
-        pressImg.alt = 'NC加工';
-
-        const pressLabel = document.createElement('div');
-        pressLabel.classList.add('label');
-        pressLabel.textContent = 'NC加工';
-
-        pressCard.appendChild(pressImg);
-        pressCard.appendChild(pressLabel);
-        containers.appendChild(pressCard);
-
-        // Create card for 検査
-        const kensaCard = document.createElement('div');
-        kensaCard.classList.add('card');
-        kensaCard.addEventListener('click', () => {
-            window.location.href = `newKensa iReporter.html?filter=${filterValue}`;
-        });
-
-        const kensaImg = document.createElement('img');
-        kensaImg.src = 'src/machines/kensa.jpg'; // Adjust the path to your image
-        kensaImg.alt = '検査';
-
-        const kensaLabel = document.createElement('div');
-        kensaLabel.classList.add('label');
-        kensaLabel.textContent = '検査';
-
-        kensaCard.appendChild(kensaImg);
-        kensaCard.appendChild(kensaLabel);
-        containers.appendChild(kensaCard);
-
-         // Create card for 肥田瀬QRスキャナー
-         const hidaseCard = document.createElement('div');
-        hidaseCard.classList.add('card');
-        hidaseCard.addEventListener('click', () => {
-            window.location.href = `hidase labelprinter.html?filter=${filterValue}`;
-        });
-
-        const hidaseImg = document.createElement('img');
-        hidaseImg.src = 'src/qr-code.png'; // Adjust the path to your image
-        hidaseImg.alt = 'ラベルプリンター';
-
-        const hidaseLabel = document.createElement('div');
-        hidaseLabel.classList.add('label');
-        hidaseLabel.textContent = 'ラベルプリンター';
-
-        hidaseCard.appendChild(hidaseImg);
-        hidaseCard.appendChild(hidaseLabel);
-        containers.appendChild(hidaseCard);
-    } 
-        else if (filterValue === '第一工場') {
-        const containers = document.getElementById('containers');
-
-        // Create card for Laser加工 (Existing)
-        const pressCard = document.createElement('div');
-        pressCard.classList.add('card');
-        pressCard.addEventListener('click', () => {
-            window.location.href = `Press Cutting iReporter.html?filter=${filterValue}`;
-        });
-
-        const pressImg = document.createElement('img');
-        pressImg.src = 'src/machines/ALC01.jpg';
-        pressImg.alt = 'レーザー加工';
-
-        const pressLabel = document.createElement('div');
-        pressLabel.classList.add('label');
-        pressLabel.textContent = 'NC加工';
-
-        pressCard.appendChild(pressImg);
-        pressCard.appendChild(pressLabel);
-        containers.appendChild(pressCard);
-
-        // Create card for 検査 (Existing)
-        const kensaCard = document.createElement('div');
-        kensaCard.classList.add('card');
-        kensaCard.addEventListener('click', () => {
-            window.location.href = `newKensa iReporter.html?filter=${filterValue}`;
-        });
-
-        const kensaImg = document.createElement('img');
-        kensaImg.src = 'src/machines/kensa.jpg';
-        kensaImg.alt = '検査';
-
-        const kensaLabel = document.createElement('div');
-        kensaLabel.classList.add('label');
-        kensaLabel.textContent = '検査';
-
-        kensaCard.appendChild(kensaImg);
-        kensaCard.appendChild(kensaLabel);
-        containers.appendChild(kensaCard);
-
-        // Create card for 粘着 (Existing)
-        const nenchakuCard = document.createElement('div');
-        nenchakuCard.classList.add('card');
-        nenchakuCard.addEventListener('click', () => {
-            window.location.href = `firstKojoLabelPrinter.html?filter=${filterValue}`;
-        });
-
-        const nenchakuImg = document.createElement('img');
-        nenchakuImg.src = 'src/machines/nenchaku.jpg';
-        nenchakuImg.alt = '粘着';
-
-        const nenchakuLabel = document.createElement('div');
-        nenchakuLabel.classList.add('label');
-        nenchakuLabel.textContent = '粘着';
-
-        nenchakuCard.appendChild(nenchakuImg);
-        nenchakuCard.appendChild(nenchakuLabel);
-        containers.appendChild(nenchakuCard);
-
-        // Create card for CSVアップロード (Existing)
-        const csvCard = document.createElement('div');
-        csvCard.classList.add('card');
-        csvCard.addEventListener('click', () => {
-            window.location.href = `csvUploader.html?filter=${filterValue}`;
-        });
-
-        const csvImg = document.createElement('img');
-        csvImg.src = 'src/machines/csv.jpg';
-        csvImg.alt = 'CSVアップロード';
-
-        const csvLabel = document.createElement('div');
-        csvLabel.classList.add('label');
-        csvLabel.textContent = 'CSVアップロード';
-
-        csvCard.appendChild(csvImg);
-        csvCard.appendChild(csvLabel);
-        containers.appendChild(csvCard);
-
-        // === ADDED: Create card for Rikeshi Printer ===
-        const rikeshiCard = document.createElement('div');
-        rikeshiCard.classList.add('card');
-        rikeshiCard.addEventListener('click', () => {
-            window.location.href = `rikeshiPrinter.html?filter=${filterValue}`;
-        });
-
-        const rikeshiImg = document.createElement('img');
-        rikeshiImg.src = 'src/machines/rikeshi2.jpg' // Image path for Rikeshi printer
-        rikeshiImg.alt = '理計士プリンター'; // Alt text for the image
-
-        const rikeshiLabel = document.createElement('div');
-        rikeshiLabel.classList.add('label');
-        rikeshiLabel.textContent = '理計士プリンター'; // Label for the card
-
-        rikeshiCard.appendChild(rikeshiImg);
-        rikeshiCard.appendChild(rikeshiLabel);
-        containers.appendChild(rikeshiCard);
-        // === End of ADDED Rikeshi Printer card ===
-
-    }
-
-    else if (filterValue === 'SCNA') {
-        const containers = document.getElementById('containers');
-
-        // Create card for DCP
-        const pressCard = document.createElement('div');
-        pressCard.classList.add('card');
-        pressCard.addEventListener('click', () => {
-            window.location.href = `chooseMachine.html?filter=${filterValue}`;
-        });
-
-        const pressImg = document.createElement('img');
-        pressImg.src = 'src/machines/NCC01.jpg'; // Adjust the path to your image
-        pressImg.alt = 'NC加工';
-
-        const pressLabel = document.createElement('div');
-        pressLabel.classList.add('label');
-        pressLabel.textContent = 'NC CUTTING PROCESS';
-
-        pressCard.appendChild(pressImg);
-        pressCard.appendChild(pressLabel);
-        containers.appendChild(pressCard);
-
-        // Create card for PRESS CUTTING PROCESS
-        const pressCuttingCard = document.createElement('div');
-        pressCuttingCard.classList.add('card');
-        pressCuttingCard.addEventListener('click', () => {
-            window.location.href = `Press Cutting iReporter English.html?filter=${filterValue}`;
-        });
-
-        const pressCuttingImg = document.createElement('img');
-        pressCuttingImg.src = 'src/machines/MANAS.jpg'; // Adjust the path to your image
-        pressCuttingImg.alt = 'プレス加工';
-
-        const pressCuttingLabel = document.createElement('div');
-        pressCuttingLabel.classList.add('label');
-        pressCuttingLabel.textContent = 'PRESS CUTTING PROCESS';
-
-        pressCuttingCard.appendChild(pressCuttingImg);
-        pressCuttingCard.appendChild(pressCuttingLabel);
-        containers.appendChild(pressCuttingCard);
-
-        // Create card for SRS
-        const srsCard = document.createElement('div');
-            srsCard.classList.add('card');
-            srsCard.addEventListener('click', () => {
-                window.location.href = `SRS Process iReporter English.html?filter=${filterValue}`;
-            });
-
-            const srsImg = document.createElement('img');
-            srsImg.src = 'src/machines/srs.jpg'; // Adjust the path to your image
-            srsImg.alt = 'SRS';
-
-            const srsLabel = document.createElement('div');
-            srsLabel.classList.add('label');
-            srsLabel.textContent = 'SRS';
-
-            srsCard.appendChild(srsImg);
-            srsCard.appendChild(srsLabel);
-            containers.appendChild(srsCard);
-
-        // Create card for 検査
-        const kensaCard = document.createElement('div');
-        kensaCard.classList.add('card');
-        kensaCard.addEventListener('click', () => {
-            window.location.href = `newKensa iReporter English.html?filter=${filterValue}`;
-        });
-
-        const kensaImg = document.createElement('img');
-        kensaImg.src = 'src/machines/kensa.jpg'; // Adjust the path to your image
-        kensaImg.alt = '検査';
-
-        const kensaLabel = document.createElement('div');
-        kensaLabel.classList.add('label');
-        kensaLabel.textContent = 'INSPECTION';
-
-        kensaCard.appendChild(kensaImg);
-        kensaCard.appendChild(kensaLabel);
-        containers.appendChild(kensaCard);
-        
-    } 
-    else if (filterValue === '小瀬') {
-        const containers = document.getElementById('containers');
-
-        // Create card for プレス加工
-        const pressCard = document.createElement('div');
-        pressCard.classList.add('card');
-        pressCard.addEventListener('click', () => {
-            window.location.href = `chooseMachine.html?filter=${filterValue}`;
-        });
-
-        const pressImg = document.createElement('img');
-        pressImg.src = 'src/machines/NCC01.jpg'; // Adjust the path to your image
-        pressImg.alt = 'NC加工';
-
-        const pressLabel = document.createElement('div');
-        pressLabel.classList.add('label');
-        pressLabel.textContent = 'NC加工';
-
-        pressCard.appendChild(pressImg);
-        pressCard.appendChild(pressLabel);
-        containers.appendChild(pressCard);
-
-        // Create card for 検査
-        const kensaCard = document.createElement('div');
-        kensaCard.classList.add('card');
-        kensaCard.addEventListener('click', () => {
-            window.location.href = `newKensa iReporter.html?filter=${filterValue}`;
-        });
-
-        const kensaImg = document.createElement('img');
-        kensaImg.src = 'src/machines/kensa.jpg'; // Adjust the path to your image
-        kensaImg.alt = '検査';
-
-        const kensaLabel = document.createElement('div');
-        kensaLabel.classList.add('label');
-        kensaLabel.textContent = '検査';
-
-        kensaCard.appendChild(kensaImg);
-        kensaCard.appendChild(kensaLabel);
-        containers.appendChild(kensaCard);
-    } 
-    else if (filterValue === 'NFH') {
-        const containers = document.getElementById('containers');
-
-        // Create card for プレス加工
-        const pressCard = document.createElement('div');
-        pressCard.classList.add('card');
-        pressCard.addEventListener('click', () => {
-            window.location.href = `Press Cutting iReporter.html?filter=${filterValue}`;
-        });
-
-        const pressImg = document.createElement('img');
-        pressImg.src = 'src/machines/MANAS.jpg'; // Adjust the path to your image
-        pressImg.alt = 'プレス加工';
-
-        const pressLabel = document.createElement('div');
-        pressLabel.classList.add('label');
-        pressLabel.textContent = 'プレス / レーザー 加工';
-
-        pressCard.appendChild(pressImg);
-        pressCard.appendChild(pressLabel);
-        containers.appendChild(pressCard);
-
-        // Create card for 検査
-        const kensaCard = document.createElement('div');
-        kensaCard.classList.add('card');
-        kensaCard.addEventListener('click', () => {
-            window.location.href = `newKensa iReporter.html?filter=${filterValue}`;
-        });
-
-        const kensaImg = document.createElement('img');
-        kensaImg.src = 'src/machines/kensa.jpg'; // Adjust the path to your image
-        kensaImg.alt = '検査';
-
-        const kensaLabel = document.createElement('div');
-        kensaLabel.classList.add('label');
-        kensaLabel.textContent = '検査';
-
-        kensaCard.appendChild(kensaImg);
-        kensaCard.appendChild(kensaLabel);
-        containers.appendChild(kensaCard);
-    } 
-        
-        
-        else {
-            fetch(`${dbURL}?filter=${filterValue}`)
-                .then(response => response.json())
-                .then(data => {
-                    const containers = document.getElementById('containers');
-                    
-                    // Normal case, display cards based on fetched data
-                    data.forEach((list) => {
-                        const card = document.createElement('div');
-                        card.classList.add('card');
-                        card.addEventListener('click', () => {
-                            window.location.href = `nippo.html?selected=${list}&filter=${filterValue}`;
-                        });
-
-                        const img = document.createElement('img');
-                        if (list === "自動プレス機") {
-                            img.src = `src/machines/jido.jpg`;
-                        } else {
-                            img.src = `src/machines/${list}.jpg`;
-                        }
-                        img.alt = list;
-
-                        const label = document.createElement('div');
-                        label.classList.add('label');
-                        label.textContent = list;
-                        label.addEventListener('click', (event) => {
-                            event.stopPropagation();
-                            window.location.href = `nippo.html?selected=${list}&filter=${filterValue}`;
-                        });
-
-                        card.appendChild(img);
-                        card.appendChild(label);
-                        containers.appendChild(card);
+        // Function to create correction card
+        async function createCorrectionCard(factory) {
+            try {
+                const collections = ["kensaDB", "pressDB", "slitDB", "SRSDB"];
+                let allCorrections = [];
+                
+                // Check each collection for corrections
+                for (const collectionName of collections) {
+                    const response = await fetch(`${serverURL}/queries`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            dbName: "submittedDB",
+                            collectionName: collectionName,
+                            query: { 
+                                "工場": factory,
+                                "approvalStatus": "correction_needed"
+                            }
+                        })
                     });
 
-                    // Add the additional card for QR code scanning
-                    const qrCard = document.createElement('div');
-                    qrCard.classList.add('card');
-                    qrCard.addEventListener('click', () => {
-                        const popup = window.open('popup.html', 'QR Scanner', 'width=400,height=300');
+                    const corrections = await response.json();
+                    // Add collection name to each correction for tracking
+                    corrections.forEach(correction => {
+                        correction.sourceCollection = collectionName;
+                    });
+                    allCorrections = allCorrections.concat(corrections);
+                }
 
-                        window.addEventListener('message', function(event) {
-                            if (event.origin === window.location.origin) {
-                                const BarcodeValue = event.data;
-                                console.log(`QR Code detected: ${BarcodeValue}`);
+                const correctionCount = allCorrections.length;
 
-                                // Check if the scanned value is in the list
-                                if (data.includes(BarcodeValue)) {
-                                    // Redirect to nippo.html with the QR code value as filter
-                                    window.location.href = `nippo.html?selected=${BarcodeValue}&filter=${filterValue}`;
-                                } else {
-                                    alert('Invalid QR Code');
+                if (correctionCount > 0) {
+                    const correctionCard = document.createElement('div');
+                    correctionCard.classList.add('card', 'correction-card');
+                    
+                    const badge = document.createElement('div');
+                    badge.classList.add('correction-badge');
+                    badge.textContent = correctionCount;
+                    
+                    correctionCard.addEventListener('click', () => {
+                        showCorrectionList(allCorrections, factory);
+                    });
+
+                    const correctionImg = document.createElement('img');
+                    correctionImg.src = 'src/machines/kensa.jpg';
+                    correctionImg.alt = '修正要求';
+
+                    const correctionLabel = document.createElement('div');
+                    correctionLabel.classList.add('label');
+                    correctionLabel.textContent = '修正要求';
+
+                    correctionCard.appendChild(badge);
+                    correctionCard.appendChild(correctionImg);
+                    correctionCard.appendChild(correctionLabel);
+                    
+                    return correctionCard;
+                }
+            } catch (error) {
+                console.error('Error fetching corrections:', error);
+            }
+            return null;
+        }
+
+        // Function to show correction list modal
+        function showCorrectionList(corrections, factory) {
+            const modal = document.getElementById('correctionModal');
+            const correctionList = document.getElementById('correctionList');
+            
+            correctionList.innerHTML = `<h3>${factory} - 修正要求一覧</h3>`;
+            
+            corrections.forEach((item, index) => {
+                const correctionItem = document.createElement('div');
+                correctionItem.classList.add('correction-item');
+                
+                correctionItem.innerHTML = `
+                    <h4>修正要求 #${index + 1} (${item.sourceCollection})</h4>
+                    <div class="correction-detail"><strong>品番:</strong> ${item.品番 || 'N/A'}</div>
+                    <div class="correction-detail"><strong>背番号:</strong> ${item.背番号 || 'N/A'}</div>
+                    <div class="correction-detail"><strong>作業者:</strong> ${item.Worker_Name || 'N/A'}</div>
+                    <div class="correction-detail"><strong>設備:</strong> ${item.設備 || 'N/A'}</div>
+                    <div class="correction-detail"><strong>日付:</strong> ${item.Date || 'N/A'}</div>
+                    <div class="correction-detail"><strong>修正コメント:</strong> ${item.correctionComment || 'N/A'}</div>
+                    <div class="correction-detail"><strong>修正要求者:</strong> ${item.correctionBy || 'N/A'}</div>
+                    <div class="correction-detail"><strong>修正要求日時:</strong> ${new Date(item.correctionAt).toLocaleString('ja-JP') || 'N/A'}</div>
+                    <div class="correction-detail"><strong>データベース:</strong> ${item.sourceCollection}</div>
+                    <div class="correction-actions">
+                        <button class="correct-btn" onclick="correctItem('${item._id}', '${factory}', '${item.sourceCollection}')">修正する</button>
+                    </div>
+                `;
+                
+                correctionList.appendChild(correctionItem);
+            });
+            
+            modal.style.display = 'block';
+        }
+
+        // Function to close correction modal
+        function closeCorrectionModal() {
+            document.getElementById('correctionModal').style.display = 'none';
+        }
+
+        // Function to handle correction
+        async function correctItem(itemId, factory, sourceCollection) {
+            try {
+                // Fetch the full document from the correct collection
+                const response = await fetch(`${serverURL}/queries`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        dbName: "submittedDB",
+                        collectionName: sourceCollection,
+                        query: { "_id": itemId }
+                    })
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('Server error response:', errorText);
+                    throw new Error(`Server responded with status ${response.status}: ${errorText}`);
+                }
+
+                const data = await response.json();
+                
+                if (!data || data.length === 0) {
+                    throw new Error('Document not found');
+                }
+
+                const docData = data[0];
+                
+                // Open the edit modal with the document data
+                openCorrectionEditModal(docData, sourceCollection, factory);
+                
+            } catch (error) {
+                console.error('Error fetching document for correction:', error);
+                alert(`データの取得に失敗しました: ${error.message}`);
+            }
+        }
+
+        function openCorrectionEditModal(docData, sourceCollection, factory) {
+            const modal = document.getElementById('correctionEditModal');
+            const title = document.getElementById('editModalTitle');
+            const formFields = document.getElementById('editFormFields');
+            
+            // Set modal title
+            const processTypes = {
+                'kensaDB': '検査',
+                'pressDB': 'プレス加工', 
+                'slitDB': 'スリット',
+                'SRSDB': 'SRS'
+            };
+            title.textContent = `${processTypes[sourceCollection] || sourceCollection} データ修正`;
+            
+            // Generate form fields based on process type
+            formFields.innerHTML = generateFormFields(docData, sourceCollection);
+            
+            // Store document info for submission
+            modal.dataset.documentId = docData._id;
+            modal.dataset.sourceCollection = sourceCollection;
+            modal.dataset.factory = factory;
+            modal.dataset.originalData = JSON.stringify(docData); // Store original data for comparison
+            
+            modal.style.display = 'block';
+            
+            // Initialize textarea heights after modal is shown
+            setTimeout(() => {
+                const textareas = modal.querySelectorAll('textarea');
+                textareas.forEach(textarea => {
+                    autoResize(textarea);
+                });
+            }, 100);
+
+            // Add event listener for comment validation after modal is shown
+            setTimeout(() => {
+                const commentField = document.getElementById('correctionComment');
+                if (commentField) {
+                    commentField.addEventListener('input', validateInputs);
+                }
+            }, 100);
+        }
+
+        function generateFormFields(docData, sourceCollection) {
+            let html = '';
+            const isKensa = sourceCollection === 'kensaDB';
+            const isPress = sourceCollection === 'pressDB';
+            const isSlit = sourceCollection === 'slitDB';
+            const isSRS = sourceCollection === 'SRSDB';
+            
+            const labelToKeyMap = {
+                "品番": "品番", "背番号": "背番号", "工場": "工場", "日付": "Date",
+                "作業者": "Worker_Name", "設備": "設備", "数量": "Process_Quantity",
+                "残数量": "Remaining_Quantity", "不良数": "Total_NG", "Total": "Total",
+                "開始": "Time_start", "終了": "Time_end", "製造ロット": "製造ロット",
+                "コメント": "Comment", "サイクルタイム": "Cycle_Time", "ショット数": "ショット数",
+                "材料ロット": "材料ロット", "疵引不良": "疵引不良", "加工不良": "加工不良",
+                "その他": "その他", "SRSコード": "SRSコード", "くっつき・めくれ": "くっつき・めくれ",
+                "シワ": "シワ", "転写位置ズレ": "転写位置ズレ", "転写不良": "転写不良",
+                "文字欠け": "文字欠け"
+            };
+
+            // Add counter mappings
+            for (let i = 1; i <= 12; i++) {
+                labelToKeyMap[`counter-${i}`] = `Counters.counter-${i}`;
+            }
+            
+            const entries = [];
+            
+            if (isKensa) {
+                const fields = ["品番", "背番号", "工場", "日付", "作業者", "設備", "数量", "残数量", "不良数", "Total", "開始", "終了", "製造ロット", "コメント", "サイクルタイム"];
+                fields.forEach(label => {
+                    const key = labelToKeyMap[label];
+                    entries.push([label, docData[key] ?? ""]);
+                });
+                for (let i = 1; i <= 12; i++) {
+                    entries.push([`counter-${i}`, docData?.Counters?.[`counter-${i}`] ?? 0]);
+                }
+            } else if (isPress) {
+                const fields = ["品番", "背番号", "工場", "日付", "作業者", "設備", "数量", "不良数", "Total", "開始", "終了", "材料ロット", "疵引不良", "加工不良", "その他", "サイクルタイム", "ショット数", "コメント"];
+                fields.forEach(label => {
+                    const key = labelToKeyMap[label];
+                    entries.push([label, docData[key] ?? ""]);
+                });
+            } else if (isSRS) {
+                const fields = ["品番", "背番号", "工場", "日付", "作業者", "設備", "数量", "不良数", "Total", "開始", "終了", "製造ロット", "サイクルタイム", "SRSコード", "くっつき・めくれ", "シワ", "転写位置ズレ", "転写不良", "文字欠け", "その他", "コメント"];
+                fields.forEach(label => {
+                    const key = labelToKeyMap[label];
+                    entries.push([label, docData[key] ?? ""]);
+                });
+            } else if (isSlit) {
+                const fields = ["品番", "背番号", "工場", "日付", "作業者", "設備", "数量", "不良数", "Total", "開始", "終了", "製造ロット", "サイクルタイム", "疵引不良", "加工不良", "その他", "コメント"];
+                fields.forEach(label => {
+                    const key = labelToKeyMap[label];
+                    entries.push([label, docData[key] ?? ""]);
+                });
+            }
+
+            entries.forEach(([label, value]) => {
+                const isComment = label === "コメント" || label === "Comment";
+                const isReadOnly = ["品番", "工場", "サイクルタイム", "不良数", "Total"].includes(label);
+                
+                if (isComment) {
+                    html += `
+                        <div class="edit-form-field">
+                            <label for="${label}">${label}:</label>
+                            <textarea name="${label}" id="${label}" class="editable-input" 
+                                      style="min-height: 2.5rem; resize: none; overflow: hidden;"
+                                      ${isReadOnly ? 'readonly' : ''}
+                                      oninput="autoResize(this); recalculateLive();">${value ?? ""}</textarea>
+                        </div>
+                    `;
+                } else {
+                    const inputType = ["数量", "残数量", "不良数", "Total", "ショット数", "疵引不良", "加工不良", "その他", "くっつき・めくれ", "シワ", "転写位置ズレ", "転写不良", "文字欠け"].includes(label) ? "number" : "text";
+                    const isTimeField = ["開始", "終了"].includes(label);
+                    const actualType = isTimeField ? "time" : inputType;
+                    
+                    html += `
+                        <div class="edit-form-field">
+                            <label for="${label}">${label}:</label>
+                            <input type="${actualType}" name="${label}" id="${label}" value="${value ?? ""}" 
+                                   class="editable-input" ${isReadOnly ? 'readonly' : ''}
+                                   ${inputType === "number" ? 'min="0"' : ''}
+                                   oninput="recalculateLive(); validateInputs();" />
+                        </div>
+                    `;
+                }
+            });
+            
+            html += '<div id="inputError" class="text-red-500 text-sm mt-2"></div>';
+            
+            return html;
+        }
+
+        function closeCorrectionEditModal() {
+            document.getElementById('correctionEditModal').style.display = 'none';
+        }
+
+        // Auto-resize function for textareas
+        function autoResize(textarea) {
+            textarea.style.height = 'auto';
+            textarea.style.height = textarea.scrollHeight + 'px';
+        }
+
+        // Recalculate values live as user types
+        function recalculateLive() {
+            const get = label => {
+                const el = document.getElementById(label);
+                return el ? el.value.trim() : null;
+            };
+            const set = (label, value) => {
+                const el = document.getElementById(label);
+                if (el) el.value = value;
+            };
+
+            const start = new Date(`1970-01-01T${get("開始") || "00:00"}:00Z`);
+            const end = new Date(`1970-01-01T${get("終了") || "00:00"}:00Z`);
+            const quantity = Number(get("数量")) || 1;
+
+            const durationInSeconds = Math.max(0, (end - start) / 1000);
+            const cycleTime = durationInSeconds / quantity;
+            set("サイクルタイム", cycleTime.toFixed(2));
+
+            let totalNG = 0;
+            const modal = document.getElementById('correctionEditModal');
+            const sourceCollection = modal.dataset.sourceCollection;
+            
+            if (sourceCollection === 'kensaDB') {
+                for (let i = 1; i <= 12; i++) {
+                    totalNG += Number(get(`counter-${i}`)) || 0;
+                }
+            } else if (sourceCollection === 'pressDB' || sourceCollection === 'slitDB') {
+                ["疵引不良", "加工不良", "その他"].forEach(f => totalNG += Number(get(f)) || 0);
+            } else if (sourceCollection === 'SRSDB') {
+                ["くっつき・めくれ", "シワ", "転写位置ズレ", "転写不良", "文字欠け"].forEach(f => totalNG += Number(get(f)) || 0);
+            }
+
+            set("不良数", totalNG);
+            set("Total", quantity - totalNG);
+        }
+
+        // Validate input fields
+        function validateInputs() {
+            const intFields = ["数量", "残数量", "不良数", "Total", "ショット数", "疵引不良", "加工不良", "その他"];
+            for (let i = 1; i <= 12; i++) intFields.push(`counter-${i}`);
+            intFields.push(...["くっつき・めくれ", "シワ", "転写位置ズレ", "転写不良", "文字欠け"]);
+            
+            const timeFields = ["開始", "終了"];
+            const errorDiv = document.getElementById("inputError");
+            
+            let isValid = true;
+            let messages = [];
+
+            document.querySelectorAll(".editable-input").forEach(input => {
+                const label = input.name;
+                const value = input.value.trim();
+
+                if (intFields.includes(label)) {
+                    if (!/^\d+$/.test(value) && value !== "") {
+                        isValid = false;
+                        messages.push(`${label} must be an integer`);
+                        input.classList.add("border-red-500");
+                    } else {
+                        input.classList.remove("border-red-500");
+                    }
+                }
+
+                if (timeFields.includes(label)) {
+                    if (!/^\d{2}:\d{2}$/.test(value) || Number(value.split(":")[0]) > 23 || Number(value.split(":")[1]) > 59) {
+                        isValid = false;
+                        messages.push(`${label} must be in 24-hour HH:mm format`);
+                        input.classList.add("border-red-500");
+                    } else {
+                        input.classList.remove("border-red-500");
+                    }
+                }
+            });
+
+            // Check correction comment
+            const correctionComment = document.getElementById('correctionComment');
+            if (correctionComment) {
+                if (!correctionComment.value.trim()) {
+                    isValid = false;
+                    correctionComment.classList.add("border-red-500");
+                } else {
+                    correctionComment.classList.remove("border-red-500");
+                }
+            }
+
+            if (!isValid) {
+                errorDiv.innerHTML = messages.join("<br>");
+                errorDiv.style.color = "red";
+            } else {
+                errorDiv.innerHTML = "";
+            }
+
+            const submitBtn = document.querySelector('#correctionEditForm button[type="submit"]');
+            if (submitBtn) submitBtn.disabled = !isValid;
+        }
+
+        // Handle form submission
+        document.getElementById('correctionEditForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const modal = document.getElementById('correctionEditModal');
+            const documentId = modal.dataset.documentId;
+            const sourceCollection = modal.dataset.sourceCollection;
+            const factory = modal.dataset.factory;
+            
+            // Get correction comment and validate
+            const correctionComment = document.getElementById('correctionComment').value.trim();
+            const commentError = document.getElementById('commentError');
+            
+            if (!correctionComment) {
+                commentError.style.display = 'block';
+                document.getElementById('correctionComment').focus();
+                return;
+            }
+            commentError.style.display = 'none';
+            
+            // Get original data for comparison
+            const originalData = JSON.parse(modal.dataset.originalData || '{}');
+            
+            // Get form data
+            const formData = new FormData(this);
+            const updatedFields = {};
+            const counters = {};
+            let processQty = 0;
+            const changes = []; // Track what changed
+
+            const labelToKeyMap = {
+                "品番": "品番", "背番号": "背番号", "工場": "工場", "日付": "Date",
+                "作業者": "Worker_Name", "設備": "設備", "数量": "Process_Quantity",
+                "残数量": "Remaining_Quantity", "不良数": "Total_NG", "Total": "Total",
+                "開始": "Time_start", "終了": "Time_end", "製造ロット": "製造ロット",
+                "コメント": "Comment", "サイクルタイム": "Cycle_Time", "ショット数": "ショット数",
+                "材料ロット": "材料ロット", "疵引不良": "疵引不良", "加工不良": "加工不良",
+                "その他": "その他", "SRSコード": "SRSコード", "くっつき・めくれ": "くっつき・めくれ",
+                "シワ": "シワ", "転写位置ズレ": "転写位置ズレ", "転写不良": "転写不良",
+                "文字欠け": "文字欠け"
+            };
+
+            for (let [label, value] of formData.entries()) {
+                if (label === 'correctionComment') continue; // Skip the comment field
+                
+                // Handle counter fields specially for kensa
+                if (label.startsWith('counter-')) {
+                    const counterKey = label;
+                    const newValue = Number(value) || 0;
+                    const oldValue = originalData?.Counters?.[counterKey] || 0;
+                    
+                    counters[counterKey] = newValue;
+                    
+                    if (newValue !== oldValue) {
+                        changes.push(`${label}: ${oldValue} → ${newValue}`);
+                    }
+                } else {
+                    const key = labelToKeyMap[label] || label;
+                    const numericFields = ["Process_Quantity", "Remaining_Quantity", "Total_NG", "Total", "Cycle_Time", "ショット数", "疵引不良", "加工不良", "その他", "くっつき・めくれ", "シワ", "転写位置ズレ", "転写不良", "文字欠け"];
+                    
+                    let newValue;
+                    if (numericFields.includes(key)) {
+                        newValue = Number(value) || 0;
+                        if (key === "Process_Quantity") processQty = newValue;
+                    } else {
+                        newValue = value;
+                    }
+                    
+                    updatedFields[key] = newValue;
+                    
+                    // Track changes (skip calculated fields)
+                    if (!["Total_NG", "Total", "Cycle_Time"].includes(key)) {
+                        const oldValue = originalData[key];
+                        if (String(newValue) !== String(oldValue)) {
+                            const displayLabel = Object.keys(labelToKeyMap).find(k => labelToKeyMap[k] === key) || key;
+                            changes.push(`${displayLabel}: "${oldValue}" → "${newValue}"`);
+                        }
+                    }
+                }
+            }
+
+            // Add counters object if we have counter fields
+            if (Object.keys(counters).length > 0) {
+                updatedFields["Counters"] = counters;
+            }
+
+            // Calculate cycle time again for final save
+            if (updatedFields["Time_start"] && updatedFields["Time_end"] && processQty > 0) {
+                const start = new Date(`1970-01-01T${updatedFields["Time_start"]}:00Z`);
+                const end = new Date(`1970-01-01T${updatedFields["Time_end"]}:00Z`);
+                const diffSeconds = (end - start) / 1000;
+                updatedFields["Cycle_Time"] = Math.max(diffSeconds / processQty, 0);
+            }
+
+            // Calculate Total_NG and Total
+            let totalNG = 0;
+            if (sourceCollection === 'kensaDB') {
+                Object.values(counters).forEach(v => totalNG += v || 0);
+            } else if (sourceCollection === 'pressDB' || sourceCollection === 'slitDB') {
+                ["疵引不良", "加工不良", "その他"].forEach(f => totalNG += Number(updatedFields[f]) || 0);
+            } else if (sourceCollection === 'SRSDB') {
+                ["くっつき・めくれ", "シワ", "転写位置ズレ", "転写不良", "文字欠け", "その他"].forEach(f => totalNG += Number(updatedFields[f]) || 0);
+            }
+
+            updatedFields["Total_NG"] = totalNG;
+            updatedFields["Total"] = processQty - totalNG;
+
+            // Get worker name for correction history
+            const workerName = updatedFields.Worker_Name || 'Unknown';
+            
+            // Create detailed comment with changes
+            const changeDetails = changes.length > 0 ? 
+                `${correctionComment}\n\n変更内容:\n${changes.join('\n')}` : 
+                correctionComment;
+            
+            try {
+                const response = await fetch(`${serverURL}/queries`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        dbName: "submittedDB",
+                        collectionName: sourceCollection,
+                        query: { "_id": documentId },
+                        update: {
+                            $set: {
+                                ...updatedFields,
+                                "approvalStatus": "pending",
+                                "correctionResponseBy": workerName,
+                                "correctionResponseAt": new Date()
+                            },
+                            $push: {
+                                "approvalHistory": {
+                                    "action": "修正対応",
+                                    "user": workerName,
+                                    "timestamp": new Date(),
+                                    "comment": changeDetails,
+                                    "changesCount": changes.length
                                 }
                             }
-                        });
-                    });
+                        }
+                    })
+                });
 
-                    const qrImg = document.createElement('img');
-                    qrImg.src = 'src/qr-code.png';  // Path to your QR code image
-                    qrImg.alt = 'QR Code Scanner';
+                if (response.ok) {
+                    alert('修正が完了しました');
+                    closeCorrectionEditModal();
+                    closeCorrectionModal();
+                    location.reload(); // Refresh to update the correction count
+                } else {
+                    const errorText = await response.text();
+                    console.error('Update failed:', errorText);
+                    alert(`修正に失敗しました: ${errorText}`);
+                }
+            } catch (error) {
+                console.error('Error updating document:', error);
+                alert(`修正中にエラーが発生しました: ${error.message}`);
+            }
+        });
 
-                    const qrLabel = document.createElement('div');
-                    qrLabel.classList.add('label');
-                    qrLabel.textContent = 'Scan Machine!';
-
-                    qrCard.appendChild(qrImg);
-                    qrCard.appendChild(qrLabel);
-                    containers.appendChild(qrCard);
-
-                    // Add the additional card for Kensa Only
-                    const kensaOnlyCard = document.createElement('div');
-                    kensaOnlyCard.classList.add('card');
-                    kensaOnlyCard.addEventListener('click', () => {
-                        window.location.href = `choose.html?selected=${filterValue}`;
-                    });
-
-                    const kensaImg = document.createElement('img');
-                    kensaImg.src = 'src/machines/kensa.jpg';  // Path to your Kensa image
-                    kensaImg.alt = '検査のみ';
-
-                    const kensaLabel = document.createElement('div');
-                    kensaLabel.classList.add('label');
-                    kensaLabel.textContent = '検査のみ';
-
-                    kensaOnlyCard.appendChild(kensaImg);
-                    kensaOnlyCard.appendChild(kensaLabel);
-                    containers.appendChild(kensaOnlyCard);
-                })
-                .catch(error => console.error('Error fetching data:', error));
+        // Add correction card to each factory
+        async function addCorrectionCardToFactory(containers, factory) {
+            const correctionCard = await createCorrectionCard(factory);
+            if (correctionCard) {
+                // Insert correction card as the first card
+                containers.insertBefore(correctionCard, containers.firstChild);
+            }
         }
-    </script>
+
+        // Main function to initialize factory cards
+        async function initializeFactoryCards() {
+            if (filterValue === '天徳') {
+                const containers = document.getElementById('containers');
+
+                // Add correction card first
+                await addCorrectionCardToFactory(containers, filterValue);
+
+                // Create card for スリット
+                const slitCard = document.createElement('div');
+                slitCard.classList.add('card');
+                slitCard.addEventListener('click', () => {
+                    window.location.href = `SLIT Process iReporter.html?filter=${filterValue}`;
+                });
+
+                const slitImg = document.createElement('img');
+                slitImg.src = 'src/machines/slit.jpg';
+                slitImg.alt = 'スリット';
+
+                const slitLabel = document.createElement('div');
+                slitLabel.classList.add('label');
+                slitLabel.textContent = 'スリット';
+
+                slitCard.appendChild(slitImg);
+                slitCard.appendChild(slitLabel);
+                containers.appendChild(slitCard);
+
+                // Create card for SRS
+                const srsCard = document.createElement('div');
+                srsCard.classList.add('card');
+                srsCard.addEventListener('click', () => {
+                    window.location.href = `SRS Process iReporter.html?filter=${filterValue}`;
+                });
+
+                const srsImg = document.createElement('img');
+                srsImg.src = 'src/machines/srs.jpg';
+                srsImg.alt = 'SRS';
+
+                const srsLabel = document.createElement('div');
+                srsLabel.classList.add('label');
+                srsLabel.textContent = 'SRS';
+
+                srsCard.appendChild(srsImg);
+                srsCard.appendChild(srsLabel);
+                containers.appendChild(srsCard);
+
+                // Create card for 検査
+                const kensaCard = document.createElement('div');
+                kensaCard.classList.add('card');
+                kensaCard.addEventListener('click', () => {
+                    window.location.href = `newKensa iReporter.html?filter=${filterValue}`;
+                });
+
+                const kensaImg = document.createElement('img');
+                kensaImg.src = 'src/machines/kensa.jpg';
+                kensaImg.alt = '検査';
+
+                const kensaLabel = document.createElement('div');
+                kensaLabel.classList.add('label');
+                kensaLabel.textContent = '検査';
+
+                kensaCard.appendChild(kensaImg);
+                kensaCard.appendChild(kensaLabel);
+                containers.appendChild(kensaCard);
+                
+            } else if (filterValue === 'SCNA') {
+                const containers = document.getElementById('containers');
+
+                // Add correction card first
+                await addCorrectionCardToFactory(containers, filterValue);
+
+                // Create card for プレス加工
+                const pressCard = document.createElement('div');
+                pressCard.classList.add('card');
+                pressCard.addEventListener('click', () => {
+                    window.location.href = `Press Cutting iReporter English.html?filter=${filterValue}`;
+                });
+
+                const pressImg = document.createElement('img');
+                pressImg.src = 'src/machines/MANAS.jpg';
+                pressImg.alt = 'プレス加工';
+
+                const pressLabel = document.createElement('div');
+                pressLabel.classList.add('label');
+                pressLabel.textContent = 'PRESS CUTTING PROCESS';
+
+                pressCard.appendChild(pressImg);
+                pressCard.appendChild(pressLabel);
+                containers.appendChild(pressCard);
+
+                // Create card for SRS
+                const srsCard = document.createElement('div');
+                srsCard.classList.add('card');
+                srsCard.addEventListener('click', () => {
+                    window.location.href = `SRS Process iReporter English.html?filter=${filterValue}`;
+                });
+
+                const srsImg = document.createElement('img');
+                srsImg.src = 'src/machines/srs.jpg';
+                srsImg.alt = 'SRS';
+
+                const srsLabel = document.createElement('div');
+                srsLabel.classList.add('label');
+                srsLabel.textContent = 'SRS';
+
+                srsCard.appendChild(srsImg);
+                srsCard.appendChild(srsLabel);
+                containers.appendChild(srsCard);
+
+                // Create card for 検査
+                const kensaCard = document.createElement('div');
+                kensaCard.classList.add('card');
+                kensaCard.addEventListener('click', () => {
+                    window.location.href = `newKensa iReporter English.html?filter=${filterValue}`;
+                });
+
+                const kensaImg = document.createElement('img');
+                kensaImg.src = 'src/machines/kensa.jpg';
+                kensaImg.alt = '検査';
+
+                const kensaLabel = document.createElement('div');
+                kensaLabel.classList.add('label');
+                kensaLabel.textContent = 'INSPECTION';
+
+                kensaCard.appendChild(kensaImg);
+                kensaCard.appendChild(kensaLabel);
+                containers.appendChild(kensaCard);
+                
+            } else if (filterValue === '小瀬') {
+                const containers = document.getElementById('containers');
+
+                // Add correction card first
+                await addCorrectionCardToFactory(containers, filterValue);
+
+                // Create card for プレス加工
+                const pressCard = document.createElement('div');
+                pressCard.classList.add('card');
+                pressCard.addEventListener('click', () => {
+                    window.location.href = `chooseMachine.html?filter=${filterValue}`;
+                });
+
+                const pressImg = document.createElement('img');
+                pressImg.src = 'src/machines/NCC01.jpg';
+                pressImg.alt = 'NC加工';
+
+                const pressLabel = document.createElement('div');
+                pressLabel.classList.add('label');
+                pressLabel.textContent = 'NC加工';
+
+                pressCard.appendChild(pressImg);
+                pressCard.appendChild(pressLabel);
+                containers.appendChild(pressCard);
+
+                // Create card for 検査
+                const kensaCard = document.createElement('div');
+                kensaCard.classList.add('card');
+                kensaCard.addEventListener('click', () => {
+                    window.location.href = `newKensa iReporter.html?filter=${filterValue}`;
+                });
+
+                const kensaImg = document.createElement('img');
+                kensaImg.src = 'src/machines/kensa.jpg';
+                kensaImg.alt = '検査';
+
+                const kensaLabel = document.createElement('div');
+                kensaLabel.classList.add('label');
+                kensaLabel.textContent = '検査';
+
+                kensaCard.appendChild(kensaImg);
+                kensaCard.appendChild(kensaLabel);
+                containers.appendChild(kensaCard);
+            } else if (filterValue === 'NFH') {
+                const containers = document.getElementById('containers');
+
+                // Add correction card first
+                await addCorrectionCardToFactory(containers, filterValue);
+
+                // Create card for プレス加工
+                const pressCard = document.createElement('div');
+                pressCard.classList.add('card');
+                pressCard.addEventListener('click', () => {
+                    window.location.href = `Press Cutting iReporter.html?filter=${filterValue}`;
+                });
+
+                const pressImg = document.createElement('img');
+                pressImg.src = 'src/machines/MANAS.jpg';
+                pressImg.alt = 'プレス加工';
+
+                const pressLabel = document.createElement('div');
+                pressLabel.classList.add('label');
+                pressLabel.textContent = 'プレス / レーザー 加工';
+
+                pressCard.appendChild(pressImg);
+                pressCard.appendChild(pressLabel);
+                containers.appendChild(pressCard);
+
+                // Create card for 検査
+                const kensaCard = document.createElement('div');
+                kensaCard.classList.add('card');
+                kensaCard.addEventListener('click', () => {
+                    window.location.href = `newKensa iReporter.html?filter=${filterValue}`;
+                });
+
+                const kensaImg = document.createElement('img');
+                kensaImg.src = 'src/machines/kensa.jpg';
+                kensaImg.alt = '検査';
+
+                const kensaLabel = document.createElement('div');
+                kensaLabel.classList.add('label');
+                kensaLabel.textContent = '検査';
+
+                kensaCard.appendChild(kensaImg);
+                kensaCard.appendChild(kensaLabel);
+                containers.appendChild(kensaCard);
+            } else {
+                const containers = document.getElementById('containers');
+
+                // Add correction card first for other factories too
+                await addCorrectionCardToFactory(containers, filterValue);
+
+                fetch(`${dbURL}?filter=${filterValue}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        // Normal case, display cards based on fetched data
+                        data.forEach((list) => {
+                            const card = document.createElement('div');
+                            card.classList.add('card');
+                            card.addEventListener('click', () => {
+                                window.location.href = `nippo.html?selected=${list}&filter=${filterValue}`;
+                            });
+
+                            const img = document.createElement('img');
+                            if (list === "自動プレス機") {
+                                img.src = `src/machines/jido.jpg`;
+                            } else {
+                                img.src = `src/machines/${list}.jpg`;
+                            }
+                            img.alt = list;
+
+                            const label = document.createElement('div');
+                            label.classList.add('label');
+                            label.textContent = list;
+                            label.addEventListener('click', (event) => {
+                                event.stopPropagation();
+                                window.location.href = `nippo.html?selected=${list}&filter=${filterValue}`;
+                            });
+
+                            card.appendChild(img);
+                            card.appendChild(label);
+                            containers.appendChild(card);
+                        });
+
+                        // Add the additional card for QR code scanning
+                        const qrCard = document.createElement('div');
+                        qrCard.classList.add('card');
+                        qrCard.addEventListener('click', () => {
+                            const popup = window.open('popup.html', 'QR Scanner', 'width=400,height=300');
+
+                            window.addEventListener('message', function(event) {
+                                if (event.origin === window.location.origin) {
+                                    const BarcodeValue = event.data;
+                                    console.log(`QR Code detected: ${BarcodeValue}`);
+
+                                    // Check if the scanned value is in the list
+                                    if (data.includes(BarcodeValue)) {
+                                        // Redirect to nippo.html with the QR code value as filter
+                                        window.location.href = `nippo.html?selected=${BarcodeValue}&filter=${filterValue}`;
+                                    } else {
+                                        alert('Invalid QR Code');
+                                    }
+                                }
+                            });
+                        });
+
+                        const qrImg = document.createElement('img');
+                        qrImg.src = 'src/qr-code.png';
+                        qrImg.alt = 'QR Code Scanner';
+
+                        const qrLabel = document.createElement('div');
+                        qrLabel.classList.add('label');
+                        qrLabel.textContent = 'Scan Machine!';
+
+                        qrCard.appendChild(qrImg);
+                        qrCard.appendChild(qrLabel);
+                        containers.appendChild(qrCard);
+
+                        // Add the additional card for Kensa Only
+                        const kensaOnlyCard = document.createElement('div');
+                        kensaOnlyCard.classList.add('card');
+                        kensaOnlyCard.addEventListener('click', () => {
+                            window.location.href = `choose.html?selected=${filterValue}`;
+                        });
+
+                        const kensaImg = document.createElement('img');
+                        kensaImg.src = 'src/machines/kensa.jpg';
+                        kensaImg.alt = '検査のみ';
+
+                        const kensaLabel = document.createElement('div');
+                        kensaLabel.classList.add('label');
+                        kensaLabel.textContent = '検査のみ';
+
+                        kensaOnlyCard.appendChild(kensaImg);
+                        kensaOnlyCard.appendChild(kensaLabel);
+                        containers.appendChild(kensaOnlyCard);
+                    })
+                    .catch(error => console.error('Error fetching data:', error));
+            }
+        }
+        
+        // Initialize the factory cards
+        initializeFactoryCards();
+        </script>
 </body>
 </html>
