@@ -1645,8 +1645,9 @@ function checkProcessCondition() {
         }
     } else {
         // --- This configuration requires ONLY ONE SCAN (or second is skipped) ---
-        // Inputs should be enabled if the first scan is done OR if second scan was marked as SKIPPED.
-        if (firstScanActualValue) { // If first scan is done, that's enough for a 1-scan process
+        // Inputs should be enabled if the first scan is done OR if dropdown has a value selected.
+        const subDropdownValue = subDropdown ? subDropdown.value : "";
+        if (firstScanActualValue || subDropdownValue) { // If first scan is done OR dropdown selection exists, that's enough for a 1-scan process
             console.log(`Inputs enabled: Single scan requirement met or second scan not needed (Factory: ${currentFactory}, Process: ${currentProcess}).`);
             enableInputs();
         } else {
