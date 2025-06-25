@@ -3045,12 +3045,11 @@ app.post("/createUser", async (req, res) => {
 });
 
 
-
 app.post("/updateUser", async (req, res) => {
-  const { userId, firstName, lastName, email, role, factory } = req.body;
+  const { userId, firstName, lastName, email, role, username } = req.body;
 
   if (!userId || !role) {
-    console.log("❌ Missing userId or role:", { userId, firstName, lastName, email, role, factory });
+    console.log("❌ Missing userId or role:", { userId, firstName, lastName, email, role, factory, username });
     return res.status(400).json({ error: "User ID and role are required" });
   }
 
@@ -3063,33 +3062,39 @@ app.post("/updateUser", async (req, res) => {
       ...(firstName && { firstName }),
       ...(lastName && { lastName }),
       ...(email && { email }),
+      ...(username && { username }),
       ...(role && { role })
     };
 
     // Handle 工場 field for 班長 users
     if (role === '班長') {
-      if (factory) {
-        // Store factory in 工場 field
-        // Support both string and array format for future multi-factory support
-        updateFields['工場'] = typeof factory === 'string' ? factory : factory;
+      if (factory && factory.length > 0) {
+        // Store factory array in 工場 field  
+        updateFields['工場'] = Array.isArray(factory) ? factory : [factory];
       } else {
-        // If no factory provided for 班長, this might be an error
+        // If no factory provided for 班長, set empty array
         console.warn("班長 user without factory assignment");
+        updateFields['工場'] = [];
       }
     } else {
-      // Remove 工場 field for non-班長 users
-      updateFields['$unset'] = { '工場': "" };
+      // For non-班長 users, we'll unset the 工場 field
+      // Don't include it in updateFields, handle separately
     }
 
-    // Handle unset separately if needed
-    let updateOperation = { $set: updateFields };
-    if (updateFields['$unset']) {
+    let updateOperation;
+    
+    if (role !== '班長') {
+      // For non-班長 users, remove 工場 field
       updateOperation = {
-        $set: { ...updateFields },
-        $unset: updateFields['$unset']
+        $set: updateFields,
+        $unset: { '工場': "" }
       };
-      delete updateFields['$unset'];
+    } else {
+      // For 班長 users, just set the fields
+      updateOperation = { $set: updateFields };
     }
+
+    console.log("Update operation:", updateOperation);
 
     const result = await users.updateOne(
       { _id: new ObjectId(userId) },
