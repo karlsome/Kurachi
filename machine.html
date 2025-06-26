@@ -240,25 +240,35 @@
                 
                 // Check each collection for corrections
                 for (const collectionName of collections) {
-                    const response = await fetch(`${serverURL}/queries`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            dbName: "submittedDB",
-                            collectionName: collectionName,
-                            query: { 
-                                "工場": factory,
-                                "approvalStatus": "correction_needed"
-                            }
-                        })
-                    });
+                    try {
+                        const response = await fetch(`${serverURL}/queries`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                dbName: "submittedDB",
+                                collectionName: collectionName,
+                                query: { 
+                                    "工場": factory,
+                                    "approvalStatus": "correction_needed"
+                                }
+                            })
+                        });
 
-                    const corrections = await response.json();
-                    // Add collection name to each correction for tracking
-                    corrections.forEach(correction => {
-                        correction.sourceCollection = collectionName;
-                    });
-                    allCorrections = allCorrections.concat(corrections);
+                        if (response.ok) {
+                            const corrections = await response.json();
+                            // Ensure corrections is an array
+                            const correctionArray = Array.isArray(corrections) ? corrections : [];
+                            // Add collection name to each correction for tracking
+                            correctionArray.forEach(correction => {
+                                correction.sourceCollection = collectionName;
+                            });
+                            allCorrections = allCorrections.concat(correctionArray);
+                        } else {
+                            console.warn(`Failed to fetch corrections from ${collectionName}:`, response.status);
+                        }
+                    } catch (collectionError) {
+                        console.warn(`Error fetching corrections from ${collectionName}:`, collectionError);
+                    }
                 }
 
                 const correctionCount = allCorrections.length;
@@ -500,6 +510,30 @@
             
             html += '<div id="inputError" class="text-red-500 text-sm mt-2"></div>';
             
+            return html;
+        }
+
+        function createFormField(name, label, value, type, options = []) {
+            let html = `<div class="edit-form-field">
+                <label for="${name}">${label}:</label>`;
+            
+            if (type === 'select') {
+                html += `<select name="${name}" id="${name}">`;
+                options.forEach(option => {
+                    const selected = option === value ? 'selected' : '';
+                    html += `<option value="${option}" ${selected}>${option}</option>`;
+                });
+                html += '</select>';
+            } else {
+                const inputType = type || 'text';
+                html += `<input type="${inputType}" name="${name}" id="${name}" value="${value}"`;
+                if (inputType === 'number') {
+                    html += ' min="0"';
+                }
+                html += '>';
+            }
+            
+            html += '</div>';
             return html;
         }
 
@@ -775,9 +809,7 @@
                 // Insert correction card as the first card
                 containers.insertBefore(correctionCard, containers.firstChild);
             }
-        }
-
-        // Main function to initialize factory cards
+        }        // Main function to initialize factory cards
         async function initializeFactoryCards() {
             if (filterValue === '天徳') {
                 const containers = document.getElementById('containers');
@@ -841,8 +873,8 @@
                 kensaCard.appendChild(kensaImg);
                 kensaCard.appendChild(kensaLabel);
                 containers.appendChild(kensaCard);
-                
-            } else if (filterValue === 'SCNA') {
+
+            } else if (filterValue === '肥田瀬') {
                 const containers = document.getElementById('containers');
 
                 // Add correction card first
@@ -852,7 +884,7 @@
                 const pressCard = document.createElement('div');
                 pressCard.classList.add('card');
                 pressCard.addEventListener('click', () => {
-                    window.location.href = `Press Cutting iReporter English.html?filter=${filterValue}`;
+                    window.location.href = `Press Cutting iReporter.html?filter=${filterValue}`;
                 });
 
                 const pressImg = document.createElement('img');
@@ -861,11 +893,354 @@
 
                 const pressLabel = document.createElement('div');
                 pressLabel.classList.add('label');
-                pressLabel.textContent = 'PRESS CUTTING PROCESS';
+                pressLabel.textContent = 'プレス加工';
 
                 pressCard.appendChild(pressImg);
                 pressCard.appendChild(pressLabel);
                 containers.appendChild(pressCard);
+
+                // Create card for 検査
+                const kensaCard = document.createElement('div');
+                kensaCard.classList.add('card');
+                kensaCard.addEventListener('click', () => {
+                    window.location.href = `newKensa iReporter.html?filter=${filterValue}`;
+                });
+
+                const kensaImg = document.createElement('img');
+                kensaImg.src = 'src/machines/kensa.jpg';
+                kensaImg.alt = '検査';
+
+                const kensaLabel = document.createElement('div');
+                kensaLabel.classList.add('label');
+                kensaLabel.textContent = '検査';
+
+                kensaCard.appendChild(kensaImg);
+                kensaCard.appendChild(kensaLabel);
+                containers.appendChild(kensaCard);
+
+                // Create card for 肥田瀬QRスキャナー
+                const hidaseCard = document.createElement('div');
+                hidaseCard.classList.add('card');
+                hidaseCard.addEventListener('click', () => {
+                    window.location.href = `hidase labelprinter.html?filter=${filterValue}`;
+                });
+
+                const hidaseImg = document.createElement('img');
+                hidaseImg.src = 'src/qr-code.png';
+                hidaseImg.alt = '肥田瀬QRスキャナー';
+
+                const hidaseLabel = document.createElement('div');
+                hidaseLabel.classList.add('label');
+                hidaseLabel.textContent = '肥田瀬QRスキャナー';
+
+                hidaseCard.appendChild(hidaseImg);
+                hidaseCard.appendChild(hidaseLabel);
+                containers.appendChild(hidaseCard);
+
+                // Create card for 在庫スキャン
+                const stockScanCard = document.createElement('div');
+                stockScanCard.classList.add('card');
+                stockScanCard.addEventListener('click', () => {
+                    window.location.href = `https://karlsome.github.io/InventorySystem?factoryValue=${filterValue}`;
+                });
+
+                const stockScanImg = document.createElement('img');
+                stockScanImg.src = 'src/machines/scanner.jpg';
+                stockScanImg.alt = '在庫スキャン';
+
+                const stockScanLabel = document.createElement('div');
+                stockScanLabel.classList.add('label');
+                stockScanLabel.textContent = '在庫スキャン';
+
+                stockScanCard.appendChild(stockScanImg);
+                stockScanCard.appendChild(stockScanLabel);
+                containers.appendChild(stockScanCard);
+            } else if (filterValue === '第二工場') {
+                const containers = document.getElementById('containers');
+
+                // Add correction card first
+                await addCorrectionCardToFactory(containers, filterValue);
+
+                // Create card for プレス加工
+                const pressCard = document.createElement('div');
+                pressCard.classList.add('card');
+                pressCard.addEventListener('click', () => {
+                    window.location.href = `Press Cutting iReporter.html?filter=${filterValue}`;
+                });
+
+                const pressImg = document.createElement('img');
+                pressImg.src = 'src/machines/MANAS.jpg';
+                pressImg.alt = 'プレス加工';
+
+                const pressLabel = document.createElement('div');
+                pressLabel.classList.add('label');
+                pressLabel.textContent = 'プレス加工';
+
+                pressCard.appendChild(pressImg);
+                pressCard.appendChild(pressLabel);
+                containers.appendChild(pressCard);
+
+                // Create card for スリット
+                const slitCard = document.createElement('div');
+                slitCard.classList.add('card');
+                slitCard.addEventListener('click', () => {
+                    window.location.href = `SLIT Process iReporter.html?filter=${filterValue}`;
+                });
+
+                const slitImg = document.createElement('img');
+                slitImg.src = 'src/machines/slit.jpg';
+                slitImg.alt = 'スリット';
+
+                const slitLabel = document.createElement('div');
+                slitLabel.classList.add('label');
+                slitLabel.textContent = 'スリット';
+
+                slitCard.appendChild(slitImg);
+                slitCard.appendChild(slitLabel);
+                containers.appendChild(slitCard);
+
+                // Create card for 検査
+                const kensaCard = document.createElement('div');
+                kensaCard.classList.add('card');
+                kensaCard.addEventListener('click', () => {
+                    window.location.href = `newKensa iReporter.html?filter=${filterValue}`;
+                });
+
+                const kensaImg = document.createElement('img');
+                kensaImg.src = 'src/machines/kensa.jpg';
+                kensaImg.alt = '検査';
+
+                const kensaLabel = document.createElement('div');
+                kensaLabel.classList.add('label');
+                kensaLabel.textContent = '検査';
+
+                kensaCard.appendChild(kensaImg);
+                kensaCard.appendChild(kensaLabel);
+                containers.appendChild(kensaCard);
+
+                // Create card for 第二工場 QRスキャナー
+                const qrCard = document.createElement('div');
+                qrCard.classList.add('card');
+                qrCard.addEventListener('click', () => {
+                    window.location.href = `HABA request.html?filter=${filterValue}`;
+                });
+
+                const qrImg = document.createElement('img');
+                qrImg.src = 'src/qr-code.png';
+                qrImg.alt = '第二工場 QRスキャナー';
+
+                const qrLabel = document.createElement('div');
+                qrLabel.classList.add('label');
+                qrLabel.textContent = '第二工場 QRスキャナー';
+
+                qrCard.appendChild(qrImg);
+                qrCard.appendChild(qrLabel);
+                containers.appendChild(qrCard);
+            } else if (filterValue === '倉知') {
+                const containers = document.getElementById('containers');
+
+                // Add correction card first
+                await addCorrectionCardToFactory(containers, filterValue);
+
+                // Create card for プレス加工
+                const pressCard = document.createElement('div');
+                pressCard.classList.add('card');
+                pressCard.addEventListener('click', () => {
+                    window.location.href = `Press Cutting iReporter.html?filter=${filterValue}`;
+                });
+
+                const pressImg = document.createElement('img');
+                pressImg.src = 'src/machines/NCC01.jpg';
+                pressImg.alt = 'NC加工';
+
+                const pressLabel = document.createElement('div');
+                pressLabel.classList.add('label');
+                pressLabel.textContent = 'NC加工';
+
+                pressCard.appendChild(pressImg);
+                pressCard.appendChild(pressLabel);
+                containers.appendChild(pressCard);
+
+                // Create card for 検査
+                const kensaCard = document.createElement('div');
+                kensaCard.classList.add('card');
+                kensaCard.addEventListener('click', () => {
+                    window.location.href = `newKensa iReporter.html?filter=${filterValue}`;
+                });
+
+                const kensaImg = document.createElement('img');
+                kensaImg.src = 'src/machines/kensa.jpg';
+                kensaImg.alt = '検査';
+
+                const kensaLabel = document.createElement('div');
+                kensaLabel.classList.add('label');
+                kensaLabel.textContent = '検査';
+
+                kensaCard.appendChild(kensaImg);
+                kensaCard.appendChild(kensaLabel);
+                containers.appendChild(kensaCard);
+
+                // Create card for ラベルプリンター
+                const hidaseCard = document.createElement('div');
+                hidaseCard.classList.add('card');
+                hidaseCard.addEventListener('click', () => {
+                    window.location.href = `hidase labelprinter.html?filter=${filterValue}`;
+                });
+
+                const hidaseImg = document.createElement('img');
+                hidaseImg.src = 'src/qr-code.png';
+                hidaseImg.alt = 'ラベルプリンター';
+
+                const hidaseLabel = document.createElement('div');
+                hidaseLabel.classList.add('label');
+                hidaseLabel.textContent = 'ラベルプリンター';
+
+                hidaseCard.appendChild(hidaseImg);
+                hidaseCard.appendChild(hidaseLabel);
+                containers.appendChild(hidaseCard);
+            } else if (filterValue === '第一工場') {
+                const containers = document.getElementById('containers');
+
+                // Add correction card first
+                await addCorrectionCardToFactory(containers, filterValue);
+
+                // Create card for Laser加工
+                const pressCard = document.createElement('div');
+                pressCard.classList.add('card');
+                pressCard.addEventListener('click', () => {
+                    window.location.href = `Press Cutting iReporter.html?filter=${filterValue}`;
+                });
+
+                const pressImg = document.createElement('img');
+                pressImg.src = 'src/machines/ALC01.jpg';
+                pressImg.alt = 'レーザー加工';
+
+                const pressLabel = document.createElement('div');
+                pressLabel.classList.add('label');
+                pressLabel.textContent = 'NC加工';
+
+                pressCard.appendChild(pressImg);
+                pressCard.appendChild(pressLabel);
+                containers.appendChild(pressCard);
+
+                // Create card for 検査
+                const kensaCard = document.createElement('div');
+                kensaCard.classList.add('card');
+                kensaCard.addEventListener('click', () => {
+                    window.location.href = `newKensa iReporter.html?filter=${filterValue}`;
+                });
+
+                const kensaImg = document.createElement('img');
+                kensaImg.src = 'src/machines/kensa.jpg';
+                kensaImg.alt = '検査';
+
+                const kensaLabel = document.createElement('div');
+                kensaLabel.classList.add('label');
+                kensaLabel.textContent = '検査';
+
+                kensaCard.appendChild(kensaImg);
+                kensaCard.appendChild(kensaLabel);
+                containers.appendChild(kensaCard);
+
+                // Create card for 粘着
+                const nenchakuCard = document.createElement('div');
+                nenchakuCard.classList.add('card');
+                nenchakuCard.addEventListener('click', () => {
+                    window.location.href = `firstKojoLabelPrinter.html?filter=${filterValue}`;
+                });
+
+                const nenchakuImg = document.createElement('img');
+                nenchakuImg.src = 'src/machines/nenchaku.jpg';
+                nenchakuImg.alt = '粘着';
+
+                const nenchakuLabel = document.createElement('div');
+                nenchakuLabel.classList.add('label');
+                nenchakuLabel.textContent = '粘着';
+
+                nenchakuCard.appendChild(nenchakuImg);
+                nenchakuCard.appendChild(nenchakuLabel);
+                containers.appendChild(nenchakuCard);
+
+                // Create card for CSVアップロード
+                const csvCard = document.createElement('div');
+                csvCard.classList.add('card');
+                csvCard.addEventListener('click', () => {
+                    window.location.href = `csvUploader.html?filter=${filterValue}`;
+                });
+
+                const csvImg = document.createElement('img');
+                csvImg.src = 'src/machines/csv.jpg';
+                csvImg.alt = 'CSVアップロード';
+
+                const csvLabel = document.createElement('div');
+                csvLabel.classList.add('label');
+                csvLabel.textContent = 'CSVアップロード';
+
+                csvCard.appendChild(csvImg);
+                csvCard.appendChild(csvLabel);
+                containers.appendChild(csvCard);
+
+                // Create card for Rikeshi Printer
+                const rikeshiCard = document.createElement('div');
+                rikeshiCard.classList.add('card');
+                rikeshiCard.addEventListener('click', () => {
+                    window.location.href = `rikeshiPrinter.html?filter=${filterValue}`;
+                });
+
+                const rikeshiImg = document.createElement('img');
+                rikeshiImg.src = 'src/machines/rikeshi2.jpg';
+                rikeshiImg.alt = '理計士プリンター';
+
+                const rikeshiLabel = document.createElement('div');
+                rikeshiLabel.classList.add('label');
+                rikeshiLabel.textContent = '理計士プリンター';
+
+                rikeshiCard.appendChild(rikeshiImg);
+                rikeshiCard.appendChild(rikeshiLabel);
+                containers.appendChild(rikeshiCard);
+            } else if (filterValue === 'SCNA') {
+                const containers = document.getElementById('containers');
+
+                // Add correction card first
+                await addCorrectionCardToFactory(containers, filterValue);
+
+                // Create card for DCP
+                const pressCard = document.createElement('div');
+                pressCard.classList.add('card');
+                pressCard.addEventListener('click', () => {
+                    window.location.href = `chooseMachine.html?filter=${filterValue}`;
+                });
+
+                const pressImg = document.createElement('img');
+                pressImg.src = 'src/machines/NCC01.jpg';
+                pressImg.alt = 'NC加工';
+
+                const pressLabel = document.createElement('div');
+                pressLabel.classList.add('label');
+                pressLabel.textContent = 'NC CUTTING PROCESS';
+
+                pressCard.appendChild(pressImg);
+                pressCard.appendChild(pressLabel);
+                containers.appendChild(pressCard);
+
+                // Create card for PRESS CUTTING PROCESS
+                const pressCuttingCard = document.createElement('div');
+                pressCuttingCard.classList.add('card');
+                pressCuttingCard.addEventListener('click', () => {
+                    window.location.href = `Press Cutting iReporter English.html?filter=${filterValue}`;
+                });
+
+                const pressCuttingImg = document.createElement('img');
+                pressCuttingImg.src = 'src/machines/MANAS.jpg';
+                pressCuttingImg.alt = 'プレス加工';
+
+                const pressCuttingLabel = document.createElement('div');
+                pressCuttingLabel.classList.add('label');
+                pressCuttingLabel.textContent = 'PRESS CUTTING PROCESS';
+
+                pressCuttingCard.appendChild(pressCuttingImg);
+                pressCuttingCard.appendChild(pressCuttingLabel);
+                containers.appendChild(pressCuttingCard);
 
                 // Create card for SRS
                 const srsCard = document.createElement('div');
@@ -904,7 +1279,6 @@
                 kensaCard.appendChild(kensaImg);
                 kensaCard.appendChild(kensaLabel);
                 containers.appendChild(kensaCard);
-                
             } else if (filterValue === '小瀬') {
                 const containers = document.getElementById('containers');
 
@@ -997,97 +1371,48 @@
                 // Add correction card first for other factories too
                 await addCorrectionCardToFactory(containers, filterValue);
 
-                fetch(`${dbURL}?filter=${filterValue}`)
-                    .then(response => response.json())
-                    .then(data => {
-                        // Normal case, display cards based on fetched data
-                        data.forEach((list) => {
-                            const card = document.createElement('div');
-                            card.classList.add('card');
-                            card.addEventListener('click', () => {
-                                window.location.href = `nippo.html?selected=${list}&filter=${filterValue}`;
-                            });
+                // Default Press Cutting card
+                const pressCard = document.createElement('div');
+                pressCard.classList.add('card');
+                pressCard.addEventListener('click', () => {
+                    window.location.href = `Press Cutting iReporter.html?filter=${filterValue}`;
+                });
 
-                            const img = document.createElement('img');
-                            if (list === "自動プレス機") {
-                                img.src = `src/machines/jido.jpg`;
-                            } else {
-                                img.src = `src/machines/${list}.jpg`;
-                            }
-                            img.alt = list;
+                const pressImg = document.createElement('img');
+                pressImg.src = 'src/machines/MANAS.jpg';
+                pressImg.alt = 'プレス加工';
 
-                            const label = document.createElement('div');
-                            label.classList.add('label');
-                            label.textContent = list;
-                            label.addEventListener('click', (event) => {
-                                event.stopPropagation();
-                                window.location.href = `nippo.html?selected=${list}&filter=${filterValue}`;
-                            });
+                const pressLabel = document.createElement('div');
+                pressLabel.classList.add('label');
+                pressLabel.textContent = 'プレス加工';
 
-                            card.appendChild(img);
-                            card.appendChild(label);
-                            containers.appendChild(card);
-                        });
+                pressCard.appendChild(pressImg);
+                pressCard.appendChild(pressLabel);
+                containers.appendChild(pressCard);
 
-                        // Add the additional card for QR code scanning
-                        const qrCard = document.createElement('div');
-                        qrCard.classList.add('card');
-                        qrCard.addEventListener('click', () => {
-                            const popup = window.open('popup.html', 'QR Scanner', 'width=400,height=300');
+                // Default Kensa card
+                const kensaCard = document.createElement('div');
+                kensaCard.classList.add('card');
+                kensaCard.addEventListener('click', () => {
+                    window.location.href = `newKensa iReporter.html?filter=${filterValue}`;
+                });
 
-                            window.addEventListener('message', function(event) {
-                                if (event.origin === window.location.origin) {
-                                    const BarcodeValue = event.data;
-                                    console.log(`QR Code detected: ${BarcodeValue}`);
+                const kensaImg = document.createElement('img');
+                kensaImg.src = 'src/machines/kensa.jpg';
+                kensaImg.alt = '検査';
 
-                                    // Check if the scanned value is in the list
-                                    if (data.includes(BarcodeValue)) {
-                                        // Redirect to nippo.html with the QR code value as filter
-                                        window.location.href = `nippo.html?selected=${BarcodeValue}&filter=${filterValue}`;
-                                    } else {
-                                        alert('Invalid QR Code');
-                                    }
-                                }
-                            });
-                        });
+                const kensaLabel = document.createElement('div');
+                kensaLabel.classList.add('label');
+                kensaLabel.textContent = '検査';
 
-                        const qrImg = document.createElement('img');
-                        qrImg.src = 'src/qr-code.png';
-                        qrImg.alt = 'QR Code Scanner';
-
-                        const qrLabel = document.createElement('div');
-                        qrLabel.classList.add('label');
-                        qrLabel.textContent = 'Scan Machine!';
-
-                        qrCard.appendChild(qrImg);
-                        qrCard.appendChild(qrLabel);
-                        containers.appendChild(qrCard);
-
-                        // Add the additional card for Kensa Only
-                        const kensaOnlyCard = document.createElement('div');
-                        kensaOnlyCard.classList.add('card');
-                        kensaOnlyCard.addEventListener('click', () => {
-                            window.location.href = `newKensa iReporter.html?filter=${filterValue}`;
-                        });
-
-                        const kensaImg = document.createElement('img');
-                        kensaImg.src = 'src/machines/kensa.jpg';
-                        kensaImg.alt = '検査のみ';
-
-                        const kensaLabel = document.createElement('div');
-                        kensaLabel.classList.add('label');
-                        kensaLabel.textContent = '検査のみ';
-
-                        kensaOnlyCard.appendChild(kensaImg);
-                        kensaOnlyCard.appendChild(kensaLabel);
-                        containers.appendChild(kensaOnlyCard);
-                    })
-                    .catch(error => console.error('Error fetching data:', error));
+                kensaCard.appendChild(kensaImg);
+                kensaCard.appendChild(kensaLabel);
+                containers.appendChild(kensaCard);
             }
-        }
+        } // Close initializeFactoryCards function
         
         // Initialize the factory cards
         initializeFactoryCards();
-        </script>
+    </script>
 </body>
 </html>
