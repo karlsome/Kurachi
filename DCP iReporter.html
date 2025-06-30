@@ -13,6 +13,211 @@
             padding: 5px; /* Optional: add padding around the text */
             border-radius: 3px; /* Optional: round the title background corners */
         }
+
+        /* Break time section styles */
+        .break-time-section {
+            margin-top: 20px;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 5px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .break-time-section h4 {
+            margin-top: 0;
+            margin-bottom: 15px;
+            color: white;
+            text-align: center;
+        }
+
+        .break-time-entry {
+            margin-bottom: 10px;
+            padding: 8px;
+            background: rgba(255, 255, 255, 0.9);
+            border-radius: 3px;
+            border: 1px solid #ddd;
+        }
+
+        .break-time-entry label {
+            font-weight: bold;
+            color: #555;
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        .break-time-inputs {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .break-time-inputs input[type="time"] {
+            flex: 1;
+            padding: 5px;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+        }
+
+        .break-time-inputs span {
+            color: #666;
+            font-size: 12px;
+        }
+
+        .break-time-inputs .reset-btn {
+            background: #ff6b6b;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            padding: 5px 8px;
+            font-size: 12px;
+            cursor: pointer;
+            min-width: 50px;
+        }
+
+        .break-time-inputs .reset-btn:hover {
+            background: #ff5252;
+        }
+
+        .total-break-time {
+            margin-top: 15px;
+            padding: 10px;
+            background: rgba(232, 244, 253, 0.9);
+            border: 1px solid rgba(179, 217, 255, 0.8);
+            border-radius: 3px;
+            text-align: center;
+            font-weight: bold;
+            color: #333;
+        }
+
+        /* Machine trouble section styles */
+        .machine-trouble-section {
+            margin-top: 20px;
+            padding: 15px;
+            background: rgba(255, 200, 200, 0.1);
+            border-radius: 5px;
+            border: 1px solid rgba(255, 100, 100, 0.3);
+        }
+
+        .machine-trouble-section h4 {
+            margin-top: 0;
+            margin-bottom: 15px;
+            color: #cc0000;
+            text-align: center;
+            font-weight: bold;
+        }
+
+        .total-trouble-time {
+            margin-top: 15px;
+            padding: 10px;
+            background: rgba(255, 230, 230, 0.9);
+            border: 1px solid rgba(255, 180, 180, 0.8);
+            border-radius: 3px;
+            text-align: center;
+            font-weight: bold;
+            color: #cc0000;
+        }
+
+        /* Maintenance Modal Styles */
+        .maintenance-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 10000;
+        }
+
+        .maintenance-record-item {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 10px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        .maintenance-record-item:hover {
+            background-color: #e9ecef;
+        }
+
+        #add-maintenance-btn:hover {
+            background: #005a8a !important;
+        }
+
+        /* Modal form styles */
+        .maintenance-modal input,
+        .maintenance-modal textarea {
+            font-family: inherit;
+            font-size: 14px;
+        }
+
+        .maintenance-modal button {
+            font-family: inherit;
+            font-size: 14px;
+            transition: background-color 0.2s;
+        }
+
+        .maintenance-modal button:hover {
+            opacity: 0.9;
+        }
+
+        /* Photo thumbnail styles for maintenance */
+        #maintenance-photo-thumbnails {
+            min-height: 100px;
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 10px;
+            background: #f9f9f9;
+        }
+
+        /* Camera modal styles */
+        #maintenanceCameraModal {
+            z-index: 10002 !important;
+        }
+
+        #maintenanceCameraModal video {
+            max-width: 100%;
+            max-height: 400px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        #maintenanceCameraModal button {
+            font-size: 16px;
+            padding: 15px 30px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+            transition: all 0.2s;
+        }
+
+        #maintenanceCameraModal button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+
+        /* Photo count indicator */
+        #maintenance-photo-count {
+            font-weight: bold;
+            color: #007cba;
+        }
+
+        /* Empty photo state */
+        #maintenance-photo-thumbnails p {
+            margin: 20px 0;
+            text-align: center;
+            color: #666;
+            font-style: italic;
+        }
     </style>
 </head>
 <body>
@@ -208,12 +413,11 @@
 
         
         <!-- Uploading Modal -->
-        <div id="uploadingModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-        background: rgba(0, 0, 0, 0.6); z-index: 9999; display: flex; justify-content: center; align-items: center;">
-        <div style="background: white; padding: 30px; border-radius: 10px; text-align: center;">
-            <div class="loader" style="margin-bottom: 20px;"></div>
-            <p style="font-size: 18px;">Uploading, please wait...</p>
-        </div>
+        <div id="uploadingModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.6); z-index: 9999; justify-content: center; align-items: center;">
+            <div style="background: white; padding: 30px; border-radius: 10px; text-align: center;">
+                <div class="loader" style="margin-bottom: 20px;"></div>
+                <p style="font-size: 18px;">Uploading, please wait...</p>
+            </div>
         </div>
 
         <!-- Optional: Simple CSS Spinner -->
@@ -266,7 +470,6 @@
             <br>
              <br>
              
-            
     </div>
     </form>      
     </div>
@@ -448,9 +651,88 @@
                 <label>Cycle Time Kensa:</label>
                 <input readonly id="cycleTimeK" value="0" name="Cycle TimeK">
                 <br>
+                <label>Breaktime(mins):</label>
+                <input readonly id="breaktime-mins" value="0" name="Breaktime">
+                <br>
+                <label for="trouble-time-display">故障時間:</label>
+                <input type="text" id="trouble-time-display" name="trouble-time-display" placeholder="00h 00m" readonly style="background: #f0f0f0;">
+                <br>
 
             </div>
         
+            <!-- Break Time Section -->
+            <div class="break-time-section">
+                <h4>休憩時間</h4>
+                
+                <div class="break-time-entry">
+                    <label>休憩1:</label>
+                    <div class="break-time-inputs">
+                        <input type="time" id="break1-start" name="break1-start" onfocus="setDefaultTime(this)">
+                        <span>~</span>
+                        <input type="time" id="break1-end" name="break1-end" onfocus="setDefaultTime(this)">
+                        <button type="button" class="reset-btn" onclick="resetBreakTime(1)">Reset</button>
+                    </div>
+                </div>
+
+                <div class="break-time-entry">
+                    <label>休憩2:</label>
+                    <div class="break-time-inputs">
+                        <input type="time" id="break2-start" name="break2-start" onfocus="setDefaultTime(this)">
+                        <span>~</span>
+                        <input type="time" id="break2-end" name="break2-end" onfocus="setDefaultTime(this)">
+                        <button type="button" class="reset-btn" onclick="resetBreakTime(2)">Reset</button>
+                    </div>
+                </div>
+
+                <div class="break-time-entry">
+                    <label>休憩3:</label>
+                    <div class="break-time-inputs">
+                        <input type="time" id="break3-start" name="break3-start" onfocus="setDefaultTime(this)">
+                        <span>~</span>
+                        <input type="time" id="break3-end" name="break3-end" onfocus="setDefaultTime(this)">
+                        <button type="button" class="reset-btn" onclick="resetBreakTime(3)">Reset</button>
+                    </div>
+                </div>
+
+                <div class="break-time-entry">
+                    <label>休憩4:</label>
+                    <div class="break-time-inputs">
+                        <input type="time" id="break4-start" name="break4-start" onfocus="setDefaultTime(this)">
+                        <span>~</span>
+                        <input type="time" id="break4-end" name="break4-end" onfocus="setDefaultTime(this)">
+                        <button type="button" class="reset-btn" onclick="resetBreakTime(4)">Reset</button>
+                    </div>
+                </div>
+
+                <div class="total-break-time">
+                    <span>合計休憩時間: </span>
+                    <span id="total-break-display">0分</span>
+                </div>
+            </div>
+
+            <!-- Machine Trouble Section -->
+            <div class="machine-trouble-section">
+                <h4 style="margin-top: 0; margin-bottom: 15px; color: #cc0000; text-align: center;">
+                    機械故障時間 / Machine Maintenance Time
+                </h4>
+                
+                <div style="margin-bottom: 20px;">
+                    <button type="button" id="add-maintenance-btn" 
+                            style="background: #007cba; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; font-size: 16px; width: 100%;">
+                        ➕ 機械故障時間を追加 / Add Maintenance Time
+                    </button>
+                </div>
+                
+                <div id="maintenance-records-container" style="margin-bottom: 20px;">
+                    <!-- Dynamic maintenance records will be rendered here -->
+                </div>
+
+                <div class="total-trouble-time">
+                    <span>合計故障時間: </span>
+                    <span id="total-trouble-display">0分</span>
+                </div>
+            </div>
+
         </div>
     
     

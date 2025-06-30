@@ -671,6 +671,221 @@ app.post('/logPrintAndUpdateMaterialRequest', async (req, res) => {
 
 
 
+
+//this is the route for DCP submit, it has pressDB and kensaDB combined and handles image upload
+// DCP Combined Route - Handles image upload + document creation in one transaction
+app.post('/submitToDCP', async (req, res) => {
+    console.log("🟢 POST /submitToDCP received");
+    
+    try {
+        await client.connect();
+        
+        // Extract form data and images
+        const formData = req.body;
+        const maintenanceImages = formData.maintenanceImages || []; // Array of maintenance images with base64
+        const cycleCheckImages = formData.images || []; // Existing cycle check images
+        
+        console.log("🔍 DCP submission received:", {
+            品番: formData.品番,
+            背番号: formData.背番号,
+            工場: formData.工場,
+            設備: formData.設備,
+            Worker_Name: formData.Worker_Name,
+            Date: formData.Date,
+            Time_start: formData.Time_start,
+            Time_end: formData.Time_end,
+            maintenanceImageCount: maintenanceImages.length,
+            cycleCheckImageCount: cycleCheckImages.length,
+            isToggleChecked: formData.isToggleChecked
+        });
+
+        // 1. Upload all images to Firebase Storage first
+        const bucket = admin.storage().bucket();
+        let uploadedImageURLs = {};
+        let maintenancePhotosUrls = [];
+
+        // Upload cycle check images (existing logic)
+        for (const img of cycleCheckImages) {
+            if (!img.base64 || !img.label) continue;
+
+            try {
+                const buffer = Buffer.from(img.base64, 'base64');
+                const fileName = `${img.sebanggo}_${img.date}_${img.worker}_${img.factory}_${img.machine}_${img.label}.jpg`;
+                const filePath = `CycleCheck/${img.factory}/${fileName}`;
+                const file = bucket.file(filePath);
+                const downloadToken = "masterDBToken69";
+
+                await file.save(buffer, {
+                    metadata: {
+                        contentType: "image/jpeg",
+                        metadata: { firebaseStorageDownloadTokens: downloadToken }
+                    },
+                    validation: false
+                });
+
+                const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(file.name)}?alt=media&token=${downloadToken}`;
+                
+                // Map to specific fields
+                if (img.label === "初物チェック") uploadedImageURLs["初物チェック画像"] = publicUrl;
+                else if (img.label === "終物チェック") uploadedImageURLs["終物チェック画像"] = publicUrl;
+                else if (img.label === "材料ラベル") uploadedImageURLs["材料ラベル画像"] = publicUrl;
+                
+                console.log(`✅ Cycle check image uploaded: ${img.label} -> ${publicUrl}`);
+            } catch (uploadError) {
+                console.error(`❌ Error uploading cycle check image ${img.label}:`, uploadError);
+            }
+        }
+
+        // Upload maintenance images
+        for (const imgData of maintenanceImages) {
+            if (!imgData.base64 || !imgData.id || !imgData.timestamp) continue;
+
+            try {
+                const buffer = Buffer.from(imgData.base64, 'base64');
+                console.log(`🔍 Processing maintenance image ${imgData.id}: buffer size = ${buffer.length} bytes`);
+
+                // Create unique filename
+                const fileName = `${formData.背番号}_${formData.Date}_${imgData.timestamp}_${imgData.id}_maintenanceImage.jpg`;
+                const filePath = `maintenance/${formData.工場}/${formData.設備}/${fileName}`;
+                const file = bucket.file(filePath);
+                const downloadToken = "masterDBToken69";
+
+                await file.save(buffer, {
+                    metadata: {
+                        contentType: "image/jpeg",
+                        metadata: { firebaseStorageDownloadTokens: downloadToken }
+                    },
+                    validation: false
+                });
+
+                const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(filePath)}?alt=media&token=${downloadToken}`;
+                maintenancePhotosUrls.push({
+                    url: publicUrl,
+                    maintenanceRecordId: imgData.maintenanceRecordId,
+                    id: imgData.id,
+                    timestamp: imgData.timestamp
+                });
+                
+                console.log(`✅ Maintenance image uploaded: ${publicUrl}`);
+            } catch (uploadError) {
+                console.error(`❌ Error uploading maintenance image ${imgData.id}:`, uploadError);
+            }
+        }
+
+        // 2. Process maintenance data and attach photos to correct records
+        const processedMaintenanceData = {
+            records: (formData.Maintenance_Data?.records || []).map(record => {
+                // Find photos for this specific maintenance record
+                const recordPhotos = maintenancePhotosUrls
+                    .filter(photo => photo.maintenanceRecordId === record.id)
+                    .map(photo => photo.url);
+                
+                return {
+                    id: record.id,
+                    startTime: record.startTime,
+                    endTime: record.endTime,
+                    comment: record.comment,
+                    timestamp: record.timestamp,
+                    photos: recordPhotos // Array of Firebase URLs
+                };
+            }),
+            totalMinutes: formData.Maintenance_Data?.totalMinutes || 0,
+            totalHours: formData.Maintenance_Data?.totalHours || 0
+        };
+
+        // 3. Prepare pressDB data (exclude Counters - that's only for kensaDB)
+        const pressDBData = {
+            ...formData,
+            ...uploadedImageURLs, // Add cycle check image URLs
+            Maintenance_Data: processedMaintenanceData // Add maintenance data with photo URLs
+        };
+
+        // Remove the raw image arrays and kensaDB-specific data from pressDB
+        delete pressDBData.images;
+        delete pressDBData.maintenanceImages;
+        delete pressDBData.Counters; // Counters are only for kensaDB, not pressDB
+        delete pressDBData.isToggleChecked; // This is just a UI state flag, not data to store
+
+        // 4. Save to pressDB
+        const database = client.db("submittedDB");
+        const pressDB = database.collection("pressDB");
+        
+        const pressResult = await pressDB.insertOne(pressDBData);
+        console.log(`✅ Data saved to pressDB with ID: ${pressResult.insertedId}`);
+
+        let kensaResult = null;
+        
+        // 5. Save to kensaDB if toggle is checked
+        if (formData.isToggleChecked) {
+            const kensaDB = database.collection("kensaDB");
+            
+            // Calculate kensa-specific values
+            const counters = formData.Counters || {};
+            const Total_NG_Kensa = Object.values(counters).reduce((sum, val) => sum + (parseInt(val) || 0), 0);
+            const Total_KensaDB = formData.Total - Total_NG_Kensa;
+
+            // Format Date to yyyymmdd for 製造ロット
+            const dateStr = formData.Date || '';
+            const formattedDate = dateStr.replace(/\D/g, ''); // Remove all non-digits to get yyyymmdd
+
+            const kensaDBData = {
+                品番: formData.品番,
+                背番号: formData.背番号,
+                工場: formData.工場,
+                Total: Total_KensaDB,
+                Worker_Name: formData.Worker_Name,
+                Process_Quantity: formData.Process_Quantity,
+                Remaining_Quantity: formData.Total,
+                Date: formData.Date,
+                Time_start: formData.Time_start,
+                Time_end: formData.Time_end,
+                設備: formData.設備,
+                Cycle_Time: formData.Cycle_Time,
+                製造ロット: formattedDate, // Use formatted Date in yyyymmdd format instead of 材料ロット
+                Comment: formData.Comment,
+                Spare: formData.Spare,
+                Counters: counters,
+                Total_NG: Total_NG_Kensa,
+                Break_Time_Data: formData.Break_Time_Data,
+                Total_Break_Minutes: formData.Total_Break_Minutes,
+                Total_Break_Hours: formData.Total_Break_Hours,
+                Maintenance_Data: processedMaintenanceData, // Same maintenance data with photos
+                Total_Trouble_Minutes: formData.Total_Trouble_Minutes,
+                Total_Trouble_Hours: formData.Total_Trouble_Hours,
+                Total_Work_Hours: formData.Total_Work_Hours
+            };
+
+            kensaResult = await kensaDB.insertOne(kensaDBData);
+            console.log(`✅ Data saved to kensaDB with ID: ${kensaResult.insertedId}`);
+        }
+
+        // 6. Send success response
+        res.status(201).json({
+            status: "success",
+            message: "DCP data submitted successfully",
+            pressDB_id: pressResult.insertedId,
+            kensaDB_id: kensaResult?.insertedId || null,
+            uploadedImages: {
+                cycleCheck: Object.keys(uploadedImageURLs).length,
+                maintenance: maintenancePhotosUrls.length
+            },
+            maintenanceRecords: processedMaintenanceData.records.length,
+            totalMaintenancePhotos: maintenancePhotosUrls.length
+        });
+
+    } catch (error) {
+        console.error("❌ Error in /submitToDCP:", error);
+        res.status(500).json({
+            status: "error",
+            message: "Error submitting DCP data",
+            details: error.message
+        });
+    }
+});
+
+
+
+
 // iReporter route to submit data to kensaDB
 app.post("/submitToKensaDBiReporter", async (req, res) => {
   try {

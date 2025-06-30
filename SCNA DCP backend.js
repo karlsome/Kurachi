@@ -446,6 +446,7 @@ function updateImageSrc(link) {
 function NCPresstoFalse(){
   // Save to localStorage with a unique key format = FALSE
   sendtoNCButtonisPressed = "FALSE";
+  popupShown = false;
   const selected工場 = document.getElementById('selected工場').value; // Get the current factory value
   const pageName = location.pathname.split('/').pop(); // Get the current HTML file name
   const key = `${uniquePrefix}sendtoNCButtonisPressed`;
