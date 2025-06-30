@@ -26,6 +26,7 @@ const client = new MongoClient(uri, {
     strict: true,
     deprecationErrors: true,
   },
+  readPreference:'nearest', // Use 'nearest' read preference for better performance
 });
 
 const DB_NAME = "Sasaki_Coating_MasterDB";
