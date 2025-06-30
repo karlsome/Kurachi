@@ -3216,9 +3216,9 @@ app.post("/createUser", async (req, res) => {
     return res.status(400).json({ error: "Missing required fields" });
   }
 
-  // Validate factory for 班長 users
-  if (role === '班長' && !factory) {
-    return res.status(400).json({ error: "Factory is required for 班長 users" });
+  // Validate factory for 班長 and 係長 users
+  if ((role === '班長' || role === '係長') && (!factory || factory.length === 0)) {
+    return res.status(400).json({ error: `Factory is required for ${role} users` });
   }
 
   try {
@@ -3244,8 +3244,8 @@ app.post("/createUser", async (req, res) => {
       createdAt: new Date()
     };
 
-    // Add 工場 field for 班長 users
-    if (role === '班長' && factory) {
+    // Add 工場 field for 班長 and 係長 users
+    if ((role === '班長' || role === '係長') && factory) {
       userData['工場'] = factory;
     }
 
@@ -3261,8 +3261,75 @@ app.post("/createUser", async (req, res) => {
 });
 
 
+// app.post("/updateUser", async (req, res) => {
+//   const { userId, firstName, lastName, email, role, username } = req.body;
+
+//   if (!userId || !role) {
+//     console.log("❌ Missing userId or role:", { userId, firstName, lastName, email, role, factory, username });
+//     return res.status(400).json({ error: "User ID and role are required" });
+//   }
+
+//   try {
+//     await client.connect();
+//     const db = client.db("Sasaki_Coating_MasterDB");
+//     const users = db.collection("users");
+
+//     const updateFields = {
+//       ...(firstName && { firstName }),
+//       ...(lastName && { lastName }),
+//       ...(email && { email }),
+//       ...(username && { username }),
+//       ...(role && { role })
+//     };
+
+//     // Handle 工場 field for 班長 users
+//     if (role === '班長') {
+//       if (factory && factory.length > 0) {
+//         // Store factory array in 工場 field  
+//         updateFields['工場'] = Array.isArray(factory) ? factory : [factory];
+//       } else {
+//         // If no factory provided for 班長, set empty array
+//         console.warn("班長 user without factory assignment");
+//         updateFields['工場'] = [];
+//       }
+//     } else {
+//       // For non-班長 users, we'll unset the 工場 field
+//       // Don't include it in updateFields, handle separately
+//     }
+
+//     let updateOperation;
+    
+//     if (role !== '班長') {
+//       // For non-班長 users, remove 工場 field
+//       updateOperation = {
+//         $set: updateFields,
+//         $unset: { '工場': "" }
+//       };
+//     } else {
+//       // For 班長 users, just set the fields
+//       updateOperation = { $set: updateFields };
+//     }
+
+//     console.log("Update operation:", updateOperation);
+
+//     const result = await users.updateOne(
+//       { _id: new ObjectId(userId) },
+//       updateOperation
+//     );
+
+//     if (result.modifiedCount === 0) {
+//       return res.status(404).json({ error: "User not found or no changes made" });
+//     }
+
+//     res.json({ message: "User updated successfully" });
+//   } catch (err) {
+//     console.error("Error updating user:", err);
+//     res.status(500).json({ error: "Internal server error" });
+//   }
+// });
+
 app.post("/updateUser", async (req, res) => {
-  const { userId, firstName, lastName, email, role, username } = req.body;
+  const { userId, firstName, lastName, email, role, username, factory } = req.body; // Added factory to destructuring
 
   if (!userId || !role) {
     console.log("❌ Missing userId or role:", { userId, firstName, lastName, email, role, factory, username });
@@ -3282,31 +3349,31 @@ app.post("/updateUser", async (req, res) => {
       ...(role && { role })
     };
 
-    // Handle 工場 field for 班長 users
-    if (role === '班長') {
+    // Handle 工場 field for 班長 and 係長 users
+    if (role === '班長' || role === '係長') {
       if (factory && factory.length > 0) {
         // Store factory array in 工場 field  
         updateFields['工場'] = Array.isArray(factory) ? factory : [factory];
       } else {
-        // If no factory provided for 班長, set empty array
-        console.warn("班長 user without factory assignment");
+        // If no factory provided for 班長/係長, set empty array
+        console.warn(`${role} user without factory assignment`);
         updateFields['工場'] = [];
       }
     } else {
-      // For non-班長 users, we'll unset the 工場 field
+      // For non-班長/係長 users, we'll unset the 工場 field
       // Don't include it in updateFields, handle separately
     }
 
     let updateOperation;
     
-    if (role !== '班長') {
-      // For non-班長 users, remove 工場 field
+    if (role !== '班長' && role !== '係長') {
+      // For non-班長/係長 users, remove 工場 field
       updateOperation = {
         $set: updateFields,
         $unset: { '工場': "" }
       };
     } else {
-      // For 班長 users, just set the fields
+      // For 班長/係長 users, just set the fields
       updateOperation = { $set: updateFields };
     }
 
@@ -3319,6 +3386,11 @@ app.post("/updateUser", async (req, res) => {
 
     if (result.modifiedCount === 0) {
       return res.status(404).json({ error: "User not found or no changes made" });
+    }
+
+    console.log(`✅ User ${userId} updated successfully with role: ${role}`);
+    if (role === '班長' || role === '係長') {
+      console.log(`✅ Factory assignments: ${JSON.stringify(updateFields['工場'])}`);
     }
 
     res.json({ message: "User updated successfully" });
