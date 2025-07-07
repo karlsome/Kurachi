@@ -275,141 +275,6 @@ input, select {
             width: 100%;
             height: 100%;
             background-color: rgba(0,0,0,0.85);
-            justify-content: center;
-            align-items: center;
-        }
-        #imagePreviewModal img {
-            max-width: 90%;
-            max-height: 90vh; /* vh for viewport height */
-            border-radius: 5px;
-            border: 3px solid white;
-        }
-        #imagePreviewModal .close-preview-btn {
-            position: absolute;
-            top: 20px;
-            right: 35px;
-            color: #f1f1f1;
-            font-size: 40px;
-            font-weight: bold;
-            transition: 0.3s;
-            cursor: pointer;
-        }
-        #imagePreviewModal .close-preview-btn:hover,
-        #imagePreviewModal .close-preview-btn:focus {
-            color: #bbb;
-            text-decoration: none;
-        }
-
-        /* Additional styles for image capture feature */
-        .image-capture-section {
-            margin-top: 20px;
-            padding-top: 15px;
-            border-top: 1px solid #0174b3;
-        }
-
-        .image-capture-section h3 {
-            color: #ffffff;
-            margin-bottom: 10px;
-        }
-
-        #takePictureButton {
-            background-color: #ffc107; /* Amber color for distinction */
-            color: #002b46;
-            margin-bottom: 15px;
-        }
-        #takePictureButton:hover {
-            background-color: #e0a800;
-        }
-
-        .thumbnails-container {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            margin-bottom: 15px;
-            padding: 10px;
-            background-color: rgba(255, 255, 255, 0.1);
-            border-radius: 5px;
-            min-height: 80px; /* Ensure some space even when empty */
-        }
-
-        .thumbnail-item {
-            position: relative;
-            cursor: pointer;
-        }
-
-        .thumbnail-item img {
-            width: 70px;
-            height: 70px;
-            object-fit: cover;
-            border: 2px solid #0174b3;
-            border-radius: 4px;
-        }
-
-        .thumbnail-item .remove-img-btn {
-            position: absolute;
-            top: -5px;
-            right: -5px;
-            background-color: #dc3545;
-            color: white;
-            border: none;
-            border-radius: 50%;
-            width: 20px;
-            height: 20px;
-            font-size: 12px;
-            line-height: 18px; /* Adjust for vertical centering */
-            text-align: center;
-            cursor: pointer;
-            padding: 0;
-        }
-        .thumbnail-item .remove-img-btn:hover {
-            background-color: #c82333;
-        }
-
-
-        /* Camera Modal */
-        #cameraModal {
-            display: none;
-            position: fixed;
-            z-index: 1001; /* Higher than other modals */
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0,0,0,0.7);
-        }
-        #cameraModal .modal-content {
-            width: 90%;
-            max-width: 600px;
-            margin-top: 5%; /* Adjust for better vertical centering */
-        }
-        #videoFeed {
-            width: 100%;
-            max-height: 400px;
-            border: 1px solid #0174b3;
-            background-color: #000;
-            border-radius: 5px;
-            margin-bottom: 10px;
-        }
-        #captureButton, #closeCameraButton {
-            width: calc(50% - 5px);
-        }
-        #captureButton {
-            background-color: #28a745;
-        }
-         #captureButton:hover {
-            background-color: #218838;
-        }
-
-        /* Image Preview Modal */
-        #imagePreviewModal {
-            display: none;
-            position: fixed;
-            z-index: 1002; /* Highest */
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0,0,0,0.85);
             justify-content: center; /* For centering the image */
             align-items: center; /* For centering the image */
             display: flex; /* Use flex for centering */
@@ -434,4 +299,127 @@ input, select {
         #imagePreviewModal .close-preview-btn:focus {
             color: #bbb;
             text-decoration: none;
+        }
+
+        /* Production Order Selection Modal */
+        #productionOrderModal {
+            display: none;
+            position: fixed;
+            z-index: 1001;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.8);
+        }
+        
+        #productionOrderModal.show {
+            display: flex !important;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        #productionOrderModal .modal-content {
+            background: #033a5f;
+            padding: 30px;
+            border-radius: 10px;
+            border: 2px solid #0174b3;
+            max-width: 500px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+            margin: auto;
+        }
+        
+        #productionOrderModal h2 {
+            color: #ffffff;
+            margin-bottom: 20px;
+            text-align: center;
+            font-size: 20px;
+        }
+        
+        #productionOrderModal p {
+            color: #ffffff;
+            margin-bottom: 20px;
+            text-align: center;
+            font-size: 14px;
+        }
+        
+        .production-order-list {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        
+        .production-order-option {
+            background: #0174b3;
+            color: #ffffff;
+            border: 2px solid #0aa5ff;
+            padding: 15px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 14px;
+            width: 100%;
+            text-align: left;
+        }
+        
+        .production-order-option:hover {
+            background: #0aa5ff;
+            border-color: #ffffff;
+            transform: translateY(-2px);
+        }
+        
+        .order-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        
+        .order-number {
+            font-weight: bold;
+            font-size: 16px;
+        }
+        
+        .order-status {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        
+        .order-status.completed {
+            background: #28a745;
+            color: #ffffff;
+        }
+        
+        .order-status.active {
+            background: #ffc107;
+            color: #000000;
+        }
+        
+        .order-details {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            opacity: 0.9;
+        }
+        
+        .production-order-cancel {
+            background: #dc3545;
+            color: #ffffff;
+            border: 2px solid #dc3545;
+            padding: 12px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            margin-top: 10px;
+            width: 100%;
+        }
+        
+        .production-order-cancel:hover {
+            background: #c82333;
+            border-color: #c82333;
         }

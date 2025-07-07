@@ -214,6 +214,113 @@ function blankInfo() {
   if(window.clearTakenPictures && typeof window.clearTakenPictures === 'function') {
       window.clearTakenPictures();
   }
+  // ✅ Clear the selected production order
+  selectedProductionOrder = null;
+}
+
+// === Global variable to store the selected 生産順番 ===
+let selectedProductionOrder = null;
+
+// === Production Order Selection Modal Functions ===
+function showProductionOrderModal(documents, 品番, sagyoubiForQuery) {
+  return new Promise((resolve) => {
+    console.log("📋 showProductionOrderModal called with documents:", documents);
+    
+    const modal = document.getElementById('productionOrderModal');
+    if (!modal) {
+      console.error("❌ productionOrderModal not found in HTML");
+      alert("Modal not found!");
+      resolve(null);
+      return;
+    }
+    
+    const modalContent = modal.querySelector('.production-order-list');
+    if (!modalContent) {
+      console.error("❌ production-order-list not found in modal");
+      alert("Modal content not found!");
+      resolve(null);
+      return;
+    }
+    
+    console.log("✅ Modal elements found, clearing content...");
+    modalContent.innerHTML = '';
+    
+    // Sort documents by 生産順番 for better UX
+    const sortedDocs = documents.sort((a, b) => {
+      const orderA = parseInt(a.生産順番, 10) || 0;
+      const orderB = parseInt(b.生産順番, 10) || 0;
+      return orderA - orderB;
+    });
+    
+    console.log("📊 Sorted documents:", sortedDocs.map(doc => ({ 生産順番: doc.生産順番, STATUS: doc.STATUS })));
+    
+    sortedDocs.forEach((doc, index) => {
+      console.log(`🔘 Creating button for document ${index}:`, { 生産順番: doc.生産順番, STATUS: doc.STATUS });
+      
+      const button = document.createElement('button');
+      button.className = 'production-order-option';
+      button.style.display = 'block';
+      button.style.width = '100%';
+      button.style.marginBottom = '10px';
+      button.style.padding = '15px';
+      button.style.background = '#0174b3';
+      button.style.color = 'white';
+      button.style.border = '2px solid #0aa5ff';
+      button.style.borderRadius = '8px';
+      button.style.cursor = 'pointer';
+      
+      const status = doc.STATUS || "未設定";
+      const statusClass = status === "Completed" ? "completed" : "active";
+      
+      button.innerHTML = `
+        <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+          <span style="font-weight: bold;">生産順番: ${doc.生産順番}</span>
+          <span style="background: ${status === "Completed" ? "#28a745" : "#ffc107"}; color: ${status === "Completed" ? "white" : "black"}; padding: 4px 8px; border-radius: 4px; font-size: 12px;">${status}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; font-size: 12px;">
+          <span>生産数: ${doc.生産数 || 'N/A'}</span>
+          <span>納期: ${doc.納期 || 'N/A'}</span>
+        </div>
+      `;
+      
+      button.addEventListener('click', () => {
+        console.log(`✅ User selected production order: ${doc.生産順番}`);
+        selectedProductionOrder = doc.生産順番; // ✅ Store the selected production order
+        modal.style.display = 'none';
+        resolve(doc);
+      });
+      
+      modalContent.appendChild(button);
+      console.log(`✅ Button ${index} appended to modal`);
+    });
+    
+    // Add cancel button
+    const cancelButton = document.createElement('button');
+    cancelButton.textContent = 'キャンセル';
+    cancelButton.style.background = '#dc3545';
+    cancelButton.style.color = 'white';
+    cancelButton.style.border = '2px solid #dc3545';
+    cancelButton.style.padding = '12px 20px';
+    cancelButton.style.borderRadius = '8px';
+    cancelButton.style.cursor = 'pointer';
+    cancelButton.style.marginTop = '10px';
+    cancelButton.style.width = '100%';
+    cancelButton.addEventListener('click', () => {
+      console.log("❌ User cancelled production order selection");
+      modal.style.display = 'none';
+      resolve(null);
+    });
+    modalContent.appendChild(cancelButton);
+    console.log("✅ Cancel button added");
+    
+    console.log("✅ Showing modal...");
+    modal.style.display = 'flex';
+    
+    // Additional debugging
+    console.log("Modal style after setting:", modal.style.display);
+    console.log("Modal computed style:", window.getComputedStyle(modal).display);
+    console.log("Modal content children count:", modalContent.children.length);
+  });
 }
 
 async function fetchProductDetails() {
@@ -234,6 +341,7 @@ async function fetchProductDetails() {
   const sagyoubiForQuery = `${yearToday}${monthToday}${dayToday}`;
 
   try {
+    // ✅ First, get ALL documents matching 品番 and 作業日 (including completed ones)
     const requestQueryPayload = {
       dbName: "submittedDB",
       collectionName: "materialRequestDB",
@@ -250,7 +358,29 @@ async function fetchProductDetails() {
         throw new Error("Invalid data format received for material request.");
     }
     
-    const request = requestData.length > 0 ? requestData[0] : null;
+    let request = null;
+    
+    // ✅ If multiple documents found, show modal for user to choose
+    if (requestData.length > 1) {
+      console.log(`Found ${requestData.length} documents for 品番: ${selected品番Value}, 作業日: ${sagyoubiForQuery}`);
+      console.log("Documents:", requestData.map(doc => ({ 生産順番: doc.生産順番, STATUS: doc.STATUS })));
+      
+      const selectedDoc = await showProductionOrderModal(requestData, selected品番Value, sagyoubiForQuery);
+      if (!selectedDoc) {
+        console.log("User cancelled production order selection");
+        return; // User cancelled
+      }
+      request = selectedDoc;
+    } else if (requestData.length === 1) {
+      // Only one document found, use it directly
+      request = requestData[0];
+      selectedProductionOrder = request.生産順番; // ✅ Store the production order
+    } else {
+      // No documents found for today
+      request = null;
+      selectedProductionOrder = null; // ✅ Clear the production order
+    }
+    
     let matched材料品番 = request ? request.材料品番 : null;
 
     if (!matched材料品番 && (!request || requestData.length === 0) ) { 
@@ -540,8 +670,9 @@ function showPrintConfirmationModal() {
   const targetCountInput = document.getElementById('targetProductionCount');
   const printConfirmationModal = document.getElementById('printConfirmationModal');
   const currentPrintedEl = document.getElementById("printStatus");
+  const orderValue = document.getElementById("order")?.value;
 
-
+    console.log(orderValue, "Order Value for print confirmation modal");
   if (!selectedValue) {
     showModalAlert('品番を選択してください。(Please select a 品番.)', true);
     return;
@@ -605,6 +736,7 @@ function decrementPrintTimes() {
 }
 
 function confirmPrint() {
+    
   const printConfirmationModal = document.getElementById('printConfirmationModal');
   const printingStatusModal = document.getElementById('printingStatusModal');
   if(printConfirmationModal) printConfirmationModal.style.display = 'none';
@@ -864,6 +996,7 @@ async function printLabel() {
   const length = document.getElementById("length")?.value || "50";
   const orderVal = document.getElementById("order")?.value || "";
   const copiesToPrintNow = parseInt(document.getElementById("printTimes")?.value, 10) || 1;
+  
 
   if (!品番) {
     showModalAlert('品番が選択されていません。(Product Number is not selected.)', true);
@@ -871,7 +1004,7 @@ async function printLabel() {
     return;
   }
 
-  const storageKey = `${uniquePrefix}${品番}_printData`;
+  const storageKey = `${uniquePrefix}${品番}_${selectedProductionOrder || 'default'}_printData`;
   const lotDateInputElement = document.getElementById('Lot No.');
   if (!lotDateInputElement) {
     showModalAlert('日付入力フィールドが見つかりません。', true);
@@ -1056,6 +1189,7 @@ async function updateMongoDBAfterPrint(品番, sagyoubi_yyMMdd, printedLotNumber
     const payloadForBackend = {
         品番: 品番,
         作業日: sagyoubi_yyMMdd,
+        生産順番: selectedProductionOrder, // ✅ Include selected production order to avoid conflicts
         numJustPrinted: numJustPrinted, // This is the total number printed in the batch
         printLogEntry: {
             timestamp: new Date().toISOString(),
@@ -1133,7 +1267,7 @@ if (reprintButton) {
             showModalAlert("まず品番を選択してください。(Please select a 品番 first.)", true);
             return;
         }
-        const storageKey = `${uniquePrefix}${品番}_printData`;
+        const storageKey = `${uniquePrefix}${品番}_${selectedProductionOrder || 'default'}_printData`;
         const lotSuffixSelect = document.getElementById('suffixSelector');
         
         if (!lotSuffixSelect) return;

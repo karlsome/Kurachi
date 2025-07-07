@@ -538,6 +538,7 @@ app.post('/logPrintAndUpdateMaterialRequest', async (req, res) => {
     const {
         品番, // Used in query
         作業日, // Used in query
+        生産順番, // ✅ Added to distinguish between multiple documents with same 品番 and 作業日
         numJustPrinted,
         printLogEntry, // { timestamp, lotNumbers, count, printedBy, factory, machine }
         lastPrintTimestamp,
@@ -557,7 +558,12 @@ app.post('/logPrintAndUpdateMaterialRequest', async (req, res) => {
         const database = client.db("submittedDB"); // Hardcoded as per your frontend
         const collection = database.collection("materialRequestDB"); // Hardcoded
 
+        // ✅ Include 生産順番 in query if provided to avoid conflicts
         const query = { "品番": 品番, "作業日": 作業日 };
+        if (生産順番) {
+            query["生産順番"] = 生産順番;
+            console.log(`🔵 Using 生産順番 (${生産順番}) to distinguish documents`);
+        }
         
         let updateDoc = {
             $inc: { "TotalLabelsPrintedForOrder": numJustPrinted },
