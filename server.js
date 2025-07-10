@@ -3839,6 +3839,34 @@ app.post("/customerUpdateRecord", async (req, res) => {
 
 
 
+// app.post("/customerDeleteUser", async (req, res) => {
+//   const { recordId, dbName, role, username } = req.body;
+
+//   if (!recordId || !dbName || !username) {
+//     return res.status(400).json({ error: "Missing required fields" });
+//   }
+
+//   if (!["admin", "masterUser"].includes(role)) {
+//     return res.status(403).json({ error: "Access denied" });
+//   }
+
+//   try {
+//     await client.connect();
+//     const db = client.db(dbName);
+//     const users = db.collection("users");
+
+//     const result = await users.deleteOne({ _id: new ObjectId(recordId) });
+
+//     res.status(200).json({
+//       message: "User record deleted",
+//       deletedCount: result.deletedCount
+//     });
+//   } catch (error) {
+//     console.error("Error deleting user:", error);
+//     res.status(500).json({ error: "Internal server error" });
+//   }
+// });
+
 app.post("/customerDeleteUser", async (req, res) => {
   const { recordId, dbName, role, username } = req.body;
 
@@ -3852,10 +3880,28 @@ app.post("/customerDeleteUser", async (req, res) => {
 
   try {
     await client.connect();
-    const db = client.db(dbName);
-    const users = db.collection("users");
+    const customerDB = client.db(dbName);
+    const masterDB = client.db("Sasaki_Coating_MasterDB");
+    
+    const users = customerDB.collection("users");
+    const masterUsers = masterDB.collection("masterUsers");
 
+    // 1. Get the user to be deleted first to get their username
+    const userToDelete = await users.findOne({ _id: new ObjectId(recordId) });
+    if (!userToDelete) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // 2. Delete user from customer database
     const result = await users.deleteOne({ _id: new ObjectId(recordId) });
+
+    // 3. Remove username from subUsernames in master database
+    if (result.deletedCount > 0) {
+      await masterUsers.updateOne(
+        { dbName },
+        { $pull: { subUsernames: userToDelete.username } }
+      );
+    }
 
     res.status(200).json({
       message: "User record deleted",
