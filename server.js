@@ -4186,6 +4186,309 @@ app.post('/fetchCustomerSubmittedLogs', async (req, res) => {
     // }
 });
 
+// Update customer masterDB with history
+app.post("/customerUpdateMasterDBWithHistory", async (req, res) => {
+  const { recordId, updateData, changes, role, dbName, username } = req.body;
+
+  if (!recordId || !updateData || !dbName || !username) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+
+  if (!["admin", "masterUser"].includes(role)) {
+    return res.status(403).json({ error: "Access denied" });
+  }
+
+  try {
+    await client.connect();
+    const db = client.db(dbName);
+    const masterDB = db.collection("masterDB");
+
+    // First, get the current document to check changeHistory field
+    const currentDoc = await masterDB.findOne({ _id: new ObjectId(recordId) });
+    
+    if (!currentDoc) {
+      return res.status(404).json({ error: "Record not found" });
+    }
+
+    // Update the record with the new data
+    const result = await masterDB.updateOne(
+      { _id: new ObjectId(recordId) },
+      { $set: updateData }
+    );
+
+    // Add history entry
+    if (result.modifiedCount > 0) {
+      const historyEntry = {
+        timestamp: new Date(),
+        changedBy: username,
+        action: "更新",
+        changes: changes
+      };
+
+      // Check if changeHistory exists and is an array
+      if (!currentDoc.changeHistory || !Array.isArray(currentDoc.changeHistory)) {
+        // Initialize changeHistory as an empty array if it doesn't exist or is not an array
+        await masterDB.updateOne(
+          { _id: new ObjectId(recordId) },
+          { $set: { changeHistory: [historyEntry] } }
+        );
+      } else {
+        // Push to existing array
+        await masterDB.updateOne(
+          { _id: new ObjectId(recordId) },
+          { $push: { changeHistory: historyEntry } }
+        );
+      }
+    }
+
+    res.status(200).json({
+      message: "Customer masterDB record updated with history",
+      modifiedCount: result.modifiedCount
+    });
+  } catch (error) {
+    console.error("Error updating masterDB with history:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+
+// Get masterDB change history for a specific record
+app.post("/customerGetMasterHistory", async (req, res) => {
+  const { recordId, dbName } = req.body;
+
+  if (!recordId || !dbName) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+
+  try {
+    await client.connect();
+    const db = client.db(dbName);
+    const masterDB = db.collection("masterDB");
+
+    const record = await masterDB.findOne(
+      { _id: new ObjectId(recordId) },
+      { projection: { changeHistory: 1 } }
+    );
+
+    let history = [];
+    if (record && record.changeHistory) {
+      // Ensure changeHistory is an array
+      if (Array.isArray(record.changeHistory)) {
+        history = record.changeHistory;
+      } else {
+        // If it's not an array, convert it or initialize as empty
+        history = [];
+      }
+    }
+
+    // Sort by timestamp descending (newest first)
+    history.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+    res.status(200).json(history);
+  } catch (error) {
+    console.error("Error fetching masterDB history:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+
+// Upload customer master image with history
+app.post("/customerUploadMasterImageWithHistory", async (req, res) => {
+  const { base64, recordId, username, dbName, oldImageURL } = req.body;
+
+  if (!base64 || !recordId || !username || !dbName) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+
+  try {
+    await client.connect();
+    const db = client.db(dbName);
+    const masterDB = db.collection("masterDB");
+
+    const objectId = new ObjectId(recordId);
+    const oldRecord = await masterDB.findOne({ _id: objectId });
+
+    if (!oldRecord) {
+      return res.status(404).json({ error: "Record not found" });
+    }
+
+    const 品番 = oldRecord["品番"] || "unknownPart";
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const fileName = `${品番}_${timestamp}.jpg`;
+    const filePath = `${dbName}/masterImages/${fileName}`;
+    const file = admin.storage().bucket().file(filePath);
+
+    const buffer = Buffer.from(base64, "base64");
+    const downloadToken = "customerMasterImageToken";
+
+    await file.save(buffer, {
+      metadata: {
+        contentType: "image/jpeg",
+        metadata: {
+          firebaseStorageDownloadTokens: downloadToken
+        }
+      }
+    });
+
+    const firebaseUrl = `https://firebasestorage.googleapis.com/v0/b/${file.bucket.name}/o/${encodeURIComponent(file.name)}?alt=media&token=${downloadToken}`;
+
+    // Update imageURL in customer masterDB
+    await masterDB.updateOne({ _id: objectId }, { $set: { imageURL: firebaseUrl } });
+
+    // Add history entry
+    const historyEntry = {
+      timestamp: new Date(),
+      changedBy: username,
+      action: "画像更新",
+      changes: [{
+        field: "製品画像",
+        oldValue: oldImageURL || "(なし)",
+        newValue: firebaseUrl
+      }]
+    };
+
+    // Check if changeHistory exists and is an array
+    if (!oldRecord.changeHistory || !Array.isArray(oldRecord.changeHistory)) {
+      // Initialize changeHistory as an empty array if it doesn't exist or is not an array
+      await masterDB.updateOne(
+        { _id: objectId },
+        { $set: { changeHistory: [historyEntry] } }
+      );
+    } else {
+      // Push to existing array
+      await masterDB.updateOne(
+        { _id: objectId },
+        { $push: { changeHistory: historyEntry } }
+      );
+    }
+
+    res.json({ message: "Customer image uploaded successfully with history", imageURL: firebaseUrl });
+  } catch (error) {
+    console.error("Error uploading customer master image with history:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Insert customer masterDB with history
+app.post("/customerInsertMasterDBWithHistory", async (req, res) => {
+  const { data, role, dbName, username, action = "新規作成" } = req.body;
+
+  if (!data || !dbName || !username) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+
+  if (!["admin", "masterUser"].includes(role)) {
+    return res.status(403).json({ error: "Access denied" });
+  }
+
+  try {
+    await client.connect();
+    const db = client.db(dbName);
+    const masterDB = db.collection("masterDB");
+    const logs = db.collection("logs");
+
+    // Insert the record
+    const result = await masterDB.insertOne(data);
+
+    // Log the creation
+    await logs.insertOne({
+      timestamp: new Date(),
+      action: action,
+      createdBy: username,
+      recordId: result.insertedId,
+      recordData: data,
+      collection: "masterDB"
+    });
+
+    res.status(201).json({
+      message: "Data inserted into customer masterDB with history",
+      insertedId: result.insertedId
+    });
+  } catch (error) {
+    console.error("Error inserting to customer masterDB with history:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Get masterDB creation history
+app.post("/customerGetMasterDBHistory", async (req, res) => {
+  const { dbName } = req.body;
+
+  if (!dbName) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+
+  try {
+    await client.connect();
+    const db = client.db(dbName);
+    const logs = db.collection("logs");
+
+    const history = await logs.find(
+      { collection: "masterDB" },
+      { sort: { timestamp: -1 } }
+    ).toArray();
+
+    res.status(200).json(history);
+  } catch (error) {
+    console.error("Error fetching masterDB creation history:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+
+// Bulk delete with history tracking
+app.post("/customerBulkDeleteWithHistory", async (req, res) => {
+  const { recordIds, recordsData, dbName, collectionName, role, username } = req.body;
+
+  if (!recordIds || !Array.isArray(recordIds) || !dbName || !collectionName || !username) {
+    return res.status(400).json({ error: "Missing required fields or invalid input" });
+  }
+
+  if (!["admin", "masterUser"].includes(role)) {
+    return res.status(403).json({ error: "Access denied" });
+  }
+
+  try {
+    await client.connect();
+    const db = client.db(dbName);
+    const collection = db.collection(collectionName);
+    const logs = db.collection("logs");
+
+    const objectIds = recordIds.map(id => new ObjectId(id));
+
+    // If recordsData wasn't provided, fetch the records before deletion
+    let recordsToLog = recordsData;
+    if (!recordsData || recordsData.length === 0) {
+      recordsToLog = await collection.find({ _id: { $in: objectIds } }).toArray();
+    }
+
+    // Perform the deletion
+    const result = await collection.deleteMany({ _id: { $in: objectIds } });
+
+    // Log each deletion
+    if (result.deletedCount > 0 && recordsToLog && recordsToLog.length > 0) {
+      const deletionLogs = recordsToLog.map(record => ({
+        timestamp: new Date(),
+        action: "削除",
+        deletedBy: username,
+        recordId: record._id,
+        recordData: record,
+        collection: collectionName
+      }));
+
+      // Insert all deletion logs
+      await logs.insertMany(deletionLogs);
+    }
+
+    res.status(200).json({
+      message: `Bulk delete from ${collectionName} completed with history`,
+      deletedCount: result.deletedCount
+    });
+  } catch (error) {
+    console.error("Error in bulk delete with history:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
 
 
 //FREYA CUSTOMER ACCESS BACKEND END
