@@ -798,7 +798,10 @@ async function fetchProductDetails() {
     }
 }
 
-document.getElementById("sub-dropdown").addEventListener("change", fetchProductDetails);
+document.getElementById("sub-dropdown").addEventListener("change", async () => {
+    await fetchProductDetails();
+    checkProcessCondition(); // Update input states after fetching product details
+});
 
 
 // Function to fetch image link from Google Sheets
