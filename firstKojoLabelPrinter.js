@@ -426,7 +426,35 @@ async function fetchProductDetails() {
       picLINK(selected品番Value); 
       return;
     }
-    const material = materialData[0];
+
+    let material = null;
+    
+    // ✅ NEW LOGIC: Handle multiple materials with same 材料品番
+    if (materialData.length > 1) {
+      console.log(`Found ${materialData.length} materials with same 材料品番: ${matched材料品番}`);
+      
+      // Get 材料背番号 from the request document if available
+      const matched材料背番号 = request ? request.材料背番号 : null;
+      
+      if (matched材料背番号) {
+        console.log(`Filtering by 材料背番号: ${matched材料背番号}`);
+        const filteredMaterials = materialData.filter(mat => mat.材料背番号 === matched材料背番号);
+        
+        if (filteredMaterials.length > 0) {
+          material = filteredMaterials[0];
+          console.log(`Found matching material with 材料背番号: ${matched材料背番号}`);
+        } else {
+          console.warn(`No material found with 材料背番号: ${matched材料背番号}, using first material`);
+          material = materialData[0];
+        }
+      } else {
+        console.warn(`No 材料背番号 available in request, using first material from ${materialData.length} matches`);
+        material = materialData[0];
+      }
+    } else {
+      // Only one material found, use it
+      material = materialData[0];
+    }
 
     document.getElementById("材料背番号").value = material.材料背番号 || "";
     document.getElementById("材料品番").value = material.材料品番 || "";
