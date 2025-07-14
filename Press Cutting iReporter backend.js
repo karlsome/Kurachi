@@ -696,6 +696,17 @@ async function fetchProductDetails() {
                 }),
             });
             result = await response.json();
+            
+            // If found by 品番 and 背番号 exists, update dropdown to 背番号
+            if (result && result.length > 0) {
+                const matched = result[0];
+                if (matched.背番号) {
+                    console.log("[fetchProductDetails] Found by 品番, updating dropdown to 背番号:", matched.背番号);
+                    subDropdown.value = matched.背番号;
+                    // Update localStorage as well to maintain consistency
+                    localStorage.setItem(`${uniquePrefix}sub-dropdown`, matched.背番号);
+                }
+            }
         }
 
         if (!result || result.length === 0) {
