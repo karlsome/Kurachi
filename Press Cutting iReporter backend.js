@@ -143,7 +143,7 @@ function isSecondScanCurrentlyRequired(factory, process) {
 
     if (ENABLE_FULL_SECOND_SCAN_LOGIC) {
         // === FULL FUTURE LOGIC ===
-        if (factory === "第二工場") return true;
+        if (factory === "第二工場") return false;
         if (factory === "肥田瀬") return true;
         if (factory === "SCNA") return true; // SCNA will require it
         if (factory === "NFH" && process !== "RLC") return true;
@@ -153,7 +153,7 @@ function isSecondScanCurrentlyRequired(factory, process) {
     } else {
         // === TEMPORARY LOGIC ===
         // Only 第二工場 requires a second scan for now.
-        return factory === "第二工場";
+        return false;
     }
 }
 
