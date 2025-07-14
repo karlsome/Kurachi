@@ -98,6 +98,7 @@
             <label for="Lot No.">加工日:</label>
             <input type="date" name="Date" id="Lot No." placeholder="Date" onfocus="setDefaultDate(this)" required>
             <input type="number" name="Labelextension" id="Labelextension"> </input>
+            
             <br><br>
             <label for="Start Time">加工開始時間:</label>
             <input type="time" name="Time_start" id="Start Time" placeholder="Time Start" onfocus="setDefaultTime(this)" required>
@@ -115,7 +116,15 @@
             <button id="scan-lot" type="button">Scan ロット</button>
             <input type="text" name="材料ロット" id="材料ロット" placeholder="Material Lot" required >
             <br>
-
+            <br>
+             <label>材料ラベル写真: </label>
+             <label id="makerLabel">FALSE</label>
+             <button id="makerLabelButton" type="button">写真撮影</button>
+             <img id="材料ラベル" src="" alt="材料ラベル" style="display:none; width: 320px; height: 240px;">
+                <br>
+                <br>
+                <br>
+                <br>
         <!-- what modal is this???? -->
 
         <!-- Bluetooth Scanner Modal -->
@@ -231,7 +240,14 @@
         }
         </style>
 
-
+            <div id="counter-box-27" class="counter-box">  
+                <label for="counter-27">疵引処理数</label>
+                <button class="plus-btn" type="button" onclick="incrementCounter(27)" >+</button>  
+                <input id="counter-27" value="0" type="number" name="疵引処理数">  
+                <button class="minus-btn" type="button" onclick="decrementCounter(27)" >-</button>  
+            </div>
+            <br>
+            <br>
             <div id="counter-box-18" class="counter-box">  
                 <label for="counter-18">疵引不良</label>
                 <button class="plus-btn" type="button" onclick="incrementCounter(18)" >+</button>  
@@ -286,13 +302,7 @@
              <label id="atomonoLabel">FALSE</label>
              <button id="atomonoButton" type="button">Check Last Cycle</button>
              <img id="atomonoPic" src="" alt="atomonoPic" style="display:none; width: 320px; height: 240px;">
-             <br>
-             <br>
-             <label>材料ラベル: </label>
-             <label id="makerLabel">FALSE</label>
-             <button id="makerLabelButton" type="button">写真撮影</button>
-             <img id="材料ラベル" src="" alt="材料ラベル" style="display:none; width: 320px; height: 240px;">
-    
+             
              <br>
              <br>
              <input type="submit" value="保存" id="submit">

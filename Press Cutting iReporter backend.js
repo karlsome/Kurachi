@@ -151,11 +151,12 @@ function isSecondScanCurrentlyRequired(factory, process) {
         // Default for full logic: if not listed above, or if NFH and RLC, second scan is not required.
         return false;
     } else {
-        // === TEMPORARY LOGIC ===
+        // === TEMPORARY LOGIC ===  
         // Only 第二工場 requires a second scan for now.
         return false;
     }
 }
+
 
 
 
@@ -1189,6 +1190,7 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
       Time_start: document.getElementById('Start Time').value,
       Time_end: document.getElementById('End Time').value,
       材料ロット: document.getElementById('材料ロット').value,
+      疵引処理数: parseInt(document.getElementById('counter-27').value, 10) || 0,
       疵引不良: parseInt(document.getElementById('counter-18').value, 10) || 0,
       加工不良: parseInt(document.getElementById('counter-19').value, 10) || 0,
       その他: parseInt(document.getElementById('counter-20').value, 10) || 0,
