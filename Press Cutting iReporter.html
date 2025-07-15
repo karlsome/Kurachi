@@ -62,6 +62,7 @@
             
            
 
+            <!-- 1. 背番号セレクト -->
             <select id="sub-dropdown" name="背番号">  
             <!-- options will be populated dynamically based on the selected value of #dropdown -->
             </select>
@@ -70,14 +71,12 @@
             <button id="scan-button" type="button">Scan 背番号</button>
             <br>
             <br>
+
+            <!-- 2. Print Label ボタン -->
             <button id="print" type="button" onclick="printLabel()"> Print Label </button>
             <div id="hidase-label-buttons"></div>
-
-
-
-    
-            
-    
+            <br>
+            <br>
 
     <!-- Cutting Section (A) -->
     <div id="sectionA" class="process-section">
@@ -86,45 +85,111 @@
         <select id="process" name="設備">
             <!-- setsubi machines should be generated here -->
         </select>
+        <br>
+        <br>
         
+        <!-- 3. 作業者 -->
         <label for="Machine Operator">作業者:</label>
-            <input list="machine-operator-suggestions" placeholder="Worker's Name" id="Machine Operator" name="Worker_Name" required>
-            <datalist id="machine-operator-suggestions"></datalist>
-            <br><br>
-            <label for="Process Quantity">加工数（良品）+ NG:</label>
-            <input type="text" name="Process Quantity" id="ProcessQuantity" placeholder="Process Quantity" required>
-            
-            <br><br>
-            <label for="Lot No.">加工日:</label>
-            <input type="date" name="Date" id="Lot No." placeholder="Date" onfocus="setDefaultDate(this)" required>
-            <input type="number" name="Labelextension" id="Labelextension"> </input>
-            
-            <br><br>
-            <label for="Start Time">加工開始時間:</label>
-            <input type="time" name="Time_start" id="Start Time" placeholder="Time Start" onfocus="setDefaultTime(this)" required>
-            <br>
-            <label for="End Time">加工終了時間:</label>
-            <input type="time" name="Time_end" id="End Time" placeholder="Time End" onfocus="setDefaultTime(this)" required >
-            <br>
+        <input list="machine-operator-suggestions" placeholder="Worker's Name" id="Machine Operator" name="Worker_Name" required>
+        <datalist id="machine-operator-suggestions"></datalist>
+        <br><br>
 
-            <label for="shot">ショット数</label>
-            <input type="shot" name="shot" id="shot" placeholder="ショット数" required>
-            <br>
+        <!-- 4. 加工日＿枝番 -->
+        <label for="Lot No.">加工日:</label>
+        <input type="date" name="Date" id="Lot No." placeholder="Date" onfocus="setDefaultDate(this)" required>
+        <input type="number" name="Labelextension" id="Labelextension"> </input>
+        <br><br>
 
+        <!-- 5. 材料ロット -->
+        <label for="材料ロット">材料ロット:</label>
+        <button id="scan-lot" type="button">Scan ロット</button>
+        <input type="text" name="材料ロット" id="材料ロット" placeholder="Material Lot" required >
+        <br>
+        <br>
 
-            <label for="材料ロット">材料ロット:</label>
-            <button id="scan-lot" type="button">Scan ロット</button>
-            <input type="text" name="材料ロット" id="材料ロット" placeholder="Material Lot" required >
-            <br>
-            <br>
-             <label>材料ラベル写真: </label>
-             <label id="makerLabel">FALSE</label>
-             <button id="makerLabelButton" type="button">写真撮影</button>
-             <img id="材料ラベル" src="" alt="材料ラベル" style="display:none; width: 320px; height: 240px;">
-                <br>
-                <br>
-                <br>
-                <br>
+        <!-- 6. 材料ラベル写真 -->
+        <label>材料ラベル写真: </label>
+        <label id="makerLabel">FALSE</label>
+        <button id="makerLabelButton" type="button">写真撮影</button>
+        <img id="材料ラベル" src="" alt="材料ラベル" style="display:none; width: 320px; height: 240px;">
+        <br>
+        <br>
+
+        <!-- 7. 加工開始時間 -->
+        <label for="Start Time">加工開始時間:</label>
+        <input type="time" name="Time_start" id="Start Time" placeholder="Time Start" onfocus="setDefaultTime(this)" required>
+        <br>
+        <br>
+
+        <!-- 8. 初物チェック -->
+        <label>初物チェック: </label>
+        <label id="hatsumonoLabel">FALSE</label>
+        <button id="hatsumonoButton" type="button">Check 1st Cycle</button>
+        <img id="hatsumonoPic" src="" alt="hatsumonoPic" style="display:none; width: 320px; height: 240px;">
+        <br>
+        <br>
+
+        <!-- 9. 終物チェック -->
+        <label>終物チェック: </label>
+        <label id="atomonoLabel">FALSE</label>
+        <button id="atomonoButton" type="button">Check Last Cycle</button>
+        <img id="atomonoPic" src="" alt="atomonoPic" style="display:none; width: 320px; height: 240px;">
+        <br>
+        <br>
+
+        <!-- 10. 加工終了時間 -->
+        <label for="End Time">加工終了時間:</label>
+        <input type="time" name="Time_end" id="End Time" placeholder="Time End" onfocus="setDefaultTime(this)" required >
+        <br>
+        <br>
+
+        <!-- 11. 疵引処理数 -->
+        <div id="counter-box-27" class="counter-box">  
+            <label for="counter-27">疵引処理数</label>
+            <button class="plus-btn" type="button" onclick="incrementCounter(27)" >+</button>  
+            <input id="counter-27" value="0" type="number" name="疵引処理数">  
+            <button class="minus-btn" type="button" onclick="decrementCounter(27)" >-</button>  
+        </div>
+        <br><br>
+
+        <!-- 12. 疵引不良 -->
+        <div id="counter-box-18" class="counter-box">  
+            <label for="counter-18">疵引不良</label>
+            <button class="plus-btn" type="button" onclick="incrementCounter(18)" >+</button>  
+            <input id="counter-18" value="0" type="number" name="疵引不良">  
+            <button class="minus-btn" type="button" onclick="decrementCounter(18)" >-</button>  
+        </div>
+        
+
+        <!-- 13. 加工不良 -->
+        <div id="counter-box-19" class="counter-box">  
+            <label for="counter-19">加工不良</label>
+            <button class="plus-btn" type="button" onclick="incrementCounter(19)" >+</button>  
+            <input id="counter-19" value="0" type="number" name="加工不良">  
+            <button class="minus-btn" type="button" onclick="decrementCounter(19)" >-</button>  
+        </div>
+        
+
+        <!-- 14. その他 -->
+        <div id="counter-box-20" class="counter-box">  
+            <label for="counter-20">その他:</label>
+            <button class="plus-btn" type="button" onclick="incrementCounter(20)" >+</button>  
+            <input id="counter-20" value="0" type="number" name="その他">  
+            <button class="minus-btn" type="button" onclick="decrementCounter(20)" >-</button>  
+        </div>
+        <br>
+
+        <!-- 15. ショット数 -->
+        <label for="shot">ショット数</label>
+        <input type="shot" name="shot" id="shot" placeholder="ショット数" required>
+        <br>
+        <br>
+
+        <!-- 16. 加工数（良品）+ NG -->
+        <label for="Process Quantity">加工数（良品）+ NG:</label>
+        <input type="text" name="Process Quantity" id="ProcessQuantity" placeholder="Process Quantity" required>
+        <br>
+        <br>
         <!-- what modal is this???? -->
 
         <!-- Bluetooth Scanner Modal -->
@@ -240,80 +305,38 @@
         }
         </style>
 
-            <div id="counter-box-27" class="counter-box">  
-                <label for="counter-27">疵引処理数</label>
-                <button class="plus-btn" type="button" onclick="incrementCounter(27)" >+</button>  
-                <input id="counter-27" value="0" type="number" name="疵引処理数">  
-                <button class="minus-btn" type="button" onclick="decrementCounter(27)" >-</button>  
-            </div>
-            <br>
-            <br>
-            <div id="counter-box-18" class="counter-box">  
-                <label for="counter-18">疵引不良</label>
-                <button class="plus-btn" type="button" onclick="incrementCounter(18)" >+</button>  
-                <input id="counter-18" value="0" type="number" name="疵引不良">  
-                <button class="minus-btn" type="button" onclick="decrementCounter(18)" >-</button>  
-            </div>
-            <div id="counter-box-19" class="counter-box">  
-                <label for="counter-19">加工不良</label>
-                <button class="plus-btn" type="button" onclick="incrementCounter(19)" >+</button>  
-                <input id="counter-19" value="0" type="number" name="加工不良">  
-                <button class="minus-btn" type="button" onclick="decrementCounter(19)" >-</button>  
-            </div>
-            <div id="counter-box-20" class="counter-box">  
-                <label for="counter-20">その他:</label>
-                <button class="plus-btn" type="button" onclick="incrementCounter(20)" >+</button>  
-                <input id="counter-20" value="0" type="number" name="その他">  
-                <button class="minus-btn" type="button" onclick="decrementCounter(20)" >-</button>  
-            </div>
-            <br>
-            <div id="NG-container">
-                <NGlabel for="Total_NG">NG Quantity:</label>
-                <input readonly id="Total_NG" value="0" type="number" name="Total_NG">
-            </div>
-            <br><br>
-            <div id="total-container">
-                <label for="total">良品合計(TOTAL):</label>
-                <input readonly id="total" value="0" type="number" name="Final Quantity">
-            </div>
-                </div>
-                <label for="spare">スペア:</label>
-                <input type="text" name="spare" id="spare" placeholder="Spare" >
-                <br>
+        <!-- NG container and totals moved up in the form -->
+        <div id="NG-container">
+            <NGlabel for="Total_NG">NG Quantity:</label>
+            <input readonly id="Total_NG" value="0" type="number" name="Total_NG">
+        </div>
+        <br><br>
+        <div id="total-container">
+            <label for="total">良品合計(TOTAL):</label>
+            <input readonly id="total" value="0" type="number" name="Final Quantity">
+        </div>
+        <br>
 
-            <br>
+        <!-- Spare and Comments sections -->
+        <label for="spare">スペア:</label>
+        <input type="text" name="spare" id="spare" placeholder="Spare" >
+        <br>
+        <br>
 
+        <textarea name="Comments1" rows="5" placeholder="Enter Comments"></textarea>
+        <br>
+        <br>
 
-            <textarea name="Comments1" rows="5" placeholder="Enter Comments"></textarea>
-            <br>
-
-            <!-- This code is for the checklist -->
-             <br>
-             <br>
-             <br>
-             <br>
-             <label>初物チェック: </label>
-             <label id="hatsumonoLabel">FALSE</label>
-             <button id="hatsumonoButton" type="button">Check 1st Cycle</button>
-             <img id="hatsumonoPic" src="" alt="hatsumonoPic" style="display:none; width: 320px; height: 240px;">
-             <br>
-             <br>
-             <label>終物チェック: </label>
-             <label id="atomonoLabel">FALSE</label>
-             <button id="atomonoButton" type="button">Check Last Cycle</button>
-             <img id="atomonoPic" src="" alt="atomonoPic" style="display:none; width: 320px; height: 240px;">
-             
-             <br>
-             <br>
-             <input type="submit" value="保存" id="submit">
-            <br>
-            <br>
-            <br>
-            <br>
-            <br>
-            <br>
-            <button type="button" onclick="resetForm()" id="reset-button">Reset</button>
-            
+        <!-- Submit and Reset buttons -->
+        <input type="submit" value="保存" id="submit">
+        <br>
+        <br>
+        <br>
+        <br>
+        <br>
+        <br>
+        <button type="button" onclick="resetForm()" id="reset-button">Reset</button>
+        
     </div>
 
     
