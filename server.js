@@ -3444,6 +3444,77 @@ app.post("/resetUserPassword", async (req, res) => {
 });
 
 
+// Delete selected records from submitted DB (masterUser only)
+app.post('/deleteCustomerSubmittedRecords', async (req, res) => {
+    try {
+        const { dbName, recordIds, role, username } = req.body;
+
+        // Validation
+        if (!dbName || !recordIds || !Array.isArray(recordIds) || recordIds.length === 0) {
+            return res.status(400).json({ error: 'Missing required fields: dbName, recordIds (array)' });
+        }
+
+        if (!role || !username) {
+            return res.status(400).json({ error: 'Missing authentication fields: role, username' });
+        }
+
+        // Authorization - only masterUser can delete records
+        if (role !== 'masterUser') {
+            return res.status(403).json({ error: 'Access denied. Only masterUser can delete records.' });
+        }
+
+        // Connect to the customer's database
+        const customerDb = client.db(dbName);
+        const submittedCollection = customerDb.collection('submittedDB');
+
+        // Convert string IDs to ObjectId
+        const { ObjectId } = require('mongodb');
+        const objectIds = recordIds.map(id => {
+            try {
+                return new ObjectId(id);
+            } catch (err) {
+                throw new Error(`Invalid record ID format: ${id}`);
+            }
+        });
+
+        // Delete the records
+        const deleteResult = await submittedCollection.deleteMany({
+            _id: { $in: objectIds }
+        });
+
+        // Log the deletion activity (optional)
+        const logCollection = customerDb.collection('activityLogs');
+        try {
+            await logCollection.insertOne({
+                action: 'delete_submitted_records',
+                performedBy: username,
+                performedByRole: role,
+                recordsDeleted: deleteResult.deletedCount,
+                recordIds: recordIds,
+                timestamp: new Date(),
+                ip: req.ip || req.connection.remoteAddress
+            });
+        } catch (logError) {
+            console.warn('Failed to log deletion activity:', logError);
+            // Don't fail the main operation if logging fails
+        }
+
+        res.json({
+            success: true,
+            deletedCount: deleteResult.deletedCount,
+            message: `Successfully deleted ${deleteResult.deletedCount} record(s)`
+        });
+
+    } catch (error) {
+        console.error('Error deleting submitted records:', error);
+        res.status(500).json({ 
+            error: 'Failed to delete records',
+            details: error.message 
+        });
+    }
+});
+
+
 //FREYA ADMIN BACKEND END
 
 
