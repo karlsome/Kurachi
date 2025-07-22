@@ -423,7 +423,6 @@ async function fetchProductDetails() {
 
     if (materialData.length === 0) { 
       showModalAlert(`材料DBに詳細が見つかりません。材料品番: ${matched材料品番}`, true);
-      picLINK(selected品番Value); 
       return;
     }
 
@@ -464,6 +463,18 @@ async function fetchProductDetails() {
     document.getElementById("length").value = materialLength;
     document.getElementById("SRS").value = material.SRS === "有り" ? "有り" : "無し";
 
+    // Update image using imageURL from materialDB
+    const dynamicImage = document.getElementById("dynamicImage");
+    if (dynamicImage) {
+      if (material.imageURL && material.imageURL.trim() !== "") {
+        dynamicImage.src = material.imageURL;
+        dynamicImage.style.display = 'block';
+      } else {
+        dynamicImage.src = "";
+        dynamicImage.style.display = 'none';
+      }
+    }
+
     if (request) {
         const statusInput = document.getElementById("status");
         if (!request.STATUS || request.STATUS.trim() === "" || request.STATUS === "加工中") {
@@ -501,7 +512,6 @@ async function fetchProductDetails() {
         document.getElementById("targetProductionCount").value = "0";
         document.getElementById("order").value = ""; 
     }
-    picLINK(selected品番Value); 
   } catch (error) {
     console.error("Error in fetchProductDetails:", error);
     showModalAlert(`製品詳細の取得エラー: ${error.message}`, true);

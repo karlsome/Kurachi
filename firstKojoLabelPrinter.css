@@ -92,14 +92,16 @@ input, select {
     padding: 10px;
     margin: 20px 0;
     border-radius: 5px;
+    text-align: center;
 }
 
 .image-container img {
-    width: 100%;
     max-width: 300px;
     height: auto;
     border-radius: 5px;
     box-shadow: 0 0 5px rgba(0, 0, 0, 0.2);
+    display: block;
+    margin: 0 auto;
 }
 
 /* Responsive adjustments */

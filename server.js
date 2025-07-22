@@ -4591,19 +4591,68 @@ app.post('/saveImageURL', async (req, res) => {
 });
 
 
+// //updates masterDB
+// app.post("/updateMasterRecord", async (req, res) => {
+//   const { recordId, updates, username } = req.body;
+
+//   if (!recordId || !updates || !username) {
+//     return res.status(400).json({ error: "Missing required fields" });
+//   }
+
+//   try {
+//     await client.connect();
+//     const db = client.db("Sasaki_Coating_MasterDB");
+//     const masterColl = db.collection("masterDB");
+//     const logColl = db.collection("masterDB_Log");
+
+//     const objectId = new ObjectId(recordId);
+
+//     // Fetch old record
+//     const oldRecord = await masterColl.findOne({ _id: objectId });
+//     if (!oldRecord) {
+//       return res.status(404).json({ error: "Record not found" });
+//     }
+
+//     // Perform update
+//     const updateResult = await masterColl.updateOne(
+//       { _id: objectId },
+//       { $set: updates }
+//     );
+
+//     if (updateResult.modifiedCount === 0) {
+//       return res.status(304).json({ message: "No changes made" });
+//     }
+
+//     // Log the change
+//     await logColl.insertOne({
+//       _id: new ObjectId(),
+//       masterId: objectId,
+//       username,
+//       timestamp: new Date(Date.now() + 9 * 60 * 60 * 1000), // JST = UTC + 9 hours
+//       oldData: oldRecord,
+//       newData: updates
+//     });
+
+//     res.json({ success: true, modifiedCount: updateResult.modifiedCount });
+//   } catch (err) {
+//     console.error("Update failed:", err);
+//     res.status(500).json({ error: "Internal server error" });
+//   }
+// });
+
 //updates masterDB
 app.post("/updateMasterRecord", async (req, res) => {
-  const { recordId, updates, username } = req.body;
+  const { recordId, updates, username, collectionName } = req.body; // Add collectionName
 
-  if (!recordId || !updates || !username) {
+  if (!recordId || !updates || !username || !collectionName) { // Add collectionName to validation
     return res.status(400).json({ error: "Missing required fields" });
   }
 
   try {
     await client.connect();
     const db = client.db("Sasaki_Coating_MasterDB");
-    const masterColl = db.collection("masterDB");
-    const logColl = db.collection("masterDB_Log");
+    const masterColl = db.collection(collectionName); // Use dynamic collection name
+    const logColl = db.collection(`${collectionName}_Log`); // Use dynamic log collection
 
     const objectId = new ObjectId(recordId);
 
@@ -4641,28 +4690,93 @@ app.post("/updateMasterRecord", async (req, res) => {
 });
 
 
+// //this uploads or updates the image in the masterDB mongoDB
+// app.post("/uploadMasterImage", async (req, res) => {
+//   const { base64, label, recordId, username } = req.body;
+
+//   if (!base64 || !recordId || !username) {
+//     return res.status(400).json({ error: "Missing required fields" });
+//   }
+
+//   try {
+//     await client.connect();
+//     const db = client.db("Sasaki_Coating_MasterDB");
+//     const masterDB = db.collection("masterDB");
+//     const logColl = db.collection("masterDB_Log");
+
+//     const objectId = new ObjectId(recordId);
+//     const oldRecord = await masterDB.findOne({ _id: objectId });
+
+//     if (!oldRecord) {
+//       return res.status(404).json({ error: "Record not found" });
+//     }
+
+//     const 品番 = oldRecord["品番"] || "unknownPart";
+//     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+//     const fileName = `${品番}.jpg`;
+//     const filePath = `masterImage/${fileName}`;
+//     const file = admin.storage().bucket().file(filePath);
+
+//     const buffer = Buffer.from(base64, "base64");
+
+//     // Use a random token or constant token (example below)
+//     const downloadToken = "masterDBToken69";
+
+//     await file.save(buffer, {
+//       metadata: {
+//         contentType: "image/jpeg",
+//         metadata: {
+//           firebaseStorageDownloadTokens: downloadToken
+//         }
+//       }
+//     });
+
+//     // ✅ Firebase-style URL (supports preview/download with token)
+//     const firebaseUrl = `https://firebasestorage.googleapis.com/v0/b/${file.bucket.name}/o/${encodeURIComponent(file.name)}?alt=media&token=${downloadToken}`;
+
+//     // Update masterDB document
+//     await masterDB.updateOne({ _id: objectId }, { $set: { imageURL: firebaseUrl } });
+
+//     // Log the update
+//     await logColl.insertOne({
+//       _id: new ObjectId(),
+//       masterId: objectId,
+//       username,
+//       timestamp: new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" })),
+//       oldData: oldRecord,
+//       newData: { imageURL: firebaseUrl }
+//     });
+
+//     res.json({ message: "Image uploaded and record updated", imageURL: firebaseUrl });
+//   } catch (error) {
+//     console.error("Error uploading master image:", error);
+//     res.status(500).json({ error: "Error uploading image" });
+//   }
+// });
+
+
 //this uploads or updates the image in the masterDB mongoDB
 app.post("/uploadMasterImage", async (req, res) => {
-  const { base64, label, recordId, username } = req.body;
+  const { base64, label, recordId, username, collectionName } = req.body; // Add collectionName
 
-  if (!base64 || !recordId || !username) {
+  if (!base64 || !recordId || !username || !collectionName) { // Add collectionName to validation
     return res.status(400).json({ error: "Missing required fields" });
   }
 
   try {
     await client.connect();
     const db = client.db("Sasaki_Coating_MasterDB");
-    const masterDB = db.collection("masterDB");
-    const logColl = db.collection("masterDB_Log");
+    const collection = db.collection(collectionName); // Use dynamic collection name
+    const logColl = db.collection(`${collectionName}_Log`); // Use dynamic log collection
 
     const objectId = new ObjectId(recordId);
-    const oldRecord = await masterDB.findOne({ _id: objectId });
+    const oldRecord = await collection.findOne({ _id: objectId }); // Use dynamic collection
 
     if (!oldRecord) {
       return res.status(404).json({ error: "Record not found" });
     }
 
-    const 品番 = oldRecord["品番"] || "unknownPart";
+    const 品番 = oldRecord["品番"] || oldRecord["材料品番"] || "unknownPart"; // Support both 品番 and 材料品番
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
     const fileName = `${品番}.jpg`;
     const filePath = `masterImage/${fileName}`;
@@ -4685,8 +4799,8 @@ app.post("/uploadMasterImage", async (req, res) => {
     // ✅ Firebase-style URL (supports preview/download with token)
     const firebaseUrl = `https://firebasestorage.googleapis.com/v0/b/${file.bucket.name}/o/${encodeURIComponent(file.name)}?alt=media&token=${downloadToken}`;
 
-    // Update masterDB document
-    await masterDB.updateOne({ _id: objectId }, { $set: { imageURL: firebaseUrl } });
+    // Update document in the specified collection
+    await collection.updateOne({ _id: objectId }, { $set: { imageURL: firebaseUrl } });
 
     // Log the update
     await logColl.insertOne({
@@ -4705,22 +4819,61 @@ app.post("/uploadMasterImage", async (req, res) => {
   }
 });
 
+
+
+// //inserts data to masterDB
+// app.post("/submitToMasterDB", async (req, res) => {
+//   const { data, username } = req.body;
+
+//   if (!data || !username) {
+//     return res.status(400).json({ error: "Missing data or username" });
+//   }
+
+//   try {
+//     await client.connect();
+//     const db = client.db("Sasaki_Coating_MasterDB");
+//     const masterDB = db.collection("masterDB");
+//     const logColl = db.collection("masterDB_Log");
+
+//     // Insert the data
+//     const result = await masterDB.insertOne(data);
+
+//     // Log the insert
+//     await logColl.insertOne({
+//       _id: new ObjectId(),
+//       masterId: result.insertedId,
+//       action: "insert",
+//       username,
+//       timestamp: new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" })),
+//       newData: data
+//     });
+
+//     res.status(201).json({
+//       message: "Data inserted and logged successfully",
+//       insertedId: result.insertedId,
+//     });
+//   } catch (error) {
+//     console.error("Error inserting to masterDB:", error);
+//     res.status(500).json({ error: "Error inserting to masterDB" });
+//   }
+// });
+
 //inserts data to masterDB
 app.post("/submitToMasterDB", async (req, res) => {
-  const { data, username } = req.body;
+  const { data, username, collectionName } = req.body; // Add collectionName
 
-  if (!data || !username) {
-    return res.status(400).json({ error: "Missing data or username" });
+  if (!data || !username || !collectionName) { // Add collectionName to validation
+    return res.status(400).json({ error: "Missing data, username, or collectionName" });
   }
 
   try {
     await client.connect();
     const db = client.db("Sasaki_Coating_MasterDB");
-    const masterDB = db.collection("masterDB");
-    const logColl = db.collection("masterDB_Log");
+    const collection = db.collection(collectionName); // Use dynamic collection name
+    const logColl = db.collection(`${collectionName}_Log`); // Use dynamic log collection
 
     // Insert the data
-    const result = await masterDB.insertOne(data);
+    const result = await collection.insertOne(data);
 
     // Log the insert
     await logColl.insertOne({
