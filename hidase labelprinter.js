@@ -382,7 +382,7 @@ function printLabel() {
   buttonBox.style.cursor = 'pointer';
   buttonBox.style.borderRadius = '5px';
   buttonBox.onclick = () => {
-    showCopiesPrompt('hidaselabel5.lbx');
+    showCopiesPrompt('hidaselabel6.lbx');
     document.body.removeChild(modal);
   };
   modal.appendChild(buttonBox);
@@ -395,7 +395,7 @@ function printLabel() {
   buttonProduct.style.cursor = 'pointer';
   buttonProduct.style.borderRadius = '5px';
   buttonProduct.onclick = () => {
-    showCopiesPrompt('hidaselabel6inner.lbx');
+    showCopiesPrompt('hidaselabel7inner.lbx');
     document.body.removeChild(modal);
   };
   modal.appendChild(buttonProduct);
