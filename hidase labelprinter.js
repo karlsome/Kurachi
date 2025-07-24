@@ -500,6 +500,7 @@ function printLabel() {
         `&text_品番=${encodeURIComponent(品番)}` +
         `&text_収容数=${encodeURIComponent(収容数)}` +
         `&text_DateT=${encodeURIComponent(Date)}` +
+        `&text_kensa=${encodeURIComponent("")}` +
         `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
   
       window.location.href = url;
