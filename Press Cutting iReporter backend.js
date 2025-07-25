@@ -1183,7 +1183,7 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
   try {
     const hatsumono = document.getElementById("hatsumonoLabel").textContent;
     const atomono = document.getElementById("atomonoLabel").textContent;
-    const markerlabel = document.getElementById("markerLabel").textContent;
+    const markerlabel = document.getElementById("makerLabel").textContent;
 
     if (hatsumono === "FALSE" || atomono === "FALSE" || markerlabel === "FALSE") {
       showAlert("初物/終物/材料ラベル確認してください / Please do Hatsumono and Atomono or MaterialLabel");
