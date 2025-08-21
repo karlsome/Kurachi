@@ -2947,6 +2947,713 @@ app.post('/queries', async (req, res) => {
 
 
 
+//PAGINATION
+/**
+ * Pagination API Routes for MongoDB Collections
+ * Supports efficient pagination with sorting, filtering, and aggregation
+ * 
+ * Add these routes to your server.js file
+ */
+
+// Add this to your server.js after the existing /queries route
+
+/**
+ * Generic pagination route for any MongoDB collection
+ * POST /api/paginate
+ */
+app.post('/api/paginate', async (req, res) => {
+  console.log("🟢 Received POST request to /api/paginate");
+  
+  const { 
+    dbName, 
+    collectionName, 
+    query = {}, 
+    sort = {}, 
+    page = 1, 
+    limit = 15,        // Frontend can override this default
+    maxLimit = 100,    // Frontend can set custom max limit
+    aggregation = null,
+    projection = null
+  } = req.body;
+
+  try {
+    // Validate required parameters
+    if (!dbName || !collectionName) {
+      return res.status(400).json({ 
+        error: "dbName and collectionName are required",
+        success: false 
+      });
+    }
+
+    // Convert page and limit to numbers with dynamic max limit
+    const currentPage = parseInt(page, 10);
+    const maxAllowedLimit = parseInt(maxLimit, 10) || 100; // Default max 100, but configurable
+    const itemsPerPage = Math.min(parseInt(limit, 10), maxAllowedLimit);
+    const skip = (currentPage - 1) * itemsPerPage;
+
+    console.log(`📄 Pagination request: Page ${currentPage}, Limit ${itemsPerPage}/${maxAllowedLimit} for ${dbName}.${collectionName}`);
+
+    // Convert string _id to ObjectId if present in query
+    if (query._id && typeof query._id === "string") {
+      try {
+        query._id = new ObjectId(query._id);
+      } catch (err) {
+        return res.status(400).json({ 
+          error: "Invalid _id format provided in query.",
+          success: false
+        });
+      }
+    }
+
+    const database = client.db(dbName);
+    const collection = database.collection(collectionName);
+
+    let results = [];
+    let totalCount = 0;
+
+    if (aggregation && Array.isArray(aggregation)) {
+      // Use aggregation pipeline for complex queries
+      console.log("🔵 Running Aggregation Pipeline with pagination");
+      
+      // Create two pipelines: one for data, one for count
+      const dataPipeline = [
+        ...aggregation,
+        { $sort: Object.keys(sort).length > 0 ? sort : { _id: -1 } },
+        { $skip: skip },
+        { $limit: itemsPerPage }
+      ];
+
+      const countPipeline = [
+        ...aggregation,
+        { $count: "total" }
+      ];
+
+      const [dataResult, countResult] = await Promise.all([
+        collection.aggregate(dataPipeline).toArray(),
+        collection.aggregate(countPipeline).toArray()
+      ]);
+
+      results = dataResult;
+      totalCount = countResult.length > 0 ? countResult[0].total : 0;
+
+    } else {
+      // Use regular find with pagination
+      console.log("🔵 Running Find Query with pagination");
+      
+      // Build the find query
+      let findQuery = collection.find(query);
+      
+      // Apply projection if specified
+      if (projection) {
+        findQuery = findQuery.project(projection);
+      }
+
+      // Apply sort (default to newest first)
+      const sortOptions = Object.keys(sort).length > 0 ? sort : { _id: -1 };
+      findQuery = findQuery.sort(sortOptions);
+
+      // Get both data and count in parallel for efficiency
+      const [dataResult, countResult] = await Promise.all([
+        findQuery.skip(skip).limit(itemsPerPage).toArray(),
+        collection.countDocuments(query)
+      ]);
+
+      results = dataResult;
+      totalCount = countResult;
+    }
+
+    // Calculate pagination info
+    const totalPages = Math.ceil(totalCount / itemsPerPage);
+    const hasNext = currentPage < totalPages;
+    const hasPrevious = currentPage > 1;
+
+    console.log(`✅ Pagination Results: Page ${currentPage}/${totalPages}, ${results.length}/${totalCount} items`);
+
+    res.json({
+      data: results,
+      pagination: {
+        currentPage,
+        totalPages,
+        totalRecords: totalCount,
+        itemsPerPage,
+        hasNext,
+        hasPrevious,
+        startIndex: skip + 1,
+        endIndex: Math.min(skip + itemsPerPage, totalCount)
+      },
+      success: true
+    });
+
+  } catch (error) {
+    console.error("❌ Error in pagination route:", error);
+    res.status(500).json({ 
+      error: "Error executing paginated query", 
+      details: error.message,
+      success: false
+    });
+  }
+});
+
+/**
+ * Specialized sensor history pagination
+ * POST /api/sensor-history
+ */
+app.post('/api/sensor-history', async (req, res) => {
+  console.log("🟢 Received POST request to /api/sensor-history");
+  
+  const { 
+    deviceId, 
+    page = 1, 
+    limit = 15,        // Frontend controlled page size
+    maxLimit = 50,     // Frontend can set max limit for sensors
+    startDate = null,
+    endDate = null,
+    factoryName = null,
+    dbName = "submittedDB",           // Allow custom database
+    collectionName = "tempHumidityDB" // Allow custom collection
+  } = req.body;
+
+  try {
+    if (!deviceId) {
+      return res.status(400).json({ 
+        error: "deviceId is required",
+        success: false
+      });
+    }
+
+    // Build date range query (default to last 30 days)
+    const queryEndDate = endDate ? new Date(endDate) : new Date();
+    const queryStartDate = startDate ? new Date(startDate) : new Date();
+    if (!startDate) {
+      queryStartDate.setDate(queryStartDate.getDate() - 30);
+    }
+
+    const query = {
+      device: deviceId,
+      Date: {
+        $gte: queryStartDate.toISOString().split("T")[0],
+        $lte: queryEndDate.toISOString().split("T")[0]
+      }
+    };
+
+    // Add factory filter if specified
+    if (factoryName) {
+      query.工場 = factoryName;
+    }
+
+    // Sort by date and time (newest first)
+    const sort = { Date: -1, Time: -1 };
+
+    const currentPage = parseInt(page, 10);
+    const maxAllowedLimit = parseInt(maxLimit, 10) || 50; // Configurable max for sensors
+    const itemsPerPage = Math.min(parseInt(limit, 10), maxAllowedLimit);
+    const skip = (currentPage - 1) * itemsPerPage;
+
+    const database = client.db(dbName);
+    const collection = database.collection(collectionName);
+
+    console.log(`🌡️ Sensor pagination: Device ${deviceId}, Page ${currentPage}, Limit ${itemsPerPage}/${maxAllowedLimit}`);
+
+    // Get both data and count in parallel
+    const [dataResult, countResult] = await Promise.all([
+      collection.find(query).sort(sort).skip(skip).limit(itemsPerPage).toArray(),
+      collection.countDocuments(query)
+    ]);
+
+    // Transform sensor data for frontend
+    const transformedData = dataResult.map(record => ({
+      id: record._id,
+      date: record.Date,
+      time: record.Time,
+      temperature: parseFloat((record.Temperature || '0').toString().replace('°C', '').trim()),
+      humidity: parseFloat((record.Humidity || '0').toString().replace('%', '').trim()),
+      status: record.sensorStatus || 'OK',
+      factory: record.工場,
+      device: record.device,
+      timestamp: new Date(`${record.Date} ${record.Time}`)
+    }));
+
+    // Calculate pagination info
+    const totalPages = Math.ceil(countResult / itemsPerPage);
+
+    console.log(`✅ Sensor History: Device ${deviceId}, Page ${currentPage}/${totalPages}, ${transformedData.length}/${countResult} records`);
+
+    res.json({
+      data: transformedData,
+      pagination: {
+        currentPage,
+        totalPages,
+        totalRecords: countResult,
+        itemsPerPage,
+        hasNext: currentPage < totalPages,
+        hasPrevious: currentPage > 1,
+        startIndex: skip + 1,
+        endIndex: Math.min(skip + itemsPerPage, countResult)
+      },
+      query: {
+        deviceId,
+        startDate: queryStartDate.toISOString().split("T")[0],
+        endDate: queryEndDate.toISOString().split("T")[0],
+        factoryName
+      },
+      success: true
+    });
+
+  } catch (error) {
+    console.error("❌ Error in sensor history pagination:", error);
+    res.status(500).json({ 
+      error: "Error fetching sensor history", 
+      details: error.message,
+      success: false
+    });
+  }
+});
+
+/**
+ * Specialized approval data pagination
+ * POST /api/approval-paginate
+ */
+app.post('/api/approval-paginate', async (req, res) => {
+  console.log("🟢 Received POST request to /api/approval-paginate");
+  
+  const { 
+    collectionName,
+    page = 1, 
+    limit = 15,        // Frontend controlled page size
+    maxLimit = 100,    // Frontend can set custom max limit
+    filters = {},
+    userRole = 'member',
+    factoryAccess = [],
+    dbName = "submittedDB" // Allow custom database
+  } = req.body;
+
+  try {
+    if (!collectionName) {
+      return res.status(400).json({ 
+        error: "collectionName is required",
+        success: false
+      });
+    }
+
+    const currentPage = parseInt(page, 10);
+    const maxAllowedLimit = parseInt(maxLimit, 10) || 100; // Configurable max limit
+    const itemsPerPage = Math.min(parseInt(limit, 10), maxAllowedLimit);
+    const skip = (currentPage - 1) * itemsPerPage;
+
+    const database = client.db(dbName);
+    const collection = database.collection(collectionName);
+
+    console.log(`✅ Approval pagination: ${collectionName}, Page ${currentPage}, Limit ${itemsPerPage}/${maxAllowedLimit}`);
+
+    // Build query based on filters and user access
+    let query = { ...filters };
+
+    // Apply factory access restrictions based on user role
+    if (userRole !== 'admin' && userRole !== '部長' && factoryAccess.length > 0) {
+      query.工場 = { $in: factoryAccess };
+    }
+
+    // Convert string _id to ObjectId if present
+    if (query._id && typeof query._id === "string") {
+      try {
+        query._id = new ObjectId(query._id);
+      } catch (err) {
+        return res.status(400).json({ 
+          error: "Invalid _id format provided in query.",
+          success: false
+        });
+      }
+    }
+
+    // Sort by date (newest first) and approval status
+    const sort = { Date: -1, _id: -1 };
+
+    const [dataResult, countResult] = await Promise.all([
+      collection.find(query).sort(sort).skip(skip).limit(itemsPerPage).toArray(),
+      collection.countDocuments(query)
+    ]);
+
+    // Calculate pagination info
+    const totalPages = Math.ceil(countResult / itemsPerPage);
+
+    console.log(`✅ Approval Pagination: ${collectionName}, Page ${currentPage}/${totalPages}, ${dataResult.length}/${countResult} records`);
+
+    res.json({
+      data: dataResult,
+      pagination: {
+        currentPage,
+        totalPages,
+        totalRecords: countResult,
+        itemsPerPage,
+        hasNext: currentPage < totalPages,
+        hasPrevious: currentPage > 1,
+        startIndex: skip + 1,
+        endIndex: Math.min(skip + itemsPerPage, countResult)
+      },
+      filters: query,
+      success: true
+    });
+
+  } catch (error) {
+    console.error("❌ Error in approval pagination:", error);
+    res.status(500).json({ 
+      error: "Error fetching approval data", 
+      details: error.message,
+      success: false
+    });
+  }
+});
+
+/**
+ * Master DB pagination with search
+ * POST /api/master-paginate
+ */
+app.post('/api/master-paginate', async (req, res) => {
+  console.log("🟢 Received POST request to /api/master-paginate");
+  
+  const { 
+    page = 1, 
+    limit = 15,        // Frontend controlled page size
+    maxLimit = 100,    // Frontend can set custom max limit
+    search = '',
+    factory = '',
+    category = '',
+    dbName = "submittedDB",    // Allow custom database
+    collectionName = "masterDB" // Allow custom collection
+  } = req.body;
+
+  try {
+    const currentPage = parseInt(page, 10);
+    const maxAllowedLimit = parseInt(maxLimit, 10) || 100; // Configurable max limit
+    const itemsPerPage = Math.min(parseInt(limit, 10), maxAllowedLimit);
+    const skip = (currentPage - 1) * itemsPerPage;
+
+    const database = client.db(dbName);
+    const collection = database.collection(collectionName);
+
+    console.log(`🗂️ Master DB pagination: ${collectionName}, Page ${currentPage}, Limit ${itemsPerPage}/${maxAllowedLimit}`);
+
+    // Build search query
+    let query = {};
+
+    if (search) {
+      query.$or = [
+        { 品番: { $regex: search, $options: 'i' } },
+        { 背番号: { $regex: search, $options: 'i' } },
+        { 工場: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    if (factory) {
+      query.工場 = factory;
+    }
+
+    if (category) {
+      query.カテゴリ = category;
+    }
+
+    // Sort by factory and 品番
+    const sort = { 工場: 1, 品番: 1 };
+
+    const [dataResult, countResult] = await Promise.all([
+      collection.find(query).sort(sort).skip(skip).limit(itemsPerPage).toArray(),
+      collection.countDocuments(query)
+    ]);
+
+    // Calculate pagination info
+    const totalPages = Math.ceil(countResult / itemsPerPage);
+
+    console.log(`✅ Master DB Pagination: Page ${currentPage}/${totalPages}, ${dataResult.length}/${countResult} records`);
+
+    res.json({
+      data: dataResult,
+      pagination: {
+        currentPage,
+        totalPages,
+        totalRecords: countResult,
+        itemsPerPage,
+        hasNext: currentPage < totalPages,
+        hasPrevious: currentPage > 1,
+        startIndex: skip + 1,
+        endIndex: Math.min(skip + itemsPerPage, countResult)
+      },
+      query: {
+        search,
+        factory,
+        category
+      },
+      success: true
+    });
+
+  } catch (error) {
+    console.error("❌ Error in master DB pagination:", error);
+    res.status(500).json({ 
+      error: "Error fetching master DB data", 
+      details: error.message,
+      success: false
+    });
+  }
+});
+
+console.log("📄 Pagination routes loaded successfully");
+
+
+
+
+/**
+ * Get approval statistics using MongoDB aggregation
+ * POST /api/approval-stats
+ */
+app.post('/api/approval-stats', async (req, res) => {
+  console.log("🟢 Received POST request to /api/approval-stats");
+  
+  const { 
+    collectionName,
+    userRole = 'member',
+    factoryAccess = [],
+    filters = {},
+    dbName = "submittedDB"
+  } = req.body;
+
+  try {
+    if (!collectionName) {
+      return res.status(400).json({ 
+        error: "collectionName is required",
+        success: false
+      });
+    }
+
+    const database = client.db(dbName);
+    const collection = database.collection(collectionName);
+
+    console.log(`📊 Computing approval stats for: ${collectionName}, Role: ${userRole}`);
+
+    // Build base query based on user access and filters
+    let baseQuery = { ...filters };
+
+    // Apply factory access restrictions based on user role
+    if (userRole !== 'admin' && userRole !== '部長' && factoryAccess.length > 0) {
+      baseQuery.工場 = { $in: factoryAccess };
+    }
+
+    // Convert string _id to ObjectId if present
+    if (baseQuery._id && typeof baseQuery._id === "string") {
+      try {
+        baseQuery._id = new ObjectId(baseQuery._id);
+      } catch (err) {
+        return res.status(400).json({ 
+          error: "Invalid _id format provided in query.",
+          success: false
+        });
+      }
+    }
+
+    // Get today's date for today's total calculation
+    const today = new Date().toISOString().split('T')[0];
+
+    // Create aggregation pipeline for statistics
+    const statsAggregation = [
+      { $match: baseQuery },
+      {
+        $facet: {
+          // Overall status statistics
+          statusStats: [
+            {
+              $group: {
+                _id: {
+                  $switch: {
+                    branches: [
+                      { 
+                        case: { $or: [{ $not: ["$approvalStatus"] }, { $eq: ["$approvalStatus", "pending"] }] },
+                        then: "pending"
+                      },
+                      { 
+                        case: { $eq: ["$approvalStatus", "hancho_approved"] },
+                        then: "hancho_approved"
+                      },
+                      { 
+                        case: { $eq: ["$approvalStatus", "fully_approved"] },
+                        then: "fully_approved"
+                      },
+                      { 
+                        case: { 
+                          $or: [
+                            { $eq: ["$approvalStatus", "correction_needed"] },
+                            { $eq: ["$approvalStatus", "correction_needed_from_kacho"] }
+                          ]
+                        },
+                        then: "correction_needed"
+                      },
+                      { 
+                        case: { $eq: ["$approvalStatus", "correction_needed_from_kacho"] },
+                        then: "correction_needed_from_kacho"
+                      }
+                    ],
+                    default: "unknown"
+                  }
+                },
+                count: { $sum: 1 }
+              }
+            }
+          ],
+          // Today's submissions
+          todayStats: [
+            {
+              $match: { Date: today }
+            },
+            {
+              $group: {
+                _id: null,
+                count: { $sum: 1 }
+              }
+            }
+          ],
+          // Total count
+          totalCount: [
+            {
+              $group: {
+                _id: null,
+                count: { $sum: 1 }
+              }
+            }
+          ]
+        }
+      }
+    ];
+
+    const statsResult = await collection.aggregate(statsAggregation).toArray();
+    const stats = statsResult[0];
+
+    // Process status statistics
+    const statusCounts = {
+      pending: 0,
+      hancho_approved: 0,
+      fully_approved: 0,
+      correction_needed: 0,
+      correction_needed_from_kacho: 0
+    };
+
+    if (stats.statusStats && stats.statusStats.length > 0) {
+      stats.statusStats.forEach(stat => {
+        if (statusCounts.hasOwnProperty(stat._id)) {
+          statusCounts[stat._id] = stat.count;
+        }
+      });
+    }
+
+    // Get today's total
+    const todayTotal = stats.todayStats && stats.todayStats.length > 0 ? stats.todayStats[0].count : 0;
+    
+    // Get overall total
+    const overallTotal = stats.totalCount && stats.totalCount.length > 0 ? stats.totalCount[0].count : 0;
+
+    console.log(`✅ Approval Statistics computed: Total: ${overallTotal}, Today: ${todayTotal}`);
+    console.log(`📊 Status breakdown:`, statusCounts);
+
+    res.json({
+      statistics: {
+        pending: statusCounts.pending,
+        hanchoApproved: statusCounts.hancho_approved,
+        fullyApproved: statusCounts.fully_approved,
+        correctionNeeded: statusCounts.correction_needed,
+        correctionNeededFromKacho: statusCounts.correction_needed_from_kacho,
+        todayTotal: todayTotal,
+        overallTotal: overallTotal
+      },
+      query: baseQuery,
+      success: true,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error("❌ Error in approval statistics route:", error);
+    res.status(500).json({ 
+      error: "Error calculating approval statistics", 
+      details: error.message,
+      success: false
+    });
+  }
+});
+
+/**
+ * Get factory list for current user and collection
+ * POST /api/approval-factories
+ */
+app.post('/api/approval-factories', async (req, res) => {
+  console.log("🟢 Received POST request to /api/approval-factories");
+  
+  const { 
+    collectionName,
+    userRole = 'member',
+    factoryAccess = [],
+    dbName = "submittedDB"
+  } = req.body;
+
+  try {
+    if (!collectionName) {
+      return res.status(400).json({ 
+        error: "collectionName is required",
+        success: false
+      });
+    }
+
+    const database = client.db(dbName);
+    const collection = database.collection(collectionName);
+
+    console.log(`🏭 Getting factory list for: ${collectionName}, Role: ${userRole}`);
+
+    // Build base query based on user access
+    let baseQuery = {};
+
+    // Apply factory access restrictions based on user role
+    if (userRole !== 'admin' && userRole !== '部長' && factoryAccess.length > 0) {
+      baseQuery.工場 = { $in: factoryAccess };
+    }
+
+    // Get distinct factories using aggregation (API Version 1 compatible)
+    const factoryAggregation = [
+      { $match: baseQuery },
+      {
+        $group: {
+          _id: "$工場"
+        }
+      },
+      {
+        $match: {
+          _id: { $ne: null, $ne: "" }
+        }
+      },
+      { $sort: { _id: 1 } }
+    ];
+    
+    const factoryResults = await collection.aggregate(factoryAggregation).toArray();
+    const factories = factoryResults.map(result => result._id);
+    const filteredFactories = factories.filter(factory => factory && factory.trim() !== '');
+
+    console.log(`✅ Found ${filteredFactories.length} factories:`, filteredFactories);
+
+    res.json({
+      factories: filteredFactories.sort(),
+      success: true
+    });
+
+  } catch (error) {
+    console.error("❌ Error in approval factories route:", error);
+    res.status(500).json({ 
+      error: "Error fetching factory list", 
+      details: error.message,
+      success: false
+    });
+  }
+});
+
+console.log("📊 Approval statistics routes loaded successfully");
+
+
+//PAGINATION END
+
+
+
 
 // For Inventory app
 app.post('/inventoryChat', async (req, res) => {
