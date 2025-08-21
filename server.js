@@ -3653,6 +3653,659 @@ console.log("📊 Approval statistics routes loaded successfully");
 //PAGINATION END
 
 
+//ANALYTICS START
+
+/**
+ * Get comprehensive analytics data from kensaDB
+ * POST /api/analytics-data
+ */
+app.post('/api/analytics-data', async (req, res) => {
+  console.log("📊 Received POST request to /api/analytics-data");
+  
+  const { 
+    fromDate,
+    toDate,
+    userRole = 'member',
+    factoryAccess = [],
+    factoryFilter, // CRITICAL: Factory filter parameter
+    collectionName = 'kensaDB',
+    dbName = "submittedDB"
+  } = req.body;
+
+  try {
+    if (!fromDate || !toDate) {
+      return res.status(400).json({ 
+        error: "fromDate and toDate are required",
+        success: false
+      });
+    }
+
+    const database = client.db(dbName);
+    const collection = database.collection(collectionName);
+    const tempHumidityCollection = database.collection('tempHumidityDB'); // Climate data collection
+
+    console.log(`📊 Computing analytics data for: ${collectionName} from ${fromDate} to ${toDate}, Role: ${userRole}`, req.body.factoryFilter ? `Factory: ${req.body.factoryFilter}` : 'All factories');
+
+    // Build base query based on user access and date range
+    let baseQuery = {
+      Date: {
+        $gte: fromDate,
+        $lte: toDate
+      }
+    };
+
+    // CRITICAL FIX: Apply factory filter if specified
+    if (req.body.factoryFilter) {
+      baseQuery['工場'] = req.body.factoryFilter;
+      console.log(`🏭 Applied factory filter: ${req.body.factoryFilter}`);
+    } else if (userRole !== 'admin' && userRole !== '部長' && factoryAccess && factoryAccess.length > 0) {
+      // Apply user role restrictions if no specific factory filter is provided
+      baseQuery['工場'] = { $in: factoryAccess };
+      console.log(`🔐 Applied role-based factory restriction: ${factoryAccess.join(', ')}`);
+    }
+
+    // Build climate data query (for temperature/humidity)
+    let climateQuery = {
+      Date: {
+        $gte: fromDate,
+        $lte: toDate
+      }
+    };
+
+    // Apply same factory filtering to climate data
+    if (req.body.factoryFilter) {
+      climateQuery['工場'] = req.body.factoryFilter;
+    } else if (userRole !== 'admin' && userRole !== '部長' && factoryAccess && factoryAccess.length > 0) {
+      climateQuery['工場'] = { $in: factoryAccess };
+    }
+
+    // Collection-specific field mappings
+    const getCollectionFields = (collectionName) => {
+      switch (collectionName) {
+        case 'kensaDB':
+          return {
+            defectFields: ['Total_NG'], // Use the actual Total_NG field
+            counterFields: ['Counters.counter-1', 'Counters.counter-2', 'Counters.counter-3', 'Counters.counter-4', 
+                           'Counters.counter-5', 'Counters.counter-6', 'Counters.counter-7', 'Counters.counter-8',
+                           'Counters.counter-9', 'Counters.counter-10', 'Counters.counter-11', 'Counters.counter-12'],
+            workerField: 'Worker_Name', // Actual field name
+            equipmentField: '設備',
+            cycleTimeField: 'Cycle_Time' // Actual field name
+          };
+        case 'pressDB':
+          return {
+            defectFields: ['Total_NG'], // Use actual Total_NG field
+            individualDefectFields: ['疵引不良', '加工不良', 'その他'], // Individual defect breakdown
+            counterFields: [],
+            workerField: 'Worker_Name', // Actual field name
+            equipmentField: '設備', // Actual field name
+            cycleTimeField: 'Cycle_Time' // Actual field name
+          };
+        case 'slitDB':
+          return {
+            defectFields: ['Total_NG'], // Use actual Total_NG field
+            individualDefectFields: ['疵引不良', '加工不良', 'その他'], // Individual defect breakdown
+            counterFields: [],
+            workerField: 'Worker_Name', // Actual field name
+            equipmentField: '設備', // Actual field name
+            cycleTimeField: 'Cycle_Time' // Actual field name
+          };
+        case 'SRSDB':
+          return {
+            defectFields: ['SRS_Total_NG'], // Use actual SRS_Total_NG field
+            individualDefectFields: ['くっつき・めくれ', 'シワ', '転写位置ズレ', '転写不良', '文字欠け', 'その他'], // Individual defect breakdown
+            counterFields: [],
+            workerField: 'Worker_Name', // Actual field name
+            equipmentField: '設備', // Actual field name
+            cycleTimeField: 'Cycle_Time' // Actual field name
+          };
+        default:
+          return {
+            defectFields: ['Total_NG'],
+            counterFields: ['Counters.counter-1', 'Counters.counter-2', 'Counters.counter-3', 'Counters.counter-4', 
+                           'Counters.counter-5', 'Counters.counter-6', 'Counters.counter-7', 'Counters.counter-8',
+                           'Counters.counter-9', 'Counters.counter-10', 'Counters.counter-11', 'Counters.counter-12'],
+            workerField: 'Worker_Name',
+            equipmentField: '設備',
+            cycleTimeField: 'Cycle_Time'
+          };
+      }
+    };
+
+    const fields = getCollectionFields(collectionName);
+
+    // Calculate total defects expression - use collection-specific defect fields
+    const totalDefectsExpression = (() => {
+      switch (collectionName) {
+        case 'kensaDB':
+          return { $ifNull: ["$Total_NG", 0] }; // For kensaDB, use Total_NG field
+        case 'pressDB':
+        case 'slitDB':
+          return { $ifNull: ["$Total_NG", 0] }; // For pressDB and slitDB, use Total_NG field
+        case 'SRSDB':
+          return { $ifNull: ["$SRS_Total_NG", 0] }; // For SRSDB, use SRS_Total_NG field
+        default:
+          return { $add: fields.defectFields.map(field => ({ $ifNull: [`$${field}`, 0] })) };
+      }
+    })();
+
+    // Enhanced aggregation pipeline with proper field mapping
+    const analyticsAggregation = [
+      { $match: baseQuery },
+      {
+        $facet: {
+          // Debug: Sample a few records to see the actual structure
+          sampleRecords: [
+            { $limit: 2 }
+          ],
+          
+          // Summary statistics
+          summary: [
+            {
+              $group: {
+                _id: null,
+                totalProduction: { $sum: 1 }, // Count of records
+                totalDefects: { $sum: totalDefectsExpression },
+                avgCycleTime: { $avg: `$${fields.cycleTimeField}` },
+                factories: { $addToSet: "$工場" },
+                workers: { $addToSet: `$${fields.workerField}` }
+              }
+            },
+            {
+              $project: {
+                _id: 0,
+                totalProduction: 1,
+                totalDefects: 1,
+                avgDefectRate: { 
+                  $cond: {
+                    if: { $gt: ["$totalProduction", 0] },
+                    then: { $multiply: [{ $divide: ["$totalDefects", "$totalProduction"] }, 100] },
+                    else: 0
+                  }
+                },
+                avgCycleTime: { $round: ["$avgCycleTime", 2] },
+                totalFactories: { $size: "$factories" },
+                totalWorkers: { $size: "$workers" }
+              }
+            }
+          ],
+          
+          // Daily trend analysis
+          dailyTrend: [
+            {
+              $group: {
+                _id: "$Date",
+                totalProduction: { $sum: 1 },
+                totalDefects: { $sum: totalDefectsExpression },
+                avgCycleTime: { $avg: `$${fields.cycleTimeField}` }
+              }
+            },
+            {
+              $project: {
+                _id: 0,
+                date: "$_id",
+                totalProduction: 1,
+                totalDefects: 1,
+                defectRate: { 
+                  $cond: {
+                    if: { $gt: ["$totalProduction", 0] },
+                    then: { $multiply: [{ $divide: ["$totalDefects", "$totalProduction"] }, 100] },
+                    else: 0
+                  }
+                },
+                avgCycleTime: { $round: ["$avgCycleTime", 2] }
+              }
+            },
+            { $sort: { date: 1 } }
+          ],
+          
+          // Factory comparison
+          factoryStats: [
+            {
+              $group: {
+                _id: "$工場",
+                totalProduction: { $sum: 1 },
+                totalDefects: { $sum: totalDefectsExpression },
+                avgCycleTime: { $avg: `$${fields.cycleTimeField}` }
+              }
+            },
+            {
+              $project: {
+                _id: 0,
+                factory: "$_id",
+                totalProduction: 1,
+                totalDefects: 1,
+                defectRate: { 
+                  $cond: {
+                    if: { $gt: ["$totalProduction", 0] },
+                    then: { $multiply: [{ $divide: ["$totalDefects", "$totalProduction"] }, 100] },
+                    else: 0
+                  }
+                },
+                avgCycleTime: { $round: ["$avgCycleTime", 2] }
+              }
+            },
+            { $sort: { totalProduction: -1 } }
+          ],
+          
+          // Worker performance (top 10)
+          workerStats: [
+            {
+              $group: {
+                _id: `$${fields.workerField}`,
+                totalProduction: { $sum: 1 },
+                totalDefects: { $sum: totalDefectsExpression },
+                avgCycleTime: { $avg: `$${fields.cycleTimeField}` }
+              }
+            },
+            {
+              $project: {
+                _id: 0,
+                worker: "$_id",
+                totalProduction: 1,
+                totalDefects: 1,
+                defectRate: { 
+                  $cond: {
+                    if: { $gt: ["$totalProduction", 0] },
+                    then: { $multiply: [{ $divide: ["$totalDefects", "$totalProduction"] }, 100] },
+                    else: 0
+                  }
+                },
+                avgCycleTime: { $round: ["$avgCycleTime", 2] }
+              }
+            },
+            { $sort: { totalProduction: -1 } },
+            { $limit: 10 }
+          ],
+          
+          // Equipment efficiency
+          equipmentStats: [
+            {
+              $group: {
+                _id: `$${fields.equipmentField}`,
+                totalProduction: { $sum: 1 },
+                avgCycleTime: { $avg: `$${fields.cycleTimeField}` }
+              }
+            },
+            {
+              $project: {
+                _id: 0,
+                equipment: "$_id",
+                totalProduction: 1,
+                avgCycleTime: { $round: ["$avgCycleTime", 2] }
+              }
+            },
+            { $sort: { avgCycleTime: 1 } },
+            { $limit: 10 }
+          ],
+          
+          // Defect analysis (collection-specific breakdown) - standardized for frontend
+          defectAnalysis: (() => {
+            switch (collectionName) {
+              case 'kensaDB':
+                return [
+                  {
+                    $group: {
+                      _id: null,
+                      counter1Total: { $sum: { $ifNull: ["$Counters.counter-1", 0] } },
+                      counter2Total: { $sum: { $ifNull: ["$Counters.counter-2", 0] } },
+                      counter3Total: { $sum: { $ifNull: ["$Counters.counter-3", 0] } },
+                      counter4Total: { $sum: { $ifNull: ["$Counters.counter-4", 0] } },
+                      counter5Total: { $sum: { $ifNull: ["$Counters.counter-5", 0] } },
+                      counter6Total: { $sum: { $ifNull: ["$Counters.counter-6", 0] } },
+                      counter7Total: { $sum: { $ifNull: ["$Counters.counter-7", 0] } },
+                      counter8Total: { $sum: { $ifNull: ["$Counters.counter-8", 0] } },
+                      counter9Total: { $sum: { $ifNull: ["$Counters.counter-9", 0] } },
+                      counter10Total: { $sum: { $ifNull: ["$Counters.counter-10", 0] } },
+                      counter11Total: { $sum: { $ifNull: ["$Counters.counter-11", 0] } },
+                      counter12Total: { $sum: { $ifNull: ["$Counters.counter-12", 0] } }
+                    }
+                  },
+                  {
+                    $addFields: {
+                      // Add metadata for frontend
+                      defectLabels: ['カウンター1', 'カウンター2', 'カウンター3', 'カウンター4', 'カウンター5', 'カウンター6', 'カウンター7', 'カウンター8', 'カウンター9', 'カウンター10', 'カウンター11', 'カウンター12'],
+                      defectFields: ['counter1Total', 'counter2Total', 'counter3Total', 'counter4Total', 'counter5Total', 'counter6Total', 'counter7Total', 'counter8Total', 'counter9Total', 'counter10Total', 'counter11Total', 'counter12Total']
+                    }
+                  }
+                ];
+              case 'pressDB':
+              case 'slitDB':
+                return [
+                  {
+                    $group: {
+                      _id: null,
+                      // Map to consistent field names for frontend compatibility
+                      counter1Total: { $sum: { $ifNull: ["$疵引不良", 0] } },
+                      counter2Total: { $sum: { $ifNull: ["$加工不良", 0] } },
+                      counter3Total: { $sum: { $ifNull: ["$その他", 0] } },
+                      counter4Total: { $sum: { $ifNull: [null, 0] } }, // Set to 0
+                      counter5Total: { $sum: { $ifNull: [null, 0] } }, // Set to 0
+                      counter6Total: { $sum: { $ifNull: [null, 0] } }, // Set to 0
+                      counter7Total: { $sum: { $ifNull: [null, 0] } }, // Set to 0
+                      counter8Total: { $sum: { $ifNull: [null, 0] } }, // Set to 0
+                      counter9Total: { $sum: { $ifNull: [null, 0] } }, // Set to 0
+                      counter10Total: { $sum: { $ifNull: [null, 0] } }, // Set to 0
+                      counter11Total: { $sum: { $ifNull: [null, 0] } }, // Set to 0
+                      counter12Total: { $sum: { $ifNull: [null, 0] } } // Set to 0
+                    }
+                  },
+                  {
+                    $addFields: {
+                      // Add metadata for frontend with actual labels
+                      defectLabels: ['疵引不良', '加工不良', 'その他'],
+                      defectFields: ['counter1Total', 'counter2Total', 'counter3Total']
+                    }
+                  }
+                ];
+              case 'SRSDB':
+                return [
+                  {
+                    $group: {
+                      _id: null,
+                      // Map to consistent field names for frontend compatibility
+                      counter1Total: { $sum: { $ifNull: ["$くっつき・めくれ", 0] } },
+                      counter2Total: { $sum: { $ifNull: ["$シワ", 0] } },
+                      counter3Total: { $sum: { $ifNull: ["$転写位置ズレ", 0] } },
+                      counter4Total: { $sum: { $ifNull: ["$転写不良", 0] } },
+                      counter5Total: { $sum: { $ifNull: ["$文字欠け", 0] } },
+                      counter6Total: { $sum: { $ifNull: ["$その他", 0] } },
+                      counter7Total: { $sum: { $ifNull: [null, 0] } }, // Set to 0
+                      counter8Total: { $sum: { $ifNull: [null, 0] } }, // Set to 0
+                      counter9Total: { $sum: { $ifNull: [null, 0] } }, // Set to 0
+                      counter10Total: { $sum: { $ifNull: [null, 0] } }, // Set to 0
+                      counter11Total: { $sum: { $ifNull: [null, 0] } }, // Set to 0
+                      counter12Total: { $sum: { $ifNull: [null, 0] } } // Set to 0
+                    }
+                  },
+                  {
+                    $addFields: {
+                      // Add metadata for frontend with actual labels
+                      defectLabels: ['くっつき・めくれ', 'シワ', '転写位置ズレ', '転写不良', '文字欠け', 'その他'],
+                      defectFields: ['counter1Total', 'counter2Total', 'counter3Total', 'counter4Total', 'counter5Total', 'counter6Total']
+                    }
+                  }
+                ];
+              default:
+                return [
+                  {
+                    $group: {
+                      _id: null,
+                      counter1Total: { $sum: "$counter1" },
+                      counter2Total: { $sum: "$counter2" },
+                      counter3Total: { $sum: "$counter3" },
+                      counter4Total: { $sum: "$counter4" },
+                      counter5Total: { $sum: "$counter5" },
+                      counter6Total: { $sum: "$counter6" },
+                      counter7Total: { $sum: "$counter7" },
+                      counter8Total: { $sum: "$counter8" },
+                      counter9Total: { $sum: "$counter9" },
+                      counter10Total: { $sum: "$counter10" },
+                      counter11Total: { $sum: "$counter11" },
+                      counter12Total: { $sum: "$counter12" }
+                    }
+                  },
+                  {
+                    $addFields: {
+                      defectLabels: ['Counter1', 'Counter2', 'Counter3', 'Counter4', 'Counter5', 'Counter6', 'Counter7', 'Counter8', 'Counter9', 'Counter10', 'Counter11', 'Counter12'],
+                      defectFields: ['counter1Total', 'counter2Total', 'counter3Total', 'counter4Total', 'counter5Total', 'counter6Total', 'counter7Total', 'counter8Total', 'counter9Total', 'counter10Total', 'counter11Total', 'counter12Total']
+                    }
+                  }
+                ];
+            }
+          })()
+        }
+      }
+    ];
+
+    // Climate data aggregation pipeline
+    const climateAggregation = [
+      { $match: climateQuery },
+      {
+        $addFields: {
+          // Parse temperature and humidity strings
+          tempValue: {
+            $toDouble: {
+              $arrayElemAt: [
+                { $split: ["$Temperature", " "] },
+                0
+              ]
+            }
+          },
+          humidityValue: {
+            $toDouble: {
+              $trim: { 
+                input: "$Humidity", 
+                chars: "%" 
+              }
+            }
+          }
+        }
+      },
+      {
+        $facet: {
+          // Daily temperature trend
+          temperatureTrend: [
+            {
+              $group: {
+                _id: { 
+                  date: "$Date",
+                  device: "$device"
+                },
+                avgTemp: { $avg: "$tempValue" },
+                minTemp: { $min: "$tempValue" },
+                maxTemp: { $max: "$tempValue" },
+                factory: { $first: "$工場" },
+                device: { $first: "$device" },
+                readings: { $sum: 1 }
+              }
+            },
+            {
+              $group: {
+                _id: "$_id.date",
+                avgTemp: { $avg: "$avgTemp" },
+                minTemp: { $min: "$minTemp" },
+                maxTemp: { $max: "$maxTemp" },
+                deviceReadings: {
+                  $push: {
+                    device: "$device",
+                    avgTemp: "$avgTemp",
+                    factory: "$factory"
+                  }
+                }
+              }
+            },
+            {
+              $project: {
+                _id: 0,
+                date: "$_id",
+                avgTemp: { $round: ["$avgTemp", 2] },
+                minTemp: { $round: ["$minTemp", 2] },
+                maxTemp: { $round: ["$maxTemp", 2] },
+                deviceReadings: 1
+              }
+            },
+            { $sort: { date: 1 } }
+          ],
+          
+          // Daily humidity trend
+          humidityTrend: [
+            {
+              $group: {
+                _id: { 
+                  date: "$Date",
+                  device: "$device"
+                },
+                avgHumidity: { $avg: "$humidityValue" },
+                minHumidity: { $min: "$humidityValue" },
+                maxHumidity: { $max: "$humidityValue" },
+                factory: { $first: "$工場" },
+                device: { $first: "$device" },
+                readings: { $sum: 1 }
+              }
+            },
+            {
+              $group: {
+                _id: "$_id.date",
+                avgHumidity: { $avg: "$avgHumidity" },
+                minHumidity: { $min: "$minHumidity" },
+                maxHumidity: { $max: "$maxHumidity" },
+                deviceReadings: {
+                  $push: {
+                    device: "$device",
+                    avgHumidity: "$avgHumidity",
+                    factory: "$factory"
+                  }
+                }
+              }
+            },
+            {
+              $project: {
+                _id: 0,
+                date: "$_id",
+                avgHumidity: { $round: ["$avgHumidity", 2] },
+                minHumidity: { $round: ["$minHumidity", 2] },
+                maxHumidity: { $round: ["$maxHumidity", 2] },
+                deviceReadings: 1
+              }
+            },
+            { $sort: { date: 1 } }
+          ],
+
+          // Factory climate summary
+          factoryClimate: [
+            {
+              $group: {
+                _id: "$工場",
+                avgTemp: { $avg: "$tempValue" },
+                avgHumidity: { $avg: "$humidityValue" },
+                minTemp: { $min: "$tempValue" },
+                maxTemp: { $max: "$tempValue" },
+                minHumidity: { $min: "$humidityValue" },
+                maxHumidity: { $max: "$humidityValue" },
+                sensorCount: { $addToSet: "$device" },
+                totalReadings: { $sum: 1 }
+              }
+            },
+            {
+              $project: {
+                _id: 0,
+                factory: "$_id",
+                avgTemp: { $round: ["$avgTemp", 2] },
+                avgHumidity: { $round: ["$avgHumidity", 2] },
+                minTemp: { $round: ["$minTemp", 2] },
+                maxTemp: { $round: ["$maxTemp", 2] },
+                minHumidity: { $round: ["$minHumidity", 2] },
+                maxHumidity: { $round: ["$maxHumidity", 2] },
+                sensorCount: { $size: "$sensorCount" },
+                totalReadings: 1
+              }
+            }
+          ]
+        }
+      }
+    ];
+
+    // Execute both aggregations in parallel
+    console.log('🔄 Running production analytics aggregation...');
+    const [productionResult, climateResult] = await Promise.all([
+      collection.aggregate(analyticsAggregation).toArray(),
+      tempHumidityCollection.aggregate(climateAggregation).toArray()
+    ]);
+    
+    // Handle empty climate results
+    const climateData = climateResult && climateResult.length > 0 ? climateResult[0] : {
+      temperatureTrend: [],
+      humidityTrend: [],
+      factoryClimate: []
+    };
+
+    // Handle empty production results
+    if (!productionResult || productionResult.length === 0) {
+      console.log('⚠️ No production data found');
+      
+      // Return combined empty data with climate data
+      const emptyProductionData = {
+        summary: [{ totalProduction: 0, totalDefects: 0, avgDefectRate: 0, avgCycleTime: 0, totalFactories: 0, totalWorkers: 0 }],
+        dailyTrend: [],
+        factoryStats: [],
+        workerStats: [],
+        equipmentStats: [],
+        defectAnalysis: [{}],
+        temperatureTrend: climateData.temperatureTrend || [],
+        humidityTrend: climateData.humidityTrend || [],
+        factoryClimate: climateData.factoryClimate || []
+      };
+
+      return res.json({
+        success: true,
+        data: emptyProductionData,
+        appliedFilters: {
+          dateRange: `${fromDate} to ${toDate}`,
+          factory: req.body.factoryFilter || 'All factories',
+          collection: collectionName,
+          userRole: userRole
+        }
+      });
+    }
+
+    const productionData = productionResult[0] || {
+      summary: [{ totalProduction: 0, totalDefects: 0, avgDefectRate: 0, avgCycleTime: 0, totalFactories: 0, totalWorkers: 0 }],
+      dailyTrend: [],
+      factoryStats: [],
+      workerStats: [],
+      equipmentStats: [],
+      defectAnalysis: [{}]
+    };
+
+    // Combine production and climate data
+    const combinedData = {
+      ...productionData,
+      temperatureTrend: climateData.temperatureTrend || [],
+      humidityTrend: climateData.humidityTrend || [],
+      factoryClimate: climateData.factoryClimate || []
+    };
+    
+    console.log('✅ Analytics data computed successfully');
+    console.log(`📊 Production Summary: ${combinedData.summary?.[0]?.totalProduction || 0} production, ${combinedData.summary?.[0]?.totalDefects || 0} defects`);
+    console.log(`🌡️ Climate Data: ${climateData.temperatureTrend?.length || 0} temperature readings, ${climateData.humidityTrend?.length || 0} humidity readings`);
+    
+    // Debug: Log sample records to understand data structure
+    if (combinedData.sampleRecords && combinedData.sampleRecords.length > 0) {
+      console.log(`🔍 Sample ${collectionName} records:`, JSON.stringify(combinedData.sampleRecords, null, 2));
+    }
+    
+    // Debug: Log defect calculation details
+    console.log(`🧮 Defect calculation using ${collectionName === 'SRSDB' ? 'SRS_Total_NG' : 'Total_NG'} field for ${collectionName}`);
+    console.log('📊 Worker field:', fields.workerField, '| Equipment field:', fields.equipmentField, '| Cycle time field:', fields.cycleTimeField);
+    console.log('📊 Total defects expression:', JSON.stringify(totalDefectsExpression, null, 2));
+    
+    return res.json({
+      success: true,
+      data: combinedData,
+      appliedFilters: {
+        dateRange: `${fromDate} to ${toDate}`,
+        factory: req.body.factoryFilter || 'All factories',
+        collection: collectionName,
+        userRole: userRole
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error computing analytics data:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.message || "Failed to compute analytics data"
+    });
+  }
+});
+
+
+
+
+//ANALYTICS END
+
+
 
 
 // For Inventory app
