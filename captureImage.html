@@ -4,62 +4,452 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Capture Image</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #000;
+            color: white;
+            overflow: hidden;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        .header {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+            text-align: center;
+        }
+
+        h1 {
+            font-size: 1.8rem;
+            font-weight: 600;
+            color: white;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.8);
+        }
+
+        .camera-container {
+            position: relative;
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: #000;
+        }
+
+        #video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            cursor: crosshair;
+        }
+
+        .focus-indicator {
+            position: absolute;
+            width: 80px;
+            height: 80px;
+            border: 2px solid #fff;
+            border-radius: 4px;
+            pointer-events: none;
+            opacity: 0;
+            transform: translate(-50%, -50%);
+            transition: opacity 0.3s ease;
+            z-index: 5;
+        }
+
+        .focus-indicator.show {
+            opacity: 1;
+        }
+
+        .controls {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            padding: 30px;
+            background: linear-gradient(transparent, rgba(0,0,0,0.8));
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 20px;
+        }
+
+        #captureBtn {
+            width: 90px;
+            height: 90px;
+            border-radius: 50%;
+            border: 5px solid white;
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(10px);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            color: white;
+            font-weight: 600;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        #captureBtn:hover, #captureBtn:active {
+            transform: scale(0.95);
+            background: rgba(255, 255, 255, 0.25);
+            box-shadow: 0 0 20px rgba(255, 255, 255, 0.3);
+        }
+
+        .capture-icon {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: white;
+        }
+
+        .secondary-btn {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            border: 3px solid rgba(255, 255, 255, 0.8);
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(5px);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            color: white;
+            font-weight: 500;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .secondary-btn:hover, .secondary-btn:active {
+            transform: scale(0.95);
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        #flipCameraBtn {
+            font-size: 20px;
+        }
+
+        .status-indicator {
+            position: absolute;
+            top: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            z-index: 10;
+        }
+
+        .status-indicator.show {
+            opacity: 1;
+        }
+
+        @media (max-width: 768px) {
+            #captureBtn {
+                width: 100px;
+                height: 100px;
+                font-size: 20px;
+            }
+            
+            .secondary-btn {
+                width: 70px;
+                height: 70px;
+                font-size: 16px;
+            }
+
+            #flipCameraBtn {
+                font-size: 24px;
+            }
+            
+            .controls {
+                padding: 40px 30px;
+                gap: 25px;
+            }
+        }
+    </style>
 </head>
 <body>
-    <h1>Capture Image</h1>
-    <video id="video" width="640" height="480" autoplay></video>
-    <button id="captureBtn">Capture Photo</button>
+    <div class="header">
+        <h1>Capture Image</h1>
+    </div>
+    
+    <div class="status-indicator" id="statusIndicator">Tap to focus</div>
+    
+    <div class="camera-container">
+        <video id="video" autoplay playsinline></video>
+        <div class="focus-indicator" id="focusIndicator"></div>
+    </div>
+    
+    <div class="controls">
+        <button class="secondary-btn" id="focusBtn" title="Auto Focus">AF</button>
+        <button id="captureBtn" title="Take Photo">
+            <div class="capture-icon"></div>
+        </button>
+        <button class="secondary-btn" id="flipCameraBtn" title="Switch Camera">📷</button>
+    </div>
+    
     <canvas id="canvas" width="640" height="480" style="display:none;"></canvas>
 
     <script>
+        let video, canvas, context;
+        let videoTrack = null;
         let capturedImage = null;
+        let currentFacingMode = 'user'; // Start with front camera by default
+        let isFlipping = false;
 
-        async function startCamera() {
-            const video = document.getElementById('video');
+        async function startCamera(facingMode = null) {
+            if (isFlipping) return; // Prevent multiple simultaneous camera switches
+            
+            video = document.getElementById('video');
+            canvas = document.getElementById('canvas');
+            context = canvas.getContext('2d');
 
-            // Function to detect if the device is mobile
             function isMobileDevice() {
-                return /Mobi|Android/i.test(navigator.userAgent);
+                return /Mobi|Android|iPad|Tablet/i.test(navigator.userAgent);
+            }
+
+            // Use provided facingMode or determine based on device
+            const cameraMode = facingMode || (isMobileDevice() ? 'environment' : 'user');
+            currentFacingMode = cameraMode;
+
+            // Stop existing track if any
+            if (videoTrack) {
+                videoTrack.stop();
             }
 
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({
                     video: {
-                        facingMode: isMobileDevice() ? { exact: 'environment' } : 'user' // Rear camera on mobile, front camera on laptop
+                        facingMode: { exact: cameraMode }
                     }
                 });
                 video.srcObject = stream;
+                videoTrack = stream.getVideoTracks()[0];
+
+                // Show camera switched message
+                if (facingMode) {
+                    const cameraName = cameraMode === 'environment' ? 'Back Camera' : 'Front Camera';
+                    showStatus(`Switched to ${cameraName}`, 2000);
+                } else {
+                    showStatus('Tap anywhere to focus', 3000);
+                }
+                
+                // Wait for video to load before setting canvas dimensions
+                video.addEventListener('loadedmetadata', () => {
+                    console.log(`Video dimensions: ${video.videoWidth} x ${video.videoHeight}`);
+                    console.log(`Aspect ratio: ${(video.videoWidth / video.videoHeight).toFixed(2)}`);
+                });
+
             } catch (error) {
-                console.error('Error accessing the camera:', error);
-                // Optional: fallback logic for handling errors (e.g., try to access the front camera)
+                console.error('Error accessing camera:', error);
+                showStatus('Camera access failed, trying fallback...', 2000);
+                
+                // Fallback to any available camera
                 try {
-                    const stream = await navigator.mediaDevices.getUserMedia({
-                        video: { facingMode: 'user' } // Fallback to front camera
+                    const fallbackMode = cameraMode === 'environment' ? 'user' : 'environment';
+                    const fallbackStream = await navigator.mediaDevices.getUserMedia({ 
+                        video: { facingMode: fallbackMode }
                     });
-                    video.srcObject = stream;
+                    video.srcObject = fallbackStream;
+                    videoTrack = fallbackStream.getVideoTracks()[0];
+                    currentFacingMode = fallbackMode;
+                    
+                    const cameraName = fallbackMode === 'environment' ? 'Back Camera' : 'Front Camera';
+                    showStatus(`Using ${cameraName}`, 2000);
                 } catch (fallbackError) {
-                    console.error('Error accessing the front camera as a fallback:', fallbackError);
-                    // Handle the error or notify the user
+                    console.error('Error accessing the fallback camera:', fallbackError);
+                    showStatus('No camera available', 3000);
                 }
             }
         }
 
-        // Capture the photo and send it to the parent window
-        document.getElementById('captureBtn').addEventListener('click', function() {
+        function showStatus(message, duration = 2000) {
+            const statusIndicator = document.getElementById('statusIndicator');
+            statusIndicator.textContent = message;
+            statusIndicator.classList.add('show');
+            
+            setTimeout(() => {
+                statusIndicator.classList.remove('show');
+            }, duration);
+        }
+
+        function showFocusIndicator(x, y) {
+            const focusIndicator = document.getElementById('focusIndicator');
+            focusIndicator.style.left = x + 'px';
+            focusIndicator.style.top = y + 'px';
+            focusIndicator.classList.add('show');
+            
+            setTimeout(() => {
+                focusIndicator.classList.remove('show');
+            }, 1000);
+        }
+
+        async function focusAtPoint(x, y) {
+            if (!videoTrack || !videoTrack.getCapabilities) return;
+
+            const capabilities = videoTrack.getCapabilities();
+            
+            // Show focus indicator
+            showFocusIndicator(x, y);
+            showStatus('Focusing...', 1000);
+
+            if (capabilities.focusMode && capabilities.focusMode.includes('manual')) {
+                try {
+                    await videoTrack.applyConstraints({
+                        advanced: [{
+                            focusMode: 'continuous',
+                            pointsOfInterest: [{ x: x / video.offsetWidth, y: y / video.offsetHeight }]
+                        }]
+                    });
+                } catch (error) {
+                    console.log('Manual focus not supported, using auto focus');
+                    autoFocus();
+                }
+            } else {
+                autoFocus();
+            }
+        }
+
+        async function flipCamera() {
+            if (isFlipping) return; // Prevent multiple flips at once
+            
+            isFlipping = true;
+            showStatus('Switching camera...', 1500);
+            
+            // Toggle between front and back camera
+            const newFacingMode = currentFacingMode === 'user' ? 'environment' : 'user';
+            
+            try {
+                await startCamera(newFacingMode);
+            } catch (error) {
+                console.error('Error flipping camera:', error);
+                showStatus('Camera switch failed', 2000);
+            } finally {
+                // Reset flip flag after a delay to prevent rapid switching
+                setTimeout(() => {
+                    isFlipping = false;
+                }, 1000);
+            }
+        }
+
+        async function autoFocus() {
+            if (!videoTrack) return;
+            
+            showStatus('Auto focusing...', 1000);
+            
+            try {
+                await videoTrack.applyConstraints({
+                    focusMode: 'continuous'
+                });
+            } catch (error) {
+                console.log('Auto focus adjustment failed:', error);
+            }
+        }
+
+        function capturePhoto() {
             const canvas = document.getElementById('canvas');
             const video = document.getElementById('video');
             const context = canvas.getContext('2d');
             context.drawImage(video, 0, 0, canvas.width, canvas.height);
             capturedImage = canvas.toDataURL('image/jpeg');
 
-            if (capturedImage) {
-                window.opener.postMessage({ image: capturedImage }, window.location.origin);
-                window.close();
+            if (capturedImage && window.opener) {
+                showStatus('Photo captured!', 1000);
+                setTimeout(() => {
+                    window.opener.postMessage({ image: capturedImage }, window.location.origin);
+                    window.close();
+                }, 500);
+            } else if (capturedImage) {
+                showStatus('Photo captured!', 2000);
+                // Could add download functionality here if not in popup
             }
+        }
+
+        // Event listeners
+        document.addEventListener('DOMContentLoaded', () => {
+            const captureBtn = document.getElementById('captureBtn');
+            const focusBtn = document.getElementById('focusBtn');
+            const flipCameraBtn = document.getElementById('flipCameraBtn');
+            const videoElement = document.getElementById('video');
+
+            // Capture button
+            captureBtn.addEventListener('click', capturePhoto);
+            captureBtn.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                capturePhoto();
+            });
+
+            // Manual focus button
+            focusBtn.addEventListener('click', autoFocus);
+            focusBtn.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                autoFocus();
+            });
+
+            // Flip camera button
+            flipCameraBtn.addEventListener('click', flipCamera);
+            flipCameraBtn.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                flipCamera();
+            });
+
+            // Touch to focus on video
+            videoElement.addEventListener('click', (e) => {
+                const rect = videoElement.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                focusAtPoint(x, y);
+            });
+
+            videoElement.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                if (e.changedTouches.length === 1) {
+                    const touch = e.changedTouches[0];
+                    const rect = videoElement.getBoundingClientRect();
+                    const x = touch.clientX - rect.left;
+                    const y = touch.clientY - rect.top;
+                    focusAtPoint(x, y);
+                }
+            });
+
+            // Prevent default touch behaviors
+            document.addEventListener('touchstart', (e) => {
+                if (e.touches.length > 1) {
+                    e.preventDefault();
+                }
+            }, { passive: false });
+
+            // Start camera
+            startCamera();
         });
 
-        // Start the camera when the page loads
-        window.onload = startCamera;
+        // Handle page visibility changes
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible' && !video.srcObject) {
+                startCamera();
+            }
+        });
     </script>
 </body>
 </html>
