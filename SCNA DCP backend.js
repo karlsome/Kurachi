@@ -275,6 +275,7 @@ function blankInfo() {
   document.getElementById("material-code").value = "";
   document.getElementById("material-color").value = "";
   document.getElementById("送りピッチ").textContent = ""; // Corrected to textContent for label
+  document.getElementById("rikeshitext").textContent = "";
 }
 
 async function fetchProductDetails() {
@@ -354,6 +355,16 @@ async function fetchProductDetails() {
     document.getElementById("kataban").value = data.型番 || "";
     document.getElementById("収容数").value = data.収容数 || "";
     document.getElementById("送りピッチ").textContent = "Roll Distance: " + (data.送りピッチ || "");
+    
+    // Translate 離型紙上/下 values to English
+    let releasePaperValue = data["離型紙上/下"] || "";
+    if (releasePaperValue === "上") {
+      releasePaperValue = "Up";
+    } else if (releasePaperValue === "下") {
+      releasePaperValue = "Down";
+    }
+    document.getElementById("rikeshitext").textContent = releasePaperValue;
+    
     document.getElementById("SRS").value = data.SRS || "";
 
     // Set image

@@ -346,14 +346,16 @@
         <button id="scan-lot" type="button">Scan Lot</button>
         <input type="text" name="材料ロット" id="材料ロット" placeholder="Material Lot" required>
         <br>
+        <br>
+        <br>
         <div id="counter-box-18" class="counter-box">  
-            <label for="counter-18">Material Defect</label>
+            <label for="counter-18">Non Confroming (Internal)</label>
             <button class="plus-btn" type="button" onclick="incrementCounter(18)" >+</button>  
             <input readonly id="counter-18" value="0" type="number" name="疵引不良">  
             <button class="minus-btn" type="button" onclick="decrementCounter(18)" >-</button>  
         </div>
         <div id="counter-box-19" class="counter-box">  
-            <label for="counter-19">Processing Defect</label>
+            <label for="counter-19">Non Conforming (Supplier)</label>
             <button class="plus-btn" type="button" onclick="incrementCounter(19)" >+</button>  
             <input readonly id="counter-19" value="0" type="number" name="加工不良">  
             <button class="minus-btn" type="button" onclick="decrementCounter(19)" >-</button>  
@@ -410,6 +412,9 @@
             <p id="scanAlertText">Different product detected! Please save form before changing.</p>
             </div>
         </div>
+
+
+
 
         
         <!-- Uploading Modal -->
@@ -624,7 +629,7 @@
                     <img id="dynamicImage" src="" alt="Image Description">
                 </div>
                 <label name="送りピッチ" id="送りピッチ" value=""></label>
-                <label>Release Paper: </label><label name="rikeshitext" id="rikeshitext" value=""></label>
+                <label>Release Paper: <span name="rikeshitext" id="rikeshitext"></span></label>
                 <label>Product Number:</label>
                 <input readonly id="product-number" value="" name="品番"> 
                 <label>Model:</label>
