@@ -318,6 +318,9 @@
 
 
             <button id="sendtoNC" type="button">Send to Machine</button>
+            <br>
+            <br>
+            <br>
             
             
             <label for="Machine Operator">Worker:</label>
@@ -455,13 +458,13 @@
              <br>
              <br>
              <br>
-             <label>First Article Check: </label>
+             <label>First Cycle Check: </label>
              <label id="hatsumonoLabel">FALSE</label>
              <button id="hatsumonoButton" type="button">Check 1st Cycle</button>
              <img id="hatsumonoPic" src="" alt="hatsumonoPic" style="display:none; max-width: 320px; height: auto;">
              <br>
              <br>
-             <label>Last Article Check: </label>
+             <label>Last Cycle Check: </label>
              <label id="atomonoLabel">FALSE</label>
              <button id="atomonoButton" type="button">Check Last Cycle</button>
              <img id="atomonoPic" src="" alt="atomonoPic" style="display:none; max-width: 320px; height: auto;">
@@ -470,6 +473,18 @@
              <label>Material Label: </label>
              <label id="makerLabel">FALSE</label>
              <button id="makerLabelButton" type="button">Take Photo</button>
+             
+             <!-- Multiple Material Label Photos Container -->
+             <div id="material-label-photos-container" style="margin-top: 10px; display: none;">
+                 <div style="margin-bottom: 10px;">
+                     <span style="font-weight: bold;">Material Label Photos (<span id="material-photo-count">0</span>):</span>
+                 </div>
+                 <div id="material-photo-thumbnails" style="display: flex; flex-wrap: wrap; gap: 10px; padding: 10px; border: 1px solid #ddd; border-radius: 5px; background: #f9f9f9;">
+                     <!-- Photo thumbnails will be rendered here -->
+                 </div>
+             </div>
+             
+             <!-- Legacy single photo (hidden, kept for backward compatibility) -->
              <img id="材料ラベル" src="" alt="材料ラベル" style="display:none; max-width: 320px; height: auto;">
             
             <br>
