@@ -10,8 +10,8 @@ const googleSheetLiveStatusURL = 'https://script.google.com/macros/s/AKfycbwbL30
 // Link for Rikeshi (up/down color info) - This was missing in the original, adding it here.
 const dbURL = 'https://script.google.com/macros/s/AKfycbx0qBw0_wF5X-hA2t1yY-d5h5M7Z_a8z_V9R5D6k/exec'; // Placeholder, replace with your actual URL if different.
 
-const serverURL = "https://kurachi.onrender.com";
-//const serverURL = "http://localhost:3000";
+//const serverURL = "https://kurachi.onrender.com";
+const serverURL = "http://localhost:3000";
 
 //this code listens to incoming parameters passed
 function getQueryParam(param) {
@@ -2629,7 +2629,13 @@ document.getElementById('submit').addEventListener('click', async (event) => {
             // Include image data
             images: uploadedImages, // Cycle check images (existing logic)
             maintenanceImages: maintenanceImages, // Maintenance images
-            materialLabelImages: materialLabelImages, // NEW: Material label images
+            materialLabelImages: materialLabelImages, // NEW: Material label images (base64 for upload only)
+            
+            // Material label image handling instructions for server:
+            // - Single image: Store as "材料ラベル画像": "firebase_url" (preserve existing structure)
+            // - Multiple images: Store as "材料ラベル画像": "first_url" + "materialLabelImages": ["url1", "url2", ...]
+            // - NEVER store base64 in MongoDB, only Firebase URLs
+            materialLabelImageCount: materialLabelImages.length,
             
             // Include toggle state and counter data for kensaDB
             isToggleChecked: isToggleChecked
@@ -2706,10 +2712,9 @@ async function collectImagesForUpload() {
   }, {
     imgId: 'atomonoPic',
     label: '終物チェック'
-  }, {
-    imgId: '材料ラベル',
-    label: '材料ラベル'
-  }];
+  }
+  // Removed 材料ラベル - now handled by the new multi-photo system
+  ];
 
   const imagesToUpload = [];
 

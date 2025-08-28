@@ -732,10 +732,10 @@ app.post('/submitToDCP', async (req, res) => {
 
                 const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(file.name)}?alt=media&token=${downloadToken}`;
                 
-                // Map to specific fields
+                // Map to specific fields (removed 材料ラベル - now handled separately)
                 if (img.label === "初物チェック") uploadedImageURLs["初物チェック画像"] = publicUrl;
                 else if (img.label === "終物チェック") uploadedImageURLs["終物チェック画像"] = publicUrl;
-                else if (img.label === "材料ラベル") uploadedImageURLs["材料ラベル画像"] = publicUrl;
+                // 材料ラベル is now handled by the new multi-photo system below
                 
                 console.log(`✅ Cycle check image uploaded: ${img.label} -> ${publicUrl}`);
             } catch (uploadError) {
@@ -800,6 +800,64 @@ app.post('/submitToDCP', async (req, res) => {
             totalHours: formData.Maintenance_Data?.totalHours || 0
         };
 
+        // 2.5. Upload material label images and handle single vs multiple logic
+        const materialLabelImages = formData.materialLabelImages || [];
+        let materialLabelImageURLs = [];
+        
+        if (materialLabelImages.length > 0) {
+            console.log(`🖼️ Processing ${materialLabelImages.length} material label images...`);
+            
+            for (const imgData of materialLabelImages) {
+                if (!imgData.base64 || !imgData.id || !imgData.timestamp) continue;
+
+                try {
+                    const buffer = Buffer.from(imgData.base64, 'base64');
+                    console.log(`🔍 Processing material label image ${imgData.id}: buffer size = ${buffer.length} bytes`);
+
+                    // Create unique filename
+                    const fileName = `${formData.背番号}_${formData.Date}_${imgData.timestamp}_${imgData.id}_materialLabelImage.jpg`;
+                    const filePath = `materialLabel/${formData.工場}/${formData.設備}/${fileName}`;
+                    const file = bucket.file(filePath);
+                    const downloadToken = "masterDBToken69";
+
+                    await file.save(buffer, {
+                        metadata: {
+                            contentType: "image/jpeg",
+                            metadata: { firebaseStorageDownloadTokens: downloadToken }
+                        },
+                        validation: false
+                    });
+
+                    const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(filePath)}?alt=media&token=${downloadToken}`;
+                    materialLabelImageURLs.push(publicUrl);
+                    
+                    console.log(`✅ Material label image uploaded: ${publicUrl}`);
+                } catch (uploadError) {
+                    console.error(`❌ Error uploading material label image ${imgData.id}:`, uploadError);
+                }
+            }
+        }
+
+        // Handle single vs multiple material label images logic
+        if (materialLabelImageURLs.length === 1) {
+            // Single image: Use existing structure for backwards compatibility
+            uploadedImageURLs["材料ラベル画像"] = materialLabelImageURLs[0];
+            console.log(`📄 Single material label image: stored in 材料ラベル画像 field`);
+        } else if (materialLabelImageURLs.length > 1) {
+            // Multiple images: Keep first in original field + add array
+            uploadedImageURLs["材料ラベル画像"] = materialLabelImageURLs[0]; // First image for compatibility
+            uploadedImageURLs["materialLabelImages"] = materialLabelImageURLs; // All images array
+            uploadedImageURLs["materialLabelImageCount"] = materialLabelImageURLs.length; // Count for reference
+            console.log(`📄 Multiple material label images: ${materialLabelImageURLs.length} images stored`);
+            console.log(`🔍 Material label URLs being stored:`, {
+                "材料ラベル画像": materialLabelImageURLs[0],
+                "materialLabelImages": materialLabelImageURLs,
+                "materialLabelImageCount": materialLabelImageURLs.length
+            });
+        }
+
+        console.log(`🔍 Final uploadedImageURLs object:`, uploadedImageURLs);
+
         // 3. Prepare pressDB data (exclude Counters - that's only for kensaDB)
         const pressDBData = {
             ...formData,
@@ -807,9 +865,18 @@ app.post('/submitToDCP', async (req, res) => {
             Maintenance_Data: processedMaintenanceData // Add maintenance data with photo URLs
         };
 
+        console.log(`🔍 pressDBData before cleanup contains these image fields:`, {
+            "初物チェック画像": pressDBData["初物チェック画像"],
+            "終物チェック画像": pressDBData["終物チェック画像"], 
+            "材料ラベル画像": pressDBData["材料ラベル画像"],
+            "materialLabelImages": pressDBData["materialLabelImages"]
+        });
+
         // Remove the raw image arrays and kensaDB-specific data from pressDB
         delete pressDBData.images;
         delete pressDBData.maintenanceImages;
+        // Note: Keep materialLabelImages (Firebase URLs) and materialLabelImageCount in MongoDB
+        // Only delete the base64 data which was already excluded when spreading uploadedImageURLs
         delete pressDBData.Counters; // Counters are only for kensaDB, not pressDB
         delete pressDBData.isToggleChecked; // This is just a UI state flag, not data to store
 
