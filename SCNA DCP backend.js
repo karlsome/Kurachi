@@ -164,6 +164,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // Initialize maintenance system
   loadMaintenanceRecords();
 
+  // Initialize material label photos system
+  loadMaterialLabelPhotos();
+
   // Add maintenance button
   const addMaintenanceBtn = document.getElementById('add-maintenance-btn');
   if (addMaintenanceBtn) {
@@ -737,6 +740,214 @@ function showMaintenancePhotoPreview(imageDataURL) {
   previewModal.appendChild(img);
   previewModal.appendChild(closeBtn);
   document.body.appendChild(previewModal);
+}
+
+// === Material Label Photo Functions ===
+let materialLabelPhotos = []; // Array to store multiple material label photos
+const MAX_MATERIAL_PHOTOS = 5; // Maximum number of photos allowed
+
+function clearMaterialLabelPhotos() {
+  materialLabelPhotos = [];
+  renderMaterialPhotoThumbnails();
+  updateMaterialPhotoCount();
+}
+
+function addMaterialLabelPhoto(photoDataURL) {
+  if (materialLabelPhotos.length >= MAX_MATERIAL_PHOTOS) {
+    alert(`Maximum ${MAX_MATERIAL_PHOTOS} photos allowed for Material Label.`);
+    return;
+  }
+
+  // Create photo object with base64 data for storage
+  const base64Data = photoDataURL.replace(/^data:image\/[a-z]+;base64,/, '');
+  const photoData = {
+    base64: base64Data,
+    timestamp: new Date().toISOString(),
+    displayURL: photoDataURL // Keep original for display
+  };
+
+  materialLabelPhotos.push(photoData);
+  renderMaterialPhotoThumbnails();
+  updateMaterialPhotoCount();
+}
+
+function removeMaterialLabelPhoto(index) {
+  if (index >= 0 && index < materialLabelPhotos.length) {
+    materialLabelPhotos.splice(index, 1);
+    // Save updated array to localStorage
+    localStorage.setItem(`${uniquePrefix}materialLabelPhotos`, JSON.stringify(materialLabelPhotos));
+    renderMaterialPhotoThumbnails();
+    updateMaterialPhotoCount();
+  }
+}
+
+function renderMaterialPhotoThumbnails() {
+  const container = document.getElementById('material-photo-thumbnails');
+  const photosContainer = document.getElementById('material-label-photos-container');
+  
+  if (!container) return;
+  
+  container.innerHTML = '';
+  
+  if (materialLabelPhotos.length === 0) {
+    photosContainer.style.display = 'none';
+  } else {
+    photosContainer.style.display = 'block';
+    
+    materialLabelPhotos.forEach((photo, index) => {
+      const thumbItem = document.createElement('div');
+      thumbItem.style.cssText = `
+        position: relative;
+        display: inline-block;
+        margin: 5px;
+      `;
+      
+      const img = document.createElement('img');
+      
+      // Determine image source
+      let imageSrc;
+      if (photo.displayURL) {
+        imageSrc = photo.displayURL;
+      } else if (photo.firebaseURL) {
+        imageSrc = photo.firebaseURL;
+      } else if (photo.base64) {
+        imageSrc = `data:image/jpeg;base64,${photo.base64}`;
+      } else {
+        console.warn('Material label photo has no displayable source:', photo);
+        imageSrc = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODAiIGhlaWdodD0iODAiIHZpZXdCb3g9IjAgMCA4MCA4MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjgwIiBoZWlnaHQ9IjgwIiBmaWxsPSIjZjBmMGYwIi8+Cjx0ZXh0IHg9IjQwIiB5PSI0NSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEyIiBmaWxsPSIjOTk5Ij5JbWFnZTwvdGV4dD4KPHR0ZXh0IHg9IjQwIiB5PSI1NSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOTk5Ij5FcnJvcjwvdGV4dD4KPC9zdmc+'; // Placeholder SVG
+      }
+      
+      img.src = imageSrc;
+      img.style.cssText = `
+        width: 80px;
+        height: 80px;
+        object-fit: cover;
+        cursor: pointer;
+        display: block;
+        border: 2px solid #ddd;
+        border-radius: 5px;
+      `;
+      img.onclick = () => showMaterialPhotoPreview(imageSrc);
+      
+      // Add error handling
+      img.onerror = () => {
+        console.error('Failed to load material label photo:', imageSrc);
+        img.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODAiIGhlaWdodD0iODAiIHZpZXdCb3g9IjAgMCA4MCA4MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjgwIiBoZWlnaHQ9IjgwIiBmaWxsPSIjZjBmMGYwIi8+Cjx0ZXh0IHg9IjQwIiB5PSI0NSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEyIiBmaWxsPSIjOTk5Ij5FcnJvcjwvdGV4dD4KPC9zdmc+'; // Error fallback
+      };
+      
+      // Delete button
+      const deleteBtn = document.createElement('button');
+      deleteBtn.innerHTML = '×';
+      deleteBtn.style.cssText = `
+        position: absolute;
+        top: -5px;
+        right: -5px;
+        background: #ff4444;
+        color: white;
+        border: none;
+        border-radius: 50%;
+        width: 20px;
+        height: 20px;
+        font-size: 14px;
+        cursor: pointer;
+        line-height: 1;
+      `;
+      deleteBtn.onclick = (e) => {
+        e.stopPropagation();
+        if (confirm('Delete this material label photo?')) {
+          removeMaterialLabelPhoto(index);
+        }
+      };
+      
+      thumbItem.appendChild(img);
+      thumbItem.appendChild(deleteBtn);
+      container.appendChild(thumbItem);
+    });
+  }
+}
+
+function showMaterialPhotoPreview(imageDataURL) {
+  const previewModal = document.createElement('div');
+  previewModal.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.8);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 10001;
+  `;
+  
+  const img = document.createElement('img');
+  img.src = imageDataURL;
+  img.style.cssText = `
+    max-width: 90%;
+    max-height: 90%;
+    border-radius: 10px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+  `;
+  
+  const closeBtn = document.createElement('button');
+  closeBtn.innerHTML = '×';
+  closeBtn.style.cssText = `
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    background: #ff4444;
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    font-size: 20px;
+    cursor: pointer;
+  `;
+  
+  closeBtn.onclick = () => document.body.removeChild(previewModal);
+  previewModal.onclick = (e) => {
+    if (e.target === previewModal) document.body.removeChild(previewModal);
+  };
+  
+  previewModal.appendChild(img);
+  previewModal.appendChild(closeBtn);
+  document.body.appendChild(previewModal);
+}
+
+function updateMaterialPhotoCount() {
+  const countElement = document.getElementById('material-photo-count');
+  const statusLabel = document.getElementById('makerLabel');
+  
+  if (countElement) {
+    countElement.textContent = materialLabelPhotos.length;
+  }
+  
+  // Update Material Label status based on photo count
+  if (statusLabel) {
+    if (materialLabelPhotos.length > 0) {
+      statusLabel.textContent = 'TRUE';
+    } else {
+      statusLabel.textContent = 'FALSE';
+    }
+  }
+}
+
+// Load material label photos from localStorage
+function loadMaterialLabelPhotos() {
+  const photosKey = `${uniquePrefix}materialLabelPhotos`;
+  const saved = localStorage.getItem(photosKey);
+  if (saved) {
+    try {
+      materialLabelPhotos = JSON.parse(saved);
+      renderMaterialPhotoThumbnails();
+      updateMaterialPhotoCount();
+    } catch (error) {
+      console.error('Error loading material label photos from localStorage:', error);
+      materialLabelPhotos = [];
+    }
+  }
 }
 
 // Show maintenance modal
@@ -1415,6 +1626,10 @@ function resetForm() {
   localStorage.removeItem(`${uniquePrefix}maintenanceRecords`);
   maintenanceRecords = [];
 
+  // Clear material label photos
+  localStorage.removeItem(`${uniquePrefix}materialLabelPhotos`);
+  materialLabelPhotos = [];
+  renderMaterialPhotoThumbnails();
 
   // Reset all textContent elements
   const textContentElements = document.querySelectorAll('[id]'); // Select all elements with an ID
@@ -1658,9 +1873,9 @@ const buttonMappings = [{
 
 let currentButtonId = null;
 
-buttonMappings.forEach(({
-  buttonId
-}) => {
+// Setup individual button event listeners
+// Handle hatsumonoButton and atomonoButton with original functionality
+['hatsumonoButton', 'atomonoButton'].forEach(buttonId => {
   const button = document.getElementById(buttonId);
   button.addEventListener('click', () => {
     const subDropdown = document.getElementById('sub-dropdown');
@@ -1709,43 +1924,105 @@ buttonMappings.forEach(({
   });
 });
 
+// Handle makerLabelButton with multi-photo functionality
+document.getElementById('makerLabelButton').addEventListener('click', () => {
+  const subDropdown = document.getElementById('sub-dropdown');
+  const selectedValue = subDropdown?.value;
+
+  if (!selectedValue) {
+    // Trigger modal message instead of alert
+    const scanAlertModal = document.getElementById('scanAlertModal');
+    const scanAlertText = document.getElementById('scanAlertText');
+    const alertSound = document.getElementById('alert-sound');
+
+    scanAlertText.innerText = '背番号を選択してください / Please select a Sebanggo first.';
+    scanAlertModal.style.display = 'block';
+
+    // Flash body and sub-dropdown
+    document.body.classList.add('flash-red');
+    subDropdown.classList.add('flash-red-border');
+
+    // Play alert sound
+    if (alertSound) {
+      alertSound.muted = false;
+      alertSound.volume = 1;
+      alertSound.play().catch(err => console.error("Failed to play sound:", err));
+    }
+
+    // Set modal close behavior
+    const closeScanModalButton = document.getElementById('closeScanModalButton');
+    closeScanModalButton.onclick = function() {
+      scanAlertModal.style.display = 'none';
+      document.body.classList.remove('flash-red');
+      subDropdown.classList.remove('flash-red-border');
+
+      if (alertSound) {
+        alertSound.pause();
+        alertSound.currentTime = 0;
+        alertSound.muted = true;
+      }
+    };
+
+    return; // stop further action
+  }
+
+  // If value is selected, proceed with multi-photo functionality
+  currentButtonId = 'makerLabelButton';
+  window.open('captureImage.html', 'Capture Image', 'width=900,height=900');
+});
+
 // Handle the message from the popup window
 window.addEventListener('message', function(event) {
   if (event.origin === window.location.origin) {
     const data = event.data;
 
     if (data.image && currentButtonId) {
-      // Find the mapping for the current button
-      const mapping = buttonMappings.find(({
-        buttonId
-      }) => buttonId === currentButtonId);
-
-      if (mapping) {
-        const {
-          labelId,
-          imgId
-        } = mapping;
-
-        // Update photo preview
-        const photoPreview = document.getElementById(imgId);
-        photoPreview.src = data.image;
-        photoPreview.style.display = 'block';
-
+      // Handle makerLabelButton with multi-photo functionality
+      if (currentButtonId === 'makerLabelButton') {
+        // Add photo to material label photos array
+        addMaterialLabelPhoto(data.image);
+        
         // Update the associated label to TRUE
-        const label = document.getElementById(labelId);
+        const label = document.getElementById('makerLabel');
         label.textContent = 'TRUE';
-
+        
         // Save label textContent to localStorage
-        const labelKey = `${uniquePrefix}${labelId}.textContent`;
+        const labelKey = `${uniquePrefix}makerLabel.textContent`;
         localStorage.setItem(labelKey, label.textContent);
+        
+        // Save material label photos to localStorage
+        const photosKey = `${uniquePrefix}materialLabelPhotos`;
+        localStorage.setItem(photosKey, JSON.stringify(materialLabelPhotos));
+        
+      } else {
+        // Handle other buttons with original single-photo functionality
+        const mapping = buttonMappings.find(({
+          buttonId
+        }) => buttonId === currentButtonId);
 
-        // Save image source to localStorage
-        const photoPreviewKey = `${uniquePrefix}${imgId}.src`;
-        localStorage.setItem(photoPreviewKey, photoPreview.src);
+        if (mapping) {
+          const {
+            labelId,
+            imgId
+          } = mapping;
 
-        console.log(
-          `Saved ${labelId}: ${label.textContent} and ${imgId} image: ${photoPreview.src} to localStorage.`
-        );
+          // Update photo preview
+          const photoPreview = document.getElementById(imgId);
+          photoPreview.src = data.image;
+          photoPreview.style.display = 'block';
+
+          // Update the associated label to TRUE
+          const label = document.getElementById(labelId);
+          label.textContent = 'TRUE';
+
+          // Save label textContent to localStorage
+          const labelKey = `${uniquePrefix}${labelId}.textContent`;
+          localStorage.setItem(labelKey, label.textContent);
+
+          // Save image source to localStorage
+          const photoPreviewKey = `${uniquePrefix}${imgId}.src`;
+          localStorage.setItem(photoPreviewKey, photoPreview.src);
+        }
       }
 
       // Reset the current button ID after processing
@@ -2166,10 +2443,10 @@ document.getElementById('submit').addEventListener('click', async (event) => {
 
     uploadingModal.style.display = 'flex';
 
-    const makerPic = document.getElementById('材料ラベル');
-    if (!makerPic || !makerPic.src || makerPic.style.display === 'none') {
+    // Check for material label photos (new multi-photo system)
+    if (!materialLabelPhotos || materialLabelPhotos.length === 0) {
         uploadingModal.style.display = 'none';
-        showAlert("材料ラベルの写真を撮影してください / Please capture the 材料ラベル image");
+        showAlert("Please capture at least one Material Label photo");
         return;
     }
 
@@ -2206,6 +2483,43 @@ document.getElementById('submit').addEventListener('click', async (event) => {
 
         const totalTroubleMinutes = calculateTotalMachineTroubleTime();
         const totalTroubleHours = totalTroubleMinutes / 60;
+
+        // Validate processing time vs break time + maintenance time
+        if (Time_start && Time_end) {
+            // Calculate total processing time in minutes
+            const startTime = new Date(`2000-01-01T${Time_start}:00`);
+            const endTime = new Date(`2000-01-01T${Time_end}:00`);
+            
+            // Handle overnight processing (if end time is before start time)
+            if (endTime < startTime) {
+                endTime.setDate(endTime.getDate() + 1);
+            }
+            
+            const processingTimeMinutes = (endTime - startTime) / (1000 * 60);
+            const combinedBreakAndMaintenanceMinutes = totalBreakMinutes + totalTroubleMinutes;
+            
+            console.log(`⏰ Processing time: ${processingTimeMinutes} minutes`);
+            console.log(`⏸️ Total break time: ${totalBreakMinutes} minutes`);
+            console.log(`🔧 Total maintenance time: ${totalTroubleMinutes} minutes`);
+            console.log(`🔄 Combined break + maintenance: ${combinedBreakAndMaintenanceMinutes} minutes`);
+            
+            if (combinedBreakAndMaintenanceMinutes > processingTimeMinutes) {
+                uploadingModal.style.display = 'none';
+                const processingHours = Math.floor(processingTimeMinutes / 60);
+                const processingMins = Math.round(processingTimeMinutes % 60);
+                const combinedHours = Math.floor(combinedBreakAndMaintenanceMinutes / 60);
+                const combinedMins = Math.round(combinedBreakAndMaintenanceMinutes % 60);
+                
+                showAlert(
+                    `❌ Time Validation Error!\n\n` +
+                    `Processing Time: ${processingHours}h ${processingMins}m\n` +
+                    `Break + Maintenance Time: ${combinedHours}h ${combinedMins}m\n\n` +
+                    `Break time and maintenance time combined cannot exceed the total processing time.\n` +
+                    `Please check your time entries.`
+                );
+                return;
+            }
+        }
 
         // Prepare maintenance images data for the new submitToDCP route
         const maintenanceImages = [];
@@ -2251,6 +2565,25 @@ document.getElementById('submit').addEventListener('click', async (event) => {
             totalMinutes: totalTroubleMinutes
         });
 
+        // Prepare material label images data
+        const materialLabelImages = [];
+        
+        if (materialLabelPhotos.length > 0) {
+            console.log(`📸 Preparing ${materialLabelPhotos.length} material label photos for submission...`);
+            
+            materialLabelPhotos.forEach((photo, index) => {
+                if (photo.base64) {
+                    materialLabelImages.push({
+                        base64: photo.base64,
+                        id: `material-label-${index}-${Date.now()}`,
+                        timestamp: photo.timestamp || new Date().toISOString()
+                    });
+                }
+            });
+            
+            console.log(`📊 Prepared ${materialLabelImages.length} material label images for upload`);
+        }
+
         let totalWorkHours = 0;
         if (Time_start && Time_end) {
             const startWork = new Date(`2000-01-01T${Time_start}:00`);
@@ -2295,7 +2628,8 @@ document.getElementById('submit').addEventListener('click', async (event) => {
             
             // Include image data
             images: uploadedImages, // Cycle check images (existing logic)
-            maintenanceImages: maintenanceImages, // NEW: Maintenance images
+            maintenanceImages: maintenanceImages, // Maintenance images
+            materialLabelImages: materialLabelImages, // NEW: Material label images
             
             // Include toggle state and counter data for kensaDB
             isToggleChecked: isToggleChecked
@@ -3012,3 +3346,95 @@ function closeMaintenanceCamera(cameraModal) {
     document.body.removeChild(cameraModal);
   }
 }
+
+// === Numeric Keypad Functions ===
+let currentNumericInputId = null;
+
+function openNumericKeypad(inputId) {
+  currentNumericInputId = inputId;
+  const modal = document.getElementById('numericKeypadModal');
+  const display = document.getElementById('numericDisplay');
+  const currentInput = document.getElementById(inputId);
+  
+  // Set current value in display
+  display.value = currentInput.value || '';
+  modal.style.display = 'block';
+  
+  // Prevent body scrolling when modal is open
+  document.body.style.overflow = 'hidden';
+}
+
+function closeNumericKeypad() {
+  const modal = document.getElementById('numericKeypadModal');
+  modal.style.display = 'none';
+  currentNumericInputId = null;
+  
+  // Restore body scrolling
+  document.body.style.overflow = 'auto';
+}
+
+function addToNumericDisplay(digit) {
+  const display = document.getElementById('numericDisplay');
+  display.value += digit;
+}
+
+function clearNumericDisplay() {
+  const display = document.getElementById('numericDisplay');
+  display.value = '';
+}
+
+function backspaceNumericDisplay() {
+  const display = document.getElementById('numericDisplay');
+  display.value = display.value.slice(0, -1);
+}
+
+function confirmNumericInput() {
+  if (!currentNumericInputId) return;
+  
+  const display = document.getElementById('numericDisplay');
+  const targetInput = document.getElementById(currentNumericInputId);
+  const value = display.value;
+  
+  // Validate the input (must be positive number)
+  if (value === '' || isNaN(value) || parseInt(value) < 0) {
+    showAlert('Please enter a valid positive number');
+    return;
+  }
+  
+  // Set the value to the target input
+  targetInput.value = value;
+  
+  // Trigger the input event to save to localStorage
+  const event = new Event('input', { bubbles: true });
+  targetInput.dispatchEvent(event);
+  
+  closeNumericKeypad();
+}
+
+// Close modal when clicking outside
+document.addEventListener('click', function(event) {
+  const modal = document.getElementById('numericKeypadModal');
+  if (event.target === modal) {
+    closeNumericKeypad();
+  }
+});
+
+// Handle keyboard input when modal is open
+document.addEventListener('keydown', function(event) {
+  const modal = document.getElementById('numericKeypadModal');
+  if (modal && modal.style.display === 'block') {
+    event.preventDefault(); // Prevent default keyboard behavior
+    
+    if (event.key >= '0' && event.key <= '9') {
+      addToNumericDisplay(event.key);
+    } else if (event.key === 'Backspace') {
+      backspaceNumericDisplay();
+    } else if (event.key === 'Enter') {
+      confirmNumericInput();
+    } else if (event.key === 'Escape') {
+      closeNumericKeypad();
+    } else if (event.key === 'Delete' || event.key.toLowerCase() === 'c') {
+      clearNumericDisplay();
+    }
+  }
+});
