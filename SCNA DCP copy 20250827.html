@@ -3,7 +3,7 @@
 <head>
     <link rel="stylesheet" href="Google Sheet.css">
     <link rel="icon" type="image/png" href="src/favicon2.png">
-    <title>Automated Daily Report (Kurachi)</title>
+    <title>自動日報(倉知)</title>
     <style>
         
         
@@ -13,222 +13,13 @@
             padding: 5px; /* Optional: add padding around the text */
             border-radius: 3px; /* Optional: round the title background corners */
         }
-
-        /* Break time section styles */
-        .break-time-section {
-            margin-top: 20px;
-            padding: 15px;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 5px;
-            border: 1px solid rgba(255, 255, 255, 0.2);
-        }
-
-        .break-time-section h4 {
-            margin-top: 0;
-            margin-bottom: 15px;
-            color: white;
-            text-align: center;
-        }
-
-        .break-time-entry {
-            margin-bottom: 10px;
-            padding: 8px;
-            background: rgba(255, 255, 255, 0.9);
-            border-radius: 3px;
-            border: 1px solid #ddd;
-        }
-
-        .break-time-entry label {
-            font-weight: bold;
-            color: #555;
-            display: block;
-            margin-bottom: 5px;
-        }
-
-        .break-time-inputs {
-            display: flex;
-            gap: 10px;
-            align-items: center;
-        }
-
-        .break-time-inputs input[type="time"] {
-            flex: 1;
-            padding: 5px;
-            border: 1px solid #ccc;
-            border-radius: 3px;
-        }
-
-        .break-time-inputs span {
-            color: #666;
-            font-size: 12px;
-        }
-
-        .break-time-inputs .reset-btn {
-            background: #ff6b6b;
-            color: white;
-            border: none;
-            border-radius: 3px;
-            padding: 5px 8px;
-            font-size: 12px;
-            cursor: pointer;
-            min-width: 50px;
-        }
-
-        .break-time-inputs .reset-btn:hover {
-            background: #ff5252;
-        }
-
-        .total-break-time {
-            margin-top: 15px;
-            padding: 10px;
-            background: rgba(232, 244, 253, 0.9);
-            border: 1px solid rgba(179, 217, 255, 0.8);
-            border-radius: 3px;
-            text-align: center;
-            font-weight: bold;
-            color: #333;
-        }
-
-        /* Machine trouble section styles */
-        .machine-trouble-section {
-            margin-top: 20px;
-            padding: 15px;
-            background: rgba(255, 200, 200, 0.1);
-            border-radius: 5px;
-            border: 1px solid rgba(255, 100, 100, 0.3);
-        }
-
-        .machine-trouble-section h4 {
-            margin-top: 0;
-            margin-bottom: 15px;
-            color: #cc0000;
-            text-align: center;
-            font-weight: bold;
-        }
-
-        .total-trouble-time {
-            margin-top: 15px;
-            padding: 10px;
-            background: rgba(255, 230, 230, 0.9);
-            border: 1px solid rgba(255, 180, 180, 0.8);
-            border-radius: 3px;
-            text-align: center;
-            font-weight: bold;
-            color: #cc0000;
-        }
-
-        /* Maintenance Modal Styles */
-        .maintenance-modal {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.7);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            z-index: 10000;
-        }
-
-        .maintenance-record-item {
-            background: #f8f9fa;
-            border: 1px solid #dee2e6;
-            border-radius: 5px;
-            padding: 10px;
-            margin-bottom: 10px;
-            cursor: pointer;
-            transition: background-color 0.2s;
-        }
-
-        .maintenance-record-item:hover {
-            background-color: #e9ecef;
-        }
-
-        #add-maintenance-btn:hover {
-            background: #005a8a !important;
-        }
-
-        /* Modal form styles */
-        .maintenance-modal input,
-        .maintenance-modal textarea {
-            font-family: inherit;
-            font-size: 14px;
-        }
-
-        .maintenance-modal button {
-            font-family: inherit;
-            font-size: 14px;
-            transition: background-color 0.2s;
-        }
-
-        .maintenance-modal button:hover {
-            opacity: 0.9;
-        }
-
-        /* Photo thumbnail styles for maintenance */
-        #maintenance-photo-thumbnails {
-            min-height: 100px;
-            max-height: 200px;
-            overflow-y: auto;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-            padding: 10px;
-            background: #f9f9f9;
-        }
-
-        /* Camera modal styles */
-        #maintenanceCameraModal {
-            z-index: 10002 !important;
-        }
-
-        #maintenanceCameraModal video {
-            max-width: 100%;
-            max-height: 400px;
-            border: 2px solid #ddd;
-            border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        }
-
-        #maintenanceCameraModal button {
-            font-size: 16px;
-            padding: 15px 30px;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            margin: 5px;
-            transition: all 0.2s;
-        }
-
-        #maintenanceCameraModal button:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-        }
-
-        /* Photo count indicator */
-        #maintenance-photo-count {
-            font-weight: bold;
-            color: #007cba;
-        }
-
-        /* Empty photo state */
-        #maintenance-photo-thumbnails p {
-            margin: 20px 0;
-            text-align: center;
-            color: #666;
-            font-style: italic;
-        }
     </style>
 </head>
 <body>
     <!-- this code is for process -->
     <div class="container">        
         <form method="post" action="" name="contact-form">
-            <nav>
-                <a href="index.html">Home</a>
-                <a href="index.html">Factory</a>
-                <a href="machine.html">Equipment</a>
-            </nav>
+           
             <h4 id = "nippoTitle">Daily Report</h4>
             
             <input type="hidden" name="設備" id="hidden設備">
@@ -286,12 +77,16 @@
             </select>
 
             <!-- QR code button -->
-            <button id="scan-button" type="button">Scan Worker ID</button>
+            <button id="scan-button" type="button">Scan Product QR</button>
+            <br>
+            <br>
+            <!-- this is the printLabel button -->
+            <button id="print" type="button" onclick="printLabel()"> Print Label </button>
             <br>
             <br>
 
 
-            <label for="process">Equipment Name:</label>
+            <label for="process">Machine Name:</label>
             <input id="process" name="process" value="OZNC01" readonly>
                 
 
@@ -318,34 +113,36 @@
 
 
             <button id="sendtoNC" type="button">Send to Machine</button>
+            <br>
+            <br><br>
             
             
-            <label for="Machine Operator">Worker:</label>
+            <label for="Machine Operator">Worker Name:</label>
             <input list="machine-operator-suggestions" placeholder="Worker's Name" id="Machine Operator" name="Machine Operator" required>
             <datalist id="machine-operator-suggestions"></datalist>
             <br><br>
-            <label for="Process Quantity">Process Quantity (Good) + NG:</label>
+            <label for="Process Quantity">Quantity Made (Including Defects):</label>
             <input type="text" name="Process Quantity" id="ProcessQuantity" placeholder="Process Quantity" required>
             <button id="sendtoQty" type="button">1 box completed</button>
             <br><br>
-            <label for="Lot No.">Processing Date:</label>
+            <label for="Lot No.">Date:</label>
             <input type="date" name="Lot No." id="Lot No." placeholder="Date" onfocus="setDefaultDate(this)" required>
             <input type="number" name="Labelextension" id="Labelextension">
-            <br>
-            <label for="Start Time">Processing Start Time:</label>
+            <br><br>
+            <label for="Start Time">Time Start:</label>
             <input type="time" name="Start Time" id="Start Time" placeholder="Time Start" onfocus="setDefaultTime(this)" required>
             <br>
-            <label for="End Time">Processing End Time:</label>
+            <label for="End Time">Time End:</label>
             <input type="time" name="End Time" id="End Time" placeholder="Time End" onfocus="setDefaultTime(this)" required>
-            <br>
-            <label for="shot">Shot Count</label>
-            <input type="number" name="shot" id="shot" placeholder="Shot Count" >
+            <br><br>
+            <label for="shot">Number of Cycles</label>
+            <input type="input" name="shot" id="shot" placeholder="Shot Quantity" required>
+            <br><br>
 
-
-            <label for="材料ロット">Material Lot:</label>
-        <button id="scan-lot" type="button">Scan Lot</button>
+            <label for="材料ロット">Material Lot No.:</label>
+        <button id="scan-lot" type="button">Scan ロット</button>
         <input type="text" name="材料ロット" id="材料ロット" placeholder="Material Lot" required>
-        <br>
+        <br><br>
         <div id="counter-box-18" class="counter-box">  
             <label for="counter-18">Material Defect</label>
             <button class="plus-btn" type="button" onclick="incrementCounter(18)" >+</button>  
@@ -353,7 +150,7 @@
             <button class="minus-btn" type="button" onclick="decrementCounter(18)" >-</button>  
         </div>
         <div id="counter-box-19" class="counter-box">  
-            <label for="counter-19">Processing Defect</label>
+            <label for="counter-19">Process Defect</label>
             <button class="plus-btn" type="button" onclick="incrementCounter(19)" >+</button>  
             <input readonly id="counter-19" value="0" type="number" name="加工不良">  
             <button class="minus-btn" type="button" onclick="decrementCounter(19)" >-</button>  
@@ -363,6 +160,16 @@
             <button class="plus-btn" type="button" onclick="incrementCounter(20)" >+</button>  
             <input readonly id="counter-20" value="0" type="number" name="その他">  
             <button class="minus-btn" type="button" onclick="decrementCounter(20)" >-</button>  
+        </div>
+
+        <div id="NG-container">
+            <NGlabel for="Total_NG">Defects Quantity:</label>
+            <input readonly id="Total_NG" value="0" type="number" name="Total_NG">
+        </div>
+        <br><br><br><br>
+        <div id="total-container">
+            <label for="total">Total Produced (Defects deducted):</label>
+            <input readonly id="total" value="0" type="number" name="Final Quantity">
         </div>
 
         <!-- what modal is this???? -->
@@ -383,14 +190,14 @@
         <div id="customAlertModal" class="modal" style="display:none;">
         <div class="modal-content">
             <span class="close-button" id="closeModalButton">&times;</span>
-            <p id="customAlertText">Wrong Kanban</p>
+            <p id="customAlertText">Wrong Kanban / 看板間違い</p>
         </div>
         </div>
 
         <div id="scanAlertModal" class="modal" style="display:none;">
         <div class="modal-content">
             <span class="close-button" id="closeScanModalButton">&times;</span>
-            <p id="scanAlertText">Different product detected! Please save form before changing.</p>
+            <p id="scanAlertText">Different product detected! Please save form before changing. / 異なる製品が検出されました。保存してください！</p>
         </div>
         </div>
 
@@ -407,20 +214,19 @@
         <div id="scanAlertModal" class="modal" style="display:none;">
             <div class="modal-content">
             <span class="close-button" id="closeScanModalButton">&times;</span>
-            <p id="scanAlertText">Different product detected! Please save form before changing.</p>
+            <p id="scanAlertText">Different product detected! Please save form before changing. / 異なる製品が検出されました。保存してください！</p>
             </div>
         </div>
 
-        
         <!-- Uploading Modal -->
-        <div id="uploadingModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.6); z-index: 9999; justify-content: center; align-items: center;">
-            <div style="background: white; padding: 30px; border-radius: 10px; text-align: center;">
-                <div class="loader" style="margin-bottom: 20px;"></div>
-                <p style="font-size: 18px;">Uploading, please wait...</p>
-            </div>
+        <div id="uploadingModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background: rgba(0, 0, 0, 0.6); z-index: 9999; display: flex; justify-content: center; align-items: center;">
+        <div style="background: white; padding: 30px; border-radius: 10px; text-align: center;">
+            <div class="loader" style="margin-bottom: 20px;"></div>
+            <p style="font-size: 18px;">Uploading, please wait...</p>
         </div>
-
-        <!-- Optional: Simple CSS Spinner -->
+        </div>
+         <!-- Optional: Simple CSS Spinner -->
         <style>
         .loader {
             border: 6px solid #f3f3f3;
@@ -450,26 +256,36 @@
              <br>
              <br>
              <br>
-             <label>First Article Check: </label>
+             <label>First Cycle Check: </label>
              <label id="hatsumonoLabel">FALSE</label>
              <button id="hatsumonoButton" type="button">Check 1st Cycle</button>
-             <img id="hatsumonoPic" src="" alt="hatsumonoPic" style="display:none; max-width: 320px; height: auto;">
+             <img id="hatsumonoPic" src="" alt="hatsumonoPic" style="display:none; width: 320px; height: 240px;">
              <br>
              <br>
-             <label>Last Article Check: </label>
+             <label>Last Cycle Check: </label>
              <label id="atomonoLabel">FALSE</label>
              <button id="atomonoButton" type="button">Check Last Cycle</button>
-             <img id="atomonoPic" src="" alt="atomonoPic" style="display:none; max-width: 320px; height: auto;">
+             <img id="atomonoPic" src="" alt="atomonoPic" style="display:none; width: 320px; height: 240px;">
              <br>
              <br>
-             <label>Material Label: </label>
+             <label>Material Label Pic: </label>
              <label id="makerLabel">FALSE</label>
-             <button id="makerLabelButton" type="button">Take Photo</button>
-             <img id="材料ラベル" src="" alt="材料ラベル" style="display:none; max-width: 320px; height: auto;">
-            
-            <br>
+             <button id="makerLabelButton" type="button">Material Label Picture</button>
+             <img id="材料ラベル" src="" alt="材料ラベル" style="display:none; width: 320px; height: 240px;">
+    
              <br>
+             <br>
+             <input type="submit" value="Submit Data" id="submit">
+             <br>
+             <br>
+             <br>
+             <br>
+             <br>
+             <br>
+
+             <button type="button" onclick="resetForm()">Reset</button>
              
+            
     </div>
     </form>      
     </div>
@@ -485,27 +301,29 @@
     <h4>
         <label>
             <input type="checkbox" id="enable-inputs" onclick="toggleInputs()"> 
-            <span id="checkboxLabel">Kurachi Inspection</span>
+            <span id="checkboxLabel">Check box if Inspection Process Included</span>
         </label>
     </h4>
-    <!-- this is the printLabel button -->
-    <button id="print" type="button" onclick="printLabel()"> Print Label </button>
+    <br>
+    <br>
+    
 
 
 
-    <label for="Kensa Name">Inspector:</label>
+    <label for="Kensa Name">Inspector Name:</label>
     <input list="kensa-name-suggestions" placeholder="Kensa Name" id="Kensa Name" name="Kensa Name" type="text" disabled>
     <datalist id="kensa-name-suggestions"></datalist>
     <br>
-    <label for="KDate">Inspection Date:</label>
+    <label for="KDate">Date of Inspection:</label>
     <input type="date" name="KDate" id="KDate" placeholder="KDate" onfocus="setDefaultDate(this)" disabled>
     <br>
-    <label for="KStart Time">Inspection Start Time:</label>
+    <label for="KStart Time">Inspection Start:</label>
     <input type="time" name="KStart Time" id="KStart Time" placeholder="KTime Start" onfocus="setDefaultTime(this)" disabled>
     <br>
-    <label for="KEnd Time">Inspection End Time:</label>
+    <label for="KEnd Time">Inspection End:</label>
     <input type="time" name="KEnd Time" id="KEnd Time" placeholder="KTime End" onfocus="setDefaultTime(this)" disabled>
     <br>
+    
 
     <!-- these are for the buttons numbers -->
     <div class="counter-container">  
@@ -587,29 +405,21 @@
     <!-- this displays the total furyo a -->
     <div class="counter-container">
         <!-- Add the total display element -->
-        <div id="NG-container">
-            <NGlabel for="Total_NG">NG Quantity:</label>
-            <input readonly id="Total_NG" value="0" type="number" name="Total_NG">
-        </div>
-        <br><br><br><br>
-        <div id="total-container">
-            <label for="total">Good Total (TOTAL):</label>
-            <input readonly id="total" value="0" type="number" name="Final Quantity">
-        </div>
+        
             </div>
             <label for="在庫">Spare:</label>
             <input type="text" name="在庫" id="在庫" placeholder="Spare" disabled>
             <br>
                     
             <textarea name="Comments2" rows="5" placeholder="Enter Comments" disabled></textarea>
-            <input type="submit" value="Submit" id="submit">
+            
             <br>
             <br>
             <br>
             <br>
             <br>
             <br>
-            <button type="button" onclick="resetForm()">Reset</button>
+            
         </div>
         
     
@@ -624,7 +434,7 @@
                     <img id="dynamicImage" src="" alt="Image Description">
                 </div>
                 <label name="送りピッチ" id="送りピッチ" value=""></label>
-                <label>Release Paper: </label><label name="rikeshitext" id="rikeshitext" value=""></label>
+                <label>離型紙: </label><label name="rikeshitext" id="rikeshitext" value=""></label>
                 <label>Product Number:</label>
                 <input readonly id="product-number" value="" name="品番"> 
                 <label>Model:</label>
@@ -639,7 +449,7 @@
                 <input readonly id="material-code" value="">
                 <label>Material Color:</label>
                 <input readonly id="material-color" value="">
-                <label>Model Number:</label>
+                <label>型番:</label>
                 <input readonly id="kataban" value="">
                 <br>
                 <label>Total Time (in hours):</label>
@@ -651,88 +461,9 @@
                 <label>Cycle Time Kensa:</label>
                 <input readonly id="cycleTimeK" value="0" name="Cycle TimeK">
                 <br>
-                <label>Breaktime(mins):</label>
-                <input readonly id="breaktime-mins" value="0" name="Breaktime">
-                <br>
-                <label for="trouble-time-display">Trouble Time:</label>
-                <input type="text" id="trouble-time-display" name="trouble-time-display" placeholder="00h 00m" readonly style="background: #f0f0f0;">
-                <br>
 
             </div>
         
-            <!-- Break Time Section -->
-            <div class="break-time-section">
-                <h4>Break Time</h4>
-                
-                <div class="break-time-entry">
-                    <label>Break 1:</label>
-                    <div class="break-time-inputs">
-                        <input type="time" id="break1-start" name="break1-start" onfocus="setDefaultTime(this)">
-                        <span>~</span>
-                        <input type="time" id="break1-end" name="break1-end" onfocus="setDefaultTime(this)">
-                        <button type="button" class="reset-btn" onclick="resetBreakTime(1)">Reset</button>
-                    </div>
-                </div>
-
-                <div class="break-time-entry">
-                    <label>Break 2:</label>
-                    <div class="break-time-inputs">
-                        <input type="time" id="break2-start" name="break2-start" onfocus="setDefaultTime(this)">
-                        <span>~</span>
-                        <input type="time" id="break2-end" name="break2-end" onfocus="setDefaultTime(this)">
-                        <button type="button" class="reset-btn" onclick="resetBreakTime(2)">Reset</button>
-                    </div>
-                </div>
-
-                <div class="break-time-entry">
-                    <label>Break 3:</label>
-                    <div class="break-time-inputs">
-                        <input type="time" id="break3-start" name="break3-start" onfocus="setDefaultTime(this)">
-                        <span>~</span>
-                        <input type="time" id="break3-end" name="break3-end" onfocus="setDefaultTime(this)">
-                        <button type="button" class="reset-btn" onclick="resetBreakTime(3)">Reset</button>
-                    </div>
-                </div>
-
-                <div class="break-time-entry">
-                    <label>Break 4:</label>
-                    <div class="break-time-inputs">
-                        <input type="time" id="break4-start" name="break4-start" onfocus="setDefaultTime(this)">
-                        <span>~</span>
-                        <input type="time" id="break4-end" name="break4-end" onfocus="setDefaultTime(this)">
-                        <button type="button" class="reset-btn" onclick="resetBreakTime(4)">Reset</button>
-                    </div>
-                </div>
-
-                <div class="total-break-time">
-                    <span>Total Break Time: </span>
-                    <span id="total-break-display">0 min</span>
-                </div>
-            </div>
-
-            <!-- Machine Trouble Section -->
-            <div class="machine-trouble-section">
-                <h4 style="margin-top: 0; margin-bottom: 15px; color: #cc0000; text-align: center;">
-                    Machine Maintenance Time
-                </h4>
-                
-                <div style="margin-bottom: 20px;">
-                    <button type="button" id="add-maintenance-btn" 
-                            style="background: #007cba; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; font-size: 16px; width: 100%;">
-                        ➕ Add Maintenance Time
-                    </button>
-                </div>
-                
-                <div id="maintenance-records-container" style="margin-bottom: 20px;">
-                    <!-- Dynamic maintenance records will be rendered here -->
-                </div>
-
-                <div class="total-trouble-time">
-                    <span>Total Trouble Time: </span>
-                    <span id="total-trouble-display">0 min</span>
-                </div>
-            </div>
-
         </div>
     
     

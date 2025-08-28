@@ -1,18 +1,17 @@
-
 //link for ip address database
 const ipURL = 'https://script.google.com/macros/s/AKfycbyC6-KiT3xwGiahhzhB-L-OOL8ufG0WqnT5mjEelGBKGnbiqVAS6qjT78FlzBUHqTn3Gg/exec';
 
 // link for pictures database
 const picURL = 'https://script.google.com/macros/s/AKfycbwHUW1ia8hNZG-ljsguNq8K4LTPVnB6Ng_GLXIHmtJTdUgGGd2WoiQo9ToF-7PvcJh9bA/exec';
 
-
 //link for live status (google sheets live status)
 const googleSheetLiveStatusURL = 'https://script.google.com/macros/s/AKfycbwbL30hlX9nBlQH4dwxlbdxSM5kJtgtNEQJQInA1mgXlEhYJxFHykZkdXV38deR6P83Ow/exec';
 
+// Link for Rikeshi (up/down color info) - This was missing in the original, adding it here.
+const dbURL = 'https://script.google.com/macros/s/AKfycbx0qBw0_wF5X-hA2t1yY-d5h5M7Z_a8z_V9R5D6k/exec'; // Placeholder, replace with your actual URL if different.
+
 const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
-
-
 
 //this code listens to incoming parameters passed
 function getQueryParam(param) {
@@ -23,9 +22,9 @@ function getQueryParam(param) {
 const selectedFactory = getQueryParam('filter');
 const selectedMachine = getQueryParam('machine');
 
-if (selectedFactory){
+if (selectedFactory) {
   document.getElementById('selected工場').value = selectedFactory;
-  document.getElementById('nippoTitle').textContent=selectedFactory + " Daily Report";
+  document.getElementById('nippoTitle').textContent = selectedFactory + "日報";
   console.log("kojo changed to: " + selectedFactory);
 }
 if (selectedMachine) {
@@ -36,39 +35,35 @@ if (selectedMachine) {
   }
 }
 
-
-
 // Select all input, select, and button elements
 const inputs = document.querySelectorAll('input, select, button,textarea');
-const selected工場 = document.getElementById('selected工場').value; // Get the current factory value
+const currentSelectedFactory = document.getElementById('selected工場').value; // Get the current factory value
 const pageName = location.pathname.split('/').pop(); // Get the current HTML file name
-const uniquePrefix = `${pageName}_${selected工場}_${selectedMachine}_`;
+const uniquePrefix = `${pageName}_${currentSelectedFactory}_${selectedMachine}_`;
 
 // Save the value of each input to localStorage on change
 inputs.forEach(input => {
-    input.addEventListener('input', () => {
-        const key = `${uniquePrefix}${input.id || input.name}`; // Prefix key with pageName and selected工場
-        if (key) {
-            localStorage.setItem(key, input.value);
-        }
-    });
-
-    if (input.type === 'checkbox' || input.type === 'radio') {
-        input.addEventListener('change', () => {
-            const key = `${uniquePrefix}${input.id || input.name}`;
-            if (key) {
-                localStorage.setItem(key, input.checked); // Save checkbox/radio state
-            }
-        });
+  input.addEventListener('input', () => {
+    const key = `${uniquePrefix}${input.id || input.name}`; // Prefix key with pageName and selected工場
+    if (key) {
+      localStorage.setItem(key, input.value);
     }
+  });
+
+  if (input.type === 'checkbox' || input.type === 'radio') {
+    input.addEventListener('change', () => {
+      const key = `${uniquePrefix}${input.id || input.name}`;
+      if (key) {
+        localStorage.setItem(key, input.checked); // Save checkbox/radio state
+      }
+    });
+  }
 });
-
-
 
 // Restore the values of input fields, images, and textContent from localStorage on page load
 document.addEventListener('DOMContentLoaded', () => {
-  uploadingModal.style.display = 'none';
   getIP(); // ip address for machine
+  document.getElementById('uploadingModal').style.display = 'none';
   const inputs = document.querySelectorAll('input, select, button, textarea'); // Get all input elements
   const images = document.querySelectorAll('img'); // Get all <img> elements
   const textElements = document.querySelectorAll('[id]'); // Get all elements with an ID
@@ -77,83 +72,112 @@ document.addEventListener('DOMContentLoaded', () => {
   const processElement = document.getElementById("process");
 
   if (!selected工場) {
-      console.error("Selected 工場 is not set or found.");
-      return;
+    console.error("Selected 工場 is not set or found.");
+    return;
   }
 
   // Loop through all keys in localStorage
   Object.keys(localStorage).forEach(key => {
-      // Check if the key belongs to the current HTML file and selected 工場
-      if (key.startsWith(`${uniquePrefix}`)) {
-          const savedValue = localStorage.getItem(key);
+    // Check if the key belongs to the current HTML file and selected 工場
+    if (key.startsWith(`${uniquePrefix}`)) {
+      const savedValue = localStorage.getItem(key);
 
-          if (savedValue !== null) {
-              // Match each input with its respective localStorage key
-              inputs.forEach(input => {
-                  const inputKey = `${uniquePrefix}${input.id || input.name}`;
-                  if (inputKey === key) {
-                      if (input.type === 'checkbox' || input.type === 'radio') {
-                          input.checked = savedValue === 'true'; // Restore checkbox/radio state
-                      } else if (input.tagName === 'SELECT') {
-                          // For select elements, wait for options to populate
-                          setTimeout(() => {
-                              if ([...input.options].some(option => option.value === savedValue)) {
-                                  input.value = savedValue; // Restore select value
-                                  console.log(`Restored ${input.id || input.name}:`, savedValue);
-                                  fetchProductDetails();
-                                  
-                              } else {
-                                  console.error(`Option '${savedValue}' not found in select '${input.id || input.name}'.`);
-                              }
-                          }, 2000); // Adjust delay if options are populated dynamically
-                      } else {
-                          input.value = savedValue; // Restore value for text, hidden, and other inputs
-                      }
-                  }
-              });
+      if (savedValue !== null) {
+        // Match each input with its respective localStorage key
+        inputs.forEach(input => {
+          const inputKey = `${uniquePrefix}${input.id || input.name}`;
+          if (inputKey === key) {
+            if (input.type === 'checkbox' || input.type === 'radio') {
+              input.checked = savedValue === 'true'; // Restore checkbox/radio state
+            } else if (input.tagName === 'SELECT') {
+              // For select elements, wait for options to populate
+              setTimeout(() => {
+                if ([...input.options].some(option => option.value === savedValue)) {
+                  input.value = savedValue; // Restore select value
+                  console.log(`Restored ${input.id || input.name}:`, savedValue);
+                  fetchProductDetails();
 
-              // Restore textContent dynamically for all elements with IDs
-              textElements.forEach(element => {
-                  const textKey = `${uniquePrefix}${element.id}.textContent`;
-                  if (key === textKey) {
-                      element.textContent = savedValue; // Restore textContent
-                      console.log(`Restored textContent for ${element.id}:`, savedValue);
-                  }
-              });
-
-              // Restore image sources dynamically
-              images.forEach(image => {
-                  const imageKey = `${uniquePrefix}${image.id || image.name}.src`;
-                  if (key === imageKey) {
-                      image.src = savedValue; // Restore the image source
-                      image.style.display = 'block'; // Ensure the image is visible
-                      console.log(`Restored ${image.id || image.name} image src:`, savedValue);
-                  }
-              });
-              updateTotal();
+                } else {
+                  console.error(`Option '${savedValue}' not found in select '${input.id || input.name}'.`);
+                }
+              }, 2000); // Adjust delay if options are populated dynamically
+            } else {
+              input.value = savedValue; // Restore value for text, hidden, and other inputs
+            }
           }
+        });
+
+        // Restore textContent dynamically for all elements with IDs
+        textElements.forEach(element => {
+          const textKey = `${uniquePrefix}${element.id}.textContent`;
+          if (key === textKey) {
+            element.textContent = savedValue; // Restore textContent
+            console.log(`Restored textContent for ${element.id}:`, savedValue);
+          }
+        });
+
+        // Restore image sources dynamically
+        images.forEach(image => {
+          const imageKey = `${uniquePrefix}${image.id || image.name}.src`;
+          if (key === imageKey) {
+            image.src = savedValue; // Restore the image source
+            image.style.display = 'block'; // Ensure the image is visible
+            //console.log(`Restored ${image.id || image.name} image src:`, savedValue);
+          }
+        });
+        updateTotal();
       }
+    }
   });
 
   // Log the restored value for debugging (Optional)
   if (processElement) {
-      console.log('Process value after restoration:', processElement.value); // Debugging the restored process value
+    console.log('Process value after restoration:', processElement.value); // Debugging the restored process value
   }
+
+  // Calculate break time and trouble time after restoring values
+  calculateTotalBreakTime();
+  calculateTotalMachineTroubleTime();
+
+  // Add event listeners to all break time inputs
+  for (let i = 1; i <= 4; i++) {
+    const startInput = document.getElementById(`break${i}-start`);
+    const endInput = document.getElementById(`break${i}-end`);
+
+    if (startInput && endInput) {
+      startInput.addEventListener('change', function() {
+        calculateTotalBreakTime();
+        // Save to localStorage
+        const key = `${uniquePrefix}${this.id}`;
+        localStorage.setItem(key, this.value);
+      });
+
+      endInput.addEventListener('change', function() {
+        calculateTotalBreakTime();
+        // Save to localStorage
+        const key = `${uniquePrefix}${this.id}`;
+        localStorage.setItem(key, this.value);
+      });
+    }
+  }
+
+  // Initialize maintenance system
+  loadMaintenanceRecords();
+
+  // Add maintenance button
+  const addMaintenanceBtn = document.getElementById('add-maintenance-btn');
+  if (addMaintenanceBtn) {
+    addMaintenanceBtn.addEventListener('click', () => showMaintenanceModal());
+  }
+
   toggleInputs(); //enable or disable the kensa page
 });
-
-
-
-
-
-
-
 
 // this function fetches setsubi list (process.value)
 async function fetchSetsubiList() {
   const factory = document.getElementById("selected工場").value;
-  
-  if (factory === '肥田瀬' || factory ==='第二工場') {
+
+  if (factory === '肥田瀬' || factory === '第二工場') {
     disableInputs();
     console.log("this is runned");
   }
@@ -162,11 +186,10 @@ async function fetchSetsubiList() {
     // Fetch data for the process dropdown
     const response = await fetch(`${serverURL}/getSetsubiList?factory=${encodeURIComponent(factory)}`);
     const data = await response.json();
-    
 
     // Get unique values of `設備`
     const uniqueSetsubi = [...new Set(data.map(item => item.設備))];
-    
+
     // Select the process dropdown element
     const processDropdown = document.getElementById("process");
 
@@ -196,7 +219,6 @@ async function fetchSetsubiList() {
   }
 }
 
-
 // this function fetches sebanggo list
 async function fetchSebanggo() {
   // Get the selected process from the process dropdown
@@ -218,7 +240,7 @@ async function fetchSebanggo() {
     // Add a blank option at the top
     const blankOption = document.createElement("option");
     blankOption.value = "";
-    blankOption.textContent = "Select Product";
+    blankOption.textContent = "Select 背番号";
     subDropdown.appendChild(blankOption);
 
     // Populate the sub-dropdown with new options based on the 背番号 values
@@ -230,7 +252,7 @@ async function fetchSebanggo() {
     });
 
     console.log("Sub-dropdown populated with 背番号 options:", data);
-    
+
   } catch (error) {
     console.error("Error fetching 背番号 data:", error);
   }
@@ -252,68 +274,8 @@ function blankInfo() {
   document.getElementById("material").value = "";
   document.getElementById("material-code").value = "";
   document.getElementById("material-color").value = "";
-  document.getElementById("送りピッチ").value = "";
+  document.getElementById("送りピッチ").textContent = ""; // Corrected to textContent for label
 }
-
-
-// //for the info section
-// async function fetchProductDetails() {
-//   const serialNumber = document.getElementById("sub-dropdown").value;
-//   const factory = document.getElementById("selected工場").value;
-//   // Update the dynamicImage src attribute with the retrieved htmlWebsite value
-//   const dynamicImage = document.getElementById("dynamicImage");
-//   dynamicImage.src = "";
-
-//   if (!serialNumber) {
-//     console.error("Please select a valid 背番号.");
-//     blankInfo();
-//     return;
-//   }
-
-//   try {
-//     const response = await fetch(`${serverURL}/getProductDetails?serialNumber=${encodeURIComponent(serialNumber)}&factory=${encodeURIComponent(factory)}`);
-//     if (response.ok) {
-//       const data = await response.json();
-
-//       // Populate the HTML fields with the retrieved data
-//       document.getElementById("product-number").value = data.品番 || "";
-//       document.getElementById("model").value = data.モデル || "";
-//       document.getElementById("shape").value = data.形状 || "";
-//       document.getElementById("R-L").value = data["R/L"] || "";
-//       document.getElementById("material").value = data.材料 || "";
-//       document.getElementById("material-code").value = data.材料背番号 || "";
-//       document.getElementById("material-color").value = data.色 || "";
-//       document.getElementById("kataban").value = data.型番 || "";
-//       document.getElementById("収容数").value = data.収容数 || "";
-//       document.getElementById("送りピッチ").textContent = "rolldist: " + data.送りピッチ || "";
-//       document.getElementById("SRS").value = data.SRS || "";
-      
-      
-
-      
-      
-//       // if (data.htmlWebsite) {
-//       //   dynamicImage.src = data.htmlWebsite; // Set the image source to the retrieved URL
-//       //   dynamicImage.alt = "Product Image"; // Optional: Set the alt text
-//       //   dynamicImage.style.display = "block"; // Ensure the image is visible
-//       // } else {
-//       //   dynamicImage.src = ""; // Clear the image source if no URL is available
-//       //   dynamicImage.alt = "No Image Available"; // Optional: Set fallback alt text
-//       //   dynamicImage.style.display = "none"; // Hide the image if no URL is available
-//       // }
-//     } else {
-//       console.error("No matching product found.");
-//     }
-//   } catch (error) {
-//     console.error("Error fetching product details:", error);
-//   }
-//   picLINK(serialNumber);
-// }
-
-// // Call fetchProductDetails when a new 背番号 is selected
-// document.getElementById("sub-dropdown").addEventListener("change", fetchProductDetails);
-// document.getElementById("sub-dropdown").addEventListener("change", NCPresstoFalse);
-
 
 async function fetchProductDetails() {
   const serialNumber = document.getElementById("sub-dropdown").value;
@@ -331,11 +293,15 @@ async function fetchProductDetails() {
     // Step 1: Try query by 背番号
     let response = await fetch(`${serverURL}/queries`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json"
+      },
       body: JSON.stringify({
         dbName: "Sasaki_Coating_MasterDB",
         collectionName: "masterDB",
-        query: { 背番号: serialNumber }
+        query: {
+          背番号: serialNumber
+        }
       }),
     });
 
@@ -345,11 +311,15 @@ async function fetchProductDetails() {
     if (!result || result.length === 0) {
       const altRes = await fetch(`${serverURL}/queries`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json"
+        },
         body: JSON.stringify({
           dbName: "Sasaki_Coating_MasterDB",
           collectionName: "masterDB",
-          query: { 品番: serialNumber }
+          query: {
+            品番: serialNumber
+          }
         }),
       });
 
@@ -383,7 +353,7 @@ async function fetchProductDetails() {
     document.getElementById("material-color").value = data.色 || "";
     document.getElementById("kataban").value = data.型番 || "";
     document.getElementById("収容数").value = data.収容数 || "";
-    document.getElementById("送りピッチ").textContent = "送りピッチ: " + (data.送りピッチ || "");
+    document.getElementById("送りピッチ").textContent = "Roll Distance: " + (data.送りピッチ || "");
     document.getElementById("SRS").value = data.SRS || "";
 
     // Set image
@@ -400,19 +370,16 @@ async function fetchProductDetails() {
   } catch (error) {
     console.error("Error fetching product details:", error);
   }
+  // Call getRikeshi after product details are fetched
+  //getRikeshi(serialNumber);
 }
 
 // Trigger when 背番号 is selected
 document.getElementById("sub-dropdown").addEventListener("change", fetchProductDetails);
 document.getElementById("sub-dropdown").addEventListener("change", NCPresstoFalse);
 
-
-
-
 // Function to get link from Google Drive
 function picLINK(headerValue) {
-  
-
   fetch(`${picURL}?link=${headerValue}`)
     .then(response => {
       if (!response.ok) {
@@ -441,9 +408,9 @@ function updateImageSrc(link) {
   }
 }
 
-
 //simple function to set ncbuttonisPressed = false
-function NCPresstoFalse(){
+function NCPresstoFalse() {
+  checkValue();
   // Save to localStorage with a unique key format = FALSE
   sendtoNCButtonisPressed = "FALSE";
   popupShown = false;
@@ -454,12 +421,9 @@ function NCPresstoFalse(){
 
 }
 
-
 // when time is pressed
 // Set current time as default when time is pressed
 function setDefaultTime(input) {
-  
-
   const now = new Date();
   const hours = String(now.getHours()).padStart(2, '0');
   const minutes = String(now.getMinutes()).padStart(2, '0');
@@ -468,8 +432,675 @@ function setDefaultTime(input) {
 
   // Save the time to local storage with unique prefix
   localStorage.setItem(`${uniquePrefix}${input.id}`, timeValue);
+
+  // If this is a break time input, calculate total break time
+  if (input.id.includes('break')) {
+    calculateTotalBreakTime();
+  }
+
+  // If this is a trouble time input, calculate total trouble time
+  if (input.id.includes('trouble')) {
+    calculateTotalMachineTroubleTime();
+  }
 }
 
+// Function to reset individual break time
+function resetBreakTime(breakNumber) {
+  const startInput = document.getElementById(`break${breakNumber}-start`);
+  const endInput = document.getElementById(`break${breakNumber}-end`);
+
+  if (startInput && endInput) {
+    // Clear the values
+    startInput.value = '';
+    endInput.value = '';
+
+    // Create the unique prefix for localStorage
+    const pageName = location.pathname.split('/').pop();
+    const selected工場 = document.getElementById('selected工場').value;
+    const selectedMachine = getQueryParam('machine');
+    const prefix = `${pageName}_${selected工場}_${selectedMachine}_`;
+
+    // Remove from localStorage
+    const startKey = `${prefix}break${breakNumber}-start`;
+    const endKey = `${prefix}break${breakNumber}-end`;
+    localStorage.removeItem(startKey);
+    localStorage.removeItem(endKey);
+
+    // Recalculate total break time
+    calculateTotalBreakTime();
+
+    console.log(`Break time ${breakNumber} has been reset`);
+  }
+}
+
+// Function to calculate total break time in minutes
+function calculateTotalBreakTime() {
+  let totalMinutes = 0;
+
+  for (let i = 1; i <= 4; i++) {
+    const startInput = document.getElementById(`break${i}-start`);
+    const endInput = document.getElementById(`break${i}-end`);
+
+    if (startInput && endInput) {
+      const startTime = startInput.value;
+      const endTime = endInput.value;
+
+      if (startTime && endTime) {
+        const start = new Date(`2000-01-01T${startTime}:00`);
+        const end = new Date(`2000-01-01T${endTime}:00`);
+
+        if (end > start) {
+          const diffMs = end - start;
+          const diffMinutes = Math.floor(diffMs / (1000 * 60));
+          totalMinutes += diffMinutes;
+        }
+      }
+    }
+  }
+
+  // Update the display and the input field
+  const totalDisplay = document.getElementById('total-break-display');
+  const breaktimeMins = document.getElementById('breaktime-mins');
+
+  if (totalDisplay) {
+    totalDisplay.textContent = `${totalMinutes}分`;
+  }
+  if (breaktimeMins) {
+    breaktimeMins.value = totalMinutes;
+  }
+
+  // Save to localStorage with proper prefix
+  const pageName = location.pathname.split('/').pop();
+  const selected工場 = document.getElementById('selected工場')?.value;
+  const selectedMachine = getQueryParam('machine');
+
+  if (pageName && selected工場 && selectedMachine) {
+    const prefix = `${pageName}_${selected工場}_${selectedMachine}_`;
+    localStorage.setItem(`${prefix}breaktime-mins`, totalMinutes);
+    localStorage.setItem(`${prefix}total-break-display`, `${totalMinutes}分`);
+  }
+  return totalMinutes; // Return total minutes for calculation in submit
+}
+
+// Dynamic Maintenance Time System
+let maintenanceRecords = [];
+let currentEditingIndex = -1;
+let maintenancePhotos = []; // Array to store multiple photos for current maintenance
+const MAX_MAINTENANCE_PHOTOS = 5; // Maximum photos per maintenance record
+
+// Load maintenance records from localStorage
+function loadMaintenanceRecords() {
+  const saved = localStorage.getItem(`${uniquePrefix}maintenanceRecords`);
+  if (saved) {
+    maintenanceRecords = JSON.parse(saved);
+    renderMaintenanceRecords();
+    calculateTotalMachineTroubleTime();
+  }
+}
+
+// Save maintenance records to localStorage
+function saveMaintenanceRecords() {
+  localStorage.setItem(`${uniquePrefix}maintenanceRecords`, JSON.stringify(maintenanceRecords));
+}
+
+// Clear maintenance photos
+function clearMaintenancePhotos() {
+  maintenancePhotos = [];
+  renderMaintenancePhotoThumbnails();
+}
+
+// Add photo to maintenance photos
+function addMaintenancePhoto(base64Data) {
+  if (maintenancePhotos.length >= MAX_MAINTENANCE_PHOTOS) {
+    showAlert(`最大${MAX_MAINTENANCE_PHOTOS}枚まで撮影できます / Maximum ${MAX_MAINTENANCE_PHOTOS} photos allowed`);
+    return false;
+  }
+  
+  // SIMPLIFIED validation like test HTML - just check if it's not empty
+  if (!base64Data || base64Data.length === 0) {
+    console.error('❌ addMaintenancePhoto ERROR: Empty base64 data');
+    showAlert('無効な画像データです。再試行してください。', false);
+    return false;
+  }
+  
+  console.log(`🔍 addMaintenancePhoto: Received ${base64Data.length} bytes of base64 data`);
+  console.log(`🔍 addMaintenancePhoto: First 50 chars: ${base64Data.substring(0, 50)}`);
+  
+  const photoData = {
+    base64: base64Data, // Clean base64 without data URL prefix  
+    timestamp: Date.now(),
+    id: `maintenance_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+    uploaded: false // Track upload status
+  };
+  
+  maintenancePhotos.push(photoData);
+  
+  console.log(`📷 Photo added: ID=${photoData.id}, base64Length=${base64Data.length}, timestamp=${photoData.timestamp}`);
+  
+  renderMaintenancePhotoThumbnails();
+  return true;
+}
+
+// Remove photo from maintenance photos
+function removeMaintenancePhoto(index) {
+  if (index >= 0 && index < maintenancePhotos.length) {
+    maintenancePhotos.splice(index, 1);
+    renderMaintenancePhotoThumbnails();
+  }
+}
+
+// Render photo thumbnails in the modal
+function renderMaintenancePhotoThumbnails() {
+  const container = document.getElementById('maintenance-photo-thumbnails');
+  if (!container) return;
+  
+  container.innerHTML = '';
+  
+  if (maintenancePhotos.length === 0) {
+    container.innerHTML = '<p style="text-align: center; color: #666; margin: 20px 0;">No photos</p>';
+  } else {
+    maintenancePhotos.forEach((photo, index) => {
+      const thumbItem = document.createElement('div');
+      thumbItem.style.cssText = `
+        position: relative;
+        display: inline-block;
+        margin: 5px;
+        border: 2px solid #ddd;
+        border-radius: 5px;
+        overflow: hidden;
+        background: #f9f9f9;
+      `;
+      
+      const img = document.createElement('img');
+      // Use firebaseUrl if uploaded, otherwise use base64 data
+      let imageSrc;
+      if (photo.firebaseUrl && photo.uploaded) {
+        imageSrc = photo.firebaseUrl;
+      } else if (photo.base64) {
+        // Use clean base64 data with proper data URL prefix for display
+        imageSrc = `data:image/jpeg;base64,${photo.base64}`;
+      } else {
+        // Fallback for photos without either source
+        console.warn('Photo has no displayable source:', photo);
+        imageSrc = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODAiIGhlaWdodD0iODAiIHZpZXdCb3g9IjAgMCA4MCA4MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjgwIiBoZWlnaHQ9IjgwIiBmaWxsPSIjZjBmMGYwIi8+Cjx0ZXh0IHg9IjQwIiB5PSI0NSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEyIiBmaWxsPSIjOTk5Ij5JbWFnZTwvdGV4dD4KPHR0ZXh0IHg9IjQwIiB5PSI1NSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOTk5Ij5FcnJvcjwvdGV4dD4KPC9zdmc+'; // Placeholder SVG
+      }
+      img.src = imageSrc;
+      img.style.cssText = `
+        width: 80px;
+        height: 80px;
+        object-fit: cover;
+        cursor: pointer;
+        display: block;
+      `;
+      img.onclick = () => showMaintenancePhotoPreview(imageSrc);
+      
+      // Add error handling for failed image loads
+      img.onerror = () => {
+        console.error('Failed to load maintenance photo:', imageSrc);
+        img.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODAiIGhlaWdodD0iODAiIHZpZXdCb3g9IjAgMCA4MCA4MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjgwIiBoZWlnaHQ9IjgwIiBmaWxsPSIjZjBmMGYwIi8+Cjx0ZXh0IHg9IjQwIiB5PSI0NSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEyIiBmaWxsPSIjOTk5Ij5GYWlsZWQ8L3RleHQ+CjwvdGV4dD4KPC9zdmc+'; // Error placeholder
+      };
+      
+      const removeBtn = document.createElement('button');
+      removeBtn.innerHTML = '×';
+      removeBtn.style.cssText = `
+        position: absolute;
+        top: 2px;
+        right: 2px;
+        background: #ff4444;
+        color: white;
+        border: none;
+        border-radius: 50%;
+        width: 20px;
+        height: 20px;
+        font-size: 12px;
+        cursor: pointer;
+        line-height: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      `;
+      removeBtn.onclick = (e) => {
+        e.stopPropagation();
+        removeMaintenancePhoto(index);
+      };
+      
+      thumbItem.appendChild(img);
+      thumbItem.appendChild(removeBtn);
+      container.appendChild(thumbItem);
+    });
+  }
+  
+  // Update photo count display
+  const photoCount = document.getElementById('maintenance-photo-count');
+  if (photoCount) {
+    photoCount.textContent = `${maintenancePhotos.length}/${MAX_MAINTENANCE_PHOTOS}`;
+  }
+}
+
+// Show full size photo preview
+function showMaintenancePhotoPreview(imageDataURL) {
+  // Create a modal for full preview
+  const previewModal = document.createElement('div');
+  previewModal.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.9);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 10001;
+  `;
+  
+  const img = document.createElement('img');
+  img.src = imageDataURL;
+  img.style.cssText = `
+    max-width: 90%;
+    max-height: 90%;
+    object-fit: contain;
+  `;
+  
+  const closeBtn = document.createElement('button');
+  closeBtn.innerHTML = '×';
+  closeBtn.style.cssText = `
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    background: #ff4444;
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    font-size: 20px;
+    cursor: pointer;
+  `;
+  
+  closeBtn.onclick = () => document.body.removeChild(previewModal);
+  previewModal.onclick = (e) => {
+    if (e.target === previewModal) document.body.removeChild(previewModal);
+  };
+  
+  previewModal.appendChild(img);
+  previewModal.appendChild(closeBtn);
+  document.body.appendChild(previewModal);
+}
+
+// Show maintenance modal
+function showMaintenanceModal(editIndex = -1) {
+  currentEditingIndex = editIndex;
+  const isEditing = editIndex >= 0;
+  
+  // Clear or load existing photos
+  if (isEditing && maintenanceRecords[editIndex] && maintenanceRecords[editIndex].photos) {
+    maintenancePhotos = [...maintenanceRecords[editIndex].photos];
+  } else {
+    maintenancePhotos = [];
+  }
+  
+  // Create modal
+  const modal = document.createElement('div');
+  modal.id = 'maintenanceModal';
+  modal.className = 'maintenance-modal';
+  modal.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.7);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 10000;
+  `;
+
+  const modalContent = document.createElement('div');
+  modalContent.style.cssText = `
+    background: white;
+    padding: 30px;
+    border-radius: 10px;
+    width: 90%;
+    max-width: 600px;
+    max-height: 90vh;
+    overflow-y: auto;
+  `;
+
+  // Pre-fill data if editing
+  let existingRecord = {};
+  if (isEditing && maintenanceRecords[editIndex]) {
+    existingRecord = maintenanceRecords[editIndex];
+  }
+
+  modalContent.innerHTML = `
+    <h2 style="margin-top: 0; text-align: center;">
+      ${isEditing ? 'Edit Maintenance' : 'Add Maintenance'}
+    </h2>
+    
+    <div style="margin-bottom: 20px;">
+      <label style="display: block; margin-bottom: 5px; font-weight: bold;">Start Time:</label>
+      <input type="time" id="maintenance-start" value="${existingRecord.startTime || ''}" 
+             style="width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 5px;">
+    </div>
+    
+    <div style="margin-bottom: 20px;">
+      <label style="display: block; margin-bottom: 5px; font-weight: bold;">End Time:</label>
+      <input type="time" id="maintenance-end" value="${existingRecord.endTime || ''}"
+             style="width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 5px;">
+    </div>
+    
+    <div style="margin-bottom: 20px;">
+      <label style="display: block; margin-bottom: 5px; font-weight: bold;">Reason/Comment:</label>
+      <textarea id="maintenance-comment" rows="4" placeholder="Please enter the reason for machine trouble..."
+                style="width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 5px; resize: vertical;">${existingRecord.comment || ''}</textarea>
+    </div>
+    
+    <div style="margin-bottom: 20px;">
+      <label style="display: block; margin-bottom: 10px; font-weight: bold;">
+        Photos (<span id="maintenance-photo-count">0/${MAX_MAINTENANCE_PHOTOS}</span>):
+      </label>
+      <div style="margin-bottom: 10px;">
+        <button type="button" id="take-maintenance-photo" 
+                style="padding: 10px 20px; background: #007cba; color: white; border: none; border-radius: 5px; cursor: pointer; margin-right: 10px;">
+          📷 Take Photo
+        </button>
+        <button type="button" id="clear-maintenance-photos" 
+                style="padding: 10px 20px; background: #dc3545; color: white; border: none; border-radius: 5px; cursor: pointer;">
+          🗑️ Clear All
+        </button>
+      </div>
+      <div id="maintenance-photo-thumbnails" style="border: 1px solid #ddd; border-radius: 5px; padding: 10px; min-height: 60px; background: #f9f9f9;">
+        <!-- Photo thumbnails will be rendered here -->
+      </div>
+    </div>
+    
+    <div style="display: flex; gap: 10px; justify-content: flex-end;">
+      <button type="button" id="cancel-maintenance" 
+              style="padding: 10px 20px; background: #ccc; color: black; border: none; border-radius: 5px; cursor: pointer;">
+        Cancel
+      </button>
+      ${isEditing ? `
+        <button type="button" id="delete-maintenance" 
+                style="padding: 10px 20px; background: #dc3545; color: white; border: none; border-radius: 5px; cursor: pointer;">
+          Delete
+        </button>
+      ` : ''}
+      <button type="button" id="save-maintenance" 
+              style="padding: 10px 20px; background: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer;">
+        Save
+      </button>
+    </div>
+  `;
+
+  modal.appendChild(modalContent);
+  document.body.appendChild(modal);
+
+  // Render existing photos
+  renderMaintenancePhotoThumbnails();
+
+  // Add event listeners
+  setupMaintenanceModalEvents(modal, existingRecord);
+}
+
+// Setup modal event listeners
+function setupMaintenanceModalEvents(modal, existingRecord) {
+  const takePhotoBtn = modal.querySelector('#take-maintenance-photo');
+  const clearPhotosBtn = modal.querySelector('#clear-maintenance-photos');
+  const saveBtn = modal.querySelector('#save-maintenance');
+  const cancelBtn = modal.querySelector('#cancel-maintenance');
+  const deleteBtn = modal.querySelector('#delete-maintenance');
+
+  // Take photo functionality
+  takePhotoBtn.addEventListener('click', async () => {
+    if (maintenancePhotos.length >= MAX_MAINTENANCE_PHOTOS) {
+      showAlert(`最大${MAX_MAINTENANCE_PHOTOS}枚まで撮影できます / Maximum ${MAX_MAINTENANCE_PHOTOS} photos allowed`);
+      return;
+    }
+    
+    await openMaintenanceCamera();
+  });
+
+  // Clear all photos functionality
+  clearPhotosBtn.addEventListener('click', () => {
+    if (maintenancePhotos.length > 0) {
+      if (confirm('すべての写真を削除しますか？ / Delete all photos?')) {
+        clearMaintenancePhotos();
+      }
+    }
+  });
+
+  // Save functionality
+  saveBtn.addEventListener('click', () => {
+    const startTime = modal.querySelector('#maintenance-start').value;
+    const endTime = modal.querySelector('#maintenance-end').value;
+    const comment = modal.querySelector('#maintenance-comment').value;
+
+    if (!startTime || !endTime) {
+      showAlert('開始時間と終了時間を入力してください / Please enter start and end times');
+      return;
+    }
+
+    if (!comment.trim()) {
+      showAlert('理由・説明を入力してください / Please enter a reason/comment');
+      return;
+    }
+
+    const record = {
+      id: currentEditingIndex >= 0 ? maintenanceRecords[currentEditingIndex].id : Date.now(),
+      startTime,
+      endTime,
+      comment: comment.trim(),
+      photos: [...maintenancePhotos], // Store multiple photos
+      timestamp: currentEditingIndex >= 0 ? maintenanceRecords[currentEditingIndex].timestamp : new Date().toISOString()
+    };
+
+    if (currentEditingIndex >= 0) {
+      maintenanceRecords[currentEditingIndex] = record;
+    } else {
+      maintenanceRecords.push(record);
+    }
+
+    saveMaintenanceRecords();
+    renderMaintenanceRecords();
+    calculateTotalMachineTroubleTime();
+    
+    // Clear the working photos array
+    maintenancePhotos = [];
+    
+    document.body.removeChild(modal);
+  });
+
+  // Cancel functionality
+  cancelBtn.addEventListener('click', () => {
+    // Clear the working photos array
+    maintenancePhotos = [];
+    document.body.removeChild(modal);
+  });
+
+  // Delete functionality
+  if (deleteBtn) {
+    deleteBtn.addEventListener('click', () => {
+      if (confirm('この機械故障記録を削除しますか？ / Delete this maintenance record?')) {
+        maintenanceRecords.splice(currentEditingIndex, 1);
+        saveMaintenanceRecords();
+        renderMaintenanceRecords();
+        calculateTotalMachineTroubleTime();
+        
+        // Clear the working photos array
+        maintenancePhotos = [];
+        
+        document.body.removeChild(modal);
+      }
+    });
+  }
+
+  // Close on background click
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) {
+      // Clear the working photos array
+      maintenancePhotos = [];
+      document.body.removeChild(modal);
+    }
+  });
+}
+
+// Render maintenance records as clickable items
+function renderMaintenanceRecords() {
+  const container = document.getElementById('maintenance-records-container');
+  if (!container) {
+    console.error('Maintenance records container not found');
+    return;
+  }
+
+  container.innerHTML = '';
+
+  maintenanceRecords.forEach((record, index) => {
+    const recordElement = document.createElement('div');
+    recordElement.className = 'maintenance-record-item';
+    recordElement.style.cssText = `
+      background: #f8f9fa;
+      border: 1px solid #dee2e6;
+      border-radius: 5px;
+      padding: 10px;
+      margin-bottom: 10px;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    `;
+
+    const duration = calculateDuration(record.startTime, record.endTime);
+    const photoCount = record.photos ? record.photos.length : 0;
+    const photoIndicator = photoCount > 0 ? `📷 ${photoCount}` : '';
+    
+    recordElement.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div style="flex: 1;">
+          <strong>${record.startTime} - ${record.endTime}</strong> (${duration}分)
+          <br>
+          <small style="color: #666;">${record.comment}</small>
+        </div>
+        <div style="color: #007cba; font-size: 14px;">
+          ${photoIndicator}
+        </div>
+      </div>
+    `;
+
+    recordElement.addEventListener('click', () => showMaintenanceModal(index));
+    recordElement.addEventListener('mouseenter', () => {
+      recordElement.style.backgroundColor = '#e9ecef';
+    });
+    recordElement.addEventListener('mouseleave', () => {
+      recordElement.style.backgroundColor = '#f8f9fa';
+    });
+
+    container.appendChild(recordElement);
+  });
+}
+
+// Calculate duration between start and end time
+function calculateDuration(startTime, endTime) {
+  if (!startTime || !endTime) return 0;
+  
+  const start = new Date(`2000-01-01T${startTime}:00`);
+  const end = new Date(`2000-01-01T${endTime}:00`);
+  
+  if (end > start) {
+    return Math.floor((end - start) / (1000 * 60));
+  }
+  return 0;
+}
+
+// Calculate total maintenance time
+function calculateTotalMachineTroubleTime() {
+  let totalMinutes = 0;
+
+  maintenanceRecords.forEach(record => {
+    totalMinutes += calculateDuration(record.startTime, record.endTime);
+  });
+
+  const totalElement = document.getElementById('total-trouble-display');
+  if (totalElement) {
+    totalElement.textContent = `${totalMinutes}分`;
+  }
+
+  const troubleTimeDisplay = document.getElementById('trouble-time-display');
+  if (troubleTimeDisplay) {
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    troubleTimeDisplay.value = `${hours.toString().padStart(2, '0')}h ${minutes.toString().padStart(2, '0')}m`;
+  }
+
+  // Save to localStorage
+  const pageName = location.pathname.split('/').pop();
+  const selected工場 = document.getElementById('selected工場')?.value;
+  const selectedMachine = getQueryParam('machine');
+
+  if (pageName && selected工場 && selectedMachine) {
+    const prefix = `${pageName}_${selected工場}_${selectedMachine}_`;
+    localStorage.setItem(`${prefix}total-trouble-display`, `${totalMinutes}分`);
+    localStorage.setItem(`${prefix}trouble-time-mins`, totalMinutes);
+  }
+  
+  return totalMinutes;
+}
+
+
+// Upload maintenance photos to Firebase via server endpoint
+// Legacy uploadMaintenancePhotos function removed - now using atomic submission via /submitToDCP
+
+async function testMaintenanceData() {
+  const selectedSebanggo = document.getElementById("sub-dropdown").value;
+  const currentDate = document.getElementById("Lot No.").value;
+  const selectedWorker = document.getElementById("Machine Operator").value;
+  const selectedFactory = document.getElementById("selected工場").value;
+  const selectedMachine = document.getElementById("process").value;
+
+  console.log("🧪 Testing maintenance data transmission...");
+  console.log("🔍 Values from frontend:", {
+    selectedSebanggo: `"${selectedSebanggo}"`,
+    currentDate: `"${currentDate}"`,
+    selectedWorker: `"${selectedWorker}"`,
+    selectedFactory: `"${selectedFactory}"`,
+    selectedMachine: `"${selectedMachine}"`
+  });
+
+  try {
+    const testPayload = {
+      factory: selectedFactory,
+      machine: selectedMachine,
+      worker: selectedWorker,
+      sebanggo: selectedSebanggo,
+      date: currentDate
+    };
+
+    console.log("🧪 Sending test payload:", JSON.stringify(testPayload, null, 2));
+
+    const testResponse = await fetch(`${serverURL}/testMaintenanceData`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(testPayload)
+    });
+    
+    const testResult = await testResponse.json();
+    console.log("🧪 Test response received:", testResult);
+    alert("Check console for test results");
+  } catch (error) {
+    console.error("🧪 Test failed:", error);
+    alert("Test failed: " + error.message);
+  }
+}
+
+// Legacy functions for compatibility (keep these as they are)
+function resetMachineTrouble(troubleNumber) {
+  // This function is kept for backward compatibility but now just opens the maintenance modal
+  showMaintenanceModal();
+}
+
+function resetTroubleTime(troubleNumber) {
+  // This function is kept for backward compatibility but now just opens the maintenance modal
+  showMaintenanceModal();
+}
 
 
 // When date is pressed or on page load, set current date as default
@@ -493,9 +1124,7 @@ document.addEventListener("DOMContentLoaded", function() {
   setDefaultDate(dateInput);
 });
 
-
-
-// Get worker list
+//Get worker list
 document.addEventListener("DOMContentLoaded", async function() {
   const selectedFactory = document.getElementById("selected工場").value;
 
@@ -505,31 +1134,19 @@ document.addEventListener("DOMContentLoaded", async function() {
       if (!response.ok) throw new Error("Failed to fetch worker names");
 
       const workerNames = await response.json();
+      const dataList = document.getElementById("machine-operator-suggestions");
+      dataList.innerHTML = ""; // Clear any existing options
 
-      // Get both datalists
-      const operatorList = document.getElementById("machine-operator-suggestions");
-      const kensaList = document.getElementById("kensa-name-suggestions");
-
-      // Clear any existing options
-      operatorList.innerHTML = "";
-      kensaList.innerHTML = "";
-
-      // Add options to both datalists
       workerNames.forEach(name => {
-        const option1 = document.createElement("option");
-        option1.value = name;
-        operatorList.appendChild(option1);
-
-        const option2 = document.createElement("option");
-        option2.value = name;
-        kensaList.appendChild(option2);
+        const option = document.createElement("option");
+        option.value = name;
+        dataList.appendChild(option);
       });
     } catch (error) {
       console.error("Error fetching worker names:", error);
     }
   }
 });
-
 
 //function for plus minus button
 function incrementCounter(counterId) {
@@ -548,16 +1165,15 @@ function decrementCounter(counterId) {
   const counterElement = document.getElementById(`counter-${counterId}`);
   let currentValue = parseInt(counterElement.value, 10);
   if (currentValue > 0) {
-      currentValue -= 1;
-      counterElement.value = currentValue;
+    currentValue -= 1;
+    counterElement.value = currentValue;
 
-      // Save the updated value to local storage with the unique prefix
-      localStorage.setItem(`${uniquePrefix}counter-${counterId}`, currentValue);
+    // Save the updated value to local storage with the unique prefix
+    localStorage.setItem(`${uniquePrefix}counter-${counterId}`, currentValue);
 
-      updateTotal();
+    updateTotal();
   }
 }
-
 
 // Helper function to handle alert modal display
 function showAlert(message) {
@@ -567,24 +1183,22 @@ function showAlert(message) {
   scanAlertModal.style.display = 'block';
 
   if (alertSound) {
-      alertSound.muted = false; // Unmute to alert user
-      alertSound.volume = 1; // Set full volume
-      alertSound.play().catch(error => console.error("Failed to play alert sound:", error));
+    alertSound.muted = false; // Unmute to alert user
+    alertSound.volume = 1; // Set full volume
+    alertSound.play().catch(error => console.error("Failed to play alert sound:", error));
   }
 
   document.body.classList.add('flash-red');
 
   const closeScanModalButton = document.getElementById('closeScanModalButton');
-  closeScanModalButton.onclick = function () {
-      scanAlertModal.style.display = 'none';
-      alertSound.pause();
-      alertSound.currentTime = 0; // Reset sound to the beginning
-      alertSound.muted = true; // Mute again for next time
-      document.body.classList.remove('flash-red');
+  closeScanModalButton.onclick = function() {
+    scanAlertModal.style.display = 'none';
+    alertSound.pause();
+    alertSound.currentTime = 0; // Reset sound to the beginning
+    alertSound.muted = true; // Mute again for next time
+    document.body.classList.remove('flash-red');
   };
 }
-
-
 
 // Updates cycle times for pressDB and kensaDB
 function updateCycleTime() {
@@ -627,10 +1241,8 @@ function updateCycleTime() {
   }
 }
 
-
-
 //scan BUtton javascript
-document.getElementById('scan-button').addEventListener('click', function () {
+document.getElementById('scan-button').addEventListener('click', function() {
   const qrScannerModal = document.getElementById('qrScannerModal');
   const scanAlertModal = document.getElementById('scanAlertModal');
   const scanAlertText = document.getElementById('scanAlertText');
@@ -639,9 +1251,9 @@ document.getElementById('scan-button').addEventListener('click', function () {
 
   // Preload the alert sound without playing it
   if (alertSound) {
-      alertSound.muted = true; // Mute initially to preload
-      alertSound.loop = false; // Disable looping
-      alertSound.load(); // Preload the audio file
+    alertSound.muted = true; // Mute initially to preload
+    alertSound.loop = false; // Disable looping
+    alertSound.load(); // Preload the audio file
   }
 
   // Show the modal
@@ -649,83 +1261,87 @@ document.getElementById('scan-button').addEventListener('click', function () {
 
   // Start QR code scanning
   html5QrCode.start(
-      { facingMode: "environment" },
-      {
-          fps: 10,
-          qrbox: { width: 250, height: 250 }
-      },
-      async qrCodeMessage => {
-          const subDropdown = document.getElementById('sub-dropdown');
-          const options = [...subDropdown.options].map(option => option.value);
-
-          console.log("Scanned QR Code:", qrCodeMessage);
-          if (subDropdown != qrCodeMessage){
-            NCPresstoFalse();
-          }
-
-          // Check if the scanned QR code does NOT exist in the dropdown options
-          if (!options.includes(qrCodeMessage)) {
-              // Display error modal
-              scanAlertText.innerText = "背番号が存在しません。 / Sebanggo does not exist.";
-              scanAlertModal.style.display = 'block';
-
-              // Play alert sound
-              if (alertSound) {
-                  alertSound.muted = false; // Unmute to alert user
-                  alertSound.volume = 1; // Set full volume
-                  alertSound.play().catch(error => console.error("Failed to play alert sound:", error));
-              }
-
-              // Add blinking red background
-              document.body.classList.add('flash-red');
-
-              const closeScanModalButton = document.getElementById('closeScanModalButton');
-              closeScanModalButton.onclick = function () {
-                  scanAlertModal.style.display = 'none';
-                  alertSound.pause();
-                  alertSound.currentTime = 0; // Reset sound to the beginning
-                  alertSound.muted = true; // Mute again for next time
-                  document.body.classList.remove('flash-red');
-              };
-
-              // Stop QR scanning
-              html5QrCode.stop().then(() => {
-                  qrScannerModal.style.display = 'none';
-              }).catch(err => console.error("Failed to stop scanning:", err));
-
-              return;
-          }
-
-          // If QR code matches an option, set the dropdown value and close scanner
-          if (subDropdown && subDropdown.value !== qrCodeMessage) {
-              subDropdown.value = qrCodeMessage;
-              fetchProductDetails();
-
-              html5QrCode.stop().then(() => {
-                  qrScannerModal.style.display = 'none';
-              }).catch(err => console.error("Failed to stop scanning:", err));
-
-              return;
-          }
+    {
+      facingMode: "environment"
+    }, {
+      fps: 10,
+      qrbox: {
+        width: 250,
+        height: 250
       }
+    },
+    async qrCodeMessage => {
+      const subDropdown = document.getElementById('sub-dropdown');
+      const options = [...subDropdown.options].map(option => option.value);
+
+      console.log("Scanned QR Code:", qrCodeMessage);
+      if (subDropdown != qrCodeMessage) {
+        NCPresstoFalse();
+      }
+
+      // Check if the scanned QR code does NOT exist in the dropdown options
+      if (!options.includes(qrCodeMessage)) {
+        // Display error modal
+        scanAlertText.innerText = "背番号が存在しません。 / Sebanggo does not exist.";
+        scanAlertModal.style.display = 'block';
+
+        // Play alert sound
+        if (alertSound) {
+          alertSound.muted = false; // Unmute to alert user
+          alertSound.volume = 1; // Set full volume
+          alertSound.play().catch(error => console.error("Failed to play alert sound:", error));
+        }
+
+        // Add blinking red background
+        document.body.classList.add('flash-red');
+
+        const closeScanModalButton = document.getElementById('closeScanModalButton');
+        closeScanModalButton.onclick = function() {
+          scanAlertModal.style.display = 'none';
+          alertSound.pause();
+          alertSound.currentTime = 0; // Reset sound to the beginning
+          alertSound.muted = true; // Mute again for next time
+          document.body.classList.remove('flash-red');
+        };
+
+        // Stop QR scanning
+        html5QrCode.stop().then(() => {
+          qrScannerModal.style.display = 'none';
+        }).catch(err => console.error("Failed to stop scanning:", err));
+
+        return;
+      }
+
+      // If QR code matches an option, set the dropdown value and close scanner
+      if (subDropdown && subDropdown.value !== qrCodeMessage) {
+        subDropdown.value = qrCodeMessage;
+        fetchProductDetails();
+
+        html5QrCode.stop().then(() => {
+          qrScannerModal.style.display = 'none';
+        }).catch(err => console.error("Failed to stop scanning:", err));
+
+        return;
+      }
+    }
   ).catch(err => {
-      console.error("Failed to start scanning:", err);
+    console.error("Failed to start scanning:", err);
   });
 
   // Close the QR scanner modal
-  document.getElementById('closeQRScannerModal').onclick = function () {
-      html5QrCode.stop().then(() => {
-          qrScannerModal.style.display = 'none';
-      }).catch(err => console.error("Failed to stop scanning:", err));
+  document.getElementById('closeQRScannerModal').onclick = function() {
+    html5QrCode.stop().then(() => {
+      qrScannerModal.style.display = 'none';
+    }).catch(err => console.error("Failed to stop scanning:", err));
   };
 
   // Close scanner if user clicks outside the modal
-  window.onclick = function (event) {
-      if (event.target == qrScannerModal) {
-          html5QrCode.stop().then(() => {
-              qrScannerModal.style.display = 'none';
-          }).catch(err => console.error("Failed to stop scanning:", err));
-      }
+  window.onclick = function(event) {
+    if (event.target == qrScannerModal) {
+      html5QrCode.stop().then(() => {
+        qrScannerModal.style.display = 'none';
+      }).catch(err => console.error("Failed to stop scanning:", err));
+    }
   };
 });
 
@@ -744,9 +1360,6 @@ style.innerHTML = `
 `;
 document.head.appendChild(style);
 
-
-
-
 // Function to reset everything and reload the page
 function resetForm() {
   const excludedInputs = ['process']; // IDs or names of inputs to exclude from reset
@@ -754,51 +1367,68 @@ function resetForm() {
   // Clear all form inputs with unique prefix except excluded ones
   const inputs = document.querySelectorAll('input, select, textarea');
   inputs.forEach(input => {
-      const key = `${uniquePrefix}${input.id || input.name}`;
-      if (!excludedInputs.includes(input.id) && !excludedInputs.includes(input.name)) {
-          localStorage.removeItem(key);
-          input.value = ''; // Reset input value
-      }
+    const key = `${uniquePrefix}${input.id || input.name}`;
+    if (!excludedInputs.includes(input.id) && !excludedInputs.includes(input.name)) {
+      localStorage.removeItem(key);
+      input.value = ''; // Reset input value
+    }
   });
 
   // Clear counters with unique prefix
-  for (let i = 18; i <= 20; i++) {
-      const key = `${uniquePrefix}counter-${i}`;
-      localStorage.removeItem(key);
-      const counterElement = document.getElementById(`counter-${i}`);
-      if (counterElement) {
-          counterElement.value = '0'; // Reset counter display
-      }
+  for (let i = 1; i <= 20; i++) { // Adjusted loop to clear all counter values
+    const key = `${uniquePrefix}counter-${i}`;
+    localStorage.removeItem(key);
+    const counterElement = document.getElementById(`counter-${i}`);
+    if (counterElement) {
+      counterElement.value = '0'; // Reset counter display
+    }
   }
+
+  // Clear break time inputs and total
+  for (let i = 1; i <= 4; i++) {
+    localStorage.removeItem(`${uniquePrefix}break${i}-start`);
+    localStorage.removeItem(`${uniquePrefix}break${i}-end`);
+  }
+  localStorage.removeItem(`${uniquePrefix}breaktime-mins`);
+  localStorage.removeItem(`${uniquePrefix}total-break-display`);
+
+  // Clear machine trouble inputs and total
+  for (let i = 1; i <= 4; i++) {
+    localStorage.removeItem(`${uniquePrefix}trouble${i}-start`);
+    localStorage.removeItem(`${uniquePrefix}trouble${i}-end`);
+  }
+  localStorage.removeItem(`${uniquePrefix}trouble-time-mins`);
+  localStorage.removeItem(`${uniquePrefix}total-trouble-display`);
+  
+  // Clear maintenance records
+  localStorage.removeItem(`${uniquePrefix}maintenanceRecords`);
+  maintenanceRecords = [];
+
 
   // Reset all textContent elements
   const textContentElements = document.querySelectorAll('[id]'); // Select all elements with an ID
   textContentElements.forEach(element => {
-      const textKey = `${uniquePrefix}${element.id}.textContent`;
-      if (localStorage.getItem(textKey)) {
-          localStorage.removeItem(textKey); // Remove from localStorage
-          element.textContent = ''; // Reset to default empty textContent
-          console.log(`Reset textContent for element with ID: ${element.id}`);
-      }
+    const textKey = `${uniquePrefix}${element.id}.textContent`;
+    if (localStorage.getItem(textKey)) {
+      localStorage.removeItem(textKey); // Remove from localStorage
+      element.textContent = ''; // Reset to default empty textContent
+      console.log(`Reset textContent for element with ID: ${element.id}`);
+    }
   });
 
   // Reset all <img> elements
   const images = document.querySelectorAll('img'); // Get all <img> elements
   images.forEach(image => {
-      const imageKey = `${uniquePrefix}${image.id || image.name}.src`;
-      localStorage.removeItem(imageKey); // Remove image source from localStorage
-      image.src = ''; // Reset the image source
-      image.style.display = 'none'; // Hide the image
-      console.log(`Reset image ${image.id || image.name}`);
+    const imageKey = `${uniquePrefix}${image.id || image.name}.src`;
+    localStorage.removeItem(imageKey); // Remove image source from localStorage
+    image.src = ''; // Reset the image source
+    image.style.display = 'none'; // Hide the image
+    console.log(`Reset image ${image.id || image.name}`);
   });
 
   // Reload the page
   window.location.reload();
 }
-
-
-
-
 
 // Print label using "Smooth Print" app for mobile devices
 function printLabel() {
@@ -832,7 +1462,7 @@ function printLabel() {
 
     // Close modal on button click
     const closeScanModalButton = document.getElementById('closeScanModalButton');
-    closeScanModalButton.onclick = function () {
+    closeScanModalButton.onclick = function() {
       scanAlertModal.style.display = 'none';
       alertSound.pause();
       alertSound.currentTime = 0; // Reset sound to the beginning
@@ -924,13 +1554,13 @@ function printLabel() {
       const SRS = document.getElementById("SRS").value;
       let filename = "";
 
-      const Date = extension ? `${Date2} - ${extension}` : Date2;
+      const WorkDate = extension ? `${Date2} - ${extension}` : Date2;
 
       // Smooth Print URL scheme
-      if (SRS === "有り"){
-          filename = "SRS3.lbx";
-      } else if (背番号 === "NC2"){
-          filename = "NC21.lbx"
+      if (SRS === "有り") {
+        filename = "SRS3.lbx";
+      } else if (背番号 === "NC2") {
+        filename = "NC21.lbx"
       } else {
         filename = "sample6.lbx";
       }
@@ -945,10 +1575,10 @@ function printLabel() {
         `&text_RL=${encodeURIComponent(R_L)}` +
         `&text_材料=${encodeURIComponent(材料)}` +
         `&text_色=${encodeURIComponent(色)}` +
-        `&text_DateT=${encodeURIComponent(Date)}` +
+        `&text_DateT=${encodeURIComponent(WorkDate)}` +
         `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
 
-      console.log(Date);
+      console.log(WorkDate);
       window.location.href = url; // Redirect to Smooth Print
     }
 
@@ -968,16 +1598,16 @@ function printLabel() {
   const SRS = document.getElementById("SRS").value;
   let filename = "";
 
-  const Date = extension ? `${Date2} - ${extension}` : Date2;
+  const WorkDate = extension ? `${Date2} - ${extension}` : Date2;
 
-  if (SRS === "有り"){
+  if (SRS === "有り") {
     filename = "SRS3.lbx";
-  } else if (背番号 === "NC2"){
-      filename = "NC21.lbx"
+  } else if (背番号 === "NC2") {
+    filename = "NC21.lbx"
   } else {
     filename = "sample6.lbx";
   }
-  
+
   const size = "RollW62";
   const copies = 1;
   const url =
@@ -989,43 +1619,37 @@ function printLabel() {
     `&text_RL=${encodeURIComponent(R_L)}` +
     `&text_材料=${encodeURIComponent(材料)}` +
     `&text_色=${encodeURIComponent(色)}` +
-    `&text_DateT=${encodeURIComponent(Date)}` +
+    `&text_DateT=${encodeURIComponent(WorkDate)}` +
     `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
 
-  console.log(Date);
+  console.log(WorkDate);
   window.location.href = url;
 }
 
-
-
-
-
 // Take photo hatsumono and atomono and label
 // Mapping of buttons to labels and images
-const buttonMappings = [
-  {
-    buttonId: 'hatsumonoButton',
-    labelId: 'hatsumonoLabel',
-    imgId: 'hatsumonoPic',
-    labelText: '初物チェック',
-  },
-  {
-    buttonId: 'atomonoButton',
-    labelId: 'atomonoLabel',
-    imgId: 'atomonoPic',
-    labelText: '終物チェック',
-  },
-  {
-    buttonId: 'makerLabelButton',
-    labelId: 'makerLabel',
-    imgId: '材料ラベル',
-    labelText: '材料ラベル',
-  },
-];
+const buttonMappings = [{
+  buttonId: 'hatsumonoButton',
+  labelId: 'hatsumonoLabel',
+  imgId: 'hatsumonoPic',
+  labelText: '初物チェック',
+}, {
+  buttonId: 'atomonoButton',
+  labelId: 'atomonoLabel',
+  imgId: 'atomonoPic',
+  labelText: '終物チェック',
+}, {
+  buttonId: 'makerLabelButton',
+  labelId: 'makerLabel',
+  imgId: '材料ラベル',
+  labelText: '材料ラベル',
+}, ];
 
 let currentButtonId = null;
 
-buttonMappings.forEach(({ buttonId }) => {
+buttonMappings.forEach(({
+  buttonId
+}) => {
   const button = document.getElementById(buttonId);
   button.addEventListener('click', () => {
     const subDropdown = document.getElementById('sub-dropdown');
@@ -1053,7 +1677,7 @@ buttonMappings.forEach(({ buttonId }) => {
 
       // Set modal close behavior
       const closeScanModalButton = document.getElementById('closeScanModalButton');
-      closeScanModalButton.onclick = function () {
+      closeScanModalButton.onclick = function() {
         scanAlertModal.style.display = 'none';
         document.body.classList.remove('flash-red');
         subDropdown.classList.remove('flash-red-border');
@@ -1074,19 +1698,22 @@ buttonMappings.forEach(({ buttonId }) => {
   });
 });
 
-
-
 // Handle the message from the popup window
-window.addEventListener('message', function (event) {
+window.addEventListener('message', function(event) {
   if (event.origin === window.location.origin) {
     const data = event.data;
 
     if (data.image && currentButtonId) {
       // Find the mapping for the current button
-      const mapping = buttonMappings.find(({ buttonId }) => buttonId === currentButtonId);
+      const mapping = buttonMappings.find(({
+        buttonId
+      }) => buttonId === currentButtonId);
 
       if (mapping) {
-        const { labelId, imgId } = mapping;
+        const {
+          labelId,
+          imgId
+        } = mapping;
 
         // Update photo preview
         const photoPreview = document.getElementById(imgId);
@@ -1116,7 +1743,6 @@ window.addEventListener('message', function (event) {
   }
 });
 
-
 // Upload Photo Function for multiple images
 function uploadPhotou() {
   const selectedSebanggo = document.getElementById("sub-dropdown").value;
@@ -1126,13 +1752,21 @@ function uploadPhotou() {
   const selectedMachine = document.getElementById("process").value;
 
   // Mapping of images to their respective IDs
-  const imageMappings = [
-    { imgId: 'hatsumonoPic', label: '初物チェック' },
-    { imgId: 'atomonoPic', label: '終物チェック' },
-    { imgId: '材料ラベル', label: '材料ラベル' },
-  ];
+  const imageMappings = [{
+    imgId: 'hatsumonoPic',
+    label: '初物チェック'
+  }, {
+    imgId: 'atomonoPic',
+    label: '終物チェック'
+  }, {
+    imgId: '材料ラベル',
+    label: '材料ラベル'
+  }, ];
 
-  imageMappings.forEach(({ imgId, label }) => {
+  imageMappings.forEach(({
+    imgId,
+    label
+  }) => {
     const photoPreview = document.getElementById(imgId);
 
     if (!photoPreview || !photoPreview.src) {
@@ -1145,7 +1779,7 @@ function uploadPhotou() {
       .then(response => response.blob())
       .then(blob => {
         const reader = new FileReader();
-        reader.onloadend = function () {
+        reader.onloadend = function() {
           const base64data = reader.result.split(',')[1]; // Get the base64 encoded string
 
           const formData = new FormData();
@@ -1159,12 +1793,11 @@ function uploadPhotou() {
 
           // Send the blob to Apps Script via POST request
           fetch(
-            'https://script.google.com/macros/s/AKfycbxDWa2RTdI2_aHBgzq9GA9GtQx5MrwqaRnW4F26VZdoptwJ1Pg_Enr_xI3vw1t7WHYbTw/exec',
-            {
-              method: 'POST',
-              body: formData,
-            }
-          )
+              'https://script.google.com/macros/s/AKfycbxDWa2RTdI2_aHBgzq9GA9GtQx5MrwqaRnW4F26VZdoptwJ1Pg_Enr_xI3vw1t7WHYbTw/exec', {
+                method: 'POST',
+                body: formData,
+              }
+            )
             .then((response) => response.text()) // Fetch raw text response
             .then((text) => {
               console.log(`Raw response for ${label}:`, text); // Log the raw response
@@ -1189,36 +1822,41 @@ function uploadPhotou() {
   });
 }
 
+//Submit Button
 
-
-// // Submit Button
 // document.getElementById('submit').addEventListener('click', async (event) => {
-//   event.preventDefault(); // Prevent default form submission
+//   event.preventDefault();
 //   updateCycleTime();
+
 //   const hatsumono = document.getElementById("hatsumonoLabel").textContent;
 //   const atomono = document.getElementById("atomonoLabel").textContent;
-
 //   const isToggleChecked = document.getElementById('enable-inputs').checked;
 
 //   const alertSound = document.getElementById('alert-sound');
 //   const scanAlertModal = document.getElementById('scanAlertModal');
 //   const scanAlertText = document.getElementById('scanAlertText');
+//   const uploadingModal = document.getElementById('uploadingModal');
 
-//   // Preload the alert sound without playing it
-//   if (alertSound) {
-//     alertSound.muted = true; // Mute initially to preload
-//     alertSound.loop = false; // Disable looping
-//     alertSound.load(); // Preload the audio file
+//   const shotInput = document.getElementById('shot');
+
+//   // Add this validation for the 'shot' field
+//   if (!shotInput.value || parseInt(shotInput.value) < 1) {
+//     showAlert('ショット数 (Shot Count) is required and must be at least 1.');
+//     shotInput.focus();
+//     return; // Stop form submission
 //   }
 
-//   // Check if hatsumono and atomono are done
-//   if (hatsumono === "FALSE" || atomono === "FALSE") {
-//     showAlert("初物/終物確認してください / Please do Hatsumono and Atomono");
+//   // Show loading modal
+//   uploadingModal.style.display = 'flex';
+
+//   const makerPic = document.getElementById('材料ラベル');
+//   if (!makerPic || !makerPic.src || makerPic.style.display === 'none') {
+//     uploadingModal.style.display = 'none';
+//     showAlert("材料ラベルの写真を撮影してください / Please capture the 材料ラベル image");
 //     return;
 //   }
 
 //   try {
-//     // Extract common data
 //     const 品番 = document.getElementById('product-number').value;
 //     const 背番号 = document.getElementById('sub-dropdown').value;
 //     const 工場 = document.getElementById('selected工場').value;
@@ -1228,46 +1866,126 @@ function uploadPhotou() {
 //     const 加工不良 = parseInt(document.getElementById('counter-19').value, 10) || 0;
 //     const その他 = parseInt(document.getElementById('counter-20').value, 10) || 0;
 //     const Total_NG = 疵引不良 + 加工不良 + その他;
-//     const Total_PressDB = Process_Quantity - Total_NG; // Total for pressDB
+//     const Total_PressDB = Process_Quantity - Total_NG;
 //     const Worker_Name = document.getElementById('Machine Operator').value;
-//     const Date = document.getElementById('Lot No.').value;
+//     const WorkDate = document.getElementById('Lot No.').value;
 //     const Time_start = document.getElementById('Start Time').value;
 //     const Time_end = document.getElementById('End Time').value;
 //     const 材料ロット = document.getElementById('材料ロット').value;
 //     const Spare = parseInt(document.getElementById('在庫').value, 10) || 0;
 //     const Comment = document.querySelector('textarea[name="Comments1"]').value;
 //     const Cycle_Time = parseFloat(document.getElementById('cycleTime').value) || 0;
+//     const ショット数 = parseInt(document.getElementById('shot').value, 10) || 0;
 
-//     // Check if 背番号 is selected
-//     if (!背番号) {
-//       // Show alert modal
-//       scanAlertText.innerText = '背番号が必要です。 / Sebanggo is required.';
-//       scanAlertModal.style.display = 'block';
-
-//       // Play alert sound
-//       if (alertSound) {
-//         alertSound.muted = false; // Unmute to alert user
-//         alertSound.volume = 1; // Set full volume
-//         alertSound.play().catch(error => console.error('Failed to play alert sound:', error));
+//     // Collect break time data
+//     const breakTimeData = {
+//       break1: {
+//         start: document.getElementById('break1-start')?.value || '',
+//         end: document.getElementById('break1-end')?.value || ''
+//       },
+//       break2: {
+//         start: document.getElementById('break2-start')?.value || '',
+//         end: document.getElementById('break2-end')?.value || ''
+//       },
+//       break3: {
+//         start: document.getElementById('break3-start')?.value || '',
+//         end: document.getElementById('break3-end')?.value || ''
+//       },
+//       break4: {
+//         start: document.getElementById('break4-start')?.value || '',
+//         end: document.getElementById('break4-end')?.value || ''
 //       }
+//     };
 
-//       // Add blinking red background
-//       document.body.classList.add('flash-red');
+//     // Calculate total break time in minutes
+//     const totalBreakMinutes = calculateTotalBreakTime();
+//     const totalBreakHours = totalBreakMinutes / 60;
 
-//       // Close modal on button click
-//       const closeScanModalButton = document.getElementById('closeScanModalButton');
-//       closeScanModalButton.onclick = function () {
-//         scanAlertModal.style.display = 'none';
-//         alertSound.pause();
-//         alertSound.currentTime = 0; // Reset sound to the beginning
-//         alertSound.muted = true; // Mute again for next time
-//         document.body.classList.remove('flash-red');
-//       };
+//     // Calculate total machine trouble/maintenance time in minutes
+//     const totalTroubleMinutes = calculateTotalMachineTroubleTime();
+//     const totalTroubleHours = totalTroubleMinutes / 60;
 
-//       return; // Stop the submission process
+//     // Upload maintenance photos before submitting
+//     if (maintenanceRecords.length > 0) {
+//       console.log(`📸 Uploading maintenance photos for ${maintenanceRecords.length} maintenance records...`);
+//       await uploadMaintenancePhotos();
+//       console.log("✅ Maintenance photo upload process completed");
 //     }
 
-//     // Data for pressDB
+//     // Prepare maintenance data for submission (only Firebase URLs, no base64)
+//     const maintenanceDataForSubmission = {
+//       records: maintenanceRecords.map(record => ({
+//         id: record.id,
+//         startTime: record.startTime,
+//         endTime: record.endTime,
+//         comment: record.comment,
+//         timestamp: record.timestamp,
+//         // Only include Firebase URLs, not base64 data
+//         photos: record.photos ? record.photos.map(photo => ({
+//           id: photo.id,
+//           timestamp: photo.timestamp,
+//           firebaseUrl: photo.firebaseUrl,
+//           uploaded: photo.uploaded,
+//           uploadError: photo.uploadError
+//         })).filter(photo => photo.firebaseUrl) : [] // Only include photos with Firebase URLs
+//       })),
+//       totalMinutes: totalTroubleMinutes,
+//       totalHours: totalTroubleHours
+//     };
+
+//     console.log("📊 Maintenance data prepared for submission:", {
+//       recordCount: maintenanceDataForSubmission.records.length,
+//       totalPhotosWithUrls: maintenanceDataForSubmission.records.reduce((sum, record) => sum + record.photos.length, 0),
+//       totalMinutes: totalTroubleMinutes
+//     });
+
+//     // Calculate total work hours (Time_end - Time_start - break time - maintenance time)
+//     let totalWorkHours = 0;
+//     if (Time_start && Time_end) {
+//       const startWork = new Date(`2000-01-01T${Time_start}:00`);
+//       const endWork = new Date(`2000-01-01T${Time_end}:00`);
+
+//       if (endWork > startWork) {
+//         const workDiffMs = endWork - startWork;
+//         const workHours = workDiffMs / (1000 * 60 * 60); // Convert to hours
+//         totalWorkHours = Math.max(0, workHours - totalBreakHours - totalTroubleHours); // Subtract break and maintenance time, ensure not negative
+//       }
+//     }
+
+//     // Log the calculations for debugging
+//     console.log('Time Calculations:', {
+//       totalBreakMinutes,
+//       totalBreakHours: totalBreakHours.toFixed(2),
+//       totalMaintenanceMinutes: totalTroubleMinutes,
+//       totalMaintenanceHours: totalTroubleHours.toFixed(2),
+//       workTimeWithoutBreakAndMaintenance: totalWorkHours.toFixed(2),
+//       startTime: Time_start,
+//       endTime: Time_end,
+//       maintenanceRecordsCount: maintenanceRecords.length
+//     });
+
+//     if (!背番号) {
+//       uploadingModal.style.display = 'none';
+//       scanAlertText.innerText = '背番号が必要です。 / Sebanggo is required.';
+//       scanAlertModal.style.display = 'block';
+//       if (alertSound) {
+//         alertSound.muted = false;
+//         alertSound.volume = 1;
+//         alertSound.play().catch(console.error);
+//       }
+//       document.body.classList.add('flash-red');
+//       document.getElementById('closeScanModalButton').onclick = function() {
+//         scanAlertModal.style.display = 'none';
+//         alertSound.pause();
+//         alertSound.currentTime = 0;
+//         alertSound.muted = true;
+//         document.body.classList.remove('flash-red');
+//       };
+//       return;
+//     }
+
+//     // Upload images and map to data
+//     const uploadedImages = await collectImagesForUpload();
 //     const pressDBData = {
 //       品番,
 //       背番号,
@@ -1276,7 +1994,7 @@ function uploadPhotou() {
 //       工場,
 //       Worker_Name,
 //       Process_Quantity,
-//       Date,
+//       Date: WorkDate,
 //       Time_start,
 //       Time_end,
 //       材料ロット,
@@ -1287,14 +2005,34 @@ function uploadPhotou() {
 //       Spare,
 //       Comment,
 //       Cycle_Time,
+//       ショット数,
+//       Break_Time_Data: breakTimeData,
+//       Total_Break_Minutes: totalBreakMinutes,
+//       Total_Break_Hours: parseFloat(totalBreakHours.toFixed(2)),
+//       Maintenance_Data: maintenanceDataForSubmission,
+//       Total_Trouble_Minutes: totalTroubleMinutes,
+//       Total_Trouble_Hours: parseFloat(totalTroubleHours.toFixed(2)),
+//       Total_Work_Hours: parseFloat(totalWorkHours.toFixed(2))
 //     };
 
-//     console.log('PressDB Data:', pressDBData);
+//     uploadedImages.forEach(img => {
+//       if (img.label === "初物チェック") {
+//         pressDBData["初物チェック画像"] = img.url;
+//       } else if (img.label === "終物チェック") {
+//         pressDBData["終物チェック画像"] = img.url;
+//       } else if (img.label === "材料ラベル") {
+//         pressDBData["材料ラベル画像"] = img.url;
+//       }
+//     });
 
-//     // Save to pressDB
+//     // Attach base64 for backend processing
+//     pressDBData.images = uploadedImages;
+
 //     const pressDBResponse = await fetch(`${serverURL}/submitTopressDBiReporter`, {
 //       method: 'POST',
-//       headers: { 'Content-Type': 'application/json' },
+//       headers: {
+//         'Content-Type': 'application/json'
+//       },
 //       body: JSON.stringify(pressDBData),
 //     });
 
@@ -1302,50 +2040,17 @@ function uploadPhotou() {
 //       const errorData = await pressDBResponse.json();
 //       throw new Error(errorData.error || 'Failed to save data to pressDB');
 //     }
-//     console.log('Data saved to pressDB successfully.');
 
-//     // Run uploadPhotou() after saving data
-//     try {
-//       await uploadPhotou();
-
-//       // Wait for 3 seconds before showing success message and closing
-//       setTimeout(() => {
-//         // Show success modal with blinking green background
-//         scanAlertText.innerText = 'Form submitted successfully / 保存しました';
-//         scanAlertModal.style.display = 'block';
-//         document.body.classList.add('flash-green');
-
-//         const closeScanModalButton = document.getElementById('closeScanModalButton');
-//         closeScanModalButton.onclick = function () {
-//           scanAlertModal.style.display = 'none';
-//           document.body.classList.remove('flash-green');
-//           window.location.reload();
-//           resetForm();
-//         };
-//       }, 3000);
-//     } catch (error) {
-//       console.error('Upload failed:', error);
-
-//       // Show error message and close window after 3 seconds
-//       scanAlertText.innerText = 'Upload failed. Please try again.';
-//       scanAlertModal.style.display = 'block';
-//       setTimeout(() => {
-//         scanAlertModal.style.display = 'none';
-//         window.close();
-//       }, 3000);
-//     }
-
+//     // Optionally submit to kensaDB
 //     if (isToggleChecked) {
-//       // Data for kensaDB
-//       const counters = Array.from({ length: 12 }, (_, i) => {
+//       const counters = Array.from({
+//         length: 12
+//       }, (_, i) => {
 //         const counter = document.getElementById(`counter-${i + 1}`);
 //         return parseInt(counter?.value || 0, 10);
 //       });
 
-//       // Calculate Total_NG as the sum of counters 1 to 12
-//       const Total_NG_Kensa = counters.reduce((sum, count) => sum + count, 0);
-
-//       // Total for kensaDB
+//       const Total_NG_Kensa = counters.reduce((sum, val) => sum + val, 0);
 //       const Total_KensaDB = Total_PressDB - Total_NG_Kensa;
 
 //       const kensaDBData = {
@@ -1356,27 +2061,33 @@ function uploadPhotou() {
 //         Worker_Name,
 //         Process_Quantity,
 //         Remaining_Quantity: Total_PressDB,
-//         Date,
+//         Date: WorkDate,
 //         Time_start,
 //         Time_end,
 //         設備,
-//         Counters: counters.reduce((acc, val, idx) => {
-//           acc[`counter-${idx + 1}`] = val; // Dynamically add counters
-//           return acc;
-//         }, {}),
-//         Total_NG: Total_NG_Kensa,
 //         Cycle_Time,
 //         製造ロット: 材料ロット,
 //         Comment,
 //         Spare,
+//         Counters: counters.reduce((acc, val, i) => {
+//           acc[`counter-${i + 1}`] = val;
+//           return acc;
+//         }, {}),
+//         Total_NG: Total_NG_Kensa,
+//         Break_Time_Data: breakTimeData,
+//         Total_Break_Minutes: totalBreakMinutes,
+//         Total_Break_Hours: parseFloat(totalBreakHours.toFixed(2)),
+//         Maintenance_Data: maintenanceDataForSubmission,
+//         Total_Trouble_Minutes: totalTroubleMinutes,
+//         Total_Trouble_Hours: parseFloat(totalTroubleHours.toFixed(2)),
+//         Total_Work_Hours: parseFloat(totalWorkHours.toFixed(2))
 //       };
 
-//       console.log('KensaDB Data:', kensaDBData);
-
-//       // Save to kensaDB
 //       const kensaDBResponse = await fetch(`${serverURL}/submitToKensaDBiReporter`, {
 //         method: 'POST',
-//         headers: { 'Content-Type': 'application/json' },
+//         headers: {
+//           'Content-Type': 'application/json'
+//         },
 //         body: JSON.stringify(kensaDBData),
 //       });
 
@@ -1384,28 +2095,33 @@ function uploadPhotou() {
 //         const errorData = await kensaDBResponse.json();
 //         throw new Error(errorData.error || 'Failed to save data to kensaDB');
 //       }
-//       console.log('Data saved to kensaDB successfully.');
 //     }
+
+//     setTimeout(() => {
+//       uploadingModal.style.display = 'none';
+//       scanAlertText.innerText = 'Form submitted successfully / 保存しました';
+//       scanAlertModal.style.display = 'block';
+//       document.body.classList.add('flash-green');
+//       document.getElementById('closeScanModalButton').onclick = function() {
+//         scanAlertModal.style.display = 'none';
+//         document.body.classList.remove('flash-green');
+//         window.location.reload();
+//         resetForm();
+//       };
+//     }, 3000);
+
 //   } catch (error) {
 //     console.error('Error during submission:', error);
-
-//     // Show error modal
+//     uploadingModal.style.display = 'none';
 //     scanAlertText.innerText = 'An error occurred. Please try again.';
 //     scanAlertModal.style.display = 'block';
-
-//     // Play alert sound
 //     if (alertSound) {
 //       alertSound.muted = false;
 //       alertSound.volume = 1;
-//       alertSound.play().catch(error => console.error('Failed to play alert sound:', error));
+//       alertSound.play().catch(console.error);
 //     }
-
-//     // Add blinking red background
 //     document.body.classList.add('flash-red');
-
-//     // Close modal after error
-//     const closeScanModalButton = document.getElementById('closeScanModalButton');
-//     closeScanModalButton.onclick = function () {
+//     document.getElementById('closeScanModalButton').onclick = function() {
 //       scanAlertModal.style.display = 'none';
 //       alertSound.pause();
 //       alertSound.currentTime = 0;
@@ -1415,213 +2131,269 @@ function uploadPhotou() {
 //   }
 // });
 
+// Locate your document.getElementById('submit').addEventListener('click', async (event) => { ... }
 document.getElementById('submit').addEventListener('click', async (event) => {
-  event.preventDefault();
-  updateCycleTime();
+    event.preventDefault();
+    updateCycleTime();
 
-  const hatsumono = document.getElementById("hatsumonoLabel").textContent;
-  const atomono = document.getElementById("atomonoLabel").textContent;
-  const isToggleChecked = document.getElementById('enable-inputs').checked;
+    const hatsumono = document.getElementById("hatsumonoLabel").textContent;
+    const atomono = document.getElementById("atomonoLabel").textContent;
+    const isToggleChecked = document.getElementById('enable-inputs').checked;
 
-  const alertSound = document.getElementById('alert-sound');
-  const scanAlertModal = document.getElementById('scanAlertModal');
-  const scanAlertText = document.getElementById('scanAlertText');
-  const uploadingModal = document.getElementById('uploadingModal');
+    const alertSound = document.getElementById('alert-sound');
+    const scanAlertModal = document.getElementById('scanAlertModal');
+    const scanAlertText = document.getElementById('scanAlertText');
+    const uploadingModal = document.getElementById('uploadingModal');
 
-  // Show loading modal
-  uploadingModal.style.display = 'flex';
+    const shotInput = document.getElementById('shot');
 
-  if (hatsumono === "FALSE" || atomono === "FALSE") {
-    uploadingModal.style.display = 'none';
-    showAlert("初物/終物確認してください / Please do Hatsumono and Atomono");
-    return;
-  }
-
-  try {
-    const 品番 = document.getElementById('product-number').value;
-    const 背番号 = document.getElementById('sub-dropdown').value;
-    const 工場 = document.getElementById('selected工場').value;
-    const 設備 = document.getElementById('process').value;
-    const Process_Quantity = parseInt(document.getElementById('ProcessQuantity').value, 10) || 0;
-    const 疵引不良 = parseInt(document.getElementById('counter-18').value, 10) || 0;
-    const 加工不良 = parseInt(document.getElementById('counter-19').value, 10) || 0;
-    const その他 = parseInt(document.getElementById('counter-20').value, 10) || 0;
-    const Total_NG = 疵引不良 + 加工不良 + その他;
-    const Total_PressDB = Process_Quantity - Total_NG;
-    const Worker_Name = document.getElementById('Machine Operator').value;
-    const Date = document.getElementById('Lot No.').value;
-    const Time_start = document.getElementById('Start Time').value;
-    const Time_end = document.getElementById('End Time').value;
-    const 材料ロット = document.getElementById('材料ロット').value;
-    const Spare = parseInt(document.getElementById('在庫').value, 10) || 0;
-    const Comment = document.querySelector('textarea[name="Comments1"]').value;
-    const Cycle_Time = parseFloat(document.getElementById('cycleTime').value) || 0;
-    const ショット数 = parseInt(document.getElementById('shot').value, 10) || 0;
-
-    if (!背番号) {
-      uploadingModal.style.display = 'none';
-      scanAlertText.innerText = '背番号が必要です。 / Sebanggo is required.';
-      scanAlertModal.style.display = 'block';
-      if (alertSound) {
-        alertSound.muted = false;
-        alertSound.volume = 1;
-        alertSound.play().catch(console.error);
-      }
-      document.body.classList.add('flash-red');
-      document.getElementById('closeScanModalButton').onclick = function () {
-        scanAlertModal.style.display = 'none';
-        alertSound.pause();
-        alertSound.currentTime = 0;
-        alertSound.muted = true;
-        document.body.classList.remove('flash-red');
-      };
-      return;
+    if (!shotInput.value || parseInt(shotInput.value) < 1) {
+        showAlert('ショット数 (Shot Count) is required and must be at least 1.');
+        shotInput.focus();
+        return;
     }
 
-    const pressDBData = {
-      品番,
-      背番号,
-      設備,
-      Total: Total_PressDB,
-      工場,
-      Worker_Name,
-      Process_Quantity,
-      Date,
-      Time_start,
-      Time_end,
-      材料ロット,
-      疵引不良,
-      加工不良,
-      その他,
-      Total_NG,
-      Spare,
-      Comment,
-      Cycle_Time,
-      ショット数,
-    };
+    uploadingModal.style.display = 'flex';
 
-    // Collect image data
-    const images = [];
+    const makerPic = document.getElementById('材料ラベル');
+    if (!makerPic || !makerPic.src || makerPic.style.display === 'none') {
+        uploadingModal.style.display = 'none';
+        showAlert("材料ラベルの写真を撮影してください / Please capture the 材料ラベル image");
+        return;
+    }
 
-    const imageMappings = [
-      { id: 'hatsumonoPic', label: '初物チェック' },
-      { id: 'atomonoPic', label: '終物チェック' },
-      { id: '材料ラベル', label: '材料ラベル' }
-    ];
+    try {
+        const 品番 = document.getElementById('product-number').value;
+        const 背番号 = document.getElementById('sub-dropdown').value;
+        const 工場 = document.getElementById('selected工場').value;
+        const 設備 = document.getElementById('process').value;
+        const Process_Quantity = parseInt(document.getElementById('ProcessQuantity').value, 10) || 0;
+        const 疵引不良 = parseInt(document.getElementById('counter-18').value, 10) || 0;
+        const 加工不良 = parseInt(document.getElementById('counter-19').value, 10) || 0;
+        const その他 = parseInt(document.getElementById('counter-20').value, 10) || 0;
+        const Total_NG = 疵引不良 + 加工不良 + その他;
+        const Total_PressDB = Process_Quantity - Total_NG;
+        const Worker_Name = document.getElementById('Machine Operator').value;
+        const WorkDate = document.getElementById('Lot No.').value;
+        const Time_start = document.getElementById('Start Time').value;
+        const Time_end = document.getElementById('End Time').value;
+        const 材料ロット = document.getElementById('材料ロット').value;
+        const Spare = parseInt(document.getElementById('在庫').value, 10) || 0;
+        const Comment = document.querySelector('textarea[name="Comments1"]').value;
+        const Cycle_Time = parseFloat(document.getElementById('cycleTime').value) || 0;
+        const ショット数 = parseInt(document.getElementById('shot').value, 10) || 0;
 
-    for (const { id, label } of imageMappings) {
-      const img = document.getElementById(id);
-      if (img && img.src) {
-        const response = await fetch(img.src);
-        const blob = await response.blob();
-        const base64 = await blobToBase64(blob);
-        images.push({
-          base64,
-          label,
-          factory: 工場,
-          machine: 設備,
-          worker: Worker_Name,
-          date: Date,
-          sebanggo: 背番号,
+        const breakTimeData = {
+            break1: { start: document.getElementById('break1-start')?.value || '', end: document.getElementById('break1-end')?.value || '' },
+            break2: { start: document.getElementById('break2-start')?.value || '', end: document.getElementById('break2-end')?.value || '' },
+            break3: { start: document.getElementById('break3-start')?.value || '', end: document.getElementById('break3-end')?.value || '' },
+            break4: { start: document.getElementById('break4-start')?.value || '', end: document.getElementById('break4-end')?.value || '' }
+        };
+
+        const totalBreakMinutes = calculateTotalBreakTime();
+        const totalBreakHours = totalBreakMinutes / 60;
+
+        const totalTroubleMinutes = calculateTotalMachineTroubleTime();
+        const totalTroubleHours = totalTroubleMinutes / 60;
+
+        // Prepare maintenance images data for the new submitToDCP route
+        const maintenanceImages = [];
+        
+        if (maintenanceRecords.length > 0) {
+            console.log(`📸 Preparing ${maintenanceRecords.length} maintenance records for submission...`);
+            
+            maintenanceRecords.forEach(record => {
+                if (record.photos && record.photos.length > 0) {
+                    record.photos.forEach(photo => {
+                        if (photo.base64 && photo.id && photo.timestamp) {
+                            maintenanceImages.push({
+                                base64: photo.base64,
+                                id: photo.id,
+                                timestamp: photo.timestamp,
+                                maintenanceRecordId: record.id
+                            });
+                        }
+                    });
+                }
+            });
+            
+            console.log(`📊 Prepared ${maintenanceImages.length} maintenance images for upload`);
+        }
+
+        // Prepare maintenance data structure (without photos - they'll be added by server)
+        const maintenanceDataForSubmission = {
+            records: maintenanceRecords.map(record => ({
+                id: record.id,
+                startTime: record.startTime,
+                endTime: record.endTime,
+                comment: record.comment,
+                timestamp: record.timestamp
+                // photos will be populated by the server after upload
+            })),
+            totalMinutes: totalTroubleMinutes,
+            totalHours: totalTroubleHours
+        };
+
+        console.log("📊 Maintenance data prepared for submission:", {
+            recordCount: maintenanceDataForSubmission.records.length,
+            totalImages: maintenanceImages.length,
+            totalMinutes: totalTroubleMinutes
         });
-      }
+
+        let totalWorkHours = 0;
+        if (Time_start && Time_end) {
+            const startWork = new Date(`2000-01-01T${Time_start}:00`);
+            const endWork = new Date(`2000-01-01T${Time_end}:00`);
+            if (endWork > startWork) {
+                const workDiffMs = endWork - startWork;
+                const workHours = workDiffMs / (1000 * 60 * 60);
+                totalWorkHours = Math.max(0, workHours - totalBreakHours - totalTroubleHours);
+            }
+        }
+        console.log('Time Calculations:', {
+            totalBreakMinutes, totalBreakHours: totalBreakHours.toFixed(2),
+            totalMaintenanceMinutes: totalTroubleMinutes, totalMaintenanceHours: totalTroubleHours.toFixed(2),
+            workTimeWithoutBreakAndMaintenance: totalWorkHours.toFixed(2),
+            startTime: Time_start, endTime: Time_end, maintenanceRecordsCount: maintenanceRecords.length
+        });
+
+        if (!背番号) {
+            uploadingModal.style.display = 'none';
+            scanAlertText.innerText = '背番号が必要です。 / Sebanggo is required.';
+            scanAlertModal.style.display = 'block';
+            if (alertSound) { alertSound.muted = false; alertSound.volume = 1; alertSound.play().catch(console.error); }
+            document.body.classList.add('flash-red');
+            document.getElementById('closeScanModalButton').onclick = function() {
+                scanAlertModal.style.display = 'none'; alertSound.pause(); alertSound.currentTime = 0;
+                alertSound.muted = true; document.body.classList.remove('flash-red');
+            };
+            return;
+        }
+
+        const uploadedImages = await collectImagesForUpload();
+        
+        // Prepare data for the new submitToDCP route
+        const dcpSubmissionData = {
+            品番, 背番号, 設備, Total: Total_PressDB, 工場, Worker_Name, Process_Quantity, Date: WorkDate,
+            Time_start, Time_end, 材料ロット, 疵引不良, 加工不良, その他, Total_NG, Spare, Comment,
+            Cycle_Time, ショット数, Break_Time_Data: breakTimeData,
+            Total_Break_Minutes: totalBreakMinutes, Total_Break_Hours: parseFloat(totalBreakHours.toFixed(2)),
+            Maintenance_Data: maintenanceDataForSubmission,
+            Total_Trouble_Minutes: totalTroubleMinutes, Total_Trouble_Hours: parseFloat(totalTroubleHours.toFixed(2)),
+            Total_Work_Hours: parseFloat(totalWorkHours.toFixed(2)),
+            
+            // Include image data
+            images: uploadedImages, // Cycle check images (existing logic)
+            maintenanceImages: maintenanceImages, // NEW: Maintenance images
+            
+            // Include toggle state and counter data for kensaDB
+            isToggleChecked: isToggleChecked
+        };
+
+        // Add counter data if toggle is checked
+        if (isToggleChecked) {
+            const counters = Array.from({ length: 12 }, (_, i) => {
+                const counter = document.getElementById(`counter-${i + 1}`);
+                return parseInt(counter?.value || 0, 10);
+            });
+            dcpSubmissionData.Counters = counters.reduce((acc, val, i) => {
+                acc[`counter-${i + 1}`] = val;
+                return acc;
+            }, {});
+        }
+
+        console.log("🚀 Submitting to new DCP route:", {
+            品番, 背番号, 工場, 設備, Worker_Name,
+            cycleCheckImages: uploadedImages.length,
+            maintenanceImages: maintenanceImages.length,
+            maintenanceRecords: maintenanceDataForSubmission.records.length,
+            isToggleChecked
+        });
+
+        // Submit to the new combined route
+        const dcpResponse = await fetch(`${serverURL}/submitToDCP`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(dcpSubmissionData)
+        });
+
+        if (!dcpResponse.ok) {
+            const errorData = await dcpResponse.json();
+            throw new Error(errorData.message || 'Failed to submit DCP data');
+        }
+
+        const dcpResult = await dcpResponse.json();
+        console.log("✅ DCP submission successful:", dcpResult);
+
+        setTimeout(() => {
+            uploadingModal.style.display = 'none'; scanAlertText.innerText = 'Form submitted successfully / 保存しました';
+            scanAlertModal.style.display = 'block'; document.body.classList.add('flash-green');
+            document.getElementById('closeScanModalButton').onclick = function() {
+                scanAlertModal.style.display = 'none'; document.body.classList.remove('flash-green');
+                window.location.reload(); resetForm();
+            };
+        }, 3000);
+
+    } catch (error) {
+        console.error('Error during submission:', error);
+        uploadingModal.style.display = 'none'; scanAlertText.innerText = 'An error occurred. Please try again.';
+        scanAlertModal.style.display = 'block';
+        if (alertSound) { alertSound.muted = false; alertSound.volume = 1; alertSound.play().catch(console.error); }
+        document.body.classList.add('flash-red');
+        document.getElementById('closeScanModalButton').onclick = function() {
+            scanAlertModal.style.display = 'none'; alertSound.pause(); alertSound.currentTime = 0;
+            alertSound.muted = true; document.body.classList.remove('flash-red');
+        };
     }
-
-    pressDBData.images = images;
-
-    // Submit to pressDB with images
-    const pressDBResponse = await fetch(`${serverURL}/submitTopressDBiReporter`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(pressDBData),
-    });
-
-    if (!pressDBResponse.ok) {
-      const errorData = await pressDBResponse.json();
-      throw new Error(errorData.error || 'Failed to save data to pressDB');
-    }
-
-    // ✅ Submit to kensaDB if toggle is ON
-    if (isToggleChecked) {
-      const counters = Array.from({ length: 12 }, (_, i) => {
-        const counter = document.getElementById(`counter-${i + 1}`);
-        return parseInt(counter?.value || 0, 10);
-      });
-
-      const Total_NG_Kensa = counters.reduce((sum, val) => sum + val, 0);
-      const Total_KensaDB = Total_PressDB - Total_NG_Kensa;
-
-      const kensaDBData = {
-        品番,
-        背番号,
-        工場,
-        Total: Total_KensaDB,
-        Worker_Name,
-        Process_Quantity,
-        Remaining_Quantity: Total_PressDB,
-        Date,
-        Time_start,
-        Time_end,
-        設備,
-        Counters: counters.reduce((acc, val, i) => {
-          acc[`counter-${i + 1}`] = val;
-          return acc;
-        }, {}),
-        Total_NG: Total_NG_Kensa,
-        Cycle_Time,
-        製造ロット: 材料ロット,
-        Comment,
-        Spare,
-      };
-
-      const kensaDBResponse = await fetch(`${serverURL}/submitToKensaDBiReporter`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(kensaDBData),
-      });
-
-      if (!kensaDBResponse.ok) {
-        const errorData = await kensaDBResponse.json();
-        throw new Error(errorData.error || 'Failed to save data to kensaDB');
-      }
-    }
-
-    // ✅ Final Success Handling
-    setTimeout(() => {
-      uploadingModal.style.display = 'none';
-      scanAlertText.innerText = 'Form submitted successfully / 保存しました';
-      scanAlertModal.style.display = 'block';
-      document.body.classList.add('flash-green');
-      document.getElementById('closeScanModalButton').onclick = function () {
-        scanAlertModal.style.display = 'none';
-        document.body.classList.remove('flash-green');
-        window.location.reload();
-        resetForm();
-      };
-    }, 3000);
-
-  } catch (error) {
-    console.error('Error during submission:', error);
-    uploadingModal.style.display = 'none';
-    scanAlertText.innerText = 'An error occurred. Please try again.';
-    scanAlertModal.style.display = 'block';
-    if (alertSound) {
-      alertSound.muted = false;
-      alertSound.volume = 1;
-      alertSound.play().catch(console.error);
-    }
-    document.body.classList.add('flash-red');
-    document.getElementById('closeScanModalButton').onclick = function () {
-      scanAlertModal.style.display = 'none';
-      alertSound.pause();
-      alertSound.currentTime = 0;
-      alertSound.muted = true;
-      document.body.classList.remove('flash-red');
-    };
-  }
 });
 
-// 🔁 Utility: Convert Blob to Base64
+// Image Collection with Base64 + Metadata
+async function collectImagesForUpload() {
+  const selectedSebanggo = document.getElementById("sub-dropdown").value;
+  const currentDate = document.getElementById("Lot No.").value;
+  const selectedWorker = document.getElementById("Machine Operator").value;
+  const selectedFactory = document.getElementById("selected工場").value;
+  const selectedMachine = document.getElementById("process").value;
+
+  const imageMappings = [{
+    imgId: 'hatsumonoPic',
+    label: '初物チェック'
+  }, {
+    imgId: 'atomonoPic',
+    label: '終物チェック'
+  }, {
+    imgId: '材料ラベル',
+    label: '材料ラベル'
+  }];
+
+  const imagesToUpload = [];
+
+  for (const {
+      imgId,
+      label
+    } of imageMappings) {
+    const photoPreview = document.getElementById(imgId);
+    if (!photoPreview || !photoPreview.src) continue;
+
+    const response = await fetch(photoPreview.src);
+    const blob = await response.blob();
+    const base64Data = await blobToBase64(blob);
+
+    imagesToUpload.push({
+      base64: base64Data,
+      label,
+      factory: selectedFactory,
+      machine: selectedMachine,
+      worker: selectedWorker,
+      date: currentDate,
+      sebanggo: selectedSebanggo
+    });
+  }
+
+  return imagesToUpload;
+}
+
+// Blob to base64 conversion
 function blobToBase64(blob) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -1631,96 +2403,65 @@ function blobToBase64(blob) {
   });
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 let sendtoNCButtonisPressed = false; // this global variable is to check if sendtoNC button is pressed or not
 
+function toggleInputs() {
+  var isChecked = document.getElementById('enable-inputs').checked;
+  var inputs = document.querySelectorAll('#Kensa\\ Name, #KDate, #KStart\\ Time, #KEnd\\ Time,.plus-btn,.minus-btn, textarea[name="Comments2"], #在庫');
 
-
-
-
-
-function toggleInputs() {  
-  var isChecked = document.getElementById('enable-inputs').checked;  
-  var inputs = document.querySelectorAll('#Kensa\\ Name, #KDate, #KStart\\ Time, #KEnd\\ Time,.plus-btn,.minus-btn, textarea[name="Comments2"], #在庫');  
-  
-  inputs.forEach(function(input) {  
-      input.disabled = !isChecked;  
-  });  
+  inputs.forEach(function(input) {
+    input.disabled = !isChecked;
+  });
 
   // Enable or disable only counters 1 to 12 when the checkbox is checked
   for (let i = 1; i <= 12; i++) {
-      var plusBtn = document.querySelector(`#counter-box-${i} .plus-btn`);
-      var minusBtn = document.querySelector(`#counter-box-${i} .minus-btn`);
-      if (plusBtn) plusBtn.disabled = !isChecked;
-      if (minusBtn) minusBtn.disabled = !isChecked;
+    var plusBtn = document.querySelector(`#counter-box-${i} .plus-btn`);
+    var minusBtn = document.querySelector(`#counter-box-${i} .minus-btn`);
+    if (plusBtn) plusBtn.disabled = !isChecked;
+    if (minusBtn) minusBtn.disabled = !isChecked;
   }
 
   // Ensure plus and minus buttons of 18, 19, and 20 remain functional
   [18, 19, 20].forEach(function(counterId) {
-      var plusBtn = document.querySelector(`#counter-box-${counterId} .plus-btn`);
-      var minusBtn = document.querySelector(`#counter-box-${counterId} .minus-btn`);
-      if (plusBtn) plusBtn.disabled = false;
-      if (minusBtn) minusBtn.disabled = false;
+    var plusBtn = document.querySelector(`#counter-box-${counterId} .plus-btn`);
+    var minusBtn = document.querySelector(`#counter-box-${counterId} .minus-btn`);
+    if (plusBtn) plusBtn.disabled = false;
+    if (minusBtn) minusBtn.disabled = false;
   });
 
   // Set hidden input value based on checkbox status
   document.getElementById('検査STATUS').value = isChecked ? "TRUE" : "false";
 }
 
-
-
-
-
-
-
-
-
 //LIVE STATUS function
 // this function sends the post command to google sheet live status
-function updateSheetStatus(selectedValue,machineName){
+function updateSheetStatus(selectedValue, machineName) {
   const selectedFactory = document.getElementById('hidden工場').value;
   fetch(googleSheetLiveStatusURL, {
-    method: 'POST',
-    mode: 'no-cors',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded'
-    },
-    body: new URLSearchParams({
-      'current': selectedValue,
-      'machine': machineName,
-      'factory': selectedFactory
+      method: 'POST',
+      mode: 'no-cors',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: new URLSearchParams({
+        'current': selectedValue,
+        'machine': machineName,
+        'factory': selectedFactory
+      })
     })
-  })
-  .then(response => response.text())
-  .then(data => {
-    console.log(data);
-  })
-  .catch(error => {
-    console.error('Error:', error);
-  });
-  
-
+    .then(response => response.text())
+    .then(data => {
+      console.log(data);
+    })
+    .catch(error => {
+      console.error('Error:', error);
+    });
 }
 
-
 //this function sends request to nc cutter's pC
-function sendtoNC(selectedValue){
-  
-  sendCommand("off"); // this is for arduino (emergency button)
+function sendtoNC(selectedValue) {
+
+  //sendCommand("off"); // this is for arduino (emergency button)
   sendtoNCButtonisPressed = true;
 
   // Save to localStorage with a unique key format
@@ -1737,22 +2478,17 @@ function sendtoNC(selectedValue){
   }
 
   //let pcName = "DESKTOP-V36G1SK-2";
-  const url = `http://${ipAddress}:5000/request?filename=${currentSebanggo}.pce`; //change to 
- 
-    // Open a new tab with the desired URL
-    const newTab = window.open(url, '_blank');
-    
-    // Set a timer to close the new tab after a delay (e.g., 1 seconds)
-    setTimeout(() => {
-      newTab.close();
-    }, 5000);
+  const url = `http://${ipAddress}:5000/request?filename=${currentSebanggo}.pce`; //change to
+
+  // Open a new tab with the desired URL
+  const newTab = window.open(url, '_blank');
+
+  // Set a timer to close the new tab after a delay (e.g., 1 seconds)
+  setTimeout(() => {
+    newTab.close();
+  }, 5000);
 }
 document.getElementById('sendtoNC').addEventListener('click', sendtoNC);
-
-
-
-
-
 
 // Function to handle printing
 function runPrintFunction() {
@@ -1774,10 +2510,6 @@ function runPrintFunction() {
     }
   }, 5000);
 }
-
-
-
-
 
 // this updates the total quantity
 function updateTotal() {
@@ -1820,10 +2552,6 @@ for (let i = 18; i <= 20; i++) {
   document.getElementById(`counter-${i}`).addEventListener('input', updateTotal);
 }
 
-
-
-
-
 // global variable for ip address input container
 const ipInput = document.getElementById('ipInfo');
 // Function to fetch ip address
@@ -1845,15 +2573,14 @@ function getIP() {
     });
 }
 
-
-
-
-
-
 // Function to fetch rikeshi up or down color info
 function getRikeshi(headerValue) {
-  const factoryValue = document.getElementById('hidden工場').value; // Get the factory value
+  const factoryValue = document.getElementById('selected工場').value; // Get the factory value, corrected to selected工場
   const rikeshiInfo = document.getElementById("rikeshitext");
+  // Assuming rikeshiInput is defined somewhere or passed as an argument. If not, it's a global variable or part of this scope.
+  // For now, let's assume it's like ipInput, directly referencing an element.
+  const rikeshiInput = document.getElementById("rikeshi"); // Assuming 'rikeshi' is the ID of a hidden input for the value itself.
+
   fetch(`${dbURL}?rikeshi=${headerValue}&factory=${factoryValue}`)
     .then(response => {
       if (!response.ok) {
@@ -1864,12 +2591,14 @@ function getRikeshi(headerValue) {
     .then(data => {
       const cleanedData = data.replace(/"/g, '');
       rikeshiInput.value = cleanedData;
-      if (cleanedData == "上"){
+      if (cleanedData == "上") {
         rikeshiInfo.textContent = cleanedData + " - Release paper UP";
-      } else if (cleanedData == "下"){
+      } else if (cleanedData == "下") {
         rikeshiInfo.textContent = cleanedData + " - Release paper DOWN";
+      } else {
+        rikeshiInfo.textContent = cleanedData; // For other cases or empty
       }
-      
+
       sendtoShowVideo(cleanedData);
     })
     .catch(error => {
@@ -1877,26 +2606,17 @@ function getRikeshi(headerValue) {
     });
 }
 
-
-
-
-
-
 //this function is just to send value of showVideo which is either rikeshidown or up
-function sendtoShowVideo(rikeshivalue){
-  
-      if (rikeshivalue == "下") {
-        showVideo('rikeshidown');
-      } 
-      else if (rikeshivalue == "上") {
-        showVideo('rikeshiup');
-      }
+function sendtoShowVideo(rikeshivalue) {
+
+  if (rikeshivalue == "下") {
+    showVideo('rikeshidown');
+  } else if (rikeshivalue == "上") {
+    showVideo('rikeshiup');
+  }
 }
 
-
-
 // this code is to show video either up or down rikeshi
-
 let videoTimeout;
 let isRikeshiPlaying = false; // Flag to check if rikeshi.mp4 is already playing
 
@@ -1947,14 +2667,11 @@ function closeVideoPopup() {
   isRikeshiPlaying = false;
 }
 
-
-
-
 //this function is for ARDUINO command (command value should be "on" or "off")
 async function sendCommand(command) {
   const ipAddress = document.getElementById('ipInfo').value;
   const url = `http://${ipAddress}:5000/control?command=${encodeURIComponent(command)}`;
-  
+
   // Get the existing hidden iframe or create one if it doesn't exist
   let iframe = document.getElementById('hiddenIframe');
   if (!iframe) {
@@ -1969,13 +2686,9 @@ async function sendCommand(command) {
 
   // Remove the iframe after 2 seconds
   setTimeout(() => {
-      iframe.src = ''; // Clear the iframe source
+    iframe.src = ''; // Clear the iframe source
   }, 1000);
 }
-
-
-
-
 
 // this function waits for 1 mins to see if send to NC button is pressed, if not it will pop up and force the user to send to machine
 var popupShown = false;
@@ -1984,92 +2697,307 @@ audio.loop = true; // Set the audio to loop
 
 // Function to show the popup
 function showPopup() {
-  sendCommand('on');
+  //sendCommand('on');
   console.log("LED on");
 
   if (!popupShown) {
-      // Create the popup elements
-      var popup = document.createElement('div');
-      popup.style.position = 'fixed';
-      popup.style.top = '50%';
-      popup.style.left = '50%';
-      popup.style.transform = 'translate(-50%, -50%)';
-      popup.style.padding = '20px';
-      popup.style.backgroundColor = 'white';
-      popup.style.border = '1px solid black';
-      popup.style.zIndex = '1000';
+    // Create the popup elements
+    var popup = document.createElement('div');
+    popup.style.position = 'fixed';
+    popup.style.top = '50%';
+    popup.style.left = '50%';
+    popup.style.transform = 'translate(-50%, -50%)';
+    popup.style.padding = '20px';
+    popup.style.backgroundColor = 'white';
+    popup.style.border = '1px solid black';
+    popup.style.zIndex = '1000';
 
-      var message = document.createElement('p');
-      message.textContent = 'Please press "send to machine" button! / "send to machine" ボタンを押してください';
-      popup.appendChild(message);
+    var message = document.createElement('p');
+    message.textContent = 'Please press "send to machine" button! GAGO! / "send to machine" ボタンを押してください';
+    popup.appendChild(message);
 
-      var button = document.createElement('button');
-      button.textContent = 'Send to Machine';
-      button.onclick = function () {
-          sendtoNCButtonisPressed = true;
+    var button = document.createElement('button');
+    button.textContent = 'Send to Machine';
+    button.onclick = function() {
+      sendtoNCButtonisPressed = true;
 
-          // Save to localStorage with a unique key format
-          const selected工場 = document.getElementById('selected工場').value; // Get the current factory value
-          const pageName = location.pathname.split('/').pop(); // Get the current HTML file name
-          const key = `${uniquePrefix}sendtoNCButtonisPressed`;
-          localStorage.setItem(key, 'true'); // Save the value with the unique key
+      // Save to localStorage with a unique key format
+      const selected工場 = document.getElementById('selected工場').value; // Get the current factory value
+      const pageName = location.pathname.split('/').pop(); // Get the current HTML file name
+      const key = `${uniquePrefix}sendtoNCButtonisPressed`;
+      localStorage.setItem(key, 'true'); // Save the value with the unique key
 
-          sendtoNC(); // Call the sendtoNC function
-          console.log("sendtoNC function called");
-          document.body.removeChild(popup);
-          audio.pause(); // Stop the audio
-          audio.currentTime = 0; // Reset the audio to the beginning
-      };
-      popup.appendChild(button);
+      sendtoNC(); // Call the sendtoNC function
+      console.log("sendtoNC function called");
+      document.body.removeChild(popup);
+      audio.pause(); // Stop the audio
+      audio.currentTime = 0; // Reset the audio to the beginning
+    };
+    popup.appendChild(button);
 
-      document.body.appendChild(popup);
-      popupShown = true; // Set the flag to true after showing the popup
-      audio.play(); // Play the audio
+    document.body.appendChild(popup);
+    popupShown = true; // Set the flag to true after showing the popup
+    audio.play(); // Play the audio
   }
 }
 
 // Function to check the value every 1 minute
 function checkValue() {
-  var interval = setInterval(function () {
-      console.log("selectedFactory: " + selectedFactory);
-    
+  var interval = setInterval(function() {
+    console.log("selectedFactory: " + selectedFactory);
+    if (selectedFactory !== "小瀬") {
+      return; // Skip the check if selectedFactory is not "小瀬"
+    }
 
-      const selected工場 = document.getElementById('selected工場').value; // Get the current factory value
-      const pageName = location.pathname.split('/').pop(); // Get the current HTML file name
-      const key = `${uniquePrefix}sendtoNCButtonisPressed`;
+    const selected工場 = document.getElementById('selected工場').value; // Get the current factory value
+    const pageName = location.pathname.split('/').pop(); // Get the current HTML file name
+    const key = `${uniquePrefix}sendtoNCButtonisPressed`;
 
-      if (localStorage.getItem(key) === null) {
-          return; // Skip the check if the key is not present in local storage
+    if (localStorage.getItem(key) === null) {
+      return; // Skip the check if the key is not present in local storage
+    }
+    var sendtoNCButtonisPressed = localStorage.getItem(key) === 'true'; // Retrieve the value from local storage
+    console.log("sendtoNCButtonisPressed: " + sendtoNCButtonisPressed);
+
+    if (sendtoNCButtonisPressed) {
+      clearInterval(interval); // Stop checking if the value is true
+    } else {
+      // Get the sub-dropdown value
+      const subDropdownValue = document.getElementById('sub-dropdown').value;
+
+      // Check if sub-dropdown value is in its default state
+      if (!subDropdownValue || subDropdownValue === "Select 背番号") {
+        console.log("Sub-dropdown is in its default state. Skipping showPopup.");
+        return; // Do not call showPopup if the value is default
       }
-      var sendtoNCButtonisPressed = localStorage.getItem(key) === 'true'; // Retrieve the value from local storage
+      console.log("Sub-dropdown value is not default. Showing popup.");
 
-      if (sendtoNCButtonisPressed) {
-        clearInterval(interval); // Stop checking if the value is true
-      } else {
-          // Get the sub-dropdown value
-          const subDropdownValue = document.getElementById('sub-dropdown').value;
-      
-          // Check if sub-dropdown value is in its default state
-          if (!subDropdownValue || subDropdownValue === "Select 背番号") {
-              console.log("Sub-dropdown is in its default state. Skipping showPopup.");
-              return; // Do not call showPopup if the value is default
-          }
-      
-          showPopup();
-      }
+      showPopup();
+    }
   }, 30000); // 30000 milliseconds = 30 seconds
 }
 
 // Run the checkValue function when the page loads
 window.onload = checkValue;
 
+// Maintenance Camera Functionality
+let maintenanceCameraStream = null;
 
-//for dynamic process link from nav
-document.addEventListener("DOMContentLoaded", function () {
-  const selectedFactory = document.getElementById("selected工場")?.value;
-  const processLink = document.getElementById("process-link");
-
-  if (selectedFactory && processLink) {
-    processLink.href = `machine.html?selected=${encodeURIComponent(selectedFactory)}`;
+// Open camera in modal for maintenance photos
+async function openMaintenanceCamera() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    showAlert("カメラ機能はこのブラウザではサポートされていません。(Camera features are not supported in this browser.)", true);
+    return;
   }
-});
+
+  // Create camera modal
+  const cameraModal = document.createElement('div');
+  cameraModal.id = 'maintenanceCameraModal';
+  cameraModal.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.9);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 10002;
+  `;
+
+  const cameraContent = document.createElement('div');
+  cameraContent.style.cssText = `
+    background: white;
+    padding: 20px;
+    border-radius: 10px;
+    text-align: center;
+    max-width: 90%;
+    max-height: 90%;
+  `;
+
+  cameraContent.innerHTML = `
+    <h3 style="margin-top: 0;">機械故障写真撮影 / Maintenance Photo Capture</h3>
+    <video id="maintenanceVideoFeed" autoplay playsinline style="max-width: 100%; max-height: 400px; border: 2px solid #ddd; border-radius: 5px;"></video>
+    <br><br>
+    <button id="maintenanceCaptureBtn" style="padding: 15px 30px; background: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer; margin-right: 10px; font-size: 16px;">📷 撮影 / Capture</button>
+    <button id="maintenanceCloseCameraBtn" style="padding: 15px 30px; background: #dc3545; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px;">閉じる / Close</button>
+    <canvas id="maintenanceCaptureCanvas" style="display: none;"></canvas>
+  `;
+
+  cameraModal.appendChild(cameraContent);
+  document.body.appendChild(cameraModal);
+
+  const videoFeed = document.getElementById('maintenanceVideoFeed');
+  const captureBtn = document.getElementById('maintenanceCaptureBtn');
+  const closeCameraBtn = document.getElementById('maintenanceCloseCameraBtn');
+  const captureCanvas = document.getElementById('maintenanceCaptureCanvas');
+
+  // Camera constraints
+  const constraints = {
+    video: { 
+      facingMode: { ideal: "environment" }, 
+      width: { ideal: 1280 }, 
+      height: { ideal: 720 } 
+    },
+    audio: false
+  };
+
+  try {
+    maintenanceCameraStream = await navigator.mediaDevices.getUserMedia(constraints);
+  } catch (e) {
+    console.warn("Environment camera failed, trying user camera:", e);
+    constraints.video.facingMode = { ideal: "user" };
+    try {
+      maintenanceCameraStream = await navigator.mediaDevices.getUserMedia(constraints);
+    } catch (err) {
+      console.error("Error accessing camera: ", err);
+      showAlert("カメラにアクセスできませんでした。設定を確認してください。", true);
+      document.body.removeChild(cameraModal);
+      return;
+    }
+  }
+
+  if (maintenanceCameraStream && videoFeed) {
+    videoFeed.srcObject = maintenanceCameraStream;
+    videoFeed.onloadedmetadata = () => {
+      // TEMPORARY: Force exact same approach as working test HTML
+      captureCanvas.width = videoFeed.videoWidth;
+      captureCanvas.height = videoFeed.videoHeight;
+      console.log(`🔍 Canvas initialized: ${captureCanvas.width}x${captureCanvas.height} (exact same as test HTML)`);
+    };
+  }
+
+  // Capture button functionality
+  captureBtn.addEventListener('click', () => {
+    if (!maintenanceCameraStream || !videoFeed) {
+      console.error("Stream or video not ready for snapshot");
+      closeMaintenanceCamera(cameraModal);
+      return;
+    }
+
+    if (maintenancePhotos.length >= MAX_MAINTENANCE_PHOTOS) {
+      showAlert(`最大${MAX_MAINTENANCE_PHOTOS}枚までです。(Max ${MAX_MAINTENANCE_PHOTOS} photos allowed.)`, false);
+      closeMaintenanceCamera(cameraModal);
+      return;
+    }
+
+    // Validate video before capture
+    if (videoFeed.readyState !== videoFeed.HAVE_ENOUGH_DATA) {
+      console.warn("⚠️ Video feed not ready for capture");
+      showAlert("カメラの準備ができていません。しばらく待ってから再試行してください。", false);
+      return;
+    }
+
+    // Create a NEW canvas for each capture (exactly like test HTML)
+    const freshCanvas = document.createElement('canvas');
+    freshCanvas.width = videoFeed.videoWidth;
+    freshCanvas.height = videoFeed.videoHeight;
+    
+    console.log(`🔍 DCP Fresh canvas created: ${freshCanvas.width}x${freshCanvas.height} (video: ${videoFeed.videoWidth}x${videoFeed.videoHeight})`);
+
+    const context = freshCanvas.getContext('2d');
+    if (!context) {
+      console.error("Failed to get 2D context from fresh canvas.");
+      closeMaintenanceCamera(cameraModal);
+      return;
+    }
+
+    context.drawImage(videoFeed, 0, 0, freshCanvas.width, freshCanvas.height);
+    
+    // Use the EXACT same approach as the working test
+    const imageDataURL = freshCanvas.toDataURL('image/jpeg', 0.8);
+    console.log(`🔍 DCP Canvas capture:`, {
+      canvasSize: `${freshCanvas.width}x${freshCanvas.height}`,
+      videoSize: `${videoFeed.videoWidth}x${videoFeed.videoHeight}`,
+      dataURLLength: imageDataURL.length,
+      startsWithDataURL: imageDataURL.startsWith('data:image/jpeg;base64,')
+    });
+    
+    // Validate data URL format
+    if (!imageDataURL.startsWith('data:image/jpeg;base64,')) {
+      console.error('❌ Invalid data URL format:', imageDataURL.substring(0, 100));
+      showAlert('画像キャプチャに失敗しました。再試行してください。', false);
+      closeMaintenanceCamera(cameraModal);
+      return;
+    }
+    
+    // Extract clean base64 data WITHOUT the data URL prefix (same as test)
+    const base64Data = imageDataURL.split(',')[1];
+    console.log(`🔍 DCP Extracted clean base64 length: ${base64Data.length}`);
+    console.log(`🔍 DCP Base64 first 50 chars: ${base64Data.substring(0, 50)}`);
+    console.log(`🔍 DCP Using video dimensions: ${videoFeed.videoWidth}x${videoFeed.videoHeight}`);
+    console.log(`🔍 DCP Canvas dimensions: ${captureCanvas.width}x${captureCanvas.height}`);
+    
+    // Validate base64 data
+    if (!base64Data || base64Data.length === 0) {
+      console.error('❌ Empty base64 data');
+      showAlert('画像データが無効です。再試行してください。', false);
+      closeMaintenanceCamera(cameraModal);
+      return;
+    }
+
+    // Client-side validation like the test
+    try {
+      const buffer = atob(base64Data);
+      console.log(`🔍 DCP Client validation: Successfully decoded ${buffer.length} bytes`);
+      console.log(`🔍 DCP Buffer first 10 bytes: [${Array.from(buffer.slice(0, 10)).map(b => b.charCodeAt(0)).join(', ')}]`);
+      
+      // Check JPEG headers
+      const firstByte = buffer.charCodeAt(0);
+      const secondByte = buffer.charCodeAt(1);
+      console.log(`🔍 DCP JPEG header check: [${firstByte}, ${secondByte}] (should be [255, 216])`);
+      
+      if (firstByte !== 255 || secondByte !== 216) {
+        console.warn('⚠️ DCP WARNING: Invalid JPEG header detected!');
+      } else {
+        console.log('✅ DCP Valid JPEG header confirmed');
+      }
+    } catch (error) {
+      console.error('❌ DCP ERROR: Invalid base64 data - ' + error.message);
+      showAlert('画像データが無効です。再試行してください。', false);
+      closeMaintenanceCamera(cameraModal);
+      return;
+    }
+
+    // Add photo with clean base64 data (same as test)
+    const success = addMaintenancePhoto(base64Data);
+    
+    if (success) {
+      console.log('✅ Photo successfully added to maintenance photos');
+      // Close camera after successful capture
+      closeMaintenanceCamera(cameraModal);
+    } else {
+      showAlert('写真の追加に失敗しました。', false);
+    }
+  });
+
+  // Close camera button functionality
+  closeCameraBtn.addEventListener('click', () => {
+    closeMaintenanceCamera(cameraModal);
+  });
+
+  // Close on background click
+  cameraModal.addEventListener('click', (e) => {
+    if (e.target === cameraModal) {
+      closeMaintenanceCamera(cameraModal);
+    }
+  });
+}
+
+// Close maintenance camera and cleanup
+function closeMaintenanceCamera(cameraModal) {
+  if (maintenanceCameraStream) {
+    maintenanceCameraStream.getTracks().forEach(track => track.stop());
+    maintenanceCameraStream = null;
+  }
+  
+  const videoFeed = document.getElementById('maintenanceVideoFeed');
+  if (videoFeed) {
+    videoFeed.srcObject = null;
+  }
+  
+  if (cameraModal && cameraModal.parentNode) {
+    document.body.removeChild(cameraModal);
+  }
+}
