@@ -1359,7 +1359,44 @@ app.get("/getSeBanggoListPressAndHinban", async (req, res) => {
   }
 });
 
+// Fetch SCNA Work Orders from SCNAWorkOrderDB
+app.get("/getSCNAWorkOrders", async (req, res) => {
+  try {
+    await client.connect();
+    const database = client.db("submittedDB");
+    const collection = database.collection("SCNAWorkOrderDB");
 
+    // Fetch all work orders, sorted by date (newest first)
+    const result = await collection.find({}).sort({ "Date and time": -1 }).toArray();
+
+    res.json(result);
+  } catch (error) {
+    console.error("Error retrieving SCNA work orders:", error);
+    res.status(500).send("Error retrieving SCNA work orders");
+  }
+});
+
+// Fetch work order by number
+app.get("/getWorkOrderByNumber", async (req, res) => {
+  try {
+    const workOrderNumber = req.query.number;
+    
+    await client.connect();
+    const database = client.db("submittedDB");
+    const collection = database.collection("SCNAWorkOrderDB");
+
+    const result = await collection.findOne({ "Number": workOrderNumber });
+
+    if (!result) {
+      return res.status(404).json({ error: "Work order not found" });
+    }
+
+    res.json(result);
+  } catch (error) {
+    console.error("Error retrieving work order:", error);
+    res.status(500).send("Error retrieving work order");
+  }
+});
 
 ///////////////////////////////////////////
 //END of iREPORTER ROUTE
