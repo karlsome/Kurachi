@@ -3658,6 +3658,9 @@ function updateSheetStatus(selectedValue, machineName) {
 //this function sends request to nc cutter's PC - supports multiple machines
 async function sendtoNC(selectedValue) {
   
+  // Clear the reminder timer since user is now sending
+  clearSendReminderTimer();
+  
   // Check if button is currently disabled (within 12-second cooldown)
   const sendButton = document.getElementById('sendtoNC');
   if (sendButton.disabled) {
@@ -3999,6 +4002,188 @@ function resetSendToMachineButton() {
     sendButton.style.cursor = 'pointer';
     localStorage.setItem(buttonStateKey, 'red');
     console.log('Send to Machine button reset to RED state');
+    
+    // Start the 10-second failsafe timer
+    startSendReminderTimer();
+  }
+}
+
+// Global variable to track the reminder timer
+let sendReminderTimer = null;
+
+// Function to start the 10-second reminder timer
+function startSendReminderTimer() {
+  // Clear any existing timer
+  clearSendReminderTimer();
+  
+  console.log('🕐 Starting 10-second Send to Machine reminder timer');
+  
+  sendReminderTimer = setTimeout(() => {
+    const sendButton = document.getElementById('sendtoNC');
+    const buttonStateKey = `${uniquePrefix}sendButtonState`;
+    const currentButtonState = localStorage.getItem(buttonStateKey);
+    
+    // Only show reminder if button is still in red state (not sent yet)
+    if (currentButtonState === 'red' && sendButton) {
+      showSendReminderModal();
+    }
+  }, 10000); // 10 seconds
+}
+
+// Function to clear the reminder timer
+function clearSendReminderTimer() {
+  if (sendReminderTimer) {
+    clearTimeout(sendReminderTimer);
+    sendReminderTimer = null;
+    console.log('🕐 Send to Machine reminder timer cleared');
+  }
+}
+
+// Function to show the reminder modal
+function showSendReminderModal() {
+  // Create modal if it doesn't exist
+  let reminderModal = document.getElementById('sendReminderModal');
+  if (!reminderModal) {
+    reminderModal = document.createElement('div');
+    reminderModal.id = 'sendReminderModal';
+    reminderModal.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.8);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 10001;
+      font-family: Arial, sans-serif;
+    `;
+    
+    const modalContent = document.createElement('div');
+    modalContent.style.cssText = `
+      background: white;
+      padding: 30px;
+      border-radius: 15px;
+      text-align: center;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+      max-width: 500px;
+      width: 90%;
+      animation: slideIn 0.3s ease-out;
+    `;
+    
+    const warningIcon = document.createElement('div');
+    warningIcon.innerHTML = '⚠️';
+    warningIcon.style.cssText = `
+      font-size: 48px;
+      margin-bottom: 20px;
+      color: #ff9800;
+    `;
+    
+    const title = document.createElement('h3');
+    title.textContent = 'Send to Machine Reminder';
+    title.style.cssText = `
+      color: #f44336;
+      margin: 0 0 15px 0;
+      font-size: 24px;
+    `;
+    
+    const message = document.createElement('p');
+    message.innerHTML = `
+      You selected a new item but haven't sent the NC program to the machine yet.<br><br>
+      <strong>Don't forget to send the program!</strong><br>
+      <span style="color: #666; font-size: 14px;">NC プログラムを機械に送信することを忘れないでください！</span>
+    `;
+    message.style.cssText = `
+      color: #333;
+      font-size: 16px;
+      line-height: 1.5;
+      margin: 0 0 25px 0;
+    `;
+    
+    const buttonContainer = document.createElement('div');
+    buttonContainer.style.cssText = `
+      display: flex;
+      gap: 15px;
+      justify-content: center;
+    `;
+    
+    const sendButton = document.createElement('button');
+    sendButton.textContent = 'Send to Machine';
+    sendButton.style.cssText = `
+      background: #f44336;
+      color: white;
+      border: none;
+      padding: 15px 25px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 16px;
+      font-weight: bold;
+      transition: background 0.3s;
+      min-width: 150px;
+    `;
+    
+    sendButton.onmouseover = () => sendButton.style.background = '#d32f2f';
+    sendButton.onmouseout = () => sendButton.style.background = '#f44336';
+    sendButton.onclick = () => {
+      closeSendReminderModal();
+      sendtoNC(); // Call the actual send function
+    };
+    
+    const laterButton = document.createElement('button');
+    laterButton.textContent = 'Later';
+    laterButton.style.cssText = `
+      background: #757575;
+      color: white;
+      border: none;
+      padding: 15px 25px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 16px;
+      transition: background 0.3s;
+      min-width: 100px;
+    `;
+    
+    laterButton.onmouseover = () => laterButton.style.background = '#616161';
+    laterButton.onmouseout = () => laterButton.style.background = '#757575';
+    laterButton.onclick = () => {
+      closeSendReminderModal();
+      // Restart the timer for another 10 seconds
+      startSendReminderTimer();
+    };
+    
+    buttonContainer.appendChild(sendButton);
+    buttonContainer.appendChild(laterButton);
+    
+    modalContent.appendChild(warningIcon);
+    modalContent.appendChild(title);
+    modalContent.appendChild(message);
+    modalContent.appendChild(buttonContainer);
+    reminderModal.appendChild(modalContent);
+    
+    // Add CSS animation
+    const style = document.createElement('style');
+    style.textContent = `
+      @keyframes slideIn {
+        from { opacity: 0; transform: translateY(-50px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+    `;
+    document.head.appendChild(style);
+    
+    document.body.appendChild(reminderModal);
+  }
+  
+  reminderModal.style.display = 'flex';
+  console.log('⚠️ Send to Machine reminder modal shown');
+}
+
+// Function to close the reminder modal
+function closeSendReminderModal() {
+  const reminderModal = document.getElementById('sendReminderModal');
+  if (reminderModal) {
+    reminderModal.style.display = 'none';
+    console.log('✅ Send to Machine reminder modal closed');
   }
 }
 
