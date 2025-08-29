@@ -840,9 +840,16 @@ app.post('/submitToDCP', async (req, res) => {
 
         // Handle single vs multiple material label images logic
         if (materialLabelImageURLs.length === 1) {
-            // Single image: Use existing structure for backwards compatibility
+            // Single image: Use existing structure for backwards compatibility AND populate array
             uploadedImageURLs["材料ラベル画像"] = materialLabelImageURLs[0];
-            console.log(`📄 Single material label image: stored in 材料ラベル画像 field`);
+            uploadedImageURLs["materialLabelImages"] = materialLabelImageURLs; // ✅ FIX: Also populate array for single images
+            uploadedImageURLs["materialLabelImageCount"] = materialLabelImageURLs.length;
+            console.log(`📄 Single material label image: stored in both 材料ラベル画像 field and materialLabelImages array`);
+            console.log(`🔍 Single material label URLs being stored:`, {
+                "材料ラベル画像": materialLabelImageURLs[0],
+                "materialLabelImages": materialLabelImageURLs,
+                "materialLabelImageCount": materialLabelImageURLs.length
+            });
         } else if (materialLabelImageURLs.length > 1) {
             // Multiple images: Keep first in original field + add array
             uploadedImageURLs["材料ラベル画像"] = materialLabelImageURLs[0]; // First image for compatibility
