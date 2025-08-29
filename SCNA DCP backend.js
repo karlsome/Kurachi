@@ -95,7 +95,23 @@ document.addEventListener('DOMContentLoaded', () => {
                 if ([...input.options].some(option => option.value === savedValue)) {
                   input.value = savedValue; // Restore select value
                   console.log(`Restored ${input.id || input.name}:`, savedValue);
-                  fetchProductDetails();
+                  
+                  // Handle different types of selections properly
+                  if (input.id === 'sub-dropdown') {
+                    const selectedOption = input.options[input.selectedIndex];
+                    if (selectedOption && selectedOption.dataset.type === 'workorder') {
+                      // It's a work order, call the work order handler
+                      handleWorkOrderSelection(selectedOption);
+                    } else {
+                      // It's a regular 背番号 or 品番, call fetchProductDetails
+                      fetchProductDetails();
+                    }
+                  } else {
+                    // For other selects, call fetchProductDetails if needed
+                    if (input.id !== 'process') { // Don't auto-fetch for process dropdown
+                      fetchProductDetails();
+                    }
+                  }
 
                 } else {
                   console.error(`Option '${savedValue}' not found in select '${input.id || input.name}'.`);
@@ -222,18 +238,13 @@ async function fetchSetsubiList() {
   }
 }
 
-// this function fetches sebanggo list
+// this function fetches sebanggo list, hinban list, and work orders for SCNA
 async function fetchSebanggo() {
   // Get the selected process from the process dropdown
   const 工場 = document.getElementById("selected工場").value;
   blankInfo();
 
   try {
-    // Fetch 背番号 values from the server based on the selected process
-    const response = await fetch(`${serverURL}/getSeBanggoListPress?工場=${encodeURIComponent(工場)}`);
-    const data = await response.json();
-    data.sort((a, b) => a.localeCompare(b, 'ja')); // 'ja' for Japanese sorting if needed // sort alphabetically
-
     // Get the sub-dropdown element
     const subDropdown = document.getElementById("sub-dropdown");
 
@@ -243,22 +254,164 @@ async function fetchSebanggo() {
     // Add a blank option at the top
     const blankOption = document.createElement("option");
     blankOption.value = "";
-    blankOption.textContent = "Select 背番号";
+    blankOption.textContent = "Select 背番号 / 品番 / Work Order";
     subDropdown.appendChild(blankOption);
 
-    // Populate the sub-dropdown with new options based on the 背番号 values
-    data.forEach(item => {
-      const option = document.createElement("option");
-      option.value = item;
-      option.textContent = item;
-      subDropdown.appendChild(option);
-    });
+    // Fetch both 背番号 and 品番 values from the server
+    const response = await fetch(`${serverURL}/getSeBanggoListPressAndHinban?工場=${encodeURIComponent(工場)}`);
+    const data = await response.json();
 
-    console.log("Sub-dropdown populated with 背番号 options:", data);
+    // Separate 背番号 and 品番 into different arrays
+    const sebanggoList = data.map(item => item.背番号).filter(Boolean); // Remove null/undefined
+    const hinbanList = data.map(item => item.品番).filter(Boolean); // Remove null/undefined
+
+    // Sort both lists alphabetically
+    sebanggoList.sort((a, b) => a.localeCompare(b, 'ja')); // 'ja' for Japanese sorting
+    hinbanList.sort((a, b) => a.localeCompare(b, 'ja'));
+
+    // Add separator for 背番号 section
+    if (sebanggoList.length > 0) {
+      const seBanggoSeparator = document.createElement("option");
+      seBanggoSeparator.disabled = true;
+      seBanggoSeparator.textContent = "─── 背番号 ───";
+      seBanggoSeparator.style.fontWeight = "bold";
+      seBanggoSeparator.style.backgroundColor = "#f0f0f0";
+      subDropdown.appendChild(seBanggoSeparator);
+
+      // Populate the sub-dropdown with 背番号 options
+      sebanggoList.forEach(sebanggo => {
+        const option = document.createElement("option");
+        option.value = sebanggo;
+        option.textContent = sebanggo;
+        option.dataset.type = "sebanggo";
+        subDropdown.appendChild(option);
+      });
+    }
+
+    // Add separator for 品番 section
+    if (hinbanList.length > 0) {
+      const hinbanSeparator = document.createElement("option");
+      hinbanSeparator.disabled = true;
+      hinbanSeparator.textContent = "─── 品番 ───";
+      hinbanSeparator.style.fontWeight = "bold";
+      hinbanSeparator.style.backgroundColor = "#f5f5f5";
+      subDropdown.appendChild(hinbanSeparator);
+
+      // Populate the sub-dropdown with 品番 options
+      hinbanList.forEach(hinban => {
+        const option = document.createElement("option");
+        option.value = hinban;
+        option.textContent = hinban;
+        option.dataset.type = "hinban";
+        subDropdown.appendChild(option);
+      });
+    }
+
+    // For SCNA factory, also fetch work orders
+    if (工場 === "SCNA") {
+      try {
+        const workOrderResponse = await fetch(`${serverURL}/getSCNAWorkOrders`);
+        const workOrders = await workOrderResponse.json();
+
+        if (workOrders && workOrders.length > 0) {
+          // Add separator for Work Orders section
+          const workOrderSeparator = document.createElement("option");
+          workOrderSeparator.disabled = true;
+          workOrderSeparator.textContent = "─── Work Orders ───";
+          workOrderSeparator.style.fontWeight = "bold";
+          workOrderSeparator.style.backgroundColor = "#e3f2fd";
+          subDropdown.appendChild(workOrderSeparator);
+
+          // Add work order options - simplified display (just WO number)
+          workOrders.forEach(workOrder => {
+            const option = document.createElement("option");
+            option.value = workOrder.Number;
+            option.textContent = workOrder.Number; // Simplified - just show WO-003404
+            option.dataset.type = "workorder";
+            option.dataset.assignedTo = workOrder["Assign to-Custom fields"];
+            option.dataset.sku = workOrder["P_SKU-Custom fields"];
+            option.dataset.status = workOrder.Status;
+            option.dataset.customer = workOrder["Customer-Custom fields"];
+            subDropdown.appendChild(option);
+          });
+        }
+      } catch (workOrderError) {
+        console.warn("Could not fetch work orders:", workOrderError);
+        // Continue without work orders if there's an error
+      }
+    }
+
+    console.log("Sub-dropdown populated with 背番号, 品番, and work order options", { sebanggoList, hinbanList });
 
   } catch (error) {
-    console.error("Error fetching 背番号 data:", error);
+    console.error("Error fetching dropdown data:", error);
   }
+}
+
+// Utility function to get current selection information
+function getCurrentSelectionInfo() {
+  const subDropdown = document.getElementById('sub-dropdown');
+  if (!subDropdown.value) return null;
+  
+  const selectedOption = subDropdown.options[subDropdown.selectedIndex];
+  
+  return {
+    value: subDropdown.value,
+    type: selectedOption.dataset.type || 'sebanggo',
+    assignedTo: selectedOption.dataset.assignedTo || null,
+    sku: selectedOption.dataset.sku || null,
+    status: selectedOption.dataset.status || null,
+    customer: selectedOption.dataset.customer || null,
+    isWorkOrder: selectedOption.dataset.type === 'workorder',
+    isHinban: selectedOption.dataset.type === 'hinban',
+    isSebanggo: selectedOption.dataset.type === 'sebanggo'
+  };
+}
+
+// Function to get target machines for current selection
+function getTargetMachines() {
+  const selectionInfo = getCurrentSelectionInfo();
+  
+  if (!selectionInfo) {
+    return [document.getElementById('process').value]; // fallback to current machine
+  }
+  
+  if (selectionInfo.isWorkOrder && selectionInfo.assignedTo) {
+    // Parse assigned machines from work order
+    if (selectionInfo.assignedTo.includes("AOL")) {
+      const machineNumbers = selectionInfo.assignedTo.replace(/AOL\s*/g, '').split(',').map(num => num.trim());
+      return machineNumbers.map(num => `AOL-${num}`);
+    }
+  }
+  
+  // Default to current machine
+  return [document.getElementById('process').value];
+}
+
+// Function to get filename for NC program
+function getNCFilename() {
+  const selectionInfo = getCurrentSelectionInfo();
+  
+  if (!selectionInfo) return null;
+  
+  // For work orders, use 背番号 instead of SKU
+  if (selectionInfo.isWorkOrder) {
+    const subDropdown = document.getElementById('sub-dropdown');
+    const selectedOption = subDropdown.options[subDropdown.selectedIndex];
+    
+    // Check if we have stored the 背番号 from the product lookup
+    if (selectedOption.dataset.sebanggo) {
+      return selectedOption.dataset.sebanggo;
+    }
+    
+    // Fallback to cleaned SKU if 背番号 not found
+    if (selectionInfo.sku) {
+      return selectionInfo.sku.startsWith('P') ? selectionInfo.sku.substring(1) : selectionInfo.sku;
+    }
+  }
+  
+  // For regular 背番号 or 品番, use the value directly
+  return selectionInfo.value;
 }
 
 // Call fetchSetsubiList when the page loads
@@ -388,7 +541,247 @@ async function fetchProductDetails() {
   //getRikeshi(serialNumber);
 }
 
-// Trigger when 背番号 is selected
+// Trigger when 背番号, 品番, or Work Order is selected
+document.getElementById("sub-dropdown").addEventListener("change", async function() {
+  // Skip handling if we're in the middle of an auto-switch from work order
+  if (window.workOrderAutoSwitching) {
+    return;
+  }
+  
+  const selectedOption = this.options[this.selectedIndex];
+  
+  // Reset UI from previous work order mode if needed
+  resetUIFromWorkOrderMode();
+  
+  if (selectedOption && selectedOption.dataset.type === "workorder") {
+    // Handle work order selection
+    await handleWorkOrderSelection(selectedOption);
+  } else if (selectedOption && (selectedOption.dataset.type === "sebanggo" || selectedOption.dataset.type === "hinban")) {
+    // Handle regular 背番号 or 品番 selection
+    await fetchProductDetails();
+  } else {
+    // Fallback for items without dataset.type (backward compatibility)
+    await fetchProductDetails();
+  }
+  
+  NCPresstoFalse();
+});
+
+// Function to handle work order selection
+async function handleWorkOrderSelection(selectedOption) {
+  try {
+    const workOrderNumber = selectedOption.value;
+    const sku = selectedOption.dataset.sku;
+    const assignedTo = selectedOption.dataset.assignedTo;
+    const status = selectedOption.dataset.status;
+    
+    // Remove "P" prefix from SKU for masterDB lookup
+    const cleanSku = sku.startsWith('P') ? sku.substring(1) : sku;
+    
+    // Try to fetch product details using the cleaned SKU
+    if (cleanSku) {
+      // First, try to find this SKU in the master database by 品番
+      const response = await fetch(`${serverURL}/queries`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          dbName: "Sasaki_Coating_MasterDB",
+          collectionName: "masterDB",
+          query: {
+            品番: cleanSku
+          }
+        }),
+      });
+      
+      const result = await response.json();
+      
+      if (result && result.length > 0) {
+        const data = result[0];
+        
+        // Store the 背番号 for NC filename use
+        selectedOption.dataset.sebanggo = data.背番号 || cleanSku;
+        
+        // AUTOMATICALLY UPDATE THE SUB-DROPDOWN TO 背番号 (like 品番 selection does)
+        if (data.背番号) {
+          const subDropdown = document.getElementById('sub-dropdown');
+          // Find if 背番号 exists in the dropdown options
+          const sebanggoOption = Array.from(subDropdown.options).find(option => 
+            option.value === data.背番号 && option.dataset.type === 'sebanggo'
+          );
+          
+          if (sebanggoOption) {
+            // Change selection to the 背番号
+            subDropdown.value = data.背番号;
+            console.log(`Work Order ${workOrderNumber}: Auto-switched to 背番号 ${data.背番号}`);
+            
+            // Mark this option as having work order context to preserve multi-machine targeting
+            sebanggoOption.dataset.workOrderContext = "true";
+            sebanggoOption.dataset.workOrderAssignment = assignedTo;
+            sebanggoOption.dataset.workOrderSku = sku;
+            
+            // Set a flag to prevent infinite recursion and call fetchProductDetails
+            window.workOrderAutoSwitching = true;
+            try {
+              await fetchProductDetails();
+            } finally {
+              // Clear the flag
+              delete window.workOrderAutoSwitching;
+            }
+          }
+        }
+        
+        // Since we're calling fetchProductDetails() above, it will populate all fields correctly
+        // No need to populate fields here again as it would overwrite with potentially incorrect data
+        
+        // Set work order specific information in comment field
+        const commentField = document.querySelector('textarea[name="Comments1"]');
+        if (commentField) {
+          commentField.value = `Work Order: ${workOrderNumber}\nAssigned to: ${assignedTo}\nStatus: ${status}\nSKU: ${sku}\n背番号: ${data.背番号 || 'Not found'}`;
+        }
+        
+        console.log("Work order details loaded successfully:", data);
+        console.log(`Will use 背番号 "${data.背番号}" for NC filename instead of SKU "${sku}"`);
+      } else {
+        // If not found in master database, populate what we know from work order
+        document.getElementById("product-number").value = sku;
+        
+        // Store the cleaned SKU as fallback for NC filename
+        selectedOption.dataset.sebanggo = cleanSku;
+        
+        const commentField = document.querySelector('textarea[name="Comments1"]');
+        if (commentField) {
+          commentField.value = `Work Order: ${workOrderNumber}\nAssigned to: ${assignedTo}\nStatus: ${status}\nSKU: ${sku}\n(Product details not found in master database)`;
+        }
+        
+        console.log("Product details not found, using cleaned SKU:", cleanSku);
+      }
+      
+      // Update any UI elements to show work order mode
+      updateUIForWorkOrderMode(assignedTo);
+      
+    }
+  } catch (error) {
+    console.error("Error handling work order selection:", error);
+  }
+}
+
+// Function to update UI for work order mode
+function updateUIForWorkOrderMode(assignedTo) {
+  // Update the machine dropdown to show assigned machines for work orders
+  
+  if (assignedTo && assignedTo.includes("AOL")) {
+    const machineNumbers = assignedTo.replace(/AOL\s*/g, '').split(',').map(num => num.trim());
+    const targetMachines = machineNumbers.map(num => `AOL-${num}`);
+    
+    console.log(`Work Order Mode: Target machines are ${targetMachines.join(', ')}`);
+    
+    // Update the process/machine dropdown to show the assigned machines
+    const processDropdown = document.getElementById('process');
+    if (processDropdown) {
+      // Create the display format that matches the work order assignment
+      const displayText = `AOL ${machineNumbers.join(',')}`;
+      
+      // Check if this option already exists
+      let existingOption = null;
+      if (processDropdown.options) {
+        existingOption = Array.from(processDropdown.options).find(option => 
+          option.value === displayText || option.dataset.isWorkOrderAssignment === "true"
+        );
+      }
+      
+      if (!existingOption) {
+        // Create a new option for the multi-machine assignment
+        const multiMachineOption = document.createElement("option");
+        multiMachineOption.value = displayText;
+        multiMachineOption.textContent = displayText;
+        multiMachineOption.dataset.isWorkOrderAssignment = "true";
+        multiMachineOption.dataset.originalAssignment = assignedTo;
+        processDropdown.appendChild(multiMachineOption);
+      }
+      
+      // Select this option
+      processDropdown.value = displayText;
+      
+      // Add visual indication
+      processDropdown.style.backgroundColor = "#e3f2fd";
+      processDropdown.style.fontWeight = "bold";
+      
+      console.log(`Machine dropdown updated to: "${displayText}"`);
+      
+      // Update URL parameter to reflect multi-machine assignment
+      const urlParams = new URLSearchParams(window.location.search);
+      urlParams.set('machine', displayText);
+      const newUrl = `${window.location.pathname}?${urlParams.toString()}`;
+      window.history.replaceState(null, '', newUrl);
+      console.log(`URL updated to show machine parameter: ${displayText}`);
+      
+      // Also update the process input field directly (Equipment Name field)
+      processDropdown.value = displayText;
+      
+      // Trigger input event to save to localStorage
+      const inputEvent = new Event('input', { bubbles: true });
+      processDropdown.dispatchEvent(inputEvent);
+    }
+    
+    // Show notification to user
+    const notification = document.createElement('div');
+    notification.id = 'workOrderNotification';
+    notification.style.cssText = `
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      background: #2196F3;
+      color: white;
+      padding: 15px;
+      border-radius: 5px;
+      z-index: 1000;
+      font-weight: bold;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+    `;
+    notification.innerHTML = `
+      📋 Work Order Mode<br>
+      🎯 Target Machines: ${targetMachines.join(', ')}<br>
+      🔧 Will send NC program to ${targetMachines.length} machine${targetMachines.length > 1 ? 's' : ''}
+    `;
+    
+    // Remove existing notification if any
+    const existing = document.getElementById('workOrderNotification');
+    if (existing) existing.remove();
+    
+    document.body.appendChild(notification);
+    
+    // Auto-hide after 5 seconds
+    setTimeout(() => {
+      if (notification && notification.parentNode) {
+        notification.remove();
+      }
+    }, 5000);
+  }
+}
+
+// Function to reset UI when not in work order mode
+function resetUIFromWorkOrderMode() {
+  const processDropdown = document.getElementById('process');
+  if (processDropdown && processDropdown.options) {
+    // Remove work order assignment options
+    Array.from(processDropdown.options).forEach(option => {
+      if (option.dataset && option.dataset.isWorkOrderAssignment === "true") {
+        option.remove();
+      }
+    });
+    
+    // Reset styling
+    processDropdown.style.backgroundColor = "";
+    processDropdown.style.fontWeight = "";
+  }
+  
+  // Remove notification
+  const notification = document.getElementById('workOrderNotification');
+  if (notification) notification.remove();
+}
+
 document.getElementById("sub-dropdown").addEventListener("change", fetchProductDetails);
 document.getElementById("sub-dropdown").addEventListener("change", NCPresstoFalse);
 
@@ -2808,8 +3201,8 @@ function updateSheetStatus(selectedValue, machineName) {
     });
 }
 
-//this function sends request to nc cutter's pC
-function sendtoNC(selectedValue) {
+//this function sends request to nc cutter's PC - supports multiple machines
+async function sendtoNC(selectedValue) {
 
   //sendCommand("off"); // this is for arduino (emergency button)
   sendtoNCButtonisPressed = true;
@@ -2818,25 +3211,110 @@ function sendtoNC(selectedValue) {
   const key = `${uniquePrefix}sendtoNCButtonisPressed`;
   localStorage.setItem(key, 'true'); // Save the value with the unique key
 
-  const ipAddress = document.getElementById('ipInfo').value;
-  console.log(ipAddress);
-  const currentSebanggo = document.getElementById('sub-dropdown').value;
-  //window.alert(machineName + currentSebanggo);
-  if (!currentSebanggo) {
-    window.alert("Please select product first / 背番号選んでください");
+  const subDropdown = document.getElementById('sub-dropdown');
+  const currentSelection = subDropdown.value;
+  const selectedOption = subDropdown.options[subDropdown.selectedIndex];
+  
+  if (!currentSelection) {
+    window.alert("Please select product, 品番, or work order first / 背番号、品番、またはワークオーダーを選んでください");
     return;
   }
 
-  //let pcName = "DESKTOP-V36G1SK-2";
-  const url = `http://${ipAddress}:5000/request?filename=${currentSebanggo}.pce`; //change to
+  // Determine filename and target machines
+  let filename = getNCFilename(); // Use the updated filename function
+  let targetMachines = [];
+  
+  // Check if we're in work order mode (either original work order or auto-switched)
+  const isWorkOrderMode = (selectedOption && selectedOption.dataset.type === "workorder") || 
+                          (selectedOption && selectedOption.dataset.workOrderContext === "true");
+  
+  if (isWorkOrderMode) {
+    // Get work order context
+    let assignedTo, sku;
+    if (selectedOption.dataset.type === "workorder") {
+      // Original work order selection
+      assignedTo = selectedOption.dataset.assignedTo;
+      sku = selectedOption.dataset.sku;
+    } else if (selectedOption.dataset.workOrderContext === "true") {
+      // Auto-switched 背番号 with work order context
+      assignedTo = selectedOption.dataset.workOrderAssignment;
+      sku = selectedOption.dataset.workOrderSku;
+    }
+    
+    // Parse assigned machines (e.g., "AOL 4,5" or "AOL 1")
+    if (assignedTo && assignedTo.includes("AOL")) {
+      const machineNumbers = assignedTo.replace(/AOL\s*/g, '').split(',').map(num => num.trim());
+      targetMachines = machineNumbers.map(num => `AOL-${num}`);
+    }
+    
+    console.log(`Work Order Mode: Using filename ${filename}, targeting machines: ${JSON.stringify(targetMachines)}`);
+  } else {
+    // It's a regular 背番号 or 品番 - use current machine selection
+    const currentMachine = document.getElementById('process').value;
+    
+    // Check if current machine is multi-machine format (e.g., "AOL 4,5")
+    if (currentMachine && currentMachine.includes("AOL") && currentMachine.includes(",")) {
+      // Parse multi-machine format
+      const machineNumbers = currentMachine.replace(/AOL\s*/g, '').split(',').map(num => num.trim());
+      targetMachines = machineNumbers.map(num => `AOL-${num}`);
+    } else {
+      targetMachines = [currentMachine];
+    }
+    
+    console.log(`${selectedOption?.dataset.type === 'hinban' ? '品番' : '背番号'} ${currentSelection}: Using filename ${filename}, targeting machine: ${JSON.stringify(targetMachines)}`);
+  }
 
-  // Open a new tab with the desired URL
-  const newTab = window.open(url, '_blank');
+  // If no target machines determined, fall back to current machine
+  if (targetMachines.length === 0) {
+    const currentMachine = document.getElementById('process').value;
+    targetMachines = [currentMachine];
+    console.log("Fallback to current machine:", targetMachines);
+  }
 
-  // Set a timer to close the new tab after a delay (e.g., 1 seconds)
-  setTimeout(() => {
-    newTab.close();
-  }, 5000);
+  // Get IP addresses for target machines
+  const ipPromises = targetMachines.map(async (machine) => {
+    try {
+      const response = await fetch(`${ipURL}?filter=${machine}`);
+      const data = await response.text();
+      return { machine, ip: data.trim() };
+    } catch (error) {
+      console.error(`Error getting IP for ${machine}:`, error);
+      return { machine, ip: null };
+    }
+  });
+
+  const machineIPs = await Promise.all(ipPromises);
+  const validMachines = machineIPs.filter(item => item.ip && item.ip !== 'No data found');
+
+  if (validMachines.length === 0) {
+    window.alert("No valid IP addresses found for target machines / 対象機械のIPアドレスが見つかりません");
+    return;
+  }
+
+  // Send to all target machines
+  const sendPromises = validMachines.map((machineInfo) => {
+    const url = `http://${machineInfo.ip}:5000/request?filename=${filename}.pce`;
+    console.log(`Sending to ${machineInfo.machine} (${machineInfo.ip}): ${url}`);
+    
+    return new Promise((resolve) => {
+      const newTab = window.open(url, '_blank');
+      setTimeout(() => {
+        try {
+          newTab.close();
+        } catch (e) {
+          console.log(`Could not close tab for ${machineInfo.machine}:`, e);
+        }
+        resolve();
+      }, 5000);
+    });
+  });
+
+  // Wait for all sends to complete
+  await Promise.all(sendPromises);
+  
+  // Show success message
+  const machineList = validMachines.map(m => m.machine).join(', ');
+  window.alert(`Program sent to: ${machineList}\nFilename: ${filename}.pce`);
 }
 document.getElementById('sendtoNC').addEventListener('click', sendtoNC);
 
@@ -3116,7 +3594,7 @@ function checkValue() {
       const subDropdownValue = document.getElementById('sub-dropdown').value;
 
       // Check if sub-dropdown value is in its default state
-      if (!subDropdownValue || subDropdownValue === "Select 背番号") {
+      if (!subDropdownValue || subDropdownValue === "Select 背番号 / 品番 / Work Order") {
         console.log("Sub-dropdown is in its default state. Skipping showPopup.");
         return; // Do not call showPopup if the value is default
       }
