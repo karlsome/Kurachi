@@ -3479,82 +3479,52 @@ async function sendtoNC(selectedValue) {
     return;
   }
 
-  // Send to all target machines with staggered delays to avoid popup blocking
-  const sendPromises = validMachines.map((machineInfo, index) => {
+  // Simple, direct approach - open all tabs immediately
+  console.log(`Opening tabs for ${validMachines.length} machines:`);
+  
+  const openedTabs = [];
+  const successfulMachines = [];
+  const failedMachines = [];
+  
+  // Open all tabs immediately (like your openLinks() example)
+  validMachines.forEach((machineInfo) => {
     const url = `http://${machineInfo.ip}:5000/request?filename=${filename}.pce`;
-    console.log(`Sending to ${machineInfo.machine} (${machineInfo.ip}): ${url}`);
+    console.log(`Opening tab for ${machineInfo.machine}: ${url}`);
     
-    return new Promise((resolve) => {
-      // Add a small delay for each subsequent machine to avoid popup blocking
-      setTimeout(() => {
-        console.log(`Attempting to open tab for ${machineInfo.machine} with URL: ${url}`);
-        const newTab = window.open(url, '_blank');
-        
-        // Enhanced popup detection
-        if (newTab && !newTab.closed) {
-          console.log(`Successfully opened tab for ${machineInfo.machine}`);
-          
-          // Check if tab is actually accessible (not blocked)
-          setTimeout(() => {
-            try {
-              if (newTab.closed) {
-                console.log(`Tab for ${machineInfo.machine} was closed (possibly by user or error)`);
-              } else {
-                console.log(`Tab for ${machineInfo.machine} is still open and accessible`);
-              }
-            } catch (e) {
-              console.log(`Tab for ${machineInfo.machine} exists but may be blocked by CORS:`, e);
-            }
-          }, 1000);
-          
-          setTimeout(() => {
-            try {
-              if (!newTab.closed) {
-                newTab.close();
-                console.log(`Tab closed for ${machineInfo.machine}`);
-              }
-            } catch (e) {
-              console.log(`Could not close tab for ${machineInfo.machine}:`, e);
-            }
-            resolve({ machine: machineInfo.machine, success: true });
-          }, 5000);
-        } else {
-          console.warn(`Failed to open tab for ${machineInfo.machine} - popup blocked or URL invalid`);
-          
-          // Try alternative method - create a temporary link and click it
-          console.log(`Trying alternative method for ${machineInfo.machine}...`);
-          const tempLink = document.createElement('a');
-          tempLink.href = url;
-          tempLink.target = '_blank';
-          tempLink.style.display = 'none';
-          document.body.appendChild(tempLink);
-          
-          try {
-            tempLink.click();
-            console.log(`Alternative method triggered for ${machineInfo.machine}`);
-            setTimeout(() => {
-              document.body.removeChild(tempLink);
-              resolve({ machine: machineInfo.machine, success: true });
-            }, 1000);
-          } catch (e) {
-            console.error(`Alternative method also failed for ${machineInfo.machine}:`, e);
-            document.body.removeChild(tempLink);
-            resolve({ machine: machineInfo.machine, success: false });
-          }
-        }
-      }, index * 500); // 500ms delay between each machine
-    });
+    try {
+      const newTab = window.open(url, '_blank');
+      if (newTab) {
+        openedTabs.push({ tab: newTab, machine: machineInfo.machine });
+        successfulMachines.push(machineInfo.machine);
+        console.log(`✅ Tab opened for ${machineInfo.machine}`);
+      } else {
+        failedMachines.push(machineInfo.machine);
+        console.log(`❌ Failed to open tab for ${machineInfo.machine} - popup blocked`);
+      }
+    } catch (error) {
+      failedMachines.push(machineInfo.machine);
+      console.log(`❌ Error opening tab for ${machineInfo.machine}:`, error);
+    }
   });
-
-  // Wait for all sends to complete
-  const sendResults = await Promise.all(sendPromises);
+  
+  // Close all tabs after 5 seconds
+  if (openedTabs.length > 0) {
+    setTimeout(() => {
+      openedTabs.forEach(({ tab, machine }) => {
+        try {
+          if (tab && !tab.closed) {
+            tab.close();
+            console.log(`Tab closed for ${machine}`);
+          }
+        } catch (e) {
+          console.log(`Could not close tab for ${machine}:`, e);
+        }
+      });
+    }, 5000);
+  }
   
   // Hide loading modal
   hideSendingModal();
-  
-  // Analyze results and show appropriate message
-  const successfulMachines = sendResults.filter(result => result.success).map(result => result.machine);
-  const failedMachines = sendResults.filter(result => !result.success).map(result => result.machine);
   
   let message = `✅ NC Program Send Completed!\n\nFilename: ${filename}.pce\n`;
   
