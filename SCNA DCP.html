@@ -286,7 +286,7 @@
             </select>
 
             <!-- QR code button -->
-            <button id="scan-button" type="button">Scan Worker ID</button>
+            <button id="scan-button" type="button">Scan QR</button>
             <br>
             <br>
 
@@ -342,8 +342,13 @@
             <input type="time" name="End Time" id="End Time" placeholder="Time End" onfocus="setDefaultTime(this)" required>
             <br>
             <br>
-            <label for="shot">Shot Count</label>
-            <input type="number" name="shot" id="shot" placeholder="Shot Count" style="font-size: 24px; padding: 15px; width: 200px; height: 60px; text-align: center; border: 2px solid #ccc; border-radius: 8px;" readonly onclick="openNumericKeypad('shot')">
+            
+            <!-- Dynamic Shot Count Container -->
+            <div id="shot-count-container">
+                <label for="shot">Shot Count</label>
+                <input type="number" name="shot" id="shot" placeholder="Shot Count" style="font-size: 24px; padding: 15px; width: 200px; height: 60px; text-align: center; border: 2px solid #ccc; border-radius: 8px;" readonly onclick="openNumericKeypad('shot')">
+            </div>
+            
             <br><br>
 
             <label for="partial-from-spare">Partial from Spare</label>

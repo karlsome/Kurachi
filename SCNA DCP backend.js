@@ -87,7 +87,14 @@ function getCurrentTargetMachines() {
     const currentMachine = document.getElementById('process').value;
     
     if (currentMachine && currentMachine.includes("AOL") && currentMachine.includes(",")) {
-      const machineNumbers = currentMachine.replace(/AOL\s*/g, '').split(',').map(num => num.trim());
+      // Handle both "AOL 4,5" and "AOL4,5" formats
+      const machineNumbers = currentMachine
+        .replace(/AOL\s*/gi, '')  // Remove "AOL" and any following spaces (case insensitive)
+        .split(',')
+        .map(num => num.trim())
+        .filter(num => num); // Remove empty strings
+      
+      console.log(`🔍 Parsed machine numbers from "${currentMachine}":`, machineNumbers);
       return machineNumbers.map(num => `AOL-${num}`);
     } else if (currentMachine) {
       return [currentMachine];
@@ -95,6 +102,170 @@ function getCurrentTargetMachines() {
   }
   
   return [];
+}
+
+// Function to create dynamic shot count inputs based on target machines
+function createDynamicShotCountInputs() {
+  const targetMachines = getCurrentTargetMachines();
+  const shotCountContainer = document.getElementById('shot-count-container');
+  
+  // Debug: Log current state with more details
+  const currentMachine = document.getElementById('process')?.value;
+  const subDropdown = document.getElementById('sub-dropdown');
+  const selectedOption = subDropdown?.options[subDropdown.selectedIndex];
+  
+  console.log(`🔍 createDynamicShotCountInputs Debug:`, {
+    currentMachine,
+    targetMachines,
+    targetMachinesLength: targetMachines.length,
+    subDropdownValue: subDropdown?.value,
+    selectedOptionText: selectedOption?.text,
+    selectedOptionValue: selectedOption?.value
+  });
+  
+  if (!shotCountContainer) {
+    console.error('Shot count container not found in HTML');
+    return;
+  }
+  
+  // Clear existing inputs
+  shotCountContainer.innerHTML = '';
+  
+  if (targetMachines.length === 0) {
+    // No target machines, show single generic input
+    shotCountContainer.innerHTML = `
+      <label for="shot">Shot Count</label>
+      <input type="number" name="shot" id="shot" placeholder="Shot Count" 
+             style="font-size: 24px; padding: 15px; width: 200px; height: 60px; text-align: center; border: 2px solid #ccc; border-radius: 8px;" 
+             readonly onclick="openNumericKeypad('shot')">
+    `;
+  } else if (targetMachines.length === 1) {
+    // Single target machine
+    const machineId = targetMachines[0].replace('-', '');
+    shotCountContainer.innerHTML = `
+      <label for="ShotCount-${machineId}">Shot Count (${targetMachines[0]})</label>
+      <input type="number" name="ShotCount-${machineId}" id="ShotCount-${machineId}" placeholder="Shot Count for ${targetMachines[0]}" 
+             style="font-size: 24px; padding: 15px; width: 200px; height: 60px; text-align: center; border: 2px solid #ccc; border-radius: 8px;" 
+             readonly onclick="openNumericKeypad('ShotCount-${machineId}')">
+    `;
+  } else {
+    // Multiple target machines
+    let inputsHtml = '<div style="margin-bottom: 10px;"><strong>Shot Count for Each Machine:</strong></div>';
+    
+    targetMachines.forEach(machine => {
+      const machineId = machine.replace('-', '');
+      inputsHtml += `
+        <div style="margin-bottom: 15px;">
+          <label for="ShotCount-${machineId}">Shot Count (${machine})</label>
+          <input type="number" name="ShotCount-${machineId}" id="ShotCount-${machineId}" placeholder="Shot Count for ${machine}" 
+                 style="font-size: 20px; padding: 10px; width: 180px; height: 50px; text-align: center; border: 2px solid #ccc; border-radius: 8px;" 
+                 readonly onclick="openNumericKeypad('ShotCount-${machineId}')">
+        </div>
+      `;
+    });
+    
+    shotCountContainer.innerHTML = inputsHtml;
+  }
+  
+  console.log(`✅ Created dynamic shot count inputs for ${targetMachines.length} target machines:`, targetMachines);
+}
+
+// Function to validate and collect shot count data
+function validateAndCollectShotCounts() {
+  const targetMachines = getCurrentTargetMachines();
+  let isValid = true;
+  let totalShotCount = 0;
+  let shot1 = 0;
+  let shot2 = 0;
+  
+  if (targetMachines.length === 0) {
+    // Single generic shot input
+    const shotInput = document.getElementById('shot');
+    if (!shotInput) {
+      console.error('Shot input not found');
+      return { isValid: false, error: 'Shot input not found' };
+    }
+    
+    const shotValue = parseInt(shotInput.value) || 0;
+    if (shotValue < 1) {
+      return { 
+        isValid: false, 
+        error: 'ショット数 (Shot Count) is required and must be at least 1.',
+        focusElement: shotInput 
+      };
+    }
+    
+    totalShotCount = shotValue;
+    shot1 = shotValue;  // Single machine goes to shot1
+    shot2 = 0;          // No second machine
+  } else if (targetMachines.length === 1) {
+    // Single machine-specific shot input
+    const machineId = targetMachines[0].replace('-', '');
+    const shotInput = document.getElementById(`ShotCount-${machineId}`);
+    
+    if (!shotInput) {
+      return { 
+        isValid: false, 
+        error: `Shot count input not found for ${targetMachines[0]}`,
+        focusElement: null
+      };
+    }
+    
+    const shotValue = parseInt(shotInput.value) || 0;
+    if (shotValue < 1) {
+      return { 
+        isValid: false, 
+        error: `Shot count for ${targetMachines[0]} is required and must be at least 1.`,
+        focusElement: shotInput 
+      };
+    }
+    
+    totalShotCount = shotValue;
+    shot1 = shotValue;  // Single machine goes to shot1
+    shot2 = 0;          // No second machine
+  } else {
+    // Multiple machines (2 or more)
+    for (let i = 0; i < targetMachines.length; i++) {
+      const machine = targetMachines[i];
+      const machineId = machine.replace('-', '');
+      const shotInput = document.getElementById(`ShotCount-${machineId}`);
+      
+      if (!shotInput) {
+        return { 
+          isValid: false, 
+          error: `Shot count input not found for ${machine}`,
+          focusElement: null
+        };
+      }
+      
+      const shotValue = parseInt(shotInput.value) || 0;
+      if (shotValue < 1) {
+        return { 
+          isValid: false, 
+          error: `Shot count for ${machine} is required and must be at least 1.`,
+          focusElement: shotInput 
+        };
+      }
+      
+      totalShotCount += shotValue;
+      
+      // Assign to shot1 and shot2 based on order
+      if (i === 0) {
+        shot1 = shotValue;  // First machine
+      } else if (i === 1) {
+        shot2 = shotValue;  // Second machine
+      }
+      // Note: If more than 2 machines, only first 2 are tracked in shot1/shot2
+    }
+  }
+  
+  return { 
+    isValid: true, 
+    totalShotCount,
+    shot1,
+    shot2,
+    targetMachines 
+  };
 }
 
 //this code listens to incoming parameters passed
@@ -161,6 +332,10 @@ inputs.forEach(input => {
 document.addEventListener('DOMContentLoaded', () => {
   getIP(); // ip address for machine
   document.getElementById('uploadingModal').style.display = 'none';
+  
+  // Initialize dynamic shot count inputs on page load
+  createDynamicShotCountInputs();
+  
   const inputs = document.querySelectorAll('input, select, button, textarea'); // Get all input elements
   const images = document.querySelectorAll('img'); // Get all <img> elements
   const textElements = document.querySelectorAll('[id]'); // Get all elements with an ID
@@ -647,6 +822,9 @@ document.getElementById("sub-dropdown").addEventListener("change", async functio
   
   const selectedOption = this.options[this.selectedIndex];
   
+  // Reset Send to Machine button back to red state when changing selection
+  resetSendToMachineButton();
+  
   // Reset UI from previous work order mode if needed
   resetUIFromWorkOrderMode();
   
@@ -666,6 +844,9 @@ document.getElementById("sub-dropdown").addEventListener("change", async functio
   if (targetMachines.length > 0) {
     preFetchMachineIPs(targetMachines);
   }
+  
+  // Create dynamic shot count inputs based on target machines
+  createDynamicShotCountInputs();
   
   NCPresstoFalse();
 });
@@ -738,10 +919,41 @@ async function handleWorkOrderSelection(selectedOption) {
         // Since we're calling fetchProductDetails() above, it will populate all fields correctly
         // No need to populate fields here again as it would overwrite with potentially incorrect data
         
-        // Set work order specific information in comment field
+        // Create or update work order info display (read-only)
+        let workOrderInfo = document.getElementById('workOrderInfo');
+        if (!workOrderInfo) {
+          workOrderInfo = document.createElement('div');
+          workOrderInfo.id = 'workOrderInfo';
+          workOrderInfo.style.cssText = `
+            background: #e3f2fd;
+            border: 2px solid #2196F3;
+            border-radius: 5px;
+            padding: 10px;
+            margin-bottom: 10px;
+            font-family: monospace;
+            font-size: 14px;
+            white-space: pre-line;
+            color: #1565C0;
+            font-weight: bold;
+          `;
+          
+          // Insert before the Comments1 textarea
+          const commentField = document.querySelector('textarea[name="Comments1"]');
+          if (commentField && commentField.parentNode) {
+            commentField.parentNode.insertBefore(workOrderInfo, commentField);
+          }
+        }
+        
+        workOrderInfo.textContent = `Work Order: ${workOrderNumber}\nAssigned to: ${assignedTo}\nStatus: ${status}\nSKU: ${sku}\n背番号: ${data.背番号 || 'Not found'}`;
+        
+        // Keep Comments1 textarea for user input (not read-only)
         const commentField = document.querySelector('textarea[name="Comments1"]');
         if (commentField) {
-          commentField.value = `Work Order: ${workOrderNumber}\nAssigned to: ${assignedTo}\nStatus: ${status}\nSKU: ${sku}\n背番号: ${data.背番号 || 'Not found'}`;
+          commentField.readOnly = false;
+          commentField.style.backgroundColor = '';
+          commentField.style.cursor = '';
+          commentField.placeholder = 'Add your comments here... / コメントをここに追加してください...';
+          console.log('Comments1 textarea kept editable for user input');
         }
         
         console.log("Work order details loaded successfully:", data);
@@ -753,9 +965,41 @@ async function handleWorkOrderSelection(selectedOption) {
         // Store the cleaned SKU as fallback for NC filename
         selectedOption.dataset.sebanggo = cleanSku;
         
+        // Create or update work order info display (read-only)
+        let workOrderInfo = document.getElementById('workOrderInfo');
+        if (!workOrderInfo) {
+          workOrderInfo = document.createElement('div');
+          workOrderInfo.id = 'workOrderInfo';
+          workOrderInfo.style.cssText = `
+            background: #e3f2fd;
+            border: 2px solid #2196F3;
+            border-radius: 5px;
+            padding: 10px;
+            margin-bottom: 10px;
+            font-family: monospace;
+            font-size: 14px;
+            white-space: pre-line;
+            color: #1565C0;
+            font-weight: bold;
+          `;
+          
+          // Insert before the Comments1 textarea
+          const commentField = document.querySelector('textarea[name="Comments1"]');
+          if (commentField && commentField.parentNode) {
+            commentField.parentNode.insertBefore(workOrderInfo, commentField);
+          }
+        }
+        
+        workOrderInfo.textContent = `Work Order: ${workOrderNumber}\nAssigned to: ${assignedTo}\nStatus: ${status}\nSKU: ${sku}\n(Product details not found in master database)`;
+        
+        // Keep Comments1 textarea for user input (not read-only)
         const commentField = document.querySelector('textarea[name="Comments1"]');
         if (commentField) {
-          commentField.value = `Work Order: ${workOrderNumber}\nAssigned to: ${assignedTo}\nStatus: ${status}\nSKU: ${sku}\n(Product details not found in master database)`;
+          commentField.readOnly = false;
+          commentField.style.backgroundColor = '';
+          commentField.style.cursor = '';
+          commentField.placeholder = 'Add your comments here... / コメントをここに追加してください...';
+          console.log('Comments1 textarea kept editable for user input (product not found case)');
         }
         
         console.log("Product details not found, using cleaned SKU:", cleanSku);
@@ -882,6 +1126,24 @@ function resetUIFromWorkOrderMode() {
   // Remove notification
   const notification = document.getElementById('workOrderNotification');
   if (notification) notification.remove();
+  
+  // Remove work order info display and restore Comments1 textarea to normal
+  const workOrderInfo = document.getElementById('workOrderInfo');
+  if (workOrderInfo) {
+    workOrderInfo.remove();
+    console.log('Work order info display removed');
+  }
+  
+  // Reset Comments1 textarea to normal state
+  const commentField = document.querySelector('textarea[name="Comments1"]');
+  if (commentField) {
+    commentField.readOnly = false;
+    commentField.style.backgroundColor = '';
+    commentField.style.cursor = '';
+    commentField.placeholder = 'Add your comments here... / コメントをここに追加してください...';
+    // Don't clear the value - keep any user comments
+    console.log('Comments1 textarea restored to normal editable state');
+  }
 }
 
 // Remove duplicate event listeners - the main async function above handles all cases
@@ -904,6 +1166,9 @@ document.getElementById("process").addEventListener("change", function() {
       preFetchMachineIPs(machines);
     }
   }
+  
+  // Update shot count inputs when equipment changes
+  createDynamicShotCountInputs();
 });
 
 // Pre-fetch common machine IPs when page loads
@@ -2061,7 +2326,11 @@ document.getElementById('scan-button').addEventListener('click', function() {
       // If QR code matches an option, set the dropdown value and close scanner
       if (subDropdown && subDropdown.value !== qrCodeMessage) {
         subDropdown.value = qrCodeMessage;
-        fetchProductDetails();
+        
+        // ✅ FIX: Trigger the change event to simulate user selection behavior
+        // This will trigger all the same logic as when user manually changes the dropdown
+        const changeEvent = new Event('change', { bubbles: true });
+        subDropdown.dispatchEvent(changeEvent);
 
         html5QrCode.stop().then(() => {
           qrScannerModal.style.display = 'none';
@@ -2119,6 +2388,9 @@ function resetForm() {
       input.value = ''; // Reset input value
     }
   });
+
+  // Reset Send to Machine button back to red state
+  resetSendToMachineButton();
 
   // Reset Equipment Name (process field) to original URL parameter value
   const selectedMachine = getQueryParam('machine');
@@ -2962,6 +3234,9 @@ document.getElementById('submit').addEventListener('click', async (event) => {
     event.preventDefault();
     updateCycleTime();
 
+    // Reset Send to Machine button back to red state when submitting
+    resetSendToMachineButton();
+
     const hatsumono = document.getElementById("hatsumonoLabel").textContent;
     const atomono = document.getElementById("atomonoLabel").textContent;
     const isToggleChecked = document.getElementById('enable-inputs').checked;
@@ -2971,11 +3246,13 @@ document.getElementById('submit').addEventListener('click', async (event) => {
     const scanAlertText = document.getElementById('scanAlertText');
     const uploadingModal = document.getElementById('uploadingModal');
 
-    const shotInput = document.getElementById('shot');
-
-    if (!shotInput.value || parseInt(shotInput.value) < 1) {
-        showAlert('ショット数 (Shot Count) is required and must be at least 1.');
-        shotInput.focus();
+    // Validate shot counts using new dynamic validation
+    const shotValidation = validateAndCollectShotCounts();
+    if (!shotValidation.isValid) {
+        showAlert(shotValidation.error);
+        if (shotValidation.focusElement) {
+            shotValidation.focusElement.focus();
+        }
         return;
     }
 
@@ -3007,7 +3284,19 @@ document.getElementById('submit').addEventListener('click', async (event) => {
         const Spare = parseInt(document.getElementById('在庫').value, 10) || 0;
         const Comment = document.querySelector('textarea[name="Comments1"]').value;
         const Cycle_Time = parseFloat(document.getElementById('cycleTime').value) || 0;
-        const ショット数 = parseInt(document.getElementById('shot').value, 10) || 0;
+        
+        // Use dynamic shot count validation data
+        const ショット数 = shotValidation.totalShotCount;
+        const shot1 = shotValidation.shot1;
+        const shot2 = shotValidation.shot2;
+        
+        console.log(`📊 Shot Count Summary:`, {
+            totalShotCount: ショット数,
+            shot1,
+            shot2,
+            targetMachines: shotValidation.targetMachines
+        });
+        
         const スペアからの部分数 = parseInt(document.getElementById('partial-from-spare').value, 10) || 0;
 
         const breakTimeData = {
@@ -3155,15 +3444,34 @@ document.getElementById('submit').addEventListener('click', async (event) => {
 
         const uploadedImages = await collectImagesForUpload();
         
+        // Collect work order information if in work order mode
+        const workOrderData = getWorkOrderData();
+        
+        // Add NC program send status to work order data
+        if (workOrderData) {
+          const buttonStateKey = `${uniquePrefix}sendButtonState`;
+          const buttonState = localStorage.getItem(buttonStateKey);
+          workOrderData.ncProgramSent = (buttonState === 'green');
+          workOrderData.ncSendTimestamp = workOrderData.ncProgramSent ? new Date().toISOString() : null;
+        }
+        
         // Prepare data for the new submitToDCP route
         const dcpSubmissionData = {
             品番, 背番号, 設備, Total: Total_PressDB, 工場, Worker_Name, Process_Quantity, Date: WorkDate,
             Time_start, Time_end, 材料ロット, 疵引不良, 加工不良, その他, Total_NG, Spare, Comment,
             Cycle_Time, ショット数, スペアからの部分数, Break_Time_Data: breakTimeData,
+            
+            // NEW: Individual shot counts for tracking
+            shot1: shot1,  // First machine's shot count (or total if single machine)
+            shot2: shot2,  // Second machine's shot count (0 if single machine)
+            
             Total_Break_Minutes: totalBreakMinutes, Total_Break_Hours: parseFloat(totalBreakHours.toFixed(2)),
             Maintenance_Data: maintenanceDataForSubmission,
             Total_Trouble_Minutes: totalTroubleMinutes, Total_Trouble_Hours: parseFloat(totalTroubleHours.toFixed(2)),
             Total_Work_Hours: parseFloat(totalWorkHours.toFixed(2)),
+            
+            // Include work order information for historical tracking
+            WorkOrder_Info: workOrderData,
             
             // Include image data
             images: uploadedImages, // Cycle check images (existing logic)
@@ -3361,6 +3669,7 @@ async function sendtoNC(selectedValue) {
   sendButton.disabled = true;
   sendButton.style.opacity = '0.6';
   sendButton.style.cursor = 'not-allowed';
+  sendButton.style.backgroundColor = '#ff6b6b'; // Red color during sending
   const originalText = sendButton.textContent;
   sendButton.textContent = 'Sending...';
 
@@ -3631,16 +3940,30 @@ async function sendtoNC(selectedValue) {
   
   function restoreButton() {
     const sendButton = document.getElementById('sendtoNC');
+    const buttonStateKey = `${uniquePrefix}sendButtonState`;
+    
     sendButton.disabled = false;
     sendButton.style.opacity = '1';
     sendButton.style.cursor = 'pointer';
+    sendButton.style.backgroundColor = '#f44336'; // Return to red on error
     sendButton.textContent = originalText;
+    
+    // Save red state (error occurred)
+    localStorage.setItem(buttonStateKey, 'red');
+    console.log('Button restored to RED state due to error');
   }
   
   function restoreButtonWithCooldown() {
     const sendButton = document.getElementById('sendtoNC');
+    const buttonStateKey = `${uniquePrefix}sendButtonState`;
+    
     sendButton.textContent = originalText;
     sendButton.style.opacity = '0.7';
+    sendButton.style.backgroundColor = '#4CAF50'; // Green for successful send
+    
+    // Save green state persistently
+    localStorage.setItem(buttonStateKey, 'green');
+    console.log('Button set to GREEN state (successful send) - will persist until reset');
     
     // Start 12-second cooldown timer
     let countdown = 12;
@@ -3655,10 +3978,83 @@ async function sendtoNC(selectedValue) {
         sendButton.disabled = false;
         sendButton.style.opacity = '1';
         sendButton.style.cursor = 'pointer';
+        // KEEP GREEN - don't change back to red
+        sendButton.style.backgroundColor = '#4CAF50'; // Stay green!
         sendButton.textContent = originalText;
+        console.log('Cooldown complete - button stays GREEN until reset condition');
       }
     }, 1000);
   }
+}
+
+// Function to reset Send to Machine button to red state
+function resetSendToMachineButton() {
+  const sendButton = document.getElementById('sendtoNC');
+  const buttonStateKey = `${uniquePrefix}sendButtonState`;
+  
+  if (sendButton) {
+    sendButton.style.backgroundColor = '#f44336'; // Red
+    sendButton.style.color = 'white';
+    sendButton.style.opacity = '1';
+    sendButton.style.cursor = 'pointer';
+    localStorage.setItem(buttonStateKey, 'red');
+    console.log('Send to Machine button reset to RED state');
+  }
+}
+
+// Function to collect work order data for MongoDB submission
+function getWorkOrderData() {
+  const subDropdown = document.getElementById('sub-dropdown');
+  const selectedOption = subDropdown.options[subDropdown.selectedIndex];
+  
+  if (!selectedOption) {
+    return null;
+  }
+  
+  // Check if we're in work order mode
+  const isWorkOrderMode = (selectedOption && selectedOption.dataset.type === "workorder") || 
+                          (selectedOption && selectedOption.dataset.workOrderContext === "true");
+  
+  if (isWorkOrderMode) {
+    let workOrderNumber, assignedTo, status, sku;
+    
+    if (selectedOption.dataset.type === "workorder") {
+      // Original work order selection
+      workOrderNumber = selectedOption.value;
+      assignedTo = selectedOption.dataset.assignedTo;
+      status = selectedOption.dataset.status;
+      sku = selectedOption.dataset.sku;
+    } else if (selectedOption.dataset.workOrderContext === "true") {
+      // Auto-switched 背番号 with work order context
+      assignedTo = selectedOption.dataset.workOrderAssignment;
+      sku = selectedOption.dataset.workOrderSku;
+      // Extract work order number from work order info display
+      const workOrderInfo = document.getElementById('workOrderInfo');
+      if (workOrderInfo) {
+        const infoText = workOrderInfo.textContent;
+        const match = infoText.match(/Work Order:\s*([^\n]+)/);
+        workOrderNumber = match ? match[1].trim() : null;
+        
+        const statusMatch = infoText.match(/Status:\s*([^\n]+)/);
+        status = statusMatch ? statusMatch[1].trim() : null;
+      }
+    }
+    
+    return {
+      isWorkOrder: true,
+      workOrderNumber: workOrderNumber,
+      assignedTo: assignedTo,
+      status: status,
+      sku: sku,
+      targetMachines: getCurrentTargetMachines(),
+      timestamp: new Date().toISOString()
+    };
+  }
+  
+  return {
+    isWorkOrder: false,
+    timestamp: new Date().toISOString()
+  };
 }
 
 // Function to send to a single machine with cooldown protection
@@ -3804,6 +4200,38 @@ function hideSendingModal() {
 }
 
 document.getElementById('sendtoNC').addEventListener('click', sendtoNC);
+
+// Initialize Send to Machine button with persistent color state
+window.addEventListener('load', function() {
+  const sendButton = document.getElementById('sendtoNC');
+  if (sendButton) {
+    // Check for saved button state
+    const buttonStateKey = `${uniquePrefix}sendButtonState`;
+    const savedState = localStorage.getItem(buttonStateKey);
+    
+    if (savedState === 'green') {
+      // Restore green state (successful send)
+      sendButton.style.backgroundColor = '#4CAF50'; // Green
+      sendButton.style.color = 'white';
+      sendButton.style.border = 'none';
+      sendButton.style.padding = '10px 20px';
+      sendButton.style.borderRadius = '5px';
+      sendButton.style.cursor = 'pointer';
+      sendButton.style.fontWeight = 'bold';
+      console.log('Restored Send to Machine button to GREEN state (successful send)');
+    } else {
+      // Default red state (ready to send)
+      sendButton.style.backgroundColor = '#f44336'; // Red
+      sendButton.style.color = 'white';
+      sendButton.style.border = 'none';
+      sendButton.style.padding = '10px 20px';
+      sendButton.style.borderRadius = '5px';
+      sendButton.style.cursor = 'pointer';
+      sendButton.style.fontWeight = 'bold';
+      console.log('Initialized Send to Machine button to RED state (ready to send)');
+    }
+  }
+});
 
 // Function to handle printing
 function runPrintFunction() {
