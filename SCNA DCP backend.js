@@ -13,6 +13,90 @@ const dbURL = 'https://script.google.com/macros/s/AKfycbx0qBw0_wF5X-hA2t1yY-d5h5
 const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
 
+// Global cache for machine IP addresses
+const machineIPCache = new Map();
+
+// Function to pre-fetch IP addresses for machines
+async function preFetchMachineIPs(machines) {
+  console.log('Pre-fetching IP addresses for machines:', machines);
+  
+  for (const machine of machines) {
+    // Skip if already cached and cache is fresh (less than 5 minutes old)
+    const cached = machineIPCache.get(machine);
+    if (cached && (Date.now() - cached.timestamp < 5 * 60 * 1000)) {
+      console.log(`Using cached IP for ${machine}: ${cached.ip}`);
+      continue;
+    }
+    
+    try {
+      const response = await fetch(`${ipURL}?filter=${machine}`);
+      const data = await response.text();
+      const cleanIP = data.replace(/['"]/g, '').trim();
+      
+      if (cleanIP && cleanIP !== 'No data found') {
+        machineIPCache.set(machine, {
+          ip: cleanIP,
+          timestamp: Date.now()
+        });
+        console.log(`Cached IP for ${machine}: ${cleanIP}`);
+      } else {
+        console.warn(`No valid IP found for ${machine}`);
+      }
+    } catch (error) {
+      console.error(`Error pre-fetching IP for ${machine}:`, error);
+    }
+  }
+}
+
+// Function to get cached IP address
+function getCachedIP(machine) {
+  const cached = machineIPCache.get(machine);
+  if (cached && (Date.now() - cached.timestamp < 5 * 60 * 1000)) {
+    return cached.ip;
+  }
+  return null;
+}
+
+// Function to determine target machines from current state
+function getCurrentTargetMachines() {
+  const subDropdown = document.getElementById('sub-dropdown');
+  const selectedOption = subDropdown.options[subDropdown.selectedIndex];
+  
+  if (!selectedOption || !selectedOption.value) {
+    return [];
+  }
+  
+  // Check if we're in work order mode
+  const isWorkOrderMode = (selectedOption && selectedOption.dataset.type === "workorder") || 
+                          (selectedOption && selectedOption.dataset.workOrderContext === "true");
+  
+  if (isWorkOrderMode) {
+    let assignedTo;
+    if (selectedOption.dataset.type === "workorder") {
+      assignedTo = selectedOption.dataset.assignedTo;
+    } else if (selectedOption.dataset.workOrderContext === "true") {
+      assignedTo = selectedOption.dataset.workOrderAssignment;
+    }
+    
+    if (assignedTo && assignedTo.includes("AOL")) {
+      const machineNumbers = assignedTo.replace(/AOL\s*/g, '').split(',').map(num => num.trim());
+      return machineNumbers.map(num => `AOL-${num}`);
+    }
+  } else {
+    // Regular mode - use current machine selection
+    const currentMachine = document.getElementById('process').value;
+    
+    if (currentMachine && currentMachine.includes("AOL") && currentMachine.includes(",")) {
+      const machineNumbers = currentMachine.replace(/AOL\s*/g, '').split(',').map(num => num.trim());
+      return machineNumbers.map(num => `AOL-${num}`);
+    } else if (currentMachine) {
+      return [currentMachine];
+    }
+  }
+  
+  return [];
+}
+
 //this code listens to incoming parameters passed
 function getQueryParam(param) {
   const urlParams = new URLSearchParams(window.location.search);
@@ -32,6 +116,19 @@ if (selectedMachine) {
   if (processInput) {
     processInput.value = selectedMachine;
     console.log("machine set to: " + selectedMachine);
+    
+    // Pre-fetch IP for the initial machine
+    const initialMachines = [];
+    if (selectedMachine.includes("AOL") && selectedMachine.includes(",")) {
+      const machineNumbers = selectedMachine.replace(/AOL\s*/g, '').split(',').map(num => num.trim());
+      initialMachines.push(...machineNumbers.map(num => `AOL-${num}`));
+    } else {
+      initialMachines.push(selectedMachine);
+    }
+    
+    if (initialMachines.length > 0) {
+      preFetchMachineIPs(initialMachines);
+    }
   }
 }
 
@@ -564,6 +661,12 @@ document.getElementById("sub-dropdown").addEventListener("change", async functio
     await fetchProductDetails();
   }
   
+  // Pre-fetch IP addresses for current target machines
+  const targetMachines = getCurrentTargetMachines();
+  if (targetMachines.length > 0) {
+    preFetchMachineIPs(targetMachines);
+  }
+  
   NCPresstoFalse();
 });
 
@@ -717,12 +820,8 @@ function updateUIForWorkOrderMode(assignedTo) {
       window.history.replaceState(null, '', newUrl);
       console.log(`URL updated to show machine parameter: ${displayText}`);
       
-      // Also update the process input field directly (Equipment Name field)
-      processDropdown.value = displayText;
-      
-      // Trigger input event to save to localStorage
-      const inputEvent = new Event('input', { bubbles: true });
-      processDropdown.dispatchEvent(inputEvent);
+      // Note: Don't trigger input events here as it might interfere with work order data population
+      // The field value is already set above and that's sufficient for display purposes
     }
     
     // Show notification to user
@@ -741,9 +840,9 @@ function updateUIForWorkOrderMode(assignedTo) {
       box-shadow: 0 4px 8px rgba(0,0,0,0.3);
     `;
     notification.innerHTML = `
-      📋 Work Order Mode<br>
-      🎯 Target Machines: ${targetMachines.join(', ')}<br>
-      🔧 Will send NC program to ${targetMachines.length} machine${targetMachines.length > 1 ? 's' : ''}
+      Work Order Mode<br>
+      Target Machines: ${targetMachines.join(', ')}<br>
+      Will send NC program to ${targetMachines.length} machine${targetMachines.length > 1 ? 's' : ''}
     `;
     
     // Remove existing notification if any
@@ -758,6 +857,9 @@ function updateUIForWorkOrderMode(assignedTo) {
         notification.remove();
       }
     }, 5000);
+    
+    // Pre-fetch IP addresses for work order machines
+    preFetchMachineIPs(targetMachines);
   }
 }
 
@@ -782,8 +884,37 @@ function resetUIFromWorkOrderMode() {
   if (notification) notification.remove();
 }
 
-document.getElementById("sub-dropdown").addEventListener("change", fetchProductDetails);
+// Remove duplicate event listeners - the main async function above handles all cases
+// document.getElementById("sub-dropdown").addEventListener("change", fetchProductDetails);
 document.getElementById("sub-dropdown").addEventListener("change", NCPresstoFalse);
+
+// Add listener for process dropdown changes to pre-fetch IPs
+document.getElementById("process").addEventListener("change", function() {
+  const selectedMachine = this.value;
+  if (selectedMachine) {
+    const machines = [];
+    if (selectedMachine.includes("AOL") && selectedMachine.includes(",")) {
+      const machineNumbers = selectedMachine.replace(/AOL\s*/g, '').split(',').map(num => num.trim());
+      machines.push(...machineNumbers.map(num => `AOL-${num}`));
+    } else {
+      machines.push(selectedMachine);
+    }
+    
+    if (machines.length > 0) {
+      preFetchMachineIPs(machines);
+    }
+  }
+});
+
+// Pre-fetch common machine IPs when page loads
+window.addEventListener('load', function() {
+  // Pre-fetch IPs for common AOL machines
+  const commonMachines = ['AOL-1', 'AOL-2', 'AOL-3', 'AOL-4', 'AOL-5', 'AOL-6', 'AOL-7', 'AOL-8'];
+  setTimeout(() => {
+    preFetchMachineIPs(commonMachines);
+    console.log('Pre-cached common machine IPs for faster access');
+  }, 1000); // Delay slightly to not interfere with initial page load
+});
 
 // Function to get link from Google Drive
 function picLINK(headerValue) {
@@ -1977,7 +2108,7 @@ document.head.appendChild(style);
 
 // Function to reset everything and reload the page
 function resetForm() {
-  const excludedInputs = ['process']; // IDs or names of inputs to exclude from reset
+  const excludedInputs = []; // Remove 'process' from excluded inputs as we'll handle it specially
 
   // Clear all form inputs with unique prefix except excluded ones
   const inputs = document.querySelectorAll('input, select, textarea');
@@ -1988,6 +2119,20 @@ function resetForm() {
       input.value = ''; // Reset input value
     }
   });
+
+  // Reset Equipment Name (process field) to original URL parameter value
+  const selectedMachine = getQueryParam('machine');
+  const processInput = document.getElementById('process');
+  if (processInput && selectedMachine) {
+    // Clear localStorage for process field
+    const processKey = `${uniquePrefix}process`;
+    localStorage.removeItem(processKey);
+    
+    processInput.value = selectedMachine;
+    processInput.style.backgroundColor = ''; // Reset any work order styling
+    processInput.style.fontWeight = '';
+    console.log("Equipment Name reset to original machine value:", selectedMachine);
+  }
 
   // Clear counters with unique prefix
   for (let i = 1; i <= 20; i++) { // Adjusted loop to clear all counter values
@@ -2863,6 +3008,7 @@ document.getElementById('submit').addEventListener('click', async (event) => {
         const Comment = document.querySelector('textarea[name="Comments1"]').value;
         const Cycle_Time = parseFloat(document.getElementById('cycleTime').value) || 0;
         const ショット数 = parseInt(document.getElementById('shot').value, 10) || 0;
+        const スペアからの部分数 = parseInt(document.getElementById('partial-from-spare').value, 10) || 0;
 
         const breakTimeData = {
             break1: { start: document.getElementById('break1-start')?.value || '', end: document.getElementById('break1-end')?.value || '' },
@@ -3013,7 +3159,7 @@ document.getElementById('submit').addEventListener('click', async (event) => {
         const dcpSubmissionData = {
             品番, 背番号, 設備, Total: Total_PressDB, 工場, Worker_Name, Process_Quantity, Date: WorkDate,
             Time_start, Time_end, 材料ロット, 疵引不良, 加工不良, その他, Total_NG, Spare, Comment,
-            Cycle_Time, ショット数, Break_Time_Data: breakTimeData,
+            Cycle_Time, ショット数, スペアからの部分数, Break_Time_Data: breakTimeData,
             Total_Break_Minutes: totalBreakMinutes, Total_Break_Hours: parseFloat(totalBreakHours.toFixed(2)),
             Maintenance_Data: maintenanceDataForSubmission,
             Total_Trouble_Minutes: totalTroubleMinutes, Total_Trouble_Hours: parseFloat(totalTroubleHours.toFixed(2)),
@@ -3203,6 +3349,23 @@ function updateSheetStatus(selectedValue, machineName) {
 
 //this function sends request to nc cutter's PC - supports multiple machines
 async function sendtoNC(selectedValue) {
+  
+  // Check if button is currently disabled (within 12-second cooldown)
+  const sendButton = document.getElementById('sendtoNC');
+  if (sendButton.disabled) {
+    window.alert("Please wait. Send to Machine is on cooldown to prevent double sending.");
+    return;
+  }
+
+  // Disable the button and show loading state
+  sendButton.disabled = true;
+  sendButton.style.opacity = '0.6';
+  sendButton.style.cursor = 'not-allowed';
+  const originalText = sendButton.textContent;
+  sendButton.textContent = 'Sending...';
+
+  // Show loading modal
+  showSendingModal();
 
   //sendCommand("off"); // this is for arduino (emergency button)
   sendtoNCButtonisPressed = true;
@@ -3216,11 +3379,14 @@ async function sendtoNC(selectedValue) {
   const selectedOption = subDropdown.options[subDropdown.selectedIndex];
   
   if (!currentSelection) {
+    hideSendingModal();
+    restoreButton();
     window.alert("Please select product, 品番, or work order first / 背番号、品番、またはワークオーダーを選んでください");
     return;
   }
 
-  // Determine filename and target machines
+  try {
+    // Determine filename and target machines
   let filename = getNCFilename(); // Use the updated filename function
   let targetMachines = [];
   
@@ -3271,51 +3437,402 @@ async function sendtoNC(selectedValue) {
     console.log("Fallback to current machine:", targetMachines);
   }
 
-  // Get IP addresses for target machines
-  const ipPromises = targetMachines.map(async (machine) => {
-    try {
-      const response = await fetch(`${ipURL}?filter=${machine}`);
-      const data = await response.text();
-      return { machine, ip: data.trim() };
-    } catch (error) {
-      console.error(`Error getting IP for ${machine}:`, error);
-      return { machine, ip: null };
+  // Get IP addresses for target machines (use cache for instant response)
+  const machineIPs = [];
+  const missingIPs = [];
+  
+  // First, try to get IPs from cache
+  for (const machine of targetMachines) {
+    const cachedIP = getCachedIP(machine);
+    if (cachedIP) {
+      machineIPs.push({ machine, ip: cachedIP });
+      console.log(`Using cached IP for ${machine}: ${cachedIP}`);
+    } else {
+      missingIPs.push(machine);
     }
-  });
+  }
+  
+  // If any IPs are missing from cache, fetch them now (fallback)
+  if (missingIPs.length > 0) {
+    console.log(`Fetching missing IPs for: ${missingIPs.join(', ')}`);
+    const ipPromises = missingIPs.map(async (machine) => {
+      try {
+        const response = await fetch(`${ipURL}?filter=${machine}`);
+        const data = await response.text();
+        const cleanIP = data.replace(/['"]/g, '').trim();
+        return { machine, ip: cleanIP };
+      } catch (error) {
+        console.error(`Error getting IP for ${machine}:`, error);
+        return { machine, ip: null };
+      }
+    });
 
-  const machineIPs = await Promise.all(ipPromises);
+    const fetchedIPs = await Promise.all(ipPromises);
+    machineIPs.push(...fetchedIPs);
+  }
   const validMachines = machineIPs.filter(item => item.ip && item.ip !== 'No data found');
 
   if (validMachines.length === 0) {
+    hideSendingModal();
+    restoreButton();
     window.alert("No valid IP addresses found for target machines / 対象機械のIPアドレスが見つかりません");
     return;
   }
 
-  // Send to all target machines
-  const sendPromises = validMachines.map((machineInfo) => {
+  // Send to all target machines with staggered delays to avoid popup blocking
+  const sendPromises = validMachines.map((machineInfo, index) => {
     const url = `http://${machineInfo.ip}:5000/request?filename=${filename}.pce`;
     console.log(`Sending to ${machineInfo.machine} (${machineInfo.ip}): ${url}`);
     
     return new Promise((resolve) => {
-      const newTab = window.open(url, '_blank');
+      // Add a small delay for each subsequent machine to avoid popup blocking
       setTimeout(() => {
-        try {
-          newTab.close();
-        } catch (e) {
-          console.log(`Could not close tab for ${machineInfo.machine}:`, e);
+        console.log(`Attempting to open tab for ${machineInfo.machine} with URL: ${url}`);
+        const newTab = window.open(url, '_blank');
+        
+        // Enhanced popup detection
+        if (newTab && !newTab.closed) {
+          console.log(`Successfully opened tab for ${machineInfo.machine}`);
+          
+          // Check if tab is actually accessible (not blocked)
+          setTimeout(() => {
+            try {
+              if (newTab.closed) {
+                console.log(`Tab for ${machineInfo.machine} was closed (possibly by user or error)`);
+              } else {
+                console.log(`Tab for ${machineInfo.machine} is still open and accessible`);
+              }
+            } catch (e) {
+              console.log(`Tab for ${machineInfo.machine} exists but may be blocked by CORS:`, e);
+            }
+          }, 1000);
+          
+          setTimeout(() => {
+            try {
+              if (!newTab.closed) {
+                newTab.close();
+                console.log(`Tab closed for ${machineInfo.machine}`);
+              }
+            } catch (e) {
+              console.log(`Could not close tab for ${machineInfo.machine}:`, e);
+            }
+            resolve({ machine: machineInfo.machine, success: true });
+          }, 5000);
+        } else {
+          console.warn(`Failed to open tab for ${machineInfo.machine} - popup blocked or URL invalid`);
+          
+          // Try alternative method - create a temporary link and click it
+          console.log(`Trying alternative method for ${machineInfo.machine}...`);
+          const tempLink = document.createElement('a');
+          tempLink.href = url;
+          tempLink.target = '_blank';
+          tempLink.style.display = 'none';
+          document.body.appendChild(tempLink);
+          
+          try {
+            tempLink.click();
+            console.log(`Alternative method triggered for ${machineInfo.machine}`);
+            setTimeout(() => {
+              document.body.removeChild(tempLink);
+              resolve({ machine: machineInfo.machine, success: true });
+            }, 1000);
+          } catch (e) {
+            console.error(`Alternative method also failed for ${machineInfo.machine}:`, e);
+            document.body.removeChild(tempLink);
+            resolve({ machine: machineInfo.machine, success: false });
+          }
         }
-        resolve();
-      }, 5000);
+      }, index * 500); // 500ms delay between each machine
     });
   });
 
   // Wait for all sends to complete
-  await Promise.all(sendPromises);
+  const sendResults = await Promise.all(sendPromises);
   
-  // Show success message
-  const machineList = validMachines.map(m => m.machine).join(', ');
-  window.alert(`Program sent to: ${machineList}\nFilename: ${filename}.pce`);
+  // Hide loading modal
+  hideSendingModal();
+  
+  // Analyze results and show appropriate message
+  const successfulMachines = sendResults.filter(result => result.success).map(result => result.machine);
+  const failedMachines = sendResults.filter(result => !result.success).map(result => result.machine);
+  
+  let message = `✅ NC Program Send Completed!\n\nFilename: ${filename}.pce\n`;
+  
+  if (successfulMachines.length > 0) {
+    message += `\n✅ Successfully sent to: ${successfulMachines.join(', ')}`;
+  }
+  
+  if (failedMachines.length > 0) {
+    message += `\n⚠️ May have been blocked by popup blocker: ${failedMachines.join(', ')}`;
+    message += `\n\n💡 Manual links will appear below to send to blocked machines.`;
+  }
+  
+  if (failedMachines.length === 0) {
+    message += `\n\n🎉 All machines targeted successfully!`;
+  }
+  
+  // Always show manual links for verification
+  message += `\n\n🔗 Manual verification links will appear below.`;
+  
+  window.alert(message);
+  
+  // Always create manual links (both for failed machines and as backup verification)
+  const allMachineInfo = validMachines;
+  if (allMachineInfo.length > 0) {
+    const manualLinks = document.createElement('div');
+    manualLinks.id = 'manualSendLinks';
+    manualLinks.style.cssText = `
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: white;
+      border: 2px solid #2196F3;
+      border-radius: 10px;
+      padding: 20px;
+      z-index: 1000;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+      max-width: 600px;
+      max-height: 80vh;
+      overflow-y: auto;
+    `;
+    
+    let linksHTML = `
+      <div style="font-weight: bold; color: #2196F3; margin-bottom: 15px; text-align: center;">
+        � NC Program Send Links - ${filename}.pce
+      </div>
+      <div style="margin-bottom: 15px; text-align: center;">
+        Click these links to manually send to machines (useful if popups were blocked):
+      </div>
+    `;
+    
+    allMachineInfo.forEach((machineInfo, index) => {
+      const url = `http://${machineInfo.ip}:5000/request?filename=${filename}.pce`;
+      const status = successfulMachines.includes(machineInfo.machine) ? 
+        '<span style="color: #4CAF50;">✅ Sent</span>' : 
+        '<span style="color: #ff9800;">⚠️ Verify</span>';
+      
+      const buttonId = `manualSend_${machineInfo.machine.replace('-', '_')}`;
+      
+      linksHTML += `
+        <div style="margin: 10px 0; padding: 10px; border: 1px solid #ddd; border-radius: 5px;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <strong>${machineInfo.machine} (${machineInfo.ip}):</strong>
+            ${status}
+          </div>
+          <div style="margin-top: 5px;">
+            <button id="${buttonId}" onclick="sendToSingleMachine('${machineInfo.machine}', '${machineInfo.ip}', '${filename}', '${buttonId}')"
+               style="background: #2196F3; color: white; padding: 8px 15px; border: none; border-radius: 3px; cursor: pointer; font-size: 14px;">
+              Send to ${machineInfo.machine}
+            </button>
+          </div>
+        </div>
+      `;
+    });
+    
+    linksHTML += `
+      <div style="text-align: center; margin-top: 20px; border-top: 1px solid #ddd; padding-top: 15px;">
+        <button onclick="document.getElementById('manualSendLinks').remove()" 
+                style="background: #4CAF50; color: white; border: none; padding: 12px 25px; border-radius: 5px; cursor: pointer; font-size: 16px;">
+          Close
+        </button>
+      </div>
+    `;
+    
+    manualLinks.innerHTML = linksHTML;
+    document.body.appendChild(manualLinks);
+    
+    // Auto-remove after 60 seconds (longer time for manual verification)
+    setTimeout(() => {
+      const element = document.getElementById('manualSendLinks');
+      if (element) element.remove();
+    }, 60000);
+  }
+  
+  // Restore button after success and start 12-second cooldown
+  restoreButtonWithCooldown();
+  
+  } catch (error) {
+    console.error('Error in sendtoNC:', error);
+    hideSendingModal();
+    restoreButton();
+    window.alert("An error occurred while sending the program. Please try again. / プログラム送信中にエラーが発生しました。もう一度お試しください。");
+  }
+  
+  function restoreButton() {
+    const sendButton = document.getElementById('sendtoNC');
+    sendButton.disabled = false;
+    sendButton.style.opacity = '1';
+    sendButton.style.cursor = 'pointer';
+    sendButton.textContent = originalText;
+  }
+  
+  function restoreButtonWithCooldown() {
+    const sendButton = document.getElementById('sendtoNC');
+    sendButton.textContent = originalText;
+    sendButton.style.opacity = '0.7';
+    
+    // Start 12-second cooldown timer
+    let countdown = 12;
+    sendButton.textContent = `Send to Machine (${countdown}s)`;
+    
+    const cooldownInterval = setInterval(() => {
+      countdown--;
+      if (countdown > 0) {
+        sendButton.textContent = `Send to Machine (${countdown}s)`;
+      } else {
+        clearInterval(cooldownInterval);
+        sendButton.disabled = false;
+        sendButton.style.opacity = '1';
+        sendButton.style.cursor = 'pointer';
+        sendButton.textContent = originalText;
+      }
+    }, 1000);
+  }
 }
+
+// Function to send to a single machine with cooldown protection
+function sendToSingleMachine(machine, ip, filename, buttonId) {
+  const button = document.getElementById(buttonId);
+  
+  // Check if button is already in cooldown
+  if (button.disabled) {
+    return;
+  }
+  
+  // Disable button and start cooldown
+  button.disabled = true;
+  button.style.opacity = '0.6';
+  button.style.cursor = 'not-allowed';
+  const originalText = button.textContent;
+  
+  const url = `http://${ip}:5000/request?filename=${filename}.pce`;
+  console.log(`Manual send to ${machine} (${ip}): ${url}`);
+  
+  // Open the URL
+  const newTab = window.open(url, '_blank');
+  
+  if (newTab && !newTab.closed) {
+    console.log(`Manual tab opened for ${machine}`);
+    setTimeout(() => {
+      try {
+        if (!newTab.closed) {
+          newTab.close();
+          console.log(`Manual tab closed for ${machine}`);
+        }
+      } catch (e) {
+        console.log(`Could not close manual tab for ${machine}:`, e);
+      }
+    }, 5000);
+  } else {
+    console.warn(`Manual tab failed to open for ${machine}`);
+  }
+  
+  // Start 12-second cooldown
+  let countdown = 12;
+  button.textContent = `Sending... (${countdown}s)`;
+  
+  const cooldownInterval = setInterval(() => {
+    countdown--;
+    if (countdown > 0) {
+      button.textContent = `Wait (${countdown}s)`;
+    } else {
+      clearInterval(cooldownInterval);
+      button.disabled = false;
+      button.style.opacity = '1';
+      button.style.cursor = 'pointer';
+      button.textContent = originalText;
+    }
+  }, 1000);
+}
+
+// Function to show sending modal
+function showSendingModal() {
+  // Create modal if it doesn't exist
+  let modal = document.getElementById('sendingModal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'sendingModal';
+    modal.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.7);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 10000;
+      font-family: Arial, sans-serif;
+    `;
+    
+    const modalContent = document.createElement('div');
+    modalContent.style.cssText = `
+      background: white;
+      padding: 30px;
+      border-radius: 10px;
+      text-align: center;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+      min-width: 300px;
+    `;
+    
+    const spinner = document.createElement('div');
+    spinner.style.cssText = `
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #3498db;
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 20px;
+    `;
+    
+    const message = document.createElement('div');
+    message.style.cssText = `
+      font-size: 18px;
+      color: #333;
+      margin-bottom: 10px;
+      font-weight: bold;
+    `;
+    message.textContent = 'Sending NC Program...';
+    
+    const subMessage = document.createElement('div');
+    subMessage.style.cssText = `
+      font-size: 14px;
+      color: #666;
+    `;
+    subMessage.textContent = 'Please wait while the program is being sent to the machine(s)';
+    
+    modalContent.appendChild(spinner);
+    modalContent.appendChild(message);
+    modalContent.appendChild(subMessage);
+    modal.appendChild(modalContent);
+    
+    // Add CSS animation for spinner
+    const style = document.createElement('style');
+    style.textContent = `
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+    `;
+    document.head.appendChild(style);
+    
+    document.body.appendChild(modal);
+  }
+  
+  modal.style.display = 'flex';
+}
+
+// Function to hide sending modal
+function hideSendingModal() {
+  const modal = document.getElementById('sendingModal');
+  if (modal) {
+    modal.style.display = 'none';
+  }
+}
+
 document.getElementById('sendtoNC').addEventListener('click', sendtoNC);
 
 // Function to handle printing
