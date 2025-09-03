@@ -446,6 +446,8 @@ document.addEventListener('DOMContentLoaded', () => {
         localStorage.setItem(key, this.value);
         // Update quality check timer pause/resume status
         updateTwoHourCheckStatus();
+        // Update lock status for this break time
+        updateBreakTimeLockStatus(i);
       });
 
       endInput.addEventListener('change', function() {
@@ -455,9 +457,75 @@ document.addEventListener('DOMContentLoaded', () => {
         localStorage.setItem(key, this.value);
         // Update quality check timer pause/resume status
         updateTwoHourCheckStatus();
+        // Update lock status for this break time
+        updateBreakTimeLockStatus(i);
       });
     }
   }
+
+  // Initialize lock status for all break times after values are restored
+  setTimeout(() => {
+    updateAllBreakTimeLockStatus();
+    updateAllProcessingTimeLockStatus(); // Initialize processing time locks
+    
+    // Add click event listeners to locked inputs for visual feedback
+    for (let i = 1; i <= 4; i++) {
+      const startInput = document.getElementById(`break${i}-start`);
+      const endInput = document.getElementById(`break${i}-end`);
+      
+      [startInput, endInput].forEach(input => {
+        if (input) {
+          input.addEventListener('click', function(e) {
+            if (this.classList.contains('locked') || this.readOnly) {
+              e.preventDefault();
+              // Brief visual feedback
+              const originalBackground = this.style.backgroundColor;
+              this.style.backgroundColor = '#ffcccc';
+              this.style.transition = 'background-color 0.3s';
+              
+              setTimeout(() => {
+                this.style.backgroundColor = originalBackground;
+                setTimeout(() => {
+                  this.style.transition = '';
+                }, 300);
+              }, 200);
+              
+              console.log(`🔒 Click on locked break time input ${this.id} - use Edit button to modify`);
+            }
+          });
+        }
+      });
+    }
+    
+    // Add click event listeners for processing time inputs
+    const processingTimeInputs = [
+      document.getElementById('Start Time'),
+      document.getElementById('End Time')
+    ];
+    
+    processingTimeInputs.forEach(input => {
+      if (input) {
+        input.addEventListener('click', function(e) {
+          if (this.classList.contains('locked') || this.readOnly) {
+            e.preventDefault();
+            // Brief visual feedback
+            const originalBackground = this.style.backgroundColor;
+            this.style.backgroundColor = '#ffcccc';
+            this.style.transition = 'background-color 0.3s';
+            
+            setTimeout(() => {
+              this.style.backgroundColor = originalBackground;
+              setTimeout(() => {
+                this.style.transition = '';
+              }, 300);
+            }, 200);
+            
+            console.log(`🔒 Click on locked processing time input ${this.id} - use Edit button to modify`);
+          }
+        });
+      }
+    });
+  }, 2100); // After select option restoration delay
 
   // Initialize maintenance system
   loadMaintenanceRecords();
@@ -489,6 +557,8 @@ document.addEventListener('DOMContentLoaded', () => {
           console.log('⏰ Start time cleared, stopping quality check timer');
           clearTwoHourCheckTimer();
         }
+        // Update lock status for start time
+        updateProcessingTimeLockStatus('start');
       });
       
       // Also listen for input events (real-time changes)
@@ -535,6 +605,8 @@ document.addEventListener('DOMContentLoaded', () => {
           console.log('🏁 End time entered, stopping quality check timer (work completed)');
           updateTwoHourCheckStatus(); // This will detect work completion and stop the timer
         }
+        // Update lock status for end time
+        updateProcessingTimeLockStatus('end');
       });
       
       // Also listen for input events (real-time changes)
@@ -543,6 +615,7 @@ document.addEventListener('DOMContentLoaded', () => {
           console.log('🏁 End time being entered:', this.value);
           setTimeout(() => {
             updateTwoHourCheckStatus();
+            updateProcessingTimeLockStatus('end');
           }, 500); // Small delay to ensure value is set
         }
       });
@@ -808,7 +881,7 @@ function blankInfo() {
 }
 
 async function fetchProductDetails() {
-  blankInfo();
+  
   const serialNumber = document.getElementById("sub-dropdown").value;
   const factory = document.getElementById("selected工場").value;
   const dynamicImage = document.getElementById("dynamicImage");
@@ -819,6 +892,7 @@ async function fetchProductDetails() {
     blankInfo();
     return;
   }
+
 
   try {
     // Step 1: Try query by 背番号
@@ -1061,7 +1135,8 @@ async function handleWorkOrderSelection(selectedOption) {
         console.log("Work order details loaded successfully:", data);
         console.log(`Will use 背番号 "${data.背番号}" for NC filename instead of SKU "${sku}"`);
       } else {
-        // If not found in master database, populate what we know from work order
+        // If not found in master database, clear all fields first then populate what we know from work order
+        blankInfo(); // Clear all previous data to prevent mixing with other selections
         document.getElementById("product-number").value = sku;
         
         // Store the cleaned SKU as fallback for NC filename
@@ -1338,22 +1413,40 @@ function setDefaultTime(input) {
   // Save the time to local storage with unique prefix
   localStorage.setItem(`${uniquePrefix}${input.id}`, timeValue);
 
-  // If this is a break time input, calculate total break time
+  // If this is a break time input, calculate total break time and update lock status
   if (input.id.includes('break')) {
     calculateTotalBreakTime();
     // Update quality check timer pause/resume status
     updateTwoHourCheckStatus();
+    
+    // Extract break number from input id (e.g., "break1-start" -> "1")
+    const breakMatch = input.id.match(/break(\d+)/);
+    if (breakMatch) {
+      const breakNumber = parseInt(breakMatch[1]);
+      // Use setTimeout to ensure both inputs are processed before checking lock status
+      setTimeout(() => {
+        updateBreakTimeLockStatus(breakNumber);
+      }, 100);
+    }
   }
 
   // If this is the Start Time input, reset selection time (setup complete)
   if (input.id === 'Start Time') {
     subDropdownSelectionTime = null;
     console.log('⏰ Start Time set via setDefaultTime, quality setup complete');
+    // Update lock status for start time
+    setTimeout(() => {
+      updateProcessingTimeLockStatus('start');
+    }, 100);
   }
 
   // If this is the End Time input, update quality check timer status (work completion)
   if (input.id === 'End Time') {
     updateTwoHourCheckStatus();
+    // Update lock status for end time
+    setTimeout(() => {
+      updateProcessingTimeLockStatus('end');
+    }, 100);
   }
 
   // If this is a trouble time input, calculate total trouble time
@@ -1362,8 +1455,26 @@ function setDefaultTime(input) {
   }
 }
 
+// Handle break time input focus - check if locked before setting time
+function handleBreakTimeFocus(input) {
+  // Check if the input is locked
+  if (input.classList.contains('locked') || input.readOnly) {
+    console.log(`🔒 Break time input ${input.id} is locked - focus ignored to prevent accidental changes`);
+    input.blur(); // Remove focus to prevent interaction
+    return;
+  }
+  
+  // If not locked, proceed with normal setDefaultTime behavior
+  setDefaultTime(input);
+}
+
 // Function to reset individual break time
 function resetBreakTime(breakNumber) {
+  // Add confirmation dialog to prevent accidental resets
+  if (!confirm(`Are you sure you want to reset Break ${breakNumber} time?\n\nThis will clear both start and end times.`)) {
+    return; // User cancelled, exit without resetting
+  }
+
   const startInput = document.getElementById(`break${breakNumber}-start`);
   const endInput = document.getElementById(`break${breakNumber}-end`);
 
@@ -1390,8 +1501,172 @@ function resetBreakTime(breakNumber) {
     // Update quality check timer pause/resume status
     updateTwoHourCheckStatus();
 
+    // Update lock status after reset
+    updateBreakTimeLockStatus(breakNumber);
+
     console.log(`Break time ${breakNumber} has been reset`);
   }
+}
+
+// Function to lock break time inputs when both start and end have values
+function lockBreakTime(breakNumber) {
+  const startInput = document.getElementById(`break${breakNumber}-start`);
+  const endInput = document.getElementById(`break${breakNumber}-end`);
+  const editBtn = document.getElementById(`edit-break${breakNumber}`);
+  const breakEntry = startInput?.closest('.break-time-entry');
+
+  if (startInput && endInput) {
+    // Add locked class and disable inputs
+    startInput.classList.add('locked');
+    startInput.readOnly = true;
+    startInput.style.pointerEvents = 'none';
+    
+    endInput.classList.add('locked');
+    endInput.readOnly = true;
+    endInput.style.pointerEvents = 'none';
+    
+    if (breakEntry) {
+      breakEntry.classList.add('locked');
+    }
+    
+    // Show edit button
+    if (editBtn) {
+      editBtn.style.display = 'inline-block';
+    }
+    
+    console.log(`🔒 Break time ${breakNumber} locked to prevent accidental changes`);
+  }
+}
+
+// Function to unlock break time inputs for editing
+function unlockBreakTime(breakNumber) {
+  const startInput = document.getElementById(`break${breakNumber}-start`);
+  const endInput = document.getElementById(`break${breakNumber}-end`);
+  const editBtn = document.getElementById(`edit-break${breakNumber}`);
+  const breakEntry = startInput?.closest('.break-time-entry');
+
+  if (startInput && endInput) {
+    // Remove locked class and enable inputs
+    startInput.classList.remove('locked');
+    startInput.readOnly = false;
+    startInput.style.pointerEvents = 'auto';
+    
+    endInput.classList.remove('locked');
+    endInput.readOnly = false;
+    endInput.style.pointerEvents = 'auto';
+    
+    if (breakEntry) {
+      breakEntry.classList.remove('locked');
+    }
+    
+    // Hide edit button
+    if (editBtn) {
+      editBtn.style.display = 'none';
+    }
+    
+    console.log(`🔓 Break time ${breakNumber} unlocked for editing`);
+  }
+}
+
+// Function to check and update lock status for a specific break time
+function updateBreakTimeLockStatus(breakNumber) {
+  const startInput = document.getElementById(`break${breakNumber}-start`);
+  const endInput = document.getElementById(`break${breakNumber}-end`);
+  
+  if (startInput && endInput) {
+    const startTime = startInput.value;
+    const endTime = endInput.value;
+    
+    // Lock only if both start and end times have values
+    if (startTime && endTime) {
+      lockBreakTime(breakNumber);
+    } else {
+      unlockBreakTime(breakNumber);
+    }
+  }
+}
+
+// Function to update all break time lock statuses
+function updateAllBreakTimeLockStatus() {
+  for (let i = 1; i <= 4; i++) {
+    updateBreakTimeLockStatus(i);
+  }
+}
+
+// Processing time lock functions
+// Function to lock processing time inputs when they have values
+function lockProcessingTime(timeType) {
+  const timeInput = document.getElementById(timeType === 'start' ? 'Start Time' : 'End Time');
+  const editBtn = document.getElementById(timeType === 'start' ? 'edit-start-time' : 'edit-end-time');
+
+  if (timeInput) {
+    // Add locked class and disable input
+    timeInput.classList.add('locked');
+    timeInput.readOnly = true;
+    timeInput.style.pointerEvents = 'none';
+    
+    // Show edit button
+    if (editBtn) {
+      editBtn.style.display = 'inline-block';
+    }
+    
+    console.log(`🔒 Processing ${timeType} time locked to prevent accidental changes`);
+  }
+}
+
+// Function to unlock processing time inputs for editing
+function unlockProcessingTime(timeType) {
+  const timeInput = document.getElementById(timeType === 'start' ? 'Start Time' : 'End Time');
+  const editBtn = document.getElementById(timeType === 'start' ? 'edit-start-time' : 'edit-end-time');
+
+  if (timeInput) {
+    // Remove locked class and enable input
+    timeInput.classList.remove('locked');
+    timeInput.readOnly = false;
+    timeInput.style.pointerEvents = 'auto';
+    
+    // Hide edit button
+    if (editBtn) {
+      editBtn.style.display = 'none';
+    }
+    
+    console.log(`🔓 Processing ${timeType} time unlocked for editing`);
+  }
+}
+
+// Function to check and update lock status for processing times
+function updateProcessingTimeLockStatus(timeType) {
+  const timeInput = document.getElementById(timeType === 'start' ? 'Start Time' : 'End Time');
+  
+  if (timeInput) {
+    const timeValue = timeInput.value;
+    
+    // Lock only if time has a value
+    if (timeValue && timeValue.trim() !== '') {
+      lockProcessingTime(timeType);
+    } else {
+      unlockProcessingTime(timeType);
+    }
+  }
+}
+
+// Function to update all processing time lock statuses
+function updateAllProcessingTimeLockStatus() {
+  updateProcessingTimeLockStatus('start');
+  updateProcessingTimeLockStatus('end');
+}
+
+// Handle processing time input focus - check if locked before setting time
+function handleProcessingTimeFocus(input) {
+  // Check if the input is locked
+  if (input.classList.contains('locked') || input.readOnly) {
+    console.log(`🔒 Processing time input ${input.id} is locked - focus ignored to prevent accidental changes`);
+    input.blur(); // Remove focus to prevent interaction
+    return;
+  }
+  
+  // If not locked, proceed with normal setDefaultTime behavior
+  setDefaultTime(input);
 }
 
 // Function to calculate total break time in minutes
@@ -1911,12 +2186,14 @@ function showMaintenanceModal(editIndex = -1) {
     <div style="margin-bottom: 20px;">
       <label style="display: block; margin-bottom: 5px; font-weight: bold;">Start Time:</label>
       <input type="time" id="maintenance-start" value="${existingRecord.startTime || ''}" 
+             onfocus="setDefaultTime(this)"
              style="width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 5px;">
     </div>
     
     <div style="margin-bottom: 20px;">
       <label style="display: block; margin-bottom: 5px; font-weight: bold;">End Time:</label>
       <input type="time" id="maintenance-end" value="${existingRecord.endTime || ''}"
+             onfocus="setDefaultTime(this)"
              style="width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 5px;">
     </div>
     
@@ -2501,6 +2778,11 @@ document.head.appendChild(style);
 
 // Function to reset everything and reload the page
 function resetForm() {
+  // Add confirmation dialog to prevent accidental form reset
+  if (!confirm('Are you sure you want to reset the entire form?\n\nThis will clear ALL data including:\n• Product information\n• Break times\n• Processing times\n• Maintenance records\n• Photos\n• All other entered data\n\nThis cannot be undone!')) {
+    return; // User cancelled, exit without resetting
+  }
+
   const excludedInputs = []; // Remove 'process' from excluded inputs as we'll handle it specially
 
   // Clear all form inputs with unique prefix except excluded ones

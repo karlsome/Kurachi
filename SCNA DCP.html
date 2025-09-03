@@ -78,6 +78,73 @@
             background: #ff5252;
         }
 
+        .break-time-inputs .edit-btn {
+            background: #FFC240;
+            color: #003b5b;
+            border: none;
+            border-radius: 3px;
+            padding: 5px 8px;
+            font-size: 12px;
+            cursor: pointer;
+            min-width: 50px;
+            font-weight: bold;
+        }
+
+        .break-time-inputs .edit-btn:hover {
+            background: #ffb520;
+        }
+
+        .break-time-inputs input[type="time"].locked {
+            background-color: #f5f5f5;
+            color: #666;
+            cursor: not-allowed;
+            opacity: 0.7;
+            border: 2px solid #ddd;
+        }
+
+        .break-time-inputs input[type="time"].locked:hover {
+            background-color: #f0f0f0;
+        }
+
+        .break-time-entry.locked {
+            background: rgba(245, 245, 245, 0.9);
+            border: 1px solid #ccc;
+        }
+
+        .break-time-entry.locked label {
+            color: #666;
+        }
+
+        /* Processing time lock styles */
+        .time-input-wrapper input[type="time"].locked {
+            background-color: #f5f5f5;
+            color: #666;
+            cursor: not-allowed;
+            opacity: 0.7;
+        }
+
+        .time-input-wrapper .edit-btn {
+            background: #FFC240;
+            color: #003b5b;
+            border: none;
+            border-radius: 3px;
+            padding: 5px 8px;
+            font-size: 12px;
+            cursor: pointer;
+            min-width: 50px;
+            font-weight: bold;
+            vertical-align: middle;
+        }
+
+        .time-input-wrapper .edit-btn:hover {
+            background: #ffb520;
+        }
+
+        .break-time-entry.locked label:after {
+            content: " 🔒";
+            font-size: 12px;
+        }
+
         .total-break-time {
             margin-top: 15px;
             padding: 10px;
@@ -336,10 +403,16 @@
             <input type="number" name="Labelextension" id="Labelextension">
             <br>
             <label for="Start Time">Processing Start Time:</label>
-            <input type="time" name="Start Time" id="Start Time" placeholder="Time Start" onfocus="setDefaultTime(this)" required>
+            <div class="time-input-wrapper" style="display: inline-block; position: relative;">
+                <input type="time" name="Start Time" id="Start Time" placeholder="Time Start" onfocus="handleProcessingTimeFocus(this)" required>
+                <button type="button" class="edit-btn" id="edit-start-time" onclick="unlockProcessingTime('start')" style="display: none; margin-left: 5px;">Edit</button>
+            </div>
             <br>
             <label for="End Time">Processing End Time:</label>
-            <input type="time" name="End Time" id="End Time" placeholder="Time End" onfocus="setDefaultTime(this)" required>
+            <div class="time-input-wrapper" style="display: inline-block; position: relative;">
+                <input type="time" name="End Time" id="End Time" placeholder="Time End" onfocus="handleProcessingTimeFocus(this)" required>
+                <button type="button" class="edit-btn" id="edit-end-time" onclick="unlockProcessingTime('end')" style="display: none; margin-left: 5px;">Edit</button>
+            </div>
             <br>
             <br>
             
@@ -707,9 +780,10 @@
                 <div class="break-time-entry">
                     <label>Break 1:</label>
                     <div class="break-time-inputs">
-                        <input type="time" id="break1-start" name="break1-start" onfocus="setDefaultTime(this)">
+                        <input type="time" id="break1-start" name="break1-start" onfocus="handleBreakTimeFocus(this)">
                         <span>~</span>
-                        <input type="time" id="break1-end" name="break1-end" onfocus="setDefaultTime(this)">
+                        <input type="time" id="break1-end" name="break1-end" onfocus="handleBreakTimeFocus(this)">
+                        <button type="button" class="edit-btn" id="edit-break1" onclick="unlockBreakTime(1)" style="display: none;">Edit</button>
                         <button type="button" class="reset-btn" onclick="resetBreakTime(1)">Reset</button>
                     </div>
                 </div>
@@ -717,9 +791,10 @@
                 <div class="break-time-entry">
                     <label>Break 2:</label>
                     <div class="break-time-inputs">
-                        <input type="time" id="break2-start" name="break2-start" onfocus="setDefaultTime(this)">
+                        <input type="time" id="break2-start" name="break2-start" onfocus="handleBreakTimeFocus(this)">
                         <span>~</span>
-                        <input type="time" id="break2-end" name="break2-end" onfocus="setDefaultTime(this)">
+                        <input type="time" id="break2-end" name="break2-end" onfocus="handleBreakTimeFocus(this)">
+                        <button type="button" class="edit-btn" id="edit-break2" onclick="unlockBreakTime(2)" style="display: none;">Edit</button>
                         <button type="button" class="reset-btn" onclick="resetBreakTime(2)">Reset</button>
                     </div>
                 </div>
@@ -727,9 +802,10 @@
                 <div class="break-time-entry">
                     <label>Break 3:</label>
                     <div class="break-time-inputs">
-                        <input type="time" id="break3-start" name="break3-start" onfocus="setDefaultTime(this)">
+                        <input type="time" id="break3-start" name="break3-start" onfocus="handleBreakTimeFocus(this)">
                         <span>~</span>
-                        <input type="time" id="break3-end" name="break3-end" onfocus="setDefaultTime(this)">
+                        <input type="time" id="break3-end" name="break3-end" onfocus="handleBreakTimeFocus(this)">
+                        <button type="button" class="edit-btn" id="edit-break3" onclick="unlockBreakTime(3)" style="display: none;">Edit</button>
                         <button type="button" class="reset-btn" onclick="resetBreakTime(3)">Reset</button>
                     </div>
                 </div>
@@ -737,9 +813,10 @@
                 <div class="break-time-entry">
                     <label>Break 4:</label>
                     <div class="break-time-inputs">
-                        <input type="time" id="break4-start" name="break4-start" onfocus="setDefaultTime(this)">
+                        <input type="time" id="break4-start" name="break4-start" onfocus="handleBreakTimeFocus(this)">
                         <span>~</span>
-                        <input type="time" id="break4-end" name="break4-end" onfocus="setDefaultTime(this)">
+                        <input type="time" id="break4-end" name="break4-end" onfocus="handleBreakTimeFocus(this)">
+                        <button type="button" class="edit-btn" id="edit-break4" onclick="unlockBreakTime(4)" style="display: none;">Edit</button>
                         <button type="button" class="reset-btn" onclick="resetBreakTime(4)">Reset</button>
                     </div>
                 </div>
