@@ -370,6 +370,12 @@ document.addEventListener('DOMContentLoaded', () => {
                   
                   // Handle different types of selections properly
                   if (input.id === 'sub-dropdown') {
+                    // Set selection time for quality check setup timing
+                    if (savedValue && !subDropdownSelectionTime) {
+                      subDropdownSelectionTime = new Date();
+                      console.log('📋 Sub-dropdown restored from localStorage, selection time set:', subDropdownSelectionTime.toISOString());
+                    }
+                    
                     const selectedOption = input.options[input.selectedIndex];
                     if (selectedOption && selectedOption.dataset.type === 'workorder') {
                       // It's a work order, call the work order handler
@@ -438,6 +444,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // Save to localStorage
         const key = `${uniquePrefix}${this.id}`;
         localStorage.setItem(key, this.value);
+        // Update quality check timer pause/resume status
+        updateTwoHourCheckStatus();
       });
 
       endInput.addEventListener('change', function() {
@@ -445,6 +453,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // Save to localStorage
         const key = `${uniquePrefix}${this.id}`;
         localStorage.setItem(key, this.value);
+        // Update quality check timer pause/resume status
+        updateTwoHourCheckStatus();
       });
     }
   }
@@ -460,6 +470,84 @@ document.addEventListener('DOMContentLoaded', () => {
   if (addMaintenanceBtn) {
     addMaintenanceBtn.addEventListener('click', () => showMaintenanceModal());
   }
+
+  // Initialize 2-hour check system
+  setTimeout(() => {
+    initializeTwoHourCheckSystem();
+    
+    // Set up listener for Start Time changes to manage 2-hour check timer
+    const startTimeInput = document.getElementById('Start Time');
+    if (startTimeInput) {
+      startTimeInput.addEventListener('change', function() {
+        console.log('⏰ Start Time field changed:', this.value);
+        if (this.value) {
+          // Reset selection time since setup is now complete
+          subDropdownSelectionTime = null;
+          console.log('⏰ Start time entered, quality setup complete, checking if ready to start quality check timer');
+          attemptToStartQualityCheckTimer(); // Check if both conditions are met
+        } else {
+          console.log('⏰ Start time cleared, stopping quality check timer');
+          clearTwoHourCheckTimer();
+        }
+      });
+      
+      // Also listen for input events (real-time changes)
+      startTimeInput.addEventListener('input', function() {
+        if (this.value && this.value.includes(':')) {
+          // Reset selection time since setup is now complete
+          subDropdownSelectionTime = null;
+          console.log('⏰ Start time being entered:', this.value);
+          setTimeout(() => {
+            attemptToStartQualityCheckTimer();
+          }, 500); // Small delay to ensure value is set
+        }
+      });
+    }
+    
+    // Set up listener for sub-dropdown changes to manage 2-hour check timer  
+    const subDropdown = document.getElementById('sub-dropdown');
+    if (subDropdown) {
+      subDropdown.addEventListener('change', function() {
+        console.log('📋 Sub-dropdown changed:', this.value);
+        if (this.value) {
+          // Track when sub-dropdown was first selected for setup reminder timing
+          if (!subDropdownSelectionTime) {
+            subDropdownSelectionTime = new Date();
+            console.log('📋 Sub-dropdown selection time recorded:', subDropdownSelectionTime.toISOString());
+          }
+          console.log('📋 Sub-dropdown selected, checking if ready to start quality check timer');
+          attemptToStartQualityCheckTimer(); // Check if both conditions are met
+        } else {
+          console.log('📋 Sub-dropdown cleared, stopping quality check timer');
+          // Reset the selection time when dropdown is cleared
+          subDropdownSelectionTime = null;
+          clearTwoHourCheckTimer();
+        }
+      });
+    }
+    
+    // Set up listener for End Time changes to stop quality check timer when work is completed
+    const endTimeInput = document.getElementById('End Time');
+    if (endTimeInput) {
+      endTimeInput.addEventListener('change', function() {
+        console.log('🏁 End Time field changed:', this.value);
+        if (this.value) {
+          console.log('🏁 End time entered, stopping quality check timer (work completed)');
+          updateTwoHourCheckStatus(); // This will detect work completion and stop the timer
+        }
+      });
+      
+      // Also listen for input events (real-time changes)
+      endTimeInput.addEventListener('input', function() {
+        if (this.value && this.value.includes(':')) {
+          console.log('🏁 End time being entered:', this.value);
+          setTimeout(() => {
+            updateTwoHourCheckStatus();
+          }, 500); // Small delay to ensure value is set
+        }
+      });
+    }
+  }, 100);
 
   toggleInputs(); //enable or disable the kensa page
 });
@@ -702,11 +790,25 @@ function blankInfo() {
   document.getElementById("material").value = "";
   document.getElementById("material-code").value = "";
   document.getElementById("material-color").value = "";
+  document.getElementById("kataban").value = ""; // Added - was missing
+  document.getElementById("収容数").value = ""; // Added - was missing
+  document.getElementById("SRS").value = ""; // Added - was missing
   document.getElementById("送りピッチ").textContent = ""; // Corrected to textContent for label
   document.getElementById("rikeshitext").textContent = "";
+  
+  // Clear the dynamic image
+  const dynamicImage = document.getElementById("dynamicImage");
+  if (dynamicImage) {
+    dynamicImage.src = "";
+    dynamicImage.alt = "No Image Available";
+    dynamicImage.style.display = "none";
+  }
+  
+  console.log("All product info fields have been cleared");
 }
 
 async function fetchProductDetails() {
+  blankInfo();
   const serialNumber = document.getElementById("sub-dropdown").value;
   const factory = document.getElementById("selected工場").value;
   const dynamicImage = document.getElementById("dynamicImage");
@@ -1239,6 +1341,19 @@ function setDefaultTime(input) {
   // If this is a break time input, calculate total break time
   if (input.id.includes('break')) {
     calculateTotalBreakTime();
+    // Update quality check timer pause/resume status
+    updateTwoHourCheckStatus();
+  }
+
+  // If this is the Start Time input, reset selection time (setup complete)
+  if (input.id === 'Start Time') {
+    subDropdownSelectionTime = null;
+    console.log('⏰ Start Time set via setDefaultTime, quality setup complete');
+  }
+
+  // If this is the End Time input, update quality check timer status (work completion)
+  if (input.id === 'End Time') {
+    updateTwoHourCheckStatus();
   }
 
   // If this is a trouble time input, calculate total trouble time
@@ -1271,6 +1386,9 @@ function resetBreakTime(breakNumber) {
 
     // Recalculate total break time
     calculateTotalBreakTime();
+    
+    // Update quality check timer pause/resume status
+    updateTwoHourCheckStatus();
 
     console.log(`Break time ${breakNumber} has been reset`);
   }
@@ -1917,6 +2035,9 @@ function setupMaintenanceModalEvents(modal, existingRecord) {
     renderMaintenanceRecords();
     calculateTotalMachineTroubleTime();
     
+    // Update quality check timer pause/resume status
+    updateTwoHourCheckStatus();
+    
     // Clear the working photos array
     maintenancePhotos = [];
     
@@ -1938,6 +2059,9 @@ function setupMaintenanceModalEvents(modal, existingRecord) {
         saveMaintenanceRecords();
         renderMaintenanceRecords();
         calculateTotalMachineTroubleTime();
+        
+        // Update quality check timer pause/resume status
+        updateTwoHourCheckStatus();
         
         // Clear the working photos array
         maintenancePhotos = [];
@@ -2461,6 +2585,13 @@ function resetForm() {
     image.style.display = 'none'; // Hide the image
     console.log(`Reset image ${image.id || image.name}`);
   });
+
+  // Clear 2-hour check system
+  localStorage.removeItem(`${uniquePrefix}twoHourChecks`);
+  localStorage.removeItem(`${uniquePrefix}twoHourTimerState`); // Clear timer state too
+  clearTwoHourCheckTimer();
+  twoHourCheckList = [];
+  console.log('⏰ 2-hour check system cleared including timer state');
 
   // Reload the page
   window.location.reload();
@@ -3470,6 +3601,20 @@ document.getElementById('submit').addEventListener('click', async (event) => {
             Total_Trouble_Minutes: totalTroubleMinutes, Total_Trouble_Hours: parseFloat(totalTroubleHours.toFixed(2)),
             Total_Work_Hours: parseFloat(totalWorkHours.toFixed(2)),
             
+            // Include quality check data
+            "2HourQualityCheck": {
+                totalChecks: twoHourCheckList.length,
+                checks: twoHourCheckList.map((check, index) => ({
+                    [`check${index + 1}`]: {
+                        checkerName: check.inspectorName,
+                        timestamp: check.timestamp,
+                        checkTime: check.checkTime,
+                        checkNumber: index + 1
+                    }
+                })).reduce((acc, check) => Object.assign(acc, check), {}),
+                lastCheckTimestamp: twoHourCheckList.length > 0 ? twoHourCheckList[twoHourCheckList.length - 1].timestamp : null
+            },
+            
             // Include work order information for historical tracking
             WorkOrder_Info: workOrderData,
             
@@ -3682,9 +3827,11 @@ async function sendtoNC(selectedValue) {
   //sendCommand("off"); // this is for arduino (emergency button)
   sendtoNCButtonisPressed = true;
 
-  // Save to localStorage with a unique key format
+  // Save to localStorage with a unique key format and update button state
   const key = `${uniquePrefix}sendtoNCButtonisPressed`;
+  const buttonStateKey = `${uniquePrefix}sendButtonState`;
   localStorage.setItem(key, 'true'); // Save the value with the unique key
+  localStorage.setItem(buttonStateKey, 'green'); // Update button state to green (sent)
 
   const subDropdown = document.getElementById('sub-dropdown');
   const currentSelection = subDropdown.value;
@@ -4184,6 +4331,886 @@ function closeSendReminderModal() {
   if (reminderModal) {
     reminderModal.style.display = 'none';
     console.log('✅ Send to Machine reminder modal closed');
+  }
+}
+
+// ================== 2-HOUR CHECK SYSTEM ==================
+
+// Global variables for 2-hour check system
+let twoHourCheckTimer = null;
+let twoHourCheckStartTime = null;
+let twoHourCheckPaused = false;
+let twoHourCheckList = [];
+let subDropdownSelectionTime = null; // Track when sub-dropdown was first selected
+
+// Function to pause/resume 2-hour check based on breaks and maintenance
+function updateTwoHourCheckStatus() {
+  // First check if work is completed - if so, stop the timer completely
+  if (isWorkCompleted()) {
+    if (twoHourCheckTimer) {
+      clearInterval(twoHourCheckTimer);
+      twoHourCheckTimer = null;
+      twoHourCheckStartTime = null;
+      twoHourCheckPaused = false;
+      
+      // Clear timer state from localStorage
+      localStorage.removeItem(`${uniquePrefix}twoHourTimerState`);
+      
+      console.log('🏁 QUALITY CHECK TIMER STOPPED - Work completed (End Time filled)');
+      return; // Exit early, no need to check pause/resume logic
+    }
+  }
+  
+  const shouldPause = isWorkerOnBreakOrMaintenance();
+  
+  if (shouldPause && !twoHourCheckPaused) {
+    twoHourCheckPaused = true;
+    console.log('⏸️  QUALITY CHECK TIMER PAUSED - Worker on break/maintenance');
+  } else if (!shouldPause && twoHourCheckPaused) {
+    twoHourCheckPaused = false;
+    console.log('▶️  QUALITY CHECK TIMER RESUMED - Worker returned from break/maintenance');
+    
+    // Reset the start time to current time when resuming to avoid immediate trigger
+    if (twoHourCheckStartTime) {
+      twoHourCheckStartTime = new Date();
+      console.log('🔄 Timer reset - next check in 2 hours (PRODUCTION MODE)');
+    }
+  }
+  
+  // Log current status periodically
+  if (twoHourCheckTimer) {
+    const statusEmoji = twoHourCheckPaused ? '⏸️' : '⏰';
+    const statusText = twoHourCheckPaused ? 'PAUSED' : 'RUNNING';
+    const nextCheckIn = twoHourCheckPaused ? 'paused' : '2 hours (PRODUCTION)';
+    console.log(`${statusEmoji} Quality check timer: ${statusText} - Next check in: ${nextCheckIn}`);
+  }
+}
+
+// Function to check if worker is currently on break or doing maintenance
+function isWorkerOnBreakOrMaintenance() {
+  // Check if any break is in progress (has start time but no end time)
+  for (let i = 1; i <= 4; i++) {
+    const startInput = document.getElementById(`break${i}-start`);
+    const endInput = document.getElementById(`break${i}-end`);
+    
+    if (startInput?.value && !endInput?.value) {
+      console.log(`🛑 Break ${i} in progress - pausing 2-hour check`);
+      return true;
+    }
+  }
+  
+  // Check if maintenance is in progress
+  const maintenanceRecords = window.maintenanceRecords || [];
+  const activeMaintenanceExists = maintenanceRecords.some(record => 
+    record.startTime && !record.endTime
+  );
+  
+  if (activeMaintenanceExists) {
+    console.log('🔧 Maintenance in progress - pausing 2-hour check');
+    return true;
+  }
+  
+  return false;
+}
+
+// Function to check if work is completed (End Time is filled)
+function isWorkCompleted() {
+  const endTimeInput = document.getElementById('End Time');
+  
+  if (endTimeInput?.value) {
+    console.log('✅ Work completed - End Time filled, stopping quality check timer');
+    return true;
+  }
+  
+  return false;
+}
+
+// Function to attempt starting quality check timer (always monitors, but smart about popups)
+function attemptToStartQualityCheckTimer() {
+  const startTimeInput = document.getElementById('Start Time');
+  const subDropdown = document.getElementById('sub-dropdown');
+  
+  console.log('🔍 attemptToStartQualityCheckTimer called');
+  console.log(`   📋 Sub-dropdown element: ${subDropdown ? 'Found' : 'Not found'}`);
+  console.log(`   📋 Sub-dropdown value: "${subDropdown ? subDropdown.value : 'N/A'}"`);
+  console.log(`   ⏰ Start Time element: ${startTimeInput ? 'Found' : 'Not found'}`);
+  console.log(`   ⏰ Start Time value: "${startTimeInput ? startTimeInput.value : 'N/A'}"`);
+  
+  // Check if work is already completed - if so, don't start timer
+  if (isWorkCompleted()) {
+    console.log('🏁 Work already completed (End Time filled) - not starting quality check timer');
+    clearTwoHourCheckTimer(); // Ensure any existing timer is stopped
+    return;
+  }
+  
+  // Check if both required conditions are met
+  const hasStartTime = startTimeInput && startTimeInput.value;
+  const hasSubDropdown = subDropdown && subDropdown.value;
+  
+  // Always clear any existing timer first
+  clearTwoHourCheckTimer();
+  
+  if (hasStartTime && hasSubDropdown) {
+    console.log('✅ Both conditions met - starting quality check timer with full functionality');
+    console.log(`   📋 Sub-dropdown: "${subDropdown.value}"`);
+    console.log(`   ⏰ Start time: "${startTimeInput.value}"`);
+    
+    startTwoHourCheckTimer(); // Start full timer with timer state
+    updateTwoHourCheckStatus(); // Update pause status
+  } else {
+    console.log('🔄 Starting background monitoring - checking requirements continuously');
+    if (!hasStartTime) console.log('   ⏰ Missing: Start Time');
+    if (!hasSubDropdown) console.log('   📋 Missing: Sub-dropdown selection');
+    
+    // Always start background monitoring regardless of conditions
+    startContinuousQualityMonitoring();
+  }
+}
+
+// Function to start continuous monitoring that checks conditions every 10 seconds
+function startContinuousQualityMonitoring() {
+  console.log('🔄 Starting continuous quality monitoring - checking setup requirements and quality intervals');
+  
+  // Check immediately
+  checkQualityRequirements();
+  
+  // Set up recurring check every 10 seconds (timer frequency stays the same)
+  twoHourCheckTimer = setInterval(() => {
+    checkQualityRequirements();
+  }, 10000); // Check every 10 seconds
+}
+
+// Function to check quality requirements and remind user if missing (smart popup logic)
+function checkQualityRequirements() {
+  // First check if work is completed - if so, stop all monitoring
+  if (isWorkCompleted()) {
+    console.log('🏁 Work completed during background check - stopping all quality monitoring');
+    clearTwoHourCheckTimer();
+    return;
+  }
+  
+  const startTimeInput = document.getElementById('Start Time');
+  const subDropdown = document.getElementById('sub-dropdown');
+  
+  const hasStartTime = startTimeInput && startTimeInput.value;
+  const hasSubDropdown = subDropdown && subDropdown.value;
+  
+  // Log current status for debugging
+  console.log(`🔍 Background check - Start Time: ${hasStartTime ? 'Set' : 'Missing'}, Sub-dropdown: ${hasSubDropdown ? 'Set' : 'Missing'}`);
+  
+  // If both requirements are met, switch to full quality check timer
+  if (hasStartTime && hasSubDropdown) {
+    console.log('✅ Requirements now met! Switching to full quality check timer');
+    clearTwoHourCheckTimer();
+    startTwoHourCheckTimer();
+    updateTwoHourCheckStatus();
+    return;
+  }
+  
+  // Only show popup reminders if work has started (sub-dropdown is set)
+  if (hasSubDropdown && !hasStartTime) {
+    // Check if 1 minute has passed since sub-dropdown was selected
+    if (subDropdownSelectionTime) {
+      const currentTime = new Date();
+      const timeSinceSelection = (currentTime - subDropdownSelectionTime) / 1000 / 60; // Convert to minutes
+      
+      if (timeSinceSelection >= 1) {
+        console.log(`⚠️ Work started ${timeSinceSelection.toFixed(1)} minutes ago but start time still missing, showing reminder`);
+        showQualityRequirementsReminder(true, false); // Only missing start time
+      } else {
+        console.log(`📝 Work started ${timeSinceSelection.toFixed(1)} minutes ago, waiting for 1 minute before showing setup reminder`);
+      }
+    } else {
+      console.log('📝 Work started but no selection time recorded, continuing monitoring');
+    }
+  } else if (!hasSubDropdown) {
+    console.log('📝 Work not started yet (no sub-dropdown), continuing silent background monitoring');
+    // Continue background checking but don't show popup - work hasn't started yet
+  }
+}
+
+// Function to show reminder modal for missing quality check requirements
+function showQualityRequirementsReminder(missingStartTime, missingSubDropdown) {
+  // Check if modal already exists and is visible
+  const existingModal = document.getElementById('qualityRequirementsModal');
+  if (existingModal && existingModal.style.display === 'flex') {
+    return; // Don't show multiple modals
+  }
+  
+  let missingItems = [];
+  if (missingStartTime) missingItems.push('Start Time');
+  if (missingSubDropdown) missingItems.push('Product Selection');
+  
+  const message = `Quality Check Requirements Missing:\n\n• ${missingItems.join('\n• ')}\n\nPlease set these values to enable quality check monitoring.`;
+  
+  // Create and show a themed alert modal
+  const modal = document.createElement('div');
+  modal.id = 'qualityRequirementsModal';
+  modal.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0,0,0,0.8);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 10000;
+    font-family: 'Poppins', sans-serif;
+  `;
+  
+  modal.innerHTML = `
+    <div style="background: #003b5b; padding: 30px; border-radius: 15px; max-width: 450px; width: 90%; text-align: center; border: 2px solid #FFC240; box-shadow: 0 8px 32px rgba(0,0,0,0.4);">
+      <div style="font-size: 48px; margin-bottom: 15px; color: #FFC240;">⚠️</div>
+      <h3 style="color: white; margin: 0 0 20px 0; font-size: 20px; text-shadow: 1px 1px 2px rgba(0,0,0,0.3);">Quality Check Setup Required</h3>
+      <div style="background: rgba(255, 194, 64, 0.1); padding: 20px; border-radius: 10px; border: 1px solid rgba(255, 194, 64, 0.3); margin-bottom: 25px;">
+        <p style="white-space: pre-line; margin: 0; color: white; line-height: 1.5; font-size: 14px;">${message}</p>
+        <p style="color: rgba(255, 255, 255, 0.7); font-size: 12px; margin-top: 10px; font-style: italic;">品質チェック設定が必要です</p>
+      </div>
+      <button onclick="this.closest('#qualityRequirementsModal').remove();" 
+              style="background: orangered; color: white; border: none; padding: 12px 25px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: bold; font-family: 'Poppins', sans-serif; transition: background-color 0.3s; box-shadow: 0 4px 8px rgba(0,0,0,0.2);"
+              onmouseover="this.style.background='#333333'" 
+              onmouseout="this.style.background='orangered'">
+        OK - I'll Set These Up
+      </button>
+    </div>
+  `;
+  
+  document.body.appendChild(modal);
+  
+  // Auto-remove modal after 5 seconds
+  setTimeout(() => {
+    if (modal.parentNode) {
+      modal.remove();
+    }
+  }, 5000);
+}
+
+// Function to start the 2-hour check timer (PRODUCTION: 2-hour intervals)
+function startTwoHourCheckTimer() {
+  const startTimeInput = document.getElementById('Start Time');
+  const subDropdown = document.getElementById('sub-dropdown');
+  
+  // Check if both Start Time and sub-dropdown have values
+  if (!startTimeInput || !startTimeInput.value) {
+    console.log('⏰ Cannot start quality check: No processing start time set');
+    return;
+  }
+  
+  if (!subDropdown || !subDropdown.value) {
+    console.log('⏰ Cannot start quality check: No sub-dropdown value selected');
+    return;
+  }
+  
+  // Clear any existing timer
+  clearTwoHourCheckTimer();
+  
+  const startTime = startTimeInput.value;
+  const [hours, minutes] = startTime.split(':');
+  
+  // Save the processing start time to localStorage for persistence
+  const processingStartTime = new Date();
+  processingStartTime.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+  
+  const timerState = {
+    processingStartTime: processingStartTime.toISOString(),
+    lastCheckTime: new Date().toISOString(),
+    checksCompleted: twoHourCheckList.length
+  };
+  
+  localStorage.setItem(`${uniquePrefix}twoHourTimerState`, JSON.stringify(timerState));
+  
+  // Set the global variable for current interval tracking
+  twoHourCheckStartTime = new Date(); // This tracks the current interval start
+  
+  console.log(`✅ 2-HOUR QUALITY CHECK TIMER STARTED (PRODUCTION MODE)`);
+  console.log(`   📋 Sub-dropdown: ${subDropdown.value}`);
+  console.log(`   ⏰ Processing start time: ${startTime}`);
+  console.log(`   🔍 Checking every 10 seconds for 2-hour intervals`);
+  
+  // Check immediately if we need to trigger a check based on elapsed time
+  checkTwoHourInterval();
+  
+  // Set up recurring check every 10 seconds (timer frequency stays the same)
+  twoHourCheckTimer = setInterval(() => {
+    checkTwoHourInterval();
+  }, 10000); // Check every 10 seconds for faster testing
+}
+
+// Function to clear the 2-hour check timer
+function clearTwoHourCheckTimer() {
+  if (twoHourCheckTimer) {
+    clearInterval(twoHourCheckTimer);
+    twoHourCheckTimer = null;
+    console.log('⏰ 2-hour check timer cleared');
+  }
+  
+  // Clear the timer state from localStorage
+  localStorage.removeItem(`${uniquePrefix}twoHourTimerState`);
+  console.log('💾 Timer state cleared from localStorage');
+}
+
+// Function to check if 2 hours have passed since last check (PRODUCTION MODE)
+function checkTwoHourInterval() {
+  // First check if work is completed - if so, stop the timer
+  if (isWorkCompleted()) {
+    console.log('🏁 Work completed during interval check - stopping quality check timer');
+    clearTwoHourCheckTimer();
+    return;
+  }
+  
+  if (twoHourCheckPaused) {
+    return;
+  }
+  
+  // Get the saved timer state from localStorage
+  const timerStateJson = localStorage.getItem(`${uniquePrefix}twoHourTimerState`);
+  if (!timerStateJson) {
+    console.log('⏰ No timer state found');
+    return;
+  }
+  
+  const timerState = JSON.parse(timerStateJson);
+  const processingStartTime = new Date(timerState.processingStartTime);
+  const currentTime = new Date();
+  
+  // Calculate when the next check should be due
+  let lastCheckTime;
+  if (twoHourCheckList.length === 0) {
+    // No checks completed yet, use processing start time
+    lastCheckTime = processingStartTime;
+  } else {
+    // Use the timestamp of the last completed check
+    const lastCheck = twoHourCheckList[twoHourCheckList.length - 1];
+    lastCheckTime = new Date(lastCheck.timestamp);
+  }
+  
+  // Calculate time elapsed since last check (or start if no checks)
+  const timeSinceLastCheckMs = currentTime.getTime() - lastCheckTime.getTime();
+  
+  // Subtract any pause time that occurred since the last check
+  const pauseTimeSinceLastCheckMs = calculatePauseTimeSince(lastCheckTime);
+  const workingTimeSinceLastCheckMs = timeSinceLastCheckMs - pauseTimeSinceLastCheckMs;
+  
+  // Convert to minutes for production
+  const workingMinutesSinceLastCheck = workingTimeSinceLastCheckMs / (1000 * 60);
+  const checkInterval = 120; // 2 hours for production
+  
+  console.log(`⏰ Working time since last check: ${workingMinutesSinceLastCheck.toFixed(1)} minutes (PRODUCTION MODE - 2 HOUR INTERVALS)`);
+  console.log(`⏰ Completed checks: ${twoHourCheckList.length}`);
+  
+  // Check if we're overdue for a quality check AND no modal is currently showing
+  const existingModal = document.getElementById('twoHourCheckModal');
+  const modalVisible = existingModal && existingModal.style.display === 'flex';
+  
+  if (workingMinutesSinceLastCheck >= checkInterval && !modalVisible) {
+    console.log(`🔔 Quality check overdue - ${workingMinutesSinceLastCheck.toFixed(1)} minutes since last check (PRODUCTION MODE - 2 HOUR INTERVALS)`);
+    showTwoHourCheckModal();
+  } else if (modalVisible) {
+    console.log('⏰ Quality check modal already visible, skipping trigger');
+  } else {
+    const remainingMinutes = checkInterval - workingMinutesSinceLastCheck;
+    const remainingHours = Math.floor(remainingMinutes / 60);
+    const remainingMins = Math.floor(remainingMinutes % 60);
+    console.log(`⏰ Next quality check in ${remainingHours}h ${remainingMins}m`);
+  }
+}
+
+// Function to calculate total pause time in milliseconds
+function calculateTotalPauseTimeMs() {
+  let totalPauseMs = 0;
+  
+  // Calculate break time
+  for (let i = 1; i <= 4; i++) {
+    const startInput = document.getElementById(`break${i}-start`);
+    const endInput = document.getElementById(`break${i}-end`);
+    
+    if (startInput?.value) {
+      const breakStart = new Date();
+      const [startHours, startMinutes] = startInput.value.split(':');
+      breakStart.setHours(parseInt(startHours), parseInt(startMinutes), 0, 0);
+      
+      let breakEnd;
+      if (endInput?.value) {
+        breakEnd = new Date();
+        const [endHours, endMinutes] = endInput.value.split(':');
+        breakEnd.setHours(parseInt(endHours), parseInt(endMinutes), 0, 0);
+      } else {
+        // Break is still ongoing, use current time
+        breakEnd = new Date();
+      }
+      
+      if (breakEnd > breakStart) {
+        totalPauseMs += breakEnd.getTime() - breakStart.getTime();
+      }
+    }
+  }
+  
+  // Calculate maintenance time
+  const maintenanceRecords = window.maintenanceRecords || [];
+  maintenanceRecords.forEach(record => {
+    if (record.startTime) {
+      const maintStart = new Date(record.startTime);
+      let maintEnd;
+      
+      if (record.endTime) {
+        maintEnd = new Date(record.endTime);
+      } else {
+        // Maintenance is still ongoing, use current time
+        maintEnd = new Date();
+      }
+      
+      if (maintEnd > maintStart) {
+        totalPauseMs += maintEnd.getTime() - maintStart.getTime();
+      }
+    }
+  });
+  
+  return totalPauseMs;
+}
+
+// Function to calculate pause time since a specific timestamp
+function calculatePauseTimeSince(sinceTime) {
+  const pausedEntries = JSON.parse(localStorage.getItem('pausedEntries')) || [];
+  let pauseTimeSinceMs = 0;
+  
+  pausedEntries.forEach(entry => {
+    const pauseStart = new Date(entry.pauseStart);
+    const pauseEnd = entry.pauseEnd ? new Date(entry.pauseEnd) : new Date();
+    
+    // Only count pause time that occurred after the sinceTime
+    if (pauseEnd.getTime() > sinceTime) {
+      const effectiveStart = Math.max(pauseStart.getTime(), sinceTime);
+      pauseTimeSinceMs += pauseEnd.getTime() - effectiveStart;
+    }
+  });
+  
+  return pauseTimeSinceMs;
+}
+
+// Function to show the 2-hour check modal
+function showTwoHourCheckModal() {
+  // Create modal if it doesn't exist
+  let checkModal = document.getElementById('twoHourCheckModal');
+  if (!checkModal) {
+    checkModal = document.createElement('div');
+    checkModal.id = 'twoHourCheckModal';
+    checkModal.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.9);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 10002;
+      font-family: 'Poppins', sans-serif;
+    `;
+    
+    const modalContent = document.createElement('div');
+    modalContent.style.cssText = `
+      background: #003b5b;
+      padding: 40px;
+      border-radius: 15px;
+      text-align: center;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+      border: 2px solid #FFC240;
+      max-width: 600px;
+      width: 90%;
+      animation: slideIn 0.3s ease-out;
+    `;
+    
+    const clockIcon = document.createElement('div');
+    clockIcon.innerHTML = '🕐';
+    clockIcon.style.cssText = `
+      font-size: 64px;
+      margin-bottom: 20px;
+      color: #FFC240;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+    `;
+    
+    const title = document.createElement('h2');
+    title.textContent = '2-Hour Quality Check (PRODUCTION MODE)';
+    title.style.cssText = `
+      color: white;
+      margin: 0 0 20px 0;
+      font-size: 28px;
+      text-shadow: 1px 1px 2px rgba(0,0,0,0.3);
+    `;
+    
+    const message = document.createElement('p');
+    message.innerHTML = `
+      <strong style="color: #FFC240;">🔍 PRODUCTION MODE - 2-Hour Quality Check!</strong><br><br>
+      Time for your regular 2-hour quality inspection:<br>
+      • Small defects or abnormalities<br>
+      • Machine operation issues<br>
+      • Product quality consistency<br><br>
+      <span style="color: rgba(255, 255, 255, 0.7); font-size: 14px;">テストモード - 1分毎の品質チェック</span>
+    `;
+    message.style.cssText = `
+      color: white;
+      font-size: 16px;
+      line-height: 1.6;
+      margin: 0 0 30px 0;
+      text-align: left;
+      background: rgba(255, 255, 255, 0.1);
+      padding: 20px;
+      border-radius: 10px;
+      border: 1px solid rgba(255, 194, 64, 0.3);
+    `;
+    
+    const inspectorLabel = document.createElement('label');
+    inspectorLabel.textContent = 'Inspector Name / 検査者名:';
+    inspectorLabel.style.cssText = `
+      display: block;
+      color: white;
+      font-weight: bold;
+      margin-bottom: 10px;
+      font-size: 16px;
+      text-align: left;
+    `;
+    
+    const inspectorSelect = document.createElement('select');
+    inspectorSelect.id = 'twoHourCheckInspector';
+    inspectorSelect.style.cssText = `
+      width: 100%;
+      padding: 12px;
+      font-size: 16px;
+      border: 2px solid #FFC240;
+      border-radius: 8px;
+      margin-bottom: 30px;
+      background: white;
+      font-family: 'Poppins', sans-serif;
+      color: #333;
+    `;
+    
+    // Add default option
+    const defaultOption = document.createElement('option');
+    defaultOption.value = '';
+    defaultOption.textContent = 'Select Inspector / 検査者を選択';
+    inspectorSelect.appendChild(defaultOption);
+    
+    // Populate with machine operator suggestions
+    populateInspectorOptions(inspectorSelect);
+    
+    const buttonContainer = document.createElement('div');
+    buttonContainer.style.cssText = `
+      display: flex;
+      gap: 15px;
+      justify-content: center;
+      flex-wrap: wrap;
+    `;
+    
+    const completeButton = document.createElement('button');
+    completeButton.textContent = 'Check Complete';
+    completeButton.style.cssText = `
+      background: orangered;
+      color: white;
+      border: none;
+      padding: 15px 30px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 16px;
+      font-weight: bold;
+      font-family: 'Poppins', sans-serif;
+      transition: background-color 0.3s;
+      min-width: 150px;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    `;
+    
+    completeButton.onmouseover = () => completeButton.style.background = '#333333';
+    completeButton.onmouseout = () => completeButton.style.background = 'orangered';
+    completeButton.onclick = () => completeTwoHourCheck();
+    
+    const snoozeButton = document.createElement('button');
+    snoozeButton.textContent = 'Snooze 15min';
+    snoozeButton.style.cssText = `
+      background: #FFC240;
+      color: #003b5b;
+      border: none;
+      padding: 15px 30px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 16px;
+      font-weight: bold;
+      font-family: 'Poppins', sans-serif;
+      transition: all 0.3s;
+      min-width: 150px;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    `;
+    
+    snoozeButton.onmouseover = () => {
+      snoozeButton.style.background = '#333333';
+      snoozeButton.style.color = 'white';
+    };
+    snoozeButton.onmouseout = () => {
+      snoozeButton.style.background = '#FFC240';
+      snoozeButton.style.color = '#003b5b';
+    };
+    snoozeButton.onclick = () => snoozeTwoHourCheck();
+    
+    buttonContainer.appendChild(completeButton);
+    buttonContainer.appendChild(snoozeButton);
+    
+    modalContent.appendChild(clockIcon);
+    modalContent.appendChild(title);
+    modalContent.appendChild(message);
+    modalContent.appendChild(inspectorLabel);
+    modalContent.appendChild(inspectorSelect);
+    modalContent.appendChild(buttonContainer);
+    checkModal.appendChild(modalContent);
+    
+    document.body.appendChild(checkModal);
+  }
+  
+  checkModal.style.display = 'flex';
+  console.log('🔔 2-hour check modal shown');
+}
+
+// Function to populate inspector options from machine operator suggestions
+function populateInspectorOptions(selectElement) {
+  const machineOperatorInput = document.getElementById('Machine Operator');
+  const dataList = document.getElementById('machine-operator-suggestions');
+  
+  if (dataList) {
+    // Get options from the datalist
+    const options = dataList.querySelectorAll('option');
+    options.forEach(option => {
+      if (option.value) {
+        const optionElement = document.createElement('option');
+        optionElement.value = option.value;
+        optionElement.textContent = option.value;
+        selectElement.appendChild(optionElement);
+      }
+    });
+  }
+  
+  // Also add current machine operator if not already in list
+  if (machineOperatorInput && machineOperatorInput.value) {
+    const currentWorker = machineOperatorInput.value;
+    const existingOption = selectElement.querySelector(`option[value="${currentWorker}"]`);
+    if (!existingOption) {
+      const optionElement = document.createElement('option');
+      optionElement.value = currentWorker;
+      optionElement.textContent = currentWorker;
+      selectElement.appendChild(optionElement);
+    }
+    
+    // Pre-select current worker
+    selectElement.value = currentWorker;
+  }
+}
+
+// Function to complete the 2-hour check
+function completeTwoHourCheck() {
+  const inspectorSelect = document.getElementById('twoHourCheckInspector');
+  const inspectorName = inspectorSelect.value;
+  
+  if (!inspectorName) {
+    alert('Please select an inspector name / 検査者名を選択してください');
+    return;
+  }
+  
+  // Record the check
+  const checkRecord = {
+    timestamp: new Date().toISOString(),
+    inspectorName: inspectorName,
+    checkTime: new Date().toLocaleString('ja-JP', { 
+      timeZone: 'Asia/Tokyo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit'
+    })
+  };
+  
+  twoHourCheckList.push(checkRecord);
+  
+  // Update the timer state to reflect the new check count
+  const timerStateJson = localStorage.getItem(`${uniquePrefix}twoHourTimerState`);
+  if (timerStateJson) {
+    const timerState = JSON.parse(timerStateJson);
+    timerState.checksCompleted = twoHourCheckList.length;
+    timerState.lastCheckTime = new Date().toISOString();
+    localStorage.setItem(`${uniquePrefix}twoHourTimerState`, JSON.stringify(timerState));
+    console.log(`💾 Updated timer state - checks completed: ${timerState.checksCompleted}`);
+  }
+  
+  // Close modal
+  closeTwoHourCheckModal();
+  
+  // Update the display list
+  updateTwoHourCheckDisplay();
+  
+  // Save checks to localStorage
+  saveTwoHourChecks();
+  
+  console.log('✅ 2-hour check completed by:', inspectorName);
+  
+  // Show success message
+  setTimeout(() => {
+    alert(`✅ Quality check completed!\nInspector: ${inspectorName}\nTime: ${checkRecord.checkTime}`);
+  }, 300);
+}
+
+// Function to snooze the 2-hour check for 15 minutes
+function snoozeTwoHourCheck() {
+  // Close modal
+  closeTwoHourCheckModal();
+  
+  // Set timer for 15 minutes
+  setTimeout(() => {
+    showTwoHourCheckModal();
+  }, 15 * 60 * 1000); // 15 minutes
+  
+  console.log('😴 2-hour check snoozed for 15 minutes');
+  alert('⏰ Quality check reminder snoozed for 15 minutes');
+}
+
+// Function to close the 2-hour check modal
+function closeTwoHourCheckModal() {
+  const checkModal = document.getElementById('twoHourCheckModal');
+  if (checkModal) {
+    checkModal.style.display = 'none';
+    console.log('✅ 2-hour check modal closed');
+  }
+}
+
+// Function to update the 2-hour check display list
+function updateTwoHourCheckDisplay() {
+  let displayContainer = document.getElementById('twoHourCheckDisplay');
+  
+  if (!displayContainer) {
+    // Create display container near the reset button
+    const resetButton = document.getElementById('resetButton') || document.querySelector('button[onclick="resetForm()"]');
+    if (!resetButton) return;
+    
+    displayContainer = document.createElement('div');
+    displayContainer.id = 'twoHourCheckDisplay';
+    displayContainer.style.cssText = `
+      margin-top: 15px;
+      padding: 15px;
+      background: rgba(255, 194, 64, 0.1);
+      border-radius: 8px;
+      border: 2px solid rgba(255, 194, 64, 0.3);
+      font-size: 14px;
+      max-height: 200px;
+      overflow-y: auto;
+      font-family: 'Poppins', sans-serif;
+    `;
+    
+    // Insert after reset button
+    resetButton.parentNode.insertBefore(displayContainer, resetButton.nextSibling);
+  }
+  
+  // Update the display content
+  if (twoHourCheckList.length === 0) {
+    displayContainer.innerHTML = `
+      <div style="color: rgba(255, 255, 255, 0.7); text-align: center; font-style: italic; padding: 20px;">
+        📋 No quality checks completed yet<br>
+        <span style="font-size: 12px; color: rgba(255, 255, 255, 0.5);">品質チェックはまだ完了していません</span>
+      </div>
+    `;
+  } else {
+    let listHTML = `
+      <div style="font-weight: bold; color: white; margin-bottom: 15px; text-align: center; background: rgba(255, 194, 64, 0.2); padding: 10px; border-radius: 5px;">
+        📋 Quality Checks Completed (${twoHourCheckList.length})
+      </div>
+    `;
+    
+    // Show most recent checks first
+    const recentChecks = twoHourCheckList.slice().reverse().slice(0, 10); // Show last 10
+    
+    recentChecks.forEach((check, index) => {
+      listHTML += `
+        <div style="padding: 12px; margin: 8px 0; background: rgba(255, 255, 255, 0.95); border-radius: 8px; border-left: 4px solid #FFC240; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span style="font-weight: bold; color: #003b5b; background: #FFC240; padding: 4px 8px; border-radius: 4px; font-size: 12px;">#${twoHourCheckList.length - index}</span>
+            <span style="color: #666; font-size: 11px;">${check.checkTime}</span>
+          </div>
+          <div style="margin-top: 8px; color: #003b5b; font-weight: 500;">
+            Inspector: <strong style="color: orangered;">${check.inspectorName}</strong>
+          </div>
+        </div>
+      `;
+    });
+    
+    if (twoHourCheckList.length > 10) {
+      listHTML += `
+        <div style="text-align: center; color: rgba(255, 255, 255, 0.7); font-style: italic; margin-top: 15px; padding: 10px; background: rgba(255, 194, 64, 0.1); border-radius: 5px; border: 1px solid rgba(255, 194, 64, 0.2);">
+          ... and ${twoHourCheckList.length - 10} more checks<br>
+          <span style="font-size: 10px;">他 ${twoHourCheckList.length - 10} 件のチェック</span>
+        </div>
+      `;
+    }
+    
+    displayContainer.innerHTML = listHTML;
+  }
+}
+
+// Function to initialize the 2-hour check system
+function initializeTwoHourCheckSystem() {
+  // Load saved checks from localStorage
+  const savedChecks = localStorage.getItem(`${uniquePrefix}twoHourChecks`);
+  if (savedChecks) {
+    try {
+      twoHourCheckList = JSON.parse(savedChecks);
+    } catch (e) {
+      console.error('Error loading saved 2-hour checks:', e);
+      twoHourCheckList = [];
+    }
+  }
+  
+  // Update display
+  updateTwoHourCheckDisplay();
+  
+  // Check for saved timer state and attempt to resume
+  const timerStateJson = localStorage.getItem(`${uniquePrefix}twoHourTimerState`);
+  if (timerStateJson) {
+    try {
+      const timerState = JSON.parse(timerStateJson);
+      const processingStartTime = new Date(timerState.processingStartTime);
+      const currentTime = new Date();
+      
+      console.log('🔄 Found saved timer state - attempting to resume timer');
+      console.log(`   ⏰ Original processing start: ${processingStartTime.toLocaleString()}`);
+      console.log(`   📋 Checks completed before: ${timerState.checksCompleted}`);
+      
+      // Calculate how much time has passed
+      const totalElapsedMs = currentTime.getTime() - processingStartTime.getTime();
+      const totalElapsedMinutes = totalElapsedMs / (1000 * 60);
+      
+      console.log(`   ⏱️ Total elapsed time: ${totalElapsedMinutes.toFixed(1)} minutes`);
+      
+      // Resume the timer if we have both required conditions
+      setTimeout(() => {
+        attemptToStartQualityCheckTimer();
+      }, 1000);
+      
+    } catch (e) {
+      console.error('Error parsing saved timer state:', e);
+      localStorage.removeItem(`${uniquePrefix}twoHourTimerState`);
+    }
+  } else {
+    // No saved timer state, attempt to start fresh if conditions are met
+    setTimeout(() => {
+      attemptToStartQualityCheckTimer();
+    }, 1000);
+  }
+  
+  console.log('⏰ 2-hour check system initialized with persistence support');
+}
+
+// Function to save 2-hour checks to localStorage
+function saveTwoHourChecks() {
+  try {
+    localStorage.setItem(`${uniquePrefix}twoHourChecks`, JSON.stringify(twoHourCheckList));
+  } catch (e) {
+    console.error('Error saving 2-hour checks:', e);
   }
 }
 

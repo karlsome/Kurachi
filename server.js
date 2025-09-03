@@ -4169,26 +4169,35 @@ app.post('/api/analytics-data', async (req, res) => {
       }
     ];
 
-    // Climate data aggregation pipeline
+    // Climate data aggregation pipeline with SAFE PARSING
     const climateAggregation = [
       { $match: climateQuery },
       {
         $addFields: {
-          // Parse temperature and humidity strings
+          // Safe temperature parsing with error handling
           tempValue: {
-            $toDouble: {
-              $arrayElemAt: [
-                { $split: ["$Temperature", " "] },
-                0
-              ]
+            $convert: {
+              input: {
+                $arrayElemAt: [
+                  { $split: ["$Temperature", " "] },
+                  0
+                ]
+              },
+              to: "double",
+              onError: 0 // Default to 0 if conversion fails
             }
           },
+          // Safe humidity parsing with error handling
           humidityValue: {
-            $toDouble: {
-              $trim: { 
-                input: "$Humidity", 
-                chars: "%" 
-              }
+            $convert: {
+              input: {
+                $trim: { 
+                  input: "$Humidity", 
+                  chars: "%" 
+                }
+              },
+              to: "double",
+              onError: 0 // Default to 0 if conversion fails
             }
           }
         }
