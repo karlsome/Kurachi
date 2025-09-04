@@ -5282,6 +5282,7 @@ let twoHourCheckStartTime = null;
 let twoHourCheckPaused = false;
 let twoHourCheckList = [];
 let subDropdownSelectionTime = null; // Track when sub-dropdown was first selected
+let twoHourCheckSnoozedUntil = null; // Track when snooze period ends
 
 // Function to pause/resume 2-hour check based on breaks and maintenance
 function updateTwoHourCheckStatus() {
@@ -5604,6 +5605,17 @@ function checkTwoHourInterval() {
     return;
   }
   
+  // Check if currently snoozed
+  if (twoHourCheckSnoozedUntil && new Date() < twoHourCheckSnoozedUntil) {
+    const remainingMinutes = Math.ceil((twoHourCheckSnoozedUntil - new Date()) / (1000 * 60));
+    console.log(`😴 Quality check snoozed for ${remainingMinutes} more minutes`);
+    return;
+  } else if (twoHourCheckSnoozedUntil && new Date() >= twoHourCheckSnoozedUntil) {
+    // Snooze period has ended
+    twoHourCheckSnoozedUntil = null;
+    console.log('⏰ Snooze period ended - resuming quality check monitoring');
+  }
+  
   // Get the saved timer state from localStorage
   const timerStateJson = localStorage.getItem(`${uniquePrefix}twoHourTimerState`);
   if (!timerStateJson) {
@@ -5912,23 +5924,59 @@ function showTwoHourCheckModal() {
 
 // Function to populate inspector options from machine operator suggestions
 function populateInspectorOptions(selectElement) {
-  const machineOperatorInput = document.getElementById('Machine Operator');
-  const dataList = document.getElementById('machine-operator-suggestions');
+  // Clear existing options
+  selectElement.innerHTML = '';
   
-  if (dataList) {
-    // Get options from the datalist
-    const options = dataList.querySelectorAll('option');
-    options.forEach(option => {
-      if (option.value) {
+  // Add default option
+  const defaultOption = document.createElement('option');
+  defaultOption.value = '';
+  defaultOption.textContent = 'Select Inspector / 検査者を選択';
+  selectElement.appendChild(defaultOption);
+  
+  // Get the same worker names that are used in the main dropdowns
+  // First try to get from the existing worker dropdown
+  const workerDropdown = document.getElementById("MachineOperatorDropdown");
+  if (workerDropdown && workerDropdown.options.length > 2) {
+    // Copy options from worker dropdown (skip first blank option and last manual option)
+    for (let i = 1; i < workerDropdown.options.length - 1; i++) {
+      const option = workerDropdown.options[i];
+      if (option.value && option.value !== "__manual__") {
         const optionElement = document.createElement('option');
         optionElement.value = option.value;
         optionElement.textContent = option.value;
         selectElement.appendChild(optionElement);
       }
-    });
+    }
+  } else {
+    // Fallback: fetch worker names from server
+    const selectedFactory = document.getElementById("selected工場").value;
+    if (selectedFactory) {
+      fetch(`${serverURL}/getWorkerNames?selectedFactory=${encodeURIComponent(selectedFactory)}`)
+        .then(response => response.json())
+        .then(workerNames => {
+          workerNames.forEach(name => {
+            const optionElement = document.createElement('option');
+            optionElement.value = name;
+            optionElement.textContent = name;
+            selectElement.appendChild(optionElement);
+          });
+        })
+        .catch(error => {
+          console.error("Error fetching worker names for quality check:", error);
+          // Add some fallback names
+          const fallbackNames = ["Worker A", "Worker B", "Worker C", "Worker D"];
+          fallbackNames.forEach(name => {
+            const optionElement = document.createElement('option');
+            optionElement.value = name;
+            optionElement.textContent = name;
+            selectElement.appendChild(optionElement);
+          });
+        });
+    }
   }
   
   // Also add current machine operator if not already in list
+  const machineOperatorInput = document.getElementById('Machine Operator');
   if (machineOperatorInput && machineOperatorInput.value) {
     const currentWorker = machineOperatorInput.value;
     const existingOption = selectElement.querySelector(`option[value="${currentWorker}"]`);
@@ -6002,12 +6050,10 @@ function snoozeTwoHourCheck() {
   // Close modal
   closeTwoHourCheckModal();
   
-  // Set timer for 15 minutes
-  setTimeout(() => {
-    showTwoHourCheckModal();
-  }, 15 * 60 * 1000); // 15 minutes
+  // Set snooze end time to 15 minutes from now
+  twoHourCheckSnoozedUntil = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
   
-  console.log('😴 2-hour check snoozed for 15 minutes');
+  console.log(`😴 2-hour check snoozed until ${twoHourCheckSnoozedUntil.toLocaleTimeString()}`);
   alert('⏰ Quality check reminder snoozed for 15 minutes');
 }
 
