@@ -390,11 +390,13 @@
             <br>
             
             
-            <label for="Machine Operator">Worker:</label>
-            <input list="machine-operator-suggestions" placeholder="Worker's Name" id="Machine Operator" name="Machine Operator" required>
-            <datalist id="machine-operator-suggestions"></datalist>
+            <label for="MachineOperatorDropdown">Worker:</label>
+                <select id="MachineOperatorDropdown" name="Machine Operator" required>
+                    <!-- Options will be populated by JS -->
+                </select>
+                <input type="text" id="MachineOperatorManual" name="MachineOperatorManual" placeholder="Enter worker's name manually" style="display:none; margin-top:5px;" />
             <br><br>
-            <label for="Process Quantity">Process Quantity (Good) + NG:</label>
+            <label for="ProcessQuantity">Process Quantity (Good) + NG:</label>
             <input type="text" name="Process Quantity" id="ProcessQuantity" placeholder="Process Quantity" required>
             <button id="sendtoQty" type="button">1 box completed</button>
             <br><br>
@@ -596,9 +598,11 @@
 
 
 
-    <label for="Kensa Name">Inspector:</label>
-    <input list="kensa-name-suggestions" placeholder="Kensa Name" id="Kensa Name" name="Kensa Name" type="text" disabled>
-    <datalist id="kensa-name-suggestions"></datalist>
+    <label for="KensaNameDropdown">Inspector:</label>
+        <select id="KensaNameDropdown" name="Kensa Name" disabled>
+            <!-- Options will be populated by JS -->
+        </select>
+        <input type="text" id="KensaNameManual" name="KensaNameManual" placeholder="Enter inspector's name manually" style="display:none; margin-top:5px;" disabled />
     <br>
     <label for="KDate">Inspection Date:</label>
     <input type="date" name="KDate" id="KDate" placeholder="KDate" onfocus="setDefaultDate(this)" disabled>

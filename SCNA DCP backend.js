@@ -128,6 +128,12 @@ function createDynamicShotCountInputs() {
     return;
   }
   
+  // Get localStorage prefix
+  const pageName = location.pathname.split('/').pop();
+  const selectedFactory = document.getElementById('selected工場')?.value;
+  const selectedMachine = document.getElementById('process')?.value;
+  const uniquePrefix = `${pageName}_${selectedFactory}_${selectedMachine}_`;
+  
   // Clear existing inputs
   shotCountContainer.innerHTML = '';
   
@@ -139,6 +145,16 @@ function createDynamicShotCountInputs() {
              style="font-size: 24px; padding: 15px; width: 200px; height: 60px; text-align: center; border: 2px solid #ccc; border-radius: 8px;" 
              readonly onclick="openNumericKeypad('shot')">
     `;
+    
+    // Add event listener and restore value for generic shot input
+    setTimeout(() => {
+      const shotInput = document.getElementById('shot');
+      if (shotInput) {
+        addShotCountEventListener(shotInput, uniquePrefix);
+        restoreShotCountValue(shotInput, uniquePrefix);
+      }
+    }, 100);
+    
   } else if (targetMachines.length === 1) {
     // Single target machine
     const machineId = targetMachines[0].replace('-', '');
@@ -148,6 +164,16 @@ function createDynamicShotCountInputs() {
              style="font-size: 24px; padding: 15px; width: 200px; height: 60px; text-align: center; border: 2px solid #ccc; border-radius: 8px;" 
              readonly onclick="openNumericKeypad('ShotCount-${machineId}')">
     `;
+    
+    // Add event listener and restore value for single machine shot input
+    setTimeout(() => {
+      const shotInput = document.getElementById(`ShotCount-${machineId}`);
+      if (shotInput) {
+        addShotCountEventListener(shotInput, uniquePrefix);
+        restoreShotCountValue(shotInput, uniquePrefix);
+      }
+    }, 100);
+    
   } else {
     // Multiple target machines
     let inputsHtml = '<div style="margin-bottom: 10px;"><strong>Shot Count for Each Machine:</strong></div>';
@@ -165,9 +191,40 @@ function createDynamicShotCountInputs() {
     });
     
     shotCountContainer.innerHTML = inputsHtml;
+    
+    // Add event listeners and restore values for multiple machine shot inputs
+    setTimeout(() => {
+      targetMachines.forEach(machine => {
+        const machineId = machine.replace('-', '');
+        const shotInput = document.getElementById(`ShotCount-${machineId}`);
+        if (shotInput) {
+          addShotCountEventListener(shotInput, uniquePrefix);
+          restoreShotCountValue(shotInput, uniquePrefix);
+        }
+      });
+    }, 100);
   }
   
   console.log(`✅ Created dynamic shot count inputs for ${targetMachines.length} target machines:`, targetMachines);
+}
+
+// Helper function to add localStorage event listener to shot count inputs
+function addShotCountEventListener(input, uniquePrefix) {
+  input.addEventListener('input', () => {
+    const key = `${uniquePrefix}${input.id}`;
+    localStorage.setItem(key, input.value);
+    console.log(`💾 Saved shot count: ${input.id} = ${input.value}`);
+  });
+}
+
+// Helper function to restore shot count value from localStorage
+function restoreShotCountValue(input, uniquePrefix) {
+  const key = `${uniquePrefix}${input.id}`;
+  const savedValue = localStorage.getItem(key);
+  if (savedValue !== null && savedValue !== '') {
+    input.value = savedValue;
+    console.log(`🔄 Restored shot count: ${input.id} = ${savedValue}`);
+  }
 }
 
 // Function to validate and collect shot count data
@@ -311,6 +368,26 @@ const uniquePrefix = `${pageName}_${currentSelectedFactory}_${selectedMachine}_`
 
 // Save the value of each input to localStorage on change
 inputs.forEach(input => {
+  // Special handling for manual name inputs
+  if (input.id === "MachineOperatorManual") {
+    input.addEventListener('input', () => {
+      const key = `${uniquePrefix}MachineOperatorManual`;
+      localStorage.setItem(key, input.value);
+      //console.log(`Saved worker manual input: ${input.value}`);
+    });
+    return; // Skip default handling
+  }
+  
+  if (input.id === "KensaNameManual") {
+    input.addEventListener('input', () => {
+      const key = `${uniquePrefix}KensaNameManual`;
+      localStorage.setItem(key, input.value);
+      //console.log(`Saved kensa manual input: ${input.value}`);
+    });
+    return; // Skip default handling
+  }
+  
+  // Default handling for all other inputs
   input.addEventListener('input', () => {
     const key = `${uniquePrefix}${input.id || input.name}`; // Prefix key with pageName and selected工場
     if (key) {
@@ -380,10 +457,23 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (selectedOption && selectedOption.dataset.type === 'workorder') {
                       // It's a work order, call the work order handler
                       handleWorkOrderSelection(selectedOption);
+                      
+                      // Also recreate shot count inputs for work orders
+                      setTimeout(() => {
+                        console.log('🔄 Work order restored, recreating shot count inputs');
+                        createDynamicShotCountInputs();
+                      }, 300); // Delay to ensure work order processing is complete
+                      
                     } else {
                       // It's a regular 背番号 or 品番, call fetchProductDetails
                       fetchProductDetails();
                     }
+                  } else if (input.id === 'process') {
+                    // For process dropdown, recreate shot count inputs after restoration
+                    console.log('🔄 Process dropdown restored, recreating shot count inputs');
+                    setTimeout(() => {
+                      createDynamicShotCountInputs();
+                    }, 100); // Small delay to ensure sub-dropdown is also restored
                   } else {
                     // For other selects, call fetchProductDetails if needed
                     if (input.id !== 'process') { // Don't auto-fetch for process dropdown
@@ -1240,6 +1330,12 @@ function updateUIForWorkOrderMode(assignedTo) {
       const newUrl = `${window.location.pathname}?${urlParams.toString()}`;
       window.history.replaceState(null, '', newUrl);
       console.log(`URL updated to show machine parameter: ${displayText}`);
+      
+      // Recreate shot count inputs for the work order machines
+      console.log(`🔄 Recreating shot count inputs for work order machines`);
+      setTimeout(() => {
+        createDynamicShotCountInputs();
+      }, 200); // Small delay to ensure DOM is fully updated
       
       // Note: Don't trigger input events here as it might interfere with work order data population
       // The field value is already set above and that's sufficient for display purposes
@@ -2464,7 +2560,7 @@ function calculateTotalMachineTroubleTime() {
 async function testMaintenanceData() {
   const selectedSebanggo = document.getElementById("sub-dropdown").value;
   const currentDate = document.getElementById("Lot No.").value;
-  const selectedWorker = document.getElementById("Machine Operator").value;
+  const selectedWorker = getWorkerName();
   const selectedFactory = document.getElementById("selected工場").value;
   const selectedMachine = document.getElementById("process").value;
 
@@ -2539,26 +2635,176 @@ document.addEventListener("DOMContentLoaded", function() {
 //Get worker list
 document.addEventListener("DOMContentLoaded", async function() {
   const selectedFactory = document.getElementById("selected工場").value;
-
+  // --- Worker & Kensa Name Dropdown Setup ---
+  // Fetch worker names from server and use same list for both worker and kensa
+  let workerNames = [];
   if (selectedFactory) {
     try {
       const response = await fetch(`${serverURL}/getWorkerNames?selectedFactory=${encodeURIComponent(selectedFactory)}`);
       if (!response.ok) throw new Error("Failed to fetch worker names");
-
-      const workerNames = await response.json();
-      const dataList = document.getElementById("machine-operator-suggestions");
-      dataList.innerHTML = ""; // Clear any existing options
-
-      workerNames.forEach(name => {
-        const option = document.createElement("option");
-        option.value = name;
-        dataList.appendChild(option);
-      });
+      workerNames = await response.json();
     } catch (error) {
       console.error("Error fetching worker names:", error);
+      // Fallback to static list if fetch fails
+      workerNames = ["Worker A", "Worker B", "Worker C", "Worker D"];
+    }
+  } else {
+    // Fallback if no factory selected
+    workerNames = ["Worker A", "Worker B", "Worker C", "Worker D"];
+  }
+  
+  // Setup worker dropdown
+  const workerDropdown = document.getElementById("MachineOperatorDropdown");
+  const workerManual = document.getElementById("MachineOperatorManual");
+  if (workerDropdown) {
+    workerDropdown.innerHTML = "";
+    
+    // Add default blank option
+    const blankOpt = document.createElement("option");
+    blankOpt.value = "";
+    blankOpt.textContent = "Select Worker / 作業者を選択";
+    workerDropdown.appendChild(blankOpt);
+    
+    workerNames.forEach(name => {
+      const opt = document.createElement("option");
+      opt.value = name;
+      opt.textContent = name;
+      workerDropdown.appendChild(opt);
+    });
+    // Add manual entry option
+    const manualOpt = document.createElement("option");
+    manualOpt.value = "__manual__";
+    manualOpt.textContent = "Enter name manually...";
+    workerDropdown.appendChild(manualOpt);
+    workerDropdown.addEventListener("change", function() {
+      if (this.value === "__manual__") {
+        workerManual.style.display = "inline-block";
+        workerManual.required = true;
+        workerManual.focus(); // Focus on manual input when selected
+      } else {
+        workerManual.style.display = "none";
+        workerManual.required = false;
+      }
+      // Save dropdown state immediately
+      localStorage.setItem(`${uniquePrefix}MachineOperatorDropdown`, this.value);
+    });
+  }
+  
+  // Setup kensa dropdown (using same worker names list)
+  const kensaDropdown = document.getElementById("KensaNameDropdown");
+  const kensaManual = document.getElementById("KensaNameManual");
+  if (kensaDropdown) {
+    kensaDropdown.innerHTML = "";
+    
+    // Add default blank option
+    const blankOpt = document.createElement("option");
+    blankOpt.value = "";
+    blankOpt.textContent = "Select Inspector / 検査者を選択";
+    kensaDropdown.appendChild(blankOpt);
+    
+    workerNames.forEach(name => {
+      const opt = document.createElement("option");
+      opt.value = name;
+      opt.textContent = name;
+      kensaDropdown.appendChild(opt);
+    });
+    // Add manual entry option
+    const manualOpt = document.createElement("option");
+    manualOpt.value = "__manual__";
+    manualOpt.textContent = "Enter name manually...";
+    kensaDropdown.appendChild(manualOpt);
+    kensaDropdown.addEventListener("change", function() {
+      const isInspectionEnabled = document.getElementById('enable-inputs')?.checked || false;
+      if (this.value === "__manual__") {
+        kensaManual.style.display = "inline-block";
+        kensaManual.disabled = !isInspectionEnabled; // Respect inspection checkbox state
+        kensaManual.required = isInspectionEnabled;
+        if (isInspectionEnabled) {
+          kensaManual.focus(); // Only focus if enabled
+        }
+      } else {
+        kensaManual.style.display = "none";
+        kensaManual.disabled = !isInspectionEnabled; // Keep consistent with inspection state
+        kensaManual.required = false;
+      }
+      // Save dropdown state immediately
+      localStorage.setItem(`${uniquePrefix}KensaNameDropdown`, this.value);
+    });
+  }
+  
+  // Restore dropdown states and manual inputs after a delay to ensure options are populated
+  setTimeout(() => {
+    // Restore worker dropdown and manual input
+    const savedWorkerDropdownValue = localStorage.getItem(`${uniquePrefix}MachineOperatorDropdown`);
+    const savedWorkerManualValue = localStorage.getItem(`${uniquePrefix}MachineOperatorManual`);
+    
+    if (savedWorkerDropdownValue && workerDropdown) {
+      // Check if the saved value exists in options
+      const optionExists = [...workerDropdown.options].some(option => option.value === savedWorkerDropdownValue);
+      if (optionExists) {
+        workerDropdown.value = savedWorkerDropdownValue;
+        if (savedWorkerDropdownValue === "__manual__" && savedWorkerManualValue && workerManual) {
+          workerManual.value = savedWorkerManualValue;
+          workerManual.style.display = "inline-block";
+          workerManual.required = true;
+        }
+        console.log(`Restored worker dropdown: ${savedWorkerDropdownValue}, manual: ${savedWorkerManualValue}`);
+      }
+    }
+    
+    // Restore kensa dropdown and manual input
+    const savedKensaDropdownValue = localStorage.getItem(`${uniquePrefix}KensaNameDropdown`);
+    const savedKensaManualValue = localStorage.getItem(`${uniquePrefix}KensaNameManual`);
+    
+    if (savedKensaDropdownValue && kensaDropdown) {
+      // Check if the saved value exists in options
+      const optionExists = [...kensaDropdown.options].some(option => option.value === savedKensaDropdownValue);
+      if (optionExists) {
+        kensaDropdown.value = savedKensaDropdownValue;
+        if (savedKensaDropdownValue === "__manual__" && savedKensaManualValue && kensaManual) {
+          const isInspectionEnabled = document.getElementById('enable-inputs')?.checked || false;
+          kensaManual.value = savedKensaManualValue;
+          kensaManual.style.display = "inline-block";
+          kensaManual.disabled = !isInspectionEnabled; // Respect inspection checkbox state
+          kensaManual.required = isInspectionEnabled;
+        }
+        console.log(`Restored kensa dropdown: ${savedKensaDropdownValue}, manual: ${savedKensaManualValue}`);
+      }
+    }
+  }, 100); // Small delay to ensure options are populated first
+  
+  // --- End Worker & Kensa Name Dropdown Setup ---
+});
+
+// Helper function to get the current worker name (from dropdown or manual input)
+function getWorkerName() {
+  const workerDropdown = document.getElementById("MachineOperatorDropdown");
+  const workerManual = document.getElementById("MachineOperatorManual");
+  
+  if (workerDropdown && workerDropdown.value) {
+    if (workerDropdown.value === "__manual__") {
+      return workerManual ? workerManual.value : "";
+    } else {
+      return workerDropdown.value;
     }
   }
-});
+  return "";
+}
+
+// Helper function to get the current kensa name (from dropdown or manual input)
+function getKensaName() {
+  const kensaDropdown = document.getElementById("KensaNameDropdown");
+  const kensaManual = document.getElementById("KensaNameManual");
+  
+  if (kensaDropdown && kensaDropdown.value) {
+    if (kensaDropdown.value === "__manual__") {
+      return kensaManual ? kensaManual.value : "";
+    } else {
+      return kensaDropdown.value;
+    }
+  }
+  return "";
+}
 
 //function for plus minus button
 function incrementCounter(counterId) {
@@ -2777,6 +3023,95 @@ style.innerHTML = `
 document.head.appendChild(style);
 
 // Function to reset everything and reload the page
+// Clear form data and reload page (for successful submissions)
+function clearFormDataAndReload() {
+  console.log('🧹 Clearing all form data after successful submission');
+  
+  // Clear all form inputs with unique prefix
+  const inputs = document.querySelectorAll('input, select, textarea');
+  inputs.forEach(input => {
+    const key = `${uniquePrefix}${input.id || input.name}`;
+    localStorage.removeItem(key);
+  });
+
+  // Reset Send to Machine button back to red state
+  resetSendToMachineButton();
+
+  // Reset Equipment Name (process field) to original URL parameter value
+  const selectedMachine = getQueryParam('machine');
+  const processInput = document.getElementById('process');
+  if (processInput && selectedMachine) {
+    const processKey = `${uniquePrefix}process`;
+    localStorage.removeItem(processKey);
+  }
+
+  // Clear counters with unique prefix
+  for (let i = 1; i <= 20; i++) {
+    const key = `${uniquePrefix}counter-${i}`;
+    localStorage.removeItem(key);
+  }
+
+  // Clear break time inputs and total
+  for (let i = 1; i <= 4; i++) {
+    localStorage.removeItem(`${uniquePrefix}break${i}-start`);
+    localStorage.removeItem(`${uniquePrefix}break${i}-end`);
+  }
+  localStorage.removeItem(`${uniquePrefix}breaktime-mins`);
+  localStorage.removeItem(`${uniquePrefix}total-break-display`);
+
+  // Clear machine trouble inputs and total
+  for (let i = 1; i <= 4; i++) {
+    localStorage.removeItem(`${uniquePrefix}trouble${i}-start`);
+    localStorage.removeItem(`${uniquePrefix}trouble${i}-end`);
+  }
+  localStorage.removeItem(`${uniquePrefix}trouble-time-mins`);
+  localStorage.removeItem(`${uniquePrefix}total-trouble-display`);
+  
+  // Clear maintenance records
+  localStorage.removeItem(`${uniquePrefix}maintenanceRecords`);
+
+  // Clear material label photos
+  localStorage.removeItem(`${uniquePrefix}materialLabelPhotos`);
+
+  // Clear all textContent elements
+  const textContentElements = document.querySelectorAll('[id]');
+  textContentElements.forEach(element => {
+    const textKey = `${uniquePrefix}${element.id}.textContent`;
+    localStorage.removeItem(textKey);
+  });
+
+  // Clear all image sources
+  const images = document.querySelectorAll('img');
+  images.forEach(image => {
+    const imageKey = `${uniquePrefix}${image.id || image.name}.src`;
+    localStorage.removeItem(imageKey);
+  });
+
+  // Clear 2-hour check system
+  localStorage.removeItem(`${uniquePrefix}twoHourChecks`);
+  localStorage.removeItem(`${uniquePrefix}twoHourTimerState`);
+
+  // Clear worker and inspector dropdown selections
+  localStorage.removeItem(`${uniquePrefix}MachineOperatorDropdown`);
+  localStorage.removeItem(`${uniquePrefix}KensaNameDropdown`);
+  localStorage.removeItem(`${uniquePrefix}MachineOperatorManual`);
+  localStorage.removeItem(`${uniquePrefix}KensaNameManual`);
+
+  // Clear shot count inputs (both single and multiple machine formats)
+  localStorage.removeItem(`${uniquePrefix}shot`);
+  for (let i = 1; i <= 8; i++) {
+    localStorage.removeItem(`${uniquePrefix}ShotCount-AOL${i}`);
+  }
+
+  // Clear Send to Machine button state
+  localStorage.removeItem(`${uniquePrefix}sendButtonState`);
+
+  console.log('✅ All form data cleared from localStorage');
+  
+  // Reload the page
+  window.location.reload();
+}
+
 function resetForm() {
   // Add confirmation dialog to prevent accidental form reset
   if (!confirm('Are you sure you want to reset the entire form?\n\nThis will clear ALL data including:\n• Product information\n• Break times\n• Processing times\n• Maintenance records\n• Photos\n• All other entered data\n\nThis cannot be undone!')) {
@@ -3258,7 +3593,7 @@ window.addEventListener('message', function(event) {
 function uploadPhotou() {
   const selectedSebanggo = document.getElementById("sub-dropdown").value;
   const currentDate = document.getElementById("Lot No.").value;
-  const selectedWorker = document.getElementById("Machine Operator").value;
+  const selectedWorker = getWorkerName();
   const selectedFactory = document.getElementById("selected工場").value;
   const selectedMachine = document.getElementById("process").value;
 
@@ -3647,8 +3982,8 @@ document.getElementById('submit').addEventListener('click', async (event) => {
     event.preventDefault();
     updateCycleTime();
 
-    // Reset Send to Machine button back to red state when submitting
-    resetSendToMachineButton();
+    // Don't reset Send to Machine button when submitting - only reset when changing work orders
+    // resetSendToMachineButton(); // REMOVED - this was causing the reminder modal issue
 
     const hatsumono = document.getElementById("hatsumonoLabel").textContent;
     const atomono = document.getElementById("atomonoLabel").textContent;
@@ -3669,11 +4004,8 @@ document.getElementById('submit').addEventListener('click', async (event) => {
         return;
     }
 
-    uploadingModal.style.display = 'flex';
-
     // Check for material label photos (new multi-photo system)
     if (!materialLabelPhotos || materialLabelPhotos.length === 0) {
-        uploadingModal.style.display = 'none';
         showAlert("Please capture at least one Material Label photo");
         return;
     }
@@ -3689,7 +4021,38 @@ document.getElementById('submit').addEventListener('click', async (event) => {
         const その他 = parseInt(document.getElementById('counter-20').value, 10) || 0;
         const Total_NG = 疵引不良 + 加工不良 + その他;
         const Total_PressDB = Process_Quantity - Total_NG;
-        const Worker_Name = document.getElementById('Machine Operator').value;
+        const Worker_Name = getWorkerName();
+        
+        // Validate that worker name is provided
+        if (!Worker_Name || Worker_Name.trim() === "") {
+            showAlert("Please enter worker name / 作業者名を入力してください");
+            const workerDropdown = document.getElementById("MachineOperatorDropdown");
+            const workerManual = document.getElementById("MachineOperatorManual");
+            if (workerDropdown && workerDropdown.value === "__manual__" && workerManual) {
+                workerManual.focus();
+            } else if (workerDropdown) {
+                workerDropdown.focus();
+            }
+            return;
+        }
+        
+        // Validate inspector name if inspection is enabled
+        if (isToggleChecked) {
+            const kensaName = getKensaName();
+            if (!kensaName || kensaName.trim() === "") {
+                showAlert("Please enter inspector name / 検査者名を入力してください");
+                const kensaDropdown = document.getElementById("KensaNameDropdown");
+                const kensaManual = document.getElementById("KensaNameManual");
+                if (kensaDropdown && kensaDropdown.value === "__manual__" && kensaManual) {
+                    kensaManual.focus();
+                } else if (kensaDropdown) {
+                    kensaDropdown.focus();
+                }
+                return;
+            }
+        }
+
+        // Collect all data before showing summary
         const WorkDate = document.getElementById('Lot No.').value;
         const Time_start = document.getElementById('Start Time').value;
         const Time_end = document.getElementById('End Time').value;
@@ -3702,13 +4065,6 @@ document.getElementById('submit').addEventListener('click', async (event) => {
         const ショット数 = shotValidation.totalShotCount;
         const shot1 = shotValidation.shot1;
         const shot2 = shotValidation.shot2;
-        
-        console.log(`📊 Shot Count Summary:`, {
-            totalShotCount: ショット数,
-            shot1,
-            shot2,
-            targetMachines: shotValidation.targetMachines
-        });
         
         const スペアからの部分数 = parseInt(document.getElementById('partial-from-spare').value, 10) || 0;
 
@@ -3725,11 +4081,249 @@ document.getElementById('submit').addEventListener('click', async (event) => {
         const totalTroubleMinutes = calculateTotalMachineTroubleTime();
         const totalTroubleHours = totalTroubleMinutes / 60;
 
+        // Validate required fields before showing summary
+        const validationResult = validateRequiredFields();
+        if (!validationResult.isValid) {
+            showAlert(`Missing required field: ${validationResult.message}`);
+            if (validationResult.focusElement) {
+                validationResult.focusElement.focus();
+            }
+            return;
+        }
+
+        // Show submission summary modal instead of directly proceeding
+        // Clear any active reminder timer since user is proceeding with submission
+        clearSendReminderTimer();
+        
+        await showSubmissionSummary({
+            品番, 背番号, 工場, 設備, Process_Quantity, 疵引不良, 加工不良, その他, Total_NG, Total_PressDB,
+            Worker_Name, WorkDate, Time_start, Time_end, 材料ロット, Spare, Comment, Cycle_Time,
+            ショット数, shot1, shot2, スペアからの部分数, breakTimeData, totalBreakMinutes, totalBreakHours,
+            totalTroubleMinutes, totalTroubleHours, isToggleChecked, shotValidation
+        });
+
+    } catch (error) {
+        uploadingModal.style.display = 'none';
+        console.error('Error during submission:', error);
+        showAlert(`Submission failed: ${error.message}`);
+    }
+});
+
+// Function to validate required fields
+function validateRequiredFields() {
+    const requiredFields = [
+        { id: 'ProcessQuantity', label: 'Process Quantity' },
+        { id: 'Lot No.', label: 'Processing Date' },
+        { id: 'Start Time', label: 'Start Time' },
+        { id: 'End Time', label: 'End Time' },
+        { id: '材料ロット', label: 'Material Lot' }
+    ];
+
+    for (const field of requiredFields) {
+        const element = document.getElementById(field.id);
+        if (!element || !element.value || element.value.trim() === '') {
+            return {
+                isValid: false,
+                message: field.label,
+                focusElement: element
+            };
+        }
+    }
+
+    return { isValid: true };
+}
+
+// Function to show submission summary modal
+async function showSubmissionSummary(data) {
+    // Create modal if it doesn't exist
+    let summaryModal = document.getElementById('submissionSummaryModal');
+    if (!summaryModal) {
+        summaryModal = document.createElement('div');
+        summaryModal.id = 'submissionSummaryModal';
+        summaryModal.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.8);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 10000;
+            font-family: Arial, sans-serif;
+        `;
+        
+        const modalContent = document.createElement('div');
+        modalContent.style.cssText = `
+            background: white;
+            border-radius: 10px;
+            max-width: 800px;
+            max-height: 80vh;
+            overflow-y: auto;
+            margin: 20px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        `;
+        
+        const modalHeader = document.createElement('div');
+        modalHeader.style.cssText = `
+            background: #f8f9fa;
+            color: #333;
+            padding: 15px 20px;
+            border-radius: 10px 10px 0 0;
+            border-bottom: 1px solid #dee2e6;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        `;
+        modalHeader.innerHTML = `
+            <h2 style="margin: 0; font-size: 18px;">Submission Summary / 提出内容確認</h2>
+            <p style="margin: 5px 0 0 0; color: #666; font-size: 14px;">Please review all data before submitting / 提出前に内容を確認してください</p>
+        `;
+        
+        const modalBody = document.createElement('div');
+        modalBody.id = 'summaryModalBody';
+        modalBody.style.cssText = `
+            padding: 20px;
+            max-height: 500px;
+            overflow-y: auto;
+        `;
+        
+        const modalFooter = document.createElement('div');
+        modalFooter.style.cssText = `
+            padding: 20px;
+            border-top: 1px solid #ddd;
+            display: flex;
+            gap: 15px;
+            justify-content: flex-end;
+            position: sticky;
+            bottom: 0;
+            background: white;
+            border-radius: 0 0 10px 10px;
+        `;
+        
+        const cancelBtn = document.createElement('button');
+        cancelBtn.textContent = 'Cancel / キャンセル';
+        cancelBtn.style.cssText = `
+            padding: 12px 24px;
+            background: #ccc;
+            color: #333;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background 0.3s;
+        `;
+        cancelBtn.onclick = () => {
+            document.body.removeChild(summaryModal);
+        };
+        
+        const confirmBtn = document.createElement('button');
+        confirmBtn.textContent = 'Confirm & Submit / 確認して提出';
+        confirmBtn.style.cssText = `
+            padding: 12px 24px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background 0.3s;
+        `;
+        confirmBtn.onclick = async () => {
+            document.body.removeChild(summaryModal);
+            await proceedWithSubmission(data);
+        };
+        
+        modalFooter.appendChild(cancelBtn);
+        modalFooter.appendChild(confirmBtn);
+        
+        modalContent.appendChild(modalHeader);
+        modalContent.appendChild(modalBody);
+        modalContent.appendChild(modalFooter);
+        summaryModal.appendChild(modalContent);
+        document.body.appendChild(summaryModal);
+    }
+    
+    // Populate modal content
+    const modalBody = document.getElementById('summaryModalBody');
+    modalBody.innerHTML = generateSummaryHTML(data);
+}
+
+// Function to generate summary HTML content
+function generateSummaryHTML(data) {
+    const workerSection = `
+        <div style="flex: 1; margin-right: 10px;">
+            <h3 style="margin: 0 0 15px 0; padding: 10px; background: #f5f5f5; border: 1px solid #ddd; font-size: 16px; color: #333;">
+                Worker Data
+            </h3>
+            <div style="background: #fafafa; padding: 15px; border: 1px solid #ddd;">
+                <div style="margin-bottom: 10px;"><strong>Worker Name:</strong> ${data.Worker_Name}</div>
+                <div style="margin-bottom: 10px;"><strong>Factory:</strong> ${data.工場}</div>
+                <div style="margin-bottom: 10px;"><strong>Equipment:</strong> ${data.設備}</div>
+                <div style="margin-bottom: 10px;"><strong>Date:</strong> ${data.WorkDate}</div>
+                <div style="margin-bottom: 10px;"><strong>Start Time:</strong> ${data.Time_start}</div>
+                <div style="margin-bottom: 10px;"><strong>End Time:</strong> ${data.Time_end}</div>
+                <div style="margin-bottom: 10px;"><strong>Product Code:</strong> ${data.品番}</div>
+                <div style="margin-bottom: 10px;"><strong>Serial No:</strong> ${data.背番号}</div>
+                <div style="margin-bottom: 10px;"><strong>Material Lot:</strong> ${data.材料ロット}</div>
+                <div style="margin-bottom: 10px;"><strong>Process Quantity:</strong> ${data.Process_Quantity}</div>
+                <div style="margin-bottom: 10px;"><strong>Total NG:</strong> ${data.Total_NG}</div>
+                <div style="margin-bottom: 10px;"><strong>Total OK:</strong> ${data.Total_PressDB}</div>
+                <div style="margin-bottom: 10px;"><strong>Shot Count:</strong> ${data.ショット数}</div>
+                <div style="margin-bottom: 10px;"><strong>Break Time:</strong> ${data.totalBreakMinutes} minutes</div>
+                <div style="margin-bottom: 10px;"><strong>Maintenance Time:</strong> ${data.totalTroubleMinutes} minutes</div>
+                ${data.Comment ? `<div style="margin-bottom: 10px;"><strong>Comments:</strong> ${data.Comment}</div>` : ''}
+            </div>
+        </div>
+    `;
+
+    const inspectionSection = data.isToggleChecked ? `
+        <div style="flex: 1; margin-left: 10px;">
+            <h3 style="margin: 0 0 15px 0; padding: 10px; background: #f5f5f5; border: 1px solid #ddd; font-size: 16px; color: #333;">
+                Inspection Data
+            </h3>
+            <div style="background: #fafafa; padding: 15px; border: 1px solid #ddd;">
+                <div style="margin-bottom: 10px;"><strong>Inspector Name:</strong> ${getKensaName()}</div>
+                <div style="margin-bottom: 10px;"><strong>Status:</strong> ENABLED</div>
+                <div style="margin-bottom: 15px; padding-top: 10px; border-top: 1px solid #ccc;">
+                    <strong>Counter Values:</strong>
+                </div>
+                ${Array.from({length: 12}, (_, i) => {
+                    const counter = document.getElementById(`counter-${i + 1}`);
+                    const value = parseInt(counter?.value || 0, 10);
+                    if (value > 0) {
+                        return `<div style="margin-bottom: 5px;">Counter ${i + 1}: ${value}</div>`;
+                    }
+                    return '';
+                }).join('')}
+            </div>
+        </div>
+    ` : '';
+
+    return `
+        <div style="display: flex; gap: 20px;">
+            ${workerSection}
+            ${inspectionSection}
+        </div>
+    `;
+}
+
+// Function to proceed with actual submission after confirmation
+async function proceedWithSubmission(data) {
+    const uploadingModal = document.getElementById('uploadingModal');
+    const alertSound = document.getElementById('alert-sound');
+    const scanAlertModal = document.getElementById('scanAlertModal');
+    const scanAlertText = document.getElementById('scanAlertText');
+    
+    uploadingModal.style.display = 'flex';
+
+    try {
         // Validate processing time vs break time + maintenance time
-        if (Time_start && Time_end) {
+        if (data.Time_start && data.Time_end) {
             // Calculate total processing time in minutes
-            const startTime = new Date(`2000-01-01T${Time_start}:00`);
-            const endTime = new Date(`2000-01-01T${Time_end}:00`);
+            const startTime = new Date(`2000-01-01T${data.Time_start}:00`);
+            const endTime = new Date(`2000-01-01T${data.Time_end}:00`);
             
             // Handle overnight processing (if end time is before start time)
             if (endTime < startTime) {
@@ -3737,12 +4331,7 @@ document.getElementById('submit').addEventListener('click', async (event) => {
             }
             
             const processingTimeMinutes = (endTime - startTime) / (1000 * 60);
-            const combinedBreakAndMaintenanceMinutes = totalBreakMinutes + totalTroubleMinutes;
-            
-            console.log(`⏰ Processing time: ${processingTimeMinutes} minutes`);
-            console.log(`⏸️ Total break time: ${totalBreakMinutes} minutes`);
-            console.log(`🔧 Total maintenance time: ${totalTroubleMinutes} minutes`);
-            console.log(`🔄 Combined break + maintenance: ${combinedBreakAndMaintenanceMinutes} minutes`);
+            const combinedBreakAndMaintenanceMinutes = data.totalBreakMinutes + data.totalTroubleMinutes;
             
             if (combinedBreakAndMaintenanceMinutes > processingTimeMinutes) {
                 uploadingModal.style.display = 'none';
@@ -3762,12 +4351,9 @@ document.getElementById('submit').addEventListener('click', async (event) => {
             }
         }
 
-        // Prepare maintenance images data for the new submitToDCP route
+        // Prepare maintenance images data
         const maintenanceImages = [];
-        
         if (maintenanceRecords.length > 0) {
-            console.log(`📸 Preparing ${maintenanceRecords.length} maintenance records for submission...`);
-            
             maintenanceRecords.forEach(record => {
                 if (record.photos && record.photos.length > 0) {
                     record.photos.forEach(photo => {
@@ -3782,11 +4368,9 @@ document.getElementById('submit').addEventListener('click', async (event) => {
                     });
                 }
             });
-            
-            console.log(`📊 Prepared ${maintenanceImages.length} maintenance images for upload`);
         }
 
-        // Prepare maintenance data structure (without photos - they'll be added by server)
+        // Prepare maintenance data structure
         const maintenanceDataForSubmission = {
             records: maintenanceRecords.map(record => ({
                 id: record.id,
@@ -3794,24 +4378,14 @@ document.getElementById('submit').addEventListener('click', async (event) => {
                 endTime: record.endTime,
                 comment: record.comment,
                 timestamp: record.timestamp
-                // photos will be populated by the server after upload
             })),
-            totalMinutes: totalTroubleMinutes,
-            totalHours: totalTroubleHours
+            totalMinutes: data.totalTroubleMinutes,
+            totalHours: data.totalTroubleHours
         };
-
-        console.log("📊 Maintenance data prepared for submission:", {
-            recordCount: maintenanceDataForSubmission.records.length,
-            totalImages: maintenanceImages.length,
-            totalMinutes: totalTroubleMinutes
-        });
 
         // Prepare material label images data
         const materialLabelImages = [];
-        
         if (materialLabelPhotos.length > 0) {
-            console.log(`📸 Preparing ${materialLabelPhotos.length} material label photos for submission...`);
-            
             materialLabelPhotos.forEach((photo, index) => {
                 if (photo.base64) {
                     materialLabelImages.push({
@@ -3821,69 +4395,51 @@ document.getElementById('submit').addEventListener('click', async (event) => {
                     });
                 }
             });
-            
-            console.log(`📊 Prepared ${materialLabelImages.length} material label images for upload`);
         }
 
         let totalWorkHours = 0;
-        if (Time_start && Time_end) {
-            const startWork = new Date(`2000-01-01T${Time_start}:00`);
-            const endWork = new Date(`2000-01-01T${Time_end}:00`);
+        if (data.Time_start && data.Time_end) {
+            const startWork = new Date(`2000-01-01T${data.Time_start}:00`);
+            const endWork = new Date(`2000-01-01T${data.Time_end}:00`);
             if (endWork > startWork) {
                 const workDiffMs = endWork - startWork;
                 const workHours = workDiffMs / (1000 * 60 * 60);
-                totalWorkHours = Math.max(0, workHours - totalBreakHours - totalTroubleHours);
+                totalWorkHours = Math.max(0, workHours - data.totalBreakHours - data.totalTroubleHours);
             }
         }
-        console.log('Time Calculations:', {
-            totalBreakMinutes, totalBreakHours: totalBreakHours.toFixed(2),
-            totalMaintenanceMinutes: totalTroubleMinutes, totalMaintenanceHours: totalTroubleHours.toFixed(2),
-            workTimeWithoutBreakAndMaintenance: totalWorkHours.toFixed(2),
-            startTime: Time_start, endTime: Time_end, maintenanceRecordsCount: maintenanceRecords.length
-        });
 
-        if (!背番号) {
+        if (!data.背番号) {
             uploadingModal.style.display = 'none';
-            scanAlertText.innerText = '背番号が必要です。 / Sebanggo is required.';
-            scanAlertModal.style.display = 'block';
-            if (alertSound) { alertSound.muted = false; alertSound.volume = 1; alertSound.play().catch(console.error); }
-            document.body.classList.add('flash-red');
-            document.getElementById('closeScanModalButton').onclick = function() {
-                scanAlertModal.style.display = 'none'; alertSound.pause(); alertSound.currentTime = 0;
-                alertSound.muted = true; document.body.classList.remove('flash-red');
-            };
+            showAlert('背番号が必要です。 / Sebanggo is required.');
             return;
         }
 
         const uploadedImages = await collectImagesForUpload();
-        
-        // Collect work order information if in work order mode
         const workOrderData = getWorkOrderData();
         
         // Add NC program send status to work order data
         if (workOrderData) {
-          const buttonStateKey = `${uniquePrefix}sendButtonState`;
-          const buttonState = localStorage.getItem(buttonStateKey);
-          workOrderData.ncProgramSent = (buttonState === 'green');
-          workOrderData.ncSendTimestamp = workOrderData.ncProgramSent ? new Date().toISOString() : null;
+            const buttonStateKey = `${uniquePrefix}sendButtonState`;
+            const buttonState = localStorage.getItem(buttonStateKey);
+            workOrderData.ncProgramSent = (buttonState === 'green');
+            workOrderData.ncSendTimestamp = workOrderData.ncProgramSent ? new Date().toISOString() : null;
         }
-        
-        // Prepare data for the new submitToDCP route
+
+        // Prepare complete submission data
         const dcpSubmissionData = {
-            品番, 背番号, 設備, Total: Total_PressDB, 工場, Worker_Name, Process_Quantity, Date: WorkDate,
-            Time_start, Time_end, 材料ロット, 疵引不良, 加工不良, その他, Total_NG, Spare, Comment,
-            Cycle_Time, ショット数, スペアからの部分数, Break_Time_Data: breakTimeData,
+            品番: data.品番, 背番号: data.背番号, 設備: data.設備, Total: data.Total_PressDB, 工場: data.工場, 
+            Worker_Name: data.Worker_Name, Process_Quantity: data.Process_Quantity, Date: data.WorkDate,
+            Time_start: data.Time_start, Time_end: data.Time_end, 材料ロット: data.材料ロット, 
+            疵引不良: data.疵引不良, 加工不良: data.加工不良, その他: data.その他, Total_NG: data.Total_NG, 
+            Spare: data.Spare, Comment: data.Comment, Cycle_Time: data.Cycle_Time, ショット数: data.ショット数, 
+            スペアからの部分数: data.スペアからの部分数, Break_Time_Data: data.breakTimeData,
             
-            // NEW: Individual shot counts for tracking
-            shot1: shot1,  // First machine's shot count (or total if single machine)
-            shot2: shot2,  // Second machine's shot count (0 if single machine)
-            
-            Total_Break_Minutes: totalBreakMinutes, Total_Break_Hours: parseFloat(totalBreakHours.toFixed(2)),
+            shot1: data.shot1, shot2: data.shot2,
+            Total_Break_Minutes: data.totalBreakMinutes, Total_Break_Hours: parseFloat(data.totalBreakHours.toFixed(2)),
             Maintenance_Data: maintenanceDataForSubmission,
-            Total_Trouble_Minutes: totalTroubleMinutes, Total_Trouble_Hours: parseFloat(totalTroubleHours.toFixed(2)),
+            Total_Trouble_Minutes: data.totalTroubleMinutes, Total_Trouble_Hours: parseFloat(data.totalTroubleHours.toFixed(2)),
             Total_Work_Hours: parseFloat(totalWorkHours.toFixed(2)),
             
-            // Include quality check data
             "2HourQualityCheck": {
                 totalChecks: twoHourCheckList.length,
                 checks: twoHourCheckList.map((check, index) => ({
@@ -3897,26 +4453,16 @@ document.getElementById('submit').addEventListener('click', async (event) => {
                 lastCheckTimestamp: twoHourCheckList.length > 0 ? twoHourCheckList[twoHourCheckList.length - 1].timestamp : null
             },
             
-            // Include work order information for historical tracking
             WorkOrder_Info: workOrderData,
-            
-            // Include image data
-            images: uploadedImages, // Cycle check images (existing logic)
-            maintenanceImages: maintenanceImages, // Maintenance images
-            materialLabelImages: materialLabelImages, // NEW: Material label images (base64 for upload only)
-            
-            // Material label image handling instructions for server:
-            // - Single image: Store as "材料ラベル画像": "firebase_url" (preserve existing structure)
-            // - Multiple images: Store as "材料ラベル画像": "first_url" + "materialLabelImages": ["url1", "url2", ...]
-            // - NEVER store base64 in MongoDB, only Firebase URLs
+            images: uploadedImages,
+            maintenanceImages: maintenanceImages,
+            materialLabelImages: materialLabelImages,
             materialLabelImageCount: materialLabelImages.length,
-            
-            // Include toggle state and counter data for kensaDB
-            isToggleChecked: isToggleChecked
+            isToggleChecked: data.isToggleChecked
         };
 
-        // Add counter data if toggle is checked
-        if (isToggleChecked) {
+        // Add counter data if inspection is enabled
+        if (data.isToggleChecked) {
             const counters = Array.from({ length: 12 }, (_, i) => {
                 const counter = document.getElementById(`counter-${i + 1}`);
                 return parseInt(counter?.value || 0, 10);
@@ -3925,17 +4471,25 @@ document.getElementById('submit').addEventListener('click', async (event) => {
                 acc[`counter-${i + 1}`] = val;
                 return acc;
             }, {});
+            
+            // Add inspection-specific data
+            dcpSubmissionData.Inspector_Name = getKensaName();
+            dcpSubmissionData.Inspection_Date = document.getElementById('KDate').value;
+            dcpSubmissionData.Inspection_Time_start = document.getElementById('KStart Time').value;
+            dcpSubmissionData.Inspection_Time_end = document.getElementById('KEnd Time').value;
+            dcpSubmissionData.Inspection_Comment = document.querySelector('textarea[name="Comments2"]').value;
+            dcpSubmissionData.Inspection_Spare = parseInt(document.getElementById('在庫').value, 10) || 0;
+            
+            // Calculate inspection NG total from counters
+            const inspectionNGTotal = Object.values(dcpSubmissionData.Counters).reduce((sum, val) => sum + val, 0);
+            dcpSubmissionData.Inspection_Total_NG = inspectionNGTotal;
+            
+            // Calculate inspection good total
+            const finalQuantityElement = document.getElementById('total');
+            dcpSubmissionData.Inspection_Good_Total = parseInt(finalQuantityElement.value, 10) || 0;
         }
 
-        console.log("🚀 Submitting to new DCP route:", {
-            品番, 背番号, 工場, 設備, Worker_Name,
-            cycleCheckImages: uploadedImages.length,
-            maintenanceImages: maintenanceImages.length,
-            maintenanceRecords: maintenanceDataForSubmission.records.length,
-            isToggleChecked
-        });
-
-        // Submit to the new combined route
+        // Submit to server
         const dcpResponse = await fetch(`${serverURL}/submitToDCP`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -3948,35 +4502,42 @@ document.getElementById('submit').addEventListener('click', async (event) => {
         }
 
         const dcpResult = await dcpResponse.json();
-        console.log("✅ DCP submission successful:", dcpResult);
-
+        uploadingModal.style.display = 'none';
+        
+        // Show success message
+        scanAlertText.innerText = 'Form submitted successfully! / 保存しました';
+        scanAlertModal.style.display = 'block';
+        document.body.classList.add('flash-green');
+        
+        // Set up close button handler
         setTimeout(() => {
-            uploadingModal.style.display = 'none'; scanAlertText.innerText = 'Form submitted successfully / 保存しました';
-            scanAlertModal.style.display = 'block'; document.body.classList.add('flash-green');
             document.getElementById('closeScanModalButton').onclick = function() {
-                scanAlertModal.style.display = 'none'; document.body.classList.remove('flash-green');
-                window.location.reload(); resetForm();
+                scanAlertModal.style.display = 'none'; 
+                document.body.classList.remove('flash-green');
+                clearFormDataAndReload();
             };
-        }, 3000);
+        }, 1000);
+
+        // Auto-reload after 5 seconds regardless of user action
+        setTimeout(() => {
+            console.log('🔄 Auto-reloading page after successful submission');
+            scanAlertModal.style.display = 'none';
+            document.body.classList.remove('flash-green');
+            clearFormDataAndReload();
+        }, 5000);
 
     } catch (error) {
         console.error('Error during submission:', error);
-        uploadingModal.style.display = 'none'; scanAlertText.innerText = 'An error occurred. Please try again.';
-        scanAlertModal.style.display = 'block';
-        if (alertSound) { alertSound.muted = false; alertSound.volume = 1; alertSound.play().catch(console.error); }
-        document.body.classList.add('flash-red');
-        document.getElementById('closeScanModalButton').onclick = function() {
-            scanAlertModal.style.display = 'none'; alertSound.pause(); alertSound.currentTime = 0;
-            alertSound.muted = true; document.body.classList.remove('flash-red');
-        };
+        uploadingModal.style.display = 'none';
+        showAlert(`Submission failed: ${error.message}`);
     }
-});
+}
 
 // Image Collection with Base64 + Metadata
 async function collectImagesForUpload() {
   const selectedSebanggo = document.getElementById("sub-dropdown").value;
   const currentDate = document.getElementById("Lot No.").value;
-  const selectedWorker = document.getElementById("Machine Operator").value;
+  const selectedWorker = getWorkerName();
   const selectedFactory = document.getElementById("selected工場").value;
   const selectedMachine = document.getElementById("process").value;
 
@@ -4031,7 +4592,7 @@ let sendtoNCButtonisPressed = false; // this global variable is to check if send
 
 function toggleInputs() {
   var isChecked = document.getElementById('enable-inputs').checked;
-  var inputs = document.querySelectorAll('#Kensa\\ Name, #KDate, #KStart\\ Time, #KEnd\\ Time,.plus-btn,.minus-btn, textarea[name="Comments2"], #在庫');
+  var inputs = document.querySelectorAll('#KensaNameDropdown, #KensaNameManual, #KDate, #KStart\\ Time, #KEnd\\ Time,.plus-btn,.minus-btn, textarea[name="Comments2"], #在庫');
 
   inputs.forEach(function(input) {
     input.disabled = !isChecked;

@@ -865,7 +865,7 @@ app.post('/submitToDCP', async (req, res) => {
 
         console.log(`🔍 Final uploadedImageURLs object:`, uploadedImageURLs);
 
-        // 3. Prepare pressDB data (exclude Counters - that's only for kensaDB)
+        // 3. Prepare pressDB data (exclude inspection fields and other kensaDB-specific data)
         const pressDBData = {
             ...formData,
             ...uploadedImageURLs, // Add cycle check image URLs
@@ -879,13 +879,23 @@ app.post('/submitToDCP', async (req, res) => {
             "materialLabelImages": pressDBData["materialLabelImages"]
         });
 
-        // Remove the raw image arrays and kensaDB-specific data from pressDB
+        // Remove the raw image arrays and inspection-specific data from pressDB
         delete pressDBData.images;
         delete pressDBData.maintenanceImages;
-        // Note: Keep materialLabelImages (Firebase URLs) and materialLabelImageCount in MongoDB
-        // Only delete the base64 data which was already excluded when spreading uploadedImageURLs
         delete pressDBData.Counters; // Counters are only for kensaDB, not pressDB
         delete pressDBData.isToggleChecked; // This is just a UI state flag, not data to store
+        
+        // Remove inspection-specific fields from pressDB (these belong only in kensaDB)
+        delete pressDBData.Inspector_Name;
+        delete pressDBData.Inspection_Date;
+        delete pressDBData.Inspection_Time_start;
+        delete pressDBData.Inspection_Time_end;
+        delete pressDBData.Inspection_Comment;
+        delete pressDBData.Inspection_Spare;
+        delete pressDBData.Inspection_Total_NG;
+        delete pressDBData.Inspection_Good_Total;
+        
+        console.log(`🧹 Cleaned pressDBData - removed inspection fields for pressDB-only storage`);
 
         // 4. Save to pressDB
         const database = client.db("submittedDB");
@@ -914,17 +924,17 @@ app.post('/submitToDCP', async (req, res) => {
                 背番号: formData.背番号,
                 工場: formData.工場,
                 Total: Total_KensaDB,
-                Worker_Name: formData.Worker_Name,
+                Worker_Name: formData.Inspector_Name || formData.Worker_Name, // Use Inspector_Name if available, fallback to Worker_Name
                 Process_Quantity: formData.Process_Quantity,
-                Remaining_Quantity: formData.Total,
-                Date: formData.Date,
-                Time_start: formData.Time_start,
-                Time_end: formData.Time_end,
+                Remaining_Quantity: formData.Inspection_Good_Total || formData.Total,
+                Date: formData.Inspection_Date || formData.Date, // Use Inspection_Date if available
+                Time_start: formData.Inspection_Time_start || formData.Time_start, // Use Inspection times
+                Time_end: formData.Inspection_Time_end || formData.Time_end,
                 設備: formData.設備,
                 Cycle_Time: formData.Cycle_Time,
                 製造ロット: formattedDate, // Use formatted Date in yyyymmdd format instead of 材料ロット
-                Comment: formData.Comment,
-                Spare: formData.Spare,
+                Comment: formData.Inspection_Comment || "", // Use Inspection_Comment, default to empty string if not provided
+                Spare: formData.Inspection_Spare || formData.Spare, // Use Inspection_Spare if available
                 Counters: counters,
                 Total_NG: Total_NG_Kensa,
                 Break_Time_Data: formData.Break_Time_Data,
