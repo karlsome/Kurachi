@@ -13,6 +13,9 @@ const dbURL = 'https://script.google.com/macros/s/AKfycbx0qBw0_wF5X-hA2t1yY-d5h5
 const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
 
+// Global localStorage prefix for consistent data storage/retrieval
+let uniquePrefix = null;
+
 // Global cache for machine IP addresses
 const machineIPCache = new Map();
 
@@ -106,6 +109,12 @@ function getCurrentTargetMachines() {
 
 // Function to create dynamic shot count inputs based on target machines
 function createDynamicShotCountInputs() {
+  console.log('🔄 Creating dynamic shot count inputs...');
+  if (!uniquePrefix) {
+    console.error('🚨 uniquePrefix not initialized when creating shot count inputs');
+    return;
+  }
+  
   const targetMachines = getCurrentTargetMachines();
   const shotCountContainer = document.getElementById('shot-count-container');
   
@@ -120,19 +129,14 @@ function createDynamicShotCountInputs() {
     targetMachinesLength: targetMachines.length,
     subDropdownValue: subDropdown?.value,
     selectedOptionText: selectedOption?.text,
-    selectedOptionValue: selectedOption?.value
+    selectedOptionValue: selectedOption?.value,
+    uniquePrefix: uniquePrefix
   });
   
   if (!shotCountContainer) {
     console.error('Shot count container not found in HTML');
     return;
   }
-  
-  // Get localStorage prefix
-  const pageName = location.pathname.split('/').pop();
-  const selectedFactory = document.getElementById('selected工場')?.value;
-  const selectedMachine = document.getElementById('process')?.value;
-  const uniquePrefix = `${pageName}_${selectedFactory}_${selectedMachine}_`;
   
   // Clear existing inputs
   shotCountContainer.innerHTML = '';
@@ -150,8 +154,8 @@ function createDynamicShotCountInputs() {
     setTimeout(() => {
       const shotInput = document.getElementById('shot');
       if (shotInput) {
-        addShotCountEventListener(shotInput, uniquePrefix);
-        restoreShotCountValue(shotInput, uniquePrefix);
+        addShotCountEventListener(shotInput);
+        restoreShotCountValue(shotInput);
       }
     }, 100);
     
@@ -169,8 +173,8 @@ function createDynamicShotCountInputs() {
     setTimeout(() => {
       const shotInput = document.getElementById(`ShotCount-${machineId}`);
       if (shotInput) {
-        addShotCountEventListener(shotInput, uniquePrefix);
-        restoreShotCountValue(shotInput, uniquePrefix);
+        addShotCountEventListener(shotInput);
+        restoreShotCountValue(shotInput);
       }
     }, 100);
     
@@ -198,8 +202,8 @@ function createDynamicShotCountInputs() {
         const machineId = machine.replace('-', '');
         const shotInput = document.getElementById(`ShotCount-${machineId}`);
         if (shotInput) {
-          addShotCountEventListener(shotInput, uniquePrefix);
-          restoreShotCountValue(shotInput, uniquePrefix);
+          addShotCountEventListener(shotInput);
+          restoreShotCountValue(shotInput);
         }
       });
     }, 100);
@@ -209,21 +213,35 @@ function createDynamicShotCountInputs() {
 }
 
 // Helper function to add localStorage event listener to shot count inputs
-function addShotCountEventListener(input, uniquePrefix) {
+function addShotCountEventListener(input) {
   input.addEventListener('input', () => {
+    if (!uniquePrefix) {
+      console.error('🚨 Cannot save shot count - uniquePrefix not initialized');
+      return;
+    }
+    
     const key = `${uniquePrefix}${input.id}`;
     localStorage.setItem(key, input.value);
-    console.log(`💾 Saved shot count: ${input.id} = ${input.value}`);
+    console.log(`💾 Saved shot count: ${input.id} = ${input.value} (key: ${key})`);
   });
 }
 
 // Helper function to restore shot count value from localStorage
-function restoreShotCountValue(input, uniquePrefix) {
+function restoreShotCountValue(input) {
+  if (!uniquePrefix) {
+    console.error('🚨 Cannot restore shot count - uniquePrefix not initialized');
+    return;
+  }
+  
   const key = `${uniquePrefix}${input.id}`;
   const savedValue = localStorage.getItem(key);
+  console.log(`🔍 Checking localStorage for key: ${key}, found: ${savedValue}`);
+  
   if (savedValue !== null && savedValue !== '') {
     input.value = savedValue;
     console.log(`🔄 Restored shot count: ${input.id} = ${savedValue}`);
+  } else {
+    console.log(`❌ No saved value found for shot count: ${input.id}`);
   }
 }
 
@@ -360,17 +378,35 @@ if (selectedMachine) {
   }
 }
 
+// Helper function to get unique prefix for localStorage keys
+// Function to initialize and cache the unique prefix globally
+function initializeUniquePrefix() {
+  const pageName = location.pathname.split('/').pop();
+  const selected工場 = document.getElementById('selected工場')?.value || '';
+  const selectedMachine = document.getElementById('process')?.value || getQueryParam('machine') || '';
+  
+  uniquePrefix = `${pageName}_${selected工場}_${selectedMachine}_`;
+  console.log('🔧 Initialized uniquePrefix:', uniquePrefix);
+  return uniquePrefix;
+}
+
+// Function to get the unique prefix (uses cached value or calculates new one)
+function getUniquePrefix() {
+  if (!uniquePrefix) {
+    return initializeUniquePrefix();
+  }
+  return uniquePrefix;
+}
+
 // Select all input, select, and button elements
 const inputs = document.querySelectorAll('input, select, button,textarea');
-const currentSelectedFactory = document.getElementById('selected工場').value; // Get the current factory value
-const pageName = location.pathname.split('/').pop(); // Get the current HTML file name
-const uniquePrefix = `${pageName}_${currentSelectedFactory}_${selectedMachine}_`;
 
 // Save the value of each input to localStorage on change
 inputs.forEach(input => {
   // Special handling for manual name inputs
   if (input.id === "MachineOperatorManual") {
     input.addEventListener('input', () => {
+      const uniquePrefix = getUniquePrefix();
       const key = `${uniquePrefix}MachineOperatorManual`;
       localStorage.setItem(key, input.value);
       //console.log(`Saved worker manual input: ${input.value}`);
@@ -380,6 +416,7 @@ inputs.forEach(input => {
   
   if (input.id === "KensaNameManual") {
     input.addEventListener('input', () => {
+      const uniquePrefix = getUniquePrefix();
       const key = `${uniquePrefix}KensaNameManual`;
       localStorage.setItem(key, input.value);
       //console.log(`Saved kensa manual input: ${input.value}`);
@@ -389,6 +426,7 @@ inputs.forEach(input => {
   
   // Default handling for all other inputs
   input.addEventListener('input', () => {
+    const uniquePrefix = getUniquePrefix();
     const key = `${uniquePrefix}${input.id || input.name}`; // Prefix key with pageName and selected工場
     if (key) {
       localStorage.setItem(key, input.value);
@@ -397,6 +435,7 @@ inputs.forEach(input => {
 
   if (input.type === 'checkbox' || input.type === 'radio') {
     input.addEventListener('change', () => {
+      const uniquePrefix = getUniquePrefix();
       const key = `${uniquePrefix}${input.id || input.name}`;
       if (key) {
         localStorage.setItem(key, input.checked); // Save checkbox/radio state
@@ -409,6 +448,9 @@ inputs.forEach(input => {
 document.addEventListener('DOMContentLoaded', () => {
   getIP(); // ip address for machine
   document.getElementById('uploadingModal').style.display = 'none';
+  
+  // Initialize the unique prefix early so all functions can access it
+  initializeUniquePrefix();
   
   // Initialize dynamic shot count inputs on page load
   createDynamicShotCountInputs();
@@ -424,6 +466,10 @@ document.addEventListener('DOMContentLoaded', () => {
     console.error("Selected 工場 is not set or found.");
     return;
   }
+
+  // Calculate uniquePrefix inside DOMContentLoaded to ensure proper values
+  const uniquePrefix = getUniquePrefix();
+  console.log(`🔍 Restoration uniquePrefix: ${uniquePrefix}`);
 
   // Loop through all keys in localStorage
   Object.keys(localStorage).forEach(key => {
@@ -477,7 +523,14 @@ document.addEventListener('DOMContentLoaded', () => {
                   } else {
                     // For other selects, call fetchProductDetails if needed
                     if (input.id !== 'process') { // Don't auto-fetch for process dropdown
-                      fetchProductDetails();
+                      // Check if it's a work order value to avoid unnecessary product lookups
+                      const isWorkOrderValue = /^WO-\d+/.test(savedValue);
+                      if (!isWorkOrderValue) {
+                        console.log(`🔍 Calling fetchProductDetails for ${input.id} with value: ${savedValue}`);
+                        fetchProductDetails();
+                      } else {
+                        console.log(`🚫 Skipping fetchProductDetails for work order value: ${savedValue}`);
+                      }
                     }
                   }
 
@@ -532,6 +585,7 @@ document.addEventListener('DOMContentLoaded', () => {
       startInput.addEventListener('change', function() {
         calculateTotalBreakTime();
         // Save to localStorage
+        const uniquePrefix = getUniquePrefix();
         const key = `${uniquePrefix}${this.id}`;
         localStorage.setItem(key, this.value);
         // Update quality check timer pause/resume status
@@ -543,6 +597,7 @@ document.addEventListener('DOMContentLoaded', () => {
       endInput.addEventListener('change', function() {
         calculateTotalBreakTime();
         // Save to localStorage
+        const uniquePrefix = getUniquePrefix();
         const key = `${uniquePrefix}${this.id}`;
         localStorage.setItem(key, this.value);
         // Update quality check timer pause/resume status
@@ -1087,6 +1142,14 @@ document.getElementById("sub-dropdown").addEventListener("change", async functio
   }
   
   const selectedOption = this.options[this.selectedIndex];
+  const selectedValue = this.value;
+  
+  console.log('🔄 Sub-dropdown change event triggered:', {
+    value: selectedValue,
+    hasDataset: !!selectedOption?.dataset,
+    datasetType: selectedOption?.dataset?.type,
+    isWorkOrderPattern: /^WO-\d+/.test(selectedValue)
+  });
   
   // Reset Send to Machine button back to red state when changing selection
   resetSendToMachineButton();
@@ -1094,15 +1157,24 @@ document.getElementById("sub-dropdown").addEventListener("change", async functio
   // Reset UI from previous work order mode if needed
   resetUIFromWorkOrderMode();
   
-  if (selectedOption && selectedOption.dataset.type === "workorder") {
+  // Check if it's a work order by dataset.type OR by value pattern
+  const isWorkOrder = (selectedOption && selectedOption.dataset.type === "workorder") ||
+                      /^WO-\d+/.test(selectedValue);
+  
+  if (isWorkOrder) {
     // Handle work order selection
+    console.log('🎯 Handling as work order');
     await handleWorkOrderSelection(selectedOption);
   } else if (selectedOption && (selectedOption.dataset.type === "sebanggo" || selectedOption.dataset.type === "hinban")) {
     // Handle regular 背番号 or 品番 selection
+    console.log('🎯 Handling as regular product');
+    await fetchProductDetails();
+  } else if (selectedValue && selectedValue !== "") {
+    // Fallback for items without dataset.type but only if there's a value
+    console.log('🎯 Fallback product lookup for:', selectedValue);
     await fetchProductDetails();
   } else {
-    // Fallback for items without dataset.type (backward compatibility)
-    await fetchProductDetails();
+    console.log('🎯 No action taken - empty selection');
   }
   
   // Pre-fetch IP addresses for current target machines
@@ -1426,6 +1498,10 @@ document.getElementById("sub-dropdown").addEventListener("change", NCPresstoFals
 // Add listener for process dropdown changes to pre-fetch IPs
 document.getElementById("process").addEventListener("change", function() {
   const selectedMachine = this.value;
+  
+  // Update the unique prefix when machine changes
+  initializeUniquePrefix();
+  
   if (selectedMachine) {
     const machines = [];
     if (selectedMachine.includes("AOL") && selectedMachine.includes(",")) {
@@ -1802,12 +1878,8 @@ function calculateTotalBreakTime() {
   }
 
   // Save to localStorage with proper prefix
-  const pageName = location.pathname.split('/').pop();
-  const selected工場 = document.getElementById('selected工場')?.value;
-  const selectedMachine = getQueryParam('machine');
-
-  if (pageName && selected工場 && selectedMachine) {
-    const prefix = `${pageName}_${selected工場}_${selectedMachine}_`;
+  const prefix = getUniquePrefix();
+  if (prefix) {
     localStorage.setItem(`${prefix}breaktime-mins`, totalMinutes);
     localStorage.setItem(`${prefix}total-break-display`, `${totalMinutes}分`);
   }
@@ -1822,7 +1894,10 @@ const MAX_MAINTENANCE_PHOTOS = 5; // Maximum photos per maintenance record
 
 // Load maintenance records from localStorage
 function loadMaintenanceRecords() {
-  const saved = localStorage.getItem(`${uniquePrefix}maintenanceRecords`);
+  const prefix = getUniquePrefix();
+  if (!prefix) return;
+  
+  const saved = localStorage.getItem(`${prefix}maintenanceRecords`);
   if (saved) {
     maintenanceRecords = JSON.parse(saved);
     renderMaintenanceRecords();
@@ -1832,7 +1907,10 @@ function loadMaintenanceRecords() {
 
 // Save maintenance records to localStorage
 function saveMaintenanceRecords() {
-  localStorage.setItem(`${uniquePrefix}maintenanceRecords`, JSON.stringify(maintenanceRecords));
+  const prefix = getUniquePrefix();
+  if (prefix) {
+    localStorage.setItem(`${prefix}maintenanceRecords`, JSON.stringify(maintenanceRecords));
+  }
 }
 
 // Clear maintenance photos
@@ -2053,7 +2131,10 @@ function removeMaterialLabelPhoto(index) {
   if (index >= 0 && index < materialLabelPhotos.length) {
     materialLabelPhotos.splice(index, 1);
     // Save updated array to localStorage
-    localStorage.setItem(`${uniquePrefix}materialLabelPhotos`, JSON.stringify(materialLabelPhotos));
+    const prefix = getUniquePrefix();
+    if (prefix) {
+      localStorage.setItem(`${prefix}materialLabelPhotos`, JSON.stringify(materialLabelPhotos));
+    }
     renderMaterialPhotoThumbnails();
     updateMaterialPhotoCount();
   }
@@ -2214,7 +2295,10 @@ function updateMaterialPhotoCount() {
 
 // Load material label photos from localStorage
 function loadMaterialLabelPhotos() {
-  const photosKey = `${uniquePrefix}materialLabelPhotos`;
+  const prefix = getUniquePrefix();
+  if (!prefix) return;
+  
+  const photosKey = `${prefix}materialLabelPhotos`;
   const saved = localStorage.getItem(photosKey);
   if (saved) {
     try {
@@ -3027,10 +3111,17 @@ document.head.appendChild(style);
 function clearFormDataAndReload() {
   console.log('🧹 Clearing all form data after successful submission');
   
+  const prefix = getUniquePrefix();
+  if (!prefix) {
+    console.error('Cannot clear data - prefix not available');
+    window.location.reload();
+    return;
+  }
+  
   // Clear all form inputs with unique prefix
   const inputs = document.querySelectorAll('input, select, textarea');
   inputs.forEach(input => {
-    const key = `${uniquePrefix}${input.id || input.name}`;
+    const key = `${prefix}${input.id || input.name}`;
     localStorage.removeItem(key);
   });
 
@@ -3041,70 +3132,70 @@ function clearFormDataAndReload() {
   const selectedMachine = getQueryParam('machine');
   const processInput = document.getElementById('process');
   if (processInput && selectedMachine) {
-    const processKey = `${uniquePrefix}process`;
+    const processKey = `${prefix}process`;
     localStorage.removeItem(processKey);
   }
 
   // Clear counters with unique prefix
   for (let i = 1; i <= 20; i++) {
-    const key = `${uniquePrefix}counter-${i}`;
+    const key = `${prefix}counter-${i}`;
     localStorage.removeItem(key);
   }
 
   // Clear break time inputs and total
   for (let i = 1; i <= 4; i++) {
-    localStorage.removeItem(`${uniquePrefix}break${i}-start`);
-    localStorage.removeItem(`${uniquePrefix}break${i}-end`);
+    localStorage.removeItem(`${prefix}break${i}-start`);
+    localStorage.removeItem(`${prefix}break${i}-end`);
   }
-  localStorage.removeItem(`${uniquePrefix}breaktime-mins`);
-  localStorage.removeItem(`${uniquePrefix}total-break-display`);
+  localStorage.removeItem(`${prefix}breaktime-mins`);
+  localStorage.removeItem(`${prefix}total-break-display`);
 
   // Clear machine trouble inputs and total
   for (let i = 1; i <= 4; i++) {
-    localStorage.removeItem(`${uniquePrefix}trouble${i}-start`);
-    localStorage.removeItem(`${uniquePrefix}trouble${i}-end`);
+    localStorage.removeItem(`${prefix}trouble${i}-start`);
+    localStorage.removeItem(`${prefix}trouble${i}-end`);
   }
-  localStorage.removeItem(`${uniquePrefix}trouble-time-mins`);
-  localStorage.removeItem(`${uniquePrefix}total-trouble-display`);
+  localStorage.removeItem(`${prefix}trouble-time-mins`);
+  localStorage.removeItem(`${prefix}total-trouble-display`);
   
   // Clear maintenance records
-  localStorage.removeItem(`${uniquePrefix}maintenanceRecords`);
+  localStorage.removeItem(`${prefix}maintenanceRecords`);
 
   // Clear material label photos
-  localStorage.removeItem(`${uniquePrefix}materialLabelPhotos`);
+  localStorage.removeItem(`${prefix}materialLabelPhotos`);
 
   // Clear all textContent elements
   const textContentElements = document.querySelectorAll('[id]');
   textContentElements.forEach(element => {
-    const textKey = `${uniquePrefix}${element.id}.textContent`;
+    const textKey = `${prefix}${element.id}.textContent`;
     localStorage.removeItem(textKey);
   });
 
   // Clear all image sources
   const images = document.querySelectorAll('img');
   images.forEach(image => {
-    const imageKey = `${uniquePrefix}${image.id || image.name}.src`;
+    const imageKey = `${prefix}${image.id || image.name}.src`;
     localStorage.removeItem(imageKey);
   });
 
   // Clear 2-hour check system
-  localStorage.removeItem(`${uniquePrefix}twoHourChecks`);
-  localStorage.removeItem(`${uniquePrefix}twoHourTimerState`);
+  localStorage.removeItem(`${prefix}twoHourChecks`);
+  localStorage.removeItem(`${prefix}twoHourTimerState`);
 
   // Clear worker and inspector dropdown selections
-  localStorage.removeItem(`${uniquePrefix}MachineOperatorDropdown`);
-  localStorage.removeItem(`${uniquePrefix}KensaNameDropdown`);
-  localStorage.removeItem(`${uniquePrefix}MachineOperatorManual`);
-  localStorage.removeItem(`${uniquePrefix}KensaNameManual`);
+  localStorage.removeItem(`${prefix}MachineOperatorDropdown`);
+  localStorage.removeItem(`${prefix}KensaNameDropdown`);
+  localStorage.removeItem(`${prefix}MachineOperatorManual`);
+  localStorage.removeItem(`${prefix}KensaNameManual`);
 
   // Clear shot count inputs (both single and multiple machine formats)
-  localStorage.removeItem(`${uniquePrefix}shot`);
+  localStorage.removeItem(`${prefix}shot`);
   for (let i = 1; i <= 8; i++) {
-    localStorage.removeItem(`${uniquePrefix}ShotCount-AOL${i}`);
+    localStorage.removeItem(`${prefix}ShotCount-AOL${i}`);
   }
 
   // Clear Send to Machine button state
-  localStorage.removeItem(`${uniquePrefix}sendButtonState`);
+  localStorage.removeItem(`${prefix}sendButtonState`);
 
   console.log('✅ All form data cleared from localStorage');
   
@@ -3120,10 +3211,16 @@ function resetForm() {
 
   const excludedInputs = []; // Remove 'process' from excluded inputs as we'll handle it specially
 
+  const prefix = getUniquePrefix();
+  if (!prefix) {
+    console.error('Cannot reset form - prefix not available');
+    return;
+  }
+
   // Clear all form inputs with unique prefix except excluded ones
   const inputs = document.querySelectorAll('input, select, textarea');
   inputs.forEach(input => {
-    const key = `${uniquePrefix}${input.id || input.name}`;
+    const key = `${prefix}${input.id || input.name}`;
     if (!excludedInputs.includes(input.id) && !excludedInputs.includes(input.name)) {
       localStorage.removeItem(key);
       input.value = ''; // Reset input value
@@ -3138,7 +3235,7 @@ function resetForm() {
   const processInput = document.getElementById('process');
   if (processInput && selectedMachine) {
     // Clear localStorage for process field
-    const processKey = `${uniquePrefix}process`;
+    const processKey = `${prefix}process`;
     localStorage.removeItem(processKey);
     
     processInput.value = selectedMachine;
@@ -3149,7 +3246,7 @@ function resetForm() {
 
   // Clear counters with unique prefix
   for (let i = 1; i <= 20; i++) { // Adjusted loop to clear all counter values
-    const key = `${uniquePrefix}counter-${i}`;
+    const key = `${prefix}counter-${i}`;
     localStorage.removeItem(key);
     const counterElement = document.getElementById(`counter-${i}`);
     if (counterElement) {
@@ -3159,33 +3256,33 @@ function resetForm() {
 
   // Clear break time inputs and total
   for (let i = 1; i <= 4; i++) {
-    localStorage.removeItem(`${uniquePrefix}break${i}-start`);
-    localStorage.removeItem(`${uniquePrefix}break${i}-end`);
+    localStorage.removeItem(`${prefix}break${i}-start`);
+    localStorage.removeItem(`${prefix}break${i}-end`);
   }
-  localStorage.removeItem(`${uniquePrefix}breaktime-mins`);
-  localStorage.removeItem(`${uniquePrefix}total-break-display`);
+  localStorage.removeItem(`${prefix}breaktime-mins`);
+  localStorage.removeItem(`${prefix}total-break-display`);
 
   // Clear machine trouble inputs and total
   for (let i = 1; i <= 4; i++) {
-    localStorage.removeItem(`${uniquePrefix}trouble${i}-start`);
-    localStorage.removeItem(`${uniquePrefix}trouble${i}-end`);
+    localStorage.removeItem(`${prefix}trouble${i}-start`);
+    localStorage.removeItem(`${prefix}trouble${i}-end`);
   }
-  localStorage.removeItem(`${uniquePrefix}trouble-time-mins`);
-  localStorage.removeItem(`${uniquePrefix}total-trouble-display`);
+  localStorage.removeItem(`${prefix}trouble-time-mins`);
+  localStorage.removeItem(`${prefix}total-trouble-display`);
   
   // Clear maintenance records
-  localStorage.removeItem(`${uniquePrefix}maintenanceRecords`);
+  localStorage.removeItem(`${prefix}maintenanceRecords`);
   maintenanceRecords = [];
 
   // Clear material label photos
-  localStorage.removeItem(`${uniquePrefix}materialLabelPhotos`);
+  localStorage.removeItem(`${prefix}materialLabelPhotos`);
   materialLabelPhotos = [];
   renderMaterialPhotoThumbnails();
 
   // Reset all textContent elements
   const textContentElements = document.querySelectorAll('[id]'); // Select all elements with an ID
   textContentElements.forEach(element => {
-    const textKey = `${uniquePrefix}${element.id}.textContent`;
+    const textKey = `${prefix}${element.id}.textContent`;
     if (localStorage.getItem(textKey)) {
       localStorage.removeItem(textKey); // Remove from localStorage
       element.textContent = ''; // Reset to default empty textContent
@@ -3196,7 +3293,7 @@ function resetForm() {
   // Reset all <img> elements
   const images = document.querySelectorAll('img'); // Get all <img> elements
   images.forEach(image => {
-    const imageKey = `${uniquePrefix}${image.id || image.name}.src`;
+    const imageKey = `${prefix}${image.id || image.name}.src`;
     localStorage.removeItem(imageKey); // Remove image source from localStorage
     image.src = ''; // Reset the image source
     image.style.display = 'none'; // Hide the image
@@ -3204,8 +3301,8 @@ function resetForm() {
   });
 
   // Clear 2-hour check system
-  localStorage.removeItem(`${uniquePrefix}twoHourChecks`);
-  localStorage.removeItem(`${uniquePrefix}twoHourTimerState`); // Clear timer state too
+  localStorage.removeItem(`${prefix}twoHourChecks`);
+  localStorage.removeItem(`${prefix}twoHourTimerState`); // Clear timer state too
   clearTwoHourCheckTimer();
   twoHourCheckList = [];
   console.log('⏰ 2-hour check system cleared including timer state');
