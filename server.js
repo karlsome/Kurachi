@@ -5342,9 +5342,783 @@ app.post("/submitToMasterDB", async (req, res) => {
 
 
 
-//FREYA CUSTOMER ACCESS BACKEND
-// ✅ Add this route to your customer backend
 
+//SCNA ADMIN BACKEND START
+
+
+
+// Get work orders with filters, pagination, and sorting
+app.post("/api/workorders", async (req, res) => {
+  const { action, filters = {}, page = 1, limit = 10, sort = {} } = req.body;
+
+  try {
+    await client.connect();
+    const db = client.db("submittedDB");
+    const collection = db.collection("SCNAWorkOrderDB");
+
+    if (action === 'getWorkOrders') {
+      // Build MongoDB query from filters
+      let query = {};
+
+      // Status filter
+      if (filters.Status) {
+        query.Status = filters.Status;
+      }
+
+      // Customer filter
+      if (filters['Customer-Custom fields']) {
+        query['Customer-Custom fields'] = filters['Customer-Custom fields'];
+      }
+
+      // Assignee filter
+      if (filters['Assign to-Custom fields']) {
+        query['Assign to-Custom fields'] = filters['Assign to-Custom fields'];
+      }
+
+      // Date range filter (filter by Deadline, not Date and time)
+      if (filters.dateRange) {
+        query['Deadline'] = {};
+        if (filters.dateRange.from) {
+          // Handle both string and Date formats for deadline comparison
+          query['Deadline'].$gte = filters.dateRange.from + 'T00:00:00';
+        }
+        if (filters.dateRange.to) {
+          // Handle both string and Date formats for deadline comparison
+          query['Deadline'].$lte = filters.dateRange.to + 'T23:59:59.999';
+        }
+        
+        // Debug: Log date range query
+        console.log('📅 Date range query (Deadline):', {
+          original: filters.dateRange,
+          query: query['Deadline']
+        });
+      }
+
+      // Search filter (searches across multiple fields)
+      if (filters.search) {
+        const searchRegex = new RegExp(filters.search, 'i');
+        query.$or = [
+          { 'Number': searchRegex },
+          { 'Customer-Custom fields': searchRegex },
+          { 'P_SKU-Custom fields': searchRegex },
+          { 'Assign to-Custom fields': searchRegex },
+          { 'Owner': searchRegex },
+          { 'Status': searchRegex }
+        ];
+      }
+
+      console.log('Work Order Query:', JSON.stringify(query, null, 2));
+
+      // Build sort object
+      let sortObj = {};
+      if (sort.column) {
+        sortObj[sort.column] = sort.direction || 1;
+      } else {
+        sortObj['Date and time'] = -1; // Default sort by date descending
+      }
+
+      // Get total count for pagination
+      const totalCount = await collection.countDocuments(query);
+
+      // Get paginated data
+      const skip = (page - 1) * limit;
+      const data = await collection
+        .find(query)
+        .sort(sortObj)
+        .skip(skip)
+        .limit(parseInt(limit))
+        .toArray();
+
+      console.log('Work Order Query Results:', {
+        totalCount,
+        returnedCount: data.length,
+        sampleDeadlines: data.slice(0, 3).map(d => ({ 
+          number: d.Number, 
+          deadline: d['Deadline'],
+          deadlineType: typeof d['Deadline']
+        }))
+      });
+
+      // Get statistics
+      const statistics = await calculateWorkOrderStatistics(collection, query);
+
+      res.json({
+        success: true,
+        data: data,
+        statistics: statistics,
+        pagination: {
+          currentPage: page,
+          totalPages: Math.ceil(totalCount / limit),
+          totalItems: totalCount,
+          itemsPerPage: limit
+        }
+      });
+
+    } else if (action === 'getWorkOrderById') {
+      const { workOrderId } = req.body;
+      
+      if (!workOrderId) {
+        return res.status(400).json({ error: "Work Order ID is required" });
+      }
+
+      const workOrder = await collection.findOne({ _id: new ObjectId(workOrderId) });
+      
+      if (!workOrder) {
+        return res.status(404).json({ error: "Work order not found" });
+      }
+
+      res.json({
+        success: true,
+        data: workOrder
+      });
+
+    } else {
+      res.status(400).json({ error: "Invalid action" });
+    }
+
+  } catch (error) {
+    console.error("Error in work orders API:", error);
+    res.status(500).json({ error: "Internal server error", details: error.message });
+  }
+});
+
+// Get unique assignee options
+app.get("/api/workorders/assignees", async (req, res) => {
+  try {
+    await client.connect();
+    const db = client.db("submittedDB");
+    const collection = db.collection("SCNAWorkOrderDB");
+
+    // Use aggregation pipeline instead of distinct() for API Version 1 compatibility
+    const assignees = await collection.aggregate([
+      {
+        $match: {
+          "Assign to-Custom fields": { $exists: true, $ne: null, $ne: "" }
+        }
+      },
+      {
+        $group: {
+          _id: "$Assign to-Custom fields"
+        }
+      },
+      {
+        $sort: { _id: 1 }
+      }
+    ]).toArray();
+    
+    // Extract the assignee values from the aggregation result
+    const assigneeList = assignees.map(item => item._id).filter(assignee => 
+      assignee && assignee.trim() !== ''
+    );
+
+    console.log('📋 Assignee options loaded:', assigneeList.length, 'unique assignees');
+
+    res.json({
+      success: true,
+      data: assigneeList
+    });
+
+  } catch (error) {
+    console.error("Error getting assignee options:", error);
+    res.status(500).json({ error: "Error getting assignee options", details: error.message });
+  }
+});
+
+// Update work order
+app.put("/api/workorders/:id", async (req, res) => {
+  const { id } = req.params;
+  const { data, username } = req.body;
+
+  if (!data || !username) {
+    return res.status(400).json({ error: "Missing data or username" });
+  }
+
+  try {
+    await client.connect();
+    const db = client.db("submittedDB");
+    const collection = db.collection("SCNAWorkOrderDB");
+    const logCollection = db.collection("SCNAWorkOrderDB_Log");
+
+    // Get original document for logging
+    const originalDoc = await collection.findOne({ _id: new ObjectId(id) });
+    
+    if (!originalDoc) {
+      return res.status(404).json({ error: "Work order not found" });
+    }
+
+    // Update the document
+    const updateData = {
+      ...data,
+      'Last Updated': new Date(),
+      'Last Updated By': username
+    };
+
+    const result = await collection.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: updateData }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ error: "Work order not found" });
+    }
+
+    // Log the update
+    await logCollection.insertOne({
+      _id: new ObjectId(),
+      workOrderId: new ObjectId(id),
+      action: "update",
+      username,
+      timestamp: new Date(),
+      originalData: originalDoc,
+      newData: updateData,
+      changes: getChangedFields(originalDoc, updateData)
+    });
+
+    res.json({
+      success: true,
+      message: "Work order updated successfully",
+      modifiedCount: result.modifiedCount
+    });
+
+  } catch (error) {
+    console.error("Error updating work order:", error);
+    res.status(500).json({ error: "Error updating work order", details: error.message });
+  }
+});
+
+// Create new work order
+app.post("/api/workorders/create", async (req, res) => {
+  const { data, username } = req.body;
+
+  if (!data || !username) {
+    return res.status(400).json({ error: "Missing data or username" });
+  }
+
+  try {
+    await client.connect();
+    const db = client.db("submittedDB");
+    const collection = db.collection("SCNAWorkOrderDB");
+    const logCollection = db.collection("SCNAWorkOrderDB_Log");
+
+    // Add metadata
+    const workOrderData = {
+      ...data,
+      'Date and time': new Date(),
+      'Created By': username,
+      'Last Updated': new Date(),
+      'Last Updated By': username
+    };
+
+    // Insert the work order
+    const result = await collection.insertOne(workOrderData);
+
+    // Log the creation
+    await logCollection.insertOne({
+      _id: new ObjectId(),
+      workOrderId: result.insertedId,
+      action: "create",
+      username,
+      timestamp: new Date(),
+      newData: workOrderData
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Work order created successfully",
+      insertedId: result.insertedId
+    });
+
+  } catch (error) {
+    console.error("Error creating work order:", error);
+    res.status(500).json({ error: "Error creating work order", details: error.message });
+  }
+});
+
+// Delete work order
+app.delete("/api/workorders/:id", async (req, res) => {
+  const { id } = req.params;
+  const { username } = req.body;
+
+  if (!username) {
+    return res.status(400).json({ error: "Username is required" });
+  }
+
+  try {
+    await client.connect();
+    const db = client.db("submittedDB");
+    const collection = db.collection("SCNAWorkOrderDB");
+    const logCollection = db.collection("SCNAWorkOrderDB_Log");
+
+    // Get the document before deletion for logging
+    const originalDoc = await collection.findOne({ _id: new ObjectId(id) });
+    
+    if (!originalDoc) {
+      return res.status(404).json({ error: "Work order not found" });
+    }
+
+    // Delete the document
+    const result = await collection.deleteOne({ _id: new ObjectId(id) });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ error: "Work order not found" });
+    }
+
+    // Log the deletion
+    await logCollection.insertOne({
+      _id: new ObjectId(),
+      workOrderId: new ObjectId(id),
+      action: "delete",
+      username,
+      timestamp: new Date(),
+      deletedData: originalDoc
+    });
+
+    res.json({
+      success: true,
+      message: "Work order deleted successfully",
+      deletedCount: result.deletedCount
+    });
+
+  } catch (error) {
+    console.error("Error deleting work order:", error);
+    res.status(500).json({ error: "Error deleting work order", details: error.message });
+  }
+});
+
+// Get work order statistics
+app.post("/api/workorders/statistics", async (req, res) => {
+  const { filters = {} } = req.body;
+
+  try {
+    await client.connect();
+    const db = client.db("submittedDB");
+    const collection = db.collection("SCNAWorkOrderDB");
+
+    // Build base query from filters (excluding status filter for comprehensive stats)
+    let baseQuery = {};
+
+    if (filters['Customer-Custom fields']) {
+      baseQuery['Customer-Custom fields'] = filters['Customer-Custom fields'];
+    }
+
+    if (filters['Assign to-Custom fields']) {
+      baseQuery['Assign to-Custom fields'] = filters['Assign to-Custom fields'];
+    }
+
+    if (filters.dateRange) {
+      baseQuery['Deadline'] = {};
+      if (filters.dateRange.from) {
+        baseQuery['Deadline'].$gte = filters.dateRange.from + 'T00:00:00';
+      }
+      if (filters.dateRange.to) {
+        baseQuery['Deadline'].$lte = filters.dateRange.to + 'T23:59:59.999';
+      }
+    }
+
+    if (filters.search) {
+      const searchRegex = new RegExp(filters.search, 'i');
+      baseQuery.$or = [
+        { 'Number': searchRegex },
+        { 'Customer-Custom fields': searchRegex },
+        { 'P_SKU-Custom fields': searchRegex },
+        { 'Assign to-Custom fields': searchRegex },
+        { 'Owner': searchRegex }
+      ];
+    }
+
+    const statistics = await calculateWorkOrderStatistics(collection, baseQuery);
+
+    res.json({
+      success: true,
+      statistics: statistics
+    });
+
+  } catch (error) {
+    console.error("Error getting work order statistics:", error);
+    res.status(500).json({ error: "Error getting statistics", details: error.message });
+  }
+});
+
+// Helper function to calculate work order statistics
+async function calculateWorkOrderStatistics(collection, baseQuery) {
+  const now = new Date();
+  
+  // Get status counts
+  const statusCounts = await collection.aggregate([
+    { $match: baseQuery },
+    {
+      $group: {
+        _id: "$Status",
+        count: { $sum: 1 }
+      }
+    }
+  ]).toArray();
+
+  // Convert to object for easier access
+  const statusMap = {};
+  statusCounts.forEach(item => {
+    statusMap[item._id] = item.count;
+  });
+
+  // Get overdue orders
+  const overdueQuery = {
+    ...baseQuery,
+    Deadline: { $lt: now },
+    Status: { $nin: ['Completed', 'Cancelled'] }
+  };
+  const overdueCount = await collection.countDocuments(overdueQuery);
+
+  // Calculate total
+  const total = statusCounts.reduce((sum, item) => sum + item.count, 0);
+
+  return {
+    total: total,
+    entered: statusMap['Entered'] || 0,
+    inProgress: statusMap['In Progress'] || 0,
+    completed: statusMap['Completed'] || 0,
+    cancelled: statusMap['Cancelled'] || 0,
+    overdue: overdueCount
+  };
+}
+
+// Helper function to get changed fields
+function getChangedFields(original, updated) {
+  const changes = [];
+  
+  for (const key in updated) {
+    if (original[key] !== updated[key]) {
+      changes.push({
+        field: key,
+        oldValue: original[key],
+        newValue: updated[key]
+      });
+    }
+  }
+  
+  return changes;
+}
+
+console.log('✅ SCNA Work Order routes loaded');
+
+
+/**
+ * FREYA TABLET ROUTES - Updated with Server-side Pagination
+ * Copy these routes to your server.js file to replace the existing Freya Tablet routes
+ */
+
+// Get production records from pressDB filtered by SCNA factory with pagination and sorting
+app.get('/api/freya-tablet-data', async (req, res) => {
+    try {
+        console.log('🏭 Fetching Freya Tablet production records...');
+        
+        // Extract pagination and sort parameters from query
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const sortField = req.query.sortField || 'Date';
+        const sortDirection = parseInt(req.query.sortDirection) || -1;
+        
+        // Extract filter parameters
+        const equipment = req.query.equipment;
+        const dateFrom = req.query.dateFrom;
+        const dateTo = req.query.dateTo;
+        const search = req.query.search;
+        
+        await client.connect();
+        const db = client.db('submittedDB');
+        const collection = db.collection('pressDB');
+        
+        // Build match filter for SCNA factory
+        const matchFilter = {
+            "工場": "SCNA"
+        };
+        
+        // Add equipment filter
+        if (equipment) {
+            matchFilter["設備"] = equipment;
+        }
+        
+        // Add date range filter
+        if (dateFrom || dateTo) {
+            const dateFilter = {};
+            
+            if (dateFrom) {
+                // For Date field in "yyyy-mm-dd" format, use string comparison
+                dateFilter.$gte = dateFrom;
+            }
+            
+            if (dateTo) {
+                dateFilter.$lte = dateTo;
+            }
+            
+            // Use the Date field which is in "yyyy-mm-dd" format
+            matchFilter["Date"] = dateFilter;
+        }
+        
+        // Add search filter
+        if (search) {
+            const searchRegex = new RegExp(search, 'i');
+            const searchConditions = [
+                { "設備": searchRegex },
+                { "品番": searchRegex },
+                { "背番号": searchRegex },
+                { "Worker_Name": searchRegex },
+                { "材料ロット": searchRegex },
+                { "Comment": searchRegex }
+            ];
+            
+            // If we already have an $or condition for dates, we need to use $and
+            if (matchFilter.$or) {
+                matchFilter.$and = [
+                    { $or: matchFilter.$or },
+                    { $or: searchConditions }
+                ];
+                delete matchFilter.$or;
+            } else {
+                matchFilter.$or = searchConditions;
+            }
+        }
+        
+        console.log('🔍 Match filter:', JSON.stringify(matchFilter, null, 2));
+        
+        // Build sort object
+        const sortObject = {};
+        sortObject[sortField] = sortDirection;
+        
+        // Add default secondary sorts for consistency
+        if (sortField !== 'Date') sortObject['Date'] = -1;
+        if (sortField !== '_id') sortObject['_id'] = -1;
+        
+        // Get total count for pagination AFTER applying filters
+        const totalItems = await collection.countDocuments(matchFilter);
+        const totalPages = Math.ceil(totalItems / limit);
+        const skip = (page - 1) * limit;
+        
+        console.log(`📊 Pagination calculation: ${totalItems} total items, ${limit} per page = ${totalPages} pages, skipping ${skip} items`);
+        
+        // Build aggregation pipeline with pagination
+        const pipeline = [
+            {
+                $match: matchFilter
+            },
+            {
+                $sort: sortObject
+            },
+            {
+                $skip: skip
+            },
+            {
+                $limit: limit
+            }
+        ];
+        
+        // Execute aggregation
+        const records = await collection.aggregate(pipeline).toArray();
+        
+        console.log(`Found ${records.length} production records for SCNA factory (page ${page}/${totalPages})`);
+        
+        res.json({
+            success: true,
+            data: records,
+            pagination: {
+                currentPage: page,
+                totalPages: totalPages,
+                totalItems: totalItems,
+                itemsPerPage: limit,
+                hasNextPage: page < totalPages,
+                hasPrevPage: page > 1
+            },
+            statistics: {
+                totalRecords: totalItems,
+                currentPageRecords: records.length
+            },
+            total: records.length,
+            message: `Retrieved ${records.length} production records (page ${page}/${totalPages})`
+        });
+        
+    } catch (error) {
+        console.error('Error fetching Freya Tablet data:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch production records: ' + error.message,
+            data: [],
+            pagination: {
+                currentPage: 1,
+                totalPages: 0,
+                totalItems: 0,
+                itemsPerPage: limit || 10,
+                hasNextPage: false,
+                hasPrevPage: false
+            }
+        });
+    }
+});
+
+// Get equipment options for filter dropdown
+app.get('/api/freya-tablet-equipment-options', async (req, res) => {
+    try {
+        console.log('🔧 Fetching equipment options for Freya Tablet...');
+        
+        await client.connect();
+        const db = client.db('submittedDB');
+        const collection = db.collection('pressDB');
+        
+        // Use aggregation to get distinct equipment values for SCNA factory
+        const pipeline = [
+            {
+                $match: {
+                    "工場": "SCNA",
+                    "設備": { $exists: true, $ne: null, $ne: "" }
+                }
+            },
+            {
+                $group: {
+                    _id: "$設備"
+                }
+            },
+            {
+                $sort: { _id: 1 }
+            }
+        ];
+        
+        const equipmentDocs = await collection.aggregate(pipeline).toArray();
+        const equipment = equipmentDocs.map(doc => doc._id);
+        
+        console.log(`Found ${equipment.length} unique equipment options`);
+        
+        res.json({
+            success: true,
+            data: equipment
+        });
+        
+    } catch (error) {
+        console.error('Error fetching equipment options:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch equipment options: ' + error.message,
+            data: []
+        });
+    }
+});
+
+// Get production statistics for SCNA factory
+app.get('/api/freya-tablet-statistics', async (req, res) => {
+    try {
+        const { dateFrom, dateTo, equipment } = req.query;
+        
+        console.log('📈 Fetching Freya Tablet statistics...');
+        
+        await client.connect();
+        const db = client.db('submittedDB');
+        const collection = db.collection('pressDB');
+        
+        // Build match criteria
+        const matchCriteria = {
+            "工場": "SCNA"
+        };
+        
+        // Add date filter if provided
+        if (dateFrom || dateTo) {
+            const dateFilter = {};
+            if (dateFrom) {
+                dateFilter.$gte = new Date(dateFrom);
+            }
+            if (dateTo) {
+                const toDate = new Date(dateTo);
+                toDate.setHours(23, 59, 59, 999);
+                dateFilter.$lte = toDate;
+            }
+            
+            // Try multiple date field names
+            matchCriteria.$or = [
+                { "作成日時": dateFilter },
+                { "日時": dateFilter },
+                { "時刻": dateFilter }
+            ];
+        }
+        
+        // Add equipment filter if provided
+        if (equipment) {
+            matchCriteria["設備"] = equipment;
+        }
+        
+        // Aggregation pipeline for statistics
+        const pipeline = [
+            { $match: matchCriteria },
+            {
+                $group: {
+                    _id: null,
+                    totalRecords: { $sum: 1 },
+                    totalQuantity: {
+                        $sum: {
+                            $toInt: {
+                                $ifNull: ["$数量", 0]
+                            }
+                        }
+                    },
+                    totalNG: {
+                        $sum: {
+                            $toInt: {
+                                $ifNull: ["$NG数", 0]
+                            }
+                        }
+                    },
+                    avgCycleTime: {
+                        $avg: {
+                            $toDouble: {
+                                $ifNull: ["$サイクルタイム", 0]
+                            }
+                        }
+                    }
+                }
+            }
+        ];
+        
+        const result = await collection.aggregate(pipeline).toArray();
+        const stats = result.length > 0 ? result[0] : {
+            totalRecords: 0,
+            totalQuantity: 0,
+            totalNG: 0,
+            avgCycleTime: 0
+        };
+        
+        console.log('Statistics calculated:', stats);
+        
+        res.json({
+            success: true,
+            data: {
+                totalRecords: stats.totalRecords || 0,
+                totalQuantity: stats.totalQuantity || 0,
+                totalNG: stats.totalNG || 0,
+                avgCycleTime: Math.round((stats.avgCycleTime || 0) * 100) / 100
+            }
+        });
+        
+    } catch (error) {
+        console.error('Error fetching statistics:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch statistics: ' + error.message,
+            data: {
+                totalRecords: 0,
+                totalQuantity: 0,
+                totalNG: 0,
+                avgCycleTime: 0
+            }
+        });
+    }
+});
+
+console.log("🏭 Freya Tablet routes with server-side pagination loaded successfully");
+
+
+//SCNA ADMIN BACKEND END
+
+
+
+
+
+
+//FREYA CUSTOMER ACCESS BACKEND
 
 
 app.post("/customerGetDeviceStats", async (req, res) => {
