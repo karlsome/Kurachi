@@ -6111,6 +6111,225 @@ app.get('/api/freya-tablet-statistics', async (req, res) => {
 console.log("🏭 Freya Tablet routes with server-side pagination loaded successfully");
 
 
+// ==================== BULK UPLOAD ROUTE FOR WORK ORDERS ====================
+// Add this route to your existing server.js file
+
+/**
+ * Helper function to format any date to YYYY-MM-DD format
+ */
+function formatDateToYYYYMMDD(dateInput) {
+  if (!dateInput) return null;
+  
+  let date;
+  
+  // Handle different input types
+  if (typeof dateInput === 'string') {
+    // Parse ISO string or other date string formats
+    date = new Date(dateInput);
+  } else if (dateInput instanceof Date) {
+    date = dateInput;
+  } else {
+    console.warn('Invalid date input:', dateInput);
+    return null;
+  }
+  
+  // Check if date is valid
+  if (isNaN(date.getTime())) {
+    console.warn('Invalid date parsed:', dateInput);
+    return null;
+  }
+  
+  // Format to YYYY-MM-DD
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  
+  return `${year}-${month}-${day}`;
+}
+
+// Bulk upload work orders from JSON
+app.post("/api/workorders/bulk-upload", async (req, res) => {
+  const { workOrders, username, overwrite = false } = req.body;
+
+  if (!workOrders || !Array.isArray(workOrders) || workOrders.length === 0) {
+    return res.status(400).json({ 
+      success: false, 
+      error: "Invalid work orders data. Must be a non-empty array." 
+    });
+  }
+
+  if (!username) {
+    return res.status(400).json({ 
+      success: false, 
+      error: "Username is required for bulk upload." 
+    });
+  }
+
+  try {
+    await client.connect();
+    const db = client.db("submittedDB");
+    const collection = db.collection("SCNAWorkOrderDB");
+    const logCollection = db.collection("SCNAWorkOrderDB_Log");
+
+    const currentTime = new Date();
+    let insertedCount = 0;
+    let duplicates = [];
+    let errors = [];
+    let uploadedNumbers = []; // Track successfully uploaded work order numbers
+
+    // Check for existing work orders first
+    const workOrderNumbers = workOrders.map(wo => wo.Number);
+    const existingOrders = await collection.find(
+      { Number: { $in: workOrderNumbers } }
+    ).toArray();
+
+    const existingNumbers = new Set(existingOrders.map(order => order.Number));
+
+    // Separate new orders from duplicates
+    const newOrders = [];
+    workOrders.forEach(order => {
+      if (existingNumbers.has(order.Number)) {
+        duplicates.push(order);
+      } else {
+        newOrders.push(order);
+      }
+    });
+
+    // If not overwriting and duplicates exist, only process new orders
+    if (!overwrite && duplicates.length > 0) {
+      console.log(`📋 Found ${duplicates.length} duplicate work orders, processing ${newOrders.length} new orders`);
+    }
+
+    // Process orders to insert
+    const ordersToProcess = overwrite ? workOrders : newOrders;
+
+    for (const orderData of ordersToProcess) {
+      try {
+        // Validate required fields
+        const requiredFields = ['Number', 'Status', 'Customer-Custom fields', 'P_SKU-Custom fields'];
+        const missingFields = requiredFields.filter(field => 
+          !orderData.hasOwnProperty(field) || orderData[field] === null || orderData[field] === ''
+        );
+
+        if (missingFields.length > 0) {
+          errors.push({
+            workOrderNumber: orderData.Number || 'Unknown',
+            error: `Missing required fields: ${missingFields.join(', ')}`
+          });
+          continue;
+        }
+
+        // Prepare work order data with metadata
+        const workOrderWithMetadata = {
+          ...orderData,
+          // Keep date formats consistent - convert to simple date format
+          'Date and time': orderData['Date and time'] || currentTime.toISOString(),
+          'Deadline': orderData['Deadline'] ? formatDateToYYYYMMDD(orderData['Deadline']) : null,
+          'Created By': orderData['Created By'] || username,
+          'Last Updated': currentTime,
+          'Last Updated By': username,
+          // Ensure numeric fields are properly typed
+          'Material loading (%)': Number(orderData['Material loading (%)']) || 0,
+          'Finished goods note (%)': Number(orderData['Finished goods note (%)']) || 0,
+          'Estimated cost': Number(orderData['Estimated cost']) || 0
+        };
+
+        if (overwrite && existingNumbers.has(orderData.Number)) {
+          // Update existing work order
+          const existingOrder = existingOrders.find(order => order.Number === orderData.Number);
+          
+          const result = await collection.updateOne(
+            { Number: orderData.Number },
+            { $set: workOrderWithMetadata }
+          );
+
+          if (result.modifiedCount > 0) {
+            insertedCount++;
+            uploadedNumbers.push(orderData.Number); // Track uploaded work order
+
+            // Log the update
+            await logCollection.insertOne({
+              _id: new ObjectId(),
+              workOrderId: existingOrder._id,
+              action: "bulk_update",
+              username,
+              timestamp: currentTime,
+              originalData: existingOrder,
+              newData: workOrderWithMetadata,
+              source: "json_upload"
+            });
+          }
+        } else {
+          // Insert new work order
+          const result = await collection.insertOne(workOrderWithMetadata);
+
+          if (result.insertedId) {
+            insertedCount++;
+            uploadedNumbers.push(orderData.Number); // Track uploaded work order
+
+            // Log the creation
+            await logCollection.insertOne({
+              _id: new ObjectId(),
+              workOrderId: result.insertedId,
+              action: "bulk_create",
+              username,
+              timestamp: currentTime,
+              newData: workOrderWithMetadata,
+              source: "json_upload"
+            });
+          }
+        }
+
+      } catch (orderError) {
+        console.error(`Error processing work order ${orderData.Number}:`, orderError);
+        errors.push({
+          workOrderNumber: orderData.Number || 'Unknown',
+          error: orderError.message
+        });
+      }
+    }
+
+    // Prepare response
+    const response = {
+      success: true,
+      message: `Bulk upload completed. ${insertedCount} work orders processed.`,
+      inserted: insertedCount,
+      total: workOrders.length,
+      uploadedNumbers: uploadedNumbers, // Include list of uploaded work order numbers
+      errors: errors
+    };
+
+    // Include duplicates info if not overwriting
+    if (!overwrite && duplicates.length > 0) {
+      response.duplicates = duplicates;
+      response.message += ` ${duplicates.length} duplicates found.`;
+    }
+
+    console.log(`✅ Bulk upload completed:`, {
+      totalReceived: workOrders.length,
+      inserted: insertedCount,
+      uploadedNumbers: uploadedNumbers,
+      duplicates: duplicates.length,
+      duplicateNumbers: duplicates.map(d => d.Number),
+      errors: errors.length
+    });
+
+    res.json(response);
+
+  } catch (error) {
+    console.error("❌ Error in bulk upload:", error);
+    res.status(500).json({ 
+      success: false, 
+      error: "Internal server error during bulk upload", 
+      details: error.message 
+    });
+  }
+});
+
+console.log('✅ Bulk upload route for work orders loaded');
+
+
+
 //SCNA ADMIN BACKEND END
 
 
