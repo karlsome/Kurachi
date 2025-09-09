@@ -6330,6 +6330,129 @@ console.log('✅ Bulk upload route for work orders loaded');
 
 
 
+// SCNA Machine Analytics API Route
+
+// Get SCNA machine analytics data
+app.post('/api/scna/machine-analytics', async (req, res) => {
+    let client;
+    
+    try {
+        const { dateFrom, dateTo, machine } = req.body;
+        
+        console.log('📊 Fetching SCNA machine analytics...', { dateFrom, dateTo, machine });
+        
+        client = new MongoClient(process.env.MONGODB_URI || 'mongodb://localhost:27017');
+        await client.connect();
+        
+        const db = client.db('submittedDB');
+        const collection = db.collection('pressDB');
+        
+        // Build match criteria
+        const matchCriteria = {
+            "工場": "SCNA"
+        };
+        
+        // Add date filter
+        if (dateFrom || dateTo) {
+            const dateFilter = {};
+            if (dateFrom) {
+                dateFilter.$gte = dateFrom;
+            }
+            if (dateTo) {
+                dateFilter.$lte = dateTo;
+            }
+            matchCriteria.Date = dateFilter;
+        }
+        
+        // Add machine filter
+        if (machine && machine !== 'all') {
+            matchCriteria.設備 = machine;
+        }
+        
+        console.log('🔍 Match criteria:', matchCriteria);
+        
+        // Fetch machine data with all necessary fields
+        const machineData = await collection.find(matchCriteria)
+            .sort({ Date: 1, Time_start: 1 })
+            .toArray();
+        
+        console.log(`✅ Found ${machineData.length} machine records`);
+        
+        // Calculate summary statistics
+        const summary = {
+            totalRecords: machineData.length,
+            machines: [...new Set(machineData.map(item => item.設備))].filter(Boolean),
+            dateRange: {
+                from: dateFrom,
+                to: dateTo
+            },
+            totalWorkHours: machineData.reduce((sum, item) => sum + (item.Total_Work_Hours || 0), 0),
+            totalBreakHours: machineData.reduce((sum, item) => sum + (item.Total_Break_Hours || 0), 0),
+            totalProduction: machineData.reduce((sum, item) => sum + (item.Total || 0), 0)
+        };
+        
+        res.json({
+            success: true,
+            data: machineData,
+            summary: summary,
+            message: `Retrieved ${machineData.length} machine records`
+        });
+        
+    } catch (error) {
+        console.error('❌ Error fetching SCNA machine analytics:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch machine analytics: ' + error.message,
+            data: []
+        });
+    } finally {
+        if (client) {
+            await client.close();
+        }
+    }
+});
+
+// Get unique machine names for filter dropdown
+app.get('/api/scna/machines', async (req, res) => {
+    let client;
+    
+    try {
+        console.log('🔧 Fetching SCNA machine list...');
+        
+        client = new MongoClient(process.env.MONGODB_URI || 'mongodb://localhost:27017');
+        await client.connect();
+        
+        const db = client.db('submittedDB');
+        const collection = db.collection('pressDB');
+        
+        // Get unique machine names
+        const machines = await collection.distinct('設備', { "工場": "SCNA" });
+        
+        console.log(`✅ Found ${machines.length} unique machines:`, machines);
+        
+        res.json({
+            success: true,
+            data: machines.filter(Boolean), // Remove any null/undefined values
+            message: `Found ${machines.length} machines`
+        });
+        
+    } catch (error) {
+        console.error('❌ Error fetching SCNA machines:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch machines: ' + error.message,
+            data: []
+        });
+    } finally {
+        if (client) {
+            await client.close();
+        }
+    }
+});
+
+
+
+
 //SCNA ADMIN BACKEND END
 
 
