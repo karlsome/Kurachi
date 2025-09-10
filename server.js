@@ -5337,6 +5337,272 @@ app.post("/submitToMasterDB", async (req, res) => {
   }
 });
 
+// API Route for Fetching Unique Factory Values from Different Collections
+// Usage: GET /api/factories/:collection
+// Collections supported: kensaDB, pressDB, SRSDB, slitDB
+
+app.get('/api/factories/:collection', async (req, res) => {
+    try {
+        const { collection } = req.params;
+        
+        // Validate collection name to prevent injection
+        const validCollections = ['kensaDB', 'pressDB', 'SRSDB', 'slitDB'];
+        if (!validCollections.includes(collection)) {
+            return res.status(400).json({ 
+                error: 'Invalid collection name',
+                validCollections: validCollections
+            });
+        }
+
+        console.log(`📋 Fetching unique factory values from ${collection}...`);
+
+        // Connect to submittedDB database
+        const db = client.db('submittedDB');
+        const targetCollection = db.collection(collection);
+
+        // Aggregate to get unique factory (工場) values
+        const uniqueFactories = await targetCollection.aggregate([
+            {
+                $match: {
+                    '工場': { $exists: true, $ne: null, $ne: '' }
+                }
+            },
+            {
+                $group: {
+                    _id: '$工場'
+                }
+            },
+            {
+                $sort: { '_id': 1 }
+            },
+            {
+                $project: {
+                    _id: 0,
+                    factory: '$_id'
+                }
+            }
+        ]).toArray();
+
+        console.log(`✅ Found ${uniqueFactories.length} unique factories in ${collection}`);
+
+        res.json({
+            success: true,
+            collection: collection,
+            factories: uniqueFactories.map(item => item.factory),
+            count: uniqueFactories.length
+        });
+
+    } catch (error) {
+        console.error(`❌ Error fetching factories from ${req.params.collection}:`, error);
+        res.status(500).json({ 
+            error: 'Failed to fetch factory list',
+            message: error.message,
+            collection: req.params.collection
+        });
+    }
+});
+
+// Alternative route with query parameter instead of path parameter
+// Usage: GET /api/factories?collection=kensaDB
+app.get('/api/factories', async (req, res) => {
+    try {
+        const { collection } = req.query;
+        
+        if (!collection) {
+            return res.status(400).json({ 
+                error: 'Collection parameter is required',
+                usage: 'GET /api/factories?collection=kensaDB'
+            });
+        }
+
+        // Validate collection name to prevent injection
+        const validCollections = ['kensaDB', 'pressDB', 'SRSDB', 'slitDB'];
+        if (!validCollections.includes(collection)) {
+            return res.status(400).json({ 
+                error: 'Invalid collection name',
+                validCollections: validCollections
+            });
+        }
+
+        console.log(`📋 Fetching unique factory values from ${collection}...`);
+
+        // Connect to submittedDB database
+        const db = client.db('submittedDB');
+        const targetCollection = db.collection(collection);
+
+        // Aggregate to get unique factory (工場) values
+        const uniqueFactories = await targetCollection.aggregate([
+            {
+                $match: {
+                    '工場': { $exists: true, $ne: null, $ne: '' }
+                }
+            },
+            {
+                $group: {
+                    _id: '$工場'
+                }
+            },
+            {
+                $sort: { '_id': 1 }
+            },
+            {
+                $project: {
+                    _id: 0,
+                    factory: '$_id'
+                }
+            }
+        ]).toArray();
+
+        console.log(`✅ Found ${uniqueFactories.length} unique factories in ${collection}`);
+
+        res.json({
+            success: true,
+            collection: collection,
+            factories: uniqueFactories.map(item => item.factory),
+            count: uniqueFactories.length
+        });
+
+    } catch (error) {
+        console.error(`❌ Error fetching factories from ${req.query.collection}:`, error);
+        res.status(500).json({ 
+            error: 'Failed to fetch factory list',
+            message: error.message,
+            collection: req.query.collection
+        });
+    }
+});
+
+// Batch route to get factories from multiple collections at once
+// Usage: POST /api/factories/batch with body: { collections: ['kensaDB', 'pressDB'] }
+app.post('/api/factories/batch', async (req, res) => {
+    try {
+        const { collections } = req.body;
+        
+        if (!collections || !Array.isArray(collections)) {
+            return res.status(400).json({ 
+                error: 'Collections array is required',
+                usage: 'POST /api/factories/batch with body: { collections: ["kensaDB", "pressDB"] }'
+            });
+        }
+
+        // Validate all collection names
+        const validCollections = ['kensaDB', 'pressDB', 'SRSDB', 'slitDB'];
+        const invalidCollections = collections.filter(col => !validCollections.includes(col));
+        
+        if (invalidCollections.length > 0) {
+            return res.status(400).json({ 
+                error: 'Invalid collection names found',
+                invalidCollections: invalidCollections,
+                validCollections: validCollections
+            });
+        }
+
+        console.log(`📋 Fetching unique factory values from multiple collections: ${collections.join(', ')}`);
+
+        const db = client.db('submittedDB');
+        const results = {};
+
+        // Process each collection
+        for (const collectionName of collections) {
+            try {
+                const targetCollection = db.collection(collectionName);
+
+                const uniqueFactories = await targetCollection.aggregate([
+                    {
+                        $match: {
+                            '工場': { $exists: true, $ne: null, $ne: '' }
+                        }
+                    },
+                    {
+                        $group: {
+                            _id: '$工場'
+                        }
+                    },
+                    {
+                        $sort: { '_id': 1 }
+                    },
+                    {
+                        $project: {
+                            _id: 0,
+                            factory: '$_id'
+                        }
+                    }
+                ]).toArray();
+
+                results[collectionName] = {
+                    factories: uniqueFactories.map(item => item.factory),
+                    count: uniqueFactories.length
+                };
+
+                console.log(`✅ Found ${uniqueFactories.length} unique factories in ${collectionName}`);
+
+            } catch (collectionError) {
+                console.error(`❌ Error processing ${collectionName}:`, collectionError);
+                results[collectionName] = {
+                    error: collectionError.message,
+                    factories: [],
+                    count: 0
+                };
+            }
+        }
+
+        res.json({
+            success: true,
+            results: results,
+            totalCollections: collections.length
+        });
+
+    } catch (error) {
+        console.error('❌ Error in batch factory fetch:', error);
+        res.status(500).json({ 
+            error: 'Failed to fetch factory lists',
+            message: error.message
+        });
+    }
+});
+
+/*
+USAGE EXAMPLES:
+
+1. Get factories from single collection (path parameter):
+   GET /api/factories/kensaDB
+   GET /api/factories/pressDB
+   GET /api/factories/SRSDB
+   GET /api/factories/slitDB
+
+2. Get factories from single collection (query parameter):
+   GET /api/factories?collection=kensaDB
+
+3. Get factories from multiple collections:
+   POST /api/factories/batch
+   Body: { "collections": ["kensaDB", "pressDB", "SRSDB", "slitDB"] }
+
+RESPONSE FORMAT:
+{
+    "success": true,
+    "collection": "kensaDB",
+    "factories": ["第一工場", "第二工場", "小滿", "佐藤"],
+    "count": 4
+}
+
+For batch requests:
+{
+    "success": true,
+    "results": {
+        "kensaDB": {
+            "factories": ["第一工場", "第二工場"],
+            "count": 2
+        },
+        "pressDB": {
+            "factories": ["第一工場", "小滿"],
+            "count": 2
+        }
+    },
+    "totalCollections": 2
+}
+*/
+
+
 
 //FREYA ADMIN BACKEND END
 
