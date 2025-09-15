@@ -5472,8 +5472,18 @@ app.get('/api/factories', async (req, res) => {
     }
 });
 
+
+
+
 // Batch route to get factories from multiple collections at once
 // Usage: POST /api/factories/batch with body: { collections: ['kensaDB', 'pressDB'] }
+
+
+/*
+
+Start of unique dropdown values for filtering
+
+*/
 app.post('/api/factories/batch', async (req, res) => {
     try {
         const { collections } = req.body;
@@ -5561,46 +5571,1717 @@ app.post('/api/factories/batch', async (req, res) => {
     }
 });
 
-/*
-USAGE EXAMPLES:
 
-1. Get factories from single collection (path parameter):
-   GET /api/factories/kensaDB
-   GET /api/factories/pressDB
-   GET /api/factories/SRSDB
-   GET /api/factories/slitDB
+// Route to get unique factory values from Master DB
+app.get('/api/masterdb/factories', async (req, res) => {
+    try {
+        console.log('📋 Fetching unique factory values from Master DB...');
 
-2. Get factories from single collection (query parameter):
-   GET /api/factories?collection=kensaDB
+        const db = client.db('Sasaki_Coating_MasterDB');
+        const collection = db.collection('masterDB');
 
-3. Get factories from multiple collections:
-   POST /api/factories/batch
-   Body: { "collections": ["kensaDB", "pressDB", "SRSDB", "slitDB"] }
+        const uniqueFactories = await collection.aggregate([
+            {
+                $match: {
+                    '工場': { $exists: true, $ne: null, $ne: '' }
+                }
+            },
+            {
+                $group: {
+                    _id: '$工場'
+                }
+            },
+            {
+                $sort: { '_id': 1 }
+            },
+            {
+                $project: {
+                    _id: 0,
+                    value: '$_id'
+                }
+            }
+        ]).toArray();
 
-RESPONSE FORMAT:
-{
-    "success": true,
-    "collection": "kensaDB",
-    "factories": ["第一工場", "第二工場", "小滿", "佐藤"],
-    "count": 4
-}
+        console.log(`✅ Found ${uniqueFactories.length} unique factories in Master DB`);
 
-For batch requests:
-{
-    "success": true,
-    "results": {
-        "kensaDB": {
-            "factories": ["第一工場", "第二工場"],
-            "count": 2
-        },
-        "pressDB": {
-            "factories": ["第一工場", "小滿"],
-            "count": 2
+        res.json({
+            success: true,
+            data: uniqueFactories.map(item => item.value),
+            count: uniqueFactories.length
+        });
+
+    } catch (error) {
+        console.error('❌ Error fetching factories from Master DB:', error);
+        res.status(500).json({ 
+            error: 'Failed to fetch factory list',
+            message: error.message
+        });
+    }
+});
+
+// Route to get unique R/L values from Master DB
+app.get('/api/masterdb/rl', async (req, res) => {
+    try {
+        console.log('📋 Fetching unique R/L values from Master DB...');
+
+        const db = client.db('Sasaki_Coating_MasterDB');
+        const collection = db.collection('masterDB');
+
+        const uniqueRL = await collection.aggregate([
+            {
+                $match: {
+                    'R/L': { $exists: true, $ne: null, $ne: '' }
+                }
+            },
+            {
+                $group: {
+                    _id: '$R/L'
+                }
+            },
+            {
+                $sort: { '_id': 1 }
+            },
+            {
+                $project: {
+                    _id: 0,
+                    value: '$_id'
+                }
+            }
+        ]).toArray();
+
+        console.log(`✅ Found ${uniqueRL.length} unique R/L values in Master DB`);
+
+        res.json({
+            success: true,
+            data: uniqueRL.map(item => item.value),
+            count: uniqueRL.length
+        });
+
+    } catch (error) {
+        console.error('❌ Error fetching R/L values from Master DB:', error);
+        res.status(500).json({ 
+            error: 'Failed to fetch R/L list',
+            message: error.message
+        });
+    }
+});
+
+// Route to get unique color values from Master DB
+app.get('/api/masterdb/colors', async (req, res) => {
+    try {
+        console.log('📋 Fetching unique color values from Master DB...');
+
+        const db = client.db('Sasaki_Coating_MasterDB');
+        const collection = db.collection('masterDB');
+
+        const uniqueColors = await collection.aggregate([
+            {
+                $match: {
+                    '色': { $exists: true, $ne: null, $ne: '' }
+                }
+            },
+            {
+                $group: {
+                    _id: '$色'
+                }
+            },
+            {
+                $sort: { '_id': 1 }
+            },
+            {
+                $project: {
+                    _id: 0,
+                    value: '$_id'
+                }
+            }
+        ]).toArray();
+
+        console.log(`✅ Found ${uniqueColors.length} unique colors in Master DB`);
+
+        res.json({
+            success: true,
+            data: uniqueColors.map(item => item.value),
+            count: uniqueColors.length
+        });
+
+    } catch (error) {
+        console.error('❌ Error fetching colors from Master DB:', error);
+        res.status(500).json({ 
+            error: 'Failed to fetch color list',
+            message: error.message
+        });
+    }
+});
+
+// Route to get unique equipment values from Master DB
+app.get('/api/masterdb/equipment', async (req, res) => {
+    try {
+        console.log('📋 Fetching unique equipment values from Master DB...');
+
+        const db = client.db('Sasaki_Coating_MasterDB');
+        const collection = db.collection('masterDB');
+
+        const uniqueEquipment = await collection.aggregate([
+            {
+                $match: {
+                    '加工設備': { $exists: true, $ne: null, $ne: '' }
+                }
+            },
+            {
+                $group: {
+                    _id: '$加工設備'
+                }
+            },
+            {
+                $sort: { '_id': 1 }
+            },
+            {
+                $project: {
+                    _id: 0,
+                    value: '$_id'
+                }
+            }
+        ]).toArray();
+
+        console.log(`✅ Found ${uniqueEquipment.length} unique equipment values in Master DB`);
+
+        res.json({
+            success: true,
+            data: uniqueEquipment.map(item => item.value),
+            count: uniqueEquipment.length
+        });
+
+    } catch (error) {
+        console.error('❌ Error fetching equipment from Master DB:', error);
+        res.status(500).json({ 
+            error: 'Failed to fetch equipment list',
+            message: error.message
+        });
+    }
+});
+
+// Route to get unique model values from Master DB
+app.get('/api/masterdb/models', async (req, res) => {
+    try {
+        console.log('📋 Fetching unique model values from Master DB...');
+
+        const db = client.db('Sasaki_Coating_MasterDB');
+        const collection = db.collection('masterDB');
+
+        const uniqueModels = await collection.aggregate([
+            {
+                $match: {
+                    'モデル': { $exists: true, $ne: null, $ne: '' }
+                }
+            },
+            {
+                $group: {
+                    _id: '$モデル'
+                }
+            },
+            {
+                $sort: { '_id': 1 }
+            },
+            {
+                $project: {
+                    _id: 0,
+                    value: '$_id'
+                }
+            }
+        ]).toArray();
+
+        console.log(`✅ Found ${uniqueModels.length} unique models in Master DB`);
+
+        res.json({
+            success: true,
+            data: uniqueModels.map(item => item.value),
+            count: uniqueModels.length
+        });
+
+    } catch (error) {
+        console.error('❌ Error fetching models from Master DB:', error);
+        res.status(500).json({ 
+            error: 'Failed to fetch model list',
+            message: error.message
+        });
+    }
+});
+
+// Route to get unique shape values from Master DB
+app.get('/api/masterdb/shapes', async (req, res) => {
+    try {
+        console.log('📋 Fetching unique shape values from Master DB...');
+
+        const db = client.db('Sasaki_Coating_MasterDB');
+        const collection = db.collection('masterDB');
+
+        const uniqueShapes = await collection.aggregate([
+            {
+                $match: {
+                    '形状': { $exists: true, $ne: null, $ne: '' }
+                }
+            },
+            {
+                $group: {
+                    _id: '$形状'
+                }
+            },
+            {
+                $sort: { '_id': 1 }
+            },
+            {
+                $project: {
+                    _id: 0,
+                    value: '$_id'
+                }
+            }
+        ]).toArray();
+
+        console.log(`✅ Found ${uniqueShapes.length} unique shapes in Master DB`);
+
+        res.json({
+            success: true,
+            data: uniqueShapes.map(item => item.value),
+            count: uniqueShapes.length
+        });
+
+    } catch (error) {
+        console.error('❌ Error fetching shapes from Master DB:', error);
+        res.status(500).json({ 
+            error: 'Failed to fetch shape list',
+            message: error.message
+        });
+    }
+});
+
+// Route to get unique material values from Master DB
+app.get('/api/masterdb/materials', async (req, res) => {
+    try {
+        console.log('📋 Fetching unique material values from Master DB...');
+
+        const db = client.db('Sasaki_Coating_MasterDB');
+        const collection = db.collection('masterDB');
+
+        const uniqueMaterials = await collection.aggregate([
+            {
+                $match: {
+                    '材料': { $exists: true, $ne: null, $ne: '' }
+                }
+            },
+            {
+                $group: {
+                    _id: '$材料'
+                }
+            },
+            {
+                $sort: { '_id': 1 }
+            },
+            {
+                $project: {
+                    _id: 0,
+                    value: '$_id'
+                }
+            }
+        ]).toArray();
+
+        console.log(`✅ Found ${uniqueMaterials.length} unique materials in Master DB`);
+
+        res.json({
+            success: true,
+            data: uniqueMaterials.map(item => item.value),
+            count: uniqueMaterials.length
+        });
+
+    } catch (error) {
+        console.error('❌ Error fetching materials from Master DB:', error);
+        res.status(500).json({ 
+            error: 'Failed to fetch material list',
+            message: error.message
+        });
+    }
+});
+
+// Batch route to get all filter values at once (more efficient)
+app.get('/api/masterdb/filters', async (req, res) => {
+    try {
+        console.log('📋 Fetching all filter values from Master DB...');
+
+        const db = client.db('Sasaki_Coating_MasterDB');
+        const collection = db.collection('masterDB');
+
+        // Define all the fields we want to get unique values for
+        const fields = [
+            { field: '工場', key: 'factories' },
+            { field: 'R/L', key: 'rl' },
+            { field: '色', key: 'colors' },
+            { field: '加工設備', key: 'equipment' },
+            { field: 'モデル', key: 'models' },
+            { field: '形状', key: 'shapes' },
+            { field: '材料', key: 'materials' }
+        ];
+
+        const results = {};
+
+        // Process each field
+        for (const { field, key } of fields) {
+            try {
+                const uniqueValues = await collection.aggregate([
+                    {
+                        $match: {
+                            [field]: { $exists: true, $ne: null, $ne: '' }
+                        }
+                    },
+                    {
+                        $group: {
+                            _id: `$${field}`
+                        }
+                    },
+                    {
+                        $sort: { '_id': 1 }
+                    },
+                    {
+                        $project: {
+                            _id: 0,
+                            value: '$_id'
+                        }
+                    }
+                ]).toArray();
+
+                results[key] = {
+                    data: uniqueValues.map(item => item.value),
+                    count: uniqueValues.length
+                };
+
+                console.log(`✅ Found ${uniqueValues.length} unique ${key} values`);
+
+            } catch (fieldError) {
+                console.error(`❌ Error processing field ${field}:`, fieldError);
+                results[key] = {
+                    data: [],
+                    count: 0,
+                    error: fieldError.message
+                };
+            }
         }
-    },
-    "totalCollections": 2
+
+        res.json({
+            success: true,
+            filters: results,
+            timestamp: new Date().toISOString()
+        });
+
+    } catch (error) {
+        console.error('❌ Error fetching all filter values from Master DB:', error);
+        res.status(500).json({ 
+            error: 'Failed to fetch filter values',
+            message: error.message
+        });
+    }
+});
+
+
+
+// ==================== NODA WAREHOUSE MANAGEMENT API ROUTES ====================
+// Copy this entire section to your server.js file
+
+// NODA Requests API Route
+app.post("/api/noda-requests", async (req, res) => {
+  const { action, filters = {}, page = 1, limit = 10, sort = {}, requestId, data } = req.body;
+
+  try {
+    await client.connect();
+    const db = client.db("submittedDB");
+    const requestsCollection = db.collection("nodaRequestDB");
+    const inventoryCollection = db.collection("nodaInventoryDB");
+
+    switch (action) {
+      case 'getNodaRequests':
+        try {
+          // Build MongoDB query from filters
+          let query = {};
+
+          // Status filter
+          if (filters.status) {
+            query.status = filters.status;
+          }
+
+          // Part number filter
+          if (filters['品番']) {
+            query['品番'] = filters['品番'];
+          }
+
+          // Back number filter
+          if (filters['背番号']) {
+            query['背番号'] = filters['背番号'];
+          }
+
+          // Date range filter
+          if (filters.dateRange) {
+            query['date'] = {};
+            if (filters.dateRange.from) {
+              query['date'].$gte = filters.dateRange.from;
+            }
+            if (filters.dateRange.to) {
+              query['date'].$lte = filters.dateRange.to;
+            }
+          }
+
+          // Search filter (searches across multiple fields)
+          if (filters.search) {
+            const searchRegex = new RegExp(filters.search, 'i');
+            query.$or = [
+              { 'requestNumber': searchRegex },
+              { '品番': searchRegex },
+              { '背番号': searchRegex },
+              { 'status': searchRegex }
+            ];
+          }
+
+          console.log('NODA Requests Query:', JSON.stringify(query, null, 2));
+
+          // Build sort object
+          let sortObj = {};
+          if (sort.column) {
+            sortObj[sort.column] = sort.direction || 1;
+          } else {
+            sortObj['createdAt'] = -1; // Default sort by creation date descending
+          }
+
+          // Get total count for pagination
+          const totalCount = await requestsCollection.countDocuments(query);
+
+          // Get paginated data
+          const skip = (page - 1) * limit;
+          const requests = await requestsCollection
+            .find(query)
+            .sort(sortObj)
+            .skip(skip)
+            .limit(parseInt(limit))
+            .toArray();
+
+          // Calculate statistics
+          const statistics = await calculateNodaStatistics(requestsCollection, query);
+
+          res.json({
+            success: true,
+            data: requests,
+            statistics: statistics,
+            pagination: {
+              currentPage: page,
+              totalPages: Math.ceil(totalCount / limit),
+              totalItems: totalCount,
+              itemsPerPage: limit
+            }
+          });
+
+        } catch (error) {
+          console.error("Error in getNodaRequests:", error);
+          res.status(500).json({ error: "Failed to fetch requests", details: error.message });
+        }
+        break;
+
+      case 'getRequestById':
+        try {
+          if (!requestId) {
+            return res.status(400).json({ error: "Request ID is required" });
+          }
+
+          const request = await requestsCollection.findOne({ _id: new ObjectId(requestId) });
+          
+          if (!request) {
+            return res.status(404).json({ error: "Request not found" });
+          }
+
+          res.json({
+            success: true,
+            data: request
+          });
+
+        } catch (error) {
+          console.error("Error in getRequestById:", error);
+          res.status(500).json({ error: "Failed to fetch request", details: error.message });
+        }
+        break;
+
+      case 'createRequest':
+        try {
+          if (!data || !data.品番 || !data.背番号 || !data.quantity || !data.date) {
+            return res.status(400).json({ error: "Missing required fields" });
+          }
+
+          // Get user information from request (assuming it's passed in the data)
+          const userName = data.userName || 'Unknown User';
+
+          // Check two-stage inventory availability using aggregation pipeline
+          const pipeline = [
+            { $match: { 背番号: data.背番号 } },
+            {
+              $addFields: {
+                timeStampDate: {
+                  $cond: {
+                    if: { $type: "$timeStamp" },
+                    then: { $toDate: "$timeStamp" },
+                    else: new Date()
+                  }
+                }
+              }
+            },
+            { $sort: { timeStampDate: -1 } },
+            { $limit: 1 }
+          ];
+
+          const results = await inventoryCollection.aggregate(pipeline).toArray();
+          const inventoryItem = results.length > 0 ? results[0] : null;
+
+          if (!inventoryItem) {
+            return res.status(400).json({ error: "Item not found in inventory" });
+          }
+
+          // Check available quantity (not physical quantity)
+          const availableQuantity = inventoryItem.availableQuantity || inventoryItem.runningQuantity || 0;
+          if (availableQuantity < data.quantity) {
+            return res.status(400).json({ 
+              error: `Insufficient inventory. Available: ${availableQuantity}, Requested: ${data.quantity}` 
+            });
+          }
+
+          // Generate request number
+          const today = new Date().toISOString().split('T')[0].replace(/-/g, '');
+          const todayStart = new Date();
+          todayStart.setHours(0, 0, 0, 0);
+          const todayEnd = new Date();
+          todayEnd.setHours(23, 59, 59, 999);
+
+          const todayCount = await requestsCollection.countDocuments({
+            createdAt: {
+              $gte: todayStart,
+              $lte: todayEnd
+            }
+          });
+
+          const requestNumber = `NODAPO-${today}-${String(todayCount + 1).padStart(3, '0')}`;
+
+          // Create request
+          const newRequest = {
+            requestNumber: requestNumber,
+            品番: data.品番,
+            背番号: data.背番号,
+            date: data.date,
+            quantity: parseInt(data.quantity),
+            status: 'pending',
+            createdBy: userName,
+            createdAt: new Date(),
+            updatedAt: new Date()
+          };
+
+          const result = await requestsCollection.insertOne(newRequest);
+
+          // Insert two-stage inventory transaction record (banking style)
+          const currentPhysical = inventoryItem.physicalQuantity || inventoryItem.runningQuantity || 0;
+          const currentReserved = inventoryItem.reservedQuantity || 0;
+          const currentAvailable = inventoryItem.availableQuantity || inventoryItem.runningQuantity || 0;
+
+          const newReservedQuantity = currentReserved + parseInt(data.quantity);
+          const newAvailableQuantity = currentAvailable - parseInt(data.quantity);
+
+          const inventoryTransaction = {
+            背番号: data.背番号,
+            品番: data.品番,
+            timeStamp: new Date(),
+            Date: data.date,
+            
+            // Two-stage inventory fields
+            physicalQuantity: currentPhysical, // Physical stock unchanged
+            reservedQuantity: newReservedQuantity, // Increase reserved
+            availableQuantity: newAvailableQuantity, // Decrease available
+            
+            // Legacy field for compatibility
+            runningQuantity: newAvailableQuantity,
+            lastQuantity: currentAvailable,
+            
+            action: `Reservation (+${data.quantity})`,
+            source: `Freya Admin - ${userName}`,
+            requestId: result.insertedId.toString(),
+            note: `Reserved ${data.quantity} units for picking request ${requestNumber}`
+          };
+
+          await inventoryCollection.insertOne(inventoryTransaction);
+
+          res.json({
+            success: true,
+            data: { ...newRequest, _id: result.insertedId }
+          });
+
+        } catch (error) {
+          console.error("Error in createRequest:", error);
+          res.status(500).json({ error: "Failed to create request", details: error.message });
+        }
+        break;
+
+      case 'bulkCreateRequests':
+        try {
+          if (!data || !Array.isArray(data) || data.length === 0) {
+            return res.status(400).json({ error: "No requests data provided" });
+          }
+
+          // Get user information from request body
+          const userName = req.body.userName || 'Unknown User';
+
+          let successCount = 0;
+          let failedCount = 0;
+          const errors = [];
+
+          // Get today's count for request numbering
+          const today = new Date().toISOString().split('T')[0].replace(/-/g, '');
+          const todayStart = new Date();
+          todayStart.setHours(0, 0, 0, 0);
+          const todayEnd = new Date();
+          todayEnd.setHours(23, 59, 59, 999);
+
+          let todayCount = await requestsCollection.countDocuments({
+            createdAt: {
+              $gte: todayStart,
+              $lte: todayEnd
+            }
+          });
+
+          for (const requestData of data) {
+            try {
+              // Validate required fields
+              if (!requestData.品番 || !requestData.背番号 || !requestData.quantity || !requestData.Date) {
+                failedCount++;
+                errors.push(`Missing required fields for ${requestData.背番号}`);
+                continue;
+              }
+
+              // Check inventory using aggregation pipeline
+              const pipeline = [
+                { $match: { 背番号: requestData.背番号 } },
+                {
+                  $addFields: {
+                    timeStampDate: {
+                      $cond: {
+                        if: { $type: "$timeStamp" },
+                        then: { $toDate: "$timeStamp" },
+                        else: new Date()
+                      }
+                    }
+                  }
+                },
+                { $sort: { timeStampDate: -1 } },
+                { $limit: 1 }
+              ];
+
+              const results = await inventoryCollection.aggregate(pipeline).toArray();
+              const inventoryItem = results.length > 0 ? results[0] : null;
+
+              if (!inventoryItem) {
+                failedCount++;
+                errors.push(`${requestData.背番号} not found in inventory`);
+                continue;
+              }
+
+              // Check available quantity (not physical quantity)
+              const availableQuantity = inventoryItem.availableQuantity || inventoryItem.runningQuantity || 0;
+              if (availableQuantity < parseInt(requestData.quantity)) {
+                failedCount++;
+                errors.push(`${requestData.背番号} insufficient inventory (Available: ${availableQuantity}, Requested: ${requestData.quantity})`);
+                continue;
+              }
+
+              // Generate request number
+              todayCount++;
+              const requestNumber = `NODAPO-${today}-${String(todayCount).padStart(3, '0')}`;
+
+              // Create request
+              const newRequest = {
+                requestNumber: requestNumber,
+                品番: requestData.品番,
+                背番号: requestData.背番号,
+                date: requestData.Date,
+                quantity: parseInt(requestData.quantity),
+                status: 'pending',
+                createdBy: userName,
+                createdAt: new Date(),
+                updatedAt: new Date()
+              };
+
+              await requestsCollection.insertOne(newRequest);
+
+              // Insert two-stage inventory transaction record (banking style)
+              const currentPhysical = inventoryItem.physicalQuantity || inventoryItem.runningQuantity || 0;
+              const currentReserved = inventoryItem.reservedQuantity || 0;
+              const currentAvailable = inventoryItem.availableQuantity || inventoryItem.runningQuantity || 0;
+
+              const newReservedQuantity = currentReserved + parseInt(requestData.quantity);
+              const newAvailableQuantity = currentAvailable - parseInt(requestData.quantity);
+
+              const inventoryTransaction = {
+                背番号: requestData.背番号,
+                品番: requestData.品番,
+                timeStamp: new Date(),
+                Date: requestData.Date,
+                
+                // Two-stage inventory fields
+                physicalQuantity: currentPhysical, // Physical stock unchanged
+                reservedQuantity: newReservedQuantity, // Increase reserved
+                availableQuantity: newAvailableQuantity, // Decrease available
+                
+                // Legacy field for compatibility
+                runningQuantity: newAvailableQuantity,
+                lastQuantity: currentAvailable,
+                
+                action: `Reservation (+${requestData.quantity})`,
+                source: `Freya Admin - ${userName}`,
+                requestId: newRequest._id ? newRequest._id.toString() : 'bulk',
+                note: `Reserved ${requestData.quantity} units for picking request ${requestNumber}`
+              };
+
+              await inventoryCollection.insertOne(inventoryTransaction);
+
+              successCount++;
+
+            } catch (error) {
+              failedCount++;
+              errors.push(`${requestData.背番号}: ${error.message}`);
+            }
+          }
+
+          res.json({
+            success: true,
+            successCount: successCount,
+            failedCount: failedCount,
+            errors: errors
+          });
+
+        } catch (error) {
+          console.error("Error in bulkCreateRequests:", error);
+          res.status(500).json({ error: "Failed to create bulk requests", details: error.message });
+        }
+        break;
+
+      case 'updateRequest':
+        try {
+          if (!requestId || !data) {
+            return res.status(400).json({ error: "Request ID and data are required" });
+          }
+
+          // If quantity or back number changed, check inventory
+          if (data.quantity || data.背番号) {
+            const existingRequest = await requestsCollection.findOne({ _id: new ObjectId(requestId) });
+            const backNumber = data.背番号 || existingRequest.背番号;
+            const quantity = data.quantity || existingRequest.quantity;
+
+            // Check inventory using aggregation pipeline
+            const pipeline = [
+              { $match: { 背番号: backNumber } },
+              {
+                $addFields: {
+                  timeStampDate: {
+                    $cond: {
+                      if: { $type: "$timeStamp" },
+                      then: { $toDate: "$timeStamp" },
+                      else: new Date()
+                    }
+                  }
+                }
+              },
+              { $sort: { timeStampDate: -1 } },
+              { $limit: 1 }
+            ];
+
+            const results = await inventoryCollection.aggregate(pipeline).toArray();
+            const inventoryItem = results.length > 0 ? results[0] : null;
+
+            if (!inventoryItem) {
+              return res.status(400).json({ error: "Item not found in inventory" });
+            }
+
+            const availableQuantity = inventoryItem.availableQuantity || inventoryItem.runningQuantity || 0;
+            if (availableQuantity < quantity) {
+              return res.status(400).json({ 
+                error: `Insufficient inventory. Available: ${availableQuantity}, Requested: ${quantity}` 
+              });
+            }
+          }
+
+          const updateData = {
+            ...data,
+            updatedAt: new Date()
+          };
+
+          const result = await requestsCollection.updateOne(
+            { _id: new ObjectId(requestId) },
+            { $set: updateData }
+          );
+
+          if (result.matchedCount === 0) {
+            return res.status(404).json({ error: "Request not found" });
+          }
+
+          res.json({ success: true });
+
+        } catch (error) {
+          console.error("Error in updateRequest:", error);
+          res.status(500).json({ error: "Failed to update request", details: error.message });
+        }
+        break;
+
+      case 'changeRequestStatus':
+        try {
+          if (!requestId || !data || !data.status) {
+            return res.status(400).json({ error: "Request ID and status are required" });
+          }
+
+          const request = await requestsCollection.findOne({ _id: new ObjectId(requestId) });
+          if (!request) {
+            return res.status(404).json({ error: "Request not found" });
+          }
+
+          const userName = data.userName || 'Unknown User';
+          const oldStatus = request.status;
+          const newStatus = data.status;
+
+          // Handle inventory changes based on status transition
+          if (oldStatus !== newStatus) {
+            // Get current inventory using aggregation pipeline
+            const pipeline = [
+              { $match: { 背番号: request.背番号 } },
+              {
+                $addFields: {
+                  timeStampDate: {
+                    $cond: {
+                      if: { $type: "$timeStamp" },
+                      then: { $toDate: "$timeStamp" },
+                      else: new Date()
+                    }
+                  }
+                }
+              },
+              { $sort: { timeStampDate: -1 } },
+              { $limit: 1 }
+            ];
+
+            const results = await inventoryCollection.aggregate(pipeline).toArray();
+            const inventoryItem = results.length > 0 ? results[0] : null;
+
+            if (inventoryItem) {
+              const currentPhysical = inventoryItem.physicalQuantity || inventoryItem.runningQuantity || 0;
+              const currentReserved = inventoryItem.reservedQuantity || 0;
+              const currentAvailable = inventoryItem.availableQuantity || inventoryItem.runningQuantity || 0;
+
+              let newPhysical = currentPhysical;
+              let newReserved = currentReserved;
+              let newAvailable = currentAvailable;
+              let action = '';
+              let note = '';
+
+              // Handle different status transitions
+              if (newStatus === 'complete' && (oldStatus === 'pending' || oldStatus === 'active')) {
+                // Completing pickup: reduce physical and reserved quantities
+                newPhysical = currentPhysical - request.quantity;
+                newReserved = Math.max(0, currentReserved - request.quantity);
+                // Available stays the same (already reduced when request was created)
+                action = `Picking Completed (-${request.quantity})`;
+                note = `Physically picked ${request.quantity} units for request ${request.requestNumber}`;
+
+              } else if (newStatus === 'failed' && (oldStatus === 'pending' || oldStatus === 'active')) {
+                // Failed pickup: restore available, reduce reserved
+                newReserved = Math.max(0, currentReserved - request.quantity);
+                newAvailable = currentAvailable + request.quantity;
+                // Physical stays the same (nothing was actually picked)
+                action = `Picking Failed (Restored +${request.quantity})`;
+                note = `Failed to pick ${request.quantity} units, restored to available inventory`;
+
+              } else if (newStatus === 'active' && oldStatus === 'pending') {
+                // No inventory change, just status update
+                action = `Status Change: ${oldStatus} → ${newStatus}`;
+                note = `Request ${request.requestNumber} status changed to active`;
+
+              } else {
+                // Other status changes that don't affect inventory
+                action = `Status Change: ${oldStatus} → ${newStatus}`;
+                note = `Request ${request.requestNumber} status updated`;
+              }
+
+              // Create inventory transaction if there was a quantity change
+              if (newPhysical !== currentPhysical || newReserved !== currentReserved || newAvailable !== currentAvailable) {
+                const statusTransaction = {
+                  背番号: request.背番号,
+                  品番: request.品番,
+                  timeStamp: new Date(),
+                  Date: new Date().toISOString().split('T')[0],
+                  
+                  // Two-stage inventory fields
+                  physicalQuantity: newPhysical,
+                  reservedQuantity: newReserved,
+                  availableQuantity: newAvailable,
+                  
+                  // Legacy field for compatibility
+                  runningQuantity: newAvailable,
+                  lastQuantity: currentAvailable,
+                  
+                  action: action,
+                  source: `Freya Admin - ${userName}`,
+                  requestId: requestId,
+                  note: note
+                };
+
+                await inventoryCollection.insertOne(statusTransaction);
+              }
+            }
+          }
+
+          // Update request status
+          const updateData = {
+            status: newStatus,
+            updatedAt: new Date(),
+            updatedBy: userName
+          };
+
+          if (newStatus === 'complete') {
+            updateData.completedAt = new Date();
+          }
+
+          const result = await requestsCollection.updateOne(
+            { _id: new ObjectId(requestId) },
+            { $set: updateData }
+          );
+
+          if (result.matchedCount === 0) {
+            return res.status(404).json({ error: "Request not found" });
+          }
+
+          res.json({ 
+            success: true,
+            message: `Request status changed from ${oldStatus} to ${newStatus}`
+          });
+
+        } catch (error) {
+          console.error("Error in changeRequestStatus:", error);
+          res.status(500).json({ error: "Failed to change request status", details: error.message });
+        }
+        break;
+
+      case 'deleteRequest':
+        try {
+          if (!requestId) {
+            return res.status(400).json({ error: "Request ID is required" });
+          }
+
+          // Get the request details first
+          const request = await requestsCollection.findOne({ _id: new ObjectId(requestId) });
+          if (!request) {
+            return res.status(404).json({ error: "Request not found" });
+          }
+
+          // Only restore inventory if request is still pending/active (not completed)
+          if (request.status === 'pending' || request.status === 'active') {
+            // Get current inventory state using aggregation pipeline
+            const pipeline = [
+              { $match: { 背番号: request.背番号 } },
+              {
+                $addFields: {
+                  timeStampDate: {
+                    $cond: {
+                      if: { $type: "$timeStamp" },
+                      then: { $toDate: "$timeStamp" },
+                      else: new Date()
+                    }
+                  }
+                }
+              },
+              { $sort: { timeStampDate: -1 } },
+              { $limit: 1 }
+            ];
+
+            const results = await inventoryCollection.aggregate(pipeline).toArray();
+            const inventoryItem = results.length > 0 ? results[0] : null;
+
+            if (inventoryItem) {
+              // Get user information for transaction
+              const userName = req.body.userName || 'Unknown User';
+
+              // Create inventory restoration transaction
+              const currentPhysical = inventoryItem.physicalQuantity || inventoryItem.runningQuantity || 0;
+              const currentReserved = inventoryItem.reservedQuantity || 0;
+              const currentAvailable = inventoryItem.availableQuantity || inventoryItem.runningQuantity || 0;
+
+              const newReservedQuantity = Math.max(0, currentReserved - request.quantity);
+              const newAvailableQuantity = currentAvailable + request.quantity;
+
+              const restorationTransaction = {
+                背番号: request.背番号,
+                品番: request.品番,
+                timeStamp: new Date(),
+                Date: new Date().toISOString().split('T')[0],
+                
+                // Two-stage inventory fields
+                physicalQuantity: currentPhysical, // Physical stock unchanged
+                reservedQuantity: newReservedQuantity, // Decrease reserved
+                availableQuantity: newAvailableQuantity, // Increase available
+                
+                // Legacy field for compatibility
+                runningQuantity: newAvailableQuantity,
+                lastQuantity: currentAvailable,
+                
+                action: `Reservation Cancelled (-${request.quantity})`,
+                source: `Freya Admin - ${userName}`,
+                requestId: requestId,
+                note: `Restored ${request.quantity} units from cancelled request ${request.requestNumber}`
+              };
+
+              await inventoryCollection.insertOne(restorationTransaction);
+            }
+          }
+
+          // Delete the request
+          const result = await requestsCollection.deleteOne({ _id: new ObjectId(requestId) });
+
+          res.json({ 
+            success: true,
+            message: request.status === 'pending' || request.status === 'active' 
+              ? `Request deleted and ${request.quantity} units restored to inventory`
+              : 'Request deleted (no inventory restoration for completed requests)'
+          });
+
+        } catch (error) {
+          console.error("Error in deleteRequest:", error);
+          res.status(500).json({ error: "Failed to delete request", details: error.message });
+        }
+        break;
+
+      case 'getFilterOptions':
+        try {
+          // Use aggregation instead of distinct for API Version 1 compatibility
+          const partNumbersResult = await requestsCollection.aggregate([
+            { $group: { _id: "$品番" } },
+            { $match: { _id: { $ne: null, $ne: "" } } },
+            { $sort: { _id: 1 } }
+          ]).toArray();
+
+          const backNumbersResult = await requestsCollection.aggregate([
+            { $group: { _id: "$背番号" } },
+            { $match: { _id: { $ne: null, $ne: "" } } },
+            { $sort: { _id: 1 } }
+          ]).toArray();
+
+          const partNumbers = partNumbersResult.map(item => item._id);
+          const backNumbers = backNumbersResult.map(item => item._id);
+
+          res.json({
+            success: true,
+            data: {
+              partNumbers: partNumbers,
+              backNumbers: backNumbers
+            }
+          });
+
+        } catch (error) {
+          console.error("Error in getFilterOptions:", error);
+          res.status(500).json({ error: "Failed to fetch filter options", details: error.message });
+        }
+        break;
+
+      case 'checkInventory':
+        try {
+          const { 背番号 } = req.body;
+          
+          if (!背番号) {
+            return res.status(400).json({ error: "背番号 is required" });
+          }
+
+          // Use aggregation pipeline to ensure we get the absolute latest record
+          const pipeline = [
+            // Match the specific back number
+            { $match: { 背番号: 背番号 } },
+            // Convert timeStamp to Date for proper sorting
+            {
+              $addFields: {
+                timeStampDate: {
+                  $cond: {
+                    if: { $type: "$timeStamp" },
+                    then: { $toDate: "$timeStamp" },
+                    else: new Date()
+                  }
+                }
+              }
+            },
+            // Sort by timestamp (newest first)
+            { $sort: { timeStampDate: -1 } },
+            // Get only the first (latest) record
+            { $limit: 1 }
+          ];
+
+          const results = await inventoryCollection.aggregate(pipeline).toArray();
+          const inventoryItem = results.length > 0 ? results[0] : null;
+
+          if (!inventoryItem) {
+            return res.json({ success: false, message: "Item not found in inventory" });
+          }
+
+          // Return two-stage inventory information
+          const inventoryInfo = {
+            背番号: inventoryItem.背番号,
+            品番: inventoryItem.品番,
+            physicalQuantity: inventoryItem.physicalQuantity || inventoryItem.runningQuantity || 0,
+            reservedQuantity: inventoryItem.reservedQuantity || 0,
+            availableQuantity: inventoryItem.availableQuantity || inventoryItem.runningQuantity || 0,
+            lastUpdated: inventoryItem.timeStamp,
+            
+            // Legacy field for compatibility
+            runningQuantity: inventoryItem.availableQuantity || inventoryItem.runningQuantity || 0
+          };
+
+          console.log(`🔍 checkInventory for ${背番号}:`, inventoryInfo); // Debug log
+
+          res.json({
+            success: true,
+            inventory: inventoryInfo,
+            message: `Physical: ${inventoryInfo.physicalQuantity}, Reserved: ${inventoryInfo.reservedQuantity}, Available: ${inventoryInfo.availableQuantity}`
+          });
+
+        } catch (error) {
+          console.error("Error in checkInventory:", error);
+          res.status(500).json({ error: "Failed to check inventory", details: error.message });
+        }
+        break;
+
+      case 'lookupMasterData':
+        try {
+          const { 品番, 背番号 } = req.body;
+          
+          if (!品番 && !背番号) {
+            return res.status(400).json({ error: "Either 品番 or 背番号 is required" });
+          }
+
+          // Connect to master database
+          const masterDb = client.db("Sasaki_Coating_MasterDB");
+          const masterCollection = masterDb.collection("masterDB");
+
+          let query = {};
+          if (品番) {
+            query.品番 = 品番;
+          } else if (背番号) {
+            query.背番号 = 背番号;
+          }
+
+          const masterItem = await masterCollection.findOne(query);
+
+          if (!masterItem) {
+            return res.json({ 
+              success: false, 
+              message: `No master data found for ${品番 ? '品番: ' + 品番 : '背番号: ' + 背番号}` 
+            });
+          }
+
+          res.json({
+            success: true,
+            data: {
+              品番: masterItem.品番,
+              背番号: masterItem.背番号,
+              品名: masterItem.品名,
+              モデル: masterItem.モデル,
+              形状: masterItem.形状,
+              色: masterItem.色
+            }
+          });
+
+        } catch (error) {
+          console.error("Error in lookupMasterData:", error);
+          res.status(500).json({ error: "Failed to lookup master data", details: error.message });
+        }
+        break;
+
+      case 'exportRequests':
+        try {
+          // Build query from filters (same as getNodaRequests)
+          let query = {};
+
+          if (filters.status) {
+            query.status = filters.status;
+          }
+
+          if (filters['品番']) {
+            query['品番'] = filters['品番'];
+          }
+
+          if (filters['背番号']) {
+            query['背番号'] = filters['背番号'];
+          }
+
+          if (filters.dateRange) {
+            query['date'] = {};
+            if (filters.dateRange.from) {
+              query['date'].$gte = filters.dateRange.from;
+            }
+            if (filters.dateRange.to) {
+              query['date'].$lte = filters.dateRange.to;
+            }
+          }
+
+          if (filters.search) {
+            const searchRegex = new RegExp(filters.search, 'i');
+            query.$or = [
+              { 'requestNumber': searchRegex },
+              { '品番': searchRegex },
+              { '背番号': searchRegex },
+              { 'status': searchRegex }
+            ];
+          }
+
+          // Get all matching requests (no pagination for export)
+          const requests = await requestsCollection
+            .find(query)
+            .sort({ createdAt: -1 })
+            .toArray();
+
+          res.json({
+            success: true,
+            data: requests
+          });
+
+        } catch (error) {
+          console.error("Error in exportRequests:", error);
+          res.status(500).json({ error: "Failed to export requests", details: error.message });
+        }
+        break;
+
+      default:
+        res.status(400).json({ error: "Invalid action" });
+    }
+
+  } catch (error) {
+    console.error("Error in NODA requests API:", error);
+    res.status(500).json({ error: "Internal server error", details: error.message });
+  }
+});
+
+/**
+ * Calculate NODA statistics
+ */
+async function calculateNodaStatistics(collection, baseQuery = {}) {
+  try {
+    const stats = await collection.aggregate([
+      { $match: baseQuery },
+      {
+        $group: {
+          _id: "$status",
+          count: { $sum: 1 }
+        }
+      }
+    ]).toArray();
+
+    const statistics = {
+      pending: 0,
+      active: 0,
+      complete: 0,
+      failed: 0
+    };
+
+    stats.forEach(stat => {
+      if (statistics.hasOwnProperty(stat._id)) {
+        statistics[stat._id] = stat.count;
+      }
+    });
+
+    return statistics;
+  } catch (error) {
+    console.error("Error calculating NODA statistics:", error);
+    return { pending: 0, active: 0, complete: 0, failed: 0 };
+  }
 }
-*/
+
+// ==================== END OF NODA API ROUTES ====================
+
+
+
+// ==================== INVENTORY MANAGEMENT API ROUTES ====================
+// Copy this entire section to your server.js file
+
+// Inventory Management API Route
+app.post("/api/inventory-management", async (req, res) => {
+  const { action, filters = {}, page = 1, limit = 10, sort = {}, 背番号 } = req.body;
+
+  try {
+    await client.connect();
+    const db = client.db("submittedDB");
+    const inventoryCollection = db.collection("nodaInventoryDB");
+
+    switch (action) {
+      case 'getInventoryData':
+        try {
+          // Get latest inventory state for each unique 背番号
+          const pipeline = [
+            // First convert timeStamp to Date for proper sorting
+            {
+              $addFields: {
+                timeStampDate: {
+                  $cond: {
+                    if: { $type: "$timeStamp" },
+                    then: { $toDate: "$timeStamp" },
+                    else: new Date()
+                  }
+                }
+              }
+            },
+            // Sort by 背番号 and timestamp (newest first)
+            {
+              $sort: { 背番号: 1, timeStampDate: -1 }
+            },
+            // Group by 背番号 and get the latest record
+            {
+              $group: {
+                _id: "$背番号",
+                latestRecord: { $first: "$$ROOT" }
+              }
+            },
+            // Replace root with the latest record
+            {
+              $replaceRoot: { newRoot: "$latestRecord" }
+            }
+          ];
+
+          // Apply filters if provided
+          const matchStage = {};
+          if (filters['品番']) {
+            matchStage['品番'] = filters['品番'];
+          }
+          if (filters['背番号']) {
+            matchStage['背番号'] = filters['背番号'];
+          }
+          if (filters.search) {
+            const searchRegex = new RegExp(filters.search, 'i');
+            matchStage.$or = [
+              { '品番': searchRegex },
+              { '背番号': searchRegex }
+            ];
+          }
+
+          // Add match stage if filters exist
+          if (Object.keys(matchStage).length > 0) {
+            pipeline.unshift({ $match: matchStage });
+          }
+
+          // Get filtered results
+          const inventoryItems = await inventoryCollection.aggregate(pipeline).toArray();
+          
+          // Debug logging
+          console.log(`📊 Found ${inventoryItems.length} inventory items`);
+          if (inventoryItems.length > 0) {
+            console.log('📝 Sample inventory item:', JSON.stringify(inventoryItems[0], null, 2));
+          }
+
+          // Calculate summary statistics
+          const summary = calculateInventorySummary(inventoryItems);
+
+          // Apply sorting
+          if (sort.column) {
+            inventoryItems.sort((a, b) => {
+              let aVal = a[sort.column];
+              let bVal = b[sort.column];
+              
+              // Handle numeric fields
+              if (['physicalQuantity', 'reservedQuantity', 'availableQuantity', 'runningQuantity'].includes(sort.column)) {
+                aVal = Number(aVal) || 0;
+                bVal = Number(bVal) || 0;
+              }
+              
+              // Handle date fields
+              if (['timeStamp', 'lastUpdated'].includes(sort.column)) {
+                aVal = new Date(aVal || 0);
+                bVal = new Date(bVal || 0);
+              }
+              
+              if (aVal < bVal) return -sort.direction;
+              if (aVal > bVal) return sort.direction;
+              return 0;
+            });
+          }
+
+          // Apply pagination
+          const totalItems = inventoryItems.length;
+          const totalPages = Math.ceil(totalItems / limit);
+          const startIndex = (page - 1) * limit;
+          const endIndex = startIndex + limit;
+          const paginatedItems = inventoryItems.slice(startIndex, endIndex);
+
+          // Format data for frontend
+          const formattedItems = paginatedItems.map(item => ({
+            品番: item.品番,
+            背番号: item.背番号,
+            physicalQuantity: item.physicalQuantity || item.runningQuantity || 0,
+            reservedQuantity: item.reservedQuantity || 0,
+            availableQuantity: item.availableQuantity || item.runningQuantity || 0,
+            lastUpdated: item.timeStamp
+          }));
+
+          res.json({
+            success: true,
+            data: formattedItems,
+            summary: summary,
+            pagination: {
+              currentPage: page,
+              totalPages: totalPages,
+              totalItems: totalItems,
+              itemsPerPage: limit
+            }
+          });
+
+        } catch (error) {
+          console.error("Error in getInventoryData:", error);
+          res.status(500).json({ error: "Failed to fetch inventory data", details: error.message });
+        }
+        break;
+
+      case 'getItemTransactions':
+        try {
+          if (!背番号) {
+            return res.status(400).json({ error: "背番号 is required" });
+          }
+
+          // Get all transactions for the specific item, sorted by timestamp (newest first)
+          const transactions = await inventoryCollection
+            .find({ 背番号: 背番号 })
+            .sort({ timeStamp: -1 })
+            .toArray();
+
+          if (transactions.length === 0) {
+            return res.json({
+              success: true,
+              data: [],
+              message: `No transactions found for ${背番号}`
+            });
+          }
+
+          res.json({
+            success: true,
+            data: transactions
+          });
+
+        } catch (error) {
+          console.error("Error in getItemTransactions:", error);
+          res.status(500).json({ error: "Failed to fetch item transactions", details: error.message });
+        }
+        break;
+
+      case 'getFilterOptions':
+        try {
+          // Get unique values for filters from latest inventory records
+          const pipeline = [
+            {
+              $sort: { 背番号: 1, timeStamp: -1 }
+            },
+            {
+              $group: {
+                _id: "$背番号",
+                latestRecord: { $first: "$$ROOT" }
+              }
+            },
+            {
+              $replaceRoot: { newRoot: "$latestRecord" }
+            }
+          ];
+
+          const latestInventory = await inventoryCollection.aggregate(pipeline).toArray();
+
+          const partNumbers = [...new Set(latestInventory.map(item => item.品番).filter(Boolean))].sort();
+          const backNumbers = [...new Set(latestInventory.map(item => item.背番号).filter(Boolean))].sort();
+
+          res.json({
+            success: true,
+            data: {
+              partNumbers: partNumbers,
+              backNumbers: backNumbers
+            }
+          });
+
+        } catch (error) {
+          console.error("Error in getFilterOptions:", error);
+          res.status(500).json({ error: "Failed to fetch filter options", details: error.message });
+        }
+        break;
+
+      case 'exportInventoryData':
+        try {
+          // Get latest inventory state for all items (no pagination for export)
+          const pipeline = [
+            {
+              $sort: { 背番号: 1, timeStamp: -1 }
+            },
+            {
+              $group: {
+                _id: "$背番号",
+                latestRecord: { $first: "$$ROOT" }
+              }
+            },
+            {
+              $replaceRoot: { newRoot: "$latestRecord" }
+            }
+          ];
+
+          // Apply filters if provided
+          const matchStage = {};
+          if (filters['品番']) {
+            matchStage['品番'] = filters['品番'];
+          }
+          if (filters['背番号']) {
+            matchStage['背番号'] = filters['背番号'];
+          }
+          if (filters.search) {
+            const searchRegex = new RegExp(filters.search, 'i');
+            matchStage.$or = [
+              { '品番': searchRegex },
+              { '背番号': searchRegex }
+            ];
+          }
+
+          if (Object.keys(matchStage).length > 0) {
+            pipeline.unshift({ $match: matchStage });
+          }
+
+          const inventoryItems = await inventoryCollection.aggregate(pipeline).toArray();
+
+          // Format data for export
+          const exportData = inventoryItems.map(item => ({
+            品番: item.品番,
+            背番号: item.背番号,
+            physicalQuantity: item.physicalQuantity || item.runningQuantity || 0,
+            reservedQuantity: item.reservedQuantity || 0,
+            availableQuantity: item.availableQuantity || item.runningQuantity || 0,
+            lastUpdated: item.timeStamp
+          }));
+
+          res.json({
+            success: true,
+            data: exportData
+          });
+
+        } catch (error) {
+          console.error("Error in exportInventoryData:", error);
+          res.status(500).json({ error: "Failed to export inventory data", details: error.message });
+        }
+        break;
+
+      default:
+        res.status(400).json({ error: "Invalid action" });
+    }
+
+  } catch (error) {
+    console.error("Error in inventory management API:", error);
+    res.status(500).json({ error: "Internal server error", details: error.message });
+  }
+});
+
+/**
+ * Calculate inventory summary statistics
+ */
+function calculateInventorySummary(inventoryItems) {
+  const summary = {
+    totalItems: inventoryItems.length,
+    totalPhysicalStock: 0,
+    totalReservedStock: 0,
+    totalAvailableStock: 0
+  };
+
+  inventoryItems.forEach(item => {
+    summary.totalPhysicalStock += item.physicalQuantity || item.runningQuantity || 0;
+    summary.totalReservedStock += item.reservedQuantity || 0;
+    summary.totalAvailableStock += item.availableQuantity || item.runningQuantity || 0;
+  });
+
+  return summary;
+}
+
+// Add Inventory API Route
+app.post("/api/inventory/add", async (req, res) => {
+  try {
+    const { 品番, 背番号, physicalQuantityChange, action, source, Date, timeStamp } = req.body;
+
+    // Validation
+    if (!品番 || !背番号 || !physicalQuantityChange || physicalQuantityChange <= 0) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Missing required fields: 品番, 背番号, and physicalQuantityChange (must be > 0)" 
+      });
+    }
+
+    if (!action || !source || !Date) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Missing required fields: action, source, and Date" 
+      });
+    }
+
+    await client.connect();
+    const db = client.db("submittedDB");
+    const inventoryCollection = db.collection("nodaInventoryDB");
+
+    // Get current inventory state for this item
+    const currentInventory = await inventoryCollection.findOne(
+      { 背番号: 背番号 },
+      { sort: { timeStamp: -1 } }
+    );
+
+    const currentPhysicalQuantity = currentInventory ? (currentInventory.physicalQuantity || currentInventory.runningQuantity || 0) : 0;
+    const currentReservedQuantity = currentInventory ? (currentInventory.reservedQuantity || 0) : 0;
+
+    // Calculate new quantities
+    const newPhysicalQuantity = currentPhysicalQuantity + physicalQuantityChange;
+    const newAvailableQuantity = newPhysicalQuantity - currentReservedQuantity;
+
+    // Create new inventory transaction record
+    const inventoryTransaction = {
+      背番号: 背番号,
+      品番: 品番,
+      timeStamp: timeStamp || new Date(),
+      Date: Date,
+      physicalQuantity: newPhysicalQuantity,
+      reservedQuantity: currentReservedQuantity,
+      availableQuantity: newAvailableQuantity,
+      runningQuantity: newPhysicalQuantity, // For backward compatibility
+      lastQuantity: currentPhysicalQuantity,
+      action: `${action} (+${physicalQuantityChange})`,
+      source: source
+    };
+
+    // Insert the transaction
+    const insertResult = await inventoryCollection.insertOne(inventoryTransaction);
+
+    if (insertResult.acknowledged) {
+      res.json({
+        success: true,
+        message: `Successfully added ${physicalQuantityChange} units to inventory`,
+        data: {
+          品番: 品番,
+          背番号: 背番号,
+          previousPhysicalQuantity: currentPhysicalQuantity,
+          newPhysicalQuantity: newPhysicalQuantity,
+          availableQuantity: newAvailableQuantity
+        }
+      });
+    } else {
+      throw new Error("Failed to insert inventory transaction");
+    }
+
+  } catch (error) {
+    console.error("Error adding inventory:", error);
+    res.status(500).json({ 
+      success: false, 
+      message: "Internal server error", 
+      details: error.message 
+    });
+  }
+});
+
+// ==================== END OF INVENTORY MANAGEMENT API ROUTES ====================
+
+
+
+
+
+
+
 
 
 
