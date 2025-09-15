@@ -222,6 +222,24 @@
         </div>
     </div>
 
+    <!-- NC Machine Selection Modal -->
+    <div id="ncMachineModal" class="correction-list-modal">
+        <div class="correction-modal-content">
+            <h2>NC加工機器選択</h2>
+            <div style="display: flex; gap: 20px; justify-content: center; margin: 20px 0;">
+                <div class="card" style="cursor: pointer;" onclick="selectNCMachine('camera')">
+                    <img src="src/machines/NCC01.jpg" alt="カメラNC" style="width: 100px; height: 100px; object-fit: cover;">
+                    <div class="label">カメラNC</div>
+                </div>
+                <div class="card" style="cursor: pointer;" onclick="selectNCMachine('ncc01')">
+                    <img src="src/machines/NCC01.jpg" alt="NCC01" style="width: 100px; height: 100px; object-fit: cover;">
+                    <div class="label">NCC01</div>
+                </div>
+            </div>
+            <button class="close-modal" onclick="closeNCMachineModal()">キャンセル</button>
+        </div>
+    </div>
+
     <script>
         const urlParams = new URLSearchParams(window.location.search);
         const filterValue = urlParams.get('selected') || 'none';
@@ -341,6 +359,32 @@
         // Function to close correction modal
         function closeCorrectionModal() {
             document.getElementById('correctionModal').style.display = 'none';
+        }
+
+        // Function to show NC machine selection modal
+        function showNCMachineSelection(filterValue) {
+            const modal = document.getElementById('ncMachineModal');
+            modal.dataset.filterValue = filterValue; // Store the filter value for later use
+            modal.style.display = 'block';
+        }
+
+        // Function to close NC machine modal
+        function closeNCMachineModal() {
+            document.getElementById('ncMachineModal').style.display = 'none';
+        }
+
+        // Function to handle NC machine selection
+        function selectNCMachine(machineType) {
+            const modal = document.getElementById('ncMachineModal');
+            const filterValue = modal.dataset.filterValue;
+            
+            closeNCMachineModal();
+            
+            if (machineType === 'camera') {
+                window.location.href = `Press Cutting iReporter.html?filter=${filterValue}`;
+            } else if (machineType === 'ncc01') {
+                window.location.href = `chooseMachine.html?filter=${filterValue}`;
+            }
         }
 
         // Function to handle correction
@@ -1046,7 +1090,7 @@
                 const pressCard = document.createElement('div');
                 pressCard.classList.add('card');
                 pressCard.addEventListener('click', () => {
-                    window.location.href = `Press Cutting iReporter.html?filter=${filterValue}`;
+                    showNCMachineSelection(filterValue);
                 });
 
                 const pressImg = document.createElement('img');
