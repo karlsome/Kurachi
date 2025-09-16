@@ -6778,19 +6778,119 @@ app.post("/api/noda-requests", async (req, res) => {
             return res.status(400).json({ error: "This operation is only for bulk requests" });
           }
 
+          // Find the current line item
+          const currentLineItem = bulkRequest.lineItems.find(item => item.lineNumber === data.lineNumber);
+          if (!currentLineItem) {
+            return res.status(404).json({ error: "Line item not found" });
+          }
+
+          const currentStatus = currentLineItem.status;
+          const newStatus = data.status;
+
+          // Prevent admin from changing in-progress to completed (only ESP32/IoT device should do this)
+          if (currentStatus === 'in-progress' && newStatus === 'completed') {
+            return res.status(400).json({ 
+              error: "Cannot change status from 'in-progress' to 'completed' via admin interface. Only ESP32/IoT device can complete in-progress items to prevent inventory mismatches." 
+            });
+          }
+
+          // Handle inventory transactions when changing from completed to pending/in-progress
+          if (currentStatus === 'completed' && (newStatus === 'pending' || newStatus === 'in-progress')) {
+            console.log(`🔄 Reversing inventory transaction for line item ${data.lineNumber}: ${currentStatus} → ${newStatus}`);
+            
+            // Get current inventory state
+            const inventoryResults = await inventoryCollection.aggregate([
+              { $match: { 背番号: currentLineItem.背番号 } },
+              {
+                $addFields: {
+                  timeStampDate: {
+                    $cond: {
+                      if: { $type: "$timeStamp" },
+                      then: {
+                        $cond: {
+                          if: { $eq: [{ $type: "$timeStamp" }, "string"] },
+                          then: { $dateFromString: { dateString: "$timeStamp" } },
+                          else: "$timeStamp"
+                        }
+                      },
+                      else: new Date()
+                    }
+                  }
+                }
+              },
+              { $sort: { timeStampDate: -1 } },
+              { $limit: 1 }
+            ]).toArray();
+
+            if (inventoryResults.length > 0) {
+              const currentInventory = inventoryResults[0];
+              const quantity = currentLineItem.quantity;
+
+              // Calculate reversed inventory quantities
+              // When reversing a picking operation (completed → pending/in-progress), we need to:
+              // 1. Restore the physical quantity (items go back to stock)
+              // 2. Restore the reserved quantity (items become reserved again for this request)
+              // 3. Keep available quantity unchanged (items are reserved, not available for others)
+              
+              // From the original flow:
+              // - When reserved: physical unchanged, reserved increased, available decreased
+              // - When picked: physical decreased, reserved decreased, available unchanged
+              // - When reversing pick: physical increased, reserved increased, available unchanged
+              
+              const newPhysicalQuantity = (currentInventory.physicalQuantity || 0) + quantity;
+              const newReservedQuantity = (currentInventory.reservedQuantity || 0) + quantity;
+              const newAvailableQuantity = currentInventory.availableQuantity || 0; // Available stays the same
+
+              // Create reverse inventory transaction
+              const reverseTransaction = {
+                背番号: currentLineItem.背番号,
+                品番: currentLineItem.品番,
+                timeStamp: new Date(),
+                Date: new Date().toISOString().split('T')[0],
+                
+                // Two-stage inventory fields
+                physicalQuantity: newPhysicalQuantity,
+                reservedQuantity: newReservedQuantity,
+                availableQuantity: newAvailableQuantity,
+                
+                // Legacy field for compatibility
+                runningQuantity: newAvailableQuantity,
+                lastQuantity: currentInventory.physicalQuantity || 0,
+                
+                action: `Admin Status Reversal (+${quantity} physical, +${quantity} reserved)`,
+                source: `Freya Admin - Status Change (${currentStatus} → ${newStatus})`,
+                requestId: requestId,
+                bulkRequestNumber: bulkRequest.requestNumber,
+                lineNumber: data.lineNumber,
+                note: `Reversed picking transaction for request ${bulkRequest.requestNumber} line ${data.lineNumber}. Status changed from ${currentStatus} to ${newStatus}. Physical: ${currentInventory.physicalQuantity || 0} → ${newPhysicalQuantity}, Reserved: ${currentInventory.reservedQuantity || 0} → ${newReservedQuantity}`
+              };
+
+              await inventoryCollection.insertOne(reverseTransaction);
+              console.log(`✅ Inventory transaction reversed for ${currentLineItem.背番号}: +${quantity} units`);
+            } else {
+              console.warn(`⚠️ No inventory record found for ${currentLineItem.背番号}`);
+            }
+          }
+
           // Update the specific line item status
+          const updateFields = {
+            "lineItems.$.status": data.status,
+            "lineItems.$.updatedAt": new Date(),
+            updatedAt: new Date()
+          };
+
+          // Clear completion fields if moving away from completed status
+          if (currentStatus === 'completed' && newStatus !== 'completed') {
+            updateFields["lineItems.$.completedAt"] = null;
+            updateFields["lineItems.$.completedBy"] = null;
+          }
+
           const result = await requestsCollection.updateOne(
             { 
               _id: new ObjectId(requestId),
               "lineItems.lineNumber": data.lineNumber
             },
-            { 
-              $set: { 
-                "lineItems.$.status": data.status,
-                "lineItems.$.updatedAt": new Date(),
-                updatedAt: new Date()
-              }
-            }
+            { $set: updateFields }
           );
 
           if (result.matchedCount === 0) {
@@ -6803,29 +6903,66 @@ app.post("/api/noda-requests", async (req, res) => {
           const anyInProgress = updatedRequest.lineItems.some(item => item.status === 'in-progress');
 
           let newBulkStatus = updatedRequest.status;
+          let bulkUpdateFields = { updatedAt: new Date() };
+
           if (allCompleted) {
             newBulkStatus = 'completed';
+            if (updatedRequest.status !== 'completed') {
+              bulkUpdateFields.status = 'completed';
+              bulkUpdateFields.completedAt = new Date();
+            }
           } else if (anyInProgress) {
             newBulkStatus = 'in-progress';
+            if (updatedRequest.status !== 'in-progress') {
+              bulkUpdateFields.status = 'in-progress';
+              // Clear completion timestamp if moving away from completed
+              if (updatedRequest.status === 'completed') {
+                bulkUpdateFields.completedAt = null;
+              }
+            }
+          } else {
+            // All items are pending
+            newBulkStatus = 'pending';
+            if (updatedRequest.status !== 'pending') {
+              bulkUpdateFields.status = 'pending';
+              // Clear completion and start timestamps
+              bulkUpdateFields.completedAt = null;
+              bulkUpdateFields.startedAt = null;
+              bulkUpdateFields.startedBy = null;
+            }
           }
 
           // Update bulk request status if needed
-          if (newBulkStatus !== updatedRequest.status) {
+          if (Object.keys(bulkUpdateFields).length > 1) { // More than just updatedAt
+            const updateOperation = { $set: {} };
+            const unsetFields = {};
+            
+            // Separate fields to set vs unset
+            for (const [key, value] of Object.entries(bulkUpdateFields)) {
+              if (value === null) {
+                unsetFields[key] = "";
+              } else {
+                updateOperation.$set[key] = value;
+              }
+            }
+            
+            if (Object.keys(unsetFields).length > 0) {
+              updateOperation.$unset = unsetFields;
+            }
+            
             await requestsCollection.updateOne(
               { _id: new ObjectId(requestId) },
-              { 
-                $set: { 
-                  status: newBulkStatus,
-                  updatedAt: new Date()
-                }
-              }
+              updateOperation
             );
           }
 
           res.json({
             success: true,
             message: "Line item status updated successfully",
-            bulkStatus: newBulkStatus
+            previousStatus: currentStatus,
+            newStatus: data.status,
+            bulkStatus: newBulkStatus,
+            inventoryReversed: currentStatus === 'completed' && (newStatus === 'pending' || newStatus === 'in-progress')
           });
 
         } catch (error) {
@@ -7266,6 +7403,8 @@ async function calculateNodaStatistics(collection, baseQuery = {}) {
 }
 
 // ==================== END OF NODA API ROUTES ====================
+
+
 
 
 
