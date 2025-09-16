@@ -6391,6 +6391,205 @@ app.post("/api/noda-requests", async (req, res) => {
         }
         break;
 
+      case 'addItemsToRequest':
+        try {
+          if (!requestId || !data || !Array.isArray(data.items) || data.items.length === 0) {
+            return res.status(400).json({ error: "Request ID and items are required" });
+          }
+
+          // Get existing request
+          const existingRequest = await requestsCollection.findOne({ _id: new ObjectId(requestId) });
+          if (!existingRequest) {
+            return res.status(404).json({ error: "Request not found" });
+          }
+
+          // Check if request is still pending
+          if (existingRequest.status !== 'pending') {
+            return res.status(400).json({ 
+              error: `Cannot add items to request with status: ${existingRequest.status}. Only pending requests can be modified.` 
+            });
+          }
+
+          // Verify it's a bulk request
+          if (existingRequest.requestType !== 'bulk') {
+            return res.status(400).json({ error: "Can only add items to bulk requests" });
+          }
+
+          // Get user information
+          const userName = req.body.userName || 'Unknown User';
+
+          let failedItems = [];
+          let validItems = [];
+
+          // Validate all items and check inventory
+          for (const item of data.items) {
+            try {
+              // Validate required fields
+              if (!item.品番 || !item.背番号 || !item.quantity) {
+                failedItems.push({
+                  背番号: item.背番号 || 'Unknown',
+                  error: 'Missing required fields'
+                });
+                continue;
+              }
+
+              // Check if item already exists in this request
+              const existingLineItem = existingRequest.lineItems.find(lineItem => lineItem.背番号 === item.背番号);
+              if (existingLineItem) {
+                failedItems.push({
+                  背番号: item.背番号,
+                  error: 'Item already exists in this request'
+                });
+                continue;
+              }
+
+              // Check inventory using aggregation pipeline
+              const inventoryResults = await inventoryCollection.aggregate([
+                { $match: { 背番号: item.背番号 } },
+                {
+                  $addFields: {
+                    timeStampDate: {
+                      $cond: {
+                        if: { $type: "$timeStamp" },
+                        then: {
+                          $cond: {
+                            if: { $eq: [{ $type: "$timeStamp" }, "string"] },
+                            then: { $dateFromString: { dateString: "$timeStamp" } },
+                            else: "$timeStamp"
+                          }
+                        },
+                        else: new Date()
+                      }
+                    }
+                  }
+                },
+                { $sort: { timeStampDate: -1 } },
+                { $limit: 1 }
+              ]).toArray();
+
+              if (inventoryResults.length === 0) {
+                failedItems.push({
+                  背番号: item.背番号,
+                  error: 'Item not found in inventory'
+                });
+                continue;
+              }
+
+              const inventoryItem = inventoryResults[0];
+              const availableQuantity = inventoryItem.availableQuantity || inventoryItem.runningQuantity || 0;
+              
+              if (availableQuantity < parseInt(item.quantity)) {
+                failedItems.push({
+                  背番号: item.背番号,
+                  error: `Insufficient inventory (Available: ${availableQuantity}, Requested: ${item.quantity})`
+                });
+                continue;
+              }
+
+              // Item is valid
+              validItems.push({
+                ...item,
+                inventoryItem: inventoryItem,
+                availableQuantity: availableQuantity
+              });
+
+            } catch (error) {
+              failedItems.push({
+                背番号: item.背番号 || 'Unknown',
+                error: error.message
+              });
+            }
+          }
+
+          // If no valid items, return error
+          if (validItems.length === 0) {
+            return res.status(400).json({ 
+              success: false,
+              error: "No valid items to add",
+              failedItems: failedItems
+            });
+          }
+
+          // Get the next line number
+          const currentMaxLineNumber = Math.max(...existingRequest.lineItems.map(item => item.lineNumber));
+          
+          // Create new line items
+          const newLineItems = validItems.map((item, index) => ({
+            lineNumber: currentMaxLineNumber + index + 1,
+            品番: item.品番,
+            背番号: item.背番号,
+            quantity: parseInt(item.quantity),
+            status: 'pending',
+            createdAt: new Date(),
+            updatedAt: new Date()
+          }));
+
+          // Update the bulk request with new line items
+          const updateResult = await requestsCollection.updateOne(
+            { _id: new ObjectId(requestId) },
+            { 
+              $push: { lineItems: { $each: newLineItems } },
+              $set: { 
+                totalItems: existingRequest.totalItems + validItems.length,
+                updatedAt: new Date(),
+                lastModifiedBy: userName
+              }
+            }
+          );
+
+          if (updateResult.matchedCount === 0) {
+            return res.status(404).json({ error: "Failed to update request" });
+          }
+
+          // Process inventory transactions for all valid items
+          for (const item of validItems) {
+            const currentPhysical = item.inventoryItem.physicalQuantity || item.inventoryItem.runningQuantity || 0;
+            const currentReserved = item.inventoryItem.reservedQuantity || 0;
+            const currentAvailable = item.availableQuantity;
+
+            const newReservedQuantity = currentReserved + parseInt(item.quantity);
+            const newAvailableQuantity = currentAvailable - parseInt(item.quantity);
+
+            const inventoryTransaction = {
+              背番号: item.背番号,
+              品番: item.品番,
+              timeStamp: new Date(),
+              Date: existingRequest.pickupDate,
+              
+              // Two-stage inventory fields
+              physicalQuantity: currentPhysical, // Physical stock unchanged
+              reservedQuantity: newReservedQuantity, // Increase reserved
+              availableQuantity: newAvailableQuantity, // Decrease available
+              
+              // Legacy field for compatibility
+              runningQuantity: newAvailableQuantity,
+              lastQuantity: currentAvailable,
+              
+              action: `Additional Reservation (+${item.quantity})`,
+              source: `Freya Admin - ${userName}`,
+              requestId: requestId,
+              bulkRequestNumber: existingRequest.requestNumber,
+              note: `Added ${item.quantity} units to existing bulk picking request ${existingRequest.requestNumber}`
+            };
+
+            await inventoryCollection.insertOne(inventoryTransaction);
+          }
+
+          res.json({
+            success: true,
+            requestNumber: existingRequest.requestNumber,
+            addedItems: validItems.length,
+            failedItems: failedItems.length,
+            failedItemDetails: failedItems,
+            newLineItems: newLineItems
+          });
+
+        } catch (error) {
+          console.error("Error in addItemsToRequest:", error);
+          res.status(500).json({ error: "Failed to add items to request", details: error.message });
+        }
+        break;
+
       case 'updateRequest':
         try {
           if (!requestId || !data) {
@@ -6864,15 +7063,35 @@ app.post("/api/noda-requests", async (req, res) => {
             return res.status(400).json({ error: "背番号 is required" });
           }
 
-          const inventoryItem = await inventoryCollection.findOne({ 
-            背番号: 背番号 
-          }, { 
-            sort: { timeStamp: -1 } 
-          });
+          // Use aggregation pipeline for proper timestamp sorting (same as inventory management)
+          const inventoryResults = await inventoryCollection.aggregate([
+            { $match: { 背番号: 背番号 } },
+            {
+              $addFields: {
+                timeStampDate: {
+                  $cond: {
+                    if: { $type: "$timeStamp" },
+                    then: {
+                      $cond: {
+                        if: { $eq: [{ $type: "$timeStamp" }, "string"] },
+                        then: { $dateFromString: { dateString: "$timeStamp" } },
+                        else: "$timeStamp"
+                      }
+                    },
+                    else: new Date()
+                  }
+                }
+              }
+            },
+            { $sort: { timeStampDate: -1 } },
+            { $limit: 1 }
+          ]).toArray();
 
-          if (!inventoryItem) {
+          if (inventoryResults.length === 0) {
             return res.json({ success: false, message: "Item not found in inventory" });
           }
+
+          const inventoryItem = inventoryResults[0];
 
           // Return two-stage inventory information
           const inventoryInfo = {
@@ -6886,6 +7105,8 @@ app.post("/api/noda-requests", async (req, res) => {
             // Legacy field for compatibility
             runningQuantity: inventoryItem.availableQuantity || inventoryItem.runningQuantity || 0
           };
+
+          console.log(`📊 CheckInventory for ${背番号}: Physical=${inventoryInfo.physicalQuantity}, Reserved=${inventoryInfo.reservedQuantity}, Available=${inventoryInfo.availableQuantity}`);
 
           res.json({
             success: true,
@@ -7045,6 +7266,8 @@ async function calculateNodaStatistics(collection, baseQuery = {}) {
 }
 
 // ==================== END OF NODA API ROUTES ====================
+
+
 
 
 
