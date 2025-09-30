@@ -11,6 +11,9 @@ function debug(...args) {
   }
 }
 
+// Cache for DOM elements
+const domCache = {};
+
 // Local storage keys
 const STORAGE_KEYS = {
   PENDING_LOGS: 'labelComparator_pendingLogs',
@@ -296,15 +299,12 @@ window.addEventListener('offline', () => {
   uploadQueueProcessing = false;
 });
 
-// Cache for DOM elements
-const domCache = {};
-
 // Pre-initialize DOM elements
 document.addEventListener("DOMContentLoaded", () => {
   console.time('initialization');
   
   // Cache frequently used DOM elements
-  ['logList', 'scanStatus', 'alert-sound', 'welcomeModal', 'startButton', 
+  ['logList', 'scanStatus', 'alert-sound', 'success-sound', 'welcomeModal', 'startButton', 
    'customerQR', 'ourQR', 'result', 'mismatchModal'].forEach(id => {
     domCache[id] = document.getElementById(id);
   });
@@ -317,9 +317,12 @@ document.addEventListener("DOMContentLoaded", () => {
   // Show welcome modal on page load (immediately)
   welcomeModal.style.display = 'flex';
   
-  // Prepare audio element for faster response
+  // Prepare audio elements for faster response
   if (domCache['alert-sound']) {
     domCache['alert-sound'].load();
+  }
+  if (domCache['success-sound']) {
+    domCache['success-sound'].load();
   }
   
   // Handle start button click - optimized
@@ -339,11 +342,28 @@ document.addEventListener("DOMContentLoaded", () => {
       // Pre-load the sound
       audio.load();
       
-      // Try to play it silently
+      // Try to play it silently to initialize audio context
       audio.play().then(() => {
-        console.log("Audio successfully initialized");
+        console.log("Alert audio successfully initialized");
       }).catch(error => {
-        console.error("Audio initialization error:", error);
+        console.error("Alert audio initialization error:", error);
+      });
+    }
+    
+    // Initialize success sound with user interaction
+    if (domCache['success-sound']) {
+      const successAudio = domCache['success-sound'];
+      successAudio.muted = true;
+      successAudio.volume = 0;
+      
+      // Pre-load the success sound
+      successAudio.load();
+      
+      // Try to play it silently to initialize audio context
+      successAudio.play().then(() => {
+        console.log("Success audio successfully initialized");
+      }).catch(error => {
+        console.error("Success audio initialization error:", error);
       });
     }
     
@@ -670,11 +690,29 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Update UI based on match result
     if (isMatch) {
+      // Show match result
       result.textContent = "✅ 一致: " + customerProduct;
       result.className = "mt-6 text-center text-lg font-semibold text-green-600";
       
-      // Schedule auto-clear (only for matches)
-      setTimeout(() => clearFields(), 3000);
+      // Play success sound to indicate match
+      playSuccessSound();
+      
+      // Clear input fields immediately to prepare for next scan
+      // But keep the result message and success sound
+      if (domCache['customerQR']) domCache['customerQR'].value = "";
+      if (domCache['ourQR']) domCache['ourQR'].value = "";
+      
+      // Clear saved form data immediately
+      saveFormData({
+        customerQR: "",
+        ourQR: ""
+      });
+      
+      // After a brief delay, clear the result message too
+      setTimeout(() => {
+        if (domCache['result']) domCache['result'].textContent = "";
+        updateScanStatus("次のスキャンを待機中...");
+      }, 1500);
       
     } else {
       result.textContent = `❌ 不一致 お客様: ${customerProduct} 社内: ${ourProduct}`;
@@ -731,7 +769,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (alertSound) {
       // Unmute and play at full volume
       alertSound.muted = false;
-      alertSound.volume = 1;
+      alertSound.volume = 0.3;
       alertSound.currentTime = 0; // Reset to start
       
       // Use promise with timeout to prevent hanging
@@ -741,6 +779,27 @@ document.addEventListener("DOMContentLoaded", () => {
           console.error("Failed to play alert sound:", error);
           // Try once more with user interaction already present
           setTimeout(() => alertSound.play().catch(e => console.error("Retry failed:", e)), 100);
+        });
+      }
+    }
+  }
+  
+  // Play the success sound when QR codes match
+  function playSuccessSound() {
+    const successSound = domCache['success-sound'];
+    if (successSound) {
+      // Unmute and play at full volume
+      successSound.muted = false;
+      successSound.volume = 1.0; // Increased to full volume to be more audible
+      successSound.currentTime = 0; // Reset to start
+      
+      // Use promise with timeout to prevent hanging
+      const playPromise = successSound.play();
+      if (playPromise) {
+        playPromise.catch(error => {
+          console.error("Failed to play success sound:", error);
+          // Try once more with user interaction already present
+          setTimeout(() => successSound.play().catch(e => console.error("Retry failed:", e)), 100);
         });
       }
     }
@@ -772,13 +831,22 @@ document.addEventListener("DOMContentLoaded", () => {
   window.closeMismatchModal = function() {
     const modal = domCache['mismatchModal'];
     const alertSound = domCache['alert-sound'];
+    const successSound = domCache['success-sound'];
     
     if (modal) modal.style.display = 'none';
     document.body.classList.remove('flash-red');
     
+    // Stop all sounds
     if (alertSound) {
       alertSound.muted = true;
       alertSound.pause();
+      alertSound.currentTime = 0;
+    }
+    
+    if (successSound) {
+      successSound.muted = true;
+      successSound.pause();
+      successSound.currentTime = 0;
     }
     
     clearFields();
@@ -802,6 +870,19 @@ document.addEventListener("DOMContentLoaded", () => {
     
     // Reset visual alerts if any
     document.body.classList.remove('flash-red');
+    
+    // Stop any playing sounds
+    if (domCache['alert-sound']) {
+      domCache['alert-sound'].pause();
+      domCache['alert-sound'].currentTime = 0;
+      domCache['alert-sound'].muted = true;
+    }
+    
+    if (domCache['success-sound']) {
+      domCache['success-sound'].pause();
+      domCache['success-sound'].currentTime = 0;
+      domCache['success-sound'].muted = true;
+    }
     
     // Clear saved form data - use deferred saving for better performance
     setTimeout(() => {
