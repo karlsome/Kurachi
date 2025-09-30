@@ -846,20 +846,64 @@
             }
         });
 
-        // Add correction card to each factory
-        async function addCorrectionCardToFactory(containers, factory) {
-            const correctionCard = await createCorrectionCard(factory);
-            if (correctionCard) {
-                // Insert correction card as the first card
-                containers.insertBefore(correctionCard, containers.firstChild);
-            }
-        }        // Main function to initialize factory cards
-        async function initializeFactoryCards() {
+        // Add correction card to each factory - asynchronously
+        function addCorrectionCardToFactory(containers, factory) {
+            // Create a placeholder for the correction card
+            const placeholderCard = document.createElement('div');
+            placeholderCard.id = 'correction-placeholder';
+            placeholderCard.classList.add('card');
+            placeholderCard.style.position = 'relative';
+            placeholderCard.style.backgroundColor = '#f8f8f8';
+            placeholderCard.style.border = '2px dashed #ccc';
+            placeholderCard.innerHTML = `
+                <div style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; justify-content: center; align-items: center;">
+                    <div class="spinner" style="border: 4px solid #f3f3f3; border-top: 4px solid #cc0000; border-radius: 50%; width: 40px; height: 40px; animation: spin 2s linear infinite;"></div>
+                    <div style="margin-top: 10px; font-size: 14px; color: #777;">修正確認中...</div>
+                </div>
+                <style>
+                    @keyframes spin {
+                        0% { transform: rotate(0deg); }
+                        100% { transform: rotate(360deg); }
+                    }
+                </style>
+            `;
+            
+            // Insert placeholder as the first card
+            containers.insertBefore(placeholderCard, containers.firstChild);
+            
+            // Load the correction card asynchronously
+            createCorrectionCard(factory).then(correctionCard => {
+                if (correctionCard) {
+                    // Replace placeholder with the actual correction card
+                    containers.replaceChild(correctionCard, placeholderCard);
+                } else {
+                    // Remove placeholder if no corrections
+                    placeholderCard.remove();
+                }
+            }).catch(error => {
+                console.error('Error loading corrections:', error);
+                // Update placeholder to show error
+                placeholderCard.innerHTML = `
+                    <div style="padding: 15px; text-align: center; color: #777;">
+                        <div style="font-size: 24px; margin-bottom: 8px;">⚠️</div>
+                        <div>修正データを取得できませんでした</div>
+                    </div>
+                `;
+                
+                // Remove placeholder after 3 seconds
+                setTimeout(() => {
+                    placeholderCard.remove();
+                }, 3000);
+            });
+        }
+        
+        // Main function to initialize factory cards
+        function initializeFactoryCards() {
             if (filterValue === '天徳') {
                 const containers = document.getElementById('containers');
 
-                // Add correction card first
-                await addCorrectionCardToFactory(containers, filterValue);
+                // Add correction card first (asynchronously)
+                addCorrectionCardToFactory(containers, filterValue);
 
                 // Create card for スリット
                 const slitCard = document.createElement('div');
@@ -921,8 +965,8 @@
             } else if (filterValue === '肥田瀬') {
                 const containers = document.getElementById('containers');
 
-                // Add correction card first
-                await addCorrectionCardToFactory(containers, filterValue);
+                // Add correction card first (asynchronously)
+                addCorrectionCardToFactory(containers, filterValue);
 
                 // Create card for プレス加工
                 const pressCard = document.createElement('div');
@@ -1002,8 +1046,8 @@
             } else if (filterValue === '第二工場') {
                 const containers = document.getElementById('containers');
 
-                // Add correction card first
-                await addCorrectionCardToFactory(containers, filterValue);
+                // Add correction card first (asynchronously)
+                addCorrectionCardToFactory(containers, filterValue);
 
                 // Create card for プレス加工
                 const pressCard = document.createElement('div');
@@ -1083,8 +1127,8 @@
             } else if (filterValue === '倉知') {
                 const containers = document.getElementById('containers');
 
-                // Add correction card first
-                await addCorrectionCardToFactory(containers, filterValue);
+                // Add correction card first (asynchronously)
+                addCorrectionCardToFactory(containers, filterValue);
 
                 // Create card for プレス加工
                 const pressCard = document.createElement('div');
@@ -1145,8 +1189,8 @@
             } else if (filterValue === '第一工場') {
                 const containers = document.getElementById('containers');
 
-                // Add correction card first
-                await addCorrectionCardToFactory(containers, filterValue);
+                // Add correction card first (asynchronously)
+                addCorrectionCardToFactory(containers, filterValue);
 
                 // Create card for Laser加工
                 const pressCard = document.createElement('div');
@@ -1242,11 +1286,30 @@
                 rikeshiCard.appendChild(rikeshiImg);
                 rikeshiCard.appendChild(rikeshiLabel);
                 containers.appendChild(rikeshiCard);
+                
+                // Create card for Label Comparator
+                const labelCompCard = document.createElement('div');
+                labelCompCard.classList.add('card');
+                labelCompCard.addEventListener('click', () => {
+                    window.location.href = `labelComparator.html?filter=${filterValue}`;
+                });
+
+                const labelCompImg = document.createElement('img');
+                labelCompImg.src = 'src/machines/scanner.jpg';
+                labelCompImg.alt = 'ラベル比較';
+
+                const labelCompLabel = document.createElement('div');
+                labelCompLabel.classList.add('label');
+                labelCompLabel.textContent = 'ラベル比較';
+
+                labelCompCard.appendChild(labelCompImg);
+                labelCompCard.appendChild(labelCompLabel);
+                containers.appendChild(labelCompCard);
             } else if (filterValue === 'SCNA') {
                 const containers = document.getElementById('containers');
 
-                // Add correction card first
-                await addCorrectionCardToFactory(containers, filterValue);
+                // Add correction card first (asynchronously)
+                addCorrectionCardToFactory(containers, filterValue);
 
                 // Create card for DCP
                 const pressCard = document.createElement('div');
@@ -1326,8 +1389,8 @@
             } else if (filterValue === '小瀬') {
                 const containers = document.getElementById('containers');
 
-                // Add correction card first
-                await addCorrectionCardToFactory(containers, filterValue);
+                // Add correction card first (asynchronously)
+                addCorrectionCardToFactory(containers, filterValue);
 
                 // Create card for プレス加工
                 const pressCard = document.createElement('div');
@@ -1369,8 +1432,8 @@
             } else if (filterValue === 'NFH') {
                 const containers = document.getElementById('containers');
 
-                // Add correction card first
-                await addCorrectionCardToFactory(containers, filterValue);
+                // Add correction card first (asynchronously)
+                addCorrectionCardToFactory(containers, filterValue);
 
                 // Create card for プレス加工
                 const pressCard = document.createElement('div');
@@ -1412,8 +1475,8 @@
             } else {
                 const containers = document.getElementById('containers');
 
-                // Add correction card first for other factories too
-                await addCorrectionCardToFactory(containers, filterValue);
+                // Add correction card first for other factories too (asynchronously)
+                addCorrectionCardToFactory(containers, filterValue);
 
                 // Default Press Cutting card
                 const pressCard = document.createElement('div');
