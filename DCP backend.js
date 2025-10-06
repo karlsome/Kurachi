@@ -70,10 +70,34 @@ document.addEventListener('DOMContentLoaded', () => {
   const pageName = location.pathname.split('/').pop(); // Get the current HTML file name
   const selected工場 = document.getElementById('selected工場')?.value; // Get the selected 工場 value
   const processElement = document.getElementById("process");
+  const subDropdown = document.getElementById("sub-dropdown");
 
   if (!selected工場) {
     console.error("Selected 工場 is not set or found.");
     return;
+  }
+  
+  // Explicitly restore sub-dropdown value first
+  if (subDropdown) {
+    const subDropdownKey = `${uniquePrefix}sub-dropdown`;
+    const savedSubDropdownValue = localStorage.getItem(subDropdownKey);
+    
+    if (savedSubDropdownValue) {
+      console.log(`Found saved sub-dropdown value: ${savedSubDropdownValue}`);
+      
+      // Wait for options to be populated before setting value
+      setTimeout(() => {
+        if ([...subDropdown.options].some(option => option.value === savedSubDropdownValue)) {
+          subDropdown.value = savedSubDropdownValue;
+          console.log(`Restored sub-dropdown to: ${savedSubDropdownValue}`);
+          
+          // Fetch product details after setting dropdown value
+          fetchProductDetails();
+        } else {
+          console.error(`Option '${savedSubDropdownValue}' not found in sub-dropdown options.`);
+        }
+      }, 500);
+    }
   }
 
   // Loop through all keys in localStorage
@@ -138,6 +162,17 @@ document.addEventListener('DOMContentLoaded', () => {
   // Calculate break time and trouble time after restoring values
   calculateTotalBreakTime();
   calculateTotalMachineTroubleTime();
+  
+  // Also restore the sendtoNCButtonisPressed state
+  const sendToNCKey = `${uniquePrefix}sendtoNCButtonisPressed`;
+  const savedSendToNCState = localStorage.getItem(sendToNCKey);
+  if (savedSendToNCState === 'true') {
+    sendtoNCButtonisPressed = true;
+    console.log("Restored sendtoNCButtonisPressed to true on page load");
+  } else {
+    sendtoNCButtonisPressed = false;
+    console.log("Restored sendtoNCButtonisPressed to false on page load");
+  }
 
   // Add event listeners to all break time inputs
   for (let i = 1; i <= 4; i++) {
@@ -163,6 +198,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Initialize maintenance system
   loadMaintenanceRecords();
+  
+  // Initialize material label photo system
+  loadMaterialLabelPhotos();
 
   // Add maintenance button
   const addMaintenanceBtn = document.getElementById('add-maintenance-btn');
@@ -290,6 +328,8 @@ async function fetchProductDetails() {
   }
 
   try {
+    console.log(`Fetching product details for ${serialNumber}`);
+    
     // Step 1: Try query by 背番号
     let response = await fetch(`${serverURL}/queries`, {
       method: "POST",
@@ -305,10 +345,17 @@ async function fetchProductDetails() {
       }),
     });
 
+    // Check if response is ok before trying to parse JSON
+    if (!response.ok) {
+      throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+    }
+
     let result = await response.json();
 
     // Step 2: If not found, try query by 品番
     if (!result || result.length === 0) {
+      console.log(`No results found for 背番号: ${serialNumber}, trying 品番 instead`);
+      
       const altRes = await fetch(`${serverURL}/queries`, {
         method: "POST",
         headers: {
@@ -323,9 +370,15 @@ async function fetchProductDetails() {
         }),
       });
 
+      // Check if alt response is ok
+      if (!altRes.ok) {
+        throw new Error(`Server returned ${altRes.status}: ${altRes.statusText}`);
+      }
+
       const altResult = await altRes.json();
 
       if (altResult.length > 0) {
+        console.log(`Found result using 品番: ${serialNumber}`);
         const matched = altResult[0];
         if (matched.背番号) {
           document.getElementById("sub-dropdown").value = matched.背番号;
@@ -336,12 +389,18 @@ async function fetchProductDetails() {
 
     // Step 3: Still no result
     if (!result || result.length === 0) {
-      console.error("No matching product found.");
+      console.error(`No matching product found for ${serialNumber}`);
       blankInfo();
       return;
     }
 
     const data = result[0];
+    console.log(`Successfully found product data for ${serialNumber}`);
+
+    // Ensure we have valid data before populating fields
+    if (!data) {
+      throw new Error("Retrieved data is null or undefined");
+    }
 
     // Populate fields
     document.getElementById("product-number").value = data.品番 || "";
@@ -369,14 +428,52 @@ async function fetchProductDetails() {
 
   } catch (error) {
     console.error("Error fetching product details:", error);
+    blankInfo(); // Make sure we blank fields on error
+    
+    // Display user-friendly error
+    const scanAlertModal = document.getElementById('scanAlertModal');
+    const scanAlertText = document.getElementById('scanAlertText');
+    
+    if (scanAlertModal && scanAlertText) {
+      scanAlertText.innerText = `製品情報の取得中にエラーが発生しました / Error fetching product details: ${error.message}`;
+      scanAlertModal.style.display = 'block';
+      
+      const closeScanModalButton = document.getElementById('closeScanModalButton');
+      if (closeScanModalButton) {
+        closeScanModalButton.onclick = function() {
+          scanAlertModal.style.display = 'none';
+        };
+      }
+    }
   }
   // Call getRikeshi after product details are fetched
   //getRikeshi(serialNumber);
 }
 
 // Trigger when 背番号 is selected
-document.getElementById("sub-dropdown").addEventListener("change", fetchProductDetails);
-document.getElementById("sub-dropdown").addEventListener("change", NCPresstoFalse);
+document.getElementById("sub-dropdown").addEventListener("change", function() {
+  // Save current button state before fetching product details
+  const key = `${uniquePrefix}sendtoNCButtonisPressed`;
+  const currentButtonState = localStorage.getItem(key);
+  console.log(`Sub-dropdown changed. Current button state: ${currentButtonState}`);
+  
+  // Save the sub-dropdown value immediately to localStorage
+  const subDropdownValue = document.getElementById("sub-dropdown").value;
+  localStorage.setItem(`${uniquePrefix}sub-dropdown`, subDropdownValue);
+  console.log(`Saved sub-dropdown value to localStorage: ${subDropdownValue}`);
+  
+  // Fetch product details
+  fetchProductDetails();
+  
+  // Restore button state if it was true
+  if (currentButtonState === 'true') {
+    localStorage.setItem(key, 'true');
+    sendtoNCButtonisPressed = true;
+    console.log("Restored sendtoNCButtonisPressed to true after dropdown change");
+  }
+});
+// Remove automatic resetting of sendtoNCButtonisPressed on sub-dropdown change
+// document.getElementById("sub-dropdown").addEventListener("change", NCPresstoFalse);
 
 // Function to get link from Google Drive
 function picLINK(headerValue) {
@@ -411,14 +508,20 @@ function updateImageSrc(link) {
 //simple function to set ncbuttonisPressed = false
 function NCPresstoFalse() {
   checkValue();
-  // Save to localStorage with a unique key format = FALSE
-  sendtoNCButtonisPressed = "FALSE";
-  popupShown = false;
-  const selected工場 = document.getElementById('selected工場').value; // Get the current factory value
-  const pageName = location.pathname.split('/').pop(); // Get the current HTML file name
+  // Before resetting, check if we already have a value for this item in localStorage
   const key = `${uniquePrefix}sendtoNCButtonisPressed`;
-  localStorage.setItem(key, 'false'); // Save the value with the unique key
-
+  const currentSebanggo = document.getElementById('sub-dropdown').value;
+  
+  // Only reset if this is a completely new selection
+  // or the localStorage value isn't already true
+  if (localStorage.getItem(key) !== 'true') {
+    sendtoNCButtonisPressed = false;
+    popupShown = false;
+    localStorage.setItem(key, 'false'); // Save the value with the unique key
+    console.log(`Reset sendtoNCButtonisPressed to false for ${currentSebanggo}`);
+  } else {
+    console.log(`Preserved sendtoNCButtonisPressed state for ${currentSebanggo}: true`);
+  }
 }
 
 // when time is pressed
@@ -527,6 +630,10 @@ let maintenanceRecords = [];
 let currentEditingIndex = -1;
 let maintenancePhotos = []; // Array to store multiple photos for current maintenance
 const MAX_MAINTENANCE_PHOTOS = 5; // Maximum photos per maintenance record
+
+// Material Label Photo System
+let materialLabelPhotos = []; // Array to store multiple material label photos
+const MAX_MATERIAL_PHOTOS = 5; // Maximum number of photos allowed
 
 // Load maintenance records from localStorage
 function loadMaintenanceRecords() {
@@ -946,6 +1053,484 @@ function setupMaintenanceModalEvents(modal, existingRecord) {
   });
 }
 
+// === Material Label Photo Functions ===
+function clearMaterialLabelPhotos() {
+  materialLabelPhotos = [];
+  renderMaterialPhotoThumbnails();
+  updateMaterialPhotoCount();
+}
+
+function addMaterialLabelPhoto(photoDataURL) {
+  if (materialLabelPhotos.length >= MAX_MATERIAL_PHOTOS) {
+    alert(`最大${MAX_MATERIAL_PHOTOS}枚まで撮影できます / Maximum ${MAX_MATERIAL_PHOTOS} photos allowed`);
+    return false;
+  }
+  
+  console.log('Adding material label photo:', typeof photoDataURL, photoDataURL ? photoDataURL.substring(0, 50) + '...' : 'undefined');
+  
+  // Handle both base64 string and data URL formats
+  let base64Data = photoDataURL;
+  let displayURL;
+  
+  if (typeof photoDataURL === 'string') {
+    if (photoDataURL.startsWith('data:image')) {
+      // This is a full data URL
+      displayURL = photoDataURL;
+      base64Data = photoDataURL.split(',')[1];
+      console.log('Extracted base64 data from data URL');
+    } else {
+      // Assume this is already base64 data
+      displayURL = `data:image/jpeg;base64,${photoDataURL}`;
+      console.log('Created display URL from base64 data');
+    }
+  } else {
+    console.error('Invalid photo data provided to addMaterialLabelPhoto');
+    return false;
+  }
+
+  const photoData = {
+    base64: base64Data,
+    timestamp: new Date().toISOString(),
+    displayURL: displayURL
+  };
+
+  materialLabelPhotos.push(photoData);
+  console.log(`Added material label photo #${materialLabelPhotos.length}`);
+  
+  renderMaterialPhotoThumbnails();
+  updateMaterialPhotoCount();
+  updateMaterialLabelElement();
+  
+  // Save to localStorage
+  const key = `${uniquePrefix}materialLabelPhotos`;
+  localStorage.setItem(key, JSON.stringify(materialLabelPhotos));
+  console.log('Saved material label photos to localStorage');
+  
+  return true;
+}
+
+function removeMaterialLabelPhoto(index) {
+  if (index >= 0 && index < materialLabelPhotos.length) {
+    materialLabelPhotos.splice(index, 1);
+    // Save updated array to localStorage
+    const key = `${uniquePrefix}materialLabelPhotos`;
+    localStorage.setItem(key, JSON.stringify(materialLabelPhotos));
+    renderMaterialPhotoThumbnails();
+    updateMaterialPhotoCount();
+  }
+}
+
+function renderMaterialPhotoThumbnails() {
+  console.log('Rendering material photo thumbnails');
+  
+  let container = document.getElementById('material-photo-thumbnails');
+  let photosContainer = document.getElementById('material-label-photos-container');
+  
+  // Create container if it doesn't exist
+  if (!photosContainer) {
+    console.log('Creating material label photos container');
+    const mainForm = document.querySelector('form') || document.querySelector('.main-form') || document.body;
+    
+    const photoSection = document.createElement('div');
+    photoSection.id = 'material-label-photos-container';
+    photoSection.style.cssText = 'margin: 10px 0; padding: 10px; border: 1px solid #ddd; border-radius: 5px; display: none; background-color: #f9f9f9;';
+    
+    const header = document.createElement('div');
+    header.innerHTML = '<strong>材料ラベル Photos (<span id="material-photo-count">0</span>):</strong>';
+    
+    const thumbnailsDiv = document.createElement('div');
+    thumbnailsDiv.id = 'material-photo-thumbnails';
+    thumbnailsDiv.style.cssText = 'display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px;';
+    
+    photoSection.appendChild(header);
+    photoSection.appendChild(thumbnailsDiv);
+    
+    // Look for the best place to insert the container
+    // First try finding material label specific elements
+    const makerLabelButton = document.getElementById('makerLabelButton');
+    const materialLabelJP = document.getElementById('材料ラベル_L');
+    const materialLabelEN = document.getElementById('makerLabel');
+    const materialImg = document.getElementById('材料ラベル');
+    
+    console.log('Finding placement for material label photos container:', {
+      'makerLabelButton': !!makerLabelButton,
+      '材料ラベル_L': !!materialLabelJP,
+      'makerLabel': !!materialLabelEN,
+      '材料ラベル': !!materialImg
+    });
+    
+    // Try to find the best container area
+    let insertAfter = null;
+    
+    // Priority 1: After the button's parent
+    if (makerLabelButton) {
+      insertAfter = makerLabelButton.parentElement;
+    } 
+    // Priority 2: After the Japanese label's parent
+    else if (materialLabelJP) {
+      insertAfter = materialLabelJP.parentElement;
+    }
+    // Priority 3: After the English label's parent
+    else if (materialLabelEN) {
+      insertAfter = materialLabelEN.parentElement;
+    }
+    // Priority 4: After the image element's parent
+    else if (materialImg) {
+      insertAfter = materialImg.parentElement;
+    }
+    
+    if (insertAfter) {
+      // Insert after the target element
+      if (insertAfter.nextSibling) {
+        insertAfter.parentNode.insertBefore(photoSection, insertAfter.nextSibling);
+      } else {
+        insertAfter.parentNode.appendChild(photoSection);
+      }
+      console.log('Inserted material photo container after appropriate element');
+    } else {
+      // Fallback: Just append to the main form
+      mainForm.appendChild(photoSection);
+      console.log('Appended material photo container to main form (fallback)');
+    }
+    
+    // Update our references to the newly created elements
+    container = document.getElementById('material-photo-thumbnails');
+    photosContainer = document.getElementById('material-label-photos-container');
+  }
+  
+  if (!container) {
+    console.error('Failed to find or create material-photo-thumbnails container');
+    // Create the container if it still doesn't exist
+    try {
+      const photosContainer = document.getElementById('material-label-photos-container');
+      if (photosContainer) {
+        const thumbnailsDiv = document.createElement('div');
+        thumbnailsDiv.id = 'material-photo-thumbnails';
+        thumbnailsDiv.style.cssText = 'display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px;';
+        photosContainer.appendChild(thumbnailsDiv);
+        container = thumbnailsDiv;
+        console.log('Created missing thumbnails container within existing container');
+      } else {
+        throw new Error('Parent container still not found');
+      }
+    } catch (error) {
+      console.error('Failed to create thumbnails container:', error);
+      return;
+    }
+  }
+  
+  // Clear existing thumbnails and update display
+  container.innerHTML = '';
+  
+  const photoCount = document.getElementById('material-photo-count');
+  if (photoCount) {
+    photoCount.textContent = materialLabelPhotos.length;
+  }
+  
+  if (materialLabelPhotos.length === 0) {
+    photosContainer.style.display = 'none';
+    console.log('No material label photos to display');
+  } else {
+    photosContainer.style.display = 'block';
+    console.log(`Rendering ${materialLabelPhotos.length} material label photos`);
+    
+    materialLabelPhotos.forEach((photo, index) => {
+      const thumbItem = document.createElement('div');
+      thumbItem.style.cssText = `
+        position: relative;
+        display: inline-block;
+        margin: 5px;
+      `;
+      
+      const img = document.createElement('img');
+      
+      // Determine image source
+      let imageSrc;
+      if (photo.displayURL) {
+        imageSrc = photo.displayURL;
+      } else if (photo.firebaseURL) {
+        imageSrc = photo.firebaseURL;
+      } else if (photo.base64) {
+        imageSrc = `data:image/jpeg;base64,${photo.base64}`;
+      } else {
+        imageSrc = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODAiIGhlaWdodD0iODAiIHZpZXdCb3g9IjAgMCA4MCA4MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjgwIiBoZWlnaHQ9IjgwIiBmaWxsPSIjZjBmMGYwIi8+Cjx0ZXh0IHg9IjQwIiB5PSI0NSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEyIiBmaWxsPSIjOTk5Ij5JbWFnZTwvdGV4dD4KPHR0ZXh0IHg9IjQwIiB5PSI1NSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOTk5Ij5FcnJvcjwvdGV4dD4KPC9zdmc+';
+      }
+      
+      img.src = imageSrc;
+      img.style.cssText = `
+        width: 80px;
+        height: 80px;
+        object-fit: cover;
+        cursor: pointer;
+        display: block;
+        border: 2px solid #ddd;
+        border-radius: 5px;
+      `;
+      img.onclick = () => showMaterialPhotoPreview(imageSrc);
+      
+      // Add error handling
+      img.onerror = () => {
+        console.error('Failed to load material label photo:', imageSrc);
+        img.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODAiIGhlaWdodD0iODAiIHZpZXdCb3g9IjAgMCA4MCA4MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjgwIiBoZWlnaHQ9IjgwIiBmaWxsPSIjZjBmMGYwIi8+Cjx0ZXh0IHg9IjQwIiB5PSI0NSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEyIiBmaWxsPSIjOTk5Ij5FcnJvcjwvdGV4dD4KPC9zdmc+';
+      };
+      
+      // Delete button
+      const deleteBtn = document.createElement('button');
+      deleteBtn.innerHTML = '×';
+      deleteBtn.style.cssText = `
+        position: absolute;
+        top: -5px;
+        right: -5px;
+        background: #ff4444;
+        color: white;
+        border: none;
+        border-radius: 50%;
+        width: 20px;
+        height: 20px;
+        font-size: 14px;
+        cursor: pointer;
+        line-height: 1;
+      `;
+      deleteBtn.onclick = (e) => {
+        e.stopPropagation();
+        if (confirm('Delete this material label photo?')) {
+          removeMaterialLabelPhoto(index);
+        }
+      };
+      
+      thumbItem.appendChild(img);
+      thumbItem.appendChild(deleteBtn);
+      container.appendChild(thumbItem);
+    });
+  }
+}
+
+function showMaterialPhotoPreview(imageDataURL) {
+  const previewModal = document.createElement('div');
+  previewModal.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.8);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 10001;
+  `;
+  
+  const img = document.createElement('img');
+  img.src = imageDataURL;
+  img.style.cssText = `
+    max-width: 90%;
+    max-height: 90%;
+    border-radius: 10px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+  `;
+  
+  const closeBtn = document.createElement('button');
+  closeBtn.innerHTML = '×';
+  closeBtn.style.cssText = `
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    background: #ff4444;
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    font-size: 20px;
+    cursor: pointer;
+  `;
+  
+  closeBtn.onclick = () => document.body.removeChild(previewModal);
+  previewModal.onclick = (e) => {
+    if (e.target === previewModal) document.body.removeChild(previewModal);
+  };
+  
+  previewModal.appendChild(img);
+  previewModal.appendChild(closeBtn);
+  document.body.appendChild(previewModal);
+}
+
+function updateMaterialPhotoCount() {
+  const countElement = document.getElementById('material-photo-count');
+  const statusLabel = document.getElementById('makerLabel');
+  
+  if (countElement) {
+    countElement.textContent = materialLabelPhotos.length;
+  }
+  
+  // Update Material Label status based on photo count
+  if (statusLabel) {
+    if (materialLabelPhotos.length > 0) {
+      statusLabel.textContent = 'TRUE';
+    } else {
+      statusLabel.textContent = 'FALSE';
+    }
+  }
+  
+  // Update the hidden 材料ラベル element as well (for compatibility)
+  updateMaterialLabelElement();
+}
+
+// Function to load material label photos from localStorage
+function loadMaterialLabelPhotos() {
+  console.log('Loading material label photos from localStorage');
+  const key = `${uniquePrefix}materialLabelPhotos`;
+  const saved = localStorage.getItem(key);
+  
+  if (saved) {
+    try {
+      materialLabelPhotos = JSON.parse(saved);
+      console.log(`Loaded ${materialLabelPhotos.length} material label photos from localStorage`);
+      
+      // Ensure photos have proper displayURL format if missing
+      materialLabelPhotos = materialLabelPhotos.map(photo => {
+        // Fix missing displayURL if needed
+        if (!photo.displayURL && photo.base64) {
+          photo.displayURL = `data:image/jpeg;base64,${photo.base64}`;
+        }
+        return photo;
+      });
+      
+      // Update UI with the loaded photos
+      renderMaterialPhotoThumbnails();
+      updateMaterialPhotoCount();
+      updateMaterialLabelElement();
+      
+      // Force an additional render after a short delay to ensure UI is updated
+      setTimeout(() => {
+        renderMaterialPhotoThumbnails();
+        updateMaterialLabelElement();
+        console.log('Completed delayed rendering of material label photos');
+      }, 1000);
+      
+    } catch (error) {
+      console.error('Error loading material label photos from localStorage:', error);
+      materialLabelPhotos = [];
+    }
+  } else {
+    console.log('No material label photos found in localStorage');
+    materialLabelPhotos = [];
+  }
+}
+
+// Function to update the hidden 材料ラベル element for compatibility
+function updateMaterialLabelElement() {
+  // Try different possible selectors for material label image element
+  const makerPic = document.getElementById('材料ラベル') || 
+                  document.querySelector('img[id="材料ラベル"]') || 
+                  document.querySelector('img[name="材料ラベル"]');
+  
+  if (!makerPic) {
+    console.warn('Could not find 材料ラベル element to update. Creating one if needed.');
+    
+    // Try to find a parent element to attach to
+    const makerLabelButton = document.getElementById('makerLabelButton');
+    const makerLabelArea = document.querySelector('div:has(> #材料ラベル_L)') || 
+                          makerLabelButton?.parentElement;
+                          
+    if (makerLabelArea) {
+      // Create the image element if it doesn't exist
+      const newImg = document.createElement('img');
+      newImg.id = '材料ラベル';
+      newImg.style.cssText = 'max-width: 200px; max-height: 200px; margin-top: 10px; display: none;';
+      
+      // Insert after the button's parent div or at the end of the target area
+      makerLabelArea.appendChild(newImg);
+      console.log('Created new 材料ラベル image element');
+      
+      // Now use the newly created element
+      updateMaterialLabelElement();
+      return;
+    } else {
+      console.error('Could not find appropriate parent for 材料ラベル element');
+      return;
+    }
+  }
+  
+  // Try different possible selectors for material label status elements
+  const materialLabelJP = document.getElementById('材料ラベル_L');
+  const materialLabelEN = document.getElementById('makerLabel');
+  
+  console.log('Material label elements found for update:', {
+    '材料ラベル': !!makerPic,
+    '材料ラベル_L': !!materialLabelJP,
+    'makerLabel': !!materialLabelEN
+  });
+  
+  if (materialLabelPhotos.length > 0) {
+    // Use the first photo to set the legacy element
+    const photo = materialLabelPhotos[0];
+    let src;
+    
+    if (photo.displayURL) {
+      src = photo.displayURL;
+      console.log('Using displayURL for material label');
+    } else if (photo.firebaseURL) {
+      src = photo.firebaseURL;
+      console.log('Using firebaseURL for material label');
+    } else if (photo.base64) {
+      src = `data:image/jpeg;base64,${photo.base64}`;
+      console.log('Using base64 data for material label');
+    } else {
+      console.warn('No valid image source found in photo object');
+      return;
+    }
+    
+    try {
+      // Set the image source and make it visible
+      makerPic.src = src;
+      makerPic.style.display = 'block';
+      
+      // Save to localStorage for persistence across refreshes
+      localStorage.setItem(`${uniquePrefix}材料ラベル.src`, src);
+      
+      // Update all possible label status elements
+      if (materialLabelJP) {
+        materialLabelJP.textContent = 'TRUE';
+        localStorage.setItem(`${uniquePrefix}材料ラベル_L.textContent`, 'TRUE');
+      }
+      
+      if (materialLabelEN) {
+        materialLabelEN.textContent = 'TRUE';
+        localStorage.setItem(`${uniquePrefix}makerLabel.textContent`, 'TRUE');
+      }
+      
+      console.log('Successfully updated 材料ラベル element with first material photo');
+    } catch (error) {
+      console.error('Error setting material label image:', error);
+    }
+  } else {
+    // No photos, clear the element
+    try {
+      makerPic.src = '';
+      makerPic.style.display = 'none';
+      
+      // Update localStorage
+      localStorage.removeItem(`${uniquePrefix}材料ラベル.src`);
+      
+      // Update all possible label status elements
+      if (materialLabelJP) {
+        materialLabelJP.textContent = 'FALSE';
+        localStorage.setItem(`${uniquePrefix}材料ラベル_L.textContent`, 'FALSE');
+      }
+      
+      if (materialLabelEN) {
+        materialLabelEN.textContent = 'FALSE';
+        localStorage.setItem(`${uniquePrefix}makerLabel.textContent`, 'FALSE');
+      }
+      
+      console.log('Cleared 材料ラベル element (no photos)');
+    } catch (error) {
+      console.error('Error clearing material label image:', error);
+    }
+  }
+}
+
 // Render maintenance records as clickable items
 function renderMaintenanceRecords() {
   const container = document.getElementById('maintenance-records-container');
@@ -1275,10 +1860,11 @@ document.getElementById('scan-button').addEventListener('click', function() {
       const options = [...subDropdown.options].map(option => option.value);
 
       console.log("Scanned QR Code:", qrCodeMessage);
-      if (subDropdown != qrCodeMessage) {
-        NCPresstoFalse();
-      }
-
+      
+      // Save current state of sendtoNCButtonisPressed before potentially changing dropdown
+      const currentState = localStorage.getItem(`${uniquePrefix}sendtoNCButtonisPressed`);
+      console.log("Current sendtoNCButtonisPressed state before scan:", currentState);
+      
       // Check if the scanned QR code does NOT exist in the dropdown options
       if (!options.includes(qrCodeMessage)) {
         // Display error modal
@@ -1314,12 +1900,38 @@ document.getElementById('scan-button').addEventListener('click', function() {
 
       // If QR code matches an option, set the dropdown value and close scanner
       if (subDropdown && subDropdown.value !== qrCodeMessage) {
-        subDropdown.value = qrCodeMessage;
-        fetchProductDetails();
-
-        html5QrCode.stop().then(() => {
+        // Save current button state before changing dropdown
+        const key = `${uniquePrefix}sendtoNCButtonisPressed`;
+        const currentButtonState = localStorage.getItem(key);
+        console.log(`Saving current button state before changing dropdown: ${currentButtonState}`);
+        
+        try {
+          // First stop the QR scanner to prevent continued scanning during processing
+          await html5QrCode.stop();
           qrScannerModal.style.display = 'none';
-        }).catch(err => console.error("Failed to stop scanning:", err));
+          
+          // Now that the scanner is closed, change dropdown value
+          console.log(`Setting sub-dropdown value to: ${qrCodeMessage}`);
+          subDropdown.value = qrCodeMessage;
+          
+          // Save the dropdown value to localStorage so it persists on refresh
+          localStorage.setItem(`${uniquePrefix}sub-dropdown`, qrCodeMessage);
+          
+          // Call fetchProductDetails but don't reset button state
+          await fetchProductDetails();
+          
+          // Restore button state if it was true (do this after product details are fetched)
+          if (currentButtonState === 'true') {
+            localStorage.setItem(key, 'true');
+            sendtoNCButtonisPressed = true;
+            console.log("Restored sendtoNCButtonisPressed to true after QR scan");
+          }
+        } catch (err) {
+          console.error("Error processing QR code:", err);
+          // Ensure QR scanner is stopped even if there's an error
+          html5QrCode.stop().catch(stopErr => console.error("Error stopping QR scanner:", stopErr));
+          qrScannerModal.style.display = 'none';
+        }
 
         return;
       }
@@ -1403,6 +2015,12 @@ function resetForm() {
   // Clear maintenance records
   localStorage.removeItem(`${uniquePrefix}maintenanceRecords`);
   maintenanceRecords = [];
+  
+  // Clear material label photos
+  localStorage.removeItem(`${uniquePrefix}materialLabelPhotos`);
+  materialLabelPhotos = [];
+  renderMaterialPhotoThumbnails();
+  updateMaterialPhotoCount();
 
 
   // Reset all textContent elements
@@ -1640,17 +2258,18 @@ const buttonMappings = [{
   labelText: '終物チェック',
 }, {
   buttonId: 'makerLabelButton',
-  labelId: 'makerLabel',
+  labelId: '材料ラベル_L', // Updated to match the Japanese label ID
   imgId: '材料ラベル',
   labelText: '材料ラベル',
 }, ];
 
 let currentButtonId = null;
 
-buttonMappings.forEach(({
-  buttonId
-}) => {
+// Handle hatsumonoButton and atomonoButton with original functionality
+['hatsumonoButton', 'atomonoButton'].forEach(buttonId => {
   const button = document.getElementById(buttonId);
+  if (!button) return;
+  
   button.addEventListener('click', () => {
     const subDropdown = document.getElementById('sub-dropdown');
     const selectedValue = subDropdown?.value;
@@ -1692,53 +2311,211 @@ buttonMappings.forEach(({
       return; // stop further action
     }
 
-    // If value is selected, proceed
+    // If value is selected, proceed with standard functionality
     currentButtonId = buttonId;
     window.open('captureImage.html', 'Capture Image', 'width=900,height=900');
   });
 });
 
+// Handle makerLabelButton with multi-photo functionality
+const makerLabelButton = document.getElementById('makerLabelButton');
+if (makerLabelButton) {
+  makerLabelButton.addEventListener('click', () => {
+    const subDropdown = document.getElementById('sub-dropdown');
+    const selectedValue = subDropdown?.value;
+
+    if (!selectedValue) {
+      // Trigger modal message instead of alert
+      const scanAlertModal = document.getElementById('scanAlertModal');
+      const scanAlertText = document.getElementById('scanAlertText');
+      const alertSound = document.getElementById('alert-sound');
+
+      scanAlertText.innerText = '背番号を選択してください / Please select a Sebanggo first.';
+      scanAlertModal.style.display = 'block';
+
+      // Flash body and sub-dropdown
+      document.body.classList.add('flash-red');
+      subDropdown.classList.add('flash-red-border');
+
+      // Play alert sound
+      if (alertSound) {
+        alertSound.muted = false;
+        alertSound.volume = 1;
+        alertSound.play().catch(err => console.error("Failed to play sound:", err));
+      }
+
+      // Set modal close behavior
+      const closeScanModalButton = document.getElementById('closeScanModalButton');
+      closeScanModalButton.onclick = function() {
+        scanAlertModal.style.display = 'none';
+        document.body.classList.remove('flash-red');
+        subDropdown.classList.remove('flash-red-border');
+
+        if (alertSound) {
+          alertSound.pause();
+          alertSound.currentTime = 0;
+          alertSound.muted = true;
+        }
+      };
+
+      return; // stop further action
+    }
+
+    // If value is selected, proceed with multi-photo functionality for material label
+    currentButtonId = 'makerLabelButton';
+    window.open('captureImage.html', 'Capture Image', 'width=900,height=900');
+  });
+}
+
 // Handle the message from the popup window
 window.addEventListener('message', function(event) {
   if (event.origin === window.location.origin) {
     const data = event.data;
+    
+    // First, preserve the sub-dropdown value if it exists
+    const subDropdown = document.getElementById('sub-dropdown');
+    const selectedSubDropdownValue = subDropdown?.value;
+    if (selectedSubDropdownValue) {
+      localStorage.setItem(`${uniquePrefix}sub-dropdown`, selectedSubDropdownValue);
+      console.log(`Preserved sub-dropdown value: ${selectedSubDropdownValue}`);
+    }
 
     if (data.image && currentButtonId) {
-      // Find the mapping for the current button
-      const mapping = buttonMappings.find(({
-        buttonId
-      }) => buttonId === currentButtonId);
-
-      if (mapping) {
-        const {
-          labelId,
-          imgId
-        } = mapping;
-
-        // Update photo preview
-        const photoPreview = document.getElementById(imgId);
-        photoPreview.src = data.image;
-        photoPreview.style.display = 'block';
-
-        // Update the associated label to TRUE
-        const label = document.getElementById(labelId);
-        label.textContent = 'TRUE';
-
-        // Save label textContent to localStorage
-        const labelKey = `${uniquePrefix}${labelId}.textContent`;
-        localStorage.setItem(labelKey, label.textContent);
-
-        // Save image source to localStorage
-        const photoPreviewKey = `${uniquePrefix}${imgId}.src`;
-        localStorage.setItem(photoPreviewKey, photoPreview.src);
-
-        console.log(
-          `Saved ${labelId}: ${label.textContent} and ${imgId} image: ${photoPreview.src} to localStorage.`
-        );
+      try {
+        // Handle material label photos separately using the multi-photo system
+        if (currentButtonId === 'makerLabelButton') {
+          console.log('Processing material label photo from popup window');
+          
+          // Log elements for debugging
+          const materialLabelJP = document.getElementById('材料ラベル_L');
+          const materialLabelEN = document.getElementById('makerLabel');
+          const materialImg = document.getElementById('材料ラベル');
+          
+          console.log('Material label elements found:', {
+            '材料ラベル_L': !!materialLabelJP,
+            'makerLabel': !!materialLabelEN,
+            '材料ラベル': !!materialImg
+          });
+          
+          // Create/ensure elements exist if they don't
+          if (!materialLabelJP && !materialLabelEN) {
+            console.warn('Material label status elements not found, attempting to create...');
+            
+            // Find a place to add them if they don't exist
+            const makerLabelButton = document.getElementById('makerLabelButton');
+            if (makerLabelButton && makerLabelButton.parentElement) {
+              const container = document.createElement('div');
+              container.style.cssText = 'margin: 5px 0;';
+              
+              const jpLabel = document.createElement('span');
+              jpLabel.id = '材料ラベル_L';
+              jpLabel.textContent = 'FALSE';
+              jpLabel.style.cssText = 'display: none;'; // Hidden by default
+              
+              const enLabel = document.createElement('span');
+              enLabel.id = 'makerLabel';
+              enLabel.textContent = 'FALSE';
+              enLabel.style.cssText = 'display: none;'; // Hidden by default
+              
+              container.appendChild(jpLabel);
+              container.appendChild(enLabel);
+              
+              makerLabelButton.parentElement.appendChild(container);
+              console.log('Created material label status elements');
+            }
+          }
+          
+          // We pass the full data URL to addMaterialLabelPhoto
+          const added = addMaterialLabelPhoto(data.image);
+          
+          if (added) {
+            console.log('Successfully added material label photo');
+            
+            // Update all possible material label elements to ensure compatibility
+            // Update the legacy single image element
+            updateMaterialLabelElement();
+            
+            // Force render thumbnails to make sure they appear
+            setTimeout(() => {
+              renderMaterialPhotoThumbnails();
+              updateMaterialPhotoCount(); // Make sure counts are updated
+              
+              // Re-save all material label data to ensure it persists
+              localStorage.setItem(`${uniquePrefix}materialLabelPhotos`, JSON.stringify(materialLabelPhotos));
+              
+              // Double check elements are properly updated
+              updateMaterialLabelElement();
+            }, 500);
+          }
+          
+          // Reset the current button ID after processing
+          currentButtonId = null;
+          return;
+        }
+        
+        // Handle other buttons with original functionality
+        // Find the mapping for the current button
+        const mapping = buttonMappings.find(({
+          buttonId
+        }) => buttonId === currentButtonId);
+  
+        if (mapping) {
+          const {
+            labelId,
+            imgId
+          } = mapping;
+  
+          // Update photo preview
+          const photoPreview = document.getElementById(imgId);
+          if (photoPreview) {
+            photoPreview.src = data.image;
+            photoPreview.style.display = 'block';
+            
+            // Save image source to localStorage
+            const photoPreviewKey = `${uniquePrefix}${imgId}.src`;
+            localStorage.setItem(photoPreviewKey, photoPreview.src);
+            console.log(`Updated and saved image for ${imgId}`);
+          } else {
+            console.error(`Image element ${imgId} not found`);
+          }
+  
+          // Update the associated label to TRUE
+          const label = document.getElementById(labelId);
+          if (label) {
+            label.textContent = 'TRUE';
+            
+            // Save label textContent to localStorage
+            const labelKey = `${uniquePrefix}${labelId}.textContent`;
+            localStorage.setItem(labelKey, label.textContent);
+            console.log(`Updated and saved ${labelId} as TRUE`);
+          } else {
+            console.error(`Label element ${labelId} not found`);
+          }
+        } else {
+          console.error(`No mapping found for button ID ${currentButtonId}`);
+        }
+      } catch (error) {
+        console.error('Error processing image from popup:', error);
+      } finally {
+        // Reset the current button ID after processing
+        currentButtonId = null;
+        
+        // Double check the sub-dropdown value is preserved
+        if (selectedSubDropdownValue && subDropdown) {
+          setTimeout(() => {
+            subDropdown.value = selectedSubDropdownValue;
+            console.log(`Re-applied sub-dropdown value: ${selectedSubDropdownValue}`);
+            
+            // Make sure the "send to machine" button isn't reset
+            const sendtoNCKey = `${uniquePrefix}sendtoNCButtonisPressed`;
+            const savedSendToNCState = localStorage.getItem(sendtoNCKey);
+            if (savedSendToNCState === 'true') {
+              sendtoNCButtonisPressed = true;
+              console.log("Preserved sendtoNCButtonisPressed state");
+            }
+          }, 100);
+        }
       }
-
-      // Reset the current button ID after processing
-      currentButtonId = null;
     }
   }
 });
@@ -2155,12 +2932,27 @@ document.getElementById('submit').addEventListener('click', async (event) => {
 
     uploadingModal.style.display = 'flex';
 
-    const makerPic = document.getElementById('材料ラベル');
-    if (!makerPic || !makerPic.src || makerPic.style.display === 'none') {
-        uploadingModal.style.display = 'none';
-        showAlert("材料ラベルの写真を撮影してください / Please capture the 材料ラベル image");
-        return;
+    // Use the new material label photo system for validation
+    if (materialLabelPhotos.length === 0) {
+        // Check legacy system as fallback
+        const makerPic = document.getElementById('材料ラベル');
+        if (!makerPic || !makerPic.src || makerPic.src === '' || makerPic.src === 'data:,' || makerPic.style.display === 'none') {
+            console.error("材料ラベル validation failed - no photos in either system:", {
+                newSystemPhotoCount: materialLabelPhotos.length,
+                legacyExists: !!makerPic,
+                legacyHasSrc: !!(makerPic && makerPic.src),
+                legacySrc: makerPic ? makerPic.src.substring(0, 30) + '...' : 'none',
+                legacyDisplay: makerPic ? makerPic.style.display : 'N/A'
+            });
+            uploadingModal.style.display = 'none';
+            showAlert("材料ラベルの写真を撮影してください / Please capture the 材料ラベル image");
+            return;
+        }
     }
+    
+    console.log("材料ラベル validation passed:", {
+        newSystemPhotoCount: materialLabelPhotos.length
+    });
 
     try {
         const 品番 = document.getElementById('product-number').value;
@@ -2272,6 +3064,58 @@ document.getElementById('submit').addEventListener('click', async (event) => {
 
         const uploadedImages = await collectImagesForUpload();
         
+        // Process all material label photos from the new system
+        const materialLabelImages = [];
+        
+        console.log(`Processing ${materialLabelPhotos.length} material label photos for submission`);
+        
+        // Convert all material label photos to the format expected by server
+        for (let i = 0; i < materialLabelPhotos.length; i++) {
+            const photo = materialLabelPhotos[i];
+            if (!photo.base64) {
+                console.warn(`Skipping material label photo ${i} - no base64 data`);
+                continue;
+            }
+            
+            materialLabelImages.push({
+                base64: photo.base64,
+                id: `material-label-${i}-${photo.timestamp || new Date().getTime()}`,
+                timestamp: photo.timestamp || new Date().getTime(),
+                description: `材料ラベル ${i+1}/${materialLabelPhotos.length}`
+            });
+            
+            console.log(`Material label photo ${i+1} processed: ${(photo.base64.length / 1024).toFixed(2)} KB`);
+        }
+        
+        // Fallback to legacy method if no photos in new system
+        if (materialLabelImages.length === 0) {
+            const makerPic = document.getElementById('材料ラベル');
+            
+            // Only process if the image element exists and has content
+            if (makerPic && makerPic.src && makerPic.src !== '' && makerPic.src !== 'data:,' && makerPic.style.display !== 'none') {
+                try {
+                    console.log("No photos in new system - Processing legacy material label image");
+                    const response = await fetch(makerPic.src);
+                    const blob = await response.blob();
+                    const base64Data = await blobToBase64(blob);
+                    
+                    // Add material label as a separate entry with timestamp for uniqueness
+                    materialLabelImages.push({
+                        base64: base64Data,
+                        id: 'material-label-legacy-' + new Date().getTime(),
+                        timestamp: new Date().getTime(),
+                        description: '材料ラベル (Legacy)'
+                    });
+                    
+                    console.log(`Legacy material label image processed: ${(base64Data.length / 1024).toFixed(2)} KB`);
+                } catch (error) {
+                    console.error("Error processing legacy material label image:", error);
+                }
+            } else {
+                console.warn("Material label image not available in either system");
+            }
+        }
+        
         // Prepare data for the new submitToDCP route
         const dcpSubmissionData = {
             品番, 背番号, 設備, Total: Total_PressDB, 工場, Worker_Name, Process_Quantity, Date: WorkDate,
@@ -2284,7 +3128,8 @@ document.getElementById('submit').addEventListener('click', async (event) => {
             
             // Include image data
             images: uploadedImages, // Cycle check images (existing logic)
-            maintenanceImages: maintenanceImages, // NEW: Maintenance images
+            maintenanceImages: maintenanceImages, // Maintenance images
+            materialLabelImages: materialLabelImages, // NEW: Special handling for material label
             
             // Include toggle state and counter data for kensaDB
             isToggleChecked: isToggleChecked
@@ -2361,33 +3206,116 @@ async function collectImagesForUpload() {
   }, {
     imgId: 'atomonoPic',
     label: '終物チェック'
-  }, {
-    imgId: '材料ラベル',
-    label: '材料ラベル'
   }];
 
   const imagesToUpload = [];
 
-  for (const {
-      imgId,
-      label
-    } of imageMappings) {
+  // Debug logging for image element existence
+  console.log("Checking image elements:");
+  for (const { imgId, label } of imageMappings) {
     const photoPreview = document.getElementById(imgId);
-    if (!photoPreview || !photoPreview.src) continue;
+    console.log(`Image element '${imgId}' (${label}): ${photoPreview ? 'Found' : 'Not found'}, ` + 
+                `Has src: ${photoPreview && photoPreview.src ? 'Yes' : 'No'}, ` +
+                `Display: ${photoPreview ? photoPreview.style.display : 'N/A'}`);
+  }
 
-    const response = await fetch(photoPreview.src);
-    const blob = await response.blob();
-    const base64Data = await blobToBase64(blob);
+  // Process regular cycle check images (hatsumono and atomono)
+  for (const { imgId, label } of imageMappings) {
+    const photoPreview = document.getElementById(imgId);
+    // Skip if element doesn't exist, has no src, or is hidden
+    if (!photoPreview || !photoPreview.src || photoPreview.src === '' || photoPreview.src === 'data:,' || 
+        photoPreview.style.display === 'none') {
+      console.log(`Skipping ${label} image: not available or hidden`);
+      continue;
+    }
 
-    imagesToUpload.push({
-      base64: base64Data,
-      label,
-      factory: selectedFactory,
-      machine: selectedMachine,
-      worker: selectedWorker,
-      date: currentDate,
-      sebanggo: selectedSebanggo
-    });
+    try {
+      console.log(`Processing ${label} image from element: ${imgId}`);
+      const response = await fetch(photoPreview.src);
+      const blob = await response.blob();
+      const base64Data = await blobToBase64(blob);
+
+      // Debug log the size to verify we have real image data
+      console.log(`Image ${label}: ${(base64Data.length / 1024).toFixed(2)} KB`);
+
+      imagesToUpload.push({
+        base64: base64Data,
+        label,
+        factory: selectedFactory,
+        machine: selectedMachine,
+        worker: selectedWorker,
+        date: currentDate,
+        sebanggo: selectedSebanggo,
+        timestamp: new Date().getTime() // Add timestamp for uniqueness
+      });
+    } catch (error) {
+      console.error(`Error processing ${label} image:`, error);
+    }
+  }
+  
+  // Process all material label photos from our new system
+  console.log(`Processing ${materialLabelPhotos.length} material label photos`);
+  
+  if (materialLabelPhotos.length > 0) {
+    // Process each material label photo
+    for (let i = 0; i < materialLabelPhotos.length; i++) {
+      const photo = materialLabelPhotos[i];
+      if (!photo || !photo.base64) {
+        console.warn(`Skipping invalid material label photo at index ${i}`);
+        continue;
+      }
+      
+      const photoBase64 = photo.base64;
+      const photoIndex = i === 0 ? '' : `_${i+1}`;  // First photo has no index suffix
+      
+      console.log(`Adding material label photo ${i+1}/${materialLabelPhotos.length} (${(photoBase64.length / 1024).toFixed(2)} KB) to upload list`);
+      
+      imagesToUpload.push({
+        base64: photoBase64,
+        label: `材料ラベル${photoIndex}`,  // First one is "材料ラベル", others are "材料ラベル_2", etc.
+        factory: selectedFactory,
+        machine: selectedMachine,
+        worker: selectedWorker,
+        date: currentDate,
+        sebanggo: selectedSebanggo,
+        timestamp: photo.timestamp || new Date().getTime()
+      });
+    }
+    
+    // Update the legacy element if needed (for backward compatibility)
+    updateMaterialLabelElement();
+    
+  } else {
+    // Fall back to legacy approach if no new system photos
+    const makerPic = document.getElementById('材料ラベル');
+    
+    if (makerPic && makerPic.src && makerPic.src !== '' && makerPic.src !== 'data:,' && 
+        makerPic.style.display !== 'none') {
+      try {
+        console.log('No material label photos in new system, falling back to legacy element');
+        const response = await fetch(makerPic.src);
+        const blob = await response.blob();
+        const base64Data = await blobToBase64(blob);
+
+        // Debug log the size
+        console.log(`Legacy 材料ラベル image: ${(base64Data.length / 1024).toFixed(2)} KB`);
+
+        imagesToUpload.push({
+          base64: base64Data,
+          label: '材料ラベル',
+          factory: selectedFactory,
+          machine: selectedMachine,
+          worker: selectedWorker,
+          date: currentDate,
+          sebanggo: selectedSebanggo,
+          timestamp: new Date().getTime()
+        });
+      } catch (error) {
+        console.error('Error processing legacy 材料ラベル image:', error);
+      }
+    } else {
+      console.warn('No material label photos available in either system');
+    }
   }
 
   return imagesToUpload;
