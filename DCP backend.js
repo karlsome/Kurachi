@@ -35,6 +35,49 @@ if (selectedMachine) {
   }
 }
 
+// Add CSS styles for time input fields and edit buttons
+const timeInputStyles = `
+<style>
+  .time-input-wrapper {
+    display: inline-block;
+    position: relative;
+    margin-bottom: 10px;
+  }
+  
+  .time-input-wrapper input[type="time"] {
+    padding: 5px 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    transition: border-color 0.2s;
+  }
+  
+  .time-input-wrapper input[type="time"].locked {
+    background-color: #f8f9fa;
+    border-color: #dee2e6;
+    color: #495057;
+  }
+  
+  .time-input-wrapper .edit-btn {
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 12px;
+    cursor: pointer;
+    margin-left: 5px;
+    transition: background-color 0.2s;
+    vertical-align: middle;
+  }
+  
+  .time-input-wrapper .edit-btn:hover {
+    background-color: #0069d9;
+  }
+</style>`;
+
+// Inject styles into document head
+document.head.insertAdjacentHTML('beforeend', timeInputStyles);
+
 // Select all input, select, and button elements
 const inputs = document.querySelectorAll('input, select, button,textarea');
 const currentSelectedFactory = document.getElementById('selected工場').value; // Get the current factory value
@@ -167,6 +210,62 @@ document.addEventListener('DOMContentLoaded', () => {
   const sendToNCKey = `${uniquePrefix}sendtoNCButtonisPressed`;
   const savedSendToNCState = localStorage.getItem(sendToNCKey);
   const currentSebanggo = document.getElementById('sub-dropdown')?.value;
+  
+  // Set up processing time inputs with edit buttons
+  const startTimeInput = document.getElementById('Start Time');
+  const endTimeInput = document.getElementById('End Time');
+  
+  if (startTimeInput) {
+    // Wrap start time input in a container if not already wrapped
+    if (!startTimeInput.closest('.time-input-wrapper')) {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'time-input-wrapper';
+      startTimeInput.parentNode.insertBefore(wrapper, startTimeInput);
+      wrapper.appendChild(startTimeInput);
+      
+      // Add edit button
+      const editBtn = document.createElement('button');
+      editBtn.type = 'button';
+      editBtn.className = 'edit-btn';
+      editBtn.id = 'edit-start-time';
+      editBtn.textContent = 'Edit';
+      editBtn.style.display = 'none';
+      editBtn.onclick = function() { unlockProcessingTime('start'); };
+      wrapper.appendChild(editBtn);
+      
+      // Update focus handler to use our custom handler
+      startTimeInput.onfocus = function() { handleProcessingTimeFocus(this); };
+      
+      // Update lock status based on current value
+      updateProcessingTimeLockStatus('start');
+    }
+  }
+  
+  if (endTimeInput) {
+    // Wrap end time input in a container if not already wrapped
+    if (!endTimeInput.closest('.time-input-wrapper')) {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'time-input-wrapper';
+      endTimeInput.parentNode.insertBefore(wrapper, endTimeInput);
+      wrapper.appendChild(endTimeInput);
+      
+      // Add edit button
+      const editBtn = document.createElement('button');
+      editBtn.type = 'button';
+      editBtn.className = 'edit-btn';
+      editBtn.id = 'edit-end-time';
+      editBtn.textContent = 'Edit';
+      editBtn.style.display = 'none';
+      editBtn.onclick = function() { unlockProcessingTime('end'); };
+      wrapper.appendChild(editBtn);
+      
+      // Update focus handler to use our custom handler
+      endTimeInput.onfocus = function() { handleProcessingTimeFocus(this); };
+      
+      // Update lock status based on current value
+      updateProcessingTimeLockStatus('end');
+    }
+  }
   
   // Initialize previous sebanggo if it doesn't exist
   if (!localStorage.getItem(`${uniquePrefix}previous-sebanggo`) && currentSebanggo) {
@@ -559,6 +658,35 @@ function setDefaultTime(input) {
   if (input.id.includes('trouble')) {
     calculateTotalMachineTroubleTime();
   }
+
+  // If this is the Start Time input, lock it to prevent accidental changes
+  if (input.id === 'Start Time') {
+    // Update lock status for start time
+    setTimeout(() => {
+      updateProcessingTimeLockStatus('start');
+    }, 100);
+  }
+
+  // If this is the End Time input, lock it to prevent accidental changes
+  if (input.id === 'End Time') {
+    // Update lock status for end time
+    setTimeout(() => {
+      updateProcessingTimeLockStatus('end');
+    }, 100);
+  }
+}
+
+// Handle processing time input focus - check if locked before setting time
+function handleProcessingTimeFocus(input) {
+  // Check if the input is locked
+  if (input.classList.contains('locked') || input.readOnly) {
+    console.log(`🔒 Processing time input ${input.id} is locked - focus ignored to prevent accidental changes`);
+    input.blur(); // Remove focus to prevent interaction
+    return;
+  }
+  
+  // If not locked, proceed with normal setDefaultTime behavior
+  setDefaultTime(input);
 }
 
 // Function to reset individual break time
@@ -588,6 +716,69 @@ function resetBreakTime(breakNumber) {
 
     console.log(`Break time ${breakNumber} has been reset`);
   }
+}
+
+// Processing time lock functions
+// Function to lock processing time inputs when they have values
+function lockProcessingTime(timeType) {
+  const timeInput = document.getElementById(timeType === 'start' ? 'Start Time' : 'End Time');
+  const editBtn = document.getElementById(timeType === 'start' ? 'edit-start-time' : 'edit-end-time');
+
+  if (timeInput) {
+    // Add locked class and disable input
+    timeInput.classList.add('locked');
+    timeInput.readOnly = true;
+    timeInput.style.pointerEvents = 'none';
+    
+    // Show edit button
+    if (editBtn) {
+      editBtn.style.display = 'inline-block';
+    }
+    
+    console.log(`🔒 Processing ${timeType} time locked to prevent accidental changes`);
+  }
+}
+
+// Function to unlock processing time inputs for editing
+function unlockProcessingTime(timeType) {
+  const timeInput = document.getElementById(timeType === 'start' ? 'Start Time' : 'End Time');
+  const editBtn = document.getElementById(timeType === 'start' ? 'edit-start-time' : 'edit-end-time');
+
+  if (timeInput) {
+    // Remove locked class and enable input
+    timeInput.classList.remove('locked');
+    timeInput.readOnly = false;
+    timeInput.style.pointerEvents = 'auto';
+    
+    // Hide edit button
+    if (editBtn) {
+      editBtn.style.display = 'none';
+    }
+    
+    console.log(`🔓 Processing ${timeType} time unlocked for editing`);
+  }
+}
+
+// Function to check and update lock status for processing times
+function updateProcessingTimeLockStatus(timeType) {
+  const timeInput = document.getElementById(timeType === 'start' ? 'Start Time' : 'End Time');
+  
+  if (timeInput) {
+    const timeValue = timeInput.value;
+    
+    // Lock only if time has a value
+    if (timeValue && timeValue.trim() !== '') {
+      lockProcessingTime(timeType);
+    } else {
+      unlockProcessingTime(timeType);
+    }
+  }
+}
+
+// Function to update all processing time lock statuses
+function updateAllProcessingTimeLockStatus() {
+  updateProcessingTimeLockStatus('start');
+  updateProcessingTimeLockStatus('end');
 }
 
 // Function to calculate total break time in minutes
@@ -4185,6 +4376,9 @@ window.confirmDirectNumericInput = function() {
 
 // Run initialization after page is fully loaded to ensure it runs after other DOM events
 window.addEventListener('load', function() {
+  // Update processing time lock statuses
+  updateAllProcessingTimeLockStatus();
+  
   // Create a completely different implementation of the modal as direct HTML
   const modalHTML = `
     <div id="numericKeypadModalDirect" style="
