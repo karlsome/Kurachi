@@ -662,6 +662,7 @@ function stopBluetoothScannerListening() {
 // === Special QR Code Logic ===
 function checkSpecialQRPattern(qrValue) {
   // Define the special QR patterns with wildcard support
+  //kinuura label
   const specialPatterns = [
     "CNU/C2E2SB*/D/***WA8",
     "CNU/C2Z1YG*/D/***WA8", 
@@ -773,12 +774,16 @@ async function handleSpecialQR(qrCodeMessage) {
 
     // ✅ STEP 3: Fetch from materialDB using 材料品番 (same as normal flow)
     if (!matched材料品番) {
-      // ✅ FALLBACK: If no 材料品番 found, try using QR as 粘着品番 (special QR logic)
+      // ✅ FALLBACK: If no 材料品番 found, try using QR as 粘着品番 (special QR logic) - MODIFIED to prioritize entries with お客様品番
       console.log("No 材料品番 found, trying special QR logic with 粘着品番");
       const specialMaterialQuery = {
         dbName: "Sasaki_Coating_MasterDB", 
         collectionName: "materialDB", 
-        query: { "粘着品番": qrCodeMessage }
+        aggregation: [
+          { $match: { "粘着品番": qrCodeMessage } },
+          { $addFields: { "hasCustomerPN": { $cond: [ { $ifNull: ["$お客様品番", false] }, true, false ] } } },
+          { $sort: { "hasCustomerPN": -1 } }  // Sort with records having お客様品番 first
+        ]
       };
       
       const specialResponse = await fetch(`${serverURL}/queries`, { 
@@ -800,11 +805,16 @@ async function handleSpecialQR(qrCodeMessage) {
       matched材料品番 = specialData[0].材料品番;
     }
 
-    // ✅ STEP 4: Get material details using 材料品番
+    // ✅ STEP 4: Get material details using 材料品番 - MODIFIED to prioritize entries with お客様品番
+    // First try to find materials with both matching 材料品番 AND an お客様品番 field
     const materialQueryPayload = {
       dbName: "Sasaki_Coating_MasterDB", 
       collectionName: "materialDB", 
-      query: { "材料品番": matched材料品番 }
+      aggregation: [
+        { $match: { "材料品番": matched材料品番 } },
+        { $addFields: { "hasCustomerPN": { $cond: [ { $ifNull: ["$お客様品番", false] }, true, false ] } } },
+        { $sort: { "hasCustomerPN": -1 } }  // Sort with records having お客様品番 first
+      ]
     };
     
     const materialResponse = await fetch(`${serverURL}/queries`, { 
@@ -823,19 +833,54 @@ async function handleSpecialQR(qrCodeMessage) {
       return false;
     }
 
+    // Log the materials found to debug
+    console.log(`Found ${materialData.length} materials for 材料品番/粘着品番:`, 
+      materialData.map(mat => ({ 
+        材料背番号: mat.材料背番号, 
+        お客様品番: mat.お客様品番 || "未設定", 
+        hasCustomerPN: mat.hasCustomerPN
+      }))
+    );
+
     let material = null;
     
-    // Handle multiple materials (same logic as normal flow)
+    // Handle multiple materials - PRIORITIZE THOSE WITH お客様品番
     if (materialData.length > 1) {
       const matched材料背番号 = request ? request.材料背番号 : null;
-      if (matched材料背番号) {
+      
+      // First try to find materials with お客様品番
+      const materialsWithCustomerPN = materialData.filter(mat => mat.お客様品番 && mat.お客様品番.trim() !== "");
+      
+      if (materialsWithCustomerPN.length > 0) {
+        console.log(`Found ${materialsWithCustomerPN.length} materials with お客様品番`);
+        
+        // If we have materials with お客様品番 AND matching 材料背番号, use that one
+        if (matched材料背番号) {
+          const filteredWithPN = materialsWithCustomerPN.filter(mat => mat.材料背番号 === matched材料背番号);
+          if (filteredWithPN.length > 0) {
+            material = filteredWithPN[0];
+            console.log(`Selected material with matching 材料背番号 (${matched材料背番号}) and お客様品番`);
+          } else {
+            material = materialsWithCustomerPN[0];
+            console.log(`Selected first material with お客様品番 (no matching 材料背番号)`);
+          }
+        } else {
+          material = materialsWithCustomerPN[0];
+          console.log(`Selected first material with お客様品番 (no 材料背番号 to match)`);
+        }
+      } 
+      // Fall back to original logic if no materials with お客様品番
+      else if (matched材料背番号) {
         const filteredMaterials = materialData.filter(mat => mat.材料背番号 === matched材料背番号);
         material = filteredMaterials.length > 0 ? filteredMaterials[0] : materialData[0];
+        console.log(`No materials with お客様品番, selected by 材料背番号: ${material.材料背番号}`);
       } else {
         material = materialData[0];
+        console.log(`No materials with お客様品番, selected first result: ${material.材料背番号}`);
       }
     } else {
       material = materialData[0];
+      console.log(`Only one material found: ${material.材料背番号}, has お客様品番: ${!!material.お客様品番}`);
     }
 
     // ✅ STEP 5: Populate form fields (same as normal flow)
@@ -911,11 +956,21 @@ async function handleSpecialQR(qrCodeMessage) {
       saveToLocalStorage('sub-dropdown', qrCodeMessage);
     }
 
-    // ✅ Store the special QR flag for printing (ONLY difference is here)
+    // ✅ Store the special QR flag for printing - with enhanced debug information
+    
+    // First log the material object to check its structure
+    console.log("Special QR material data:", JSON.stringify(material, null, 2));
+    
+    // Make sure the material has all required fields or provide fallbacks
+    if (!material.hasOwnProperty('お客様品番') || !material.お客様品番) {
+      console.warn("Warning: お客様品番 is missing or empty in material data");
+    }
+    
     window.currentSpecialQR = {
       isSpecial: true,
       qrValue: qrCodeMessage,
-      materialData: material
+      materialData: material,
+      requestData: request // Store the request data as well (important for 収容数)
     };
 
     showModalAlert(`特殊QRコード処理完了: ${qrCodeMessage}`, false, 3000);
@@ -1011,6 +1066,62 @@ function showPrintConfirmationModal() {
     return;
   }
    if (statusValue === "本日リクエストなし") {
+    // Log what the values would have been if printing was allowed
+    console.log("=== NO WORK REQUEST FOR TODAY - POTENTIAL PRINT VALUES ===");
+    
+    // Get all the form values that would be used for printing
+    const potentialPrintValues = {
+      品番: document.getElementById("品番")?.value || "",
+      材料背番号: document.getElementById("材料背番号")?.value || "",
+      品名: document.getElementById("品名")?.value || "",
+      色: document.getElementById("material-color")?.value || "",
+      length: document.getElementById("length")?.value || "",
+      収容数: document.getElementById("order")?.value || "",
+      isSpecialQR: window.currentSpecialQR && window.currentSpecialQR.isSpecial
+    };
+    
+    // If this is a special QR code, add more detailed information
+    if (window.currentSpecialQR && window.currentSpecialQR.isSpecial) {
+      const specialMaterial = window.currentSpecialQR.materialData;
+      
+      console.log("Special QR values that would be used (if allowed to print):", {
+        // Standard form fields
+        formValues: potentialPrintValues,
+        
+        // Special QR specific details
+        specialQR: {
+          qrValue: window.currentSpecialQR.qrValue,
+          お客様品番: specialMaterial.お客様品番 || "未設定",
+          品名: specialMaterial.品名 || "",
+          材料背番号: specialMaterial.材料背番号 || "",
+          length: specialMaterial.length || "",
+          色: specialMaterial.色 || ""
+        },
+        
+        // How the print fields would be constructed
+        potentialPrintFields: {
+          品番: specialMaterial.お客様品番 || window.currentSpecialQR.qrValue || potentialPrintValues.品番,
+          背番号: specialMaterial.品名 || "",
+          収容数: "N/A (No 生産順番 available without today's request)",
+          色: specialMaterial.色 || potentialPrintValues.色,
+          barcode: specialMaterial.お客様品番 || window.currentSpecialQR.qrValue || potentialPrintValues.品番
+        }
+      });
+      
+      // Generate a sample of what the URL would have looked like
+      const sampleFilename = "kinuuraLabel.lbx";
+      const sampleLotNo = "SAMPLE-LOT";
+      const sampleURL = `http://localhost:8088/print?filename=${encodeURIComponent(sampleFilename)}&size=RollW62&copies=1` +
+        `&text_品番=${encodeURIComponent(specialMaterial.お客様品番 || window.currentSpecialQR.qrValue || "")}` +
+        `&text_背番号=${encodeURIComponent(specialMaterial.品名 || "")}` +
+        `&text_収容数=N/A&text_色=${encodeURIComponent(specialMaterial.色 || "")}` +
+        `&text_DateT=${encodeURIComponent(sampleLotNo)}&barcode_barcode=${encodeURIComponent(specialMaterial.お客様品番 || window.currentSpecialQR.qrValue || "")}`;
+        
+      console.log("Sample URL that would have been generated:", sampleURL);
+    } else {
+      console.log("Regular (non-Special QR) values that would be used (if allowed to print):", potentialPrintValues);
+    }
+    
     showModalAlert('本日の作業リクエストがありません。印刷はできません。(No work request for today. Printing not allowed.)', false);
     return;
   }
@@ -1316,6 +1427,8 @@ function confirmPrint() {
 
 
 async function printLabel() {
+  console.log("===== PRINT LABEL PROCESS STARTED =====");
+  
   const printingStatusModal = document.getElementById('printingStatusModal');
   const printCompletionModal = document.getElementById('printCompletionModal');
 
@@ -1326,9 +1439,23 @@ async function printLabel() {
   const orderVal = document.getElementById("order")?.value || "";
   const copiesToPrintNow = parseInt(document.getElementById("printTimes")?.value, 10) || 1;
   
+  console.log("Print preparation values:", {
+    材料背番号: 材料背番号,
+    品番: 品番,
+    色: 色,
+    length: length,
+    orderVal: orderVal,
+    copiesToPrintNow: copiesToPrintNow,
+    isSpecialQR: window.currentSpecialQR && window.currentSpecialQR.isSpecial,
+    specialQRData: window.currentSpecialQR ? {
+      qrValue: window.currentSpecialQR.qrValue,
+      hasRequestData: !!window.currentSpecialQR.requestData
+    } : null
+  });
 
   if (!品番) {
     showModalAlert('品番が選択されていません。(Product Number is not selected.)', true);
+    console.log("Print cancelled: No 品番 selected");
     if (printingStatusModal) printingStatusModal.style.display = 'none';
     return;
   }
@@ -1373,19 +1500,103 @@ async function printLabel() {
     let filename, printFields, barcodeFullValue;
     
     if (isSpecialQR) {
-      // ✅ SPECIAL QR PRINTING LOGIC
+      // ✅ SPECIAL QR PRINTING LOGIC - FIXED
       console.log("Using special QR printing logic with kinuuraLabel.lbx");
       filename = "kinuuraLabel.lbx";
       
       const specialMaterial = window.currentSpecialQR.materialData;
+      const requestData = window.currentSpecialQR.requestData;
+      
+      // Debug the material structure
+      console.log("Special material for printing:", {
+        material: specialMaterial,
+        hasCustomerPN: specialMaterial.hasOwnProperty('お客様品番'),
+        customerPN: specialMaterial.お客様品番,
+        materialName: specialMaterial.品名,
+        length: specialMaterial.length,
+        color: specialMaterial.色,
+        qrValue: window.currentSpecialQR.qrValue
+      });
+      
+      // Debug request data status - especially important for "no request for today" scenarios
+      console.log("Request data for special QR:", {
+        hasRequest: !!requestData,
+        requestData: requestData ? {
+          生産順番: requestData.生産順番,
+          作業日: requestData.作業日,
+          STATUS: requestData.STATUS
+        } : "No request found for today"
+      });
+
+      // If we don't have お客様品番, try to see if we can find a better material record
+      if (!specialMaterial.お客様品番 || specialMaterial.お客様品番.trim() === "") {
+        console.warn("Special QR material is missing お客様品番, attempting to find a better record...");
+        
+        try {
+          // Make an emergency lookup to find a record with お客様品番
+          const emergencyQuery = {
+            dbName: "Sasaki_Coating_MasterDB", 
+            collectionName: "materialDB",
+            query: {
+              "$or": [
+                { "粘着品番": window.currentSpecialQR.qrValue },
+                { "材料品番": specialMaterial.材料品番 }
+              ],
+              "お客様品番": { "$exists": true, "$ne": "" }
+            }
+          };
+          
+          const emergencyResponse = await fetch(`${serverURL}/queries`, { 
+            method: "POST", 
+            headers: { "Content-Type": "application/json" }, 
+            body: JSON.stringify(emergencyQuery)
+          });
+          
+          if (emergencyResponse.ok) {
+            const betterMaterials = await emergencyResponse.json();
+            if (Array.isArray(betterMaterials) && betterMaterials.length > 0) {
+              console.log("Found better material record with お客様品番:", betterMaterials[0]);
+              // Update our reference to use the better material
+              specialMaterial.お客様品番 = betterMaterials[0].お客様品番;
+            }
+          }
+        } catch (err) {
+          console.error("Emergency material lookup failed:", err);
+        }
+      }
+
+      // Calculate 収容数 from request's 生産順番 divided by 10 if available
+      let calculatedCapacity = length; // Default to regular length
+      if (requestData && requestData.生産順番) {
+        const orderNum = parseInt(requestData.生産順番, 10);
+        if (!isNaN(orderNum)) {
+          calculatedCapacity = Math.floor(orderNum / 10);
+          console.log(`Calculated 収容数 from 生産順番 (${requestData.生産順番}): ${calculatedCapacity}`);
+        }
+      }
+      
       printFields = {
-        品番: specialMaterial.お客様品番 || 品番,           // 品番 ← お客様品番
+        品番: specialMaterial.お客様品番 || window.currentSpecialQR.qrValue || 品番, // Use QR value as backup
         背番号: specialMaterial.品名 || "",              // 背番号 ← 品名  
-        収容数: specialMaterial.length || length,        // 収容数 ← length
+        収容数: calculatedCapacity,                     // 収容数 ← 生産順番 / 10
         色: specialMaterial.色 || 色,                    // 色 stays the same
       };
+      
+      // Log the final printFields to verify
+      console.log("Final printFields for special QR:", {
+        品番: printFields.品番,
+        背番号: printFields.背番号,
+        収容数: printFields.収容数,
+        色: printFields.色,
+        source: {
+          品番Source: specialMaterial.お客様品番 ? "お客様品番" : (window.currentSpecialQR.qrValue ? "QR Value" : "Default 品番"),
+          収容数Source: requestData && requestData.生産順番 ? "生産順番/10" : "Default length"
+        }
+      });
+      
       // ✅ For special QR: barcode is ONLY the お客様品番 (no concatenation)
-      barcodeFullValue = specialMaterial.お客様品番 || 品番;
+      barcodeFullValue = specialMaterial.お客様品番 || window.currentSpecialQR.qrValue || 品番;
+      console.log("Barcode value for special QR:", barcodeFullValue);
       
       console.log("Special QR print fields:", printFields);
     } else {
@@ -1405,12 +1616,46 @@ async function printLabel() {
     }
 
     let wasSuccessful = false;
+    
+    // Check if we have a request for today's date (important for no request scenarios)
+    const today = new Date();
+    const yearToday = String(today.getFullYear()).slice(-2);
+    const monthToday = String(today.getMonth() + 1).padStart(2, '0');
+    const dayToday = String(today.getDate()).padStart(2, '0');
+    const todayFormatted = `${yearToday}${monthToday}${dayToday}`;
+    
+    // For special QR, check if there's no request for today
+    if (isSpecialQR && window.currentSpecialQR.requestData) {
+      const requestDate = window.currentSpecialQR.requestData.作業日;
+      if (requestDate !== todayFormatted) {
+        console.log(`⚠️ WARNING: Request date (${requestDate}) does not match today's date (${todayFormatted})`);
+        console.log("This is expected if there's no request for today. Current values will still be shown:");
+        console.log({
+          品番: printFields.品番,
+          背番号: printFields.背番号,
+          収容数: printFields.収容数,
+          色: printFields.色,
+          barcode: barcodeFullValue,
+          lotNo: currentLotNo
+        });
+      }
+    }
+    
     if (isIOS) {
       const url = `brotherwebprint://print?filename=${encodeURIComponent(filename)}&size=RollW62&copies=1` +
         `&text_品番=${encodeURIComponent(printFields.品番)}&text_背番号=${encodeURIComponent(printFields.背番号)}` +
         `&text_収容数=${encodeURIComponent(printFields.収容数)}&text_色=${encodeURIComponent(printFields.色)}` +
         `&text_DateT=${encodeURIComponent(currentLotNo)}&barcode_barcode=${encodeURIComponent(barcodeFullValue)}`;
       console.log(`[iOS] Special QR: ${isSpecialQR}, URL:`, url);
+      console.log("Final printing values (iOS):", {
+        filename: filename,
+        品番: printFields.品番,
+        背番号: printFields.背番号,
+        収容数: printFields.収容数,
+        色: printFields.色,
+        DateT: currentLotNo,
+        barcode: barcodeFullValue
+      });
       window.location.href = url;
       wasSuccessful = true; // Assume success for iOS URL scheme
       await new Promise(resolve => setTimeout(resolve, 3500));
@@ -1420,6 +1665,15 @@ async function printLabel() {
         `&text_収容数=${encodeURIComponent(printFields.収容数)}&text_色=${encodeURIComponent(printFields.色)}` +
         `&text_DateT=${encodeURIComponent(currentLotNo)}&barcode_barcode=${encodeURIComponent(barcodeFullValue)}`;
       console.log(`[Android] Special QR: ${isSpecialQR}, URL:`, url);
+      console.log("Final printing values (Android):", {
+        filename: filename,
+        品番: printFields.品番,
+        背番号: printFields.背番号,
+        収容数: printFields.収容数,
+        色: printFields.色,
+        DateT: currentLotNo,
+        barcode: barcodeFullValue
+      });
       try {
         const response = await Promise.race([
           fetch(url).then(res => res.text()),
