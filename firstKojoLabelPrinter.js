@@ -409,13 +409,14 @@ async function fetchProductDetails() {
         return;
     }
     
+    // ✅ NEW: Query materialMasterDB2 instead of materialDB
     const materialQueryPayload = {
-      dbName: "Sasaki_Coating_MasterDB", collectionName: "materialDB", query: { "材料品番": matched材料品番 }
+      dbName: "Sasaki_Coating_MasterDB", collectionName: "materialMasterDB2", query: { "品番": selected品番Value }
     };
     const materialResponse = await fetch(`${serverURL}/queries`, { 
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(materialQueryPayload),
     });
-    if (!materialResponse.ok) throw new Error(`materialDB fetch failed: ${materialResponse.statusText}`);
+    if (!materialResponse.ok) throw new Error(`materialMasterDB2 fetch failed: ${materialResponse.statusText}`);
     
     const materialData = await materialResponse.json();
     if (!Array.isArray(materialData)) {
@@ -424,46 +425,23 @@ async function fetchProductDetails() {
     }
 
     if (materialData.length === 0) { 
-      showModalAlert(`材料DBに詳細が見つかりません。材料品番: ${matched材料品番}`, true);
+      showModalAlert(`材料DBに詳細が見つかりません。品番: ${selected品番Value}`, true);
       return;
     }
 
-    let material = null;
-    
-    // ✅ NEW LOGIC: Handle multiple materials with same 材料品番
-    if (materialData.length > 1) {
-      console.log(`Found ${materialData.length} materials with same 材料品番: ${matched材料品番}`);
-      
-      // Get 材料背番号 from the request document if available
-      const matched材料背番号 = request ? request.材料背番号 : null;
-      
-      if (matched材料背番号) {
-        console.log(`Filtering by 材料背番号: ${matched材料背番号}`);
-        const filteredMaterials = materialData.filter(mat => mat.材料背番号 === matched材料背番号);
-        
-        if (filteredMaterials.length > 0) {
-          material = filteredMaterials[0];
-          console.log(`Found matching material with 材料背番号: ${matched材料背番号}`);
-        } else {
-          console.warn(`No material found with 材料背番号: ${matched材料背番号}, using first material`);
-          material = materialData[0];
-        }
-      } else {
-        console.warn(`No 材料背番号 available in request, using first material from ${materialData.length} matches`);
-        material = materialData[0];
-      }
-    } else {
-      // Only one material found, use it
-      material = materialData[0];
-    }
+    // ✅ NEW: Use first match (materialMasterDB2 should have unique 品番)
+    let material = materialData[0];
+    console.log(`Using material from materialMasterDB2 for 品番: ${selected品番Value}`);
 
-    document.getElementById("材料背番号").value = material.材料背番号 || "";
-    document.getElementById("材料品番").value = material.材料品番 || "";
-    document.getElementById("material").value = material.材料 || "";
-    document.getElementById("material-color").value = material.色 || "";
-    const materialLength = parseInt(material.length, 10) || 50; 
+    // ✅ NEW FIELD MAPPINGS for materialMasterDB2
+    document.getElementById("材料背番号").value = material.ラベル品番 || "";  // ← ラベル品番
+    document.getElementById("材料品番").value = material.品番 || "";  // ← 品番
+    document.getElementById("品名").value = material.品名 || "";  // ← 品名
+    document.getElementById("material").value = material.構成品番 || "";  // ← 構成品番
+    document.getElementById("material-color").value = material.NMOJI_色コード || "";  // ← NMOJI_色コード
+    const materialLength = parseInt(material.基材長, 10) || 50;  // ← 基材長
     document.getElementById("length").value = materialLength;
-    document.getElementById("SRS").value = material.SRS === "有り" ? "有り" : "無し";
+    document.getElementById("SRS").value = "無し"; // Default value for now
 
     // Update image using imageURL from materialDB
     const dynamicImage = document.getElementById("dynamicImage");
@@ -492,21 +470,22 @@ async function fetchProductDetails() {
         document.getElementById("order").value = orderValForLabelText;
         
         const 生産数 = parseInt(request.生産数, 10); 
+        const 梱包数 = parseInt(material.梱包数, 10); // ✅ NEW: Get 梱包数 from materialMasterDB2
         let targetForCompletion = 0; 
 
-        if (!isNaN(生産数) && !isNaN(materialLength) && materialLength > 0) {
-            const rollTimes = (生産数 / materialLength) / 100; 
-            targetForCompletion = Math.ceil(rollTimes);
-            console.log("生産数:", 生産数, "length:", materialLength, "Calculated rollTimes (target):", targetForCompletion);
+        // ✅ NEW CALCULATION: 生産数 / 梱包数
+        if (!isNaN(生産数) && !isNaN(梱包数) && 梱包数 > 0) {
+            targetForCompletion = Math.ceil(生産数 / 梱包数);
+            console.log("生産数:", 生産数, "梱包数:", 梱包数, "Calculated target (生産数/梱包数):", targetForCompletion);
         } else {
-            console.warn("Invalid 生産数 or length for roll time calculation. Defaulting target to 0.");
+            console.warn("Invalid 生産数 or 梱包数 for target calculation. Defaulting target to 0.");
         }
         
         document.getElementById("targetProductionCount").value = targetForCompletion;
 
         const currentPrints = parseInt(request.TotalLabelsPrintedForOrder, 10) || 0;
         document.getElementById("printStatus").value = `${currentPrints} / ${targetForCompletion}`;
-        console.log(`Current prints: ${currentPrints}, Target for completion (from RollTimes): ${targetForCompletion}`);
+        console.log(`Current prints: ${currentPrints}, Target for completion (生産数/梱包数): ${targetForCompletion}`);
         
     } else {
         document.getElementById("status").value = "本日リクエストなし";
@@ -772,134 +751,49 @@ async function handleSpecialQR(qrCodeMessage) {
       }
     }
 
-    // ✅ STEP 3: Fetch from materialDB using 材料品番 (same as normal flow)
-    if (!matched材料品番) {
-      // ✅ FALLBACK: If no 材料品番 found, try using QR as 粘着品番 (special QR logic) - MODIFIED to prioritize entries with お客様品番
-      console.log("No 材料品番 found, trying special QR logic with 粘着品番");
-      const specialMaterialQuery = {
-        dbName: "Sasaki_Coating_MasterDB", 
-        collectionName: "materialDB", 
-        aggregation: [
-          { $match: { "粘着品番": qrCodeMessage } },
-          { $addFields: { "hasCustomerPN": { $cond: [ { $ifNull: ["$お客様品番", false] }, true, false ] } } },
-          { $sort: { "hasCustomerPN": -1 } }  // Sort with records having お客様品番 first
-        ]
-      };
-      
-      const specialResponse = await fetch(`${serverURL}/queries`, { 
-        method: "POST", 
-        headers: { "Content-Type": "application/json" }, 
-        body: JSON.stringify(specialMaterialQuery),
-      });
-      
-      if (!specialResponse.ok) {
-        throw new Error(`Special materialDB fetch failed: ${specialResponse.statusText}`);
-      }
-      
-      const specialData = await specialResponse.json();
-      if (!Array.isArray(specialData) || specialData.length === 0) {
-        showModalAlert(`特殊QRコードに対応する材料が見つかりません: ${qrCodeMessage}`, true);
-        return false;
-      }
-      
-      matched材料品番 = specialData[0].材料品番;
-    }
-
-    // ✅ STEP 4: Get material details using 材料品番 - MODIFIED to prioritize entries with お客様品番
-    // First try to find materials with both matching 材料品番 AND an お客様品番 field
-    const materialQueryPayload = {
+    // ✅ STEP 3: Fetch from materialMasterDB2 using 品番 matching QR code
+    console.log("Fetching material from materialMasterDB2 for special QR:", qrCodeMessage);
+    const specialMaterialQuery = {
       dbName: "Sasaki_Coating_MasterDB", 
-      collectionName: "materialDB", 
-      aggregation: [
-        { $match: { "材料品番": matched材料品番 } },
-        { $addFields: { "hasCustomerPN": { $cond: [ { $ifNull: ["$お客様品番", false] }, true, false ] } } },
-        { $sort: { "hasCustomerPN": -1 } }  // Sort with records having お客様品番 first
-      ]
+      collectionName: "materialMasterDB2", 
+      query: { "品番": qrCodeMessage }
     };
     
-    const materialResponse = await fetch(`${serverURL}/queries`, { 
+    const specialResponse = await fetch(`${serverURL}/queries`, { 
       method: "POST", 
       headers: { "Content-Type": "application/json" }, 
-      body: JSON.stringify(materialQueryPayload),
+      body: JSON.stringify(specialMaterialQuery),
     });
     
-    if (!materialResponse.ok) {
-      throw new Error(`materialDB fetch failed: ${materialResponse.statusText}`);
+    if (!specialResponse.ok) {
+      throw new Error(`Special materialMasterDB2 fetch failed: ${specialResponse.statusText}`);
     }
     
-    const materialData = await materialResponse.json();
-    if (!Array.isArray(materialData) || materialData.length === 0) {
-      showModalAlert(`材料DBに詳細が見つかりません。材料品番: ${matched材料品番}`, true);
+    const specialData = await specialResponse.json();
+    if (!Array.isArray(specialData) || specialData.length === 0) {
+      showModalAlert(`特殊QRコードに対応する材料が見つかりません: ${qrCodeMessage}`, true);
       return false;
     }
-
-    // Log the materials found to debug
-    console.log(`Found ${materialData.length} materials for 材料品番/粘着品番:`, 
-      materialData.map(mat => ({ 
-        材料背番号: mat.材料背番号, 
-        お客様品番: mat.お客様品番 || "未設定", 
-        hasCustomerPN: mat.hasCustomerPN
-      }))
-    );
-
-    let material = null;
     
-    // Handle multiple materials - PRIORITIZE THOSE WITH お客様品番
-    if (materialData.length > 1) {
-      const matched材料背番号 = request ? request.材料背番号 : null;
-      
-      // First try to find materials with お客様品番
-      const materialsWithCustomerPN = materialData.filter(mat => mat.お客様品番 && mat.お客様品番.trim() !== "");
-      
-      if (materialsWithCustomerPN.length > 0) {
-        console.log(`Found ${materialsWithCustomerPN.length} materials with お客様品番`);
-        
-        // If we have materials with お客様品番 AND matching 材料背番号, use that one
-        if (matched材料背番号) {
-          const filteredWithPN = materialsWithCustomerPN.filter(mat => mat.材料背番号 === matched材料背番号);
-          if (filteredWithPN.length > 0) {
-            material = filteredWithPN[0];
-            console.log(`Selected material with matching 材料背番号 (${matched材料背番号}) and お客様品番`);
-          } else {
-            material = materialsWithCustomerPN[0];
-            console.log(`Selected first material with お客様品番 (no matching 材料背番号)`);
-          }
-        } else {
-          material = materialsWithCustomerPN[0];
-          console.log(`Selected first material with お客様品番 (no 材料背番号 to match)`);
-        }
-      } 
-      // Fall back to original logic if no materials with お客様品番
-      else if (matched材料背番号) {
-        const filteredMaterials = materialData.filter(mat => mat.材料背番号 === matched材料背番号);
-        material = filteredMaterials.length > 0 ? filteredMaterials[0] : materialData[0];
-        console.log(`No materials with お客様品番, selected by 材料背番号: ${material.材料背番号}`);
-      } else {
-        material = materialData[0];
-        console.log(`No materials with お客様品番, selected first result: ${material.材料背番号}`);
-      }
-    } else {
-      material = materialData[0];
-      console.log(`Only one material found: ${material.材料背番号}, has お客様品番: ${!!material.お客様品番}`);
-    }
+    // Use the first match from materialMasterDB2
+    const specialQRMaterial = specialData[0];
+    console.log("Found material in materialMasterDB2 for special QR:", specialQRMaterial);
 
-    // ✅ STEP 5: Populate form fields (same as normal flow)
-    document.getElementById("材料背番号").value = material.材料背番号 || "";
-    document.getElementById("材料品番").value = material.材料品番 || "";
-    document.getElementById("material").value = material.材料 || "";
-    document.getElementById("material-color").value = material.色 || "";
-    const materialLength = parseInt(material.length, 10) || 50;
+    // ✅ STEP 5: Populate form fields using materialMasterDB2 data
+    document.getElementById("材料背番号").value = specialQRMaterial.ラベル品番 || "";  // ← ラベル品番
+    document.getElementById("材料品番").value = specialQRMaterial.品番 || "";  // ← 品番 (the QR value)
+    document.getElementById("品名").value = specialQRMaterial.品名 || "";  // ← 品名
+    document.getElementById("material").value = specialQRMaterial.構成品番 || "";  // ← 構成品番
+    document.getElementById("material-color").value = specialQRMaterial.NMOJI_色コード || "";  // ← NMOJI_色コード
+    const materialLength = parseInt(specialQRMaterial.基材長, 10) || 50;  // ← 基材長
     document.getElementById("length").value = materialLength;
-    document.getElementById("SRS").value = material.SRS === "有り" ? "有り" : "無し";
-    
-    // Set 品名 to the QR code value for special QR
-    document.getElementById("品名").value = qrCodeMessage;
+    document.getElementById("SRS").value = "無し"; // Default value
 
-    // Handle image (same as normal flow)
+    // Handle image using imageURL from materialMasterDB2
     const dynamicImage = document.getElementById("dynamicImage");
     if (dynamicImage) {
-      if (material.imageURL && material.imageURL.trim() !== "") {
-        dynamicImage.src = material.imageURL;
+      if (specialQRMaterial.imageURL && specialQRMaterial.imageURL.trim() !== "") {
+        dynamicImage.src = specialQRMaterial.imageURL;
         dynamicImage.style.display = 'block';
       } else {
         dynamicImage.src = "";
@@ -907,7 +801,7 @@ async function handleSpecialQR(qrCodeMessage) {
       }
     }
 
-    // ✅ STEP 6: Handle request data (same as normal flow)
+    // ✅ STEP 6: Handle request data with new calculation
     if (request) {
       const statusInput = document.getElementById("status");
       if (!request.STATUS || request.STATUS.trim() === "" || request.STATUS === "加工中") {
@@ -923,11 +817,13 @@ async function handleSpecialQR(qrCodeMessage) {
       document.getElementById("order").value = orderValForLabelText;
       
       const 生産数 = parseInt(request.生産数, 10);
+      const 梱包数 = parseInt(specialQRMaterial.梱包数, 10); // ✅ NEW: Get 梱包数 from materialMasterDB2
       let targetForCompletion = 0;
 
-      if (!isNaN(生産数) && !isNaN(materialLength) && materialLength > 0) {
-        const rollTimes = (生産数 / materialLength) / 100;
-        targetForCompletion = Math.ceil(rollTimes);
+      // ✅ NEW CALCULATION: 生産数 / 梱包数
+      if (!isNaN(生産数) && !isNaN(梱包数) && 梱包数 > 0) {
+        targetForCompletion = Math.ceil(生産数 / 梱包数);
+        console.log("Special QR - 生産数:", 生産数, "梱包数:", 梱包数, "Target:", targetForCompletion);
       }
       
       document.getElementById("targetProductionCount").value = targetForCompletion;
@@ -956,21 +852,21 @@ async function handleSpecialQR(qrCodeMessage) {
       saveToLocalStorage('sub-dropdown', qrCodeMessage);
     }
 
-    // ✅ Store the special QR flag for printing - with enhanced debug information
-    
-    // First log the material object to check its structure
-    console.log("Special QR material data:", JSON.stringify(material, null, 2));
-    
-    // Make sure the material has all required fields or provide fallbacks
-    if (!material.hasOwnProperty('お客様品番') || !material.お客様品番) {
-      console.warn("Warning: お客様品番 is missing or empty in material data");
-    }
+    // ✅ Store the special QR flag for printing with materialMasterDB2 data
+    console.log("Special QR material data from materialMasterDB2:", {
+      品番: specialQRMaterial.品番,
+      お客様品番: specialQRMaterial.お客様品番,
+      品名: specialQRMaterial.品名,
+      ラベル品番: specialQRMaterial.ラベル品番,
+      構成品番: specialQRMaterial.構成品番,
+      梱包数: specialQRMaterial.梱包数
+    });
     
     window.currentSpecialQR = {
       isSpecial: true,
       qrValue: qrCodeMessage,
-      materialData: material,
-      requestData: request // Store the request data as well (important for 収容数)
+      materialData: specialQRMaterial,
+      requestData: request // Store the request data as well
     };
 
     showModalAlert(`特殊QRコード処理完了: ${qrCodeMessage}`, false, 3000);
@@ -1500,25 +1396,26 @@ async function printLabel() {
     let filename, printFields, barcodeFullValue;
     
     if (isSpecialQR) {
-      // ✅ SPECIAL QR PRINTING LOGIC - FIXED
+      // ✅ SPECIAL QR PRINTING LOGIC using materialMasterDB2
       console.log("Using special QR printing logic with kinuuraLabel.lbx");
       filename = "kinuuraLabel.lbx";
       
       const specialMaterial = window.currentSpecialQR.materialData;
       const requestData = window.currentSpecialQR.requestData;
       
-      // Debug the material structure
-      console.log("Special material for printing:", {
-        material: specialMaterial,
-        hasCustomerPN: specialMaterial.hasOwnProperty('お客様品番'),
-        customerPN: specialMaterial.お客様品番,
-        materialName: specialMaterial.品名,
-        length: specialMaterial.length,
-        color: specialMaterial.色,
-        qrValue: window.currentSpecialQR.qrValue
+      // Debug the material structure from materialMasterDB2
+      console.log("Special material for printing (materialMasterDB2):", {
+        品番: specialMaterial.品番,
+        お客様品番: specialMaterial.お客様品番,
+        品名: specialMaterial.品名,
+        ラベル品番: specialMaterial.ラベル品番,
+        構成品番: specialMaterial.構成品番,
+        NMOJI_色コード: specialMaterial.NMOJI_色コード,
+        基材長: specialMaterial.基材長,
+        梱包数: specialMaterial.梱包数
       });
       
-      // Debug request data status - especially important for "no request for today" scenarios
+      // Debug request data status
       console.log("Request data for special QR:", {
         hasRequest: !!requestData,
         requestData: requestData ? {
@@ -1527,43 +1424,6 @@ async function printLabel() {
           STATUS: requestData.STATUS
         } : "No request found for today"
       });
-
-      // If we don't have お客様品番, try to see if we can find a better material record
-      if (!specialMaterial.お客様品番 || specialMaterial.お客様品番.trim() === "") {
-        console.warn("Special QR material is missing お客様品番, attempting to find a better record...");
-        
-        try {
-          // Make an emergency lookup to find a record with お客様品番
-          const emergencyQuery = {
-            dbName: "Sasaki_Coating_MasterDB", 
-            collectionName: "materialDB",
-            query: {
-              "$or": [
-                { "粘着品番": window.currentSpecialQR.qrValue },
-                { "材料品番": specialMaterial.材料品番 }
-              ],
-              "お客様品番": { "$exists": true, "$ne": "" }
-            }
-          };
-          
-          const emergencyResponse = await fetch(`${serverURL}/queries`, { 
-            method: "POST", 
-            headers: { "Content-Type": "application/json" }, 
-            body: JSON.stringify(emergencyQuery)
-          });
-          
-          if (emergencyResponse.ok) {
-            const betterMaterials = await emergencyResponse.json();
-            if (Array.isArray(betterMaterials) && betterMaterials.length > 0) {
-              console.log("Found better material record with お客様品番:", betterMaterials[0]);
-              // Update our reference to use the better material
-              specialMaterial.お客様品番 = betterMaterials[0].お客様品番;
-            }
-          }
-        } catch (err) {
-          console.error("Emergency material lookup failed:", err);
-        }
-      }
 
       // Calculate 収容数 from request's 生産順番 divided by 10 if available
       let calculatedCapacity = length; // Default to regular length
@@ -1575,11 +1435,12 @@ async function printLabel() {
         }
       }
       
+      // ✅ NEW FIELD MAPPINGS for materialMasterDB2
       printFields = {
-        品番: specialMaterial.お客様品番 || window.currentSpecialQR.qrValue || 品番, // Use QR value as backup
-        背番号: specialMaterial.品名 || "",              // 背番号 ← 品名  
-        収容数: calculatedCapacity,                     // 収容数 ← 生産順番 / 10
-        色: specialMaterial.色 || 色,                    // 色 stays the same
+        品番: specialMaterial.お客様品番 || specialMaterial.品番 || 品番,  // ← お客様品番 (or fallback to 品番)
+        背番号: specialMaterial.品名 || "",  // ← 品名
+        収容数: calculatedCapacity,  // ← 生産順番 / 10
+        色: specialMaterial.NMOJI_色コード || 色,  // ← NMOJI_色コード
       };
       
       // Log the final printFields to verify
@@ -1589,13 +1450,15 @@ async function printLabel() {
         収容数: printFields.収容数,
         色: printFields.色,
         source: {
-          品番Source: specialMaterial.お客様品番 ? "お客様品番" : (window.currentSpecialQR.qrValue ? "QR Value" : "Default 品番"),
+          品番Source: specialMaterial.お客様品番 ? "お客様品番" : "品番",
+          背番号Source: "品名",
+          色Source: "NMOJI_色コード",
           収容数Source: requestData && requestData.生産順番 ? "生産順番/10" : "Default length"
         }
       });
       
-      // ✅ For special QR: barcode is ONLY the お客様品番 (no concatenation)
-      barcodeFullValue = specialMaterial.お客様品番 || window.currentSpecialQR.qrValue || 品番;
+      // ✅ For special QR: barcode is the お客様品番
+      barcodeFullValue = specialMaterial.お客様品番 || specialMaterial.品番 || 品番;
       console.log("Barcode value for special QR:", barcodeFullValue);
       
       console.log("Special QR print fields:", printFields);
