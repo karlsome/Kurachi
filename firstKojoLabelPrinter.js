@@ -439,7 +439,7 @@ async function fetchProductDetails() {
     document.getElementById("品名").value = material.品名 || "";  // ← 品名
     document.getElementById("material").value = material.構成品番 || "";  // ← 構成品番
     document.getElementById("material-color").value = material.NMOJI_色コード || "";  // ← NMOJI_色コード
-    const materialLength = parseInt(material.基材長, 10) || 50;  // ← 基材長
+    const materialLength = parseInt(material.梱包数, 10) || 50;  // ← 梱包数 (packaging quantity)
     document.getElementById("length").value = materialLength;
     document.getElementById("SRS").value = "無し"; // Default value for now
 
@@ -785,7 +785,7 @@ async function handleSpecialQR(qrCodeMessage) {
     document.getElementById("品名").value = specialQRMaterial.品名 || "";  // ← 品名
     document.getElementById("material").value = specialQRMaterial.構成品番 || "";  // ← 構成品番
     document.getElementById("material-color").value = specialQRMaterial.NMOJI_色コード || "";  // ← NMOJI_色コード
-    const materialLength = parseInt(specialQRMaterial.基材長, 10) || 50;  // ← 基材長
+    const materialLength = parseInt(specialQRMaterial.梱包数, 10) || 50;  // ← 梱包数 (packaging quantity)
     document.getElementById("length").value = materialLength;
     document.getElementById("SRS").value = "無し"; // Default value
 
