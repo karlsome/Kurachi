@@ -425,3 +425,109 @@ input, select {
             background: #c82333;
             border-color: #c82333;
         }
+
+/* ===== RESPONSIVE 2-COLUMN LAYOUT ===== */
+
+/* Two-column layout wrapper */
+.two-column-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    width: 100%;
+}
+
+/* Individual column styling */
+.column {
+    flex: 1;
+    min-width: 0;
+}
+
+/* Landscape mode (tablet horizontal): Side-by-side columns */
+/* 10-inch tablet landscape is typically 1280x800 or 1024x768 */
+@media (min-width: 768px) {
+    .container {
+        max-width: 95% !important;
+        width: 100% !important;
+        height: 100vh;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+    }
+    
+    .two-column-layout {
+        flex-direction: row;
+        align-items: flex-start;
+        flex: 1;
+        overflow: hidden;
+    }
+    
+    .column-1,
+    .column-2 {
+        flex: 1;
+        overflow-y: auto;
+        overflow-x: hidden;
+        max-height: calc(100vh - 100px);
+        padding-right: 10px;
+    }
+    
+    /* Custom scrollbar styling for columns */
+    .column-1::-webkit-scrollbar,
+    .column-2::-webkit-scrollbar {
+        width: 8px;
+    }
+    
+    .column-1::-webkit-scrollbar-track,
+    .column-2::-webkit-scrollbar-track {
+        background: #022a44;
+        border-radius: 10px;
+    }
+    
+    .column-1::-webkit-scrollbar-thumb,
+    .column-2::-webkit-scrollbar-thumb {
+        background: #0174b3;
+        border-radius: 10px;
+    }
+    
+    .column-1::-webkit-scrollbar-thumb:hover,
+    .column-2::-webkit-scrollbar-thumb:hover {
+        background: #0198e8;
+    }
+}
+
+/* ===== RED RESET BUTTON (DANGER) ===== */
+.resetbtn {
+    display: inline-block;
+    background-color: #dc3545;
+    color: white;
+    border: 2px solid #dc3545;
+    padding: 12px 20px;
+    font-size: 16px;
+    font-weight: bold;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: 0.3s;
+    width: 100%;
+    margin-top: 15px;
+}
+
+.resetbtn:hover {
+    background-color: #c82333;
+    border-color: #bd2130;
+    transform: scale(1.02);
+}
+
+.resetbtn:active {
+    transform: scale(0.98);
+}
+
+/* Portrait mode (tablet vertical or mobile): Stacked columns */
+@media (max-width: 767px) {
+    .two-column-layout {
+        flex-direction: column;
+    }
+    
+    .column-1,
+    .column-2 {
+        width: 100%;
+    }
+}

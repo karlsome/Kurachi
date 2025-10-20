@@ -439,6 +439,9 @@ async function fetchProductDetails() {
     document.getElementById("品名").value = material.品名 || "";  // ← 品名
     document.getElementById("material").value = material.構成品番 || "";  // ← 構成品番
     document.getElementById("material-color").value = material.NMOJI_色コード || "";  // ← NMOJI_色コード
+    document.getElementById("specification").value = material.仕様 || "";  // ← 仕様 (Specification)
+    document.getElementById("raw-material-number").value = material.原材料品番 || "";  // ← 原材料品番 (Raw Material)
+    document.getElementById("hidden-location").value = material.NMOJI_ユーザー || "";  // ← NMOJI_ユーザー (location)
     const materialLength = parseInt(material.梱包数, 10) || 50;  // ← 梱包数 (packaging quantity)
     document.getElementById("length").value = materialLength;
     document.getElementById("SRS").value = "無し"; // Default value for now
@@ -785,6 +788,9 @@ async function handleSpecialQR(qrCodeMessage) {
     document.getElementById("品名").value = specialQRMaterial.品名 || "";  // ← 品名
     document.getElementById("material").value = specialQRMaterial.構成品番 || "";  // ← 構成品番
     document.getElementById("material-color").value = specialQRMaterial.NMOJI_色コード || "";  // ← NMOJI_色コード
+    document.getElementById("specification").value = specialQRMaterial.仕様 || "";  // ← 仕様 (Specification)
+    document.getElementById("raw-material-number").value = specialQRMaterial.原材料品番 || "";  // ← 原材料品番 (Raw Material)
+    document.getElementById("hidden-location").value = specialQRMaterial.NMOJI_ユーザー || "";  // ← NMOJI_ユーザー (location)
     const materialLength = parseInt(specialQRMaterial.梱包数, 10) || 50;  // ← 梱包数 (packaging quantity)
     document.getElementById("length").value = materialLength;
     document.getElementById("SRS").value = "無し"; // Default value
@@ -1329,7 +1335,7 @@ async function printLabel() {
   const printCompletionModal = document.getElementById('printCompletionModal');
 
   const 材料背番号 = document.getElementById("材料背番号")?.value || "";
-  const 品番 = document.getElementById("品名")?.value;
+  const 品番 = document.getElementById("材料品番")?.value;
   const 色 = document.getElementById("material-color")?.value || "";
   const length = document.getElementById("length")?.value || "50";
   const orderVal = document.getElementById("order")?.value || "";
@@ -1467,13 +1473,18 @@ async function printLabel() {
       const barcodeValuePart1 = 材料背番号 || 品番;
       barcodeFullValue = `${barcodeValuePart1},${currentLotNo},${length}`;
       const srsStatus = document.getElementById("SRS")?.value;
-      filename = srsStatus === "有り" ? "SRS3.lbx" : (材料背番号 === "NC2" ? "NC21.lbx" : "firstkojo3.lbx");
+      filename = srsStatus === "有り" ? "SRS3.lbx" : (材料背番号 === "NC2" ? "NC21.lbx" : "firstkojo4.lbx");
+      
+      const 品名 = document.getElementById("品名")?.value || "";
+      const location = document.getElementById("hidden-location")?.value || "";
       
       printFields = {
         品番: 品番,
         背番号: 材料背番号,
         収容数: orderVal,
         色: 色,
+        品名: 品名,
+        location: location,
         barcode: barcodeFullValue
       };
     }
@@ -1507,7 +1518,8 @@ async function printLabel() {
     if (isIOS) {
       const url = `brotherwebprint://print?filename=${encodeURIComponent(filename)}&size=RollW62&copies=1` +
         `&text_品番=${encodeURIComponent(printFields.品番)}&text_背番号=${encodeURIComponent(printFields.背番号)}` +
-        `&text_収容数=${encodeURIComponent(printFields.収容数)}&text_色=${encodeURIComponent(printFields.色)}` +
+        `&text_収容数=${encodeURIComponent(printFields.収容数)}&text_color=${encodeURIComponent(printFields.色)}` +
+        `&text_品名=${encodeURIComponent(printFields.品名 || "")}&text_location=${encodeURIComponent((printFields.location || "") + "へ")}` +
         `&text_DateT=${encodeURIComponent(currentLotNo)}&barcode_barcode=${encodeURIComponent(barcodeFullValue)}`;
       console.log(`[iOS] Special QR: ${isSpecialQR}, URL:`, url);
       console.log("Final printing values (iOS):", {
@@ -1516,6 +1528,8 @@ async function printLabel() {
         背番号: printFields.背番号,
         収容数: printFields.収容数,
         色: printFields.色,
+        品名: printFields.品名,
+        location: printFields.location,
         DateT: currentLotNo,
         barcode: barcodeFullValue
       });
@@ -1525,7 +1539,8 @@ async function printLabel() {
     } else {
       const url = `http://localhost:8088/print?filename=${encodeURIComponent(filename)}&size=RollW62&copies=1` +
         `&text_品番=${encodeURIComponent(printFields.品番)}&text_背番号=${encodeURIComponent(printFields.背番号)}` +
-        `&text_収容数=${encodeURIComponent(printFields.収容数)}&text_色=${encodeURIComponent(printFields.色)}` +
+        `&text_収容数=${encodeURIComponent(printFields.収容数)}&text_color=${encodeURIComponent(printFields.色)}` +
+        `&text_品名=${encodeURIComponent(printFields.品名 || "")}&text_location=${encodeURIComponent((printFields.location || "") + "へ")}` +
         `&text_DateT=${encodeURIComponent(currentLotNo)}&barcode_barcode=${encodeURIComponent(barcodeFullValue)}`;
       console.log(`[Android] Special QR: ${isSpecialQR}, URL:`, url);
       console.log("Final printing values (Android):", {
@@ -1534,6 +1549,8 @@ async function printLabel() {
         背番号: printFields.背番号,
         収容数: printFields.収容数,
         色: printFields.色,
+        品名: printFields.品名,
+        location: printFields.location,
         DateT: currentLotNo,
         barcode: barcodeFullValue
       });
@@ -1676,7 +1693,7 @@ if (reprintButton) {
         confirmReprintBtn.disabled = false;
         confirmReprintBtn.textContent = 'Reprint This Label';
 
-        const 品番 = document.getElementById("品名")?.value;
+        const 品番 = document.getElementById("材料品番")?.value;
         if (!品番) {
             showModalAlert("まず品番を選択してください。(Please select a 品番 first.)", true);
             return;
@@ -1694,6 +1711,7 @@ if (reprintButton) {
         lotSuffixSelect.innerHTML = ""; 
         const storedData = JSON.parse(localStorage.getItem(storageKey));
         if (storedData && storedData.extension && storedData.date) {
+            // ✅ PRIMARY: Use localStorage data if available
             for (let i = 1; i <= storedData.extension; i++) {
             const suffix = `${storedData.date}-${i}`;
             const option = document.createElement('option');
@@ -1707,7 +1725,52 @@ if (reprintButton) {
                 showModalAlert("この品番の以前のラベル履歴はありません。(No previous label history for this 品番.)", false);
             }
         } else {
-            showModalAlert("この品番の以前のラベル履歴はありません。(No previous label history for this 品番.)", false);
+            // ✅ FALLBACK: Use Print Progress field if localStorage not found
+            console.log("localStorage not found, checking Print Progress field...");
+            const printStatusField = document.getElementById("printStatus");
+            const printStatusValue = printStatusField?.value || "";
+            
+            // Parse "2 / 2" format to get completed prints (first number)
+            const match = printStatusValue.match(/^(\d+)\s*\/\s*\d+$/);
+            if (match && parseInt(match[1], 10) > 0) {
+                const completedPrints = parseInt(match[1], 10);
+                console.log(`Found ${completedPrints} completed prints from Print Progress`);
+                
+                // Get date from Lot No. field and convert to yymmdd format
+                const lotDateField = document.getElementById("Lot No.");
+                const lotDateValue = lotDateField?.value || "";
+                
+                if (!lotDateValue) {
+                    showModalAlert("日付が入力されていません。(Date field is empty.)", true);
+                    return;
+                }
+                
+                // Convert "2025-10-20" to "251020"
+                const dateParts = lotDateValue.split("-");
+                if (dateParts.length !== 3) {
+                    showModalAlert("日付の形式が無効です。(Invalid date format.)", true);
+                    return;
+                }
+                const year = dateParts[0].slice(-2); // "25"
+                const month = dateParts[1]; // "10"
+                const day = dateParts[2]; // "20"
+                const formattedDate = `${year}${month}${day}`; // "251020"
+                
+                // Generate dropdown options from 1 to completedPrints
+                for (let i = 1; i <= completedPrints; i++) {
+                    const suffix = `${formattedDate}-${i}`;
+                    const option = document.createElement('option');
+                    option.value = suffix;
+                    option.textContent = `${formattedDate} (ロット ${i})`;
+                    lotSuffixSelect.appendChild(option);
+                }
+                
+                reprintModal.style.display = 'block';
+                console.log(`Generated ${completedPrints} reprint options from Print Progress`);
+            } else {
+                // No localStorage and no valid print progress
+                showModalAlert("この品番の以前のラベル履歴はありません。(No previous label history for this 品番.)", false);
+            }
         }
     });
 }
@@ -1731,8 +1794,10 @@ if(confirmReprintButton) {
         confirmReprintButton.textContent = '再印刷中...';
 
         const 材料背番号 = document.getElementById("材料背番号")?.value || "";
-        const 品番 = document.getElementById("品名")?.value;
+        const 品番 = document.getElementById("材料品番")?.value;
+        const 品名 = document.getElementById("品名")?.value || "";
         const 色 = document.getElementById("material-color")?.value || "";
+        const location = document.getElementById("hidden-location")?.value || "";
         const length = document.getElementById("length")?.value || "50";
         const orderVal = document.getElementById("order")?.value || "";
         const isIOS = /iphone|ipad|ipod/.test(navigator.userAgent.toLowerCase());
@@ -1760,13 +1825,15 @@ if(confirmReprintButton) {
           const barcodeValuePart1 = 材料背番号 || 品番;
           barcodeFullValue = `${barcodeValuePart1},${selectedSuffix},${length}`;
           const srsStatus = document.getElementById("SRS")?.value;
-          filename = srsStatus === "有り" ? "SRS3.lbx" : (材料背番号 === "NC2" ? "NC21.lbx" : "firstkojo3.lbx");
+          filename = srsStatus === "有り" ? "SRS3.lbx" : (材料背番号 === "NC2" ? "NC21.lbx" : "firstkojo4.lbx");
           
           printFields = {
             品番: 品番,
             背番号: 材料背番号,
             収容数: orderVal,
-            色: 色
+            色: 色,
+            品名: 品名,
+            location: location
           };
         }
 
@@ -1774,7 +1841,8 @@ if(confirmReprintButton) {
             if (isIOS) {
                 const url = `brotherwebprint://print?filename=${encodeURIComponent(filename)}&size=RollW62&copies=1` +
                     `&text_品番=${encodeURIComponent(printFields.品番)}&text_背番号=${encodeURIComponent(printFields.背番号)}` +
-                    `&text_収容数=${encodeURIComponent(printFields.収容数)}&text_色=${encodeURIComponent(printFields.色)}` +
+                    `&text_収容数=${encodeURIComponent(printFields.収容数)}&text_color=${encodeURIComponent(printFields.色)}` +
+                    `&text_品名=${encodeURIComponent(printFields.品名 || "")}&text_location=${encodeURIComponent((printFields.location || "") + "へ")}` +
                     `&text_DateT=${encodeURIComponent(selectedSuffix)}&barcode_barcode=${encodeURIComponent(barcodeFullValue)}`;
                 console.log(`[iOS Reprint] Special QR: ${isSpecialQR}, URL:`, url);
                 window.location.href = url;
@@ -1785,7 +1853,8 @@ if(confirmReprintButton) {
             } else {
                 const url = `http://localhost:8088/print?filename=${encodeURIComponent(filename)}&size=RollW62&copies=1` +
                     `&text_品番=${encodeURIComponent(printFields.品番)}&text_背番号=${encodeURIComponent(printFields.背番号)}` +
-                    `&text_収容数=${encodeURIComponent(printFields.収容数)}&text_色=${encodeURIComponent(printFields.色)}` +
+                    `&text_収容数=${encodeURIComponent(printFields.収容数)}&text_color=${encodeURIComponent(printFields.色)}` +
+                    `&text_品名=${encodeURIComponent(printFields.品名 || "")}&text_location=${encodeURIComponent((printFields.location || "") + "へ")}` +
                     `&text_DateT=${encodeURIComponent(selectedSuffix)}&barcode_barcode=${encodeURIComponent(barcodeFullValue)}`;
                 console.log(`[Android Reprint] Special QR: ${isSpecialQR}, URL:`, url);
                 
@@ -1810,6 +1879,27 @@ if(confirmReprintButton) {
     });
 }
 
+
+// === Confirm Reset with Warning ===
+function confirmReset() {
+    const confirmMessage = "⚠️ 警告 / WARNING ⚠️\n\n" +
+        "すべてのデータがリセットされます。\n" +
+        "All data will be reset.\n\n" +
+        "本当にリセットしますか？\n" +
+        "Are you sure you want to reset?";
+    
+    if (confirm(confirmMessage)) {
+        resetForm();
+        showModalAlert("データがリセットされました。ページを更新します。\n(Data has been reset. Refreshing page...)", false, 1500);
+        
+        // Auto refresh page after 1.5 seconds
+        setTimeout(() => {
+            location.reload();
+        }, 1500);
+    } else {
+        console.log("Reset cancelled by user.");
+    }
+}
 
 // === Form Reset ===
 function resetForm() {
