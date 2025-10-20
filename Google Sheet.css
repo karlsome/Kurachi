@@ -16,8 +16,22 @@ body {
     align-items: top;
     justify-content: center;
     margin: 0;
-    padding: 20px;
+    padding: 10px;
     overscroll-behavior: none;
+    overflow-x: hidden;
+}
+
+@media (max-width: 770px) {
+    body {
+        padding: 5px;
+        justify-content: flex-start;
+    }
+}
+
+@media (max-width: 600px) {
+    body {
+        padding: 5px;
+    }
 }
 
 .container {
@@ -27,6 +41,21 @@ body {
     border: 2px solid #eeeeee;
     border-radius: 10px;
     background-color: #003b5b;
+    box-sizing: border-box;
+}
+
+@media (max-width: 770px) {
+    .container {
+        padding: 20px;
+        margin: 0;
+    }
+}
+
+@media (max-width: 600px) {
+    .container {
+        padding: 15px;
+        border-width: 1px;
+    }
 }
 
 
@@ -37,6 +66,21 @@ body {
     border: 2px solid #eeeeee;
     border-radius: 10px;
     background-color: #FFC240;
+    box-sizing: border-box;
+}
+
+@media (max-width: 770px) {
+    .kensacontainer {
+        padding: 20px;
+        margin: 0;
+    }
+}
+
+@media (max-width: 600px) {
+    .kensacontainer {
+        padding: 15px;
+        border-width: 1px;
+    }
 }
 
 h4 {
