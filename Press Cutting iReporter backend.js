@@ -3354,3 +3354,459 @@ function isIOS() {
 function isAndroid() {
   return /Android/.test(navigator.userAgent);
 }
+
+
+// ===== NUMERIC KEYPAD FUNCTIONALITY =====
+
+// Define direct keypad functions in the global scope
+window.openDirectNumericKeypad = function(inputId) {
+  window.currentDirectInputId = inputId;
+  const modal = document.getElementById('numericKeypadModalDirect');
+  const display = document.getElementById('numericDisplayDirect');
+  const currentInput = document.getElementById(inputId);
+  
+  if (modal && display && currentInput) {
+    display.value = currentInput.value || '';
+    modal.style.display = 'block';
+    document.body.style.overflow = 'hidden';
+    
+    // Update keypad title based on which input field was clicked
+    const keypadTitle = modal.querySelector('h2');
+    if (keypadTitle) {
+      if (inputId === 'shot') {
+        keypadTitle.textContent = 'ショット数を入力';
+      } else if (inputId === '材料ロット') {
+        keypadTitle.textContent = '材料ロットを入力';
+      }
+    }
+    
+    // Show/hide the hyphen button based on input field
+    const hyphenButton = document.getElementById('hyphenButton');
+    if (hyphenButton) {
+      if (inputId === '材料ロット') {
+        hyphenButton.style.display = 'block';
+      } else {
+        hyphenButton.style.display = 'none';
+      }
+    }
+    
+    // Setup keyboard event handling for the keypad
+    window.directKeypadKeydownHandler = function(event) {
+      if (modal.style.display === 'block') {
+        event.preventDefault(); // Prevent default keyboard behavior
+        
+        if (event.key >= '0' && event.key <= '9') {
+          window.addToDirectNumericDisplay(event.key);
+        } else if (event.key === 'Backspace') {
+          window.backspaceDirectNumericDisplay();
+        } else if (event.key === 'Enter') {
+          window.confirmDirectNumericInput();
+        } else if (event.key === 'Escape') {
+          window.closeDirectNumericKeypad();
+        } else if (event.key === 'Delete' || event.key.toLowerCase() === 'c') {
+          window.clearDirectNumericDisplay();
+        } else if (event.key === '-' && inputId === '材料ロット') {
+          window.addToDirectNumericDisplay('-');
+        } else if (event.key === ' ') {
+          window.addToDirectNumericDisplay(' ');
+        }
+      }
+    };
+    
+    // Add the keyboard event listener
+    document.addEventListener('keydown', window.directKeypadKeydownHandler);
+  }
+};
+
+window.closeDirectNumericKeypad = function() {
+  const modal = document.getElementById('numericKeypadModalDirect');
+  if (modal) {
+    modal.style.display = 'none';
+    window.currentDirectInputId = null;
+    document.body.style.overflow = 'auto';
+    
+    // Remove the keyboard event handler
+    if (window.directKeypadKeydownHandler) {
+      document.removeEventListener('keydown', window.directKeypadKeydownHandler);
+      window.directKeypadKeydownHandler = null;
+    }
+  }
+};
+
+window.addToDirectNumericDisplay = function(digit) {
+  const display = document.getElementById('numericDisplayDirect');
+  if (display) {
+    display.value += digit;
+  }
+};
+
+window.clearDirectNumericDisplay = function() {
+  const display = document.getElementById('numericDisplayDirect');
+  if (display) {
+    display.value = '';
+  }
+};
+
+window.backspaceDirectNumericDisplay = function() {
+  const display = document.getElementById('numericDisplayDirect');
+  if (display) {
+    display.value = display.value.slice(0, -1);
+  }
+};
+
+window.confirmDirectNumericInput = function() {
+  if (!window.currentDirectInputId) return;
+  
+  const display = document.getElementById('numericDisplayDirect');
+  const targetInput = document.getElementById(window.currentDirectInputId);
+  
+  if (display && targetInput) {
+    const value = display.value;
+    
+    // Different validation based on input type
+    if (window.currentDirectInputId === '材料ロット') {
+      // For material lot, allow numbers, hyphens, spaces, and blank values
+      if (value !== '' && !/^[0-9\-\s]*$/.test(value)) {
+        if (typeof showAlert === 'function') {
+          showAlert('数字、ハイフン、スペースのみを入力してください');
+        } else {
+          window.alert('数字、ハイフン、スペースのみを入力してください');
+        }
+        return;
+      }
+      // Allow blank value - no validation needed
+    } else if (window.currentDirectInputId === 'shot') {
+      // For shot count, allow numbers, spaces, and blank values
+      // If not blank, validate as a number (after removing spaces)
+      if (value !== '') {
+        const numericValue = value.replace(/\s/g, '');
+        if (numericValue !== '' && (isNaN(numericValue) || parseInt(numericValue) < 0)) {
+          if (typeof showAlert === 'function') {
+            showAlert('有効な数字を入力してください');
+          } else {
+            window.alert('有効な数字を入力してください');
+          }
+          return;
+        }
+      }
+      // Allow blank value - no validation needed
+    } else {
+      // For other inputs, allow blank values and positive numbers
+      if (value !== '' && (isNaN(value) || parseInt(value) < 0)) {
+        if (typeof showAlert === 'function') {
+          showAlert('有効な数字を入力してください');
+        } else {
+          window.alert('有効な数字を入力してください');
+        }
+        return;
+      }
+    }
+    
+    // Set the value to the target input
+    targetInput.value = value;
+    
+    // Get the current uniquePrefix for localStorage
+    const pageName = location.pathname.split('/').pop();
+    const selected工場 = document.getElementById('selected工場')?.value;
+    const uniquePrefix = `${pageName}_${selected工場}_`;
+    
+    // Save to localStorage with the unique key format
+    const key = `${uniquePrefix}${targetInput.id}`;
+    localStorage.setItem(key, value);
+    
+    // Trigger the input event to handle any event listeners
+    const event = new Event('input', { bubbles: true });
+    targetInput.dispatchEvent(event);
+    
+    window.closeDirectNumericKeypad();
+  }
+};
+
+// Run initialization after page is fully loaded
+window.addEventListener('load', function() {
+  // Create the keypad modal HTML
+  const modalHTML = `
+    <div id="numericKeypadModalDirect" style="
+      display: none;
+      position: fixed;
+      z-index: 10000;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0,0,0,0.7);
+    ">
+      <div style="
+        background-color: #fefefe;
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        padding: 20px;
+        border: 1px solid #888;
+        width: 320px;
+        max-width: 90%;
+        border-radius: 10px;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+      ">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+          <h2 style="margin: 0; font-size: 20px; font-weight: bold; color: #333;">ショット数を入力</h2>
+          <span onclick="window.closeDirectNumericKeypad()" style="color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer;">&times;</span>
+        </div>
+        
+        <div style="margin-bottom: 15px;">
+          <input type="text" id="numericDisplayDirect" readonly style="
+            width: 100%;
+            padding: 12px;
+            font-size: 28px;
+            text-align: right;
+            border: 2px solid #007bff;
+            border-radius: 5px;
+            margin-bottom: 15px;
+            background-color: #f8f9fa;
+            box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);
+          ">
+        </div>
+        
+        <div id="keypadContainerDirect" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">
+          <!-- Number buttons will be added via JavaScript -->
+        </div>
+        
+        <button onclick="window.confirmDirectNumericInput()" style="
+          width: 100%;
+          padding: 15px;
+          margin-top: 15px;
+          font-size: 20px;
+          font-weight: bold;
+          background-color: #4CAF50;
+          color: white;
+          border: none;
+          border-radius: 5px;
+          cursor: pointer;
+          transition: background-color 0.2s;
+        ">確認</button>
+      </div>
+    </div>
+  `;
+  
+  // Inject the HTML directly into the body
+  const modalContainer = document.createElement('div');
+  modalContainer.innerHTML = modalHTML;
+  document.body.appendChild(modalContainer.firstElementChild);
+  
+  // Add number buttons dynamically
+  const keypadContainer = document.getElementById('keypadContainerDirect');
+  if (keypadContainer) {
+    // Add number buttons 1-9
+    for (let i = 1; i <= 9; i++) {
+      const btn = document.createElement('button');
+      btn.textContent = i.toString();
+      const digit = i.toString(); // Capture the current value in a closure
+      btn.onclick = function() { window.addToDirectNumericDisplay(digit); };
+      btn.style.cssText = `
+        padding: 15px;
+        font-size: 24px;
+        background-color: #f1f1f1;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        transition: background-color 0.2s;
+      `;
+      // Add touch feedback
+      btn.addEventListener('touchstart', function() {
+        this.style.backgroundColor = '#d0d0d0';
+      });
+      btn.addEventListener('touchend', function() {
+        this.style.backgroundColor = '#f1f1f1';
+      });
+      keypadContainer.appendChild(btn);
+    }
+    
+    // Add C, 0, and backspace buttons
+    const clearBtn = document.createElement('button');
+    clearBtn.textContent = 'C';
+    clearBtn.onclick = function() { window.clearDirectNumericDisplay(); };
+    clearBtn.style.cssText = `
+      padding: 15px;
+      font-size: 24px;
+      background-color: #ffcccc;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    `;
+    // Add touch feedback
+    clearBtn.addEventListener('touchstart', function() {
+      this.style.backgroundColor = '#ff9999';
+    });
+    clearBtn.addEventListener('touchend', function() {
+      this.style.backgroundColor = '#ffcccc';
+    });
+    
+    const zeroBtn = document.createElement('button');
+    zeroBtn.textContent = '0';
+    zeroBtn.onclick = function() { window.addToDirectNumericDisplay('0'); };
+    zeroBtn.style.cssText = `
+      padding: 15px;
+      font-size: 24px;
+      background-color: #f1f1f1;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    `;
+    // Add touch feedback
+    zeroBtn.addEventListener('touchstart', function() {
+      this.style.backgroundColor = '#d0d0d0';
+    });
+    zeroBtn.addEventListener('touchend', function() {
+      this.style.backgroundColor = '#f1f1f1';
+    });
+    
+    const backBtn = document.createElement('button');
+    backBtn.innerHTML = '&#9003;';
+    backBtn.onclick = function() { window.backspaceDirectNumericDisplay(); };
+    backBtn.style.cssText = `
+      padding: 15px;
+      font-size: 24px;
+      background-color: #f1f1f1;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    `;
+    // Add touch feedback
+    backBtn.addEventListener('touchstart', function() {
+      this.style.backgroundColor = '#d0d0d0';
+    });
+    backBtn.addEventListener('touchend', function() {
+      this.style.backgroundColor = '#f1f1f1';
+    });
+    
+    // Create hyphen button for material lot input
+    const hyphenBtn = document.createElement('button');
+    hyphenBtn.textContent = '-';
+    hyphenBtn.id = 'hyphenButton';
+    hyphenBtn.onclick = function() { window.addToDirectNumericDisplay('-'); };
+    hyphenBtn.style.cssText = `
+      padding: 15px;
+      font-size: 24px;
+      background-color: #e0e0ff;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background-color 0.2s;
+      display: none;
+    `;
+    // Add touch feedback
+    hyphenBtn.addEventListener('touchstart', function() {
+      this.style.backgroundColor = '#c0c0ff';
+    });
+    hyphenBtn.addEventListener('touchend', function() {
+      this.style.backgroundColor = '#e0e0ff';
+    });
+    
+    // Create space button
+    const spaceBtn = document.createElement('button');
+    spaceBtn.textContent = 'Space';
+    spaceBtn.id = 'spaceButton';
+    spaceBtn.onclick = function() { window.addToDirectNumericDisplay(' '); };
+    spaceBtn.style.cssText = `
+      padding: 15px;
+      font-size: 20px;
+      background-color: #e0ffec;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    `;
+    // Add touch feedback
+    spaceBtn.addEventListener('touchstart', function() {
+      this.style.backgroundColor = '#c0ffd8';
+    });
+    spaceBtn.addEventListener('touchend', function() {
+      this.style.backgroundColor = '#e0ffec';
+    });
+    
+    // Append all buttons
+    keypadContainer.appendChild(clearBtn);
+    keypadContainer.appendChild(zeroBtn);
+    keypadContainer.appendChild(backBtn);
+    keypadContainer.appendChild(hyphenBtn); // Add hyphen button to the keypad
+    keypadContainer.appendChild(spaceBtn); // Add space button to the keypad
+  }
+  
+  // Configure the shot input with the direct keypad
+  const shotInput = document.getElementById('shot');
+  if (shotInput) {
+    shotInput.readOnly = true;
+    
+    // Use a more robust event attachment
+    if (shotInput.addEventListener) {
+      shotInput.addEventListener('click', function() {
+        window.openDirectNumericKeypad('shot');
+      });
+    } else {
+      // Fallback for older browsers
+      shotInput.onclick = function() {
+        window.openDirectNumericKeypad('shot');
+      };
+    }
+    
+    // Style the input
+    shotInput.style.cssText = `
+      cursor: pointer;
+      background-color: #f0f8ff;
+      border: 2px solid #007bff;
+      border-radius: 5px;
+      padding: 8px 10px;
+      font-size: 16px;
+      width: 100%;
+      background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="%23007bff"><path d="M4 2h16a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm1 4h4v4H5V6zm0 6h4v4H5v-4zm6-6h4v4h-4V6zm6 0h2v4h-2V6zm-6 6h4v4h-4v-4zm6 0h2v4h-2v-4z"/></svg>');
+      background-repeat: no-repeat;
+      background-position: right 8px center;
+      background-size: 16px 16px;
+      padding-right: 30px;
+    `;
+    
+    console.log('Shot input configured with direct keypad');
+  }
+  
+  // Configure material lot input to use the same keypad
+  const materialLotInput = document.getElementById('材料ロット');
+  if (materialLotInput) {
+    materialLotInput.readOnly = true;
+    
+    // Use a more robust event attachment
+    if (materialLotInput.addEventListener) {
+      materialLotInput.addEventListener('click', function() {
+        window.openDirectNumericKeypad('材料ロット');
+      });
+    } else {
+      // Fallback for older browsers
+      materialLotInput.onclick = function() {
+        window.openDirectNumericKeypad('材料ロット');
+      };
+    }
+    
+    // Style the input
+    materialLotInput.style.cssText = `
+      cursor: pointer;
+      background-color: #f0f8ff;
+      border: 2px solid #007bff;
+      border-radius: 5px;
+      padding: 8px 10px;
+      font-size: 16px;
+      width: 100%;
+      background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="%23007bff"><path d="M4 2h16a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm1 4h4v4H5V6zm0 6h4v4H5v-4zm6-6h4v4h-4V6zm6 0h2v4h-2V6zm-6 6h4v4h-4v-4zm6 0h2v4h-2v-4z"/></svg>');
+      background-repeat: no-repeat;
+      background-position: right 8px center;
+      background-size: 16px 16px;
+      padding-right: 30px;
+    `;
+    
+    console.log('Material lot input configured with direct keypad');
+  }
+});
+
+// ===== END OF NUMERIC KEYPAD FUNCTIONALITY =====
