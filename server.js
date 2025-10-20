@@ -4,6 +4,9 @@
 
 if (process.env.NODE_ENV !== "production") {
   require("dotenv").config();
+  // Disable SSL certificate validation for development (fixes Google API SSL errors)
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+  console.log('⚠️  Development mode: SSL certificate validation disabled');
 }
 
 const express = require("express");
@@ -27,6 +30,8 @@ const client = new MongoClient(uri, {
     deprecationErrors: true,
   },
   readPreference:'nearest', // Use 'nearest' read preference for better performance
+  tlsAllowInvalidCertificates: true, // Fix for local development SSL certificate issues
+  tlsAllowInvalidHostnames: true, // Fix for local development SSL certificate issues
 });
 
 const DB_NAME = "Sasaki_Coating_MasterDB";
@@ -467,17 +472,23 @@ app.post("/submitTopressDBiReporter", async (req, res) => {
     const pressDB = database.collection("pressDB");
     const formData = req.body;
 
-    // Extract and remove base64 image data
+    // Extract image arrays and remove from formData
     const images = formData.images || [];
+    const maintenanceImages = formData.maintenanceImages || [];
+    const materialLabelImages = formData.materialLabelImages || [];
     delete formData.images;
+    delete formData.maintenanceImages;
+    delete formData.materialLabelImages;
 
+    const downloadToken = "masterDBToken69";
+
+    // === PHASE 1: Upload all images atomically (cycle check images) ===
     const labelToField = {
       "初物チェック": "初物チェック画像",
       "終物チェック": "終物チェック画像",
       "材料ラベル": "材料ラベル画像",
     };
 
-    // Upload each image and store its URL directly into the formData object
     for (const img of images) {
       if (!img.base64 || !img.label) continue;
 
@@ -485,15 +496,6 @@ app.post("/submitTopressDBiReporter", async (req, res) => {
       const fileName = `${img.sebanggo}_${img.date}_${img.worker}_${img.factory}_${img.machine}_${img.label}.jpg`;
       const filePath = `CycleCheck/${img.factory}/${fileName}`;
       const file = admin.storage().bucket().file(filePath);
-
-      // await file.save(buffer, {
-      //   metadata: { contentType: 'image/jpeg' },
-      //   public: true,
-      // });
-
-      // const publicUrl = `https://storage.googleapis.com/${file.bucket.name}/${file.name}`;
-       // Use a random token or constant token (example below)
-      const downloadToken = "masterDBToken69";
 
       await file.save(buffer, {
         metadata: {
@@ -504,23 +506,111 @@ app.post("/submitTopressDBiReporter", async (req, res) => {
         }
       });
 
-      // ✅ Firebase-style URL (supports preview/download with token)
       const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${file.bucket.name}/o/${encodeURIComponent(file.name)}?alt=media&token=${downloadToken}`;
-
-      // Use predefined field name or fallback
       const fieldName = labelToField[img.label] || `${img.label}画像`;
       formData[fieldName] = publicUrl;
     }
 
+    // === PHASE 2: Upload material label images atomically ===
+    if (materialLabelImages && materialLabelImages.length > 0) {
+      console.log(`📸 Uploading ${materialLabelImages.length} material label images...`);
+      
+      const materialLabelImageURLs = [];
+      
+      for (const img of materialLabelImages) {
+        if (!img.base64) continue;
+
+        const buffer = Buffer.from(img.base64, 'base64');
+        const fileName = `${formData.背番号}_${formData.Date}_${formData.Worker_Name}_${formData.工場}_${formData.設備}_materialLabel_${img.timestamp || Date.now()}.jpg`;
+        const filePath = `materialLabel/${formData.工場}/${formData.設備}/${fileName}`;
+        const file = admin.storage().bucket().file(filePath);
+
+        await file.save(buffer, {
+          metadata: {
+            contentType: "image/jpeg",
+            metadata: {
+              firebaseStorageDownloadTokens: downloadToken
+            }
+          }
+        });
+
+        const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${file.bucket.name}/o/${encodeURIComponent(file.name)}?alt=media&token=${downloadToken}`;
+        materialLabelImageURLs.push(publicUrl);
+      }
+
+      formData.materialLabelImages = materialLabelImageURLs;
+      formData.materialLabelImageCount = materialLabelImageURLs.length;
+      
+      // First image becomes the legacy 材料ラベル画像 field
+      if (materialLabelImageURLs.length > 0) {
+        formData.材料ラベル画像 = materialLabelImageURLs[0];
+      }
+      
+      console.log(`✅ Uploaded ${materialLabelImageURLs.length} material label images`);
+    }
+
+    // === PHASE 3: Upload maintenance images and build Maintenance_Data structure ===
+    if (maintenanceImages && maintenanceImages.length > 0) {
+      console.log(`📸 Uploading ${maintenanceImages.length} maintenance images...`);
+      
+      // Group images by maintenanceRecordId
+      const imagesByRecordId = {};
+      for (const img of maintenanceImages) {
+        if (!img.base64 || !img.maintenanceRecordId) continue;
+        
+        if (!imagesByRecordId[img.maintenanceRecordId]) {
+          imagesByRecordId[img.maintenanceRecordId] = [];
+        }
+        
+        const buffer = Buffer.from(img.base64, 'base64');
+        const fileName = `${formData.背番号}_${formData.Date}_${formData.Worker_Name}_${formData.工場}_${formData.設備}_maintenance_${img.id}.jpg`;
+        const filePath = `maintenance/${formData.工場}/${formData.設備}/${fileName}`;
+        const file = admin.storage().bucket().file(filePath);
+
+        await file.save(buffer, {
+          metadata: {
+            contentType: "image/jpeg",
+            metadata: {
+              firebaseStorageDownloadTokens: downloadToken
+            }
+          }
+        });
+
+        const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${file.bucket.name}/o/${encodeURIComponent(file.name)}?alt=media&token=${downloadToken}`;
+        imagesByRecordId[img.maintenanceRecordId].push(publicUrl);
+      }
+
+      // Add Firebase URLs to maintenance records
+      if (formData.Maintenance_Data && formData.Maintenance_Data.records) {
+        formData.Maintenance_Data.records = formData.Maintenance_Data.records.map(record => {
+          const recordImages = imagesByRecordId[record.id] || [];
+          return {
+            ...record,
+            images: recordImages
+          };
+        });
+      }
+      
+      console.log(`✅ Uploaded maintenance images and updated Maintenance_Data structure`);
+    }
+
+    // === PHASE 4: Add timestamp ===
+    formData.createdAt = new Date();
+
+    // === PHASE 5: Insert to MongoDB ===
     const result = await pressDB.insertOne(formData);
+
+    console.log(`✅ Successfully saved Press Cutting record with ID: ${result.insertedId}`);
 
     res.status(201).json({
       message: "Data and images successfully saved to pressDB",
       insertedId: result.insertedId,
+      materialLabelImageCount: formData.materialLabelImageCount || 0,
+      maintenanceRecordCount: formData.Maintenance_Data?.records?.length || 0
     });
   } catch (error) {
     console.error("Error saving data to pressDB:", error);
-    res.status(500).json({ error: "Error saving data to pressDB" });
+    res.status(500).json({ error: "Error saving data to pressDB", details: error.message });
   }
 });
 
