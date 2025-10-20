@@ -116,6 +116,17 @@ document.addEventListener('DOMContentLoaded', () => {
                       image.src = savedValue; // Restore the image source
                       image.style.display = 'block'; // Ensure the image is visible
                       console.log(`Restored ${image.id || image.name} image src:`, savedValue);
+                      
+                      // Update button color to green if image exists
+                      if (savedValue && savedValue !== '') {
+                        if (image.id === 'hatsumonoPic') {
+                          const hatsumonoButton = document.getElementById('hatsumonoButton');
+                          if (hatsumonoButton) hatsumonoButton.classList.add('has-photo');
+                        } else if (image.id === 'atomonoPic') {
+                          const atomonoButton = document.getElementById('atomonoButton');
+                          if (atomonoButton) atomonoButton.classList.add('has-photo');
+                        }
+                      }
                   }
               });
               updateTotal();
@@ -1185,10 +1196,22 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
     const atomono = document.getElementById("atomonoLabel").textContent;
     const markerlabel = document.getElementById("makerLabel").textContent;
 
-    if (hatsumono === "FALSE" || atomono === "FALSE" || markerlabel === "FALSE") {
-      showAlert("初物/終物/材料ラベル確認してください / Please do Hatsumono and Atomono or MaterialLabel");
+    // Validate Hatsumono, Atomono, and Material Label
+    if (hatsumono === "FALSE" || atomono === "FALSE") {
+      showAlert("初物/終物確認してください / Please do Hatsumono and Atomono");
       document.getElementById('uploadingModal').style.display = 'none';
       return;
+    }
+
+    // Check material label - either new multi-photo system or legacy single photo
+    if (materialLabelPhotos.length === 0) {
+      const makerPic = document.getElementById('材料ラベル');
+      if (!makerPic || !makerPic.src || makerPic.src === '' || makerPic.src === 'data:,' || makerPic.style.display === 'none') {
+        console.error("材料ラベル validation failed - no photos in either system");
+        showAlert("材料ラベルの写真を撮影してください / Please capture the 材料ラベル image");
+        document.getElementById('uploadingModal').style.display = 'none';
+        return;
+      }
     }
 
     updateCycleTime();
@@ -1222,6 +1245,112 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
       return;
     }
 
+    // Collect Break Time Data
+    const breakTimeData = {
+      break1: { 
+        start: document.getElementById('break1-start')?.value || '', 
+        end: document.getElementById('break1-end')?.value || '' 
+      },
+      break2: { 
+        start: document.getElementById('break2-start')?.value || '', 
+        end: document.getElementById('break2-end')?.value || '' 
+      },
+      break3: { 
+        start: document.getElementById('break3-start')?.value || '', 
+        end: document.getElementById('break3-end')?.value || '' 
+      },
+      break4: { 
+        start: document.getElementById('break4-start')?.value || '', 
+        end: document.getElementById('break4-end')?.value || '' 
+      }
+    };
+
+    formData.Break_Time_Data = breakTimeData;
+
+    const totalBreakMinutes = calculateTotalBreakTime();
+    const totalBreakHours = totalBreakMinutes / 60;
+    formData.Total_Break_Hours = totalBreakHours;
+
+    const totalTroubleMinutes = calculateTotalMachineTroubleTime();
+    const totalTroubleHours = totalTroubleMinutes / 60;
+
+    // Prepare maintenance images data
+    const maintenanceImages = [];
+    
+    if (maintenanceRecords.length > 0) {
+      console.log(`📸 Preparing ${maintenanceRecords.length} maintenance records for submission...`);
+      
+      maintenanceRecords.forEach(record => {
+        if (record.photos && record.photos.length > 0) {
+          record.photos.forEach(photo => {
+            if (photo.base64 && photo.id && photo.timestamp) {
+              maintenanceImages.push({
+                base64: photo.base64,
+                id: photo.id,
+                timestamp: photo.timestamp,
+                maintenanceRecordId: record.id
+              });
+            }
+          });
+        }
+      });
+      
+      console.log(`📊 Prepared ${maintenanceImages.length} maintenance images for upload`);
+    }
+
+    // Prepare maintenance data structure (without photos - they'll be added by server)
+    const maintenanceDataForSubmission = {
+      records: maintenanceRecords.map(record => ({
+        id: record.id,
+        startTime: record.startTime,
+        endTime: record.endTime,
+        comment: record.comment,
+        timestamp: record.timestamp
+        // photos will be populated by the server after upload
+      })),
+      totalMinutes: totalTroubleMinutes,
+      totalHours: totalTroubleHours
+    };
+
+    formData.Maintenance_Data = maintenanceDataForSubmission;
+
+    console.log("📊 Maintenance data prepared for submission:", {
+      recordCount: maintenanceDataForSubmission.records.length,
+      totalImages: maintenanceImages.length,
+      totalMinutes: totalTroubleMinutes
+    });
+
+    // Calculate Total Work Hours = Time_end - Time_start - Total_Break_Hours - Total_Trouble_Hours
+    let totalWorkHours = 0;
+    if (formData.Time_start && formData.Time_end) {
+      const startWork = new Date(`2000-01-01T${formData.Time_start}:00`);
+      const endWork = new Date(`2000-01-01T${formData.Time_end}:00`);
+      if (endWork > startWork) {
+        const workDiffMs = endWork - startWork;
+        const totalMinutes = Math.floor(workDiffMs / (1000 * 60));
+        const totalHours = totalMinutes / 60;
+        totalWorkHours = totalHours - totalBreakHours - totalTroubleHours;
+      }
+    }
+    formData.Total_Work_Hours = Math.max(0, totalWorkHours); // Ensure non-negative
+
+    // Prepare material label images for upload
+    const materialLabelImagesForUpload = [];
+    if (materialLabelPhotos.length > 0) {
+      console.log(`📸 Preparing ${materialLabelPhotos.length} material label photos for submission...`);
+      materialLabelPhotos.forEach((photo, index) => {
+        if (photo.base64) {
+          materialLabelImagesForUpload.push({
+            base64: photo.base64,
+            timestamp: photo.timestamp,
+            index: index
+          });
+        }
+      });
+    }
+
+    formData.materialLabelImageCount = materialLabelPhotos.length;
+
     //  Generate uniqueID for duplication check
     formData.uniqueID = `${formData.背番号}_${formData.Date}_${formData.Time_start}_${formData.Worker_Name}_${formData.設備}`;
 
@@ -1243,8 +1372,23 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
       return;
     }
 
-    // Collect base64 images
+    // Collect base64 images (hatsumono, atomono)
     formData.images = await collectImagesForUpload();
+
+    // Add maintenance images to submission
+    formData.maintenanceImages = maintenanceImages;
+
+    // Add material label images to submission
+    formData.materialLabelImages = materialLabelImagesForUpload;
+
+    console.log('📦 Final submission data:', {
+      breakTimeData: formData.Break_Time_Data,
+      totalBreakHours: formData.Total_Break_Hours,
+      maintenanceRecordCount: formData.Maintenance_Data.records.length,
+      maintenanceImageCount: maintenanceImages.length,
+      materialLabelImageCount: materialLabelImagesForUpload.length,
+      totalWorkHours: formData.Total_Work_Hours
+    });
 
     const response = await fetch(`${serverURL}/submitTopressDBiReporter`, {
       method: 'POST',
@@ -2316,6 +2460,16 @@ function showSuccessPrompt(message, duration = 3500) {
 
 // Function to reset everything and reload the page
 function resetForm() {
+  // Show confirmation dialog
+  const userConfirmed = confirm(
+    "すべてのデータが削除されます。本当にリセットしますか？\n\nAll data will be deleted. Are you sure you want to reset?"
+  );
+  
+  // If user clicks "Cancel", exit the function
+  if (!userConfirmed) {
+    return;
+  }
+
   const excludedInputs = ['process']; // IDs or names of inputs to exclude from reset
 
   // Clear all form inputs with unique prefix except excluded ones
@@ -2358,8 +2512,34 @@ function resetForm() {
       image.style.display = 'none'; // Hide the image
       console.log(`Reset image ${image.id || image.name}`);
   });
+  
+  // Reset button colors to red (remove green class)
+  const hatsumonoButton = document.getElementById('hatsumonoButton');
+  const atomonoButton = document.getElementById('atomonoButton');
+  const makerLabelButton = document.getElementById('makerLabelButton');
+  
+  if (hatsumonoButton) hatsumonoButton.classList.remove('has-photo');
+  if (atomonoButton) atomonoButton.classList.remove('has-photo');
+  if (makerLabelButton) makerLabelButton.classList.remove('has-photos');
 
   localStorage.removeItem(`${uniquePrefix}scannerChoice`); // clear choice
+
+  // Clear maintenance records
+  const maintenanceKey = `${uniquePrefix}maintenanceRecords`;
+  localStorage.removeItem(maintenanceKey);
+  console.log('Cleared maintenance records from localStorage');
+  
+  // Clear material label photos
+  const materialPhotosKey = `${uniquePrefix}materialLabelPhotos`;
+  localStorage.removeItem(materialPhotosKey);
+  console.log('Cleared material label photos from localStorage');
+  
+  // Clear break times
+  for (let i = 1; i <= 4; i++) {
+    localStorage.removeItem(`${uniquePrefix}break${i}-start`);
+    localStorage.removeItem(`${uniquePrefix}break${i}-end`);
+  }
+  console.log('Cleared break times from localStorage');
 
   // Reload the page
   window.location.reload();
@@ -3124,11 +3304,38 @@ window.addEventListener('message', function (event) {
     const data = event.data;
 
     if (data.image && currentButtonId) {
-      // Find the mapping for the current button
+      // Handle material label photos separately using the multi-photo system
+      if (currentButtonId === 'makerLabelButton') {
+        console.log('Processing material label photo from popup window');
+        
+        // Add to material label photos array
+        const added = addMaterialLabelPhoto(data.image);
+        
+        if (added) {
+          console.log('Successfully added material label photo');
+          
+          // Update the legacy single image element for compatibility
+          updateMaterialLabelElement();
+          
+          // Force render thumbnails
+          setTimeout(() => {
+            renderMaterialPhotoThumbnails();
+            console.log('Forced thumbnail render after photo addition');
+          }, 100);
+        } else {
+          console.error('Failed to add material label photo');
+        }
+        
+        // Reset current button ID
+        currentButtonId = null;
+        return;
+      }
+      
+      // Handle other buttons with single-photo system
       const mapping = buttonMappings.find(({ buttonId }) => buttonId === currentButtonId);
 
       if (mapping) {
-        const { labelId, imgId } = mapping;
+        const { labelId, imgId, buttonId } = mapping;
 
         // Update photo preview
         const photoPreview = document.getElementById(imgId);
@@ -3138,6 +3345,12 @@ window.addEventListener('message', function (event) {
         // Update the associated label to TRUE
         const label = document.getElementById(labelId);
         label.textContent = 'TRUE';
+        
+        // Toggle button color to green when photo is captured
+        const button = document.getElementById(buttonId);
+        if (button) {
+          button.classList.add('has-photo');
+        }
 
         // Save label textContent to localStorage
         const labelKey = `${uniquePrefix}${labelId}.textContent`;
@@ -3377,6 +3590,8 @@ window.openDirectNumericKeypad = function(inputId) {
         keypadTitle.textContent = 'ショット数を入力';
       } else if (inputId === '材料ロット') {
         keypadTitle.textContent = '材料ロットを入力';
+      } else if (inputId === 'ProcessQuantity') {
+        keypadTitle.textContent = '加工数を入力';
       }
     }
     
@@ -3475,8 +3690,8 @@ window.confirmDirectNumericInput = function() {
         return;
       }
       // Allow blank value - no validation needed
-    } else if (window.currentDirectInputId === 'shot') {
-      // For shot count, allow numbers, spaces, and blank values
+    } else if (window.currentDirectInputId === 'shot' || window.currentDirectInputId === 'ProcessQuantity') {
+      // For shot count and process quantity, allow numbers, spaces, and blank values
       // If not blank, validate as a number (after removing spaces)
       if (value !== '') {
         const numericValue = value.replace(/\s/g, '');
@@ -3807,6 +4022,1201 @@ window.addEventListener('load', function() {
     
     console.log('Material lot input configured with direct keypad');
   }
+  
+  // Configure Process Quantity input with the direct keypad
+  const processQuantityInput = document.getElementById('ProcessQuantity');
+  if (processQuantityInput) {
+    processQuantityInput.readOnly = true;
+    
+    // Use a more robust event attachment
+    if (processQuantityInput.addEventListener) {
+      processQuantityInput.addEventListener('click', function() {
+        window.openDirectNumericKeypad('ProcessQuantity');
+      });
+    } else {
+      // Fallback for older browsers
+      processQuantityInput.onclick = function() {
+        window.openDirectNumericKeypad('ProcessQuantity');
+      };
+    }
+    
+    // Style the input
+    processQuantityInput.style.cssText = `
+      cursor: pointer;
+      background-color: #f0f8ff;
+      border: 2px solid #007bff;
+      border-radius: 5px;
+      padding: 8px 10px;
+      font-size: 16px;
+      width: 100%;
+      background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="%23007bff"><path d="M4 2h16a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm1 4h4v4H5V6zm0 6h4v4H5v-4zm6-6h4v4h-4V6zm6 0h2v4h-2V6zm-6 6h4v4h-4v-4zm6 0h2v4h-2v-4z"/></svg>');
+      background-repeat: no-repeat;
+      background-position: right 8px center;
+      background-size: 16px 16px;
+      padding-right: 30px;
+    `;
+    
+    console.log('Process Quantity input configured with direct keypad');
+  }
 });
 
 // ===== END OF NUMERIC KEYPAD FUNCTIONALITY =====
+
+
+// ===== BREAK TIME, MAINTENANCE, AND MATERIAL LABEL MULTI-PHOTO FUNCTIONALITY =====
+
+// Break Time Functions
+function calculateTotalBreakTime() {
+  let totalMinutes = 0;
+
+  for (let i = 1; i <= 4; i++) {
+    const startInput = document.getElementById(`break${i}-start`);
+    const endInput = document.getElementById(`break${i}-end`);
+
+    if (startInput && endInput) {
+      const startTime = startInput.value;
+      const endTime = endInput.value;
+
+      if (startTime && endTime) {
+        const start = new Date(`2000-01-01T${startTime}:00`);
+        const end = new Date(`2000-01-01T${endTime}:00`);
+
+        if (end > start) {
+          const diffMs = end - start;
+          const diffMinutes = Math.floor(diffMs / (1000 * 60));
+          totalMinutes += diffMinutes;
+        }
+      }
+    }
+  }
+
+  // Update the display
+  const totalDisplay = document.getElementById('total-break-display');
+  const breaktimeMins = document.getElementById('breaktime-mins');
+
+  if (totalDisplay) {
+    totalDisplay.textContent = `${totalMinutes}分`;
+  }
+  if (breaktimeMins) {
+    breaktimeMins.value = totalMinutes;
+  }
+
+  // Save to localStorage with proper prefix
+  const pageName = location.pathname.split('/').pop();
+  const selected工場 = document.getElementById('selected工場')?.value;
+
+  if (pageName && selected工場) {
+    const prefix = `${pageName}_${selected工場}_`;
+    localStorage.setItem(`${prefix}breaktime-mins`, totalMinutes);
+    localStorage.setItem(`${prefix}total-break-display`, `${totalMinutes}分`);
+  }
+  return totalMinutes; // Return total minutes for calculation in submit
+}
+
+// Reset a specific break time
+function resetBreakTime(breakNumber) {
+  const startInput = document.getElementById(`break${breakNumber}-start`);
+  const endInput = document.getElementById(`break${breakNumber}-end`);
+  
+  if (startInput) startInput.value = '';
+  if (endInput) endInput.value = '';
+  
+  calculateTotalBreakTime();
+  
+  // Save to localStorage
+  const pageName = location.pathname.split('/').pop();
+  const selected工場 = document.getElementById('selected工場')?.value;
+  
+  if (pageName && selected工場) {
+    const prefix = `${pageName}_${selected工場}_`;
+    localStorage.setItem(`${prefix}break${breakNumber}-start`, '');
+    localStorage.setItem(`${prefix}break${breakNumber}-end`, '');
+  }
+}
+
+// Dynamic Maintenance Time System
+let maintenanceRecords = [];
+let currentEditingIndex = -1;
+let maintenancePhotos = []; // Array to store multiple photos for current maintenance
+const MAX_MAINTENANCE_PHOTOS = 5; // Maximum photos per maintenance record
+
+// Material Label Photo System
+let materialLabelPhotos = []; // Array to store multiple material label photos
+const MAX_MATERIAL_PHOTOS = 5; // Maximum number of photos allowed
+
+// Load maintenance records from localStorage
+function loadMaintenanceRecords() {
+  const prefix = `${location.pathname.split('/').pop()}_${document.getElementById('selected工場')?.value}_`;
+  const saved = localStorage.getItem(`${prefix}maintenanceRecords`);
+  if (saved) {
+    maintenanceRecords = JSON.parse(saved);
+    renderMaintenanceRecords();
+    calculateTotalMachineTroubleTime();
+  }
+}
+
+// Save maintenance records to localStorage
+function saveMaintenanceRecords() {
+  const prefix = `${location.pathname.split('/').pop()}_${document.getElementById('selected工場')?.value}_`;
+  localStorage.setItem(`${prefix}maintenanceRecords`, JSON.stringify(maintenanceRecords));
+}
+
+// Clear maintenance photos
+function clearMaintenancePhotos() {
+  maintenancePhotos = [];
+  renderMaintenancePhotoThumbnails();
+}
+
+// Add photo to maintenance photos
+function addMaintenancePhoto(base64Data) {
+  if (maintenancePhotos.length >= MAX_MAINTENANCE_PHOTOS) {
+    showAlert(`最大${MAX_MAINTENANCE_PHOTOS}枚まで撮影できます / Maximum ${MAX_MAINTENANCE_PHOTOS} photos allowed`);
+    return false;
+  }
+  
+  if (!base64Data || base64Data.length === 0) {
+    console.error('❌ addMaintenancePhoto ERROR: Empty base64 data');
+    showAlert('無効な画像データです。再試行してください。');
+    return false;
+  }
+  
+  console.log(`🔍 addMaintenancePhoto: Received ${base64Data.length} bytes of base64 data`);
+  
+  const photoData = {
+    base64: base64Data,
+    timestamp: Date.now(),
+    id: `maintenance_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+    uploaded: false
+  };
+  
+  maintenancePhotos.push(photoData);
+  console.log(`📷 Photo added: ID=${photoData.id}, base64Length=${base64Data.length}`);
+  
+  renderMaintenancePhotoThumbnails();
+  return true;
+}
+
+// Remove photo from maintenance photos
+function removeMaintenancePhoto(index) {
+  if (index >= 0 && index < maintenancePhotos.length) {
+    maintenancePhotos.splice(index, 1);
+    renderMaintenancePhotoThumbnails();
+  }
+}
+
+// Render maintenance photo thumbnails in modal
+function renderMaintenancePhotoThumbnails() {
+  const container = document.getElementById('maintenance-photo-thumbnails');
+  const countDisplay = document.getElementById('maintenance-photo-count');
+  
+  if (!container) return;
+  
+  container.innerHTML = '';
+  
+  if (countDisplay) {
+    countDisplay.textContent = `${maintenancePhotos.length}/${MAX_MAINTENANCE_PHOTOS}`;
+  }
+  
+  if (maintenancePhotos.length === 0) {
+    container.innerHTML = '<p style="color: #999; text-align: center; padding: 20px;">写真がありません / No photos</p>';
+    return;
+  }
+  
+  maintenancePhotos.forEach((photo, index) => {
+    const thumbItem = document.createElement('div');
+    thumbItem.style.cssText = `
+      position: relative;
+      display: inline-block;
+      margin: 5px;
+      border: 2px solid #ddd;
+      border-radius: 5px;
+      overflow: hidden;
+      background: #f9f9f9;
+    `;
+    
+    const img = document.createElement('img');
+    // Use firebaseUrl if uploaded, otherwise use base64 data
+    let imageSrc;
+    if (photo.firebaseUrl && photo.uploaded) {
+      imageSrc = photo.firebaseUrl;
+    } else if (photo.base64) {
+      // Use clean base64 data with proper data URL prefix for display
+      imageSrc = `data:image/jpeg;base64,${photo.base64}`;
+    } else {
+      console.warn('Photo has no displayable source:', photo);
+      imageSrc = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODAiIGhlaWdodD0iODAiIHZpZXdCb3g9IjAgMCA4MCA4MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjgwIiBoZWlnaHQ9IjgwIiBmaWxsPSIjZjBmMGYwIi8+Cjx0ZXh0IHg9IjQwIiB5PSI0NSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEyIiBmaWxsPSIjOTk5Ij5JbWFnZTwvdGV4dD4KPC9zdmc+';
+    }
+    
+    img.src = imageSrc;
+    img.style.cssText = `
+      width: 80px;
+      height: 80px;
+      object-fit: cover;
+      cursor: pointer;
+      display: block;
+    `;
+    
+    // Add click event to show preview
+    img.onclick = () => showMaintenancePhotoPreview(imageSrc);
+    
+    // Add error handling for failed image loads
+    img.onerror = () => {
+      console.error('Failed to load maintenance photo:', imageSrc);
+      img.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODAiIGhlaWdodD0iODAiIHZpZXdCb3g9IjAgMCA4MCA4MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjgwIiBoZWlnaHQ9IjgwIiBmaWxsPSIjZjBmMGYwIi8+Cjx0ZXh0IHg9IjQwIiB5PSI0NSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEyIiBmaWxsPSIjOTk5Ij5GYWlsZWQ8L3RleHQ+CjwvdGV4dD4KPC9zdmc+';
+    };
+    
+    const deleteBtn = document.createElement('button');
+    deleteBtn.innerHTML = '×';
+    deleteBtn.style.cssText = `
+      position: absolute;
+      top: 2px;
+      right: 2px;
+      background: #ff4444;
+      color: white;
+      border: none;
+      border-radius: 50%;
+      width: 20px;
+      height: 20px;
+      font-size: 12px;
+      cursor: pointer;
+      line-height: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    `;
+    deleteBtn.onclick = (e) => {
+      e.stopPropagation();
+      removeMaintenancePhoto(index);
+    };
+    
+    thumbItem.appendChild(img);
+    thumbItem.appendChild(deleteBtn);
+    container.appendChild(thumbItem);
+  });
+}
+
+// Show full size photo preview
+function showMaintenancePhotoPreview(imageDataURL) {
+  // Create a modal for full preview
+  const previewModal = document.createElement('div');
+  previewModal.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.9);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 10001;
+  `;
+  
+  const img = document.createElement('img');
+  img.src = imageDataURL;
+  img.style.cssText = `
+    max-width: 90%;
+    max-height: 90%;
+    object-fit: contain;
+  `;
+  
+  const closeBtn = document.createElement('button');
+  closeBtn.innerHTML = '×';
+  closeBtn.style.cssText = `
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    background: #ff4444;
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    font-size: 20px;
+    cursor: pointer;
+  `;
+  
+  closeBtn.onclick = () => document.body.removeChild(previewModal);
+  previewModal.onclick = (e) => {
+    if (e.target === previewModal) document.body.removeChild(previewModal);
+  };
+  
+  previewModal.appendChild(img);
+  previewModal.appendChild(closeBtn);
+  document.body.appendChild(previewModal);
+}
+
+// Show maintenance modal
+function showMaintenanceModal(editIndex = -1) {
+  currentEditingIndex = editIndex;
+  const isEditing = editIndex >= 0;
+  
+  // Clear or load existing photos
+  if (isEditing && maintenanceRecords[editIndex] && maintenanceRecords[editIndex].photos) {
+    maintenancePhotos = [...maintenanceRecords[editIndex].photos];
+  } else {
+    maintenancePhotos = [];
+  }
+  
+  // Create modal
+  const modal = document.createElement('div');
+  modal.id = 'maintenanceModal';
+  modal.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.7);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 10000;
+  `;
+
+  const modalContent = document.createElement('div');
+  modalContent.style.cssText = `
+    background: white;
+    padding: 30px;
+    border-radius: 10px;
+    width: 90%;
+    max-width: 600px;
+    max-height: 90vh;
+    overflow-y: auto;
+  `;
+
+  let existingRecord = {};
+  if (isEditing && maintenanceRecords[editIndex]) {
+    existingRecord = maintenanceRecords[editIndex];
+  }
+
+  modalContent.innerHTML = `
+    <h2 style="margin-top: 0; text-align: center;">
+      ${isEditing ? '機械故障時間編集' : '機械故障時間追加'} / ${isEditing ? 'Edit Maintenance' : 'Add Maintenance'}
+    </h2>
+    
+    <div style="margin-bottom: 20px;">
+      <label style="display: block; margin-bottom: 5px; font-weight: bold;">開始時間 / Start Time:</label>
+      <input type="time" id="maintenance-start" value="${existingRecord.startTime || ''}" 
+             style="width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 5px;">
+    </div>
+    
+    <div style="margin-bottom: 20px;">
+      <label style="display: block; margin-bottom: 5px; font-weight: bold;">終了時間 / End Time:</label>
+      <input type="time" id="maintenance-end" value="${existingRecord.endTime || ''}"
+             style="width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 5px;">
+    </div>
+    
+    <div style="margin-bottom: 20px;">
+      <label style="display: block; margin-bottom: 5px; font-weight: bold;">理由・説明 / Reason/Comment:</label>
+      <textarea id="maintenance-comment" rows="4" placeholder="機械故障の理由を入力してください..."
+                style="width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 5px; resize: vertical;">${existingRecord.comment || ''}</textarea>
+    </div>
+    
+    <div style="margin-bottom: 20px;">
+      <label style="display: block; margin-bottom: 10px; font-weight: bold;">
+        写真 / Photos (<span id="maintenance-photo-count">0/${MAX_MAINTENANCE_PHOTOS}</span>):
+      </label>
+      <div style="margin-bottom: 10px;">
+        <button type="button" id="take-maintenance-photo" 
+                style="padding: 8px 16px; background: #007cba; color: white; border: none; border-radius: 5px; cursor: pointer; margin-right: 10px; font-size: 14px;">
+          📷 写真を撮る / Take Photo
+        </button>
+        <button type="button" id="clear-maintenance-photos" 
+                style="padding: 8px 16px; background: #dc3545; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 14px;">
+          🗑️ 全削除 / Clear All
+        </button>
+      </div>
+      <div id="maintenance-photo-thumbnails" style="border: 1px solid #ddd; border-radius: 5px; padding: 10px; min-height: 60px; background: #f9f9f9;">
+        <!-- Photo thumbnails will be rendered here -->
+      </div>
+    </div>
+    
+    <div style="display: flex; gap: 10px; justify-content: flex-end;">
+      <button type="button" id="cancel-maintenance" 
+              style="padding: 10px 20px; background: #ccc; color: black; border: none; border-radius: 5px; cursor: pointer;">
+        キャンセル / Cancel
+      </button>
+      ${isEditing ? `
+        <button type="button" id="delete-maintenance" 
+                style="padding: 10px 20px; background: #dc3545; color: white; border: none; border-radius: 5px; cursor: pointer;">
+          削除 / Delete
+        </button>
+      ` : ''}
+      <button type="button" id="save-maintenance" 
+              style="padding: 10px 20px; background: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer;">
+        保存 / Save
+      </button>
+    </div>
+  `;
+
+  modal.appendChild(modalContent);
+  document.body.appendChild(modal);
+
+  renderMaintenancePhotoThumbnails();
+
+  // Make time inputs touch-friendly - set current time on click/touch if empty
+  const startTimeInput = modal.querySelector('#maintenance-start');
+  const endTimeInput = modal.querySelector('#maintenance-end');
+  
+  // Add touch/click handlers to set current time if empty
+  [startTimeInput, endTimeInput].forEach(input => {
+    input.addEventListener('focus', function() {
+      // Set current time if the input is empty
+      if (!this.value) {
+        const now = new Date();
+        const hours = String(now.getHours()).padStart(2, '0');
+        const minutes = String(now.getMinutes()).padStart(2, '0');
+        this.value = `${hours}:${minutes}`;
+      }
+      // Try to show the picker (works on some browsers)
+      setTimeout(() => {
+        this.showPicker && this.showPicker();
+      }, 100);
+    });
+    
+    input.addEventListener('click', function() {
+      // Set current time if the input is empty
+      if (!this.value) {
+        const now = new Date();
+        const hours = String(now.getHours()).padStart(2, '0');
+        const minutes = String(now.getMinutes()).padStart(2, '0');
+        this.value = `${hours}:${minutes}`;
+      }
+    });
+  });
+
+  // Add event listeners
+  const takePhotoBtn = modal.querySelector('#take-maintenance-photo');
+  const clearPhotosBtn = modal.querySelector('#clear-maintenance-photos');
+  const saveBtn = modal.querySelector('#save-maintenance');
+  const cancelBtn = modal.querySelector('#cancel-maintenance');
+  const deleteBtn = modal.querySelector('#delete-maintenance');
+
+  takePhotoBtn.addEventListener('click', async () => {
+    if (maintenancePhotos.length >= MAX_MAINTENANCE_PHOTOS) {
+      showAlert(`最大${MAX_MAINTENANCE_PHOTOS}枚まで撮影できます / Maximum ${MAX_MAINTENANCE_PHOTOS} photos allowed`);
+      return;
+    }
+    
+    await openMaintenanceCamera();
+  });
+
+  clearPhotosBtn.addEventListener('click', () => {
+    if (maintenancePhotos.length > 0) {
+      if (confirm('すべての写真を削除しますか？ / Delete all photos?')) {
+        clearMaintenancePhotos();
+      }
+    }
+  });
+
+  saveBtn.addEventListener('click', () => {
+    const startTime = modal.querySelector('#maintenance-start').value;
+    const endTime = modal.querySelector('#maintenance-end').value;
+    const comment = modal.querySelector('#maintenance-comment').value;
+
+    if (!startTime || !endTime) {
+      showAlert('開始時間と終了時間を入力してください / Please enter start and end times');
+      return;
+    }
+
+    if (!comment.trim()) {
+      showAlert('理由・説明を入力してください / Please enter a reason/comment');
+      return;
+    }
+
+    const record = {
+      id: currentEditingIndex >= 0 ? maintenanceRecords[currentEditingIndex].id : Date.now(),
+      startTime,
+      endTime,
+      comment: comment.trim(),
+      photos: [...maintenancePhotos],
+      timestamp: currentEditingIndex >= 0 ? maintenanceRecords[currentEditingIndex].timestamp : new Date().toISOString()
+    };
+
+    if (currentEditingIndex >= 0) {
+      maintenanceRecords[currentEditingIndex] = record;
+    } else {
+      maintenanceRecords.push(record);
+    }
+
+    saveMaintenanceRecords();
+    renderMaintenanceRecords();
+    calculateTotalMachineTroubleTime();
+    
+    maintenancePhotos = [];
+    document.body.removeChild(modal);
+  });
+
+  cancelBtn.addEventListener('click', () => {
+    maintenancePhotos = [];
+    document.body.removeChild(modal);
+  });
+
+  if (deleteBtn) {
+    deleteBtn.addEventListener('click', () => {
+      if (confirm('この機械故障記録を削除しますか？ / Delete this maintenance record?')) {
+        maintenanceRecords.splice(currentEditingIndex, 1);
+        saveMaintenanceRecords();
+        renderMaintenanceRecords();
+        calculateTotalMachineTroubleTime();
+        
+        maintenancePhotos = [];
+        document.body.removeChild(modal);
+      }
+    });
+  }
+
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) {
+      maintenancePhotos = [];
+      document.body.removeChild(modal);
+    }
+  });
+}
+
+// Render maintenance records list
+function renderMaintenanceRecords() {
+  const container = document.getElementById('maintenance-records-container');
+  if (!container) return;
+  
+  container.innerHTML = '';
+  
+  if (maintenanceRecords.length === 0) {
+    container.innerHTML = '<p style="color: #999; text-align: center; padding: 10px;">記録なし / No records</p>';
+    return;
+  }
+  
+  maintenanceRecords.forEach((record, index) => {
+    const recordElement = document.createElement('div');
+    recordElement.style.cssText = `
+      background: #f8f9fa;
+      padding: 10px;
+      margin-bottom: 10px;
+      border-radius: 5px;
+      cursor: pointer;
+      border: 1px solid #dee2e6;
+    `;
+    recordElement.onclick = () => showMaintenanceModal(index);
+    
+    const duration = calculateDuration(record.startTime, record.endTime);
+    
+    recordElement.innerHTML = `
+      <div style="font-weight: bold;">${record.startTime} - ${record.endTime} (${duration}分)</div>
+      <div style="color: #666; font-size: 14px; margin-top: 5px;">${record.comment}</div>
+      <div style="color: #999; font-size: 12px; margin-top: 5px;">写真: ${record.photos ? record.photos.length : 0}枚</div>
+    `;
+    
+    container.appendChild(recordElement);
+  });
+}
+
+// Calculate duration in minutes
+function calculateDuration(startTime, endTime) {
+  if (!startTime || !endTime) return 0;
+  
+  const start = new Date(`2000-01-01T${startTime}:00`);
+  const end = new Date(`2000-01-01T${endTime}:00`);
+  
+  if (end > start) {
+    const diffMs = end - start;
+    return Math.floor(diffMs / (1000 * 60));
+  }
+  
+  return 0;
+}
+
+// Calculate total machine trouble time
+function calculateTotalMachineTroubleTime() {
+  let totalMinutes = 0;
+  
+  maintenanceRecords.forEach(record => {
+    totalMinutes += calculateDuration(record.startTime, record.endTime);
+  });
+  
+  const totalDisplay = document.getElementById('total-trouble-display');
+  const maintenanceMins = document.getElementById('maintenance-mins');
+  
+  if (totalDisplay) {
+    totalDisplay.textContent = `${totalMinutes}分 (${(totalMinutes / 60).toFixed(2)}時間)`;
+  }
+  if (maintenanceMins) {
+    maintenanceMins.value = totalMinutes;
+  }
+  
+  return totalMinutes;
+}
+
+// === Material Label Photo Functions ===
+function clearMaterialLabelPhotos() {
+  materialLabelPhotos = [];
+  renderMaterialPhotoThumbnails();
+  updateMaterialPhotoCount();
+}
+
+function addMaterialLabelPhoto(photoDataURL) {
+  if (materialLabelPhotos.length >= MAX_MATERIAL_PHOTOS) {
+    showAlert(`最大${MAX_MATERIAL_PHOTOS}枚まで撮影できます / Maximum ${MAX_MATERIAL_PHOTOS} photos allowed`);
+    return false;
+  }
+  
+  console.log('Adding material label photo:', typeof photoDataURL, photoDataURL ? photoDataURL.substring(0, 50) + '...' : 'undefined');
+  
+  let base64Data = photoDataURL;
+  let displayURL;
+  
+  if (typeof photoDataURL === 'string') {
+    if (photoDataURL.startsWith('data:image')) {
+      displayURL = photoDataURL;
+      base64Data = photoDataURL.split(',')[1];
+      console.log('Extracted base64 data from data URL');
+    } else {
+      displayURL = `data:image/jpeg;base64,${photoDataURL}`;
+      console.log('Created display URL from base64 data');
+    }
+  } else {
+    console.error('Invalid photo data provided to addMaterialLabelPhoto');
+    return false;
+  }
+
+  const photoData = {
+    base64: base64Data,
+    timestamp: new Date().toISOString(),
+    displayURL: displayURL
+  };
+
+  materialLabelPhotos.push(photoData);
+  console.log(`Added material label photo #${materialLabelPhotos.length}`);
+  
+  renderMaterialPhotoThumbnails();
+  updateMaterialPhotoCount();
+  updateMaterialLabelElement();
+  
+  const prefix = `${location.pathname.split('/').pop()}_${document.getElementById('selected工場')?.value}_`;
+  localStorage.setItem(`${prefix}materialLabelPhotos`, JSON.stringify(materialLabelPhotos));
+  console.log('Saved material label photos to localStorage');
+  
+  return true;
+}
+
+function removeMaterialLabelPhoto(index) {
+  if (index >= 0 && index < materialLabelPhotos.length) {
+    materialLabelPhotos.splice(index, 1);
+    const prefix = `${location.pathname.split('/').pop()}_${document.getElementById('selected工場')?.value}_`;
+    localStorage.setItem(`${prefix}materialLabelPhotos`, JSON.stringify(materialLabelPhotos));
+    renderMaterialPhotoThumbnails();
+    updateMaterialPhotoCount();
+    updateMaterialLabelElement();
+  }
+}
+
+function updateMaterialPhotoCount() {
+  const photoCount = document.getElementById('material-photo-count');
+  if (photoCount) {
+    photoCount.textContent = materialLabelPhotos.length;
+  }
+  
+  const makerLabel = document.getElementById('makerLabel');
+  const makerLabelButton = document.getElementById('makerLabelButton');
+  
+  if (makerLabel) {
+    makerLabel.textContent = materialLabelPhotos.length > 0 ? 'TRUE' : 'FALSE';
+  }
+  
+  // Toggle button color based on whether photos exist
+  if (makerLabelButton) {
+    if (materialLabelPhotos.length > 0) {
+      makerLabelButton.classList.add('has-photos');
+    } else {
+      makerLabelButton.classList.remove('has-photos');
+    }
+  }
+}
+
+function updateMaterialLabelElement() {
+  updateMaterialPhotoCount();
+}
+
+function renderMaterialPhotoThumbnails() {
+  console.log('Rendering material photo thumbnails');
+  
+  let container = document.getElementById('material-photo-thumbnails');
+  let photosContainer = document.getElementById('material-label-photos-container');
+  
+  if (!photosContainer) {
+    console.log('Creating material label photos container');
+    const mainForm = document.querySelector('form') || document.body;
+    
+    const photoSection = document.createElement('div');
+    photoSection.id = 'material-label-photos-container';
+    photoSection.style.cssText = 'margin: 10px 0; padding: 10px; border: 1px solid #ddd; border-radius: 5px; display: none; background-color: #f9f9f9;';
+    
+    const header = document.createElement('div');
+    header.innerHTML = '<strong>材料ラベル Photos (<span id="material-photo-count">0</span>):</strong>';
+    
+    const thumbnailsDiv = document.createElement('div');
+    thumbnailsDiv.id = 'material-photo-thumbnails';
+    thumbnailsDiv.style.cssText = 'display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px;';
+    
+    photoSection.appendChild(header);
+    photoSection.appendChild(thumbnailsDiv);
+    
+    // Insert after the legacy 材料ラベル image element
+    const legacyImg = document.getElementById('材料ラベル');
+    if (legacyImg && legacyImg.nextSibling) {
+      // Insert right after the img element
+      legacyImg.parentNode.insertBefore(photoSection, legacyImg.nextSibling);
+    } else if (legacyImg) {
+      // If no next sibling, append after
+      legacyImg.parentNode.appendChild(photoSection);
+    } else {
+      // Fallback: try to insert after makerLabelButton
+      const makerLabelButton = document.getElementById('makerLabelButton');
+      if (makerLabelButton && makerLabelButton.nextSibling) {
+        makerLabelButton.parentNode.insertBefore(photoSection, makerLabelButton.nextSibling);
+      } else {
+        mainForm.appendChild(photoSection);
+      }
+    }
+    
+    container = document.getElementById('material-photo-thumbnails');
+    photosContainer = document.getElementById('material-label-photos-container');
+  }
+  
+  if (!container) {
+    console.error('Failed to find or create material-photo-thumbnails container');
+    return;
+  }
+  
+  container.innerHTML = '';
+  
+  const photoCount = document.getElementById('material-photo-count');
+  if (photoCount) {
+    photoCount.textContent = materialLabelPhotos.length;
+  }
+  
+  if (materialLabelPhotos.length === 0) {
+    photosContainer.style.display = 'none';
+    console.log('No material label photos to display');
+  } else {
+    photosContainer.style.display = 'block';
+    console.log(`Rendering ${materialLabelPhotos.length} material label photos`);
+    
+    materialLabelPhotos.forEach((photo, index) => {
+      const thumbItem = document.createElement('div');
+      thumbItem.style.cssText = 'position: relative; display: inline-block; margin: 5px;';
+      
+      const img = document.createElement('img');
+      
+      let imageSrc;
+      if (photo.displayURL) {
+        imageSrc = photo.displayURL;
+      } else if (photo.firebaseURL) {
+        imageSrc = photo.firebaseURL;
+      } else if (photo.base64) {
+        imageSrc = `data:image/jpeg;base64,${photo.base64}`;
+      } else {
+        imageSrc = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODAiIGhlaWdodD0iODAiIHZpZXdCb3g9IjAgMCA4MCA4MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjgwIiBoZWlnaHQ9IjgwIiBmaWxsPSIjZjBmMGYwIi8+Cjx0ZXh0IHg9IjQwIiB5PSI0NSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEyIiBmaWxsPSIjOTk5Ij5JbWFnZTwvdGV4dD4KPHR0ZXh0IHg9IjQwIiB5PSI1NSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOTk5Ij5FcnJvcjwvdGV4dD4KPC9zdmc+';
+      }
+      
+      img.src = imageSrc;
+      img.style.cssText = `
+        width: 80px;
+        height: 80px;
+        object-fit: cover;
+        cursor: pointer;
+        display: block;
+        border: 2px solid #ddd;
+        border-radius: 5px;
+      `;
+      
+      img.onerror = () => {
+        console.error('Failed to load material label photo:', imageSrc);
+        img.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODAiIGhlaWdodD0iODAiIHZpZXdCb3g9IjAgMCA4MCA4MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjgwIiBoZWlnaHQ9IjgwIiBmaWxsPSIjZjBmMGYwIi8+Cjx0ZXh0IHg9IjQwIiB5PSI0NSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEyIiBmaWxsPSIjOTk5Ij5FcnJvcjwvdGV4dD4KPC9zdmc+';
+      };
+      
+      // Add click handler to show full-size preview
+      img.onclick = () => {
+        showMaterialPhotoPreview(imageSrc);
+      };
+      
+      const deleteBtn = document.createElement('button');
+      deleteBtn.innerHTML = '×';
+      deleteBtn.style.cssText = `
+        position: absolute;
+        top: -5px;
+        right: -5px;
+        background: #ff4444;
+        color: white;
+        border: none;
+        border-radius: 50%;
+        width: 20px;
+        height: 20px;
+        font-size: 14px;
+        cursor: pointer;
+        line-height: 1;
+      `;
+      deleteBtn.onclick = (e) => {
+        e.stopPropagation();
+        if (confirm('この写真を削除しますか？ / Delete this photo?')) {
+          removeMaterialLabelPhoto(index);
+        }
+      };
+      
+      thumbItem.appendChild(img);
+      thumbItem.appendChild(deleteBtn);
+      container.appendChild(thumbItem);
+    });
+  }
+}
+
+// Show full-size preview of material label photo
+function showMaterialPhotoPreview(imageSrc) {
+  // Create modal overlay
+  const modal = document.createElement('div');
+  modal.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.9);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 10003;
+    cursor: pointer;
+  `;
+  
+  // Create image element
+  const img = document.createElement('img');
+  img.src = imageSrc;
+  img.style.cssText = `
+    max-width: 90%;
+    max-height: 90%;
+    object-fit: contain;
+    border-radius: 8px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  `;
+  
+  // Create close button
+  const closeBtn = document.createElement('button');
+  closeBtn.innerHTML = '×';
+  closeBtn.style.cssText = `
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    background: rgba(255, 255, 255, 0.9);
+    color: #333;
+    border: none;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    font-size: 28px;
+    cursor: pointer;
+    line-height: 1;
+    font-weight: bold;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    transition: background 0.2s;
+  `;
+  
+  closeBtn.onmouseover = () => {
+    closeBtn.style.background = 'rgba(255, 255, 255, 1)';
+  };
+  
+  closeBtn.onmouseout = () => {
+    closeBtn.style.background = 'rgba(255, 255, 255, 0.9)';
+  };
+  
+  // Close modal function
+  const closeModal = () => {
+    document.body.removeChild(modal);
+  };
+  
+  // Close on background click
+  modal.onclick = closeModal;
+  
+  // Close on close button click
+  closeBtn.onclick = (e) => {
+    e.stopPropagation();
+    closeModal();
+  };
+  
+  // Prevent closing when clicking on image
+  img.onclick = (e) => {
+    e.stopPropagation();
+  };
+  
+  // Close on ESC key
+  const escHandler = (e) => {
+    if (e.key === 'Escape') {
+      closeModal();
+      document.removeEventListener('keydown', escHandler);
+    }
+  };
+  document.addEventListener('keydown', escHandler);
+  
+  // Add elements to modal
+  modal.appendChild(img);
+  modal.appendChild(closeBtn);
+  document.body.appendChild(modal);
+}
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', () => {
+  loadMaintenanceRecords();
+  
+  // Load material label photos from localStorage
+  const prefix = `${location.pathname.split('/').pop()}_${document.getElementById('selected工場')?.value}_`;
+  const savedPhotos = localStorage.getItem(`${prefix}materialLabelPhotos`);
+  if (savedPhotos) {
+    try {
+      materialLabelPhotos = JSON.parse(savedPhotos);
+      renderMaterialPhotoThumbnails();
+      updateMaterialPhotoCount();
+    } catch (e) {
+      console.error('Failed to load material label photos:', e);
+    }
+  }
+  
+  // Setup break time change listeners
+  for (let i = 1; i <= 4; i++) {
+    const startInput = document.getElementById(`break${i}-start`);
+    const endInput = document.getElementById(`break${i}-end`);
+    
+    if (startInput) {
+      startInput.addEventListener('change', calculateTotalBreakTime);
+    }
+    if (endInput) {
+      endInput.addEventListener('change', calculateTotalBreakTime);
+    }
+  }
+  
+  // Setup add maintenance button
+  const addMaintenanceBtn = document.getElementById('add-maintenance-btn');
+  if (addMaintenanceBtn) {
+    addMaintenanceBtn.addEventListener('click', () => showMaintenanceModal());
+  }
+  
+  // Calculate initial totals
+  calculateTotalBreakTime();
+  calculateTotalMachineTroubleTime();
+});
+
+// ===== MAINTENANCE CAMERA FUNCTIONALITY =====
+let maintenanceCameraStream = null;
+
+// Open camera in modal for maintenance photos
+async function openMaintenanceCamera() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    showAlert("カメラ機能はこのブラウザではサポートされていません。(Camera features are not supported in this browser.)", true);
+    return;
+  }
+
+  // Create camera modal
+  const cameraModal = document.createElement('div');
+  cameraModal.id = 'maintenanceCameraModal';
+  cameraModal.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.9);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 10002;
+  `;
+
+  const cameraContent = document.createElement('div');
+  cameraContent.style.cssText = `
+    background: white;
+    padding: 20px;
+    border-radius: 10px;
+    text-align: center;
+    max-width: 90%;
+    max-height: 90%;
+  `;
+
+  cameraContent.innerHTML = `
+    <h3 style="margin-top: 0;">機械故障写真撮影 / Maintenance Photo Capture</h3>
+    <video id="maintenanceVideoFeed" autoplay playsinline style="max-width: 100%; max-height: 400px; border: 2px solid #ddd; border-radius: 5px;"></video>
+    <br><br>
+    <button id="maintenanceCaptureBtn" style="padding: 15px 30px; background: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer; margin-right: 10px; font-size: 16px;">📷 撮影 / Capture</button>
+    <button id="maintenanceCloseCameraBtn" style="padding: 15px 30px; background: #dc3545; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px;">閉じる / Close</button>
+    <canvas id="maintenanceCaptureCanvas" style="display: none;"></canvas>
+  `;
+
+  cameraModal.appendChild(cameraContent);
+  document.body.appendChild(cameraModal);
+
+  const videoFeed = document.getElementById('maintenanceVideoFeed');
+  const captureBtn = document.getElementById('maintenanceCaptureBtn');
+  const closeCameraBtn = document.getElementById('maintenanceCloseCameraBtn');
+  const captureCanvas = document.getElementById('maintenanceCaptureCanvas');
+
+  // Camera constraints
+  const constraints = {
+    video: { 
+      facingMode: { ideal: "environment" }, 
+      width: { ideal: 1280 }, 
+      height: { ideal: 720 } 
+    },
+    audio: false
+  };
+
+  try {
+    maintenanceCameraStream = await navigator.mediaDevices.getUserMedia(constraints);
+  } catch (e) {
+    console.warn("Environment camera failed, trying user camera:", e);
+    constraints.video.facingMode = { ideal: "user" };
+    try {
+      maintenanceCameraStream = await navigator.mediaDevices.getUserMedia(constraints);
+    } catch (err) {
+      console.error("Error accessing camera: ", err);
+      showAlert("カメラにアクセスできませんでした。設定を確認してください。", true);
+      document.body.removeChild(cameraModal);
+      return;
+    }
+  }
+
+  if (maintenanceCameraStream && videoFeed) {
+    videoFeed.srcObject = maintenanceCameraStream;
+    videoFeed.onloadedmetadata = () => {
+      captureCanvas.width = videoFeed.videoWidth;
+      captureCanvas.height = videoFeed.videoHeight;
+      console.log(`🔍 Canvas initialized: ${captureCanvas.width}x${captureCanvas.height}`);
+    };
+  }
+
+  // Capture button functionality
+  captureBtn.addEventListener('click', () => {
+    if (!maintenanceCameraStream || !videoFeed) {
+      console.error("Stream or video not ready for snapshot");
+      closeMaintenanceCamera(cameraModal);
+      return;
+    }
+
+    if (maintenancePhotos.length >= MAX_MAINTENANCE_PHOTOS) {
+      showAlert(`最大${MAX_MAINTENANCE_PHOTOS}枚までです。(Max ${MAX_MAINTENANCE_PHOTOS} photos allowed.)`, false);
+      closeMaintenanceCamera(cameraModal);
+      return;
+    }
+
+    // Validate video before capture
+    if (videoFeed.readyState !== videoFeed.HAVE_ENOUGH_DATA) {
+      console.warn("⚠️ Video feed not ready for capture");
+      showAlert("カメラの準備ができていません。しばらく待ってから再試行してください。", false);
+      return;
+    }
+
+    // Create a fresh canvas for each capture
+    const freshCanvas = document.createElement('canvas');
+    freshCanvas.width = videoFeed.videoWidth;
+    freshCanvas.height = videoFeed.videoHeight;
+    
+    console.log(`🔍 Fresh canvas created: ${freshCanvas.width}x${freshCanvas.height} (video: ${videoFeed.videoWidth}x${videoFeed.videoHeight})`);
+
+    const context = freshCanvas.getContext('2d');
+    if (!context) {
+      console.error("Failed to get 2D context from fresh canvas.");
+      closeMaintenanceCamera(cameraModal);
+      return;
+    }
+
+    context.drawImage(videoFeed, 0, 0, freshCanvas.width, freshCanvas.height);
+    
+    const imageDataURL = freshCanvas.toDataURL('image/jpeg', 0.8);
+    console.log(`🔍 Canvas capture:`, {
+      canvasSize: `${freshCanvas.width}x${freshCanvas.height}`,
+      videoSize: `${videoFeed.videoWidth}x${videoFeed.videoHeight}`,
+      dataURLLength: imageDataURL.length,
+      startsWithDataURL: imageDataURL.startsWith('data:image/jpeg;base64,')
+    });
+    
+    // Validate data URL format
+    if (!imageDataURL.startsWith('data:image/jpeg;base64,')) {
+      console.error('❌ Invalid data URL format:', imageDataURL.substring(0, 100));
+      showAlert('画像キャプチャに失敗しました。再試行してください。', false);
+      closeMaintenanceCamera(cameraModal);
+      return;
+    }
+    
+    // Extract clean base64 data WITHOUT the data URL prefix
+    const base64Data = imageDataURL.split(',')[1];
+    console.log(`🔍 Extracted clean base64 length: ${base64Data.length}`);
+    
+    // Validate base64 data
+    if (!base64Data || base64Data.length === 0) {
+      console.error('❌ Empty base64 data');
+      showAlert('画像データが無効です。再試行してください。', false);
+      closeMaintenanceCamera(cameraModal);
+      return;
+    }
+
+    // Client-side validation
+    try {
+      const buffer = atob(base64Data);
+      console.log(`🔍 Client validation: Successfully decoded ${buffer.length} bytes`);
+      
+      // Check JPEG headers
+      const firstByte = buffer.charCodeAt(0);
+      const secondByte = buffer.charCodeAt(1);
+      console.log(`🔍 JPEG header check: [${firstByte}, ${secondByte}] (should be [255, 216])`);
+      
+      if (firstByte !== 255 || secondByte !== 216) {
+        console.warn('⚠️ WARNING: Invalid JPEG header detected!');
+      } else {
+        console.log('✅ Valid JPEG header confirmed');
+      }
+    } catch (error) {
+      console.error('❌ ERROR: Invalid base64 data - ' + error.message);
+      showAlert('画像データが無効です。再試行してください。', false);
+      closeMaintenanceCamera(cameraModal);
+      return;
+    }
+
+    // Add photo with clean base64 data
+    const success = addMaintenancePhoto(base64Data);
+    
+    if (success) {
+      console.log('✅ Photo successfully added to maintenance photos');
+      // Close camera after successful capture
+      closeMaintenanceCamera(cameraModal);
+    } else {
+      showAlert('写真の追加に失敗しました。', false);
+    }
+  });
+
+  // Close camera button functionality
+  closeCameraBtn.addEventListener('click', () => {
+    closeMaintenanceCamera(cameraModal);
+  });
+
+  // Close on background click
+  cameraModal.addEventListener('click', (e) => {
+    if (e.target === cameraModal) {
+      closeMaintenanceCamera(cameraModal);
+    }
+  });
+}
+
+// Close maintenance camera and cleanup
+function closeMaintenanceCamera(cameraModal) {
+  if (maintenanceCameraStream) {
+    maintenanceCameraStream.getTracks().forEach(track => track.stop());
+    maintenanceCameraStream = null;
+  }
+  
+  const videoFeed = document.getElementById('maintenanceVideoFeed');
+  if (videoFeed) {
+    videoFeed.srcObject = null;
+  }
+  
+  if (cameraModal && cameraModal.parentNode) {
+    document.body.removeChild(cameraModal);
+  }
+}
+
+// ===== END OF BREAK TIME, MAINTENANCE, AND MATERIAL LABEL FUNCTIONALITY =====

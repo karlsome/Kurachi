@@ -3,7 +3,7 @@
     padding: 0;
     margin: 0;
     font-family: 'Poppins', sans-serif;
-    font-size: 22px;
+    font-size: 19px;
 }
 
 html {
@@ -242,6 +242,7 @@ label {
     display: block;
     margin-bottom: 5px;
     color: white;
+    font-size: 19px;
 }
 
 input:invalid {
