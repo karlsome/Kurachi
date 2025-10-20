@@ -895,6 +895,18 @@ async function handleScannedQR(qrCodeMessage) {
   console.log("Handling Scanned QR:", qrCodeMessage);
 
   try {
+    // ✅ ALWAYS SET DATE TO CURRENT DATE AFTER SCAN
+    const lotNoInput = document.getElementById('Lot No.');
+    if (lotNoInput) {
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const day = String(now.getDate()).padStart(2, '0');
+      lotNoInput.value = `${year}-${month}-${day}`;
+      saveToLocalStorage(lotNoInput.id || lotNoInput.name, lotNoInput.value);
+      console.log("Date reset to current date:", lotNoInput.value);
+    }
+    
     // ✅ CHECK FOR SPECIAL QR PATTERNS FIRST
     if (checkSpecialQRPattern(qrCodeMessage)) {
       console.log("Special QR pattern detected, processing with normal flow but special printing...");
