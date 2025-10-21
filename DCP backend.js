@@ -2601,8 +2601,8 @@ if (materialLotInput) {
   window.enableManualLotEntry = function() {
     allowKeypadForManualEntry = true;
     
-    // Open the keypad directly
-    window.openDirectNumericKeypad('材料ロット');
+    // Open the keypad directly in NEW ENTRY MODE (starts empty, appends on confirm)
+    window.openDirectNumericKeypad('材料ロット', true);
     
     // Set up one-time listener for when keypad closes
     const checkForNewLot = setInterval(() => {
@@ -4744,14 +4744,16 @@ function initNumericKeypad() {
 }
 
 // Define direct keypad functions in the global scope first
-window.openDirectNumericKeypad = function(inputId) {
+window.openDirectNumericKeypad = function(inputId, isNewEntryMode = false) {
   window.currentDirectInputId = inputId;
+  window.isNewEntryMode = isNewEntryMode; // Store the mode
   const modal = document.getElementById('numericKeypadModalDirect');
   const display = document.getElementById('numericDisplayDirect');
   const currentInput = document.getElementById(inputId);
   
   if (modal && display && currentInput) {
-    display.value = currentInput.value || '';
+    // If new entry mode, start with empty display, otherwise show current value
+    display.value = isNewEntryMode ? '' : (currentInput.value || '');
     modal.style.display = 'block';
     document.body.style.overflow = 'hidden';
     
@@ -4887,8 +4889,22 @@ window.confirmDirectNumericInput = function() {
       }
     }
     
-    // Set the value to the target input
-    targetInput.value = value;
+    // Handle new entry mode for 材料ロット
+    if (window.isNewEntryMode && window.currentDirectInputId === '材料ロット') {
+      // In new entry mode, append the new lot to existing lots with comma
+      const existingValue = targetInput.value;
+      if (existingValue && value) {
+        // Append with comma
+        targetInput.value = existingValue + ',' + value;
+      } else if (value) {
+        // No existing value, just set the new value
+        targetInput.value = value;
+      }
+      // If value is empty, don't change anything
+    } else {
+      // Normal mode - replace the value
+      targetInput.value = value;
+    }
     
     // Get the current uniquePrefix for localStorage
     const pageName = location.pathname.split('/').pop();
@@ -4898,7 +4914,7 @@ window.confirmDirectNumericInput = function() {
     
     // Save to localStorage with the unique key format
     const key = `${uniquePrefix}${targetInput.id}`;
-    localStorage.setItem(key, value);
+    localStorage.setItem(key, targetInput.value);
     
     // Trigger the input event to handle any event listeners
     const event = new Event('input', { bubbles: true });
