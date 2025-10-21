@@ -4455,42 +4455,45 @@ function showPopup() {
 }
 
 // Function to check the value every 1 minute
+// TEMPORARILY DISABLED - Timer that shows popup if "Send to Machine" not pressed
 function checkValue() {
-  var interval = setInterval(function() {
-    console.log("selectedFactory: " + selectedFactory);
-    if (selectedFactory !== "小瀬") {
-      return; // Skip the check if selectedFactory is not "小瀬"
-    }
+  console.log("checkValue() called - Timer temporarily disabled");
+  // var interval = setInterval(function() {
+  //   console.log("selectedFactory: " + selectedFactory);
+  //   if (selectedFactory !== "小瀬") {
+  //     return; // Skip the check if selectedFactory is not "小瀬"
+  //   }
 
-    const selected工場 = document.getElementById('selected工場').value; // Get the current factory value
-    const pageName = location.pathname.split('/').pop(); // Get the current HTML file name
-    const key = `${uniquePrefix}sendtoNCButtonisPressed`;
+  //   const selected工場 = document.getElementById('selected工場').value; // Get the current factory value
+  //   const pageName = location.pathname.split('/').pop(); // Get the current HTML file name
+  //   const key = `${uniquePrefix}sendtoNCButtonisPressed`;
 
-    if (localStorage.getItem(key) === null) {
-      return; // Skip the check if the key is not present in local storage
-    }
-    var sendtoNCButtonisPressed = localStorage.getItem(key) === 'true'; // Retrieve the value from local storage
-    console.log("sendtoNCButtonisPressed: " + sendtoNCButtonisPressed);
+  //   if (localStorage.getItem(key) === null) {
+  //     return; // Skip the check if the key is not present in local storage
+  //   }
+  //   var sendtoNCButtonisPressed = localStorage.getItem(key) === 'true'; // Retrieve the value from local storage
+  //   console.log("sendtoNCButtonisPressed: " + sendtoNCButtonisPressed);
 
-    if (sendtoNCButtonisPressed) {
-      clearInterval(interval); // Stop checking if the value is true
-    } else {
-      // Get the sub-dropdown value
-      const subDropdownValue = document.getElementById('sub-dropdown').value;
+  //   if (sendtoNCButtonisPressed) {
+  //     clearInterval(interval); // Stop checking if the value is true
+  //   } else {
+  //     // Get the sub-dropdown value
+  //     const subDropdownValue = document.getElementById('sub-dropdown').value;
 
-      // Check if sub-dropdown value is in its default state
-      if (!subDropdownValue || subDropdownValue === "Select 背番号") {
-        console.log("Sub-dropdown is in its default state. Skipping showPopup.");
-        return; // Do not call showPopup if the value is default
-      }
-      console.log("Sub-dropdown value is not default. Showing popup.");
+  //     // Check if sub-dropdown value is in its default state
+  //     if (!subDropdownValue || subDropdownValue === "Select 背番号") {
+  //       console.log("Sub-dropdown is in its default state. Skipping showPopup.");
+  //       return; // Do not call showPopup if the value is default
+  //     }
+  //     console.log("Sub-dropdown value is not default. Showing popup.");
 
-      showPopup();
-    }
-  }, 30000); // 30000 milliseconds = 30 seconds
+  //     showPopup();
+  //   }
+  // }, 30000); // 30000 milliseconds = 30 seconds
 }
 
 // Run the checkValue function when the page loads
+// TEMPORARILY DISABLED - Timer functionality
 window.onload = checkValue;
 
 // Maintenance Camera Functionality
@@ -5264,9 +5267,28 @@ let step1Scanner = null;
 let step2Scanner = null;
 let currentStep = 0;
 
+// Global variable to store fetched product details
+let currentProductDetails = {
+  sebanggo: '',
+  hinban: '',
+  materialCode: ''
+};
+
 // Function to get machine name
 function getMachineName() {
   return document.getElementById('process')?.value || 'MACHINE';
+}
+
+// Function to save current step to localStorage
+function saveCurrentStep(step) {
+  currentStep = step;
+  localStorage.setItem(`${uniquePrefix}currentStep`, step);
+}
+
+// Function to get current step from localStorage
+function getCurrentStepFromStorage() {
+  const saved = localStorage.getItem(`${uniquePrefix}currentStep`);
+  return saved ? parseInt(saved) : 0;
 }
 
 // Function to show Step 1 Modal
@@ -5280,7 +5302,7 @@ function showStep1Modal() {
   content.style.display = 'flex';
   scanner.style.display = 'none';
   modal.style.display = 'block';
-  currentStep = 1;
+  saveCurrentStep(1);
 }
 
 // Function to show Step 2 Modal
@@ -5290,20 +5312,16 @@ function showStep2Modal() {
   const content = document.getElementById('step2Content');
   const scanner = document.getElementById('step2Scanner');
   
-  // Get product details
-  const subDropdown = document.getElementById('sub-dropdown');
-  const selectedValue = subDropdown?.value || '';
-  const materialCode = document.getElementById('Material Code')?.value || '';
-  
-  document.getElementById('step2Sebanggo').textContent = selectedValue;
-  document.getElementById('step2Hinban').textContent = document.getElementById('品番')?.value || '';
-  document.getElementById('step2Material').textContent = materialCode;
+  // Use cached product details instead of reading from DOM
+  document.getElementById('step2Sebanggo').textContent = currentProductDetails.sebanggo;
+  document.getElementById('step2Hinban').textContent = currentProductDetails.hinban;
+  document.getElementById('step2Material').textContent = currentProductDetails.materialCode;
   
   machineName.textContent = getMachineName();
   content.style.display = 'flex';
   scanner.style.display = 'none';
   modal.style.display = 'block';
-  currentStep = 2;
+  saveCurrentStep(2);
 }
 
 // Function to show Step 3 Modal
@@ -5311,17 +5329,14 @@ function showStep3Modal() {
   const modal = document.getElementById('step3Modal');
   const machineName = document.getElementById('step3MachineName');
   
-  // Get product details
-  const subDropdown = document.getElementById('sub-dropdown');
-  const selectedValue = subDropdown?.value || '';
-  
-  document.getElementById('step3Sebanggo').textContent = selectedValue;
-  document.getElementById('step3Hinban').textContent = document.getElementById('品番')?.value || '';
-  document.getElementById('step3Material').textContent = document.getElementById('Material Code')?.value || '';
+  // Use cached product details instead of reading from DOM
+  document.getElementById('step3Sebanggo').textContent = currentProductDetails.sebanggo;
+  document.getElementById('step3Hinban').textContent = currentProductDetails.hinban;
+  document.getElementById('step3Material').textContent = currentProductDetails.materialCode;
   
   machineName.textContent = getMachineName();
   modal.style.display = 'block';
-  currentStep = 3;
+  saveCurrentStep(3);
 }
 
 // Function to close all step modals
@@ -5356,8 +5371,15 @@ function resetAllSteps() {
   saveMaterialLots();
   renderMaterialLotTags();
   
-  // Reset to Step 1
-  currentStep = 0;
+  // Clear product details cache
+  currentProductDetails = {
+    sebanggo: '',
+    hinban: '',
+    materialCode: ''
+  };
+  
+  // Reset step to 0 and clear from localStorage
+  saveCurrentStep(0);
   
   // Call resetForm() to clear all form data
   resetForm();
@@ -5410,6 +5432,15 @@ document.getElementById('startStep1Scan').addEventListener('click', function() {
       // Fetch product details
       await fetchProductDetails();
       
+      // Cache product details after fetching
+      currentProductDetails = {
+        sebanggo: qrCodeMessage,
+        hinban: document.getElementById('product-number')?.value || '',
+        materialCode: document.getElementById('material-code')?.value || ''
+      };
+      
+      console.log('Cached product details:', currentProductDetails);
+      
       // Apply NC button logic
       NCPresstoFalse();
       
@@ -5451,7 +5482,7 @@ document.getElementById('startStep2Scan').addEventListener('click', function() {
         await step2Scanner.stop();
         step2Scanner = null;
         
-        // Parse QR code: "97B,251020-1,12000"
+        // Parse QR code: "Z1Z9,250805-5,500"
         const parts = qrCodeMessage.split(',');
         
         if (parts.length < 2) {
@@ -5461,8 +5492,13 @@ document.getElementById('startStep2Scan').addEventListener('click', function() {
         const scannedMaterialCode = parts[0].trim();
         const lotNumber = parts[1].trim();
         
-        // Validate Material Code
-        const expectedMaterialCode = document.getElementById('Material Code')?.value || '';
+        // Validate Material Code using cached product details
+        const expectedMaterialCode = currentProductDetails.materialCode || '';
+        
+        console.log("Material Code Comparison:", { 
+          scanned: scannedMaterialCode, 
+          expected: expectedMaterialCode 
+        });
         
         if (scannedMaterialCode !== expectedMaterialCode) {
           showAlert(`材料コードが一致しません！<br>Expected: ${expectedMaterialCode}<br>Scanned: ${scannedMaterialCode}`);
@@ -5471,7 +5507,7 @@ document.getElementById('startStep2Scan').addEventListener('click', function() {
           return;
         }
         
-        // Add scanned lot
+        // Add scanned lot to the material lot input
         const success = addScannedLot(lotNumber);
         
         if (!success) {
@@ -5482,6 +5518,7 @@ document.getElementById('startStep2Scan').addEventListener('click', function() {
         }
         
         // Success - move to Step 3
+        console.log("Lot added successfully:", lotNumber);
         document.getElementById('step2Modal').style.display = 'none';
         showStep3Modal();
         
@@ -5503,14 +5540,16 @@ document.getElementById('startStep2Scan').addEventListener('click', function() {
 document.getElementById('startStep3Send').addEventListener('click', async function() {
   try {
     // Call the send to machine function
-    const sendButton = document.getElementById('send-to-machine');
+    const sendButton = document.getElementById('sendtoNC');
     if (sendButton && typeof sendButton.onclick === 'function') {
       await sendButton.onclick();
     }
     
+    // Mark workflow as complete
+    saveCurrentStep(0);
+    
     // Close Step 3 modal
     document.getElementById('step3Modal').style.display = 'none';
-    currentStep = 0;
     
   } catch (error) {
     console.error("Error sending to machine:", error);
@@ -5523,11 +5562,41 @@ document.getElementById('resetStep1').addEventListener('click', resetAllSteps);
 document.getElementById('resetStep2').addEventListener('click', resetAllSteps);
 document.getElementById('resetStep3').addEventListener('click', resetAllSteps);
 
-// Auto-show Step 1 on page load if sub-dropdown is empty
+// Auto-show modal on page load based on workflow state
 window.addEventListener('load', function() {
   setTimeout(() => {
     const subDropdown = document.getElementById('sub-dropdown');
-    if (subDropdown && (!subDropdown.value || subDropdown.selectedIndex === 0)) {
+    const savedStep = getCurrentStepFromStorage();
+    
+    // If sub-dropdown is empty, always start at Step 1
+    if (!subDropdown.value || subDropdown.selectedIndex === 0) {
+      saveCurrentStep(0);
+      showStep1Modal();
+      return;
+    }
+    
+    // If sub-dropdown has value but workflow is incomplete
+    if (savedStep > 0 && savedStep < 3) {
+      // Restore product details from DOM
+      currentProductDetails = {
+        sebanggo: subDropdown.value,
+        hinban: document.getElementById('product-number')?.value || '',
+        materialCode: document.getElementById('material-code')?.value || ''
+      };
+      
+      console.log('Resuming workflow at step:', savedStep);
+      console.log('Restored product details:', currentProductDetails);
+      
+      // Resume at the appropriate step
+      if (savedStep === 1) {
+        showStep1Modal();
+      } else if (savedStep === 2) {
+        showStep2Modal();
+      }
+    } else if (savedStep === 0 && subDropdown.value) {
+      // If step is 0 but dropdown has value, workflow was completed
+      // Force restart workflow
+      console.log('Workflow was completed, but dropdown has value. Starting fresh workflow.');
       showStep1Modal();
     }
   }, 500);
