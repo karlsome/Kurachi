@@ -2346,6 +2346,9 @@ document.getElementById('scan-lot').addEventListener('click', function() {
       console.log("Scanned Lot QR Code:", qrCodeMessage);
 
       try {
+        // ✅ IMMEDIATELY stop the scanner to prevent multiple scans
+        await html5QrCode.stop();
+        
         // Parse QR code: "97B,251020-1,12000"
         const parts = qrCodeMessage.split(',');
         
@@ -2370,11 +2373,8 @@ document.getElementById('scan-lot').addEventListener('click', function() {
           // Use showAlert function
           showAlert(`材料コードが一致しません / Material code mismatch\n\nScanned: ${scannedMaterialCode}\nExpected: ${materialCode}`);
           
-          // Stop scanner and close modal
-          html5QrCode.stop().then(() => {
-            scanLotModal.style.display = 'none';
-          }).catch(err => console.error("Failed to stop scanning:", err));
-          
+          // Close modal
+          scanLotModal.style.display = 'none';
           return;
         }
 
@@ -2386,11 +2386,9 @@ document.getElementById('scan-lot').addEventListener('click', function() {
         if (lotsArray.includes(lotNumber)) {
           scanLotStatus.innerHTML = '<span style="color: #f39c12;">⚠️ このロット番号は既に追加されています<br>Lot number already added</span>';
           
-          // Still close after showing message briefly
+          // Close after showing message briefly
           setTimeout(() => {
-            html5QrCode.stop().then(() => {
-              scanLotModal.style.display = 'none';
-            }).catch(err => console.error("Failed to stop scanning:", err));
+            scanLotModal.style.display = 'none';
           }, 1500);
           
           return;
@@ -2407,12 +2405,10 @@ document.getElementById('scan-lot').addEventListener('click', function() {
         scanLotStatus.innerHTML = '<span class="success-checkmark">✓</span><br><span style="color: #4CAF50; font-weight: bold;">成功！ / Success!</span>';
         document.body.classList.add('flash-green');
 
-        // Stop scanner and close modal after short delay
+        // Close modal after short delay
         setTimeout(() => {
           document.body.classList.remove('flash-green');
-          html5QrCode.stop().then(() => {
-            scanLotModal.style.display = 'none';
-          }).catch(err => console.error("Failed to stop scanning:", err));
+          scanLotModal.style.display = 'none';
         }, 1000);
 
       } catch (error) {
@@ -2421,9 +2417,8 @@ document.getElementById('scan-lot').addEventListener('click', function() {
         
         showAlert('QRコードの形式が正しくありません / Invalid QR code format');
         
-        html5QrCode.stop().then(() => {
-          scanLotModal.style.display = 'none';
-        }).catch(err => console.error("Failed to stop scanning:", err));
+        // Scanner already stopped, just close modal
+        scanLotModal.style.display = 'none';
       }
     },
     (errorMessage) => {
