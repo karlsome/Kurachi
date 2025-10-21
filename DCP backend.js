@@ -5358,7 +5358,9 @@ function resetAllSteps() {
   
   // Reset to Step 1
   currentStep = 0;
-  showStep1Modal();
+  
+  // Call resetForm() to clear all form data
+  resetForm();
 }
 
 // Step 1: Start Scan Button
