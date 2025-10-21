@@ -5390,6 +5390,26 @@ document.getElementById('startStep1Scan').addEventListener('click', function() {
   const content = document.getElementById('step1Content');
   const scanner = document.getElementById('step1Scanner');
   
+  // Stop any active alert sound and close alert modal
+  const alertSound = document.getElementById('alert-sound');
+  const scanAlertModal = document.getElementById('scanAlertModal');
+  if (alertSound) {
+    alertSound.pause();
+    alertSound.currentTime = 0;
+    alertSound.muted = true;
+  }
+  if (scanAlertModal) {
+    scanAlertModal.style.display = 'none';
+  }
+  // Remove red flash effect
+  document.body.classList.remove('flash-red');
+  
+  // Clear any previous error messages
+  const errorMsg = document.getElementById('step1ErrorMsg');
+  if (errorMsg) {
+    errorMsg.style.display = 'none';
+  }
+  
   content.style.display = 'none';
   scanner.style.display = 'block';
   
@@ -5410,7 +5430,23 @@ document.getElementById('startStep1Scan').addEventListener('click', function() {
       const options = [...subDropdown.options].map(option => option.value);
       
       if (!options.includes(qrCodeMessage)) {
-        showAlert('背番号が存在しません。 / Sebanggo does not exist.');
+        // Stop scanner
+        await step1Scanner.stop();
+        step1Scanner = null;
+        
+        // Hide scanner, show button again
+        scanner.style.display = 'none';
+        content.style.display = 'flex';
+        
+        // Show error message in modal
+        const errorMsg = document.getElementById('step1ErrorMsg');
+        const errorText = errorMsg.querySelector('p');
+        errorText.innerHTML = `❌ <strong>背番号が存在しません / Sebanggo does not exist</strong><br><br>Scanned: <code style="background: #f8f9fa; padding: 2px 8px; border-radius: 4px;">${qrCodeMessage}</code>`;
+        errorMsg.style.display = 'block';
+        
+        // Also show alert with red flash and sound
+        showAlert(`❌ 背番号が存在しません / Sebanggo does not exist\n\nScanned: ${qrCodeMessage}`);
+        
         return;
       }
       
@@ -5462,6 +5498,26 @@ document.getElementById('startStep2Scan').addEventListener('click', function() {
   const content = document.getElementById('step2Content');
   const scanner = document.getElementById('step2Scanner');
   
+  // Stop any active alert sound and close alert modal
+  const alertSound = document.getElementById('alert-sound');
+  const scanAlertModal = document.getElementById('scanAlertModal');
+  if (alertSound) {
+    alertSound.pause();
+    alertSound.currentTime = 0;
+    alertSound.muted = true;
+  }
+  if (scanAlertModal) {
+    scanAlertModal.style.display = 'none';
+  }
+  // Remove red flash effect
+  document.body.classList.remove('flash-red');
+  
+  // Clear any previous error messages
+  const errorMsg = document.getElementById('step2ErrorMsg');
+  if (errorMsg) {
+    errorMsg.style.display = 'none';
+  }
+  
   content.style.display = 'none';
   scanner.style.display = 'block';
   
@@ -5479,14 +5535,28 @@ document.getElementById('startStep2Scan').addEventListener('click', function() {
       console.log("Step 2 QR Scanned:", qrCodeMessage);
       
       try {
-        await step2Scanner.stop();
-        step2Scanner = null;
-        
         // Parse QR code: "Z1Z9,250805-5,500"
         const parts = qrCodeMessage.split(',');
         
         if (parts.length < 2) {
-          throw new Error('Invalid QR code format');
+          // Stop scanner
+          await step2Scanner.stop();
+          step2Scanner = null;
+          
+          // Hide scanner, show button again
+          scanner.style.display = 'none';
+          content.style.display = 'flex';
+          
+          // Show error in modal
+          const errorMsg = document.getElementById('step2ErrorMsg');
+          const errorText = errorMsg.querySelector('p');
+          errorText.innerHTML = `❌ <strong>QRコードの形式が正しくありません / Invalid QR code format</strong><br><br>Scanned: <code style="background: #f8f9fa; padding: 2px 8px; border-radius: 4px;">${qrCodeMessage}</code><br><br>Expected format: <code style="background: #f8f9fa; padding: 2px 8px; border-radius: 4px;">MaterialCode,LotNumber,Quantity</code>`;
+          errorMsg.style.display = 'block';
+          
+          // Also show alert with red flash and sound
+          showAlert(`❌ QRコードの形式が正しくありません / Invalid QR code format\n\nScanned: ${qrCodeMessage}\n\nExpected format: MaterialCode,LotNumber,Quantity`);
+          
+          return;
         }
 
         const scannedMaterialCode = parts[0].trim();
@@ -5501,9 +5571,23 @@ document.getElementById('startStep2Scan').addEventListener('click', function() {
         });
         
         if (scannedMaterialCode !== expectedMaterialCode) {
-          showAlert(`材料コードが一致しません！<br>Expected: ${expectedMaterialCode}<br>Scanned: ${scannedMaterialCode}`);
-          // Restart scanner
-          document.getElementById('startStep2Scan').click();
+          // Stop scanner
+          await step2Scanner.stop();
+          step2Scanner = null;
+          
+          // Hide scanner, show button again
+          scanner.style.display = 'none';
+          content.style.display = 'flex';
+          
+          // Show error in modal
+          const errorMsg = document.getElementById('step2ErrorMsg');
+          const errorText = errorMsg.querySelector('p');
+          errorText.innerHTML = `❌ <strong>材料コードが一致しません / Material code mismatch</strong><br><br>Expected: <code style="background: #e8f5e9; padding: 2px 8px; border-radius: 4px; color: #2e7d32;">${expectedMaterialCode}</code><br>Scanned: <code style="background: #ffebee; padding: 2px 8px; border-radius: 4px; color: #c62828;">${scannedMaterialCode}</code><br><br>Please scan the correct material lot.`;
+          errorMsg.style.display = 'block';
+          
+          // Also show alert with red flash and sound
+          showAlert(`❌ 材料コードが一致しません / Material code mismatch\n\nExpected: ${expectedMaterialCode}\nScanned: ${scannedMaterialCode}\n\nPlease scan the correct material lot.`);
+          
           return;
         }
         
@@ -5511,20 +5595,55 @@ document.getElementById('startStep2Scan').addEventListener('click', function() {
         const success = addScannedLot(lotNumber);
         
         if (!success) {
-          showAlert('このロット番号は既に追加されています<br>Lot number already added');
-          // Restart scanner
-          document.getElementById('startStep2Scan').click();
+          // Stop scanner
+          await step2Scanner.stop();
+          step2Scanner = null;
+          
+          // Hide scanner, show button again
+          scanner.style.display = 'none';
+          content.style.display = 'flex';
+          
+          // Show error in modal
+          const errorMsg = document.getElementById('step2ErrorMsg');
+          const errorText = errorMsg.querySelector('p');
+          errorText.innerHTML = `⚠️ <strong>このロット番号は既に追加されています / Lot number already added</strong><br><br>Lot: <code style="background: #f8f9fa; padding: 2px 8px; border-radius: 4px;">${lotNumber}</code>`;
+          errorMsg.style.display = 'block';
+          
+          // Also show alert with red flash and sound
+          showAlert(`⚠️ このロット番号は既に追加されています / Lot number already added\n\nLot: ${lotNumber}`);
+          
           return;
         }
         
-        // Success - move to Step 3
+        // Success - stop scanner and move to Step 3
+        await step2Scanner.stop();
+        step2Scanner = null;
+        
         console.log("Lot added successfully:", lotNumber);
         document.getElementById('step2Modal').style.display = 'none';
         showStep3Modal();
         
       } catch (error) {
         console.error("Error processing lot QR code:", error);
-        showAlert('QRコードの処理エラー / QR code processing error');
+        
+        // Stop scanner if still running
+        if (step2Scanner) {
+          await step2Scanner.stop();
+          step2Scanner = null;
+        }
+        
+        // Hide scanner, show button again
+        scanner.style.display = 'none';
+        content.style.display = 'flex';
+        
+        // Show error in modal
+        const errorMsg = document.getElementById('step2ErrorMsg');
+        const errorText = errorMsg.querySelector('p');
+        errorText.innerHTML = `❌ <strong>QRコードの処理エラー / QR code processing error</strong><br><br>${error.message}`;
+        errorMsg.style.display = 'block';
+        
+        // Also show alert with red flash and sound
+        showAlert(`❌ QRコードの処理エラー / QR code processing error\n\n${error.message}`);
       }
     },
     (errorMessage) => {
@@ -5539,11 +5658,16 @@ document.getElementById('startStep2Scan').addEventListener('click', function() {
 // Step 3: Send to Machine Button
 document.getElementById('startStep3Send').addEventListener('click', async function() {
   try {
-    // Call the send to machine function
-    const sendButton = document.getElementById('sendtoNC');
-    if (sendButton && typeof sendButton.onclick === 'function') {
-      await sendButton.onclick();
+    // Get the current 背番号
+    const currentSebanggo = document.getElementById('sub-dropdown').value;
+    
+    if (!currentSebanggo) {
+      showAlert('背番号を選んでください / Please select sebanggo first');
+      return;
     }
+    
+    // Call the sendtoNC function directly
+    sendtoNC(currentSebanggo);
     
     // Mark workflow as complete
     saveCurrentStep(0);
