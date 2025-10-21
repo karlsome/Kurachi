@@ -2706,6 +2706,23 @@ document.getElementById('overrideLotButton').addEventListener('click', function(
     leaderVerificationStatus.textContent = '❌ カメラを起動できませんでした / Could not start camera';
     leaderVerificationStatus.style.color = '#cc0000';
   });
+  
+  // Set up cancel button handler for override flow
+  document.getElementById('closeLeaderVerificationModal').onclick = function() {
+    if (leaderVerificationScanner) {
+      leaderVerificationScanner.stop().then(() => {
+        leaderVerificationModal.style.display = 'none';
+        leaderVerificationScanner = null;
+        console.log("Leader verification cancelled from override flow");
+      }).catch(err => {
+        console.error("Error stopping scanner:", err);
+        leaderVerificationModal.style.display = 'none';
+        leaderVerificationScanner = null;
+      });
+    } else {
+      leaderVerificationModal.style.display = 'none';
+    }
+  };
 });
 
 // Load lots on page load
