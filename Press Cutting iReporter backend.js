@@ -6,7 +6,17 @@ const serverURL = "https://kurachi.onrender.com";
 const picURL = 'https://script.google.com/macros/s/AKfycbwHUW1ia8hNZG-ljsguNq8K4LTPVnB6Ng_GLXIHmtJTdUgGGd2WoiQo9ToF-7PvcJh9bA/exec';
 
 
-
+// Auto-resize textarea based on content
+function autoResizeTextarea(textarea) {
+  if (!textarea) return;
+  
+  // Reset height to recalculate
+  textarea.style.height = 'auto';
+  
+  // Set height based on scroll height
+  const newHeight = Math.max(38, textarea.scrollHeight);
+  textarea.style.height = newHeight + 'px';
+}
 
 
 //this code listens to incoming parameters passed
@@ -135,6 +145,11 @@ document.addEventListener('DOMContentLoaded', () => {
       }
   });
   
+  // Auto-resize material textarea after restoration
+  const materialField = document.getElementById('material');
+  if (materialField) {
+    autoResizeTextarea(materialField);
+  }
 
   // Log the restored value for debugging (Optional)
   if (processElement) {
@@ -340,7 +355,11 @@ function blankInfo() {
   document.getElementById("model").value = "";
   document.getElementById("shape").value = "";
   document.getElementById("R-L").value = "";
-  document.getElementById("material").value = "";
+  
+  const materialField = document.getElementById("material");
+  materialField.value = "";
+  autoResizeTextarea(materialField);
+  
   document.getElementById("material-code").value = "";
   document.getElementById("material-color").value = "";
   document.getElementById("送りピッチ").value = "";
@@ -744,7 +763,12 @@ async function fetchProductDetails() {
         document.getElementById("model").value = product.モデル || "";
         document.getElementById("shape").value = product.形状 || "";
         document.getElementById("R-L").value = product["R/L"] || "";
-        document.getElementById("material").value = product.材料 || "";
+        
+        // Set material value and auto-resize textarea
+        const materialField = document.getElementById("material");
+        materialField.value = product.材料 || "";
+        autoResizeTextarea(materialField);
+        
         document.getElementById("material-code").value = product.材料背番号 || "";
         document.getElementById("material-color").value = product.色 || "";
         document.getElementById("kataban").value = product.型番 || "";
