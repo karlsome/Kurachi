@@ -602,13 +602,10 @@ function showLeaderVerification(attemptedValue) {
   html5QrCode.start(
     { facingMode: "environment" },
     { 
-      fps: 20,
-      qrbox: function(viewfinderWidth, viewfinderHeight) {
-        let minEdgeSize = Math.min(viewfinderWidth, viewfinderHeight);
-        let qrboxSize = Math.floor(minEdgeSize * 0.9);
-        return { width: qrboxSize, height: qrboxSize };
-      },
-      aspectRatio: 1.0
+      fps: 30,
+      qrbox: { width: 500, height: 500 },
+      aspectRatio: 1.0,
+      disableFlip: false
     },
     async (decodedText) => {
       console.log("Leader QR Code scanned:", decodedText);
@@ -2368,14 +2365,10 @@ document.getElementById('scan-lot').addEventListener('click', function() {
   html5QrCode.start(
     { facingMode: "environment" },
     { 
-      fps: 20, // Increased FPS for better detection
-      qrbox: function(viewfinderWidth, viewfinderHeight) {
-        // Use 90% of the smaller dimension for larger scanning area
-        let minEdgeSize = Math.min(viewfinderWidth, viewfinderHeight);
-        let qrboxSize = Math.floor(minEdgeSize * 0.9);
-        return { width: qrboxSize, height: qrboxSize };
-      },
-      aspectRatio: 1.0 // Square aspect ratio for QR codes
+      fps: 30, // Maximum FPS for best detection
+      qrbox: { width: 500, height: 500 }, // Very large box for maximum range
+      aspectRatio: 1.0, // Square aspect ratio for QR codes
+      disableFlip: false // Allow flipping for better detection
     },
     async (qrCodeMessage) => {
       console.log("Scanned Lot QR Code:", qrCodeMessage);
@@ -2678,13 +2671,10 @@ document.getElementById('overrideLotButton').addEventListener('click', function(
   leaderVerificationScanner.start(
     { facingMode: "environment" },
     { 
-      fps: 20,
-      qrbox: function(viewfinderWidth, viewfinderHeight) {
-        let minEdgeSize = Math.min(viewfinderWidth, viewfinderHeight);
-        let qrboxSize = Math.floor(minEdgeSize * 0.9);
-        return { width: qrboxSize, height: qrboxSize };
-      },
-      aspectRatio: 1.0
+      fps: 30,
+      qrbox: { width: 500, height: 500 },
+      aspectRatio: 1.0,
+      disableFlip: false
     },
     async (decodedText) => {
       console.log("Leader QR Code scanned for override:", decodedText);
