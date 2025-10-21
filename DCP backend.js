@@ -308,6 +308,45 @@ document.addEventListener('DOMContentLoaded', () => {
   // Initialize maintenance system
   loadMaintenanceRecords();
   
+  // ============================================
+  // STEP PERSISTENCE LOGIC
+  // ============================================
+  // Check if there's a saved step and resume workflow
+  const savedStep = getCurrentStepFromStorage();
+  const currentSebanggoValue = document.getElementById('sub-dropdown')?.value;
+  
+  console.log(`Page loaded - Saved step: ${savedStep}, Sebanggo: ${currentSebanggoValue}`);
+  
+  if (savedStep > 0 && currentSebanggoValue) {
+    // There's an incomplete workflow - resume it
+    console.log(`Resuming workflow from step ${savedStep}`);
+    
+    // Restore cached product details from localStorage if available
+    const cachedSebanggo = localStorage.getItem(`${uniquePrefix}cached-sebanggo`);
+    const cachedHinban = localStorage.getItem(`${uniquePrefix}cached-hinban`);
+    const cachedMaterialCode = localStorage.getItem(`${uniquePrefix}cached-materialCode`);
+    
+    if (cachedSebanggo) {
+      currentProductDetails.sebanggo = cachedSebanggo;
+      currentProductDetails.hinban = cachedHinban || '';
+      currentProductDetails.materialCode = cachedMaterialCode || '';
+      console.log('Restored cached product details:', currentProductDetails);
+    }
+    
+    // Resume from the saved step
+    if (savedStep === 1) {
+      showStep1Modal();
+    } else if (savedStep === 2) {
+      showStep2Modal();
+    } else if (savedStep === 3) {
+      showStep3Modal();
+    }
+  } else if (savedStep > 0 && !currentSebanggoValue) {
+    // Step was saved but no sebanggo - reset workflow
+    console.log('Saved step found but no sebanggo - resetting workflow');
+    saveCurrentStep(0);
+  }
+  
   // Initialize material label photo system
   loadMaterialLabelPhotos();
 
@@ -5378,6 +5417,11 @@ function resetAllSteps() {
     materialCode: ''
   };
   
+  // Clear cached product details from localStorage
+  localStorage.removeItem(`${uniquePrefix}cached-sebanggo`);
+  localStorage.removeItem(`${uniquePrefix}cached-hinban`);
+  localStorage.removeItem(`${uniquePrefix}cached-materialCode`);
+  
   // Reset step to 0 and clear from localStorage
   saveCurrentStep(0);
   
@@ -5386,7 +5430,9 @@ function resetAllSteps() {
 }
 
 // Step 1: Start Scan Button
-document.getElementById('startStep1Scan').addEventListener('click', function() {
+document.getElementById('startStep1Scan').addEventListener('click', function(event) {
+  event.preventDefault(); // Prevent form submission
+  
   const content = document.getElementById('step1Content');
   const scanner = document.getElementById('step1Scanner');
   
@@ -5477,6 +5523,11 @@ document.getElementById('startStep1Scan').addEventListener('click', function() {
       
       console.log('Cached product details:', currentProductDetails);
       
+      // Save cached product details to localStorage
+      localStorage.setItem(`${uniquePrefix}cached-sebanggo`, currentProductDetails.sebanggo);
+      localStorage.setItem(`${uniquePrefix}cached-hinban`, currentProductDetails.hinban);
+      localStorage.setItem(`${uniquePrefix}cached-materialCode`, currentProductDetails.materialCode);
+      
       // Apply NC button logic
       NCPresstoFalse();
       
@@ -5494,7 +5545,9 @@ document.getElementById('startStep1Scan').addEventListener('click', function() {
 });
 
 // Step 2: Start Scan Button
-document.getElementById('startStep2Scan').addEventListener('click', function() {
+document.getElementById('startStep2Scan').addEventListener('click', function(event) {
+  event.preventDefault(); // Prevent form submission
+  
   const content = document.getElementById('step2Content');
   const scanner = document.getElementById('step2Scanner');
   
@@ -5595,22 +5648,23 @@ document.getElementById('startStep2Scan').addEventListener('click', function() {
         const success = addScannedLot(lotNumber);
         
         if (!success) {
-          // Stop scanner
+          // Lot already exists - show info message but don't treat as error
+          console.log("Lot already added, but material code is correct. Proceeding to Step 3.");
+          
+          // Show info in modal (yellow box with informational message)
+          const errorMsg = document.getElementById('step2ErrorMsg');
+          const errorText = errorMsg.querySelector('p');
+          errorText.innerHTML = `⚠️ <strong>このロット番号は既に追加されています / Lot number already added</strong><br><br>Lot: <code style="background: #f8f9fa; padding: 2px 8px; border-radius: 4px;">${lotNumber}</code><br><br>Material code is correct. Proceeding to next step...`;
+          errorMsg.style.display = 'block';
+          
+          // Stop scanner and move to Step 3 after a short delay
           await step2Scanner.stop();
           step2Scanner = null;
           
-          // Hide scanner, show button again
-          scanner.style.display = 'none';
-          content.style.display = 'flex';
-          
-          // Show error in modal
-          const errorMsg = document.getElementById('step2ErrorMsg');
-          const errorText = errorMsg.querySelector('p');
-          errorText.innerHTML = `⚠️ <strong>このロット番号は既に追加されています / Lot number already added</strong><br><br>Lot: <code style="background: #f8f9fa; padding: 2px 8px; border-radius: 4px;">${lotNumber}</code>`;
-          errorMsg.style.display = 'block';
-          
-          // Also show alert with red flash and sound
-          showAlert(`⚠️ このロット番号は既に追加されています / Lot number already added\n\nLot: ${lotNumber}`);
+          setTimeout(() => {
+            document.getElementById('step2Modal').style.display = 'none';
+            showStep3Modal();
+          }, 2000); // 2 second delay to show the message
           
           return;
         }
@@ -5656,7 +5710,9 @@ document.getElementById('startStep2Scan').addEventListener('click', function() {
 });
 
 // Step 3: Send to Machine Button
-document.getElementById('startStep3Send').addEventListener('click', async function() {
+document.getElementById('startStep3Send').addEventListener('click', async function(event) {
+  event.preventDefault(); // Prevent form submission
+  
   try {
     // Get the current 背番号
     const currentSebanggo = document.getElementById('sub-dropdown').value;
@@ -5668,6 +5724,11 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
     
     // Call the sendtoNC function directly
     sendtoNC(currentSebanggo);
+    
+    // Clear cached product details from localStorage
+    localStorage.removeItem(`${uniquePrefix}cached-sebanggo`);
+    localStorage.removeItem(`${uniquePrefix}cached-hinban`);
+    localStorage.removeItem(`${uniquePrefix}cached-materialCode`);
     
     // Mark workflow as complete
     saveCurrentStep(0);
@@ -5682,9 +5743,18 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
 });
 
 // Reset buttons
-document.getElementById('resetStep1').addEventListener('click', resetAllSteps);
-document.getElementById('resetStep2').addEventListener('click', resetAllSteps);
-document.getElementById('resetStep3').addEventListener('click', resetAllSteps);
+document.getElementById('resetStep1').addEventListener('click', function(event) {
+  event.preventDefault(); // Prevent form submission
+  resetAllSteps();
+});
+document.getElementById('resetStep2').addEventListener('click', function(event) {
+  event.preventDefault(); // Prevent form submission
+  resetAllSteps();
+});
+document.getElementById('resetStep3').addEventListener('click', function(event) {
+  event.preventDefault(); // Prevent form submission
+  resetAllSteps();
+});
 
 // Auto-show modal on page load based on workflow state
 window.addEventListener('load', function() {
