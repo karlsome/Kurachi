@@ -2276,7 +2276,7 @@ document.getElementById('scan-button').addEventListener('click', function() {
   };
 });
 
-// CSS for blinking red background
+// CSS for blinking red background and success animation
 const style = document.createElement('style');
 style.innerHTML = `
 .flash-red {
@@ -2288,8 +2288,162 @@ style.innerHTML = `
     background-color: red;
   }
 }
+
+.flash-green {
+  animation: flash-green 0.5s ease-in-out;
+}
+
+@keyframes flash-green {
+  0%, 100% {
+    background-color: transparent;
+  }
+  50% {
+    background-color: rgba(76, 175, 80, 0.3);
+  }
+}
+
+.success-checkmark {
+  display: inline-block;
+  font-size: 48px;
+  color: #4CAF50;
+  animation: checkmark-pop 0.3s ease-in-out;
+}
+
+@keyframes checkmark-pop {
+  0% {
+    transform: scale(0);
+  }
+  50% {
+    transform: scale(1.2);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
 `;
 document.head.appendChild(style);
+
+// Scan Lot Button functionality
+document.getElementById('scan-lot').addEventListener('click', function() {
+  const scanLotModal = document.getElementById('scanLotModal');
+  const scanLotStatus = document.getElementById('scanLotStatus');
+  const materialCodeInput = document.getElementById('material-code');
+  const materialLotInput = document.getElementById('材料ロット');
+  const html5QrCode = new Html5Qrcode("lotQrReader");
+
+  // Reset status
+  scanLotStatus.textContent = '';
+  scanLotStatus.style.color = '#666';
+
+  // Show modal
+  scanLotModal.style.display = 'block';
+
+  // Start QR code scanning
+  html5QrCode.start(
+    { facingMode: "environment" },
+    { fps: 10, qrbox: { width: 250, height: 250 } },
+    async (qrCodeMessage) => {
+      console.log("Scanned Lot QR Code:", qrCodeMessage);
+
+      try {
+        // Parse QR code: "97B,251020-1,12000"
+        const parts = qrCodeMessage.split(',');
+        
+        if (parts.length < 2) {
+          throw new Error('Invalid QR code format');
+        }
+
+        const scannedMaterialCode = parts[0].trim();
+        const lotNumber = parts[1].trim();
+        // parts[2] is ignored for now
+
+        // Get Material Code from the form
+        const materialCode = materialCodeInput ? materialCodeInput.value.trim() : '';
+
+        console.log("Comparison:", { scannedMaterialCode, materialCode, lotNumber });
+
+        // Compare Material Codes
+        if (scannedMaterialCode !== materialCode) {
+          // Material code mismatch - show error
+          scanLotStatus.innerHTML = '<span style="color: #e74c3c;">❌ 材料コードが一致しません<br>Material code mismatch</span>';
+          
+          // Use showAlert function
+          showAlert(`材料コードが一致しません / Material code mismatch\n\nScanned: ${scannedMaterialCode}\nExpected: ${materialCode}`);
+          
+          // Stop scanner and close modal
+          html5QrCode.stop().then(() => {
+            scanLotModal.style.display = 'none';
+          }).catch(err => console.error("Failed to stop scanning:", err));
+          
+          return;
+        }
+
+        // Material code matches - add lot number
+        const currentLots = materialLotInput.value.trim();
+        let lotsArray = currentLots ? currentLots.split(',').map(lot => lot.trim()) : [];
+
+        // Check for duplicates
+        if (lotsArray.includes(lotNumber)) {
+          scanLotStatus.innerHTML = '<span style="color: #f39c12;">⚠️ このロット番号は既に追加されています<br>Lot number already added</span>';
+          
+          // Still close after showing message briefly
+          setTimeout(() => {
+            html5QrCode.stop().then(() => {
+              scanLotModal.style.display = 'none';
+            }).catch(err => console.error("Failed to stop scanning:", err));
+          }, 1500);
+          
+          return;
+        }
+
+        // Add the new lot number
+        lotsArray.push(lotNumber);
+        materialLotInput.value = lotsArray.join(',');
+
+        // Save to localStorage
+        localStorage.setItem(`${uniquePrefix}材料ロット`, materialLotInput.value);
+
+        // Show success animation
+        scanLotStatus.innerHTML = '<span class="success-checkmark">✓</span><br><span style="color: #4CAF50; font-weight: bold;">成功！ / Success!</span>';
+        document.body.classList.add('flash-green');
+
+        // Stop scanner and close modal after short delay
+        setTimeout(() => {
+          document.body.classList.remove('flash-green');
+          html5QrCode.stop().then(() => {
+            scanLotModal.style.display = 'none';
+          }).catch(err => console.error("Failed to stop scanning:", err));
+        }, 1000);
+
+      } catch (error) {
+        console.error("Error processing lot QR code:", error);
+        scanLotStatus.innerHTML = '<span style="color: #e74c3c;">❌ QRコードの処理エラー<br>QR code processing error</span>';
+        
+        showAlert('QRコードの形式が正しくありません / Invalid QR code format');
+        
+        html5QrCode.stop().then(() => {
+          scanLotModal.style.display = 'none';
+        }).catch(err => console.error("Failed to stop scanning:", err));
+      }
+    },
+    (errorMessage) => {
+      // QR scan error (ignore continuous scanning errors)
+    }
+  ).catch(err => {
+    console.error("Failed to start lot scanning:", err);
+    scanLotStatus.innerHTML = '<span style="color: #e74c3c;">❌ カメラを起動できませんでした<br>Could not start camera</span>';
+  });
+
+  // Close button handler
+  document.getElementById('closeScanLotModal').onclick = function() {
+    html5QrCode.stop().then(() => {
+      scanLotModal.style.display = 'none';
+    }).catch(err => {
+      console.error("Failed to stop scanning:", err);
+      scanLotModal.style.display = 'none';
+    });
+  };
+});
 
 // Function to reset everything and reload the page
 function resetForm() {

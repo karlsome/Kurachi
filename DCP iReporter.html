@@ -440,6 +440,31 @@
             </div>
         </div>
 
+        <!-- Scan Lot Modal -->
+        <div id="scanLotModal" class="modal" style="display:none;">
+            <div class="modal-content" style="background: white; border: 2px solid #ddd; border-radius: 10px; padding: 30px; max-width: 450px; box-shadow: 0 4px 20px rgba(0,0,0,0.2);">
+                <div style="text-align: center; margin-bottom: 20px;">
+                    <div style="background: #333; color: white; padding: 10px; border-radius: 5px; margin-bottom: 15px;">
+                        <h3 style="margin: 0; font-size: 20px; font-weight: 600;">材料ロットをスキャンしてください<br>Please scan material lot QR code</h3>
+                    </div>
+                </div>
+                
+                <div style="background: #f5f5f5; border: 1px solid #ddd; border-radius: 8px; padding: 20px; margin: 20px 0;">
+                    <div id="lotQrReader" style="width: 100%; max-width: 350px; height: 350px; margin: auto; border-radius: 6px; overflow: hidden; background: #000;"></div>
+                </div>
+                
+                <div style="text-align: center; margin: 20px 0;">
+                    <p id="scanLotStatus" style="color: #666; font-size: 14px; min-height: 20px; margin: 0;"></p>
+                </div>
+                
+                <div style="text-align: center; margin-top: 20px;">
+                    <button id="closeScanLotModal" type="button" style="background: #e74c3c; color: white; border: none; padding: 12px 40px; border-radius: 6px; cursor: pointer; font-size: 15px; font-weight: 500; transition: background 0.3s;">
+                        Cancel / キャンセル
+                    </button>
+                </div>
+            </div>
+        </div>
+
         
         <!-- Uploading Modal -->
         <div id="uploadingModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.6); z-index: 9999; justify-content: center; align-items: center;">
