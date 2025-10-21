@@ -601,7 +601,15 @@ function showLeaderVerification(attemptedValue) {
   
   html5QrCode.start(
     { facingMode: "environment" },
-    { fps: 10, qrbox: { width: 250, height: 250 } },
+    { 
+      fps: 20,
+      qrbox: function(viewfinderWidth, viewfinderHeight) {
+        let minEdgeSize = Math.min(viewfinderWidth, viewfinderHeight);
+        let qrboxSize = Math.floor(minEdgeSize * 0.9);
+        return { width: qrboxSize, height: qrboxSize };
+      },
+      aspectRatio: 1.0
+    },
     async (decodedText) => {
       console.log("Leader QR Code scanned:", decodedText);
       
@@ -2356,10 +2364,19 @@ document.getElementById('scan-lot').addEventListener('click', function() {
   // Show modal
   scanLotModal.style.display = 'block';
 
-  // Start QR code scanning
+  // Start QR code scanning with improved settings for far-range detection
   html5QrCode.start(
     { facingMode: "environment" },
-    { fps: 10, qrbox: { width: 250, height: 250 } },
+    { 
+      fps: 20, // Increased FPS for better detection
+      qrbox: function(viewfinderWidth, viewfinderHeight) {
+        // Use 90% of the smaller dimension for larger scanning area
+        let minEdgeSize = Math.min(viewfinderWidth, viewfinderHeight);
+        let qrboxSize = Math.floor(minEdgeSize * 0.9);
+        return { width: qrboxSize, height: qrboxSize };
+      },
+      aspectRatio: 1.0 // Square aspect ratio for QR codes
+    },
     async (qrCodeMessage) => {
       console.log("Scanned Lot QR Code:", qrCodeMessage);
 
@@ -2660,7 +2677,15 @@ document.getElementById('overrideLotButton').addEventListener('click', function(
   
   leaderVerificationScanner.start(
     { facingMode: "environment" },
-    { fps: 10, qrbox: { width: 250, height: 250 } },
+    { 
+      fps: 20,
+      qrbox: function(viewfinderWidth, viewfinderHeight) {
+        let minEdgeSize = Math.min(viewfinderWidth, viewfinderHeight);
+        let qrboxSize = Math.floor(minEdgeSize * 0.9);
+        return { width: qrboxSize, height: qrboxSize };
+      },
+      aspectRatio: 1.0
+    },
     async (decodedText) => {
       console.log("Leader QR Code scanned for override:", decodedText);
       
