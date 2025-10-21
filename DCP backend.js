@@ -5254,3 +5254,279 @@ window.addEventListener('load', function() {
   // Also run the original initialization
   initNumericKeypad();
 });
+
+// ============================================
+// 3-STEP MODAL VERIFICATION SYSTEM
+// ============================================
+
+// Global variables for step tracking
+let step1Scanner = null;
+let step2Scanner = null;
+let currentStep = 0;
+
+// Function to get machine name
+function getMachineName() {
+  return document.getElementById('process')?.value || 'MACHINE';
+}
+
+// Function to show Step 1 Modal
+function showStep1Modal() {
+  const modal = document.getElementById('step1Modal');
+  const machineName = document.getElementById('step1MachineName');
+  const content = document.getElementById('step1Content');
+  const scanner = document.getElementById('step1Scanner');
+  
+  machineName.textContent = getMachineName();
+  content.style.display = 'flex';
+  scanner.style.display = 'none';
+  modal.style.display = 'block';
+  currentStep = 1;
+}
+
+// Function to show Step 2 Modal
+function showStep2Modal() {
+  const modal = document.getElementById('step2Modal');
+  const machineName = document.getElementById('step2MachineName');
+  const content = document.getElementById('step2Content');
+  const scanner = document.getElementById('step2Scanner');
+  
+  // Get product details
+  const subDropdown = document.getElementById('sub-dropdown');
+  const selectedValue = subDropdown?.value || '';
+  const materialCode = document.getElementById('Material Code')?.value || '';
+  
+  document.getElementById('step2Sebanggo').textContent = selectedValue;
+  document.getElementById('step2Hinban').textContent = document.getElementById('品番')?.value || '';
+  document.getElementById('step2Material').textContent = materialCode;
+  
+  machineName.textContent = getMachineName();
+  content.style.display = 'flex';
+  scanner.style.display = 'none';
+  modal.style.display = 'block';
+  currentStep = 2;
+}
+
+// Function to show Step 3 Modal
+function showStep3Modal() {
+  const modal = document.getElementById('step3Modal');
+  const machineName = document.getElementById('step3MachineName');
+  
+  // Get product details
+  const subDropdown = document.getElementById('sub-dropdown');
+  const selectedValue = subDropdown?.value || '';
+  
+  document.getElementById('step3Sebanggo').textContent = selectedValue;
+  document.getElementById('step3Hinban').textContent = document.getElementById('品番')?.value || '';
+  document.getElementById('step3Material').textContent = document.getElementById('Material Code')?.value || '';
+  
+  machineName.textContent = getMachineName();
+  modal.style.display = 'block';
+  currentStep = 3;
+}
+
+// Function to close all step modals
+function closeAllStepModals() {
+  document.getElementById('step1Modal').style.display = 'none';
+  document.getElementById('step2Modal').style.display = 'none';
+  document.getElementById('step3Modal').style.display = 'none';
+  
+  // Stop any running scanners
+  if (step1Scanner) {
+    step1Scanner.stop().catch(err => console.error("Error stopping step1 scanner:", err));
+    step1Scanner = null;
+  }
+  if (step2Scanner) {
+    step2Scanner.stop().catch(err => console.error("Error stopping step2 scanner:", err));
+    step2Scanner = null;
+  }
+}
+
+// Function to reset all steps
+function resetAllSteps() {
+  closeAllStepModals();
+  
+  // Clear sub-dropdown
+  const subDropdown = document.getElementById('sub-dropdown');
+  if (subDropdown) {
+    subDropdown.selectedIndex = 0;
+  }
+  
+  // Clear material lots
+  materialLots = [];
+  saveMaterialLots();
+  renderMaterialLotTags();
+  
+  // Reset to Step 1
+  currentStep = 0;
+  showStep1Modal();
+}
+
+// Step 1: Start Scan Button
+document.getElementById('startStep1Scan').addEventListener('click', function() {
+  const content = document.getElementById('step1Content');
+  const scanner = document.getElementById('step1Scanner');
+  
+  content.style.display = 'none';
+  scanner.style.display = 'block';
+  
+  step1Scanner = new Html5Qrcode("step1QrReader");
+  
+  step1Scanner.start(
+    { facingMode: "environment" },
+    { 
+      fps: 30,
+      qrbox: { width: 800, height: 800 },
+      aspectRatio: 1.0,
+      disableFlip: false
+    },
+    async (qrCodeMessage) => {
+      console.log("Step 1 QR Scanned:", qrCodeMessage);
+      
+      const subDropdown = document.getElementById('sub-dropdown');
+      const options = [...subDropdown.options].map(option => option.value);
+      
+      if (!options.includes(qrCodeMessage)) {
+        showAlert('背番号が存在しません。 / Sebanggo does not exist.');
+        return;
+      }
+      
+      // Stop scanner
+      await step1Scanner.stop();
+      step1Scanner = null;
+      
+      // Set dropdown value
+      subDropdown.value = qrCodeMessage;
+      
+      // Update previous value for leader verification
+      if (typeof updatePreviousDropdownValue === 'function') {
+        updatePreviousDropdownValue(qrCodeMessage);
+      }
+      
+      // Save to localStorage
+      localStorage.setItem(`${uniquePrefix}sub-dropdown`, qrCodeMessage);
+      
+      // Fetch product details
+      await fetchProductDetails();
+      
+      // Apply NC button logic
+      NCPresstoFalse();
+      
+      // Close Step 1, Open Step 2
+      document.getElementById('step1Modal').style.display = 'none';
+      showStep2Modal();
+    },
+    (errorMessage) => {
+      // Ignore scan errors
+    }
+  ).catch(err => {
+    console.error("Failed to start Step 1 scanner:", err);
+    showAlert('カメラを起動できませんでした / Could not start camera');
+  });
+});
+
+// Step 2: Start Scan Button
+document.getElementById('startStep2Scan').addEventListener('click', function() {
+  const content = document.getElementById('step2Content');
+  const scanner = document.getElementById('step2Scanner');
+  
+  content.style.display = 'none';
+  scanner.style.display = 'block';
+  
+  step2Scanner = new Html5Qrcode("step2QrReader");
+  
+  step2Scanner.start(
+    { facingMode: "environment" },
+    { 
+      fps: 30,
+      qrbox: { width: 800, height: 800 },
+      aspectRatio: 1.0,
+      disableFlip: false
+    },
+    async (qrCodeMessage) => {
+      console.log("Step 2 QR Scanned:", qrCodeMessage);
+      
+      try {
+        await step2Scanner.stop();
+        step2Scanner = null;
+        
+        // Parse QR code: "97B,251020-1,12000"
+        const parts = qrCodeMessage.split(',');
+        
+        if (parts.length < 2) {
+          throw new Error('Invalid QR code format');
+        }
+
+        const scannedMaterialCode = parts[0].trim();
+        const lotNumber = parts[1].trim();
+        
+        // Validate Material Code
+        const expectedMaterialCode = document.getElementById('Material Code')?.value || '';
+        
+        if (scannedMaterialCode !== expectedMaterialCode) {
+          showAlert(`材料コードが一致しません！<br>Expected: ${expectedMaterialCode}<br>Scanned: ${scannedMaterialCode}`);
+          // Restart scanner
+          document.getElementById('startStep2Scan').click();
+          return;
+        }
+        
+        // Add scanned lot
+        const success = addScannedLot(lotNumber);
+        
+        if (!success) {
+          showAlert('このロット番号は既に追加されています<br>Lot number already added');
+          // Restart scanner
+          document.getElementById('startStep2Scan').click();
+          return;
+        }
+        
+        // Success - move to Step 3
+        document.getElementById('step2Modal').style.display = 'none';
+        showStep3Modal();
+        
+      } catch (error) {
+        console.error("Error processing lot QR code:", error);
+        showAlert('QRコードの処理エラー / QR code processing error');
+      }
+    },
+    (errorMessage) => {
+      // Ignore scan errors
+    }
+  ).catch(err => {
+    console.error("Failed to start Step 2 scanner:", err);
+    showAlert('カメラを起動できませんでした / Could not start camera');
+  });
+});
+
+// Step 3: Send to Machine Button
+document.getElementById('startStep3Send').addEventListener('click', async function() {
+  try {
+    // Call the send to machine function
+    const sendButton = document.getElementById('send-to-machine');
+    if (sendButton && typeof sendButton.onclick === 'function') {
+      await sendButton.onclick();
+    }
+    
+    // Close Step 3 modal
+    document.getElementById('step3Modal').style.display = 'none';
+    currentStep = 0;
+    
+  } catch (error) {
+    console.error("Error sending to machine:", error);
+    showAlert('送信エラー / Send error');
+  }
+});
+
+// Reset buttons
+document.getElementById('resetStep1').addEventListener('click', resetAllSteps);
+document.getElementById('resetStep2').addEventListener('click', resetAllSteps);
+document.getElementById('resetStep3').addEventListener('click', resetAllSteps);
+
+// Auto-show Step 1 on page load if sub-dropdown is empty
+window.addEventListener('load', function() {
+  setTimeout(() => {
+    const subDropdown = document.getElementById('sub-dropdown');
+    if (subDropdown && (!subDropdown.value || subDropdown.selectedIndex === 0)) {
+      showStep1Modal();
+    }
+  }, 500);
+});

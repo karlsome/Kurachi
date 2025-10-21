@@ -471,6 +471,108 @@
         </div>
 
         
+        <!-- Step 1 Modal: Scan Kanban -->
+        <div id="step1Modal" style="position: fixed !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; background: rgba(0, 0, 0, 0.8) !important; z-index: 10001 !important; display: none; overflow: auto !important; transform: none !important; padding: 0 !important; border-radius: 0 !important; max-width: none !important;">
+            <div style="background: white; border-radius: 20px; padding: 40px; max-width: 600px; width: 90%; max-height: 90vh; overflow-y: auto; box-shadow: 0 8px 32px rgba(0,0,0,0.3); position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);">
+                <h2 style="text-align: center; margin: 0 0 30px 0; font-size: 28px; color: #333;">
+                    Step <span style="color: #4CAF50;">1</span>: SCAN <strong>Kanban</strong> / スキャン看板
+                </h2>
+                
+                <div id="step1Content" style="text-align: center; min-height: 400px; display: flex; flex-direction: column; justify-content: center; align-items: center;">
+                    <p style="font-size: 18px; color: #666; margin-bottom: 20px;">Press this button / このボタンを押して</p>
+                    <div style="font-size: 60px; margin: 20px 0;">⬇️</div>
+                    <button id="startStep1Scan" style="background: linear-gradient(135deg, #4CAF50, #45a049); color: white; border: none; padding: 20px 50px; border-radius: 15px; cursor: pointer; font-size: 20px; font-weight: 600; box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4); transition: all 0.3s;">
+                        Scan Kanban<br>スキャン看板
+                    </button>
+                </div>
+                
+                <div id="step1Scanner" style="display: none;">
+                    <div id="step1QrReader" style="width: 100%; max-width: 500px; height: 500px; margin: auto; border-radius: 10px; overflow: hidden; background: #000;"></div>
+                </div>
+                
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 30px;">
+                    <p style="text-align: left; font-size: 18px; color: #333; font-weight: 600; margin: 0;">
+                        <span id="step1MachineName"></span>
+                    </p>
+                    <button id="resetStep1" style="background: #e74c3c; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600;">
+                        Reset / リセット
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 2 Modal: Scan Material -->
+        <div id="step2Modal" style="position: fixed !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; background: rgba(0, 0, 0, 0.8) !important; z-index: 10001 !important; display: none; overflow: auto !important; transform: none !important; padding: 0 !important; border-radius: 0 !important; max-width: none !important;">
+            <div style="background: white; border-radius: 20px; padding: 40px; max-width: 600px; width: 90%; max-height: 90vh; overflow-y: auto; box-shadow: 0 8px 32px rgba(0,0,0,0.3); position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);">
+                <h2 style="text-align: center; margin: 0 0 20px 0; font-size: 28px; color: #333;">
+                    Step <span style="color: #2196F3;">2</span>: SCAN <strong>Material</strong> / スキャン材料
+                </h2>
+                
+                <div style="background: #f5f5f5; padding: 15px; border-radius: 10px; margin-bottom: 20px; text-align: center;">
+                    <p style="font-size: 16px; color: #333; margin: 5px 0;">
+                        背番号: <strong id="step2Sebanggo" style="color: #4CAF50;"></strong> 
+                        品番: <strong id="step2Hinban" style="color: #2196F3;"></strong> 
+                        材料: <strong id="step2Material" style="color: #f39c12;"></strong>
+                    </p>
+                </div>
+                
+                <div id="step2Content" style="text-align: center; min-height: 350px; display: flex; flex-direction: column; justify-content: center; align-items: center;">
+                    <p style="font-size: 18px; color: #666; margin-bottom: 20px;">Press this button / このボタンを押して</p>
+                    <div style="font-size: 60px; margin: 20px 0;">⬇️</div>
+                    <button id="startStep2Scan" style="background: linear-gradient(135deg, #4CAF50, #45a049); color: white; border: none; padding: 20px 50px; border-radius: 15px; cursor: pointer; font-size: 20px; font-weight: 600; box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4); transition: all 0.3s;">
+                        Scan Lot. No.<br>スキャンロット
+                    </button>
+                </div>
+                
+                <div id="step2Scanner" style="display: none;">
+                    <div id="step2QrReader" style="width: 100%; max-width: 500px; height: 500px; margin: auto; border-radius: 10px; overflow: hidden; background: #000;"></div>
+                </div>
+                
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 20px;">
+                    <p style="text-align: left; font-size: 18px; color: #333; font-weight: 600; margin: 0;">
+                        <span id="step2MachineName"></span>
+                    </p>
+                    <button id="resetStep2" style="background: #e74c3c; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600;">
+                        Reset / リセット
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 3 Modal: Send to Machine -->
+        <div id="step3Modal" style="position: fixed !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; background: rgba(0, 0, 0, 0.8) !important; z-index: 10001 !important; display: none; overflow: auto !important; transform: none !important; padding: 0 !important; border-radius: 0 !important; max-width: none !important;">
+            <div style="background: white; border-radius: 20px; padding: 40px; max-width: 600px; width: 90%; max-height: 90vh; overflow-y: auto; box-shadow: 0 8px 32px rgba(0,0,0,0.3); position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);">
+                <h2 style="text-align: center; margin: 0 0 20px 0; font-size: 28px; color: #333;">
+                    Step <span style="color: #f39c12;">3</span>: send to <strong>Machine</strong> / データ送信
+                </h2>
+                
+                <div style="background: #f5f5f5; padding: 15px; border-radius: 10px; margin-bottom: 30px; text-align: center;">
+                    <p style="font-size: 16px; color: #333; margin: 5px 0;">
+                        背番号: <strong id="step3Sebanggo" style="color: #4CAF50;"></strong> 
+                        品番: <strong id="step3Hinban" style="color: #2196F3;"></strong> 
+                        材料: <strong id="step3Material" style="color: #f39c12;"></strong>
+                    </p>
+                </div>
+                
+                <div style="text-align: center; min-height: 250px; display: flex; flex-direction: column; justify-content: center; align-items: center;">
+                    <p style="font-size: 18px; color: #666; margin-bottom: 20px;">Press this button / このボタンを押して</p>
+                    <div style="font-size: 60px; margin: 20px 0;">⬇️</div>
+                    <button id="startStep3Send" style="background: linear-gradient(135deg, #4CAF50, #45a049); color: white; border: none; padding: 20px 50px; border-radius: 15px; cursor: pointer; font-size: 20px; font-weight: 600; box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4); transition: all 0.3s;">
+                        Send to machine
+                    </button>
+                </div>
+                
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 20px;">
+                    <p style="text-align: left; font-size: 18px; color: #333; font-weight: 600; margin: 0;">
+                        <span id="step3MachineName"></span>
+                    </p>
+                    <button id="resetStep3" style="background: #e74c3c; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600;">
+                        Reset / リセット
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <!-- Uploading Modal -->
         <div id="uploadingModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.6); z-index: 9999; justify-content: center; align-items: center;">
             <div style="background: white; padding: 30px; border-radius: 10px; text-align: center;">
