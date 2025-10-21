@@ -287,6 +287,7 @@
 
             <!-- QR code button -->
             <button id="scan-button" type="button">Scan 背番号</button>
+            <button id="scan-lot" type="button">Scan ロット</button>
             <br>
             <br>
 
@@ -343,7 +344,6 @@
 
 
             <label for="材料ロット">材料ロット:</label>
-        <button id="scan-lot" type="button">Scan ロット</button>
         <input type="text" name="材料ロット" id="材料ロット" placeholder="Material Lot" required>
         <br>
         <div id="counter-box-18" class="counter-box">  
@@ -408,6 +408,35 @@
             <div class="modal-content">
             <span class="close-button" id="closeScanModalButton">&times;</span>
             <p id="scanAlertText">Different product detected! Please save form before changing. / 異なる製品が検出されました。保存してください！</p>
+            </div>
+        </div>
+
+        <!-- Leader Verification Modal -->
+        <div id="leaderVerificationModal" class="modal" style="display:none;">
+            <div class="modal-content" style="background: white; border: 2px solid #ddd; border-radius: 10px; padding: 30px; max-width: 400px; box-shadow: 0 4px 20px rgba(0,0,0,0.2);">
+                <div style="text-align: center; margin-bottom: 25px;">
+                    <div style="font-size: 48px; margin-bottom: 15px;">⚠️</div>
+                    <h3 style="color: #333; margin: 0 0 15px 0; font-size: 20px; font-weight: 600;">Warning!</h3>
+                    <p style="color: #666; font-size: 15px; margin: 8px 0; line-height: 1.5;">
+                        価値観を変えることができるのはリーダーだけ<br>
+                        <span style="font-size: 14px;">Only leaders can change value</span>
+                    </p>
+                </div>
+                
+                <div style="background: #f5f5f5; border: 1px solid #ddd; border-radius: 8px; padding: 20px; margin: 20px 0;">
+                    <p style="color: #666; text-align: center; margin: 0 0 12px 0; font-size: 14px;">リーダーのQRコードをスキャンしてください<br>Please scan leader QR code</p>
+                    <div id="leaderQrReader" style="width: 100%; max-width: 280px; height: 280px; margin: auto; border-radius: 6px; overflow: hidden; background: #000;"></div>
+                </div>
+                
+                <div style="text-align: center; margin: 20px 0;">
+                    <p id="leaderVerificationStatus" style="color: #666; font-size: 14px; min-height: 20px; margin: 0;"></p>
+                </div>
+                
+                <div style="text-align: center; margin-top: 20px;">
+                    <button id="closeLeaderVerificationModal" type="button" style="background: #e74c3c; color: white; border: none; padding: 12px 40px; border-radius: 6px; cursor: pointer; font-size: 15px; font-weight: 500; transition: background 0.3s;">
+                        Cancel / キャンセル
+                    </button>
+                </div>
             </div>
         </div>
 

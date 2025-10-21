@@ -10,8 +10,8 @@ const googleSheetLiveStatusURL = 'https://script.google.com/macros/s/AKfycbwbL30
 // Link for Rikeshi (up/down color info) - This was missing in the original, adding it here.
 const dbURL = 'https://script.google.com/macros/s/AKfycbx0qBw0_wF5X-hA2t1yY-d5h5M7Z_a8z_V9R5D6k/exec'; // Placeholder, replace with your actual URL if different.
 
-const serverURL = "https://kurachi.onrender.com";
-//const serverURL = "http://localhost:3000";
+//const serverURL = "https://kurachi.onrender.com";
+const serverURL = "http://localhost:3000";
 
 //this code listens to incoming parameters passed
 function getQueryParam(param) {
@@ -132,6 +132,7 @@ document.addEventListener('DOMContentLoaded', () => {
       setTimeout(() => {
         if ([...subDropdown.options].some(option => option.value === savedSubDropdownValue)) {
           subDropdown.value = savedSubDropdownValue;
+          previousSubDropdownValue = savedSubDropdownValue; // Initialize previous value
           console.log(`Restored sub-dropdown to: ${savedSubDropdownValue}`);
           
           // Fetch product details after setting dropdown value
@@ -558,19 +559,129 @@ async function fetchProductDetails() {
   //getRikeshi(serialNumber);
 }
 
-// Trigger when 背番号 is selected
-document.getElementById("sub-dropdown").addEventListener("change", function() {
-  // Save the sub-dropdown value immediately to localStorage
-  const subDropdownValue = document.getElementById("sub-dropdown").value;
-  localStorage.setItem(`${uniquePrefix}sub-dropdown`, subDropdownValue);
-  console.log(`Saved sub-dropdown value to localStorage: ${subDropdownValue}`);
+// Variable to store the previous dropdown value
+let previousSubDropdownValue = document.getElementById("sub-dropdown").value;
+
+// Trigger when 背番号 is selected - with leader verification
+document.getElementById("sub-dropdown").addEventListener("change", function(event) {
+  const currentValue = document.getElementById("sub-dropdown").value;
+  const subDropdown = document.getElementById('sub-dropdown');
   
-  // Apply the proper sendtoNCButtonisPressed logic
-  NCPresstoFalse();
+  // Check if value actually changed
+  if (currentValue === previousSubDropdownValue) {
+    return; // No change, exit early
+  }
   
-  // Fetch product details
-  fetchProductDetails();
+  // Immediately revert the dropdown to previous value
+  subDropdown.value = previousSubDropdownValue;
+  
+  // User is trying to change the dropdown - trigger leader verification with the attempted value
+  showLeaderVerification(currentValue);
 });
+
+// Function to show leader verification modal
+function showLeaderVerification(attemptedValue) {
+  const modal = document.getElementById('leaderVerificationModal');
+  const statusText = document.getElementById('leaderVerificationStatus');
+  const subDropdown = document.getElementById('sub-dropdown');
+  
+  // Reset status text
+  statusText.textContent = 'リーダーのQRコードをスキャンしてください / Please scan leader QR code';
+  statusText.style.color = '#2d5f4f';
+  
+  // Show modal
+  modal.style.display = 'block';
+  
+  // Initialize QR scanner for leader verification
+  const html5QrCode = new Html5Qrcode("leaderQrReader");
+  
+  html5QrCode.start(
+    { facingMode: "environment" },
+    { fps: 10, qrbox: { width: 250, height: 250 } },
+    async (decodedText) => {
+      console.log("Leader QR Code scanned:", decodedText);
+      
+      // Verify leader with backend
+      try {
+        const response = await fetch(`${serverURL}/verifyLeader`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: decodedText })
+        });
+        
+        const result = await response.json();
+        
+        if (result.authorized) {
+          // Leader verified successfully
+          statusText.textContent = `✅ 認証成功！ / Verified: ${result.firstName} ${result.lastName} (${result.role})`;
+          statusText.style.color = '#006400';
+          
+          // Stop scanner
+          html5QrCode.stop().then(() => {
+            // Close modal after short delay
+            setTimeout(() => {
+              modal.style.display = 'none';
+              
+              // Allow the change to happen
+              previousSubDropdownValue = attemptedValue;
+              subDropdown.value = attemptedValue;
+              
+              // Save the sub-dropdown value to localStorage
+              localStorage.setItem(`${uniquePrefix}sub-dropdown`, attemptedValue);
+              console.log(`Leader authorized change to: ${attemptedValue}`);
+              
+              // Apply the proper sendtoNCButtonisPressed logic
+              NCPresstoFalse();
+              
+              // Fetch product details
+              fetchProductDetails();
+            }, 1500);
+          }).catch(err => console.error("Error stopping scanner:", err));
+        } else {
+          // Not authorized
+          statusText.textContent = `❌ 権限がありません / Not authorized: ${result.error}`;
+          statusText.style.color = '#cc0000';
+          
+          // Revert dropdown to previous value
+          subDropdown.value = previousSubDropdownValue;
+        }
+      } catch (error) {
+        console.error("Error verifying leader:", error);
+        statusText.textContent = '❌ エラーが発生しました / Error occurred during verification';
+        statusText.style.color = '#cc0000';
+        
+        // Revert dropdown to previous value
+        subDropdown.value = previousSubDropdownValue;
+      }
+    },
+    (errorMessage) => {
+      // QR scan error (ignore continuous scanning errors)
+    }
+  ).catch(err => {
+    console.error("Error starting QR scanner:", err);
+    statusText.textContent = '❌ カメラを起動できませんでした / Could not start camera';
+    statusText.style.color = '#cc0000';
+  });
+  
+  // Close button handler
+  document.getElementById('closeLeaderVerificationModal').onclick = function() {
+    html5QrCode.stop().then(() => {
+      modal.style.display = 'none';
+      // Revert dropdown to previous value
+      subDropdown.value = previousSubDropdownValue;
+      console.log("Leader verification cancelled, reverted to:", previousSubDropdownValue);
+    }).catch(err => {
+      console.error("Error stopping scanner:", err);
+      modal.style.display = 'none';
+      subDropdown.value = previousSubDropdownValue;
+    });
+  };
+}
+
+// Update previous value when scan button successfully changes the dropdown
+function updatePreviousDropdownValue(newValue) {
+  previousSubDropdownValue = newValue;
+}
 
 // Function to get link from Google Drive
 function picLINK(headerValue) {
@@ -2114,6 +2225,9 @@ document.getElementById('scan-button').addEventListener('click', function() {
           // First stop the QR scanner to prevent continued scanning during processing
           await html5QrCode.stop();
           qrScannerModal.style.display = 'none';
+          
+          // Update the previous dropdown value to allow this change (bypassing leader verification)
+          updatePreviousDropdownValue(qrCodeMessage);
           
           // Now that the scanner is closed, change dropdown value
           console.log(`Setting sub-dropdown value to: ${qrCodeMessage}`);

@@ -5235,6 +5235,53 @@ app.post("/resetUserPassword", async (req, res) => {
 });
 
 
+// Verify leader by username and role for QR authentication
+app.post("/verifyLeader", async (req, res) => {
+  const { username } = req.body;
+
+  if (!username) {
+    return res.status(400).json({ error: "Username is required" });
+  }
+
+  try {
+    await client.connect();
+    const db = client.db("Sasaki_Coating_MasterDB");
+    const usersCollection = db.collection("users");
+
+    // Find user by username
+    const user = await usersCollection.findOne({ username: username });
+
+    if (!user) {
+      return res.status(404).json({ error: "User not found", authorized: false });
+    }
+
+    // Check if user has an authorized role
+    const authorizedRoles = ["班長", "admin", "課長", "部長"];
+    const isAuthorized = authorizedRoles.includes(user.role);
+
+    if (isAuthorized) {
+      res.json({ 
+        authorized: true, 
+        message: "Leader verified successfully",
+        username: user.username,
+        role: user.role,
+        firstName: user.firstName,
+        lastName: user.lastName
+      });
+    } else {
+      res.status(403).json({ 
+        authorized: false, 
+        error: "User does not have leader privileges",
+        role: user.role
+      });
+    }
+  } catch (err) {
+    console.error("Error verifying leader:", err);
+    res.status(500).json({ error: "Internal server error during leader verification." });
+  }
+});
+
+
 // Delete selected records from submitted DB (masterUser only)
 app.post('/deleteCustomerSubmittedRecords', async (req, res) => {
     try {
