@@ -345,6 +345,8 @@
 
             <label for="材料ロット">材料ロット:</label>
         <input type="text" name="材料ロット" id="材料ロット" placeholder="Material Lot" required>
+        <div id="材料ロット-tags" style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; margin-bottom: 10px;"></div>
+        <input type="hidden" id="材料ロット-data" value="">
         <br>
         <div id="counter-box-18" class="counter-box">  
             <label for="counter-18">疵引不良</label>
@@ -457,7 +459,10 @@
                     <p id="scanLotStatus" style="color: #666; font-size: 14px; min-height: 20px; margin: 0;"></p>
                 </div>
                 
-                <div style="text-align: center; margin-top: 20px;">
+                <div style="text-align: center; margin-top: 20px; display: flex; flex-direction: column; gap: 10px;">
+                    <button id="overrideLotButton" type="button" style="background: #f39c12; color: white; border: none; padding: 12px 40px; border-radius: 6px; cursor: pointer; font-size: 15px; font-weight: 500; transition: background 0.3s;">
+                        Override (Manual Entry) / 手動入力
+                    </button>
                     <button id="closeScanLotModal" type="button" style="background: #e74c3c; color: white; border: none; padding: 12px 40px; border-radius: 6px; cursor: pointer; font-size: 15px; font-weight: 500; transition: background 0.3s;">
                         Cancel / キャンセル
                     </button>

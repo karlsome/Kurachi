@@ -579,6 +579,9 @@ document.getElementById("sub-dropdown").addEventListener("change", function(even
   showLeaderVerification(currentValue);
 });
 
+// Global variable to hold the leader verification scanner
+let leaderVerificationScanner = null;
+
 // Function to show leader verification modal
 function showLeaderVerification(attemptedValue) {
   const modal = document.getElementById('leaderVerificationModal');
@@ -593,7 +596,8 @@ function showLeaderVerification(attemptedValue) {
   modal.style.display = 'block';
   
   // Initialize QR scanner for leader verification
-  const html5QrCode = new Html5Qrcode("leaderQrReader");
+  leaderVerificationScanner = new Html5Qrcode("leaderQrReader");
+  const html5QrCode = leaderVerificationScanner;
   
   html5QrCode.start(
     { facingMode: "environment" },
@@ -665,16 +669,24 @@ function showLeaderVerification(attemptedValue) {
   
   // Close button handler
   document.getElementById('closeLeaderVerificationModal').onclick = function() {
-    html5QrCode.stop().then(() => {
+    // Stop the leader verification scanner and close modal
+    if (leaderVerificationScanner) {
+      leaderVerificationScanner.stop().then(() => {
+        modal.style.display = 'none';
+        // Revert dropdown to previous value
+        subDropdown.value = previousSubDropdownValue;
+        console.log("Leader verification cancelled, reverted to:", previousSubDropdownValue);
+        leaderVerificationScanner = null;
+      }).catch(err => {
+        console.error("Error stopping scanner:", err);
+        modal.style.display = 'none';
+        subDropdown.value = previousSubDropdownValue;
+        leaderVerificationScanner = null;
+      });
+    } else {
       modal.style.display = 'none';
-      // Revert dropdown to previous value
       subDropdown.value = previousSubDropdownValue;
-      console.log("Leader verification cancelled, reverted to:", previousSubDropdownValue);
-    }).catch(err => {
-      console.error("Error stopping scanner:", err);
-      modal.style.display = 'none';
-      subDropdown.value = previousSubDropdownValue;
-    });
+    }
   };
 }
 
@@ -2323,6 +2335,9 @@ style.innerHTML = `
 `;
 document.head.appendChild(style);
 
+// Global reference for lot scanner
+window.lotHtml5QrCode = null;
+
 // Scan Lot Button functionality
 document.getElementById('scan-lot').addEventListener('click', function() {
   const scanLotModal = document.getElementById('scanLotModal');
@@ -2330,6 +2345,9 @@ document.getElementById('scan-lot').addEventListener('click', function() {
   const materialCodeInput = document.getElementById('material-code');
   const materialLotInput = document.getElementById('材料ロット');
   const html5QrCode = new Html5Qrcode("lotQrReader");
+  
+  // Store reference globally
+  window.lotHtml5QrCode = html5QrCode;
 
   // Reset status
   scanLotStatus.textContent = '';
@@ -2378,12 +2396,11 @@ document.getElementById('scan-lot').addEventListener('click', function() {
           return;
         }
 
-        // Material code matches - add lot number
-        const currentLots = materialLotInput.value.trim();
-        let lotsArray = currentLots ? currentLots.split(',').map(lot => lot.trim()) : [];
-
-        // Check for duplicates
-        if (lotsArray.includes(lotNumber)) {
+        // Material code matches - add lot number using the new system
+        const success = addScannedLot(lotNumber);
+        
+        if (!success) {
+          // Duplicate
           scanLotStatus.innerHTML = '<span style="color: #f39c12;">⚠️ このロット番号は既に追加されています<br>Lot number already added</span>';
           
           // Close after showing message briefly
@@ -2393,13 +2410,6 @@ document.getElementById('scan-lot').addEventListener('click', function() {
           
           return;
         }
-
-        // Add the new lot number
-        lotsArray.push(lotNumber);
-        materialLotInput.value = lotsArray.join(',');
-
-        // Save to localStorage
-        localStorage.setItem(`${uniquePrefix}材料ロット`, materialLotInput.value);
 
         // Show success animation
         scanLotStatus.innerHTML = '<span class="success-checkmark">✓</span><br><span style="color: #4CAF50; font-weight: bold;">成功！ / Success!</span>';
@@ -2438,6 +2448,267 @@ document.getElementById('scan-lot').addEventListener('click', function() {
       scanLotModal.style.display = 'none';
     });
   };
+});
+
+// ===== MATERIAL LOT TRACKING SYSTEM =====
+// Track lots with their source (scanned vs manual)
+let materialLots = []; // Array of {lotNumber: string, source: 'scanned'|'manual'}
+let manualEntryAllowed = false; // Flag for override mode
+
+// Load lots from localStorage
+function loadMaterialLots() {
+  const savedLots = localStorage.getItem(`${uniquePrefix}材料ロット-data`);
+  if (savedLots) {
+    try {
+      materialLots = JSON.parse(savedLots);
+      renderMaterialLotTags();
+      updateMaterialLotInput();
+    } catch (e) {
+      console.error("Error loading material lots:", e);
+      materialLots = [];
+    }
+  }
+}
+
+// Save lots to localStorage
+function saveMaterialLots() {
+  localStorage.setItem(`${uniquePrefix}材料ロット-data`, JSON.stringify(materialLots));
+  updateMaterialLotInput();
+}
+
+// Update the hidden input value (comma-separated)
+function updateMaterialLotInput() {
+  const materialLotInput = document.getElementById('材料ロット');
+  if (materialLotInput) {
+    materialLotInput.value = materialLots.map(lot => lot.lotNumber).join(',');
+  }
+}
+
+// Render lot tags
+function renderMaterialLotTags() {
+  const tagsContainer = document.getElementById('材料ロット-tags');
+  if (!tagsContainer) return;
+
+  tagsContainer.innerHTML = '';
+
+  materialLots.forEach((lot, index) => {
+    const tag = document.createElement('div');
+    tag.style.cssText = `
+      display: inline-flex;
+      align-items: center;
+      background: ${lot.source === 'scanned' ? '#4CAF50' : '#2196F3'};
+      color: white;
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 14px;
+      gap: 8px;
+    `;
+
+    const lotText = document.createElement('span');
+    lotText.textContent = lot.lotNumber;
+    tag.appendChild(lotText);
+
+    // Add delete button (only for manual lots)
+    if (lot.source === 'manual') {
+      const deleteBtn = document.createElement('span');
+      deleteBtn.textContent = '×';
+      deleteBtn.style.cssText = `
+        cursor: pointer;
+        font-size: 18px;
+        font-weight: bold;
+        margin-left: 4px;
+      `;
+      deleteBtn.onclick = () => {
+        materialLots.splice(index, 1);
+        saveMaterialLots();
+        renderMaterialLotTags();
+      };
+      tag.appendChild(deleteBtn);
+    } else {
+      // Show × but disabled for scanned lots
+      const disabledX = document.createElement('span');
+      disabledX.textContent = '×';
+      disabledX.style.cssText = `
+        font-size: 18px;
+        font-weight: bold;
+        margin-left: 4px;
+        opacity: 0.3;
+        cursor: not-allowed;
+      `;
+      tag.appendChild(disabledX);
+    }
+
+    tagsContainer.appendChild(tag);
+  });
+}
+
+// Add scanned lot
+function addScannedLot(lotNumber) {
+  // Check for duplicates
+  if (materialLots.some(lot => lot.lotNumber === lotNumber)) {
+    return false; // Duplicate
+  }
+  materialLots.push({ lotNumber, source: 'scanned' });
+  saveMaterialLots();
+  renderMaterialLotTags();
+  return true; // Success
+}
+
+// Add manual lot
+function addManualLot(lotNumber) {
+  if (!lotNumber || !lotNumber.trim()) return false;
+  lotNumber = lotNumber.trim();
+  
+  // Check for duplicates
+  if (materialLots.some(lot => lot.lotNumber === lotNumber)) {
+    return false; // Duplicate
+  }
+  materialLots.push({ lotNumber, source: 'manual' });
+  saveMaterialLots();
+  renderMaterialLotTags();
+  return true; // Success
+}
+
+// Intercept 材料ロット input click to open QR scanner instead of keypad
+const materialLotInput = document.getElementById('材料ロット');
+if (materialLotInput) {
+  // Flag to control if we should allow keypad
+  let allowKeypadForManualEntry = false;
+  
+  materialLotInput.addEventListener('focus', (e) => {
+    // If manual entry is allowed, let the keypad open naturally
+    if (allowKeypadForManualEntry) {
+      return; // Let the default behavior happen (keypad opens)
+    }
+    
+    // Check if sub-dropdown has a value
+    const subDropdown = document.getElementById('sub-dropdown');
+    if (!subDropdown || !subDropdown.value) {
+      // No value in sub-dropdown, just blur and do nothing
+      e.preventDefault();
+      materialLotInput.blur();
+      showAlert('Please select a product code first / まず製品コードを選択してください');
+      return;
+    }
+    
+    // Block keypad and open QR scanner
+    e.preventDefault();
+    materialLotInput.blur();
+    document.getElementById('scan-lot').click();
+  });
+  
+  // Store reference to allow keypad function
+  window.enableManualLotEntry = function() {
+    allowKeypadForManualEntry = true;
+    
+    // Open the keypad directly
+    window.openDirectNumericKeypad('材料ロット');
+    
+    // Set up one-time listener for when keypad closes
+    const checkForNewLot = setInterval(() => {
+      const currentValue = materialLotInput.value;
+      const currentLots = materialLots.map(lot => lot.lotNumber);
+      const valuesInInput = currentValue ? currentValue.split(',').map(v => v.trim()).filter(v => v) : [];
+      
+      // Check if there's a new lot added
+      const newLots = valuesInInput.filter(lot => !currentLots.includes(lot));
+      
+      if (newLots.length > 0) {
+        // New lot(s) added via keypad
+        newLots.forEach(lotNumber => {
+          const success = addManualLot(lotNumber);
+          if (success) {
+            console.log("Manual lot added:", lotNumber);
+          }
+        });
+        
+        // Disable manual entry mode
+        allowKeypadForManualEntry = false;
+        clearInterval(checkForNewLot);
+      }
+      
+      // Also check if input is no longer focused (keypad closed)
+      if (document.activeElement !== materialLotInput) {
+        allowKeypadForManualEntry = false;
+        clearInterval(checkForNewLot);
+      }
+    }, 500);
+  };
+}
+
+// Override button - Leader verification for manual entry
+document.getElementById('overrideLotButton').addEventListener('click', function() {
+  const scanLotModal = document.getElementById('scanLotModal');
+  const leaderVerificationModal = document.getElementById('leaderVerificationModal');
+  const leaderVerificationStatus = document.getElementById('leaderVerificationStatus');
+  
+  // Close scan lot modal first
+  if (window.lotHtml5QrCode) {
+    window.lotHtml5QrCode.stop().catch(err => console.error("Error stopping lot scanner:", err));
+  }
+  scanLotModal.style.display = 'none';
+  
+  // Show leader verification modal
+  leaderVerificationStatus.textContent = 'リーダーのQRコードをスキャンしてください / Please scan leader QR code';
+  leaderVerificationStatus.style.color = '#2d5f4f';
+  leaderVerificationModal.style.display = 'block';
+  
+  // Use global scanner variable for leader verification
+  leaderVerificationScanner = new Html5Qrcode("leaderQrReader");
+  
+  leaderVerificationScanner.start(
+    { facingMode: "environment" },
+    { fps: 10, qrbox: { width: 250, height: 250 } },
+    async (decodedText) => {
+      console.log("Leader QR Code scanned for override:", decodedText);
+      
+      try {
+        const response = await fetch(`${serverURL}/verifyLeader`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: decodedText })
+        });
+        
+        const result = await response.json();
+        
+        if (result.authorized) {
+          leaderVerificationStatus.textContent = `✅ 認証成功！ / Verified! Opening keypad...`;
+          leaderVerificationStatus.style.color = '#006400';
+          
+          leaderVerificationScanner.stop().then(() => {
+            setTimeout(() => {
+              leaderVerificationModal.style.display = 'none';
+              leaderVerificationScanner = null;
+              
+              // Enable keypad for manual entry
+              if (window.enableManualLotEntry) {
+                window.enableManualLotEntry();
+              }
+            }, 1000);
+          }).catch(err => console.error("Error stopping scanner:", err));
+        } else {
+          leaderVerificationStatus.textContent = `❌ 権限がありません / Not authorized`;
+          leaderVerificationStatus.style.color = '#cc0000';
+        }
+      } catch (error) {
+        console.error("Error verifying leader for override:", error);
+        leaderVerificationStatus.textContent = '❌ エラーが発生しました / Error occurred';
+        leaderVerificationStatus.style.color = '#cc0000';
+      }
+    },
+    (errorMessage) => {
+      // QR scan error (ignore continuous scanning errors)
+    }
+  ).catch(err => {
+    console.error("Error starting QR scanner:", err);
+    leaderVerificationStatus.textContent = '❌ カメラを起動できませんでした / Could not start camera';
+    leaderVerificationStatus.style.color = '#cc0000';
+  });
+});
+
+// Load lots on page load
+document.addEventListener('DOMContentLoaded', () => {
+  loadMaterialLots();
 });
 
 // Function to reset everything and reload the page
@@ -4892,41 +5163,41 @@ window.addEventListener('load', function() {
     console.log('Shot input configured with direct keypad');
   }
   
-  // Configure material lot input to use the same keypad
-  const materialLotInput = document.getElementById('材料ロット');
-  if (materialLotInput) {
-    materialLotInput.readOnly = true;
-    
-    // Use a more robust event attachment
-    if (materialLotInput.addEventListener) {
-      materialLotInput.addEventListener('click', function() {
-        window.openDirectNumericKeypad('材料ロット');
-      });
-    } else {
-      // Fallback for older browsers
-      materialLotInput.onclick = function() {
-        window.openDirectNumericKeypad('材料ロット');
-      };
-    }
-    
-    // Style the input
-    materialLotInput.style.cssText = `
-      cursor: pointer;
-      background-color: #f0f8ff;
-      border: 2px solid #007bff;
-      border-radius: 5px;
-      padding: 8px 10px;
-      font-size: 16px;
-      width: 100%;
-      background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="%23007bff"><path d="M4 2h16a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm1 4h4v4H5V6zm0 6h4v4H5v-4zm6-6h4v4h-4V6zm6 0h2v4h-2V6zm-6 6h4v4h-4v-4zm6 0h2v4h-2v-4z"/></svg>');
-      background-repeat: no-repeat;
-      background-position: right 8px center;
-      background-size: 16px 16px;
-      padding-right: 30px;
-    `;
-    
-    console.log('Material lot input configured with direct keypad');
-  }
+  // Configure material lot input - DISABLED, now using QR scanner with override
+  // const materialLotInput = document.getElementById('材料ロット');
+  // if (materialLotInput) {
+  //   materialLotInput.readOnly = true;
+  //   
+  //   // Use a more robust event attachment
+  //   if (materialLotInput.addEventListener) {
+  //     materialLotInput.addEventListener('click', function() {
+  //       window.openDirectNumericKeypad('材料ロット');
+  //     });
+  //   } else {
+  //     // Fallback for older browsers
+  //     materialLotInput.onclick = function() {
+  //       window.openDirectNumericKeypad('材料ロット');
+  //     };
+  //   }
+  //   
+  //   // Style the input
+  //   materialLotInput.style.cssText = `
+  //     cursor: pointer;
+  //     background-color: #f0f8ff;
+  //     border: 2px solid #007bff;
+  //     border-radius: 5px;
+  //     padding: 8px 10px;
+  //     font-size: 16px;
+  //     width: 100%;
+  //     background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="%23007bff"><path d="M4 2h16a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm1 4h4v4H5V6zm0 6h4v4H5v-4zm6-6h4v4h-4V6zm6 0h2v4h-2V6zm-6 6h4v4h-4v-4zm6 0h2v4h-2v-4z"/></svg>');
+  //     background-repeat: no-repeat;
+  //     background-position: right 8px center;
+  //     background-size: 16px 16px;
+  //     padding-right: 30px;
+  //   `;
+  //   
+  //   console.log('Material lot input configured with direct keypad');
+  // }
   
   // Also run the original initialization
   initNumericKeypad();
