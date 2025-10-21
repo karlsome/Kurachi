@@ -2601,38 +2601,40 @@ if (materialLotInput) {
   window.enableManualLotEntry = function() {
     allowKeypadForManualEntry = true;
     
+    // Store current lots before opening keypad
+    const lotsBeforeKeypad = materialLots.map(lot => lot.lotNumber);
+    
     // Open the keypad directly in NEW ENTRY MODE (starts empty, appends on confirm)
     window.openDirectNumericKeypad('材料ロット', true);
     
-    // Set up one-time listener for when keypad closes
+    // Set up listener for when keypad closes to detect new lots
     const checkForNewLot = setInterval(() => {
-      const currentValue = materialLotInput.value;
-      const currentLots = materialLots.map(lot => lot.lotNumber);
-      const valuesInInput = currentValue ? currentValue.split(',').map(v => v.trim()).filter(v => v) : [];
+      const keypadModal = document.getElementById('numericKeypadModalDirect');
+      const isKeypadOpen = keypadModal && keypadModal.style.display === 'block';
       
-      // Check if there's a new lot added
-      const newLots = valuesInInput.filter(lot => !currentLots.includes(lot));
-      
-      if (newLots.length > 0) {
-        // New lot(s) added via keypad
-        newLots.forEach(lotNumber => {
-          const success = addManualLot(lotNumber);
-          if (success) {
-            console.log("Manual lot added:", lotNumber);
-          }
-        });
+      // Only check after keypad is closed
+      if (!isKeypadOpen) {
+        const currentValue = materialLotInput.value;
+        const valuesInInput = currentValue ? currentValue.split(',').map(v => v.trim()).filter(v => v) : [];
         
-        // Disable manual entry mode
+        // Check if there's a new lot added (compare with lots before keypad)
+        const newLots = valuesInInput.filter(lot => lot && !lotsBeforeKeypad.includes(lot));
+        
+        if (newLots.length > 0) {
+          // New lot(s) added via keypad - add as blue tags
+          newLots.forEach(lotNumber => {
+            const success = addManualLot(lotNumber);
+            if (success) {
+              console.log("Manual lot added as blue tag:", lotNumber);
+            }
+          });
+        }
+        
+        // Disable manual entry mode and stop checking
         allowKeypadForManualEntry = false;
         clearInterval(checkForNewLot);
       }
-      
-      // Also check if input is no longer focused (keypad closed)
-      if (document.activeElement !== materialLotInput) {
-        allowKeypadForManualEntry = false;
-        clearInterval(checkForNewLot);
-      }
-    }, 500);
+    }, 300);
   };
 }
 
