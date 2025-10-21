@@ -603,7 +603,7 @@ function showLeaderVerification(attemptedValue) {
     { facingMode: "environment" },
     { 
       fps: 30,
-      qrbox: { width: 500, height: 500 },
+      qrbox: { width: 800, height: 800 },
       aspectRatio: 1.0,
       disableFlip: false
     },
@@ -2177,16 +2177,18 @@ document.getElementById('scan-button').addEventListener('click', function() {
   // Show the modal
   qrScannerModal.style.display = 'block';
 
-  // Start QR code scanning
+  // Start QR code scanning with improved far-range detection (optimized for 10-inch tablet)
   html5QrCode.start(
     {
       facingMode: "environment"
     }, {
-      fps: 10,
+      fps: 30,
       qrbox: {
-        width: 250,
-        height: 250
-      }
+        width: 800,
+        height: 800
+      },
+      aspectRatio: 1.0,
+      disableFlip: false
     },
     async qrCodeMessage => {
       const subDropdown = document.getElementById('sub-dropdown');
@@ -2361,14 +2363,14 @@ document.getElementById('scan-lot').addEventListener('click', function() {
   // Show modal
   scanLotModal.style.display = 'block';
 
-  // Start QR code scanning with improved settings for far-range detection
+  // Start QR code scanning with improved settings for far-range detection (optimized for 10-inch tablet)
   html5QrCode.start(
     { facingMode: "environment" },
     { 
-      fps: 30, // Maximum FPS for best detection
-      qrbox: { width: 500, height: 500 }, // Very large box for maximum range
-      aspectRatio: 1.0, // Square aspect ratio for QR codes
-      disableFlip: false // Allow flipping for better detection
+      fps: 30,
+      qrbox: { width: 800, height: 800 },
+      aspectRatio: 1.0,
+      disableFlip: false
     },
     async (qrCodeMessage) => {
       console.log("Scanned Lot QR Code:", qrCodeMessage);
@@ -2672,7 +2674,7 @@ document.getElementById('overrideLotButton').addEventListener('click', function(
     { facingMode: "environment" },
     { 
       fps: 30,
-      qrbox: { width: 500, height: 500 },
+      qrbox: { width: 800, height: 800 },
       aspectRatio: 1.0,
       disableFlip: false
     },
