@@ -2496,7 +2496,7 @@ function renderMaterialLotTags() {
     tag.style.cssText = `
       display: inline-flex;
       align-items: center;
-      background: ${lot.source === 'scanned' ? '#4CAF50' : '#2196F3'};
+      background: ${lot.source === 'scanned' ? '#f44336' : '#4CAF50'};
       color: white;
       padding: 6px 12px;
       border-radius: 20px;
