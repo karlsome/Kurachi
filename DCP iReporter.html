@@ -327,6 +327,23 @@
             margin: 5px 0;
         }
 
+        /* Pulsing animation for Step 2 material code to draw attention */
+        #step2Material {
+            animation: materialPulse 2s ease-in-out infinite;
+            display: inline-block;
+        }
+
+        @keyframes materialPulse {
+            0%, 100% {
+                transform: scale(1);
+                opacity: 1;
+            }
+            50% {
+                transform: scale(1.15);
+                opacity: 0.8;
+            }
+        }
+
         /* Responsive adjustments for tablets and smaller */
         @media (max-width: 768px) {
             #step1Modal > div,
