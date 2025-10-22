@@ -218,6 +218,152 @@
             color: #666;
             font-style: italic;
         }
+
+        /* 3-Step Modal Dynamic Responsive Styles - ONLY FOR STEP MODALS */
+        /* Very specific selectors to avoid conflicts with main page */
+        #step1Modal > div,
+        #step2Modal > div,
+        #step3Modal > div {
+            background: white;
+            border-radius: 20px;
+            padding: clamp(15px, 3vh, 40px);
+            max-width: 600px;
+            width: 90%;
+            max-height: calc(100vh - 30px);
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            overflow: hidden;
+        }
+
+        #step1Modal h2,
+        #step2Modal h2,
+        #step3Modal h2 {
+            text-align: center;
+            margin: 0 0 clamp(15px, 2vh, 30px) 0;
+            font-size: clamp(20px, 4vw, 28px);
+            color: #333;
+            flex-shrink: 0;
+        }
+
+        #step1Modal #step1Content,
+        #step2Modal #step2Content,
+        #step3Modal #step3Content {
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            flex: 1;
+            min-height: 0;
+            overflow-y: auto;
+            padding: 10px 0;
+        }
+
+        #step1Modal #step1Content p,
+        #step2Modal #step2Content p,
+        #step3Modal #step3Content p {
+            font-size: clamp(14px, 3vw, 18px);
+            color: #666;
+            margin-bottom: clamp(10px, 2vh, 20px);
+        }
+
+        #step1Modal #step1Content > div[style*="font-size: 60px"],
+        #step2Modal #step2Content > div[style*="font-size: 60px"],
+        #step3Modal #step3Content > div[style*="font-size: 60px"] {
+            font-size: clamp(40px, 8vw, 60px) !important;
+            margin: clamp(10px, 2vh, 20px) 0 !important;
+        }
+
+        #step1Modal button,
+        #step2Modal button,
+        #step3Modal button {
+            font-size: clamp(14px, 2.5vw, 20px) !important;
+            padding: clamp(12px, 2vh, 20px) clamp(25px, 5vw, 50px) !important;
+        }
+
+        #step1Modal #step1QrReader,
+        #step2Modal #step2QrReader,
+        #step3Modal #step3QrReader {
+            width: 100%;
+            max-width: min(500px, 80vw);
+            height: auto;
+            aspect-ratio: 1;
+            max-height: 50vh;
+            margin: auto;
+            border-radius: 10px;
+            overflow: hidden;
+            background: #000;
+        }
+
+        #step1Modal > div > div:last-child,
+        #step2Modal > div > div:last-child,
+        #step3Modal > div > div:last-child {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: clamp(15px, 2vh, 30px);
+            flex-shrink: 0;
+        }
+
+        #step2Modal .step-modal-info-box,
+        #step3Modal .step-modal-info-box {
+            background: #f5f5f5;
+            padding: clamp(10px, 1.5vh, 15px);
+            border-radius: 10px;
+            text-align: center;
+            margin-bottom: clamp(10px, 1.5vh, 20px);
+            flex-shrink: 0;
+        }
+
+        #step2Modal .step-modal-info-box p,
+        #step3Modal .step-modal-info-box p {
+            font-size: clamp(12px, 2vw, 14px) !important;
+            color: #333;
+            margin: 5px 0;
+        }
+
+        /* Responsive adjustments for tablets and smaller */
+        @media (max-width: 768px) {
+            #step1Modal > div,
+            #step2Modal > div,
+            #step3Modal > div {
+                width: 95%;
+                padding: clamp(10px, 2vh, 20px);
+            }
+
+            #step1Modal #step1QrReader,
+            #step2Modal #step2QrReader,
+            #step3Modal #step3QrReader {
+                max-height: 45vh;
+            }
+        }
+
+        @media (max-height: 600px) {
+            #step1Modal > div,
+            #step2Modal > div,
+            #step3Modal > div {
+                padding: 10px;
+                max-height: calc(100vh - 20px);
+            }
+
+            #step1Modal h2,
+            #step2Modal h2,
+            #step3Modal h2 {
+                margin-bottom: 10px;
+                font-size: 20px;
+            }
+
+            #step1Modal #step1QrReader,
+            #step2Modal #step2QrReader,
+            #step3Modal #step3QrReader {
+                max-height: 40vh;
+            }
+        }
     </style>
 </head>
 <body>
@@ -473,16 +619,16 @@
         
         <!-- Step 1 Modal: Scan Kanban -->
         <div id="step1Modal" style="position: fixed !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; background: rgba(0, 0, 0, 0.8) !important; z-index: 10001 !important; display: none; overflow: auto !important; transform: none !important; padding: 0 !important; border-radius: 0 !important; max-width: none !important;">
-            <div style="background: white; border-radius: 20px; padding: 40px; max-width: 600px; width: 90%; max-height: 90vh; overflow-y: auto; box-shadow: 0 8px 32px rgba(0,0,0,0.3); position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);">
-                <h2 style="text-align: center; margin: 0 0 30px 0; font-size: 28px; color: #333;">
+            <div>
+                <h2>
                     Step <span style="color: #4CAF50;">1</span>: SCAN <strong>Kanban</strong> / スキャン看板
                 </h2>
                 
-                <div id="step1Content" style="text-align: center; min-height: 400px; display: flex; flex-direction: column; justify-content: center; align-items: center;">
+                <div id="step1Content">
                     <div id="step1ErrorMsg" style="display: none; background: #fff3cd; border: 2px solid #ffc107; border-radius: 10px; padding: 15px 20px; margin-bottom: 20px; max-width: 500px;">
                         <p style="color: #856404; margin: 0; font-size: 16px; line-height: 1.5;"></p>
                     </div>
-                    <p style="font-size: 18px; color: #666; margin-bottom: 20px;">Press this button / このボタンを押して</p>
+                    <p>Press this button / このボタンを押して</p>
                     <div style="font-size: 60px; margin: 20px 0;">👇🏻</div>
                     <button id="startStep1Scan" style="background: linear-gradient(135deg, #4CAF50, #45a049); color: white; border: none; padding: 20px 50px; border-radius: 15px; cursor: pointer; font-size: 20px; font-weight: 600; box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4); transition: all 0.3s;">
                         Scan Kanban<br>スキャン看板
@@ -490,10 +636,10 @@
                 </div>
                 
                 <div id="step1Scanner" style="display: none;">
-                    <div id="step1QrReader" style="width: 100%; max-width: 500px; height: 500px; margin: auto; border-radius: 10px; overflow: hidden; background: #000;"></div>
+                    <div id="step1QrReader"></div>
                 </div>
                 
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 30px;">
+                <div>
                     <p style="text-align: left; font-size: 18px; color: #333; font-weight: 600; margin: 0;">
                         <span id="step1MachineName"></span>
                     </p>
@@ -506,24 +652,24 @@
 
         <!-- Step 2 Modal: Scan Material -->
         <div id="step2Modal" style="position: fixed !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; background: rgba(0, 0, 0, 0.8) !important; z-index: 10001 !important; display: none; overflow: auto !important; transform: none !important; padding: 0 !important; border-radius: 0 !important; max-width: none !important;">
-            <div style="background: white; border-radius: 20px; padding: 40px; max-width: 600px; width: 90%; max-height: 90vh; overflow-y: auto; box-shadow: 0 8px 32px rgba(0,0,0,0.3); position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);">
-                <h2 style="text-align: center; margin: 0 0 20px 0; font-size: 28px; color: #333;">
+            <div>
+                <h2>
                     Step <span style="color: #2196F3;">2</span>: SCAN <strong>Material</strong> / スキャン材料
                 </h2>
                 
-                <div style="background: #f5f5f5; padding: 15px; border-radius: 10px; margin-bottom: 20px; text-align: center;">
-                    <p style="font-size: 16px; color: #333; margin: 5px 0;">
+                <div class="step-modal-info-box">
+                    <p>
                         背番号: <strong id="step2Sebanggo" style="color: #4CAF50;"></strong> 
                         品番: <strong id="step2Hinban" style="color: #2196F3;"></strong> 
                         材料: <strong id="step2Material" style="color: #f39c12;"></strong>
                     </p>
                 </div>
                 
-                <div id="step2Content" style="text-align: center; min-height: 350px; display: flex; flex-direction: column; justify-content: center; align-items: center;">
+                <div id="step2Content">
                     <div id="step2ErrorMsg" style="display: none; background: #fff3cd; border: 2px solid #ffc107; border-radius: 10px; padding: 15px 20px; margin-bottom: 20px; max-width: 500px;">
                         <p style="color: #856404; margin: 0; font-size: 16px; line-height: 1.5;"></p>
                     </div>
-                    <p style="font-size: 18px; color: #666; margin-bottom: 20px;">Press this button / このボタンを押して</p>
+                    <p>Press this button / このボタンを押して</p>
                     <div style="font-size: 60px; margin: 20px 0;">👇🏻</div>
                     <button id="startStep2Scan" style="background: linear-gradient(135deg, #4CAF50, #45a049); color: white; border: none; padding: 20px 50px; border-radius: 15px; cursor: pointer; font-size: 20px; font-weight: 600; box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4); transition: all 0.3s;">
                         Scan Lot. No.<br>スキャンロット
@@ -531,10 +677,10 @@
                 </div>
                 
                 <div id="step2Scanner" style="display: none;">
-                    <div id="step2QrReader" style="width: 100%; max-width: 500px; height: 500px; margin: auto; border-radius: 10px; overflow: hidden; background: #000;"></div>
+                    <div id="step2QrReader"></div>
                 </div>
                 
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 20px;">
+                <div>
                     <p style="text-align: left; font-size: 18px; color: #333; font-weight: 600; margin: 0;">
                         <span id="step2MachineName"></span>
                     </p>
@@ -547,28 +693,28 @@
 
         <!-- Step 3 Modal: Send to Machine -->
         <div id="step3Modal" style="position: fixed !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; background: rgba(0, 0, 0, 0.8) !important; z-index: 10001 !important; display: none; overflow: auto !important; transform: none !important; padding: 0 !important; border-radius: 0 !important; max-width: none !important;">
-            <div style="background: white; border-radius: 20px; padding: 40px; max-width: 600px; width: 90%; max-height: 90vh; overflow-y: auto; box-shadow: 0 8px 32px rgba(0,0,0,0.3); position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);">
-                <h2 style="text-align: center; margin: 0 0 20px 0; font-size: 28px; color: #333;">
+            <div>
+                <h2>
                     Step <span style="color: #f39c12;">3</span>: send to <strong>Machine</strong> / データ送信
                 </h2>
                 
-                <div style="background: #f5f5f5; padding: 15px; border-radius: 10px; margin-bottom: 30px; text-align: center;">
-                    <p style="font-size: 16px; color: #333; margin: 5px 0;">
+                <div class="step-modal-info-box">
+                    <p>
                         背番号: <strong id="step3Sebanggo" style="color: #4CAF50;"></strong> 
                         品番: <strong id="step3Hinban" style="color: #2196F3;"></strong> 
                         材料: <strong id="step3Material" style="color: #f39c12;"></strong>
                     </p>
                 </div>
                 
-                <div style="text-align: center; min-height: 250px; display: flex; flex-direction: column; justify-content: center; align-items: center;">
-                    <p style="font-size: 18px; color: #666; margin-bottom: 20px;">Press this button / このボタンを押して</p>
+                <div id="step3Content">
+                    <p>Press this button / このボタンを押して</p>
                     <div style="font-size: 60px; margin: 20px 0;">👇🏻</div>
                     <button id="startStep3Send" style="background: linear-gradient(135deg, #4CAF50, #45a049); color: white; border: none; padding: 20px 50px; border-radius: 15px; cursor: pointer; font-size: 20px; font-weight: 600; box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4); transition: all 0.3s;">
                         Send to machine
                     </button>
                 </div>
                 
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 20px;">
+                <div>
                     <p style="text-align: left; font-size: 18px; color: #333; font-weight: 600; margin: 0;">
                         <span id="step3MachineName"></span>
                     </p>
