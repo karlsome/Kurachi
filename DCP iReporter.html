@@ -345,6 +345,78 @@
             }
         }
 
+        /* Responsive styles for qrScannerModal and scanLotModal - Dynamic sizing */
+        #qrScannerModal .modal-content,
+        #scanLotModal .modal-content {
+            max-width: min(600px, 90vw) !important;
+            width: 95% !important;
+            max-height: calc(100vh - 40px) !important;
+            overflow-y: auto !important;
+            padding: clamp(15px, 3vh, 30px) !important;
+        }
+
+        #qrScannerModal #qrReader,
+        #scanLotModal #lotQrReader {
+            max-width: min(500px, 80vw) !important;
+            width: 100% !important;
+            height: auto !important;
+            aspect-ratio: 1 !important;
+            max-height: min(500px, 60vh) !important;
+        }
+
+        #qrScannerModal h3,
+        #scanLotModal h3 {
+            font-size: clamp(16px, 3vw, 20px) !important;
+        }
+
+        #qrScannerModal button,
+        #scanLotModal button {
+            font-size: clamp(13px, 2.5vw, 15px) !important;
+            padding: clamp(10px, 1.5vh, 12px) clamp(25px, 5vw, 40px) !important;
+        }
+
+        /* Tablet adjustments for scan modals */
+        @media (max-width: 768px) {
+            #qrScannerModal .modal-content,
+            #scanLotModal .modal-content {
+                width: 95% !important;
+                padding: clamp(10px, 2vh, 20px) !important;
+            }
+
+            #qrScannerModal #qrReader,
+            #scanLotModal #lotQrReader {
+                max-height: min(450px, 55vh) !important;
+            }
+        }
+
+        /* Mobile adjustments for scan modals */
+        @media (max-width: 480px) {
+            #qrScannerModal .modal-content,
+            #scanLotModal .modal-content {
+                width: 98% !important;
+                padding: 15px !important;
+            }
+
+            #qrScannerModal #qrReader,
+            #scanLotModal #lotQrReader {
+                max-height: min(350px, 50vh) !important;
+            }
+        }
+
+        /* Landscape mode for scan modals */
+        @media (max-height: 600px) {
+            #qrScannerModal .modal-content,
+            #scanLotModal .modal-content {
+                padding: 10px !important;
+                max-height: calc(100vh - 20px) !important;
+            }
+
+            #qrScannerModal #qrReader,
+            #scanLotModal #lotQrReader {
+                max-height: 40vh !important;
+            }
+        }
+
         /* Responsive adjustments for tablets and smaller */
         @media (max-width: 768px) {
             #step1Modal > div,
@@ -562,10 +634,26 @@
 
         <!-- QR Code Scanner Modal -->
         <div id="qrScannerModal" class="modal">
-            <div class="modal-content">
-                <span class="close" id="closeQRScannerModal">&times;</span>
-                <h3>Scan QR Code</h3>
-                <div id="qrReader" style="width: 300px; height: 300px;"></div>
+            <div class="modal-content" style="background: white; border: 2px solid #ddd; border-radius: 10px; padding: 30px; max-width: 600px; box-shadow: 0 4px 20px rgba(0,0,0,0.2);">
+                <div style="text-align: center; margin-bottom: 20px;">
+                    <div style="background: #333; color: white; padding: 10px; border-radius: 5px; margin-bottom: 15px;">
+                        <h3 style="margin: 0; font-size: 20px; font-weight: 600;">背番号をスキャンしてください<br>Please scan product QR code</h3>
+                    </div>
+                </div>
+                
+                <div style="background: #f5f5f5; border: 1px solid #ddd; border-radius: 8px; padding: 20px; margin: 20px 0;">
+                    <div id="qrReader" style="width: 100%; max-width: 500px; height: 500px; margin: auto; border-radius: 6px; overflow: hidden; background: #000;"></div>
+                </div>
+                
+                <div style="text-align: center; margin: 20px 0;">
+                    <p id="scanQRStatus" style="color: #666; font-size: 14px; min-height: 20px; margin: 0;"></p>
+                </div>
+                
+                <div style="text-align: center; margin-top: 20px;">
+                    <button id="closeQRScannerModal" type="button" style="background: #e74c3c; color: white; border: none; padding: 12px 40px; border-radius: 6px; cursor: pointer; font-size: 15px; font-weight: 500; transition: background 0.3s;">
+                        Cancel / キャンセル
+                    </button>
+                </div>
             </div>
         </div>
         
@@ -608,7 +696,7 @@
 
         <!-- Scan Lot Modal -->
         <div id="scanLotModal" class="modal" style="display:none;">
-            <div class="modal-content" style="background: white; border: 2px solid #ddd; border-radius: 10px; padding: 30px; max-width: 450px; box-shadow: 0 4px 20px rgba(0,0,0,0.2);">
+            <div class="modal-content" style="background: white; border: 2px solid #ddd; border-radius: 10px; padding: 30px; max-width: 600px; box-shadow: 0 4px 20px rgba(0,0,0,0.2);">
                 <div style="text-align: center; margin-bottom: 20px;">
                     <div style="background: #333; color: white; padding: 10px; border-radius: 5px; margin-bottom: 15px;">
                         <h3 style="margin: 0; font-size: 20px; font-weight: 600;">材料ロットをスキャンしてください<br>Please scan material lot QR code</h3>
@@ -616,7 +704,7 @@
                 </div>
                 
                 <div style="background: #f5f5f5; border: 1px solid #ddd; border-radius: 8px; padding: 20px; margin: 20px 0;">
-                    <div id="lotQrReader" style="width: 100%; max-width: 350px; height: 350px; margin: auto; border-radius: 6px; overflow: hidden; background: #000;"></div>
+                    <div id="lotQrReader" style="width: 100%; max-width: 500px; height: 500px; margin: auto; border-radius: 6px; overflow: hidden; background: #000;"></div>
                 </div>
                 
                 <div style="text-align: center; margin: 20px 0;">
