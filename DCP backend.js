@@ -5465,7 +5465,7 @@ document.getElementById('startStep1Scan').addEventListener('click', function(eve
     { facingMode: "environment" },
     { 
       fps: 30,
-      qrbox: { width: 800, height: 800 },
+      qrbox: { width: 1000, height: 1000 },
       aspectRatio: 1.0,
       disableFlip: false
     },
@@ -5706,6 +5706,138 @@ document.getElementById('startStep2Scan').addEventListener('click', function(eve
   ).catch(err => {
     console.error("Failed to start Step 2 scanner:", err);
     showAlert('カメラを起動できませんでした / Could not start camera');
+  });
+});
+
+// Step 2: Override Button (Manual Entry with Leader Verification)
+document.getElementById('overrideStep2').addEventListener('click', function(event) {
+  event.preventDefault(); // Prevent form submission
+  
+  const step2Modal = document.getElementById('step2Modal');
+  const leaderVerificationModal = document.getElementById('leaderVerificationModal');
+  const leaderVerificationStatus = document.getElementById('leaderVerificationStatus');
+  const materialLotInput = document.getElementById('材料ロット');
+  
+  // Stop Step 2 scanner if running
+  if (step2Scanner) {
+    step2Scanner.stop().catch(err => console.error("Error stopping step2 scanner:", err));
+    step2Scanner = null;
+  }
+  
+  // Close Step 2 modal
+  step2Modal.style.display = 'none';
+  
+  // Show leader verification modal
+  leaderVerificationStatus.textContent = 'リーダーのQRコードをスキャンしてください / Please scan leader QR code';
+  leaderVerificationStatus.style.color = '#2d5f4f';
+  leaderVerificationModal.style.display = 'block';
+  
+  // Start leader verification scanner
+  let leaderScanner = new Html5Qrcode("leaderQrReader");
+  
+  leaderScanner.start(
+    { facingMode: "environment" },
+    { 
+      fps: 30,
+      qrbox: { width: 800, height: 800 },
+      aspectRatio: 1.0,
+      disableFlip: false
+    },
+    async (decodedText) => {
+      console.log("Leader QR Code scanned for Step 2 override:", decodedText);
+      
+      try {
+        const response = await fetch(`${serverURL}/verifyLeader`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: decodedText })
+        });
+        
+        const result = await response.json();
+        
+        if (result.authorized) {
+          leaderVerificationStatus.textContent = `✅ 認証成功！ / Verified! Opening keypad...`;
+          leaderVerificationStatus.style.color = '#006400';
+          
+          leaderScanner.stop().then(() => {
+            setTimeout(() => {
+              leaderVerificationModal.style.display = 'none';
+              
+              // Open keypad for manual lot entry
+              const currentLots = materialLotInput.value ? materialLotInput.value.split(',').map(v => v.trim()).filter(v => v) : [];
+              
+              // Open keypad in new entry mode
+              window.openDirectNumericKeypad('材料ロット', true);
+              
+              // Monitor keypad closure and capture the entered value
+              const checkKeypadClosure = setInterval(() => {
+                const keypadModal = document.getElementById('numericKeypadModalDirect');
+                const isKeypadOpen = keypadModal && keypadModal.style.display === 'block';
+                
+                if (!isKeypadOpen) {
+                  clearInterval(checkKeypadClosure);
+                  
+                  // Get the newly entered value
+                  const newValue = materialLotInput.value;
+                  const newLots = newValue ? newValue.split(',').map(v => v.trim()).filter(v => v && !currentLots.includes(v)) : [];
+                  
+                  if (newLots.length > 0) {
+                    // Add the manual lot as a blue tag (visually different)
+                    const lotNumber = newLots[0]; // Take the first new lot
+                    
+                    // Add to material lots array with manual flag
+                    if (window.addManualLot) {
+                      window.addManualLot(lotNumber);
+                      console.log("Manual lot added via Step 2 override:", lotNumber);
+                    }
+                    
+                    // Automatically proceed to Step 3
+                    setTimeout(() => {
+                      showStep3Modal();
+                    }, 500);
+                  } else {
+                    // No lot entered, return to Step 2
+                    showStep2Modal();
+                  }
+                }
+              }, 300);
+              
+            }, 1000);
+          }).catch(err => console.error("Error stopping leader scanner:", err));
+        } else {
+          leaderVerificationStatus.textContent = `❌ 権限がありません / Not authorized`;
+          leaderVerificationStatus.style.color = '#cc0000';
+          
+          // Return to Step 2 after 2 seconds
+          setTimeout(() => {
+            leaderScanner.stop().then(() => {
+              leaderVerificationModal.style.display = 'none';
+              showStep2Modal();
+            }).catch(err => console.error("Error stopping scanner:", err));
+          }, 2000);
+        }
+      } catch (error) {
+        console.error("Error verifying leader:", error);
+        leaderVerificationStatus.textContent = `❌ エラーが発生しました / Error occurred`;
+        leaderVerificationStatus.style.color = '#cc0000';
+        
+        // Return to Step 2 after 2 seconds
+        setTimeout(() => {
+          leaderScanner.stop().then(() => {
+            leaderVerificationModal.style.display = 'none';
+            showStep2Modal();
+          }).catch(err => console.error("Error stopping scanner:", err));
+        }, 2000);
+      }
+    },
+    (errorMessage) => {
+      // Ignore scan errors
+    }
+  ).catch(err => {
+    console.error("Failed to start leader verification scanner:", err);
+    showAlert('カメラを起動できませんでした / Could not start camera');
+    leaderVerificationModal.style.display = 'none';
+    showStep2Modal();
   });
 });
 
