@@ -10,8 +10,8 @@ const googleSheetLiveStatusURL = 'https://script.google.com/macros/s/AKfycbwbL30
 // Link for Rikeshi (up/down color info) - This was missing in the original, adding it here.
 const dbURL = 'https://script.google.com/macros/s/AKfycbx0qBw0_wF5X-hA2t1yY-d5h5M7Z_a8z_V9R5D6k/exec'; // Placeholder, replace with your actual URL if different.
 
-//const serverURL = "https://kurachi.onrender.com";
-const serverURL = "http://localhost:3000";
+const serverURL = "https://kurachi.onrender.com";
+//const serverURL = "http://localhost:3000";
 
 //this code listens to incoming parameters passed
 function getQueryParam(param) {
@@ -309,43 +309,11 @@ document.addEventListener('DOMContentLoaded', () => {
   loadMaintenanceRecords();
   
   // ============================================
-  // STEP PERSISTENCE LOGIC
+  // STEP PERSISTENCE LOGIC - REMOVED
   // ============================================
-  // Check if there's a saved step and resume workflow
-  const savedStep = getCurrentStepFromStorage();
-  const currentSebanggoValue = document.getElementById('sub-dropdown')?.value;
-  
-  console.log(`Page loaded - Saved step: ${savedStep}, Sebanggo: ${currentSebanggoValue}`);
-  
-  if (savedStep > 0 && currentSebanggoValue) {
-    // There's an incomplete workflow - resume it
-    console.log(`Resuming workflow from step ${savedStep}`);
-    
-    // Restore cached product details from localStorage if available
-    const cachedSebanggo = localStorage.getItem(`${uniquePrefix}cached-sebanggo`);
-    const cachedHinban = localStorage.getItem(`${uniquePrefix}cached-hinban`);
-    const cachedMaterialCode = localStorage.getItem(`${uniquePrefix}cached-materialCode`);
-    
-    if (cachedSebanggo) {
-      currentProductDetails.sebanggo = cachedSebanggo;
-      currentProductDetails.hinban = cachedHinban || '';
-      currentProductDetails.materialCode = cachedMaterialCode || '';
-      console.log('Restored cached product details:', currentProductDetails);
-    }
-    
-    // Resume from the saved step
-    if (savedStep === 1) {
-      showStep1Modal();
-    } else if (savedStep === 2) {
-      showStep2Modal();
-    } else if (savedStep === 3) {
-      showStep3Modal();
-    }
-  } else if (savedStep > 0 && !currentSebanggoValue) {
-    // Step was saved but no sebanggo - reset workflow
-    console.log('Saved step found but no sebanggo - resetting workflow');
-    saveCurrentStep(0);
-  }
+  // Step persistence is now handled in window.addEventListener('load') 
+  // to ensure dropdown is fully restored before checking
+  // See bottom of file for step restoration logic
   
   // Initialize material label photo system
   loadMaterialLabelPhotos();
@@ -4207,7 +4175,7 @@ function updateSheetStatus(selectedValue, machineName) {
 }
 
 //this function sends request to nc cutter's pC
-function sendtoNC(selectedValue) {
+async function sendtoNC(selectedValue) {
 
   //sendCommand("off"); // this is for arduino (emergency button)
   sendtoNCButtonisPressed = true;
@@ -4232,15 +4200,62 @@ function sendtoNC(selectedValue) {
   //let pcName = "DESKTOP-V36G1SK-2";
   const url = `http://${ipAddress}:5000/request?filename=${currentSebanggo}.pce`; //change to
 
-  // Open a new tab with the desired URL
-  const newTab = window.open(url, '_blank');
+  // Show progress bar at top of page
+  const progressBar = document.getElementById('sendingProgressBar');
+  if (progressBar) {
+    progressBar.classList.remove('hide');
+    progressBar.classList.add('show');
+  }
 
-  // Set a timer to close the new tab after a delay (e.g., 1 seconds)
-  setTimeout(() => {
-    newTab.close();
-  }, 5000);
+  // Send command using fetch instead of opening new tab
+  try {
+    console.log(`Sending command to mini PC: ${url}`);
+    
+    const response = await fetch(url, {
+      method: 'GET',
+      mode: 'no-cors' // Allow cross-origin request without CORS preflight
+    });
+    
+    console.log('Command sent successfully to mini PC');
+    
+    // Hide progress bar after 7 seconds
+    setTimeout(() => {
+      if (progressBar) {
+        progressBar.classList.remove('show');
+        progressBar.classList.add('hide');
+        // Reset after animation completes
+        setTimeout(() => {
+          progressBar.classList.remove('hide');
+          progressBar.style.display = 'none';
+        }, 300);
+      }
+    }, 4000);
+    
+  } catch (error) {
+    console.error('Failed to send command to mini PC:', error);
+    
+    // Hide progress bar on error
+    if (progressBar) {
+      progressBar.classList.remove('show');
+      progressBar.classList.add('hide');
+      setTimeout(() => {
+        progressBar.classList.remove('hide');
+        progressBar.style.display = 'none';
+      }, 300);
+    }
+    
+    // Fallback: Try opening in new tab if fetch fails
+    console.log('Fetch failed, trying fallback method...');
+    const newTab = window.open(url, '_blank');
+    setTimeout(() => {
+      newTab.close();
+    }, 5000);
+  }
 }
-document.getElementById('sendtoNC').addEventListener('click', sendtoNC);
+document.getElementById('sendtoNC').addEventListener('click', async function() {
+  const currentSebanggo = document.getElementById('sub-dropdown').value;
+  await sendtoNC(currentSebanggo);
+});
 
 // Function to handle printing
 function runPrintFunction() {
@@ -5321,12 +5336,16 @@ function getMachineName() {
 // Function to save current step to localStorage
 function saveCurrentStep(step) {
   currentStep = step;
-  localStorage.setItem(`${uniquePrefix}currentStep`, step);
+  const key = `${uniquePrefix}currentStep`;
+  console.log('Saving step:', step, 'with key:', key);
+  localStorage.setItem(key, step);
 }
 
 // Function to get current step from localStorage
 function getCurrentStepFromStorage() {
-  const saved = localStorage.getItem(`${uniquePrefix}currentStep`);
+  const key = `${uniquePrefix}currentStep`;
+  const saved = localStorage.getItem(key);
+  console.log('Getting step from key:', key, '→ value:', saved);
   return saved ? parseInt(saved) : 0;
 }
 
@@ -5854,8 +5873,8 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
       return;
     }
     
-    // Call the sendtoNC function directly
-    sendtoNC(currentSebanggo);
+    // Close Step 3 modal immediately (sending in background)
+    document.getElementById('step3Modal').style.display = 'none';
     
     // Clear cached product details from localStorage
     localStorage.removeItem(`${uniquePrefix}cached-sebanggo`);
@@ -5865,8 +5884,8 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
     // Mark workflow as complete
     saveCurrentStep(0);
     
-    // Close Step 3 modal
-    document.getElementById('step3Modal').style.display = 'none';
+    // Call the sendtoNC function (sends in background with progress bar)
+    await sendtoNC(currentSebanggo);
     
   } catch (error) {
     console.error("Error sending to machine:", error);
@@ -5894,15 +5913,21 @@ window.addEventListener('load', function() {
     const subDropdown = document.getElementById('sub-dropdown');
     const savedStep = getCurrentStepFromStorage();
     
+    console.log('=== 3-Step Modal Auto-Load Debug ===');
+    console.log('Dropdown value:', subDropdown?.value);
+    console.log('Dropdown selectedIndex:', subDropdown?.selectedIndex);
+    console.log('Saved step from localStorage:', savedStep);
+    
     // If sub-dropdown is empty, always start at Step 1
     if (!subDropdown.value || subDropdown.selectedIndex === 0) {
+      console.log('Empty dropdown detected - showing Step 1');
       saveCurrentStep(0);
       showStep1Modal();
       return;
     }
     
-    // If sub-dropdown has value but workflow is incomplete
-    if (savedStep > 0 && savedStep < 3) {
+    // If workflow was incomplete (step 1, 2, or 3), restart from Step 1
+    if (savedStep === 1 || savedStep === 2 || savedStep === 3) {
       // Restore product details from DOM
       currentProductDetails = {
         sebanggo: subDropdown.value,
@@ -5910,20 +5935,16 @@ window.addEventListener('load', function() {
         materialCode: document.getElementById('material-code')?.value || ''
       };
       
-      console.log('Resuming workflow at step:', savedStep);
-      console.log('Restored product details:', currentProductDetails);
+      console.log('Incomplete workflow detected (step ' + savedStep + ') - Restarting from Step 1');
+      console.log('Product details:', currentProductDetails);
       
-      // Resume at the appropriate step
-      if (savedStep === 1) {
-        showStep1Modal();
-      } else if (savedStep === 2) {
-        showStep2Modal();
-      }
-    } else if (savedStep === 0 && subDropdown.value) {
-      // If step is 0 but dropdown has value, workflow was completed
-      // Force restart workflow
-      console.log('Workflow was completed, but dropdown has value. Starting fresh workflow.');
+      // Always restart from Step 1 for incomplete workflows
       showStep1Modal();
+    } else if (savedStep === 0) {
+      // Workflow was completed (or never started) - don't show modal
+      console.log('Workflow complete (step 0) - No modal shown');
+    } else {
+      console.log('Unknown savedStep:', savedStep);
     }
-  }, 500);
+  }, 2000); // Increased timeout to 2 seconds to ensure dropdown is fully restored
 });
