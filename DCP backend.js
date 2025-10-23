@@ -612,7 +612,11 @@ function showLeaderVerification(attemptedValue) {
       fps: 30,
       qrbox: { width: 800, height: 800 },
       aspectRatio: 1.0,
-      disableFlip: false
+      disableFlip: false,
+      advanced: [{
+        focusMode: "continuous",
+        focusDistance: { ideal: 0 }
+      }]
     },
     async (decodedText) => {
       console.log("Leader QR Code scanned:", decodedText);
@@ -2184,7 +2188,7 @@ document.getElementById('scan-button').addEventListener('click', function() {
   // Show the modal
   qrScannerModal.style.display = 'block';
 
-  // Start QR code scanning with improved far-range detection (optimized for 10-inch tablet)
+  // Start QR code scanning with near-focus detection (optimized for 10-inch tablet)
   html5QrCode.start(
     {
       facingMode: "environment"
@@ -2195,7 +2199,11 @@ document.getElementById('scan-button').addEventListener('click', function() {
         height: 800
       },
       aspectRatio: 1.0,
-      disableFlip: false
+      disableFlip: false,
+      advanced: [{
+        focusMode: "continuous",
+        focusDistance: { ideal: 0 }
+      }]
     },
     async qrCodeMessage => {
       const subDropdown = document.getElementById('sub-dropdown');
@@ -2370,14 +2378,18 @@ document.getElementById('scan-lot').addEventListener('click', function() {
   // Show modal
   scanLotModal.style.display = 'block';
 
-  // Start QR code scanning with improved settings for far-range detection (optimized for 10-inch tablet)
+  // Start QR code scanning with near-focus detection (optimized for 10-inch tablet)
   html5QrCode.start(
     { facingMode: "environment" },
     { 
       fps: 30,
       qrbox: { width: 800, height: 800 },
       aspectRatio: 1.0,
-      disableFlip: false
+      disableFlip: false,
+      advanced: [{
+        focusMode: "continuous",
+        focusDistance: { ideal: 0 }
+      }]
     },
     async (qrCodeMessage) => {
       console.log("Scanned Lot QR Code:", qrCodeMessage);
@@ -2683,7 +2695,11 @@ document.getElementById('overrideLotButton').addEventListener('click', function(
       fps: 30,
       qrbox: { width: 800, height: 800 },
       aspectRatio: 1.0,
-      disableFlip: false
+      disableFlip: false,
+      advanced: [{
+        focusMode: "continuous",
+        focusDistance: { ideal: 0 }
+      }]
     },
     async (decodedText) => {
       console.log("Leader QR Code scanned for override:", decodedText);
@@ -5486,7 +5502,11 @@ document.getElementById('startStep1Scan').addEventListener('click', function(eve
       fps: 30,
       qrbox: { width: 1000, height: 1000 },
       aspectRatio: 1.0,
-      disableFlip: false
+      disableFlip: false,
+      advanced: [{
+        focusMode: "continuous",
+        focusDistance: { ideal: 0 }
+      }]
     },
     async (qrCodeMessage) => {
       console.log("Step 1 QR Scanned:", qrCodeMessage);
@@ -5601,7 +5621,11 @@ document.getElementById('startStep2Scan').addEventListener('click', function(eve
       fps: 30,
       qrbox: { width: 800, height: 800 },
       aspectRatio: 1.0,
-      disableFlip: false
+      disableFlip: false,
+      advanced: [{
+        focusMode: "continuous",
+        focusDistance: { ideal: 0 }
+      }]
     },
     async (qrCodeMessage) => {
       console.log("Step 2 QR Scanned:", qrCodeMessage);
