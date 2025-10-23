@@ -327,20 +327,21 @@
             margin: 5px 0;
         }
 
-        /* Pulsing animation for Step 2 material code to draw attention */
-        #step2Material {
-            animation: materialPulse 2s ease-in-out infinite;
-            display: inline-block;
+        /* Blinking animation for Step 2 material code to draw attention */
+        #step2Modal #step2Material {
+            animation: materialBlink 1s ease-in-out infinite !important;
+            display: inline-block !important;
+            font-size: 1.8em !important;
+            font-weight: 900 !important;
+            color: #dc3545 !important;
         }
 
-        @keyframes materialPulse {
-            0%, 100% {
-                transform: scale(1);
+        @keyframes materialBlink {
+            0%, 49% {
                 opacity: 1;
             }
-            50% {
-                transform: scale(1.15);
-                opacity: 0.8;
+            50%, 100% {
+                opacity: 0.15;
             }
         }
 
@@ -678,7 +679,7 @@
                     <p>
                         背番号: <strong id="step2Sebanggo" style="color: #4CAF50;"></strong> 
                         品番: <strong id="step2Hinban" style="color: #2196F3;"></strong> 
-                        材料: <strong id="step2Material" style="color: #f39c12;"></strong>
+                        材料: <strong id="step2Material"></strong>
                     </p>
                 </div>
                 
