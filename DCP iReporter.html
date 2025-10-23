@@ -5,6 +5,78 @@
     <link rel="icon" type="image/png" href="src/favicon2.png">
     <title>自動日報(倉知)</title>
     <style>
+        /* Progress Bar Notification - Top of page */
+        #sendingProgressBar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px 20px;
+            text-align: center;
+            font-size: 16px;
+            font-weight: bold;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+            z-index: 99999;
+            display: none;
+            animation: slideDown 0.3s ease-out;
+        }
+
+        #sendingProgressBar.show {
+            display: block;
+        }
+
+        #sendingProgressBar.hide {
+            animation: slideUp 0.3s ease-out forwards;
+        }
+
+        @keyframes slideDown {
+            from {
+                transform: translateY(-100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        @keyframes slideUp {
+            from {
+                transform: translateY(0);
+                opacity: 1;
+            }
+            to {
+                transform: translateY(-100%);
+                opacity: 0;
+            }
+        }
+
+        #sendingProgressBar .progress-content {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 15px;
+        }
+
+        #sendingProgressBar .spinner {
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        #sendingProgressBar .progress-text {
+            font-size: clamp(14px, 2.5vw, 16px);
+        }
         
         
         .process-section h3 {
@@ -218,9 +290,255 @@
             color: #666;
             font-style: italic;
         }
+
+        /* 3-Step Modal Dynamic Responsive Styles - ONLY FOR STEP MODALS */
+        /* Very specific selectors to avoid conflicts with main page */
+        #step1Modal > div,
+        #step2Modal > div,
+        #step3Modal > div {
+            background: white;
+            border-radius: 20px;
+            padding: clamp(15px, 3vh, 40px);
+            max-width: 600px;
+            width: 90%;
+            max-height: calc(100vh - 30px);
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            overflow: hidden;
+        }
+
+        #step1Modal h2,
+        #step2Modal h2,
+        #step3Modal h2 {
+            text-align: center;
+            margin: 0 0 clamp(15px, 2vh, 30px) 0;
+            font-size: clamp(20px, 4vw, 28px);
+            color: #333;
+            flex-shrink: 0;
+        }
+
+        #step1Modal #step1Content,
+        #step2Modal #step2Content,
+        #step3Modal #step3Content {
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            flex: 1;
+            min-height: 0;
+            overflow-y: auto;
+            padding: 10px 0;
+        }
+
+        #step1Modal #step1Content p,
+        #step2Modal #step2Content p,
+        #step3Modal #step3Content p {
+            font-size: clamp(14px, 3vw, 18px);
+            color: #666;
+            margin-bottom: clamp(10px, 2vh, 20px);
+        }
+
+        #step1Modal #step1Content > div[style*="font-size: 60px"],
+        #step2Modal #step2Content > div[style*="font-size: 60px"],
+        #step3Modal #step3Content > div[style*="font-size: 60px"] {
+            font-size: clamp(40px, 8vw, 60px) !important;
+            margin: clamp(10px, 2vh, 20px) 0 !important;
+        }
+
+        #step1Modal button,
+        #step2Modal button,
+        #step3Modal button {
+            font-size: clamp(14px, 2.5vw, 20px) !important;
+            padding: clamp(12px, 2vh, 20px) clamp(25px, 5vw, 50px) !important;
+        }
+
+        #step1Modal #step1QrReader,
+        #step2Modal #step2QrReader,
+        #step3Modal #step3QrReader {
+            width: 100%;
+            max-width: min(500px, 80vw);
+            height: auto;
+            aspect-ratio: 1;
+            max-height: 50vh;
+            margin: auto;
+            border-radius: 10px;
+            overflow: hidden;
+            background: #000;
+        }
+
+        #step1Modal > div > div:last-child,
+        #step2Modal > div > div:last-child,
+        #step3Modal > div > div:last-child {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: clamp(15px, 2vh, 30px);
+            flex-shrink: 0;
+        }
+
+        #step2Modal .step-modal-info-box,
+        #step3Modal .step-modal-info-box {
+            background: #f5f5f5;
+            padding: clamp(10px, 1.5vh, 15px);
+            border-radius: 10px;
+            text-align: center;
+            margin-bottom: clamp(10px, 1.5vh, 20px);
+            flex-shrink: 0;
+        }
+
+        #step2Modal .step-modal-info-box p,
+        #step3Modal .step-modal-info-box p {
+            font-size: clamp(12px, 2vw, 14px) !important;
+            color: #333;
+            margin: 5px 0;
+        }
+
+        /* Blinking animation for Step 2 material code to draw attention */
+        #step2Modal #step2Material {
+            animation: materialBlink 1s ease-in-out infinite !important;
+            display: inline-block !important;
+            font-size: 1.8em !important;
+            font-weight: 900 !important;
+            color: #dc3545 !important;
+        }
+
+        @keyframes materialBlink {
+            0%, 49% {
+                opacity: 1;
+            }
+            50%, 100% {
+                opacity: 0.15;
+            }
+        }
+
+        /* Responsive styles for qrScannerModal and scanLotModal - Dynamic sizing */
+        #qrScannerModal .modal-content,
+        #scanLotModal .modal-content {
+            max-width: min(600px, 90vw) !important;
+            width: 95% !important;
+            max-height: calc(100vh - 40px) !important;
+            overflow-y: auto !important;
+            padding: clamp(15px, 3vh, 30px) !important;
+        }
+
+        #qrScannerModal #qrReader,
+        #scanLotModal #lotQrReader {
+            max-width: min(500px, 80vw) !important;
+            width: 100% !important;
+            height: auto !important;
+            aspect-ratio: 1 !important;
+            max-height: min(500px, 60vh) !important;
+        }
+
+        #qrScannerModal h3,
+        #scanLotModal h3 {
+            font-size: clamp(16px, 3vw, 20px) !important;
+        }
+
+        #qrScannerModal button,
+        #scanLotModal button {
+            font-size: clamp(13px, 2.5vw, 15px) !important;
+            padding: clamp(10px, 1.5vh, 12px) clamp(25px, 5vw, 40px) !important;
+        }
+
+        /* Tablet adjustments for scan modals */
+        @media (max-width: 768px) {
+            #qrScannerModal .modal-content,
+            #scanLotModal .modal-content {
+                width: 95% !important;
+                padding: clamp(10px, 2vh, 20px) !important;
+            }
+
+            #qrScannerModal #qrReader,
+            #scanLotModal #lotQrReader {
+                max-height: min(450px, 55vh) !important;
+            }
+        }
+
+        /* Mobile adjustments for scan modals */
+        @media (max-width: 480px) {
+            #qrScannerModal .modal-content,
+            #scanLotModal .modal-content {
+                width: 98% !important;
+                padding: 15px !important;
+            }
+
+            #qrScannerModal #qrReader,
+            #scanLotModal #lotQrReader {
+                max-height: min(350px, 50vh) !important;
+            }
+        }
+
+        /* Landscape mode for scan modals */
+        @media (max-height: 600px) {
+            #qrScannerModal .modal-content,
+            #scanLotModal .modal-content {
+                padding: 10px !important;
+                max-height: calc(100vh - 20px) !important;
+            }
+
+            #qrScannerModal #qrReader,
+            #scanLotModal #lotQrReader {
+                max-height: 40vh !important;
+            }
+        }
+
+        /* Responsive adjustments for tablets and smaller */
+        @media (max-width: 768px) {
+            #step1Modal > div,
+            #step2Modal > div,
+            #step3Modal > div {
+                width: 95%;
+                padding: clamp(10px, 2vh, 20px);
+            }
+
+            #step1Modal #step1QrReader,
+            #step2Modal #step2QrReader,
+            #step3Modal #step3QrReader {
+                max-height: 45vh;
+            }
+        }
+
+        @media (max-height: 600px) {
+            #step1Modal > div,
+            #step2Modal > div,
+            #step3Modal > div {
+                padding: 10px;
+                max-height: calc(100vh - 20px);
+            }
+
+            #step1Modal h2,
+            #step2Modal h2,
+            #step3Modal h2 {
+                margin-bottom: 10px;
+                font-size: 20px;
+            }
+
+            #step1Modal #step1QrReader,
+            #step2Modal #step2QrReader,
+            #step3Modal #step3QrReader {
+                max-height: 40vh;
+            }
+        }
     </style>
 </head>
 <body>
+    <!-- Progress Bar Notification (Top of page) -->
+    <div id="sendingProgressBar">
+        <div class="progress-content">
+            <div class="spinner"></div>
+            <div class="progress-text">
+                <span>マシンにデータを送信中 / Sending data to PC</span>
+            </div>
+        </div>
+    </div>
+
     <!-- this code is for process -->
     <div class="container">        
         <form method="post" action="" name="contact-form">
@@ -287,6 +605,7 @@
 
             <!-- QR code button -->
             <button id="scan-button" type="button">Scan 背番号</button>
+            <button id="scan-lot" type="button">Scan ロット</button>
             <br>
             <br>
 
@@ -343,8 +662,9 @@
 
 
             <label for="材料ロット">材料ロット:</label>
-        <button id="scan-lot" type="button">Scan ロット</button>
         <input type="text" name="材料ロット" id="材料ロット" placeholder="Material Lot" required>
+        <div id="材料ロット-tags" style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; margin-bottom: 10px;"></div>
+        <input type="hidden" id="材料ロット-data" value="">
         <br>
         <div id="counter-box-18" class="counter-box">  
             <label for="counter-18">疵引不良</label>
@@ -396,10 +716,26 @@
 
         <!-- QR Code Scanner Modal -->
         <div id="qrScannerModal" class="modal">
-            <div class="modal-content">
-                <span class="close" id="closeQRScannerModal">&times;</span>
-                <h3>Scan QR Code</h3>
-                <div id="qrReader" style="width: 300px; height: 300px;"></div>
+            <div class="modal-content" style="background: white; border: 2px solid #ddd; border-radius: 10px; padding: 30px; max-width: 600px; box-shadow: 0 4px 20px rgba(0,0,0,0.2);">
+                <div style="text-align: center; margin-bottom: 20px;">
+                    <div style="background: #333; color: white; padding: 10px; border-radius: 5px; margin-bottom: 15px;">
+                        <h3 style="margin: 0; font-size: 20px; font-weight: 600;">背番号をスキャンしてください<br>Please scan product QR code</h3>
+                    </div>
+                </div>
+                
+                <div style="background: #f5f5f5; border: 1px solid #ddd; border-radius: 8px; padding: 20px; margin: 20px 0;">
+                    <div id="qrReader" style="width: 100%; max-width: 500px; height: 500px; margin: auto; border-radius: 6px; overflow: hidden; background: #000;"></div>
+                </div>
+                
+                <div style="text-align: center; margin: 20px 0;">
+                    <p id="scanQRStatus" style="color: #666; font-size: 14px; min-height: 20px; margin: 0;"></p>
+                </div>
+                
+                <div style="text-align: center; margin-top: 20px;">
+                    <button id="closeQRScannerModal" type="button" style="background: #e74c3c; color: white; border: none; padding: 12px 40px; border-radius: 6px; cursor: pointer; font-size: 15px; font-weight: 500; transition: background 0.3s;">
+                        Cancel / キャンセル
+                    </button>
+                </div>
             </div>
         </div>
         
@@ -411,7 +747,175 @@
             </div>
         </div>
 
+        <!-- Leader Verification Modal -->
+        <div id="leaderVerificationModal" class="modal" style="display:none;">
+            <div class="modal-content" style="background: white; border: 2px solid #ddd; border-radius: 10px; padding: 30px; max-width: 400px; box-shadow: 0 4px 20px rgba(0,0,0,0.2);">
+                <div style="text-align: center; margin-bottom: 25px;">
+                    <div style="font-size: 48px; margin-bottom: 15px;">⚠️</div>
+                    <h3 style="color: #333; margin: 0 0 15px 0; font-size: 20px; font-weight: 600;">Warning!</h3>
+                    <p style="color: #666; font-size: 15px; margin: 8px 0; line-height: 1.5;">
+                        価値観を変えることができるのはリーダーだけ<br>
+                        <span style="font-size: 14px;">Only leaders can change value</span>
+                    </p>
+                </div>
+                
+                <div style="background: #f5f5f5; border: 1px solid #ddd; border-radius: 8px; padding: 20px; margin: 20px 0;">
+                    <p style="color: #666; text-align: center; margin: 0 0 12px 0; font-size: 14px;">リーダーのQRコードをスキャンしてください<br>Please scan leader QR code</p>
+                    <div id="leaderQrReader" style="width: 100%; max-width: 280px; height: 280px; margin: auto; border-radius: 6px; overflow: hidden; background: #000;"></div>
+                </div>
+                
+                <div style="text-align: center; margin: 20px 0;">
+                    <p id="leaderVerificationStatus" style="color: #666; font-size: 14px; min-height: 20px; margin: 0;"></p>
+                </div>
+                
+                <div style="text-align: center; margin-top: 20px;">
+                    <button id="closeLeaderVerificationModal" type="button" style="background: #e74c3c; color: white; border: none; padding: 12px 40px; border-radius: 6px; cursor: pointer; font-size: 15px; font-weight: 500; transition: background 0.3s;">
+                        Cancel / キャンセル
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Scan Lot Modal -->
+        <div id="scanLotModal" class="modal" style="display:none;">
+            <div class="modal-content" style="background: white; border: 2px solid #ddd; border-radius: 10px; padding: 30px; max-width: 600px; box-shadow: 0 4px 20px rgba(0,0,0,0.2);">
+                <div style="text-align: center; margin-bottom: 20px;">
+                    <div style="background: #333; color: white; padding: 10px; border-radius: 5px; margin-bottom: 15px;">
+                        <h3 style="margin: 0; font-size: 20px; font-weight: 600;">材料ロットをスキャンしてください<br>Please scan material lot QR code</h3>
+                    </div>
+                </div>
+                
+                <div style="background: #f5f5f5; border: 1px solid #ddd; border-radius: 8px; padding: 20px; margin: 20px 0;">
+                    <div id="lotQrReader" style="width: 100%; max-width: 500px; height: 500px; margin: auto; border-radius: 6px; overflow: hidden; background: #000;"></div>
+                </div>
+                
+                <div style="text-align: center; margin: 20px 0;">
+                    <p id="scanLotStatus" style="color: #666; font-size: 14px; min-height: 20px; margin: 0;"></p>
+                </div>
+                
+                <div style="text-align: center; margin-top: 20px; display: flex; flex-direction: column; gap: 10px;">
+                    <button id="overrideLotButton" type="button" style="background: #f39c12; color: white; border: none; padding: 12px 40px; border-radius: 6px; cursor: pointer; font-size: 15px; font-weight: 500; transition: background 0.3s;">
+                        Override (Manual Entry) / 手動入力
+                    </button>
+                    <button id="closeScanLotModal" type="button" style="background: #e74c3c; color: white; border: none; padding: 12px 40px; border-radius: 6px; cursor: pointer; font-size: 15px; font-weight: 500; transition: background 0.3s;">
+                        Cancel / キャンセル
+                    </button>
+                </div>
+            </div>
+        </div>
+
         
+        <!-- Step 1 Modal: Scan Kanban -->
+        <div id="step1Modal" style="position: fixed !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; background: rgba(0, 0, 0, 0.8) !important; z-index: 10001 !important; display: none; overflow: auto !important; transform: none !important; padding: 0 !important; border-radius: 0 !important; max-width: none !important;">
+            <div>
+                <h2>
+                    Step <span style="color: #4CAF50;">1</span>: SCAN <strong>Kanban</strong> / スキャン看板
+                </h2>
+                
+                <div id="step1Content">
+                    <div id="step1ErrorMsg" style="display: none; background: #fff3cd; border: 2px solid #ffc107; border-radius: 10px; padding: 15px 20px; margin-bottom: 20px; max-width: 500px;">
+                        <p style="color: #856404; margin: 0; font-size: 16px; line-height: 1.5;"></p>
+                    </div>
+                    <p>Press this button / このボタンを押して</p>
+                    <div style="font-size: 60px; margin: 20px 0;">👇🏻</div>
+                    <button id="startStep1Scan" style="background: linear-gradient(135deg, #4CAF50, #45a049); color: white; border: none; padding: 20px 50px; border-radius: 15px; cursor: pointer; font-size: 20px; font-weight: 600; box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4); transition: all 0.3s;">
+                        Scan Kanban<br>スキャン看板
+                    </button>
+                </div>
+                
+                <div id="step1Scanner" style="display: none;">
+                    <div id="step1QrReader"></div>
+                </div>
+                
+                <div>
+                    <p style="text-align: left; font-size: 18px; color: #333; font-weight: 600; margin: 0;">
+                        <span id="step1MachineName"></span>
+                    </p>
+                    <button id="resetStep1" style="background: #e74c3c; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600;">
+                        Reset / リセット
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 2 Modal: Scan Material -->
+        <div id="step2Modal" style="position: fixed !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; background: rgba(0, 0, 0, 0.8) !important; z-index: 10001 !important; display: none; overflow: auto !important; transform: none !important; padding: 0 !important; border-radius: 0 !important; max-width: none !important;">
+            <div>
+                <h2>
+                    Step <span style="color: #2196F3;">2</span>: SCAN <strong>Material</strong> / スキャン材料
+                </h2>
+                
+                <div class="step-modal-info-box">
+                    <p>
+                        背番号: <strong id="step2Sebanggo" style="color: #4CAF50;"></strong> 
+                        品番: <strong id="step2Hinban" style="color: #2196F3;"></strong> 
+                        材料: <strong id="step2Material"></strong>
+                    </p>
+                </div>
+                
+                <div id="step2Content">
+                    <div id="step2ErrorMsg" style="display: none; background: #fff3cd; border: 2px solid #ffc107; border-radius: 10px; padding: 15px 20px; margin-bottom: 20px; max-width: 500px;">
+                        <p style="color: #856404; margin: 0; font-size: 16px; line-height: 1.5;"></p>
+                    </div>
+                    <p>Press this button / このボタンを押して</p>
+                    <div style="font-size: 60px; margin: 20px 0;">👇🏻</div>
+                    <button id="startStep2Scan" style="background: linear-gradient(135deg, #4CAF50, #45a049); color: white; border: none; padding: 20px 50px; border-radius: 15px; cursor: pointer; font-size: 20px; font-weight: 600; box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4); transition: all 0.3s;">
+                        Scan Lot. No.<br>スキャンロット
+                    </button>
+                </div>
+                
+                <div id="step2Scanner" style="display: none;">
+                    <div id="step2QrReader"></div>
+                </div>
+                
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px;">
+                    <p style="text-align: left; font-size: 18px; color: #333; font-weight: 600; margin: 0; flex: 1;">
+                        <span id="step2MachineName"></span>
+                    </p>
+                    <button id="overrideStep2" style="background: #f39c12; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600;">
+                        Override / 手動
+                    </button>
+                    <button id="resetStep2" style="background: #e74c3c; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600;">
+                        Reset / リセット
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 3 Modal: Send to Machine -->
+        <div id="step3Modal" style="position: fixed !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; background: rgba(0, 0, 0, 0.8) !important; z-index: 10001 !important; display: none; overflow: auto !important; transform: none !important; padding: 0 !important; border-radius: 0 !important; max-width: none !important;">
+            <div>
+                <h2>
+                    Step <span style="color: #f39c12;">3</span>: send to <strong>Machine</strong> / データ送信
+                </h2>
+                
+                <div class="step-modal-info-box">
+                    <p>
+                        背番号: <strong id="step3Sebanggo" style="color: #4CAF50;"></strong> 
+                        品番: <strong id="step3Hinban" style="color: #2196F3;"></strong> 
+                        材料: <strong id="step3Material" style="color: #f39c12;"></strong>
+                    </p>
+                </div>
+                
+                <div id="step3Content">
+                    <p>Press this button / このボタンを押して</p>
+                    <div style="font-size: 60px; margin: 20px 0;">👇🏻</div>
+                    <button id="startStep3Send" style="background: linear-gradient(135deg, #4CAF50, #45a049); color: white; border: none; padding: 20px 50px; border-radius: 15px; cursor: pointer; font-size: 20px; font-weight: 600; box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4); transition: all 0.3s;">
+                        Send to machine
+                    </button>
+                </div>
+                
+                <div>
+                    <p style="text-align: left; font-size: 18px; color: #333; font-weight: 600; margin: 0;">
+                        <span id="step3MachineName"></span>
+                    </p>
+                    <button id="resetStep3" style="background: #e74c3c; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600;">
+                        Reset / リセット
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <!-- Uploading Modal -->
         <div id="uploadingModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.6); z-index: 9999; justify-content: center; align-items: center;">
             <div style="background: white; padding: 30px; border-radius: 10px; text-align: center;">
