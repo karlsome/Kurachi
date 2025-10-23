@@ -599,6 +599,20 @@ function showLeaderVerification(attemptedValue) {
   statusText.textContent = 'リーダーのQRコードをスキャンしてください / Please scan leader QR code';
   statusText.style.color = '#2d5f4f';
   
+  // Reset the warning text to original (for sub-dropdown flow)
+  const modalContent = modal.querySelector('.modal-content');
+  const warningTextElement = modalContent.querySelector('p[style*="font-size"]');
+  
+  if (warningTextElement) {
+    // Restore original warning text
+    warningTextElement.innerHTML = `価値観を変えることができるのはリーダーだけ<br>
+        <span style="font-size: 14px;">Only leaders can change value</span>`;
+    warningTextElement.style.fontSize = '15px';
+    warningTextElement.style.margin = '8px 0';
+    warningTextElement.style.color = '#666';
+    warningTextElement.style.lineHeight = '1.5';
+  }
+  
   // Show modal
   modal.style.display = 'block';
   
@@ -2354,6 +2368,23 @@ style.innerHTML = `
     transform: scale(1);
   }
 }
+
+.material-code-blink {
+  animation: materialBlink 1s ease-in-out infinite;
+  display: inline-block;
+  font-size: 1.8em;
+  font-weight: 900;
+  color: #dc3545;
+}
+
+@keyframes materialBlink {
+  0%, 49% {
+    opacity: 1;
+  }
+  50%, 100% {
+    opacity: 0.15;
+  }
+}
 `;
 document.head.appendChild(style);
 
@@ -2680,6 +2711,21 @@ document.getElementById('overrideLotButton').addEventListener('click', function(
     window.lotHtml5QrCode.stop().catch(err => console.error("Error stopping lot scanner:", err));
   }
   scanLotModal.style.display = 'none';
+  
+  // Get material code from input
+  const materialCodeInput = document.getElementById('material-code');
+  const materialCode = materialCodeInput ? materialCodeInput.value.trim() : 'N/A';
+  
+  // Find and update the warning text to show material code instead
+  const modalContent = leaderVerificationModal.querySelector('.modal-content');
+  const warningTextElement = modalContent.querySelector('p[style*="color: #666"]');
+  
+  if (warningTextElement) {
+    // Replace the warning text with blinking material code
+    warningTextElement.innerHTML = `<span class="material-code-blink">材料: ${materialCode} / Material Code: ${materialCode}</span>`;
+    warningTextElement.style.fontSize = '18px';
+    warningTextElement.style.margin = '15px 0';
+  }
   
   // Show leader verification modal
   leaderVerificationStatus.textContent = 'リーダーのQRコードをスキャンしてください / Please scan leader QR code';
@@ -5770,6 +5816,21 @@ document.getElementById('overrideStep2').addEventListener('click', function(even
   // Close Step 2 modal
   step2Modal.style.display = 'none';
   
+  // Get material code from input
+  const materialCodeInput = document.getElementById('material-code');
+  const materialCode = materialCodeInput ? materialCodeInput.value.trim() : 'N/A';
+  
+  // Find and update the warning text to show material code with blinking
+  const modalContent = leaderVerificationModal.querySelector('.modal-content');
+  const warningTextElement = modalContent.querySelector('p[style*="font-size"], p[style*="color: #666"]');
+  
+  if (warningTextElement) {
+    // Replace the warning text with blinking material code
+    warningTextElement.innerHTML = `<span class="material-code-blink">材料: ${materialCode} / Material Code: ${materialCode}</span>`;
+    warningTextElement.style.fontSize = '18px';
+    warningTextElement.style.margin = '15px 0';
+  }
+  
   // Show leader verification modal
   leaderVerificationStatus.textContent = 'リーダーのQRコードをスキャンしてください / Please scan leader QR code';
   leaderVerificationStatus.style.color = '#2d5f4f';
@@ -5784,7 +5845,11 @@ document.getElementById('overrideStep2').addEventListener('click', function(even
       fps: 30,
       qrbox: { width: 800, height: 800 },
       aspectRatio: 1.0,
-      disableFlip: false
+      disableFlip: false,
+      advanced: [{
+        focusMode: "continuous",
+        focusDistance: { ideal: 0 }
+      }]
     },
     async (decodedText) => {
       console.log("Leader QR Code scanned for Step 2 override:", decodedText);
@@ -5882,6 +5947,25 @@ document.getElementById('overrideStep2').addEventListener('click', function(even
     leaderVerificationModal.style.display = 'none';
     showStep2Modal();
   });
+  
+  // Set up cancel button handler for Step 2 override flow
+  document.getElementById('closeLeaderVerificationModal').onclick = function() {
+    if (leaderScanner) {
+      leaderScanner.stop().then(() => {
+        leaderVerificationModal.style.display = 'none';
+        leaderScanner = null;
+        showStep2Modal(); // Return to Step 2 modal
+      }).catch(err => {
+        console.error("Error stopping leader scanner:", err);
+        leaderVerificationModal.style.display = 'none';
+        leaderScanner = null;
+        showStep2Modal(); // Return to Step 2 modal anyway
+      });
+    } else {
+      leaderVerificationModal.style.display = 'none';
+      showStep2Modal(); // Return to Step 2 modal
+    }
+  };
 });
 
 // Step 3: Send to Machine Button
