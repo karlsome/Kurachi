@@ -22,6 +22,28 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+// ============================================
+// SSE (Server-Sent Events) Setup
+// ============================================
+// Store connected clients for each machine
+const machineConnections = new Map();
+
+// Helper function to send SSE message to specific machine clients
+function broadcastToMachine(machineId, data) {
+  const clients = machineConnections.get(machineId) || [];
+  const message = `data: ${JSON.stringify(data)}\n\n`;
+  
+  clients.forEach(client => {
+    try {
+      client.write(message);
+    } catch (error) {
+      console.error(`Error sending to client for ${machineId}:`, error);
+    }
+  });
+  
+  console.log(`📡 Broadcasted to ${clients.length} client(s) on ${machineId}:`, data);
+}
+
 const uri = process.env.MONGODB_URI;
 const client = new MongoClient(uri, {
   serverApi: {
@@ -39,6 +61,77 @@ const DB_NAME = "Sasaki_Coating_MasterDB";
 // Routes
 app.get("/", (req, res) => {
   res.send("✅ Master User Server is running");
+});
+
+// ============================================
+// SSE ROUTES - Machine Display Pages
+// ============================================
+
+// SSE endpoint - clients connect here to receive real-time updates
+app.get("/sse/machine/:machineId", (req, res) => {
+  const machineId = req.params.machineId.toUpperCase();
+  
+  // Set headers for SSE
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  
+  // Add this client to the machine's connection list
+  if (!machineConnections.has(machineId)) {
+    machineConnections.set(machineId, []);
+  }
+  machineConnections.get(machineId).push(res);
+  
+  console.log(`✅ New SSE connection established for ${machineId}. Total clients: ${machineConnections.get(machineId).length}`);
+  
+  // Send initial connection message
+  res.write(`data: ${JSON.stringify({ type: 'connected', machineId, timestamp: new Date().toISOString() })}\n\n`);
+  
+  // Handle client disconnect
+  req.on('close', () => {
+    const clients = machineConnections.get(machineId) || [];
+    const index = clients.indexOf(res);
+    if (index !== -1) {
+      clients.splice(index, 1);
+    }
+    
+    if (clients.length === 0) {
+      machineConnections.delete(machineId);
+    }
+    
+    console.log(`❌ SSE client disconnected from ${machineId}. Remaining clients: ${clients.length}`);
+  });
+});
+
+// API endpoint to broadcast scan data to specific machine
+app.post("/api/broadcast-scan", (req, res) => {
+  const { machineId, sebanggo, hinban, timestamp, additionalData } = req.body;
+  
+  // Allow empty sebanggo only if action is 'clear'
+  const isClearAction = additionalData?.action === 'clear';
+  
+  if (!machineId || (!sebanggo && !isClearAction)) {
+    return res.status(400).json({ error: "machineId and sebanggo are required (unless action is 'clear')" });
+  }
+  
+  const normalizedMachineId = machineId.toUpperCase();
+  
+  // Broadcast to all clients listening to this machine
+  broadcastToMachine(normalizedMachineId, {
+    type: 'scan',
+    machineId: normalizedMachineId,
+    sebanggo,
+    hinban: hinban || '',
+    timestamp: timestamp || new Date().toISOString(),
+    additionalData: additionalData || {}
+  });
+  
+  res.json({ 
+    success: true, 
+    message: `Broadcasted to ${normalizedMachineId}`,
+    clientCount: (machineConnections.get(normalizedMachineId) || []).length
+  });
 });
 
 // Fetch all master users

@@ -10,8 +10,8 @@ const googleSheetLiveStatusURL = 'https://script.google.com/macros/s/AKfycbwbL30
 // Link for Rikeshi (up/down color info) - This was missing in the original, adding it here.
 const dbURL = 'https://script.google.com/macros/s/AKfycbx0qBw0_wF5X-hA2t1yY-d5h5M7Z_a8z_V9R5D6k/exec'; // Placeholder, replace with your actual URL if different.
 
-const serverURL = "https://kurachi.onrender.com";
-//const serverURL = "http://localhost:3000";
+//const serverURL = "https://kurachi.onrender.com";
+const serverURL = "http://localhost:3000";
 
 //this code listens to incoming parameters passed
 function getQueryParam(param) {
@@ -2894,7 +2894,7 @@ function resetForm() {
   localStorage.removeItem(`${uniquePrefix}previous-sebanggo`);
   console.log('Reset button pressed: Set sendtoNCButtonisPressed to false');
 
-  // Reload the page
+  // Reload the page - the load event will broadcast clear if dropdown is empty
   window.location.reload();
 }
 
@@ -5651,6 +5651,34 @@ document.getElementById('startStep1Scan').addEventListener('click', function(eve
       localStorage.setItem(`${uniquePrefix}cached-hinban`, currentProductDetails.hinban);
       localStorage.setItem(`${uniquePrefix}cached-materialCode`, currentProductDetails.materialCode);
       
+      // 🔴 BROADCAST SCAN TO SSE - Send to machine display page
+      const machineNameForSSE = getMachineName(); // Get the current machine name
+      if (machineNameForSSE) {
+        fetch(`${serverURL}/api/broadcast-scan`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            machineId: machineNameForSSE,
+            sebanggo: currentProductDetails.sebanggo,
+            hinban: currentProductDetails.hinban,
+            timestamp: new Date().toISOString(),
+            additionalData: {
+              materialCode: currentProductDetails.materialCode
+            }
+          })
+        })
+        .then(response => response.json())
+        .then(data => {
+          console.log('✅ SSE Broadcast successful:', data);
+        })
+        .catch(error => {
+          console.error('❌ SSE Broadcast failed:', error);
+          // Don't block the workflow if broadcast fails
+        });
+      }
+      
       // Apply NC button logic
       NCPresstoFalse();
       
@@ -6064,10 +6092,36 @@ window.addEventListener('load', function() {
     console.log('Dropdown selectedIndex:', subDropdown?.selectedIndex);
     console.log('Saved step from localStorage:', savedStep);
     
-    // If sub-dropdown is empty, always start at Step 1
+    // 🔴 SSE BROADCAST ON PAGE LOAD
+    const machineNameForSSE = getMachineName();
+    
+    // If sub-dropdown is empty, always start at Step 1 AND broadcast clear
     if (!subDropdown.value || subDropdown.selectedIndex === 0) {
-      console.log('Empty dropdown detected - showing Step 1');
+      console.log('Empty dropdown detected - showing Step 1 and broadcasting clear');
       saveCurrentStep(0);
+      
+      // Broadcast clear message to pdfDisplayer
+      if (machineNameForSSE) {
+        fetch(`${serverURL}/api/broadcast-scan`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            machineId: machineNameForSSE,
+            sebanggo: '',
+            hinban: '',
+            timestamp: new Date().toISOString(),
+            additionalData: {
+              action: 'clear'
+            }
+          })
+        })
+        .then(response => response.json())
+        .then(data => console.log('✅ SSE Clear broadcast on load successful:', data))
+        .catch(error => console.error('❌ SSE Clear broadcast on load failed:', error));
+      }
+      
       showStep1Modal();
       return;
     }
