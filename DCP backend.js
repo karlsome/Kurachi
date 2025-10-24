@@ -4919,6 +4919,8 @@ window.openDirectNumericKeypad = function(inputId, isNewEntryMode = false) {
         keypadTitle.textContent = 'ショット数を入力';
       } else if (inputId === '材料ロット') {
         keypadTitle.textContent = '材料ロットを入力';
+      } else if (inputId === 'ProcessQuantity') {
+        keypadTitle.textContent = '加工数 (良品) + NG:を入力';
       }
     }
     
@@ -5332,6 +5334,42 @@ window.addEventListener('load', function() {
     `;
     
     console.log('Shot input configured with direct keypad');
+  }
+  
+  // Configure ProcessQuantity input with the direct keypad
+  const processQuantityInput = document.getElementById('ProcessQuantity');
+  if (processQuantityInput) {
+    processQuantityInput.readOnly = true;
+    
+    // Use a more robust event attachment
+    if (processQuantityInput.addEventListener) {
+      processQuantityInput.addEventListener('click', function() {
+        window.openDirectNumericKeypad('ProcessQuantity');
+      });
+    } else {
+      // Fallback for older browsers
+      processQuantityInput.onclick = function() {
+        window.openDirectNumericKeypad('ProcessQuantity');
+      };
+    }
+    
+    // Style the input
+    processQuantityInput.style.cssText = `
+      cursor: pointer;
+      background-color: #f0f8ff;
+      border: 2px solid #007bff;
+      border-radius: 5px;
+      padding: 8px 10px;
+      font-size: 16px;
+      width: 100%;
+      background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="%23007bff"><path d="M4 2h16a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm1 4h4v4H5V6zm0 6h4v4H5v-4zm6-6h4v4h-4V6zm6 0h2v4h-2V6zm-6 6h4v4h-4v-4zm6 0h2v4h-2v-4z"/></svg>');
+      background-repeat: no-repeat;
+      background-position: right 8px center;
+      background-size: 16px 16px;
+      padding-right: 30px;
+    `;
+    
+    console.log('ProcessQuantity input configured with direct keypad');
   }
   
   // Configure material lot input - DISABLED, now using QR scanner with override
