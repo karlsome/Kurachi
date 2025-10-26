@@ -2818,7 +2818,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Function to reset everything and reload the page
 function resetForm() {
-  const excludedInputs = ['process']; // IDs or names of inputs to exclude from reset
+  const excludedInputs = ['process', 'languageSelector']; // IDs or names of inputs to exclude from reset
+
+  // Preserve language preference
+  const currentLanguage = localStorage.getItem('appLanguage');
 
   // Clear all form inputs with unique prefix except excluded ones
   const inputs = document.querySelectorAll('input, select, textarea');
@@ -2893,6 +2896,11 @@ function resetForm() {
   localStorage.setItem(`${uniquePrefix}sendtoNCButtonisPressed`, 'false');
   localStorage.removeItem(`${uniquePrefix}previous-sebanggo`);
   console.log('Reset button pressed: Set sendtoNCButtonisPressed to false');
+
+  // Restore language preference after reset
+  if (currentLanguage) {
+    localStorage.setItem('appLanguage', currentLanguage);
+  }
 
   // Reload the page - the load event will broadcast clear if dropdown is empty
   window.location.reload();

@@ -9,45 +9,54 @@
    
 </head>
 <body>
+    <!-- Language Selector -->
+    <div class="language-selector">
+        <select id="languageSelector">
+            <option value="ja">日本語</option>
+            <option value="en">English</option>
+            <option value="pt">Português</option>
+        </select>
+    </div>
+
     <div class="container">
-        <h1>ラベルプリンター</h1>
+        <h1 data-i18n="label_printer">ラベルプリンター</h1>
         <div id="scanOptionModal" class="modal">
             <div class="modal-content">
-                <h2>Choose Scan Method</h2>
-                <button class="btn" onclick="startCameraScanner()">📷 カメラ用</button>
-                <button class="btn" onclick="startBluetoothScanner()">🛜🖲️ ブルースス スキャナー</button>
-                <button class="btn btn-close" onclick="document.getElementById('scanOptionModal').style.display='none'">Cancel</button>
+                <h2 data-i18n="choose_scan_method">Choose Scan Method</h2>
+                <button class="btn" onclick="startCameraScanner()" data-i18n="camera_scan">📷 カメラ用</button>
+                <button class="btn" onclick="startBluetoothScanner()" data-i18n="bluetooth_scanner">🛜🖲️ ブルースス スキャナー</button>
+                <button class="btn btn-close" onclick="document.getElementById('scanOptionModal').style.display='none'" data-i18n="cancel">Cancel</button>
             </div>
         </div>
 
         <div id="qrScannerModal" class="modal">
             <div class="modal-content">
-                <h2>Scan QR Code</h2>
+                <h2 data-i18n="scan_qr_code">Scan QR Code</h2>
                 <div id="qrReader"></div>
-                <button class="btn btn-close" id="closeQRScannerModal">Close</button>
+                <button class="btn btn-close" id="closeQRScannerModal" data-i18n="close">Close</button>
             </div>
         </div>
 
         <div id="bluetoothScannerModal" class="modal">
             <div class="modal-content">
-                <h2>QR スキャンお待ち中 (Waiting for SCAN)...</h2>
-                <p>スキャンしてください。Scan QR Now!</p>
-                <button class="btn btn-close" id="closeBluetoothScannerModal" onclick="document.getElementById('bluetoothScannerModal').style.display='none'; stopBluetoothScannerListening();">Cancel</button>
+                <h2 data-i18n="waiting_scan">QR スキャンお待ち中 (Waiting for SCAN)...</h2>
+                <p data-i18n="scan_now">スキャンしてください。Scan QR Now!</p>
+                <button class="btn btn-close" id="closeBluetoothScannerModal" onclick="document.getElementById('bluetoothScannerModal').style.display='none'; stopBluetoothScannerListening();" data-i18n="cancel">Cancel</button>
             </div>
         </div>
 
         <div id="scanAlertModal" class="modal">
             <div class="modal-content">
-                <h2>Error</h2>
+                <h2 data-i18n="error">Error</h2>
                 <p id="scanAlertText"></p>
-                <button class="btn btn-close" id="closeScanModalButton">Close</button>
+                <button class="btn btn-close" id="closeScanModalButton" data-i18n="close">Close</button>
             </div>
         </div>
 
         <div id="productionOrderModal" class="modal">
             <div class="modal-content">
-                <h2>複数の生産順番が見つかりました<br>Select Production Order</h2>
-                <p>同じ品番で複数の生産順番があります。どちらを選択しますか？<br>Multiple production orders found for the same product number. Which one would you like to select?</p>
+                <h2><span data-i18n="select_production_order">複数の生産順番が見つかりました</span><br><span data-i18n="select_production_order_en">Select Production Order</span></h2>
+                <p><span data-i18n="multiple_orders_msg">同じ品番で複数の生産順番があります。どちらを選択しますか？</span><br><span data-i18n="multiple_orders_msg_en">Multiple production orders found for the same product number. Which one would you like to select?</span></p>
                 <div class="production-order-list">
                     <!-- Production order options will be populated here by JavaScript -->
                 </div>
@@ -56,32 +65,32 @@
 
         <div id="printConfirmationModal" class="modal">
             <div class="modal-content">
-                <h2>Print Confirmation</h2>
-                <p>How many labels do you want to print?</p>
+                <h2 data-i18n="print_confirmation">Print Confirmation</h2>
+                <p data-i18n="how_many_labels">How many labels do you want to print?</p>
                 <div class="quantity-selector">
                     <button class="btn" onclick="decrementPrintTimes()">-</button>
                     <span id="printTimesDisplay">1</span>
                     <button class="btn" onclick="incrementPrintTimes()">+</button>
                 </div>
-                <button class="btn btn-confirm" onclick="confirmPrint()">Print</button>
-                <button class="btn btn-close" onclick="document.getElementById('printConfirmationModal').style.display='none'">Cancel</button>
+                <button class="btn btn-confirm" onclick="confirmPrint()" data-i18n="print">Print</button>
+                <button class="btn btn-close" onclick="document.getElementById('printConfirmationModal').style.display='none'" data-i18n="cancel">Cancel</button>
             </div>
         </div>
 
        <div id="printingStatusModal" class="modal">
             <div class="modal-content">
-                <h2>Printing...</h2>
-                <p>Please wait while the labels are being printed.</p>
-                <button id="cancelPrintButton" class="btn btn-danger" style="display:none;">Cancel Printing</button>
+                <h2 data-i18n="printing">Printing...</h2>
+                <p data-i18n="please_wait_printing">Please wait while the labels are being printed.</p>
+                <button id="cancelPrintButton" class="btn btn-danger" style="display:none;" data-i18n="cancel_printing">Cancel Printing</button>
             </div>
         </div>
 
 
         <div id="printCompletionModal" class="modal">
             <div class="modal-content">
-                <h2>Print Complete</h2>
-                <p>All labels have been printed successfully.</p>
-                <button class="btn btn-close" onclick="document.getElementById('printCompletionModal').style.display='none'">Close</button>
+                <h2 data-i18n="print_complete">Print Complete</h2>
+                <p data-i18n="print_success">All labels have been printed successfully.</p>
+                <button class="btn btn-close" onclick="document.getElementById('printCompletionModal').style.display='none'" data-i18n="close">Close</button>
             </div>
         </div>
 
@@ -89,30 +98,30 @@
             <!-- COLUMN 1: Input and Print Section -->
             <div class="column column-1">
                 <div class="form-group">
-                    <label for="sub-dropdown">品番:</label>
+                    <label for="sub-dropdown" data-i18n="product_code_label">品番:</label>
                     <select id="sub-dropdown" name="背番号"></select>
                 </div>
 
-                <button id="scan-button" class="btn">📷 Scan 日報</button>
+                <button id="scan-button" class="btn" data-i18n="scan_nippo">📷 Scan 日報</button>
 
                 <div class="form-group">
-                    <label for="Lot No.">日付 (Date):</label>
+                    <label for="Lot No." data-i18n="date_label">日付 (Date):</label>
                     <input type="date" id="Lot No." name="Date" onfocus="setDefaultDate(this)" required>
-                </div>        
+                </div>
 
                 <div class="image-capture-section">
-                    <h3>材料ラベル写真 (Material Label Photos)</h3>
-                    <button id="takePictureButton" class="btn">📷 材料ラベルを撮影</button>
+                    <h3 data-i18n="material_label_photo">材料ラベル写真 (Material Label Photos)</h3>
+                    <button id="takePictureButton" class="btn" data-i18n="take_material_photo">📷 材料ラベルを撮影</button>
                     <div class="thumbnails-container" id="thumbnailsContainer">
                     </div>
                 </div>
-                <button id="print" class="btn btn-print" onclick="showPrintConfirmationModal()">🖨 Print Label</button>
+                <button id="print" class="btn btn-print" onclick="showPrintConfirmationModal()" data-i18n="print_label">🖨 Print Label</button>
             </div>
 
             <!-- COLUMN 2: Results and Status Section -->
             <div class="column column-2">
                 <div class="form-group">
-                    <label>原材料品番 (Raw Material Product Number):</label>
+                    <label data-i18n="raw_material_number">原材料品番 (Raw Material Product Number):</label>
                     <input readonly id="raw-material-number">
                 </div>
 
@@ -120,54 +129,54 @@
                     <img id="dynamicImage" src="" alt="Image Preview" onerror="this.style.display='none'; this.onerror=null;">
                 </div>
 
-                <button id="reprintButton" class="btn">🔄 Reprint Label / 再印刷</button>
+                <button id="reprintButton" class="btn" data-i18n="reprint_label">🔄 Reprint Label / 再印刷</button>
 
                 <div class="form-group">
-                    <label for="Status">STATUS:</label>
+                    <label for="Status" data-i18n="status">STATUS:</label>
                     <input readonly id="status" name="status">
                 </div>
 
                 <div class="form-group">
-                    <label for="printStatus">印刷進捗 (Print Progress):</label>
+                    <label for="printStatus" data-i18n="print_progress">印刷進捗 (Print Progress):</label>
                     <input readonly id="printStatus" name="printStatus" placeholder="0 / 0">
                 </div>
-                
+
                 <div class="form-group">
-                    <label>材料背番号 (Product Code):</label>
+                    <label data-i18n="material_sebango">材料背番号 (Product Code):</label>
                     <input readonly id="材料背番号" name="品番">
                 </div>
 
                 <div class="form-group">
-                    <label for="product-name">品名 (Product Number):</label>
+                    <label for="product-name" data-i18n="product_name">品名 (Product Number):</label>
                     <input readonly id="品名" name="品名">
                 </div>
 
                 <div class="form-group">
-                    <label>材料(Material):</label>
+                    <label data-i18n="material">材料(Material):</label>
                     <input readonly id="material">
                 </div>
 
                 <div class="form-group">
-                    <label>材料の色 (Material Color):</label>
+                    <label data-i18n="material_color_label">材料の色 (Material Color):</label>
                     <input readonly id="material-color">
                 </div>
 
                 <div class="form-group">
-                    <label>仕様 (Specification):</label>
+                    <label data-i18n="specification">仕様 (Specification):</label>
                     <input readonly id="specification">
                 </div>
 
-                <button type="button" class="resetbtn" onclick="confirmReset()">🗑️ Reset</button>
+                <button type="button" class="resetbtn" onclick="confirmReset()" data-i18n="reset_btn">🗑️ Reset</button>
             </div>
         </div>
 
         <div id="reprintModal" class="modal" style="display: none;">
             <div class="modal-content">
                 <span id="closeReprintModal" class="close">&times;</span>
-                <h3>Reprint Label</h3>
-                <label for="suffixSelector">Select Lot No. Suffix:</label>
+                <h3 data-i18n="reprint_modal_title">Reprint Label</h3>
+                <label for="suffixSelector" data-i18n="select_suffix">Select Lot No. Suffix:</label>
                 <select id="suffixSelector"></select>
-                <button id="confirmReprintButton" class="btn">Reprint This Label</button>
+                <button id="confirmReprintButton" class="btn" data-i18n="reprint_this_label">Reprint This Label</button>
             </div>
         </div>    
     
@@ -190,12 +199,12 @@
     <input type="hidden" id="targetProductionCount" name="targetProductionCount" value="0">
     <input type="hidden" id="hidden-location" name="hidden-location" value=""> </div> <div id="cameraModal" class="modal">
         <div class="modal-content">
-            <h2>カメラで撮影 (Take Picture with Camera)</h2>
+            <h2 data-i18n="take_picture_camera">カメラで撮影 (Take Picture with Camera)</h2>
             <video id="videoFeed" autoplay playsinline></video>
             <canvas id="captureCanvas" style="display:none;"></canvas>
             <div style="display:flex; justify-content:space-between;">
-                <button id="captureButton" class="btn">撮影 (Capture)</button>
-                <button id="closeCameraButton" class="btn btn-close">閉じる (Close)</button>
+                <button id="captureButton" class="btn" data-i18n="capture_btn">撮影 (Capture)</button>
+                <button id="closeCameraButton" class="btn btn-close" data-i18n="close_btn">閉じる (Close)</button>
             </div>
         </div>
     </div>
@@ -205,6 +214,7 @@
     </div>
 
 
+    <script src="i18n.js"></script>
     <script src="firstKojoLabelPrinter.js"></script>
     <script src="html5-qrcode.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jsqr/dist/jsQR.js"></script>
