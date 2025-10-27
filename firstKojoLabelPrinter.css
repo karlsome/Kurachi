@@ -5,6 +5,42 @@ body, h1, h2, h3, p, ul, li, form, label, input, select, button {
     box-sizing: border-box;
 }
 
+/* Language Dropdown Styles */
+.language-selector {
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    z-index: 100000;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+    padding: 5px;
+}
+
+.language-selector select {
+    padding: 8px 12px;
+    border: 1px solid #0174b3;
+    border-radius: 6px;
+    background: white;
+    color: #033a5f;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    outline: none;
+    transition: all 0.3s;
+    min-width: 120px;
+}
+
+.language-selector select:hover {
+    border-color: #025a8d;
+    background: #f0f8ff;
+}
+
+.language-selector select:focus {
+    border-color: #0174b3;
+    box-shadow: 0 0 0 2px rgba(1, 116, 179, 0.2);
+}
+
 /* Background color for the entire page */
 body {
     font-family: Arial, sans-serif;

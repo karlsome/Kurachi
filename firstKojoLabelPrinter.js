@@ -1915,8 +1915,11 @@ function confirmReset() {
 
 // === Form Reset ===
 function resetForm() {
-  updateUniquePrefix(); 
-  const excludedInputs = ['selected工場']; 
+  updateUniquePrefix();
+  const excludedInputs = ['selected工場', 'languageSelector']; // Exclude language selector from reset
+
+  // Preserve language preference
+  const currentLanguage = localStorage.getItem('appLanguage');
 
   const inputsToReset = document.querySelectorAll('input, select, textarea');
   inputsToReset.forEach(input => {
@@ -1950,9 +1953,14 @@ function resetForm() {
 
   const subDropdown = document.getElementById('sub-dropdown');
   if (subDropdown && subDropdown.options.length > 0 && subDropdown.options[0]?.disabled) {
-      subDropdown.selectedIndex = 0; 
+      subDropdown.selectedIndex = 0;
   }
-  
+
+  // Restore language preference after reset
+  if (currentLanguage) {
+    localStorage.setItem('appLanguage', currentLanguage);
+  }
+
   console.log("Form reset executed.");
 }
 
