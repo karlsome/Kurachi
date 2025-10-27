@@ -1250,3 +1250,476 @@ function printLabel() {
   console.log(Date);
   window.location.href = url;
 }
+
+
+// ===== NUMERIC KEYPAD FUNCTIONALITY =====
+
+// Define direct keypad functions in the global scope
+window.openDirectNumericKeypad = function(inputId) {
+  window.currentDirectInputId = inputId;
+  const modal = document.getElementById('numericKeypadModalDirect');
+  const display = document.getElementById('numericDisplayDirect');
+  const currentInput = document.getElementById(inputId);
+
+  if (modal && display && currentInput) {
+    display.value = currentInput.value || '';
+    modal.style.display = 'block';
+    document.body.style.overflow = 'hidden';
+
+    // Update keypad title based on which input field was clicked
+    const keypadTitle = modal.querySelector('h2');
+    if (keypadTitle) {
+      if (inputId === 'ProcessQuantity') {
+        keypadTitle.textContent = '加工数を入力';
+      } else if (inputId === '製造ロット') {
+        keypadTitle.textContent = '製造ロットを入力';
+      }
+    }
+
+    // Show/hide the hyphen button based on input field
+    const hyphenButton = document.getElementById('hyphenButton');
+    if (hyphenButton) {
+      if (inputId === '製造ロット') {
+        hyphenButton.style.display = 'block';
+      } else {
+        hyphenButton.style.display = 'none';
+      }
+    }
+
+    // Setup keyboard event handling for the keypad
+    window.directKeypadKeydownHandler = function(event) {
+      if (modal.style.display === 'block') {
+        event.preventDefault(); // Prevent default keyboard behavior
+
+        if (event.key >= '0' && event.key <= '9') {
+          window.addToDirectNumericDisplay(event.key);
+        } else if (event.key === 'Backspace') {
+          window.backspaceDirectNumericDisplay();
+        } else if (event.key === 'Enter') {
+          window.confirmDirectNumericInput();
+        } else if (event.key === 'Escape') {
+          window.closeDirectNumericKeypad();
+        } else if (event.key === 'Delete' || event.key.toLowerCase() === 'c') {
+          window.clearDirectNumericDisplay();
+        } else if (event.key === '-' && inputId === '製造ロット') {
+          window.addToDirectNumericDisplay('-');
+        } else if (event.key === ' ') {
+          window.addToDirectNumericDisplay(' ');
+        }
+      }
+    };
+
+    // Add the keyboard event listener
+    document.addEventListener('keydown', window.directKeypadKeydownHandler);
+  }
+};
+
+window.closeDirectNumericKeypad = function() {
+  const modal = document.getElementById('numericKeypadModalDirect');
+  if (modal) {
+    modal.style.display = 'none';
+    window.currentDirectInputId = null;
+    document.body.style.overflow = 'auto';
+
+    // Remove the keyboard event handler
+    if (window.directKeypadKeydownHandler) {
+      document.removeEventListener('keydown', window.directKeypadKeydownHandler);
+      window.directKeypadKeydownHandler = null;
+    }
+  }
+};
+
+window.addToDirectNumericDisplay = function(digit) {
+  const display = document.getElementById('numericDisplayDirect');
+  if (display) {
+    display.value += digit;
+  }
+};
+
+window.backspaceDirectNumericDisplay = function() {
+  const display = document.getElementById('numericDisplayDirect');
+  if (display && display.value.length > 0) {
+    display.value = display.value.slice(0, -1);
+  }
+};
+
+window.clearDirectNumericDisplay = function() {
+  const display = document.getElementById('numericDisplayDirect');
+  if (display) {
+    display.value = '';
+  }
+};
+
+window.confirmDirectNumericInput = function() {
+  if (!window.currentDirectInputId) return;
+
+  const display = document.getElementById('numericDisplayDirect');
+  const targetInput = document.getElementById(window.currentDirectInputId);
+
+  if (display && targetInput) {
+    const value = display.value;
+
+    // Different validation based on input type
+    if (window.currentDirectInputId === '製造ロット') {
+      // For manufacturing lot, allow numbers, hyphens, spaces, and blank values
+      if (value !== '' && !/^[0-9\-\s]*$/.test(value)) {
+        if (typeof showAlert === 'function') {
+          showAlert('数字、ハイフン、スペースのみを入力してください');
+        } else {
+          window.alert('数字、ハイフン、スペースのみを入力してください');
+        }
+        return;
+      }
+      // Allow blank value - no validation needed
+    } else if (window.currentDirectInputId === 'ProcessQuantity') {
+      // For process quantity, allow numbers, spaces, and blank values
+      // If not blank, validate as a number (after removing spaces)
+      if (value !== '') {
+        const numericValue = value.replace(/\s/g, '');
+        if (numericValue !== '' && (isNaN(numericValue) || parseInt(numericValue) < 0)) {
+          if (typeof showAlert === 'function') {
+            showAlert('有効な数字を入力してください');
+          } else {
+            window.alert('有効な数字を入力してください');
+          }
+          return;
+        }
+      }
+    }
+
+    targetInput.value = value;
+
+    // Trigger the input event to handle any event listeners
+    const event = new Event('input', { bubbles: true });
+    targetInput.dispatchEvent(event);
+
+    window.closeDirectNumericKeypad();
+  }
+};
+
+// Run initialization after page is fully loaded
+window.addEventListener('load', function() {
+  // Create the keypad modal HTML
+  const modalHTML = `
+    <div id="numericKeypadModalDirect" style="
+      display: none;
+      position: fixed;
+      z-index: 10000;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0, 0, 0, 0.6);
+      overflow: auto;
+    ">
+      <div style="
+        position: relative;
+        margin: 5% auto;
+        padding: 30px;
+        background-color: white;
+        width: 90%;
+        max-width: 400px;
+        border-radius: 10px;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+      ">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+          <h2 style="margin: 0; font-size: 20px; font-weight: bold; color: #333;">入力</h2>
+          <span onclick="window.closeDirectNumericKeypad()" style="color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer;">&times;</span>
+        </div>
+
+        <div style="margin-bottom: 15px;">
+          <input type="text" id="numericDisplayDirect" readonly style="
+            width: 100%;
+            padding: 15px;
+            font-size: 24px;
+            text-align: right;
+            border: 2px solid #007bff;
+            border-radius: 5px;
+            box-sizing: border-box;
+            background-color: #f8f9fa;
+            box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);
+          ">
+        </div>
+
+        <div id="keypadContainerDirect" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">
+          <!-- Number buttons will be added via JavaScript -->
+        </div>
+
+        <button onclick="window.confirmDirectNumericInput()" style="
+          width: 100%;
+          margin-top: 15px;
+          padding: 15px;
+          background-color: #28a745;
+          color: white;
+          border: none;
+          border-radius: 5px;
+          font-size: 18px;
+          font-weight: bold;
+          cursor: pointer;
+          transition: background-color 0.2s;
+        " onmouseover="this.style.backgroundColor='#218838'" onmouseout="this.style.backgroundColor='#28a745'">
+          確定 (Enter)
+        </button>
+      </div>
+    </div>
+  `;
+
+  // Append modal to body
+  const modalContainer = document.createElement('div');
+  modalContainer.innerHTML = modalHTML;
+  document.body.appendChild(modalContainer.firstElementChild);
+
+  // Add number buttons dynamically
+  const keypadContainer = document.getElementById('keypadContainerDirect');
+  if (keypadContainer) {
+    // Add number buttons 1-9
+    for (let i = 1; i <= 9; i++) {
+      const btn = document.createElement('button');
+      btn.textContent = i.toString();
+      const digit = i.toString(); // Capture the current value in a closure
+      btn.onclick = function() { window.addToDirectNumericDisplay(digit); };
+      btn.style.cssText = `
+        padding: 20px;
+        font-size: 24px;
+        background-color: #f1f1f1;
+        border: 1px solid #ccc;
+        border-radius: 5px;
+        cursor: pointer;
+        transition: background-color 0.2s;
+      `;
+      btn.addEventListener('mouseover', function() {
+        this.style.backgroundColor = '#d0d0d0';
+      });
+      btn.addEventListener('mouseout', function() {
+        this.style.backgroundColor = '#f1f1f1';
+      });
+      btn.addEventListener('touchstart', function() {
+        this.style.backgroundColor = '#d0d0d0';
+      });
+      btn.addEventListener('touchend', function() {
+        this.style.backgroundColor = '#f1f1f1';
+      });
+      keypadContainer.appendChild(btn);
+    }
+
+    // Add C, 0, and backspace buttons
+    const clearBtn = document.createElement('button');
+    clearBtn.textContent = 'C';
+    clearBtn.onclick = function() { window.clearDirectNumericDisplay(); };
+    clearBtn.style.cssText = `
+      padding: 20px;
+      font-size: 24px;
+      background-color: #ff6b6b;
+      color: white;
+      border: 1px solid #ff5252;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background-color 0.2s;
+      font-weight: bold;
+    `;
+    clearBtn.addEventListener('mouseover', function() {
+      this.style.backgroundColor = '#ff5252';
+    });
+    clearBtn.addEventListener('mouseout', function() {
+      this.style.backgroundColor = '#ff6b6b';
+    });
+    clearBtn.addEventListener('touchstart', function() {
+      this.style.backgroundColor = '#ff5252';
+    });
+    clearBtn.addEventListener('touchend', function() {
+      this.style.backgroundColor = '#ff6b6b';
+    });
+
+    const zeroBtn = document.createElement('button');
+    zeroBtn.textContent = '0';
+    zeroBtn.onclick = function() { window.addToDirectNumericDisplay('0'); };
+    zeroBtn.style.cssText = `
+      padding: 20px;
+      font-size: 24px;
+      background-color: #f1f1f1;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    `;
+    zeroBtn.addEventListener('mouseover', function() {
+      this.style.backgroundColor = '#d0d0d0';
+    });
+    zeroBtn.addEventListener('mouseout', function() {
+      this.style.backgroundColor = '#f1f1f1';
+    });
+    zeroBtn.addEventListener('touchstart', function() {
+      this.style.backgroundColor = '#d0d0d0';
+    });
+    zeroBtn.addEventListener('touchend', function() {
+      this.style.backgroundColor = '#f1f1f1';
+    });
+
+    const backBtn = document.createElement('button');
+    backBtn.innerHTML = '&larr;';
+    backBtn.onclick = function() { window.backspaceDirectNumericDisplay(); };
+    backBtn.style.cssText = `
+      padding: 20px;
+      font-size: 24px;
+      background-color: #ffc107;
+      color: white;
+      border: 1px solid #ffb300;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background-color 0.2s;
+      font-weight: bold;
+    `;
+    backBtn.addEventListener('mouseover', function() {
+      this.style.backgroundColor = '#ffb300';
+    });
+    backBtn.addEventListener('mouseout', function() {
+      this.style.backgroundColor = '#ffc107';
+    });
+    backBtn.addEventListener('touchstart', function() {
+      this.style.backgroundColor = '#ffb300';
+    });
+    backBtn.addEventListener('touchend', function() {
+      this.style.backgroundColor = '#ffc107';
+    });
+
+    // Add hyphen button (will be hidden/shown based on input)
+    const hyphenBtn = document.createElement('button');
+    hyphenBtn.id = 'hyphenButton';
+    hyphenBtn.textContent = '-';
+    hyphenBtn.onclick = function() { window.addToDirectNumericDisplay('-'); };
+    hyphenBtn.style.cssText = `
+      padding: 20px;
+      font-size: 24px;
+      background-color: #17a2b8;
+      color: white;
+      border: 1px solid #138496;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background-color 0.2s;
+      font-weight: bold;
+      display: none;
+    `;
+    hyphenBtn.addEventListener('mouseover', function() {
+      this.style.backgroundColor = '#138496';
+    });
+    hyphenBtn.addEventListener('mouseout', function() {
+      this.style.backgroundColor = '#17a2b8';
+    });
+    hyphenBtn.addEventListener('touchstart', function() {
+      this.style.backgroundColor = '#138496';
+    });
+    hyphenBtn.addEventListener('touchend', function() {
+      this.style.backgroundColor = '#17a2b8';
+    });
+
+    // Add space button
+    const spaceBtn = document.createElement('button');
+    spaceBtn.textContent = '␣';
+    spaceBtn.onclick = function() { window.addToDirectNumericDisplay(' '); };
+    spaceBtn.style.cssText = `
+      padding: 20px;
+      font-size: 24px;
+      background-color: #6c757d;
+      color: white;
+      border: 1px solid #5a6268;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background-color 0.2s;
+      font-weight: bold;
+      grid-column: span 2;
+    `;
+    spaceBtn.addEventListener('mouseover', function() {
+      this.style.backgroundColor = '#5a6268';
+    });
+    spaceBtn.addEventListener('mouseout', function() {
+      this.style.backgroundColor = '#6c757d';
+    });
+    spaceBtn.addEventListener('touchstart', function() {
+      this.style.backgroundColor = '#5a6268';
+    });
+    spaceBtn.addEventListener('touchend', function() {
+      this.style.backgroundColor = '#6c757d';
+    });
+
+    // Append all buttons
+    keypadContainer.appendChild(clearBtn);
+    keypadContainer.appendChild(zeroBtn);
+    keypadContainer.appendChild(backBtn);
+    keypadContainer.appendChild(hyphenBtn); // Add hyphen button to the keypad
+    keypadContainer.appendChild(spaceBtn); // Add space button to the keypad
+  }
+
+  // Configure Process Quantity input with the direct keypad
+  const processQuantityInput = document.getElementById('ProcessQuantity');
+  if (processQuantityInput) {
+    processQuantityInput.readOnly = true;
+
+    // Use a more robust event attachment
+    if (processQuantityInput.addEventListener) {
+      processQuantityInput.addEventListener('click', function() {
+        window.openDirectNumericKeypad('ProcessQuantity');
+      });
+    } else {
+      // Fallback for older browsers
+      processQuantityInput.onclick = function() {
+        window.openDirectNumericKeypad('ProcessQuantity');
+      };
+    }
+
+    // Style the input
+    processQuantityInput.style.cssText = `
+      cursor: pointer;
+      background-color: #f0f8ff;
+      border: 2px solid #007bff;
+      border-radius: 5px;
+      padding: 8px 10px;
+      font-size: 16px;
+      width: 100%;
+      background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="%23007bff"><path d="M4 2h16a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm1 4h4v4H5V6zm0 6h4v4H5v-4zm6-6h4v4h-4V6zm6 0h2v4h-2V6zm-6 6h4v4h-4v-4zm6 0h2v4h-2v-4z"/></svg>');
+      background-repeat: no-repeat;
+      background-position: right 8px center;
+      background-size: 16px 16px;
+      padding-right: 30px;
+    `;
+
+    console.log('Process Quantity input configured with direct keypad');
+  }
+
+  // Configure 製造ロット input to use the same keypad
+  const manufacturingLotInput = document.getElementById('製造ロット');
+  if (manufacturingLotInput) {
+    manufacturingLotInput.readOnly = true;
+
+    // Use a more robust event attachment
+    if (manufacturingLotInput.addEventListener) {
+      manufacturingLotInput.addEventListener('click', function() {
+        window.openDirectNumericKeypad('製造ロット');
+      });
+    } else {
+      // Fallback for older browsers
+      manufacturingLotInput.onclick = function() {
+        window.openDirectNumericKeypad('製造ロット');
+      };
+    }
+
+    // Style the input
+    manufacturingLotInput.style.cssText = `
+      cursor: pointer;
+      background-color: #f0f8ff;
+      border: 2px solid #007bff;
+      border-radius: 5px;
+      padding: 8px 10px;
+      font-size: 16px;
+      width: 100%;
+      background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="%23007bff"><path d="M4 2h16a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm1 4h4v4H5V6zm0 6h4v4H5v-4zm6-6h4v4h-4V6zm6 0h2v4h-2V6zm-6 6h4v4h-4v-4zm6 0h2v4h-2v-4z"/></svg>');
+      background-repeat: no-repeat;
+      background-position: right 8px center;
+      background-size: 16px 16px;
+      padding-right: 30px;
+    `;
+
+    console.log('製造ロット input configured with direct keypad');
+  }
+});
+
+// ===== END OF NUMERIC KEYPAD FUNCTIONALITY =====
