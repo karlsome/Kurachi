@@ -4830,6 +4830,311 @@ app.post('/api/analytics-data', async (req, res) => {
 });
 
 
+/**
+ * Backend Route: Top Defect Parts per Factory
+ * 
+ * Add this route to your Express server to provide real part-level defect data
+ * This should be added alongside the existing /api/analytics-data route
+ */
+
+
+// POST /api/analytics/top-defect-parts
+app.post('/api/analytics/top-defect-parts', async (req, res) => {
+    try {
+        const { 
+            fromDate, 
+            toDate, 
+            factoryFilter, 
+            collectionName = 'kensaDB',
+            dbName = 'submittedDB',
+            userRole = 'member',
+            factoryAccess = []
+        } = req.body;
+        
+        if (!fromDate || !toDate) {
+            return res.json({
+                success: false,
+                error: 'fromDate and toDate are required'
+            });
+        }
+
+        // Collection-specific field mappings (same as analytics route)
+        const getCollectionFields = (collectionName) => {
+            switch (collectionName) {
+                case 'kensaDB':
+                    return {
+                        defectField: 'Total_NG',
+                        productionField: 'Process_Quantity',
+                        partNumberField: '品番',
+                        serialNumberField: '背番号',
+                        factoryField: '工場'
+                    };
+                case 'pressDB':
+                    return {
+                        defectField: 'Total_NG',
+                        productionField: 'Process_Quantity',
+                        partNumberField: '品番',
+                        serialNumberField: '背番号',
+                        factoryField: '工場'
+                    };
+                case 'slitDB':
+                    return {
+                        defectField: 'Total_NG',
+                        productionField: 'Process_Quantity',
+                        partNumberField: '品番',
+                        serialNumberField: '背番号',
+                        factoryField: '工場'
+                    };
+                case 'SRSDB':
+                    return {
+                        defectField: 'Total_NG',
+                        productionField: 'Process_Quantity',
+                        partNumberField: '品番',
+                        serialNumberField: '背番号',
+                        factoryField: '工場'
+                    };
+                default:
+                    return {
+                        defectField: 'Total_NG',
+                        productionField: 'Process_Quantity',
+                        partNumberField: '品番',
+                        serialNumberField: '背番号',
+                        factoryField: '工場'
+                    };
+            }
+        };
+
+        const fields = getCollectionFields(collectionName);
+        const db = client.db(dbName);
+        const coll = db.collection(collectionName);
+
+        // Build base match stage with date range
+        const matchStage = {
+            Date: {
+                $gte: fromDate,
+                $lte: toDate
+            }
+        };
+
+        // Apply factory filter (same logic as analytics route)
+        if (factoryFilter && factoryFilter !== 'all') {
+            matchStage[fields.factoryField] = factoryFilter;
+            console.log(`Applied factory filter: ${factoryFilter}`);
+        } else if (userRole !== 'admin' && userRole !== '部長' && factoryAccess && factoryAccess.length > 0) {
+            // Apply role-based restrictions
+            matchStage[fields.factoryField] = { $in: factoryAccess };
+            console.log(`Applied role-based factory restriction: ${factoryAccess.join(', ')}`);
+        }
+
+        console.log(`Fetching top defect parts from ${collectionName}:`, matchStage);
+
+        // Aggregate top defect parts per factory
+        const pipeline = [
+            { $match: matchStage },
+            {
+                $group: {
+                    _id: {
+                        factory: `$${fields.factoryField}`,
+                        partNumber: `$${fields.partNumberField}`,
+                        serialNumber: `$${fields.serialNumberField}`
+                    },
+                    totalProduction: { $sum: `$${fields.productionField}` },
+                    totalDefects: { $sum: `$${fields.defectField}` }
+                }
+            },
+            {
+                $project: {
+                    _id: 0,
+                    factory: '$_id.factory',
+                    partNumber: '$_id.partNumber',
+                    serialNumber: '$_id.serialNumber',
+                    totalProduction: 1,
+                    totalDefects: 1,
+                    defectRate: {
+                        $cond: {
+                            if: { $gt: ['$totalProduction', 0] },
+                            then: { 
+                                $multiply: [
+                                    { $divide: ['$totalDefects', '$totalProduction'] },
+                                    100
+                                ]
+                            },
+                            else: 0
+                        }
+                    }
+                }
+            },
+            // Filter out parts with zero defects for cleaner results
+            { $match: { totalDefects: { $gt: 0 } } },
+            { $sort: { factory: 1, totalDefects: -1 } }
+        ];
+
+        const results = await coll.aggregate(pipeline).toArray();
+
+        console.log(`Found ${results.length} defect parts across all factories`);
+
+        // Group by factory and take top 5 for each
+        const factoryMap = new Map();
+        
+        results.forEach(item => {
+            const factory = item.factory || 'Unknown';
+            
+            if (!factoryMap.has(factory)) {
+                factoryMap.set(factory, []);
+            }
+            
+            const factoryParts = factoryMap.get(factory);
+            if (factoryParts.length < 5) {
+                factoryParts.push({
+                    partNumber: item.partNumber,
+                    serialNumber: item.serialNumber,
+                    totalProduction: item.totalProduction,
+                    totalDefects: item.totalDefects,
+                    defectRate: item.defectRate
+                });
+            }
+        });
+
+        // Convert map to array format
+        const factoryPartsArray = Array.from(factoryMap.entries()).map(([factory, topParts]) => ({
+            factory,
+            topParts
+        }));
+
+        console.log(`Returning top defect parts for ${factoryPartsArray.length} factories`);
+
+        res.json({
+            success: true,
+            data: factoryPartsArray
+        });
+
+    } catch (error) {
+        console.error('Error fetching top defect parts:', error);
+        res.json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+
+// POST /api/analytics/defect-part-details
+// Get detailed records for a specific part (品番 + 背番号)
+app.post('/api/analytics/defect-part-details', async (req, res) => {
+    try {
+        const { 
+            fromDate, 
+            toDate, 
+            partNumber,
+            serialNumber,
+            factory,
+            collectionName = 'kensaDB',
+            dbName = 'submittedDB'
+        } = req.body;
+        
+        if (!fromDate || !toDate || !partNumber) {
+            return res.json({
+                success: false,
+                error: 'fromDate, toDate, and partNumber are required'
+            });
+        }
+
+        // Collection-specific field mappings (same as above)
+        const getCollectionFields = (collectionName) => {
+            switch (collectionName) {
+                case 'kensaDB':
+                    return {
+                        partNumberField: '品番',
+                        serialNumberField: '背番号',
+                        factoryField: '工場'
+                    };
+                case 'pressDB':
+                    return {
+                        partNumberField: '品番',
+                        serialNumberField: '背番号',
+                        factoryField: '工場'
+                    };
+                case 'slitDB':
+                    return {
+                        partNumberField: '品番',
+                        serialNumberField: '背番号',
+                        factoryField: '工場'
+                    };
+                case 'SRSDB':
+                    return {
+                        partNumberField: '品番',
+                        serialNumberField: '背番号',
+                        factoryField: '工場'
+                    };
+                default:
+                    return {
+                        partNumberField: '品番',
+                        serialNumberField: '背番号',
+                        factoryField: '工場'
+                    };
+            }
+        };
+
+        const fields = getCollectionFields(collectionName);
+        const db = client.db(dbName);
+        const coll = db.collection(collectionName);
+
+        // Build match query
+        const matchQuery = {
+            Date: {
+                $gte: fromDate,
+                $lte: toDate
+            },
+            [fields.partNumberField]: partNumber
+        };
+
+        // Add serial number if provided
+        if (serialNumber) {
+            matchQuery[fields.serialNumberField] = serialNumber;
+        }
+
+        // Add factory filter if provided
+        if (factory) {
+            matchQuery[fields.factoryField] = factory;
+        }
+
+        console.log(`Fetching detailed records from ${collectionName}:`, matchQuery);
+
+        // Fetch all matching records
+        const records = await coll.find(matchQuery)
+            .sort({ Date: -1 })
+            .toArray();
+
+        console.log(`Found ${records.length} detailed records`);
+
+        // Get field names dynamically from the first record
+        let fieldNames = [];
+        if (records.length > 0) {
+            fieldNames = Object.keys(records[0]).filter(key => key !== '_id');
+        }
+
+        res.json({
+            success: true,
+            data: {
+                records: records,
+                fieldNames: fieldNames,
+                totalRecords: records.length,
+                collectionName: collectionName
+            }
+        });
+
+    } catch (error) {
+        console.error('Error fetching defect part details:', error);
+        res.json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+
+
+
 
 
 
