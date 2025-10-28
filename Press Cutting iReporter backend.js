@@ -1434,7 +1434,7 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
       document.body.classList.remove('flash-green');
       document.getElementById('uploadingModal').style.display = 'none';
       window.location.reload();
-      resetForm();
+      resetForm(true); // Skip confirmation dialog after successful submission
     };
 
   } catch (error) {
@@ -2483,15 +2483,17 @@ function showSuccessPrompt(message, duration = 3500) {
 
 
 // Function to reset everything and reload the page
-function resetForm() {
-  // Show confirmation dialog
-  const userConfirmed = confirm(
-    "すべてのデータが削除されます。本当にリセットしますか？\n\nAll data will be deleted. Are you sure you want to reset?"
-  );
-  
-  // If user clicks "Cancel", exit the function
-  if (!userConfirmed) {
-    return;
+function resetForm(skipConfirmation = false) {
+  // Show confirmation dialog only if not skipped
+  if (!skipConfirmation) {
+    const userConfirmed = confirm(
+      "すべてのデータが削除されます。本当にリセットしますか？\n\nAll data will be deleted. Are you sure you want to reset?"
+    );
+    
+    // If user clicks "Cancel", exit the function
+    if (!userConfirmed) {
+      return;
+    }
   }
 
   const excludedInputs = ['process']; // IDs or names of inputs to exclude from reset
