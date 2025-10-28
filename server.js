@@ -4245,7 +4245,8 @@ app.post('/api/analytics-data', async (req, res) => {
                            'Counters.counter-9', 'Counters.counter-10', 'Counters.counter-11', 'Counters.counter-12'],
             workerField: 'Worker_Name', // Actual field name
             equipmentField: '設備',
-            cycleTimeField: 'Cycle_Time' // Actual field name
+            cycleTimeField: 'Cycle_Time', // Actual field name
+            productionField: 'Process_Quantity' // ✅ ADDED: Production quantity field
           };
         case 'pressDB':
           return {
@@ -4254,7 +4255,8 @@ app.post('/api/analytics-data', async (req, res) => {
             counterFields: [],
             workerField: 'Worker_Name', // Actual field name
             equipmentField: '設備', // Actual field name
-            cycleTimeField: 'Cycle_Time' // Actual field name
+            cycleTimeField: 'Cycle_Time', // Actual field name
+            productionField: 'Process_Quantity' // ✅ ADDED: Production quantity field
           };
         case 'slitDB':
           return {
@@ -4263,7 +4265,8 @@ app.post('/api/analytics-data', async (req, res) => {
             counterFields: [],
             workerField: 'Worker_Name', // Actual field name
             equipmentField: '設備', // Actual field name
-            cycleTimeField: 'Cycle_Time' // Actual field name
+            cycleTimeField: 'Cycle_Time', // Actual field name
+            productionField: 'Process_Quantity' // ✅ ADDED: Production quantity field
           };
         case 'SRSDB':
           return {
@@ -4272,7 +4275,8 @@ app.post('/api/analytics-data', async (req, res) => {
             counterFields: [],
             workerField: 'Worker_Name', // Actual field name
             equipmentField: '設備', // Actual field name
-            cycleTimeField: 'Cycle_Time' // Actual field name
+            cycleTimeField: 'Cycle_Time', // Actual field name
+            productionField: 'Process_Quantity' // ✅ ADDED: Production quantity field
           };
         default:
           return {
@@ -4282,7 +4286,8 @@ app.post('/api/analytics-data', async (req, res) => {
                            'Counters.counter-9', 'Counters.counter-10', 'Counters.counter-11', 'Counters.counter-12'],
             workerField: 'Worker_Name',
             equipmentField: '設備',
-            cycleTimeField: 'Cycle_Time'
+            cycleTimeField: 'Cycle_Time',
+            productionField: 'Process_Quantity' // ✅ ADDED: Production quantity field
           };
       }
     };
@@ -4314,16 +4319,16 @@ app.post('/api/analytics-data', async (req, res) => {
             { $limit: 2 }
           ],
           
-          // Summary statistics
+          // Summary statistics - ✅ FIXED: Use Process_Quantity instead of counting records
           summary: [
             {
               $group: {
                 _id: null,
-                totalProduction: { $sum: 1 }, // Count of records
+                totalProduction: { $sum: "$Process_Quantity" }, // ✅ FIXED: Sum Process_Quantity
                 totalDefects: { $sum: totalDefectsExpression },
-                avgCycleTime: { $avg: `$${fields.cycleTimeField}` },
+                avgCycleTime: { $avg: "$Cycle_Time" },
                 factories: { $addToSet: "$工場" },
-                workers: { $addToSet: `$${fields.workerField}` }
+                workers: { $addToSet: "$Worker_Name" }
               }
             },
             {
@@ -4345,14 +4350,14 @@ app.post('/api/analytics-data', async (req, res) => {
             }
           ],
           
-          // Daily trend analysis
+          // Daily trend analysis - ✅ FIXED: Use Process_Quantity instead of counting records
           dailyTrend: [
             {
               $group: {
                 _id: "$Date",
-                totalProduction: { $sum: 1 },
+                totalProduction: { $sum: "$Process_Quantity" }, // ✅ FIXED: Sum Process_Quantity
                 totalDefects: { $sum: totalDefectsExpression },
-                avgCycleTime: { $avg: `$${fields.cycleTimeField}` }
+                avgCycleTime: { $avg: "$Cycle_Time" }
               }
             },
             {
@@ -4374,14 +4379,14 @@ app.post('/api/analytics-data', async (req, res) => {
             { $sort: { date: 1 } }
           ],
           
-          // Factory comparison
+          // Factory comparison - ✅ FIXED: Use Process_Quantity instead of counting records
           factoryStats: [
             {
               $group: {
                 _id: "$工場",
-                totalProduction: { $sum: 1 },
+                totalProduction: { $sum: "$Process_Quantity" }, // ✅ FIXED: Sum Process_Quantity
                 totalDefects: { $sum: totalDefectsExpression },
-                avgCycleTime: { $avg: `$${fields.cycleTimeField}` }
+                avgCycleTime: { $avg: "$Cycle_Time" }
               }
             },
             {
@@ -4403,14 +4408,14 @@ app.post('/api/analytics-data', async (req, res) => {
             { $sort: { totalProduction: -1 } }
           ],
           
-          // Worker performance (top 10)
+          // Worker performance (top 10) - ✅ FIXED: Use Process_Quantity instead of counting records
           workerStats: [
             {
               $group: {
-                _id: `$${fields.workerField}`,
-                totalProduction: { $sum: 1 },
+                _id: "$Worker_Name",
+                totalProduction: { $sum: "$Process_Quantity" }, // ✅ FIXED: Sum Process_Quantity
                 totalDefects: { $sum: totalDefectsExpression },
-                avgCycleTime: { $avg: `$${fields.cycleTimeField}` }
+                avgCycleTime: { $avg: "$Cycle_Time" }
               }
             },
             {
@@ -4433,13 +4438,13 @@ app.post('/api/analytics-data', async (req, res) => {
             { $limit: 10 }
           ],
           
-          // Equipment efficiency
+          // Equipment efficiency - ✅ FIXED: Use Process_Quantity instead of counting records
           equipmentStats: [
             {
               $group: {
-                _id: `$${fields.equipmentField}`,
-                totalProduction: { $sum: 1 },
-                avgCycleTime: { $avg: `$${fields.cycleTimeField}` }
+                _id: "$設備",
+                totalProduction: { $sum: "$Process_Quantity" }, // ✅ FIXED: Sum Process_Quantity
+                avgCycleTime: { $avg: "$Cycle_Time" }
               }
             },
             {
@@ -4791,7 +4796,7 @@ app.post('/api/analytics-data', async (req, res) => {
     };
     
     console.log('✅ Analytics data computed successfully');
-    console.log(`📊 Production Summary: ${combinedData.summary?.[0]?.totalProduction || 0} production, ${combinedData.summary?.[0]?.totalDefects || 0} defects`);
+    console.log(`📊 Production Summary: ${combinedData.summary?.[0]?.totalProduction || 0} production quantity, ${combinedData.summary?.[0]?.totalDefects || 0} defects`);
     console.log(`🌡️ Climate Data: ${climateData.temperatureTrend?.length || 0} temperature readings, ${climateData.humidityTrend?.length || 0} humidity readings`);
     
     // Debug: Log sample records to understand data structure
@@ -4799,10 +4804,10 @@ app.post('/api/analytics-data', async (req, res) => {
       console.log(`🔍 Sample ${collectionName} records:`, JSON.stringify(combinedData.sampleRecords, null, 2));
     }
     
-    // Debug: Log defect calculation details
+    // Debug: Log production calculation details
+    console.log(`🧮 Production calculation using ${fields.productionField} field for ${collectionName}`);
     console.log(`🧮 Defect calculation using ${collectionName === 'SRSDB' ? 'SRS_Total_NG' : 'Total_NG'} field for ${collectionName}`);
     console.log('📊 Worker field:', fields.workerField, '| Equipment field:', fields.equipmentField, '| Cycle time field:', fields.cycleTimeField);
-    console.log('📊 Total defects expression:', JSON.stringify(totalDefectsExpression, null, 2));
     
     return res.json({
       success: true,
@@ -4823,6 +4828,8 @@ app.post('/api/analytics-data', async (req, res) => {
     });
   }
 });
+
+
 
 
 
