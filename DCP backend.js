@@ -4369,13 +4369,19 @@ function updateTotal() {
   }
 
   // Update the Total_NG field
-  document.getElementById('Total_NG').value = totalNG;
+  const totalNGElement = document.getElementById('Total_NG');
+  if (totalNGElement) {
+    totalNGElement.value = totalNG;
+  }
 
   // Calculate Total
   const total = processQuantity - totalNG;
 
   // Update the Total field
-  document.getElementById('total').value = total;
+  const totalElement = document.getElementById('total');
+  if (totalElement) {
+    totalElement.value = total;
+  }
 }
 
 // Attach updateTotal to relevant events
