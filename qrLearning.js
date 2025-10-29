@@ -10,10 +10,10 @@ let currentUser = null;
 let pairedSamples = []; // Array of {customerQR, internalQR, timestamp, id} pairs
 let mismatchSamples = []; // Array of incorrect pairs for negative learning
 let learnedPatterns = null;
-let scanningMode = null; // 'customer', 'internal', or 'waiting'
-let currentPairIndex = 0;
-let waitingForInternal = false;
+let collectionMode = null; // 'correct' or 'mismatch'
+let scanningMode = null; // 'customer' or 'internal'
 let currentCustomerQR = null;
+let waitingForInternal = false;
 
 // DOM Cache
 const domCache = {};
@@ -25,7 +25,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Cache DOM elements
   ['authModal', 'conflictModal', 'testModal', 'learningCustomerSelect', 
    'pairedSamples', 'scanStatus', 'scanInstruction', 'scanDetails',
-   'startPairedLearning', 'markMismatch', 'finishPairing', 'pairCount', 'mismatchCount',
+   'startCorrectPairs', 'startMismatchPairs', 'finishLearning', 'pairCount', 'mismatchCount',
    'analyzePatterns', 'testPattern', 'clearLearning', 'deleteCustomerData',
    'learningLog', 'progressFill', 'progressText', 'success-sound', 'error-sound'].forEach(id => {
     domCache[id] = document.getElementById(id);
@@ -206,14 +206,14 @@ function enableLearningInterface() {
 
 // Enable/disable buttons
 function enableButtons() {
-  ['startPairedLearning', 'analyzePatterns', 'clearAllPairs', 'deleteCustomerData'].forEach(id => {
+  ['startCorrectPairs', 'startMismatchPairs', 'analyzePatterns', 'clearAllPairs', 'deleteCustomerData'].forEach(id => {
     if (domCache[id]) domCache[id].disabled = false;
   });
   updateButtonStates();
 }
 
 function disableButtons() {
-  ['startPairedLearning', 'analyzePatterns', 'clearAllPairs', 'deleteCustomerData'].forEach(id => {
+  ['startCorrectPairs', 'startMismatchPairs', 'analyzePatterns', 'clearAllPairs', 'deleteCustomerData'].forEach(id => {
     if (domCache[id]) domCache[id].disabled = true;
   });
 }
@@ -278,7 +278,10 @@ function clearLearning() {
   pairedSamples = [];
   mismatchSamples = [];
   learnedPatterns = null;
+  collectionMode = null;
   scanningMode = null;
+  currentCustomerQR = null;
+  waitingForInternal = false;
   
   updatePairedSamplesDisplay();
   updateProgress(0, 'Cleared all data');
@@ -400,139 +403,73 @@ function goBack() {
 // ============================================
 
 // Start paired learning mode
-function startPairedLearning() {
+// Start collecting correct pairs
+function startCorrectPairs() {
+  console.log('🔵 startCorrectPairs() called');
+  
   const customerType = domCache['learningCustomerSelect']?.value;
   if (!customerType) {
     logMessage('❌ Please select a customer first');
     return;
   }
 
+  collectionMode = 'correct';
   scanningMode = 'customer';
   waitingForInternal = false;
   currentCustomerQR = null;
   
-  updateScanInstruction('Scan customer QR code');
-  updateScanDetails('Waiting for customer QR...');
+  console.log('Started CORRECT pair collection mode');
+  console.log('collectionMode:', collectionMode);
+  console.log('scanningMode:', scanningMode);
+  
+  updateScanInstruction('Scan customer QR code (for correct pair)');
+  updateScanDetails('正しいペア収集モード - 正しい組み合わせをスキャン');
   
   // Update button states
-  domCache['startPairedLearning'].disabled = true;
-  domCache['finishPairing'].disabled = false;
-  domCache['markMismatch'].disabled = true;
+  domCache['startCorrectPairs'].disabled = true;
+  domCache['startMismatchPairs'].disabled = false;
+  domCache['finishLearning'].disabled = false;
   
-  logMessage('🎯 Paired learning started. Scan customer QR first, then internal QR.');
+  logMessage('🔵 正しいペア収集開始 - お客様QRをスキャンしてください');
   playSuccessSound();
 }
 
-// QR scan handling is done by the existing handleQRScan function
-
-// Process scanned QR code
-function processScannedQR(qrCode) {
-  console.log('Scanned QR:', qrCode, 'Mode:', scanningMode);
+// Start collecting mismatch pairs
+function startMismatchPairs() {
+  console.log('🔴 startMismatchPairs() called');
   
-  if (scanningMode === 'customer') {
-    // First scan: Customer QR
-    currentCustomerQR = qrCode;
-    waitingForInternal = true;
-    scanningMode = 'internal';
-    
-    updateScanInstruction('Now scan the corresponding internal QR');
-    updateScanDetails(`Customer QR captured: ${qrCode.substring(0, 50)}...`);
-    
-    domCache['markMismatch'].disabled = false;
-    logMessage(`✅ Customer QR captured: ${qrCode.substring(0, 50)}...`);
-    playSuccessSound();
-    
-  } else if (scanningMode === 'internal' && waitingForInternal) {
-    // Second scan: Internal QR
-    const internalQR = qrCode;
-    
-    // Create paired sample
-    const pair = {
-      id: Date.now(),
-      customerQR: currentCustomerQR,
-      internalQR: internalQR,
-      timestamp: new Date().toISOString(),
-      type: 'match'
-    };
-    
-    pairedSamples.push(pair);
-    
-    // Reset for next pair
-    currentCustomerQR = null;
-    waitingForInternal = false;
-    scanningMode = 'customer';
-    
-    updateScanInstruction('Scan next customer QR code');
-    updateScanDetails('Ready for next pair...');
-    updatePairedSamplesDisplay();
-    updateStatistics();
-    
-    domCache['markMismatch'].disabled = true;
-    domCache['analyzePatterns'].disabled = pairedSamples.length < 3;
-    
-    logMessage(`✅ Pair created: Customer → Internal`);
-    playSuccessSound();
-  }
-}
-
-// Mark current pair as mismatch
-function markMismatch() {
-  if (!currentCustomerQR || !waitingForInternal) {
-    logMessage('❌ No customer QR waiting for internal QR');
+  const customerType = domCache['learningCustomerSelect']?.value;
+  if (!customerType) {
+    logMessage('❌ Please select a customer first');
     return;
   }
 
-  // Ask user to scan the incorrect internal QR for negative learning
-  updateScanInstruction('Scan the INCORRECT internal QR for this customer');
-  updateScanDetails('This will teach the system what NOT to match');
+  collectionMode = 'mismatch';
+  scanningMode = 'customer';
+  waitingForInternal = false;
+  currentCustomerQR = null;
   
-  // Modify the scanning behavior temporarily
-  const originalMode = scanningMode;
-  scanningMode = 'mismatch';
+  console.log('Started MISMATCH pair collection mode');
+  console.log('collectionMode:', collectionMode);
+  console.log('scanningMode:', scanningMode);
   
-  // Set up one-time listener for mismatch QR
-  const handleMismatchScan = (qrCode) => {
-    const mismatchPair = {
-      id: Date.now(),
-      customerQR: currentCustomerQR,
-      internalQR: qrCode,
-      timestamp: new Date().toISOString(),
-      type: 'mismatch'
-    };
-    
-    mismatchSamples.push(mismatchPair);
-    
-    // Reset for next pair
-    currentCustomerQR = null;
-    waitingForInternal = false;
-    scanningMode = 'customer';
-    
-    updateScanInstruction('Scan next customer QR code');
-    updateScanDetails('Ready for next pair...');
-    updatePairedSamplesDisplay();
-    updateStatistics();
-    
-    domCache['markMismatch'].disabled = true;
-    
-    logMessage(`❌ Mismatch pair recorded for negative learning`);
-    playErrorSound();
-  };
+  updateScanInstruction('Scan customer QR code (for mismatch pair)');
+  updateScanDetails('不一致ペア収集モード - 間違った組み合わせをスキャン');
   
-  // Replace the normal QR processing temporarily
-  const originalProcessScannedQR = window.processScannedQR;
-  window.processScannedQR = handleMismatchScan;
+  // Update button states
+  domCache['startCorrectPairs'].disabled = false;
+  domCache['startMismatchPairs'].disabled = true;
+  domCache['finishLearning'].disabled = false;
   
-  // Restore after 30 seconds or after scan
-  setTimeout(() => {
-    window.processScannedQR = originalProcessScannedQR;
-    if (scanningMode === 'mismatch') {
-      scanningMode = originalMode;
-    }
-  }, 30000);
+  logMessage('🔴 不一致ペア収集開始 - お客様QRをスキャンしてください');
+  playErrorSound();
 }
 
-// Finish pairing mode
-function finishPairing() {
+// Finish learning and stop collection
+function finishLearning() {
+  console.log('🟢 finishLearning() called');
+  
+  collectionMode = null;
   scanningMode = null;
   waitingForInternal = false;
   currentCustomerQR = null;
@@ -541,15 +478,112 @@ function finishPairing() {
   updateScanDetails(`Collected ${pairedSamples.length} correct pairs and ${mismatchSamples.length} mismatches`);
   
   // Update button states
-  domCache['startPairedLearning'].disabled = false;
-  domCache['finishPairing'].disabled = true;
-  domCache['markMismatch'].disabled = true;
+  domCache['startCorrectPairs'].disabled = false;
+  domCache['startMismatchPairs'].disabled = false;
+  domCache['finishLearning'].disabled = true;
   domCache['analyzePatterns'].disabled = pairedSamples.length < 3;
   
-  logMessage(`🏁 Paired learning finished. Ready for pattern analysis.`);
+  logMessage(`🟢 学習完了 - ${pairedSamples.length}個の正しいペアと${mismatchSamples.length}個の不一致ペアを収集しました`);
   playSuccessSound();
 }
 
+// QR scan handling is done by the existing handleQRScan function
+
+// Process scanned QR code
+function processScannedQR(qrCode) {
+  console.log('🔍 processScannedQR called');
+  console.log('Scanned QR:', qrCode);
+  console.log('Current collectionMode:', collectionMode);
+  console.log('Current scanningMode:', scanningMode);
+  console.log('waitingForInternal:', waitingForInternal);
+  console.log('currentCustomerQR:', currentCustomerQR);
+  
+  // Check if we're in collection mode
+  if (!collectionMode) {
+    logMessage('⚠️ Please click "正しいペア収集開始" or "不一致ペア収集開始" first');
+    return;
+  }
+  
+  if (scanningMode === 'customer') {
+    // Scanning customer QR
+    console.log('🟢 Processing CUSTOMER scan');
+    currentCustomerQR = qrCode;
+    waitingForInternal = true;
+    scanningMode = 'internal';
+    
+    const modeText = collectionMode === 'correct' ? '正しい' : '間違った';
+    updateScanInstruction(`Now scan the ${collectionMode === 'correct' ? 'CORRECT' : 'WRONG'} internal QR`);
+    updateScanDetails(`Customer QR captured. Next: ${modeText}社内QRをスキャン`);
+    
+    console.log('After customer scan:');
+    console.log('currentCustomerQR:', currentCustomerQR?.substring(0, 50) + '...');
+    console.log('waitingForInternal:', waitingForInternal);
+    console.log('scanningMode:', scanningMode);
+    
+    logMessage(`✅ お客様QR取得: ${qrCode.substring(0, 50)}...`);
+    playSuccessSound();
+    
+  } else if (scanningMode === 'internal' && waitingForInternal) {
+    // Scanning internal QR
+    const internalQR = qrCode;
+    
+    if (collectionMode === 'correct') {
+      console.log('✅ Processing CORRECT pair');
+      // Create correct pair
+      const pair = {
+        id: Date.now(),
+        customerQR: currentCustomerQR,
+        internalQR: internalQR,
+        timestamp: new Date().toISOString(),
+        type: 'match'
+      };
+      
+      pairedSamples.push(pair);
+      console.log('Created correct pair. Total correct pairs:', pairedSamples.length);
+      
+      logMessage(`✅ 正しいペア #${pairedSamples.length} 追加完了`);
+      playSuccessSound();
+      
+    } else if (collectionMode === 'mismatch') {
+      console.log('❌ Processing MISMATCH pair');
+      // Create mismatch pair
+      const mismatchPair = {
+        id: Date.now(),
+        customerQR: currentCustomerQR,
+        internalQR: internalQR,
+        timestamp: new Date().toISOString(),
+        type: 'mismatch'
+      };
+      
+      mismatchSamples.push(mismatchPair);
+      console.log('Created mismatch pair. Total mismatch pairs:', mismatchSamples.length);
+      
+      logMessage(`❌ 不一致ペア #${mismatchSamples.length} 追加完了`);
+      playErrorSound();
+    }
+    
+    // Reset for next pair (but stay in same collection mode)
+    currentCustomerQR = null;
+    waitingForInternal = false;
+    scanningMode = 'customer';
+    
+    const modeText = collectionMode === 'correct' ? '正しいペア' : '不一致ペア';
+    updateScanInstruction(`Scan next customer QR code (${modeText}モード)`);
+    updateScanDetails(`次のお客様QRをスキャンしてください - ${modeText}収集中`);
+    updatePairedSamplesDisplay();
+    updateStatistics();
+    
+    domCache['analyzePatterns'].disabled = pairedSamples.length < 3;
+    
+  } else {
+    console.log('⚠️ No matching condition in processScannedQR');
+    console.log('collectionMode:', collectionMode);
+    console.log('scanningMode:', scanningMode);
+    console.log('waitingForInternal:', waitingForInternal);
+  }
+}
+
+// Mark current pair as mismatch
 // Update scan instruction display
 function updateScanInstruction(message) {
   if (domCache['scanInstruction']) {
@@ -654,15 +688,25 @@ function clearAllPairs() {
 
 // Enable paired learning controls
 function enablePairedLearning() {
-  if (domCache['startPairedLearning']) {
-    domCache['startPairedLearning'].disabled = false;
+  console.log('🟢 enablePairedLearning() - Enabling collection buttons');
+  if (domCache['startCorrectPairs']) {
+    domCache['startCorrectPairs'].disabled = false;
+    console.log('Blue button (正しいペア収集開始) enabled');
+  }
+  if (domCache['startMismatchPairs']) {
+    domCache['startMismatchPairs'].disabled = false;
+    console.log('Red button (不一致ペア収集開始) enabled');
   }
 }
 
 // Disable paired learning controls
 function disablePairedLearning() {
-  if (domCache['startPairedLearning']) {
-    domCache['startPairedLearning'].disabled = true;
+  console.log('🔴 disablePairedLearning() - Disabling collection buttons');
+  if (domCache['startCorrectPairs']) {
+    domCache['startCorrectPairs'].disabled = true;
+  }
+  if (domCache['startMismatchPairs']) {
+    domCache['startMismatchPairs'].disabled = true;
   }
 }
 
@@ -821,9 +865,9 @@ function playErrorSound() {
 }
 
 // Expose functions for button clicks
-window.startPairedLearning = startPairedLearning;
-window.markMismatch = markMismatch;
-window.finishPairing = finishPairing;
+window.startCorrectPairs = startCorrectPairs;
+window.startMismatchPairs = startMismatchPairs;
+window.finishLearning = finishLearning;
 window.analyzePatterns = analyzePatterns;
 window.removePair = removePair;
 window.removeMismatch = removeMismatch;
