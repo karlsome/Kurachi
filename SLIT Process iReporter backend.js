@@ -691,7 +691,7 @@ document.querySelector('form[name="contact-form"]').addEventListener("submit", a
     const 背番号 = document.getElementById("sub-dropdown").value;
     const Total = parseInt(document.getElementById("total").value, 10) || 0;
     const Worker_Name = document.getElementById("Machine Operator").value;
-    const Date = document.getElementById("Lot No.").value;
+    const WorkDate = document.getElementById("Lot No.").value;
     const Time_start = document.getElementById("Start Time").value;
     const Time_end = document.getElementById("End Time").value;
     const 設備 = document.getElementById("process").value;
@@ -837,7 +837,7 @@ document.querySelector('form[name="contact-form"]').addEventListener("submit", a
       return;
     }
 
-    if (!Date || Date.trim() === '') {
+    if (!WorkDate || WorkDate.trim() === '') {
       uploadingModal.style.display = 'none';
       scanAlertText.innerText = '加工日が必要です / Work Date is required';
       scanAlertModal.style.display = 'block';
@@ -976,7 +976,7 @@ document.querySelector('form[name="contact-form"]').addEventListener("submit", a
       背番号,
       Total,
       Worker_Name,
-      Date,
+      Date: WorkDate,
       Time_start,
       Time_end,
       設備,
@@ -1007,7 +1007,7 @@ document.querySelector('form[name="contact-form"]').addEventListener("submit", a
         factory: 工場,
         machine: 設備,
         worker: Worker_Name,
-        date: Date,
+        date: WorkDate,
         sebanggo: 背番号,
       });
     }
