@@ -10719,6 +10719,1025 @@ app.post("/customerBulkDeleteWithHistory", async (req, res) => {
 //FREYA CUSTOMER ACCESS BACKEND END
 
 
+// ============================================
+// QR LEARNING SYSTEM BACKEND
+// ============================================
+
+// Validate user permissions for learning mode
+app.post('/qr-learning/validate-user', async (req, res) => {
+  try {
+    const { username } = req.body;
+    
+    if (!username) {
+      return res.status(400).json({ error: 'Username is required' });
+    }
+
+    await client.connect();
+    const database = client.db("Sasaki_Coating_MasterDB");
+    const users = database.collection("users");
+    
+    // Find user by username
+    const user = await users.findOne({ username: username });
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    // Check if user has authorized role
+    const authorizedRoles = ['係長', '課長', '部長', 'admin'];
+    const hasPermission = authorizedRoles.includes(user.role);
+    
+    if (!hasPermission) {
+      return res.status(403).json({ 
+        error: 'Insufficient permissions',
+        userRole: user.role,
+        requiredRoles: authorizedRoles
+      });
+    }
+    
+    res.json({
+      success: true,
+      user: {
+        username: user.username,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        role: user.role
+      }
+    });
+    
+  } catch (error) {
+    console.error('Error validating user:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get pattern hash for a specific customer
+app.get('/qr-patterns/hash/:customerType', async (req, res) => {
+  try {
+    const { customerType } = req.params;
+    
+    await client.connect();
+    const database = client.db("Sasaki_Coating_MasterDB");
+    const patterns = database.collection("learnedQRDB");
+    
+    // Only return hash for DEPLOYED patterns
+    const pattern = await patterns.findOne({ 
+      customerType: customerType,
+      status: 'deployed'
+    });
+    
+    if (!pattern) {
+      return res.status(404).json({ error: 'No deployed patterns found for customer' });
+    }
+    
+    res.json({ hash: pattern.hash });
+    
+  } catch (error) {
+    console.error('Error getting pattern hash:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Check if pattern exists for customer (for testing)
+app.get('/qr-learning/check-pattern/:customerType', async (req, res) => {
+  try {
+    const { customerType } = req.params;
+    
+    await client.connect();
+    const database = client.db("Sasaki_Coating_MasterDB");
+    const patterns = database.collection("learnedQRDB");
+    
+    // Check if ANY pattern exists (draft or deployed)
+    const pattern = await patterns.findOne({ customerType: customerType });
+    
+    if (!pattern) {
+      return res.json({ exists: false });
+    }
+    
+    res.json({ 
+      exists: true,
+      status: pattern.status,
+      hash: pattern.hash,
+      lastUpdated: pattern.lastUpdated
+    });
+    
+  } catch (error) {
+    console.error('Error checking pattern:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get patterns for a specific customer
+app.get('/qr-patterns/:customerType', async (req, res) => {
+  try {
+    const { customerType } = req.params;
+    
+    await client.connect();
+    const database = client.db("Sasaki_Coating_MasterDB");
+    const patterns = database.collection("learnedQRDB");
+    
+    // Only fetch DEPLOYED patterns for tablets
+    const pattern = await patterns.findOne({ 
+      customerType: customerType,
+      status: 'deployed'
+    });
+    
+    if (!pattern) {
+      return res.status(404).json({ error: 'No deployed patterns found for customer' });
+    }
+    
+    res.json(pattern);
+    
+  } catch (error) {
+    console.error('Error getting patterns:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Learn patterns from training data
+app.post('/qr-learning/learn-patterns', async (req, res) => {
+  try {
+    console.log('=== QR Learning Request ===');
+    console.log('Request body keys:', Object.keys(req.body));
+    console.log('Customer type:', req.body.customerType);
+    console.log('Customer samples count:', req.body.customerSamples?.length);
+    console.log('Internal samples count:', req.body.internalSamples?.length);
+    console.log('Mismatch samples count:', req.body.mismatchSamples?.length);
+    console.log('Trained by:', req.body.trainedBy);
+    
+    const { customerType, customerSamples, internalSamples, mismatchSamples, trainedBy } = req.body;
+    
+    if (!customerType || !customerSamples || !internalSamples || !trainedBy) {
+      console.log('❌ Missing required data:', {
+        hasCustomerType: !!customerType,
+        hasCustomerSamples: !!customerSamples,
+        hasInternalSamples: !!internalSamples,
+        hasTrainedBy: !!trainedBy
+      });
+      return res.status(400).json({ error: 'Missing required data' });
+    }
+    
+    if (customerSamples.length < 3 || internalSamples.length < 3) {
+      console.log('❌ Insufficient samples:', {
+        customerSamplesCount: customerSamples.length,
+        internalSamplesCount: internalSamples.length
+      });
+      return res.status(400).json({ error: 'Need at least 3 samples of each type' });
+    }
+    
+    // Analyze patterns using the pattern analysis algorithm
+    const analysisResult = await analyzeQRPatterns(customerSamples, internalSamples);
+    
+    if (!analysisResult.success) {
+      return res.status(400).json({ 
+        error: 'Pattern analysis failed',
+        conflicts: analysisResult.conflicts,
+        message: analysisResult.message
+      });
+    }
+    
+    // Generate hash for the pattern
+    const patternHash = generatePatternHash(analysisResult);
+    
+    // Prepare pattern record for database
+    const patternRecord = {
+      customerType: customerType,
+      status: 'draft', // New patterns start as draft (not deployed)
+      hash: patternHash,
+      extractionRules: analysisResult.extractionRules,
+      detectionRules: analysisResult.detectionRules,
+      trainingData: {
+        customerSamples: customerSamples,
+        internalSamples: internalSamples,
+        mismatchSamples: mismatchSamples || [] // Include negative examples
+      },
+      metadata: {
+        trainedBy: trainedBy,
+        trainingDate: new Date().toISOString(),
+        confidence: analysisResult.confidence,
+        sampleCount: {
+          customer: customerSamples.length,
+          internal: internalSamples.length,
+          mismatch: mismatchSamples?.length || 0
+        }
+      },
+      lastUpdated: new Date().toISOString()
+    };
+    
+    await client.connect();
+    const database = client.db("Sasaki_Coating_MasterDB");
+    const patterns = database.collection("learnedQRDB");
+    
+    // Upsert the pattern (update if exists, insert if not)
+    await patterns.replaceOne(
+      { customerType: customerType },
+      patternRecord,
+      { upsert: true }
+    );
+    
+    res.json({
+      success: true,
+      hash: patternHash,
+      confidence: analysisResult.confidence,
+      extractionRules: analysisResult.extractionRules,
+      detectionRules: analysisResult.detectionRules
+    });
+    
+  } catch (error) {
+    console.error('Error learning patterns:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Extract product from customer QR using learned patterns
+app.post('/qr-learning/extract-product', async (req, res) => {
+  try {
+    console.log('=== Extract Product Request ===');
+    const { customerType, customerQR } = req.body;
+    
+    if (!customerType || !customerQR) {
+      return res.status(400).json({ error: 'Missing required data' });
+    }
+    
+    await client.connect();
+    const database = client.db("Sasaki_Coating_MasterDB");
+    const patterns = database.collection("learnedQRDB");
+    
+    // Get learned pattern for this customer
+    const learnedPattern = await patterns.findOne({ customerType: customerType });
+    
+    if (!learnedPattern) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'No learned pattern found for this customer' 
+      });
+    }
+    
+    // Try to extract product using extraction rules
+    let extractedProduct = null;
+    
+    for (const rule of learnedPattern.extractionRules) {
+      if (rule.type === 'regex') {
+        const regex = new RegExp(rule.pattern);
+        const match = customerQR.match(regex);
+        
+        if (match && match[rule.captureGroup || 0]) {
+          extractedProduct = match[rule.captureGroup || 0];
+          
+          // Apply formatting if specified
+          if (rule.formatting) {
+            extractedProduct = applyFormattingServer(extractedProduct, rule.formatting);
+          }
+          
+          console.log('✅ Product extracted via regex:', extractedProduct);
+          break;
+        }
+      } else if (rule.type === 'position') {
+        // Position-based extraction (e.g., third part of space-separated QR)
+        const delimiter = new RegExp(rule.delimiter || '\\s+');
+        const parts = customerQR.split(delimiter);
+        
+        console.log(`Position extraction: split into ${parts.length} parts, looking for part ${rule.partIndex}`);
+        
+        if (parts.length > rule.partIndex) {
+          let part = parts[rule.partIndex];
+          
+          // Apply substring extraction if specified
+          if (rule.substring) {
+            part = part.substring(rule.substring.start, rule.substring.end);
+            console.log(`Substring extracted: ${part}`);
+          }
+          
+          // Apply formatting if specified
+          if (rule.formatting) {
+            part = applyFormattingServer(part, rule.formatting);
+            console.log(`After formatting: ${part}`);
+          }
+          
+          extractedProduct = part;
+          console.log('✅ Product extracted via position:', extractedProduct);
+          break;
+        } else {
+          console.log(`❌ Position extraction failed: only ${parts.length} parts found`);
+        }
+      }
+    }
+    
+    if (extractedProduct) {
+      res.json({
+        success: true,
+        product: extractedProduct,
+        customerQR: customerQR
+      });
+    } else {
+      res.json({
+        success: false,
+        error: 'Could not extract product from customer QR',
+        customerQR: customerQR
+      });
+    }
+    
+  } catch (error) {
+    console.error('Error extracting product:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Deploy learned pattern (make it available for tablets)
+app.post('/qr-learning/deploy-pattern', async (req, res) => {
+  try {
+    console.log('=== Deploy Pattern Request ===');
+    const { customerType, deployedBy } = req.body;
+    
+    if (!customerType || !deployedBy) {
+      return res.status(400).json({ error: 'Missing required data' });
+    }
+    
+    await client.connect();
+    const database = client.db("Sasaki_Coating_MasterDB");
+    const patterns = database.collection("learnedQRDB");
+    
+    // Find the draft pattern
+    const draftPattern = await patterns.findOne({ 
+      customerType: customerType,
+      status: 'draft'
+    });
+    
+    if (!draftPattern) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'No draft pattern found for this customer' 
+      });
+    }
+    
+    // Generate new hash for deployment (to invalidate caches)
+    const deploymentHash = require('crypto')
+      .createHash('md5')
+      .update(JSON.stringify(draftPattern.extractionRules) + Date.now())
+      .digest('hex')
+      .substring(0, 16);
+    
+    // Update pattern to deployed status
+    const updateResult = await patterns.updateOne(
+      { customerType: customerType, status: 'draft' },
+      { 
+        $set: { 
+          status: 'deployed',
+          hash: deploymentHash,
+          deployedBy: deployedBy,
+          deployedAt: new Date().toISOString(),
+          lastUpdated: new Date().toISOString()
+        } 
+      }
+    );
+    
+    if (updateResult.modifiedCount > 0) {
+      console.log('✅ Pattern deployed:', customerType);
+      res.json({
+        success: true,
+        message: 'Pattern deployed successfully',
+        customerType: customerType,
+        hash: deploymentHash,
+        status: 'deployed'
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: 'Failed to deploy pattern'
+      });
+    }
+    
+  } catch (error) {
+    console.error('Error deploying pattern:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Test learned patterns
+app.post('/qr-learning/test-patterns', async (req, res) => {
+  try {
+    const { customerType, testSamples } = req.body;
+    
+    if (!customerType || !testSamples) {
+      return res.status(400).json({ error: 'Missing required data' });
+    }
+    
+    await client.connect();
+    const database = client.db("Sasaki_Coating_MasterDB");
+    const patterns = database.collection("learnedQRDB");
+    
+    const pattern = await patterns.findOne({ customerType: customerType });
+    
+    if (!pattern) {
+      return res.status(404).json({ error: 'No patterns found for customer' });
+    }
+    
+    // Test each sample against the learned patterns
+    const testResults = testSamples.map(sample => {
+      const extractionResult = testExtraction(sample.qr, pattern.extractionRules);
+      const detectionResult = testDetection(sample.qr, pattern.detectionRules);
+      
+      return {
+        qr: sample.qr,
+        expectedProduct: sample.expectedProduct,
+        extractedProduct: extractionResult,
+        detectionPassed: detectionResult,
+        match: extractionResult === sample.expectedProduct
+      };
+    });
+    
+    const successCount = testResults.filter(r => r.match).length;
+    const accuracy = (successCount / testResults.length) * 100;
+    
+    res.json({
+      success: true,
+      accuracy: accuracy,
+      testResults: testResults,
+      summary: {
+        total: testResults.length,
+        passed: successCount,
+        failed: testResults.length - successCount
+      }
+    });
+    
+  } catch (error) {
+    console.error('Error testing patterns:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Delete patterns for a customer
+app.delete('/qr-patterns/:customerType', async (req, res) => {
+  try {
+    const { customerType } = req.params;
+    
+    await client.connect();
+    const database = client.db("Sasaki_Coating_MasterDB");
+    const patterns = database.collection("learnedQRDB");
+    
+    const result = await patterns.deleteOne({ customerType: customerType });
+    
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ error: 'No patterns found for customer' });
+    }
+    
+    res.json({ success: true, message: `Patterns deleted for ${customerType}` });
+    
+  } catch (error) {
+    console.error('Error deleting patterns:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ============================================
+// QR PATTERN ANALYSIS ALGORITHMS
+// ============================================
+
+// Analyze QR patterns from training samples
+async function analyzeQRPatterns(customerSamples, internalSamples) {
+  console.log('Starting pattern analysis...');
+  console.log('Customer samples:', customerSamples.length);
+  console.log('Internal samples:', internalSamples.length);
+  
+  try {
+    // Step 1: Analyze customer QR patterns
+    const customerAnalysis = analyzeCustomerPatterns(customerSamples);
+    customerAnalysis.samples = customerSamples; // Keep reference to original samples
+    
+    // Step 2: Analyze internal QR patterns  
+    const internalAnalysis = analyzeInternalPatterns(internalSamples);
+    internalAnalysis.samples = internalSamples; // Keep reference to original samples
+    
+    // Step 3: Check for conflicts in customer patterns
+    const conflicts = detectPatternConflicts(customerAnalysis);
+    
+    if (conflicts.length > 0) {
+      // Only fail on severe conflicts, not warnings
+      const severeConflicts = conflicts.filter(c => c.severity === 'error');
+      if (severeConflicts.length > 0) {
+        return {
+          success: false,
+          conflicts: conflicts,
+          message: 'Inconsistent patterns detected in customer QRs'
+        };
+      }
+    }
+    
+    // Step 4: Generate extraction rules
+    const extractionRules = generateExtractionRules(customerAnalysis, internalAnalysis);
+    
+    // Step 5: Generate detection rules
+    const detectionRules = generateDetectionRules(customerAnalysis);
+    
+    // Step 6: Calculate confidence score
+    const confidence = calculateConfidence(customerAnalysis, extractionRules);
+    
+    console.log('Pattern analysis complete. Extraction rules:', extractionRules.length);
+    
+    return {
+      success: true,
+      extractionRules: extractionRules,
+      detectionRules: detectionRules,
+      confidence: confidence,
+      analysis: {
+        customer: customerAnalysis,
+        internal: internalAnalysis
+      }
+    };
+    
+  } catch (error) {
+    console.error('Error in pattern analysis:', error);
+    return {
+      success: false,
+      message: 'Pattern analysis failed',
+      error: error.message
+    };
+  }
+}
+
+// Analyze customer QR patterns
+function analyzeCustomerPatterns(samples) {
+  const analysis = {
+    lengths: [],
+    structures: [],
+    commonSubstrings: [],
+    patterns: []
+  };
+  
+  // Analyze each sample
+  samples.forEach((sample, index) => {
+    const qr = sample.qr;
+    
+    // Length analysis
+    analysis.lengths.push(qr.length);
+    
+    // Structure analysis (spaces, delimiters)
+    const spaceCount = (qr.match(/\s+/g) || []).length;
+    const parts = qr.split(/\s+/);
+    
+    analysis.structures.push({
+      index: index,
+      spaceCount: spaceCount,
+      partCount: parts.length,
+      parts: parts,
+      hasNumbers: /\d/.test(qr),
+      hasLetters: /[A-Za-z]/.test(qr),
+      upperCase: qr === qr.toUpperCase()
+    });
+  });
+  
+  // Find common patterns
+  analysis.commonLength = getMostCommon(analysis.lengths);
+  analysis.commonStructure = findCommonStructure(analysis.structures);
+  analysis.commonSubstrings = findCommonSubstrings(samples.map(s => s.qr));
+  
+  return analysis;
+}
+
+// Analyze internal QR patterns
+function analyzeInternalPatterns(samples) {
+  const analysis = {
+    products: [],
+    patterns: []
+  };
+  
+  samples.forEach(sample => {
+    // Extract product code (assume it's before first comma or the whole string)
+    const product = sample.qr.includes(',') ? 
+      sample.qr.split(',')[0].trim() : 
+      sample.qr.trim();
+    
+    analysis.products.push(product);
+    
+    // Analyze product pattern
+    const pattern = {
+      length: product.length,
+      hasGN: product.includes('GN'),
+      hasDash: product.includes('-'),
+      hasSlash: product.includes('/'),
+      format: analyzeProductFormat(product)
+    };
+    
+    analysis.patterns.push(pattern);
+  });
+  
+  return analysis;
+}
+
+// Analyze product code format
+function analyzeProductFormat(product) {
+  // Check for common patterns like GN520-02530
+  if (/^GN\d{3}[\-\/]\d{5}$/.test(product)) {
+    return 'GN-standard';
+  }
+  
+  if (/^GN\d{8}$/.test(product)) {
+    return 'GN-continuous';
+  }
+  
+  return 'unknown';
+}
+
+// Detect conflicts in patterns
+function detectPatternConflicts(analysis) {
+  const conflicts = [];
+  
+  // Check length consistency
+  const lengths = analysis.lengths;
+  const lengthVariance = Math.max(...lengths) - Math.min(...lengths);
+  if (lengthVariance > 10) { // Allow some variance
+    conflicts.push({
+      type: 'length_variance',
+      message: `QR lengths vary significantly: ${Math.min(...lengths)} to ${Math.max(...lengths)}`,
+      severity: 'warning'
+    });
+  }
+  
+  // Check structure consistency
+  const structures = analysis.structures;
+  const partCounts = structures.map(s => s.partCount);
+  const partVariance = Math.max(...partCounts) - Math.min(...partCounts);
+  if (partVariance > 1) {
+    conflicts.push({
+      type: 'structure_variance',
+      message: `Inconsistent number of parts: ${Math.min(...partCounts)} to ${Math.max(...partCounts)}`,
+      severity: 'error'
+    });
+  }
+  
+  // Check for common patterns
+  if (analysis.commonSubstrings.length === 0) {
+    conflicts.push({
+      type: 'no_common_pattern',
+      message: 'No common patterns found across customer QRs',
+      severity: 'error'
+    });
+  }
+  
+  return conflicts;
+}
+
+// Generate extraction rules from analysis
+function generateExtractionRules(customerAnalysis, internalAnalysis) {
+  const rules = [];
+  
+  // First, try to find product anywhere in the QR (for formats like Toyota)
+  const directPattern = findProductAnywhere(
+    customerAnalysis.samples || [], 
+    internalAnalysis.samples || []
+  );
+  
+  if (directPattern) {
+    rules.push(directPattern);
+  }
+  
+  // Try to find product code extraction pattern for structured formats
+  const structure = customerAnalysis.commonStructure;
+  
+  if (structure && structure.partCount === 3) {
+    // Three-part structure (like TN format)
+    const rule = {
+      type: 'position',
+      delimiter: '\\s+',
+      partIndex: 2, // Third part
+      confidence: 0.9
+    };
+    
+    // Check if we need substring extraction
+    const thirdParts = customerAnalysis.structures.map(s => s.parts[2]);
+    const productPattern = findProductInThirdPart(thirdParts, internalAnalysis.products);
+    
+    if (productPattern) {
+      rule.substring = productPattern.substring;
+      rule.formatting = productPattern.formatting;
+      rule.confidence = productPattern.confidence;
+      rules.push(rule);
+    }
+  }
+  
+  // Add regex-based rules as fallback
+  const regexPattern = generateRegexPattern(customerAnalysis, internalAnalysis);
+  if (regexPattern) {
+    rules.push({
+      type: 'regex',
+      pattern: regexPattern.pattern,
+      captureGroup: regexPattern.captureGroup,
+      confidence: regexPattern.confidence
+    });
+  }
+  
+  return rules;
+}
+
+// Find product pattern in QR parts or anywhere in the QR
+function findProductInThirdPart(thirdParts, products) {
+  // Look for patterns like "0019GN5200253000..." where GN520-02530 should be extracted
+  for (let i = 0; i < thirdParts.length && i < products.length; i++) {
+    const part = thirdParts[i];
+    const product = products[i];
+    
+    // Remove formatting from product for comparison
+    const cleanProduct = product.replace(/[\-\/,]/g, '');
+    
+    if (part.includes(cleanProduct)) {
+      const startPos = part.indexOf(cleanProduct);
+      return {
+        substring: {
+          start: startPos,
+          end: startPos + cleanProduct.length
+        },
+        formatting: {
+          insert: [{
+            position: 5, // After GN520
+            character: '-'
+          }]
+        },
+        confidence: 0.95
+      };
+    }
+  }
+  
+  return null;
+}
+
+// Find product pattern anywhere in customer QR
+function findProductAnywhere(customerSamples, internalSamples) {
+  // Analyze multiple samples to find a common pattern
+  const productMatches = [];
+  
+  for (let i = 0; i < customerSamples.length && i < internalSamples.length; i++) {
+    const customerQR = customerSamples[i].qr;
+    const internalQR = internalSamples[i].qr;
+    
+    // Extract product code from internal QR (before comma)
+    const product = internalQR.includes(',') ? internalQR.split(',')[0].trim() : internalQR.trim();
+    
+    // Check if product appears directly in customer QR (with dashes)
+    if (customerQR.includes(product)) {
+      const startPos = customerQR.indexOf(product);
+      // Find what comes before and after the product
+      const before = customerQR.substring(Math.max(0, startPos - 10), startPos);
+      const after = customerQR.substring(startPos + product.length, startPos + product.length + 10);
+      
+      productMatches.push({
+        product,
+        startPos,
+        before,
+        after,
+        hasDirectMatch: true
+      });
+    }
+  }
+  
+  // If we found direct matches in all samples, create a generic pattern
+  if (productMatches.length > 0 && productMatches.every(m => m.hasDirectMatch)) {
+    // Analyze the pattern: product codes like "67161-X1B39-B0"
+    // Format: 5 digits - alphanumeric - alphanumeric
+    const firstProduct = productMatches[0].product;
+    
+    // Detect the format pattern
+    const parts = firstProduct.split('-');
+    let pattern;
+    let captureGroup = 1;
+    
+    if (parts.length === 3) {
+      // Pattern: NNNNN-AAAAAA-AA format (like 67161-X1B39-B0)
+      // Create a flexible regex that captures this format
+      pattern = `([0-9]{5}-[A-Z0-9]{5,6}-[A-Z0-9]{2})`;
+    } else if (parts.length === 2) {
+      // Pattern: AAAAA-AAAAA format
+      pattern = `([A-Z0-9]{4,6}-[A-Z0-9]{4,6})`;
+    } else {
+      // Fallback: just capture alphanumeric with dashes
+      pattern = `([A-Z0-9\\-]{10,20})`;
+    }
+    
+    console.log('✅ Created generic product pattern:', pattern);
+    
+    return {
+      type: 'regex',
+      pattern: pattern,
+      captureGroup: captureGroup,
+      confidence: 0.95,
+      extraction: {
+        method: 'pattern_match',
+        format: parts.length === 3 ? 'NNNNN-AAAAAA-AA' : 'variable'
+      }
+    };
+  }
+  
+  return null;
+}
+
+// Generate regex pattern for extraction
+function generateRegexPattern(customerAnalysis, internalAnalysis) {
+  // Look for GN pattern in customer QRs
+  const hasGN = customerAnalysis.commonSubstrings.some(s => s.includes('GN'));
+  
+  if (hasGN) {
+    return {
+      pattern: 'GN(\\d{3})[\\-\\/]?(\\d{5})',
+      captureGroup: 0, // Full match
+      confidence: 0.8
+    };
+  }
+  
+  return null;
+}
+
+// Generate detection rules
+function generateDetectionRules(analysis) {
+  const rules = [];
+  
+  // Length-based rule
+  if (analysis.commonLength) {
+    rules.push({
+      type: 'length',
+      min: analysis.commonLength - 5,
+      max: analysis.commonLength + 5,
+      confidence: 0.7
+    });
+  }
+  
+  // Structure rule
+  if (analysis.commonStructure) {
+    rules.push({
+      type: 'structure',
+      delimiter: '\\s+',
+      partCount: analysis.commonStructure.partCount,
+      confidence: 0.8
+    });
+  }
+  
+  // Pattern-based rules
+  analysis.commonSubstrings.forEach(substring => {
+    if (substring.length > 3) { // Only meaningful substrings
+      rules.push({
+        type: 'contains',
+        text: substring,
+        confidence: 0.9
+      });
+    }
+  });
+  
+  return rules;
+}
+
+// Calculate confidence score
+function calculateConfidence(analysis, rules) {
+  let confidence = 0.5; // Base confidence
+  
+  // Boost confidence based on consistency
+  const structures = analysis.structures;
+  const partCounts = structures.map(s => s.partCount);
+  const lengthVariance = Math.max(...analysis.lengths) - Math.min(...analysis.lengths);
+  
+  if (lengthVariance <= 5) confidence += 0.2;
+  if (new Set(partCounts).size === 1) confidence += 0.2; // All same part count
+  if (analysis.commonSubstrings.length > 0) confidence += 0.1;
+  
+  // Boost based on number of rules generated
+  confidence += Math.min(rules.length * 0.05, 0.2);
+  
+  return Math.min(confidence, 1.0);
+}
+
+// Helper functions
+function getMostCommon(arr) {
+  const counts = {};
+  arr.forEach(item => counts[item] = (counts[item] || 0) + 1);
+  return Object.keys(counts).reduce((a, b) => counts[a] > counts[b] ? a : b);
+}
+
+function findCommonStructure(structures) {
+  if (structures.length === 0) return null;
+  
+  const first = structures[0];
+  const isConsistent = structures.every(s => 
+    s.partCount === first.partCount && 
+    s.spaceCount === first.spaceCount
+  );
+  
+  return isConsistent ? first : null;
+}
+
+function findCommonSubstrings(strings) {
+  if (strings.length < 2) return [];
+  
+  const substrings = [];
+  const first = strings[0];
+  
+  // Find substrings of length 4+ that appear in all strings
+  for (let i = 0; i < first.length - 3; i++) {
+    for (let len = 4; len <= first.length - i; len++) {
+      const substring = first.substring(i, i + len);
+      if (strings.every(s => s.includes(substring))) {
+        substrings.push(substring);
+      }
+    }
+  }
+  
+  // Return longest unique substrings
+  return [...new Set(substrings)].sort((a, b) => b.length - a.length).slice(0, 3);
+}
+
+// Test extraction with learned patterns
+function testExtraction(qr, extractionRules) {
+  for (const rule of extractionRules) {
+    try {
+      if (rule.type === 'regex') {
+        const match = qr.match(new RegExp(rule.pattern));
+        if (match && match[rule.captureGroup || 1]) {
+          let result = match[rule.captureGroup || 1];
+          if (rule.formatting) {
+            result = applyFormattingServer(result, rule.formatting);
+          }
+          return result;
+        }
+      } else if (rule.type === 'position') {
+        const parts = qr.split(new RegExp(rule.delimiter || '\\s+'));
+        if (parts.length > rule.partIndex && parts[rule.partIndex]) {
+          let part = parts[rule.partIndex];
+          
+          if (rule.substring) {
+            part = part.substring(rule.substring.start, rule.substring.end);
+          }
+          
+          if (rule.formatting) {
+            part = applyFormattingServer(part, rule.formatting);
+          }
+          
+          return part;
+        }
+      }
+    } catch (error) {
+      console.error('Error applying extraction rule:', error);
+    }
+  }
+  
+  return null;
+}
+
+// Test detection with learned patterns
+function testDetection(qr, detectionRules) {
+  for (const rule of detectionRules) {
+    try {
+      if (rule.type === 'regex') {
+        const regex = new RegExp(rule.pattern);
+        if (regex.test(qr)) return true;
+      } else if (rule.type === 'contains') {
+        if (qr.includes(rule.text)) return true;
+      } else if (rule.type === 'length') {
+        if (qr.length >= rule.min && qr.length <= rule.max) return true;
+      } else if (rule.type === 'structure') {
+        const parts = qr.split(new RegExp(rule.delimiter || '\\s+'));
+        if (parts.length === rule.partCount) return true;
+      }
+    } catch (error) {
+      console.error('Error applying detection rule:', error);
+    }
+  }
+  
+  return false;
+}
+
+// Apply formatting on server side
+function applyFormattingServer(text, formatting) {
+  let result = text;
+  
+  if (formatting.insert) {
+    for (const insert of formatting.insert) {
+      result = result.substring(0, insert.position) + 
+              insert.character + 
+              result.substring(insert.position);
+    }
+  }
+  
+  if (formatting.prefix) {
+    result = formatting.prefix + result;
+  }
+  
+  if (formatting.suffix) {
+    result = result + formatting.suffix;
+  }
+  
+  return result;
+}
+
+// Generate hash for pattern data
+function generatePatternHash(analysisResult) {
+  const crypto = require('crypto');
+  const dataToHash = JSON.stringify({
+    extractionRules: analysisResult.extractionRules,
+    detectionRules: analysisResult.detectionRules,
+    confidence: analysisResult.confidence
+  });
+  
+  return crypto.createHash('sha256').update(dataToHash).digest('hex').substring(0, 16);
+}
+
+// QR LEARNING SYSTEM BACKEND END
+
 
 app.listen(port, () => {
   console.log(`✅ Combined server is running at http://localhost:${port}`);

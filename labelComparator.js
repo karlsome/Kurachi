@@ -1,5 +1,5 @@
-const serverURL = "https://kurachi.onrender.com";
-//const serverURL = "http://localhost:3000";
+//const serverURL = "https://kurachi.onrender.com";
+const serverURL = "http://localhost:3000";
 
 // Enable debug mode for troubleshooting
 const DEBUG_MODE = true;
@@ -237,9 +237,11 @@ const MIN_UPLOAD_INTERVAL = 2000; // At least 2 seconds between upload batches
 // Add log entry (always saves locally first, then queues for background upload)
 function addLogEntry(customerProduct, ourProduct, isMatch, customerQR, ourQR) {
   const timestamp = new Date().toISOString();
+  const customerType = domCache['customerSelect'] ? domCache['customerSelect'].value : 'tn';
   
   const logData = {
     timestamp: timestamp,
+    customer_type: customerType,
     品番_customer: customerProduct,
     品番_our: ourProduct,
     comparison_result: isMatch ? '一致' : '不一致',
@@ -299,17 +301,15 @@ window.addEventListener('offline', () => {
   uploadQueueProcessing = false;
 });
 
-// Pre-initialize DOM elements
+  // Pre-initialize DOM elements
 document.addEventListener("DOMContentLoaded", () => {
   console.time('initialization');
   
   // Cache frequently used DOM elements
   ['logList', 'scanStatus', 'alert-sound', 'success-sound', 'welcomeModal', 'startButton', 
-   'customerQR', 'ourQR', 'result', 'mismatchModal'].forEach(id => {
+   'customerQR', 'ourQR', 'result', 'mismatchModal', 'customerSelect'].forEach(id => {
     domCache[id] = document.getElementById(id);
-  });
-  
-  // Reference cached elements - make sure they exist
+  });  // Reference cached elements - make sure they exist
   const logList = domCache['logList'];
   const welcomeModal = domCache['welcomeModal'];
   const startButton = domCache['startButton'];
@@ -325,6 +325,20 @@ document.addEventListener("DOMContentLoaded", () => {
     domCache['success-sound'].load();
   }
   
+  // Handle customer selection change
+  const customerSelect = domCache['customerSelect'];
+  if (customerSelect) {
+    customerSelect.addEventListener('change', () => {
+      const formData = {
+        customerQR: domCache['customerQR'] ? domCache['customerQR'].value : '',
+        ourQR: domCache['ourQR'] ? domCache['ourQR'].value : '',
+        customerType: customerSelect.value
+      };
+      saveFormData(formData);
+      console.log('Customer type changed to:', customerSelect.value);
+    });
+  }
+
   // Handle start button click - optimized
   startButton.addEventListener('click', () => {
     console.time('start-button');
@@ -372,6 +386,26 @@ document.addEventListener("DOMContentLoaded", () => {
     console.timeEnd('start-button');
   });
   
+  // Initialize QR Pattern System
+  setTimeout(async () => {
+    try {
+      await initQRPatternSystem(); // Use global config instead of hardcoded URL
+      console.log('QR Pattern System initialized successfully');
+      
+      // Sync patterns for all customers on startup
+      const customers = ['tn', 'toyota', 'kinuura'];
+      for (const customer of customers) {
+        try {
+          await qrPatternSync.syncCustomerPattern(customer);
+        } catch (error) {
+          console.warn(`Failed to sync patterns for ${customer}:`, error);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to initialize QR Pattern System:', error);
+    }
+  }, 500);
+
   // Non-critical initialization - defer to not block UI
   setTimeout(() => {
     // Load pending logs (background operation)
@@ -384,6 +418,9 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     if (savedFormData.ourQR && domCache['ourQR']) {
       domCache['ourQR'].value = savedFormData.ourQR;
+    }
+    if (savedFormData.customerType && domCache['customerSelect']) {
+      domCache['customerSelect'].value = savedFormData.customerType;
     }
     
     // Restore scan log in batches to prevent UI blocking
@@ -431,8 +468,8 @@ document.addEventListener("DOMContentLoaded", () => {
   let scanTimeout;
   const SCAN_TIMEOUT = 150; // ms - increased for better reliability with customer QR codes
 
-  // Customer product extraction for known format
-  function extractCustomerProduct(qr) {
+  // Customer product extraction using learned patterns from cache
+  async function extractCustomerProduct(qr) {
     console.log('Extracting customer product from:', qr);
     
     // If empty input, return null
@@ -441,74 +478,196 @@ document.addEventListener("DOMContentLoaded", () => {
       return null;
     }
     
+    // Get selected customer type
+    const customerType = domCache['customerSelect'] ? domCache['customerSelect'].value : 'tn';
+    console.log('Selected customer type:', customerType);
+    
     try {
-      // Specific customer format parsing:
-      // Example: "2149657    460502B5B2C    0019GN5200253000202510010000150"
-      
-      // Step 1: Split by spaces to get the parts
-      const parts = qr.trim().split(/\s+/);
-      console.log(`Split QR into ${parts.length} parts:`, parts);
-      
-      // Step 2: Look for the part that starts with "0019"
-      let raw = null;
-      
-      // First try the expected format: three parts with third part starting with "0019"
-      if (parts.length === 3 && parts[2].startsWith('0019')) {
-        console.log('Found standard 3-part format with 0019 in third part');
-        raw = parts[2];
-      } else {
-        // If we don't have exactly 3 parts, look for any part that contains "0019"
-        console.log('Searching for any part starting with 0019');
-        for (let i = 0; i < parts.length; i++) {
-          if (parts[i].startsWith('0019')) {
-            console.log(`Found 0019 in part ${i+1}`);
-            raw = parts[i];
-            break;
-          }
+      // Try to use learned patterns first
+      if (qrPatternSync) {
+        const pattern = await qrPatternSync.getCustomerPattern(customerType);
+        if (pattern && pattern.extractionRules) {
+          console.log('Using learned pattern for extraction');
+          return extractWithLearnedPattern(qr, pattern.extractionRules);
         }
       }
       
-      // Step 3: If we found a part with "0019", extract the product code
-      if (raw) {
-        console.log('Processing raw customer data:', raw);
-        
-        // Format: 0019GN5200253000202510010000150
-        // We want to extract "GN520-02530" from position 4 (after "0019")
-        if (raw.length >= 14) { // Make sure it's long enough
-          // Extract the product code after "0019"
-          const productRaw = raw.substring(4, 14);  // Get GN52002530
-          console.log('Raw product string:', productRaw);
-          
-          // Format it as GN520-02530
-          let result;
-          if (productRaw.startsWith('GN')) {
-            // If it already starts with GN, use proper formatting
-            const codeAfterGN = productRaw.substring(2);
-            result = 'GN' + codeAfterGN.substring(0, 3) + '-' + codeAfterGN.substring(3, 8);
-          } else {
-            // Otherwise assume it's directly the product code
-            result = productRaw.substring(0, 5) + '-' + productRaw.substring(5, 10);
-          }
-          
-          console.log('Successfully extracted customer product:', result);
-          return result;
-        }
+      // Fallback to hardcoded logic for backward compatibility
+      console.log('Falling back to hardcoded extraction logic');
+      switch (customerType) {
+        case 'tn':
+          return extractTNProduct(qr);
+        case 'toyota':
+          return extractToyotaProduct(qr);
+        case 'kinuura':
+          return extractKinuuraProduct(qr);
+        default:
+          console.error('Unknown customer type:', customerType);
+          return null;
       }
-      
-      // If the standard format didn't work, try looking for GN anywhere in the string
-      console.log('Trying alternative extraction method...');
-      const gnMatch = qr.match(/GN([0-9]{3}[\-\/]?[0-9]{5})/);
-      if (gnMatch && gnMatch[1]) {
-        const formattedCode = 'GN' + gnMatch[1].replace(/[\-\/]/, '-');
-        console.log('Extracted product via regex:', formattedCode);
-        return formattedCode;
-      }
-      
     } catch (e) {
       console.error('Error extracting customer product:', e);
+      return null;
+    }
+  }
+
+  // Extract product using learned patterns
+  function extractWithLearnedPattern(qr, extractionRules) {
+    console.log('Applying learned extraction rules:', extractionRules);
+    
+    for (const rule of extractionRules) {
+      try {
+        if (rule.type === 'regex') {
+          const match = qr.match(new RegExp(rule.pattern));
+          if (match && match[rule.captureGroup || 1]) {
+            let result = match[rule.captureGroup || 1];
+            
+            // Apply formatting rules if specified
+            if (rule.formatting) {
+              result = applyFormatting(result, rule.formatting);
+            }
+            
+            console.log('Extracted using regex rule:', result);
+            return result;
+          }
+        } else if (rule.type === 'position') {
+          // Position-based extraction
+          const parts = qr.split(new RegExp(rule.delimiter || '\\s+'));
+          if (parts.length > rule.partIndex && parts[rule.partIndex]) {
+            let part = parts[rule.partIndex];
+            
+            if (rule.substring) {
+              part = part.substring(rule.substring.start, rule.substring.end);
+            }
+            
+            if (rule.formatting) {
+              part = applyFormatting(part, rule.formatting);
+            }
+            
+            console.log('Extracted using position rule:', part);
+            return part;
+          }
+        }
+      } catch (error) {
+        console.error('Error applying extraction rule:', error, rule);
+      }
     }
     
-    console.log('Failed to extract customer product');
+    console.log('No learned pattern matched');
+    return null;
+  }
+
+  // Apply formatting rules to extracted text
+  function applyFormatting(text, formatting) {
+    let result = text;
+    
+    if (formatting.insert) {
+      // Insert characters at specific positions
+      for (const insert of formatting.insert) {
+        result = result.substring(0, insert.position) + 
+                insert.character + 
+                result.substring(insert.position);
+      }
+    }
+    
+    if (formatting.prefix) {
+      result = formatting.prefix + result;
+    }
+    
+    if (formatting.suffix) {
+      result = result + formatting.suffix;
+    }
+    
+    return result;
+  }
+
+  // ティーエヌ製作所 format extraction
+  function extractTNProduct(qr) {
+    console.log('Extracting TN product from:', qr);
+    
+    // Specific customer format parsing:
+    // Example: "2149657    460502B5B2C    0019GN5200253000202510010000150"
+    
+    // Step 1: Split by spaces to get the parts
+    const parts = qr.trim().split(/\s+/);
+    console.log(`Split QR into ${parts.length} parts:`, parts);
+    
+    // Step 2: Look for the part that starts with "0019"
+    let raw = null;
+    
+    // First try the expected format: three parts with third part starting with "0019"
+    if (parts.length === 3 && parts[2].startsWith('0019')) {
+      console.log('Found standard 3-part format with 0019 in third part');
+      raw = parts[2];
+    } else {
+      // If we don't have exactly 3 parts, look for any part that contains "0019"
+      console.log('Searching for any part starting with 0019');
+      for (let i = 0; i < parts.length; i++) {
+        if (parts[i].startsWith('0019')) {
+          console.log(`Found 0019 in part ${i+1}`);
+          raw = parts[i];
+          break;
+        }
+      }
+    }
+    
+    // Step 3: If we found a part with "0019", extract the product code
+    if (raw) {
+      console.log('Processing raw customer data:', raw);
+      
+      // Format: 0019GN5200253000202510010000150
+      // We want to extract "GN520-02530" from position 4 (after "0019")
+      if (raw.length >= 14) { // Make sure it's long enough
+        // Extract the product code after "0019"
+        const productRaw = raw.substring(4, 14);  // Get GN52002530
+        console.log('Raw product string:', productRaw);
+        
+        // Format it as GN520-02530
+        let result;
+        if (productRaw.startsWith('GN')) {
+          // If it already starts with GN, use proper formatting
+          const codeAfterGN = productRaw.substring(2);
+          result = 'GN' + codeAfterGN.substring(0, 3) + '-' + codeAfterGN.substring(3, 8);
+        } else {
+          // Otherwise assume it's directly the product code
+          result = productRaw.substring(0, 5) + '-' + productRaw.substring(5, 10);
+        }
+        
+        console.log('Successfully extracted TN product:', result);
+        return result;
+      }
+    }
+    
+    // If the standard format didn't work, try looking for GN anywhere in the string
+    console.log('Trying alternative extraction method...');
+    const gnMatch = qr.match(/GN([0-9]{3}[\-\/]?[0-9]{5})/);
+    if (gnMatch && gnMatch[1]) {
+      const formattedCode = 'GN' + gnMatch[1].replace(/[\-\/]/, '-');
+      console.log('Extracted TN product via regex:', formattedCode);
+      return formattedCode;
+    }
+    
+    console.log('Failed to extract TN product');
+    return null;
+  }
+
+  // トヨタ紡織 format extraction (placeholder - you'll need to provide the actual format)
+  function extractToyotaProduct(qr) {
+    console.log('Extracting Toyota product from:', qr);
+    
+    // TODO: Implement Toyota QR format extraction
+    // For now, return null as placeholder
+    console.log('Toyota QR format not implemented yet');
+    return null;
+  }
+
+  // 衣浦 format extraction (placeholder - you'll need to provide the actual format)
+  function extractKinuuraProduct(qr) {
+    console.log('Extracting Kinuura product from:', qr);
+    
+    // TODO: Implement Kinuura QR format extraction
+    // For now, return null as placeholder
+    console.log('Kinuura QR format not implemented yet');
     return null;
   }
 
@@ -519,10 +678,102 @@ document.addEventListener("DOMContentLoaded", () => {
     return qr.substring(0, commaPos).trim();
   }
 
-  // QR type detection specifically for the known formats
-    function detectQRType(qrCode) {
+  // QR type detection using learned patterns
+  async function detectQRType(qrCode) {
     console.log(`QR Type detection for: ${qrCode}`);
     
+    // Get selected customer type
+    const customerType = domCache['customerSelect'] ? domCache['customerSelect'].value : 'tn';
+    
+    // First check if it's our company QR (internal QR)
+    // Internal QR characteristics:
+    // 1. Contains comma (product,quantity format)
+    // 2. Has dashes in product code
+    // 3. Relatively short (< 50 characters)
+    // 4. Product code pattern: digits-alphanumeric-alphanumeric
+    
+    const hasComma = qrCode.includes(',');
+    const hasDash = qrCode.includes('-') || qrCode.includes('/');
+    const isShort = qrCode.length < 50;
+    
+    // Pattern for internal QR: NNNNN-AAAAAA-AA or GN###-##### format
+    const internalPattern = /^[A-Z0-9]{4,6}[\-\/][A-Z0-9]{4,6}[\-\/]?[A-Z0-9]{0,4}/;
+    
+    if ((hasComma && hasDash) || (isShort && hasDash && internalPattern.test(qrCode))) {
+      console.log('Detected internal QR by pattern');
+      return 'our';
+    }
+    
+    // Try to use learned patterns for customer QR detection
+    if (qrPatternSync) {
+      try {
+        const pattern = await qrPatternSync.getCustomerPattern(customerType);
+        if (pattern && pattern.detectionRules) {
+          console.log('Using learned pattern for detection');
+          const isCustomer = detectWithLearnedPattern(qrCode, pattern.detectionRules);
+          if (isCustomer) {
+            return 'customer';
+          }
+        }
+      } catch (error) {
+        console.error('Error using learned detection pattern:', error);
+      }
+    }
+    
+    // Fallback to hardcoded detection logic
+    console.log('Falling back to hardcoded detection logic');
+    switch (customerType) {
+      case 'tn':
+        return detectTNQR(qrCode);
+      case 'toyota':
+        return detectToyotaQR(qrCode);
+      case 'kinuura':
+        return detectKinuuraQR(qrCode);
+      default:
+        console.log('Unknown customer type:', customerType);
+        return null;
+    }
+  }
+
+  // Detect QR type using learned patterns
+  function detectWithLearnedPattern(qrCode, detectionRules) {
+    console.log('Applying learned detection rules:', detectionRules);
+    
+    for (const rule of detectionRules) {
+      try {
+        if (rule.type === 'regex') {
+          const regex = new RegExp(rule.pattern);
+          if (regex.test(qrCode)) {
+            console.log('Matched detection rule:', rule);
+            return true;
+          }
+        } else if (rule.type === 'contains') {
+          if (qrCode.includes(rule.text)) {
+            console.log('Matched contains rule:', rule.text);
+            return true;
+          }
+        } else if (rule.type === 'length') {
+          if (qrCode.length >= rule.min && qrCode.length <= rule.max) {
+            console.log('Matched length rule:', rule);
+            return true;
+          }
+        } else if (rule.type === 'structure') {
+          const parts = qrCode.split(new RegExp(rule.delimiter || '\\s+'));
+          if (parts.length === rule.partCount) {
+            console.log('Matched structure rule:', rule);
+            return true;
+          }
+        }
+      } catch (error) {
+        console.error('Error applying detection rule:', error, rule);
+      }
+    }
+    
+    return false;
+  }
+
+  // ティーエヌ製作所 QR detection
+  function detectTNQR(qrCode) {
     // Check for customer QR with specific space-separated format (e.g., "2149657    460502B5B2C    0019GN5200253000202510010000150")
     const spaceParts = qrCode.split(/\s+/);
     if (spaceParts.length === 3) {
@@ -530,26 +781,31 @@ document.addEventListener("DOMContentLoaded", () => {
       
       // Check if third part starts with the customer pattern
       if (spaceParts[2] && spaceParts[2].includes('0019GN')) {
-        console.log('Confirmed customer QR with 0019GN pattern in third part');
+        console.log('Confirmed TN customer QR with 0019GN pattern in third part');
         return 'customer';
       }
     }
     
-    // Check for common characteristics
-    // If QR contains characteristic patterns from our company QR
-    if (qrCode.includes('GN') && (qrCode.includes('-') || qrCode.includes('/'))) {
-      console.log('Detected our QR');
-      return 'our';
-    }
-    
     // If it's longer and more complex, it's likely a customer QR
     if (qrCode.length > 20 && /^[A-Z0-9\s]+$/.test(qrCode)) {
-      console.log('Detected customer QR by length and character pattern');
+      console.log('Detected TN customer QR by length and character pattern');
       return 'customer';
     }
+    
+    return null;
+  }
 
-    // Default - unknown
-    console.log('Unknown QR type');
+  // トヨタ紡織 QR detection (placeholder)
+  function detectToyotaQR(qrCode) {
+    console.log('Toyota QR detection not implemented yet');
+    // TODO: Implement Toyota QR detection logic
+    return null;
+  }
+
+  // 衣浦 QR detection (placeholder)
+  function detectKinuuraQR(qrCode) {
+    console.log('Kinuura QR detection not implemented yet');
+    // TODO: Implement Kinuura QR detection logic
     return null;
   }
 
@@ -568,7 +824,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let processingStartTime = 0;
   let lastScannedValues = []; // Store last few scanned values for debugging
   
-  function processScannedQR(qrCode) {
+  async function processScannedQR(qrCode) {
     // Start timing measurement
     processingStartTime = performance.now();
     console.log(`Processing QR (length: ${qrCode.length}) - Time since last scan: ${processingStartTime - lastScanTime}ms`);
@@ -582,9 +838,18 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
     
-    // Special case: If the QR contains specific patterns from customer QR
-    if (qrCode.includes('0019GN')) {
-      console.log('Detected customer QR by pattern match');
+    // Get selected customer type for special case detection
+    const customerType = domCache['customerSelect'] ? domCache['customerSelect'].value : 'tn';
+    
+    // Special case: Quick detection for known customer patterns
+    let isCustomerQR = false;
+    if (customerType === 'tn' && qrCode.includes('0019GN')) {
+      isCustomerQR = true;
+    }
+    // Add more special cases for other customers when their formats are known
+    
+    if (isCustomerQR) {
+      console.log(`Detected ${customerType} customer QR by pattern match`);
       customerQRField.value = qrCode;
       updateScanStatus("✅ お客様QRをスキャンしました", 'success');
       const endTime = performance.now();
@@ -594,7 +859,8 @@ document.addEventListener("DOMContentLoaded", () => {
       // Save form data and check if comparison is possible
       const formData = {
         customerQR: customerQRField.value,
-        ourQR: ourQRField.value
+        ourQR: ourQRField.value,
+        customerType: domCache['customerSelect'] ? domCache['customerSelect'].value : 'tn'
       };
       
       setTimeout(() => saveFormData(formData), 0);
@@ -607,7 +873,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     
     // Standard detection
-    const type = detectQRType(qrCode);
+    const type = await detectQRType(qrCode);
     
     if (!type) {
       updateScanStatus("❌ 不明なQRフォーマットです", 'error');
@@ -626,13 +892,12 @@ document.addEventListener("DOMContentLoaded", () => {
       updateScanStatus("✅ 社内QRをスキャンしました", 'success');
     }
 
-    // Save form data (debounced by using local variables)
+      // Save form data (debounced by using local variables)
     const formData = {
       customerQR: customerQRField.value,
-      ourQR: ourQRField.value
-    };
-    
-    // Defer non-critical operations
+      ourQR: ourQRField.value,
+      customerType: domCache['customerSelect'] ? domCache['customerSelect'].value : 'tn'
+    };    // Defer non-critical operations
     setTimeout(() => {
       saveFormData(formData);
     }, 0);
@@ -648,7 +913,7 @@ document.addEventListener("DOMContentLoaded", () => {
     lastScanTime = endTime;
   }
 
-  function compareQRs() {
+  async function compareQRs() {
     const compareStartTime = performance.now();
     console.log("Starting QR comparison");
     
@@ -667,7 +932,7 @@ document.addEventListener("DOMContentLoaded", () => {
     console.debug('Our QR for extraction:', ourQR);
     
     // Extract product codes (these functions are now optimized)
-    const customerProduct = extractCustomerProduct(customerQR);
+    const customerProduct = await extractCustomerProduct(customerQR);
     const ourProduct = extractOurProduct(ourQR);
     
     console.debug('Extracted customer product:', customerProduct);
@@ -888,7 +1153,8 @@ document.addEventListener("DOMContentLoaded", () => {
     setTimeout(() => {
       saveFormData({
         customerQR: "",
-        ourQR: ""
+        ourQR: "",
+        customerType: domCache['customerSelect'] ? domCache['customerSelect'].value : 'tn'
       });
     }, 0);
     
@@ -1013,6 +1279,11 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     }
   }, 60000);
+
+  // Learning mode functionality
+  window.openLearningMode = function() {
+    window.location.href = 'qrLearning.html';
+  };
 
   // Expose functions for manual button click and debugging
   window.compareQRs = compareQRs;
