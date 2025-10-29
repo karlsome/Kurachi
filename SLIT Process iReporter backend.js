@@ -381,8 +381,9 @@ function setDefaultTime(input) {
   const timeValue = `${hours}:${minutes}`;
   input.value = timeValue;
 
-  // Save the time to local storage beyatch
-  localStorage.setItem(input.id, timeValue);
+  // Save the time to local storage with unique prefix
+  const key = `${uniquePrefix}${input.id}`;
+  localStorage.setItem(key, timeValue);
 }
 
 // When date is pressed or on page load, set current date as default
@@ -394,8 +395,9 @@ function setDefaultDate(input) {
   const dateValue = `${year}-${month}-${day}`;
   input.value = dateValue;
 
-  // Save the date to local storage
-  localStorage.setItem(input.id, dateValue);
+  // Save the date to local storage with unique prefix
+  const key = `${uniquePrefix}${input.id}`;
+  localStorage.setItem(key, dateValue);
 }
 
 // Set current date as default on page load
@@ -439,8 +441,9 @@ function incrementCounter(counterId) {
   currentValue += 1;
   counterElement.value = currentValue;
 
-  // Save the updated value to local storage
-  localStorage.setItem(`counter-${counterId}`, currentValue);
+  // Save the updated value to local storage with unique prefix
+  const key = `${uniquePrefix}counter-${counterId}`;
+  localStorage.setItem(key, currentValue);
 
   updateTotal();
 }
@@ -452,8 +455,9 @@ function decrementCounter(counterId) {
     currentValue -= 1;
     counterElement.value = currentValue;
 
-    // Save the updated value to local storage
-    localStorage.setItem(`counter-${counterId}`, currentValue);
+    // Save the updated value to local storage with unique prefix
+    const key = `${uniquePrefix}counter-${counterId}`;
+    localStorage.setItem(key, currentValue);
 
     updateTotal();
   }
