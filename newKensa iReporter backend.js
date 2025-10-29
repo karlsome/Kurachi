@@ -627,7 +627,7 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
     const Worker_Name = document.getElementById('Machine Operator').value;
     const Process_Quantity = parseInt(document.getElementById('ProcessQuantity').value, 10) || 0;
     const Remaining_Quantity = Total;
-    const Date = document.getElementById('Lot No.').value;
+    const WorkDate = document.getElementById('Lot No.').value;
     const Time_start = document.getElementById('Start Time').value;
     const Time_end = document.getElementById('End Time').value;
     const 設備 = document.getElementById('process').value;
@@ -770,7 +770,7 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
       return;
     }
 
-    if (!Date || Date.trim() === '') {
+    if (!WorkDate || WorkDate.trim() === '') {
       scanAlertText.innerText = '加工日が必要です / Work Date is required';
       scanAlertModal.style.display = 'block';
       if (alertSound) {
@@ -916,7 +916,7 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
       Worker_Name,
       Process_Quantity,
       Remaining_Quantity,
-      Date,
+      Date: WorkDate,
       Time_start,
       Time_end,
       設備,
