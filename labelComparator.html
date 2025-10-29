@@ -147,6 +147,16 @@
   <div class="bg-white rounded-2xl shadow-xl p-8 max-w-2xl w-full">
     <h1 class="text-3xl font-bold text-center text-gray-800 mb-4">QRコード比較</h1>
     
+    <!-- Customer Selection Dropdown -->
+    <div class="mb-6">
+      <label for="customerSelect" class="block text-sm font-semibold text-gray-600 mb-2">お客様選択</label>
+      <select id="customerSelect" class="w-full p-3 border rounded-lg bg-white text-lg font-medium">
+        <option value="tn">ティーエヌ製作所</option>
+        <option value="toyota">トヨタ紡織</option>
+        <option value="kinuura">衣浦</option>
+      </select>
+    </div>
+    
     <!-- Scan Status -->
     <div id="scanStatus" class="text-center text-sm font-medium text-blue-600 mb-6 p-2 bg-blue-50 rounded-lg">
       スキャン待機中...
@@ -173,6 +183,10 @@
         class="flex-1 bg-gray-500 hover:bg-gray-600 text-white font-semibold py-3 rounded-xl transition duration-200">
         クリア
       </button>
+      <button onclick="openLearningMode()"
+        class="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-semibold py-3 rounded-xl transition duration-200">
+        学習モード
+      </button>
     </div>
 
     <div id="result" class="mt-4 text-center text-lg font-semibold"></div>
@@ -183,6 +197,7 @@
     </div>
   </div>
 
+  <script src="qrPatternCache.js"></script>
   <script src="labelComparator.js"></script>
 </body>
 </html>

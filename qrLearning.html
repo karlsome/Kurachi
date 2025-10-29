@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QRコード学習システム</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes pulse-green {
+      0%, 100% { background-color: rgba(34, 197, 94, 0.1); }
+      50% { background-color: rgba(34, 197, 94, 0.3); }
+    }
+    
+    @keyframes pulse-red {
+      0%, 100% { background-color: rgba(239, 68, 68, 0.1); }
+      50% { background-color: rgba(239, 68, 68, 0.3); }
+    }
+    
+    .pulse-green {
+      animation: pulse-green 1s infinite;
+    }
+    
+    .pulse-red {
+      animation: pulse-red 1s infinite;
+    }
+    
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.7);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
+    }
+    
+    .modal-content {
+      background: white;
+      padding: 2rem;
+      border-radius: 1rem;
+      max-width: 500px;
+      width: 90%;
+      text-align: center;
+      box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+    }
+    
+    .qr-sample-item {
+      border: 2px solid #e5e7eb;
+      border-radius: 0.5rem;
+      padding: 1rem;
+      margin-bottom: 0.5rem;
+      transition: all 0.2s;
+    }
+    
+    .qr-sample-item.scanned {
+      border-color: #10b981;
+      background-color: #ecfdf5;
+    }
+    
+    .qr-sample-item.active {
+      border-color: #3b82f6;
+      background-color: #eff6ff;
+    }
+    
+    .progress-bar {
+      height: 8px;
+      background: #e5e7eb;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #3b82f6, #10b981);
+      transition: width 0.3s ease;
+    }
+  </style>
+</head>
+<body class="bg-gray-100 min-h-screen p-4 text-lg">
+  <!-- Audio elements -->
+  <audio id="success-sound" src="src/success.mp3" preload="auto"></audio>
+  <audio id="error-sound" src="src/alert.mp3" preload="auto"></audio>
+  
+  <!-- Authentication Modal -->
+  <div id="authModal" class="modal-overlay">
+    <div class="modal-content">
+      <h2 class="text-2xl font-bold text-purple-600 mb-4">🔐 学習モード認証</h2>
+      <p class="mb-4">学習モードは管理者のみアクセス可能です。</p>
+      <p class="text-sm text-gray-600 mb-6">ユーザー名のQRコードをスキャンしてください。</p>
+      
+      <div class="bg-blue-50 p-4 rounded-lg mb-4">
+        <p class="text-sm font-medium text-blue-800">認証待機中...</p>
+        <p class="text-xs text-blue-600 mt-1">バーコードスキャナーでユーザー名QRをスキャン</p>
+      </div>
+      
+      <button onclick="cancelAuth()" class="bg-gray-500 hover:bg-gray-600 text-white px-6 py-2 rounded-lg">
+        キャンセル
+      </button>
+    </div>
+  </div>
+  
+  <!-- Conflict Warning Modal -->
+  <div id="conflictModal" class="modal-overlay" style="display:none;">
+    <div class="modal-content">
+      <h2 class="text-2xl font-bold text-red-600 mb-4">⚠️ パターン競合検出</h2>
+      <div id="conflictMessage" class="mb-4 text-left bg-red-50 p-4 rounded-lg"></div>
+      <p class="text-gray-600 mb-6">同じお客様の正しいラベルを使用していますか？</p>
+      <div class="flex gap-2">
+        <button onclick="continueWithConflict()" class="flex-1 bg-orange-600 hover:bg-orange-700 text-white py-2 px-4 rounded-lg">
+          続行
+        </button>
+        <button onclick="retryLearning()" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg">
+          再試行
+        </button>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Test Results Modal -->
+  <div id="testModal" class="modal-overlay" style="display:none;">
+    <div class="modal-content">
+      <h2 class="text-2xl font-bold text-green-600 mb-4">🧪 パターンテスト結果</h2>
+      <div id="testResults" class="mb-4 text-left bg-green-50 p-4 rounded-lg max-h-64 overflow-y-auto"></div>
+      <div class="flex gap-2">
+        <button onclick="deployPattern()" class="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded-lg">
+          全デバイスに配信
+        </button>
+        <button onclick="closeTestModal()" class="flex-1 bg-gray-500 hover:bg-gray-600 text-white py-2 px-4 rounded-lg">
+          キャンセル
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="max-w-4xl mx-auto">
+    <!-- Header -->
+    <div class="bg-white rounded-2xl shadow-xl p-6 mb-6">
+      <div class="flex items-center justify-between">
+        <div>
+          <h1 class="text-3xl font-bold text-gray-800">QRコード学習システム</h1>
+          <p class="text-gray-600 mt-2">新しいお客様のQRパターンを学習します</p>
+        </div>
+        <button onclick="goBack()" class="bg-gray-500 hover:bg-gray-600 text-white px-6 py-3 rounded-xl">
+          戻る
+        </button>
+      </div>
+    </div>
+
+    <!-- Learning Progress -->
+    <div class="bg-white rounded-2xl shadow-xl p-6 mb-6">
+      <h2 class="text-xl font-bold text-gray-800 mb-4">学習進捗</h2>
+      <div class="progress-bar mb-2">
+        <div id="progressFill" class="progress-fill" style="width: 0%"></div>
+      </div>
+      <p id="progressText" class="text-sm text-gray-600">待機中...</p>
+    </div>
+
+    <!-- Customer Selection -->
+    <div class="bg-white rounded-2xl shadow-xl p-6 mb-6">
+      <h2 class="text-xl font-bold text-gray-800 mb-4">お客様選択</h2>
+      <select id="learningCustomerSelect" class="w-full p-3 border rounded-lg bg-white text-lg font-medium">
+        <option value="">お客様を選択してください</option>
+        <option value="tn">ティーエヌ製作所</option>
+        <option value="toyota">トヨタ紡織</option>
+        <option value="kinuura">衣浦</option>
+      </select>
+    </div>
+
+    <!-- Paired Learning Section -->
+    <div class="bg-white rounded-2xl shadow-xl p-6 mb-6">
+      <h2 class="text-xl font-bold text-gray-800 mb-4">ペア学習システム</h2>
+      <p class="text-sm text-gray-600 mb-4">お客様QR → 社内QRの順番でスキャンして対応関係を学習します</p>
+      
+      <!-- Current Scan Status -->
+      <div id="scanStatus" class="mb-6 p-4 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300">
+        <div class="text-center">
+          <div id="scanInstruction" class="text-lg font-medium text-gray-600 mb-2">
+            お客様を選択してスキャンを開始してください
+          </div>
+          <div id="scanDetails" class="text-sm text-gray-500">
+            お客様QRをスキャン → 対応する社内QRをスキャン
+          </div>
+        </div>
+      </div>
+      
+      <!-- Action Buttons -->
+      <div class="flex gap-2 mb-6">
+        <button id="startPairedLearning" onclick="startPairedLearning()" 
+          class="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 px-4 rounded-xl" disabled>
+          ペア学習開始
+        </button>
+        <button id="markMismatch" onclick="markMismatch()" 
+          class="flex-1 bg-red-600 hover:bg-red-700 text-white py-3 px-4 rounded-xl" disabled>
+          不一致をマーク
+        </button>
+        <button id="finishPairing" onclick="finishPairing()" 
+          class="flex-1 bg-green-600 hover:bg-green-700 text-white py-3 px-4 rounded-xl" disabled>
+          ペア完了
+        </button>
+      </div>
+    </div>
+
+    <!-- Learned Pairs Display -->
+    <div class="bg-white rounded-2xl shadow-xl p-6 mb-6">
+      <h2 class="text-xl font-bold text-gray-800 mb-4">学習済みペア</h2>
+      <div id="pairedSamples" class="space-y-3 max-h-64 overflow-y-auto">
+        <p class="text-gray-500 text-center py-4">ペア学習を開始してください</p>
+      </div>
+      
+      <!-- Statistics -->
+      <div class="flex justify-between items-center mt-4 pt-4 border-t">
+        <div class="text-sm text-gray-600">
+          <span id="pairCount">0</span> 正しいペア | 
+          <span id="mismatchCount">0</span> 不一致
+        </div>
+        <button onclick="clearAllPairs()" class="text-red-600 hover:text-red-800 text-sm">
+          全ペアクリア
+        </button>
+      </div>
+    </div>
+
+    <!-- Learning Controls -->
+    <div class="bg-white rounded-2xl shadow-xl p-6 mb-6">
+      <h2 class="text-xl font-bold text-gray-800 mb-4">学習制御</h2>
+      <div class="grid md:grid-cols-4 gap-4">
+        <button id="analyzePatterns" onclick="analyzePatterns()" 
+          class="bg-purple-600 hover:bg-purple-700 text-white py-3 px-4 rounded-xl" disabled>
+          パターン解析開始
+        </button>
+        <button id="testPattern" onclick="testPattern()" 
+          class="bg-yellow-600 hover:bg-yellow-700 text-white py-3 px-4 rounded-xl" disabled>
+          パターンテスト
+        </button>
+        <button id="clearLearning" onclick="clearLearning()" 
+          class="bg-gray-500 hover:bg-gray-600 text-white py-3 px-4 rounded-xl">
+          全データクリア
+        </button>
+        <button id="deleteCustomerData" onclick="deleteCustomerData()" 
+          class="bg-red-600 hover:bg-red-700 text-white py-3 px-4 rounded-xl">
+          学習データ削除
+        </button>
+      </div>
+    </div>
+
+    <!-- Learning Log -->
+    <div class="bg-white rounded-2xl shadow-xl p-6">
+      <h2 class="text-xl font-bold text-gray-800 mb-4">学習ログ</h2>
+      <div id="learningLog" class="bg-gray-50 p-4 rounded-lg h-64 overflow-y-auto text-sm">
+        <p class="text-gray-500">学習ログがここに表示されます...</p>
+      </div>
+    </div>
+  </div>
+
+  <script src="qrLearning.js"></script>
+</body>
+</html>
