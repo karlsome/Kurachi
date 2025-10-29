@@ -10825,9 +10825,10 @@ app.post('/qr-learning/learn-patterns', async (req, res) => {
     console.log('Customer type:', req.body.customerType);
     console.log('Customer samples count:', req.body.customerSamples?.length);
     console.log('Internal samples count:', req.body.internalSamples?.length);
+    console.log('Mismatch samples count:', req.body.mismatchSamples?.length);
     console.log('Trained by:', req.body.trainedBy);
     
-    const { customerType, customerSamples, internalSamples, trainedBy } = req.body;
+    const { customerType, customerSamples, internalSamples, mismatchSamples, trainedBy } = req.body;
     
     if (!customerType || !customerSamples || !internalSamples || !trainedBy) {
       console.log('❌ Missing required data:', {
@@ -10869,7 +10870,8 @@ app.post('/qr-learning/learn-patterns', async (req, res) => {
       detectionRules: analysisResult.detectionRules,
       trainingData: {
         customerSamples: customerSamples,
-        internalSamples: internalSamples
+        internalSamples: internalSamples,
+        mismatchSamples: mismatchSamples || [] // Include negative examples
       },
       metadata: {
         trainedBy: trainedBy,
@@ -10877,7 +10879,8 @@ app.post('/qr-learning/learn-patterns', async (req, res) => {
         confidence: analysisResult.confidence,
         sampleCount: {
           customer: customerSamples.length,
-          internal: internalSamples.length
+          internal: internalSamples.length,
+          mismatch: mismatchSamples?.length || 0
         }
       },
       lastUpdated: new Date().toISOString()
