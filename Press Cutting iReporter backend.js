@@ -1269,6 +1269,102 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
       return;
     }
 
+    // ==================== VALIDATION SECTION ====================
+    // Validate all required fields before submission
+
+    // 1. Check required fields
+    if (!formData.品番 || formData.品番.trim() === '') {
+      showAlert('品番が必要です / Product Number is required');
+      document.getElementById('uploadingModal').style.display = 'none';
+      document.getElementById('product-number').focus();
+      return;
+    }
+
+    if (!formData.工場 || formData.工場.trim() === '') {
+      showAlert('工場が必要です / Factory is required');
+      document.getElementById('uploadingModal').style.display = 'none';
+      document.getElementById('selected工場').focus();
+      return;
+    }
+
+    if (!formData.設備 || formData.設備.trim() === '') {
+      showAlert('設備が必要です / Equipment is required');
+      document.getElementById('uploadingModal').style.display = 'none';
+      document.getElementById('process').focus();
+      return;
+    }
+
+    if (!formData.Process_Quantity || formData.Process_Quantity <= 0) {
+      showAlert('加工数（良品）が必要です / Process Quantity is required and must be greater than 0');
+      document.getElementById('uploadingModal').style.display = 'none';
+      document.getElementById('ProcessQuantity').focus();
+      return;
+    }
+
+    if (!formData.Worker_Name || formData.Worker_Name.trim() === '') {
+      showAlert('作業者名が必要です / Worker Name is required');
+      document.getElementById('uploadingModal').style.display = 'none';
+      document.getElementById('Machine Operator').focus();
+      return;
+    }
+
+    if (!formData.Date || formData.Date.trim() === '') {
+      showAlert('加工日が必要です / Work Date is required');
+      document.getElementById('uploadingModal').style.display = 'none';
+      document.getElementById('Lot No.').focus();
+      return;
+    }
+
+    if (!formData.材料ロット || formData.材料ロット.trim() === '') {
+      showAlert('材料ロットが必要です / Material Lot is required');
+      document.getElementById('uploadingModal').style.display = 'none';
+      document.getElementById('材料ロット').focus();
+      return;
+    }
+
+    if (!formData.ショット数 || formData.ショット数 < 1) {
+      showAlert('ショット数 (Shot Count) is required and must be at least 1.');
+      document.getElementById('uploadingModal').style.display = 'none';
+      document.getElementById('shot').focus();
+      return;
+    }
+
+    // 2. Validate Time fields
+    if (!formData.Time_start || formData.Time_start.trim() === '') {
+      showAlert('加工開始時間が必要です / Start Time is required');
+      document.getElementById('uploadingModal').style.display = 'none';
+      document.getElementById('Start Time').focus();
+      return;
+    }
+
+    if (!formData.Time_end || formData.Time_end.trim() === '') {
+      showAlert('加工終了時間が必要です / End Time is required');
+      document.getElementById('uploadingModal').style.display = 'none';
+      document.getElementById('End Time').focus();
+      return;
+    }
+
+    // 3. Validate Time_start < Time_end and Time_start ≠ Time_end
+    const startTimeDate = new Date(`2000-01-01T${formData.Time_start}:00`);
+    const endTimeDate = new Date(`2000-01-01T${formData.Time_end}:00`);
+
+    if (formData.Time_start === formData.Time_end) {
+      showAlert('加工開始時間と加工終了時間は同じにできません\n\nStart Time and End Time cannot be the same\n\n開始: ' + formData.Time_start + '\n終了: ' + formData.Time_end);
+      document.getElementById('uploadingModal').style.display = 'none';
+      document.getElementById('End Time').focus();
+      return;
+    }
+
+    if (startTimeDate >= endTimeDate) {
+      showAlert('加工開始時間は加工終了時間より前である必要があります\n\nStart Time must be before End Time\n\n開始: ' + formData.Time_start + '\n終了: ' + formData.Time_end);
+      document.getElementById('uploadingModal').style.display = 'none';
+      document.getElementById('End Time').focus();
+      return;
+    }
+
+    console.log('✅ All required fields validated successfully');
+    // ==================== END VALIDATION SECTION ====================
+
     // Collect Break Time Data
     const breakTimeData = {
       break1: { 

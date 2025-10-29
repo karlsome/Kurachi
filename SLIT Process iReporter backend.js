@@ -691,7 +691,7 @@ document.querySelector('form[name="contact-form"]').addEventListener("submit", a
     const 背番号 = document.getElementById("sub-dropdown").value;
     const Total = parseInt(document.getElementById("total").value, 10) || 0;
     const Worker_Name = document.getElementById("Machine Operator").value;
-    const Date = document.getElementById("Lot No.").value;
+    const WorkDate = document.getElementById("Lot No.").value;
     const Time_start = document.getElementById("Start Time").value;
     const Time_end = document.getElementById("End Time").value;
     const 設備 = document.getElementById("process").value;
@@ -728,12 +728,255 @@ document.querySelector('form[name="contact-form"]').addEventListener("submit", a
       return;
     }
 
+    // ==================== VALIDATION SECTION ====================
+    // Validate all required fields before submission
+
+    // 1. Check required fields
+    if (!品番 || 品番.trim() === '') {
+      uploadingModal.style.display = 'none';
+      scanAlertText.innerText = '品番が必要です / Product Number is required';
+      scanAlertModal.style.display = 'block';
+      if (alertSound) {
+        alertSound.muted = false;
+        alertSound.volume = 1;
+        alertSound.play().catch(console.error);
+      }
+      document.body.classList.add('flash-red');
+      document.getElementById('closeScanModalButton').onclick = function() {
+        scanAlertModal.style.display = 'none';
+        alertSound.pause();
+        alertSound.currentTime = 0;
+        alertSound.muted = true;
+        document.body.classList.remove('flash-red');
+      };
+      document.getElementById('product-number').focus();
+      return;
+    }
+
+    if (!工場 || 工場.trim() === '') {
+      uploadingModal.style.display = 'none';
+      scanAlertText.innerText = '工場が必要です / Factory is required';
+      scanAlertModal.style.display = 'block';
+      if (alertSound) {
+        alertSound.muted = false;
+        alertSound.volume = 1;
+        alertSound.play().catch(console.error);
+      }
+      document.body.classList.add('flash-red');
+      document.getElementById('closeScanModalButton').onclick = function() {
+        scanAlertModal.style.display = 'none';
+        alertSound.pause();
+        alertSound.currentTime = 0;
+        alertSound.muted = true;
+        document.body.classList.remove('flash-red');
+      };
+      document.getElementById('selected工場').focus();
+      return;
+    }
+
+    if (!設備 || 設備.trim() === '') {
+      uploadingModal.style.display = 'none';
+      scanAlertText.innerText = '設備が必要です / Equipment is required';
+      scanAlertModal.style.display = 'block';
+      if (alertSound) {
+        alertSound.muted = false;
+        alertSound.volume = 1;
+        alertSound.play().catch(console.error);
+      }
+      document.body.classList.add('flash-red');
+      document.getElementById('closeScanModalButton').onclick = function() {
+        scanAlertModal.style.display = 'none';
+        alertSound.pause();
+        alertSound.currentTime = 0;
+        alertSound.muted = true;
+        document.body.classList.remove('flash-red');
+      };
+      document.getElementById('process').focus();
+      return;
+    }
+
+    if (!Process_Quantity || Process_Quantity <= 0) {
+      uploadingModal.style.display = 'none';
+      scanAlertText.innerText = '加工数（良品）が必要です / Process Quantity is required and must be greater than 0';
+      scanAlertModal.style.display = 'block';
+      if (alertSound) {
+        alertSound.muted = false;
+        alertSound.volume = 1;
+        alertSound.play().catch(console.error);
+      }
+      document.body.classList.add('flash-red');
+      document.getElementById('closeScanModalButton').onclick = function() {
+        scanAlertModal.style.display = 'none';
+        alertSound.pause();
+        alertSound.currentTime = 0;
+        alertSound.muted = true;
+        document.body.classList.remove('flash-red');
+      };
+      document.getElementById('ProcessQuantity').focus();
+      return;
+    }
+
+    if (!Worker_Name || Worker_Name.trim() === '') {
+      uploadingModal.style.display = 'none';
+      scanAlertText.innerText = '作業者名が必要です / Worker Name is required';
+      scanAlertModal.style.display = 'block';
+      if (alertSound) {
+        alertSound.muted = false;
+        alertSound.volume = 1;
+        alertSound.play().catch(console.error);
+      }
+      document.body.classList.add('flash-red');
+      document.getElementById('closeScanModalButton').onclick = function() {
+        scanAlertModal.style.display = 'none';
+        alertSound.pause();
+        alertSound.currentTime = 0;
+        alertSound.muted = true;
+        document.body.classList.remove('flash-red');
+      };
+      document.getElementById('Machine Operator').focus();
+      return;
+    }
+
+    if (!WorkDate || WorkDate.trim() === '') {
+      uploadingModal.style.display = 'none';
+      scanAlertText.innerText = '加工日が必要です / Work Date is required';
+      scanAlertModal.style.display = 'block';
+      if (alertSound) {
+        alertSound.muted = false;
+        alertSound.volume = 1;
+        alertSound.play().catch(console.error);
+      }
+      document.body.classList.add('flash-red');
+      document.getElementById('closeScanModalButton').onclick = function() {
+        scanAlertModal.style.display = 'none';
+        alertSound.pause();
+        alertSound.currentTime = 0;
+        alertSound.muted = true;
+        document.body.classList.remove('flash-red');
+      };
+      document.getElementById('Lot No.').focus();
+      return;
+    }
+
+    if (!製造ロット || 製造ロット.trim() === '') {
+      uploadingModal.style.display = 'none';
+      scanAlertText.innerText = '製造ロットが必要です / Manufacturing Lot is required';
+      scanAlertModal.style.display = 'block';
+      if (alertSound) {
+        alertSound.muted = false;
+        alertSound.volume = 1;
+        alertSound.play().catch(console.error);
+      }
+      document.body.classList.add('flash-red');
+      document.getElementById('closeScanModalButton').onclick = function() {
+        scanAlertModal.style.display = 'none';
+        alertSound.pause();
+        alertSound.currentTime = 0;
+        alertSound.muted = true;
+        document.body.classList.remove('flash-red');
+      };
+      document.getElementById('製造ロット').focus();
+      return;
+    }
+
+    // 2. Validate Time fields
+    if (!Time_start || Time_start.trim() === '') {
+      uploadingModal.style.display = 'none';
+      scanAlertText.innerText = '加工開始時間が必要です / Start Time is required';
+      scanAlertModal.style.display = 'block';
+      if (alertSound) {
+        alertSound.muted = false;
+        alertSound.volume = 1;
+        alertSound.play().catch(console.error);
+      }
+      document.body.classList.add('flash-red');
+      document.getElementById('closeScanModalButton').onclick = function() {
+        scanAlertModal.style.display = 'none';
+        alertSound.pause();
+        alertSound.currentTime = 0;
+        alertSound.muted = true;
+        document.body.classList.remove('flash-red');
+      };
+      document.getElementById('Start Time').focus();
+      return;
+    }
+
+    if (!Time_end || Time_end.trim() === '') {
+      uploadingModal.style.display = 'none';
+      scanAlertText.innerText = '加工終了時間が必要です / End Time is required';
+      scanAlertModal.style.display = 'block';
+      if (alertSound) {
+        alertSound.muted = false;
+        alertSound.volume = 1;
+        alertSound.play().catch(console.error);
+      }
+      document.body.classList.add('flash-red');
+      document.getElementById('closeScanModalButton').onclick = function() {
+        scanAlertModal.style.display = 'none';
+        alertSound.pause();
+        alertSound.currentTime = 0;
+        alertSound.muted = true;
+        document.body.classList.remove('flash-red');
+      };
+      document.getElementById('End Time').focus();
+      return;
+    }
+
+    // 3. Validate Time_start < Time_end and Time_start ≠ Time_end
+    const startTimeDate = new Date(`2000-01-01T${Time_start}:00`);
+    const endTimeDate = new Date(`2000-01-01T${Time_end}:00`);
+
+    if (Time_start === Time_end) {
+      uploadingModal.style.display = 'none';
+      scanAlertText.innerText = '加工開始時間と加工終了時間は同じにできません\n\nStart Time and End Time cannot be the same\n\n開始: ' + Time_start + '\n終了: ' + Time_end;
+      scanAlertModal.style.display = 'block';
+      if (alertSound) {
+        alertSound.muted = false;
+        alertSound.volume = 1;
+        alertSound.play().catch(console.error);
+      }
+      document.body.classList.add('flash-red');
+      document.getElementById('closeScanModalButton').onclick = function() {
+        scanAlertModal.style.display = 'none';
+        alertSound.pause();
+        alertSound.currentTime = 0;
+        alertSound.muted = true;
+        document.body.classList.remove('flash-red');
+      };
+      document.getElementById('End Time').focus();
+      return;
+    }
+
+    if (startTimeDate >= endTimeDate) {
+      uploadingModal.style.display = 'none';
+      scanAlertText.innerText = '加工開始時間は加工終了時間より前である必要があります\n\nStart Time must be before End Time\n\n開始: ' + Time_start + '\n終了: ' + Time_end;
+      scanAlertModal.style.display = 'block';
+      if (alertSound) {
+        alertSound.muted = false;
+        alertSound.volume = 1;
+        alertSound.play().catch(console.error);
+      }
+      document.body.classList.add('flash-red');
+      document.getElementById('closeScanModalButton').onclick = function() {
+        scanAlertModal.style.display = 'none';
+        alertSound.pause();
+        alertSound.currentTime = 0;
+        alertSound.muted = true;
+        document.body.classList.remove('flash-red');
+      };
+      document.getElementById('End Time').focus();
+      return;
+    }
+
+    console.log('✅ All required fields validated successfully');
+    // ==================== END VALIDATION SECTION ====================
+
     const formData = {
       品番,
       背番号,
       Total,
       Worker_Name,
-      Date,
+      Date: WorkDate,
       Time_start,
       Time_end,
       設備,
@@ -764,7 +1007,7 @@ document.querySelector('form[name="contact-form"]').addEventListener("submit", a
         factory: 工場,
         machine: 設備,
         worker: Worker_Name,
-        date: Date,
+        date: WorkDate,
         sebanggo: 背番号,
       });
     }
