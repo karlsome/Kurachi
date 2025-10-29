@@ -685,13 +685,26 @@ document.addEventListener("DOMContentLoaded", () => {
     // Get selected customer type
     const customerType = domCache['customerSelect'] ? domCache['customerSelect'].value : 'tn';
     
-    // First check if it's our company QR (common for all customers)
-    if (qrCode.includes('GN') && (qrCode.includes('-') || qrCode.includes('/'))) {
-      console.log('Detected our QR');
+    // First check if it's our company QR (internal QR)
+    // Internal QR characteristics:
+    // 1. Contains comma (product,quantity format)
+    // 2. Has dashes in product code
+    // 3. Relatively short (< 50 characters)
+    // 4. Product code pattern: digits-alphanumeric-alphanumeric
+    
+    const hasComma = qrCode.includes(',');
+    const hasDash = qrCode.includes('-') || qrCode.includes('/');
+    const isShort = qrCode.length < 50;
+    
+    // Pattern for internal QR: NNNNN-AAAAAA-AA or GN###-##### format
+    const internalPattern = /^[A-Z0-9]{4,6}[\-\/][A-Z0-9]{4,6}[\-\/]?[A-Z0-9]{0,4}/;
+    
+    if ((hasComma && hasDash) || (isShort && hasDash && internalPattern.test(qrCode))) {
+      console.log('Detected internal QR by pattern');
       return 'our';
     }
     
-    // Try to use learned patterns for detection
+    // Try to use learned patterns for customer QR detection
     if (qrPatternSync) {
       try {
         const pattern = await qrPatternSync.getCustomerPattern(customerType);
