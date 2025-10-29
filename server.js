@@ -10780,16 +10780,49 @@ app.get('/qr-patterns/hash/:customerType', async (req, res) => {
     const database = client.db("Sasaki_Coating_MasterDB");
     const patterns = database.collection("learnedQRDB");
     
-    const pattern = await patterns.findOne({ customerType: customerType });
+    // Only return hash for DEPLOYED patterns
+    const pattern = await patterns.findOne({ 
+      customerType: customerType,
+      status: 'deployed'
+    });
     
     if (!pattern) {
-      return res.status(404).json({ error: 'No patterns found for customer' });
+      return res.status(404).json({ error: 'No deployed patterns found for customer' });
     }
     
     res.json({ hash: pattern.hash });
     
   } catch (error) {
     console.error('Error getting pattern hash:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Check if pattern exists for customer (for testing)
+app.get('/qr-learning/check-pattern/:customerType', async (req, res) => {
+  try {
+    const { customerType } = req.params;
+    
+    await client.connect();
+    const database = client.db("Sasaki_Coating_MasterDB");
+    const patterns = database.collection("learnedQRDB");
+    
+    // Check if ANY pattern exists (draft or deployed)
+    const pattern = await patterns.findOne({ customerType: customerType });
+    
+    if (!pattern) {
+      return res.json({ exists: false });
+    }
+    
+    res.json({ 
+      exists: true,
+      status: pattern.status,
+      hash: pattern.hash,
+      lastUpdated: pattern.lastUpdated
+    });
+    
+  } catch (error) {
+    console.error('Error checking pattern:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -10803,10 +10836,14 @@ app.get('/qr-patterns/:customerType', async (req, res) => {
     const database = client.db("Sasaki_Coating_MasterDB");
     const patterns = database.collection("learnedQRDB");
     
-    const pattern = await patterns.findOne({ customerType: customerType });
+    // Only fetch DEPLOYED patterns for tablets
+    const pattern = await patterns.findOne({ 
+      customerType: customerType,
+      status: 'deployed'
+    });
     
     if (!pattern) {
-      return res.status(404).json({ error: 'No patterns found for customer' });
+      return res.status(404).json({ error: 'No deployed patterns found for customer' });
     }
     
     res.json(pattern);
@@ -10865,6 +10902,7 @@ app.post('/qr-learning/learn-patterns', async (req, res) => {
     // Prepare pattern record for database
     const patternRecord = {
       customerType: customerType,
+      status: 'draft', // New patterns start as draft (not deployed)
       hash: patternHash,
       extractionRules: analysisResult.extractionRules,
       detectionRules: analysisResult.detectionRules,
@@ -10907,6 +10945,142 @@ app.post('/qr-learning/learn-patterns', async (req, res) => {
     
   } catch (error) {
     console.error('Error learning patterns:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Extract product from customer QR using learned patterns
+app.post('/qr-learning/extract-product', async (req, res) => {
+  try {
+    console.log('=== Extract Product Request ===');
+    const { customerType, customerQR } = req.body;
+    
+    if (!customerType || !customerQR) {
+      return res.status(400).json({ error: 'Missing required data' });
+    }
+    
+    await client.connect();
+    const database = client.db("Sasaki_Coating_MasterDB");
+    const patterns = database.collection("learnedQRDB");
+    
+    // Get learned pattern for this customer
+    const learnedPattern = await patterns.findOne({ customerType: customerType });
+    
+    if (!learnedPattern) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'No learned pattern found for this customer' 
+      });
+    }
+    
+    // Try to extract product using extraction rules
+    let extractedProduct = null;
+    
+    for (const rule of learnedPattern.extractionRules) {
+      if (rule.type === 'regex') {
+        const regex = new RegExp(rule.pattern);
+        const match = customerQR.match(regex);
+        
+        if (match && match[rule.captureGroup || 0]) {
+          extractedProduct = match[rule.captureGroup || 0];
+          
+          // Apply formatting if specified
+          if (rule.formatting) {
+            extractedProduct = applyFormattingServer(extractedProduct, rule.formatting);
+          }
+          
+          console.log('✅ Product extracted:', extractedProduct);
+          break;
+        }
+      }
+    }
+    
+    if (extractedProduct) {
+      res.json({
+        success: true,
+        product: extractedProduct,
+        customerQR: customerQR
+      });
+    } else {
+      res.json({
+        success: false,
+        error: 'Could not extract product from customer QR',
+        customerQR: customerQR
+      });
+    }
+    
+  } catch (error) {
+    console.error('Error extracting product:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Deploy learned pattern (make it available for tablets)
+app.post('/qr-learning/deploy-pattern', async (req, res) => {
+  try {
+    console.log('=== Deploy Pattern Request ===');
+    const { customerType, deployedBy } = req.body;
+    
+    if (!customerType || !deployedBy) {
+      return res.status(400).json({ error: 'Missing required data' });
+    }
+    
+    await client.connect();
+    const database = client.db("Sasaki_Coating_MasterDB");
+    const patterns = database.collection("learnedQRDB");
+    
+    // Find the draft pattern
+    const draftPattern = await patterns.findOne({ 
+      customerType: customerType,
+      status: 'draft'
+    });
+    
+    if (!draftPattern) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'No draft pattern found for this customer' 
+      });
+    }
+    
+    // Generate new hash for deployment (to invalidate caches)
+    const deploymentHash = require('crypto')
+      .createHash('md5')
+      .update(JSON.stringify(draftPattern.extractionRules) + Date.now())
+      .digest('hex')
+      .substring(0, 16);
+    
+    // Update pattern to deployed status
+    const updateResult = await patterns.updateOne(
+      { customerType: customerType, status: 'draft' },
+      { 
+        $set: { 
+          status: 'deployed',
+          hash: deploymentHash,
+          deployedBy: deployedBy,
+          deployedAt: new Date().toISOString(),
+          lastUpdated: new Date().toISOString()
+        } 
+      }
+    );
+    
+    if (updateResult.modifiedCount > 0) {
+      console.log('✅ Pattern deployed:', customerType);
+      res.json({
+        success: true,
+        message: 'Pattern deployed successfully',
+        customerType: customerType,
+        hash: deploymentHash,
+        status: 'deployed'
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: 'Failed to deploy pattern'
+      });
+    }
+    
+  } catch (error) {
+    console.error('Error deploying pattern:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -11260,6 +11434,9 @@ function findProductInThirdPart(thirdParts, products) {
 
 // Find product pattern anywhere in customer QR
 function findProductAnywhere(customerSamples, internalSamples) {
+  // Analyze multiple samples to find a common pattern
+  const productMatches = [];
+  
   for (let i = 0; i < customerSamples.length && i < internalSamples.length; i++) {
     const customerQR = customerSamples[i].qr;
     const internalQR = internalSamples[i].qr;
@@ -11267,38 +11444,58 @@ function findProductAnywhere(customerSamples, internalSamples) {
     // Extract product code from internal QR (before comma)
     const product = internalQR.includes(',') ? internalQR.split(',')[0].trim() : internalQR.trim();
     
-    // Check if product appears in customer QR
+    // Check if product appears directly in customer QR (with dashes)
     if (customerQR.includes(product)) {
       const startPos = customerQR.indexOf(product);
-      return {
-        type: 'regex',
-        pattern: product.replace(/[-]/g, '\\-'), // Escape special regex characters
-        captureGroup: 0,
-        confidence: 0.95,
-        extraction: {
-          method: 'direct_match',
-          product: product
-        }
-      };
+      // Find what comes before and after the product
+      const before = customerQR.substring(Math.max(0, startPos - 10), startPos);
+      const after = customerQR.substring(startPos + product.length, startPos + product.length + 10);
+      
+      productMatches.push({
+        product,
+        startPos,
+        before,
+        after,
+        hasDirectMatch: true
+      });
+    }
+  }
+  
+  // If we found direct matches in all samples, create a generic pattern
+  if (productMatches.length > 0 && productMatches.every(m => m.hasDirectMatch)) {
+    // Analyze the pattern: product codes like "67161-X1B39-B0"
+    // Format: 5 digits - alphanumeric - alphanumeric
+    const firstProduct = productMatches[0].product;
+    
+    // Detect the format pattern
+    const parts = firstProduct.split('-');
+    let pattern;
+    let captureGroup = 1;
+    
+    if (parts.length === 3) {
+      // Pattern: NNNNN-AAAAAA-AA format (like 67161-X1B39-B0)
+      // Create a flexible regex that captures this format
+      pattern = `([0-9]{5}-[A-Z0-9]{5,6}-[A-Z0-9]{2})`;
+    } else if (parts.length === 2) {
+      // Pattern: AAAAA-AAAAA format
+      pattern = `([A-Z0-9]{4,6}-[A-Z0-9]{4,6})`;
+    } else {
+      // Fallback: just capture alphanumeric with dashes
+      pattern = `([A-Z0-9\\-]{10,20})`;
     }
     
-    // Try with cleaned product (no dashes)
-    const cleanProduct = product.replace(/[-]/g, '');
-    if (customerQR.includes(cleanProduct)) {
-      const startPos = customerQR.indexOf(cleanProduct);
-      return {
-        type: 'regex',
-        pattern: `(${cleanProduct.substring(0, 5)})(${cleanProduct.substring(5)})`,
-        captureGroup: 0,
-        confidence: 0.9,
-        formatting: {
-          insert: [{
-            position: 5,
-            character: '-'
-          }]
-        }
-      };
-    }
+    console.log('✅ Created generic product pattern:', pattern);
+    
+    return {
+      type: 'regex',
+      pattern: pattern,
+      captureGroup: captureGroup,
+      confidence: 0.95,
+      extraction: {
+        method: 'pattern_match',
+        format: parts.length === 3 ? 'NNNNN-AAAAAA-AA' : 'variable'
+      }
+    };
   }
   
   return null;

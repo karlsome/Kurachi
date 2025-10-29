@@ -63,9 +63,17 @@ function setupEventListeners() {
         enablePairedLearning();
         logMessage(`📋 Selected customer: ${customerType}`);
         updateScanInstruction('Ready to start paired learning');
+        // Enable test button when customer is selected
+        if (domCache['testPattern']) {
+          domCache['testPattern'].disabled = false;
+        }
       } else {
         disablePairedLearning();
         updateScanInstruction('Please select a customer first');
+        // Disable test button when no customer selected
+        if (domCache['testPattern']) {
+          domCache['testPattern'].disabled = true;
+        }
       }
       updateProgress();
     });
@@ -117,6 +125,9 @@ async function processScanBuffer(qrCode) {
   if (!isAuthenticated) {
     // Handle authentication scan
     await handleAuthenticationScan(qrCode);
+  } else if (testMode) {
+    // Handle test mode scan
+    await processTestScan(qrCode);
   } else if (scanningMode) {
     // Handle paired learning scan
     processScannedQR(qrCode);
@@ -226,8 +237,11 @@ function updateButtonStates() {
     domCache['analyzePatterns'].disabled = !hasEnoughPairs;
   }
   
+  // Test button is always enabled when customer is selected
+  // It will check MongoDB for existing patterns
+  const customerSelected = domCache['learningCustomerSelect']?.value;
   if (domCache['testPattern']) {
-    domCache['testPattern'].disabled = !learnedPatterns;
+    domCache['testPattern'].disabled = !customerSelected;
   }
 }
 
@@ -389,6 +403,56 @@ function closeTestModal() {
   }
 }
 
+async function deployPattern() {
+  const customerType = domCache['learningCustomerSelect']?.value;
+  if (!customerType) {
+    alert('お客様を選択してください');
+    return;
+  }
+
+  if (!currentUser) {
+    alert('認証エラー: ユーザー情報がありません');
+    return;
+  }
+
+  const confirmed = confirm(
+    `${customerType.toUpperCase()} のパターンを全デバイスに配信しますか？\n\n` +
+    `配信後、全てのタブレットでこのパターンを使用できるようになります。`
+  );
+  
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    const response = await fetch(`${serverURL}/qr-learning/deploy-pattern`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        customerType,
+        deployedBy: currentUser.username
+      })
+    });
+
+    const result = await response.json();
+    
+    if (result.success) {
+      logMessage(`✅ パターン配信完了: ${customerType.toUpperCase()}`);
+      logMessage(`📡 新しいハッシュ: ${result.hash}`);
+      logMessage(`👤 配信者: ${currentUser.username}`);
+      alert(`✅ パターンを全デバイスに配信しました！\n\nハッシュ: ${result.hash}\n配信者: ${currentUser.username}\n\n全てのタブレットで使用可能になりました。`);
+      closeTestModal();
+    } else {
+      alert(`❌ 配信エラー: ${result.message}`);
+      logMessage(`❌ Deploy error: ${result.message}`);
+    }
+  } catch (error) {
+    console.error('Deploy error:', error);
+    alert('❌ 配信中にエラーが発生しました');
+    logMessage(`❌ Deploy failed: ${error.message}`);
+  }
+}
+
 function cancelAuth() {
   window.location.href = 'labelComparator.html';
 }
@@ -468,6 +532,12 @@ function startMismatchPairs() {
 // Finish learning and stop collection
 function finishLearning() {
   console.log('🟢 finishLearning() called');
+  
+  // Check if in test mode
+  if (testMode) {
+    stopTestMode();
+    return;
+  }
   
   collectionMode = null;
   scanningMode = null;
@@ -778,6 +848,240 @@ async function analyzePatterns() {
   }
 }
 
+// Test learned patterns by scanning customer→internal pairs
+let testMode = false;
+let testCustomerQR = null;
+let testResults = [];
+
+async function testPattern() {
+  console.log('🧪 testPattern() called');
+  
+  const customerType = domCache['learningCustomerSelect']?.value;
+  if (!customerType) {
+    alert('❌ お客様を選択してください');
+    logMessage('❌ Please select a customer first');
+    return;
+  }
+  
+  // Check if pattern exists in MongoDB
+  try {
+    const response = await fetch(`${serverURL}/qr-learning/check-pattern/${customerType}`);
+    const result = await response.json();
+    
+    if (!result.exists) {
+      alert(`❌ ${customerType.toUpperCase()} の学習データが見つかりません\n\n先にパターン解析を実行してください。`);
+      logMessage(`❌ No pattern found for ${customerType} in database`);
+      return;
+    }
+    
+    logMessage(`✅ Found pattern in database for ${customerType} (status: ${result.status})`);
+    
+  } catch (error) {
+    console.error('Error checking pattern:', error);
+    alert('❌ パターン確認エラー');
+    return;
+  }
+  
+  // Enter test mode
+  testMode = true;
+  testCustomerQR = null;
+  testResults = [];
+  collectionMode = null;
+  scanningMode = 'customer';
+  
+  updateScanInstruction('🧪 Test Mode: Scan customer QR code');
+  updateScanDetails('テストモード - お客様QRをスキャンしてください');
+  
+  // Disable collection buttons, enable stop test
+  domCache['startCorrectPairs'].disabled = true;
+  domCache['startMismatchPairs'].disabled = true;
+  domCache['testPattern'].disabled = true;
+  domCache['finishLearning'].disabled = false; // Use as "Stop Test"
+  
+  logMessage('🧪 テストモード開始 - お客様QRをスキャンしてください');
+  playSuccessSound();
+}
+
+// Process QR in test mode
+async function processTestScan(qrCode) {
+  console.log('🧪 processTestScan called');
+  console.log('Test scanningMode:', scanningMode);
+  console.log('testCustomerQR:', testCustomerQR);
+  console.log('Scanned QR:', qrCode.substring(0, 100));
+  
+  if (scanningMode === 'customer') {
+    // First scan: Customer QR
+    testCustomerQR = qrCode;
+    scanningMode = 'internal';
+    
+    updateScanInstruction('🧪 Now scan the internal QR to verify');
+    updateScanDetails(`お客様QR取得 - 対応する社内QRをスキャン`);
+    
+    logMessage(`✅ お客様QR取得: ${qrCode.substring(0, 50)}...`);
+    playSuccessSound();
+    
+  } else if (scanningMode === 'internal') {
+    // Second scan: Internal QR - validate the pair
+    const internalQR = qrCode;
+    const customerType = domCache['learningCustomerSelect']?.value;
+    
+    console.log('📤 Sending to server for extraction:');
+    console.log('  Customer QR:', testCustomerQR);
+    console.log('  Customer Type:', customerType);
+    
+    try {
+      // Call server to extract product from customer QR
+      const response = await fetch(`${serverURL}/qr-learning/extract-product`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customerType: customerType,
+          customerQR: testCustomerQR
+        })
+      });
+      
+      const result = await response.json();
+      
+      console.log('📥 Server response:', result);
+      
+      if (response.ok && result.success) {
+        const extractedProduct = result.product;
+        const actualProduct = internalQR.includes(',') ? internalQR.split(',')[0].trim() : internalQR.trim();
+        
+        const isMatch = extractedProduct === actualProduct;
+        
+        // Record test result
+        const testResult = {
+          id: Date.now(),
+          customerQR: testCustomerQR,
+          internalQR: internalQR,
+          extractedProduct: extractedProduct,
+          actualProduct: actualProduct,
+          match: isMatch,
+          timestamp: new Date().toISOString()
+        };
+        
+        testResults.push(testResult);
+        
+        // Display result
+        if (isMatch) {
+          logMessage(`✅ 一致！ 抽出: ${extractedProduct} = 実際: ${actualProduct}`);
+          updateScanDetails(`✅ 正解！ ${extractedProduct}`);
+          playSuccessSound();
+        } else {
+          logMessage(`❌ 不一致！ 抽出: ${extractedProduct} ≠ 実際: ${actualProduct}`);
+          updateScanDetails(`❌ 不正解！ 抽出: ${extractedProduct}, 実際: ${actualProduct}`);
+          playErrorSound();
+        }
+        
+        // Show test summary
+        const totalTests = testResults.length;
+        const correctTests = testResults.filter(r => r.match).length;
+        const accuracy = ((correctTests / totalTests) * 100).toFixed(1);
+        
+        logMessage(`📊 テスト結果: ${correctTests}/${totalTests} 正解 (${accuracy}%)`);
+        
+      } else {
+        logMessage(`❌ 抽出エラー: ${result.error || result.message}`);
+        console.error('Extraction failed:', result);
+        playErrorSound();
+      }
+      
+    } catch (error) {
+      console.error('Test error:', error);
+      logMessage(`❌ テストエラー: ${error.message}`);
+      playErrorSound();
+    }
+    
+    // Reset for next test pair
+    console.log('🔄 Resetting for next test pair');
+    testCustomerQR = null;
+    scanningMode = 'customer';
+    
+    updateScanInstruction('🧪 Scan next customer QR code (or click 学習完了 to stop)');
+  }
+}
+
+// Stop test mode
+function stopTestMode() {
+  if (!testMode) return;
+  
+  testMode = false;
+  testCustomerQR = null;
+  scanningMode = null;
+  
+  // Show final test summary
+  if (testResults.length > 0) {
+    const totalTests = testResults.length;
+    const correctTests = testResults.filter(r => r.match).length;
+    const accuracy = ((correctTests / totalTests) * 100).toFixed(1);
+    
+    logMessage(`🏁 テスト完了！ 最終結果: ${correctTests}/${totalTests} 正解 (精度: ${accuracy}%)`);
+    updateScanInstruction('Test completed');
+    updateScanDetails(`テスト完了 - ${correctTests}/${totalTests} 正解 (${accuracy}%)`);
+    
+    // Show test results modal
+    showTestResults();
+  } else {
+    logMessage('🏁 テスト終了 - テストなし');
+    updateScanInstruction('Test stopped');
+    updateScanDetails('テストモード終了');
+  }
+  
+  // Re-enable buttons
+  domCache['startCorrectPairs'].disabled = false;
+  domCache['startMismatchPairs'].disabled = false;
+  domCache['testPattern'].disabled = false;
+  domCache['finishLearning'].disabled = true;
+  
+  playSuccessSound();
+}
+
+function showTestResults() {
+  const totalTests = testResults.length;
+  const correctTests = testResults.filter(r => r.match).length;
+  const accuracy = ((correctTests / totalTests) * 100).toFixed(1);
+  
+  let resultsHTML = `
+    <div class="mb-3 p-3 bg-white rounded-lg border-2 ${accuracy >= 90 ? 'border-green-500' : 'border-orange-500'}">
+      <div class="text-lg font-bold mb-2">
+        ${accuracy >= 90 ? '✅' : '⚠️'} 精度: ${accuracy}%
+      </div>
+      <div class="text-sm text-gray-600">
+        正解: ${correctTests} / ${totalTests} テスト
+      </div>
+    </div>
+    
+    <div class="space-y-2 text-sm">
+  `;
+  
+  testResults.forEach((result, index) => {
+    const icon = result.match ? '✅' : '❌';
+    const bgColor = result.match ? 'bg-green-100' : 'bg-red-100';
+    
+    resultsHTML += `
+      <div class="${bgColor} p-2 rounded">
+        <div class="font-medium">${icon} テスト ${index + 1}</div>
+        <div class="text-xs text-gray-700 mt-1">
+          抽出: ${result.extracted || 'エラー'}<br>
+          実際: ${result.actual}
+        </div>
+        ${result.error ? `<div class="text-xs text-red-600 mt-1">エラー: ${result.error}</div>` : ''}
+      </div>
+    `;
+  });
+  
+  resultsHTML += '</div>';
+  
+  if (domCache['testResults']) {
+    domCache['testResults'].innerHTML = resultsHTML;
+  }
+  
+  if (domCache['testModal']) {
+    domCache['testModal'].style.display = 'flex';
+  }
+}
+
 // Sound functions
 function playSuccessSound() {
   if (domCache['success-sound']) {
@@ -869,6 +1173,7 @@ window.startCorrectPairs = startCorrectPairs;
 window.startMismatchPairs = startMismatchPairs;
 window.finishLearning = finishLearning;
 window.analyzePatterns = analyzePatterns;
+window.testPattern = testPattern;
 window.removePair = removePair;
 window.removeMismatch = removeMismatch;
 window.clearAllPairs = clearAllPairs;
