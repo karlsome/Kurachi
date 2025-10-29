@@ -10989,8 +10989,36 @@ app.post('/qr-learning/extract-product', async (req, res) => {
             extractedProduct = applyFormattingServer(extractedProduct, rule.formatting);
           }
           
-          console.log('✅ Product extracted:', extractedProduct);
+          console.log('✅ Product extracted via regex:', extractedProduct);
           break;
+        }
+      } else if (rule.type === 'position') {
+        // Position-based extraction (e.g., third part of space-separated QR)
+        const delimiter = new RegExp(rule.delimiter || '\\s+');
+        const parts = customerQR.split(delimiter);
+        
+        console.log(`Position extraction: split into ${parts.length} parts, looking for part ${rule.partIndex}`);
+        
+        if (parts.length > rule.partIndex) {
+          let part = parts[rule.partIndex];
+          
+          // Apply substring extraction if specified
+          if (rule.substring) {
+            part = part.substring(rule.substring.start, rule.substring.end);
+            console.log(`Substring extracted: ${part}`);
+          }
+          
+          // Apply formatting if specified
+          if (rule.formatting) {
+            part = applyFormattingServer(part, rule.formatting);
+            console.log(`After formatting: ${part}`);
+          }
+          
+          extractedProduct = part;
+          console.log('✅ Product extracted via position:', extractedProduct);
+          break;
+        } else {
+          console.log(`❌ Position extraction failed: only ${parts.length} parts found`);
         }
       }
     }
