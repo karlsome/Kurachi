@@ -1286,7 +1286,7 @@ function resetForm() {
 
 
 // Helper function for hidase rotary label printing
-function redirectHidaseRotary(selected収容数, labelMarking, product) {
+async function redirectHidaseRotary(selected収容数, labelMarking, product) {
   const 品番 = product.品番 || "";
   const 背番号Raw = product.背番号 || "";
   const 車型 = product.モデル || "";
@@ -1295,6 +1295,8 @@ function redirectHidaseRotary(selected収容数, labelMarking, product) {
   const 色 = product.色 || "";
   const extension = document.getElementById("Labelextension")?.value || "";
   const Date2 = document.getElementById('Lot No.')?.value || "";
+  const Worker_Name = document.getElementById('Machine Operator')?.value || "";
+  console.log(Worker_Name);
   
   // Strip all leading letters from 背番号 to get numeric value only
   // Example: "DR103" -> "103", "ABC123" -> "123", "AA1C32" -> "1C32"
@@ -1308,8 +1310,13 @@ function redirectHidaseRotary(selected収容数, labelMarking, product) {
   const size = "RollW62";
   const copies = 1;
   
+  // Determine base URL depending on platform
+  const baseURL = isIOS()
+    ? "brotherwebprint://print"
+    : "http://localhost:8088/print";
+  
   const url =
-    `brotherwebprint://print?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent(size)}&copies=${encodeURIComponent(copies)}` +
+    `${baseURL}?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent(size)}&copies=${encodeURIComponent(copies)}` +
     `&text_品番=${encodeURIComponent(品番)}` +
     `&text_車型=${encodeURIComponent(車型)}` +
     `&text_収容数=${encodeURIComponent(selected収容数)}` +
@@ -1319,14 +1326,41 @@ function redirectHidaseRotary(selected収容数, labelMarking, product) {
     `&text_色=${encodeURIComponent(色)}` +
     `&text_DateT=${encodeURIComponent(Date)}` +
     `&text_labelMarking=${encodeURIComponent(labelMarking)}` +
+    `&text_kensa=${encodeURIComponent(Worker_Name)}` +
     `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
 
   console.log('Hidase Rotary Label URL:', url);
   console.log('背番号 (raw):', 背番号Raw, '-> (numeric):', 背番号Numeric);
   console.log('Label Marking:', labelMarking);
   console.log('Selected 収容数:', selected収容数);
+  console.log('Worker Name:', Worker_Name);
   
-  window.location.href = url;
+  // On iOS, use location.href to launch brotherwebprint
+  if (isIOS()) {
+    window.location.href = url;
+    return;
+  }
+
+  // Android or desktop: use fetch to send request with printing modal
+  showPrintingModal();
+  
+  try {
+    const response = await Promise.race([
+      fetch(url).then(res => res.text()),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout after 7 seconds")), 7000))
+    ]);
+
+    if (response.includes("<result>SUCCESS</result>")) {
+      console.log("Print success.");
+      flashGreen();
+    } else {
+      alert("Printing failed. Check printer status.");
+    }
+  } catch (error) {
+    alert("Error: " + error.message);
+  } finally {
+    closePrintingModal();
+  }
 }
 
 
@@ -1428,6 +1462,24 @@ function printLabel() {
       modal.style.boxShadow = '0 0 15px rgba(0, 0, 0, 0.5)';
       modal.style.borderRadius = '10px';
       modal.style.zIndex = '10001';
+
+      // Add close button (X) at top right
+      const closeBtn = document.createElement('span');
+      closeBtn.innerHTML = '&times;';
+      closeBtn.style.cssText = `
+        position: absolute;
+        top: 10px;
+        right: 20px;
+        font-size: 35px;
+        font-weight: bold;
+        color: #aaa;
+        cursor: pointer;
+        transition: color 0.2s;
+      `;
+      closeBtn.onmouseover = () => closeBtn.style.color = '#000';
+      closeBtn.onmouseout = () => closeBtn.style.color = '#aaa';
+      closeBtn.onclick = () => document.body.removeChild(modal);
+      modal.appendChild(closeBtn);
 
       const message = document.createElement('p');
       message.innerText = '収容数を選んでください / Please choose the value for Quantity';
@@ -2089,3 +2141,124 @@ window.addEventListener('load', function() {
 });
 
 // ===== END OF NUMERIC KEYPAD FUNCTIONALITY =====
+
+
+// ===== PLATFORM DETECTION AND PRINTING HELPER FUNCTIONS =====
+
+function isIOS() {
+  return /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+}
+
+function isAndroid() {
+  return /Android/.test(navigator.userAgent);
+}
+
+// Function to show printing modal for Android
+function showPrintingModal() {
+  // Create modal if it doesn't exist
+  let modal = document.getElementById('printingModal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'printingModal';
+    modal.style.cssText = `
+      display: none;
+      position: fixed;
+      z-index: 10000;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0, 0, 0, 0.6);
+    `;
+
+    const modalContent = document.createElement('div');
+    modalContent.style.cssText = `
+      position: relative;
+      margin: 20% auto;
+      padding: 30px;
+      background-color: white;
+      width: 80%;
+      max-width: 400px;
+      border-radius: 10px;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+      text-align: center;
+    `;
+
+    const message = document.createElement('p');
+    message.style.cssText = `
+      font-size: 24px;
+      margin-bottom: 20px;
+      color: #333;
+    `;
+    message.textContent = '印刷中... / Printing...';
+
+    const closeButton = document.createElement('button');
+    closeButton.textContent = '閉じる / Close';
+    closeButton.style.cssText = `
+      padding: 10px 20px;
+      font-size: 16px;
+      background-color: #007bff;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      margin-top: 10px;
+    `;
+    closeButton.onmouseover = function() {
+      this.style.backgroundColor = '#0056b3';
+    };
+    closeButton.onmouseout = function() {
+      this.style.backgroundColor = '#007bff';
+    };
+    closeButton.onclick = closePrintingModal;
+
+    modalContent.appendChild(message);
+    modalContent.appendChild(closeButton);
+    modal.appendChild(modalContent);
+    document.body.appendChild(modal);
+  }
+
+  modal.style.display = 'block';
+}
+
+// Function to close printing modal
+function closePrintingModal() {
+  const modal = document.getElementById('printingModal');
+  if (modal) {
+    modal.style.display = 'none';
+  }
+}
+
+// Function to flash the background green
+function flashGreen() {
+  const body = document.body;
+
+  // Remove class if it already exists to restart animation
+  body.classList.remove("flash-green");
+
+  // Trigger reflow to reset the animation
+  void body.offsetWidth;
+
+  // Add the class to start animation
+  body.classList.add("flash-green");
+
+  // Optional: remove class after animation ends
+  setTimeout(() => {
+    body.classList.remove("flash-green");
+  }, 500); // match the duration of your animation
+}
+
+// Add CSS for flash-green animation
+const flashGreenStyle = document.createElement('style');
+flashGreenStyle.innerHTML = `
+.flash-green {
+  animation: flash-green 0.5s ease-in-out;
+}
+@keyframes flash-green {
+  0%, 100% { background-color: white; }
+  50% { background-color: #28a745; }
+}
+`;
+document.head.appendChild(flashGreenStyle);
+
+// ===== END OF PLATFORM DETECTION AND PRINTING HELPER FUNCTIONS =====
