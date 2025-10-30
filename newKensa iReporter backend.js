@@ -1285,6 +1285,49 @@ function resetForm() {
 }
 
 
+// Helper function for hidase rotary label printing
+function redirectHidaseRotary(selected収容数, labelMarking, product) {
+  const 品番 = product.品番 || "";
+  const 背番号Raw = product.背番号 || "";
+  const 車型 = product.モデル || "";
+  const R_L = product["R/L"] || "";
+  const 材料 = product.材料 || "";
+  const 色 = product.色 || "";
+  const extension = document.getElementById("Labelextension")?.value || "";
+  const Date2 = document.getElementById('Lot No.')?.value || "";
+  
+  // Strip all leading letters from 背番号 to get numeric value only
+  // Example: "DR103" -> "103", "ABC123" -> "123", "AA1C32" -> "1C32"
+  const 背番号Numeric = 背番号Raw.replace(/^[A-Za-z]+/, '');
+  
+  const Date = extension ? `${Date2} - ${extension}` : Date2;
+  const 品番収容数 = `${品番},${selected収容数}`;
+  
+  // Use hidaseRotary.lbx for special 品番
+  const filename = "hidaseRotary.lbx";
+  const size = "RollW62";
+  const copies = 1;
+  
+  const url =
+    `brotherwebprint://print?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent(size)}&copies=${encodeURIComponent(copies)}` +
+    `&text_品番=${encodeURIComponent(品番)}` +
+    `&text_車型=${encodeURIComponent(車型)}` +
+    `&text_収容数=${encodeURIComponent(selected収容数)}` +
+    `&text_背番号=${encodeURIComponent(背番号Numeric)}` +
+    `&text_RL=${encodeURIComponent(R_L)}` +
+    `&text_材料=${encodeURIComponent(材料)}` +
+    `&text_色=${encodeURIComponent(色)}` +
+    `&text_DateT=${encodeURIComponent(Date)}` +
+    `&text_labelMarking=${encodeURIComponent(labelMarking)}` +
+    `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
+
+  console.log('Hidase Rotary Label URL:', url);
+  console.log('背番号 (raw):', 背番号Raw, '-> (numeric):', 背番号Numeric);
+  console.log('Label Marking:', labelMarking);
+  console.log('Selected 収容数:', selected収容数);
+  
+  window.location.href = url;
+}
 
 
 // Print label using "Smooth Print" app for mobile devices
@@ -1293,6 +1336,7 @@ function printLabel() {
   const scanAlertModal = document.getElementById('scanAlertModal');
   const scanAlertText = document.getElementById('scanAlertText');
   const 背番号 = document.getElementById("sub-dropdown").value;
+  const 品番 = document.getElementById("product-number").value;
 
   // Preload the alert sound without playing it
   if (alertSound) {
@@ -1328,6 +1372,97 @@ function printLabel() {
     };
 
     return; // Stop the submission process
+  }
+
+  // List of special 品番 for hidase rotary label
+  const hidaseRotary品番List = [
+    "116671-1030", "116671-1040", "116671-0990", "116671-1000",
+    "116671-0930", "116671-0940", "116671-0920", "116671-0910",
+    "116671-0800", "116671-0810"
+  ];
+
+  // Check if current 品番 is in the hidase rotary special list
+  if (hidaseRotary品番List.includes(品番)) {
+    // Fetch product data from MongoDB to get labelMarking and 収容数
+    fetch(`${serverURL}/queries`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        dbName: "Sasaki_Coating_MasterDB",
+        collectionName: "masterDB",
+        query: { 品番: 品番 }
+      }),
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (!data || data.length === 0) {
+        console.error("No product data found for hidase rotary 品番");
+        return;
+      }
+
+      const product = data[0];
+      const labelMarking = product.labelMarking || "";
+      const 収容数String = product.収容数 || "";
+      
+      // Parse 収容数 - split by comma and trim whitespace
+      const 収容数Options = 収容数String.split(',').map(v => v.trim()).filter(v => v);
+
+      if (収容数Options.length === 0) {
+        console.error("No 収容数 values found");
+        return;
+      }
+
+      // Create modal for 収容数 selection
+      const modal = document.createElement('div');
+      modal.classList.add('modal');
+      modal.style.display = 'flex';
+      modal.style.position = 'fixed';
+      modal.style.top = '50%';
+      modal.style.left = '50%';
+      modal.style.transform = 'translate(-50%, -50%)';
+      modal.style.flexDirection = 'column';
+      modal.style.justifyContent = 'center';
+      modal.style.alignItems = 'center';
+      modal.style.padding = '30px';
+      modal.style.backgroundColor = 'white';
+      modal.style.boxShadow = '0 0 15px rgba(0, 0, 0, 0.5)';
+      modal.style.borderRadius = '10px';
+      modal.style.zIndex = '10001';
+
+      const message = document.createElement('p');
+      message.innerText = '収容数を選んでください / Please choose the value for Quantity';
+      message.style.fontSize = '24px';
+      message.style.textAlign = 'center';
+      message.style.marginBottom = '20px';
+      message.style.color = '#333';
+      modal.appendChild(message);
+
+      // Create button for each 収容数 option
+      収容数Options.forEach(option => {
+        const button = document.createElement('button');
+        button.innerText = option;
+        button.style.margin = '10px';
+        button.style.padding = '15px 30px';
+        button.style.fontSize = '20px';
+        button.style.cursor = 'pointer';
+        button.style.borderRadius = '5px';
+        button.style.border = '2px solid #007bff';
+        button.style.backgroundColor = '#007bff';
+        button.style.color = 'white';
+        button.onclick = () => {
+          document.body.removeChild(modal);
+          redirectHidaseRotary(option, labelMarking, product);
+        };
+        modal.appendChild(button);
+      });
+
+      document.body.appendChild(modal);
+    })
+    .catch(error => {
+      console.error('Error fetching hidase rotary product data:', error);
+    });
+
+    return; // Stop here and wait for user selection
   }
 
   // List of 背番号 values requiring 収容数 selection
@@ -1443,7 +1578,6 @@ function printLabel() {
   }
 
   // Default process for other 背番号 values
-  const 品番 = document.getElementById("product-number").value;
   const 車型 = document.getElementById("model").value;
   const 収容数 = document.getElementById("収容数").value;
   const R_L = document.getElementById("R-L").value;
