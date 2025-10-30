@@ -3154,33 +3154,33 @@ async function printLabelHidase() {
     return;
   }
 
-  try {
-    const response = await fetch(`${serverURL}/getCapacityBySeBanggo?seBanggo=${encodeURIComponent(品番Raw)}`);
-    const data = await response.json();
-
-    if (data.length === 0) {
-      alert("No data found for the selected 品番");
-      return;
-    }
-
-    let lowValue = data[0].収容数;
-    let highValue = data[0].収容数;
-
-    if (data.length > 1) {
-      const values = data.map(item => parseInt(item.収容数, 10));
-      lowValue = Math.min(...values);
-      highValue = Math.max(...values);
-    }
-
-    showHidaseLabelButtons({
-      品番: 品番Raw,
-      収容数Low: lowValue,
-      収容数High: highValue
-    });
-
-  } catch (error) {
-    console.error('Error fetching 収容数:', error);
+  // Get 収容数 from the already-fetched product data (populated by fetchProductDetails)
+  const 収容数String = document.getElementById("収容数").value;
+  
+  if (!収容数String || 収容数String.trim() === "") {
+    alert("収容数 data is missing. Please scan the product first.");
+    return;
   }
+
+  // Parse comma-separated values (e.g., "30,360" or "30,360,5000" or just "30")
+  const 収容数Array = 収容数String.split(',').map(val => parseInt(val.trim(), 10)).filter(val => !isNaN(val));
+  
+  if (収容数Array.length === 0) {
+    alert("Invalid 収容数 format");
+    return;
+  }
+
+  // Get minimum (for 製品用) and maximum (for 外用/BOX)
+  const lowValue = Math.min(...収容数Array);
+  const highValue = Math.max(...収容数Array);
+
+  console.log("Parsed 収容数:", { raw: 収容数String, array: 収容数Array, low: lowValue, high: highValue });
+
+  showHidaseLabelButtons({
+    品番: 品番Raw,
+    収容数Low: lowValue,
+    収容数High: highValue
+  });
 }
 
 function showHidaseLabelButtons({ 品番, 収容数Low, 収容数High }) {
