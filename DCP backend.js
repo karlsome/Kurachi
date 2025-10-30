@@ -529,6 +529,17 @@ async function fetchProductDetails() {
     document.getElementById("kataban").value = data.型番 || "";
     document.getElementById("収容数").value = data.収容数 || "";
     document.getElementById("送りピッチ").textContent = "送りピッチ: " + (data.送りピッチ || "");
+    
+    // Set 離型紙 value with Japanese/English labels
+    const rikeshiValue = data.離型紙上下 || data["離型紙上/下"] || "";
+    if (rikeshiValue === "上") {
+      document.getElementById("rikeshitext").textContent = "上 (Up)";
+    } else if (rikeshiValue === "下") {
+      document.getElementById("rikeshitext").textContent = "下 (Down)";
+    } else {
+      document.getElementById("rikeshitext").textContent = rikeshiValue;
+    }
+    
     document.getElementById("SRS").value = data.SRS || "";
 
     // Set image
