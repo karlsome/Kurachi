@@ -1288,6 +1288,7 @@ function resetForm() {
 // Helper function for hidase rotary label printing
 async function redirectHidaseRotary(selected収容数, labelMarking, product) {
   const 品番 = product.品番 || "";
+  const lotNumber = document.getElementById('製造ロット')?.value || "";
   const 背番号Raw = product.背番号 || "";
   const 車型 = product.モデル || "";
   const R_L = product["R/L"] || "";
@@ -1324,7 +1325,7 @@ async function redirectHidaseRotary(selected収容数, labelMarking, product) {
     `&text_RL=${encodeURIComponent(R_L)}` +
     `&text_材料=${encodeURIComponent(材料)}` +
     `&text_色=${encodeURIComponent(色)}` +
-    `&text_DateT=${encodeURIComponent(Date)}` +
+    `&text_DateT=${encodeURIComponent(lotNumber)}` +
     `&text_labelMarking=${encodeURIComponent(labelMarking)}` +
     `&text_kensa=${encodeURIComponent(Worker_Name)}` +
     `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
