@@ -5835,6 +5835,7 @@ app.post('/saveImageURL', async (req, res) => {
 //   }
 // });
 
+
 //updates masterDB
 app.post("/updateMasterRecord", async (req, res) => {
   const { recordId, updates, username, collectionName } = req.body; // Add collectionName
@@ -5881,6 +5882,66 @@ app.post("/updateMasterRecord", async (req, res) => {
   } catch (err) {
     console.error("Update failed:", err);
     res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+
+//updates masterDB but in batch
+// Batch update multiple masterDB records
+app.post("/batchUpdateMasterRecords", async (req, res) => {
+  const { recordIds, updates, username, collectionName } = req.body;
+
+  if (!recordIds || !Array.isArray(recordIds) || recordIds.length === 0 || !updates || !username || !collectionName) {
+    return res.status(400).json({ error: "Missing required fields or invalid recordIds array" });
+  }
+
+  try {
+    await client.connect();
+    const db = client.db("Sasaki_Coating_MasterDB");
+    const masterColl = db.collection(collectionName);
+    const logColl = db.collection(`${collectionName}_Log`);
+
+    // Convert string IDs to ObjectIds
+    const objectIds = recordIds.map(id => new ObjectId(id));
+
+    // Fetch old records for logging
+    const oldRecords = await masterColl.find({ _id: { $in: objectIds } }).toArray();
+    
+    if (oldRecords.length === 0) {
+      return res.status(404).json({ error: "No records found" });
+    }
+
+    // Perform batch update
+    const updateResult = await masterColl.updateMany(
+      { _id: { $in: objectIds } },
+      { $set: updates }
+    );
+
+    if (updateResult.modifiedCount === 0) {
+      return res.status(304).json({ message: "No changes made" });
+    }
+
+    // Log each change
+    const logEntries = oldRecords.map(oldRecord => ({
+      _id: new ObjectId(),
+      masterId: oldRecord._id,
+      username,
+      timestamp: new Date(Date.now() + 9 * 60 * 60 * 1000), // JST = UTC + 9 hours
+      oldData: oldRecord,
+      newData: updates,
+      batchUpdate: true // Flag to indicate this was part of a batch update
+    }));
+
+    await logColl.insertMany(logEntries);
+
+    res.json({ 
+      success: true, 
+      modifiedCount: updateResult.modifiedCount,
+      matchedCount: updateResult.matchedCount 
+    });
+  } catch (err) {
+    console.error("Batch update failed:", err);
+    res.status(500).json({ error: "Internal server error", details: err.message });
   }
 });
 
@@ -8547,7 +8608,195 @@ app.post("/api/inventory/add", async (req, res) => {
 
 
 
+// ==================== API ROUTES FOR DYNAMIC FILTER SYSTEM ====================
+// Copy and paste these routes into your server.js file
 
+/**
+ * API Route: Get distinct values from a collection field
+ * Used for auto-populating dropdown filters
+ * 
+ * POST /api/distinct
+ * Body: {
+ *   dbName: "submittedDB",
+ *   collectionName: "kensaDB" | "pressDB" | "SRSDB" | "slitDB",
+ *   field: "Worker_Name" | "設備" | "モデル" | etc,
+ *   filter: { "工場": "第二工場" } // optional additional filters
+ * }
+ * 
+ * Response: {
+ *   values: ["value1", "value2", ...],
+ *   count: 123
+ * }
+ */
+app.post('/api/distinct', async (req, res) => {
+    try {
+        const { dbName, collectionName, field, filter } = req.body;
+        
+        console.log(`📋 Fetching distinct values for ${field} from ${collectionName}...`);
+        
+        // Validate required parameters
+        if (!dbName || !collectionName || !field) {
+            return res.status(400).json({ 
+                error: 'Missing required parameters: dbName, collectionName, and field are required' 
+            });
+        }
+        
+        // Use existing client connection (don't create new connection)
+        const db = client.db(dbName);
+        const collection = db.collection(collectionName);
+        
+        // Build query - use provided filter or default to empty object
+        const query = filter || {};
+        
+        // Use aggregation for better performance (similar to your masterdb/filters route)
+        const uniqueValues = await collection.aggregate([
+            {
+                $match: {
+                    ...query,
+                    [field]: { $exists: true, $ne: null, $ne: '' }
+                }
+            },
+            {
+                $group: {
+                    _id: `$${field}`
+                }
+            },
+            {
+                $sort: { '_id': 1 }
+            },
+            {
+                $project: {
+                    _id: 0,
+                    value: '$_id'
+                }
+            }
+        ]).toArray();
+        
+        const cleanedValues = uniqueValues.map(item => item.value);
+        
+        console.log(`✅ Found ${cleanedValues.length} unique ${field} values`);
+        
+        res.json({
+            values: cleanedValues,
+            count: cleanedValues.length,
+            field: field,
+            collection: collectionName
+        });
+        
+    } catch (error) {
+        console.error('❌ Error fetching distinct values:', error);
+        res.status(500).json({ 
+            error: 'Failed to fetch distinct values',
+            details: error.message 
+        });
+    }
+});
+
+/**
+ * Enhanced /queries endpoint documentation
+ * 
+ * This endpoint already exists in your server.js but now supports more complex queries
+ * with dynamic filters. Here are examples of the MongoDB queries it can handle:
+ * 
+ * POST /queries
+ * Body: {
+ *   dbName: "submittedDB",
+ *   collectionName: "kensaDB",
+ *   query: {
+ *     // Basic filters
+ *     "工場": "第二工場",
+ *     "Date": { "$gte": "2025-10-30", "$lte": "2025-10-30" },
+ *     
+ *     // Text filters
+ *     "品番": "83719-59S20-WM6",                      // Exact match
+ *     "品番": { "$regex": "83719", "$options": "i" }, // Contains (case-insensitive)
+ *     "品番": { "$in": ["GN200-A0400", "GN200-B0500"] }, // Multiple values
+ *     
+ *     // Number filters
+ *     "Total": 100,                    // Exact match
+ *     "Total": { "$gt": 100 },         // Greater than
+ *     "Total": { "$lt": 100 },         // Less than
+ *     "Total": { "$gte": 50, "$lte": 100 }, // Range
+ *     
+ *     // Select/Dropdown filters
+ *     "Worker_Name": "平野",           // Single selection
+ *     "Worker_Name": { "$in": ["平野", "田中"] }, // Multiple selections
+ *     "設備": "検査テーブル 1",
+ *     "モデル": { "$in": ["Model A", "Model B"] },
+ *     
+ *     // Time filters (as strings)
+ *     "Time_start": "08:57",
+ *     "Time_start": { "$gte": "08:00", "$lte": "17:00" },
+ *     
+ *     // Status filters
+ *     "approvalStatus": "hancho_approved",
+ *     "approvalStatus": { "$in": ["pending", "hancho_approved"] }
+ *   }
+ * }
+ * 
+ * Example Complex Query:
+ * {
+ *   "dbName": "submittedDB",
+ *   "collectionName": "kensaDB",
+ *   "query": {
+ *     "工場": "第二工場",
+ *     "Date": { "$gte": "2025-10-01", "$lte": "2025-10-31" },
+ *     "Worker_Name": { "$in": ["平野", "田中"] },
+ *     "Total": { "$gte": 100 },
+ *     "Total_NG": { "$gt": 0 },
+ *     "品番": { "$regex": "83719", "$options": "i" },
+ *     "approvalStatus": "hancho_approved"
+ *   }
+ * }
+ * 
+ * This query finds all records where:
+ * - Factory is 第二工場
+ * - Date is in October 2025
+ * - Worker is either 平野 or 田中
+ * - Total quantity is at least 100
+ * - Has at least 1 NG item
+ * - Part number contains "83719"
+ * - Status is hancho_approved
+ */
+
+/**
+ * Test endpoint to verify the API is working
+ * GET /api/distinct/test
+ */
+app.get('/api/distinct/test', async (req, res) => {
+    try {
+        console.log('🧪 Testing /api/distinct endpoint...');
+        
+        // Use existing client connection
+        const db = client.db('submittedDB');
+        const collection = db.collection('kensaDB');
+        
+        // Test query: Get distinct worker names from 第二工場
+        const workers = await collection.distinct('Worker_Name', { '工場': '第二工場' });
+        
+        const cleanedWorkers = workers.filter(w => w);
+        
+        console.log(`✅ Test successful! Found ${cleanedWorkers.length} workers`);
+        
+        res.json({
+            status: 'success',
+            message: 'API is working correctly',
+            test_data: {
+                field: 'Worker_Name',
+                factory: '第二工場',
+                distinct_values: cleanedWorkers,
+                count: cleanedWorkers.length
+            }
+        });
+        
+    } catch (error) {
+        console.error('❌ Test failed:', error);
+        res.status(500).json({
+            status: 'error',
+            message: error.message
+        });
+    }
+});
 
 
 
