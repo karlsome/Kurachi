@@ -7473,7 +7473,7 @@ app.post("/api/noda-requests", async (req, res) => {
           // Handle inventory changes based on status transition
           if (oldStatus !== newStatus) {
             const inventoryItem = await inventoryCollection.findOne({ 
-              背번号: request.背番号 
+              背번호: request.背번号 
             }, { 
               sort: { timeStamp: -1 } 
             });
@@ -7520,7 +7520,7 @@ app.post("/api/noda-requests", async (req, res) => {
               // Create inventory transaction if there was a quantity change
               if (newPhysical !== currentPhysical || newReserved !== currentReserved || newAvailable !== currentAvailable) {
                 const statusTransaction = {
-                  背番号: request.背번号,
+                  背番号: request.背番号,
                   品番: request.品番,
                   timeStamp: new Date(),
                   Date: new Date().toISOString().split('T')[0],
@@ -7802,89 +7802,102 @@ app.post("/api/noda-requests", async (req, res) => {
           let restoredItems = 0;
           let totalQuantityRestored = 0;
 
-          // Only restore inventory if request is still pending/active (not completed)
-          if (request.status === 'pending' || request.status === 'active') {
+          const isBulkRequest = request.requestType === 'bulk';
+          
+          if (isBulkRequest && request.lineItems) {
+            // ============ BULK REQUEST DELETION WITH LINE-ITEM-LEVEL RESTORATION ============
+            console.log(`🗑️ Deleting bulk request ${request.requestNumber} with ${request.lineItems.length} line items`);
             
-            const isBulkRequest = request.requestType === 'bulk';
-            
-            if (isBulkRequest && request.lineItems) {
-              // Handle BULK REQUEST - restore inventory for each line item
-              console.log(`🗑️ Deleting bulk request ${request.requestNumber} with ${request.lineItems.length} line items`);
-              
-              for (const lineItem of request.lineItems) {
-                try {
-                  // Get current inventory state using aggregation pipeline
-                  const inventoryResults = await inventoryCollection.aggregate([
-                    { $match: { 背番号: lineItem.背番号 } },
-                    {
-                      $addFields: {
-                        timeStampDate: {
-                          $cond: {
-                            if: { $type: "$timeStamp" },
-                            then: {
-                              $cond: {
-                                if: { $eq: [{ $type: "$timeStamp" }, "string"] },
-                                then: { $dateFromString: { dateString: "$timeStamp" } },
-                                else: "$timeStamp"
-                              }
-                            },
-                            else: new Date()
-                          }
+            // Loop through each line item and restore inventory ONLY for items that were NOT completed
+            for (const lineItem of request.lineItems) {
+              try {
+                // ✅ KEY FIX: Check individual LINE ITEM status, not bulk request status
+                if (lineItem.status === 'completed') {
+                  console.log(`⏭️ Skipping line ${lineItem.lineNumber} (${lineItem.背番号}): Already completed (physically picked)`);
+                  continue; // Skip completed items - they were already picked physically
+                }
+                
+                // Only restore inventory for pending/in-progress/active line items
+                console.log(`🔄 Restoring line ${lineItem.lineNumber} (${lineItem.背番号}): Status = ${lineItem.status}`);
+                
+                // Get current inventory state using aggregation pipeline
+                const inventoryResults = await inventoryCollection.aggregate([
+                  { $match: { 背番号: lineItem.背番号 } },
+                  {
+                    $addFields: {
+                      timeStampDate: {
+                        $cond: {
+                          if: { $type: "$timeStamp" },
+                          then: {
+                            $cond: {
+                              if: { $eq: [{ $type: "$timeStamp" }, "string"] },
+                              then: { $dateFromString: { dateString: "$timeStamp" } },
+                              else: "$timeStamp"
+                            }
+                          },
+                          else: new Date()
                         }
                       }
-                    },
-                    { $sort: { timeStampDate: -1 } },
-                    { $limit: 1 }
-                  ]).toArray();
+                    }
+                  },
+                  { $sort: { timeStampDate: -1 } },
+                  { $limit: 1 }
+                ]).toArray();
 
-                  if (inventoryResults.length > 0) {
-                    const inventoryItem = inventoryResults[0];
+                if (inventoryResults.length > 0) {
+                  const inventoryItem = inventoryResults[0];
+                  
+                  // Create inventory restoration transaction for this line item
+                  const currentPhysical = inventoryItem.physicalQuantity || inventoryItem.runningQuantity || 0;
+                  const currentReserved = inventoryItem.reservedQuantity || 0;
+                  const currentAvailable = inventoryItem.availableQuantity || inventoryItem.runningQuantity || 0;
+
+                  // Restore inventory: Decrease reserved, Increase available
+                  const newReservedQuantity = Math.max(0, currentReserved - lineItem.quantity);
+                  const newAvailableQuantity = currentAvailable + lineItem.quantity;
+
+                  const restorationTransaction = {
+                    背番号: lineItem.背番号,
+                    品番: lineItem.品番,
+                    timeStamp: new Date(),
+                    Date: new Date().toISOString().split('T')[0],
                     
-                    // Create inventory restoration transaction for this line item
-                    const currentPhysical = inventoryItem.physicalQuantity || inventoryItem.runningQuantity || 0;
-                    const currentReserved = inventoryItem.reservedQuantity || 0;
-                    const currentAvailable = inventoryItem.availableQuantity || inventoryItem.runningQuantity || 0;
-
-                    const newReservedQuantity = Math.max(0, currentReserved - lineItem.quantity);
-                    const newAvailableQuantity = currentAvailable + lineItem.quantity;
-
-                    const restorationTransaction = {
-                      背番号: lineItem.背番号,
-                      品番: lineItem.品番,
-                      timeStamp: new Date(),
-                      Date: new Date().toISOString().split('T')[0],
-                      
-                      // Two-stage inventory fields
-                      physicalQuantity: currentPhysical, // Physical stock unchanged
-                      reservedQuantity: newReservedQuantity, // Decrease reserved
-                      availableQuantity: newAvailableQuantity, // Increase available
-                      
-                      // Legacy field for compatibility
-                      runningQuantity: newAvailableQuantity,
-                      lastQuantity: currentAvailable,
-                      
-                      action: `Bulk Reservation Cancelled (-${lineItem.quantity})`,
-                      source: `Freya Admin - ${userName}`,
-                      requestId: requestId,
-                      bulkRequestNumber: request.requestNumber,
-                      lineNumber: lineItem.lineNumber,
-                      note: `Restored ${lineItem.quantity} units from cancelled bulk request ${request.requestNumber} line ${lineItem.lineNumber}`
-                    };
-
-                    await inventoryCollection.insertOne(restorationTransaction);
-                    restoredItems++;
-                    totalQuantityRestored += lineItem.quantity;
+                    // Two-stage inventory fields
+                    physicalQuantity: currentPhysical, // Physical stock unchanged (item was never picked)
+                    reservedQuantity: newReservedQuantity, // Decrease reserved
+                    availableQuantity: newAvailableQuantity, // Increase available
                     
-                    console.log(`✅ Restored ${lineItem.quantity} units for ${lineItem.背番号} (line ${lineItem.lineNumber})`);
-                  }
-                } catch (error) {
-                  console.error(`❌ Error restoring inventory for line item ${lineItem.lineNumber} (${lineItem.背番号}):`, error);
+                    // Legacy field for compatibility
+                    runningQuantity: newAvailableQuantity,
+                    lastQuantity: currentAvailable,
+                    
+                    action: `Delete Restoration (-${lineItem.quantity} reserved, +${lineItem.quantity} available)`,
+                    source: `Freya Admin - ${userName}`,
+                    requestId: requestId,
+                    bulkRequestNumber: request.requestNumber,
+                    lineNumber: lineItem.lineNumber,
+                    note: `Restored ${lineItem.quantity} units from DELETED request ${request.requestNumber} line ${lineItem.lineNumber} (status: ${lineItem.status}). Reserved: ${currentReserved} → ${newReservedQuantity}, Available: ${currentAvailable} → ${newAvailableQuantity}`
+                  };
+
+                  await inventoryCollection.insertOne(restorationTransaction);
+                  restoredItems++;
+                  totalQuantityRestored += lineItem.quantity;
+                  
+                  console.log(`✅ Restored ${lineItem.quantity} units for ${lineItem.背番号} (line ${lineItem.lineNumber})`);
+                } else {
+                  console.warn(`⚠️ No inventory found for ${lineItem.背番号} (line ${lineItem.lineNumber})`);
                 }
+              } catch (error) {
+                console.error(`❌ Error restoring inventory for line item ${lineItem.lineNumber} (${lineItem.背番号}):`, error);
               }
-              
-            } else {
-              // Handle SINGLE REQUEST (existing logic)
-              console.log(`🗑️ Deleting single request ${request.requestNumber}`);
+            }
+            
+          } else if (!isBulkRequest) {
+            // ============ SINGLE REQUEST DELETION (ORIGINAL LOGIC) ============
+            console.log(`🗑️ Deleting single request ${request.requestNumber}`);
+            
+            // Only restore inventory if request is still pending/active (not completed)
+            if (request.status === 'pending' || request.status === 'active' || request.status === 'in-progress') {
               
               // Get current inventory state using aggregation pipeline
               const inventoryResults = await inventoryCollection.aggregate([
@@ -7948,18 +7961,29 @@ app.post("/api/noda-requests", async (req, res) => {
                 
                 console.log(`✅ Restored ${request.quantity} units for ${request.背番号}`);
               }
+            } else {
+              console.log(`⏭️ Skipping restoration: Single request status is '${request.status}' (completed requests are not restored)`);
             }
           }
 
-          // Delete the request
+          // Delete the request from database
           const result = await requestsCollection.deleteOne({ _id: new ObjectId(requestId) });
 
-          const isBulkRequest = request.requestType === 'bulk';
-          const message = request.status === 'pending' || request.status === 'active' 
-            ? isBulkRequest 
-              ? `Bulk request deleted and inventory restored for ${restoredItems} items (${totalQuantityRestored} total units)`
-              : `Request deleted and ${totalQuantityRestored} units restored to inventory`
-            : 'Request deleted (no inventory restoration for completed requests)';
+          // Build response message
+          let message = '';
+          if (isBulkRequest) {
+            if (restoredItems > 0) {
+              message = `✅ Bulk request deleted. Restored ${restoredItems} unpicked line items (${totalQuantityRestored} total units). Completed items were not restored.`;
+            } else {
+              message = `✅ Bulk request deleted. All line items were already completed - no inventory restoration needed.`;
+            }
+          } else {
+            if (restoredItems > 0) {
+              message = `✅ Request deleted and ${totalQuantityRestored} units restored to inventory.`;
+            } else {
+              message = `✅ Request deleted (no inventory restoration - request was already completed).`;
+            }
+          }
 
           res.json({ 
             success: true,
