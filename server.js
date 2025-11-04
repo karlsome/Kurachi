@@ -8363,6 +8363,7 @@ app.post("/api/inventory-management", async (req, res) => {
           const formattedItems = paginatedItems.map(item => ({
             品番: item.品番,
             背番号: item.背番号,
+            工場: item.工場,
             physicalQuantity: item.physicalQuantity || item.runningQuantity || 0,
             reservedQuantity: item.reservedQuantity || 0,
             availableQuantity: item.availableQuantity || item.runningQuantity || 0,
