@@ -2263,3 +2263,305 @@ flashGreenStyle.innerHTML = `
 document.head.appendChild(flashGreenStyle);
 
 // ===== END OF PLATFORM DETECTION AND PRINTING HELPER FUNCTIONS =====
+
+// ===== WORKER NAME MODAL FUNCTIONALITY =====
+
+let workerNamesData = [];
+const RECENT_WORKERS_KEY = 'recentWorkerNames';
+const MAX_RECENT_WORKERS = 6;
+
+// Get recent workers from localStorage
+function getRecentWorkers() {
+  const recent = localStorage.getItem(RECENT_WORKERS_KEY);
+  return recent ? JSON.parse(recent) : [];
+}
+
+// Add worker to recent list
+function addToRecentWorkers(name) {
+  if (!name || name.trim() === '') return; // Don't add empty names
+  
+  let recent = getRecentWorkers();
+  
+  // Remove if already exists
+  recent = recent.filter(w => w !== name);
+  
+  // Add to beginning
+  recent.unshift(name);
+  
+  // Keep only max recent
+  recent = recent.slice(0, MAX_RECENT_WORKERS);
+  
+  localStorage.setItem(RECENT_WORKERS_KEY, JSON.stringify(recent));
+}
+
+// Remove worker from recent list
+function removeFromRecentWorkers(name) {
+  let recent = getRecentWorkers();
+  recent = recent.filter(w => w !== name);
+  localStorage.setItem(RECENT_WORKERS_KEY, JSON.stringify(recent));
+  renderWorkerNames(); // Re-render to update UI
+}
+
+// Group names alphabetically
+function groupNamesByLetter(names) {
+  const grouped = {};
+  
+  names.forEach(name => {
+    // Get first character (handle Japanese, English, etc.)
+    let firstChar = name.charAt(0).toUpperCase();
+    
+    // For Japanese characters, try to group by first character
+    if (firstChar.match(/[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/)) {
+      // Japanese character - use as is
+      firstChar = name.charAt(0);
+    } else if (firstChar.match(/[A-Z]/)) {
+      // English letter - use uppercase
+      firstChar = firstChar.toUpperCase();
+    } else {
+      // Other characters - group under '#'
+      firstChar = '#';
+    }
+    
+    if (!grouped[firstChar]) {
+      grouped[firstChar] = [];
+    }
+    grouped[firstChar].push(name);
+  });
+  
+  // Sort each group
+  Object.keys(grouped).forEach(key => {
+    grouped[key].sort();
+  });
+  
+  return grouped;
+}
+
+// Render worker names in modal
+function renderWorkerNames() {
+  const container = document.getElementById('workerNamesContainer');
+  container.innerHTML = '';
+  
+  // Get recent workers
+  const recentWorkers = getRecentWorkers();
+  
+  // Add recent section if there are recent workers
+  if (recentWorkers.length > 0) {
+    const recentSection = document.createElement('div');
+    recentSection.className = 'worker-section recent-section';
+    
+    const header = document.createElement('div');
+    header.className = 'worker-section-header';
+    header.textContent = '⭐ 最近使用 / Recent';
+    recentSection.appendChild(header);
+    
+    const grid = document.createElement('div');
+    grid.className = 'worker-names-grid';
+    
+    recentWorkers.forEach(name => {
+      const wrapper = document.createElement('div');
+      wrapper.style.position = 'relative';
+      
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'worker-name-btn';
+      btn.textContent = name;
+      btn.onclick = () => selectWorkerName(name);
+      
+      const deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
+      deleteBtn.className = 'delete-recent-btn';
+      deleteBtn.innerHTML = '×';
+      deleteBtn.onclick = (e) => {
+        e.stopPropagation(); // Prevent selecting the worker
+        removeFromRecentWorkers(name);
+      };
+      
+      wrapper.appendChild(btn);
+      wrapper.appendChild(deleteBtn);
+      grid.appendChild(wrapper);
+    });
+    
+    recentSection.appendChild(grid);
+    container.appendChild(recentSection);
+  }
+  
+  // Group all names alphabetically
+  const grouped = groupNamesByLetter(workerNamesData);
+  const sortedKeys = Object.keys(grouped).sort();
+  
+  // Render each alphabetical group
+  sortedKeys.forEach(letter => {
+    const section = document.createElement('div');
+    section.className = 'worker-section';
+    
+    const header = document.createElement('div');
+    header.className = 'worker-section-header';
+    header.textContent = letter;
+    section.appendChild(header);
+    
+    const grid = document.createElement('div');
+    grid.className = 'worker-names-grid';
+    
+    grouped[letter].forEach(name => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'worker-name-btn';
+      btn.textContent = name;
+      btn.onclick = () => selectWorkerName(name);
+      grid.appendChild(btn);
+    });
+    
+    section.appendChild(grid);
+    container.appendChild(section);
+  });
+}
+
+// Select worker name
+function selectWorkerName(name) {
+  const input = document.getElementById('Machine Operator');
+  input.value = name;
+  
+  // Add to recent workers
+  addToRecentWorkers(name);
+  
+  // Close modal
+  closeWorkerModal();
+  
+  // Trigger change event
+  input.dispatchEvent(new Event('change'));
+}
+
+// Open worker modal
+function openWorkerModal() {
+  const modal = document.getElementById('workerNameModal');
+  modal.style.display = 'block';
+  renderWorkerNames();
+}
+
+// Close worker modal
+function closeWorkerModal() {
+  const modal = document.getElementById('workerNameModal');
+  modal.style.display = 'none';
+}
+
+// Initialize worker name modal (runs after DOMContentLoaded)
+setTimeout(function() {
+  const workerInput = document.getElementById('Machine Operator');
+  const closeModalBtn = document.getElementById('closeWorkerModal');
+  const manualEntryBtn = document.getElementById('manualEntryBtn');
+  
+  // Open modal when clicking on worker input (only if readonly)
+  if (workerInput) {
+    // Prevent default keyboard from showing on mobile
+    workerInput.addEventListener('click', function(e) {
+      // Only open modal if input is readonly (not in manual entry mode)
+      if (workerInput.readOnly && workerNamesData.length > 0) {
+        e.preventDefault();
+        openWorkerModal();
+      }
+    });
+    
+    // Also open on focus
+    workerInput.addEventListener('focus', function(e) {
+      // Only open modal if input is readonly (not in manual entry mode)
+      if (workerInput.readOnly && workerNamesData.length > 0) {
+        e.preventDefault();
+        openWorkerModal();
+      }
+    });
+    
+    // Prevent keyboard from showing on touch devices
+    workerInput.addEventListener('touchstart', function(e) {
+      // Only prevent and open modal if input is readonly
+      if (workerInput.readOnly && workerNamesData.length > 0) {
+        e.preventDefault();
+        openWorkerModal();
+      }
+    });
+  }
+  
+  // Close modal button
+  if (closeModalBtn) {
+    closeModalBtn.addEventListener('click', closeWorkerModal);
+  }
+  
+  // Manual entry button - close modal and let user type
+  if (manualEntryBtn) {
+    manualEntryBtn.addEventListener('click', function() {
+      const targetInput = document.getElementById('Machine Operator');
+      
+      // Close the modal
+      closeWorkerModal();
+      
+      if (targetInput) {
+        // Remove readonly to allow free typing
+        targetInput.removeAttribute('readonly');
+        targetInput.readOnly = false;
+        targetInput.style.cursor = 'text';
+        targetInput.placeholder = 'Type worker name manually...';
+        
+        // Clear current value and focus after modal closes
+        setTimeout(function() {
+          targetInput.value = '';
+          targetInput.focus();
+          
+          // Trigger click to ensure keyboard shows on mobile
+          targetInput.click();
+        }, 100);
+      }
+    });
+  }
+  
+  // Close modal when clicking outside
+  const modal = document.getElementById('workerNameModal');
+  if (modal) {
+    modal.addEventListener('click', function(e) {
+      if (e.target === modal) {
+        closeWorkerModal();
+      }
+    });
+  }
+  
+  // Save manually entered worker name to recents when user finishes typing
+  if (workerInput) {
+    workerInput.addEventListener('blur', function() {
+      const enteredName = workerInput.value.trim();
+      if (enteredName && !workerInput.readOnly) {
+        // Only save if user manually typed (not readonly)
+        addToRecentWorkers(enteredName);
+      }
+    });
+    
+    // Also save on Enter key
+    workerInput.addEventListener('keypress', function(e) {
+      if (e.key === 'Enter') {
+        const enteredName = workerInput.value.trim();
+        if (enteredName && !workerInput.readOnly) {
+          addToRecentWorkers(enteredName);
+        }
+      }
+    });
+  }
+}, 1000);
+
+// Fetch worker names from server
+document.addEventListener("DOMContentLoaded", async function() {
+  const selectedFactory = document.getElementById("selected工場")?.value;
+
+  if (selectedFactory) {
+    try {
+      const response = await fetch(`${serverURL}/getWorkerNames?selectedFactory=${encodeURIComponent(selectedFactory)}`);
+      if (!response.ok) throw new Error("Failed to fetch worker names");
+
+      const workerNames = await response.json();
+      
+      // Store worker names for modal
+      workerNamesData = workerNames;
+      
+    } catch (error) {
+      console.error("Error fetching worker names:", error);
+    }
+  }
+});
+
+// ===== END OF WORKER NAME MODAL FUNCTIONALITY =====
