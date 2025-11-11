@@ -4783,6 +4783,10 @@ async function sendtoNC(selectedValue) {
     
     console.log("🔵 Sending to multiple machines:", machineIPMap);
     
+    // Store machine group globally for individual send modal
+    window.currentMachineGroup = Object.entries(machineIPMap).map(([name, ip]) => ({ name, ip }));
+    console.log("💾 Stored currentMachineGroup:", window.currentMachineGroup);
+    
     // Update progress bar text for multiple machines
     const progressText = progressBar?.querySelector('span');
     if (progressText) {
@@ -4904,10 +4908,16 @@ async function sendtoNC(selectedValue) {
   }
 }
 
-// Send to NC button - triggers 3-step modal workflow
+// Send to NC button - triggers 3-step modal workflow OR individual send modal
 document.getElementById('sendtoNC').addEventListener('click', function() {
-  // Show the 3-step modal (Step 1: Scan Kanban)
-  showStep1Modal();
+  // Check if 3-step workflow was completed (sendtoNCButtonisPressed === true)
+  if (sendtoNCButtonisPressed) {
+    // 3-step workflow was completed, show individual send modal
+    showIndividualSendModal();
+  } else {
+    // 3-step workflow not completed, show Step 1 modal
+    showStep1Modal();
+  }
 });
 
 // Function to handle printing
@@ -5019,6 +5029,12 @@ function getIP() {
       // Store comma-separated IPs in the hidden input for reference
       const ips = results.map(r => r.ip).filter(ip => ip).join(',');
       ipInput.value = ips;
+      
+      // Store machine group globally for individual send modal
+      window.currentMachineGroup = results
+        .filter(r => r.ip) // Only include machines with valid IPs
+        .map(r => ({ name: r.machine, ip: r.ip }));
+      console.log("💾 Stored currentMachineGroup on page load:", window.currentMachineGroup);
     });
     
   } else {
@@ -6906,6 +6922,134 @@ document.getElementById('resetStep2').addEventListener('click', function(event) 
 document.getElementById('resetStep3').addEventListener('click', function(event) {
   event.preventDefault(); // Prevent form submission
   resetAllSteps();
+});
+
+// ============================================
+// Individual Machine Send Modal (after 3-step workflow)
+// ============================================
+
+function showIndividualSendModal() {
+  const modal = document.getElementById('individualSendModal');
+  const machineList = document.getElementById('individualMachineList');
+  
+  if (!modal || !machineList) return;
+  
+  // Clear previous content
+  machineList.innerHTML = '';
+  
+  // Get the machine config from global variables
+  const machines = window.currentMachineGroup || [];
+  // Get the 背番号 (sebanggo) value for the filename
+  const sebanggo = document.getElementById('sub-dropdown').value;
+  const ncFilename = sebanggo ? `${sebanggo}.pce` : 'program.pce';
+  
+  if (machines.length === 0) {
+    machineList.innerHTML = '<p style="text-align: center; color: #999;">No machines configured</p>';
+    modal.style.display = 'flex';
+    return;
+  }
+  
+  // Create a card for each machine
+  machines.forEach((machine, index) => {
+    const card = document.createElement('div');
+    card.style.cssText = 'border: 2px solid #ddd; border-radius: 10px; padding: 20px; background: #f8f9fa;';
+    
+    const machineName = document.createElement('div');
+    machineName.style.cssText = 'font-size: 20px; font-weight: 600; color: #333; margin-bottom: 10px;';
+    machineName.textContent = `${machine.name} (${machine.ip})`;
+    
+    const statusIndicator = document.createElement('div');
+    statusIndicator.id = `sendStatus-${index}`;
+    statusIndicator.style.cssText = 'display: none; margin-bottom: 10px; padding: 8px; background: #d4edda; border: 1px solid #c3e6cb; border-radius: 5px; color: #155724; font-weight: 600; text-align: center;';
+    statusIndicator.innerHTML = '✓ Sent / 送信完了';
+    
+    const sendButton = document.createElement('button');
+    sendButton.type = 'button';
+    sendButton.id = `sendBtn-${index}`;
+    sendButton.style.cssText = 'background: #2196F3; color: white; border: none; padding: 15px 30px; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: 600; width: 100%; transition: all 0.3s;';
+    sendButton.innerHTML = `Send to ${machine.name}<br><span style="font-size: 14px;">送信</span>`;
+    
+    sendButton.addEventListener('click', async function() {
+      await sendToIndividualMachine(machine, ncFilename, index);
+    });
+    
+    card.appendChild(machineName);
+    card.appendChild(statusIndicator);
+    card.appendChild(sendButton);
+    machineList.appendChild(card);
+  });
+  
+  // Show the modal
+  modal.style.display = 'flex';
+}
+
+async function sendToIndividualMachine(machine, ncFilename, index) {
+  const sendButton = document.getElementById(`sendBtn-${index}`);
+  const statusIndicator = document.getElementById(`sendStatus-${index}`);
+  
+  if (!sendButton) return;
+  
+  // Disable button
+  sendButton.disabled = true;
+  sendButton.style.opacity = '0.6';
+  sendButton.style.cursor = 'not-allowed';
+  sendButton.innerHTML = 'Sending... / 送信中...';
+  
+  // Use the same URL format as Step 3 modal (port 5000 with /request?filename=)
+  const ncProgramUrl = `http://${machine.ip}:5000/request?filename=${ncFilename}`;
+  
+  try {
+    // Try background fetch first
+    const response = await fetch(ncProgramUrl, {
+      method: 'GET',
+      mode: 'no-cors' // This prevents CORS errors but doesn't return response data
+    });
+    
+    console.log(`Sent to ${machine.name} (${machine.ip}) via fetch`);
+    
+    // Show success indicator
+    statusIndicator.style.display = 'block';
+    sendButton.style.display = 'none';
+    
+  } catch (error) {
+    console.error(`Fetch failed for ${machine.name}, trying new tab fallback:`, error);
+    
+    // Fallback: Open in new tab
+    const newTab = window.open(ncProgramUrl, '_blank', 'width=100,height=100,left=-1000,top=-1000');
+    
+    if (newTab) {
+      setTimeout(() => {
+        try {
+          newTab.close();
+        } catch (e) {
+          console.log('Could not close tab automatically');
+        }
+      }, 3000);
+      
+      // Show success indicator
+      statusIndicator.style.display = 'block';
+      sendButton.style.display = 'none';
+    } else {
+      // Could not send
+      sendButton.disabled = false;
+      sendButton.style.opacity = '1';
+      sendButton.style.cursor = 'pointer';
+      sendButton.innerHTML = `Send to ${machine.name}<br><span style="font-size: 14px;">送信 (Retry)</span>`;
+      alert('Could not send. Please check popup blocker.');
+    }
+  }
+}
+
+// Close button for individual send modal
+document.getElementById('closeIndividualSendModal')?.addEventListener('click', function() {
+  document.getElementById('individualSendModal').style.display = 'none';
+});
+
+// Close modal when clicking outside
+document.getElementById('individualSendModal')?.addEventListener('click', function(e) {
+  if (e.target === this) {
+    this.style.display = 'none';
+  }
 });
 
 // Auto-show modal on page load based on workflow state
