@@ -2369,27 +2369,30 @@ setTimeout(function() {
   const closeModalBtn = document.getElementById('closeWorkerModal');
   const manualEntryBtn = document.getElementById('manualEntryBtn');
   
-  // Open modal when clicking on worker input
+  // Open modal when clicking on worker input (only if readonly)
   if (workerInput) {
     // Prevent default keyboard from showing on mobile
     workerInput.addEventListener('click', function(e) {
-      e.preventDefault();
-      if (workerNamesData.length > 0) {
+      // Only open modal if input is readonly (not in manual entry mode)
+      if (workerInput.readOnly && workerNamesData.length > 0) {
+        e.preventDefault();
         openWorkerModal();
       }
     });
     
     // Also open on focus
     workerInput.addEventListener('focus', function(e) {
-      e.preventDefault();
-      if (workerNamesData.length > 0) {
+      // Only open modal if input is readonly (not in manual entry mode)
+      if (workerInput.readOnly && workerNamesData.length > 0) {
+        e.preventDefault();
         openWorkerModal();
       }
     });
     
-    // Prevent keyboard from showing
+    // Prevent keyboard from showing on touch devices
     workerInput.addEventListener('touchstart', function(e) {
-      if (workerNamesData.length > 0) {
+      // Only prevent and open modal if input is readonly
+      if (workerInput.readOnly && workerNamesData.length > 0) {
         e.preventDefault();
         openWorkerModal();
       }
@@ -2406,10 +2409,21 @@ setTimeout(function() {
     manualEntryBtn.addEventListener('click', function() {
       closeWorkerModal();
       if (workerInput) {
+        // Remove readonly and datalist to allow free typing
         workerInput.removeAttribute('list');
+        workerInput.removeAttribute('readonly');
         workerInput.readOnly = false;
         workerInput.style.cursor = 'text';
-        workerInput.focus();
+        workerInput.placeholder = 'Type worker name manually...';
+        
+        // Clear current value and focus after modal closes
+        setTimeout(function() {
+          workerInput.value = '';
+          workerInput.focus();
+          
+          // Trigger click to ensure keyboard shows on mobile
+          workerInput.click();
+        }, 100);
       }
     });
   }
