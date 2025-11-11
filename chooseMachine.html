@@ -21,9 +21,17 @@
 
         // List of machines based on filter value
         let machines = [];
+        let groupedMachines = []; // Array for grouped machine cards
 
         if (filterValue === '小瀬') {
             machines = ["OZNC01", "OZNC02", "OZNC03", "OZNC04", "OZNC05", "OZNC06", "OZNC07", "OZNC08", "OZNC09", "OZNC10", "OZNC11", "OZNC12", "OZNC13", "OZNC14", "OZNC15", "OZNC16"];
+            // Grouped machine combinations
+            groupedMachines = [
+                { label: "OZNC04+OZNC06", machines: "OZNC04,OZNC06" },
+                { label: "OZNC08+OZNC10", machines: "OZNC08,OZNC10" },
+                { label: "OZNC03+OZNC05", machines: "OZNC03,OZNC05" },
+                { label: "OZNC07+OZNC09", machines: "OZNC07,OZNC09" }
+            ];
         } else if (filterValue === 'SCNA') {
             machines = ["AOL-1", "AOL-2", "AOL-3", "AOL-4", "AOL-5"];
         } else if (filterValue === '倉知') {
@@ -69,6 +77,46 @@
             card.appendChild(label);
             machineContainer.appendChild(card);
         });
+        }
+
+        // Create grouped machine cards if groupedMachines list is not empty
+        if (groupedMachines.length > 0) {
+            groupedMachines.forEach(group => {
+                const card = document.createElement('div');
+                card.classList.add('card');
+                // Add special styling for grouped cards with blue border
+                card.style.border = '4px solid #2196F3';
+                card.style.boxShadow = '0 4px 12px rgba(33, 150, 243, 0.3)';
+
+                card.addEventListener('click', () => {
+                    // Redirect to the appropriate page based on the filter value
+                    let destination;
+                    if (filterValue === 'SCNA') {
+                        destination = 'SCNA DCP.html';
+                    } else if (filterValue === '倉知' || filterValue === '小瀬') {
+                        destination = 'DCP iReporter.html';
+                    } else {
+                        destination = 'DCP iReporter.html';
+                    }
+                    // Use comma-separated machine values
+                    window.location.href = `${destination}?filter=${filterValue}&machine=${group.machines}`;
+                });
+
+                const img = document.createElement('img');
+                img.src = 'src/machines/NCC01.jpg'; // Same placeholder image
+                img.alt = group.label;
+
+                const label = document.createElement('div');
+                label.classList.add('label');
+                label.textContent = group.label;
+                // Make the label text slightly bolder for grouped cards
+                label.style.fontWeight = 'bold';
+                label.style.color = '#2196F3';
+
+                card.appendChild(img);
+                card.appendChild(label);
+                machineContainer.appendChild(card);
+            });
         }
     </script>
 </body>
