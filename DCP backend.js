@@ -22,6 +22,20 @@ function getQueryParam(param) {
 const selectedFactory = getQueryParam('filter');
 const selectedMachine = getQueryParam('machine');
 
+// ===== GROUPED MACHINE DETECTION =====
+// Check if this is a grouped machine page
+const isGroupedMachinePage = window.location.pathname.includes('DCP Grouping');
+let groupedMachines = []; // Array to store multiple machine names
+let groupedMachineIPs = {}; // Object to store IPs: {machineA: "IP1", machineB: "IP2"}
+
+// Parse comma-separated machines if grouped
+if (selectedMachine && selectedMachine.includes(',')) {
+  groupedMachines = selectedMachine.split(',').map(m => m.trim());
+  console.log("🔵 Grouped machines detected:", groupedMachines);
+} else if (selectedMachine) {
+  groupedMachines = [selectedMachine];
+}
+
 if (selectedFactory) {
   document.getElementById('selected工場').value = selectedFactory;
   document.getElementById('nippoTitle').textContent = selectedFactory + "日報";
@@ -4366,7 +4380,7 @@ function updateSheetStatus(selectedValue, machineName) {
     });
 }
 
-//this function sends request to nc cutter's pC
+//this function sends request to nc cutter's pC (supports single or multiple machines)
 async function sendtoNC(selectedValue) {
 
   //sendCommand("off"); // this is for arduino (emergency button)
@@ -4389,9 +4403,6 @@ async function sendtoNC(selectedValue) {
     return;
   }
 
-  //let pcName = "DESKTOP-V36G1SK-2";
-  const url = `http://${ipAddress}:5000/request?filename=${currentSebanggo}.pce`; //change to
-
   // Show progress bar at top of page
   const progressBar = document.getElementById('sendingProgressBar');
   if (progressBar) {
@@ -4399,49 +4410,127 @@ async function sendtoNC(selectedValue) {
     progressBar.classList.add('show');
   }
 
-  // Send command using fetch instead of opening new tab
-  try {
-    console.log(`Sending command to mini PC: ${url}`);
+  // Check if this is grouped machines
+  if (isGroupedMachinePage && Object.keys(groupedMachineIPs).length > 1) {
+    console.log("🔵 Sending to multiple machines:", groupedMachineIPs);
     
-    const response = await fetch(url, {
-      method: 'GET',
-      mode: 'no-cors' // Allow cross-origin request without CORS preflight
+    // Update progress bar text for multiple machines
+    const progressText = progressBar?.querySelector('span');
+    if (progressText) {
+      progressText.textContent = `Sending to ${Object.keys(groupedMachineIPs).length} machines...`;
+    }
+    
+    // Send command to each machine
+    const sendPromises = Object.entries(groupedMachineIPs).map(async ([machine, ip]) => {
+      const url = `http://${ip}:5000/request?filename=${currentSebanggo}.pce`;
+      
+      try {
+        console.log(`📤 Sending to ${machine} (${ip}): ${url}`);
+        
+        const response = await fetch(url, {
+          method: 'GET',
+          mode: 'no-cors'
+        });
+        
+        console.log(`✅ Command sent successfully to ${machine}`);
+        return { machine, success: true };
+        
+      } catch (error) {
+        console.error(`❌ Failed to send command to ${machine}:`, error);
+        
+        // Fallback: Try opening in new tab if fetch fails
+        console.log(`Trying fallback method for ${machine}...`);
+        try {
+          const newTab = window.open(url, '_blank');
+          setTimeout(() => {
+            if (newTab) newTab.close();
+          }, 5000);
+          return { machine, success: true, fallback: true };
+        } catch (fallbackError) {
+          console.error(`Fallback also failed for ${machine}:`, fallbackError);
+          return { machine, success: false };
+        }
+      }
     });
     
-    console.log('Command sent successfully to mini PC');
+    // Wait for all commands to complete
+    try {
+      const results = await Promise.all(sendPromises);
+      const successCount = results.filter(r => r.success).length;
+      console.log(`✅ Sent to ${successCount}/${results.length} machines successfully`);
+      
+      // Check if any failed
+      const failed = results.filter(r => !r.success);
+      if (failed.length > 0) {
+        console.warn('⚠️ Failed machines:', failed.map(f => f.machine).join(', '));
+        // Show manual send modal as fallback
+        if (typeof showManualSendModal === 'function') {
+          setTimeout(() => showManualSendModal(currentSebanggo), 1000);
+        }
+      }
+      
+    } catch (error) {
+      console.error('Error sending to multiple machines:', error);
+    }
     
     // Hide progress bar after 7 seconds
     setTimeout(() => {
       if (progressBar) {
         progressBar.classList.remove('show');
         progressBar.classList.add('hide');
-        // Reset after animation completes
         setTimeout(() => {
           progressBar.classList.remove('hide');
           progressBar.style.display = 'none';
         }, 300);
       }
-    }, 4000);
+    }, 7000);
     
-  } catch (error) {
-    console.error('Failed to send command to mini PC:', error);
+  } else {
+    // Single machine - original logic
+    const url = `http://${ipAddress}:5000/request?filename=${currentSebanggo}.pce`;
     
-    // Hide progress bar on error
-    if (progressBar) {
-      progressBar.classList.remove('show');
-      progressBar.classList.add('hide');
+    try {
+      console.log(`Sending command to mini PC: ${url}`);
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        mode: 'no-cors'
+      });
+      
+      console.log('Command sent successfully to mini PC');
+      
+      // Hide progress bar after 4 seconds
       setTimeout(() => {
-        progressBar.classList.remove('hide');
-        progressBar.style.display = 'none';
-      }, 300);
+        if (progressBar) {
+          progressBar.classList.remove('show');
+          progressBar.classList.add('hide');
+          setTimeout(() => {
+            progressBar.classList.remove('hide');
+            progressBar.style.display = 'none';
+          }, 300);
+        }
+      }, 4000);
+      
+    } catch (error) {
+      console.error('Failed to send command to mini PC:', error);
+      
+      // Hide progress bar on error
+      if (progressBar) {
+        progressBar.classList.remove('show');
+        progressBar.classList.add('hide');
+        setTimeout(() => {
+          progressBar.classList.remove('hide');
+          progressBar.style.display = 'none';
+        }, 300);
+      }
+      
+      // Fallback: Try opening in new tab if fetch fails
+      console.log('Fetch failed, trying fallback method...');
+      const newTab = window.open(url, '_blank');
+      setTimeout(() => {
+        newTab.close();
+      }, 5000);
     }
-    
-    // Fallback: Try opening in new tab if fetch fails
-    console.log('Fetch failed, trying fallback method...');
-    const newTab = window.open(url, '_blank');
-    setTimeout(() => {
-      newTab.close();
-    }, 5000);
   }
 }
 document.getElementById('sendtoNC').addEventListener('click', async function() {
@@ -4519,23 +4608,61 @@ for (let i = 18; i <= 20; i++) {
 
 // global variable for ip address input container
 const ipInput = document.getElementById('ipInfo');
-// Function to fetch ip address
+// Function to fetch ip address (supports single or multiple machines)
 function getIP() {
   const machineName = document.getElementById('process').value;
-  fetch(`${ipURL}?filter=${machineName}`)
-    .then(response => {
-      if (!response.ok) {
-        throw new Error('Network response was not ok ' + response.statusText);
-      }
-      return response.text();
-    })
-    .then(data => {
-      const cleanedData = data.replace(/"/g, '');
-      ipInput.value = cleanedData;
-    })
-    .catch(error => {
-      console.error('Error:', error);
+  
+  // Check if this is grouped machines
+  if (isGroupedMachinePage && groupedMachines.length > 1) {
+    console.log("🔵 Fetching IPs for grouped machines:", groupedMachines);
+    
+    // Fetch IP for each machine
+    const ipPromises = groupedMachines.map(machine => 
+      fetch(`${ipURL}?filter=${machine}`)
+        .then(response => {
+          if (!response.ok) {
+            throw new Error(`Network response was not ok for ${machine}: ${response.statusText}`);
+          }
+          return response.text();
+        })
+        .then(data => {
+          const cleanedData = data.replace(/"/g, '');
+          groupedMachineIPs[machine] = cleanedData;
+          console.log(`📍 IP for ${machine}: ${cleanedData}`);
+          return { machine, ip: cleanedData };
+        })
+        .catch(error => {
+          console.error(`Error fetching IP for ${machine}:`, error);
+          return { machine, ip: null };
+        })
+    );
+    
+    // Wait for all IPs to be fetched
+    Promise.all(ipPromises).then(results => {
+      console.log("✅ All IPs fetched:", groupedMachineIPs);
+      // Store comma-separated IPs in the hidden input for reference
+      const ips = results.map(r => r.ip).filter(ip => ip).join(',');
+      ipInput.value = ips;
     });
+    
+  } else {
+    // Single machine - original logic
+    fetch(`${ipURL}?filter=${machineName}`)
+      .then(response => {
+        if (!response.ok) {
+          throw new Error('Network response was not ok ' + response.statusText);
+        }
+        return response.text();
+      })
+      .then(data => {
+        const cleanedData = data.replace(/"/g, '');
+        ipInput.value = cleanedData;
+        console.log(`📍 IP for ${machineName}: ${cleanedData}`);
+      })
+      .catch(error => {
+        console.error('Error:', error);
+      });
+  }
 }
 
 // Function to fetch rikeshi up or down color info
@@ -6339,3 +6466,74 @@ window.addEventListener('load', function() {
     }
   }, 2000); // Increased timeout to 2 seconds to ensure dropdown is fully restored
 });
+
+// ==========================
+// GROUPED MACHINES MANUAL SEND MODAL
+// ==========================
+
+// Function to show manual send modal (for grouped machines when auto-send fails)
+function showManualSendModal(sebanggo) {
+  if (!isGroupedMachinePage || Object.keys(groupedMachineIPs).length === 0) {
+    console.log('Not a grouped machine page or no IPs available');
+    return;
+  }
+  
+  const modal = document.getElementById('manualSendModal');
+  if (!modal) {
+    console.error('Manual send modal not found in HTML');
+    return;
+  }
+  
+  const container = document.getElementById('machineLinksContainer');
+  if (!container) {
+    console.error('Machine links container not found');
+    return;
+  }
+  
+  // Clear previous content
+  container.innerHTML = '';
+  
+  // Create a button for each machine
+  Object.entries(groupedMachineIPs).forEach(([machine, ip]) => {
+    const button = document.createElement('button');
+    button.className = 'manual-send-btn';
+    button.innerHTML = `
+      <strong>${machine}</strong><br>
+      <span style="font-size: 0.9em; opacity: 0.8;">${ip}</span>
+    `;
+    button.onclick = () => {
+      const url = `http://${ip}:5000/request?filename=${sebanggo}.pce`;
+      console.log(`📤 Manual send to ${machine}: ${url}`);
+      const newTab = window.open(url, '_blank');
+      setTimeout(() => {
+        if (newTab) newTab.close();
+      }, 3000);
+    };
+    container.appendChild(button);
+  });
+  
+  // Show the modal
+  modal.style.display = 'flex';
+  console.log('✅ Manual send modal shown');
+}
+
+// Close manual send modal
+const closeManualSendBtn = document.getElementById('closeManualSend');
+if (closeManualSendBtn) {
+  closeManualSendBtn.addEventListener('click', function() {
+    const modal = document.getElementById('manualSendModal');
+    if (modal) {
+      modal.style.display = 'none';
+    }
+  });
+}
+
+// Close modal when clicking outside
+const manualSendModal = document.getElementById('manualSendModal');
+if (manualSendModal) {
+  manualSendModal.addEventListener('click', function(event) {
+    if (event.target === manualSendModal) {
+      manualSendModal.style.display = 'none';
+    }
+  });
+}
