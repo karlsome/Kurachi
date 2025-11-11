@@ -16,6 +16,9 @@ const serverURL = "https://kurachi.onrender.com";
 // Global variable to track if sendtoNC button has been pressed
 let sendtoNCButtonisPressed = false;
 
+// Global variable to track which input field is currently using the worker modal
+let currentModalInputField = null; // Can be 'worker' or 'kensa'
+
 //this code listens to incoming parameters passed
 function getQueryParam(param) {
   const urlParams = new URLSearchParams(window.location.search);
@@ -2377,6 +2380,7 @@ function selectWorkerName(name) {
 
 // Open worker modal
 function openWorkerModal() {
+  currentModalInputField = 'worker'; // Track which field opened the modal
   const modal = document.getElementById('workerNameModal');
   modal.style.display = 'block';
   renderWorkerNames();
@@ -2432,22 +2436,35 @@ setTimeout(function() {
   // Manual entry button - close modal and let user type
   if (manualEntryBtn) {
     manualEntryBtn.addEventListener('click', function() {
-      closeWorkerModal();
-      if (workerInput) {
+      // Determine which input field to enable for manual entry
+      const targetInput = currentModalInputField === 'kensa' 
+        ? document.getElementById('Kensa Name')
+        : document.getElementById('Machine Operator');
+      
+      // Close the modal
+      if (currentModalInputField === 'kensa') {
+        closeKensaModal();
+      } else {
+        closeWorkerModal();
+      }
+      
+      if (targetInput) {
         // Remove readonly and datalist to allow free typing
-        workerInput.removeAttribute('list');
-        workerInput.removeAttribute('readonly');
-        workerInput.readOnly = false;
-        workerInput.style.cursor = 'text';
-        workerInput.placeholder = 'Type worker name manually...';
+        targetInput.removeAttribute('list');
+        targetInput.removeAttribute('readonly');
+        targetInput.readOnly = false;
+        targetInput.style.cursor = 'text';
+        targetInput.placeholder = currentModalInputField === 'kensa' 
+          ? 'Type inspector name manually...'
+          : 'Type worker name manually...';
         
         // Clear current value and focus after modal closes
         setTimeout(function() {
-          workerInput.value = '';
-          workerInput.focus();
+          targetInput.value = '';
+          targetInput.focus();
           
           // Trigger click to ensure keyboard shows on mobile
-          workerInput.click();
+          targetInput.click();
         }, 100);
       }
     });
@@ -2484,6 +2501,183 @@ setTimeout(function() {
     });
   }
 }, 100);
+
+// Initialize Kensa Name modal (same as worker modal but for inspector)
+setTimeout(function() {
+  const kensaInput = document.getElementById('Kensa Name');
+  const enableInputsCheckbox = document.getElementById('enable-inputs');
+  
+  if (!kensaInput) return; // Element doesn't exist, skip
+  
+  // Function to check if kensa is enabled
+  function isKensaEnabled() {
+    return enableInputsCheckbox && enableInputsCheckbox.checked;
+  }
+  
+  // Open worker modal when clicking on kensa input (only if checkbox is checked)
+  if (kensaInput) {
+    // Prevent default keyboard from showing on mobile
+    kensaInput.addEventListener('click', function(e) {
+      // Only open modal if checkbox is checked and input is readonly
+      if (isKensaEnabled() && kensaInput.readOnly && workerNamesData.length > 0) {
+        e.preventDefault();
+        openKensaModal();
+      }
+    });
+    
+    // Also open on focus
+    kensaInput.addEventListener('focus', function(e) {
+      // Only open modal if checkbox is checked and input is readonly
+      if (isKensaEnabled() && kensaInput.readOnly && workerNamesData.length > 0) {
+        e.preventDefault();
+        openKensaModal();
+      }
+    });
+    
+    // Prevent keyboard from showing on touch devices
+    kensaInput.addEventListener('touchstart', function(e) {
+      // Only prevent and open modal if checkbox is checked and input is readonly
+      if (isKensaEnabled() && kensaInput.readOnly && workerNamesData.length > 0) {
+        e.preventDefault();
+        openKensaModal();
+      }
+    });
+    
+    // Save manually entered kensa name to recents when user finishes typing
+    kensaInput.addEventListener('blur', function() {
+      const enteredName = kensaInput.value.trim();
+      if (enteredName && !kensaInput.readOnly && isKensaEnabled()) {
+        // Only save if user manually typed (not readonly) and checkbox is checked
+        addToRecentWorkers(enteredName);
+      }
+    });
+    
+    // Also save on Enter key
+    kensaInput.addEventListener('keypress', function(e) {
+      if (e.key === 'Enter') {
+        const enteredName = kensaInput.value.trim();
+        if (enteredName && !kensaInput.readOnly && isKensaEnabled()) {
+          addToRecentWorkers(enteredName);
+        }
+      }
+    });
+  }
+}, 100);
+
+// Select kensa name (inspector)
+function selectKensaName(name) {
+  const input = document.getElementById('Kensa Name');
+  if (!input) return;
+  
+  input.value = name;
+  
+  // Add to recent workers
+  addToRecentWorkers(name);
+  
+  // Close modal
+  closeKensaModal();
+  
+  // Trigger change event
+  input.dispatchEvent(new Event('change'));
+}
+
+// Open kensa modal (reuses worker modal)
+function openKensaModal() {
+  currentModalInputField = 'kensa'; // Track which field opened the modal
+  const modal = document.getElementById('workerNameModal');
+  modal.style.display = 'block';
+  renderKensaNames();
+}
+
+// Close kensa modal
+function closeKensaModal() {
+  const modal = document.getElementById('workerNameModal');
+  modal.style.display = 'none';
+}
+
+// Render kensa names (similar to renderWorkerNames but calls selectKensaName)
+function renderKensaNames() {
+  const container = document.getElementById('workerNamesContainer');
+  if (!container) return;
+  
+  container.innerHTML = '';
+  
+  // Get recent workers
+  const recentWorkers = getRecentWorkers();
+  
+  // Create recent section if there are recent workers
+  if (recentWorkers.length > 0) {
+    const recentSection = document.createElement('div');
+    recentSection.className = 'worker-section recent-section';
+    
+    const recentHeader = document.createElement('div');
+    recentHeader.className = 'worker-section-header';
+    recentHeader.textContent = '最近使用 / Recent';
+    recentSection.appendChild(recentHeader);
+    
+    const recentGrid = document.createElement('div');
+    recentGrid.className = 'worker-names-grid';
+    
+    recentWorkers.forEach(name => {
+      const wrapper = document.createElement('div');
+      wrapper.style.position = 'relative';
+      
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'worker-name-btn';
+      btn.textContent = name;
+      btn.onclick = () => selectKensaName(name);
+      
+      const deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
+      deleteBtn.className = 'delete-recent-btn';
+      deleteBtn.textContent = '×';
+      deleteBtn.onclick = (e) => {
+        e.stopPropagation();
+        removeFromRecentWorkers(name);
+        renderKensaNames(); // Re-render
+      };
+      
+      wrapper.appendChild(btn);
+      wrapper.appendChild(deleteBtn);
+      recentGrid.appendChild(wrapper);
+    });
+    
+    recentSection.appendChild(recentGrid);
+    container.appendChild(recentSection);
+  }
+  
+  // Create all workers section
+  const allSection = document.createElement('div');
+  allSection.className = 'worker-section';
+  
+  const allHeader = document.createElement('div');
+  allHeader.className = 'worker-section-header';
+  allHeader.textContent = 'すべての作業者 / All Workers';
+  allSection.appendChild(allHeader);
+  
+  const allGrid = document.createElement('div');
+  allGrid.className = 'worker-names-grid';
+  
+  workerNamesData.forEach(name => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'worker-name-btn';
+    btn.textContent = name;
+    btn.onclick = () => selectKensaName(name);
+    allGrid.appendChild(btn);
+  });
+  
+  allSection.appendChild(allGrid);
+  container.appendChild(allSection);
+  
+  // Update modal button handlers for kensa
+  const closeModalBtn = document.getElementById('closeWorkerModal');
+  const manualEntryBtn = document.getElementById('manualEntryBtn');
+  
+  // Note: Manual entry button handler is set globally in the initialization
+  // No need to override it here, it will use currentModalInputField to determine which field to edit
+}
 
 // Updates cycle times for pressDB and kensaDB
 function updateCycleTime() {
