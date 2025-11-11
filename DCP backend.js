@@ -2451,23 +2451,38 @@ document.getElementById('scan-lot').addEventListener('click', function() {
         const lotNumber = parts[1].trim();
         // parts[2] is ignored for now
 
-        // Get Material Code from the form
-        const materialCode = materialCodeInput ? materialCodeInput.value.trim() : '';
+        // Get Material Code from the form (may contain comma-separated values)
+        const materialCodeString = materialCodeInput ? materialCodeInput.value.trim() : '';
 
-        console.log("Comparison:", { scannedMaterialCode, materialCode, lotNumber });
+        console.log("Comparison:", { scannedMaterialCode, materialCodeString, lotNumber });
+
+        // Validate Material Code using new multi-value support
+        const validation = validateMaterialCode(scannedMaterialCode, materialCodeString);
+        
+        console.log("Lot Scanner Validation:", {
+          scanned: scannedMaterialCode,
+          allValidCodes: validation.allCodes,
+          isValid: validation.isValid,
+          matchedCode: validation.matchedCode
+        });
 
         // Compare Material Codes
-        if (scannedMaterialCode !== materialCode) {
+        if (!validation.isValid) {
           // Material code mismatch - show error
+          const expectedDisplay = formatMaterialCodesForDisplay(materialCodeString);
+          
           scanLotStatus.innerHTML = '<span style="color: #e74c3c;">❌ 材料コードが一致しません<br>Material code mismatch</span>';
           
           // Use showAlert function
-          showAlert(`材料コードが一致しません / Material code mismatch\n\nScanned: ${scannedMaterialCode}\nExpected: ${materialCode}`);
+          showAlert(`材料コードが一致しません / Material code mismatch\n\nExpected: ${expectedDisplay}\nScanned: ${scannedMaterialCode}`);
           
           // Close modal
           scanLotModal.style.display = 'none';
           return;
         }
+        
+        // Log which specific code was matched
+        console.log(`Lot scanner: Material code validated successfully. Matched: ${validation.matchedCode}`);
 
         // Material code matches - add lot number using the new system
         const success = addScannedLot(lotNumber);
@@ -5554,6 +5569,44 @@ function getMachineName() {
   return document.getElementById('process')?.value || 'MACHINE';
 }
 
+// Helper function to parse and validate material codes (case-sensitive)
+// Returns: { isValid: boolean, matchedCode: string|null, allCodes: string[] }
+function validateMaterialCode(scannedCode, expectedCodeString) {
+  if (!expectedCodeString) {
+    return { isValid: false, matchedCode: null, allCodes: [] };
+  }
+  
+  // Split by comma and trim whitespace
+  const allCodes = expectedCodeString.split(',').map(code => code.trim()).filter(code => code);
+  
+  // Case-sensitive exact match
+  const matchedCode = allCodes.find(code => code === scannedCode);
+  
+  return {
+    isValid: !!matchedCode,
+    matchedCode: matchedCode || null,
+    allCodes: allCodes
+  };
+}
+
+// Helper function to format material codes for display
+// Example: "MA44,MA90" -> "MA44 or MA90"
+function formatMaterialCodesForDisplay(materialCodeString) {
+  if (!materialCodeString) {
+    return '';
+  }
+  
+  const codes = materialCodeString.split(',').map(code => code.trim()).filter(code => code);
+  
+  if (codes.length === 0) {
+    return '';
+  } else if (codes.length === 1) {
+    return codes[0];
+  } else {
+    return codes.join(' or ');
+  }
+}
+
 // Function to save current step to localStorage
 function saveCurrentStep(step) {
   currentStep = step;
@@ -5594,7 +5647,8 @@ function showStep2Modal() {
   // Use cached product details instead of reading from DOM
   document.getElementById('step2Sebanggo').textContent = currentProductDetails.sebanggo;
   document.getElementById('step2Hinban').textContent = currentProductDetails.hinban;
-  document.getElementById('step2Material').textContent = currentProductDetails.materialCode;
+  // Format material codes for display: "MA44,MA90" -> "MA44 or MA90"
+  document.getElementById('step2Material').textContent = formatMaterialCodesForDisplay(currentProductDetails.materialCode);
   
   machineName.textContent = getMachineName();
   content.style.display = 'flex';
@@ -5611,7 +5665,8 @@ function showStep3Modal() {
   // Use cached product details instead of reading from DOM
   document.getElementById('step3Sebanggo').textContent = currentProductDetails.sebanggo;
   document.getElementById('step3Hinban').textContent = currentProductDetails.hinban;
-  document.getElementById('step3Material').textContent = currentProductDetails.materialCode;
+  // Format material codes for display: "MA44,MA90" -> "MA44 or MA90"
+  document.getElementById('step3Material').textContent = formatMaterialCodesForDisplay(currentProductDetails.materialCode);
   
   machineName.textContent = getMachineName();
   modal.style.display = 'block';
@@ -5891,15 +5946,19 @@ document.getElementById('startStep2Scan').addEventListener('click', function(eve
         const scannedMaterialCode = parts[0].trim();
         const lotNumber = parts[1].trim();
         
-        // Validate Material Code using cached product details
-        const expectedMaterialCode = currentProductDetails.materialCode || '';
+        // Validate Material Code using cached product details with new multi-value support
+        const expectedMaterialCodeString = currentProductDetails.materialCode || '';
+        const validation = validateMaterialCode(scannedMaterialCode, expectedMaterialCodeString);
         
         console.log("Material Code Comparison:", { 
           scanned: scannedMaterialCode, 
-          expected: expectedMaterialCode 
+          expected: expectedMaterialCodeString,
+          allValidCodes: validation.allCodes,
+          isValid: validation.isValid,
+          matchedCode: validation.matchedCode
         });
         
-        if (scannedMaterialCode !== expectedMaterialCode) {
+        if (!validation.isValid) {
           // Stop scanner
           await step2Scanner.stop();
           step2Scanner = null;
@@ -5908,17 +5967,27 @@ document.getElementById('startStep2Scan').addEventListener('click', function(eve
           scanner.style.display = 'none';
           content.style.display = 'flex';
           
+          // Format expected codes for display
+          const expectedDisplay = formatMaterialCodesForDisplay(expectedMaterialCodeString);
+          
           // Show error in modal
           const errorMsg = document.getElementById('step2ErrorMsg');
           const errorText = errorMsg.querySelector('p');
-          errorText.innerHTML = `❌ <strong>材料コードが一致しません / Material code mismatch</strong><br><br>Expected: <code style="background: #e8f5e9; padding: 2px 8px; border-radius: 4px; color: #2e7d32;">${expectedMaterialCode}</code><br>Scanned: <code style="background: #ffebee; padding: 2px 8px; border-radius: 4px; color: #c62828;">${scannedMaterialCode}</code><br><br>Please scan the correct material lot.`;
+          errorText.innerHTML = `❌ <strong>材料コードが一致しません / Material code mismatch</strong><br><br>Expected: <code style="background: #e8f5e9; padding: 2px 8px; border-radius: 4px; color: #2e7d32;">${expectedDisplay}</code><br>Scanned: <code style="background: #ffebee; padding: 2px 8px; border-radius: 4px; color: #c62828;">${scannedMaterialCode}</code><br><br>Please scan the correct material lot.`;
           errorMsg.style.display = 'block';
           
           // Also show alert with red flash and sound
-          showAlert(`❌ 材料コードが一致しません / Material code mismatch\n\nExpected: ${expectedMaterialCode}\nScanned: ${scannedMaterialCode}\n\nPlease scan the correct material lot.`);
+          showAlert(`❌ 材料コードが一致しません / Material code mismatch\n\nExpected: ${expectedDisplay}\nScanned: ${scannedMaterialCode}\n\nPlease scan the correct material lot.`);
           
           return;
         }
+        
+        // Log which specific code was matched
+        console.log(`Material code validated successfully. Matched: ${validation.matchedCode}`);
+        
+        // Store the actual scanned material code (not all valid codes, just the one scanned)
+        // This could be used later if needed for tracking which specific code was used
+        const actualScannedCode = validation.matchedCode;
         
         // Add scanned lot to the material lot input
         const success = addScannedLot(lotNumber);
@@ -6003,17 +6072,18 @@ document.getElementById('overrideStep2').addEventListener('click', function(even
   // Close Step 2 modal
   step2Modal.style.display = 'none';
   
-  // Get material code from input
+  // Get material code from input (may contain comma-separated values)
   const materialCodeInput = document.getElementById('material-code');
-  const materialCode = materialCodeInput ? materialCodeInput.value.trim() : 'N/A';
+  const materialCodeString = materialCodeInput ? materialCodeInput.value.trim() : 'N/A';
+  const materialCodeDisplay = formatMaterialCodesForDisplay(materialCodeString);
   
   // Find and update the warning text to show material code with blinking
   const modalContent = leaderVerificationModal.querySelector('.modal-content');
   const warningTextElement = modalContent.querySelector('p[style*="font-size"], p[style*="color: #666"]');
   
   if (warningTextElement) {
-    // Replace the warning text with blinking material code
-    warningTextElement.innerHTML = `<span class="material-code-blink">材料: ${materialCode} / Material Code: ${materialCode}</span>`;
+    // Replace the warning text with blinking material code (formatted for multiple codes)
+    warningTextElement.innerHTML = `<span class="material-code-blink">材料: ${materialCodeDisplay} / Material Code: ${materialCodeDisplay}</span>`;
     warningTextElement.style.fontSize = '18px';
     warningTextElement.style.margin = '15px 0';
   }
