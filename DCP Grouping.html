@@ -3,7 +3,7 @@
 <head>
     <link rel="stylesheet" href="Google Sheet.css">
     <link rel="icon" type="image/png" href="src/favicon2.png">
-    <title>自動日報(倉知)</title>
+    <title>自動日報(倉知) - Grouped Machines</title>
     <style>
         /* Language Dropdown Styles */
         .language-selector {
@@ -561,7 +561,7 @@
             }
         }
 
-        /* Worker Name Modal Styles */
+        /* Worker Name Selection Modal Styles */
         #workerNameModal {
             position: fixed !important;
             top: 0 !important;
@@ -866,7 +866,9 @@
 
             <!-- QR code button -->
             <button id="scan-button" type="button" data-i18n="scan_sebango">Scan 背番号</button>
-            <button id="scan-lot" type="button" data-i18n="scan_lot">Scan ロット</button>
+            <button id="print" type="button" onclick="printLabel()" data-i18n="print" style="padding: 12px; font-size: 16px; background: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;">
+                Print Label
+            </button>
             <br>
             <br>
 
@@ -918,15 +920,35 @@
             <label for="End Time" data-i18n="end_time">加工終了時間:</label>
             <input type="time" name="End Time" id="End Time" placeholder="Time End" data-i18n="time_end_placeholder" onfocus="setDefaultTime(this)" required>
             <br>
-            <label for="shot" data-i18n="shot_count">ショット数</label>
-            <input type="number" name="shot" id="shot" placeholder="ショット数" data-i18n="shot_count_placeholder">
-
+            
+            <!-- Dynamic Shot Count Section for Grouped Machines -->
+            <div id="shotCountSection">
+                <!-- Single machine input (default) -->
+                <label for="shot" data-i18n="shot_count">ショット数</label>
+                <input type="number" name="shot" id="shot" placeholder="ショット数" data-i18n="shot_count_placeholder">
+            </div>
+            <br>
 
             <label for="材料ロット" data-i18n="material_lot">材料ロット:</label>
         <input type="text" name="材料ロット" id="材料ロット" placeholder="Material Lot" data-i18n="material_lot_placeholder" required>
         <div id="材料ロット-tags" style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; margin-bottom: 10px;"></div>
         <input type="hidden" id="材料ロット-data" value="">
         <br>
+        
+        <!-- Hidden dummy counters 1-12 for kensa section (removed from UI but needed by backend.js) -->
+        <input type="hidden" id="counter-1" value="0" name="counter-1">
+        <input type="hidden" id="counter-2" value="0" name="counter-2">
+        <input type="hidden" id="counter-3" value="0" name="counter-3">
+        <input type="hidden" id="counter-4" value="0" name="counter-4">
+        <input type="hidden" id="counter-5" value="0" name="counter-5">
+        <input type="hidden" id="counter-6" value="0" name="counter-6">
+        <input type="hidden" id="counter-7" value="0" name="counter-7">
+        <input type="hidden" id="counter-8" value="0" name="counter-8">
+        <input type="hidden" id="counter-9" value="0" name="counter-9">
+        <input type="hidden" id="counter-10" value="0" name="counter-10">
+        <input type="hidden" id="counter-11" value="0" name="counter-11">
+        <input type="hidden" id="counter-12" value="0" name="counter-12">
+        
         <div id="counter-box-18" class="counter-box">
             <label for="counter-18" data-i18n="defect_pull">疵引不良</label>
             <button class="plus-btn" type="button" onclick="incrementCounter(18)" >+</button>
@@ -945,6 +967,24 @@
             <input readonly id="counter-20" value="0" type="number" name="その他">
             <button class="minus-btn" type="button" onclick="decrementCounter(20)" >-</button>
         </div>
+
+        <br>
+        <hr style="border: 1px solid rgba(255, 255, 255, 0.3); margin: 20px 0;">
+        
+        <!-- NG Quantity Display -->
+        <div style="margin-bottom: 15px; padding: 10px; background: rgba(255, 255, 255, 0.1); border-radius: 5px;">
+            <label for="Total_NG" data-i18n="ng_quantity" style="color: #ff6b6b; font-weight: bold; display: block; margin-bottom: 5px;">NG Quantity:</label>
+            <input readonly id="Total_NG" value="0" type="number" name="Total_NG" style="width: 100%; font-weight: bold; font-size: 1.2em; padding: 8px; border: 1px solid #ddd; border-radius: 3px; background: white;">
+        </div>
+
+        <!-- Total Good Display -->
+        <div style="margin-bottom: 15px; padding: 10px; background: rgba(255, 255, 255, 0.1); border-radius: 5px;">
+            <label for="total" data-i18n="total_good" style="color: white; font-weight: bold; display: block; margin-bottom: 5px;">良品合計(TOTAL):</label>
+            <input readonly id="total" value="0" type="number" name="Final Quantity" style="width: 100%; font-weight: bold; font-size: 1.2em; padding: 8px; border: 1px solid #ddd; border-radius: 3px; background: white;">
+        </div>
+
+        <hr style="border: 1px solid rgba(255, 255, 255, 0.3); margin: 20px 0;">
+        <br>
 
         <!-- what modal is this???? -->
         <div id="myModal" class="modal">
@@ -1161,7 +1201,7 @@
                 <div id="step3Content">
                     <p>Press this button / このボタンを押して</p>
                     <div style="font-size: 60px; margin: 20px 0;">👇🏻</div>
-                    <button id="startStep3Send" style="background: linear-gradient(135deg, #4CAF50, #45a049); color: white; border: none; padding: 20px 50px; border-radius: 15px; cursor: pointer; font-size: 20px; font-weight: 600; box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4); transition: all 0.3s;">
+                    <button id="startStep3Send" type="button" style="background: linear-gradient(135deg, #4CAF50, #45a049); color: white; border: none; padding: 20px 50px; border-radius: 15px; cursor: pointer; font-size: 20px; font-weight: 600; box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4); transition: all 0.3s;">
                         Send to machine
                     </button>
                 </div>
@@ -1234,6 +1274,17 @@
             
             <br>
              <br>
+
+            <!-- Buttons moved from yellow column to bottom of left column -->
+            <div style="margin-top: 30px; padding-top: 20px; border-top: 2px solid rgba(255, 255, 255, 0.3);">
+                <!-- Submit Button -->
+                <input type="submit" value="Submit" data-i18n="submit" id="submit" style="width: 100%; margin-bottom: 15px; padding: 15px; font-size: 18px; background: #ff6b6b; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;">
+
+                <!-- Reset Button -->
+                <button type="button" onclick="resetForm()" data-i18n="reset" style="width: 100%; padding: 12px; font-size: 16px; background: #757575; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;">
+                    Reset
+                </button>
+            </div>
              
     </div>
     </form>      
@@ -1243,146 +1294,9 @@
     
 
 
-    <!-- this code is for kensa -->
-    
-<div class="kensacontainer">
-    <form method="post" action="" name="kensa-form">
-    <h4>
-        <label>
-            <input type="checkbox" id="enable-inputs" onclick="toggleInputs()">
-            <span id="checkboxLabel" data-i18n="kensa_checkbox">倉知検査</span>
-        </label>
-    </h4>
-    <!-- this is the printLabel button -->
-    <button id="print" type="button" onclick="printLabel()" data-i18n="print"> Print Label </button>
+    <!-- Yellow kensacontainer section removed for grouped machines -->
 
-
-
-    <label for="Kensa Name" data-i18n="inspector_name">検査者:</label>
-    <input list="kensa-name-suggestions" placeholder="Kensa Name" data-i18n="inspector_placeholder" id="Kensa Name" name="Kensa Name" type="text" disabled readonly style="cursor: pointer; background: white;">
-    <datalist id="kensa-name-suggestions"></datalist>
-    <br>
-    <label for="KDate" data-i18n="inspection_date">検査日付:</label>
-    <input type="date" name="KDate" id="KDate" placeholder="KDate" onfocus="setDefaultDate(this)" disabled>
-    <br>
-    <label for="KStart Time" data-i18n="inspection_start_time">検査開始時間:</label>
-    <input type="time" name="KStart Time" id="KStart Time" placeholder="KTime Start" onfocus="setDefaultTime(this)" disabled>
-    <br>
-    <label for="KEnd Time" data-i18n="inspection_end_time">検査終了時間:</label>
-    <input type="time" name="KEnd Time" id="KEnd Time" placeholder="KTime End" onfocus="setDefaultTime(this)" disabled>
-    <br>
-
-    <!-- these are for the buttons numbers -->
-    <div class="counter-container">  
-        <div id="counter-box-1" class="counter-box"> 
-            <label for="counter-1">1</label>
-            <button class="plus-btn" type="button" onclick="incrementCounter(1)" disabled>+</button>  
-            <input readonly id="counter-1" value="0" type="number" name="1">  
-            <button class="minus-btn" type="button" onclick="decrementCounter(1)" disabled>-</button>  
-        </div>  
-        <div id="counter-box-2" class="counter-box">  
-            <label for="counter-2">2</label>
-            <button class="plus-btn" type="button" onclick="incrementCounter(2)" disabled>+</button>  
-            <input readonly id="counter-2" value="0" type="number" name="2">  
-            <button class="minus-btn" type="button" onclick="decrementCounter(2)" disabled>-</button>  
-        </div>  
-        <div id="counter-box-3" class="counter-box">  
-            <label for="counter-3">3</label>
-            <button class="plus-btn" type="button" onclick="incrementCounter(3)" disabled>+</button>  
-            <input readonly id="counter-3" value="0" type="number" name="3">  
-            <button class="minus-btn" type="button" onclick="decrementCounter(3)" disabled>-</button>  
-        </div>  
-        <div id="counter-box-4" class="counter-box">  
-            <label for="counter-4">4</label>
-            <button class="plus-btn" type="button" onclick="incrementCounter(4)" disabled>+</button>  
-            <input readonly id="counter-4" value="0" type="number" name="4">  
-            <button class="minus-btn" type="button" onclick="decrementCounter(4)" disabled>-</button>  
-        </div>  
-        <div id="counter-box-5" class="counter-box">  
-            <label for="counter-5">5</label>
-            <button class="plus-btn" type="button" onclick="incrementCounter(5)" disabled>+</button>  
-            <input readonly id="counter-5" value="0" type="number" name="5">  
-            <button class="minus-btn" type="button" onclick="decrementCounter(5)" disabled>-</button>  
-        </div>  
-        <div id="counter-box-6" class="counter-box">  
-            <label for="counter-6">6</label>
-            <button class="plus-btn" type="button" onclick="incrementCounter(6)" disabled>+</button>  
-            <input readonly id="counter-6" value="0" type="number" name="6">  
-            <button class="minus-btn" type="button" onclick="decrementCounter(6)" disabled>-</button>  
-        </div>  
-        <div id="counter-box-7" class="counter-box">  
-            <label for="counter-7">7</label>
-            <button class="plus-btn" type="button" onclick="incrementCounter(7)" disabled>+</button>  
-            <input readonly id="counter-7" value="0" type="number" name="7">  
-            <button class="minus-btn" type="button" onclick="decrementCounter(7)" disabled>-</button>  
-        </div>  
-        <div id="counter-box-8" class="counter-box">  
-            <label for="counter-8">8</label>
-            <button class="plus-btn" type="button" onclick="incrementCounter(8)" disabled>+</button>  
-            <input readonly id="counter-8" value="0" type="number" name="8">  
-            <button class="minus-btn" type="button" onclick="decrementCounter(8)" disabled>-</button>  
-        </div>  
-        <div id="counter-box-9" class="counter-box">  
-            <label for="counter-9">9</label>
-            <button class="plus-btn" type="button" onclick="incrementCounter(9)" disabled>+</button>  
-            <input readonly id="counter-9" value="0" type="number" name="9">  
-            <button class="minus-btn" type="button" onclick="decrementCounter(9)" disabled>-</button>  
-        </div>  
-        <div id="counter-box-10" class="counter-box">  
-            <label for="counter-10">10</label>
-            <button class="plus-btn" type="button" onclick="incrementCounter(10)" disabled>+</button>  
-            <input readonly id="counter-10" value="0" type="number" name="10">  
-            <button class="minus-btn" type="button" onclick="decrementCounter(10)" disabled>-</button>  
-        </div>  
-        <div id="counter-box-11" class="counter-box">  
-            <label for="counter-11">11</label>
-            <button class="plus-btn" type="button" onclick="incrementCounter(11)" disabled>+</button>  
-            <input readonly id="counter-11" value="0" type="number" name="11">  
-            <button class="minus-btn" type="button" onclick="decrementCounter(11)" disabled>-</button>  
-        </div>  
-        <div id="counter-box-12" class="counter-box">  
-            <label for="counter-12">その他</label>
-            <button class="plus-btn" type="button" onclick="incrementCounter(12)" disabled>+</button>  
-            <input readonly id="counter-12" value="0" type="number" name="その他">  
-            <button class="minus-btn" type="button" onclick="decrementCounter(12)" disabled>-</button>  
-        </div>  
-    </div>
-
-
-    <!-- this displays the total furyo a -->
-    <div class="counter-container">
-        <!-- Add the total display element -->
-        <div id="NG-container">
-            <label for="Total_NG" data-i18n="ng_quantity" style="color: #d32f2f; font-weight: bold;">NG Quantity:</label>
-            <input readonly id="Total_NG" value="0" type="number" name="Total_NG" style="font-weight: bold; font-size: 1.2em;">
-        </div>
-        <br><br><br><br>
-        <div id="total-container">
-            <label for="total" data-i18n="total_good">良品合計(TOTAL):</label>
-            <input readonly id="total" value="0" type="number" name="Final Quantity">
-        </div>
-            </div>
-            <label for="在庫" data-i18n="spare">スペア:</label>
-            <input type="text" name="在庫" id="在庫" placeholder="Spare" data-i18n="spare_placeholder" disabled>
-            <br>
-
-            <textarea name="Comments2" rows="5" placeholder="Enter Comments" data-i18n="comments" disabled></textarea>
-            <input type="submit" value="Submit" data-i18n="submit" id="submit">
-            <br>
-            <br>
-            <br>
-            <br>
-            <br>
-            <br>
-            <button type="button" onclick="resetForm()" data-i18n="reset">Reset</button>
-        </div>
-        
-    
-
-        
-    
-
-        <!-- this is for the informations -->
+        <!-- this is for the informations (right column) -->
         <div class="container">
             <div class = "container">
                 <div class="image-container">
@@ -1509,7 +1423,29 @@
 
     </div>
 
-    <!-- Worker Name Modal -->
+    <!-- Individual Machine Send Modal -->
+    <div id="individualSendModal" class="individual-machine-send-modal" style="display:none !important; position: fixed !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; background: rgba(0, 0, 0, 0.8) !important; z-index: 10002 !important; justify-content: center !important; align-items: center !important; overflow: auto !important; padding: 20px !important; box-sizing: border-box !important;">
+        <div class="individual-machine-send-content" style="background: white !important; border-radius: 15px !important; padding: 30px !important; max-width: 560px !important; width: 90% !important; max-height: 80vh !important; overflow-y: auto !important; margin: auto !important; box-shadow: 0 8px 32px rgba(0,0,0,0.3) !important; position: relative !important;">
+            <div style="text-align: center; margin-bottom: 25px;">
+                <h2 style="margin: 0 !important; font-size: 24px !important; color: #333 !important;">
+                    Send to Machine<br>
+                    <span style="font-size: 18px !important; color: #666 !important;">マシンにデータを送信</span>
+                </h2>
+            </div>
+
+            <div id="individualMachineList" style="display: flex !important; flex-direction: column !important; gap: 15px !important; margin: 20px 0 !important;">
+                <!-- Machine cards will be dynamically generated here -->
+            </div>
+
+            <div style="text-align: center; margin-top: 30px;">
+                <button id="closeIndividualSendModal" type="button" style="background: #e74c3c !important; color: white !important; border: none !important; padding: 12px 40px !important; border-radius: 8px !important; cursor: pointer !important; font-size: 16px !important; font-weight: 600 !important; transition: all 0.3s !important;">
+                    Close / 閉じる
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Worker Name Selection Modal -->
     <div id="workerNameModal">
         <div>
             <h2>作業者を選択 / Select Worker</h2>

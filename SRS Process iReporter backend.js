@@ -925,22 +925,9 @@ document.addEventListener("DOMContentLoaded", async function () {
       if (!response.ok) throw new Error("Failed to fetch worker names");
 
       const workerNames = await response.json();
-      const dataList = document.getElementById("machine-operator-suggestions");
-      const dataListRH = document.getElementById("machine-operator-suggestionsRH");
-      dataList.innerHTML = ""; // Clear any existing options
-      dataListRH.innerHTML = ""; // Clear any existing options
-
-      workerNames.forEach((name) => {
-        // Create option for dataList
-        const option1 = document.createElement("option");
-        option1.value = name;
-        dataList.appendChild(option1);
-
-        // Create a separate option for dataListRH
-        const option2 = document.createElement("option");
-        option2.value = name;
-        dataListRH.appendChild(option2);
-      });
+      
+      // Store worker names for modal (datalists removed, now using modal)
+      workerNamesData = workerNames;
     } catch (error) {
       console.error("Error fetching worker names:", error);
     }
@@ -2330,6 +2317,310 @@ function uploadPhotou() {
   });
 }
 
+// ===== WORKER NAME MODAL FUNCTIONALITY =====
+
+// Worker Name Selection Modal Variables
+let workerNamesData = [];
+let currentWorkerInputField = null; // Track which input opened the modal ('LH' or 'RH')
+const RECENT_WORKERS_KEY = 'recentWorkerNames';
+const MAX_RECENT_WORKERS = 6;
+
+// Get recent workers from localStorage
+function getRecentWorkers() {
+  const recent = localStorage.getItem(RECENT_WORKERS_KEY);
+  return recent ? JSON.parse(recent) : [];
+}
+
+// Add worker to recent list
+function addToRecentWorkers(name) {
+  if (!name || name.trim() === '') return;
+  
+  let recent = getRecentWorkers();
+  recent = recent.filter(w => w !== name);
+  recent.unshift(name);
+  recent = recent.slice(0, MAX_RECENT_WORKERS);
+  
+  localStorage.setItem(RECENT_WORKERS_KEY, JSON.stringify(recent));
+}
+
+// Remove worker from recent list
+function removeFromRecentWorkers(name) {
+  let recent = getRecentWorkers();
+  recent = recent.filter(w => w !== name);
+  localStorage.setItem(RECENT_WORKERS_KEY, JSON.stringify(recent));
+  renderWorkerNames();
+}
+
+// Group names alphabetically
+function groupNamesByLetter(names) {
+  const grouped = {};
+  
+  names.forEach(name => {
+    let firstChar = name.charAt(0).toUpperCase();
+    
+    if (firstChar.match(/[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/)) {
+      firstChar = name.charAt(0);
+    } else if (firstChar.match(/[A-Z]/)) {
+      firstChar = firstChar.toUpperCase();
+    } else {
+      firstChar = '#';
+    }
+    
+    if (!grouped[firstChar]) {
+      grouped[firstChar] = [];
+    }
+    grouped[firstChar].push(name);
+  });
+  
+  Object.keys(grouped).forEach(key => {
+    grouped[key].sort();
+  });
+  
+  return grouped;
+}
+
+// Render worker names in modal
+function renderWorkerNames() {
+  const container = document.getElementById('workerNamesContainer');
+  container.innerHTML = '';
+  
+  const recentWorkers = getRecentWorkers();
+  
+  if (recentWorkers.length > 0) {
+    const recentSection = document.createElement('div');
+    recentSection.className = 'worker-section recent-section';
+    
+    const header = document.createElement('div');
+    header.className = 'worker-section-header';
+    header.textContent = '⭐ 最近使用 / Recent';
+    recentSection.appendChild(header);
+    
+    const grid = document.createElement('div');
+    grid.className = 'worker-names-grid';
+    
+    recentWorkers.forEach(name => {
+      const wrapper = document.createElement('div');
+      wrapper.style.position = 'relative';
+      
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'worker-name-btn';
+      btn.textContent = name;
+      btn.onclick = () => selectWorkerName(name);
+      
+      const deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
+      deleteBtn.className = 'delete-recent-btn';
+      deleteBtn.innerHTML = '×';
+      deleteBtn.onclick = (e) => {
+        e.stopPropagation();
+        removeFromRecentWorkers(name);
+      };
+      
+      wrapper.appendChild(btn);
+      wrapper.appendChild(deleteBtn);
+      grid.appendChild(wrapper);
+    });
+    
+    recentSection.appendChild(grid);
+    container.appendChild(recentSection);
+  }
+  
+  const grouped = groupNamesByLetter(workerNamesData);
+  const sortedKeys = Object.keys(grouped).sort();
+  
+  sortedKeys.forEach(letter => {
+    const section = document.createElement('div');
+    section.className = 'worker-section';
+    
+    const header = document.createElement('div');
+    header.className = 'worker-section-header';
+    header.textContent = letter;
+    section.appendChild(header);
+    
+    const grid = document.createElement('div');
+    grid.className = 'worker-names-grid';
+    
+    grouped[letter].forEach(name => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'worker-name-btn';
+      btn.textContent = name;
+      btn.onclick = () => selectWorkerName(name);
+      grid.appendChild(btn);
+    });
+    
+    section.appendChild(grid);
+    container.appendChild(section);
+  });
+}
+
+// Select worker name
+function selectWorkerName(name) {
+  // Determine which input to update based on currentWorkerInputField
+  const inputId = currentWorkerInputField === 'RH' ? 'Machine OperatorRH' : 'Machine Operator';
+  const input = document.getElementById(inputId);
+  
+  if (input) {
+    input.value = name;
+    addToRecentWorkers(name);
+    
+    // Save to localStorage (programmatic changes don't trigger 'input' event)
+    const pageName = location.pathname.split('/').pop();
+    const selected工場 = document.getElementById('selected工場')?.value;
+    if (pageName && selected工場) {
+      const key = `${pageName}_${selected工場}_${input.id || input.name}`;
+      localStorage.setItem(key, name);
+    }
+    
+    closeWorkerModal();
+    input.dispatchEvent(new Event('change'));
+  }
+}
+
+// Open worker modal
+function openWorkerModal(inputType) {
+  currentWorkerInputField = inputType; // Set to 'LH' or 'RH'
+  const modal = document.getElementById('workerNameModal');
+  modal.style.display = 'block';
+  renderWorkerNames();
+}
+
+// Close worker modal
+function closeWorkerModal() {
+  const modal = document.getElementById('workerNameModal');
+  modal.style.display = 'none';
+  currentWorkerInputField = null;
+}
+
+// Initialize worker name modal for both inputs
+setTimeout(function() {
+  const workerInputLH = document.getElementById('Machine Operator');
+  const workerInputRH = document.getElementById('Machine OperatorRH');
+  const closeModalBtn = document.getElementById('closeWorkerModal');
+  const manualEntryBtn = document.getElementById('manualEntryBtn');
+  
+  // Setup LH input events
+  if (workerInputLH) {
+    workerInputLH.addEventListener('click', function(e) {
+      if (workerInputLH.readOnly && workerNamesData.length > 0) {
+        e.preventDefault();
+        openWorkerModal('LH');
+      }
+    });
+    
+    workerInputLH.addEventListener('focus', function(e) {
+      if (workerInputLH.readOnly && workerNamesData.length > 0) {
+        e.preventDefault();
+        openWorkerModal('LH');
+      }
+    });
+    
+    workerInputLH.addEventListener('touchstart', function(e) {
+      if (workerInputLH.readOnly && workerNamesData.length > 0) {
+        e.preventDefault();
+        openWorkerModal('LH');
+      }
+    });
+    
+    workerInputLH.addEventListener('blur', function() {
+      const enteredName = workerInputLH.value.trim();
+      if (enteredName && !workerInputLH.readOnly) {
+        addToRecentWorkers(enteredName);
+      }
+    });
+    
+    workerInputLH.addEventListener('keypress', function(e) {
+      if (e.key === 'Enter') {
+        const enteredName = workerInputLH.value.trim();
+        if (enteredName && !workerInputLH.readOnly) {
+          addToRecentWorkers(enteredName);
+        }
+      }
+    });
+  }
+  
+  // Setup RH input events
+  if (workerInputRH) {
+    workerInputRH.addEventListener('click', function(e) {
+      if (workerInputRH.readOnly && workerNamesData.length > 0) {
+        e.preventDefault();
+        openWorkerModal('RH');
+      }
+    });
+    
+    workerInputRH.addEventListener('focus', function(e) {
+      if (workerInputRH.readOnly && workerNamesData.length > 0) {
+        e.preventDefault();
+        openWorkerModal('RH');
+      }
+    });
+    
+    workerInputRH.addEventListener('touchstart', function(e) {
+      if (workerInputRH.readOnly && workerNamesData.length > 0) {
+        e.preventDefault();
+        openWorkerModal('RH');
+      }
+    });
+    
+    workerInputRH.addEventListener('blur', function() {
+      const enteredName = workerInputRH.value.trim();
+      if (enteredName && !workerInputRH.readOnly) {
+        addToRecentWorkers(enteredName);
+      }
+    });
+    
+    workerInputRH.addEventListener('keypress', function(e) {
+      if (e.key === 'Enter') {
+        const enteredName = workerInputRH.value.trim();
+        if (enteredName && !workerInputRH.readOnly) {
+          addToRecentWorkers(enteredName);
+        }
+      }
+    });
+  }
+  
+  // Close modal button
+  if (closeModalBtn) {
+    closeModalBtn.addEventListener('click', closeWorkerModal);
+  }
+  
+  // Manual entry button
+  if (manualEntryBtn) {
+    manualEntryBtn.addEventListener('click', function() {
+      // Determine which input to enable based on currentWorkerInputField
+      const targetInput = currentWorkerInputField === 'RH' 
+        ? document.getElementById('Machine OperatorRH')
+        : document.getElementById('Machine Operator');
+      
+      closeWorkerModal();
+      
+      if (targetInput) {
+        targetInput.removeAttribute('list');
+        targetInput.removeAttribute('readonly');
+        targetInput.readOnly = false;
+        targetInput.style.cursor = 'text';
+        targetInput.placeholder = 'Type worker name manually...';
+        
+        setTimeout(function() {
+          targetInput.value = '';
+          targetInput.focus();
+          targetInput.click();
+        }, 100);
+      }
+    });
+  }
+  
+  // Close modal when clicking outside
+  const modal = document.getElementById('workerNameModal');
+  if (modal) {
+    modal.addEventListener('click', function(e) {
+      if (e.target === modal) {
+        closeWorkerModal();
+      }
+    });
+  }
+}, 500);
 
 
 

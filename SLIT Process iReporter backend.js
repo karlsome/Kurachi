@@ -1,15 +1,17 @@
 const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
 
-// Select all input, select, and button elements
-const inputs = document.querySelectorAll('input, select, button,textarea');
-const selected工場 = document.getElementById('selected工場').value; // Get the current factory value
-const pageName = location.pathname.split('/').pop(); // Get the current HTML file name
-const uniquePrefix = `${pageName}_${selected工場}_`;
-
-// link for pictures database
+// Link for pictures database
 const picURL = 'https://script.google.com/macros/s/AKfycbwHUW1ia8hNZG-ljsguNq8K4LTPVnB6Ng_GLXIHmtJTdUgGGd2WoiQo9ToF-7PvcJh9bA/exec';
 
+// Get page name early
+const pageName = location.pathname.split('/').pop();
+
+// Function to get uniquePrefix dynamically
+function getUniquePrefix() {
+  const selected工場 = document.getElementById('selected工場')?.value || '';
+  return `${pageName}_${selected工場}_`;
+}
 
 // // this code will ping the Render website for inactivity
 // const interval = 30000; // 30 seconds
@@ -97,22 +99,28 @@ function blankInfo() {
 
 
 // Save the value of each input to localStorage on change
-inputs.forEach(input => {
-    input.addEventListener('input', () => {
-        const key = `${uniquePrefix}${input.id || input.name}`; // Prefix key with pageName and selected工場
-        if (key) {
-            localStorage.setItem(key, input.value);
-        }
-    });
+document.addEventListener('DOMContentLoaded', () => {
+  const inputs = document.querySelectorAll('input, select, button, textarea');
+  
+  inputs.forEach(input => {
+      input.addEventListener('input', () => {
+          const uniquePrefix = getUniquePrefix();
+          const key = `${uniquePrefix}${input.id || input.name}`; // Prefix key with pageName and selected工場
+          if (key) {
+              localStorage.setItem(key, input.value);
+          }
+      });
 
-    if (input.type === 'checkbox' || input.type === 'radio') {
-        input.addEventListener('change', () => {
-            const key = `${uniquePrefix}${input.id || input.name}`;
-            if (key) {
-                localStorage.setItem(key, input.checked); // Save checkbox/radio state
-            }
-        });
-    }
+      if (input.type === 'checkbox' || input.type === 'radio') {
+          input.addEventListener('change', () => {
+              const uniquePrefix = getUniquePrefix();
+              const key = `${uniquePrefix}${input.id || input.name}`;
+              if (key) {
+                  localStorage.setItem(key, input.checked); // Save checkbox/radio state
+              }
+          });
+      }
+  });
 });
 
 
@@ -123,7 +131,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const inputs = document.querySelectorAll('input, select, button, textarea'); // Get all input elements
   const images = document.querySelectorAll('img'); // Get all <img> elements
   const textElements = document.querySelectorAll('[id]'); // Get all elements with an ID
-  const pageName = location.pathname.split('/').pop(); // Get the current HTML file name
   const selected工場 = document.getElementById('selected工場')?.value; // Get the selected 工場 value
   const processElement = document.getElementById("process");
 
@@ -132,10 +139,12 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
   }
 
+  const uniquePrefix = getUniquePrefix();
+
   // Loop through all keys in localStorage
   Object.keys(localStorage).forEach(key => {
       // Check if the key belongs to the current HTML file and selected 工場
-      if (key.startsWith(`${uniquePrefix}`)) {
+      if (key.startsWith(uniquePrefix)) {
           const savedValue = localStorage.getItem(key);
 
           if (savedValue !== null) {
@@ -382,6 +391,7 @@ function setDefaultTime(input) {
   input.value = timeValue;
 
   // Save the time to local storage with unique prefix
+  const uniquePrefix = getUniquePrefix();
   const key = `${uniquePrefix}${input.id}`;
   localStorage.setItem(key, timeValue);
 }
@@ -396,6 +406,7 @@ function setDefaultDate(input) {
   input.value = dateValue;
 
   // Save the date to local storage with unique prefix
+  const uniquePrefix = getUniquePrefix();
   const key = `${uniquePrefix}${input.id}`;
   localStorage.setItem(key, dateValue);
 }
@@ -420,14 +431,9 @@ document.addEventListener("DOMContentLoaded", async function () {
       if (!response.ok) throw new Error("Failed to fetch worker names");
 
       const workerNames = await response.json();
-      const dataList = document.getElementById("machine-operator-suggestions");
-      dataList.innerHTML = ""; // Clear any existing options
-
-      workerNames.forEach((name) => {
-        const option = document.createElement("option");
-        option.value = name;
-        dataList.appendChild(option);
-      });
+      
+      // Store worker names for modal (datalist removed, now using modal)
+      workerNamesData = workerNames;
     } catch (error) {
       console.error("Error fetching worker names:", error);
     }
@@ -442,6 +448,7 @@ function incrementCounter(counterId) {
   counterElement.value = currentValue;
 
   // Save the updated value to local storage with unique prefix
+  const uniquePrefix = getUniquePrefix();
   const key = `${uniquePrefix}counter-${counterId}`;
   localStorage.setItem(key, currentValue);
 
@@ -456,6 +463,7 @@ function decrementCounter(counterId) {
     counterElement.value = currentValue;
 
     // Save the updated value to local storage with unique prefix
+    const uniquePrefix = getUniquePrefix();
     const key = `${uniquePrefix}counter-${counterId}`;
     localStorage.setItem(key, currentValue);
 
@@ -1238,6 +1246,7 @@ document.head.appendChild(style);
 // Function to reset everything and reload the page
 function resetForm() {
   const excludedInputs = ['process']; // IDs or names of inputs to exclude from reset
+  const uniquePrefix = getUniquePrefix();
 
   // Clear all form inputs with unique prefix except excluded ones
   const inputs = document.querySelectorAll('input, select, textarea');
@@ -1384,3 +1393,252 @@ window.addEventListener('message', function (event) {
     }
   }
 });
+
+// ===== WORKER NAME MODAL FUNCTIONALITY =====
+
+// Worker Name Selection Modal Variables
+let workerNamesData = [];
+const RECENT_WORKERS_KEY = 'recentWorkerNames';
+const MAX_RECENT_WORKERS = 6;
+
+// Get recent workers from localStorage
+function getRecentWorkers() {
+  const recent = localStorage.getItem(RECENT_WORKERS_KEY);
+  return recent ? JSON.parse(recent) : [];
+}
+
+// Add worker to recent list
+function addToRecentWorkers(name) {
+  if (!name || name.trim() === '') return;
+  
+  let recent = getRecentWorkers();
+  recent = recent.filter(w => w !== name);
+  recent.unshift(name);
+  recent = recent.slice(0, MAX_RECENT_WORKERS);
+  
+  localStorage.setItem(RECENT_WORKERS_KEY, JSON.stringify(recent));
+}
+
+// Remove worker from recent list
+function removeFromRecentWorkers(name) {
+  let recent = getRecentWorkers();
+  recent = recent.filter(w => w !== name);
+  localStorage.setItem(RECENT_WORKERS_KEY, JSON.stringify(recent));
+  renderWorkerNames();
+}
+
+// Group names alphabetically
+function groupNamesByLetter(names) {
+  const grouped = {};
+  
+  names.forEach(name => {
+    let firstChar = name.charAt(0).toUpperCase();
+    
+    if (firstChar.match(/[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/)) {
+      firstChar = name.charAt(0);
+    } else if (firstChar.match(/[A-Z]/)) {
+      firstChar = firstChar.toUpperCase();
+    } else {
+      firstChar = '#';
+    }
+    
+    if (!grouped[firstChar]) {
+      grouped[firstChar] = [];
+    }
+    grouped[firstChar].push(name);
+  });
+  
+  Object.keys(grouped).forEach(key => {
+    grouped[key].sort();
+  });
+  
+  return grouped;
+}
+
+// Render worker names in modal
+function renderWorkerNames() {
+  const container = document.getElementById('workerNamesContainer');
+  container.innerHTML = '';
+  
+  const recentWorkers = getRecentWorkers();
+  
+  if (recentWorkers.length > 0) {
+    const recentSection = document.createElement('div');
+    recentSection.className = 'worker-section recent-section';
+    
+    const header = document.createElement('div');
+    header.className = 'worker-section-header';
+    header.textContent = '⭐ 最近使用 / Recent';
+    recentSection.appendChild(header);
+    
+    const grid = document.createElement('div');
+    grid.className = 'worker-names-grid';
+    
+    recentWorkers.forEach(name => {
+      const wrapper = document.createElement('div');
+      wrapper.style.position = 'relative';
+      
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'worker-name-btn';
+      btn.textContent = name;
+      btn.onclick = () => selectWorkerName(name);
+      
+      const deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
+      deleteBtn.className = 'delete-recent-btn';
+      deleteBtn.innerHTML = '×';
+      deleteBtn.onclick = (e) => {
+        e.stopPropagation();
+        removeFromRecentWorkers(name);
+      };
+      
+      wrapper.appendChild(btn);
+      wrapper.appendChild(deleteBtn);
+      grid.appendChild(wrapper);
+    });
+    
+    recentSection.appendChild(grid);
+    container.appendChild(recentSection);
+  }
+  
+  const grouped = groupNamesByLetter(workerNamesData);
+  const sortedKeys = Object.keys(grouped).sort();
+  
+  sortedKeys.forEach(letter => {
+    const section = document.createElement('div');
+    section.className = 'worker-section';
+    
+    const header = document.createElement('div');
+    header.className = 'worker-section-header';
+    header.textContent = letter;
+    section.appendChild(header);
+    
+    const grid = document.createElement('div');
+    grid.className = 'worker-names-grid';
+    
+    grouped[letter].forEach(name => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'worker-name-btn';
+      btn.textContent = name;
+      btn.onclick = () => selectWorkerName(name);
+      grid.appendChild(btn);
+    });
+    
+    section.appendChild(grid);
+    container.appendChild(section);
+  });
+}
+
+// Select worker name
+function selectWorkerName(name) {
+  const input = document.getElementById('Machine Operator');
+  input.value = name;
+  addToRecentWorkers(name);
+  
+  // Save to localStorage (programmatic changes don't trigger 'input' event)
+  const pageName = location.pathname.split('/').pop();
+  const selected工場 = document.getElementById('selected工場')?.value;
+  if (pageName && selected工場) {
+    const key = `${pageName}_${selected工場}_${input.id || input.name}`;
+    localStorage.setItem(key, name);
+  }
+  
+  closeWorkerModal();
+  input.dispatchEvent(new Event('change'));
+}
+
+// Open worker modal
+function openWorkerModal() {
+  const modal = document.getElementById('workerNameModal');
+  modal.style.display = 'block';
+  renderWorkerNames();
+}
+
+// Close worker modal
+function closeWorkerModal() {
+  const modal = document.getElementById('workerNameModal');
+  modal.style.display = 'none';
+}
+
+// Initialize worker name modal
+setTimeout(function() {
+  const workerInput = document.getElementById('Machine Operator');
+  const closeModalBtn = document.getElementById('closeWorkerModal');
+  const manualEntryBtn = document.getElementById('manualEntryBtn');
+  
+  if (workerInput) {
+    workerInput.addEventListener('click', function(e) {
+      if (workerInput.readOnly && workerNamesData.length > 0) {
+        e.preventDefault();
+        openWorkerModal();
+      }
+    });
+    
+    workerInput.addEventListener('focus', function(e) {
+      if (workerInput.readOnly && workerNamesData.length > 0) {
+        e.preventDefault();
+        openWorkerModal();
+      }
+    });
+    
+    workerInput.addEventListener('touchstart', function(e) {
+      if (workerInput.readOnly && workerNamesData.length > 0) {
+        e.preventDefault();
+        openWorkerModal();
+      }
+    });
+  }
+  
+  if (closeModalBtn) {
+    closeModalBtn.addEventListener('click', closeWorkerModal);
+  }
+  
+  if (manualEntryBtn) {
+    manualEntryBtn.addEventListener('click', function() {
+      closeWorkerModal();
+      
+      if (workerInput) {
+        workerInput.removeAttribute('list');
+        workerInput.removeAttribute('readonly');
+        workerInput.readOnly = false;
+        workerInput.style.cursor = 'text';
+        workerInput.placeholder = 'Type worker name manually...';
+        
+        setTimeout(function() {
+          workerInput.value = '';
+          workerInput.focus();
+          workerInput.click();
+        }, 100);
+      }
+    });
+  }
+  
+  const modal = document.getElementById('workerNameModal');
+  if (modal) {
+    modal.addEventListener('click', function(e) {
+      if (e.target === modal) {
+        closeWorkerModal();
+      }
+    });
+  }
+  
+  if (workerInput) {
+    workerInput.addEventListener('blur', function() {
+      const enteredName = workerInput.value.trim();
+      if (enteredName && !workerInput.readOnly) {
+        addToRecentWorkers(enteredName);
+      }
+    });
+    
+    workerInput.addEventListener('keypress', function(e) {
+      if (e.key === 'Enter') {
+        const enteredName = workerInput.value.trim();
+        if (enteredName && !workerInput.readOnly) {
+          addToRecentWorkers(enteredName);
+        }
+      }
+    });
+  }
+}, 500);

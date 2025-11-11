@@ -13,6 +13,12 @@ const dbURL = 'https://script.google.com/macros/s/AKfycbx0qBw0_wF5X-hA2t1yY-d5h5
 const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
 
+// Global variable to track if sendtoNC button has been pressed
+let sendtoNCButtonisPressed = false;
+
+// Global variable to track which input field is currently using the worker modal
+let currentModalInputField = null; // Can be 'worker' or 'kensa'
+
 //this code listens to incoming parameters passed
 function getQueryParam(param) {
   const urlParams = new URLSearchParams(window.location.search);
@@ -22,18 +28,66 @@ function getQueryParam(param) {
 const selectedFactory = getQueryParam('filter');
 const selectedMachine = getQueryParam('machine');
 
-if (selectedFactory) {
-  document.getElementById('selected工場').value = selectedFactory;
-  document.getElementById('nippoTitle').textContent = selectedFactory + "日報";
-  console.log("kojo changed to: " + selectedFactory);
+console.log("🔵 ========== SCRIPT INITIALIZATION ==========");
+console.log("🔵 URL:", window.location.href);
+console.log("🔵 selectedFactory:", selectedFactory);
+console.log("🔵 selectedMachine:", selectedMachine);
+
+// ===== GROUPED MACHINE DETECTION =====
+// Check if this is a grouped machine page (decode URI to handle %20 spaces)
+const decodedPath = decodeURIComponent(window.location.pathname);
+const isGroupedMachinePage = decodedPath.includes('DCP Grouping');
+console.log("🔵 Decoded pathname:", decodedPath);
+console.log("🔵 isGroupedMachinePage:", isGroupedMachinePage);
+
+let groupedMachines = []; // Array to store multiple machine names
+let groupedMachineIPs = {}; // Object to store IPs: {machineA: "IP1", machineB: "IP2"}
+
+// Parse comma-separated machines if grouped
+if (selectedMachine && selectedMachine.includes(',')) {
+  groupedMachines = selectedMachine.split(',').map(m => m.trim());
+  console.log("✅ Grouped machines detected:", groupedMachines);
+} else if (selectedMachine) {
+  groupedMachines = [selectedMachine];
+  console.log("🔵 Single machine detected:", groupedMachines);
+} else {
+  console.log("❌ No selectedMachine found");
 }
-if (selectedMachine) {
-  const processInput = document.getElementById('process');
-  if (processInput) {
-    processInput.value = selectedMachine;
-    console.log("machine set to: " + selectedMachine);
+
+// Set factory and machine values when DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+  console.log("🔵 ========== Early DOMContentLoaded (factory/machine setup) ==========");
+  console.log("🔵 selectedFactory:", selectedFactory);
+  console.log("🔵 selectedMachine:", selectedMachine);
+  console.log("🔵 groupedMachines at this point:", groupedMachines);
+  
+  if (selectedFactory) {
+    const factoryInput = document.getElementById('selected工場');
+    const nippoTitle = document.getElementById('nippoTitle');
+    if (factoryInput) factoryInput.value = selectedFactory;
+    if (nippoTitle) nippoTitle.textContent = selectedFactory + "日報";
+    console.log("✅ kojo changed to: " + selectedFactory);
   }
-}
+  
+  if (selectedMachine) {
+    const processInput = document.getElementById('process');
+    if (processInput) {
+      processInput.value = selectedMachine;
+      console.log("✅ machine set to: " + selectedMachine);
+      
+      // Create dynamic shot inputs after machine value is set
+      setTimeout(() => {
+        console.log("🔵 ⏰ setTimeout fired - About to call createGroupedShotInputs");
+        console.log("🔵 groupedMachines before call:", groupedMachines);
+        createGroupedShotInputs();
+      }, 100);
+    } else {
+      console.log("❌ processInput element not found!");
+    }
+  } else {
+    console.log("❌ selectedMachine is null/undefined");
+  }
+}, { once: true }); // Use once option to ensure this runs first
 
 // Add CSS styles for time input fields and edit buttons
 const timeInputStyles = `
@@ -2088,6 +2142,10 @@ document.addEventListener("DOMContentLoaded", async function() {
       if (!response.ok) throw new Error("Failed to fetch worker names");
 
       const workerNames = await response.json();
+      
+      // Store worker names for modal
+      workerNamesData = workerNames;
+      
       const dataList = document.getElementById("machine-operator-suggestions");
       dataList.innerHTML = ""; // Clear any existing options
 
@@ -2152,6 +2210,473 @@ function showAlert(message) {
     alertSound.muted = true; // Mute again for next time
     document.body.classList.remove('flash-red');
   };
+}
+
+// Worker Name Selection Modal Functionality
+let workerNamesData = [];
+const RECENT_WORKERS_KEY = 'recentWorkerNames';
+const MAX_RECENT_WORKERS = 6;
+
+// Get recent workers from localStorage
+function getRecentWorkers() {
+  const recent = localStorage.getItem(RECENT_WORKERS_KEY);
+  return recent ? JSON.parse(recent) : [];
+}
+
+// Add worker to recent list
+function addToRecentWorkers(name) {
+  if (!name || name.trim() === '') return; // Don't add empty names
+  
+  let recent = getRecentWorkers();
+  
+  // Remove if already exists
+  recent = recent.filter(w => w !== name);
+  
+  // Add to beginning
+  recent.unshift(name);
+  
+  // Keep only max recent
+  recent = recent.slice(0, MAX_RECENT_WORKERS);
+  
+  localStorage.setItem(RECENT_WORKERS_KEY, JSON.stringify(recent));
+}
+
+// Remove worker from recent list
+function removeFromRecentWorkers(name) {
+  let recent = getRecentWorkers();
+  recent = recent.filter(w => w !== name);
+  localStorage.setItem(RECENT_WORKERS_KEY, JSON.stringify(recent));
+  renderWorkerNames(); // Re-render to update UI
+}
+
+// Group names alphabetically
+function groupNamesByLetter(names) {
+  const grouped = {};
+  
+  names.forEach(name => {
+    // Get first character (handle Japanese, English, etc.)
+    let firstChar = name.charAt(0).toUpperCase();
+    
+    // For Japanese characters, try to group by first character
+    if (firstChar.match(/[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/)) {
+      // Japanese character - use as is
+      firstChar = name.charAt(0);
+    } else if (firstChar.match(/[A-Z]/)) {
+      // English letter - use uppercase
+      firstChar = firstChar.toUpperCase();
+    } else {
+      // Other characters - group under '#'
+      firstChar = '#';
+    }
+    
+    if (!grouped[firstChar]) {
+      grouped[firstChar] = [];
+    }
+    grouped[firstChar].push(name);
+  });
+  
+  // Sort each group
+  Object.keys(grouped).forEach(key => {
+    grouped[key].sort();
+  });
+  
+  return grouped;
+}
+
+// Render worker names in modal
+function renderWorkerNames() {
+  const container = document.getElementById('workerNamesContainer');
+  container.innerHTML = '';
+  
+  // Get recent workers
+  const recentWorkers = getRecentWorkers();
+  
+  // Add recent section if there are recent workers
+  if (recentWorkers.length > 0) {
+    const recentSection = document.createElement('div');
+    recentSection.className = 'worker-section recent-section';
+    
+    const header = document.createElement('div');
+    header.className = 'worker-section-header';
+    header.textContent = '⭐ 最近使用 / Recent';
+    recentSection.appendChild(header);
+    
+    const grid = document.createElement('div');
+    grid.className = 'worker-names-grid';
+    
+    recentWorkers.forEach(name => {
+      const wrapper = document.createElement('div');
+      wrapper.style.position = 'relative';
+      
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'worker-name-btn';
+      btn.textContent = name;
+      btn.onclick = () => selectWorkerName(name);
+      
+      const deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
+      deleteBtn.className = 'delete-recent-btn';
+      deleteBtn.innerHTML = '×';
+      deleteBtn.onclick = (e) => {
+        e.stopPropagation(); // Prevent selecting the worker
+        removeFromRecentWorkers(name);
+      };
+      
+      wrapper.appendChild(btn);
+      wrapper.appendChild(deleteBtn);
+      grid.appendChild(wrapper);
+    });
+    
+    recentSection.appendChild(grid);
+    container.appendChild(recentSection);
+  }
+  
+  // Group all names alphabetically
+  const grouped = groupNamesByLetter(workerNamesData);
+  const sortedKeys = Object.keys(grouped).sort();
+  
+  // Render each alphabetical group
+  sortedKeys.forEach(letter => {
+    const section = document.createElement('div');
+    section.className = 'worker-section';
+    
+    const header = document.createElement('div');
+    header.className = 'worker-section-header';
+    header.textContent = letter;
+    section.appendChild(header);
+    
+    const grid = document.createElement('div');
+    grid.className = 'worker-names-grid';
+    
+    grouped[letter].forEach(name => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'worker-name-btn';
+      btn.textContent = name;
+      btn.onclick = () => selectWorkerName(name);
+      grid.appendChild(btn);
+    });
+    
+    section.appendChild(grid);
+    container.appendChild(section);
+  });
+}
+
+// Select worker name
+function selectWorkerName(name) {
+  const input = document.getElementById('Machine Operator');
+  input.value = name;
+  
+  // Add to recent workers
+  addToRecentWorkers(name);
+  
+  // Close modal
+  closeWorkerModal();
+  
+  // Trigger change event
+  input.dispatchEvent(new Event('change'));
+}
+
+// Open worker modal
+function openWorkerModal() {
+  currentModalInputField = 'worker'; // Track which field opened the modal
+  const modal = document.getElementById('workerNameModal');
+  modal.style.display = 'block';
+  renderWorkerNames();
+}
+
+// Close worker modal
+function closeWorkerModal() {
+  const modal = document.getElementById('workerNameModal');
+  modal.style.display = 'none';
+}
+
+// Initialize worker name modal (runs after DOMContentLoaded)
+setTimeout(function() {
+  const workerInput = document.getElementById('Machine Operator');
+  const closeModalBtn = document.getElementById('closeWorkerModal');
+  const manualEntryBtn = document.getElementById('manualEntryBtn');
+  
+  // Open modal when clicking on worker input (only if readonly)
+  if (workerInput) {
+    // Prevent default keyboard from showing on mobile
+    workerInput.addEventListener('click', function(e) {
+      // Only open modal if input is readonly (not in manual entry mode)
+      if (workerInput.readOnly && workerNamesData.length > 0) {
+        e.preventDefault();
+        openWorkerModal();
+      }
+    });
+    
+    // Also open on focus
+    workerInput.addEventListener('focus', function(e) {
+      // Only open modal if input is readonly (not in manual entry mode)
+      if (workerInput.readOnly && workerNamesData.length > 0) {
+        e.preventDefault();
+        openWorkerModal();
+      }
+    });
+    
+    // Prevent keyboard from showing on touch devices
+    workerInput.addEventListener('touchstart', function(e) {
+      // Only prevent and open modal if input is readonly
+      if (workerInput.readOnly && workerNamesData.length > 0) {
+        e.preventDefault();
+        openWorkerModal();
+      }
+    });
+  }
+  
+  // Close modal button
+  if (closeModalBtn) {
+    closeModalBtn.addEventListener('click', closeWorkerModal);
+  }
+  
+  // Manual entry button - close modal and let user type
+  if (manualEntryBtn) {
+    manualEntryBtn.addEventListener('click', function() {
+      // Determine which input field to enable for manual entry
+      const targetInput = currentModalInputField === 'kensa' 
+        ? document.getElementById('Kensa Name')
+        : document.getElementById('Machine Operator');
+      
+      // Close the modal
+      if (currentModalInputField === 'kensa') {
+        closeKensaModal();
+      } else {
+        closeWorkerModal();
+      }
+      
+      if (targetInput) {
+        // Remove readonly and datalist to allow free typing
+        targetInput.removeAttribute('list');
+        targetInput.removeAttribute('readonly');
+        targetInput.readOnly = false;
+        targetInput.style.cursor = 'text';
+        targetInput.placeholder = currentModalInputField === 'kensa' 
+          ? 'Type inspector name manually...'
+          : 'Type worker name manually...';
+        
+        // Clear current value and focus after modal closes
+        setTimeout(function() {
+          targetInput.value = '';
+          targetInput.focus();
+          
+          // Trigger click to ensure keyboard shows on mobile
+          targetInput.click();
+        }, 100);
+      }
+    });
+  }
+  
+  // Close modal when clicking outside
+  const modal = document.getElementById('workerNameModal');
+  if (modal) {
+    modal.addEventListener('click', function(e) {
+      if (e.target === modal) {
+        closeWorkerModal();
+      }
+    });
+  }
+  
+  // Save manually entered worker name to recents when user finishes typing
+  if (workerInput) {
+    workerInput.addEventListener('blur', function() {
+      const enteredName = workerInput.value.trim();
+      if (enteredName && !workerInput.readOnly) {
+        // Only save if user manually typed (not readonly)
+        addToRecentWorkers(enteredName);
+      }
+    });
+    
+    // Also save on Enter key
+    workerInput.addEventListener('keypress', function(e) {
+      if (e.key === 'Enter') {
+        const enteredName = workerInput.value.trim();
+        if (enteredName && !workerInput.readOnly) {
+          addToRecentWorkers(enteredName);
+        }
+      }
+    });
+  }
+}, 100);
+
+// Initialize Kensa Name modal (same as worker modal but for inspector)
+setTimeout(function() {
+  const kensaInput = document.getElementById('Kensa Name');
+  const enableInputsCheckbox = document.getElementById('enable-inputs');
+  
+  if (!kensaInput) return; // Element doesn't exist, skip
+  
+  // Function to check if kensa is enabled
+  function isKensaEnabled() {
+    return enableInputsCheckbox && enableInputsCheckbox.checked;
+  }
+  
+  // Open worker modal when clicking on kensa input (only if checkbox is checked)
+  if (kensaInput) {
+    // Prevent default keyboard from showing on mobile
+    kensaInput.addEventListener('click', function(e) {
+      // Only open modal if checkbox is checked and input is readonly
+      if (isKensaEnabled() && kensaInput.readOnly && workerNamesData.length > 0) {
+        e.preventDefault();
+        openKensaModal();
+      }
+    });
+    
+    // Also open on focus
+    kensaInput.addEventListener('focus', function(e) {
+      // Only open modal if checkbox is checked and input is readonly
+      if (isKensaEnabled() && kensaInput.readOnly && workerNamesData.length > 0) {
+        e.preventDefault();
+        openKensaModal();
+      }
+    });
+    
+    // Prevent keyboard from showing on touch devices
+    kensaInput.addEventListener('touchstart', function(e) {
+      // Only prevent and open modal if checkbox is checked and input is readonly
+      if (isKensaEnabled() && kensaInput.readOnly && workerNamesData.length > 0) {
+        e.preventDefault();
+        openKensaModal();
+      }
+    });
+    
+    // Save manually entered kensa name to recents when user finishes typing
+    kensaInput.addEventListener('blur', function() {
+      const enteredName = kensaInput.value.trim();
+      if (enteredName && !kensaInput.readOnly && isKensaEnabled()) {
+        // Only save if user manually typed (not readonly) and checkbox is checked
+        addToRecentWorkers(enteredName);
+      }
+    });
+    
+    // Also save on Enter key
+    kensaInput.addEventListener('keypress', function(e) {
+      if (e.key === 'Enter') {
+        const enteredName = kensaInput.value.trim();
+        if (enteredName && !kensaInput.readOnly && isKensaEnabled()) {
+          addToRecentWorkers(enteredName);
+        }
+      }
+    });
+  }
+}, 100);
+
+// Select kensa name (inspector)
+function selectKensaName(name) {
+  const input = document.getElementById('Kensa Name');
+  if (!input) return;
+  
+  input.value = name;
+  
+  // Add to recent workers
+  addToRecentWorkers(name);
+  
+  // Close modal
+  closeKensaModal();
+  
+  // Trigger change event
+  input.dispatchEvent(new Event('change'));
+}
+
+// Open kensa modal (reuses worker modal)
+function openKensaModal() {
+  currentModalInputField = 'kensa'; // Track which field opened the modal
+  const modal = document.getElementById('workerNameModal');
+  modal.style.display = 'block';
+  renderKensaNames();
+}
+
+// Close kensa modal
+function closeKensaModal() {
+  const modal = document.getElementById('workerNameModal');
+  modal.style.display = 'none';
+}
+
+// Render kensa names (similar to renderWorkerNames but calls selectKensaName)
+function renderKensaNames() {
+  const container = document.getElementById('workerNamesContainer');
+  if (!container) return;
+  
+  container.innerHTML = '';
+  
+  // Get recent workers
+  const recentWorkers = getRecentWorkers();
+  
+  // Create recent section if there are recent workers
+  if (recentWorkers.length > 0) {
+    const recentSection = document.createElement('div');
+    recentSection.className = 'worker-section recent-section';
+    
+    const recentHeader = document.createElement('div');
+    recentHeader.className = 'worker-section-header';
+    recentHeader.textContent = '最近使用 / Recent';
+    recentSection.appendChild(recentHeader);
+    
+    const recentGrid = document.createElement('div');
+    recentGrid.className = 'worker-names-grid';
+    
+    recentWorkers.forEach(name => {
+      const wrapper = document.createElement('div');
+      wrapper.style.position = 'relative';
+      
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'worker-name-btn';
+      btn.textContent = name;
+      btn.onclick = () => selectKensaName(name);
+      
+      const deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
+      deleteBtn.className = 'delete-recent-btn';
+      deleteBtn.textContent = '×';
+      deleteBtn.onclick = (e) => {
+        e.stopPropagation();
+        removeFromRecentWorkers(name);
+        renderKensaNames(); // Re-render
+      };
+      
+      wrapper.appendChild(btn);
+      wrapper.appendChild(deleteBtn);
+      recentGrid.appendChild(wrapper);
+    });
+    
+    recentSection.appendChild(recentGrid);
+    container.appendChild(recentSection);
+  }
+  
+  // Create all workers section
+  const allSection = document.createElement('div');
+  allSection.className = 'worker-section';
+  
+  const allHeader = document.createElement('div');
+  allHeader.className = 'worker-section-header';
+  allHeader.textContent = 'すべての作業者 / All Workers';
+  allSection.appendChild(allHeader);
+  
+  const allGrid = document.createElement('div');
+  allGrid.className = 'worker-names-grid';
+  
+  workerNamesData.forEach(name => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'worker-name-btn';
+    btn.textContent = name;
+    btn.onclick = () => selectKensaName(name);
+    allGrid.appendChild(btn);
+  });
+  
+  allSection.appendChild(allGrid);
+  container.appendChild(allSection);
+  
+  // Update modal button handlers for kensa
+  const closeModalBtn = document.getElementById('closeWorkerModal');
+  const manualEntryBtn = document.getElementById('manualEntryBtn');
+  
+  // Note: Manual entry button handler is set globally in the initialization
+  // No need to override it here, it will use currentModalInputField to determine which field to edit
 }
 
 // Updates cycle times for pressDB and kensaDB
@@ -2402,13 +2927,15 @@ document.head.appendChild(style);
 // Global reference for lot scanner
 window.lotHtml5QrCode = null;
 
-// Scan Lot Button functionality
-document.getElementById('scan-lot').addEventListener('click', function() {
-  const scanLotModal = document.getElementById('scanLotModal');
-  const scanLotStatus = document.getElementById('scanLotStatus');
-  const materialCodeInput = document.getElementById('material-code');
-  const materialLotInput = document.getElementById('材料ロット');
-  const html5QrCode = new Html5Qrcode("lotQrReader");
+// Scan Lot Button functionality (only if button exists)
+const scanLotButton = document.getElementById('scan-lot');
+if (scanLotButton) {
+  scanLotButton.addEventListener('click', function() {
+    const scanLotModal = document.getElementById('scanLotModal');
+    const scanLotStatus = document.getElementById('scanLotStatus');
+    const materialCodeInput = document.getElementById('material-code');
+    const materialLotInput = document.getElementById('材料ロット');
+    const html5QrCode = new Html5Qrcode("lotQrReader");
   
   // Store reference globally
   window.lotHtml5QrCode = html5QrCode;
@@ -2536,7 +3063,8 @@ document.getElementById('scan-lot').addEventListener('click', function() {
       scanLotModal.style.display = 'none';
     });
   };
-});
+  });
+}
 
 // ===== MATERIAL LOT TRACKING SYSTEM =====
 // Track lots with their source (scanned vs manual)
@@ -4311,10 +4839,14 @@ function blobToBase64(blob) {
   });
 }
 
-let sendtoNCButtonisPressed = false; // this global variable is to check if sendtoNC button is pressed or not
-
 function toggleInputs() {
-  var isChecked = document.getElementById('enable-inputs').checked;
+  const enableInputsCheckbox = document.getElementById('enable-inputs');
+  if (!enableInputsCheckbox) {
+    // Element doesn't exist (e.g., in DCP Grouping.html), skip this function
+    return;
+  }
+  
+  var isChecked = enableInputsCheckbox.checked;
   var inputs = document.querySelectorAll('#Kensa\\ Name, #KDate, #KStart\\ Time, #KEnd\\ Time,.plus-btn,.minus-btn, textarea[name="Comments2"], #在庫');
 
   inputs.forEach(function(input) {
@@ -4366,10 +4898,33 @@ function updateSheetStatus(selectedValue, machineName) {
     });
 }
 
-//this function sends request to nc cutter's pC
+//this function sends request to nc cutter's pC (supports single or multiple machines)
 async function sendtoNC(selectedValue) {
 
   //sendCommand("off"); // this is for arduino (emergency button)
+  
+  // Validate grouped shot inputs if present (REMOVED - validation happens in Step 3 modal workflow)
+  // const groupedInputs = document.querySelectorAll('.grouped-shot-input');
+  // if (groupedInputs.length > 0) {
+  //   let hasEmptyInput = false;
+  //   let emptyMachines = [];
+  //   
+  //   groupedInputs.forEach(input => {
+  //     const value = parseInt(input.value, 10);
+  //     if (!value || value <= 0) {
+  //       hasEmptyInput = true;
+  //       // Extract machine name from id (e.g., "shot-OZNC04" -> "OZNC04")
+  //       const machineName = input.id.replace('shot-', '');
+  //       emptyMachines.push(machineName);
+  //     }
+  //   });
+  //   
+  //   if (hasEmptyInput) {
+  //     window.alert(`全ての機械のショット数を入力してください\nPlease enter shot count for all machines:\n${emptyMachines.join(', ')}`);
+  //     return;
+  //   }
+  // }
+  
   sendtoNCButtonisPressed = true;
 
   // Save to localStorage with a unique key format
@@ -4389,9 +4944,6 @@ async function sendtoNC(selectedValue) {
     return;
   }
 
-  //let pcName = "DESKTOP-V36G1SK-2";
-  const url = `http://${ipAddress}:5000/request?filename=${currentSebanggo}.pce`; //change to
-
   // Show progress bar at top of page
   const progressBar = document.getElementById('sendingProgressBar');
   if (progressBar) {
@@ -4399,54 +4951,185 @@ async function sendtoNC(selectedValue) {
     progressBar.classList.add('show');
   }
 
-  // Send command using fetch instead of opening new tab
-  try {
-    console.log(`Sending command to mini PC: ${url}`);
+  // Check if this is grouped machines (by page detection OR comma-separated IPs)
+  const hasMultipleIPs = ipAddress && ipAddress.includes(',');
+  const hasGroupedMachines = Object.keys(groupedMachineIPs).length > 1;
+  
+  if ((isGroupedMachinePage && hasGroupedMachines) || hasMultipleIPs) {
+    // Ensure we have machine IPs populated
+    let machineIPMap = {};
     
-    const response = await fetch(url, {
-      method: 'GET',
-      mode: 'no-cors' // Allow cross-origin request without CORS preflight
+    if (hasGroupedMachines) {
+      machineIPMap = groupedMachineIPs;
+    } else if (hasMultipleIPs) {
+      // Parse comma-separated IPs and machines
+      const ips = ipAddress.split(',').map(ip => ip.trim());
+      const machines = groupedMachines.length > 0 ? groupedMachines : 
+                      document.getElementById('process').value.split(',').map(m => m.trim());
+      
+      // Create mapping
+      machines.forEach((machine, index) => {
+        if (ips[index]) {
+          machineIPMap[machine] = ips[index];
+        }
+      });
+    }
+    
+    console.log("🔵 Sending to multiple machines:", machineIPMap);
+    
+    // Store machine group globally for individual send modal
+    window.currentMachineGroup = Object.entries(machineIPMap).map(([name, ip]) => ({ name, ip }));
+    console.log("💾 Stored currentMachineGroup:", window.currentMachineGroup);
+    
+    // Update progress bar text for multiple machines
+    const progressText = progressBar?.querySelector('span');
+    if (progressText) {
+      progressText.textContent = `Sending to ${Object.keys(machineIPMap).length} machines...`;
+    }
+    
+    // Send command to each machine
+    const sendPromises = Object.entries(machineIPMap).map(async ([machine, ip]) => {
+      const url = `http://${ip}:5000/request?filename=${currentSebanggo}.pce`;
+      
+      try {
+        console.log(`📤 Sending to ${machine} (${ip}): ${url}`);
+        
+        const response = await fetch(url, {
+          method: 'GET',
+          mode: 'no-cors'
+        });
+        
+        console.log(`✅ Command sent successfully to ${machine}`);
+        return { machine, success: true };
+        
+      } catch (error) {
+        console.error(`❌ Failed to send command to ${machine}:`, error);
+        
+        // Fallback: Try opening in new tab if fetch fails
+        console.log(`Trying fallback method for ${machine}...`);
+        try {
+          const newTab = window.open(url, '_blank');
+          setTimeout(() => {
+            if (newTab) newTab.close();
+          }, 5000);
+          return { machine, success: true, fallback: true };
+        } catch (fallbackError) {
+          console.error(`Fallback also failed for ${machine}:`, fallbackError);
+          return { machine, success: false };
+        }
+      }
     });
     
-    console.log('Command sent successfully to mini PC');
+    // Wait for all commands to complete
+    try {
+      const results = await Promise.all(sendPromises);
+      const successCount = results.filter(r => r.success).length;
+      console.log(`✅ Sent to ${successCount}/${results.length} machines successfully`);
+      
+      // Check if any failed
+      const failed = results.filter(r => !r.success);
+      if (failed.length > 0) {
+        console.warn('⚠️ Failed machines:', failed.map(f => f.machine).join(', '));
+      }
+      
+      // Always show manual send modal for grouped machines (for user verification)
+      if (typeof showManualSendModal === 'function') {
+        setTimeout(() => showManualSendModal(currentSebanggo), 1000);
+      }
+      
+    } catch (error) {
+      console.error('Error sending to multiple machines:', error);
+    }
     
     // Hide progress bar after 7 seconds
     setTimeout(() => {
       if (progressBar) {
         progressBar.classList.remove('show');
         progressBar.classList.add('hide');
-        // Reset after animation completes
         setTimeout(() => {
           progressBar.classList.remove('hide');
           progressBar.style.display = 'none';
         }, 300);
       }
-    }, 4000);
+    }, 7000);
     
-  } catch (error) {
-    console.error('Failed to send command to mini PC:', error);
+  } else {
+    // Single machine - original logic
+    const url = `http://${ipAddress}:5000/request?filename=${currentSebanggo}.pce`;
     
-    // Hide progress bar on error
-    if (progressBar) {
-      progressBar.classList.remove('show');
-      progressBar.classList.add('hide');
+    try {
+      console.log(`Sending command to mini PC: ${url}`);
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        mode: 'no-cors'
+      });
+      
+      console.log('Command sent successfully to mini PC');
+      
+      // Hide progress bar after 4 seconds
       setTimeout(() => {
-        progressBar.classList.remove('hide');
-        progressBar.style.display = 'none';
-      }, 300);
+        if (progressBar) {
+          progressBar.classList.remove('show');
+          progressBar.classList.add('hide');
+          setTimeout(() => {
+            progressBar.classList.remove('hide');
+            progressBar.style.display = 'none';
+          }, 300);
+        }
+      }, 4000);
+      
+    } catch (error) {
+      console.error('Failed to send command to mini PC:', error);
+      
+      // Hide progress bar on error
+      if (progressBar) {
+        progressBar.classList.remove('show');
+        progressBar.classList.add('hide');
+        setTimeout(() => {
+          progressBar.classList.remove('hide');
+          progressBar.style.display = 'none';
+        }, 300);
+      }
+      
+      // Fallback: Try opening in new tab if fetch fails
+      console.log('Fetch failed, trying fallback method...');
+      const newTab = window.open(url, '_blank');
+      setTimeout(() => {
+        newTab.close();
+      }, 5000);
     }
-    
-    // Fallback: Try opening in new tab if fetch fails
-    console.log('Fetch failed, trying fallback method...');
-    const newTab = window.open(url, '_blank');
-    setTimeout(() => {
-      newTab.close();
-    }, 5000);
   }
 }
+
+// Send to NC button - triggers 3-step modal workflow OR individual send modal
 document.getElementById('sendtoNC').addEventListener('click', async function() {
-  const currentSebanggo = document.getElementById('sub-dropdown').value;
-  await sendtoNC(currentSebanggo);
+  // Check if this is a single machine (DCP iReporter) or grouped machines (DCP Grouping)
+  const machineName = document.getElementById('process').value;
+  const isSingleMachine = !isGroupedMachinePage && !machineName.includes(',');
+  
+  if (isSingleMachine) {
+    // Single machine (DCP iReporter) - send directly
+    const currentSebanggo = document.getElementById('sub-dropdown').value;
+    
+    if (!currentSebanggo) {
+      showAlert('背番号を選んでください / Please select sebanggo first');
+      return;
+    }
+    
+    // Send directly to machine
+    await sendtoNC(currentSebanggo);
+  } else {
+    // Grouped machines (DCP Grouping) - use 3-step modal workflow
+    // Check if 3-step workflow was completed (sendtoNCButtonisPressed === true)
+    if (sendtoNCButtonisPressed) {
+      // 3-step workflow was completed, show individual send modal
+      showIndividualSendModal();
+    } else {
+      // 3-step workflow not completed, show Step 1 modal
+      showStep1Modal();
+    }
+  }
 });
 
 // Function to handle printing
@@ -4517,25 +5200,206 @@ for (let i = 18; i <= 20; i++) {
   document.getElementById(`counter-${i}`).addEventListener('input', updateTotal);
 }
 
-// global variable for ip address input container
-const ipInput = document.getElementById('ipInfo');
-// Function to fetch ip address
+// Function to fetch ip address (supports single or multiple machines)
 function getIP() {
+  const ipInput = document.getElementById('ipInfo');
   const machineName = document.getElementById('process').value;
-  fetch(`${ipURL}?filter=${machineName}`)
-    .then(response => {
-      if (!response.ok) {
-        throw new Error('Network response was not ok ' + response.statusText);
-      }
-      return response.text();
-    })
-    .then(data => {
-      const cleanedData = data.replace(/"/g, '');
-      ipInput.value = cleanedData;
-    })
-    .catch(error => {
-      console.error('Error:', error);
+  
+  // Check if this is grouped machines (either by page detection or comma in machine name)
+  const hasMultipleMachines = (isGroupedMachinePage && groupedMachines.length > 1) || 
+                              (machineName && machineName.includes(','));
+  
+  if (hasMultipleMachines) {
+    // Ensure groupedMachines array is populated
+    const machines = groupedMachines.length > 0 ? groupedMachines : machineName.split(',').map(m => m.trim());
+    console.log("🔵 Fetching IPs for grouped machines:", machines);
+    
+    // Fetch IP for each machine individually
+    const ipPromises = machines.map(machine => 
+      fetch(`${ipURL}?filter=${machine}`)
+        .then(response => {
+          if (!response.ok) {
+            throw new Error(`Network response was not ok for ${machine}: ${response.statusText}`);
+          }
+          return response.text();
+        })
+        .then(data => {
+          const cleanedData = data.replace(/"/g, '');
+          groupedMachineIPs[machine] = cleanedData;
+          console.log(`📍 IP for ${machine}: ${cleanedData}`);
+          return { machine, ip: cleanedData };
+        })
+        .catch(error => {
+          console.error(`Error fetching IP for ${machine}:`, error);
+          return { machine, ip: null };
+        })
+    );
+    
+    // Wait for all IPs to be fetched
+    Promise.all(ipPromises).then(results => {
+      console.log("✅ All IPs fetched:", groupedMachineIPs);
+      // Store comma-separated IPs in the hidden input for reference
+      const ips = results.map(r => r.ip).filter(ip => ip).join(',');
+      ipInput.value = ips;
+      
+      // Store machine group globally for individual send modal
+      window.currentMachineGroup = results
+        .filter(r => r.ip) // Only include machines with valid IPs
+        .map(r => ({ name: r.machine, ip: r.ip }));
+      console.log("💾 Stored currentMachineGroup on page load:", window.currentMachineGroup);
     });
+    
+  } else {
+    // Single machine - original logic
+    fetch(`${ipURL}?filter=${machineName}`)
+      .then(response => {
+        if (!response.ok) {
+          throw new Error('Network response was not ok ' + response.statusText);
+        }
+        return response.text();
+      })
+      .then(data => {
+        const cleanedData = data.replace(/"/g, '');
+        ipInput.value = cleanedData;
+        console.log(`📍 IP for ${machineName}: ${cleanedData}`);
+      })
+      .catch(error => {
+        console.error('Error:', error);
+      });
+  }
+}
+
+// Function to create dynamic shot count inputs for grouped machines
+function createGroupedShotInputs() {
+  console.log("🔵 ========== createGroupedShotInputs called ==========");
+  console.log("🔵 Current URL:", window.location.href);
+  console.log("🔵 Pathname:", window.location.pathname);
+  
+  const shotSection = document.getElementById('shotCountSection');
+  
+  if (!shotSection) {
+    console.log("❌ shotCountSection not found!");
+    return;
+  }
+  
+  console.log("✅ shotCountSection found");
+  console.log("🔵 isGroupedMachinePage:", isGroupedMachinePage);
+  console.log("🔵 groupedMachines:", groupedMachines);
+  console.log("🔵 groupedMachines.length:", groupedMachines.length);
+  console.log("🔵 groupedMachines type:", typeof groupedMachines);
+  console.log("🔵 Is Array?", Array.isArray(groupedMachines));
+
+  // Check if this is a grouped machine page with multiple machines
+  if (isGroupedMachinePage && groupedMachines.length > 1) {
+    console.log("✅✅✅ Condition met! Creating shot count inputs for grouped machines:", groupedMachines);
+    
+    // Clear existing content
+    shotSection.innerHTML = '';
+    
+    // Add title
+    const title = document.createElement('label');
+    title.style.cssText = 'display: block; font-weight: bold; margin-bottom: 15px; color: white;';
+    title.innerHTML = 'ショット数 (Shot Count) <span style="color: #ffeb3b;">- Per Machine</span>';
+    shotSection.appendChild(title);
+    
+    // Create container for machine inputs
+    const container = document.createElement('div');
+    container.style.cssText = 'display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px;';
+    
+    // Create input for each machine
+    groupedMachines.forEach((machine, index) => {
+      const machineDiv = document.createElement('div');
+      machineDiv.style.cssText = 'display: flex; align-items: center; gap: 10px; background: rgba(255, 255, 255, 0.1); padding: 10px; border-radius: 5px;';
+      
+      const label = document.createElement('label');
+      label.style.cssText = 'min-width: 120px; color: white; font-weight: 600;';
+      label.textContent = `${machine}:`;
+      
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.id = `shot-${machine}`;
+      input.className = 'grouped-shot-input';
+      input.placeholder = '0';
+      input.min = '0';
+      input.value = ''; // Start with blank value
+      input.readOnly = true; // Make readonly so keypad is used
+      input.style.cssText = 'flex: 1; padding: 8px; border: 2px solid #007bff; border-radius: 3px; cursor: pointer; background-color: #f0f8ff;';
+      
+      // Restore value from localStorage
+      const savedValue = localStorage.getItem(`${uniquePrefix}shot-${machine}`);
+      if (savedValue) {
+        input.value = savedValue;
+      }
+      
+      // Add click event to open keypad
+      input.addEventListener('click', function() {
+        window.openDirectNumericKeypad(`shot-${machine}`);
+      });
+      
+      // Add input event listener for when keypad updates the value
+      input.addEventListener('input', function() {
+        // Save to localStorage
+        localStorage.setItem(`${uniquePrefix}shot-${machine}`, this.value);
+        // Update total
+        updateTotalShot();
+      });
+      
+      machineDiv.appendChild(label);
+      machineDiv.appendChild(input);
+      container.appendChild(machineDiv);
+    });
+    
+    shotSection.appendChild(container);
+    
+    // Add total display
+    const totalDiv = document.createElement('div');
+    totalDiv.style.cssText = 'display: flex; align-items: center; gap: 10px; background: rgba(76, 175, 80, 0.2); padding: 12px; border-radius: 5px; border: 2px solid #4CAF50; margin-top: 10px;';
+    
+    const totalLabel = document.createElement('label');
+    totalLabel.style.cssText = 'min-width: 120px; color: #4CAF50; font-weight: bold; font-size: 16px;';
+    totalLabel.textContent = '合計 (Total):';
+    
+    const totalInput = document.createElement('input');
+    totalInput.type = 'number';
+    totalInput.id = 'shot';
+    totalInput.name = 'shot';
+    totalInput.readOnly = true;
+    totalInput.value = '0';
+    totalInput.style.cssText = 'flex: 1; padding: 10px; border: 2px solid #4CAF50; border-radius: 3px; background: white; font-weight: bold; font-size: 16px;';
+    
+    totalDiv.appendChild(totalLabel);
+    totalDiv.appendChild(totalInput);
+    shotSection.appendChild(totalDiv);
+    
+    // Initial calculation to set total from restored values
+    updateTotalShot();
+    
+  } else {
+    // Single machine - keep original input
+    console.log("❌ Condition NOT met - using standard shot input");
+    console.log("   Reason: isGroupedMachinePage =", isGroupedMachinePage, "AND groupedMachines.length =", groupedMachines.length);
+  }
+  console.log("🔵 ========== createGroupedShotInputs finished ==========");
+}
+
+// Function to update total shot count
+function updateTotalShot() {
+  const groupedInputs = document.querySelectorAll('.grouped-shot-input');
+  let total = 0;
+  
+  groupedInputs.forEach(input => {
+    const value = parseInt(input.value, 10) || 0;
+    total += value;
+  });
+  
+  const totalInput = document.getElementById('shot');
+  if (totalInput) {
+    totalInput.value = total;
+    // Save total to localStorage
+    localStorage.setItem(`${uniquePrefix}shot`, total);
+  }
+  
+  console.log(`📊 Shot count updated - Total: ${total}`);
 }
 
 // Function to fetch rikeshi up or down color info
@@ -6272,6 +7136,134 @@ document.getElementById('resetStep3').addEventListener('click', function(event) 
   resetAllSteps();
 });
 
+// ============================================
+// Individual Machine Send Modal (after 3-step workflow)
+// ============================================
+
+function showIndividualSendModal() {
+  const modal = document.getElementById('individualSendModal');
+  const machineList = document.getElementById('individualMachineList');
+  
+  if (!modal || !machineList) return;
+  
+  // Clear previous content
+  machineList.innerHTML = '';
+  
+  // Get the machine config from global variables
+  const machines = window.currentMachineGroup || [];
+  // Get the 背番号 (sebanggo) value for the filename
+  const sebanggo = document.getElementById('sub-dropdown').value;
+  const ncFilename = sebanggo ? `${sebanggo}.pce` : 'program.pce';
+  
+  if (machines.length === 0) {
+    machineList.innerHTML = '<p style="text-align: center; color: #999;">No machines configured</p>';
+    modal.style.display = 'flex';
+    return;
+  }
+  
+  // Create a card for each machine
+  machines.forEach((machine, index) => {
+    const card = document.createElement('div');
+    card.style.cssText = 'border: 2px solid #ddd; border-radius: 10px; padding: 20px; background: #f8f9fa;';
+    
+    const machineName = document.createElement('div');
+    machineName.style.cssText = 'font-size: 20px; font-weight: 600; color: #333; margin-bottom: 10px;';
+    machineName.textContent = `${machine.name} (${machine.ip})`;
+    
+    const statusIndicator = document.createElement('div');
+    statusIndicator.id = `sendStatus-${index}`;
+    statusIndicator.style.cssText = 'display: none; margin-bottom: 10px; padding: 8px; background: #d4edda; border: 1px solid #c3e6cb; border-radius: 5px; color: #155724; font-weight: 600; text-align: center;';
+    statusIndicator.innerHTML = '✓ Sent / 送信完了';
+    
+    const sendButton = document.createElement('button');
+    sendButton.type = 'button';
+    sendButton.id = `sendBtn-${index}`;
+    sendButton.style.cssText = 'background: #2196F3; color: white; border: none; padding: 15px 30px; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: 600; width: 100%; transition: all 0.3s;';
+    sendButton.innerHTML = `Send to ${machine.name}<br><span style="font-size: 14px;">送信</span>`;
+    
+    sendButton.addEventListener('click', async function() {
+      await sendToIndividualMachine(machine, ncFilename, index);
+    });
+    
+    card.appendChild(machineName);
+    card.appendChild(statusIndicator);
+    card.appendChild(sendButton);
+    machineList.appendChild(card);
+  });
+  
+  // Show the modal
+  modal.style.display = 'flex';
+}
+
+async function sendToIndividualMachine(machine, ncFilename, index) {
+  const sendButton = document.getElementById(`sendBtn-${index}`);
+  const statusIndicator = document.getElementById(`sendStatus-${index}`);
+  
+  if (!sendButton) return;
+  
+  // Disable button
+  sendButton.disabled = true;
+  sendButton.style.opacity = '0.6';
+  sendButton.style.cursor = 'not-allowed';
+  sendButton.innerHTML = 'Sending... / 送信中...';
+  
+  // Use the same URL format as Step 3 modal (port 5000 with /request?filename=)
+  const ncProgramUrl = `http://${machine.ip}:5000/request?filename=${ncFilename}`;
+  
+  try {
+    // Try background fetch first
+    const response = await fetch(ncProgramUrl, {
+      method: 'GET',
+      mode: 'no-cors' // This prevents CORS errors but doesn't return response data
+    });
+    
+    console.log(`Sent to ${machine.name} (${machine.ip}) via fetch`);
+    
+    // Show success indicator
+    statusIndicator.style.display = 'block';
+    sendButton.style.display = 'none';
+    
+  } catch (error) {
+    console.error(`Fetch failed for ${machine.name}, trying new tab fallback:`, error);
+    
+    // Fallback: Open in new tab
+    const newTab = window.open(ncProgramUrl, '_blank', 'width=100,height=100,left=-1000,top=-1000');
+    
+    if (newTab) {
+      setTimeout(() => {
+        try {
+          newTab.close();
+        } catch (e) {
+          console.log('Could not close tab automatically');
+        }
+      }, 3000);
+      
+      // Show success indicator
+      statusIndicator.style.display = 'block';
+      sendButton.style.display = 'none';
+    } else {
+      // Could not send
+      sendButton.disabled = false;
+      sendButton.style.opacity = '1';
+      sendButton.style.cursor = 'pointer';
+      sendButton.innerHTML = `Send to ${machine.name}<br><span style="font-size: 14px;">送信 (Retry)</span>`;
+      alert('Could not send. Please check popup blocker.');
+    }
+  }
+}
+
+// Close button for individual send modal
+document.getElementById('closeIndividualSendModal')?.addEventListener('click', function() {
+  document.getElementById('individualSendModal').style.display = 'none';
+});
+
+// Close modal when clicking outside
+document.getElementById('individualSendModal')?.addEventListener('click', function(e) {
+  if (e.target === this) {
+    this.style.display = 'none';
+  }
+});
+
 // Auto-show modal on page load based on workflow state
 window.addEventListener('load', function() {
   setTimeout(() => {
@@ -6339,3 +7331,118 @@ window.addEventListener('load', function() {
     }
   }, 2000); // Increased timeout to 2 seconds to ensure dropdown is fully restored
 });
+
+// ==========================
+// GROUPED MACHINES MANUAL SEND MODAL
+// ==========================
+
+// Function to show manual send modal (for grouped machines when auto-send fails)
+function showManualSendModal(sebanggo) {
+  if (!isGroupedMachinePage || Object.keys(groupedMachineIPs).length === 0) {
+    console.log('Not a grouped machine page or no IPs available');
+    return;
+  }
+  
+  const modal = document.getElementById('manualSendModal');
+  if (!modal) {
+    console.error('Manual send modal not found in HTML');
+    return;
+  }
+  
+  const container = document.getElementById('machineLinksContainer');
+  if (!container) {
+    console.error('Machine links container not found');
+    return;
+  }
+  
+  // Update filename display
+  const filenameDisplay = document.getElementById('manualSendFilename');
+  if (filenameDisplay) {
+    filenameDisplay.textContent = `${sebanggo}.pce`;
+  }
+  
+  // Clear previous content
+  container.innerHTML = '';
+  
+  // Create a button for each machine
+  Object.entries(groupedMachineIPs).forEach(([machine, ip]) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.style.cssText = `
+      background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%);
+      color: white;
+      border: none;
+      padding: 15px 30px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 16px;
+      font-weight: 600;
+      transition: all 0.3s;
+      box-shadow: 0 2px 8px rgba(33, 150, 243, 0.3);
+      width: 100%;
+      text-align: center;
+    `;
+    button.innerHTML = `
+      <div style="font-size: 18px; margin-bottom: 5px;"><strong>${machine}</strong></div>
+      <div style="font-size: 14px; opacity: 0.9;">IP: ${ip}</div>
+    `;
+    button.onmouseover = () => {
+      button.style.background = 'linear-gradient(135deg, #1976D2 0%, #1565C0 100%)';
+      button.style.transform = 'translateY(-2px)';
+      button.style.boxShadow = '0 4px 12px rgba(33, 150, 243, 0.4)';
+    };
+    button.onmouseout = () => {
+      button.style.background = 'linear-gradient(135deg, #2196F3 0%, #1976D2 100%)';
+      button.style.transform = 'translateY(0)';
+      button.style.boxShadow = '0 2px 8px rgba(33, 150, 243, 0.3)';
+    };
+    button.onclick = () => {
+      const url = `http://${ip}:5000/request?filename=${sebanggo}.pce`;
+      console.log(`📤 Manual send to ${machine}: ${url}`);
+      const newTab = window.open(url, '_blank');
+      setTimeout(() => {
+        if (newTab) newTab.close();
+      }, 3000);
+      
+      // Visual feedback
+      button.style.background = '#4CAF50';
+      button.innerHTML = `
+        <div style="font-size: 18px; margin-bottom: 5px;"><strong>${machine}</strong></div>
+        <div style="font-size: 14px;">✅ Sent!</div>
+      `;
+      setTimeout(() => {
+        button.style.background = 'linear-gradient(135deg, #2196F3 0%, #1976D2 100%)';
+        button.innerHTML = `
+          <div style="font-size: 18px; margin-bottom: 5px;"><strong>${machine}</strong></div>
+          <div style="font-size: 14px; opacity: 0.9;">IP: ${ip}</div>
+        `;
+      }, 2000);
+    };
+    container.appendChild(button);
+  });
+  
+  // Show the modal
+  modal.style.display = 'flex';
+  console.log('✅ Manual send modal shown');
+}
+
+// Close manual send modal
+const closeManualSendBtn = document.getElementById('closeManualSendModal');
+if (closeManualSendBtn) {
+  closeManualSendBtn.addEventListener('click', function() {
+    const modal = document.getElementById('manualSendModal');
+    if (modal) {
+      modal.style.display = 'none';
+    }
+  });
+}
+
+// Close modal when clicking outside
+const manualSendModal = document.getElementById('manualSendModal');
+if (manualSendModal) {
+  manualSendModal.addEventListener('click', function(event) {
+    if (event.target === manualSendModal) {
+      manualSendModal.style.display = 'none';
+    }
+  });
+}

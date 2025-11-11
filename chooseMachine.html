@@ -89,15 +89,8 @@
                 card.style.boxShadow = '0 4px 12px rgba(33, 150, 243, 0.3)';
 
                 card.addEventListener('click', () => {
-                    // Redirect to the appropriate page based on the filter value
-                    let destination;
-                    if (filterValue === 'SCNA') {
-                        destination = 'SCNA DCP.html';
-                    } else if (filterValue === '倉知' || filterValue === '小瀬') {
-                        destination = 'DCP iReporter.html';
-                    } else {
-                        destination = 'DCP iReporter.html';
-                    }
+                    // Grouped machines always go to DCP Grouping.html
+                    const destination = 'DCP Grouping.html';
                     // Use comma-separated machine values
                     window.location.href = `${destination}?filter=${filterValue}&machine=${group.machines}`;
                 });
