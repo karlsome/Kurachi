@@ -4909,14 +4909,32 @@ async function sendtoNC(selectedValue) {
 }
 
 // Send to NC button - triggers 3-step modal workflow OR individual send modal
-document.getElementById('sendtoNC').addEventListener('click', function() {
-  // Check if 3-step workflow was completed (sendtoNCButtonisPressed === true)
-  if (sendtoNCButtonisPressed) {
-    // 3-step workflow was completed, show individual send modal
-    showIndividualSendModal();
+document.getElementById('sendtoNC').addEventListener('click', async function() {
+  // Check if this is a single machine (DCP iReporter) or grouped machines (DCP Grouping)
+  const machineName = document.getElementById('process').value;
+  const isSingleMachine = !isGroupedMachinePage && !machineName.includes(',');
+  
+  if (isSingleMachine) {
+    // Single machine (DCP iReporter) - send directly
+    const currentSebanggo = document.getElementById('sub-dropdown').value;
+    
+    if (!currentSebanggo) {
+      showAlert('背番号を選んでください / Please select sebanggo first');
+      return;
+    }
+    
+    // Send directly to machine
+    await sendtoNC(currentSebanggo);
   } else {
-    // 3-step workflow not completed, show Step 1 modal
-    showStep1Modal();
+    // Grouped machines (DCP Grouping) - use 3-step modal workflow
+    // Check if 3-step workflow was completed (sendtoNCButtonisPressed === true)
+    if (sendtoNCButtonisPressed) {
+      // 3-step workflow was completed, show individual send modal
+      showIndividualSendModal();
+    } else {
+      // 3-step workflow not completed, show Step 1 modal
+      showStep1Modal();
+    }
   }
 });
 

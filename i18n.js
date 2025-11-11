@@ -192,7 +192,7 @@ const translations = {
         'shot_count_placeholder': 'Shot Count',
         'material_lot': 'Material Lot:',
         'material_lot_placeholder': 'Material Lot',
-        'defect_pull': 'Defect Pull',
+        'defect_pull': 'Material Defect',
         'processing_defect': 'Processing Defect',
         'other': 'Other:',
         'comments': 'Enter Comments',
