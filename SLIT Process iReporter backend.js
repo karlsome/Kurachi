@@ -1,15 +1,17 @@
 const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
 
-// Select all input, select, and button elements
-const inputs = document.querySelectorAll('input, select, button,textarea');
-const selected工場 = document.getElementById('selected工場').value; // Get the current factory value
-const pageName = location.pathname.split('/').pop(); // Get the current HTML file name
-const uniquePrefix = `${pageName}_${selected工場}_`;
-
-// link for pictures database
+// Link for pictures database
 const picURL = 'https://script.google.com/macros/s/AKfycbwHUW1ia8hNZG-ljsguNq8K4LTPVnB6Ng_GLXIHmtJTdUgGGd2WoiQo9ToF-7PvcJh9bA/exec';
 
+// Get page name early
+const pageName = location.pathname.split('/').pop();
+
+// Function to get uniquePrefix dynamically
+function getUniquePrefix() {
+  const selected工場 = document.getElementById('selected工場')?.value || '';
+  return `${pageName}_${selected工場}_`;
+}
 
 // // this code will ping the Render website for inactivity
 // const interval = 30000; // 30 seconds
@@ -97,22 +99,28 @@ function blankInfo() {
 
 
 // Save the value of each input to localStorage on change
-inputs.forEach(input => {
-    input.addEventListener('input', () => {
-        const key = `${uniquePrefix}${input.id || input.name}`; // Prefix key with pageName and selected工場
-        if (key) {
-            localStorage.setItem(key, input.value);
-        }
-    });
+document.addEventListener('DOMContentLoaded', () => {
+  const inputs = document.querySelectorAll('input, select, button, textarea');
+  
+  inputs.forEach(input => {
+      input.addEventListener('input', () => {
+          const uniquePrefix = getUniquePrefix();
+          const key = `${uniquePrefix}${input.id || input.name}`; // Prefix key with pageName and selected工場
+          if (key) {
+              localStorage.setItem(key, input.value);
+          }
+      });
 
-    if (input.type === 'checkbox' || input.type === 'radio') {
-        input.addEventListener('change', () => {
-            const key = `${uniquePrefix}${input.id || input.name}`;
-            if (key) {
-                localStorage.setItem(key, input.checked); // Save checkbox/radio state
-            }
-        });
-    }
+      if (input.type === 'checkbox' || input.type === 'radio') {
+          input.addEventListener('change', () => {
+              const uniquePrefix = getUniquePrefix();
+              const key = `${uniquePrefix}${input.id || input.name}`;
+              if (key) {
+                  localStorage.setItem(key, input.checked); // Save checkbox/radio state
+              }
+          });
+      }
+  });
 });
 
 
@@ -123,7 +131,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const inputs = document.querySelectorAll('input, select, button, textarea'); // Get all input elements
   const images = document.querySelectorAll('img'); // Get all <img> elements
   const textElements = document.querySelectorAll('[id]'); // Get all elements with an ID
-  const pageName = location.pathname.split('/').pop(); // Get the current HTML file name
   const selected工場 = document.getElementById('selected工場')?.value; // Get the selected 工場 value
   const processElement = document.getElementById("process");
 
@@ -132,10 +139,12 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
   }
 
+  const uniquePrefix = getUniquePrefix();
+
   // Loop through all keys in localStorage
   Object.keys(localStorage).forEach(key => {
       // Check if the key belongs to the current HTML file and selected 工場
-      if (key.startsWith(`${uniquePrefix}`)) {
+      if (key.startsWith(uniquePrefix)) {
           const savedValue = localStorage.getItem(key);
 
           if (savedValue !== null) {
@@ -382,6 +391,7 @@ function setDefaultTime(input) {
   input.value = timeValue;
 
   // Save the time to local storage with unique prefix
+  const uniquePrefix = getUniquePrefix();
   const key = `${uniquePrefix}${input.id}`;
   localStorage.setItem(key, timeValue);
 }
@@ -396,6 +406,7 @@ function setDefaultDate(input) {
   input.value = dateValue;
 
   // Save the date to local storage with unique prefix
+  const uniquePrefix = getUniquePrefix();
   const key = `${uniquePrefix}${input.id}`;
   localStorage.setItem(key, dateValue);
 }
@@ -437,6 +448,7 @@ function incrementCounter(counterId) {
   counterElement.value = currentValue;
 
   // Save the updated value to local storage with unique prefix
+  const uniquePrefix = getUniquePrefix();
   const key = `${uniquePrefix}counter-${counterId}`;
   localStorage.setItem(key, currentValue);
 
@@ -451,6 +463,7 @@ function decrementCounter(counterId) {
     counterElement.value = currentValue;
 
     // Save the updated value to local storage with unique prefix
+    const uniquePrefix = getUniquePrefix();
     const key = `${uniquePrefix}counter-${counterId}`;
     localStorage.setItem(key, currentValue);
 
@@ -1233,6 +1246,7 @@ document.head.appendChild(style);
 // Function to reset everything and reload the page
 function resetForm() {
   const excludedInputs = ['process']; // IDs or names of inputs to exclude from reset
+  const uniquePrefix = getUniquePrefix();
 
   // Clear all form inputs with unique prefix except excluded ones
   const inputs = document.querySelectorAll('input, select, textarea');
