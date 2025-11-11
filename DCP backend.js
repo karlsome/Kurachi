@@ -13,6 +13,9 @@ const dbURL = 'https://script.google.com/macros/s/AKfycbx0qBw0_wF5X-hA2t1yY-d5h5
 const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
 
+// Global variable to track if sendtoNC button has been pressed
+let sendtoNCButtonisPressed = false;
+
 //this code listens to incoming parameters passed
 function getQueryParam(param) {
   const urlParams = new URLSearchParams(window.location.search);
@@ -2416,13 +2419,15 @@ document.head.appendChild(style);
 // Global reference for lot scanner
 window.lotHtml5QrCode = null;
 
-// Scan Lot Button functionality
-document.getElementById('scan-lot').addEventListener('click', function() {
-  const scanLotModal = document.getElementById('scanLotModal');
-  const scanLotStatus = document.getElementById('scanLotStatus');
-  const materialCodeInput = document.getElementById('material-code');
-  const materialLotInput = document.getElementById('材料ロット');
-  const html5QrCode = new Html5Qrcode("lotQrReader");
+// Scan Lot Button functionality (only if button exists)
+const scanLotButton = document.getElementById('scan-lot');
+if (scanLotButton) {
+  scanLotButton.addEventListener('click', function() {
+    const scanLotModal = document.getElementById('scanLotModal');
+    const scanLotStatus = document.getElementById('scanLotStatus');
+    const materialCodeInput = document.getElementById('material-code');
+    const materialLotInput = document.getElementById('材料ロット');
+    const html5QrCode = new Html5Qrcode("lotQrReader");
   
   // Store reference globally
   window.lotHtml5QrCode = html5QrCode;
@@ -2550,7 +2555,8 @@ document.getElementById('scan-lot').addEventListener('click', function() {
       scanLotModal.style.display = 'none';
     });
   };
-});
+  });
+}
 
 // ===== MATERIAL LOT TRACKING SYSTEM =====
 // Track lots with their source (scanned vs manual)
@@ -4325,10 +4331,14 @@ function blobToBase64(blob) {
   });
 }
 
-let sendtoNCButtonisPressed = false; // this global variable is to check if sendtoNC button is pressed or not
-
 function toggleInputs() {
-  var isChecked = document.getElementById('enable-inputs').checked;
+  const enableInputsCheckbox = document.getElementById('enable-inputs');
+  if (!enableInputsCheckbox) {
+    // Element doesn't exist (e.g., in DCP Grouping.html), skip this function
+    return;
+  }
+  
+  var isChecked = enableInputsCheckbox.checked;
   var inputs = document.querySelectorAll('#Kensa\\ Name, #KDate, #KStart\\ Time, #KEnd\\ Time,.plus-btn,.minus-btn, textarea[name="Comments2"], #在庫');
 
   inputs.forEach(function(input) {
@@ -4485,10 +4495,11 @@ async function sendtoNC(selectedValue) {
       const failed = results.filter(r => !r.success);
       if (failed.length > 0) {
         console.warn('⚠️ Failed machines:', failed.map(f => f.machine).join(', '));
-        // Show manual send modal as fallback
-        if (typeof showManualSendModal === 'function') {
-          setTimeout(() => showManualSendModal(currentSebanggo), 1000);
-        }
+      }
+      
+      // Always show manual send modal for grouped machines (for user verification)
+      if (typeof showManualSendModal === 'function') {
+        setTimeout(() => showManualSendModal(currentSebanggo), 1000);
       }
       
     } catch (error) {
@@ -4555,9 +4566,11 @@ async function sendtoNC(selectedValue) {
     }
   }
 }
-document.getElementById('sendtoNC').addEventListener('click', async function() {
-  const currentSebanggo = document.getElementById('sub-dropdown').value;
-  await sendtoNC(currentSebanggo);
+
+// Send to NC button - triggers 3-step modal workflow
+document.getElementById('sendtoNC').addEventListener('click', function() {
+  // Show the 3-step modal (Step 1: Scan Kanban)
+  showStep1Modal();
 });
 
 // Function to handle printing
@@ -4617,9 +4630,6 @@ function updateTotal() {
   }
 }
 
-// global variable for ip address input container (declared before event listeners)
-const ipInput = document.getElementById('ipInfo');
-
 // Attach updateTotal to relevant events
 document.getElementById('ProcessQuantity').addEventListener('input', updateTotal);
 
@@ -4633,6 +4643,7 @@ for (let i = 18; i <= 20; i++) {
 
 // Function to fetch ip address (supports single or multiple machines)
 function getIP() {
+  const ipInput = document.getElementById('ipInfo');
   const machineName = document.getElementById('process').value;
   
   // Check if this is grouped machines (either by page detection or comma in machine name)
@@ -6518,17 +6529,47 @@ function showManualSendModal(sebanggo) {
     return;
   }
   
+  // Update filename display
+  const filenameDisplay = document.getElementById('manualSendFilename');
+  if (filenameDisplay) {
+    filenameDisplay.textContent = `${sebanggo}.pce`;
+  }
+  
   // Clear previous content
   container.innerHTML = '';
   
   // Create a button for each machine
   Object.entries(groupedMachineIPs).forEach(([machine, ip]) => {
     const button = document.createElement('button');
-    button.className = 'manual-send-btn';
-    button.innerHTML = `
-      <strong>${machine}</strong><br>
-      <span style="font-size: 0.9em; opacity: 0.8;">${ip}</span>
+    button.type = 'button';
+    button.style.cssText = `
+      background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%);
+      color: white;
+      border: none;
+      padding: 15px 30px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 16px;
+      font-weight: 600;
+      transition: all 0.3s;
+      box-shadow: 0 2px 8px rgba(33, 150, 243, 0.3);
+      width: 100%;
+      text-align: center;
     `;
+    button.innerHTML = `
+      <div style="font-size: 18px; margin-bottom: 5px;"><strong>${machine}</strong></div>
+      <div style="font-size: 14px; opacity: 0.9;">IP: ${ip}</div>
+    `;
+    button.onmouseover = () => {
+      button.style.background = 'linear-gradient(135deg, #1976D2 0%, #1565C0 100%)';
+      button.style.transform = 'translateY(-2px)';
+      button.style.boxShadow = '0 4px 12px rgba(33, 150, 243, 0.4)';
+    };
+    button.onmouseout = () => {
+      button.style.background = 'linear-gradient(135deg, #2196F3 0%, #1976D2 100%)';
+      button.style.transform = 'translateY(0)';
+      button.style.boxShadow = '0 2px 8px rgba(33, 150, 243, 0.3)';
+    };
     button.onclick = () => {
       const url = `http://${ip}:5000/request?filename=${sebanggo}.pce`;
       console.log(`📤 Manual send to ${machine}: ${url}`);
@@ -6536,6 +6577,20 @@ function showManualSendModal(sebanggo) {
       setTimeout(() => {
         if (newTab) newTab.close();
       }, 3000);
+      
+      // Visual feedback
+      button.style.background = '#4CAF50';
+      button.innerHTML = `
+        <div style="font-size: 18px; margin-bottom: 5px;"><strong>${machine}</strong></div>
+        <div style="font-size: 14px;">✅ Sent!</div>
+      `;
+      setTimeout(() => {
+        button.style.background = 'linear-gradient(135deg, #2196F3 0%, #1976D2 100%)';
+        button.innerHTML = `
+          <div style="font-size: 18px; margin-bottom: 5px;"><strong>${machine}</strong></div>
+          <div style="font-size: 14px; opacity: 0.9;">IP: ${ip}</div>
+        `;
+      }, 2000);
     };
     container.appendChild(button);
   });
@@ -6546,7 +6601,7 @@ function showManualSendModal(sebanggo) {
 }
 
 // Close manual send modal
-const closeManualSendBtn = document.getElementById('closeManualSend');
+const closeManualSendBtn = document.getElementById('closeManualSendModal');
 if (closeManualSendBtn) {
   closeManualSendBtn.addEventListener('click', function() {
     const modal = document.getElementById('manualSendModal');

@@ -648,7 +648,9 @@
 
             <!-- QR code button -->
             <button id="scan-button" type="button" data-i18n="scan_sebango">Scan 背番号</button>
-            <button id="scan-lot" type="button" data-i18n="scan_lot">Scan ロット</button>
+            <button id="print" type="button" onclick="printLabel()" data-i18n="print" style="padding: 12px; font-size: 16px; background: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;">
+                Print Label
+            </button>
             <br>
             <br>
 
@@ -742,6 +744,24 @@
             <input readonly id="counter-20" value="0" type="number" name="その他">
             <button class="minus-btn" type="button" onclick="decrementCounter(20)" >-</button>
         </div>
+
+        <br>
+        <hr style="border: 1px solid rgba(255, 255, 255, 0.3); margin: 20px 0;">
+        
+        <!-- NG Quantity Display -->
+        <div style="margin-bottom: 15px; padding: 10px; background: rgba(255, 255, 255, 0.1); border-radius: 5px;">
+            <label for="Total_NG" data-i18n="ng_quantity" style="color: #ff6b6b; font-weight: bold; display: block; margin-bottom: 5px;">NG Quantity:</label>
+            <input readonly id="Total_NG" value="0" type="number" name="Total_NG" style="width: 100%; font-weight: bold; font-size: 1.2em; padding: 8px; border: 1px solid #ddd; border-radius: 3px; background: white;">
+        </div>
+
+        <!-- Total Good Display -->
+        <div style="margin-bottom: 15px; padding: 10px; background: rgba(255, 255, 255, 0.1); border-radius: 5px;">
+            <label for="total" data-i18n="total_good" style="color: white; font-weight: bold; display: block; margin-bottom: 5px;">良品合計(TOTAL):</label>
+            <input readonly id="total" value="0" type="number" name="Final Quantity" style="width: 100%; font-weight: bold; font-size: 1.2em; padding: 8px; border: 1px solid #ddd; border-radius: 3px; background: white;">
+        </div>
+
+        <hr style="border: 1px solid rgba(255, 255, 255, 0.3); margin: 20px 0;">
+        <br>
 
         <!-- what modal is this???? -->
         <div id="myModal" class="modal">
@@ -1034,23 +1054,6 @@
 
             <!-- Buttons moved from yellow column to bottom of left column -->
             <div style="margin-top: 30px; padding-top: 20px; border-top: 2px solid rgba(255, 255, 255, 0.3);">
-                <!-- Print Label Button -->
-                <button id="print" type="button" onclick="printLabel()" data-i18n="print" style="width: 100%; margin-bottom: 15px; padding: 12px; font-size: 16px; background: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;">
-                    Print Label
-                </button>
-
-                <!-- NG Quantity Display -->
-                <div style="margin-bottom: 15px; padding: 10px; background: rgba(255, 255, 255, 0.1); border-radius: 5px;">
-                    <label for="Total_NG" data-i18n="ng_quantity" style="color: #ff6b6b; font-weight: bold; display: block; margin-bottom: 5px;">NG Quantity:</label>
-                    <input readonly id="Total_NG" value="0" type="number" name="Total_NG" style="width: 100%; font-weight: bold; font-size: 1.2em; padding: 8px; border: 1px solid #ddd; border-radius: 3px; background: white;">
-                </div>
-
-                <!-- Total Good Display -->
-                <div style="margin-bottom: 15px; padding: 10px; background: rgba(255, 255, 255, 0.1); border-radius: 5px;">
-                    <label for="total" data-i18n="total_good" style="color: white; font-weight: bold; display: block; margin-bottom: 5px;">良品合計(TOTAL):</label>
-                    <input readonly id="total" value="0" type="number" name="Final Quantity" style="width: 100%; font-weight: bold; font-size: 1.2em; padding: 8px; border: 1px solid #ddd; border-radius: 3px; background: white;">
-                </div>
-
                 <!-- Submit Button -->
                 <input type="submit" value="Submit" data-i18n="submit" id="submit" style="width: 100%; margin-bottom: 15px; padding: 15px; font-size: 18px; background: #ff6b6b; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;">
 
@@ -1198,7 +1201,7 @@
     </div>
 
     <!-- Manual Send Popup Modal for Grouped Machines -->
-    <div id="manualSendModal" class="modal" style="display:none;">
+    <div id="manualSendModal" class="modal" style="display:none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.8); z-index: 10002; justify-content: center; align-items: center;">
         <div class="modal-content" style="background: white; border: 2px solid #ddd; border-radius: 10px; padding: 30px; max-width: 600px; box-shadow: 0 4px 20px rgba(0,0,0,0.2);">
             <div style="text-align: center; margin-bottom: 25px;">
                 <div style="background: #2196F3; color: white; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
