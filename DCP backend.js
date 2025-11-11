@@ -4410,18 +4410,40 @@ async function sendtoNC(selectedValue) {
     progressBar.classList.add('show');
   }
 
-  // Check if this is grouped machines
-  if (isGroupedMachinePage && Object.keys(groupedMachineIPs).length > 1) {
-    console.log("🔵 Sending to multiple machines:", groupedMachineIPs);
+  // Check if this is grouped machines (by page detection OR comma-separated IPs)
+  const hasMultipleIPs = ipAddress && ipAddress.includes(',');
+  const hasGroupedMachines = Object.keys(groupedMachineIPs).length > 1;
+  
+  if ((isGroupedMachinePage && hasGroupedMachines) || hasMultipleIPs) {
+    // Ensure we have machine IPs populated
+    let machineIPMap = {};
+    
+    if (hasGroupedMachines) {
+      machineIPMap = groupedMachineIPs;
+    } else if (hasMultipleIPs) {
+      // Parse comma-separated IPs and machines
+      const ips = ipAddress.split(',').map(ip => ip.trim());
+      const machines = groupedMachines.length > 0 ? groupedMachines : 
+                      document.getElementById('process').value.split(',').map(m => m.trim());
+      
+      // Create mapping
+      machines.forEach((machine, index) => {
+        if (ips[index]) {
+          machineIPMap[machine] = ips[index];
+        }
+      });
+    }
+    
+    console.log("🔵 Sending to multiple machines:", machineIPMap);
     
     // Update progress bar text for multiple machines
     const progressText = progressBar?.querySelector('span');
     if (progressText) {
-      progressText.textContent = `Sending to ${Object.keys(groupedMachineIPs).length} machines...`;
+      progressText.textContent = `Sending to ${Object.keys(machineIPMap).length} machines...`;
     }
     
     // Send command to each machine
-    const sendPromises = Object.entries(groupedMachineIPs).map(async ([machine, ip]) => {
+    const sendPromises = Object.entries(machineIPMap).map(async ([machine, ip]) => {
       const url = `http://${ip}:5000/request?filename=${currentSebanggo}.pce`;
       
       try {
@@ -4595,6 +4617,9 @@ function updateTotal() {
   }
 }
 
+// global variable for ip address input container (declared before event listeners)
+const ipInput = document.getElementById('ipInfo');
+
 // Attach updateTotal to relevant events
 document.getElementById('ProcessQuantity').addEventListener('input', updateTotal);
 
@@ -4606,18 +4631,21 @@ for (let i = 18; i <= 20; i++) {
   document.getElementById(`counter-${i}`).addEventListener('input', updateTotal);
 }
 
-// global variable for ip address input container
-const ipInput = document.getElementById('ipInfo');
 // Function to fetch ip address (supports single or multiple machines)
 function getIP() {
   const machineName = document.getElementById('process').value;
   
-  // Check if this is grouped machines
-  if (isGroupedMachinePage && groupedMachines.length > 1) {
-    console.log("🔵 Fetching IPs for grouped machines:", groupedMachines);
+  // Check if this is grouped machines (either by page detection or comma in machine name)
+  const hasMultipleMachines = (isGroupedMachinePage && groupedMachines.length > 1) || 
+                              (machineName && machineName.includes(','));
+  
+  if (hasMultipleMachines) {
+    // Ensure groupedMachines array is populated
+    const machines = groupedMachines.length > 0 ? groupedMachines : machineName.split(',').map(m => m.trim());
+    console.log("🔵 Fetching IPs for grouped machines:", machines);
     
-    // Fetch IP for each machine
-    const ipPromises = groupedMachines.map(machine => 
+    // Fetch IP for each machine individually
+    const ipPromises = machines.map(machine => 
       fetch(`${ipURL}?filter=${machine}`)
         .then(response => {
           if (!response.ok) {
