@@ -4429,27 +4429,27 @@ async function sendtoNC(selectedValue) {
 
   //sendCommand("off"); // this is for arduino (emergency button)
   
-  // Validate grouped shot inputs if present
-  const groupedInputs = document.querySelectorAll('.grouped-shot-input');
-  if (groupedInputs.length > 0) {
-    let hasEmptyInput = false;
-    let emptyMachines = [];
-    
-    groupedInputs.forEach(input => {
-      const value = parseInt(input.value, 10);
-      if (!value || value <= 0) {
-        hasEmptyInput = true;
-        // Extract machine name from id (e.g., "shot-OZNC04" -> "OZNC04")
-        const machineName = input.id.replace('shot-', '');
-        emptyMachines.push(machineName);
-      }
-    });
-    
-    if (hasEmptyInput) {
-      window.alert(`全ての機械のショット数を入力してください\nPlease enter shot count for all machines:\n${emptyMachines.join(', ')}`);
-      return;
-    }
-  }
+  // Validate grouped shot inputs if present (REMOVED - validation happens in Step 3 modal workflow)
+  // const groupedInputs = document.querySelectorAll('.grouped-shot-input');
+  // if (groupedInputs.length > 0) {
+  //   let hasEmptyInput = false;
+  //   let emptyMachines = [];
+  //   
+  //   groupedInputs.forEach(input => {
+  //     const value = parseInt(input.value, 10);
+  //     if (!value || value <= 0) {
+  //       hasEmptyInput = true;
+  //       // Extract machine name from id (e.g., "shot-OZNC04" -> "OZNC04")
+  //       const machineName = input.id.replace('shot-', '');
+  //       emptyMachines.push(machineName);
+  //     }
+  //   });
+  //   
+  //   if (hasEmptyInput) {
+  //     window.alert(`全ての機械のショット数を入力してください\nPlease enter shot count for all machines:\n${emptyMachines.join(', ')}`);
+  //     return;
+  //   }
+  // }
   
   sendtoNCButtonisPressed = true;
 
@@ -4813,8 +4813,9 @@ function createGroupedShotInputs() {
       input.className = 'grouped-shot-input';
       input.placeholder = '0';
       input.min = '0';
-      input.value = '0';
-      input.style.cssText = 'flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 3px;';
+      input.value = ''; // Start with blank value
+      input.readOnly = true; // Make readonly so keypad is used
+      input.style.cssText = 'flex: 1; padding: 8px; border: 2px solid #007bff; border-radius: 3px; cursor: pointer; background-color: #f0f8ff;';
       
       // Restore value from localStorage
       const savedValue = localStorage.getItem(`${uniquePrefix}shot-${machine}`);
@@ -4822,7 +4823,12 @@ function createGroupedShotInputs() {
         input.value = savedValue;
       }
       
-      // Add event listeners
+      // Add click event to open keypad
+      input.addEventListener('click', function() {
+        window.openDirectNumericKeypad(`shot-${machine}`);
+      });
+      
+      // Add input event listener for when keypad updates the value
       input.addEventListener('input', function() {
         // Save to localStorage
         localStorage.setItem(`${uniquePrefix}shot-${machine}`, this.value);
