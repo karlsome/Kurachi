@@ -2222,6 +2222,8 @@ function getRecentWorkers() {
 
 // Add worker to recent list
 function addToRecentWorkers(name) {
+  if (!name || name.trim() === '') return; // Don't add empty names
+  
   let recent = getRecentWorkers();
   
   // Remove if already exists
@@ -2234,6 +2236,14 @@ function addToRecentWorkers(name) {
   recent = recent.slice(0, MAX_RECENT_WORKERS);
   
   localStorage.setItem(RECENT_WORKERS_KEY, JSON.stringify(recent));
+}
+
+// Remove worker from recent list
+function removeFromRecentWorkers(name) {
+  let recent = getRecentWorkers();
+  recent = recent.filter(w => w !== name);
+  localStorage.setItem(RECENT_WORKERS_KEY, JSON.stringify(recent));
+  renderWorkerNames(); // Re-render to update UI
 }
 
 // Group names alphabetically
@@ -2292,12 +2302,27 @@ function renderWorkerNames() {
     grid.className = 'worker-names-grid';
     
     recentWorkers.forEach(name => {
+      const wrapper = document.createElement('div');
+      wrapper.style.position = 'relative';
+      
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'worker-name-btn';
       btn.textContent = name;
       btn.onclick = () => selectWorkerName(name);
-      grid.appendChild(btn);
+      
+      const deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
+      deleteBtn.className = 'delete-recent-btn';
+      deleteBtn.innerHTML = '×';
+      deleteBtn.onclick = (e) => {
+        e.stopPropagation(); // Prevent selecting the worker
+        removeFromRecentWorkers(name);
+      };
+      
+      wrapper.appendChild(btn);
+      wrapper.appendChild(deleteBtn);
+      grid.appendChild(wrapper);
     });
     
     recentSection.appendChild(grid);
@@ -2434,6 +2459,27 @@ setTimeout(function() {
     modal.addEventListener('click', function(e) {
       if (e.target === modal) {
         closeWorkerModal();
+      }
+    });
+  }
+  
+  // Save manually entered worker name to recents when user finishes typing
+  if (workerInput) {
+    workerInput.addEventListener('blur', function() {
+      const enteredName = workerInput.value.trim();
+      if (enteredName && !workerInput.readOnly) {
+        // Only save if user manually typed (not readonly)
+        addToRecentWorkers(enteredName);
+      }
+    });
+    
+    // Also save on Enter key
+    workerInput.addEventListener('keypress', function(e) {
+      if (e.key === 'Enter') {
+        const enteredName = workerInput.value.trim();
+        if (enteredName && !workerInput.readOnly) {
+          addToRecentWorkers(enteredName);
+        }
       }
     });
   }
