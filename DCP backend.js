@@ -25,32 +25,66 @@ function getQueryParam(param) {
 const selectedFactory = getQueryParam('filter');
 const selectedMachine = getQueryParam('machine');
 
+console.log("🔵 ========== SCRIPT INITIALIZATION ==========");
+console.log("🔵 URL:", window.location.href);
+console.log("🔵 selectedFactory:", selectedFactory);
+console.log("🔵 selectedMachine:", selectedMachine);
+
 // ===== GROUPED MACHINE DETECTION =====
-// Check if this is a grouped machine page
-const isGroupedMachinePage = window.location.pathname.includes('DCP Grouping');
+// Check if this is a grouped machine page (decode URI to handle %20 spaces)
+const decodedPath = decodeURIComponent(window.location.pathname);
+const isGroupedMachinePage = decodedPath.includes('DCP Grouping');
+console.log("🔵 Decoded pathname:", decodedPath);
+console.log("🔵 isGroupedMachinePage:", isGroupedMachinePage);
+
 let groupedMachines = []; // Array to store multiple machine names
 let groupedMachineIPs = {}; // Object to store IPs: {machineA: "IP1", machineB: "IP2"}
 
 // Parse comma-separated machines if grouped
 if (selectedMachine && selectedMachine.includes(',')) {
   groupedMachines = selectedMachine.split(',').map(m => m.trim());
-  console.log("🔵 Grouped machines detected:", groupedMachines);
+  console.log("✅ Grouped machines detected:", groupedMachines);
 } else if (selectedMachine) {
   groupedMachines = [selectedMachine];
+  console.log("🔵 Single machine detected:", groupedMachines);
+} else {
+  console.log("❌ No selectedMachine found");
 }
 
-if (selectedFactory) {
-  document.getElementById('selected工場').value = selectedFactory;
-  document.getElementById('nippoTitle').textContent = selectedFactory + "日報";
-  console.log("kojo changed to: " + selectedFactory);
-}
-if (selectedMachine) {
-  const processInput = document.getElementById('process');
-  if (processInput) {
-    processInput.value = selectedMachine;
-    console.log("machine set to: " + selectedMachine);
+// Set factory and machine values when DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+  console.log("🔵 ========== Early DOMContentLoaded (factory/machine setup) ==========");
+  console.log("🔵 selectedFactory:", selectedFactory);
+  console.log("🔵 selectedMachine:", selectedMachine);
+  console.log("🔵 groupedMachines at this point:", groupedMachines);
+  
+  if (selectedFactory) {
+    const factoryInput = document.getElementById('selected工場');
+    const nippoTitle = document.getElementById('nippoTitle');
+    if (factoryInput) factoryInput.value = selectedFactory;
+    if (nippoTitle) nippoTitle.textContent = selectedFactory + "日報";
+    console.log("✅ kojo changed to: " + selectedFactory);
   }
-}
+  
+  if (selectedMachine) {
+    const processInput = document.getElementById('process');
+    if (processInput) {
+      processInput.value = selectedMachine;
+      console.log("✅ machine set to: " + selectedMachine);
+      
+      // Create dynamic shot inputs after machine value is set
+      setTimeout(() => {
+        console.log("🔵 ⏰ setTimeout fired - About to call createGroupedShotInputs");
+        console.log("🔵 groupedMachines before call:", groupedMachines);
+        createGroupedShotInputs();
+      }, 100);
+    } else {
+      console.log("❌ processInput element not found!");
+    }
+  } else {
+    console.log("❌ selectedMachine is null/undefined");
+  }
+}, { once: true }); // Use once option to ensure this runs first
 
 // Add CSS styles for time input fields and edit buttons
 const timeInputStyles = `
@@ -4394,6 +4428,29 @@ function updateSheetStatus(selectedValue, machineName) {
 async function sendtoNC(selectedValue) {
 
   //sendCommand("off"); // this is for arduino (emergency button)
+  
+  // Validate grouped shot inputs if present
+  const groupedInputs = document.querySelectorAll('.grouped-shot-input');
+  if (groupedInputs.length > 0) {
+    let hasEmptyInput = false;
+    let emptyMachines = [];
+    
+    groupedInputs.forEach(input => {
+      const value = parseInt(input.value, 10);
+      if (!value || value <= 0) {
+        hasEmptyInput = true;
+        // Extract machine name from id (e.g., "shot-OZNC04" -> "OZNC04")
+        const machineName = input.id.replace('shot-', '');
+        emptyMachines.push(machineName);
+      }
+    });
+    
+    if (hasEmptyInput) {
+      window.alert(`全ての機械のショット数を入力してください\nPlease enter shot count for all machines:\n${emptyMachines.join(', ')}`);
+      return;
+    }
+  }
+  
   sendtoNCButtonisPressed = true;
 
   // Save to localStorage with a unique key format
@@ -4702,6 +4759,133 @@ function getIP() {
         console.error('Error:', error);
       });
   }
+}
+
+// Function to create dynamic shot count inputs for grouped machines
+function createGroupedShotInputs() {
+  console.log("🔵 ========== createGroupedShotInputs called ==========");
+  console.log("🔵 Current URL:", window.location.href);
+  console.log("🔵 Pathname:", window.location.pathname);
+  
+  const shotSection = document.getElementById('shotCountSection');
+  
+  if (!shotSection) {
+    console.log("❌ shotCountSection not found!");
+    return;
+  }
+  
+  console.log("✅ shotCountSection found");
+  console.log("🔵 isGroupedMachinePage:", isGroupedMachinePage);
+  console.log("🔵 groupedMachines:", groupedMachines);
+  console.log("🔵 groupedMachines.length:", groupedMachines.length);
+  console.log("🔵 groupedMachines type:", typeof groupedMachines);
+  console.log("🔵 Is Array?", Array.isArray(groupedMachines));
+
+  // Check if this is a grouped machine page with multiple machines
+  if (isGroupedMachinePage && groupedMachines.length > 1) {
+    console.log("✅✅✅ Condition met! Creating shot count inputs for grouped machines:", groupedMachines);
+    
+    // Clear existing content
+    shotSection.innerHTML = '';
+    
+    // Add title
+    const title = document.createElement('label');
+    title.style.cssText = 'display: block; font-weight: bold; margin-bottom: 15px; color: white;';
+    title.innerHTML = 'ショット数 (Shot Count) <span style="color: #ffeb3b;">- Per Machine</span>';
+    shotSection.appendChild(title);
+    
+    // Create container for machine inputs
+    const container = document.createElement('div');
+    container.style.cssText = 'display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px;';
+    
+    // Create input for each machine
+    groupedMachines.forEach((machine, index) => {
+      const machineDiv = document.createElement('div');
+      machineDiv.style.cssText = 'display: flex; align-items: center; gap: 10px; background: rgba(255, 255, 255, 0.1); padding: 10px; border-radius: 5px;';
+      
+      const label = document.createElement('label');
+      label.style.cssText = 'min-width: 120px; color: white; font-weight: 600;';
+      label.textContent = `${machine}:`;
+      
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.id = `shot-${machine}`;
+      input.className = 'grouped-shot-input';
+      input.placeholder = '0';
+      input.min = '0';
+      input.value = '0';
+      input.style.cssText = 'flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 3px;';
+      
+      // Restore value from localStorage
+      const savedValue = localStorage.getItem(`${uniquePrefix}shot-${machine}`);
+      if (savedValue) {
+        input.value = savedValue;
+      }
+      
+      // Add event listeners
+      input.addEventListener('input', function() {
+        // Save to localStorage
+        localStorage.setItem(`${uniquePrefix}shot-${machine}`, this.value);
+        // Update total
+        updateTotalShot();
+      });
+      
+      machineDiv.appendChild(label);
+      machineDiv.appendChild(input);
+      container.appendChild(machineDiv);
+    });
+    
+    shotSection.appendChild(container);
+    
+    // Add total display
+    const totalDiv = document.createElement('div');
+    totalDiv.style.cssText = 'display: flex; align-items: center; gap: 10px; background: rgba(76, 175, 80, 0.2); padding: 12px; border-radius: 5px; border: 2px solid #4CAF50; margin-top: 10px;';
+    
+    const totalLabel = document.createElement('label');
+    totalLabel.style.cssText = 'min-width: 120px; color: #4CAF50; font-weight: bold; font-size: 16px;';
+    totalLabel.textContent = '合計 (Total):';
+    
+    const totalInput = document.createElement('input');
+    totalInput.type = 'number';
+    totalInput.id = 'shot';
+    totalInput.name = 'shot';
+    totalInput.readOnly = true;
+    totalInput.value = '0';
+    totalInput.style.cssText = 'flex: 1; padding: 10px; border: 2px solid #4CAF50; border-radius: 3px; background: white; font-weight: bold; font-size: 16px;';
+    
+    totalDiv.appendChild(totalLabel);
+    totalDiv.appendChild(totalInput);
+    shotSection.appendChild(totalDiv);
+    
+    // Initial calculation to set total from restored values
+    updateTotalShot();
+    
+  } else {
+    // Single machine - keep original input
+    console.log("❌ Condition NOT met - using standard shot input");
+    console.log("   Reason: isGroupedMachinePage =", isGroupedMachinePage, "AND groupedMachines.length =", groupedMachines.length);
+  }
+  console.log("🔵 ========== createGroupedShotInputs finished ==========");
+}
+
+// Function to update total shot count
+function updateTotalShot() {
+  const groupedInputs = document.querySelectorAll('.grouped-shot-input');
+  let total = 0;
+  
+  groupedInputs.forEach(input => {
+    const value = parseInt(input.value, 10) || 0;
+    total += value;
+  });
+  
+  const totalInput = document.getElementById('shot');
+  if (totalInput) {
+    totalInput.value = total;
+    // Save total to localStorage
+    localStorage.setItem(`${uniquePrefix}shot`, total);
+  }
+  
+  console.log(`📊 Shot count updated - Total: ${total}`);
 }
 
 // Function to fetch rikeshi up or down color info
