@@ -2139,6 +2139,10 @@ document.addEventListener("DOMContentLoaded", async function() {
       if (!response.ok) throw new Error("Failed to fetch worker names");
 
       const workerNames = await response.json();
+      
+      // Store worker names for modal
+      workerNamesData = workerNames;
+      
       const dataList = document.getElementById("machine-operator-suggestions");
       dataList.innerHTML = ""; // Clear any existing options
 
@@ -2204,6 +2208,222 @@ function showAlert(message) {
     document.body.classList.remove('flash-red');
   };
 }
+
+// Worker Name Selection Modal Functionality
+let workerNamesData = [];
+const RECENT_WORKERS_KEY = 'recentWorkerNames';
+const MAX_RECENT_WORKERS = 6;
+
+// Get recent workers from localStorage
+function getRecentWorkers() {
+  const recent = localStorage.getItem(RECENT_WORKERS_KEY);
+  return recent ? JSON.parse(recent) : [];
+}
+
+// Add worker to recent list
+function addToRecentWorkers(name) {
+  let recent = getRecentWorkers();
+  
+  // Remove if already exists
+  recent = recent.filter(w => w !== name);
+  
+  // Add to beginning
+  recent.unshift(name);
+  
+  // Keep only max recent
+  recent = recent.slice(0, MAX_RECENT_WORKERS);
+  
+  localStorage.setItem(RECENT_WORKERS_KEY, JSON.stringify(recent));
+}
+
+// Group names alphabetically
+function groupNamesByLetter(names) {
+  const grouped = {};
+  
+  names.forEach(name => {
+    // Get first character (handle Japanese, English, etc.)
+    let firstChar = name.charAt(0).toUpperCase();
+    
+    // For Japanese characters, try to group by first character
+    if (firstChar.match(/[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/)) {
+      // Japanese character - use as is
+      firstChar = name.charAt(0);
+    } else if (firstChar.match(/[A-Z]/)) {
+      // English letter - use uppercase
+      firstChar = firstChar.toUpperCase();
+    } else {
+      // Other characters - group under '#'
+      firstChar = '#';
+    }
+    
+    if (!grouped[firstChar]) {
+      grouped[firstChar] = [];
+    }
+    grouped[firstChar].push(name);
+  });
+  
+  // Sort each group
+  Object.keys(grouped).forEach(key => {
+    grouped[key].sort();
+  });
+  
+  return grouped;
+}
+
+// Render worker names in modal
+function renderWorkerNames() {
+  const container = document.getElementById('workerNamesContainer');
+  container.innerHTML = '';
+  
+  // Get recent workers
+  const recentWorkers = getRecentWorkers();
+  
+  // Add recent section if there are recent workers
+  if (recentWorkers.length > 0) {
+    const recentSection = document.createElement('div');
+    recentSection.className = 'worker-section recent-section';
+    
+    const header = document.createElement('div');
+    header.className = 'worker-section-header';
+    header.textContent = '⭐ 最近使用 / Recent';
+    recentSection.appendChild(header);
+    
+    const grid = document.createElement('div');
+    grid.className = 'worker-names-grid';
+    
+    recentWorkers.forEach(name => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'worker-name-btn';
+      btn.textContent = name;
+      btn.onclick = () => selectWorkerName(name);
+      grid.appendChild(btn);
+    });
+    
+    recentSection.appendChild(grid);
+    container.appendChild(recentSection);
+  }
+  
+  // Group all names alphabetically
+  const grouped = groupNamesByLetter(workerNamesData);
+  const sortedKeys = Object.keys(grouped).sort();
+  
+  // Render each alphabetical group
+  sortedKeys.forEach(letter => {
+    const section = document.createElement('div');
+    section.className = 'worker-section';
+    
+    const header = document.createElement('div');
+    header.className = 'worker-section-header';
+    header.textContent = letter;
+    section.appendChild(header);
+    
+    const grid = document.createElement('div');
+    grid.className = 'worker-names-grid';
+    
+    grouped[letter].forEach(name => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'worker-name-btn';
+      btn.textContent = name;
+      btn.onclick = () => selectWorkerName(name);
+      grid.appendChild(btn);
+    });
+    
+    section.appendChild(grid);
+    container.appendChild(section);
+  });
+}
+
+// Select worker name
+function selectWorkerName(name) {
+  const input = document.getElementById('Machine Operator');
+  input.value = name;
+  
+  // Add to recent workers
+  addToRecentWorkers(name);
+  
+  // Close modal
+  closeWorkerModal();
+  
+  // Trigger change event
+  input.dispatchEvent(new Event('change'));
+}
+
+// Open worker modal
+function openWorkerModal() {
+  const modal = document.getElementById('workerNameModal');
+  modal.style.display = 'block';
+  renderWorkerNames();
+}
+
+// Close worker modal
+function closeWorkerModal() {
+  const modal = document.getElementById('workerNameModal');
+  modal.style.display = 'none';
+}
+
+// Initialize worker name modal (runs after DOMContentLoaded)
+setTimeout(function() {
+  const workerInput = document.getElementById('Machine Operator');
+  const closeModalBtn = document.getElementById('closeWorkerModal');
+  const manualEntryBtn = document.getElementById('manualEntryBtn');
+  
+  // Open modal when clicking on worker input
+  if (workerInput) {
+    // Prevent default keyboard from showing on mobile
+    workerInput.addEventListener('click', function(e) {
+      e.preventDefault();
+      if (workerNamesData.length > 0) {
+        openWorkerModal();
+      }
+    });
+    
+    // Also open on focus
+    workerInput.addEventListener('focus', function(e) {
+      e.preventDefault();
+      if (workerNamesData.length > 0) {
+        openWorkerModal();
+      }
+    });
+    
+    // Prevent keyboard from showing
+    workerInput.addEventListener('touchstart', function(e) {
+      if (workerNamesData.length > 0) {
+        e.preventDefault();
+        openWorkerModal();
+      }
+    });
+  }
+  
+  // Close modal button
+  if (closeModalBtn) {
+    closeModalBtn.addEventListener('click', closeWorkerModal);
+  }
+  
+  // Manual entry button - close modal and let user type
+  if (manualEntryBtn) {
+    manualEntryBtn.addEventListener('click', function() {
+      closeWorkerModal();
+      if (workerInput) {
+        workerInput.removeAttribute('list');
+        workerInput.readOnly = false;
+        workerInput.style.cursor = 'text';
+        workerInput.focus();
+      }
+    });
+  }
+  
+  // Close modal when clicking outside
+  const modal = document.getElementById('workerNameModal');
+  if (modal) {
+    modal.addEventListener('click', function(e) {
+      if (e.target === modal) {
+        closeWorkerModal();
+      }
+    });
+  }
+}, 100);
 
 // Updates cycle times for pressDB and kensaDB
 function updateCycleTime() {
