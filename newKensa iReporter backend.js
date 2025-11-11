@@ -2424,6 +2424,14 @@ function selectWorkerName(name) {
   // Add to recent workers
   addToRecentWorkers(name);
   
+  // Save to localStorage (programmatic changes don't trigger 'input' event)
+  const pageName = location.pathname.split('/').pop();
+  const selected工場 = document.getElementById('selected工場')?.value;
+  if (pageName && selected工場) {
+    const key = `${pageName}_${selected工場}_${input.id || input.name}`;
+    localStorage.setItem(key, name);
+  }
+  
   // Close modal
   closeWorkerModal();
   
