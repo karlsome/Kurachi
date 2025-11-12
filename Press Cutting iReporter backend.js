@@ -965,18 +965,12 @@ document.addEventListener("DOMContentLoaded", function() {
 
 //Get worker list
 document.addEventListener("DOMContentLoaded", async function() {
-  // It's good practice to define serverURL if it's not already globally available.
-  // For this example, I'll assume it's defined elsewhere.
-  // const serverURL = "YOUR_SERVER_URL_HERE"; // Example: "http://localhost:3000" or "https://your-api.com"
-
   const selectedFactoryInput = document.getElementById("selected工場");
   const selectedFactory = selectedFactoryInput.value;
 
-  const machineOperatorDatalist = document.getElementById("machine-operator-suggestions");
   const kensaDropdown = document.getElementById("kensa-dropdown");
 
   // Clear previous options in case this function is called multiple times
-  machineOperatorDatalist.innerHTML = "";
   kensaDropdown.innerHTML = "";
 
   // Add a default/placeholder option for the kensa-dropdown
@@ -992,21 +986,17 @@ document.addEventListener("DOMContentLoaded", async function() {
       if (!response.ok) {
         const errorText = await response.text();
         console.error("Failed to fetch worker names. Status:", response.status, "Response:", errorText);
-        // Display a user-friendly error, e.g., by setting textContent of an error display element
-        // kensaDropdown.options[0].textContent = "作業者読込失敗"; // "Failed to load workers"
         throw new Error(`Failed to fetch worker names. Status: ${response.status}`);
       }
 
       const workerNames = await response.json();
 
       if (workerNames && workerNames.length > 0) {
+        // Store worker names for modal
+        workerNamesData = workerNames;
+        
+        // Populate the select dropdown for kensa-dropdown
         workerNames.forEach(name => {
-          // Populate the datalist for machine operator suggestions
-          const datalistOption = document.createElement("option");
-          datalistOption.value = name;
-          machineOperatorDatalist.appendChild(datalistOption);
-
-          // Populate the select dropdown for kensa-dropdown
           const dropdownOption = document.createElement("option");
           dropdownOption.value = name; // Set the value of the option
           dropdownOption.textContent = name; // Set the display text of the option
@@ -1015,7 +1005,6 @@ document.addEventListener("DOMContentLoaded", async function() {
       } else {
         // Handle case where workerNames might be empty or undefined
         console.warn("No worker names returned for the selected factory or an issue with the response format.");
-        // kensaDropdown.options[0].textContent = "作業者なし"; // "No workers available"
       }
 
     } catch (error) {
