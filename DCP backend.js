@@ -2371,6 +2371,16 @@ function selectWorkerName(name) {
   // Add to recent workers
   addToRecentWorkers(name);
   
+  // Save to localStorage (programmatic changes don't trigger 'input' event)
+  const pageName = location.pathname.split('/').pop();
+  const currentSelectedFactory = document.getElementById('selected工場')?.value;
+  const currentSelectedMachine = getQueryParam('machine');
+  if (pageName && currentSelectedFactory && currentSelectedMachine) {
+    const key = `${pageName}_${currentSelectedFactory}_${currentSelectedMachine}_${input.id || input.name}`;
+    localStorage.setItem(key, name);
+    console.log('Worker name saved to localStorage:', key, '=', name);
+  }
+  
   // Close modal
   closeWorkerModal();
   
@@ -2700,23 +2710,32 @@ function updateCycleTime() {
     document.getElementById("cycleTime").value = cycleTime.toFixed(2);
   }
 
-  // KensaDB cycle time
-  const kStartTime = document.getElementById("KStart Time").value;
-  const kEndTime = document.getElementById("KEnd Time").value;
-  const kQuantity = parseInt(document.getElementById("total").value, 10) || 1; // Total quantity for kensaDB
+  // KensaDB cycle time (only if elements exist)
+  const kStartTimeElement = document.getElementById("KStart Time");
+  const kEndTimeElement = document.getElementById("KEnd Time");
+  const totalElement = document.getElementById("total");
+  
+  if (kStartTimeElement && kEndTimeElement && totalElement) {
+    const kStartTime = kStartTimeElement.value;
+    const kEndTime = kEndTimeElement.value;
+    const kQuantity = parseInt(totalElement.value, 10) || 1; // Total quantity for kensaDB
 
-  if (kStartTime && kEndTime) {
-    const kStart = new Date(`1970-01-01T${kStartTime}:00Z`);
-    const kEnd = new Date(`1970-01-01T${kEndTime}:00Z`);
+    if (kStartTime && kEndTime) {
+      const kStart = new Date(`1970-01-01T${kStartTime}:00Z`);
+      const kEnd = new Date(`1970-01-01T${kEndTime}:00Z`);
 
-    // Calculate difference in milliseconds and convert to seconds
-    const kDiffInSeconds = (kEnd - kStart) / 1000;
+      // Calculate difference in milliseconds and convert to seconds
+      const kDiffInSeconds = (kEnd - kStart) / 1000;
 
-    // Calculate cycle time (in seconds per item)
-    const cycleTimeK = kDiffInSeconds / kQuantity;
+      // Calculate cycle time (in seconds per item)
+      const cycleTimeK = kDiffInSeconds / kQuantity;
 
-    // Update the Cycle Time K field in the form
-    document.getElementById("cycleTimeK").value = cycleTimeK.toFixed(2);
+      // Update the Cycle Time K field in the form
+      const cycleTimeKElement = document.getElementById("cycleTimeK");
+      if (cycleTimeKElement) {
+        cycleTimeKElement.value = cycleTimeK.toFixed(2);
+      }
+    }
   }
 }
 
@@ -4327,7 +4346,8 @@ document.getElementById('submit').addEventListener('click', async (event) => {
 
     const hatsumono = document.getElementById("hatsumonoLabel").textContent;
     const atomono = document.getElementById("atomonoLabel").textContent;
-    const isToggleChecked = document.getElementById('enable-inputs').checked;
+    const enableInputsElement = document.getElementById('enable-inputs');
+    const isToggleChecked = enableInputsElement ? enableInputsElement.checked : false;
 
     const alertSound = document.getElementById('alert-sound');
     const scanAlertModal = document.getElementById('scanAlertModal');
