@@ -5687,6 +5687,118 @@ app.post("/verifyLeader", async (req, res) => {
 });
 
 
+// Create new worker
+app.post("/createWorker", async (req, res) => {
+  const { Name, "ID number": idNumber, 部署, Picture } = req.body;
+
+  // Validate required fields
+  if (!Name) {
+    console.log("missing required fields!!!:", { Name, idNumber, 部署, Picture });
+    return res.status(400).json({ error: "Name is required" });
+  }
+
+  try {
+    await client.connect();
+    const db = client.db("Sasaki_Coating_MasterDB");
+    const workerDB = db.collection("workerDB");
+
+    // Check if worker name already exists (optional, depending on your requirements)
+    const existing = await workerDB.findOne({ Name: Name });
+    if (existing) {
+      return res.status(400).json({ error: "Worker name already exists" });
+    }
+
+    // Prepare worker data
+    const workerData = {
+      Name: Name,
+      "ID number": idNumber || "",
+      部署: 部署 || "",
+      Picture: Picture || "",
+      createdAt: new Date()
+    };
+
+    // Insert worker
+    await workerDB.insertOne(workerData);
+
+    console.log("✅ New worker created:", Name);
+    res.json({ message: "Worker created successfully" });
+  } catch (err) {
+    console.error("❌ Error creating worker:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+
+// Update worker
+app.post("/updateWorker", async (req, res) => {
+  const { workerId, Name, "ID number": idNumber, 部署, Picture } = req.body;
+
+  if (!workerId) {
+    console.log("❌ Missing workerId:", { workerId, Name, idNumber, 部署, Picture });
+    return res.status(400).json({ error: "Worker ID is required" });
+  }
+
+  try {
+    await client.connect();
+    const db = client.db("Sasaki_Coating_MasterDB");
+    const workerDB = db.collection("workerDB");
+
+    const updateFields = {
+      ...(Name && { Name }),
+      ...(idNumber !== undefined && { "ID number": idNumber }),
+      ...(部署 !== undefined && { 部署 }),
+      ...(Picture !== undefined && { Picture }),
+      updatedAt: new Date()
+    };
+
+    console.log("Update operation:", updateFields);
+
+    const result = await workerDB.updateOne(
+      { _id: new ObjectId(workerId) },
+      { $set: updateFields }
+    );
+
+    if (result.modifiedCount === 0) {
+      return res.status(404).json({ error: "Worker not found or no changes made" });
+    }
+
+    console.log(`✅ Worker ${workerId} updated successfully`);
+    res.json({ message: "Worker updated successfully" });
+  } catch (err) {
+    console.error("Error updating worker:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+
+// Delete worker
+app.post("/deleteWorker", async (req, res) => {
+  const { workerId } = req.body;
+
+  if (!workerId) {
+    return res.status(400).json({ error: "Worker ID is required" });
+  }
+
+  try {
+    await client.connect();
+    const db = client.db("Sasaki_Coating_MasterDB");
+    const workerDB = db.collection("workerDB");
+
+    const result = await workerDB.deleteOne({ _id: new ObjectId(workerId) });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ error: "Worker not found" });
+    }
+
+    console.log(`✅ Worker ${workerId} deleted successfully`);
+    res.json({ message: "Worker deleted successfully" });
+  } catch (err) {
+    console.error("Error deleting worker:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+
 // Delete selected records from submitted DB (masterUser only)
 app.post('/deleteCustomerSubmittedRecords', async (req, res) => {
     try {
