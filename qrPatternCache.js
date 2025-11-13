@@ -1,6 +1,12 @@
 // IndexedDB Cache System for QR Learning Patterns
 // This handles local storage of customer-specific QR patterns with hash validation
 
+// Global configuration - Change server URL here
+const QR_PATTERN_CONFIG = {
+  serverURL: "https://kurachi.onrender.com"
+  // Alternative: "http://localhost:3000"
+};
+
 class QRPatternCache {
   constructor() {
     this.dbName = 'QRPatternCacheDB';
@@ -337,12 +343,6 @@ class QRPatternSync {
     }
   }
 }
-
-// Global configuration
-const QR_PATTERN_CONFIG = {
-  serverURL: "http://localhost:3000"
-  // Alternative: "https://kurachi.onrender.com"
-};
 
 // Global instance
 let qrPatternSync = null;

@@ -389,7 +389,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // Initialize QR Pattern System
   setTimeout(async () => {
     try {
-      await initQRPatternSystem(); // Use global config instead of hardcoded URL
+      await initQRPatternSystem(serverURL); // Pass the serverURL from labelComparator.js
       console.log('QR Pattern System initialized successfully');
       
       // Sync patterns for all customers on startup
