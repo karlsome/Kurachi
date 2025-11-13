@@ -36,41 +36,66 @@
       border-radius: 1rem;
       max-width: 550px;
       width: 90%;
-      max-height: 90vh;
+      max-height: 95vh;
       text-align: center;
       box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
       display: flex;
       flex-direction: column;
+      box-sizing: border-box;
+    }
+    
+    @media (max-height: 800px) {
+      .modal-content {
+        padding: 1.5rem;
+      }
+      .modal-content h2 {
+        font-size: 1.75rem;
+        margin-bottom: 0.75rem;
+      }
+      .modal-content p {
+        font-size: 0.95rem;
+        margin-bottom: 0.75rem;
+      }
     }
     
     @media (max-height: 700px) {
       .modal-content {
-        padding: 1.5rem;
-        font-size: 0.9rem;
+        padding: 1.25rem;
       }
       .modal-content h2 {
         font-size: 1.5rem;
-        margin-bottom: 0.75rem;
+        margin-bottom: 0.5rem;
+      }
+      .modal-content p {
+        font-size: 0.9rem;
+        margin-bottom: 0.5rem;
       }
       .instruction-step {
-        margin-bottom: 0.5rem;
+        margin-bottom: 0.4rem;
         padding: 0.3rem;
         font-size: 0.85rem;
       }
       .modal-button {
         padding: 0.5rem 1.5rem;
         font-size: 0.9rem;
+        margin-top: 0.75rem;
+      }
+      .space-y-3 {
+        gap: 0.4rem;
       }
     }
     
-    @media (max-height: 550px) {
+    @media (max-height: 600px) {
       .modal-content {
         padding: 1rem;
-        font-size: 0.8rem;
       }
       .modal-content h2 {
         font-size: 1.25rem;
-        margin-bottom: 0.5rem;
+        margin-bottom: 0.4rem;
+      }
+      .modal-content p {
+        font-size: 0.8rem;
+        margin-bottom: 0.4rem;
       }
       .instruction-step {
         margin-bottom: 0.3rem;
@@ -78,13 +103,68 @@
         font-size: 0.75rem;
       }
       .modal-button {
-        padding: 0.4rem 1rem;
-        font-size: 0.8rem;
+        padding: 0.4rem 1.25rem;
+        font-size: 0.85rem;
         margin-top: 0.5rem;
       }
-      .space-y-3 {
-        margin-top: 0.5rem;
-        margin-bottom: 0.5rem;
+    }
+    
+    @media (max-height: 500px) {
+      .modal-content {
+        padding: 0.75rem;
+      }
+      .modal-content h2 {
+        font-size: 1.1rem;
+        margin-bottom: 0.3rem;
+      }
+      .modal-content p {
+        font-size: 0.7rem;
+        margin-bottom: 0.3rem;
+      }
+      .instruction-step {
+        margin-bottom: 0.2rem;
+        padding: 0.2rem;
+        font-size: 0.65rem;
+      }
+      .instruction-step .step-number {
+        width: 1.2rem;
+        height: 1.2rem;
+        font-size: 0.7rem;
+      }
+      .modal-button {
+        padding: 0.35rem 1rem;
+        font-size: 0.75rem;
+        margin-top: 0.4rem;
+      }
+    }
+    
+    @media (max-height: 400px) {
+      .modal-content {
+        padding: 0.5rem;
+      }
+      .modal-content h2 {
+        font-size: 1rem;
+        margin-bottom: 0.25rem;
+      }
+      .modal-content p {
+        font-size: 0.65rem;
+        margin-bottom: 0.25rem;
+      }
+      .instruction-step {
+        margin-bottom: 0.15rem;
+        padding: 0.15rem;
+        font-size: 0.6rem;
+      }
+      .instruction-step .step-number {
+        width: 1rem;
+        height: 1rem;
+        font-size: 0.6rem;
+        margin-right: 0.3rem;
+      }
+      .modal-button {
+        padding: 0.3rem 0.75rem;
+        font-size: 0.7rem;
+        margin-top: 0.3rem;
       }
     }
     
@@ -156,7 +236,6 @@
   <div id="welcomeModal" class="modal-overlay welcome-modal">
     <div class="modal-content">
       <h2 class="text-2xl font-bold text-blue-600 mb-4">QRコード比較ツールへようこそ</h2>
-      <p class="mb-4">このツールでは、お客様QRコードと社内QRコードを比較できます。</p>
       
       <div class="space-y-3 my-6">
         <div class="instruction-step">
