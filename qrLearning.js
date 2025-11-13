@@ -1,8 +1,8 @@
 // QR Learning System JavaScript
 // Handles the learning interface, authentication, pattern collection, and deployment
 
-//const serverURL = "https://kurachi.onrender.com";
-const serverURL = "http://localhost:3000";
+const serverURL = "https://kurachi.onrender.com";
+//const serverURL = "http://localhost:3000";
 
 // State management
 let isAuthenticated = false;
