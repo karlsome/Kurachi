@@ -1028,8 +1028,15 @@ document.addEventListener("DOMContentLoaded", () => {
     console.log(`Comparison complete in ${performance.now() - compareStartTime}ms`);
   }
   
-  // Play the alert sound - using cached element
+  // Play the alert sound - using cached element or fallback
   function playAlertSound() {
+    // Use AudioSystem if available (handles online/offline automatically)
+    if (window.AudioSystem) {
+      window.AudioSystem.playError();
+      return;
+    }
+    
+    // Fallback to original method
     const alertSound = domCache['alert-sound'];
     if (alertSound) {
       // Unmute and play at full volume
@@ -1051,6 +1058,13 @@ document.addEventListener("DOMContentLoaded", () => {
   
   // Play the success sound when QR codes match
   function playSuccessSound() {
+    // Use AudioSystem if available (handles online/offline automatically)
+    if (window.AudioSystem) {
+      window.AudioSystem.playSuccess();
+      return;
+    }
+    
+    // Fallback to original method
     const successSound = domCache['success-sound'];
     if (successSound) {
       // Unmute and play at full volume

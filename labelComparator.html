@@ -6,8 +6,88 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>QRコード比較ツール</title>
   <link rel="stylesheet" href="styles.css">
-  <script src="https://cdn.tailwindcss.com"></script>
   <style>
+    /* Tailwind CSS Base Styles - Inlined for Offline Support */
+    *, ::before, ::after { box-sizing: border-box; border-width: 0; border-style: solid; border-color: #e5e7eb; }
+    ::before, ::after { --tw-content: ''; }
+    html { line-height: 1.5; -webkit-text-size-adjust: 100%; -moz-tab-size: 4; tab-size: 4; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; font-feature-settings: normal; font-variation-settings: normal; }
+    body { margin: 0; line-height: inherit; }
+    h1, h2, p, ul { margin: 0; }
+    h1, h2 { font-size: inherit; font-weight: inherit; }
+    button, input, select, textarea { font-family: inherit; font-size: 100%; font-weight: inherit; line-height: inherit; color: inherit; margin: 0; padding: 0; }
+    button, select { text-transform: none; }
+    button, [type='button'] { -webkit-appearance: button; background-color: transparent; background-image: none; }
+    ul { list-style: none; padding: 0; }
+    textarea { resize: vertical; }
+    ::placeholder { opacity: 1; color: #9ca3af; }
+    audio { display: inline-block; vertical-align: baseline; }
+    [hidden] { display: none; }
+    
+    /* Tailwind Utilities - Inlined */
+    .bg-gray-100 { background-color: #f3f4f6; }
+    .bg-gray-50 { background-color: #f9fafb; }
+    .bg-white { background-color: #ffffff; }
+    .bg-blue-50 { background-color: #eff6ff; }
+    .bg-blue-600 { background-color: #2563eb; }
+    .bg-gray-500 { background-color: #6b7280; }
+    .bg-purple-600 { background-color: #9333ea; }
+    .bg-red-600 { background-color: #dc2626; }
+    .hover\:bg-blue-700:hover { background-color: #1d4ed8; }
+    .hover\:bg-gray-600:hover { background-color: #4b5563; }
+    .hover\:bg-purple-700:hover { background-color: #7e22ce; }
+    .border { border-width: 1px; }
+    .border-gray-300 { border-color: #d1d5db; }
+    .rounded-lg { border-radius: 0.5rem; }
+    .rounded-xl { border-radius: 0.75rem; }
+    .rounded-2xl { border-radius: 1rem; }
+    .flex { display: flex; }
+    .items-center { align-items: center; }
+    .justify-center { justify-content: center; }
+    .font-bold { font-weight: 700; }
+    .font-semibold { font-weight: 600; }
+    .font-medium { font-weight: 500; }
+    .text-xs { font-size: 0.75rem; line-height: 1rem; }
+    .text-sm { font-size: 0.875rem; line-height: 1.25rem; }
+    .text-lg { font-size: 1.125rem; line-height: 1.75rem; }
+    .text-xl { font-size: 1.25rem; line-height: 1.75rem; }
+    .text-2xl { font-size: 1.5rem; line-height: 2rem; }
+    .text-3xl { font-size: 1.875rem; line-height: 2.25rem; }
+    .gap-2 { gap: 0.5rem; }
+    .min-h-screen { min-height: 100vh; }
+    .max-h-64 { max-height: 16rem; }
+    .max-w-2xl { max-width: 42rem; }
+    .w-full { width: 100%; }
+    .mb-2 { margin-bottom: 0.5rem; }
+    .mb-4 { margin-bottom: 1rem; }
+    .mb-6 { margin-bottom: 1.5rem; }
+    .mt-1 { margin-top: 0.25rem; }
+    .mt-4 { margin-top: 1rem; }
+    .mt-6 { margin-top: 1.5rem; }
+    .my-6 { margin-top: 1.5rem; margin-bottom: 1.5rem; }
+    .overflow-y-auto { overflow-y: auto; }
+    .p-2 { padding: 0.5rem; }
+    .p-3 { padding: 0.75rem; }
+    .p-4 { padding: 1rem; }
+    .p-8 { padding: 2rem; }
+    .py-3 { padding-top: 0.75rem; padding-bottom: 0.75rem; }
+    .shadow-xl { box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1); }
+    .space-y-2 > :not([hidden]) ~ :not([hidden]) { margin-top: 0.5rem; }
+    .space-y-3 > :not([hidden]) ~ :not([hidden]) { margin-top: 0.75rem; }
+    .text-center { text-align: center; }
+    .text-blue-600 { color: #2563eb; }
+    .text-gray-500 { color: #6b7280; }
+    .text-gray-600 { color: #4b5563; }
+    .text-gray-700 { color: #374151; }
+    .text-gray-800 { color: #1f2937; }
+    .text-green-600 { color: #16a34a; }
+    .text-red-600 { color: #dc2626; }
+    .text-white { color: #ffffff; }
+    .transition { transition-property: color, background-color, border-color, text-decoration-color, fill, stroke, opacity, box-shadow, transform, filter, backdrop-filter; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); transition-duration: 150ms; }
+    .duration-200 { transition-duration: 200ms; }
+    .block { display: block; }
+    .resize-none { resize: none; }
+    
+    /* Custom Styles */
     @keyframes flash-red {
       0%, 100% { background-color: rgba(255, 0, 0, 0.1); }
       50% { background-color: rgba(255, 0, 0, 0.8); }
@@ -224,6 +304,94 @@
       font-weight: bold;
       font-size: 0.875rem;
     }
+    
+    /* Custom Dropdown Styles for Offline Support */
+    .custom-dropdown {
+      position: relative;
+      width: 100%;
+    }
+    
+    .custom-dropdown-button {
+      width: 100%;
+      padding: 0.75rem;
+      border: 1px solid #d1d5db;
+      border-radius: 0.5rem;
+      background: white;
+      text-align: left;
+      font-size: 1.125rem;
+      font-weight: 500;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      transition: all 0.2s;
+    }
+    
+    .custom-dropdown-button:hover {
+      border-color: #3b82f6;
+      background: #f9fafb;
+    }
+    
+    .custom-dropdown-button:active {
+      background: #f3f4f6;
+    }
+    
+    .custom-dropdown-arrow {
+      transition: transform 0.2s;
+      font-size: 0.75rem;
+    }
+    
+    .custom-dropdown.open .custom-dropdown-arrow {
+      transform: rotate(180deg);
+    }
+    
+    .custom-dropdown-menu {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      margin-top: 0.25rem;
+      background: white;
+      border: 1px solid #d1d5db;
+      border-radius: 0.5rem;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+      z-index: 100;
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.3s ease-out;
+    }
+    
+    .custom-dropdown.open .custom-dropdown-menu {
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    
+    .custom-dropdown-option {
+      padding: 0.75rem;
+      cursor: pointer;
+      font-size: 1.125rem;
+      font-weight: 500;
+      transition: background 0.15s;
+      border-bottom: 1px solid #f3f4f6;
+    }
+    
+    .custom-dropdown-option:last-child {
+      border-bottom: none;
+    }
+    
+    .custom-dropdown-option:hover {
+      background: #eff6ff;
+    }
+    
+    .custom-dropdown-option:active {
+      background: #dbeafe;
+    }
+    
+    .custom-dropdown-option.selected {
+      background: #3b82f6;
+      color: white;
+      font-weight: 600;
+    }
   </style>
 </head>
 <body class="bg-gray-100 min-h-screen flex items-center justify-center p-4 text-lg">
@@ -276,12 +444,25 @@
     
     <!-- Customer Selection Dropdown -->
     <div class="mb-6">
-      <label for="customerSelect" class="block text-sm font-semibold text-gray-600 mb-2">お客様選択</label>
-      <select id="customerSelect" class="w-full p-3 border rounded-lg bg-white text-lg font-medium">
-        <option value="tn">ティーエヌ製作所</option>
-        <option value="toyota">トヨタ紡織</option>
-        <option value="kinuura">衣浦</option>
-      </select>
+      <label class="block text-sm font-semibold text-gray-600 mb-2">お客様選択</label>
+      <div class="custom-dropdown" id="customerDropdown">
+        <button type="button" class="custom-dropdown-button" id="customerDropdownButton">
+          <span id="customerDropdownSelected">ティーエヌ製作所</span>
+          <span class="custom-dropdown-arrow">▼</span>
+        </button>
+        <div class="custom-dropdown-menu" id="customerDropdownMenu">
+          <div class="custom-dropdown-option selected" data-value="tn">ティーエヌ製作所</div>
+          <div class="custom-dropdown-option" data-value="toyota">トヨタ紡織</div>
+          <div class="custom-dropdown-option" data-value="kinuura">衣浦</div>
+        </div>
+      </div>
+      <!-- Hidden input to maintain compatibility with existing JS -->
+      <input type="hidden" id="customerSelect" value="tn">
+    </div>
+    
+    <!-- Online/Offline Status Indicator -->
+    <div id="onlineStatus" class="text-center text-xs font-medium mb-2 p-2 rounded-lg">
+      <span id="onlineStatusText"></span>
     </div>
     
     <!-- Scan Status -->
@@ -310,7 +491,7 @@
         class="flex-1 bg-gray-500 hover:bg-gray-600 text-white font-semibold py-3 rounded-xl transition duration-200">
         クリア
       </button>
-      <button onclick="openLearningMode()"
+      <button id="learningModeBtn" onclick="openLearningMode()"
         class="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-semibold py-3 rounded-xl transition duration-200">
         学習モード
       </button>
@@ -324,6 +505,285 @@
     </div>
   </div>
 
+  <script>
+    // Audio System with Offline Fallback
+    (function() {
+      const AudioSystem = {
+        online: navigator.onLine,
+        audioContext: null,
+        
+        init: function() {
+          // Update online status
+          window.addEventListener('online', () => {
+            this.online = true;
+            console.log('Audio: Online mode - using MP3 files');
+          });
+          
+          window.addEventListener('offline', () => {
+            this.online = false;
+            console.log('Audio: Offline mode - using generated tones');
+          });
+          
+          // Initialize Web Audio API for offline sounds
+          try {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            this.audioContext = new AudioContext();
+          } catch (e) {
+            console.error('Web Audio API not supported:', e);
+          }
+        },
+        
+        playSuccess: function() {
+          if (this.online) {
+            // Try to play MP3 file
+            const audio = document.getElementById('success-sound');
+            if (audio) {
+              audio.muted = false;
+              audio.volume = 1.0;
+              audio.currentTime = 0;
+              audio.play().catch(err => {
+                console.log('MP3 playback failed, using fallback tone');
+                this.playSuccessTone();
+              });
+            } else {
+              this.playSuccessTone();
+            }
+          } else {
+            // Use generated tone for offline
+            this.playSuccessTone();
+          }
+        },
+        
+        playError: function() {
+          if (this.online) {
+            // Try to play MP3 file
+            const audio = document.getElementById('alert-sound');
+            if (audio) {
+              audio.muted = false;
+              audio.volume = 0.3;
+              audio.currentTime = 0;
+              audio.play().catch(err => {
+                console.log('MP3 playback failed, using fallback tone');
+                this.playErrorTone();
+              });
+            } else {
+              this.playErrorTone();
+            }
+          } else {
+            // Use generated tone for offline
+            this.playErrorTone();
+          }
+        },
+        
+        playSuccessTone: function() {
+          if (!this.audioContext) return;
+          
+          const ctx = this.audioContext;
+          const now = ctx.currentTime;
+          
+          // Create pleasant success sound: two ascending tones
+          // First tone: C (523.25 Hz)
+          const osc1 = ctx.createOscillator();
+          const gain1 = ctx.createGain();
+          osc1.connect(gain1);
+          gain1.connect(ctx.destination);
+          
+          osc1.type = 'sine';
+          osc1.frequency.value = 523.25;
+          gain1.gain.setValueAtTime(0, now);
+          gain1.gain.linearRampToValueAtTime(0.3, now + 0.01);
+          gain1.gain.linearRampToValueAtTime(0, now + 0.15);
+          
+          osc1.start(now);
+          osc1.stop(now + 0.15);
+          
+          // Second tone: E (659.25 Hz) - slightly delayed
+          const osc2 = ctx.createOscillator();
+          const gain2 = ctx.createGain();
+          osc2.connect(gain2);
+          gain2.connect(ctx.destination);
+          
+          osc2.type = 'sine';
+          osc2.frequency.value = 659.25;
+          gain2.gain.setValueAtTime(0, now + 0.1);
+          gain2.gain.linearRampToValueAtTime(0.3, now + 0.11);
+          gain2.gain.linearRampToValueAtTime(0, now + 0.3);
+          
+          osc2.start(now + 0.1);
+          osc2.stop(now + 0.3);
+        },
+        
+        playErrorTone: function() {
+          if (!this.audioContext) return;
+          
+          const ctx = this.audioContext;
+          const now = ctx.currentTime;
+          
+          // Create alarming error sound: three buzzer-like pulses
+          for (let i = 0; i < 3; i++) {
+            const startTime = now + (i * 0.25);
+            
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            
+            osc.type = 'sawtooth'; // Harsher sound for error
+            osc.frequency.value = 200; // Low frequency for alert
+            
+            gain.gain.setValueAtTime(0, startTime);
+            gain.gain.linearRampToValueAtTime(0.2, startTime + 0.01);
+            gain.gain.linearRampToValueAtTime(0, startTime + 0.15);
+            
+            osc.start(startTime);
+            osc.stop(startTime + 0.15);
+          }
+        }
+      };
+      
+      // Initialize audio system
+      AudioSystem.init();
+      
+      // Make it globally available
+      window.AudioSystem = AudioSystem;
+    })();
+    
+    // Custom Dropdown Logic for Offline Support
+    (function() {
+      const dropdown = document.getElementById('customerDropdown');
+      const button = document.getElementById('customerDropdownButton');
+      const menu = document.getElementById('customerDropdownMenu');
+      const selectedText = document.getElementById('customerDropdownSelected');
+      const hiddenInput = document.getElementById('customerSelect');
+      const options = menu.querySelectorAll('.custom-dropdown-option');
+      
+      // Toggle dropdown
+      button.addEventListener('click', function(e) {
+        e.stopPropagation();
+        dropdown.classList.toggle('open');
+      });
+      
+      // Close dropdown when clicking outside
+      document.addEventListener('click', function() {
+        dropdown.classList.remove('open');
+      });
+      
+      // Prevent closing when clicking inside menu
+      menu.addEventListener('click', function(e) {
+        e.stopPropagation();
+      });
+      
+      // Handle option selection
+      options.forEach(function(option) {
+        option.addEventListener('click', function() {
+          const value = this.getAttribute('data-value');
+          const text = this.textContent;
+          
+          // Update selected text
+          selectedText.textContent = text;
+          
+          // Update hidden input
+          hiddenInput.value = value;
+          
+          // Update selected class
+          options.forEach(function(opt) {
+            opt.classList.remove('selected');
+          });
+          this.classList.add('selected');
+          
+          // Close dropdown
+          dropdown.classList.remove('open');
+          
+          // Trigger change event for compatibility with existing code
+          const event = new Event('change', { bubbles: true });
+          hiddenInput.dispatchEvent(event);
+          
+          // Save to form data (matching existing functionality)
+          if (typeof saveFormData === 'function') {
+            const customerQR = document.getElementById('customerQR');
+            const ourQR = document.getElementById('ourQR');
+            saveFormData({
+              customerQR: customerQR ? customerQR.value : '',
+              ourQR: ourQR ? ourQR.value : '',
+              customerType: value
+            });
+          }
+          
+          console.log('Customer type changed to:', value);
+        });
+      });
+      
+      // Restore saved customer type on page load
+      window.addEventListener('DOMContentLoaded', function() {
+        setTimeout(function() {
+          if (typeof loadFormData === 'function') {
+            const savedFormData = loadFormData();
+            if (savedFormData.customerType) {
+              const savedOption = menu.querySelector('[data-value="' + savedFormData.customerType + '"]');
+              if (savedOption) {
+                savedOption.click();
+              }
+            }
+          }
+        }, 100);
+      });
+    })();
+    
+    // Offline Mode Handler
+    (function() {
+      const learningModeBtn = document.getElementById('learningModeBtn');
+      const onlineStatus = document.getElementById('onlineStatus');
+      const onlineStatusText = document.getElementById('onlineStatusText');
+      
+      function updateOfflineUI() {
+        const isOnline = navigator.onLine;
+        
+        // Update learning mode button
+        if (learningModeBtn) {
+          if (isOnline) {
+            learningModeBtn.disabled = false;
+            learningModeBtn.style.opacity = '1';
+            learningModeBtn.style.cursor = 'pointer';
+            learningModeBtn.title = '';
+          } else {
+            learningModeBtn.disabled = true;
+            learningModeBtn.style.opacity = '0.5';
+            learningModeBtn.style.cursor = 'not-allowed';
+            learningModeBtn.title = 'オフラインでは使用できません';
+          }
+        }
+        
+        // Update online/offline status indicator
+        if (onlineStatus && onlineStatusText) {
+          if (isOnline) {
+            onlineStatus.style.backgroundColor = '#d1fae5';
+            onlineStatus.style.color = '#065f46';
+            onlineStatusText.textContent = '🟢 オンライン (データベース同期中)';
+          } else {
+            onlineStatus.style.backgroundColor = '#fee2e2';
+            onlineStatus.style.color = '#991b1b';
+            onlineStatusText.textContent = '🔴 オフライン (ローカルモード - データは後で同期されます)';
+          }
+        }
+      }
+      
+      // Update UI on load
+      updateOfflineUI();
+      
+      // Update UI when online/offline status changes
+      window.addEventListener('online', updateOfflineUI);
+      window.addEventListener('offline', updateOfflineUI);
+      
+      // Override openLearningMode function
+      window.openLearningMode = function() {
+        if (!navigator.onLine) {
+          alert('学習モードはオンライン時のみ使用できます。');
+          return;
+        }
+        window.location.href = 'qrLearning.html';
+      };
+    })();
+  </script>
   <script src="qrPatternCache.js"></script>
   <script src="labelComparator.js"></script>
 </body>
