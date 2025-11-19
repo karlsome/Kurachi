@@ -731,12 +731,13 @@
     
     // Offline Mode Handler
     (function() {
-      const learningModeBtn = document.getElementById('learningModeBtn');
-      const onlineStatus = document.getElementById('onlineStatus');
-      const onlineStatusText = document.getElementById('onlineStatusText');
-      
       function updateOfflineUI() {
         const isOnline = navigator.onLine;
+        
+        // Get elements fresh each time to ensure they exist
+        const learningModeBtn = document.getElementById('learningModeBtn');
+        const onlineStatus = document.getElementById('onlineStatus');
+        const onlineStatusText = document.getElementById('onlineStatusText');
         
         // Update learning mode button
         if (learningModeBtn) {
@@ -765,10 +766,17 @@
             onlineStatusText.textContent = '🔴 オフライン (ローカルモード - データは後で同期されます)';
           }
         }
+        
+        console.log('Offline UI updated - Online status:', isOnline);
       }
       
-      // Update UI on load
-      updateOfflineUI();
+      // Update UI when DOM is ready
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', updateOfflineUI);
+      } else {
+        // DOM already loaded, update immediately
+        updateOfflineUI();
+      }
       
       // Update UI when online/offline status changes
       window.addEventListener('online', updateOfflineUI);
