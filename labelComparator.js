@@ -279,6 +279,21 @@ function scheduleBackgroundUpload() {
   }, 0);
 }
 
+// Function to update online status (can be called externally)
+window.updateOnlineStatus = function(online) {
+  isOnline = online;
+  console.log('Online status updated to:', isOnline);
+  
+  if (isOnline && pendingLogs.length > 0 && !uploadQueueProcessing) {
+    console.log(`Scheduling upload of ${pendingLogs.length} pending logs`);
+    setTimeout(() => {
+      scheduleBackgroundUpload();
+    }, 1000);
+  } else if (!isOnline) {
+    uploadQueueProcessing = false;
+  }
+};
+
 // Monitor network status
 window.addEventListener('online', () => {
   isOnline = true;
@@ -299,6 +314,21 @@ window.addEventListener('offline', () => {
   
   // Set flag to false since uploads can't continue
   uploadQueueProcessing = false;
+});
+
+// Listen for manual offline mode changes from the UI
+window.addEventListener('manualOfflineModeChanged', (event) => {
+  isOnline = event.detail.isOnline;
+  console.log('Manual offline mode changed, isOnline now:', isOnline);
+  
+  if (isOnline && pendingLogs.length > 0 && !uploadQueueProcessing) {
+    console.log(`Resuming uploads after manual mode change`);
+    setTimeout(() => {
+      scheduleBackgroundUpload();
+    }, 500);
+  } else if (!isOnline) {
+    uploadQueueProcessing = false;
+  }
 });
 
   // Pre-initialize DOM elements

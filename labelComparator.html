@@ -461,8 +461,11 @@
     </div>
     
     <!-- Online/Offline Status Indicator -->
-    <div id="onlineStatus" class="text-center text-xs font-medium mb-2 p-2 rounded-lg">
+    <div id="onlineStatus" class="text-center text-xs font-medium mb-2 p-2 rounded-lg" style="display: flex; align-items: center; justify-content: center; gap: 0.5rem;">
       <span id="onlineStatusText"></span>
+      <button id="toggleOfflineBtn" onclick="toggleOfflineMode()" style="padding: 0.25rem 0.75rem; border-radius: 0.375rem; font-size: 0.75rem; font-weight: 600; border: none; cursor: pointer; transition: all 0.2s;">
+        オフラインモード切替
+      </button>
     </div>
     
     <!-- Scan Status -->
@@ -731,13 +734,26 @@
     
     // Offline Mode Handler
     (function() {
+      // Manual offline mode override - stored in localStorage
+      let manualOfflineMode = localStorage.getItem('manualOfflineMode') === 'true';
+      
+      function isOfflineMode() {
+        // If manual offline mode is enabled, always return false for isOnline
+        if (manualOfflineMode) {
+          return true;
+        }
+        return !navigator.onLine;
+      }
+      
       function updateOfflineUI() {
-        const isOnline = navigator.onLine;
+        const offline = isOfflineMode();
+        const isOnline = !offline;
         
         // Get elements fresh each time to ensure they exist
         const learningModeBtn = document.getElementById('learningModeBtn');
         const onlineStatus = document.getElementById('onlineStatus');
         const onlineStatusText = document.getElementById('onlineStatusText');
+        const toggleBtn = document.getElementById('toggleOfflineBtn');
         
         // Update learning mode button
         if (learningModeBtn) {
@@ -759,16 +775,53 @@
           if (isOnline) {
             onlineStatus.style.backgroundColor = '#d1fae5';
             onlineStatus.style.color = '#065f46';
-            onlineStatusText.textContent = '🟢 オンライン (データベース同期中)';
+            onlineStatusText.textContent = manualOfflineMode ? 
+              '🟢 オンライン (手動オフラインモード解除)' : 
+              '🟢 オンライン (データベース同期中)';
           } else {
             onlineStatus.style.backgroundColor = '#fee2e2';
             onlineStatus.style.color = '#991b1b';
-            onlineStatusText.textContent = '🔴 オフライン (ローカルモード - データは後で同期されます)';
+            onlineStatusText.textContent = manualOfflineMode ? 
+              '🔴 手動オフラインモード (ローカルのみ)' :
+              '🔴 オフライン (ローカルモード - データは後で同期されます)';
           }
         }
         
-        console.log('Offline UI updated - Online status:', isOnline);
+        // Update toggle button style
+        if (toggleBtn) {
+          if (manualOfflineMode) {
+            toggleBtn.style.backgroundColor = '#22c55e';
+            toggleBtn.style.color = 'white';
+            toggleBtn.textContent = 'オンラインに戻す';
+          } else {
+            toggleBtn.style.backgroundColor = '#6b7280';
+            toggleBtn.style.color = 'white';
+            toggleBtn.textContent = 'オフラインモード';
+          }
+        }
+        
+        console.log('Offline UI updated - Manual offline:', manualOfflineMode, 'Navigator online:', navigator.onLine, 'Effective offline:', offline);
+        
+        // Update the global isOnline variable in labelComparator.js if it exists
+        if (typeof window.updateOnlineStatus === 'function') {
+          window.updateOnlineStatus(isOnline);
+        }
       }
+      
+      // Toggle offline mode manually
+      window.toggleOfflineMode = function() {
+        manualOfflineMode = !manualOfflineMode;
+        localStorage.setItem('manualOfflineMode', manualOfflineMode.toString());
+        console.log('Manual offline mode toggled:', manualOfflineMode);
+        
+        // Update UI immediately
+        updateOfflineUI();
+        
+        // Trigger custom event for labelComparator.js to react
+        window.dispatchEvent(new CustomEvent('manualOfflineModeChanged', { 
+          detail: { isOnline: !manualOfflineMode } 
+        }));
+      };
       
       // Update UI when DOM is ready
       if (document.readyState === 'loading') {
@@ -784,7 +837,7 @@
       
       // Override openLearningMode function
       window.openLearningMode = function() {
-        if (!navigator.onLine) {
+        if (isOfflineMode()) {
           alert('学習モードはオンライン時のみ使用できます。');
           return;
         }
