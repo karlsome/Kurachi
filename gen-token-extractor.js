@@ -12,8 +12,19 @@ const CREDS = {
 async function extractGENTokens() {
     console.log('🚀 Starting GEN token extraction...');
     
+<<<<<<< HEAD
     // Use the same robust browser launch logic from test.js
     const launchProfiles = [
+=======
+    // Browser launch logic with Render.com support
+    const isRender = process.env.RENDER === 'true';
+    
+    const launchProfiles = isRender ? [
+        // Render-specific configuration (headless only)
+        { desc: 'bundled Chromium (headless) for Render', opts: { headless: true } }
+    ] : [
+        // Local development profiles
+>>>>>>> f00bbfd (Merge main branch and add GEN token extraction functionality)
         { desc: 'system Chrome (headless:new)', opts: { channel: 'chrome', headless: 'new' } },
         { desc: 'bundled Chromium (headless:new)', opts: { headless: 'new' } },
         { desc: 'system Chrome (headed)', opts: { channel: 'chrome', headless: false } },
@@ -26,7 +37,11 @@ async function extractGENTokens() {
             console.log('🧪 Launching', p.desc);
             browser = await puppeteer.launch({
                 ...p.opts,
+<<<<<<< HEAD
                 dumpio: true,
+=======
+                dumpio: !isRender, // Reduce logs on Render
+>>>>>>> f00bbfd (Merge main branch and add GEN token extraction functionality)
                 args: baseArgs()
             });
             console.log('✅ Launched with', p.desc);

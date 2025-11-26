@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Maintenance Image Upload Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.4);
+        }
+        .modal-content {
+            background-color: #fefefe;
+            margin: 5% auto;
+            padding: 20px;
+            border: 1px solid #888;
+            width: 80%;
+            max-width: 600px;
+            border-radius: 10px;
+        }
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        .close:hover {
+            color: black;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input, textarea {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        .camera-container {
+            margin: 20px 0;
+        }
+        .camera-preview {
+            width: 100%;
+            max-width: 400px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+        }
+        .captured-photos {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .photo-item {
+            position: relative;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .photo-item img {
+            width: 120px;
+            height: 90px;
+            object-fit: cover;
+        }
+        .photo-item .remove-btn {
+            position: absolute;
+            top: 2px;
+            right: 2px;
+            background: red;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        .danger {
+            background: #f44336;
+        }
+        .danger:hover {
+            background: #da190b;
+        }
+        .debug-section {
+            background: #f9f9f9;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        .debug-section h3 {
+            margin-top: 0;
+        }
+        .uploaded-links {
+            margin-top: 20px;
+        }
+        .uploaded-links a {
+            display: block;
+            margin: 5px 0;
+            color: #007bff;
+            text-decoration: none;
+        }
+        .uploaded-links a:hover {
+            text-decoration: underline;
+        }
+        .base64-preview {
+            max-height: 100px;
+            overflow-y: auto;
+            background: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+            word-break: break-all;
+        }
+    </style>
+</head>
+<body>
+    <h1>Maintenance Image Upload Test</h1>
+    
+    <button onclick="openMaintenanceModal()">Start Maintenance Record</button>
+    
+    <div class="debug-section">
+        <h3>Debug Information</h3>
+        <div id="debugInfo">Ready for testing...</div>
+    </div>
+    
+    <div class="uploaded-links">
+        <h3>Uploaded Image Links</h3>
+        <div id="uploadedLinks">No images uploaded yet...</div>
+    </div>
+
+    <!-- Maintenance Modal -->
+    <div id="maintenanceModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeMaintenanceModal()">&times;</span>
+            <h2>Maintenance Record</h2>
+            
+            <div class="form-group">
+                <label for="startTime">Start Time:</label>
+                <input type="time" id="startTime" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="endTime">End Time:</label>
+                <input type="time" id="endTime" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="comment">Comment:</label>
+                <textarea id="comment" rows="3" placeholder="Enter maintenance details..."></textarea>
+            </div>
+            
+            <div class="camera-container">
+                <h3>Take Photos (Max 5)</h3>
+                <video id="cameraPreview" class="camera-preview" autoplay playsinline></video>
+                <br>
+                <button onclick="startCamera()">Start Camera</button>
+                <button onclick="capturePhoto()">Capture Photo</button>
+                <button onclick="stopCamera()" class="danger">Stop Camera</button>
+                
+                <div class="captured-photos" id="capturedPhotos"></div>
+            </div>
+            
+            <div class="debug-section">
+                <h4>Base64 Preview (First 200 chars of last captured image)</h4>
+                <div id="base64Preview" class="base64-preview">No image captured yet...</div>
+            </div>
+            
+            <button onclick="saveMaintenanceRecord()">Save Maintenance Record</button>
+            <button onclick="closeMaintenanceModal()" class="danger">Cancel</button>
+        </div>
+    </div>
+
+    <script>
+        let stream = null;
+        let capturedImages = [];
+        
+        // Test configuration
+        const TEST_CONFIG = {
+            factory: "小瀬",
+            machine: "testing",
+            worker: "TestUser",
+            sebanggo: "TEST001",
+            date: new Date().toISOString().split('T')[0]
+        };
+        
+        function log(message) {
+            console.log(message);
+            const debugDiv = document.getElementById('debugInfo');
+            debugDiv.innerHTML += '<div>' + new Date().toLocaleTimeString() + ': ' + message + '</div>';
+            debugDiv.scrollTop = debugDiv.scrollHeight;
+        }
+        
+        function openMaintenanceModal() {
+            document.getElementById('maintenanceModal').style.display = 'block';
+            // Set default times
+            const now = new Date();
+            document.getElementById('startTime').value = now.toTimeString().slice(0,5);
+            const endTime = new Date(now.getTime() + 30*60000); // 30 minutes later
+            document.getElementById('endTime').value = endTime.toTimeString().slice(0,5);
+            
+            log('Maintenance modal opened');
+        }
+        
+        function closeMaintenanceModal() {
+            document.getElementById('maintenanceModal').style.display = 'none';
+            stopCamera();
+            capturedImages = [];
+            updateCapturedPhotos();
+            log('Maintenance modal closed');
+        }
+        
+        async function startCamera() {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { 
+                        facingMode: 'environment',
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
+                    } 
+                });
+                document.getElementById('cameraPreview').srcObject = stream;
+                log('Camera started successfully');
+            } catch (error) {
+                log('Error starting camera: ' + error.message);
+                alert('Could not access camera: ' + error.message);
+            }
+        }
+        
+        function stopCamera() {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
+                document.getElementById('cameraPreview').srcObject = null;
+                log('Camera stopped');
+            }
+        }
+        
+        function capturePhoto() {
+            if (!stream) {
+                alert('Please start the camera first');
+                return;
+            }
+            
+            if (capturedImages.length >= 5) {
+                alert('Maximum 5 photos allowed');
+                return;
+            }
+            
+            const video = document.getElementById('cameraPreview');
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0);
+            
+            // Get base64 data WITHOUT the data URL prefix
+            const base64Data = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+            
+            const imageData = {
+                id: 'maintenance_' + Date.now() + '_' + Math.random().toString(36).substring(2, 15),
+                timestamp: Date.now(),
+                base64: base64Data, // Clean base64 without prefix
+                dataUrl: canvas.toDataURL('image/jpeg', 0.8) // For preview
+            };
+            
+            capturedImages.push(imageData);
+            updateCapturedPhotos();
+            
+            // Update base64 preview
+            document.getElementById('base64Preview').textContent = base64Data.substring(0, 200) + '...';
+            
+            log(`Photo captured: ID=${imageData.id}, base64Length=${base64Data.length}, timestamp=${imageData.timestamp}`);
+            
+            // Validate the base64 data
+            try {
+                const buffer = atob(base64Data);
+                log(`Base64 validation: Successfully decoded ${buffer.length} bytes`);
+                
+                // Check JPEG headers
+                const firstByte = buffer.charCodeAt(0);
+                const secondByte = buffer.charCodeAt(1);
+                log(`JPEG header check: [${firstByte}, ${secondByte}] (should be [255, 216])`);
+                
+                if (firstByte !== 255 || secondByte !== 216) {
+                    log('⚠️ WARNING: Invalid JPEG header detected!');
+                } else {
+                    log('✅ Valid JPEG header confirmed');
+                }
+            } catch (error) {
+                log('❌ ERROR: Invalid base64 data - ' + error.message);
+            }
+        }
+        
+        function updateCapturedPhotos() {
+            const container = document.getElementById('capturedPhotos');
+            container.innerHTML = '';
+            
+            capturedImages.forEach((img, index) => {
+                const photoDiv = document.createElement('div');
+                photoDiv.className = 'photo-item';
+                photoDiv.innerHTML = `
+                    <img src="${img.dataUrl}" alt="Captured photo ${index + 1}">
+                    <button class="remove-btn" onclick="removePhoto(${index})">×</button>
+                `;
+                container.appendChild(photoDiv);
+            });
+            
+            log(`Updated photo display: ${capturedImages.length} photos`);
+        }
+        
+        function removePhoto(index) {
+            const removedImage = capturedImages.splice(index, 1)[0];
+            updateCapturedPhotos();
+            log(`Removed photo: ${removedImage.id}`);
+        }
+        
+        async function saveMaintenanceRecord() {
+            const startTime = document.getElementById('startTime').value;
+            const endTime = document.getElementById('endTime').value;
+            const comment = document.getElementById('comment').value;
+            
+            if (!startTime || !endTime || !comment) {
+                alert('Please fill in all required fields');
+                return;
+            }
+            
+            if (capturedImages.length === 0) {
+                alert('Please capture at least one photo');
+                return;
+            }
+            
+            const maintenanceRecordId = Date.now();
+            
+            const uploadData = {
+                imagesToUpload: capturedImages.map(img => ({
+                    id: img.id,
+                    timestamp: img.timestamp,
+                    base64: img.base64 // Clean base64 data
+                })),
+                maintenanceRecordId: maintenanceRecordId,
+                品番: TEST_CONFIG.sebanggo,
+                作業日: TEST_CONFIG.date,
+                factory: TEST_CONFIG.factory,
+                machine: TEST_CONFIG.machine,
+                worker: TEST_CONFIG.worker
+            };
+            
+            log(`Preparing upload: ${capturedImages.length} images`);
+            log(`Upload data structure: ${JSON.stringify(uploadData, null, 2)}`);
+            
+            try {
+                const response = await fetch('/uploadMaintenanceImages', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(uploadData)
+                });
+                
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    log(`✅ Upload successful: ${result.uploadCount} images uploaded`);
+                    
+                    // Display the uploaded image links
+                    const linksDiv = document.getElementById('uploadedLinks');
+                    linksDiv.innerHTML = '<h4>Recently Uploaded Images:</h4>';
+                    result.uploadedImageURLs.forEach((url, index) => {
+                        const link = document.createElement('a');
+                        link.href = url;
+                        link.target = '_blank';
+                        link.textContent = `Image ${index + 1}: ${url}`;
+                        linksDiv.appendChild(link);
+                        linksDiv.appendChild(document.createElement('br'));
+                        
+                        log(`Image ${index + 1} URL: ${url}`);
+                    });
+                    
+                    alert('Maintenance record saved successfully!');
+                    closeMaintenanceModal();
+                } else {
+                    log(`❌ Upload failed: ${result.message}`);
+                    alert('Upload failed: ' + result.message);
+                }
+            } catch (error) {
+                log(`❌ Network error: ${error.message}`);
+                alert('Network error: ' + error.message);
+            }
+        }
+        
+        // Initialize
+        log('Test page loaded with config: ' + JSON.stringify(TEST_CONFIG));
+    </script>
+</body>
+</html>

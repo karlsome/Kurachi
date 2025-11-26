@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dynamic Maintenance System Demo</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .machine-trouble-section {
+            margin-top: 20px;
+            padding: 15px;
+            background: rgba(255, 200, 200, 0.1);
+            border-radius: 5px;
+            border: 1px solid rgba(255, 100, 100, 0.3);
+        }
+        .machine-trouble-section h4 {
+            margin-top: 0;
+            margin-bottom: 15px;
+            color: #cc0000;
+            text-align: center;
+            font-weight: bold;
+        }
+        .total-trouble-time {
+            margin-top: 15px;
+            padding: 10px;
+            background: rgba(255, 230, 230, 0.9);
+            border: 1px solid rgba(255, 180, 180, 0.8);
+            border-radius: 3px;
+            text-align: center;
+            font-weight: bold;
+            color: #cc0000;
+        }
+        .maintenance-record-item {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 10px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .maintenance-record-item:hover {
+            background-color: #e9ecef;
+        }
+        #add-maintenance-btn {
+            background: #007cba;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        #add-maintenance-btn:hover {
+            background: #005a8a;
+        }
+        .demo-info {
+            background: #e7f3ff;
+            border: 1px solid #bee5eb;
+            border-radius: 5px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 Dynamic Maintenance System Demo</h1>
+        
+        <div class="demo-info">
+            <h3>📋 How it works:</h3>
+            <ol>
+                <li><strong>Click</strong> "➕ 機械故障時間を追加" to add a new maintenance record</li>
+                <li><strong>Fill in</strong> start time, end time, reason, and optionally take a photo</li>
+                <li><strong>Save</strong> the record - it will appear as a clickable item below</li>
+                <li><strong>Click</strong> any saved record to edit or delete it</li>
+                <li><strong>Photos</strong> are saved to Firebase storage under /maintenance folder</li>
+                <li><strong>Total work hours</strong> automatically subtract maintenance time</li>
+            </ol>
+        </div>
+
+        <!-- Machine Trouble Section -->
+        <div class="machine-trouble-section">
+            <h4 style="margin-top: 0; margin-bottom: 15px; color: #cc0000; text-align: center;">
+                機械故障時間 / Machine Maintenance Time
+            </h4>
+            
+            <div style="margin-bottom: 20px;">
+                <button type="button" id="add-maintenance-btn" onclick="showMaintenanceModal()"
+                        style="background: #007cba; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; font-size: 16px; width: 100%;">
+                    ➕ 機械故障時間を追加 / Add Maintenance Time
+                </button>
+            </div>
+            
+            <div id="maintenance-records-container" style="margin-bottom: 20px;">
+                <!-- Dynamic maintenance records will be rendered here -->
+            </div>
+
+            <div class="total-trouble-time">
+                <span>合計故障時間: </span>
+                <span id="total-trouble-display">0分</span>
+            </div>
+        </div>
+
+        <div style="margin-top: 30px; padding: 15px; background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 5px;">
+            <h3>🚀 Features:</h3>
+            <ul>
+                <li>✅ Dynamic maintenance records (no fixed limit)</li>
+                <li>✅ Photo capture for each maintenance event</li>
+                <li>✅ Detailed comments/reasons for each incident</li>
+                <li>✅ Edit/delete existing records</li>
+                <li>✅ Automatic time calculations</li>
+                <li>✅ Firebase storage integration (/maintenance folder)</li>
+                <li>✅ LocalStorage persistence</li>
+                <li>✅ Mobile-friendly interface</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        // Demo version - basic functionality
+        let maintenanceRecords = [];
+        
+        function showMaintenanceModal() {
+            alert('🎯 In the real implementation:\n\n' +
+                  '1. A modal will pop up with time inputs\n' +
+                  '2. Comment field for reason/explanation\n' +
+                  '3. Photo capture button\n' +
+                  '4. Save/Cancel/Delete buttons\n' +
+                  '5. Data persists to localStorage\n' +
+                  '6. Photos upload to Firebase /maintenance folder\n' +
+                  '7. Total work hours subtract maintenance time\n\n' +
+                  'This replaces the old fixed 4-input system!');
+        }
+
+        // Demo data
+        setTimeout(() => {
+            document.getElementById('maintenance-records-container').innerHTML = `
+                <div class="maintenance-record-item" onclick="showMaintenanceModal()">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <strong>09:30 - 10:15</strong> (45分)
+                            <br>
+                            <small style="color: #666;">モーター過熱により停止 / Motor overheating</small>
+                        </div>
+                        <span style="color: #007cba;">📷</span>
+                    </div>
+                </div>
+                <div class="maintenance-record-item" onclick="showMaintenanceModal()">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <strong>14:20 - 14:35</strong> (15分)
+                            <br>
+                            <small style="color: #666;">ベルト交換 / Belt replacement</small>
+                        </div>
+                        <span style="color: #007cba;">📷</span>
+                    </div>
+                </div>
+            `;
+            document.getElementById('total-trouble-display').textContent = '60分';
+        }, 1000);
+    </script>
+</body>
+</html>

@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test SCNA Dropdown</title>
+    <style>
+        body { margin: 20px; font-family: Arial, sans-serif; }
+        select { width: 400px; height: 300px; font-size: 14px; }
+        option[disabled] { font-weight: bold; background-color: #e0e0e0; }
+        .section { margin: 20px 0; }
+        .info { background: #f0f0f0; padding: 10px; border-radius: 5px; margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <h2>SCNA DCP Dropdown Test</h2>
+    
+    <div class="section">
+        <label for="sub-dropdown">Select 背番号 / 品番 / Work Order:</label><br>
+        <select id="sub-dropdown" size="15">
+            <option value="">Loading...</option>
+        </select>
+    </div>
+    
+    <div class="section">
+        <button id="testButton">Test Selection</button>
+    </div>
+    
+    <div id="selectionInfo" class="info" style="display: none;">
+        <h4>Selection Info:</h4>
+        <div id="infoContent"></div>
+    </div>
+
+    <script>
+        const serverURL = "http://localhost:3000";
+
+        // Mock functions for testing
+        function getCurrentSelectionInfo() {
+            const subDropdown = document.getElementById('sub-dropdown');
+            if (!subDropdown.value) return null;
+            
+            const selectedOption = subDropdown.options[subDropdown.selectedIndex];
+            
+            return {
+                value: subDropdown.value,
+                type: selectedOption.dataset.type || 'sebanggo',
+                assignedTo: selectedOption.dataset.assignedTo || null,
+                sku: selectedOption.dataset.sku || null,
+                status: selectedOption.dataset.status || null,
+                customer: selectedOption.dataset.customer || null,
+                isWorkOrder: selectedOption.dataset.type === 'workorder',
+                isHinban: selectedOption.dataset.type === 'hinban',
+                isSebanggo: selectedOption.dataset.type === 'sebanggo'
+            };
+        }
+
+        // Test function to fetch dropdown data
+        async function fetchTestDropdown() {
+            const 工場 = "SCNA"; // Hard-coded for test
+            
+            try {
+                const subDropdown = document.getElementById("sub-dropdown");
+                subDropdown.innerHTML = "";
+
+                // Add a blank option at the top
+                const blankOption = document.createElement("option");
+                blankOption.value = "";
+                blankOption.textContent = "Select 背番号 / 品番 / Work Order";
+                subDropdown.appendChild(blankOption);
+
+                // Fetch both 背番号 and 品番 values
+                const response = await fetch(`${serverURL}/getSeBanggoListPressAndHinban?工場=${encodeURIComponent(工場)}`);
+                const data = await response.json();
+
+                // Separate 背番号 and 品番 into different arrays
+                const sebanggoList = data.map(item => item.背番号).filter(Boolean);
+                const hinbanList = data.map(item => item.品番).filter(Boolean);
+
+                // Sort both lists alphabetically
+                sebanggoList.sort((a, b) => a.localeCompare(b, 'ja'));
+                hinbanList.sort((a, b) => a.localeCompare(b, 'ja'));
+
+                // Add separator for 背番号 section
+                if (sebanggoList.length > 0) {
+                    const seBanggoSeparator = document.createElement("option");
+                    seBanggoSeparator.disabled = true;
+                    seBanggoSeparator.textContent = "─── 背番号 ───";
+                    seBanggoSeparator.style.fontWeight = "bold";
+                    seBanggoSeparator.style.backgroundColor = "#f0f0f0";
+                    subDropdown.appendChild(seBanggoSeparator);
+
+                    // Add first few 背番号 options for testing
+                    sebanggoList.slice(0, 5).forEach(sebanggo => {
+                        const option = document.createElement("option");
+                        option.value = sebanggo;
+                        option.textContent = sebanggo;
+                        option.dataset.type = "sebanggo";
+                        subDropdown.appendChild(option);
+                    });
+                }
+
+                // Add separator for 品番 section
+                if (hinbanList.length > 0) {
+                    const hinbanSeparator = document.createElement("option");
+                    hinbanSeparator.disabled = true;
+                    hinbanSeparator.textContent = "─── 品番 ───";
+                    hinbanSeparator.style.fontWeight = "bold";
+                    hinbanSeparator.style.backgroundColor = "#f5f5f5";
+                    subDropdown.appendChild(hinbanSeparator);
+
+                    // Add first few 品番 options for testing
+                    hinbanList.slice(0, 5).forEach(hinban => {
+                        const option = document.createElement("option");
+                        option.value = hinban;
+                        option.textContent = hinban;
+                        option.dataset.type = "hinban";
+                        subDropdown.appendChild(option);
+                    });
+                }
+
+                // For SCNA factory, also fetch work orders
+                try {
+                    const workOrderResponse = await fetch(`${serverURL}/getSCNAWorkOrders`);
+                    const workOrders = await workOrderResponse.json();
+
+                    if (workOrders && workOrders.length > 0) {
+                        // Add separator for Work Orders section
+                        const workOrderSeparator = document.createElement("option");
+                        workOrderSeparator.disabled = true;
+                        workOrderSeparator.textContent = "─── Work Orders ───";
+                        workOrderSeparator.style.fontWeight = "bold";
+                        workOrderSeparator.style.backgroundColor = "#e3f2fd";
+                        subDropdown.appendChild(workOrderSeparator);
+
+                        // Add first few work order options
+                        workOrders.slice(0, 5).forEach(workOrder => {
+                            const option = document.createElement("option");
+                            option.value = workOrder.Number;
+                            option.textContent = workOrder.Number; // Simplified display
+                            option.dataset.type = "workorder";
+                            option.dataset.assignedTo = workOrder["Assign to-Custom fields"];
+                            option.dataset.sku = workOrder["P_SKU-Custom fields"];
+                            option.dataset.status = workOrder.Status;
+                            option.dataset.customer = workOrder["Customer-Custom fields"];
+                            subDropdown.appendChild(option);
+                        });
+                    }
+                } catch (workOrderError) {
+                    console.warn("Could not fetch work orders:", workOrderError);
+                }
+
+                console.log("Dropdown populated successfully");
+
+            } catch (error) {
+                console.error("Error fetching dropdown data:", error);
+                document.getElementById("sub-dropdown").innerHTML = "<option>Error loading data</option>";
+            }
+        }
+
+        // Test button handler
+        document.getElementById('testButton').addEventListener('click', function() {
+            const info = getCurrentSelectionInfo();
+            const infoDiv = document.getElementById('selectionInfo');
+            const contentDiv = document.getElementById('infoContent');
+            
+            if (info) {
+                contentDiv.innerHTML = `
+                    <strong>Value:</strong> ${info.value}<br>
+                    <strong>Type:</strong> ${info.type}<br>
+                    <strong>Is Work Order:</strong> ${info.isWorkOrder}<br>
+                    <strong>Is 品番:</strong> ${info.isHinban}<br>
+                    <strong>Is 背番号:</strong> ${info.isSebanggo}<br>
+                    ${info.isWorkOrder ? `
+                        <strong>Assigned To:</strong> ${info.assignedTo}<br>
+                        <strong>SKU:</strong> ${info.sku}<br>
+                        <strong>Status:</strong> ${info.status}<br>
+                        <strong>Customer:</strong> ${info.customer}
+                    ` : ''}
+                `;
+                infoDiv.style.display = 'block';
+            } else {
+                contentDiv.innerHTML = 'No selection made';
+                infoDiv.style.display = 'block';
+            }
+        });
+
+        // Load data when page loads
+        document.addEventListener('DOMContentLoaded', fetchTestDropdown);
+    </script>
+</body>
+</html>

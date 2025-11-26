@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OZNC02 - Machine Display</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+        }
+
+        .header {
+            background: white;
+            padding: 20px 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .machine-name {
+            font-size: 2.5em;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 1.1em;
+        }
+
+        .status-dot {
+            width: 15px;
+            height: 15px;
+            border-radius: 50%;
+            background-color: #ccc;
+            animation: pulse 2s infinite;
+        }
+
+        .status-dot.connected {
+            background-color: #4CAF50;
+        }
+
+        .status-dot.disconnected {
+            background-color: #f44336;
+            animation: none;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .main-content {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .info-section {
+            margin-bottom: 30px;
+        }
+
+        .info-title {
+            font-size: 1.3em;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 15px;
+            border-bottom: 3px solid #667eea;
+            padding-bottom: 10px;
+        }
+
+        .product-info {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .info-card {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            border-left: 5px solid #667eea;
+        }
+
+        .info-label {
+            font-size: 0.9em;
+            color: #666;
+            margin-bottom: 5px;
+        }
+
+        .info-value {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .waiting-message {
+            text-align: center;
+            padding: 60px 20px;
+            color: #999;
+            font-size: 1.5em;
+        }
+
+        .waiting-message .icon {
+            font-size: 4em;
+            margin-bottom: 20px;
+        }
+
+        .pdf-section {
+            display: none;
+            margin-top: 20px;
+        }
+
+        .pdf-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+        }
+
+        .pdf-card {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            border: 2px solid #ddd;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .pdf-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+            border-color: #667eea;
+        }
+
+        .pdf-icon {
+            font-size: 3em;
+            text-align: center;
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+
+        .pdf-name {
+            text-align: center;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .scan-animation {
+            animation: scanPulse 0.5s ease-in-out;
+        }
+
+        @keyframes scanPulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+
+        .timestamp {
+            text-align: right;
+            color: #999;
+            font-size: 0.9em;
+            margin-top: 10px;
+        }
+
+        .no-data {
+            display: block;
+        }
+
+        .has-data {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="machine-name">OZNC02</div>
+        <div class="connection-status">
+            <span class="status-dot" id="statusDot"></span>
+            <span id="statusText">接続中...</span>
+        </div>
+    </div>
+
+    <div class="main-content">
+        <div class="waiting-message no-data" id="waitingMessage">
+            <div class="icon">📱</div>
+            <div>QRコードのスキャンを待っています...</div>
+            <div style="font-size: 0.7em; margin-top: 10px;">Waiting for QR code scan...</div>
+        </div>
+
+        <div class="info-section has-data" id="productSection">
+            <div class="info-title">製品情報 / Product Information</div>
+            <div class="product-info">
+                <div class="info-card">
+                    <div class="info-label">背番号 / Serial Number</div>
+                    <div class="info-value" id="sebanggoDisplay">-</div>
+                </div>
+                <div class="info-card">
+                    <div class="info-label">品番 / Part Number</div>
+                    <div class="info-value" id="hinbanDisplay">-</div>
+                </div>
+                <div class="info-card">
+                    <div class="info-label">スキャン時間 / Scan Time</div>
+                    <div class="info-value" id="timestampDisplay">-</div>
+                </div>
+            </div>
+
+            <div class="pdf-section" id="pdfSection">
+                <div class="info-title">関連資料 / Related Documents</div>
+                <div class="pdf-grid" id="pdfGrid">
+                    <!-- PDF cards will be dynamically inserted here -->
+                    <div class="pdf-card">
+                        <div class="pdf-icon">📄</div>
+                        <div class="pdf-name">Coming Soon: PDF Display</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const MACHINE_ID = 'OZNC02';
+        //const SERVER_URL = 'https://kurachi.onrender.com';
+         const SERVER_URL = 'http://localhost:3000';
+
+        let eventSource = null;
+        const statusDot = document.getElementById('statusDot');
+        const statusText = document.getElementById('statusText');
+        const waitingMessage = document.getElementById('waitingMessage');
+        const productSection = document.getElementById('productSection');
+        const sebanggoDisplay = document.getElementById('sebanggoDisplay');
+        const hinbanDisplay = document.getElementById('hinbanDisplay');
+        const timestampDisplay = document.getElementById('timestampDisplay');
+        const pdfSection = document.getElementById('pdfSection');
+        const mainContent = document.querySelector('.main-content');
+
+        // Connect to SSE endpoint
+        function connectSSE() {
+            console.log(`🔌 Connecting to SSE for ${MACHINE_ID}...`);
+            
+            eventSource = new EventSource(`${SERVER_URL}/sse/machine/${MACHINE_ID}`);
+
+            eventSource.onopen = function() {
+                console.log('✅ SSE Connection opened');
+                statusDot.classList.add('connected');
+                statusDot.classList.remove('disconnected');
+                statusText.textContent = '接続済み / Connected';
+            };
+
+            eventSource.onerror = function(error) {
+                console.error('❌ SSE Connection error:', error);
+                statusDot.classList.remove('connected');
+                statusDot.classList.add('disconnected');
+                statusText.textContent = '接続エラー / Connection Error';
+                
+                // Attempt to reconnect after 5 seconds
+                setTimeout(() => {
+                    console.log('🔄 Attempting to reconnect...');
+                    eventSource.close();
+                    connectSSE();
+                }, 5000);
+            };
+
+            eventSource.onmessage = function(event) {
+                console.log('📨 Received message:', event.data);
+                
+                try {
+                    const data = JSON.parse(event.data);
+                    handleMessage(data);
+                } catch (error) {
+                    console.error('Error parsing message:', error);
+                }
+            };
+        }
+
+        // Handle incoming SSE messages
+        function handleMessage(data) {
+            console.log('📊 Processing message:', data);
+
+            if (data.type === 'connected') {
+                console.log(`✅ Connected to ${data.machineId}`);
+                return;
+            }
+
+            if (data.type === 'scan') {
+                // Check if this is a clear action
+                if (data.additionalData && data.additionalData.action === 'clear') {
+                    clearDisplay();
+                    return;
+                }
+                // Trigger animation
+                mainContent.classList.add('scan-animation');
+                setTimeout(() => mainContent.classList.remove('scan-animation'), 500);
+
+                // Update display
+                updateDisplay(data);
+            }
+        }
+
+        // Clear the display and return to waiting state
+        function clearDisplay() {
+            console.log('🧹 Clearing display - reset triggered');
+            
+            // Hide product info, show waiting message
+            productSection.style.display = 'none';
+            waitingMessage.style.display = 'block';
+            
+            // Reset values
+            sebanggoDisplay.textContent = '-';
+            hinbanDisplay.textContent = '-';
+            timestampDisplay.textContent = '-';
+            
+            // Hide PDF section
+            pdfSection.style.display = 'none';
+        }
+
+        // Update the display with scan data
+        function updateDisplay(data) {
+            // Hide waiting message, show product info
+            waitingMessage.style.display = 'none';
+            productSection.style.display = 'block';
+
+            // Update product information
+            sebanggoDisplay.textContent = data.sebanggo || '-';
+            hinbanDisplay.textContent = data.hinban || '-';
+            
+            // Format timestamp
+            const scanTime = new Date(data.timestamp);
+            timestampDisplay.textContent = scanTime.toLocaleString('ja-JP', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+
+            // Show PDF section (placeholder for now)
+            pdfSection.style.display = 'block';
+
+            // TODO: Fetch and display PDFs from Firebase based on sebanggo
+            console.log(`📄 TODO: Load PDFs for 背番号: ${data.sebanggo}`);
+        }
+
+        // Initialize connection on page load
+        window.addEventListener('DOMContentLoaded', () => {
+            console.log(`🚀 Starting ${MACHINE_ID} display page...`);
+            connectSSE();
+        });
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', () => {
+            if (eventSource) {
+                eventSource.close();
+            }
+        });
+    </script>
+</body>
+</html>

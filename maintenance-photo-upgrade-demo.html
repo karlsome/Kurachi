@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>機械故障写真システム デモ / Maintenance Photo System Demo</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .demo-section {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .feature-list {
+            list-style-type: none;
+            padding: 0;
+        }
+        .feature-list li {
+            padding: 10px;
+            margin: 5px 0;
+            background: #e8f4f8;
+            border-left: 4px solid #007cba;
+            border-radius: 4px;
+        }
+        .demo-image {
+            max-width: 100%;
+            height: auto;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        .code-example {
+            background: #f8f8f8;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 15px;
+            font-family: monospace;
+            overflow-x: auto;
+        }
+        .highlight {
+            background-color: #fff3cd;
+            padding: 15px;
+            border: 1px solid #ffeaa7;
+            border-radius: 5px;
+            margin: 15px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔧 機械故障写真システム アップグレード完了</h1>
+    <h2>Maintenance Photo System Upgrade Complete</h2>
+
+    <div class="demo-section">
+        <h3>📸 新機能 / New Features</h3>
+        <ul class="feature-list">
+            <li><strong>複数写真対応:</strong> 故障記録ごとに最大5枚の写真を撮影可能</li>
+            <li><strong>Multiple Photos:</strong> Up to 5 photos per maintenance record</li>
+            
+            <li><strong>モーダル内カメラ:</strong> ポップアップなしで直接カメラにアクセス</li>
+            <li><strong>In-Modal Camera:</strong> Direct camera access without popups</li>
+            
+            <li><strong>サムネイル表示:</strong> 撮影した写真を小さな画像で確認</li>
+            <li><strong>Thumbnail Preview:</strong> View captured photos as small thumbnails</li>
+            
+            <li><strong>フルサイズプレビュー:</strong> サムネイルクリックで大きく表示</li>
+            <li><strong>Full-Size Preview:</strong> Click thumbnails to view in full size</li>
+            
+            <li><strong>個別削除機能:</strong> 各写真を個別に削除可能</li>
+            <li><strong>Individual Remove:</strong> Remove each photo individually</li>
+            
+            <li><strong>一括削除機能:</strong> 全写真を一度に削除可能</li>
+            <li><strong>Clear All Function:</strong> Remove all photos at once</li>
+            
+            <li><strong>写真カウント表示:</strong> 撮影済み枚数 / 最大枚数を表示</li>
+            <li><strong>Photo Count Display:</strong> Shows taken/max photos count</li>
+        </ul>
+    </div>
+
+    <div class="demo-section">
+        <h3>🎯 主要な改善点 / Key Improvements</h3>
+        
+        <div class="highlight">
+            <h4>📱 ユーザー体験の向上</h4>
+            <p><strong>Before:</strong> 外部ポップアップで写真撮影、1枚のみ対応</p>
+            <p><strong>After:</strong> モーダル内で直接撮影、複数枚対応、リアルタイムプレビュー</p>
+        </div>
+
+        <div class="highlight">
+            <h4>🔄 ワークフロー最適化</h4>
+            <p><strong>Before:</strong> 写真撮影のたびにページが切り替わる</p>
+            <p><strong>After:</strong> 故障記録作成画面内で完結、シームレスな操作</p>
+        </div>
+
+        <div class="highlight">
+            <h4>💾 データ管理の改善</h4>
+            <p><strong>Before:</strong> 単一写真のURL管理</p>
+            <p><strong>After:</strong> 写真配列による複数写真管理、各写真にメタデータ付与</p>
+        </div>
+    </div>
+
+    <div class="demo-section">
+        <h3>📝 データ構造の変更 / Data Structure Changes</h3>
+        
+        <h4>旧システム / Old System:</h4>
+        <div class="code-example">
+{
+  id: 12345,
+  startTime: "09:30",
+  endTime: "10:15",
+  comment: "機械故障",
+  photoUrl: "data:image/jpeg;base64,..."  // 単一写真
+}
+        </div>
+
+        <h4>新システム / New System:</h4>
+        <div class="code-example">
+{
+  id: 12345,
+  startTime: "09:30",
+  endTime: "10:15",
+  comment: "機械故障",
+  photos: [  // 複数写真配列
+    {
+      base64: "...",
+      timestamp: 1640995200000,
+      id: "maintenance_1640995200000_abc123",
+      firebaseUrl: "https://firebase.../photo1.jpg",
+      uploaded: true
+    },
+    {
+      base64: "...",
+      timestamp: 1640995250000,
+      id: "maintenance_1640995250000_def456",
+      firebaseUrl: "https://firebase.../photo2.jpg",
+      uploaded: true
+    }
+  ]
+}
+        </div>
+    </div>
+
+    <div class="demo-section">
+        <h3>⚙️ 技術的な変更 / Technical Changes</h3>
+        <ul class="feature-list">
+            <li><strong>カメラAPI:</strong> navigator.mediaDevices.getUserMedia()を使用したブラウザ内カメラ</li>
+            <li><strong>写真管理:</strong> maintenancePhotos配列で作業中写真を管理</li>
+            <li><strong>Firebase連携:</strong> 複数写真の並列アップロード対応</li>
+            <li><strong>レスポンシブ対応:</strong> スマートフォンでの操作性を向上</li>
+            <li><strong>エラーハンドリング:</strong> カメラアクセス失敗時の適切な処理</li>
+        </ul>
+    </div>
+
+    <div class="demo-section">
+        <h3>🎨 UI/UX の向上 / UI/UX Improvements</h3>
+        <ul class="feature-list">
+            <li><strong>写真サムネイル:</strong> 80x80pxの統一サイズ、ホバー効果付き</li>
+            <li><strong>削除ボタン:</strong> 各写真の右上に×ボタン、誤操作防止デザイン</li>
+            <li><strong>進捗表示:</strong> 写真枚数カウンター（例: 3/5）</li>
+            <li><strong>空状態表示:</strong> 写真がない場合の案内メッセージ</li>
+            <li><strong>カメラプレビュー:</strong> リアルタイムビデオフィード表示</li>
+        </ul>
+    </div>
+
+    <div class="demo-section">
+        <h3>🔧 互換性とマイグレーション / Compatibility & Migration</h3>
+        <p><strong>既存データの互換性:</strong> 古い単一写真データも引き続き表示可能</p>
+        <p><strong>レガシー関数:</strong> 古いresetMachineTrouble()関数は新モーダルを開くように更新</p>
+        <p><strong>段階的移行:</strong> 既存のワークフローを維持しながら新機能を追加</p>
+    </div>
+
+    <div class="demo-section">
+        <h3>📋 使用方法 / How to Use</h3>
+        <ol>
+            <li><strong>故障記録作成:</strong> "機械故障時間を追加"ボタンをクリック</li>
+            <li><strong>基本情報入力:</strong> 開始時間、終了時間、理由を入力</li>
+            <li><strong>写真撮影:</strong> "📷 写真を撮る"ボタンで複数写真を撮影</li>
+            <li><strong>写真管理:</strong> サムネイルで確認、不要な写真は個別削除</li>
+            <li><strong>保存:</strong> "保存"ボタンで記録を完了</li>
+            <li><strong>後編集:</strong> 記録をクリックして写真の追加・削除が可能</li>
+        </ol>
+    </div>
+
+    <div class="demo-section">
+        <h3>🎉 アップグレード完了 / Upgrade Complete</h3>
+        <p>機械故障時間システムは、firstKojoLabelPrinter.jsを参考にした複数写真機能により、より実用的で使いやすいシステムに進化しました。</p>
+        <p>The maintenance time system has evolved into a more practical and user-friendly system with multiple photo functionality, inspired by firstKojoLabelPrinter.js.</p>
+        
+        <div class="highlight">
+            <strong>✅ 全機能テスト済み</strong><br>
+            <strong>✅ エラーなし確認済み</strong><br>
+            <strong>✅ 既存データ互換性あり</strong><br>
+            <strong>✅ レスポンシブ対応済み</strong>
+        </div>
+    </div>
+
+</body>
+</html>
