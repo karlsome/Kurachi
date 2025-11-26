@@ -15,13 +15,35 @@ async function extractGENTokens() {
     // Browser launch logic with Render.com support
     const isRender = process.env.RENDER === 'true';
     
+    // Try to find Chrome/Chromium executable on Render
+    const findChrome = () => {
+        const fs = require('fs');
+        const possiblePaths = [
+            process.env.PUPPETEER_EXECUTABLE_PATH,
+            '/usr/bin/chromium',
+            '/usr/bin/chromium-browser',
+            '/usr/bin/google-chrome',
+            '/usr/bin/google-chrome-stable',
+            puppeteer.executablePath() // Puppeteer's bundled Chromium
+        ];
+        
+        for (const path of possiblePaths) {
+            if (path && fs.existsSync(path)) {
+                console.log(`✅ Found Chrome at: ${path}`);
+                return path;
+            }
+        }
+        console.log('⚠️ No Chrome found, using Puppeteer default');
+        return undefined; // Let Puppeteer use its bundled version
+    };
+    
     const launchProfiles = isRender ? [
         // Render-specific configuration (headless only with optimizations)
         { 
             desc: 'bundled Chromium (headless) for Render', 
             opts: { 
-                headless: true,
-                executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium-browser'
+                headless: 'new',
+                executablePath: findChrome()
             } 
         }
     ] : [
