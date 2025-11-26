@@ -5,10 +5,14 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js"
+    "dev": "nodemon server.js",
+    "postinstall": "echo 'Skipping Puppeteer Chromium download on Render'"
   },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "config": {
+    "puppeteer_skip_chromium_download": true
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",
