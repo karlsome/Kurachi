@@ -16,8 +16,14 @@ async function extractGENTokens() {
     const isRender = process.env.RENDER === 'true';
     
     const launchProfiles = isRender ? [
-        // Render-specific configuration (headless only)
-        { desc: 'bundled Chromium (headless) for Render', opts: { headless: true } }
+        // Render-specific configuration (headless only with optimizations)
+        { 
+            desc: 'bundled Chromium (headless) for Render', 
+            opts: { 
+                headless: true,
+                executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium-browser'
+            } 
+        }
     ] : [
         // Local development profiles
         { desc: 'system Chrome (headless:new)', opts: { channel: 'chrome', headless: 'new' } },
@@ -33,7 +39,8 @@ async function extractGENTokens() {
             browser = await puppeteer.launch({
                 ...p.opts,
                 dumpio: !isRender, // Reduce logs on Render
-                args: baseArgs()
+                args: baseArgs(),
+                timeout: 30000 // 30 second timeout for Render
             });
             console.log('✅ Launched with', p.desc);
             break;
@@ -263,14 +270,26 @@ if (require.main === module) {
 /** ---------- helpers from test.js ---------- */
 
 function baseArgs() {
+  const isRender = process.env.RENDER === 'true';
+  
   const args = [
     '--disable-dev-shm-usage',
     '--no-first-run',
-    '--no-default-browser-check'
+    '--no-default-browser-check',
+    '--disable-gpu',
+    '--disable-software-rasterizer'
   ];
-  if (process.platform === 'linux') {
-    args.push('--no-sandbox', '--disable-setuid-sandbox');
+  
+  // Render.com and Linux require these flags
+  if (process.platform === 'linux' || isRender) {
+    args.push(
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--single-process' // Important for Render's resource limits
+    );
   }
+  
   return args;
 }
 
