@@ -1,4 +1,5 @@
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-core');
+const chromium = require('@sparticuz/chromium');
 const fs = require('fs');
 
 const LOGIN_URL = 'https://sasaki-mfg.gen-cloud.jp/login';
@@ -12,13 +13,18 @@ const CREDS = {
 async function extractGENTokens() {
     console.log('🚀 Starting GEN token extraction...');
     
-    // Simple browser launch like Rendertron example - let Puppeteer handle Chrome path
+    // Use puppeteer-core with @sparticuz/chromium for cloud deployment
     let browser;
     try {
-        console.log('🧪 Launching browser with Puppeteer bundled Chromium...');
+        console.log('🧪 Launching browser with Sparticuz Chromium...');
+        const executablePath = await chromium.executablePath();
+        console.log('📍 Chrome executable path:', executablePath);
+        
         browser = await puppeteer.launch({
-            headless: true,
-            args: baseArgs()
+            executablePath,
+            args: chromium.args,
+            headless: chromium.headless,
+            defaultViewport: chromium.defaultViewport
         });
         console.log('✅ Browser launched successfully');
     } catch (e) {
@@ -241,15 +247,6 @@ if (require.main === module) {
 }
 
 /** ---------- helpers from test.js ---------- */
-
-function baseArgs() {
-  // Minimal args like Rendertron example - just what's essential for cloud deployment
-  return [
-    '--no-sandbox',
-    '--disable-setuid-sandbox',
-    '--disable-dev-shm-usage'
-  ];
-}
 
 async function prepPage(page) {
   await page.setUserAgent(
