@@ -5,8 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js",
-    "postinstall": "node check-puppeteer.js"
+    "dev": "nodemon server.js"
   },
   "engines": {
     "node": ">=18.0.0"
@@ -21,6 +20,7 @@
     "mongodb": "^6.10.0",
     "multer": "^1.4.5-lts.2",
     "node-fetch": "^2.7.0",
-    "puppeteer": "^21.11.0"
+    "puppeteer-core": "^21.11.0",
+    "@sparticuz/chromium": "^121.0.0"
   }
 }
