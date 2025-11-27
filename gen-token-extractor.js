@@ -12,67 +12,18 @@ const CREDS = {
 async function extractGENTokens() {
     console.log('🚀 Starting GEN token extraction...');
     
-    // Browser launch logic with Render.com support
-    const isRender = process.env.RENDER === 'true';
-    
-    // Try to find Chrome/Chromium executable on Render
-    const findChrome = () => {
-        const fs = require('fs');
-        const possiblePaths = [
-            process.env.PUPPETEER_EXECUTABLE_PATH,
-            '/usr/bin/chromium',
-            '/usr/bin/chromium-browser',
-            '/usr/bin/google-chrome',
-            '/usr/bin/google-chrome-stable',
-            puppeteer.executablePath() // Puppeteer's bundled Chromium
-        ];
-        
-        for (const path of possiblePaths) {
-            if (path && fs.existsSync(path)) {
-                console.log(`✅ Found Chrome at: ${path}`);
-                return path;
-            }
-        }
-        console.log('⚠️ No Chrome found, using Puppeteer default');
-        return undefined; // Let Puppeteer use its bundled version
-    };
-    
-    const launchProfiles = isRender ? [
-        // Render-specific configuration (headless only with optimizations)
-        { 
-            desc: 'bundled Chromium (headless) for Render', 
-            opts: { 
-                headless: 'new',
-                executablePath: findChrome()
-            } 
-        }
-    ] : [
-        // Local development profiles
-        { desc: 'system Chrome (headless:new)', opts: { channel: 'chrome', headless: 'new' } },
-        { desc: 'bundled Chromium (headless:new)', opts: { headless: 'new' } },
-        { desc: 'system Chrome (headed)', opts: { channel: 'chrome', headless: false } },
-        { desc: 'bundled Chromium (headed)', opts: { headless: false } }
-    ];
-
+    // Simple browser launch like Rendertron example - let Puppeteer handle Chrome path
     let browser;
-    for (const p of launchProfiles) {
-        try {
-            console.log('🧪 Launching', p.desc);
-            browser = await puppeteer.launch({
-                ...p.opts,
-                dumpio: !isRender, // Reduce logs on Render
-                args: baseArgs(),
-                timeout: 30000 // 30 second timeout for Render
-            });
-            console.log('✅ Launched with', p.desc);
-            break;
-        } catch (e) {
-            console.error('❌ Launch failed:', p.desc, '-', e.message);
-        }
-    }
-    if (!browser) {
-        console.error('💥 Could not launch any browser.');
-        throw new Error('Could not launch any browser profile');
+    try {
+        console.log('🧪 Launching browser with Puppeteer bundled Chromium...');
+        browser = await puppeteer.launch({
+            headless: true,
+            args: baseArgs()
+        });
+        console.log('✅ Browser launched successfully');
+    } catch (e) {
+        console.error('❌ Browser launch failed:', e.message);
+        throw new Error('Could not launch browser: ' + e.message);
     }
 
     try {
@@ -292,27 +243,12 @@ if (require.main === module) {
 /** ---------- helpers from test.js ---------- */
 
 function baseArgs() {
-  const isRender = process.env.RENDER === 'true';
-  
-  const args = [
-    '--disable-dev-shm-usage',
-    '--no-first-run',
-    '--no-default-browser-check',
-    '--disable-gpu',
-    '--disable-software-rasterizer'
+  // Minimal args like Rendertron example - just what's essential for cloud deployment
+  return [
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage'
   ];
-  
-  // Render.com and Linux require these flags
-  if (process.platform === 'linux' || isRender) {
-    args.push(
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--single-process' // Important for Render's resource limits
-    );
-  }
-  
-  return args;
 }
 
 async function prepPage(page) {
