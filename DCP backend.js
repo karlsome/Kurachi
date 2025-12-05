@@ -5570,6 +5570,19 @@ function getIP() {
   }
 }
 
+// Add logging for regular shot input (single machine mode)
+document.addEventListener('DOMContentLoaded', () => {
+  const regularShotInput = document.getElementById('shot');
+  if (regularShotInput && !regularShotInput.readOnly) {
+    // Only add listener if it's not in grouped mode (readOnly is set in grouped mode)
+    regularShotInput.addEventListener('input', function() {
+      logTabletAction('Shot count set', 'in-progress', {
+        shotCount: this.value
+      });
+    });
+  }
+});
+
 // Function to create dynamic shot count inputs for grouped machines
 function createGroupedShotInputs() {
   console.log("🔵 ========== createGroupedShotInputs called ==========");
@@ -5641,6 +5654,13 @@ function createGroupedShotInputs() {
       input.addEventListener('input', function() {
         // Save to localStorage
         localStorage.setItem(`${uniquePrefix}shot-${machine}`, this.value);
+        
+        // Log shot count change for this machine
+        logTabletAction(`Shot count set for ${machine}`, 'in-progress', {
+          machine: machine,
+          shotCount: this.value
+        });
+        
         // Update total
         updateTotalShot();
       });
@@ -5698,6 +5718,15 @@ function updateTotalShot() {
     totalInput.value = total;
     // Save total to localStorage
     localStorage.setItem(`${uniquePrefix}shot`, total);
+    
+    // Log total shot count update
+    logTabletAction('Total shot count calculated', 'in-progress', {
+      totalShot: total,
+      individualMachines: Array.from(groupedInputs).map(input => ({
+        machine: input.id.replace('shot-', ''),
+        count: parseInt(input.value, 10) || 0
+      }))
+    });
   }
   
   console.log(`📊 Shot count updated - Total: ${total}`);
