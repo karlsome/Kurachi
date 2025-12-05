@@ -5570,6 +5570,39 @@ function getIP() {
   }
 }
 
+// Add logging for Comments textarea inputs (on blur - when user finishes typing)
+document.addEventListener('DOMContentLoaded', () => {
+  // Log Comments1 (main comments) - only when focus leaves the textarea
+  const comments1 = document.querySelector('textarea[name="Comments1"]');
+  if (comments1) {
+    comments1.addEventListener('blur', function() {
+      // Only log if there's actual content
+      if (this.value.trim().length > 0) {
+        logTabletAction('Comments entered', 'in-progress', {
+          commentLength: this.value.length,
+          hasContent: true,
+          comment: this.value
+        });
+      }
+    });
+  }
+  
+  // Log Comments2 (kensa section comments) - only when focus leaves the textarea
+  const comments2 = document.querySelector('textarea[name="Comments2"]');
+  if (comments2) {
+    comments2.addEventListener('blur', function() {
+      // Only log if there's actual content
+      if (this.value.trim().length > 0) {
+        logTabletAction('Kensa comments entered', 'in-progress', {
+          commentLength: this.value.length,
+          hasContent: true,
+          comment: this.value
+        });
+      }
+    });
+  }
+});
+
 // Add logging for regular shot input (single machine mode)
 document.addEventListener('DOMContentLoaded', () => {
   const regularShotInput = document.getElementById('shot');
@@ -6741,6 +6774,13 @@ window.addEventListener('load', function() {
     `;
     
     console.log('Spare (在庫) input configured with direct keypad');
+    
+    // Add logging when spare value changes
+    spareInput.addEventListener('input', function() {
+      logTabletAction('Spare count set', 'in-progress', {
+        spareCount: this.value
+      });
+    });
   }
   
   // Configure material lot input - DISABLED, now using QR scanner with override
