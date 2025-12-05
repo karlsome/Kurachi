@@ -1713,6 +1713,13 @@ function addMaterialLabelPhoto(photoDataURL) {
   materialLabelPhotos.push(photoData);
   console.log(`Added material label photo #${materialLabelPhotos.length}`);
   
+  // Log material label photo capture
+  logTabletAction('Material label photo captured', 'in-progress', {
+    photoNumber: materialLabelPhotos.length,
+    totalPhotos: materialLabelPhotos.length,
+    timestamp: photoData.timestamp
+  });
+  
   renderMaterialPhotoThumbnails();
   updateMaterialPhotoCount();
   updateMaterialLabelElement();
@@ -1727,7 +1734,16 @@ function addMaterialLabelPhoto(photoDataURL) {
 
 function removeMaterialLabelPhoto(index) {
   if (index >= 0 && index < materialLabelPhotos.length) {
+    const removedPhoto = materialLabelPhotos[index];
     materialLabelPhotos.splice(index, 1);
+    
+    // Log material label photo removal
+    logTabletAction('Material label photo removed', 'in-progress', {
+      photoIndex: index + 1,
+      remainingPhotos: materialLabelPhotos.length,
+      timestamp: removedPhoto.timestamp
+    });
+    
     // Save updated array to localStorage
     const key = `${uniquePrefix}materialLabelPhotos`;
     localStorage.setItem(key, JSON.stringify(materialLabelPhotos));
