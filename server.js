@@ -196,13 +196,31 @@ app.get("/api/generate-session-id", async (req, res) => {
     const database = client.db("submittedDB");
     const tabletLogDB = database.collection("tabletLogDB");
     
-    // Count existing sessions with this pattern today
+    // Find the highest order number for this pattern today (count distinct sessionIDs, not all log entries)
     const basePattern = `${背番号}_${設備}_${工場}_${dateParam}`;
-    const existingCount = await tabletLogDB.countDocuments({
-      sessionID: { $regex: `^${basePattern.replace(/[.*+?^${}()|[\\\\]/g, '\\\\$&')}_` }
+    const escapedPattern = basePattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    
+    // Use aggregation pipeline to get distinct sessionIDs (API v1 compatible)
+    const existingSessions = await tabletLogDB.aggregate([
+      { $match: { sessionID: { $regex: `^${escapedPattern}_` } } },
+      { $group: { _id: "$sessionID" } },
+      { $project: { sessionID: "$_id", _id: 0 } }
+    ]).toArray();
+    
+    // Find the highest order number from existing sessions
+    let highestOrder = 0;
+    existingSessions.forEach(doc => {
+      const sessionID = doc.sessionID;
+      const match = sessionID.match(/_([0-9]+)$/);
+      if (match) {
+        const orderNum = parseInt(match[1], 10);
+        if (orderNum > highestOrder) {
+          highestOrder = orderNum;
+        }
+      }
     });
     
-    const orderNumber = existingCount + 1;
+    const orderNumber = highestOrder + 1;
     const sessionID = `${basePattern}_${orderNumber.toString().padStart(3, '0')}`;
     
     res.json({ 

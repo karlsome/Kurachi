@@ -3622,16 +3622,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Function to reset everything and reload the page
 function resetForm() {
-  // Clear session before logging and resetting
-  clearSessionID();
-  
-  // Log reset action with current values BEFORE clearing
+  // Log reset action with current values BEFORE clearing session
   const current背番号 = document.getElementById('sub-dropdown')?.value || '';
   const current品番 = document.getElementById('product-number')?.value || '';
   const current工場 = document.getElementById('selected工場')?.value || '';
   const current設備 = document.getElementById('process')?.value || '';
   
-  // Only log if we have machine info at minimum
+  // Log if we have machine info at minimum (before clearing session)
   if (current設備 && (current背番号 || current品番 || current工場)) {
     logTabletAction('Reset button pressed', 'Reset', {
       previous背番号: current背番号,
@@ -3640,6 +3637,9 @@ function resetForm() {
       previous設備: current設備
     });
   }
+  
+  // Clear session AFTER logging
+  clearSessionID();
 
   const excludedInputs = ['process', 'languageSelector']; // IDs or names of inputs to exclude from reset
 
@@ -4621,12 +4621,6 @@ document.getElementById('submit').addEventListener('click', async (event) => {
 
     uploadingModal.style.display = 'flex';
 
-    // Log submit button action
-    logTabletAction('Submit button pressed', 'Completed', { shotCount: shotInput.value });
-    
-    // Clear session after logging submission
-    clearSessionID();
-
     // Use the new material label photo system for validation
     if (materialLabelPhotos.length === 0) {
         // Check legacy system as fallback
@@ -4960,6 +4954,20 @@ document.getElementById('submit').addEventListener('click', async (event) => {
 
         const dcpResult = await dcpResponse.json();
         console.log("✅ DCP submission successful:", dcpResult);
+
+        // Log submit button action ONLY after successful submission
+        logTabletAction('Submit button pressed', 'Completed', { 
+            shotCount: shotInput.value,
+            品番,
+            背番号,
+            工場,
+            設備,
+            processQuantity: Process_Quantity,
+            totalNG: Total_NG
+        });
+        
+        // Clear session ONLY after successful submission
+        clearSessionID();
 
         setTimeout(() => {
             uploadingModal.style.display = 'none'; scanAlertText.innerText = 'Form submitted successfully / 保存しました';
