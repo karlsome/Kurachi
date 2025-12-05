@@ -10,14 +10,152 @@ const googleSheetLiveStatusURL = 'https://script.google.com/macros/s/AKfycbwbL30
 // Link for Rikeshi (up/down color info) - This was missing in the original, adding it here.
 const dbURL = 'https://script.google.com/macros/s/AKfycbx0qBw0_wF5X-hA2t1yY-d5h5M7Z_a8z_V9R5D6k/exec'; // Placeholder, replace with your actual URL if different.
 
-const serverURL = "https://kurachi.onrender.com";
-//const serverURL = "http://localhost:3000";
+//const serverURL = "https://kurachi.onrender.com";
+const serverURL = "http://localhost:3000";
 
 // Global variable to track if sendtoNC button has been pressed
 let sendtoNCButtonisPressed = false;
 
 // Global variable to track which input field is currently using the worker modal
 let currentModalInputField = null; // Can be 'worker' or 'kensa'
+
+// ============================================
+// SESSION ID MANAGEMENT SYSTEM
+// ============================================
+/**
+ * Get current sessionID from localStorage
+ * @returns {string|null} sessionID or null if not found
+ */
+function getSessionID() {
+  return localStorage.getItem(`${uniquePrefix}sessionID`);
+}
+
+/**
+ * Save sessionID to localStorage
+ * @param {string} sessionID - The session ID to store
+ */
+function setSessionID(sessionID) {
+  localStorage.setItem(`${uniquePrefix}sessionID`, sessionID);
+  console.log(`📌 SessionID saved to localStorage: ${sessionID}`);
+}
+
+/**
+ * Clear sessionID from localStorage (called on Submit/Reset)
+ */
+function clearSessionID() {
+  const oldSessionID = localStorage.getItem(`${uniquePrefix}sessionID`);
+  localStorage.removeItem(`${uniquePrefix}sessionID`);
+  console.log(`🗑️ SessionID cleared from localStorage: ${oldSessionID}`);
+}
+
+/**
+ * Generate new sessionID by calling backend for order number
+ * @param {string} 背番号 - Kanban serial number
+ * @param {string} 設備 - Machine/Equipment name
+ * @param {string} 工場 - Factory name
+ * @param {string} date - Date in yyyy-mm-dd format
+ * @returns {Promise<string|null>} Generated sessionID or null on error
+ */
+async function generateSessionID(背番号, 設備, 工場, date) {
+  try {
+    const response = await fetch(`${serverURL}/api/generate-session-id?背番号=${encodeURIComponent(背番号)}&設備=${encodeURIComponent(設備)}&工場=${encodeURIComponent(工場)}&Date=${encodeURIComponent(date)}`);
+    const data = await response.json();
+    
+    if (data.success) {
+      console.log(`✅ Generated new sessionID: ${data.sessionID} (Order #${data.orderNumber})`);
+      return data.sessionID;
+    } else {
+      console.error('❌ Failed to generate sessionID:', data.error);
+      return null;
+    }
+  } catch (error) {
+    console.error('❌ Error generating sessionID:', error);
+    return null;
+  }
+}
+
+// ============================================
+// TABLET LOGGING SYSTEM
+// ============================================
+/**
+ * Logs tablet actions to MongoDB tabletLogDB
+ * @param {string} action - Description of the action (e.g., "Scanned kanban", "Worker name selected")
+ * @param {string} status - Status of the workflow (default: "in-progress", can be "Completed", "Reset")
+ * @param {object} additionalData - Any extra data to log
+ */
+async function logTabletAction(action, status = 'in-progress', additionalData = {}) {
+  try {
+    const 背番号 = document.getElementById('sub-dropdown')?.value || '';
+    const 品番 = document.getElementById('product-number')?.value || '';
+    const 工場 = document.getElementById('selected工場')?.value || '';
+    const 設備 = document.getElementById('process')?.value || '';
+    const lotNumber = document.getElementById('Lot No.')?.value || '';
+    
+    // Don't log if machine info is missing - tablet not initialized yet
+    if (!設備) {
+      console.log('⚠️ Skipping log: Machine (設備) not selected yet');
+      return;
+    }
+    
+    // For most actions, 背番号 is required (except setup actions like checkbox toggle)
+    const setupActions = ['Kensa mode checkbox toggled', 'Break time', 'Reset'];
+    const isSetupAction = setupActions.some(setupAction => action.includes(setupAction));
+    
+    if (!背番号 && !isSetupAction) {
+      console.log('⚠️ Skipping log: Kanban (背番号) not scanned yet');
+      return;
+    }
+    
+    // Get sessionID from localStorage
+    let sessionID = getSessionID();
+    
+    // ✅ CRITICAL: sessionID is REQUIRED - Auto-generate if missing
+    if (!sessionID) {
+      console.warn(`⚠️ No sessionID found! Auto-generating for action: ${action}`);
+      
+      // Generate sessionID immediately
+      const todayDate = new Date().toISOString().split('T')[0];
+      sessionID = await generateSessionID(背番号 || 'setup', 設備, 工場, todayDate);
+      
+      if (sessionID) {
+        setSessionID(sessionID);
+        console.log(`✅ Emergency sessionID created: ${sessionID}`);
+      } else {
+        console.error(`❌ CRITICAL: Failed to generate sessionID for action: ${action}`);
+        console.error('❌ Logging blocked - cannot proceed without sessionID');
+        return; // Block logging if sessionID cannot be generated
+      }
+    }
+    
+    const logData = {
+      背番号,
+      品番,
+      工場,
+      設備,
+      Action: action,
+      Status: status,
+      sessionID: sessionID, // Include sessionID
+      AdditionalData: additionalData
+    };
+    
+    const response = await fetch(`${serverURL}/api/tablet-log`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(logData)
+    });
+    
+    if (response.ok) {
+      console.log(`📝 Tablet action logged: ${action}`);
+    } else {
+      console.error('❌ Failed to log tablet action:', await response.text());
+    }
+  } catch (error) {
+    console.error('❌ Error logging tablet action:', error);
+    // Don't throw error - logging failures shouldn't break the workflow
+  }
+}
 
 //this code listens to incoming parameters passed
 function getQueryParam(param) {
@@ -867,6 +1005,30 @@ function setDefaultTime(input) {
   // Save the time to local storage with unique prefix
   localStorage.setItem(`${uniquePrefix}${input.id}`, timeValue);
 
+  // Log time input based on type
+  if (input.id === 'Start Time') {
+    logTabletAction('Start time set', 'in-progress', {
+      startTime: timeValue
+    });
+  } else if (input.id === 'End Time') {
+    logTabletAction('End time set', 'in-progress', {
+      endTime: timeValue
+    });
+  } else if (input.id.includes('break')) {
+    logTabletAction(`Break time ${input.id} set`, 'in-progress', {
+      breakTimeField: input.id,
+      time: timeValue
+    });
+  } else if (input.id === 'KStart Time') {
+    logTabletAction('Kensa start time set', 'in-progress', {
+      kensaStartTime: timeValue
+    });
+  } else if (input.id === 'KEnd Time') {
+    logTabletAction('Kensa end time set', 'in-progress', {
+      kensaEndTime: timeValue
+    });
+  }
+
   // If this is a break time input, calculate total break time
   if (input.id.includes('break')) {
     calculateTotalBreakTime();
@@ -913,6 +1075,15 @@ function resetBreakTime(breakNumber) {
   const endInput = document.getElementById(`break${breakNumber}-end`);
 
   if (startInput && endInput) {
+    // Log reset action with current values before clearing
+    if (startInput.value || endInput.value) {
+      logTabletAction(`Break time ${breakNumber} reset`, 'Reset', {
+        breakNumber: breakNumber,
+        previousStart: startInput.value,
+        previousEnd: endInput.value
+      });
+    }
+    
     // Clear the values
     startInput.value = '';
     endInput.value = '';
@@ -1428,8 +1599,22 @@ function setupMaintenanceModalEvents(modal, existingRecord) {
 
     if (currentEditingIndex >= 0) {
       maintenanceRecords[currentEditingIndex] = record;
+      // Log maintenance record edit
+      logTabletAction('Maintenance record edited', 'Completed', {
+        startTime: record.startTime,
+        endTime: record.endTime,
+        comment: record.comment,
+        photoCount: record.photos.length
+      });
     } else {
       maintenanceRecords.push(record);
+      // Log maintenance record add
+      logTabletAction('Maintenance record added', 'Completed', {
+        startTime: record.startTime,
+        endTime: record.endTime,
+        comment: record.comment,
+        photoCount: record.photos.length
+      });
     }
 
     saveMaintenanceRecords();
@@ -1453,6 +1638,14 @@ function setupMaintenanceModalEvents(modal, existingRecord) {
   if (deleteBtn) {
     deleteBtn.addEventListener('click', () => {
       if (confirm('この機械故障記録を削除しますか？ / Delete this maintenance record?')) {
+        const deletedRecord = maintenanceRecords[currentEditingIndex];
+        // Log maintenance record delete
+        logTabletAction('Maintenance record deleted', 'Reset', {
+          startTime: deletedRecord.startTime,
+          endTime: deletedRecord.endTime,
+          comment: deletedRecord.comment
+        });
+        
         maintenanceRecords.splice(currentEditingIndex, 1);
         saveMaintenanceRecords();
         renderMaintenanceRecords();
@@ -2170,6 +2363,12 @@ function incrementCounter(counterId) {
   // Save the updated value to local storage with the unique prefix
   localStorage.setItem(`${uniquePrefix}counter-${counterId}`, currentValue);
 
+  // Log counter increment
+  logTabletAction(`Counter ${counterId} incremented`, 'in-progress', {
+    counterId: counterId,
+    newValue: currentValue
+  });
+
   updateTotal();
 }
 
@@ -2182,6 +2381,12 @@ function decrementCounter(counterId) {
 
     // Save the updated value to local storage with the unique prefix
     localStorage.setItem(`${uniquePrefix}counter-${counterId}`, currentValue);
+
+    // Log counter decrement
+    logTabletAction(`Counter ${counterId} decremented`, 'in-progress', {
+      counterId: counterId,
+      newValue: currentValue
+    });
 
     updateTotal();
   }
@@ -2380,6 +2585,11 @@ function selectWorkerName(name) {
     localStorage.setItem(key, name);
     console.log('Worker name saved to localStorage:', key, '=', name);
   }
+  
+  // Log worker name selection
+  logTabletAction('Worker name selected', 'in-progress', {
+    workerName: name
+  });
   
   // Close modal
   closeWorkerModal();
@@ -2583,6 +2793,11 @@ function selectKensaName(name) {
   
   // Add to recent workers
   addToRecentWorkers(name);
+  
+  // Log inspector name selection
+  logTabletAction('Inspector name selected', 'in-progress', {
+    inspectorName: name
+  });
   
   // Close modal
   closeKensaModal();
@@ -3391,6 +3606,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Function to reset everything and reload the page
 function resetForm() {
+  // Clear session before logging and resetting
+  clearSessionID();
+  
+  // Log reset action with current values BEFORE clearing
+  const current背番号 = document.getElementById('sub-dropdown')?.value || '';
+  const current品番 = document.getElementById('product-number')?.value || '';
+  const current工場 = document.getElementById('selected工場')?.value || '';
+  const current設備 = document.getElementById('process')?.value || '';
+  
+  // Only log if we have machine info at minimum
+  if (current設備 && (current背番号 || current品番 || current工場)) {
+    logTabletAction('Reset button pressed', 'Reset', {
+      previous背番号: current背番号,
+      previous品番: current品番,
+      previous工場: current工場,
+      previous設備: current設備
+    });
+  }
+
   const excludedInputs = ['process', 'languageSelector']; // IDs or names of inputs to exclude from reset
 
   // Preserve language preference
@@ -3919,6 +4153,13 @@ window.addEventListener('message', function(event) {
             const labelKey = `${uniquePrefix}${labelId}.textContent`;
             localStorage.setItem(labelKey, label.textContent);
             console.log(`Updated and saved ${labelId} as TRUE`);
+            
+            // Log photo capture
+            const photoType = mapping.labelText;
+            logTabletAction(`Photo captured: ${photoType}`, 'in-progress', {
+              photoType: photoType,
+              buttonId: currentButtonId
+            });
           } else {
             console.error(`Label element ${labelId} not found`);
           }
@@ -4363,6 +4604,12 @@ document.getElementById('submit').addEventListener('click', async (event) => {
     }
 
     uploadingModal.style.display = 'flex';
+
+    // Log submit button action
+    logTabletAction('Submit button pressed', 'Completed', { shotCount: shotInput.value });
+    
+    // Clear session after logging submission
+    clearSessionID();
 
     // Use the new material label photo system for validation
     if (materialLabelPhotos.length === 0) {
@@ -4867,6 +5114,10 @@ function toggleInputs() {
   }
   
   var isChecked = enableInputsCheckbox.checked;
+  
+  // Log checkbox toggle action
+  logTabletAction('Kensa mode checkbox toggled', isChecked ? 'Completed' : 'Reset', { kensaEnabled: isChecked });
+  
   var inputs = document.querySelectorAll('#Kensa\\ Name, #KDate, #KStart\\ Time, #KEnd\\ Time,.plus-btn,.minus-btn, textarea[name="Comments2"], #在庫');
 
   inputs.forEach(function(input) {
@@ -5136,6 +5387,12 @@ document.getElementById('sendtoNC').addEventListener('click', async function() {
       showAlert('背番号を選んでください / Please select sebanggo first');
       return;
     }
+    
+    // Log send to machine action (main button)
+    await logTabletAction('Send to machine pressed (Main button)', 'in-progress', {
+      sebanggo: currentSebanggo,
+      source: 'Main Send to Machine button'
+    });
     
     // Send directly to machine
     await sendtoNC(currentSebanggo);
@@ -6093,6 +6350,11 @@ window.confirmDirectNumericInput = function() {
     const key = `${uniquePrefix}${targetInput.id}`;
     localStorage.setItem(key, targetInput.value);
     
+    // Log the input action for shot count
+    if (window.currentDirectInputId === 'shot') {
+      logTabletAction('ショット数 input', 'Completed', { shotCount: targetInput.value });
+    }
+    
     // Trigger the input event to handle any event listeners
     const event = new Event('input', { bubbles: true });
     targetInput.dispatchEvent(event);
@@ -6747,8 +7009,27 @@ document.getElementById('startStep1Scan').addEventListener('click', function(eve
       localStorage.setItem(`${uniquePrefix}cached-hinban`, currentProductDetails.hinban);
       localStorage.setItem(`${uniquePrefix}cached-materialCode`, currentProductDetails.materialCode);
       
-      // 🔴 BROADCAST SCAN TO SSE - Send to machine display page
+      // 🔴 BROADCAST SCAN TO SSE - Send to machine display page (includes logging)
       const machineNameForSSE = getMachineName(); // Get the current machine name
+      const currentFactory = document.getElementById('selected工場')?.value || '';
+      
+      // Generate sessionID for this scan session
+      const current設備 = document.getElementById('process')?.value || '';
+      const todayDate = new Date().toISOString().split('T')[0];
+      const newSessionID = await generateSessionID(
+        currentProductDetails.sebanggo,
+        current設備,
+        currentFactory,
+        todayDate
+      );
+      
+      if (newSessionID) {
+        setSessionID(newSessionID);
+        console.log('✅ New session started:', newSessionID);
+      } else {
+        console.warn('⚠️ Failed to generate sessionID');
+      }
+      
       if (machineNameForSSE) {
         fetch(`${serverURL}/api/broadcast-scan`, {
           method: 'POST',
@@ -6761,7 +7042,10 @@ document.getElementById('startStep1Scan').addEventListener('click', function(eve
             hinban: currentProductDetails.hinban,
             timestamp: new Date().toISOString(),
             additionalData: {
-              materialCode: currentProductDetails.materialCode
+              materialCode: currentProductDetails.materialCode,
+              factory: currentFactory,
+              工場: currentFactory,
+              sessionID: newSessionID
             }
           })
         })
@@ -6939,6 +7223,14 @@ document.getElementById('startStep2Scan').addEventListener('click', function(eve
         step2Scanner = null;
         
         console.log("Lot added successfully:", lotNumber);
+        
+        // Log material lot scan action
+        await logTabletAction('Scanned material lot (Step 2)', 'in-progress', {
+          lotNumber: lotNumber,
+          materialCode: actualScannedCode,
+          allMaterialLots: materialLots.map(l => l.lotNumber).join(', ')
+        });
+        
         document.getElementById('step2Modal').style.display = 'none';
         showStep3Modal();
         
@@ -7160,6 +7452,12 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
     
     // Close Step 3 modal immediately (sending in background)
     document.getElementById('step3Modal').style.display = 'none';
+    
+    // Log send to machine action (Step 3)
+    await logTabletAction('Send to machine pressed (Step 3)', 'in-progress', {
+      背番号: currentSebanggo,
+      source: 'Step 3 Modal'
+    });
     
     // Clear cached product details from localStorage
     localStorage.removeItem(`${uniquePrefix}cached-sebanggo`);
