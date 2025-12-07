@@ -1,5 +1,3 @@
-const puppeteer = require('puppeteer-core');
-const chromium = require('@sparticuz/chromium');
 const fs = require('fs');
 
 const LOGIN_URL = 'https://sasaki-mfg.gen-cloud.jp/login';
@@ -10,23 +8,40 @@ const CREDS = {
   pass: process.env.GEN_PASS || 'ideaidea'
 };
 
+// Detect environment - use puppeteer for local, puppeteer-core + chromium for production
+const isProduction = process.env.RENDER === 'true' || process.env.NODE_ENV === 'production';
+const isDevelopment = !isProduction;
+
 async function extractGENTokens() {
     console.log('🚀 Starting GEN token extraction...');
     
-    // Use puppeteer-core with @sparticuz/chromium for cloud deployment
     let browser;
     try {
-        console.log('🧪 Launching browser with Sparticuz Chromium...');
-        const executablePath = await chromium.executablePath();
-        console.log('📍 Chrome executable path:', executablePath);
-        
-        browser = await puppeteer.launch({
-            executablePath,
-            args: chromium.args,
-            headless: chromium.headless,
-            defaultViewport: chromium.defaultViewport
-        });
-        console.log('✅ Browser launched successfully');
+        if (isDevelopment) {
+            // Local development: use regular puppeteer with local Chrome
+            console.log('💻 Development mode: Using local Puppeteer...');
+            const puppeteer = require('puppeteer');
+            browser = await puppeteer.launch({
+                headless: true,
+                args: ['--no-sandbox', '--disable-setuid-sandbox']
+            });
+            console.log('✅ Local browser launched successfully');
+        } else {
+            // Production: use puppeteer-core with @sparticuz/chromium
+            console.log('🧪 Production mode: Launching browser with Sparticuz Chromium...');
+            const puppeteer = require('puppeteer-core');
+            const chromium = require('@sparticuz/chromium');
+            const executablePath = await chromium.executablePath();
+            console.log('📍 Chrome executable path:', executablePath);
+            
+            browser = await puppeteer.launch({
+                executablePath,
+                args: chromium.args,
+                headless: chromium.headless,
+                defaultViewport: chromium.defaultViewport
+            });
+            console.log('✅ Production browser launched successfully');
+        }
     } catch (e) {
         console.error('❌ Browser launch failed:', e.message);
         throw new Error('Could not launch browser: ' + e.message);
