@@ -270,8 +270,11 @@ app.post("/api/tablet-log", async (req, res) => {
     const tabletLogDB = database.collection("tabletLogDB");
     
     const currentDate = new Date();
-    const dateYYYYMMDD = currentDate.toISOString().split('T')[0]; // yyyy-mm-dd
-    const timeHHMMSS = currentDate.toTimeString().split(' ')[0]; // HH:mm:ss
+    
+    // Convert to JST (UTC+9) for Date and Time fields
+    const jstDate = new Date(currentDate.getTime() + (9 * 60 * 60 * 1000));
+    const dateYYYYMMDD = jstDate.toISOString().split('T')[0]; // yyyy-mm-dd in JST
+    const timeHHMMSS = jstDate.toISOString().split('T')[1].split('.')[0]; // HH:mm:ss in JST
     
     const logEntry = {
       sessionID: sessionID,
@@ -281,9 +284,9 @@ app.post("/api/tablet-log", async (req, res) => {
       設備: 設備 || '',
       Action: Action,
       Status: Status || 'in-progress',
-      Timestamp: currentDate.toISOString(), // ISO string format (not Date object)
-      Date: dateYYYYMMDD, // yyyy-mm-dd
-      Time: timeHHMMSS, // HH:mm:ss
+      Timestamp: currentDate.toISOString(), // ISO string format in UTC (for consistency)
+      Date: dateYYYYMMDD, // yyyy-mm-dd in JST
+      Time: timeHHMMSS, // HH:mm:ss in JST
       AdditionalData: AdditionalData || {}
     };
     
@@ -5961,6 +5964,74 @@ app.delete('/api/production-plans/:id', async (req, res) => {
         res.status(500).json({ success: false, error: error.message });
     }
 });
+
+
+// ==================== BARCODE SCANNER LOOKUP ====================
+app.post('/api/production-goals/barcode-lookup', async (req, res) => {
+    try {
+        const { seiban, factory } = req.body; // seiban = 背番号
+        
+        console.log('=== BARCODE LOOKUP API DEBUG START ===');
+        console.log('背番号 (seiban):', seiban);
+        console.log('Factory:', factory);
+        
+        if (!seiban) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Missing 背番号 (seiban) parameter' 
+            });
+        }
+        
+        // Lookup from masterDB
+        const db = client.db('Sasaki_Coating_MasterDB');
+        const collection = db.collection('masterDB');
+        
+        const query = { '背番号': seiban };
+        
+        // Add factory filter if provided
+        if (factory) {
+            query['工場'] = factory;
+        }
+        
+        console.log('Query:', JSON.stringify(query));
+        
+        const product = await collection.findOne(query);
+        
+        if (!product) {
+            console.log('Product not found in masterDB');
+            console.log('=== BARCODE LOOKUP API DEBUG END ===');
+            return res.json({ 
+                success: false, 
+                error: `背番号 "${seiban}" not found in master database` 
+            });
+        }
+        
+        console.log('Product found:', product['品番']);
+        console.log('収容数:', product['収容数']);
+        console.log('=== BARCODE LOOKUP API DEBUG END ===');
+        
+        res.json({ 
+            success: true, 
+            data: {
+                '背番号': product['背番号'],
+                '品番': product['品番'],
+                '品名': product['品名'],
+                '収容数': product['収容数'],
+                '秒数(1pcs何秒)': product['秒数(1pcs何秒)'] || 22.5,
+                'pcPerCycle': product.pcPerCycle || 1,
+                '工場': product['工場'],
+                '加工設備': product['加工設備'],
+                // Return full product for additional info if needed
+                fullProduct: product
+            }
+        });
+    } catch (error) {
+        console.error('Error in barcode lookup:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+
 
 // ==================== GET PRESS HISTORY (for smart scheduling) ====================
 app.post('/api/production-goals/press-history', async (req, res) => {
