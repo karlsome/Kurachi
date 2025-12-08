@@ -75,10 +75,167 @@ async function generateSessionID(背番号, 設備, 工場, date) {
 }
 
 // ============================================
-// TABLET LOGGING SYSTEM
+// TABLET LOGGING SYSTEM WITH RETRY QUEUE
 // ============================================
+
+// Persistent queue for failed log entries
+let logQueue = [];
+const MAX_RETRY_ATTEMPTS = 5;
+const INITIAL_RETRY_DELAY = 2000; // 2 seconds
+let isProcessingQueue = false;
+
 /**
- * Logs tablet actions to MongoDB tabletLogDB
+ * Get the localStorage key for the log queue (dynamic based on uniquePrefix)
+ */
+function getLogQueueKey() {
+  // uniquePrefix is defined later in the code, so we compute it here
+  const pageName = location.pathname.split('/').pop();
+  const currentSelectedFactory = document.getElementById('selected工場')?.value || '';
+  const selectedMachine = new URLSearchParams(window.location.search).get('machine') || '';
+  return `${pageName}_${currentSelectedFactory}_${selectedMachine}_logQueue`;
+}
+
+/**
+ * Load pending logs from localStorage
+ */
+function loadLogQueue() {
+  try {
+    const saved = localStorage.getItem(getLogQueueKey());
+    if (saved) {
+      logQueue = JSON.parse(saved);
+      console.log(`📦 Loaded ${logQueue.length} pending logs from queue`);
+    }
+  } catch (error) {
+    console.error('❌ Error loading log queue:', error);
+    logQueue = [];
+  }
+}
+
+/**
+ * Save pending logs to localStorage
+ */
+function saveLogQueue() {
+  try {
+    localStorage.setItem(getLogQueueKey(), JSON.stringify(logQueue));
+  } catch (error) {
+    console.error('❌ Error saving log queue:', error);
+  }
+}
+
+/**
+ * Add log entry to queue
+ */
+function addToLogQueue(logData) {
+  const queueEntry = {
+    id: `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+    logData: logData,
+    attempts: 0,
+    timestamp: new Date().toISOString(),
+    nextRetryTime: Date.now()
+  };
+  
+  logQueue.push(queueEntry);
+  saveLogQueue();
+  console.log(`📥 Added to queue: ${logData.Action} (Queue size: ${logQueue.length})`);
+  
+  // Start processing queue if not already running
+  if (!isProcessingQueue) {
+    processLogQueue();
+  }
+}
+
+/**
+ * Send log to server with timeout
+ */
+async function sendLogToServer(logData, timeoutMs = 10000) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  
+  try {
+    const response = await fetch(`${serverURL}/api/tablet-log`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(logData),
+      signal: controller.signal
+    });
+    
+    clearTimeout(timeoutId);
+    
+    if (response.ok) {
+      return { success: true };
+    } else {
+      const errorText = await response.text();
+      return { success: false, error: errorText };
+    }
+  } catch (error) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      return { success: false, error: 'Request timeout' };
+    }
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Process the log queue - retry failed entries
+ */
+async function processLogQueue() {
+  if (isProcessingQueue || logQueue.length === 0) {
+    return;
+  }
+  
+  isProcessingQueue = true;
+  console.log(`🔄 Processing log queue (${logQueue.length} entries)...`);
+  
+  const now = Date.now();
+  const entriesToProcess = logQueue.filter(entry => entry.nextRetryTime <= now);
+  
+  for (const entry of entriesToProcess) {
+    entry.attempts++;
+    
+    console.log(`🔁 Retry attempt ${entry.attempts}/${MAX_RETRY_ATTEMPTS} for: ${entry.logData.Action}`);
+    
+    const result = await sendLogToServer(entry.logData);
+    
+    if (result.success) {
+      // Success - remove from queue
+      console.log(`✅ Successfully logged (retry): ${entry.logData.Action}`);
+      logQueue = logQueue.filter(e => e.id !== entry.id);
+      saveLogQueue();
+    } else {
+      // Failed - check if we should retry
+      if (entry.attempts >= MAX_RETRY_ATTEMPTS) {
+        console.error(`❌ Max retries reached for: ${entry.logData.Action} - Removing from queue`);
+        logQueue = logQueue.filter(e => e.id !== entry.id);
+        saveLogQueue();
+      } else {
+        // Calculate exponential backoff: 2s, 4s, 8s, 16s, 32s
+        const delay = INITIAL_RETRY_DELAY * Math.pow(2, entry.attempts - 1);
+        entry.nextRetryTime = now + delay;
+        saveLogQueue();
+        console.warn(`⏳ Will retry in ${delay/1000}s: ${entry.logData.Action}`);
+      }
+    }
+    
+    // Small delay between processing entries
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+  
+  isProcessingQueue = false;
+  
+  // Schedule next queue check if there are still entries
+  if (logQueue.length > 0) {
+    const nextRetry = Math.min(...logQueue.map(e => e.nextRetryTime));
+    const delayUntilNext = Math.max(1000, nextRetry - Date.now());
+    setTimeout(processLogQueue, delayUntilNext);
+    console.log(`⏰ Next queue check in ${(delayUntilNext/1000).toFixed(1)}s`);
+  }
+}
+
+/**
+ * Logs tablet actions to MongoDB tabletLogDB with guaranteed delivery
  * @param {string} action - Description of the action (e.g., "Scanned kanban", "Worker name selected")
  * @param {string} status - Status of the workflow (default: "in-progress", can be "Completed", "Reset")
  * @param {object} additionalData - Any extra data to log
@@ -134,28 +291,54 @@ async function logTabletAction(action, status = 'in-progress', additionalData = 
       設備,
       Action: action,
       Status: status,
-      sessionID: sessionID, // Include sessionID
+      sessionID: sessionID,
       AdditionalData: additionalData
     };
     
-    const response = await fetch(`${serverURL}/api/tablet-log`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(logData)
-    });
+    // Try to send immediately
+    const result = await sendLogToServer(logData, 8000); // 8 second timeout
     
-    if (response.ok) {
+    if (result.success) {
       console.log(`📝 Tablet action logged: ${action}`);
     } else {
-      console.error('❌ Failed to log tablet action:', await response.text());
+      // Failed - add to retry queue
+      console.warn(`⚠️ Failed to log immediately: ${action} - Adding to queue`);
+      console.warn(`⚠️ Error: ${result.error}`);
+      addToLogQueue(logData);
     }
   } catch (error) {
-    console.error('❌ Error logging tablet action:', error);
-    // Don't throw error - logging failures shouldn't break the workflow
+    console.error('❌ Error in logTabletAction:', error);
+    // Still try to queue it if we have the basic data
+    try {
+      const 背番号 = document.getElementById('sub-dropdown')?.value || '';
+      const 品番 = document.getElementById('product-number')?.value || '';
+      const 工場 = document.getElementById('selected工場')?.value || '';
+      const 設備 = document.getElementById('process')?.value || '';
+      const sessionID = getSessionID();
+      
+      if (設備 && sessionID) {
+        addToLogQueue({
+          背番号, 品番, 工場, 設備,
+          Action: action,
+          Status: status,
+          sessionID: sessionID,
+          AdditionalData: additionalData
+        });
+      }
+    } catch (queueError) {
+      console.error('❌ Failed to queue log entry:', queueError);
+    }
   }
 }
+
+// Initialize queue system on page load
+document.addEventListener('DOMContentLoaded', () => {
+  loadLogQueue();
+  if (logQueue.length > 0) {
+    console.log(`🚀 Starting queue processor for ${logQueue.length} pending logs`);
+    setTimeout(processLogQueue, 2000); // Start processing after 2 seconds
+  }
+});
 
 //this code listens to incoming parameters passed
 function getQueryParam(param) {
