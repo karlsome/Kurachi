@@ -6129,6 +6129,67 @@ app.post('/api/production-goals/press-history', async (req, res) => {
     }
 });
 
+// ==================== FACTORY STATUS API ROUTES ====================
+// For real-time factory production progress visualization
+
+// Get list of factories from production goals
+app.get('/api/production-goals/factories', async (req, res) => {
+    try {
+        const db = client.db('submittedDB');
+        const collection = db.collection('productionGoalsDB');
+        
+        const factories = await collection.distinct('factory');
+        
+        res.json({ success: true, factories: factories.sort() });
+    } catch (error) {
+        console.error('Error fetching factories:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Get production goals summary by factory for factory status graph
+app.get('/api/production-goals/summary', async (req, res) => {
+    try {
+        const { factory, date } = req.query;
+        
+        const db = client.db('submittedDB');
+        const collection = db.collection('productionGoalsDB');
+        
+        const matchStage = {};
+        
+        // Filter by factory if not "all"
+        if (factory && factory !== 'all') {
+            matchStage.factory = factory;
+        }
+        
+        // Filter by specific date
+        if (date) {
+            matchStage.date = date;
+        }
+        
+        // Aggregate goals by factory
+        const summary = await collection.aggregate([
+            { $match: matchStage },
+            {
+                $group: {
+                    _id: '$factory',
+                    totalTargetQuantity: { $sum: '$targetQuantity' },
+                    totalScheduledQuantity: { $sum: '$scheduledQuantity' },
+                    totalRemainingQuantity: { $sum: '$remainingQuantity' },
+                    goalCount: { $sum: 1 }
+                }
+            },
+            { $sort: { _id: 1 } }
+        ]).toArray();
+        
+        res.json({ success: true, data: summary });
+    } catch (error) {
+        console.error('Error fetching production goals summary:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+
 
 
 
