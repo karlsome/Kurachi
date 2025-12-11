@@ -1410,7 +1410,7 @@ const MAX_MAINTENANCE_PHOTOS = 5; // Maximum photos per maintenance record
 
 // Material Label Photo System
 let materialLabelPhotos = []; // Array to store multiple material label photos
-const MAX_MATERIAL_PHOTOS = 5; // Maximum number of photos allowed
+const MAX_MATERIAL_PHOTOS = 10; // Maximum number of photos allowed
 
 // Load maintenance records from localStorage
 function loadMaintenanceRecords() {
