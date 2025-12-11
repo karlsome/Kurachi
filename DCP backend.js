@@ -1859,7 +1859,7 @@ function clearMaterialLabelPhotos() {
   updateMaterialPhotoCount();
 }
 
-function addMaterialLabelPhoto(photoDataURL) {
+async function addMaterialLabelPhoto(photoDataURL) {
   if (materialLabelPhotos.length >= MAX_MATERIAL_PHOTOS) {
     alert(`最大${MAX_MATERIAL_PHOTOS}枚まで撮影できます / Maximum ${MAX_MATERIAL_PHOTOS} photos allowed`);
     return false;
@@ -1887,10 +1887,21 @@ function addMaterialLabelPhoto(photoDataURL) {
     return false;
   }
 
+  // Compress image for localStorage to avoid quota issues
+  // Original size
+  const originalSize = (base64Data.length * 3 / 4 / 1024).toFixed(2);
+  console.log(`Original material photo size: ${originalSize} KB`);
+  
+  // Compress to 60% quality, max 800px for localStorage storage
+  const compressedDataURL = await compressBase64Image(displayURL, 800, 0.6);
+  const compressedBase64 = compressedDataURL.split(',')[1] || compressedDataURL;
+  const compressedSize = (compressedBase64.length * 3 / 4 / 1024).toFixed(2);
+  console.log(`Compressed for localStorage: ${compressedSize} KB (${((1 - compressedBase64.length / base64Data.length) * 100).toFixed(1)}% reduction)`);
+
   const photoData = {
-    base64: base64Data,
+    base64: compressedBase64,  // Store compressed version
     timestamp: new Date().toISOString(),
-    displayURL: displayURL
+    displayURL: compressedDataURL  // Also use compressed for display
   };
 
   materialLabelPhotos.push(photoData);
@@ -1907,10 +1918,23 @@ function addMaterialLabelPhoto(photoDataURL) {
   updateMaterialPhotoCount();
   updateMaterialLabelElement();
   
-  // Save to localStorage
+  // Save to localStorage (now with compressed images)
   const key = `${uniquePrefix}materialLabelPhotos`;
-  localStorage.setItem(key, JSON.stringify(materialLabelPhotos));
-  console.log('Saved material label photos to localStorage');
+  try {
+    localStorage.setItem(key, JSON.stringify(materialLabelPhotos));
+    console.log(`Saved ${materialLabelPhotos.length} compressed material photos to localStorage`);
+  } catch (error) {
+    if (error.name === 'QuotaExceededError') {
+      console.error('localStorage quota exceeded! Cannot save material photos.');
+      showAlert('ストレージ容量不足です。古い写真を削除してください / Storage full! Please delete old photos.');
+      // Remove the photo we just added since we can't save it
+      materialLabelPhotos.pop();
+      renderMaterialPhotoThumbnails();
+      updateMaterialPhotoCount();
+      return false;
+    }
+    throw error;
+  }
   
   return true;
 }
@@ -1938,115 +1962,56 @@ function removeMaterialLabelPhoto(index) {
 function renderMaterialPhotoThumbnails() {
   console.log('Rendering material photo thumbnails');
   
-  let container = document.getElementById('material-photo-thumbnails');
-  let photosContainer = document.getElementById('material-label-photos-container');
-  
-  // Create container if it doesn't exist
-  if (!photosContainer) {
-    console.log('Creating material label photos container');
-    const mainForm = document.querySelector('form') || document.querySelector('.main-form') || document.body;
-    
-    const photoSection = document.createElement('div');
-    photoSection.id = 'material-label-photos-container';
-    photoSection.style.cssText = 'margin: 10px 0; padding: 10px; border: 1px solid #ddd; border-radius: 5px; display: none; background-color: #f9f9f9;';
-    
-    const header = document.createElement('div');
-    header.innerHTML = '<strong>材料ラベル Photos (<span id="material-photo-count">0</span>):</strong>';
-    
-    const thumbnailsDiv = document.createElement('div');
-    thumbnailsDiv.id = 'material-photo-thumbnails';
-    thumbnailsDiv.style.cssText = 'display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px;';
-    
-    photoSection.appendChild(header);
-    photoSection.appendChild(thumbnailsDiv);
-    
-    // Look for the best place to insert the container
-    // First try finding material label specific elements
-    const makerLabelButton = document.getElementById('makerLabelButton');
-    const materialLabelJP = document.getElementById('材料ラベル_L');
-    const materialLabelEN = document.getElementById('makerLabel');
-    const materialImg = document.getElementById('材料ラベル');
-    
-    console.log('Finding placement for material label photos container:', {
-      'makerLabelButton': !!makerLabelButton,
-      '材料ラベル_L': !!materialLabelJP,
-      'makerLabel': !!materialLabelEN,
-      '材料ラベル': !!materialImg
-    });
-    
-    // Try to find the best container area
-    let insertAfter = null;
-    
-    // Priority 1: After the button's parent
-    if (makerLabelButton) {
-      insertAfter = makerLabelButton.parentElement;
-    } 
-    // Priority 2: After the Japanese label's parent
-    else if (materialLabelJP) {
-      insertAfter = materialLabelJP.parentElement;
-    }
-    // Priority 3: After the English label's parent
-    else if (materialLabelEN) {
-      insertAfter = materialLabelEN.parentElement;
-    }
-    // Priority 4: After the image element's parent
-    else if (materialImg) {
-      insertAfter = materialImg.parentElement;
-    }
-    
-    if (insertAfter) {
-      // Insert after the target element
-      if (insertAfter.nextSibling) {
-        insertAfter.parentNode.insertBefore(photoSection, insertAfter.nextSibling);
-      } else {
-        insertAfter.parentNode.appendChild(photoSection);
-      }
-      console.log('Inserted material photo container after appropriate element');
-    } else {
-      // Fallback: Just append to the main form
-      mainForm.appendChild(photoSection);
-      console.log('Appended material photo container to main form (fallback)');
-    }
-    
-    // Update our references to the newly created elements
-    container = document.getElementById('material-photo-thumbnails');
-    photosContainer = document.getElementById('material-label-photos-container');
-  }
+  // Use existing HTML structure (defined in HTML)
+  const container = document.getElementById('material-photo-thumbnails');
+  const photoCountSpan = document.getElementById('material-photo-count');
   
   if (!container) {
-    console.error('Failed to find or create material-photo-thumbnails container');
-    // Create the container if it still doesn't exist
-    try {
-      const photosContainer = document.getElementById('material-label-photos-container');
-      if (photosContainer) {
-        const thumbnailsDiv = document.createElement('div');
-        thumbnailsDiv.id = 'material-photo-thumbnails';
-        thumbnailsDiv.style.cssText = 'display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px;';
-        photosContainer.appendChild(thumbnailsDiv);
-        container = thumbnailsDiv;
-        console.log('Created missing thumbnails container within existing container');
-      } else {
-        throw new Error('Parent container still not found');
+    console.error('material-photo-thumbnails container not found in HTML - this element should exist in DCP iReporter.html');
+    console.log('Creating fallback container...');
+    
+    // Create fallback container dynamically
+    const fallbackContainer = document.createElement('div');
+    fallbackContainer.id = 'material-photo-thumbnails';
+    fallbackContainer.style.cssText = 'display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0;';
+    
+    // Try to find the material label button area
+    const makerButton = document.getElementById('makerLabelButton');
+    if (makerButton && makerButton.parentElement) {
+      makerButton.parentElement.appendChild(fallbackContainer);
+      console.log('Created fallback material-photo-thumbnails container');
+      
+      // Also create photo count if missing
+      if (!photoCountSpan) {
+        const countDiv = document.createElement('div');
+        countDiv.id = 'material-photo-count';
+        countDiv.style.cssText = 'margin: 10px 0; font-weight: bold; color: #007cba;';
+        makerButton.parentElement.insertBefore(countDiv, fallbackContainer);
       }
-    } catch (error) {
-      console.error('Failed to create thumbnails container:', error);
+      
+      // Retry rendering now that container exists
+      return renderMaterialPhotoThumbnails();
+    } else {
+      console.error('Could not create fallback container - makerLabelButton not found');
       return;
     }
   }
   
-  // Clear existing thumbnails and update display
+  // Clear existing thumbnails
   container.innerHTML = '';
   
-  const photoCount = document.getElementById('material-photo-count');
-  if (photoCount) {
-    photoCount.textContent = materialLabelPhotos.length;
+  // Update photo count display
+  if (photoCountSpan) {
+    photoCountSpan.textContent = `Photo ${materialLabelPhotos.length}/${MAX_MATERIAL_PHOTOS}`;
+    photoCountSpan.style.display = materialLabelPhotos.length > 0 ? 'inline' : 'none';
   }
   
+  // Hide/show container based on photo count
   if (materialLabelPhotos.length === 0) {
-    photosContainer.style.display = 'none';
+    container.style.display = 'none';
     console.log('No material label photos to display');
   } else {
-    photosContainer.style.display = 'block';
+    container.style.display = 'flex';
     console.log(`Rendering ${materialLabelPhotos.length} material label photos`);
     
     materialLabelPhotos.forEach((photo, index) => {
@@ -2173,18 +2138,22 @@ function showMaterialPhotoPreview(imageDataURL) {
 function updateMaterialPhotoCount() {
   const countElement = document.getElementById('material-photo-count');
   const statusLabel = document.getElementById('makerLabel');
+  const statusLabelJP = document.getElementById('材料ラベル_L');
   
   if (countElement) {
-    countElement.textContent = materialLabelPhotos.length;
+    countElement.textContent = `Photo ${materialLabelPhotos.length}/${MAX_MATERIAL_PHOTOS}`;
+    countElement.style.display = materialLabelPhotos.length > 0 ? 'block' : 'none';
   }
   
   // Update Material Label status based on photo count
+  const hasPhotos = materialLabelPhotos.length > 0;
+  
   if (statusLabel) {
-    if (materialLabelPhotos.length > 0) {
-      statusLabel.textContent = 'TRUE';
-    } else {
-      statusLabel.textContent = 'FALSE';
-    }
+    statusLabel.textContent = hasPhotos ? 'TRUE' : 'FALSE';
+  }
+  
+  if (statusLabelJP) {
+    statusLabelJP.textContent = hasPhotos ? 'TRUE' : 'FALSE';
   }
   
   // Update the hidden 材料ラベル element as well (for compatibility)
@@ -4133,6 +4102,42 @@ function isMobileDevice() {
   return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 }
 
+// Compress image function
+async function compressBase64Image(base64DataURL, maxWidth = 1024, quality = 0.7) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      let width = img.width;
+      let height = img.height;
+      
+      // Calculate new dimensions
+      if (width > maxWidth) {
+        height = Math.round((height * maxWidth) / width);
+        width = maxWidth;
+      }
+      
+      canvas.width = width;
+      canvas.height = height;
+      
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+      
+      // Compress with specified quality
+      const compressedDataURL = canvas.toDataURL('image/jpeg', quality);
+      resolve(compressedDataURL);
+    };
+    
+    img.onerror = (error) => {
+      console.error('Error loading image for compression:', error);
+      reject(error);
+    };
+    
+    img.src = base64DataURL;
+  });
+}
+
 // Create hidden file inputs for each button
 buttonMappings.forEach(mapping => {
   const fileInput = document.createElement('input');
@@ -4238,9 +4243,34 @@ async function captureFromWebcam() {
   // Close webcam
   closeWebcamModal();
   
-  // Process the captured image with saved values
-  if (savedMapping && savedButtonId) {
-    console.log('✅ Processing with saved values');
+  // Check if this is for material label (multi-photo system)
+  if (savedButtonId === 'makerLabelButton') {
+    console.log('📸 Processing material label photo (multi-photo system)');
+    
+    const added = await addMaterialLabelPhoto(base64Image);
+    
+    if (added) {
+      console.log('✅ Successfully added material label photo from webcam');
+      
+      updateMaterialLabelElement();
+      
+      setTimeout(() => {
+        renderMaterialPhotoThumbnails();
+        updateMaterialPhotoCount();
+        localStorage.setItem(`${uniquePrefix}materialLabelPhotos`, JSON.stringify(materialLabelPhotos));
+        updateMaterialLabelElement();
+      }, 100);
+      
+      logTabletAction('Photo captured: 材料ラベル (webcam)', 'in-progress', {
+        photoType: '材料ラベル',
+        photoCount: materialLabelPhotos.length
+      });
+    } else {
+      showAlert(`最大${MAX_MATERIAL_PHOTOS}枚までです / Maximum ${MAX_MATERIAL_PHOTOS} photos allowed`);
+    }
+  } else if (savedMapping && savedButtonId) {
+    // Process single photo for 初物 or 終物
+    console.log('✅ Processing single photo for', savedMapping.labelText);
     await processPhotoCapture(base64Image, savedMapping, savedButtonId);
   } else {
     console.error('❌ Missing mapping or buttonId for webcam capture');
@@ -4501,7 +4531,7 @@ if (makerLabelButton) {
         const base64Image = await fileToBase64(file);
         
         // Add to material label photos array
-        const added = addMaterialLabelPhoto(base64Image);
+        const added = await addMaterialLabelPhoto(base64Image);
         
         if (added) {
           console.log('✅ Successfully added material label photo');
@@ -4599,53 +4629,13 @@ async function openWebcamModalForMaterial(mapping) {
   const modal = document.getElementById('webcamModal');
   const video = document.getElementById('webcamVideo');
   const title = document.getElementById('webcamModalTitle');
-  const captureBtn = document.getElementById('captureWebcamBtn');
   
   currentPhotoMapping = mapping;
+  currentButtonId = 'makerLabelButton'; // Set this explicitly
   title.textContent = `写真撮影: ${mapping.labelText} (${materialLabelPhotos.length + 1}/${MAX_MATERIAL_PHOTOS}) / Take Photo`;
   modal.style.display = 'flex';
   
-  // Replace capture button handler for material label
-  const newCaptureBtn = captureBtn.cloneNode(true);
-  captureBtn.parentNode.replaceChild(newCaptureBtn, captureBtn);
-  
-  newCaptureBtn.addEventListener('click', async () => {
-    const video = document.getElementById('webcamVideo');
-    const canvas = document.getElementById('webcamCanvas');
-    const ctx = canvas.getContext('2d');
-    
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    ctx.drawImage(video, 0, 0);
-    
-    const base64Image = canvas.toDataURL('image/jpeg', 0.95);
-    
-    // Add to material label photos
-    const added = addMaterialLabelPhoto(base64Image);
-    
-    if (added) {
-      console.log('✅ Successfully added material label photo from webcam');
-      
-      updateMaterialLabelElement();
-      
-      setTimeout(() => {
-        renderMaterialPhotoThumbnails();
-        updateMaterialPhotoCount();
-        localStorage.setItem(`${uniquePrefix}materialLabelPhotos`, JSON.stringify(materialLabelPhotos));
-        updateMaterialLabelElement();
-      }, 100);
-      
-      logTabletAction('Photo captured: 材料ラベル (webcam)', 'in-progress', {
-        photoType: '材料ラベル',
-        photoCount: materialLabelPhotos.length
-      });
-      
-      closeWebcamModal();
-    } else {
-      showAlert(`最大${MAX_MATERIAL_PHOTOS}枚までです / Maximum ${MAX_MATERIAL_PHOTOS} photos allowed`);
-    }
-  });
-  
+  // Start webcam
   try {
     webcamStream = await navigator.mediaDevices.getUserMedia({ 
       video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } } 
@@ -4661,7 +4651,7 @@ async function openWebcamModalForMaterial(mapping) {
 
 // Legacy message handler (kept for backward compatibility if captureImage.html is still used elsewhere)
 // NEW: Native camera system above replaces this for 初物/終物/材料ラベル
-window.addEventListener('message', function(event) {
+window.addEventListener('message', async function(event) {
   if (event.origin === window.location.origin) {
     const data = event.data;
     
@@ -4719,7 +4709,7 @@ window.addEventListener('message', function(event) {
           }
           
           // We pass the full data URL to addMaterialLabelPhoto
-          const added = addMaterialLabelPhoto(data.image);
+          const added = await addMaterialLabelPhoto(data.image);
           
           if (added) {
             console.log('Successfully added material label photo');
@@ -5395,14 +5385,22 @@ document.getElementById('submit').addEventListener('click', async (event) => {
                 if (record.photos && record.photos.length > 0) {
                     for (const photo of record.photos) {
                         if (photo.base64 && photo.id && photo.timestamp) {
-                            // Compress maintenance photo for upload
+                            // Ensure base64 data has proper data URL prefix
+                            const photoDataURL = photo.base64.startsWith('data:') 
+                                ? photo.base64 
+                                : `data:image/jpeg;base64,${photo.base64}`;
+                            
+                            // Compress maintenance photo for upload (70% quality, max 1024px)
                             const originalSize = (photo.base64.length / 1024).toFixed(2);
-                            const compressedBase64 = await compressBase64Image(photo.base64, 1024, 0.7);
-                            const compressedSize = (compressedBase64.length / 1024).toFixed(2);
+                            const compressedDataURL = await compressBase64Image(photoDataURL, 1024, 0.7);
+                            const compressedSize = (compressedDataURL.length / 1024).toFixed(2);
                             console.log(`Maintenance photo ${photo.id}: ${originalSize} KB → ${compressedSize} KB`);
                             
+                            // Extract just the base64 part (remove data:image/jpeg;base64, prefix) for server upload
+                            const compressedBase64Only = compressedDataURL.split(',')[1] || compressedDataURL;
+                            
                             maintenanceImages.push({
-                                base64: compressedBase64, // Use compressed version
+                                base64: compressedBase64Only, // Server expects base64 without prefix
                                 id: photo.id,
                                 timestamp: photo.timestamp,
                                 maintenanceRecordId: record.id
@@ -5480,20 +5478,28 @@ document.getElementById('submit').addEventListener('click', async (event) => {
                 continue;
             }
             
-            // Compress material label photo for upload
+            // Ensure base64 data has proper data URL prefix
+            const photoDataURL = photo.base64.startsWith('data:') 
+                ? photo.base64 
+                : `data:image/jpeg;base64,${photo.base64}`;
+            
+            // Compress material label photo for upload (70% quality, max 1024px)
             const originalSize = (photo.base64.length / 1024).toFixed(2);
-            const compressedBase64 = await compressBase64Image(photo.base64, 1024, 0.7);
-            const compressedSize = (compressedBase64.length / 1024).toFixed(2);
-            console.log(`Material label ${i+1}: ${originalSize} KB → ${compressedSize} KB (${((1 - compressedBase64.length / photo.base64.length) * 100).toFixed(1)}% reduction)`);
+            const compressedDataURL = await compressBase64Image(photoDataURL, 1024, 0.7);
+            const compressedSize = (compressedDataURL.length / 1024).toFixed(2);
+            console.log(`Material label ${i+1}: ${originalSize} KB → ${compressedSize} KB`);
+            
+            // Extract just the base64 part (remove data:image/jpeg;base64, prefix) for server upload
+            const compressedBase64Only = compressedDataURL.split(',')[1] || compressedDataURL;
             
             materialLabelImages.push({
-                base64: compressedBase64, // Use compressed version
+                base64: compressedBase64Only, // Server expects base64 without prefix
                 id: `material-label-${i}-${photo.timestamp || new Date().getTime()}`,
                 timestamp: photo.timestamp || new Date().getTime(),
                 description: `材料ラベル ${i+1}/${materialLabelPhotos.length}`
             });
             
-            console.log(`Material label photo ${i+1} processed: ${(photo.base64.length / 1024).toFixed(2)} KB`);
+            console.log(`Material label photo ${i+1} processed: ${(compressedBase64Only.length / 1024).toFixed(2)} KB compressed`);
         }
         
         // Fallback to legacy method if no photos in new system
@@ -5655,18 +5661,21 @@ async function collectImagesForUpload() {
     try {
       console.log(`Processing ${label} image from element: ${imgId}`);
       
-      // Get original image from localStorage (full quality)
-      const originalBase64 = photoPreview.src;
-      const originalSize = (originalBase64.length / 1024).toFixed(2);
+      // Get original image (should be a data URL)
+      const originalDataURL = photoPreview.src;
+      const originalSize = (originalDataURL.length / 1024).toFixed(2);
       console.log(`Original ${label}: ${originalSize} KB`);
       
       // Compress for upload (70% quality, max 1024px)
-      const compressedBase64 = await compressBase64Image(originalBase64, 1024, 0.7);
-      const compressedSize = (compressedBase64.length / 1024).toFixed(2);
-      console.log(`Compressed ${label}: ${compressedSize} KB (reduced ${((1 - compressedBase64.length / originalBase64.length) * 100).toFixed(1)}%)`);
+      const compressedDataURL = await compressBase64Image(originalDataURL, 1024, 0.7);
+      const compressedSize = (compressedDataURL.length / 1024).toFixed(2);
+      console.log(`Compressed ${label}: ${compressedSize} KB`);
+      
+      // Extract just the base64 part (remove data:image/jpeg;base64, prefix) for server upload
+      const compressedBase64Only = compressedDataURL.split(',')[1] || compressedDataURL;
 
       imagesToUpload.push({
-        base64: compressedBase64, // Use compressed version for upload
+        base64: compressedBase64Only, // Server expects base64 without prefix
         label,
         factory: selectedFactory,
         machine: selectedMachine,
