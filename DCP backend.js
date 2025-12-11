@@ -5468,13 +5468,14 @@ document.getElementById('submit').addEventListener('click', async (event) => {
         // Process all material label photos from the new system with compression
         const materialLabelImages = [];
         
-        console.log(`Processing ${materialLabelPhotos.length} material label photos for submission`);
+        console.log(`📸 Processing ${materialLabelPhotos.length} material label photos for submission`);
+        console.log('Material photos array:', materialLabelPhotos.map((p, i) => ({ index: i, hasBase64: !!p.base64, timestamp: p.timestamp })));
         
         // Convert all material label photos to the format expected by server (with compression)
         for (let i = 0; i < materialLabelPhotos.length; i++) {
             const photo = materialLabelPhotos[i];
             if (!photo.base64) {
-                console.warn(`Skipping material label photo ${i} - no base64 data`);
+                console.warn(`⚠️ Skipping material label photo ${i} - no base64 data`);
                 continue;
             }
             
@@ -5487,7 +5488,7 @@ document.getElementById('submit').addEventListener('click', async (event) => {
             const originalSize = (photo.base64.length / 1024).toFixed(2);
             const compressedDataURL = await compressBase64Image(photoDataURL, 1024, 0.7);
             const compressedSize = (compressedDataURL.length / 1024).toFixed(2);
-            console.log(`Material label ${i+1}: ${originalSize} KB → ${compressedSize} KB`);
+            console.log(`✅ Material label ${i+1}/${materialLabelPhotos.length}: ${originalSize} KB → ${compressedSize} KB`);
             
             // Extract just the base64 part (remove data:image/jpeg;base64, prefix) for server upload
             const compressedBase64Only = compressedDataURL.split(',')[1] || compressedDataURL;
@@ -5499,8 +5500,10 @@ document.getElementById('submit').addEventListener('click', async (event) => {
                 description: `材料ラベル ${i+1}/${materialLabelPhotos.length}`
             });
             
-            console.log(`Material label photo ${i+1} processed: ${(compressedBase64Only.length / 1024).toFixed(2)} KB compressed`);
+            console.log(`   📦 Added to upload queue: ${(compressedBase64Only.length / 1024).toFixed(2)} KB compressed`);
         }
+        
+        console.log(`📊 Total material label images prepared for upload: ${materialLabelImages.length}`);
         
         // Fallback to legacy method if no photos in new system
         if (materialLabelImages.length === 0) {
@@ -5566,9 +5569,16 @@ document.getElementById('submit').addEventListener('click', async (event) => {
             品番, 背番号, 工場, 設備, Worker_Name,
             cycleCheckImages: uploadedImages.length,
             maintenanceImages: maintenanceImages.length,
+            materialLabelImages: materialLabelImages.length, // ✅ Added logging for material labels
             maintenanceRecords: maintenanceDataForSubmission.records.length,
             isToggleChecked
         });
+        
+        console.log('📋 Material label images being sent:', materialLabelImages.map(img => ({ 
+            id: img.id, 
+            size: (img.base64.length / 1024).toFixed(2) + ' KB',
+            description: img.description 
+        })));
 
         // Submit to the new combined route
         const dcpResponse = await fetch(`${serverURL}/submitToDCP`, {
@@ -5689,70 +5699,10 @@ async function collectImagesForUpload() {
     }
   }
   
-  // Process all material label photos from our new system
-  console.log(`Processing ${materialLabelPhotos.length} material label photos`);
-  
-  if (materialLabelPhotos.length > 0) {
-    // Process each material label photo
-    for (let i = 0; i < materialLabelPhotos.length; i++) {
-      const photo = materialLabelPhotos[i];
-      if (!photo || !photo.base64) {
-        console.warn(`Skipping invalid material label photo at index ${i}`);
-        continue;
-      }
-      
-      const photoBase64 = photo.base64;
-      const photoIndex = i === 0 ? '' : `_${i+1}`;  // First photo has no index suffix
-      
-      console.log(`Adding material label photo ${i+1}/${materialLabelPhotos.length} (${(photoBase64.length / 1024).toFixed(2)} KB) to upload list`);
-      
-      imagesToUpload.push({
-        base64: photoBase64,
-        label: `材料ラベル${photoIndex}`,  // First one is "材料ラベル", others are "材料ラベル_2", etc.
-        factory: selectedFactory,
-        machine: selectedMachine,
-        worker: selectedWorker,
-        date: currentDate,
-        sebanggo: selectedSebanggo,
-        timestamp: photo.timestamp || new Date().getTime()
-      });
-    }
-    
-    // Update the legacy element if needed (for backward compatibility)
-    updateMaterialLabelElement();
-    
-  } else {
-    // Fall back to legacy approach if no new system photos
-    const makerPic = document.getElementById('材料ラベル');
-    
-    if (makerPic && makerPic.src && makerPic.src !== '' && makerPic.src !== 'data:,' && 
-        makerPic.style.display !== 'none') {
-      try {
-        console.log('No material label photos in new system, falling back to legacy element');
-        const response = await fetch(makerPic.src);
-        const blob = await response.blob();
-        const base64Data = await blobToBase64(blob);
-
-        // Debug log the size
-        console.log(`Legacy 材料ラベル image: ${(base64Data.length / 1024).toFixed(2)} KB`);
-
-        imagesToUpload.push({
-          base64: base64Data,
-          label: '材料ラベル',
-          factory: selectedFactory,
-          machine: selectedMachine,
-          worker: selectedWorker,
-          date: currentDate,
-          sebanggo: selectedSebanggo,
-          timestamp: new Date().getTime()
-        });
-      } catch (error) {
-        console.error('Error processing legacy 材料ラベル image:', error);
-      }
-    } else {
-      console.warn('No material label photos available in either system');
-    }
-  }
+  // NOTE: Material label photos are processed separately in materialLabelImages array
+  // and sent via dcpSubmissionData.materialLabelImages, not in the images array.
+  // This avoids duplicate processing and ensures all photos are uploaded correctly.
+  console.log('Material label photos are processed separately in materialLabelImages array');
 
   return imagesToUpload;
 }
