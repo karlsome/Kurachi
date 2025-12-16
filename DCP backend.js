@@ -4005,7 +4005,13 @@ function printLabel() {
       const SRS = document.getElementById("SRS").value;
       let filename = "";
 
-      const WorkDate = extension ? `${Date2} - ${extension}` : Date2;
+      // Get current time for DateT
+      const now = new Date();
+      const hours = String(now.getHours()).padStart(2, '0');
+      const minutes = String(now.getMinutes()).padStart(2, '0');
+      const currentTime = `${hours}:${minutes}`;
+
+      const WorkDate = extension ? `${Date2} - ${extension} - ${currentTime}` : `${Date2} - ${currentTime}`;
 
       // Smooth Print URL scheme
       if (SRS === "有り") {
@@ -4049,7 +4055,13 @@ function printLabel() {
   const SRS = document.getElementById("SRS").value;
   let filename = "";
 
-  const WorkDate = extension ? `${Date2} - ${extension}` : Date2;
+  // Get current time for DateT
+  const now = new Date();
+  const hours = String(now.getHours()).padStart(2, '0');
+  const minutes = String(now.getMinutes()).padStart(2, '0');
+  const currentTime = `${hours}:${minutes}`;
+
+  const WorkDate = extension ? `${Date2} - ${extension} - ${currentTime}` : `${Date2} - ${currentTime}`;
 
   if (SRS === "有り") {
     filename = "SRS3.lbx";
