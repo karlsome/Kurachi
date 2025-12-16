@@ -5416,9 +5416,9 @@ document.getElementById('submit').addEventListener('click', async (event) => {
                                 ? photo.base64 
                                 : `data:image/jpeg;base64,${photo.base64}`;
                             
-                            // Compress maintenance photo for upload (70% quality, max 1024px)
+                            // Compress maintenance photo for upload (80% quality, max 1024px)
                             const originalSize = (photo.base64.length / 1024).toFixed(2);
-                            const compressedDataURL = await compressBase64Image(photoDataURL, 1024, 0.7);
+                            const compressedDataURL = await compressBase64Image(photoDataURL, 1024, 0.8);
                             const compressedSize = (compressedDataURL.length / 1024).toFixed(2);
                             console.log(`Maintenance photo ${photo.id}: ${originalSize} KB → ${compressedSize} KB`);
                             
@@ -5510,9 +5510,9 @@ document.getElementById('submit').addEventListener('click', async (event) => {
                 ? photo.base64 
                 : `data:image/jpeg;base64,${photo.base64}`;
             
-            // Compress material label photo for upload (70% quality, max 1024px)
+            // Compress material label photo for upload (80% quality, max 1024px)
             const originalSize = (photo.base64.length / 1024).toFixed(2);
-            const compressedDataURL = await compressBase64Image(photoDataURL, 1024, 0.7);
+            const compressedDataURL = await compressBase64Image(photoDataURL, 1024, 0.8);
             const compressedSize = (compressedDataURL.length / 1024).toFixed(2);
             console.log(`✅ Material label ${i+1}/${materialLabelPhotos.length}: ${originalSize} KB → ${compressedSize} KB`);
             
@@ -5703,8 +5703,8 @@ async function collectImagesForUpload() {
       const originalSize = (originalDataURL.length / 1024).toFixed(2);
       console.log(`Original ${label}: ${originalSize} KB`);
       
-      // Compress for upload (70% quality, max 1024px)
-      const compressedDataURL = await compressBase64Image(originalDataURL, 1024, 0.7);
+      // Compress for upload (80% quality, max 1024px)
+      const compressedDataURL = await compressBase64Image(originalDataURL, 1024, 0.8);
       const compressedSize = (compressedDataURL.length / 1024).toFixed(2);
       console.log(`Compressed ${label}: ${compressedSize} KB`);
       
