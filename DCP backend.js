@@ -4078,6 +4078,16 @@ function printLabel() {
 }
 
 // Take photo hatsumono and atomono and label
+// Helper function to convert File to base64 string
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = (error) => reject(error);
+    reader.readAsDataURL(file);
+  });
+}
+
 // Mapping of buttons to labels and images
 const buttonMappings = [{
   buttonId: 'hatsumonoButton',
