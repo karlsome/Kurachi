@@ -1569,7 +1569,7 @@ async function printLabel() {
       try {
         const response = await Promise.race([
           fetch(url).then(res => res.text()),
-          new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 7000))
+          new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 30000))
         ]);
         if (response.includes("<result>SUCCESS</result>")) {
           wasSuccessful = true;
@@ -1872,7 +1872,7 @@ if(confirmReprintButton) {
                 
                 const response = await Promise.race([
                     fetch(url).then(res => res.text()),
-                    new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 7000))
+                    new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 30000))
                 ]);
                 if (response.includes("<result>SUCCESS</result>")) {
                     showModalAlert("再印刷成功。(Reprint successful.)", false);
