@@ -4094,11 +4094,13 @@ const buttonMappings = [{
   labelId: 'hatsumonoLabel',
   imgId: 'hatsumonoPic',
   labelText: '初物チェック',
+  fileInputId: 'hatsumonoFileInput'
 }, {
   buttonId: 'atomonoButton',
   labelId: 'atomonoLabel',
   imgId: 'atomonoPic',
   labelText: '終物チェック',
+  fileInputId: 'atomonoFileInput'
 }, {
   buttonId: 'makerLabelButton',
   labelId: '材料ラベル_L',
@@ -4309,10 +4311,11 @@ async function processPhotoCapture(base64Image, mapping, buttonId) {
       
       console.log(`   - Set src (${(base64Image.length / 1024).toFixed(2)} KB) and display: block`);
       
-      // Save to localStorage for persistence
+      // Compress image before saving to localStorage to avoid quota issues
+      const compressedImage = await compressBase64Image(base64Image, 1024, 0.7);
       const photoPreviewKey = `${uniquePrefix}${mapping.imgId}.src`;
-      localStorage.setItem(photoPreviewKey, base64Image);
-      console.log(`✅ Saved full-quality image to localStorage for ${mapping.imgId}`);
+      localStorage.setItem(photoPreviewKey, compressedImage);
+      console.log(`✅ Saved compressed image to localStorage for ${mapping.imgId} (${(compressedImage.length / 1024).toFixed(2)} KB)`);
     } else {
       console.error(`❌ Photo preview element not found: ${mapping.imgId}`);
     }
@@ -4458,8 +4461,9 @@ function showPhotoOptionModal(mapping, buttonId, fileInput) {
     if (!file) return;
     
     try {
-      // Convert to base64 for localStorage (full quality)
+      // Convert to base64
       const base64Image = await fileToBase64(file);
+      console.log(`📸 Original image size: ${(base64Image.length / 1024).toFixed(2)} KB`);
       
       // Process the photo
       await processPhotoCapture(base64Image, mapping, currentButtonId);
