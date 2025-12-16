@@ -5685,6 +5685,7 @@ async function collectImagesForUpload() {
   }
 
   // Process regular cycle check images (hatsumono and atomono) with compression
+  let imageIndex = 0; // Counter to ensure unique timestamps
   for (const { imgId, label } of imageMappings) {
     const photoPreview = document.getElementById(imgId);
     // Skip if element doesn't exist, has no src, or is hidden
@@ -5710,16 +5711,23 @@ async function collectImagesForUpload() {
       // Extract just the base64 part (remove data:image/jpeg;base64, prefix) for server upload
       const compressedBase64Only = compressedDataURL.split(',')[1] || compressedDataURL;
 
+      // Create unique ID using label, timestamp, and index to prevent overwrites
+      const uniqueId = `${imgId}-${Date.now()}-${imageIndex++}`;
+      
       imagesToUpload.push({
         base64: compressedBase64Only, // Server expects base64 without prefix
         label,
+        id: uniqueId, // Add unique ID for each image
+        imgId: imgId, // Keep original imgId for reference
         factory: selectedFactory,
         machine: selectedMachine,
         worker: selectedWorker,
         date: currentDate,
         sebanggo: selectedSebanggo,
-        timestamp: new Date().getTime() // Add timestamp for uniqueness
+        timestamp: Date.now() + imageIndex // Ensure unique timestamp by adding index
       });
+      
+      console.log(`✅ Added ${label} to upload queue with unique ID: ${uniqueId}`);
     } catch (error) {
       console.error(`Error processing ${label} image:`, error);
     }
