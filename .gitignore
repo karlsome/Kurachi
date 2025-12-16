@@ -168,3 +168,4 @@ wheels/
 # Server logs and runtime files
 server.log
 *.pid
+*.pem
