@@ -3001,6 +3001,18 @@ function openScanLotModal() {
               await window.lotHtml5QrCode.stop();
               await window.lotHtml5QrCode.clear();
               console.log('Camera scanner stopped and cleared successfully');
+              
+              // Desktop Chrome fix: manually stop all remaining media tracks
+              const videoElement = document.querySelector('#lotQrReader video');
+              if (videoElement && videoElement.srcObject) {
+                const stream = videoElement.srcObject;
+                stream.getTracks().forEach(track => {
+                  track.stop();
+                  console.log('Manually stopped track:', track.kind, track.label);
+                });
+                videoElement.srcObject = null;
+              }
+              
               window.lotHtml5QrCode = null;
             } catch (err) {
               console.error('Error stopping scanner:', err);
@@ -3050,6 +3062,18 @@ function openScanLotModal() {
               await window.lotHtml5QrCode.stop();
               await window.lotHtml5QrCode.clear();
               console.log('Camera stopped and cleared after error');
+              
+              // Desktop Chrome fix: manually stop remaining tracks
+              const videoElement = document.querySelector('#lotQrReader video');
+              if (videoElement && videoElement.srcObject) {
+                const stream = videoElement.srcObject;
+                stream.getTracks().forEach(track => {
+                  track.stop();
+                  console.log('Manually stopped track after error:', track.kind);
+                });
+                videoElement.srcObject = null;
+              }
+              
               window.lotHtml5QrCode = null;
               scanLotModal.style.display = 'none';
             } catch (err) {
@@ -3071,6 +3095,18 @@ function openScanLotModal() {
             await window.lotHtml5QrCode.stop();
             await window.lotHtml5QrCode.clear();
             console.log('Camera stopped and cleared after invalid format');
+            
+            // Desktop Chrome fix: manually stop remaining tracks
+            const videoElement = document.querySelector('#lotQrReader video');
+            if (videoElement && videoElement.srcObject) {
+              const stream = videoElement.srcObject;
+              stream.getTracks().forEach(track => {
+                track.stop();
+                console.log('Manually stopped track after invalid format:', track.kind);
+              });
+              videoElement.srcObject = null;
+            }
+            
             window.lotHtml5QrCode = null;
             scanLotModal.style.display = 'none';
           } catch (err) {
@@ -3103,6 +3139,17 @@ document.addEventListener('DOMContentLoaded', () => {
           await window.lotHtml5QrCode.stop();
           await window.lotHtml5QrCode.clear();
           console.log('Scanner stopped and cleared for override');
+          
+          // Desktop Chrome fix: manually stop remaining tracks
+          const videoElement = document.querySelector('#lotQrReader video');
+          if (videoElement && videoElement.srcObject) {
+            const stream = videoElement.srcObject;
+            stream.getTracks().forEach(track => {
+              track.stop();
+              console.log('Manually stopped track on override:', track.kind);
+            });
+            videoElement.srcObject = null;
+          }
         } catch (err) {
           console.error("Error stopping lot scanner:", err);
         }
@@ -3125,6 +3172,18 @@ document.addEventListener('DOMContentLoaded', () => {
           await window.lotHtml5QrCode.stop();
           await window.lotHtml5QrCode.clear();
           console.log('QR scanner stopped and cleared successfully');
+          
+          // Desktop Chrome fix: manually stop all remaining tracks
+          const videoElement = document.querySelector('#lotQrReader video');
+          if (videoElement && videoElement.srcObject) {
+            const stream = videoElement.srcObject;
+            stream.getTracks().forEach(track => {
+              track.stop();
+              console.log('Manually stopped track on close:', track.kind);
+            });
+            videoElement.srcObject = null;
+          }
+          
           window.lotHtml5QrCode = null;
         } catch (err) {
           console.error('Error stopping QR scanner:', err);
