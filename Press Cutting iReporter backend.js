@@ -3161,14 +3161,122 @@ async function printLabel() {
   // Default process for other 背番号 values (not in specialValues)
   const 品番 = document.getElementById("product-number").value;
   const 車型 = document.getElementById("model").value;
-  const 収容数 = document.getElementById("収容数").value;
+  const 収容数Raw = document.getElementById("収容数").value;
   const R_L = document.getElementById("R-L").value;
   const 材料 = document.getElementById("material").value;
   const 色 = document.getElementById("material-color").value;
   const extension = document.getElementById("Labelextension").value;
   const Date2 = document.getElementById('Lot No.').value;
-  const 品番収容数 = `${品番},${収容数}`;
   const SRS = document.getElementById("SRS").value;
+  
+  // Check if 収容数 has multiple comma-separated values
+  if (収容数Raw && 収容数Raw.includes(',')) {
+    // Parse comma-separated values
+    const 収容数Array = 収容数Raw.split(',').map(val => val.trim()).filter(val => val !== "");
+    
+    if (収容数Array.length > 1) {
+      // Show modal for 収容数 selection
+      const modal = document.createElement('div');
+      modal.classList.add('modal');
+      modal.style.display = 'flex';
+      modal.style.position = 'fixed';
+      modal.style.zIndex = '1000';
+      modal.style.top = '50%';
+      modal.style.left = '50%';
+      modal.style.transform = 'translate(-50%, -50%)';
+      modal.style.flexDirection = 'column';
+      modal.style.justifyContent = 'center';
+      modal.style.alignItems = 'center';
+      modal.style.padding = '30px';
+      modal.style.backgroundColor = 'white';
+      modal.style.boxShadow = '0 0 15px rgba(0, 0, 0, 0.5)';
+      modal.style.borderRadius = '10px';
+
+      const message = document.createElement('p');
+      message.innerText = '収容数を選んでください / Please choose the 収容数 value';
+      message.style.fontSize = '24px';
+      message.style.textAlign = 'center';
+      message.style.marginBottom = '20px';
+      modal.appendChild(message);
+
+      const createQuantityButton = (value) => {
+        const button = document.createElement('button');
+        button.innerText = String(value);
+        button.style.margin = '10px';
+        button.style.padding = '15px 30px';
+        button.style.fontSize = '20px';
+        button.style.cursor = 'pointer';
+        button.style.borderRadius = '5px';
+        button.onclick = async () => {
+          await proceedWithSelectedQuantity(value);
+        };
+        modal.appendChild(button);
+      };
+
+      // Create button for each 収容数 value
+      収容数Array.forEach(value => {
+        createQuantityButton(value);
+      });
+
+      // Add close button
+      const closeButton = document.createElement('button');
+      closeButton.innerText = '✕ Close';
+      closeButton.style.margin = '20px 10px 0px 10px';
+      closeButton.style.padding = '10px 20px';
+      closeButton.style.fontSize = '16px';
+      closeButton.style.cursor = 'pointer';
+      closeButton.style.borderRadius = '5px';
+      closeButton.style.backgroundColor = '#f44336';
+      closeButton.style.color = 'white';
+      closeButton.style.border = 'none';
+      closeButton.onclick = () => {
+        if (document.body.contains(modal)) {
+          document.body.removeChild(modal);
+        }
+      };
+      modal.appendChild(closeButton);
+
+      document.body.appendChild(modal);
+
+      async function proceedWithSelectedQuantity(selected収容数) {
+        if (document.body.contains(modal)) {
+          document.body.removeChild(modal);
+        }
+
+        const 品番収容数 = `${品番},${selected収容数}`;
+        const filename = getFilename(背番号, SRS);
+        const DateStr = extension ? `${Date2} - ${extension}` : Date2;
+
+        const currentIsIOS = isIOS();
+        const baseURL = currentIsIOS
+          ? "brotherwebprint://print"
+          : "http://localhost:8088/print";
+
+        const size = "RollW62";
+        const copies = 1;
+        const url =
+          `${baseURL}?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent(size)}&copies=${encodeURIComponent(copies)}` +
+          `&text_品番=${encodeURIComponent(品番)}` +
+          `&text_車型=${encodeURIComponent(車型)}` +
+          `&text_収容数=${encodeURIComponent(selected収容数)}` +
+          `&text_背番号=${encodeURIComponent(背番号)}` +
+          `&text_RL=${encodeURIComponent(R_L)}` +
+          `&text_材料=${encodeURIComponent(材料)}` +
+          `&text_色=${encodeURIComponent(色)}` +
+          `&text_DateT=${encodeURIComponent(DateStr)}` +
+          `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
+
+        console.log("Sending print request (multiple 収容数 selected):", url);
+        await executePrint(url, currentIsIOS);
+      }
+      
+      return; // Stop execution until user selects 収容数
+    }
+  }
+  
+  // Single 収容数 value - proceed normally
+  const 収容数 = 収容数Raw;
+  const 品番収容数 = `${品番},${収容数}`;
   
   const filename = getFilename(背番号, SRS); // Use the helper function
 
