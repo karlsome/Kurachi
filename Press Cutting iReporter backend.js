@@ -3824,8 +3824,8 @@ buttonMappings.forEach(mapping => {
   const button = document.getElementById(mapping.buttonId);
   if (button) {
     button.addEventListener('click', () => {
-      const subDropdown = document.getElementById('sub-dropdown');
-      const selectedValue = subDropdown?.value;
+      const subDropdownInput = document.getElementById('sub-dropdown-input');
+      const selectedValue = subDropdownInput?.value;
 
       if (!selectedValue) {
         // Trigger modal message instead of alert
@@ -3836,9 +3836,9 @@ buttonMappings.forEach(mapping => {
         scanAlertText.innerText = '背番号を選択してください / Please select a Sebanggo first.';
         scanAlertModal.style.display = 'block';
 
-        // Flash body and sub-dropdown
+        // Flash body and input field
         document.body.classList.add('flash-red');
-        subDropdown.classList.add('flash-red-border');
+        subDropdownInput.classList.add('flash-red-border');
 
         // Play alert sound
         if (alertSound) {
@@ -3852,7 +3852,7 @@ buttonMappings.forEach(mapping => {
         closeScanModalButton.onclick = function () {
           scanAlertModal.style.display = 'none';
           document.body.classList.remove('flash-red');
-          subDropdown.classList.remove('flash-red-border');
+          subDropdownInput.classList.remove('flash-red-border');
 
           if (alertSound) {
             alertSound.pause();
