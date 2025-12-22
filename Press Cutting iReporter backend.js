@@ -5,6 +5,16 @@ const serverURL = "https://kurachi.onrender.com";
 // link for pictures database
 const picURL = 'https://script.google.com/macros/s/AKfycbwHUW1ia8hNZG-ljsguNq8K4LTPVnB6Ng_GLXIHmtJTdUgGGd2WoiQo9ToF-7PvcJh9bA/exec';
 
+// Worker Name Selection Modal Variables (moved to top to avoid temporal dead zone)
+let workerNamesData = [];
+const RECENT_WORKERS_KEY = 'recentWorkerNames';
+const MAX_RECENT_WORKERS = 6;
+
+// 背番号/品番 Selection Modal Variables
+let sebanggoData = [];
+const RECENT_SEBANGGO_KEY = 'recentSebanggoSelection';
+const MAX_RECENT_SEBANGGO = 6;
+
 
 // Auto-resize textarea based on content
 function autoResizeTextarea(textarea) {
@@ -79,6 +89,30 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Loop through all keys in localStorage
+  
+  // Debug: First let's see what uniquePrefix patterns we're using
+  const uniquePrefix = `${pageName}_${selected工場}_`;
+  console.log(`🔧 Debug - uniquePrefix: ${uniquePrefix}`);
+  
+  // Debug: List all localStorage keys for this page
+  const allKeys = Object.keys(localStorage);
+  const pageKeys = allKeys.filter(key => key.startsWith(uniquePrefix));
+  console.log(`🔧 Debug - Found ${pageKeys.length} localStorage keys for this page:`);
+  pageKeys.forEach(key => {
+    const value = localStorage.getItem(key);
+    console.log(`  - ${key}: ${value ? (value.startsWith('data:image') ? 'IMAGE DATA' : value) : 'null'}`);
+  });
+  
+  // Migrate old sub-dropdown key to new sub-dropdown-input key
+  const oldSubDropdownKey = `${uniquePrefix}sub-dropdown`;
+  const newSubDropdownKey = `${uniquePrefix}sub-dropdown-input`;
+  if (localStorage.getItem(oldSubDropdownKey) && !localStorage.getItem(newSubDropdownKey)) {
+    const oldValue = localStorage.getItem(oldSubDropdownKey);
+    console.log(`🔄 Migrating localStorage: ${oldSubDropdownKey} -> ${newSubDropdownKey}:`, oldValue);
+    localStorage.setItem(newSubDropdownKey, oldValue);
+    localStorage.removeItem(oldSubDropdownKey);
+  }
+  
   Object.keys(localStorage).forEach(key => {
       // Check if the key belongs to the current HTML file and selected 工場
       if (key.startsWith(`${uniquePrefix}`)) {
@@ -106,6 +140,19 @@ document.addEventListener('DOMContentLoaded', () => {
                           
                       } else {
                           input.value = savedValue; // Restore value for text, hidden, and other inputs
+                          console.log(`Restored ${input.id || input.name}:`, savedValue);
+                          
+                          // Special handling for sebanggo input restoration
+                          if (input.id === 'sub-dropdown-input' && savedValue) {
+                              console.log(`🔄 Restoring sebanggo input and adding to recents:`, savedValue);
+                              // Add to recent selections
+                              addToRecentSebanggo(savedValue);
+                              // Fetch product details
+                              setTimeout(() => {
+                                  fetchProductDetails();
+                                  checkProcessCondition();
+                              }, 1000);
+                          }
                       }
                   }
               });
@@ -119,22 +166,39 @@ document.addEventListener('DOMContentLoaded', () => {
                   }
               });
 
-              // Restore image sources dynamically
+              // Restore image sources dynamically (handle both old and new key patterns)
               images.forEach(image => {
-                  const imageKey = `${uniquePrefix}${image.id || image.name}.src`;
-                  if (key === imageKey) {
+                  // Try old pattern first (with dot)
+                  const imageKeyOld = `${uniquePrefix}${image.id || image.name}.src`;
+                  // Try new pattern (with underscore - from native camera)
+                  const imageKeyNew = `${uniquePrefix}${image.id}_src`;
+                  
+                  if (key === imageKeyOld || key === imageKeyNew) {
                       image.src = savedValue; // Restore the image source
                       image.style.display = 'block'; // Ensure the image is visible
-                      console.log(`Restored ${image.id || image.name} image src:`, savedValue);
+                      console.log(`🖼️ Restored ${image.id || image.name} image src from ${key}:`, savedValue ? 'data exists' : 'no data');
                       
                       // Update button color to green if image exists
                       if (savedValue && savedValue !== '') {
+                        console.log(`🎨 Updating button appearance for image: ${image.id}`);
                         if (image.id === 'hatsumonoPic') {
                           const hatsumonoButton = document.getElementById('hatsumonoButton');
-                          if (hatsumonoButton) hatsumonoButton.classList.add('has-photo');
+                          if (hatsumonoButton) {
+                            hatsumonoButton.classList.add('has-photo');
+                            console.log('✅ Added has-photo class to hatsumonoButton');
+                          }
                         } else if (image.id === 'atomonoPic') {
                           const atomonoButton = document.getElementById('atomonoButton');
-                          if (atomonoButton) atomonoButton.classList.add('has-photo');
+                          if (atomonoButton) {
+                            atomonoButton.classList.add('has-photo');
+                            console.log('✅ Added has-photo class to atomonoButton');
+                          }
+                        } else if (image.id === '材料ラベル') {
+                          const makerLabelButton = document.getElementById('makerLabelButton');
+                          if (makerLabelButton) {
+                            makerLabelButton.classList.add('has-photos');
+                            console.log('✅ Added has-photos class to makerLabelButton');
+                          }
                         }
                       }
                   }
@@ -298,43 +362,14 @@ async function fetchSebanggo() {
     sebanggoList.sort((a, b) => a.localeCompare(b, 'ja')); // 'ja' for Japanese sorting
     hinbanList.sort((a, b) => a.localeCompare(b, 'ja'));
 
-    // Get the sub-dropdown element
-    const subDropdown = document.getElementById("sub-dropdown");
+    // Combine both lists for the modal
+    const combinedList = [...sebanggoList, ...hinbanList];
+    sebanggoData = combinedList;
 
-    // Clear any existing options in the sub-dropdown
-    subDropdown.innerHTML = "";
-
-    // Add a blank option at the top
-    const blankOption = document.createElement("option");
-    blankOption.value = "";
-    blankOption.textContent = "Select 背番号 / 品番";
-    subDropdown.appendChild(blankOption);
-
-    // Populate the sub-dropdown with 背番号 values first
-    sebanggoList.forEach(sebanggo => {
-      const option = document.createElement("option");
-      option.value = sebanggo;
-      option.textContent = sebanggo;
-      subDropdown.appendChild(option);
-    });
-
-    // Add a separator (optional)
-    if (hinbanList.length > 0) {
-      const separatorOption = document.createElement("option");
-      separatorOption.disabled = true; // Make it unselectable
-      separatorOption.textContent = "------ 品番 ------";
-      subDropdown.appendChild(separatorOption);
-    }
-
-    // Populate the sub-dropdown with 品番 values at the bottom
-    hinbanList.forEach(hinban => {
-      const option = document.createElement("option");
-      option.value = hinban;
-      option.textContent = hinban;
-      subDropdown.appendChild(option);
-    });
-
-    console.log("Sub-dropdown populated with 背番号 and 品番 options:", { sebanggoList, hinbanList });
+    console.log("Sebanggo data loaded for modal:", { sebanggoList, hinbanList, combinedList });
+    
+    // Always initialize modal functionality (removing the hasEventListener check as it's unreliable)
+    initializeSebanggoModal();
 
   } catch (error) {
     console.error("Error fetching 背番号 and 品番 data:", error);
@@ -376,7 +411,7 @@ function disableInputs() {
   inputs.forEach(input => {
       if (
           input.id !== 'scan-button' && 
-          input.id !== 'sub-dropdown' && 
+          input.id !== 'sub-dropdown-input' && 
           input.id !== 'process' && 
           input.id !== 'reset-button'&& // Specifically exclude the reset button
           input.id !== "selectBluetooth"&&
@@ -390,7 +425,7 @@ function disableInputs() {
 
 function enableInputs() {
   inputs.forEach(input => {
-      if (input.id !== 'sub-dropdown') { // Keep sub-dropdown enabled
+      if (input.id !== 'sub-dropdown-input') { // Keep sub-dropdown-input enabled
           input.disabled = false;
       }
   });
@@ -671,8 +706,8 @@ async function fetchProductDetails() {
     // Let the calling functions (handleQRScan, DOMContentLoaded for restore) manage UI state updates
     // after fetchProductDetails completes its primary job.
 
-    const subDropdown = document.getElementById("sub-dropdown");
-    const serialNumber = subDropdown.value;
+    const subDropdownInput = document.getElementById("sub-dropdown-input");
+    const serialNumber = subDropdownInput.value;
     // const factory = document.getElementById("selected工場").value; // 'factory' variable not used elsewhere in this scope
     const dynamicImage = document.getElementById("dynamicImage");
     const expectedBoardDataInputElement = document.getElementById("expectedBoardDataQR");
@@ -731,10 +766,10 @@ async function fetchProductDetails() {
             if (result && result.length > 0) {
                 const matched = result[0];
                 if (matched.背番号) {
-                    console.log("[fetchProductDetails] Found by 品番, updating dropdown to 背番号:", matched.背番号);
-                    subDropdown.value = matched.背番号;
+                    console.log("[fetchProductDetails] Found by 品番, updating input to 背番号:", matched.背番号);
+                    subDropdownInput.value = matched.背番号;
                     // Update localStorage as well to maintain consistency
-                    localStorage.setItem(`${uniquePrefix}sub-dropdown`, matched.背番号);
+                    localStorage.setItem(`${uniquePrefix}sub-dropdown-input`, matched.背番号);
                 }
             }
         }
@@ -833,7 +868,7 @@ async function fetchProductDetails() {
     }
 }
 
-document.getElementById("sub-dropdown").addEventListener("change", async () => {
+document.getElementById("sub-dropdown-input").addEventListener("change", async () => {
     await fetchProductDetails();
     checkProcessCondition(); // Update input states after fetching product details
 });
@@ -1231,7 +1266,7 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
 
     const formData = {
       品番: document.getElementById('product-number').value,
-      背番号: document.getElementById('sub-dropdown').value,
+      背番号: document.getElementById('sub-dropdown-input').value,
       設備: document.getElementById('process').value,
       Total: parseInt(document.getElementById('total').value, 10) || 0,
       工場: document.getElementById('selected工場').value,
@@ -1916,7 +1951,8 @@ function checkProcessCondition() {
     } else {
         // --- This configuration requires ONLY ONE SCAN (or second is skipped) ---
         // Inputs should be enabled if the first scan is done OR if dropdown has a value selected.
-        const subDropdownValue = subDropdown ? subDropdown.value : "";
+        const subDropdownInput = document.getElementById('sub-dropdown-input');
+        const subDropdownValue = subDropdownInput ? subDropdownInput.value : "";
         if (firstScanActualValue || subDropdownValue) { // If first scan is done OR dropdown selection exists, that's enough for a 1-scan process
             console.log(`Inputs enabled: Single scan requirement met or second scan not needed (Factory: ${currentFactory}, Process: ${currentProcess}).`);
             enableInputs();
@@ -1934,7 +1970,7 @@ let firstScanValue = localStorage.getItem(`${uniquePrefix}firstScanValue`) || ""
 let secondScanValue = localStorage.getItem(`${uniquePrefix}secondScanValue`) || "";
 
 document.addEventListener('DOMContentLoaded', () => {
-  const subDropdown = document.getElementById('sub-dropdown');
+  const subDropdownInput = document.getElementById('sub-dropdown-input');
   const processDropdown = document.getElementById("process");
   // Initialize from localStorage again to ensure consistency within this scope
   firstScanValue = localStorage.getItem(`${uniquePrefix}firstScanValue`) || "";
@@ -1957,10 +1993,10 @@ document.addEventListener('DOMContentLoaded', () => {
   console.log("Initial secondScanValue from localStorage:", secondScanValue);
   console.log("Last scan method:", lastScanMethod);
 
-  if (subDropdown && firstScanValue) { // Only need firstScanValue to attempt fetch
-    // If firstScanValue exists, populate dropdown and fetch details.
+  if (subDropdownInput && firstScanValue) { // Only need firstScanValue to attempt fetch
+    // If firstScanValue exists, populate input and fetch details.
     // This handles page reloads where data was already scanned.
-    subDropdown.value = firstScanValue;
+    subDropdownInput.value = firstScanValue;
     // fetchProductDetails will populate model, shape, R-L, and the hidden expectedBoardDataQR
     fetchProductDetails();
     // If secondScanValue also exists and is not SKIPPED, inputs should be enabled.
@@ -2145,7 +2181,7 @@ function comparePartsConsideringBluetooth(expectedPart, scannedPart, isBluetooth
 async function handleQRScan(qrCodeMessage) {
     console.log("Scanned QR (Raw):", qrCodeMessage);
 
-    const subDropdown = document.getElementById('sub-dropdown');
+    const subDropdownInput = document.getElementById('sub-dropdown-input');
     const factoryValue = document.getElementById("selected工場")?.value || "";
     const processValue = document.getElementById("process")?.value || "";
     const isNFH_RLC = factoryValue === "NFH" && processValue === "RLC";
@@ -2159,13 +2195,16 @@ async function handleQRScan(qrCodeMessage) {
         let cleanedQR = qrCodeMessage.includes(",") ? qrCodeMessage.split(",")[0] : qrCodeMessage;
         console.log("First Scan Processed QR:", cleanedQR);
 
-        const options = subDropdown ? [...subDropdown.options].map(option => option.value) : [];
-        if (subDropdown && options.includes(cleanedQR)) {
+        // Check if the scanned QR matches any item in sebanggoData
+        if (sebanggoData.includes(cleanedQR)) {
             firstScanValue = cleanedQR;
             localStorage.setItem(`${uniquePrefix}firstScanValue`, firstScanValue);
             document.getElementById("firstScanValue").value = firstScanValue;
-            subDropdown.value = firstScanValue;
-            localStorage.setItem(`${uniquePrefix}sub-dropdown`, firstScanValue);
+            subDropdownInput.value = firstScanValue;
+            localStorage.setItem(`${uniquePrefix}sub-dropdown-input`, firstScanValue);
+            
+            // Add to recent selections
+            addToRecentSebanggo(firstScanValue);
 
             // ---- MODIFICATION: Stop camera scanner immediately after first successful scan ----
             if (lastScanMethod === "camera") {
@@ -2232,7 +2271,7 @@ async function handleQRScan(qrCodeMessage) {
                 firstScanValue = "";
                 localStorage.removeItem(`${uniquePrefix}firstScanValue`);
                 document.getElementById("firstScanValue").value = "";
-                if (subDropdown) subDropdown.value = "";
+                if (subDropdownInput) subDropdownInput.value = "";
                 blankInfo();
                 disableInputs();
             }
@@ -2614,14 +2653,44 @@ function resetForm(skipConfirmation = false) {
       }
   });
 
-  // Reset all <img> elements
-  const images = document.querySelectorAll('img'); // Get all <img> elements
+// Reset all native camera images
+  buttonMappings.forEach(mapping => {
+    const imageKey = `${uniquePrefix}${mapping.imgId}_src`;
+    const labelKey = `${uniquePrefix}${mapping.labelId}.textContent`;
+    localStorage.removeItem(imageKey);
+    localStorage.removeItem(labelKey);
+    
+    const imgElement = document.getElementById(mapping.imgId);
+    const labelElement = document.getElementById(mapping.labelId);
+    const buttonElement = document.getElementById(mapping.buttonId);
+    
+    if (imgElement) {
+      imgElement.src = '';
+      imgElement.style.display = 'none';
+    }
+    if (labelElement) {
+      labelElement.textContent = 'FALSE';
+      labelElement.style.color = '';
+    }
+    if (buttonElement) {
+      buttonElement.classList.remove('has-photo', 'has-photos');
+    }
+    
+    console.log(`Reset native camera image and label for ${mapping.imgId}`);
+  });
+
+  // Reset any other legacy images
+  const images = document.querySelectorAll('img');
   images.forEach(image => {
+    // Skip if already handled by button mappings
+    const alreadyHandled = buttonMappings.some(mapping => mapping.imgId === image.id);
+    if (!alreadyHandled) {
       const imageKey = `${uniquePrefix}${image.id || image.name}.src`;
-      localStorage.removeItem(imageKey); // Remove image source from localStorage
-      image.src = ''; // Reset the image source
-      image.style.display = 'none'; // Hide the image
-      console.log(`Reset image ${image.id || image.name}`);
+      localStorage.removeItem(imageKey);
+      image.src = '';
+      image.style.display = 'none';
+      console.log(`Reset legacy image ${image.id || image.name}`);
+    }
   });
   
   // Reset button colors to red (remove green class)
@@ -2877,7 +2946,7 @@ async function printLabel() {
   const alertSound = document.getElementById('alert-sound');
   const scanAlertModal = document.getElementById('scanAlertModal');
   const scanAlertText = document.getElementById('scanAlertText');
-  const 背番号 = document.getElementById("sub-dropdown").value;
+  const 背番号 = document.getElementById("sub-dropdown-input").value;
 
   // Function to check if the device is iOS
   function isIOS() {
@@ -3092,14 +3161,171 @@ async function printLabel() {
   // Default process for other 背番号 values (not in specialValues)
   const 品番 = document.getElementById("product-number").value;
   const 車型 = document.getElementById("model").value;
-  const 収容数 = document.getElementById("収容数").value;
+  const 収容数Raw = document.getElementById("収容数").value;
   const R_L = document.getElementById("R-L").value;
   const 材料 = document.getElementById("material").value;
   const 色 = document.getElementById("material-color").value;
   const extension = document.getElementById("Labelextension").value;
   const Date2 = document.getElementById('Lot No.').value;
-  const 品番収容数 = `${品番},${収容数}`;
   const SRS = document.getElementById("SRS").value;
+  
+  // Check if 収容数 has multiple comma-separated values
+  if (収容数Raw && 収容数Raw.includes(',')) {
+    // Parse comma-separated values
+    const 収容数Array = 収容数Raw.split(',').map(val => val.trim()).filter(val => val !== "");
+    
+    if (収容数Array.length > 1) {
+      // Create modal background overlay
+      const modalOverlay = document.createElement('div');
+      modalOverlay.style.position = 'fixed';
+      modalOverlay.style.top = '0';
+      modalOverlay.style.left = '0';
+      modalOverlay.style.width = '100%';
+      modalOverlay.style.height = '100%';
+      modalOverlay.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
+      modalOverlay.style.zIndex = '999';
+      modalOverlay.style.display = 'flex';
+      modalOverlay.style.justifyContent = 'center';
+      modalOverlay.style.alignItems = 'center';
+
+      // Show modal for 收容数 selection
+      const modal = document.createElement('div');
+      modal.classList.add('quantity-modal');
+      modal.style.position = 'relative !important';
+      modal.style.display = 'flex !important';
+      modal.style.flexDirection = 'column';
+      modal.style.justifyContent = 'center';
+      modal.style.alignItems = 'center';
+      modal.style.padding = '30px';
+      modal.style.backgroundColor = 'white';
+      modal.style.boxShadow = '0 4px 10px rgba(0, 0, 0, 0.3)';
+      modal.style.borderRadius = '10px';
+      modal.style.maxWidth = '90vw';
+      modal.style.maxHeight = '90vh';
+      modal.style.minWidth = '300px';
+      modal.style.width = '90%';
+      modal.style.maxWidth = '500px';
+      modal.style.transform = 'none !important';
+      modal.style.top = 'auto !important';
+      modal.style.left = 'auto !important';
+      modal.style.textAlign = 'center';
+
+      // Close modal function
+      const closeModal = () => {
+        if (document.body.contains(modalOverlay)) {
+          document.body.removeChild(modalOverlay);
+        }
+      };
+
+      // Add close button (X) in top right corner
+      const closeButton = document.createElement('button');
+      closeButton.innerHTML = '×';
+      closeButton.className = 'close-button';
+      closeButton.style.position = 'absolute !important';
+      closeButton.style.top = '10px !important';
+      closeButton.style.right = '15px !important';
+      closeButton.style.fontSize = '24px';
+      closeButton.style.fontWeight = 'bold';
+      closeButton.style.background = 'none';
+      closeButton.style.border = 'none';
+      closeButton.style.cursor = 'pointer';
+      closeButton.style.color = '#666';
+      closeButton.style.width = '30px';
+      closeButton.style.height = '30px';
+      closeButton.style.display = 'flex';
+      closeButton.style.alignItems = 'center';
+      closeButton.style.justifyContent = 'center';
+      closeButton.style.zIndex = '1001';
+      closeButton.addEventListener('click', closeModal);
+      closeButton.addEventListener('mouseenter', () => closeButton.style.color = 'red');
+      closeButton.addEventListener('mouseleave', () => closeButton.style.color = '#666');
+
+      modal.appendChild(closeButton);
+
+      // Close modal when clicking outside (on overlay)
+      modalOverlay.addEventListener('click', (e) => {
+        if (e.target === modalOverlay) {
+          closeModal();
+        }
+      });
+
+      const message = document.createElement('p');
+      message.innerText = '収容数を選んでください / Please choose the 収容数 value';
+      message.style.fontSize = '24px';
+      message.style.textAlign = 'center';
+      message.style.marginBottom = '20px';
+      modal.appendChild(message);
+
+      // Create container for buttons to stack vertically
+      const buttonContainer = document.createElement('div');
+      buttonContainer.style.display = 'flex';
+      buttonContainer.style.flexDirection = 'column';
+      buttonContainer.style.alignItems = 'center';
+      buttonContainer.style.gap = '10px';
+      modal.appendChild(buttonContainer);
+
+      const createQuantityButton = (value) => {
+        const button = document.createElement('button');
+        button.innerText = String(value);
+        button.style.padding = '15px 30px';
+        button.style.fontSize = '20px';
+        button.style.cursor = 'pointer';
+        button.style.borderRadius = '5px';
+        button.style.minWidth = '100px';
+        button.style.border = '2px solid #ccc';
+        button.style.backgroundColor = '#f8f9fa';
+        button.onclick = async () => {
+          await proceedWithSelectedQuantity(value);
+        };
+        buttonContainer.appendChild(button);
+      };
+
+      // Create button for each 収容数 value
+      収容数Array.forEach(value => {
+        createQuantityButton(value);
+      });
+
+      // Append modal to overlay, then overlay to body
+      modalOverlay.appendChild(modal);
+      document.body.appendChild(modalOverlay);
+
+      async function proceedWithSelectedQuantity(selected収容数) {
+        closeModal();
+
+        const 品番収容数 = `${品番},${selected収容数}`;
+        const filename = getFilename(背番号, SRS);
+        const DateStr = extension ? `${Date2} - ${extension}` : Date2;
+
+        const currentIsIOS = isIOS();
+        const baseURL = currentIsIOS
+          ? "brotherwebprint://print"
+          : "http://localhost:8088/print";
+
+        const size = "RollW62";
+        const copies = 1;
+        const url =
+          `${baseURL}?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent(size)}&copies=${encodeURIComponent(copies)}` +
+          `&text_品番=${encodeURIComponent(品番)}` +
+          `&text_車型=${encodeURIComponent(車型)}` +
+          `&text_収容数=${encodeURIComponent(selected収容数)}` +
+          `&text_背番号=${encodeURIComponent(背番号)}` +
+          `&text_RL=${encodeURIComponent(R_L)}` +
+          `&text_材料=${encodeURIComponent(材料)}` +
+          `&text_色=${encodeURIComponent(色)}` +
+          `&text_DateT=${encodeURIComponent(DateStr)}` +
+          `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
+
+        console.log("Sending print request (multiple 収容数 selected):", url);
+        await executePrint(url, currentIsIOS);
+      }
+      
+      return; // Stop execution until user selects 収容数
+    }
+  }
+  
+  // Single 収容数 value - proceed normally
+  const 収容数 = 収容数Raw;
+  const 品番収容数 = `${品番},${収容数}`;
   
   const filename = getFilename(背番号, SRS); // Use the helper function
 
@@ -3323,164 +3549,374 @@ function AddKensa(){
     document.querySelector('.kensaDropdown').style.display = 'block';
 }
 
+// ============================================
+// NATIVE CAMERA FUNCTIONALITY
+// ============================================
 
+// Helper function to convert File to base64 string
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
 
+// Device detection
+function isMobileDevice() {
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+}
 
+// Compress image function
+async function compressBase64Image(base64DataURL, maxWidth = 1024, quality = 0.7) {
+  return new Promise((resolve) => {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const img = new Image();
+    
+    img.onload = () => {
+      const ratio = Math.min(maxWidth / img.width, maxWidth / img.height);
+      canvas.width = img.width * ratio;
+      canvas.height = img.height * ratio;
+      
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL('image/jpeg', quality));
+    };
+    
+    img.src = base64DataURL;
+  });
+}
 
+// Global variables for webcam functionality
+let webcamStream = null;
+let currentButtonId = null;
+let currentPhotoMapping = null;
 
+// Webcam functions
+async function openWebcamModal(mapping) {
+  const modal = document.getElementById('webcamModal');
+  const video = document.getElementById('webcamVideo');
+  const title = document.getElementById('webcamModalTitle');
+  
+  currentPhotoMapping = mapping;
+  title.textContent = `${mapping.labelText} - 写真撮影`;
+  
+  try {
+    webcamStream = await navigator.mediaDevices.getUserMedia({ 
+      video: { facingMode: 'environment' },
+      audio: false 
+    });
+    video.srcObject = webcamStream;
+    modal.style.display = 'flex';
+  } catch (error) {
+    console.error('Error accessing webcam:', error);
+    alert('カメラにアクセスできませんでした。ファイル選択を使用してください。');
+  }
+}
 
+function closeWebcamModal() {
+  const modal = document.getElementById('webcamModal');
+  const video = document.getElementById('webcamVideo');
+  
+  if (webcamStream) {
+    webcamStream.getTracks().forEach(track => track.stop());
+    webcamStream = null;
+  }
+  
+  video.srcObject = null;
+  modal.style.display = 'none';
+  currentPhotoMapping = null;
+}
 
+async function captureFromWebcam() {
+  console.log('📸 captureFromWebcam called');
+  console.log('📸 currentPhotoMapping:', currentPhotoMapping);
+  console.log('📸 currentButtonId:', currentButtonId);
+  
+  const video = document.getElementById('webcamVideo');
+  const canvas = document.getElementById('webcamCanvas');
+  const ctx = canvas.getContext('2d');
+  
+  if (!video || !canvas) {
+    console.error('❌ Video or canvas element not found');
+    return;
+  }
+  
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  ctx.drawImage(video, 0, 0);
+  
+  const base64Image = canvas.toDataURL('image/jpeg', 0.8);
+  console.log('📸 Captured image size:', (base64Image.length / 1024).toFixed(2), 'KB');
+  
+  const compressedImage = await compressBase64Image(base64Image);
+  console.log('📸 Compressed image size:', (compressedImage.length / 1024).toFixed(2), 'KB');
+  
+  // Store mapping and buttonId before closing modal (which clears these variables)
+  const tempMapping = currentPhotoMapping;
+  const tempButtonId = currentButtonId;
+  
+  closeWebcamModal();
+  
+  if (tempMapping) {
+    console.log('📸 Processing photo with mapping:', tempMapping.labelText);
+    await processPhotoCapture(compressedImage, tempMapping, tempButtonId);
+  } else {
+    console.error('❌ tempMapping is null - photo capture failed');
+  }
+}
 
+// Shared function to process photo capture (from webcam or file)
+async function processPhotoCapture(base64Image, mapping, buttonId) {
+  try {
+    console.log(`Processing photo capture for ${mapping.labelText}`);
+    
+    // Compress image before processing
+    console.log(`Original image size: ${(base64Image.length / 1024).toFixed(2)} KB`);
+    const compressedImage = await compressBase64Image(base64Image, 1024, 0.8);
+    console.log(`Compressed image size: ${(compressedImage.length / 1024).toFixed(2)} KB`);
+    
+    // Handle material label photos with single photo functionality
+    if (buttonId === 'makerLabelButton') {
+      // Set the traditional elements for compatibility
+      const imgElement = document.getElementById(mapping.imgId);
+      const labelElement = document.getElementById(mapping.labelId);
+      
+      if (imgElement) {
+        imgElement.src = compressedImage;
+        imgElement.style.display = 'block';
+      }
+      
+      if (labelElement) {
+        labelElement.textContent = 'TRUE';
+        labelElement.style.color = 'green';
+      }
+      
+      // Update button appearance
+      const button = document.getElementById(buttonId);
+      if (button) {
+        button.classList.add('has-photos');
+      }
+      
+      console.log('Material label photo processed successfully');
+    } else {
+      // Handle hatsumono and atomono photos
+      const imgElement = document.getElementById(mapping.imgId);
+      const labelElement = document.getElementById(mapping.labelId);
+      
+      if (imgElement) {
+        imgElement.src = compressedImage;
+        imgElement.style.display = 'block';
+      }
+      
+      if (labelElement) {
+        labelElement.textContent = 'TRUE';
+        labelElement.style.color = 'green';
+      }
+      
+      // Update button appearance
+      const button = document.getElementById(buttonId);
+      if (button) {
+        button.classList.add('has-photo');
+      }
+      
+      console.log(`${mapping.labelText} photo processed successfully`);
+    }
+    
+    // Save compressed image to localStorage for persistence
+    const uniqueKey = `${uniquePrefix}${mapping.imgId}_src`;
+    localStorage.setItem(uniqueKey, compressedImage);
+    console.log(`📾 Saved image to localStorage with key: ${uniqueKey}`);
+    console.log(`📾 Image data length: ${compressedImage.length} characters`);
+    
+    // Also save the label state for persistence
+    const labelKey = `${uniquePrefix}${mapping.labelId}.textContent`;
+    localStorage.setItem(labelKey, 'TRUE');
+    console.log(`📾 Saved label state to localStorage with key: ${labelKey}`);
+    
+    // Verify saved data immediately
+    const savedImg = localStorage.getItem(uniqueKey);
+    const savedLabel = localStorage.getItem(labelKey);
+    console.log(`✅ Verification - Image saved: ${!!savedImg}, Label saved: ${savedLabel}`);
+    
+  } catch (error) {
+    console.error('Error processing photo capture:', error);
+    alert('写真の処理中にエラーが発生しました。もう一度お試しください。');
+  }
+}
 
+// Show photo option modal (webcam or file)
+function showPhotoOptionModal(mapping, buttonId, fileInput) {
+  const modal = document.getElementById('photoOptionModal');
+  const title = document.getElementById('photoOptionTitle');
+  const useWebcamBtn = document.getElementById('useWebcamBtn');
+  const useFileBtn = document.getElementById('useFileBtn');
+  const cancelBtn = document.getElementById('cancelPhotoBtn');
+  
+  currentButtonId = buttonId;
+  currentPhotoMapping = mapping; // Set the mapping here for consistency
+  title.textContent = `${mapping.labelText} - 撮影方法選択`;
+  
+  // Remove any existing event listeners to prevent duplicates
+  useWebcamBtn.replaceWith(useWebcamBtn.cloneNode(true));
+  useFileBtn.replaceWith(useFileBtn.cloneNode(true));
+  cancelBtn.replaceWith(cancelBtn.cloneNode(true));
+  
+  // Get fresh references after cloning
+  const newUseWebcamBtn = document.getElementById('useWebcamBtn');
+  const newUseFileBtn = document.getElementById('useFileBtn');
+  const newCancelBtn = document.getElementById('cancelPhotoBtn');
+  
+  newUseWebcamBtn.addEventListener('click', () => {
+    modal.style.display = 'none';
+    openWebcamModal(mapping);
+  });
+  
+  newUseFileBtn.addEventListener('click', () => {
+    modal.style.display = 'none';
+    fileInput.click();
+  });
+  
+  newCancelBtn.addEventListener('click', () => {
+    modal.style.display = 'none';
+    currentButtonId = null;
+    currentPhotoMapping = null;
+  });
+  
+  modal.style.display = 'flex';
+}
 
 // Take photo hatsumono and atomono and label
-// Mapping of buttons to labels and images
+// Mapping of buttons to labels and images - Updated for native camera
 const buttonMappings = [
   {
     buttonId: 'hatsumonoButton',
     labelId: 'hatsumonoLabel',
     imgId: 'hatsumonoPic',
     labelText: '初物チェック',
+    fileInputId: 'hatsumonoFileInput'
   },
   {
     buttonId: 'atomonoButton',
     labelId: 'atomonoLabel',
     imgId: 'atomonoPic',
     labelText: '終物チェック',
+    fileInputId: 'atomonoFileInput'
   },
   {
     buttonId: 'makerLabelButton',
     labelId: 'makerLabel',
     imgId: '材料ラベル',
     labelText: '材料ラベル',
+    fileInputId: 'makerLabelFileInput'
   },
 ];
 
-let currentButtonId = null;
-
-buttonMappings.forEach(({ buttonId }) => {
-  const button = document.getElementById(buttonId);
-  button.addEventListener('click', () => {
-    const subDropdown = document.getElementById('sub-dropdown');
-    const selectedValue = subDropdown?.value;
-
-    if (!selectedValue) {
-      // Trigger modal message instead of alert
-      const scanAlertModal = document.getElementById('scanAlertModal');
-      const scanAlertText = document.getElementById('scanAlertText');
-      const alertSound = document.getElementById('alert-sound');
-
-      scanAlertText.innerText = '背番号を選択してください / Please select a Sebanggo first.';
-      scanAlertModal.style.display = 'block';
-
-      // Flash body and sub-dropdown
-      document.body.classList.add('flash-red');
-      subDropdown.classList.add('flash-red-border');
-
-      // Play alert sound
-      if (alertSound) {
-        alertSound.muted = false;
-        alertSound.volume = 1;
-        alertSound.play().catch(err => console.error("Failed to play sound:", err));
+// Create hidden file inputs for each button and setup native camera event handlers
+buttonMappings.forEach(mapping => {
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.accept = 'image/*';
+  fileInput.capture = 'environment';
+  fileInput.id = mapping.fileInputId;
+  fileInput.style.display = 'none';
+  document.body.appendChild(fileInput);
+  
+  fileInput.addEventListener('change', async (event) => {
+    const file = event.target.files[0];
+    if (file) {
+      try {
+        const base64Image = await fileToBase64(file);
+        const compressedImage = await compressBase64Image(base64Image);
+        await processPhotoCapture(compressedImage, mapping, currentButtonId);
+      } catch (error) {
+        console.error('Error processing file:', error);
+        alert('ファイルの処理中にエラーが発生しました。');
       }
-
-      // Set modal close behavior
-      const closeScanModalButton = document.getElementById('closeScanModalButton');
-      closeScanModalButton.onclick = function () {
-        scanAlertModal.style.display = 'none';
-        document.body.classList.remove('flash-red');
-        subDropdown.classList.remove('flash-red-border');
-
-        if (alertSound) {
-          alertSound.pause();
-          alertSound.currentTime = 0;
-          alertSound.muted = true;
-        }
-      };
-
-      return; // stop further action
     }
-
-    // If value is selected, proceed
-    currentButtonId = buttonId;
-    window.open('captureImage.html', 'Capture Image', 'width=900,height=900');
+    // Reset file input
+    event.target.value = '';
   });
 });
 
+// Setup native camera event handlers for buttons
+buttonMappings.forEach(mapping => {
+  const button = document.getElementById(mapping.buttonId);
+  if (button) {
+    button.addEventListener('click', () => {
+      const subDropdownInput = document.getElementById('sub-dropdown-input');
+      const selectedValue = subDropdownInput?.value;
 
+      if (!selectedValue) {
+        // Trigger modal message instead of alert
+        const scanAlertModal = document.getElementById('scanAlertModal');
+        const scanAlertText = document.getElementById('scanAlertText');
+        const alertSound = document.getElementById('alert-sound');
 
-// Handle the message from the popup window
-window.addEventListener('message', function (event) {
-  if (event.origin === window.location.origin) {
-    const data = event.data;
+        scanAlertText.innerText = '背番号を選択してください / Please select a Sebanggo first.';
+        scanAlertModal.style.display = 'block';
 
-    if (data.image && currentButtonId) {
-      // Handle material label photos separately using the multi-photo system
-      if (currentButtonId === 'makerLabelButton') {
-        console.log('Processing material label photo from popup window');
-        
-        // Add to material label photos array
-        const added = addMaterialLabelPhoto(data.image);
-        
-        if (added) {
-          console.log('Successfully added material label photo');
-          
-          // Update the legacy single image element for compatibility
-          updateMaterialLabelElement();
-          
-          // Force render thumbnails
-          setTimeout(() => {
-            renderMaterialPhotoThumbnails();
-            console.log('Forced thumbnail render after photo addition');
-          }, 100);
-        } else {
-          console.error('Failed to add material label photo');
-        }
-        
-        // Reset current button ID
-        currentButtonId = null;
-        return;
-      }
-      
-      // Handle other buttons with single-photo system
-      const mapping = buttonMappings.find(({ buttonId }) => buttonId === currentButtonId);
+        // Flash body and input field
+        document.body.classList.add('flash-red');
+        subDropdownInput.classList.add('flash-red-border');
 
-      if (mapping) {
-        const { labelId, imgId, buttonId } = mapping;
-
-        // Update photo preview
-        const photoPreview = document.getElementById(imgId);
-        photoPreview.src = data.image;
-        photoPreview.style.display = 'block';
-
-        // Update the associated label to TRUE
-        const label = document.getElementById(labelId);
-        label.textContent = 'TRUE';
-        
-        // Toggle button color to green when photo is captured
-        const button = document.getElementById(buttonId);
-        if (button) {
-          button.classList.add('has-photo');
+        // Play alert sound
+        if (alertSound) {
+          alertSound.muted = false;
+          alertSound.volume = 1;
+          alertSound.play().catch(err => console.error("Failed to play sound:", err));
         }
 
-        // Save label textContent to localStorage
-        const labelKey = `${uniquePrefix}${labelId}.textContent`;
-        localStorage.setItem(labelKey, label.textContent);
+        // Set modal close behavior
+        const closeScanModalButton = document.getElementById('closeScanModalButton');
+        closeScanModalButton.onclick = function () {
+          scanAlertModal.style.display = 'none';
+          document.body.classList.remove('flash-red');
+          subDropdownInput.classList.remove('flash-red-border');
 
-        // Save image source to localStorage
-        const photoPreviewKey = `${uniquePrefix}${imgId}.src`;
-        localStorage.setItem(photoPreviewKey, photoPreview.src);
+          if (alertSound) {
+            alertSound.pause();
+            alertSound.currentTime = 0;
+            alertSound.muted = true;
+          }
+        };
 
-        console.log(
-          `Saved ${labelId}: ${label.textContent} and ${imgId} image: ${photoPreview.src} to localStorage.`
-        );
+        return; // stop further action
       }
 
-      // Reset the current button ID after processing
-      currentButtonId = null;
-    }
+      // If value is selected, proceed with photo capture
+      // Show photo option modal for desktop or directly use camera for mobile
+      if (isMobileDevice()) {
+        const fileInput = document.getElementById(mapping.fileInputId);
+        fileInput.click();
+      } else {
+        showPhotoOptionModal(mapping, mapping.buttonId, document.getElementById(mapping.fileInputId));
+      }
+    });
   }
 });
+
+// Setup webcam modal buttons when DOM is loaded
+document.addEventListener('DOMContentLoaded', () => {
+  const captureWebcamBtn = document.getElementById('captureWebcamBtn');
+  const closeWebcamBtn = document.getElementById('closeWebcamBtn');
+  
+  if (captureWebcamBtn) {
+    captureWebcamBtn.addEventListener('click', captureFromWebcam);
+  } else {
+    console.warn('captureWebcamBtn element not found');
+  }
+  
+  if (closeWebcamBtn) {
+    closeWebcamBtn.addEventListener('click', closeWebcamModal);
+  } else {
+    console.warn('closeWebcamBtn element not found');
+  }
+});
+
+// Native camera functionality now handles all photo capture
+// Old captureImage.html popup functionality has been replaced
 
 
 
@@ -3559,7 +3995,7 @@ window.addEventListener('message', function (event) {
 
      
 async function uploadPhotou() {
-  const selectedSebanggo = document.getElementById("sub-dropdown").value;
+  const selectedSebanggo = document.getElementById("sub-dropdown-input").value;
   const currentDate = document.getElementById("Lot No.").value;
   const selectedWorker = document.getElementById("Machine Operator").value;
   const selectedFactory = document.getElementById("selected工場").value;
@@ -3614,7 +4050,7 @@ async function uploadPhotou() {
 
 
 async function collectImagesForUpload() {
-  const selectedSebanggo = document.getElementById("sub-dropdown").value;
+  const selectedSebanggo = document.getElementById("sub-dropdown-input").value;
   const currentDate = document.getElementById("Lot No.").value;
   const selectedWorker = document.getElementById("Machine Operator").value;
   const selectedFactory = document.getElementById("selected工場").value;
@@ -3632,21 +4068,52 @@ async function collectImagesForUpload() {
     const photoPreview = document.getElementById(imgId);
     if (!photoPreview || !photoPreview.src) continue;
 
-    const response = await fetch(photoPreview.src);
-    const blob = await response.blob();
-    const base64Data = await blobToBase64(blob);
+    // If the image is already a data URL, use it directly and compress
+    if (photoPreview.src.startsWith('data:')) {
+      console.log(`${label} - Original size: ${(photoPreview.src.length / 1024).toFixed(2)} KB`);
+      const compressedImage = await compressBase64Image(photoPreview.src, 1024, 0.8);
+      console.log(`${label} - Compressed size: ${(compressedImage.length / 1024).toFixed(2)} KB`);
+      
+      // Extract base64 part (remove data:image/jpeg;base64, prefix)
+      const base64Data = compressedImage.split(',')[1];
+      
+      imagesToUpload.push({
+        base64: base64Data,
+        label,
+        factory: selectedFactory,
+        machine: selectedMachine,
+        worker: selectedWorker,
+        date: currentDate,
+        sebanggo: selectedSebanggo,
+      });
+    } else {
+      // Legacy handling for blob URLs
+      const response = await fetch(photoPreview.src);
+      const blob = await response.blob();
+      const base64Data = await blobToBase64(blob);
+      
+      // Convert back to data URL for compression
+      const dataURL = `data:image/jpeg;base64,${base64Data}`;
+      console.log(`${label} - Original size: ${(dataURL.length / 1024).toFixed(2)} KB`);
+      const compressedImage = await compressBase64Image(dataURL, 1024, 0.8);
+      console.log(`${label} - Compressed size: ${(compressedImage.length / 1024).toFixed(2)} KB`);
+      
+      // Extract base64 part
+      const compressedBase64 = compressedImage.split(',')[1];
 
-    imagesToUpload.push({
-      base64: base64Data,
-      label,
-      factory: selectedFactory,
-      machine: selectedMachine,
-      worker: selectedWorker,
-      date: currentDate,
-      sebanggo: selectedSebanggo,
-    });
+      imagesToUpload.push({
+        base64: compressedBase64,
+        label,
+        factory: selectedFactory,
+        machine: selectedMachine,
+        worker: selectedWorker,
+        date: currentDate,
+        sebanggo: selectedSebanggo,
+      });
+    }
   }
 
+  console.log(`📸 Prepared ${imagesToUpload.length} images for upload`);
   return imagesToUpload;
 }
 
@@ -5332,11 +5799,6 @@ function closeMaintenanceCamera(cameraModal) {
 
 // ===== WORKER NAME MODAL FUNCTIONALITY =====
 
-// Worker Name Selection Modal Variables
-let workerNamesData = [];
-const RECENT_WORKERS_KEY = 'recentWorkerNames';
-const MAX_RECENT_WORKERS = 6;
-
 // Get recent workers from localStorage
 function getRecentWorkers() {
   const recent = localStorage.getItem(RECENT_WORKERS_KEY);
@@ -5496,6 +5958,254 @@ function openWorkerModal() {
 function closeWorkerModal() {
   const modal = document.getElementById('workerNameModal');
   modal.style.display = 'none';
+}
+
+// ========== 背番号/品番 Modal Functions ==========
+
+// Initialize 背番号/品番 modal functionality
+function initializeSebanggoModal() {
+  const input = document.getElementById('sub-dropdown-input');
+  const modal = document.getElementById('sebanggoModal');
+  const closeBtn = document.getElementById('close-sebanggo-modal');
+  const searchInput = document.getElementById('sebanggo-search');
+  const clearRecentBtn = document.getElementById('clear-recent-sebanggo');
+  
+  // Check if all required elements exist
+  if (!input || !modal || !closeBtn || !searchInput || !clearRecentBtn) {
+    console.error('Sebanggo modal elements not found:', {
+      input: !!input,
+      modal: !!modal,
+      closeBtn: !!closeBtn,
+      searchInput: !!searchInput,
+      clearRecentBtn: !!clearRecentBtn
+    });
+    return;
+  }
+  
+  // Prevent duplicate event listeners
+  if (input.hasEventListener) {
+    console.log('Sebanggo modal already initialized');
+    return;
+  }
+  
+  console.log('Initializing sebanggo modal...');
+  
+  // Mark that event listener has been added
+  input.hasEventListener = true;
+  
+  // Open modal when input is clicked
+  input.addEventListener('click', (e) => {
+    e.preventDefault();
+    console.log('Input field clicked');
+    openSebanggoModal();
+  });
+  
+  // Close modal
+  closeBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    console.log('Close button clicked');
+    closeSebanggoModal();
+  });
+  
+  // Close modal when clicking outside
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) {
+      console.log('Modal background clicked');
+      closeSebanggoModal();
+    }
+  });
+  
+  // Search functionality
+  searchInput.addEventListener('input', (e) => {
+    console.log('Search input changed:', e.target.value);
+    filterSebanggoList();
+  });
+  
+  // Clear recent selections
+  clearRecentBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    console.log('Clear recent button clicked');
+    clearRecentSebanggo();
+  });
+  
+  console.log('All event listeners attached successfully');
+}
+
+// Open sebanggo modal
+function openSebanggoModal() {
+  console.log('Opening sebanggo modal...');
+  const modal = document.getElementById('sebanggoModal');
+  
+  if (!modal) {
+    console.error('Sebanggo modal not found');
+    return;
+  }
+  
+  if (sebanggoData.length === 0) {
+    console.error('Sebanggo data is empty');
+    return;
+  }
+  
+  modal.style.display = 'block';
+  console.log('Modal display set to block, rendering list...');
+  renderSebanggoList();
+}
+
+// Close sebanggo modal
+function closeSebanggoModal() {
+  const modal = document.getElementById('sebanggoModal');
+  modal.style.display = 'none';
+  
+  // Clear search
+  document.getElementById('sebanggo-search').value = '';
+}
+
+// Render sebanggo list in modal
+function renderSebanggoList() {
+  console.log('Rendering sebanggo list...');
+  const recentSection = document.getElementById('recent-sebanggo-section');
+  const recentGrid = document.getElementById('recent-sebanggo-grid');
+  const allGrid = document.getElementById('all-sebanggo-grid');
+  
+  if (!recentSection || !recentGrid || !allGrid) {
+    console.error('Sebanggo grid elements not found:', {
+      recentSection: !!recentSection,
+      recentGrid: !!recentGrid,
+      allGrid: !!allGrid
+    });
+    return;
+  }
+  
+  // Load recent selections
+  const recentSebanggo = getRecentSebanggo();
+  console.log('Recent sebanggo:', recentSebanggo);
+  console.log('Total sebanggo data:', sebanggoData.length);
+  
+  // Show/hide recent section
+  if (recentSebanggo.length > 0) {
+    recentSection.style.display = 'block';
+    recentGrid.innerHTML = '';
+    
+    recentSebanggo.forEach(item => {
+      const button = createSebanggoButton(item, true);
+      recentGrid.appendChild(button);
+    });
+  } else {
+    recentSection.style.display = 'none';
+  }
+  
+  // Render all items
+  allGrid.innerHTML = '';
+  sebanggoData.forEach(item => {
+    const button = createSebanggoButton(item, false);
+    allGrid.appendChild(button);
+  });
+}
+
+// Create sebanggo button element
+function createSebanggoButton(item, isRecent = false) {
+  const div = document.createElement('div');
+  const button = document.createElement('button');
+  
+  button.className = 'sebanggo-btn';
+  button.textContent = item;
+  button.onclick = () => selectSebanggo(item);
+  
+  div.appendChild(button);
+  return div;
+}
+
+// Select sebanggo item
+function selectSebanggo(value) {
+  const input = document.getElementById('sub-dropdown-input');
+  input.value = value;
+  
+  // Add to recent selections
+  addToRecentSebanggo(value);
+  
+  // Close modal
+  closeSebanggoModal();
+  
+  // Save to localStorage
+  const pageName = location.pathname.split('/').pop();
+  const selected工場 = document.getElementById('selected工場').value;
+  if (pageName && selected工場) {
+    const key = `${pageName}_${selected工場}_${input.id || input.name}`;
+    localStorage.setItem(key, value);
+  }
+  
+  // Trigger change event to fetch product details
+  input.dispatchEvent(new Event('change'));
+}
+
+// Filter sebanggo list based on search
+function filterSebanggoList() {
+  const searchTerm = document.getElementById('sebanggo-search').value.toLowerCase();
+  const allGrid = document.getElementById('all-sebanggo-grid');
+  const noResults = document.getElementById('no-results');
+  
+  if (!searchTerm) {
+    renderSebanggoList();
+    noResults.style.display = 'none';
+    return;
+  }
+  
+  const filteredItems = sebanggoData.filter(item => 
+    item.toLowerCase().includes(searchTerm)
+  );
+  
+  allGrid.innerHTML = '';
+  
+  if (filteredItems.length > 0) {
+    noResults.style.display = 'none';
+    filteredItems.forEach(item => {
+      const button = createSebanggoButton(item, false);
+      allGrid.appendChild(button);
+    });
+  } else {
+    noResults.style.display = 'block';
+  }
+}
+
+// Get recent sebanggo selections from localStorage
+function getRecentSebanggo() {
+  try {
+    const recent = localStorage.getItem(RECENT_SEBANGGO_KEY);
+    return recent ? JSON.parse(recent) : [];
+  } catch (error) {
+    console.error('Error loading recent sebanggo:', error);
+    return [];
+  }
+}
+
+// Add item to recent sebanggo selections
+function addToRecentSebanggo(value) {
+  try {
+    let recent = getRecentSebanggo();
+    
+    // Remove if already exists
+    recent = recent.filter(item => item !== value);
+    
+    // Add to beginning
+    recent.unshift(value);
+    
+    // Limit to MAX_RECENT_SEBANGGO items
+    if (recent.length > MAX_RECENT_SEBANGGO) {
+      recent = recent.slice(0, MAX_RECENT_SEBANGGO);
+    }
+    
+    localStorage.setItem(RECENT_SEBANGGO_KEY, JSON.stringify(recent));
+  } catch (error) {
+    console.error('Error saving recent sebanggo:', error);
+  }
+}
+
+// Clear recent sebanggo selections
+function clearRecentSebanggo() {
+  if (confirm('Clear all recent selections?')) {
+    localStorage.removeItem(RECENT_SEBANGGO_KEY);
+    renderSebanggoList();
+  }
 }
 
 // Initialize worker name modal
