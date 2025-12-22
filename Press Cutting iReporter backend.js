@@ -145,8 +145,12 @@ document.addEventListener('DOMContentLoaded', () => {
                           // Special handling for sebanggo input restoration
                           if (input.id === 'sub-dropdown-input' && savedValue) {
                               console.log(`🔄 Restoring sebanggo input and adding to recents:`, savedValue);
-                              // Add to recent selections
-                              addToRecentSebanggo(savedValue);
+                              // Add to recent selections (with safety check)
+                              if (typeof addToRecentSebanggo === 'function') {
+                                  addToRecentSebanggo(savedValue);
+                              } else {
+                                  console.warn('addToRecentSebanggo function not yet available');
+                              }
                               // Fetch product details
                               setTimeout(() => {
                                   fetchProductDetails();
@@ -368,8 +372,20 @@ async function fetchSebanggo() {
 
     console.log("Sebanggo data loaded for modal:", { sebanggoList, hinbanList, combinedList });
     
-    // Always initialize modal functionality (removing the hasEventListener check as it's unreliable)
-    initializeSebanggoModal();
+    // Always initialize modal functionality (with safety check)
+    if (typeof initializeSebanggoModal === 'function') {
+        initializeSebanggoModal();
+    } else {
+        console.warn('initializeSebanggoModal function not yet available, will retry later');
+        // Retry after a short delay to allow functions to be defined
+        setTimeout(() => {
+            if (typeof initializeSebanggoModal === 'function') {
+                initializeSebanggoModal();
+            } else {
+                console.error('initializeSebanggoModal still not available after delay');
+            }
+        }, 100);
+    }
 
   } catch (error) {
     console.error("Error fetching 背番号 and 品番 data:", error);
@@ -2203,8 +2219,12 @@ async function handleQRScan(qrCodeMessage) {
             subDropdownInput.value = firstScanValue;
             localStorage.setItem(`${uniquePrefix}sub-dropdown-input`, firstScanValue);
             
-            // Add to recent selections
-            addToRecentSebanggo(firstScanValue);
+            // Add to recent selections (with safety check)
+            if (typeof addToRecentSebanggo === 'function') {
+                addToRecentSebanggo(firstScanValue);
+            } else {
+                console.warn('addToRecentSebanggo function not yet available during QR scan');
+            }
 
             // ---- MODIFICATION: Stop camera scanner immediately after first successful scan ----
             if (lastScanMethod === "camera") {
@@ -2957,7 +2977,7 @@ function openScanLotModal() {
       aspectRatio: 1.0,
       disableFlip: false,
     },
-    (decodedText) => {
+    async (decodedText) => {
       console.log('Scanned lot QR:', decodedText);
       
       // Parse the barcode: 材料背番号,lot number,length
@@ -2974,43 +2994,18 @@ function openScanLotModal() {
           console.log('Material code matched. Adding lot:', lotNumber);
           console.log('Current material lots before adding:', materialLots);
           
-          // STOP SCANNER IMMEDIATELY to prevent multiple scans
+          // STOP SCANNER IMMEDIATELY to prevent multiple scans (AWAIT FOR COMPLETION)
           if (window.lotHtml5QrCode) {
-            window.lotHtml5QrCode.stop().then(() => {
-              const readerElement = document.getElementById('lotQrReader');
-              if (readerElement) {
-                const video = readerElement.querySelector('video');
-                if (video && video.srcObject) {
-                  const stream = video.srcObject;
-                  const tracks = stream.getTracks();
-                  tracks.forEach(track => {
-                    track.stop();
-                    console.log('Immediately stopped camera track:', track.kind);
-                  });
-                  video.srcObject = null;
-                }
-                readerElement.innerHTML = '';
-              }
+            try {
+              // stop() halts scanning, clear() releases all camera resources
+              await window.lotHtml5QrCode.stop();
+              await window.lotHtml5QrCode.clear();
+              console.log('Camera scanner stopped and cleared successfully');
               window.lotHtml5QrCode = null;
-            }).catch(err => {
-              console.error('Error stopping scanner immediately:', err);
-              // Force cleanup even if stop() fails
-              const readerElement = document.getElementById('lotQrReader');
-              if (readerElement) {
-                const video = readerElement.querySelector('video');
-                if (video && video.srcObject) {
-                  const stream = video.srcObject;
-                  const tracks = stream.getTracks();
-                  tracks.forEach(track => {
-                    track.stop();
-                    console.log('Force stop camera track immediately:', track.kind);
-                  });
-                  video.srcObject = null;
-                }
-                readerElement.innerHTML = '';
-              }
+            } catch (err) {
+              console.error('Error stopping scanner:', err);
               window.lotHtml5QrCode = null;
-            });
+            }
           }
           
           const success = addScannedLot(lotNumber);
@@ -3051,45 +3046,17 @@ function openScanLotModal() {
           
           // Close modal
           if (window.lotHtml5QrCode) {
-            window.lotHtml5QrCode.stop().then(() => {
-              // Force cleanup of all camera tracks
-              const readerElement = document.getElementById('lotQrReader');
-              if (readerElement) {
-                const video = readerElement.querySelector('video');
-                if (video && video.srcObject) {
-                  const stream = video.srcObject;
-                  const tracks = stream.getTracks();
-                  tracks.forEach(track => {
-                    track.stop();
-                    console.log('Stopped camera track after error:', track.kind);
-                  });
-                  video.srcObject = null;
-                }
-                readerElement.innerHTML = '';
-              }
-              // Clear scanner instance
+            try {
+              await window.lotHtml5QrCode.stop();
+              await window.lotHtml5QrCode.clear();
+              console.log('Camera stopped and cleared after error');
               window.lotHtml5QrCode = null;
               scanLotModal.style.display = 'none';
-            }).catch(err => {
+            } catch (err) {
               console.error('Error stopping scanner after error:', err);
-              // Force cleanup even if stop() fails
-              const readerElement = document.getElementById('lotQrReader');
-              if (readerElement) {
-                const video = readerElement.querySelector('video');
-                if (video && video.srcObject) {
-                  const stream = video.srcObject;
-                  const tracks = stream.getTracks();
-                  tracks.forEach(track => {
-                    track.stop();
-                    console.log('Emergency stop camera track after error:', track.kind);
-                  });
-                  video.srcObject = null;
-                }
-                readerElement.innerHTML = '';
-              }
               window.lotHtml5QrCode = null;
               scanLotModal.style.display = 'none';
-            });
+            }
           }
           return;
         }
@@ -3100,45 +3067,17 @@ function openScanLotModal() {
         
         // Close modal
         if (window.lotHtml5QrCode) {
-          window.lotHtml5QrCode.stop().then(() => {
-            // Force cleanup of all camera tracks
-            const readerElement = document.getElementById('lotQrReader');
-            if (readerElement) {
-              const video = readerElement.querySelector('video');
-              if (video && video.srcObject) {
-                const stream = video.srcObject;
-                const tracks = stream.getTracks();
-                tracks.forEach(track => {
-                  track.stop();
-                  console.log('Stopped camera track after invalid format:', track.kind);
-                });
-                video.srcObject = null;
-              }
-              readerElement.innerHTML = '';
-            }
-            // Clear scanner instance
+          try {
+            await window.lotHtml5QrCode.stop();
+            await window.lotHtml5QrCode.clear();
+            console.log('Camera stopped and cleared after invalid format');
             window.lotHtml5QrCode = null;
             scanLotModal.style.display = 'none';
-          }).catch(err => {
+          } catch (err) {
             console.error('Error stopping scanner after invalid format:', err);
-            // Force cleanup even if stop() fails
-            const readerElement = document.getElementById('lotQrReader');
-            if (readerElement) {
-              const video = readerElement.querySelector('video');
-              if (video && video.srcObject) {
-                const stream = video.srcObject;
-                const tracks = stream.getTracks();
-                tracks.forEach(track => {
-                  track.stop();
-                  console.log('Emergency stop camera track after invalid format:', track.kind);
-                });
-                video.srcObject = null;
-              }
-              readerElement.innerHTML = '';
-            }
             window.lotHtml5QrCode = null;
             scanLotModal.style.display = 'none';
-          });
+          }
         }
       }
     },
@@ -3155,12 +3094,19 @@ function openScanLotModal() {
 document.addEventListener('DOMContentLoaded', () => {
   const overrideLotButton = document.getElementById('overrideLotButton');
   if (overrideLotButton) {
-    overrideLotButton.addEventListener('click', function() {
+    overrideLotButton.addEventListener('click', async function() {
       const scanLotModal = document.getElementById('scanLotModal');
       
       // Close scan modal first
       if (window.lotHtml5QrCode) {
-        window.lotHtml5QrCode.stop().catch(err => console.error("Error stopping lot scanner:", err));
+        try {
+          await window.lotHtml5QrCode.stop();
+          await window.lotHtml5QrCode.clear();
+          console.log('Scanner stopped and cleared for override');
+        } catch (err) {
+          console.error("Error stopping lot scanner:", err);
+        }
+        window.lotHtml5QrCode = null;
       }
       scanLotModal.style.display = 'none';
       
@@ -3177,47 +3123,13 @@ document.addEventListener('DOMContentLoaded', () => {
       if (window.lotHtml5QrCode) {
         try {
           await window.lotHtml5QrCode.stop();
-          console.log('QR scanner stopped successfully');
-          
-          // Force cleanup of all camera tracks from the video element
-          const readerElement = document.getElementById('lotQrReader');
-          if (readerElement) {
-            const video = readerElement.querySelector('video');
-            if (video && video.srcObject) {
-              const stream = video.srcObject;
-              const tracks = stream.getTracks();
-              tracks.forEach(track => {
-                track.stop();
-                console.log('Force stopped camera track:', track.kind);
-              });
-              video.srcObject = null;
-            }
-            // Clear the HTML content
-            readerElement.innerHTML = '';
-          }
-          
+          await window.lotHtml5QrCode.clear();
+          console.log('QR scanner stopped and cleared successfully');
+          window.lotHtml5QrCode = null;
         } catch (err) {
           console.error('Error stopping QR scanner:', err);
-          
-          // Force cleanup even if stop() fails
-          const readerElement = document.getElementById('lotQrReader');
-          if (readerElement) {
-            const video = readerElement.querySelector('video');
-            if (video && video.srcObject) {
-              const stream = video.srcObject;
-              const tracks = stream.getTracks();
-              tracks.forEach(track => {
-                track.stop();
-                console.log('Emergency stop camera track:', track.kind);
-              });
-              video.srcObject = null;
-            }
-            readerElement.innerHTML = '';
-          }
+          window.lotHtml5QrCode = null;
         }
-        
-        // Clear the scanner instance
-        window.lotHtml5QrCode = null;
       }
       
       document.getElementById('scanLotModal').style.display = 'none';
@@ -4782,6 +4694,52 @@ window.confirmDirectNumericInput = function() {
           if (success) {
             console.log("Manual lot added via keypad:", lotNumber);
           } else {
+            // Duplicate detected - stop camera scanner if still running
+            if (window.lotHtml5QrCode) {
+              console.log("Duplicate detected via keypad - stopping camera scanner");
+              window.lotHtml5QrCode.stop().then(() => {
+                const readerElement = document.getElementById('lotQrReader');
+                if (readerElement) {
+                  const video = readerElement.querySelector('video');
+                  if (video && video.srcObject) {
+                    const stream = video.srcObject;
+                    const tracks = stream.getTracks();
+                    tracks.forEach(track => {
+                      track.stop();
+                      console.log('Stopped camera track after keypad duplicate:', track.kind);
+                    });
+                    video.srcObject = null;
+                  }
+                  readerElement.innerHTML = '';
+                }
+                window.lotHtml5QrCode = null;
+              }).catch(err => {
+                console.error('Error stopping scanner after keypad duplicate:', err);
+                // Force cleanup even if stop() fails
+                const readerElement = document.getElementById('lotQrReader');
+                if (readerElement) {
+                  const video = readerElement.querySelector('video');
+                  if (video && video.srcObject) {
+                    const stream = video.srcObject;
+                    const tracks = stream.getTracks();
+                    tracks.forEach(track => {
+                      track.stop();
+                      console.log('Force stop camera track after keypad duplicate:', track.kind);
+                    });
+                    video.srcObject = null;
+                  }
+                  readerElement.innerHTML = '';
+                }
+                window.lotHtml5QrCode = null;
+              });
+            }
+            
+            // Close scan modal if still open
+            const scanLotModal = document.getElementById('scanLotModal');
+            if (scanLotModal && scanLotModal.style.display !== 'none') {
+              scanLotModal.style.display = 'none';
+            }
+            
             if (typeof showAlert === 'function') {
               showAlert(`重複: ${lotNumber} は既に追加されています`);
             } else {
