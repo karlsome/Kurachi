@@ -2725,9 +2725,363 @@ function resetForm(skipConfirmation = false) {
   window.location.reload();
 }
 
+// ===== MATERIAL LOT TRACKING SYSTEM =====
+// Track lots with their source (scanned vs manual)
+let materialLots = []; // Array of {lotNumber: string, source: 'scanned'|'manual'}
+
+// Load lots from localStorage
+function loadMaterialLots() {
+  const savedLots = localStorage.getItem(`${uniquePrefix}材料ロット-data`);
+  console.log('Loading material lots. Saved data:', savedLots);
+  if (savedLots) {
+    try {
+      materialLots = JSON.parse(savedLots);
+      console.log('Parsed material lots:', materialLots);
+      renderMaterialLotTags();
+      updateMaterialLotInput();
+    } catch (e) {
+      console.error("Error loading material lots:", e);
+      materialLots = [];
+    }
+  } else {
+    console.log('No saved material lots found');
+    materialLots = [];
+  }
+}
+
+// Save lots to localStorage
+function saveMaterialLots() {
+  localStorage.setItem(`${uniquePrefix}材料ロット-data`, JSON.stringify(materialLots));
+  updateMaterialLotInput();
+}
+
+// Update the hidden input value (comma-separated)
+function updateMaterialLotInput() {
+  const materialLotInput = document.getElementById('材料ロット');
+  if (materialLotInput) {
+    const lotNumbers = materialLots.map(lot => lot.lotNumber);
+    materialLotInput.value = lotNumbers.join(',');
+  }
+}
+
+// Render lot tags
+function renderMaterialLotTags() {
+  const tagsContainer = document.getElementById('材料ロット-tags');
+  console.log('Rendering material lot tags. Container found:', !!tagsContainer);
+  console.log('Material lots to render:', materialLots);
+  
+  if (!tagsContainer) return;
+
+  tagsContainer.innerHTML = '';
+
+  materialLots.forEach((lot, index) => {
+    console.log(`Creating tag for lot ${index}:`, lot);
+    const tag = document.createElement('div');
+    tag.style.cssText = `
+      display: inline-flex;
+      align-items: center;
+      background: ${lot.source === 'scanned' ? '#f44336' : '#4CAF50'};
+      color: white;
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 14px;
+      gap: 8px;
+    `;
+
+    const lotText = document.createElement('span');
+    lotText.textContent = lot.lotNumber;
+    tag.appendChild(lotText);
+
+    // Add delete button (only for manual lots)
+    if (lot.source === 'manual') {
+      const deleteBtn = document.createElement('span');
+      deleteBtn.textContent = '×';
+      deleteBtn.style.cssText = `
+        cursor: pointer;
+        font-size: 18px;
+        font-weight: bold;
+        margin-left: 4px;
+      `;
+      deleteBtn.onclick = () => {
+        materialLots.splice(index, 1);
+        saveMaterialLots();
+        renderMaterialLotTags();
+      };
+      tag.appendChild(deleteBtn);
+    } else {
+      // Show × but disabled for scanned lots
+      const disabledX = document.createElement('span');
+      disabledX.textContent = '×';
+      disabledX.style.cssText = `
+        font-size: 18px;
+        font-weight: bold;
+        margin-left: 4px;
+        opacity: 0.3;
+        cursor: not-allowed;
+      `;
+      tag.appendChild(disabledX);
+    }
+
+    tagsContainer.appendChild(tag);
+  });
+  
+  console.log('Finished rendering tags. Container children count:', tagsContainer.children.length);
+}
+
+// Add scanned lot
+function addScannedLot(lotNumber) {
+  if (!materialLots.some(lot => lot.lotNumber === lotNumber)) {
+    materialLots.push({ lotNumber, source: 'scanned' });
+    saveMaterialLots();
+    renderMaterialLotTags();
+    return true;
+  }
+  return false; // Duplicate
+}
+
+// Add manual lot
+function addManualLot(lotNumber) {
+  if (!materialLots.some(lot => lot.lotNumber === lotNumber)) {
+    materialLots.push({ lotNumber, source: 'manual' });
+    saveMaterialLots();
+    renderMaterialLotTags();
+    return true;
+  }
+  return false; // Duplicate
+}
 
 
 
+// Intercept 材料ロット input click to open scan modal instead of keypad
+const materialLotInput = document.getElementById('材料ロット');
+if (materialLotInput) {
+  // Always prevent keypad from appearing
+  materialLotInput.readOnly = true;
+  materialLotInput.style.cursor = 'pointer';
+  
+  // Prevent all focus events that could trigger keypad
+  materialLotInput.addEventListener('focus', (e) => {
+    e.preventDefault();
+    materialLotInput.blur();
+    openMaterialLotModal();
+  });
+  
+  materialLotInput.addEventListener('click', (e) => {
+    e.preventDefault();
+    materialLotInput.blur();
+    openMaterialLotModal();
+  });
+  
+  // Prevent touchstart on mobile devices
+  materialLotInput.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    openMaterialLotModal();
+  });
+  
+  // Function to open the modal with validation
+  function openMaterialLotModal() {
+    // Check if sebanggo has a value
+    const subDropdownInput = document.getElementById('sub-dropdown-input');
+    if (!subDropdownInput || !subDropdownInput.value) {
+      alert('背番号を選択してください / Please select a Sebanggo first');
+      return;
+    }
+    
+    // Open scan modal
+    openScanLotModal();
+  }
+  
+  // Function to enable manual entry (called from Override button)
+  window.enableManualLotEntry = function() {
+    // Use the existing keypad system for material lot entry
+    window.openDirectNumericKeypad('材料ロット');
+  };
+}
+
+// Open scan lot modal
+function openScanLotModal() {
+  const scanLotModal = document.getElementById('scanLotModal');
+  const scanLotStatus = document.getElementById('scanLotStatus');
+  
+  scanLotModal.style.display = 'block';
+  scanLotStatus.innerHTML = '<span style="color: #3498db;">🔍 QRコードをスキャンしてください<br>Please scan QR code</span>';
+  
+  // Initialize QR scanner
+  window.lotHtml5QrCode = new Html5Qrcode("lotQrReader");
+  
+  window.lotHtml5QrCode.start(
+    { facingMode: "environment" },
+    {
+      fps: 30,
+      qrbox: { width: 800, height: 800 },
+      aspectRatio: 1.0,
+      disableFlip: false,
+    },
+    (decodedText) => {
+      console.log('Scanned lot QR:', decodedText);
+      
+      // Parse the barcode: 材料背番号,lot number,length
+      const parts = decodedText.split(',');
+      if (parts.length >= 2) {
+        const scanned材料背番号 = parts[0].trim();
+        const lotNumber = parts[1].trim();
+        
+        // Get current product's 材料背番号
+        const current材料背番号 = document.getElementById('material-code').value;
+        
+        if (scanned材料背番号 === current材料背番号) {
+          // Match found - add to lots
+          const success = addScannedLot(lotNumber);
+          
+          // Close scanner with proper cleanup
+          if (window.lotHtml5QrCode) {
+            window.lotHtml5QrCode.stop().then(() => {
+              // Force cleanup of all camera tracks
+              const readerElement = document.getElementById('lotQrReader');
+              if (readerElement) {
+                const video = readerElement.querySelector('video');
+                if (video && video.srcObject) {
+                  const stream = video.srcObject;
+                  const tracks = stream.getTracks();
+                  tracks.forEach(track => {
+                    track.stop();
+                    console.log('Stopped camera track after successful scan:', track.kind);
+                  });
+                  video.srcObject = null;
+                }
+                readerElement.innerHTML = '';
+              }
+              
+              // Clear scanner instance
+              window.lotHtml5QrCode = null;
+              
+              scanLotModal.style.display = 'none';
+              if (success) {
+                alert(`材料ロット追加: ${lotNumber}`);
+              } else {
+                alert(`重複: ${lotNumber} は既に追加されています`);
+              }
+            }).catch(err => {
+              console.error('Error stopping scanner after success:', err);
+              // Force cleanup even if stop() fails
+              const readerElement = document.getElementById('lotQrReader');
+              if (readerElement) {
+                const video = readerElement.querySelector('video');
+                if (video && video.srcObject) {
+                  const stream = video.srcObject;
+                  const tracks = stream.getTracks();
+                  tracks.forEach(track => {
+                    track.stop();
+                    console.log('Emergency stop camera track after success:', track.kind);
+                  });
+                  video.srcObject = null;
+                }
+                readerElement.innerHTML = '';
+              }
+              window.lotHtml5QrCode = null;
+              scanLotModal.style.display = 'none';
+              if (success) {
+                alert(`材料ロット追加: ${lotNumber}`);
+              } else {
+                alert(`重複: ${lotNumber} は既に追加されています`);
+              }
+            });
+          }
+        } else {
+          // No match - show error
+          scanLotStatus.innerHTML = `<span style="color: #e74c3c;">❌ 材料背番号が一致しません<br>期待値: ${current材料背番号}<br>スキャン値: ${scanned材料背番号}</span>`;
+        }
+      } else {
+        scanLotStatus.innerHTML = '<span style="color: #e74c3c;">❌ 不正なQRコード形式<br>Invalid QR code format</span>';
+      }
+    },
+    (errorMessage) => {
+      // Ignore continuous scanning errors
+    }
+  ).catch(err => {
+    console.error("Failed to start lot scanning:", err);
+    scanLotStatus.innerHTML = '<span style="color: #e74c3c;">❌ カメラを起動できませんでした<br>Could not start camera</span>';
+  });
+}
+
+// Override lot button functionality (for manual entry without leader verification)
+document.addEventListener('DOMContentLoaded', () => {
+  const overrideLotButton = document.getElementById('overrideLotButton');
+  if (overrideLotButton) {
+    overrideLotButton.addEventListener('click', function() {
+      const scanLotModal = document.getElementById('scanLotModal');
+      
+      // Close scan modal first
+      if (window.lotHtml5QrCode) {
+        window.lotHtml5QrCode.stop().catch(err => console.error("Error stopping lot scanner:", err));
+      }
+      scanLotModal.style.display = 'none';
+      
+      // Enable manual entry and trigger it
+      window.enableManualLotEntry();
+    });
+  }
+  
+  // Close scan lot modal button
+  const closeScanLotModal = document.getElementById('closeScanLotModal');
+  if (closeScanLotModal) {
+    closeScanLotModal.addEventListener('click', async function() {
+      // Stop QR scanner if running
+      if (window.lotHtml5QrCode) {
+        try {
+          await window.lotHtml5QrCode.stop();
+          console.log('QR scanner stopped successfully');
+          
+          // Force cleanup of all camera tracks from the video element
+          const readerElement = document.getElementById('lotQrReader');
+          if (readerElement) {
+            const video = readerElement.querySelector('video');
+            if (video && video.srcObject) {
+              const stream = video.srcObject;
+              const tracks = stream.getTracks();
+              tracks.forEach(track => {
+                track.stop();
+                console.log('Force stopped camera track:', track.kind);
+              });
+              video.srcObject = null;
+            }
+            // Clear the HTML content
+            readerElement.innerHTML = '';
+          }
+          
+        } catch (err) {
+          console.error('Error stopping QR scanner:', err);
+          
+          // Force cleanup even if stop() fails
+          const readerElement = document.getElementById('lotQrReader');
+          if (readerElement) {
+            const video = readerElement.querySelector('video');
+            if (video && video.srcObject) {
+              const stream = video.srcObject;
+              const tracks = stream.getTracks();
+              tracks.forEach(track => {
+                track.stop();
+                console.log('Emergency stop camera track:', track.kind);
+              });
+              video.srcObject = null;
+            }
+            readerElement.innerHTML = '';
+          }
+        }
+        
+        // Clear the scanner instance
+        window.lotHtml5QrCode = null;
+      }
+      
+      document.getElementById('scanLotModal').style.display = 'none';
+    });
+  }
+});
+
+// Load lots on page load
+document.addEventListener('DOMContentLoaded', () => {
+  loadMaterialLots();
+});
 
 // Print label using "Smooth Print" app for mobile devices
 // function printLabel() {
@@ -4157,7 +4511,12 @@ window.openDirectNumericKeypad = function(inputId) {
   const currentInput = document.getElementById(inputId);
   
   if (modal && display && currentInput) {
-    display.value = currentInput.value || '';
+    // For material lot entries, always start with blank keypad
+    if (inputId === '材料ロット') {
+      display.value = '';
+    } else {
+      display.value = currentInput.value || '';
+    }
     modal.style.display = 'block';
     document.body.style.overflow = 'hidden';
     
@@ -4267,7 +4626,27 @@ window.confirmDirectNumericInput = function() {
         }
         return;
       }
-      // Allow blank value - no validation needed
+      
+      // If value is not empty, add it as a manual lot to the tagging system
+      if (value !== '') {
+        const lotNumber = value.trim();
+        if (lotNumber) {
+          const success = addManualLot(lotNumber);
+          if (success) {
+            console.log("Manual lot added via keypad:", lotNumber);
+          } else {
+            if (typeof showAlert === 'function') {
+              showAlert(`重複: ${lotNumber} は既に追加されています`);
+            } else {
+              alert(`重複: ${lotNumber} は既に追加されています`);
+            }
+          }
+        }
+      }
+      
+      // Close keypad - don't set input value directly as it's handled by tagging system
+      window.closeDirectNumericKeypad();
+      return;
     } else if (window.currentDirectInputId === 'shot' || window.currentDirectInputId === 'ProcessQuantity') {
       // For shot count and process quantity, allow numbers, spaces, and blank values
       // If not blank, validate as a number (after removing spaces)
@@ -4565,41 +4944,8 @@ window.addEventListener('load', function() {
     console.log('Shot input configured with direct keypad');
   }
   
-  // Configure material lot input to use the same keypad
-  const materialLotInput = document.getElementById('材料ロット');
-  if (materialLotInput) {
-    materialLotInput.readOnly = true;
-    
-    // Use a more robust event attachment
-    if (materialLotInput.addEventListener) {
-      materialLotInput.addEventListener('click', function() {
-        window.openDirectNumericKeypad('材料ロット');
-      });
-    } else {
-      // Fallback for older browsers
-      materialLotInput.onclick = function() {
-        window.openDirectNumericKeypad('材料ロット');
-      };
-    }
-    
-    // Style the input
-    materialLotInput.style.cssText = `
-      cursor: pointer;
-      background-color: #f0f8ff;
-      border: 2px solid #007bff;
-      border-radius: 5px;
-      padding: 8px 10px;
-      font-size: 16px;
-      width: 100%;
-      background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="%23007bff"><path d="M4 2h16a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm1 4h4v4H5V6zm0 6h4v4H5v-4zm6-6h4v4h-4V6zm6 0h2v4h-2V6zm-6 6h4v4h-4v-4zm6 0h2v4h-2v-4z"/></svg>');
-      background-repeat: no-repeat;
-      background-position: right 8px center;
-      background-size: 16px 16px;
-      padding-right: 30px;
-    `;
-    
-    console.log('Material lot input configured with direct keypad');
-  }
+  // Material lot input is handled by the scan modal system - skip keypad setup
+  console.log('Material lot input handled by scan modal system');
   
   // Configure Process Quantity input with the direct keypad
   const processQuantityInput = document.getElementById('ProcessQuantity');
