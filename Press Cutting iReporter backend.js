@@ -2566,6 +2566,31 @@ function closeActiveScannerModal() {
 });
 
 
+// Helper function to handle alert modal display (matching DCP backend)
+function showAlert(message) {
+  const alertSound = document.getElementById('alert-sound');
+  const scanAlertModal = document.getElementById('scanAlertModal');
+  document.getElementById('scanAlertText').innerText = message;
+  scanAlertModal.style.display = 'block';
+
+  if (alertSound) {
+    alertSound.muted = false; // Unmute to alert user
+    alertSound.volume = 1; // Set full volume
+    alertSound.play().catch(error => console.error("Failed to play alert sound:", error));
+  }
+
+  document.body.classList.add('flash-red');
+
+  const closeScanModalButton = document.getElementById('closeScanModalButton');
+  closeScanModalButton.onclick = function() {
+    scanAlertModal.style.display = 'none';
+    alertSound.pause();
+    alertSound.currentTime = 0; // Reset sound to the beginning
+    alertSound.muted = true; // Mute again for next time
+    document.body.classList.remove('flash-red');
+  };
+}
+
 function showSuccessPrompt(message, duration = 3500) {
     const feedbackArea = document.getElementById('scan-feedback-area');
     // NO SOUND for this success prompt
@@ -2830,24 +2855,39 @@ function renderMaterialLotTags() {
 
 // Add scanned lot
 function addScannedLot(lotNumber) {
-  if (!materialLots.some(lot => lot.lotNumber === lotNumber)) {
-    materialLots.push({ lotNumber, source: 'scanned' });
-    saveMaterialLots();
-    renderMaterialLotTags();
-    return true;
+  console.log('addScannedLot called with:', lotNumber);
+  console.log('Current materialLots array:', materialLots);
+  
+  // Check for duplicates
+  const isDuplicate = materialLots.some(lot => lot.lotNumber === lotNumber);
+  console.log('Duplicate check result:', isDuplicate);
+  
+  if (isDuplicate) {
+    console.log('Duplicate found, returning false');
+    return false; // Duplicate
   }
-  return false; // Duplicate
+  
+  console.log('No duplicate found, adding lot');
+  materialLots.push({ lotNumber, source: 'scanned' });
+  saveMaterialLots();
+  renderMaterialLotTags();
+  console.log('Lot added successfully, returning true');
+  return true; // Success
 }
 
 // Add manual lot
 function addManualLot(lotNumber) {
-  if (!materialLots.some(lot => lot.lotNumber === lotNumber)) {
-    materialLots.push({ lotNumber, source: 'manual' });
-    saveMaterialLots();
-    renderMaterialLotTags();
-    return true;
+  if (!lotNumber || !lotNumber.trim()) return false;
+  lotNumber = lotNumber.trim();
+  
+  // Check for duplicates
+  if (materialLots.some(lot => lot.lotNumber === lotNumber)) {
+    return false; // Duplicate
   }
-  return false; // Duplicate
+  materialLots.push({ lotNumber, source: 'manual' });
+  saveMaterialLots();
+  renderMaterialLotTags();
+  return true; // Success
 }
 
 
@@ -2930,10 +2970,86 @@ function openScanLotModal() {
         const current材料背番号 = document.getElementById('material-code').value;
         
         if (scanned材料背番号 === current材料背番号) {
-          // Match found - add to lots
+          // Material code matches - add lot number using the new system
+          console.log('Material code matched. Adding lot:', lotNumber);
+          console.log('Current material lots before adding:', materialLots);
+          
+          // STOP SCANNER IMMEDIATELY to prevent multiple scans
+          if (window.lotHtml5QrCode) {
+            window.lotHtml5QrCode.stop().then(() => {
+              const readerElement = document.getElementById('lotQrReader');
+              if (readerElement) {
+                const video = readerElement.querySelector('video');
+                if (video && video.srcObject) {
+                  const stream = video.srcObject;
+                  const tracks = stream.getTracks();
+                  tracks.forEach(track => {
+                    track.stop();
+                    console.log('Immediately stopped camera track:', track.kind);
+                  });
+                  video.srcObject = null;
+                }
+                readerElement.innerHTML = '';
+              }
+              window.lotHtml5QrCode = null;
+            }).catch(err => {
+              console.error('Error stopping scanner immediately:', err);
+              // Force cleanup even if stop() fails
+              const readerElement = document.getElementById('lotQrReader');
+              if (readerElement) {
+                const video = readerElement.querySelector('video');
+                if (video && video.srcObject) {
+                  const stream = video.srcObject;
+                  const tracks = stream.getTracks();
+                  tracks.forEach(track => {
+                    track.stop();
+                    console.log('Force stop camera track immediately:', track.kind);
+                  });
+                  video.srcObject = null;
+                }
+                readerElement.innerHTML = '';
+              }
+              window.lotHtml5QrCode = null;
+            });
+          }
+          
           const success = addScannedLot(lotNumber);
           
-          // Close scanner with proper cleanup
+          console.log('addScannedLot returned:', success);
+          console.log('Current material lots after adding:', materialLots);
+          
+          if (!success) {
+            // Duplicate
+            console.log('Duplicate detected for lot:', lotNumber);
+            scanLotStatus.innerHTML = '<span style="color: #f39c12;">⚠️ このロット番号は既に追加されています<br>Lot number already added</span>';
+            
+            // Close modal after showing message for 1.5 seconds
+            setTimeout(() => {
+              scanLotModal.style.display = 'none';
+            }, 1500);
+            
+            return;
+          }
+
+          // Show success animation
+          console.log('Success! Lot added:', lotNumber);
+          scanLotStatus.innerHTML = '<span class="success-checkmark">✓</span><br><span style="color: #4CAF50; font-weight: bold;">成功！ / Success!</span>';
+          document.body.classList.add('flash-green');
+
+          // Close modal after success animation (1 second)
+          setTimeout(() => {
+            document.body.classList.remove('flash-green');
+            scanLotModal.style.display = 'none';
+          }, 1000);
+          
+        } else {
+          // Material code mismatch - show error
+          scanLotStatus.innerHTML = '<span style="color: #e74c3c;">❌ 材料背番号が一致しません<br>Material code mismatch</span>';
+          
+          // Use showAlert function
+          showAlert(`材料コードが一致しません / Material code mismatch\n\nExpected: ${current材料背番号}\nScanned: ${scanned材料背番号}`);
+          
+          // Close modal
           if (window.lotHtml5QrCode) {
             window.lotHtml5QrCode.stop().then(() => {
               // Force cleanup of all camera tracks
@@ -2945,24 +3061,17 @@ function openScanLotModal() {
                   const tracks = stream.getTracks();
                   tracks.forEach(track => {
                     track.stop();
-                    console.log('Stopped camera track after successful scan:', track.kind);
+                    console.log('Stopped camera track after error:', track.kind);
                   });
                   video.srcObject = null;
                 }
                 readerElement.innerHTML = '';
               }
-              
               // Clear scanner instance
               window.lotHtml5QrCode = null;
-              
               scanLotModal.style.display = 'none';
-              if (success) {
-                alert(`材料ロット追加: ${lotNumber}`);
-              } else {
-                alert(`重複: ${lotNumber} は既に追加されています`);
-              }
             }).catch(err => {
-              console.error('Error stopping scanner after success:', err);
+              console.error('Error stopping scanner after error:', err);
               // Force cleanup even if stop() fails
               const readerElement = document.getElementById('lotQrReader');
               if (readerElement) {
@@ -2972,7 +3081,7 @@ function openScanLotModal() {
                   const tracks = stream.getTracks();
                   tracks.forEach(track => {
                     track.stop();
-                    console.log('Emergency stop camera track after success:', track.kind);
+                    console.log('Emergency stop camera track after error:', track.kind);
                   });
                   video.srcObject = null;
                 }
@@ -2980,19 +3089,57 @@ function openScanLotModal() {
               }
               window.lotHtml5QrCode = null;
               scanLotModal.style.display = 'none';
-              if (success) {
-                alert(`材料ロット追加: ${lotNumber}`);
-              } else {
-                alert(`重複: ${lotNumber} は既に追加されています`);
-              }
             });
           }
-        } else {
-          // No match - show error
-          scanLotStatus.innerHTML = `<span style="color: #e74c3c;">❌ 材料背番号が一致しません<br>期待値: ${current材料背番号}<br>スキャン値: ${scanned材料背番号}</span>`;
+          return;
         }
       } else {
-        scanLotStatus.innerHTML = '<span style="color: #e74c3c;">❌ 不正なQRコード形式<br>Invalid QR code format</span>';
+        scanLotStatus.innerHTML = '<span style="color: #e74c3c;">❌ QRコードの処理エラー<br>QR code processing error</span>';
+        
+        showAlert('QRコードの形式が正しくありません / Invalid QR code format');
+        
+        // Close modal
+        if (window.lotHtml5QrCode) {
+          window.lotHtml5QrCode.stop().then(() => {
+            // Force cleanup of all camera tracks
+            const readerElement = document.getElementById('lotQrReader');
+            if (readerElement) {
+              const video = readerElement.querySelector('video');
+              if (video && video.srcObject) {
+                const stream = video.srcObject;
+                const tracks = stream.getTracks();
+                tracks.forEach(track => {
+                  track.stop();
+                  console.log('Stopped camera track after invalid format:', track.kind);
+                });
+                video.srcObject = null;
+              }
+              readerElement.innerHTML = '';
+            }
+            // Clear scanner instance
+            window.lotHtml5QrCode = null;
+            scanLotModal.style.display = 'none';
+          }).catch(err => {
+            console.error('Error stopping scanner after invalid format:', err);
+            // Force cleanup even if stop() fails
+            const readerElement = document.getElementById('lotQrReader');
+            if (readerElement) {
+              const video = readerElement.querySelector('video');
+              if (video && video.srcObject) {
+                const stream = video.srcObject;
+                const tracks = stream.getTracks();
+                tracks.forEach(track => {
+                  track.stop();
+                  console.log('Emergency stop camera track after invalid format:', track.kind);
+                });
+                video.srcObject = null;
+              }
+              readerElement.innerHTML = '';
+            }
+            window.lotHtml5QrCode = null;
+            scanLotModal.style.display = 'none';
+          });
+        }
       }
     },
     (errorMessage) => {
