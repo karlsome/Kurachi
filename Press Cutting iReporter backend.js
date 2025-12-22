@@ -3630,21 +3630,40 @@ function closeWebcamModal() {
 }
 
 async function captureFromWebcam() {
+  console.log('📸 captureFromWebcam called');
+  console.log('📸 currentPhotoMapping:', currentPhotoMapping);
+  console.log('📸 currentButtonId:', currentButtonId);
+  
   const video = document.getElementById('webcamVideo');
   const canvas = document.getElementById('webcamCanvas');
   const ctx = canvas.getContext('2d');
+  
+  if (!video || !canvas) {
+    console.error('❌ Video or canvas element not found');
+    return;
+  }
   
   canvas.width = video.videoWidth;
   canvas.height = video.videoHeight;
   ctx.drawImage(video, 0, 0);
   
   const base64Image = canvas.toDataURL('image/jpeg', 0.8);
+  console.log('📸 Captured image size:', (base64Image.length / 1024).toFixed(2), 'KB');
+  
   const compressedImage = await compressBase64Image(base64Image);
+  console.log('📸 Compressed image size:', (compressedImage.length / 1024).toFixed(2), 'KB');
+  
+  // Store mapping and buttonId before closing modal (which clears these variables)
+  const tempMapping = currentPhotoMapping;
+  const tempButtonId = currentButtonId;
   
   closeWebcamModal();
   
-  if (currentPhotoMapping) {
-    await processPhotoCapture(compressedImage, currentPhotoMapping, currentButtonId);
+  if (tempMapping) {
+    console.log('📸 Processing photo with mapping:', tempMapping.labelText);
+    await processPhotoCapture(compressedImage, tempMapping, tempButtonId);
+  } else {
+    console.error('❌ tempMapping is null - photo capture failed');
   }
 }
 
@@ -3736,6 +3755,7 @@ function showPhotoOptionModal(mapping, buttonId, fileInput) {
   const cancelBtn = document.getElementById('cancelPhotoBtn');
   
   currentButtonId = buttonId;
+  currentPhotoMapping = mapping; // Set the mapping here for consistency
   title.textContent = `${mapping.labelText} - 撮影方法選択`;
   
   // Remove any existing event listeners to prevent duplicates
@@ -3761,6 +3781,7 @@ function showPhotoOptionModal(mapping, buttonId, fileInput) {
   newCancelBtn.addEventListener('click', () => {
     modal.style.display = 'none';
     currentButtonId = null;
+    currentPhotoMapping = null;
   });
   
   modal.style.display = 'flex';
@@ -3864,15 +3885,13 @@ buttonMappings.forEach(mapping => {
         return; // stop further action
       }
 
-      // If value is selected, proceed with native camera
-      currentButtonId = mapping.buttonId;
-      const fileInput = document.getElementById(mapping.fileInputId);
-      
+      // If value is selected, proceed with photo capture
       // Show photo option modal for desktop or directly use camera for mobile
       if (isMobileDevice()) {
+        const fileInput = document.getElementById(mapping.fileInputId);
         fileInput.click();
       } else {
-        showPhotoOptionModal(mapping, mapping.buttonId, fileInput);
+        showPhotoOptionModal(mapping, mapping.buttonId, document.getElementById(mapping.fileInputId));
       }
     });
   }
