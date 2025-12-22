@@ -5,6 +5,11 @@ const serverURL = "https://kurachi.onrender.com";
 // link for pictures database
 const picURL = 'https://script.google.com/macros/s/AKfycbwHUW1ia8hNZG-ljsguNq8K4LTPVnB6Ng_GLXIHmtJTdUgGGd2WoiQo9ToF-7PvcJh9bA/exec';
 
+// Worker Name Selection Modal Variables (moved to top to avoid temporal dead zone)
+let workerNamesData = [];
+const RECENT_WORKERS_KEY = 'recentWorkerNames';
+const MAX_RECENT_WORKERS = 6;
+
 
 // Auto-resize textarea based on content
 function autoResizeTextarea(textarea) {
@@ -79,6 +84,20 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Loop through all keys in localStorage
+  
+  // Debug: First let's see what uniquePrefix patterns we're using
+  const uniquePrefix = `${pageName}_${selected工場}_`;
+  console.log(`🔧 Debug - uniquePrefix: ${uniquePrefix}`);
+  
+  // Debug: List all localStorage keys for this page
+  const allKeys = Object.keys(localStorage);
+  const pageKeys = allKeys.filter(key => key.startsWith(uniquePrefix));
+  console.log(`🔧 Debug - Found ${pageKeys.length} localStorage keys for this page:`);
+  pageKeys.forEach(key => {
+    const value = localStorage.getItem(key);
+    console.log(`  - ${key}: ${value ? (value.startsWith('data:image') ? 'IMAGE DATA' : value) : 'null'}`);
+  });
+  
   Object.keys(localStorage).forEach(key => {
       // Check if the key belongs to the current HTML file and selected 工場
       if (key.startsWith(`${uniquePrefix}`)) {
@@ -119,22 +138,39 @@ document.addEventListener('DOMContentLoaded', () => {
                   }
               });
 
-              // Restore image sources dynamically
+              // Restore image sources dynamically (handle both old and new key patterns)
               images.forEach(image => {
-                  const imageKey = `${uniquePrefix}${image.id || image.name}.src`;
-                  if (key === imageKey) {
+                  // Try old pattern first (with dot)
+                  const imageKeyOld = `${uniquePrefix}${image.id || image.name}.src`;
+                  // Try new pattern (with underscore - from native camera)
+                  const imageKeyNew = `${uniquePrefix}${image.id}_src`;
+                  
+                  if (key === imageKeyOld || key === imageKeyNew) {
                       image.src = savedValue; // Restore the image source
                       image.style.display = 'block'; // Ensure the image is visible
-                      console.log(`Restored ${image.id || image.name} image src:`, savedValue);
+                      console.log(`🖼️ Restored ${image.id || image.name} image src from ${key}:`, savedValue ? 'data exists' : 'no data');
                       
                       // Update button color to green if image exists
                       if (savedValue && savedValue !== '') {
+                        console.log(`🎨 Updating button appearance for image: ${image.id}`);
                         if (image.id === 'hatsumonoPic') {
                           const hatsumonoButton = document.getElementById('hatsumonoButton');
-                          if (hatsumonoButton) hatsumonoButton.classList.add('has-photo');
+                          if (hatsumonoButton) {
+                            hatsumonoButton.classList.add('has-photo');
+                            console.log('✅ Added has-photo class to hatsumonoButton');
+                          }
                         } else if (image.id === 'atomonoPic') {
                           const atomonoButton = document.getElementById('atomonoButton');
-                          if (atomonoButton) atomonoButton.classList.add('has-photo');
+                          if (atomonoButton) {
+                            atomonoButton.classList.add('has-photo');
+                            console.log('✅ Added has-photo class to atomonoButton');
+                          }
+                        } else if (image.id === '材料ラベル') {
+                          const makerLabelButton = document.getElementById('makerLabelButton');
+                          if (makerLabelButton) {
+                            makerLabelButton.classList.add('has-photos');
+                            console.log('✅ Added has-photos class to makerLabelButton');
+                          }
                         }
                       }
                   }
@@ -2614,14 +2650,44 @@ function resetForm(skipConfirmation = false) {
       }
   });
 
-  // Reset all <img> elements
-  const images = document.querySelectorAll('img'); // Get all <img> elements
+// Reset all native camera images
+  buttonMappings.forEach(mapping => {
+    const imageKey = `${uniquePrefix}${mapping.imgId}_src`;
+    const labelKey = `${uniquePrefix}${mapping.labelId}.textContent`;
+    localStorage.removeItem(imageKey);
+    localStorage.removeItem(labelKey);
+    
+    const imgElement = document.getElementById(mapping.imgId);
+    const labelElement = document.getElementById(mapping.labelId);
+    const buttonElement = document.getElementById(mapping.buttonId);
+    
+    if (imgElement) {
+      imgElement.src = '';
+      imgElement.style.display = 'none';
+    }
+    if (labelElement) {
+      labelElement.textContent = 'FALSE';
+      labelElement.style.color = '';
+    }
+    if (buttonElement) {
+      buttonElement.classList.remove('has-photo', 'has-photos');
+    }
+    
+    console.log(`Reset native camera image and label for ${mapping.imgId}`);
+  });
+
+  // Reset any other legacy images
+  const images = document.querySelectorAll('img');
   images.forEach(image => {
+    // Skip if already handled by button mappings
+    const alreadyHandled = buttonMappings.some(mapping => mapping.imgId === image.id);
+    if (!alreadyHandled) {
       const imageKey = `${uniquePrefix}${image.id || image.name}.src`;
-      localStorage.removeItem(imageKey); // Remove image source from localStorage
-      image.src = ''; // Reset the image source
-      image.style.display = 'none'; // Hide the image
-      console.log(`Reset image ${image.id || image.name}`);
+      localStorage.removeItem(imageKey);
+      image.src = '';
+      image.style.display = 'none';
+      console.log(`Reset legacy image ${image.id || image.name}`);
+    }
   });
   
   // Reset button colors to red (remove green class)
@@ -3323,164 +3389,355 @@ function AddKensa(){
     document.querySelector('.kensaDropdown').style.display = 'block';
 }
 
+// ============================================
+// NATIVE CAMERA FUNCTIONALITY
+// ============================================
 
+// Helper function to convert File to base64 string
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
 
+// Device detection
+function isMobileDevice() {
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+}
 
+// Compress image function
+async function compressBase64Image(base64DataURL, maxWidth = 1024, quality = 0.7) {
+  return new Promise((resolve) => {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const img = new Image();
+    
+    img.onload = () => {
+      const ratio = Math.min(maxWidth / img.width, maxWidth / img.height);
+      canvas.width = img.width * ratio;
+      canvas.height = img.height * ratio;
+      
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL('image/jpeg', quality));
+    };
+    
+    img.src = base64DataURL;
+  });
+}
 
+// Global variables for webcam functionality
+let webcamStream = null;
+let currentButtonId = null;
+let currentPhotoMapping = null;
 
+// Webcam functions
+async function openWebcamModal(mapping) {
+  const modal = document.getElementById('webcamModal');
+  const video = document.getElementById('webcamVideo');
+  const title = document.getElementById('webcamModalTitle');
+  
+  currentPhotoMapping = mapping;
+  title.textContent = `${mapping.labelText} - 写真撮影`;
+  
+  try {
+    webcamStream = await navigator.mediaDevices.getUserMedia({ 
+      video: { facingMode: 'environment' },
+      audio: false 
+    });
+    video.srcObject = webcamStream;
+    modal.style.display = 'flex';
+  } catch (error) {
+    console.error('Error accessing webcam:', error);
+    alert('カメラにアクセスできませんでした。ファイル選択を使用してください。');
+  }
+}
 
+function closeWebcamModal() {
+  const modal = document.getElementById('webcamModal');
+  const video = document.getElementById('webcamVideo');
+  
+  if (webcamStream) {
+    webcamStream.getTracks().forEach(track => track.stop());
+    webcamStream = null;
+  }
+  
+  video.srcObject = null;
+  modal.style.display = 'none';
+  currentPhotoMapping = null;
+}
 
+async function captureFromWebcam() {
+  const video = document.getElementById('webcamVideo');
+  const canvas = document.getElementById('webcamCanvas');
+  const ctx = canvas.getContext('2d');
+  
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  ctx.drawImage(video, 0, 0);
+  
+  const base64Image = canvas.toDataURL('image/jpeg', 0.8);
+  const compressedImage = await compressBase64Image(base64Image);
+  
+  closeWebcamModal();
+  
+  if (currentPhotoMapping) {
+    await processPhotoCapture(compressedImage, currentPhotoMapping, currentButtonId);
+  }
+}
 
+// Shared function to process photo capture (from webcam or file)
+async function processPhotoCapture(base64Image, mapping, buttonId) {
+  try {
+    console.log(`Processing photo capture for ${mapping.labelText}`);
+    
+    // Compress image before processing
+    console.log(`Original image size: ${(base64Image.length / 1024).toFixed(2)} KB`);
+    const compressedImage = await compressBase64Image(base64Image, 1024, 0.8);
+    console.log(`Compressed image size: ${(compressedImage.length / 1024).toFixed(2)} KB`);
+    
+    // Handle material label photos with single photo functionality
+    if (buttonId === 'makerLabelButton') {
+      // Set the traditional elements for compatibility
+      const imgElement = document.getElementById(mapping.imgId);
+      const labelElement = document.getElementById(mapping.labelId);
+      
+      if (imgElement) {
+        imgElement.src = compressedImage;
+        imgElement.style.display = 'block';
+      }
+      
+      if (labelElement) {
+        labelElement.textContent = 'TRUE';
+        labelElement.style.color = 'green';
+      }
+      
+      // Update button appearance
+      const button = document.getElementById(buttonId);
+      if (button) {
+        button.classList.add('has-photos');
+      }
+      
+      console.log('Material label photo processed successfully');
+    } else {
+      // Handle hatsumono and atomono photos
+      const imgElement = document.getElementById(mapping.imgId);
+      const labelElement = document.getElementById(mapping.labelId);
+      
+      if (imgElement) {
+        imgElement.src = compressedImage;
+        imgElement.style.display = 'block';
+      }
+      
+      if (labelElement) {
+        labelElement.textContent = 'TRUE';
+        labelElement.style.color = 'green';
+      }
+      
+      // Update button appearance
+      const button = document.getElementById(buttonId);
+      if (button) {
+        button.classList.add('has-photo');
+      }
+      
+      console.log(`${mapping.labelText} photo processed successfully`);
+    }
+    
+    // Save compressed image to localStorage for persistence
+    const uniqueKey = `${uniquePrefix}${mapping.imgId}_src`;
+    localStorage.setItem(uniqueKey, compressedImage);
+    console.log(`📾 Saved image to localStorage with key: ${uniqueKey}`);
+    console.log(`📾 Image data length: ${compressedImage.length} characters`);
+    
+    // Also save the label state for persistence
+    const labelKey = `${uniquePrefix}${mapping.labelId}.textContent`;
+    localStorage.setItem(labelKey, 'TRUE');
+    console.log(`📾 Saved label state to localStorage with key: ${labelKey}`);
+    
+    // Verify saved data immediately
+    const savedImg = localStorage.getItem(uniqueKey);
+    const savedLabel = localStorage.getItem(labelKey);
+    console.log(`✅ Verification - Image saved: ${!!savedImg}, Label saved: ${savedLabel}`);
+    
+  } catch (error) {
+    console.error('Error processing photo capture:', error);
+    alert('写真の処理中にエラーが発生しました。もう一度お試しください。');
+  }
+}
 
+// Show photo option modal (webcam or file)
+function showPhotoOptionModal(mapping, buttonId, fileInput) {
+  const modal = document.getElementById('photoOptionModal');
+  const title = document.getElementById('photoOptionTitle');
+  const useWebcamBtn = document.getElementById('useWebcamBtn');
+  const useFileBtn = document.getElementById('useFileBtn');
+  const cancelBtn = document.getElementById('cancelPhotoBtn');
+  
+  currentButtonId = buttonId;
+  title.textContent = `${mapping.labelText} - 撮影方法選択`;
+  
+  // Remove any existing event listeners to prevent duplicates
+  useWebcamBtn.replaceWith(useWebcamBtn.cloneNode(true));
+  useFileBtn.replaceWith(useFileBtn.cloneNode(true));
+  cancelBtn.replaceWith(cancelBtn.cloneNode(true));
+  
+  // Get fresh references after cloning
+  const newUseWebcamBtn = document.getElementById('useWebcamBtn');
+  const newUseFileBtn = document.getElementById('useFileBtn');
+  const newCancelBtn = document.getElementById('cancelPhotoBtn');
+  
+  newUseWebcamBtn.addEventListener('click', () => {
+    modal.style.display = 'none';
+    openWebcamModal(mapping);
+  });
+  
+  newUseFileBtn.addEventListener('click', () => {
+    modal.style.display = 'none';
+    fileInput.click();
+  });
+  
+  newCancelBtn.addEventListener('click', () => {
+    modal.style.display = 'none';
+    currentButtonId = null;
+  });
+  
+  modal.style.display = 'flex';
+}
 
 // Take photo hatsumono and atomono and label
-// Mapping of buttons to labels and images
+// Mapping of buttons to labels and images - Updated for native camera
 const buttonMappings = [
   {
     buttonId: 'hatsumonoButton',
     labelId: 'hatsumonoLabel',
     imgId: 'hatsumonoPic',
     labelText: '初物チェック',
+    fileInputId: 'hatsumonoFileInput'
   },
   {
     buttonId: 'atomonoButton',
     labelId: 'atomonoLabel',
     imgId: 'atomonoPic',
     labelText: '終物チェック',
+    fileInputId: 'atomonoFileInput'
   },
   {
     buttonId: 'makerLabelButton',
     labelId: 'makerLabel',
     imgId: '材料ラベル',
     labelText: '材料ラベル',
+    fileInputId: 'makerLabelFileInput'
   },
 ];
 
-let currentButtonId = null;
-
-buttonMappings.forEach(({ buttonId }) => {
-  const button = document.getElementById(buttonId);
-  button.addEventListener('click', () => {
-    const subDropdown = document.getElementById('sub-dropdown');
-    const selectedValue = subDropdown?.value;
-
-    if (!selectedValue) {
-      // Trigger modal message instead of alert
-      const scanAlertModal = document.getElementById('scanAlertModal');
-      const scanAlertText = document.getElementById('scanAlertText');
-      const alertSound = document.getElementById('alert-sound');
-
-      scanAlertText.innerText = '背番号を選択してください / Please select a Sebanggo first.';
-      scanAlertModal.style.display = 'block';
-
-      // Flash body and sub-dropdown
-      document.body.classList.add('flash-red');
-      subDropdown.classList.add('flash-red-border');
-
-      // Play alert sound
-      if (alertSound) {
-        alertSound.muted = false;
-        alertSound.volume = 1;
-        alertSound.play().catch(err => console.error("Failed to play sound:", err));
+// Create hidden file inputs for each button and setup native camera event handlers
+buttonMappings.forEach(mapping => {
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.accept = 'image/*';
+  fileInput.capture = 'environment';
+  fileInput.id = mapping.fileInputId;
+  fileInput.style.display = 'none';
+  document.body.appendChild(fileInput);
+  
+  fileInput.addEventListener('change', async (event) => {
+    const file = event.target.files[0];
+    if (file) {
+      try {
+        const base64Image = await fileToBase64(file);
+        const compressedImage = await compressBase64Image(base64Image);
+        await processPhotoCapture(compressedImage, mapping, currentButtonId);
+      } catch (error) {
+        console.error('Error processing file:', error);
+        alert('ファイルの処理中にエラーが発生しました。');
       }
-
-      // Set modal close behavior
-      const closeScanModalButton = document.getElementById('closeScanModalButton');
-      closeScanModalButton.onclick = function () {
-        scanAlertModal.style.display = 'none';
-        document.body.classList.remove('flash-red');
-        subDropdown.classList.remove('flash-red-border');
-
-        if (alertSound) {
-          alertSound.pause();
-          alertSound.currentTime = 0;
-          alertSound.muted = true;
-        }
-      };
-
-      return; // stop further action
     }
-
-    // If value is selected, proceed
-    currentButtonId = buttonId;
-    window.open('captureImage.html', 'Capture Image', 'width=900,height=900');
+    // Reset file input
+    event.target.value = '';
   });
 });
 
+// Setup native camera event handlers for buttons
+buttonMappings.forEach(mapping => {
+  const button = document.getElementById(mapping.buttonId);
+  if (button) {
+    button.addEventListener('click', () => {
+      const subDropdown = document.getElementById('sub-dropdown');
+      const selectedValue = subDropdown?.value;
 
+      if (!selectedValue) {
+        // Trigger modal message instead of alert
+        const scanAlertModal = document.getElementById('scanAlertModal');
+        const scanAlertText = document.getElementById('scanAlertText');
+        const alertSound = document.getElementById('alert-sound');
 
-// Handle the message from the popup window
-window.addEventListener('message', function (event) {
-  if (event.origin === window.location.origin) {
-    const data = event.data;
+        scanAlertText.innerText = '背番号を選択してください / Please select a Sebanggo first.';
+        scanAlertModal.style.display = 'block';
 
-    if (data.image && currentButtonId) {
-      // Handle material label photos separately using the multi-photo system
-      if (currentButtonId === 'makerLabelButton') {
-        console.log('Processing material label photo from popup window');
-        
-        // Add to material label photos array
-        const added = addMaterialLabelPhoto(data.image);
-        
-        if (added) {
-          console.log('Successfully added material label photo');
-          
-          // Update the legacy single image element for compatibility
-          updateMaterialLabelElement();
-          
-          // Force render thumbnails
-          setTimeout(() => {
-            renderMaterialPhotoThumbnails();
-            console.log('Forced thumbnail render after photo addition');
-          }, 100);
-        } else {
-          console.error('Failed to add material label photo');
+        // Flash body and sub-dropdown
+        document.body.classList.add('flash-red');
+        subDropdown.classList.add('flash-red-border');
+
+        // Play alert sound
+        if (alertSound) {
+          alertSound.muted = false;
+          alertSound.volume = 1;
+          alertSound.play().catch(err => console.error("Failed to play sound:", err));
         }
-        
-        // Reset current button ID
-        currentButtonId = null;
-        return;
+
+        // Set modal close behavior
+        const closeScanModalButton = document.getElementById('closeScanModalButton');
+        closeScanModalButton.onclick = function () {
+          scanAlertModal.style.display = 'none';
+          document.body.classList.remove('flash-red');
+          subDropdown.classList.remove('flash-red-border');
+
+          if (alertSound) {
+            alertSound.pause();
+            alertSound.currentTime = 0;
+            alertSound.muted = true;
+          }
+        };
+
+        return; // stop further action
       }
+
+      // If value is selected, proceed with native camera
+      currentButtonId = mapping.buttonId;
+      const fileInput = document.getElementById(mapping.fileInputId);
       
-      // Handle other buttons with single-photo system
-      const mapping = buttonMappings.find(({ buttonId }) => buttonId === currentButtonId);
-
-      if (mapping) {
-        const { labelId, imgId, buttonId } = mapping;
-
-        // Update photo preview
-        const photoPreview = document.getElementById(imgId);
-        photoPreview.src = data.image;
-        photoPreview.style.display = 'block';
-
-        // Update the associated label to TRUE
-        const label = document.getElementById(labelId);
-        label.textContent = 'TRUE';
-        
-        // Toggle button color to green when photo is captured
-        const button = document.getElementById(buttonId);
-        if (button) {
-          button.classList.add('has-photo');
-        }
-
-        // Save label textContent to localStorage
-        const labelKey = `${uniquePrefix}${labelId}.textContent`;
-        localStorage.setItem(labelKey, label.textContent);
-
-        // Save image source to localStorage
-        const photoPreviewKey = `${uniquePrefix}${imgId}.src`;
-        localStorage.setItem(photoPreviewKey, photoPreview.src);
-
-        console.log(
-          `Saved ${labelId}: ${label.textContent} and ${imgId} image: ${photoPreview.src} to localStorage.`
-        );
+      // Show photo option modal for desktop or directly use camera for mobile
+      if (isMobileDevice()) {
+        fileInput.click();
+      } else {
+        showPhotoOptionModal(mapping, mapping.buttonId, fileInput);
       }
-
-      // Reset the current button ID after processing
-      currentButtonId = null;
-    }
+    });
   }
 });
+
+// Setup webcam modal buttons when DOM is loaded
+document.addEventListener('DOMContentLoaded', () => {
+  const captureWebcamBtn = document.getElementById('captureWebcamBtn');
+  const closeWebcamBtn = document.getElementById('closeWebcamBtn');
+  
+  if (captureWebcamBtn) {
+    captureWebcamBtn.addEventListener('click', captureFromWebcam);
+  } else {
+    console.warn('captureWebcamBtn element not found');
+  }
+  
+  if (closeWebcamBtn) {
+    closeWebcamBtn.addEventListener('click', closeWebcamModal);
+  } else {
+    console.warn('closeWebcamBtn element not found');
+  }
+});
+
+// Native camera functionality now handles all photo capture
+// Old captureImage.html popup functionality has been replaced
 
 
 
@@ -3632,21 +3889,52 @@ async function collectImagesForUpload() {
     const photoPreview = document.getElementById(imgId);
     if (!photoPreview || !photoPreview.src) continue;
 
-    const response = await fetch(photoPreview.src);
-    const blob = await response.blob();
-    const base64Data = await blobToBase64(blob);
+    // If the image is already a data URL, use it directly and compress
+    if (photoPreview.src.startsWith('data:')) {
+      console.log(`${label} - Original size: ${(photoPreview.src.length / 1024).toFixed(2)} KB`);
+      const compressedImage = await compressBase64Image(photoPreview.src, 1024, 0.8);
+      console.log(`${label} - Compressed size: ${(compressedImage.length / 1024).toFixed(2)} KB`);
+      
+      // Extract base64 part (remove data:image/jpeg;base64, prefix)
+      const base64Data = compressedImage.split(',')[1];
+      
+      imagesToUpload.push({
+        base64: base64Data,
+        label,
+        factory: selectedFactory,
+        machine: selectedMachine,
+        worker: selectedWorker,
+        date: currentDate,
+        sebanggo: selectedSebanggo,
+      });
+    } else {
+      // Legacy handling for blob URLs
+      const response = await fetch(photoPreview.src);
+      const blob = await response.blob();
+      const base64Data = await blobToBase64(blob);
+      
+      // Convert back to data URL for compression
+      const dataURL = `data:image/jpeg;base64,${base64Data}`;
+      console.log(`${label} - Original size: ${(dataURL.length / 1024).toFixed(2)} KB`);
+      const compressedImage = await compressBase64Image(dataURL, 1024, 0.8);
+      console.log(`${label} - Compressed size: ${(compressedImage.length / 1024).toFixed(2)} KB`);
+      
+      // Extract base64 part
+      const compressedBase64 = compressedImage.split(',')[1];
 
-    imagesToUpload.push({
-      base64: base64Data,
-      label,
-      factory: selectedFactory,
-      machine: selectedMachine,
-      worker: selectedWorker,
-      date: currentDate,
-      sebanggo: selectedSebanggo,
-    });
+      imagesToUpload.push({
+        base64: compressedBase64,
+        label,
+        factory: selectedFactory,
+        machine: selectedMachine,
+        worker: selectedWorker,
+        date: currentDate,
+        sebanggo: selectedSebanggo,
+      });
+    }
   }
 
+  console.log(`📸 Prepared ${imagesToUpload.length} images for upload`);
   return imagesToUpload;
 }
 
@@ -5331,11 +5619,6 @@ function closeMaintenanceCamera(cameraModal) {
 }
 
 // ===== WORKER NAME MODAL FUNCTIONALITY =====
-
-// Worker Name Selection Modal Variables
-let workerNamesData = [];
-const RECENT_WORKERS_KEY = 'recentWorkerNames';
-const MAX_RECENT_WORKERS = 6;
 
 // Get recent workers from localStorage
 function getRecentWorkers() {
