@@ -10,6 +10,11 @@ let workerNamesData = [];
 const RECENT_WORKERS_KEY = 'recentWorkerNames';
 const MAX_RECENT_WORKERS = 6;
 
+// 背番号/品番 Selection Modal Variables
+let sebanggoData = [];
+const RECENT_SEBANGGO_KEY = 'recentSebanggoSelection';
+const MAX_RECENT_SEBANGGO = 6;
+
 
 // Auto-resize textarea based on content
 function autoResizeTextarea(textarea) {
@@ -98,6 +103,16 @@ document.addEventListener('DOMContentLoaded', () => {
     console.log(`  - ${key}: ${value ? (value.startsWith('data:image') ? 'IMAGE DATA' : value) : 'null'}`);
   });
   
+  // Migrate old sub-dropdown key to new sub-dropdown-input key
+  const oldSubDropdownKey = `${uniquePrefix}sub-dropdown`;
+  const newSubDropdownKey = `${uniquePrefix}sub-dropdown-input`;
+  if (localStorage.getItem(oldSubDropdownKey) && !localStorage.getItem(newSubDropdownKey)) {
+    const oldValue = localStorage.getItem(oldSubDropdownKey);
+    console.log(`🔄 Migrating localStorage: ${oldSubDropdownKey} -> ${newSubDropdownKey}:`, oldValue);
+    localStorage.setItem(newSubDropdownKey, oldValue);
+    localStorage.removeItem(oldSubDropdownKey);
+  }
+  
   Object.keys(localStorage).forEach(key => {
       // Check if the key belongs to the current HTML file and selected 工場
       if (key.startsWith(`${uniquePrefix}`)) {
@@ -125,6 +140,19 @@ document.addEventListener('DOMContentLoaded', () => {
                           
                       } else {
                           input.value = savedValue; // Restore value for text, hidden, and other inputs
+                          console.log(`Restored ${input.id || input.name}:`, savedValue);
+                          
+                          // Special handling for sebanggo input restoration
+                          if (input.id === 'sub-dropdown-input' && savedValue) {
+                              console.log(`🔄 Restoring sebanggo input and adding to recents:`, savedValue);
+                              // Add to recent selections
+                              addToRecentSebanggo(savedValue);
+                              // Fetch product details
+                              setTimeout(() => {
+                                  fetchProductDetails();
+                                  checkProcessCondition();
+                              }, 1000);
+                          }
                       }
                   }
               });
@@ -334,43 +362,14 @@ async function fetchSebanggo() {
     sebanggoList.sort((a, b) => a.localeCompare(b, 'ja')); // 'ja' for Japanese sorting
     hinbanList.sort((a, b) => a.localeCompare(b, 'ja'));
 
-    // Get the sub-dropdown element
-    const subDropdown = document.getElementById("sub-dropdown");
+    // Combine both lists for the modal
+    const combinedList = [...sebanggoList, ...hinbanList];
+    sebanggoData = combinedList;
 
-    // Clear any existing options in the sub-dropdown
-    subDropdown.innerHTML = "";
-
-    // Add a blank option at the top
-    const blankOption = document.createElement("option");
-    blankOption.value = "";
-    blankOption.textContent = "Select 背番号 / 品番";
-    subDropdown.appendChild(blankOption);
-
-    // Populate the sub-dropdown with 背番号 values first
-    sebanggoList.forEach(sebanggo => {
-      const option = document.createElement("option");
-      option.value = sebanggo;
-      option.textContent = sebanggo;
-      subDropdown.appendChild(option);
-    });
-
-    // Add a separator (optional)
-    if (hinbanList.length > 0) {
-      const separatorOption = document.createElement("option");
-      separatorOption.disabled = true; // Make it unselectable
-      separatorOption.textContent = "------ 品番 ------";
-      subDropdown.appendChild(separatorOption);
-    }
-
-    // Populate the sub-dropdown with 品番 values at the bottom
-    hinbanList.forEach(hinban => {
-      const option = document.createElement("option");
-      option.value = hinban;
-      option.textContent = hinban;
-      subDropdown.appendChild(option);
-    });
-
-    console.log("Sub-dropdown populated with 背番号 and 品番 options:", { sebanggoList, hinbanList });
+    console.log("Sebanggo data loaded for modal:", { sebanggoList, hinbanList, combinedList });
+    
+    // Always initialize modal functionality (removing the hasEventListener check as it's unreliable)
+    initializeSebanggoModal();
 
   } catch (error) {
     console.error("Error fetching 背番号 and 品番 data:", error);
@@ -412,7 +411,8 @@ function disableInputs() {
   inputs.forEach(input => {
       if (
           input.id !== 'scan-button' && 
-          input.id !== 'sub-dropdown' && 
+          input.id !== 'sub-dropdown-input' && 
+          input.id !== 'select-sebanggo-btn' && 
           input.id !== 'process' && 
           input.id !== 'reset-button'&& // Specifically exclude the reset button
           input.id !== "selectBluetooth"&&
@@ -426,7 +426,7 @@ function disableInputs() {
 
 function enableInputs() {
   inputs.forEach(input => {
-      if (input.id !== 'sub-dropdown') { // Keep sub-dropdown enabled
+      if (input.id !== 'sub-dropdown-input') { // Keep sub-dropdown-input enabled
           input.disabled = false;
       }
   });
@@ -707,8 +707,8 @@ async function fetchProductDetails() {
     // Let the calling functions (handleQRScan, DOMContentLoaded for restore) manage UI state updates
     // after fetchProductDetails completes its primary job.
 
-    const subDropdown = document.getElementById("sub-dropdown");
-    const serialNumber = subDropdown.value;
+    const subDropdownInput = document.getElementById("sub-dropdown-input");
+    const serialNumber = subDropdownInput.value;
     // const factory = document.getElementById("selected工場").value; // 'factory' variable not used elsewhere in this scope
     const dynamicImage = document.getElementById("dynamicImage");
     const expectedBoardDataInputElement = document.getElementById("expectedBoardDataQR");
@@ -767,10 +767,10 @@ async function fetchProductDetails() {
             if (result && result.length > 0) {
                 const matched = result[0];
                 if (matched.背番号) {
-                    console.log("[fetchProductDetails] Found by 品番, updating dropdown to 背番号:", matched.背番号);
-                    subDropdown.value = matched.背番号;
+                    console.log("[fetchProductDetails] Found by 品番, updating input to 背番号:", matched.背番号);
+                    subDropdownInput.value = matched.背番号;
                     // Update localStorage as well to maintain consistency
-                    localStorage.setItem(`${uniquePrefix}sub-dropdown`, matched.背番号);
+                    localStorage.setItem(`${uniquePrefix}sub-dropdown-input`, matched.背番号);
                 }
             }
         }
@@ -869,7 +869,7 @@ async function fetchProductDetails() {
     }
 }
 
-document.getElementById("sub-dropdown").addEventListener("change", async () => {
+document.getElementById("sub-dropdown-input").addEventListener("change", async () => {
     await fetchProductDetails();
     checkProcessCondition(); // Update input states after fetching product details
 });
@@ -1267,7 +1267,7 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
 
     const formData = {
       品番: document.getElementById('product-number').value,
-      背番号: document.getElementById('sub-dropdown').value,
+      背番号: document.getElementById('sub-dropdown-input').value,
       設備: document.getElementById('process').value,
       Total: parseInt(document.getElementById('total').value, 10) || 0,
       工場: document.getElementById('selected工場').value,
@@ -1952,7 +1952,8 @@ function checkProcessCondition() {
     } else {
         // --- This configuration requires ONLY ONE SCAN (or second is skipped) ---
         // Inputs should be enabled if the first scan is done OR if dropdown has a value selected.
-        const subDropdownValue = subDropdown ? subDropdown.value : "";
+        const subDropdownInput = document.getElementById('sub-dropdown-input');
+        const subDropdownValue = subDropdownInput ? subDropdownInput.value : "";
         if (firstScanActualValue || subDropdownValue) { // If first scan is done OR dropdown selection exists, that's enough for a 1-scan process
             console.log(`Inputs enabled: Single scan requirement met or second scan not needed (Factory: ${currentFactory}, Process: ${currentProcess}).`);
             enableInputs();
@@ -1970,7 +1971,7 @@ let firstScanValue = localStorage.getItem(`${uniquePrefix}firstScanValue`) || ""
 let secondScanValue = localStorage.getItem(`${uniquePrefix}secondScanValue`) || "";
 
 document.addEventListener('DOMContentLoaded', () => {
-  const subDropdown = document.getElementById('sub-dropdown');
+  const subDropdownInput = document.getElementById('sub-dropdown-input');
   const processDropdown = document.getElementById("process");
   // Initialize from localStorage again to ensure consistency within this scope
   firstScanValue = localStorage.getItem(`${uniquePrefix}firstScanValue`) || "";
@@ -1993,10 +1994,10 @@ document.addEventListener('DOMContentLoaded', () => {
   console.log("Initial secondScanValue from localStorage:", secondScanValue);
   console.log("Last scan method:", lastScanMethod);
 
-  if (subDropdown && firstScanValue) { // Only need firstScanValue to attempt fetch
-    // If firstScanValue exists, populate dropdown and fetch details.
+  if (subDropdownInput && firstScanValue) { // Only need firstScanValue to attempt fetch
+    // If firstScanValue exists, populate input and fetch details.
     // This handles page reloads where data was already scanned.
-    subDropdown.value = firstScanValue;
+    subDropdownInput.value = firstScanValue;
     // fetchProductDetails will populate model, shape, R-L, and the hidden expectedBoardDataQR
     fetchProductDetails();
     // If secondScanValue also exists and is not SKIPPED, inputs should be enabled.
@@ -2181,7 +2182,7 @@ function comparePartsConsideringBluetooth(expectedPart, scannedPart, isBluetooth
 async function handleQRScan(qrCodeMessage) {
     console.log("Scanned QR (Raw):", qrCodeMessage);
 
-    const subDropdown = document.getElementById('sub-dropdown');
+    const subDropdownInput = document.getElementById('sub-dropdown-input');
     const factoryValue = document.getElementById("selected工場")?.value || "";
     const processValue = document.getElementById("process")?.value || "";
     const isNFH_RLC = factoryValue === "NFH" && processValue === "RLC";
@@ -2195,13 +2196,16 @@ async function handleQRScan(qrCodeMessage) {
         let cleanedQR = qrCodeMessage.includes(",") ? qrCodeMessage.split(",")[0] : qrCodeMessage;
         console.log("First Scan Processed QR:", cleanedQR);
 
-        const options = subDropdown ? [...subDropdown.options].map(option => option.value) : [];
-        if (subDropdown && options.includes(cleanedQR)) {
+        // Check if the scanned QR matches any item in sebanggoData
+        if (sebanggoData.includes(cleanedQR)) {
             firstScanValue = cleanedQR;
             localStorage.setItem(`${uniquePrefix}firstScanValue`, firstScanValue);
             document.getElementById("firstScanValue").value = firstScanValue;
-            subDropdown.value = firstScanValue;
-            localStorage.setItem(`${uniquePrefix}sub-dropdown`, firstScanValue);
+            subDropdownInput.value = firstScanValue;
+            localStorage.setItem(`${uniquePrefix}sub-dropdown-input`, firstScanValue);
+            
+            // Add to recent selections
+            addToRecentSebanggo(firstScanValue);
 
             // ---- MODIFICATION: Stop camera scanner immediately after first successful scan ----
             if (lastScanMethod === "camera") {
@@ -2268,7 +2272,7 @@ async function handleQRScan(qrCodeMessage) {
                 firstScanValue = "";
                 localStorage.removeItem(`${uniquePrefix}firstScanValue`);
                 document.getElementById("firstScanValue").value = "";
-                if (subDropdown) subDropdown.value = "";
+                if (subDropdownInput) subDropdownInput.value = "";
                 blankInfo();
                 disableInputs();
             }
@@ -2943,7 +2947,7 @@ async function printLabel() {
   const alertSound = document.getElementById('alert-sound');
   const scanAlertModal = document.getElementById('scanAlertModal');
   const scanAlertText = document.getElementById('scanAlertText');
-  const 背番号 = document.getElementById("sub-dropdown").value;
+  const 背番号 = document.getElementById("sub-dropdown-input").value;
 
   // Function to check if the device is iOS
   function isIOS() {
@@ -3816,7 +3820,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
      
 async function uploadPhotou() {
-  const selectedSebanggo = document.getElementById("sub-dropdown").value;
+  const selectedSebanggo = document.getElementById("sub-dropdown-input").value;
   const currentDate = document.getElementById("Lot No.").value;
   const selectedWorker = document.getElementById("Machine Operator").value;
   const selectedFactory = document.getElementById("selected工場").value;
@@ -3871,7 +3875,7 @@ async function uploadPhotou() {
 
 
 async function collectImagesForUpload() {
-  const selectedSebanggo = document.getElementById("sub-dropdown").value;
+  const selectedSebanggo = document.getElementById("sub-dropdown-input").value;
   const currentDate = document.getElementById("Lot No.").value;
   const selectedWorker = document.getElementById("Machine Operator").value;
   const selectedFactory = document.getElementById("selected工場").value;
@@ -5779,6 +5783,266 @@ function openWorkerModal() {
 function closeWorkerModal() {
   const modal = document.getElementById('workerNameModal');
   modal.style.display = 'none';
+}
+
+// ========== 背番号/品番 Modal Functions ==========
+
+// Initialize 背番号/品番 modal functionality
+function initializeSebanggoModal() {
+  const selectBtn = document.getElementById('select-sebanggo-btn');
+  const input = document.getElementById('sub-dropdown-input');
+  const modal = document.getElementById('sebanggoModal');
+  const closeBtn = document.getElementById('close-sebanggo-modal');
+  const searchInput = document.getElementById('sebanggo-search');
+  const clearRecentBtn = document.getElementById('clear-recent-sebanggo');
+  
+  // Check if all required elements exist
+  if (!selectBtn || !input || !modal || !closeBtn || !searchInput || !clearRecentBtn) {
+    console.error('Sebanggo modal elements not found:', {
+      selectBtn: !!selectBtn,
+      input: !!input,
+      modal: !!modal,
+      closeBtn: !!closeBtn,
+      searchInput: !!searchInput,
+      clearRecentBtn: !!clearRecentBtn
+    });
+    return;
+  }
+  
+  // Prevent duplicate event listeners
+  if (selectBtn.hasEventListener) {
+    console.log('Sebanggo modal already initialized');
+    return;
+  }
+  
+  console.log('Initializing sebanggo modal...');
+  
+  // Mark that event listener has been added
+  selectBtn.hasEventListener = true;
+  
+  // Open modal when button or input is clicked
+  selectBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    console.log('Select button clicked');
+    openSebanggoModal();
+  });
+  input.addEventListener('click', (e) => {
+    e.preventDefault();
+    console.log('Input field clicked');
+    openSebanggoModal();
+  });
+  
+  // Close modal
+  closeBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    console.log('Close button clicked');
+    closeSebanggoModal();
+  });
+  
+  // Close modal when clicking outside
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) {
+      console.log('Modal background clicked');
+      closeSebanggoModal();
+    }
+  });
+  
+  // Search functionality
+  searchInput.addEventListener('input', (e) => {
+    console.log('Search input changed:', e.target.value);
+    filterSebanggoList();
+  });
+  
+  // Clear recent selections
+  clearRecentBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    console.log('Clear recent button clicked');
+    clearRecentSebanggo();
+  });
+  
+  console.log('All event listeners attached successfully');
+}
+
+// Open sebanggo modal
+function openSebanggoModal() {
+  console.log('Opening sebanggo modal...');
+  const modal = document.getElementById('sebanggoModal');
+  
+  if (!modal) {
+    console.error('Sebanggo modal not found');
+    return;
+  }
+  
+  if (sebanggoData.length === 0) {
+    console.error('Sebanggo data is empty');
+    return;
+  }
+  
+  modal.style.display = 'block';
+  console.log('Modal display set to block, rendering list...');
+  renderSebanggoList();
+  
+  // Focus search input
+  setTimeout(() => {
+    document.getElementById('sebanggo-search').focus();
+  }, 100);
+}
+
+// Close sebanggo modal
+function closeSebanggoModal() {
+  const modal = document.getElementById('sebanggoModal');
+  modal.style.display = 'none';
+  
+  // Clear search
+  document.getElementById('sebanggo-search').value = '';
+}
+
+// Render sebanggo list in modal
+function renderSebanggoList() {
+  console.log('Rendering sebanggo list...');
+  const recentSection = document.getElementById('recent-sebanggo-section');
+  const recentGrid = document.getElementById('recent-sebanggo-grid');
+  const allGrid = document.getElementById('all-sebanggo-grid');
+  
+  if (!recentSection || !recentGrid || !allGrid) {
+    console.error('Sebanggo grid elements not found:', {
+      recentSection: !!recentSection,
+      recentGrid: !!recentGrid,
+      allGrid: !!allGrid
+    });
+    return;
+  }
+  
+  // Load recent selections
+  const recentSebanggo = getRecentSebanggo();
+  console.log('Recent sebanggo:', recentSebanggo);
+  console.log('Total sebanggo data:', sebanggoData.length);
+  
+  // Show/hide recent section
+  if (recentSebanggo.length > 0) {
+    recentSection.style.display = 'block';
+    recentGrid.innerHTML = '';
+    
+    recentSebanggo.forEach(item => {
+      const button = createSebanggoButton(item, true);
+      recentGrid.appendChild(button);
+    });
+  } else {
+    recentSection.style.display = 'none';
+  }
+  
+  // Render all items
+  allGrid.innerHTML = '';
+  sebanggoData.forEach(item => {
+    const button = createSebanggoButton(item, false);
+    allGrid.appendChild(button);
+  });
+}
+
+// Create sebanggo button element
+function createSebanggoButton(item, isRecent = false) {
+  const div = document.createElement('div');
+  const button = document.createElement('button');
+  
+  button.className = 'sebanggo-btn';
+  button.textContent = item;
+  button.onclick = () => selectSebanggo(item);
+  
+  div.appendChild(button);
+  return div;
+}
+
+// Select sebanggo item
+function selectSebanggo(value) {
+  const input = document.getElementById('sub-dropdown-input');
+  input.value = value;
+  
+  // Add to recent selections
+  addToRecentSebanggo(value);
+  
+  // Close modal
+  closeSebanggoModal();
+  
+  // Save to localStorage
+  const pageName = location.pathname.split('/').pop();
+  const selected工場 = document.getElementById('selected工場').value;
+  if (pageName && selected工場) {
+    const key = `${pageName}_${selected工場}_${input.id || input.name}`;
+    localStorage.setItem(key, value);
+  }
+  
+  // Trigger change event to fetch product details
+  input.dispatchEvent(new Event('change'));
+}
+
+// Filter sebanggo list based on search
+function filterSebanggoList() {
+  const searchTerm = document.getElementById('sebanggo-search').value.toLowerCase();
+  const allGrid = document.getElementById('all-sebanggo-grid');
+  const noResults = document.getElementById('no-results');
+  
+  if (!searchTerm) {
+    renderSebanggoList();
+    noResults.style.display = 'none';
+    return;
+  }
+  
+  const filteredItems = sebanggoData.filter(item => 
+    item.toLowerCase().includes(searchTerm)
+  );
+  
+  allGrid.innerHTML = '';
+  
+  if (filteredItems.length > 0) {
+    noResults.style.display = 'none';
+    filteredItems.forEach(item => {
+      const button = createSebanggoButton(item, false);
+      allGrid.appendChild(button);
+    });
+  } else {
+    noResults.style.display = 'block';
+  }
+}
+
+// Get recent sebanggo selections from localStorage
+function getRecentSebanggo() {
+  try {
+    const recent = localStorage.getItem(RECENT_SEBANGGO_KEY);
+    return recent ? JSON.parse(recent) : [];
+  } catch (error) {
+    console.error('Error loading recent sebanggo:', error);
+    return [];
+  }
+}
+
+// Add item to recent sebanggo selections
+function addToRecentSebanggo(value) {
+  try {
+    let recent = getRecentSebanggo();
+    
+    // Remove if already exists
+    recent = recent.filter(item => item !== value);
+    
+    // Add to beginning
+    recent.unshift(value);
+    
+    // Limit to MAX_RECENT_SEBANGGO items
+    if (recent.length > MAX_RECENT_SEBANGGO) {
+      recent = recent.slice(0, MAX_RECENT_SEBANGGO);
+    }
+    
+    localStorage.setItem(RECENT_SEBANGGO_KEY, JSON.stringify(recent));
+  } catch (error) {
+    console.error('Error saving recent sebanggo:', error);
+  }
+}
+
+// Clear recent sebanggo selections
+function clearRecentSebanggo() {
+  if (confirm('Clear all recent selections?')) {
+    localStorage.removeItem(RECENT_SEBANGGO_KEY);
+    renderSebanggoList();
+  }
 }
 
 // Initialize worker name modal
