@@ -3175,22 +3175,79 @@ async function printLabel() {
     const 収容数Array = 収容数Raw.split(',').map(val => val.trim()).filter(val => val !== "");
     
     if (収容数Array.length > 1) {
-      // Show modal for 収容数 selection
+      // Create modal background overlay
+      const modalOverlay = document.createElement('div');
+      modalOverlay.style.position = 'fixed';
+      modalOverlay.style.top = '0';
+      modalOverlay.style.left = '0';
+      modalOverlay.style.width = '100%';
+      modalOverlay.style.height = '100%';
+      modalOverlay.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
+      modalOverlay.style.zIndex = '999';
+      modalOverlay.style.display = 'flex';
+      modalOverlay.style.justifyContent = 'center';
+      modalOverlay.style.alignItems = 'center';
+
+      // Show modal for 收容数 selection
       const modal = document.createElement('div');
-      modal.classList.add('modal');
-      modal.style.display = 'flex';
-      modal.style.position = 'fixed';
-      modal.style.zIndex = '1000';
-      modal.style.top = '50%';
-      modal.style.left = '50%';
-      modal.style.transform = 'translate(-50%, -50%)';
+      modal.classList.add('quantity-modal');
+      modal.style.position = 'relative !important';
+      modal.style.display = 'flex !important';
       modal.style.flexDirection = 'column';
       modal.style.justifyContent = 'center';
       modal.style.alignItems = 'center';
       modal.style.padding = '30px';
       modal.style.backgroundColor = 'white';
-      modal.style.boxShadow = '0 0 15px rgba(0, 0, 0, 0.5)';
+      modal.style.boxShadow = '0 4px 10px rgba(0, 0, 0, 0.3)';
       modal.style.borderRadius = '10px';
+      modal.style.maxWidth = '90vw';
+      modal.style.maxHeight = '90vh';
+      modal.style.minWidth = '300px';
+      modal.style.width = '90%';
+      modal.style.maxWidth = '500px';
+      modal.style.transform = 'none !important';
+      modal.style.top = 'auto !important';
+      modal.style.left = 'auto !important';
+      modal.style.textAlign = 'center';
+
+      // Close modal function
+      const closeModal = () => {
+        if (document.body.contains(modalOverlay)) {
+          document.body.removeChild(modalOverlay);
+        }
+      };
+
+      // Add close button (X) in top right corner
+      const closeButton = document.createElement('button');
+      closeButton.innerHTML = '×';
+      closeButton.className = 'close-button';
+      closeButton.style.position = 'absolute !important';
+      closeButton.style.top = '10px !important';
+      closeButton.style.right = '15px !important';
+      closeButton.style.fontSize = '24px';
+      closeButton.style.fontWeight = 'bold';
+      closeButton.style.background = 'none';
+      closeButton.style.border = 'none';
+      closeButton.style.cursor = 'pointer';
+      closeButton.style.color = '#666';
+      closeButton.style.width = '30px';
+      closeButton.style.height = '30px';
+      closeButton.style.display = 'flex';
+      closeButton.style.alignItems = 'center';
+      closeButton.style.justifyContent = 'center';
+      closeButton.style.zIndex = '1001';
+      closeButton.addEventListener('click', closeModal);
+      closeButton.addEventListener('mouseenter', () => closeButton.style.color = 'red');
+      closeButton.addEventListener('mouseleave', () => closeButton.style.color = '#666');
+
+      modal.appendChild(closeButton);
+
+      // Close modal when clicking outside (on overlay)
+      modalOverlay.addEventListener('click', (e) => {
+        if (e.target === modalOverlay) {
+          closeModal();
+        }
+      });
 
       const message = document.createElement('p');
       message.innerText = '収容数を選んでください / Please choose the 収容数 value';
@@ -3199,18 +3256,28 @@ async function printLabel() {
       message.style.marginBottom = '20px';
       modal.appendChild(message);
 
+      // Create container for buttons to stack vertically
+      const buttonContainer = document.createElement('div');
+      buttonContainer.style.display = 'flex';
+      buttonContainer.style.flexDirection = 'column';
+      buttonContainer.style.alignItems = 'center';
+      buttonContainer.style.gap = '10px';
+      modal.appendChild(buttonContainer);
+
       const createQuantityButton = (value) => {
         const button = document.createElement('button');
         button.innerText = String(value);
-        button.style.margin = '10px';
         button.style.padding = '15px 30px';
         button.style.fontSize = '20px';
         button.style.cursor = 'pointer';
         button.style.borderRadius = '5px';
+        button.style.minWidth = '100px';
+        button.style.border = '2px solid #ccc';
+        button.style.backgroundColor = '#f8f9fa';
         button.onclick = async () => {
           await proceedWithSelectedQuantity(value);
         };
-        modal.appendChild(button);
+        buttonContainer.appendChild(button);
       };
 
       // Create button for each 収容数 value
@@ -3218,30 +3285,12 @@ async function printLabel() {
         createQuantityButton(value);
       });
 
-      // Add close button
-      const closeButton = document.createElement('button');
-      closeButton.innerText = '✕ Close';
-      closeButton.style.margin = '20px 10px 0px 10px';
-      closeButton.style.padding = '10px 20px';
-      closeButton.style.fontSize = '16px';
-      closeButton.style.cursor = 'pointer';
-      closeButton.style.borderRadius = '5px';
-      closeButton.style.backgroundColor = '#f44336';
-      closeButton.style.color = 'white';
-      closeButton.style.border = 'none';
-      closeButton.onclick = () => {
-        if (document.body.contains(modal)) {
-          document.body.removeChild(modal);
-        }
-      };
-      modal.appendChild(closeButton);
-
-      document.body.appendChild(modal);
+      // Append modal to overlay, then overlay to body
+      modalOverlay.appendChild(modal);
+      document.body.appendChild(modalOverlay);
 
       async function proceedWithSelectedQuantity(selected収容数) {
-        if (document.body.contains(modal)) {
-          document.body.removeChild(modal);
-        }
+        closeModal();
 
         const 品番収容数 = `${品番},${selected収容数}`;
         const filename = getFilename(背番号, SRS);
