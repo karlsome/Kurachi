@@ -412,7 +412,6 @@ function disableInputs() {
       if (
           input.id !== 'scan-button' && 
           input.id !== 'sub-dropdown-input' && 
-          input.id !== 'select-sebanggo-btn' && 
           input.id !== 'process' && 
           input.id !== 'reset-button'&& // Specifically exclude the reset button
           input.id !== "selectBluetooth"&&
@@ -5789,7 +5788,6 @@ function closeWorkerModal() {
 
 // Initialize 背番号/品番 modal functionality
 function initializeSebanggoModal() {
-  const selectBtn = document.getElementById('select-sebanggo-btn');
   const input = document.getElementById('sub-dropdown-input');
   const modal = document.getElementById('sebanggoModal');
   const closeBtn = document.getElementById('close-sebanggo-modal');
@@ -5797,9 +5795,8 @@ function initializeSebanggoModal() {
   const clearRecentBtn = document.getElementById('clear-recent-sebanggo');
   
   // Check if all required elements exist
-  if (!selectBtn || !input || !modal || !closeBtn || !searchInput || !clearRecentBtn) {
+  if (!input || !modal || !closeBtn || !searchInput || !clearRecentBtn) {
     console.error('Sebanggo modal elements not found:', {
-      selectBtn: !!selectBtn,
       input: !!input,
       modal: !!modal,
       closeBtn: !!closeBtn,
@@ -5810,7 +5807,7 @@ function initializeSebanggoModal() {
   }
   
   // Prevent duplicate event listeners
-  if (selectBtn.hasEventListener) {
+  if (input.hasEventListener) {
     console.log('Sebanggo modal already initialized');
     return;
   }
@@ -5818,14 +5815,9 @@ function initializeSebanggoModal() {
   console.log('Initializing sebanggo modal...');
   
   // Mark that event listener has been added
-  selectBtn.hasEventListener = true;
+  input.hasEventListener = true;
   
-  // Open modal when button or input is clicked
-  selectBtn.addEventListener('click', (e) => {
-    e.preventDefault();
-    console.log('Select button clicked');
-    openSebanggoModal();
-  });
+  // Open modal when input is clicked
   input.addEventListener('click', (e) => {
     e.preventDefault();
     console.log('Input field clicked');
@@ -5881,11 +5873,6 @@ function openSebanggoModal() {
   modal.style.display = 'block';
   console.log('Modal display set to block, rendering list...');
   renderSebanggoList();
-  
-  // Focus search input
-  setTimeout(() => {
-    document.getElementById('sebanggo-search').focus();
-  }, 100);
 }
 
 // Close sebanggo modal
