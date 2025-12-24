@@ -2312,6 +2312,43 @@ function loadMaterialLabelPhotos() {
   }
 }
 
+// Device detection
+function isMobileDevice() {
+    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+}
+
+// Helper function to convert File to base64 string
+function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+}
+
+// Compress image function
+async function compressBase64Image(base64DataURL, maxWidth = 1024, quality = 0.7) {
+    return new Promise((resolve) => {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        const img = new Image();
+        
+        img.onload = function() {
+            const ratio = Math.min(maxWidth / img.width, maxWidth / img.height);
+            canvas.width = img.width * ratio;
+            canvas.height = img.height * ratio;
+            
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            
+            const compressedDataURL = canvas.toDataURL('image/jpeg', quality);
+            resolve(compressedDataURL);
+        };
+        
+        img.src = base64DataURL;
+    });
+}
+
 // Show maintenance modal
 function showMaintenanceModal(editIndex = -1) {
   currentEditingIndex = editIndex;
@@ -3514,24 +3551,203 @@ const buttonMappings = [{
   labelId: 'hatsumonoLabel',
   imgId: 'hatsumonoPic',
   labelText: '初物チェック',
+  fileInputId: 'hatsumonoFileInput'
 }, {
   buttonId: 'atomonoButton',
   labelId: 'atomonoLabel',
   imgId: 'atomonoPic',
   labelText: '終物チェック',
+  fileInputId: 'atomonoFileInput'
 }, {
   buttonId: 'makerLabelButton',
   labelId: 'makerLabel',
   imgId: '材料ラベル',
   labelText: '材料ラベル',
+  fileInputId: 'makerLabelFileInput'
 }, ];
 
 let currentButtonId = null;
 
-// Setup individual button event listeners
-// Handle hatsumonoButton and atomonoButton with original functionality
+// Create hidden file inputs for each button
+buttonMappings.forEach(mapping => {
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = 'image/*';
+    fileInput.capture = 'environment'; // Use back camera on mobile
+    fileInput.style.display = 'none';
+    fileInput.id = mapping.fileInputId;
+    document.body.appendChild(fileInput);
+});
+
+// Create webcam modal for desktop use
+const webcamModalHTML = `
+<div id="webcamModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 10000; justify-content: center; align-items: center;">
+  <div style="background: white; padding: 20px; border-radius: 10px; max-width: 800px; width: 90%; text-align: center;">
+    <h2 id="webcamModalTitle" style="margin-top: 0;">写真撮影 / Take Photo</h2>
+    <video id="webcamVideo" autoplay playsinline style="width: 100%; max-width: 640px; border: 2px solid #333; border-radius: 8px; background: #000;"></video>
+    <canvas id="webcamCanvas" style="display: none;"></canvas>
+    <div style="margin-top: 20px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
+      <button id="captureWebcamBtn" style="padding: 12px 24px; font-size: 16px; background: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer;">
+        📸 撮影 / Capture
+      </button>
+      <button id="closeWebcamBtn" style="padding: 12px 24px; font-size: 16px; background: #f44336; color: white; border: none; border-radius: 5px; cursor: pointer;">
+        ✕ 閉じる / Close
+      </button>
+    </div>
+  </div>
+</div>`;
+
+document.body.insertAdjacentHTML('beforeend', webcamModalHTML);
+
+let webcamStream = null;
+let currentPhotoMapping = null;
+
+// Webcam functions
+async function openWebcamModal(mapping) {
+    try {
+        currentPhotoMapping = mapping;
+        const modal = document.getElementById('webcamModal');
+        const video = document.getElementById('webcamVideo');
+        const title = document.getElementById('webcamModalTitle');
+        
+        title.textContent = `${mapping.labelText} - 写真撮影 / Take Photo`;
+        
+        webcamStream = await navigator.mediaDevices.getUserMedia({ 
+            video: { facingMode: 'environment' } 
+        });
+        video.srcObject = webcamStream;
+        modal.style.display = 'flex';
+    } catch (error) {
+        console.error('Error accessing webcam:', error);
+        alert('カメラにアクセスできません / Cannot access camera');
+    }
+}
+
+function closeWebcamModal() {
+    const modal = document.getElementById('webcamModal');
+    modal.style.display = 'none';
+    
+    if (webcamStream) {
+        webcamStream.getTracks().forEach(track => track.stop());
+        webcamStream = null;
+    }
+    currentPhotoMapping = null;
+}
+
+async function captureFromWebcam() {
+    if (!currentPhotoMapping) return;
+    
+    const video = document.getElementById('webcamVideo');
+    const canvas = document.getElementById('webcamCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    // Set canvas size to match video
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    
+    // Draw video frame to canvas
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    
+    // Convert to base64
+    const base64Image = canvas.toDataURL('image/jpeg', 0.8);
+    
+    // Compress the image
+    const compressedImage = await compressBase64Image(base64Image);
+    
+    // Process the captured photo
+    await processPhotoCapture(compressedImage, currentPhotoMapping, currentPhotoMapping.buttonId);
+    
+    // Close modal
+    closeWebcamModal();
+}
+
+// Setup webcam modal buttons
+document.getElementById('captureWebcamBtn').addEventListener('click', captureFromWebcam);
+document.getElementById('closeWebcamBtn').addEventListener('click', closeWebcamModal);
+
+// Shared function to process photo capture (from webcam or file)
+async function processPhotoCapture(base64Image, mapping, buttonId) {
+    try {
+        // Compress image
+        const compressedImage = await compressBase64Image(base64Image);
+        
+        if (buttonId === 'makerLabelButton') {
+            // Handle material label with multi-photo support
+            await addMaterialLabelPhoto(compressedImage);
+            console.log('📸 Material label photo added');
+        } else {
+            // Handle single photo (hatsumono/atomono)
+            const img = document.getElementById(mapping.imgId);
+            const label = document.getElementById(mapping.labelId);
+            
+            if (img && label) {
+                img.src = compressedImage;
+                img.style.display = 'block';
+                label.textContent = mapping.labelText;
+                
+                // Save to localStorage
+                const prefix = getUniquePrefix();
+                localStorage.setItem(`${prefix}${mapping.imgId}_src`, compressedImage);
+                localStorage.setItem(`${prefix}${mapping.labelId}_textContent`, mapping.labelText);
+                
+                console.log(`📸 ${mapping.labelText} photo captured`);
+            }
+        }
+    } catch (error) {
+        console.error('Error processing photo:', error);
+        alert('写真の処理中にエラーが発生しました / Error processing photo');
+    }
+}
+
+// Show photo option modal (webcam or file)
+function showPhotoOptionModal(mapping, buttonId, fileInput) {
+    const modalHTML = `
+        <div id="photoOptionModal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 9999; display: flex; justify-content: center; align-items: center;">
+            <div style="background: white; padding: 30px; border-radius: 15px; max-width: 400px; width: 90%; text-align: center;">
+                <h2 style="margin-top: 0; color: #333;">${mapping.labelText}</h2>
+                <p style="color: #666; margin-bottom: 30px;">写真撮影方法を選択してください<br>Choose photo capture method</p>
+                <div style="display: flex; gap: 15px; justify-content: center; flex-wrap: wrap;">
+                    <button id="useWebcamBtn" style="padding: 15px 25px; font-size: 16px; background: #2196F3; color: white; border: none; border-radius: 8px; cursor: pointer; min-width: 120px;">
+                        📹 Webcam
+                    </button>
+                    <button id="useFileBtn" style="padding: 15px 25px; font-size: 16px; background: #4CAF50; color: white; border: none; border-radius: 8px; cursor: pointer; min-width: 120px;">
+                        📁 File
+                    </button>
+                    <button id="cancelPhotoBtn" style="padding: 15px 25px; font-size: 16px; background: #f44336; color: white; border: none; border-radius: 8px; cursor: pointer; min-width: 120px;">
+                        ✕ Cancel
+                    </button>
+                </div>
+            </div>
+        </div>`;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+    
+    const modal = document.getElementById('photoOptionModal');
+    
+    // Webcam option
+    document.getElementById('useWebcamBtn').addEventListener('click', () => {
+        modal.remove();
+        openWebcamModal(mapping);
+    });
+    
+    // File option
+    document.getElementById('useFileBtn').addEventListener('click', () => {
+        modal.remove();
+        fileInput.click();
+    });
+    
+    // Cancel option
+    document.getElementById('cancelPhotoBtn').addEventListener('click', () => {
+        modal.remove();
+    });
+}
+
+// Handle hatsumonoButton and atomonoButton with native camera functionality
 ['hatsumonoButton', 'atomonoButton'].forEach(buttonId => {
   const button = document.getElementById(buttonId);
+  const mapping = buttonMappings.find(m => m.buttonId === buttonId);
+  const fileInput = document.getElementById(mapping.fileInputId);
+  
   button.addEventListener('click', () => {
     const subDropdown = document.getElementById('sub-dropdown');
     const selectedValue = subDropdown?.value;
@@ -3573,196 +3789,176 @@ let currentButtonId = null;
       return; // stop further action
     }
 
-    // If value is selected, proceed
-    currentButtonId = buttonId;
-    window.open('captureImage.html', 'Capture Image', 'width=900,height=900');
+    // If value is selected, proceed with photo capture
+    if (isMobileDevice()) {
+      // On mobile, directly use native camera
+      fileInput.click();
+    } else {
+      // On desktop, show option modal (webcam or file)
+      showPhotoOptionModal(mapping, buttonId, fileInput);
+    }
+  });
+  
+  // Handle file input change
+  fileInput.addEventListener('change', async (event) => {
+    const file = event.target.files[0];
+    if (file) {
+      try {
+        const base64Image = await fileToBase64(file);
+        await processPhotoCapture(base64Image, mapping, buttonId);
+      } catch (error) {
+        console.error('Error processing file:', error);
+        alert('ファイル処理中にエラーが発生しました / Error processing file');
+      }
+      // Reset file input
+      event.target.value = '';
+    }
   });
 });
 
-// Handle makerLabelButton with multi-photo functionality
-document.getElementById('makerLabelButton').addEventListener('click', () => {
-  const subDropdown = document.getElementById('sub-dropdown');
-  const selectedValue = subDropdown?.value;
+// Handle makerLabelButton with multi-photo functionality using native camera
+const makerLabelButton = document.getElementById('makerLabelButton');
+if (makerLabelButton) {
+  const mapping = buttonMappings.find(m => m.buttonId === 'makerLabelButton');
+  const fileInput = document.getElementById(mapping.fileInputId);
+  
+  makerLabelButton.addEventListener('click', () => {
+    const subDropdown = document.getElementById('sub-dropdown');
+    const selectedValue = subDropdown?.value;
 
-  if (!selectedValue) {
-    // Trigger modal message instead of alert
-    const scanAlertModal = document.getElementById('scanAlertModal');
-    const scanAlertText = document.getElementById('scanAlertText');
-    const alertSound = document.getElementById('alert-sound');
+    if (!selectedValue) {
+      // Trigger modal message instead of alert
+      const scanAlertModal = document.getElementById('scanAlertModal');
+      const scanAlertText = document.getElementById('scanAlertText');
+      const alertSound = document.getElementById('alert-sound');
 
-    scanAlertText.innerText = '背番号を選択してください / Please select a Sebanggo first.';
-    scanAlertModal.style.display = 'block';
+      scanAlertText.innerText = '背番号を選択してください / Please select a Sebanggo first.';
+      scanAlertModal.style.display = 'block';
 
-    // Flash body and sub-dropdown
-    document.body.classList.add('flash-red');
-    subDropdown.classList.add('flash-red-border');
+      // Flash body and sub-dropdown
+      document.body.classList.add('flash-red');
+      subDropdown.classList.add('flash-red-border');
 
-    // Play alert sound
-    if (alertSound) {
-      alertSound.muted = false;
-      alertSound.volume = 1;
-      alertSound.play().catch(err => console.error("Failed to play sound:", err));
-    }
-
-    // Set modal close behavior
-    const closeScanModalButton = document.getElementById('closeScanModalButton');
-    closeScanModalButton.onclick = function() {
-      scanAlertModal.style.display = 'none';
-      document.body.classList.remove('flash-red');
-      subDropdown.classList.remove('flash-red-border');
-
+      // Play alert sound
       if (alertSound) {
-        alertSound.pause();
-        alertSound.currentTime = 0;
-        alertSound.muted = true;
+        alertSound.muted = false;
+        alertSound.volume = 1;
+        alertSound.play().catch(err => console.error("Failed to play sound:", err));
       }
-    };
 
-    return; // stop further action
-  }
+      // Set modal close behavior
+      const closeScanModalButton = document.getElementById('closeScanModalButton');
+      closeScanModalButton.onclick = function() {
+        scanAlertModal.style.display = 'none';
+        document.body.classList.remove('flash-red');
+        subDropdown.classList.remove('flash-red-border');
 
-  // If value is selected, proceed with multi-photo functionality
-  currentButtonId = 'makerLabelButton';
-  window.open('captureImage.html', 'Capture Image', 'width=900,height=900');
-});
-
-// Handle the message from the popup window
-window.addEventListener('message', function(event) {
-  if (event.origin === window.location.origin) {
-    const data = event.data;
-
-    if (data.image && currentButtonId) {
-      // Handle makerLabelButton with multi-photo functionality
-      if (currentButtonId === 'makerLabelButton') {
-        // Add photo to material label photos array
-        addMaterialLabelPhoto(data.image);
-        
-        // Update the associated label to TRUE
-        const label = document.getElementById('makerLabel');
-        label.textContent = 'TRUE';
-        
-        // Save label textContent to localStorage
-        const labelKey = `${uniquePrefix}makerLabel.textContent`;
-        localStorage.setItem(labelKey, label.textContent);
-        
-        // Save material label photos to localStorage
-        const photosKey = `${uniquePrefix}materialLabelPhotos`;
-        localStorage.setItem(photosKey, JSON.stringify(materialLabelPhotos));
-        
-      } else {
-        // Handle other buttons with original single-photo functionality
-        const mapping = buttonMappings.find(({
-          buttonId
-        }) => buttonId === currentButtonId);
-
-        if (mapping) {
-          const {
-            labelId,
-            imgId
-          } = mapping;
-
-          // Update photo preview
-          const photoPreview = document.getElementById(imgId);
-          photoPreview.src = data.image;
-          photoPreview.style.display = 'block';
-
-          // Update the associated label to TRUE
-          const label = document.getElementById(labelId);
-          label.textContent = 'TRUE';
-
-          // Save label textContent to localStorage
-          const labelKey = `${uniquePrefix}${labelId}.textContent`;
-          localStorage.setItem(labelKey, label.textContent);
-
-          // Save image source to localStorage
-          const photoPreviewKey = `${uniquePrefix}${imgId}.src`;
-          localStorage.setItem(photoPreviewKey, photoPreview.src);
+        if (alertSound) {
+          alertSound.pause();
+          alertSound.currentTime = 0;
+          alertSound.muted = true;
         }
-      }
+      };
 
-      // Reset the current button ID after processing
-      currentButtonId = null;
+      return; // stop further action
     }
-  }
-});
 
-// Upload Photo Function for multiple images
-function uploadPhotou() {
-  const selectedSebanggo = document.getElementById("sub-dropdown").value;
-  const currentDate = document.getElementById("Lot No.").value;
-  const selectedWorker = getWorkerName();
-  const selectedFactory = document.getElementById("selected工場").value;
-  const selectedMachine = document.getElementById("process").value;
-
-  // Mapping of images to their respective IDs
-  const imageMappings = [{
-    imgId: 'hatsumonoPic',
-    label: '初物チェック'
-  }, {
-    imgId: 'atomonoPic',
-    label: '終物チェック'
-  }, {
-    imgId: '材料ラベル',
-    label: '材料ラベル'
-  }, ];
-
-  imageMappings.forEach(({
-    imgId,
-    label
-  }) => {
-    const photoPreview = document.getElementById(imgId);
-
-    if (!photoPreview || !photoPreview.src) {
-      console.error(`No photo preview available for ${label}`);
+    // Check if maximum photos reached
+    if (materialLabelPhotos.length >= MAX_MATERIAL_PHOTOS) {
+      alert(`最大${MAX_MATERIAL_PHOTOS}枚までの写真を撮影できます / Maximum ${MAX_MATERIAL_PHOTOS} photos allowed`);
       return;
     }
 
-    // Convert the image to a blob
-    fetch(photoPreview.src)
-      .then(response => response.blob())
-      .then(blob => {
-        const reader = new FileReader();
-        reader.onloadend = function() {
-          const base64data = reader.result.split(',')[1]; // Get the base64 encoded string
-
-          const formData = new FormData();
-          formData.append('imageBlob', base64data);
-          formData.append(
-            'fileName',
-            `${selectedSebanggo}_${currentDate}_${selectedWorker}_${selectedFactory}_${selectedMachine}_${label}.jpg`
-          );
-          formData.append('mimeType', blob.type);
-          formData.append('selectedFactory', selectedFactory);
-
-          // Send the blob to Apps Script via POST request
-          fetch(
-              'https://script.google.com/macros/s/AKfycbxDWa2RTdI2_aHBgzq9GA9GtQx5MrwqaRnW4F26VZdoptwJ1Pg_Enr_xI3vw1t7WHYbTw/exec', {
-                method: 'POST',
-                body: formData,
-              }
-            )
-            .then((response) => response.text()) // Fetch raw text response
-            .then((text) => {
-              console.log(`Raw response for ${label}:`, text); // Log the raw response
-              try {
-                const data = JSON.parse(text); // Attempt to parse JSON
-                if (data.status === 'success') {
-                  console.log(`File uploaded successfully for ${label}: ` + data.fileUrl);
-                } else {
-                  console.error(`Upload failed for ${label}: ` + data.message);
-                }
-              } catch (error) {
-                console.error(`Error parsing JSON for ${label}:`, error);
-              }
-            })
-            .catch((error) => {
-              console.error(`Error uploading file for ${label}: `, error);
-            });
-        };
-        reader.readAsDataURL(blob);
-      })
-      .catch((error) => console.error(`Error converting image to blob for ${label}: `, error));
+    // If value is selected, proceed with photo capture
+    if (isMobileDevice()) {
+      // On mobile, directly use native camera
+      fileInput.click();
+    } else {
+      // On desktop, show option modal (webcam or file)
+      showPhotoOptionModalForMaterial(mapping, fileInput);
+    }
   });
+  
+  // Handle file input change for material label
+  fileInput.addEventListener('change', async (event) => {
+    const file = event.target.files[0];
+    if (file) {
+      try {
+        const base64Image = await fileToBase64(file);
+        await processPhotoCapture(base64Image, mapping, 'makerLabelButton');
+      } catch (error) {
+        console.error('Error processing material label file:', error);
+        alert('材料ラベルファイル処理中にエラーが発生しました / Error processing material label file');
+      }
+      // Reset file input
+      event.target.value = '';
+    }
+  });
+}
+
+// Photo option modal for material label (with webcam support)
+function showPhotoOptionModalForMaterial(mapping, fileInput) {
+    const modalHTML = `
+        <div id="photoOptionModal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 9999; display: flex; justify-content: center; align-items: center;">
+            <div style="background: white; padding: 30px; border-radius: 15px; max-width: 400px; width: 90%; text-align: center;">
+                <h2 style="margin-top: 0; color: #333;">${mapping.labelText}</h2>
+                <p style="color: #666; margin-bottom: 10px;">写真撮影方法を選択してください<br>Choose photo capture method</p>
+                <p style="color: #999; font-size: 14px; margin-bottom: 30px;">現在: ${materialLabelPhotos.length}/${MAX_MATERIAL_PHOTOS}枚</p>
+                <div style="display: flex; gap: 15px; justify-content: center; flex-wrap: wrap;">
+                    <button id="useWebcamBtn" style="padding: 15px 25px; font-size: 16px; background: #2196F3; color: white; border: none; border-radius: 8px; cursor: pointer; min-width: 120px;">
+                        📹 Webcam
+                    </button>
+                    <button id="useFileBtn" style="padding: 15px 25px; font-size: 16px; background: #4CAF50; color: white; border: none; border-radius: 8px; cursor: pointer; min-width: 120px;">
+                        📁 File
+                    </button>
+                    <button id="cancelPhotoBtn" style="padding: 15px 25px; font-size: 16px; background: #f44336; color: white; border: none; border-radius: 8px; cursor: pointer; min-width: 120px;">
+                        ✕ Cancel
+                    </button>
+                </div>
+            </div>
+        </div>`;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+    
+    const modal = document.getElementById('photoOptionModal');
+    
+    // Webcam option
+    document.getElementById('useWebcamBtn').addEventListener('click', () => {
+        modal.remove();
+        openWebcamModalForMaterial(mapping);
+    });
+    
+    // File option
+    document.getElementById('useFileBtn').addEventListener('click', () => {
+        modal.remove();
+        fileInput.click();
+    });
+    
+    // Cancel option
+    document.getElementById('cancelPhotoBtn').addEventListener('click', () => {
+        modal.remove();
+    });
+}
+
+// Open webcam modal for material label
+async function openWebcamModalForMaterial(mapping) {
+    try {
+        currentPhotoMapping = mapping;
+        const modal = document.getElementById('webcamModal');
+        const video = document.getElementById('webcamVideo');
+        const title = document.getElementById('webcamModalTitle');
+        
+        title.textContent = `${mapping.labelText} (${materialLabelPhotos.length}/${MAX_MATERIAL_PHOTOS}) - 写真撮影 / Take Photo`;
+        
+        webcamStream = await navigator.mediaDevices.getUserMedia({ 
+            video: { facingMode: 'environment' } 
+        });
+        video.srcObject = webcamStream;
+        modal.style.display = 'flex';
+    } catch (error) {
+        console.error('Error accessing webcam:', error);
+        alert('カメラにアクセスできません / Cannot access camera');
+    }
 }
 
 //Submit Button
