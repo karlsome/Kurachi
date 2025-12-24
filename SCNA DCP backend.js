@@ -2125,6 +2125,13 @@ function addMaterialLabelPhoto(photoDataURL) {
   materialLabelPhotos.push(photoData);
   renderMaterialPhotoThumbnails();
   updateMaterialPhotoCount();
+  
+  // Save to localStorage
+  const prefix = getUniquePrefix();
+  if (prefix) {
+    localStorage.setItem(`${prefix}materialLabelPhotos`, JSON.stringify(materialLabelPhotos));
+    console.log(`📸 Saved ${materialLabelPhotos.length} material label photos to localStorage`);
+  }
 }
 
 function removeMaterialLabelPhoto(index) {
