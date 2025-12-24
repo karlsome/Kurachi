@@ -3687,8 +3687,8 @@ async function processPhotoCapture(base64Image, mapping, buttonId) {
                 
                 // Save to localStorage
                 const prefix = getUniquePrefix();
-                localStorage.setItem(`${prefix}${mapping.imgId}_src`, compressedImage);
-                localStorage.setItem(`${prefix}${mapping.labelId}_textContent`, mapping.labelText);
+                localStorage.setItem(`${prefix}${mapping.imgId}.src`, compressedImage);
+                localStorage.setItem(`${prefix}${mapping.labelId}.textContent`, mapping.labelText);
                 
                 console.log(`📸 ${mapping.labelText} photo captured`);
             }
