@@ -1612,7 +1612,7 @@ function openMaterialLotKeypad() {
   
   // Clear display and allow text input for material lots
   display.value = '';
-  display.readOnly = false; // Allow typing for material lots
+  display.readOnly = true; // Allow typing for material lots
   modal.style.display = 'block';
   document.body.style.overflow = 'hidden';
   
@@ -7328,6 +7328,8 @@ function openNumericKeypad(inputId) {
   const title = modal.querySelector('h2');
   if (inputId === '材料ロット') {
     title.textContent = '材料ロットを入力 / Enter Material Lot';
+  } else if (inputId === 'ProcessQuantity') {
+    title.textContent = 'Enter Process Quantity';
   } else {
     title.textContent = 'Enter Shot Count';
   }

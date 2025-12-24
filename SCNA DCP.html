@@ -397,7 +397,7 @@
                 <input type="text" id="MachineOperatorManual" name="MachineOperatorManual" placeholder="Enter worker's name manually" style="display:none; margin-top:5px;" />
             <br><br>
             <label for="ProcessQuantity">Process Quantity (Good) + NG:</label>
-            <input type="text" name="Process Quantity" id="ProcessQuantity" placeholder="Process Quantity" required>
+            <input type="text" name="Process Quantity" id="ProcessQuantity" placeholder="Process Quantity" required readonly onclick="openNumericKeypad('ProcessQuantity')" style="cursor: pointer;">
             <button id="sendtoQty" type="button">1 box completed</button>
             <br><br>
             <label for="Lot No.">Processing Date:</label>
