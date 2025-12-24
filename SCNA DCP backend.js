@@ -677,11 +677,37 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Initialize material label photos system
   loadMaterialLabelPhotos();
+  
+  // Initialize material lot tracking system
+  loadMaterialLots();
 
   // Add maintenance button
   const addMaintenanceBtn = document.getElementById('add-maintenance-btn');
   if (addMaintenanceBtn) {
     addMaintenanceBtn.addEventListener('click', () => showMaintenanceModal());
+  }
+
+  // Set up material lot input for keypad entry
+  const materialLotInput = document.getElementById('材料ロット');
+  if (materialLotInput) {
+    materialLotInput.addEventListener('click', (e) => {
+      // Check if sub-dropdown has a value
+      const subDropdown = document.getElementById('sub-dropdown');
+      if (!subDropdown || !subDropdown.value) {
+        // No value in sub-dropdown, show alert
+        e.preventDefault();
+        showAlert('Please select a product code first / まず製品コードを選択してください');
+        return;
+      }
+      
+      // Open keypad for manual entry
+      e.preventDefault();
+      openMaterialLotKeypad();
+    });
+    
+    // Make the input readonly to prevent typing
+    materialLotInput.readOnly = true;
+    materialLotInput.style.cursor = 'pointer';
   }
 
   // Initialize 2-hour check system
@@ -1573,6 +1599,32 @@ function NCPresstoFalse() {
 
 }
 
+// Open keypad specifically for material lot entry
+function openMaterialLotKeypad() {
+  const modal = document.getElementById('numericKeypadModal');
+  const display = document.getElementById('numericDisplay');
+  const title = document.querySelector('#numericKeypadModal h2');
+  
+  // Set title for material lot entry
+  if (title) {
+    title.textContent = '材料ロットを入力 / Enter Material Lot';
+  }
+  
+  // Clear display and allow text input for material lots
+  display.value = '';
+  display.readOnly = false; // Allow typing for material lots
+  modal.style.display = 'block';
+  document.body.style.overflow = 'hidden';
+  
+  // Focus on the display for immediate typing
+  setTimeout(() => {
+    display.focus();
+  }, 100);
+  
+  // Set special flag to handle confirm differently
+  currentNumericInputId = 'material-lot-entry';
+}
+
 // when time is pressed
 // Set current time as default when time is pressed
 function setDefaultTime(input) {
@@ -2317,6 +2369,123 @@ function loadMaterialLabelPhotos() {
       materialLabelPhotos = [];
     }
   }
+}
+
+// ===== MATERIAL LOT TRACKING SYSTEM =====
+let materialLots = []; // Array of {lotNumber: string, source: 'scanned'|'manual'}
+
+// Load lots from localStorage
+function loadMaterialLots() {
+  const savedLots = localStorage.getItem(`${uniquePrefix}材料ロット-data`);
+  if (savedLots) {
+    try {
+      materialLots = JSON.parse(savedLots);
+      renderMaterialLotTags();
+      updateMaterialLotInput();
+    } catch (e) {
+      console.error("Error loading material lots:", e);
+      materialLots = [];
+    }
+  }
+}
+
+// Save lots to localStorage
+function saveMaterialLots() {
+  localStorage.setItem(`${uniquePrefix}材料ロット-data`, JSON.stringify(materialLots));
+  updateMaterialLotInput();
+}
+
+// Update the hidden input value (comma-separated)
+function updateMaterialLotInput() {
+  const materialLotInput = document.getElementById('材料ロット');
+  if (materialLotInput) {
+    materialLotInput.value = materialLots.map(lot => lot.lotNumber).join(',');
+  }
+}
+
+// Render lot tags
+function renderMaterialLotTags() {
+  const tagsContainer = document.getElementById('材料ロット-tags');
+  if (!tagsContainer) return;
+
+  tagsContainer.innerHTML = '';
+
+  materialLots.forEach((lot, index) => {
+    const tag = document.createElement('div');
+    tag.style.cssText = `
+      display: inline-flex;
+      align-items: center;
+      background: ${lot.source === 'scanned' ? '#f44336' : '#4CAF50'};
+      color: white;
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 14px;
+      gap: 8px;
+    `;
+
+    const lotText = document.createElement('span');
+    lotText.textContent = lot.lotNumber;
+    tag.appendChild(lotText);
+
+    // Add delete button (only for manual lots)
+    if (lot.source === 'manual') {
+      const deleteBtn = document.createElement('span');
+      deleteBtn.textContent = '×';
+      deleteBtn.style.cssText = `
+        cursor: pointer;
+        font-size: 18px;
+        font-weight: bold;
+        margin-left: 4px;
+      `;
+      deleteBtn.onclick = () => {
+        materialLots.splice(index, 1);
+        saveMaterialLots();
+        renderMaterialLotTags();
+      };
+      tag.appendChild(deleteBtn);
+    } else {
+      // Show × but disabled for scanned lots
+      const disabledX = document.createElement('span');
+      disabledX.textContent = '×';
+      disabledX.style.cssText = `
+        font-size: 18px;
+        font-weight: bold;
+        margin-left: 4px;
+        opacity: 0.3;
+        cursor: not-allowed;
+      `;
+      tag.appendChild(disabledX);
+    }
+
+    tagsContainer.appendChild(tag);
+  });
+}
+
+// Add scanned lot
+function addScannedLot(lotNumber) {
+  // Check for duplicates
+  if (materialLots.some(lot => lot.lotNumber === lotNumber)) {
+    return false; // Duplicate
+  }
+  materialLots.push({ lotNumber, source: 'scanned' });
+  saveMaterialLots();
+  renderMaterialLotTags();
+  return true; // Success
+}
+
+// Add manual lot
+function addManualLot(lotNumber) {
+  if (!lotNumber || !lotNumber.trim()) return false;
+  lotNumber = lotNumber.trim();
+  
+  // Check for duplicates
+  if (materialLots.some(lot => lot.lotNumber === lotNumber)) {
+    return false; // Duplicate
+  }
+  materialLots.push({ lotNumber, source: 'manual' });
+  saveMaterialLots();
+  renderMaterialLotTags();
+  return true; // Success
 }
 
 // Device detection
@@ -7155,8 +7324,18 @@ function openNumericKeypad(inputId) {
   const display = document.getElementById('numericDisplay');
   const currentInput = document.getElementById(inputId);
   
+  // Update modal title based on input
+  const title = modal.querySelector('h2');
+  if (inputId === '材料ロット') {
+    title.textContent = '材料ロットを入力 / Enter Material Lot';
+  } else {
+    title.textContent = 'Enter Shot Count';
+  }
+  
   // Set current value in display
   display.value = currentInput.value || '';
+  
+  // Show modal
   modal.style.display = 'block';
   
   // Prevent body scrolling when modal is open
@@ -7165,7 +7344,10 @@ function openNumericKeypad(inputId) {
 
 function closeNumericKeypad() {
   const modal = document.getElementById('numericKeypadModal');
+  
+  // Hide modal
   modal.style.display = 'none';
+  
   currentNumericInputId = null;
   
   // Restore body scrolling
@@ -7175,6 +7357,12 @@ function closeNumericKeypad() {
 function addToNumericDisplay(digit) {
   const display = document.getElementById('numericDisplay');
   display.value += digit;
+}
+
+// Add hyphen to numeric display (for material lot numbers like 251021-5)
+function addHyphenToNumericDisplay() {
+  const display = document.getElementById('numericDisplay');
+  display.value += '-';
 }
 
 function clearNumericDisplay() {
@@ -7191,8 +7379,44 @@ function confirmNumericInput() {
   if (!currentNumericInputId) return;
   
   const display = document.getElementById('numericDisplay');
-  const targetInput = document.getElementById(currentNumericInputId);
   const value = display.value;
+  
+  // Handle material lot entry specially
+  if (currentNumericInputId === 'material-lot-entry') {
+    if (value === '' || value.trim() === '') {
+      showAlert('Please enter a material lot number / 材料ロット番号を入力してください');
+      return;
+    }
+    
+    // Validate material lot format (allow alphanumeric and hyphens)
+    const materialLotPattern = /^[a-zA-Z0-9-]+$/;
+    if (!materialLotPattern.test(value.trim())) {
+      showAlert('Invalid characters. Use only numbers, letters, and hyphens / 無効な文字です。数字、文字、ハイフンのみ使用してください');
+      return;
+    }
+    
+    // Add as manual lot
+    const success = addManualLot(value.trim());
+    if (!success) {
+      showAlert('This lot number already exists / このロット番号は既に存在します');
+      return;
+    }
+    
+    // Close modal and resets
+    closeNumericKeypad();
+    
+    // Reset title back to default
+    const title = document.querySelector('#numericKeypadModal h2');
+    if (title) {
+      title.textContent = '数値を入力 / Enter Number';
+    }
+    
+    console.log(`Material lot added: ${value.trim()}`);
+    return;
+  }
+  
+  // Original validation for other numeric inputs
+  const targetInput = document.getElementById(currentNumericInputId);
   
   // Validate the input (must be positive number)
   if (value === '' || isNaN(value) || parseInt(value) < 0) {
@@ -7226,6 +7450,8 @@ document.addEventListener('keydown', function(event) {
     
     if (event.key >= '0' && event.key <= '9') {
       addToNumericDisplay(event.key);
+    } else if (event.key === '-' || event.key === '_') {
+      addHyphenToNumericDisplay();
     } else if (event.key === 'Backspace') {
       backspaceNumericDisplay();
     } else if (event.key === 'Enter') {
