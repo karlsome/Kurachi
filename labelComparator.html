@@ -447,17 +447,15 @@
       <label class="block text-sm font-semibold text-gray-600 mb-2">お客様選択</label>
       <div class="custom-dropdown" id="customerDropdown">
         <button type="button" class="custom-dropdown-button" id="customerDropdownButton">
-          <span id="customerDropdownSelected">ティーエヌ製作所</span>
+          <span id="customerDropdownSelected">お客様を読み込み中...</span>
           <span class="custom-dropdown-arrow">▼</span>
         </button>
         <div class="custom-dropdown-menu" id="customerDropdownMenu">
-          <div class="custom-dropdown-option selected" data-value="tn">ティーエヌ製作所</div>
-          <div class="custom-dropdown-option" data-value="toyota">トヨタ紡織</div>
-          <div class="custom-dropdown-option" data-value="kinuura">衣浦</div>
+          <div class="custom-dropdown-option loading" data-value="">お客様リストを読み込み中...</div>
         </div>
       </div>
       <!-- Hidden input to maintain compatibility with existing JS -->
-      <input type="hidden" id="customerSelect" value="tn">
+      <input type="hidden" id="customerSelect" value="">
     </div>
     
     <!-- Online/Offline Status Indicator -->
@@ -902,6 +900,7 @@
 // Global configuration - Change server URL here
 const QR_PATTERN_CONFIG = {
   serverURL: "https://kurachi.onrender.com"
+  //serverURL: "http://localhost:3000"
   // Alternative: "http://localhost:3000"
 };
 
@@ -1312,6 +1311,10 @@ const STORAGE_KEYS = {
 let pendingLogs = [];
 let isOnline = navigator.onLine;
 
+// Customer management
+let availableCustomers = [];
+let isLoadingCustomers = false;
+
 // Load pending logs from localStorage on startup
 function loadPendingLogs() {
   const stored = localStorage.getItem(STORAGE_KEYS.PENDING_LOGS);
@@ -1618,6 +1621,149 @@ window.addEventListener('manualOfflineModeChanged', (event) => {
   }
 });
 
+// ============================================
+// CUSTOMER MANAGEMENT FUNCTIONS
+// ============================================
+
+// Load customers from database
+async function loadCustomersFromDatabase() {
+  console.log('🔄 loadCustomersFromDatabase() called');
+  
+  if (isLoadingCustomers) {
+    console.log('⚠️ Already loading customers, skipping...');
+    return;
+  }
+  
+  isLoadingCustomers = true;
+  console.log('📡 Loading customers from database...');
+  
+  try {
+    console.log(`🌐 Fetching from: ${serverURL}/api/labelComparator/customers`);
+    
+    const response = await fetch(`${serverURL}/api/labelComparator/customers`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    
+    console.log('📡 API Response status:', response.status);
+    const result = await response.json();
+    console.log('📡 API Response data:', result);
+    
+    if (response.ok && result.success) {
+      availableCustomers = result.customers;
+      console.log(`✅ Loaded ${availableCustomers.length} customers:`, availableCustomers);
+      populateCustomerDropdown();
+      console.log(`✅ Loaded ${availableCustomers.length} customers from database`);
+    } else {
+      throw new Error(result.error || 'Failed to load customers');
+    }
+    
+  } catch (error) {
+    console.error('❌ Error loading customers:', error);
+    
+    // Fallback to hardcoded customers for backward compatibility
+    console.log('🔄 Falling back to hardcoded customers...');
+    availableCustomers = [
+      { customerCode: 'tn', displayName: 'ティーエヌ製作所', address: '' },
+      { customerCode: 'toyota', displayName: 'トヨタ紡織', address: '' },
+      { customerCode: 'kinuura', displayName: '衣浦', address: '' }
+    ];
+    populateCustomerDropdown();
+  } finally {
+    isLoadingCustomers = false;
+    console.log('🔄 Customer loading completed');
+  }
+}
+
+// Populate customer dropdown with loaded customers
+function populateCustomerDropdown() {
+  console.log('🔧 populateCustomerDropdown() called with', availableCustomers.length, 'customers');
+  
+  const menu = document.getElementById('customerDropdownMenu');
+  const selectedText = document.getElementById('customerDropdownSelected');
+  const hiddenInput = document.getElementById('customerSelect');
+  
+  console.log('🔍 DOM elements found:', {
+    menu: !!menu,
+    selectedText: !!selectedText, 
+    hiddenInput: !!hiddenInput
+  });
+  
+  if (!menu || !selectedText || !hiddenInput) {
+    console.error('❌ Dropdown elements not found');
+    return;
+  }
+  
+  // Clear existing options
+  console.log('🧹 Clearing existing dropdown options');
+  menu.innerHTML = '';
+  
+  // Add customers from database
+  availableCustomers.forEach((customer, index) => {
+    console.log(`➕ Adding customer ${index + 1}:`, customer);
+    
+    const option = document.createElement('div');
+    option.className = 'custom-dropdown-option' + (index === 0 ? ' selected' : '');
+    option.setAttribute('data-value', customer.customerCode);
+    option.textContent = customer.displayName;
+    if (customer.address) {
+      option.textContent += ` (${customer.address})`;
+    }
+    menu.appendChild(option);
+    
+    // Set up click handler
+    option.addEventListener('click', function() {
+      const value = this.getAttribute('data-value');
+      const text = this.textContent;
+      
+      console.log('🎯 Customer clicked:', value, text);
+      
+      // Update selected text
+      selectedText.textContent = text;
+      
+      // Update hidden input
+      hiddenInput.value = value;
+      
+      // Update selected class
+      menu.querySelectorAll('.custom-dropdown-option').forEach(opt => {
+        opt.classList.remove('selected');
+      });
+      this.classList.add('selected');
+      
+      // Close dropdown
+      const dropdown = document.getElementById('customerDropdown');
+      if (dropdown) dropdown.classList.remove('open');
+      
+      // Trigger change event for compatibility
+      const event = new Event('change', { bubbles: true });
+      hiddenInput.dispatchEvent(event);
+      
+      console.log('🎯 Customer selected:', value, text);
+    });
+  });
+  
+  // Set first customer as default if available
+  if (availableCustomers.length > 0) {
+    const firstCustomer = availableCustomers[0];
+    console.log('🎯 Setting default customer:', firstCustomer);
+    selectedText.textContent = firstCustomer.displayName;
+    hiddenInput.value = firstCustomer.customerCode;
+    
+    // Trigger change event to initialize form data
+    setTimeout(() => {
+      const event = new Event('change', { bubbles: true });
+      hiddenInput.dispatchEvent(event);
+      console.log('🔄 Triggered change event for default customer');
+    }, 100);
+  }
+  
+  console.log(`✅ Populated dropdown with ${availableCustomers.length} customers`);
+}
+
+// Make customer loading function globally available for debugging
+window.loadCustomers = loadCustomersFromDatabase;
+window.getAvailableCustomers = () => availableCustomers;
+
   // Pre-initialize DOM elements
 document.addEventListener("DOMContentLoaded", () => {
   console.time('initialization');
@@ -1703,23 +1849,38 @@ document.addEventListener("DOMContentLoaded", () => {
     console.timeEnd('start-button');
   });
   
-  // Initialize QR Pattern System
+  // Load customers first, then initialize QR Pattern System
   setTimeout(async () => {
+    console.log('🚀 Starting system initialization...');
+    
     try {
-      await initQRPatternSystem(serverURL); // Pass the serverURL from labelComparator.js
+      // STEP 1: Load customers from database FIRST
+      console.log('📋 STEP 1: Loading customers...');
+      await loadCustomersFromDatabase();
+      console.log('📋 Customer loading completed, available customers:', availableCustomers.length);
+      
+      // STEP 2: Initialize QR Pattern System after customers are loaded
+      console.log('🔧 STEP 2: Initializing QR Pattern System...');
+      await initQRPatternSystem(serverURL);
       console.log('QR Pattern System initialized successfully');
       
-      // Sync patterns for all customers on startup
-      const customers = ['tn', 'toyota', 'kinuura'];
-      for (const customer of customers) {
+      // STEP 3: Sync patterns for all loaded customers
+      console.log('🔄 STEP 3: Syncing patterns for customers...');
+      const customerCodes = availableCustomers.map(c => c.customerCode);
+      console.log('🎯 Syncing patterns for:', customerCodes);
+      
+      for (const customer of customerCodes) {
         try {
           await qrPatternSync.syncCustomerPattern(customer);
+          console.log(`✅ Synced patterns for ${customer}`);
         } catch (error) {
-          console.warn(`Failed to sync patterns for ${customer}:`, error);
+          console.warn(`⚠️ Failed to sync patterns for ${customer}:`, error);
         }
       }
+      
+      console.log('🎉 System initialization completed successfully!');
     } catch (error) {
-      console.error('Failed to initialize QR Pattern System:', error);
+      console.error('❌ Failed to initialize system:', error);
     }
   }, 500);
 
@@ -1727,6 +1888,15 @@ document.addEventListener("DOMContentLoaded", () => {
   setTimeout(() => {
     // Load pending logs (background operation)
     loadPendingLogs();
+    
+    // IMPORTANT: Also call customer loading here as backup
+    // This ensures customers are loaded even if the main initialization fails
+    if (availableCustomers.length === 0 && !isLoadingCustomers) {
+      console.log('🔄 Backup customer loading triggered...');
+      loadCustomersFromDatabase().catch(error => {
+        console.error('Backup customer loading failed:', error);
+      });
+    }
     
     // Restore form data if exists
     const savedFormData = loadFormData();

@@ -15,6 +15,10 @@ let scanningMode = null; // 'customer' or 'internal'
 let currentCustomerQR = null;
 let waitingForInternal = false;
 
+// Customer management
+let availableCustomers = []; // Will be loaded dynamically from database
+let isLoadingCustomers = false;
+
 // DOM Cache
 const domCache = {};
 
@@ -23,11 +27,13 @@ document.addEventListener("DOMContentLoaded", async () => {
   console.log('Initializing QR Learning System...');
   
   // Cache DOM elements
-  ['authModal', 'conflictModal', 'testModal', 'learningCustomerSelect', 
+  ['authModal', 'conflictModal', 'testModal', 'addCustomerModal', 'editCustomerModal', 'learningCustomerSelect', 
    'pairedSamples', 'scanStatus', 'scanInstruction', 'scanDetails',
    'startCorrectPairs', 'startMismatchPairs', 'finishLearning', 'pairCount', 'mismatchCount',
    'analyzePatterns', 'testPattern', 'clearLearning', 'deleteCustomerData',
-   'learningLog', 'progressFill', 'progressText', 'success-sound', 'error-sound'].forEach(id => {
+   'learningLog', 'progressFill', 'progressText', 'success-sound', 'error-sound',
+   'customerLoadingStatus', 'newCustomerName', 'newCustomerAddress', 'previewCustomerCode',
+   'editCustomerCode', 'editCustomerName', 'editCustomerAddress'].forEach(id => {
     domCache[id] = document.getElementById(id);
   });
 
@@ -37,6 +43,9 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // Show authentication modal
   showAuthModal();
+  
+  // Load customers from database
+  await loadCustomersFromDatabase();
   
   // Set up event listeners
   setupEventListeners();
@@ -58,10 +67,21 @@ function setupEventListeners() {
   // Customer selection change
   if (domCache['learningCustomerSelect']) {
     domCache['learningCustomerSelect'].addEventListener('change', (e) => {
-      const customerType = e.target.value;
-      if (customerType) {
+      const selectedValue = e.target.value;
+      
+      if (selectedValue === '__ADD_NEW__') {
+        // Show add customer modal
+        showAddCustomerModal();
+        // Reset selection to empty
+        e.target.value = '';
+        return;
+      }
+      
+      if (selectedValue) {
         enablePairedLearning();
-        logMessage(`📋 Selected customer: ${customerType}`);
+        const customer = availableCustomers.find(c => c.customerCode === selectedValue);
+        const displayName = customer ? customer.displayName : selectedValue;
+        logMessage(`📋 Selected customer: ${displayName} (${selectedValue})`);
         updateScanInstruction('Ready to start paired learning');
         // Enable test button when customer is selected
         if (domCache['testPattern']) {
@@ -76,6 +96,17 @@ function setupEventListeners() {
         }
       }
       updateProgress();
+    });
+  }
+
+  // Real-time customer code preview
+  if (domCache['newCustomerName']) {
+    domCache['newCustomerName'].addEventListener('input', (e) => {
+      const customerName = e.target.value;
+      const previewCode = generateCustomerCodePreview(customerName);
+      if (domCache['previewCustomerCode']) {
+        domCache['previewCustomerCode'].textContent = previewCode || '---';
+      }
     });
   }
 
@@ -461,6 +492,380 @@ function cancelAuth() {
 function goBack() {
   window.location.href = 'labelComparator.html';
 }
+
+// ============================================
+// CUSTOMER MANAGEMENT SYSTEM
+// ============================================
+
+// Load customers from database
+async function loadCustomersFromDatabase() {
+  if (isLoadingCustomers) return;
+  
+  isLoadingCustomers = true;
+  updateCustomerLoadingStatus('お客様リストを読み込み中...');
+  
+  try {
+    const response = await fetch(`${serverURL}/api/labelComparator/customers`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    
+    const result = await response.json();
+    
+    if (response.ok && result.success) {
+      availableCustomers = result.customers;
+      populateCustomerDropdown();
+      updateCustomerLoadingStatus(`${availableCustomers.length}件のお客様が見つかりました`);
+      logMessage(`✅ Loaded ${availableCustomers.length} customers from database`);
+    } else {
+      throw new Error(result.error || 'Failed to load customers');
+    }
+    
+  } catch (error) {
+    console.error('Error loading customers:', error);
+    updateCustomerLoadingStatus('❌ お客様リストの読み込みに失敗しました');
+    logMessage(`❌ Failed to load customers: ${error.message}`);
+    
+    // Fallback to hardcoded customers for backward compatibility
+    logMessage('🔄 Falling back to hardcoded customers...');
+    availableCustomers = [
+      { customerCode: 'tn', displayName: 'ティーエヌ製作所', address: '' },
+      { customerCode: 'toyota', displayName: 'トヨタ紡織', address: '' },
+      { customerCode: 'kinuura', displayName: '衣浦', address: '' }
+    ];
+    populateCustomerDropdown();
+    updateCustomerLoadingStatus('デフォルトお客様を使用中');
+  } finally {
+    isLoadingCustomers = false;
+  }
+}
+
+// Populate customer dropdown with loaded customers
+function populateCustomerDropdown() {
+  const select = domCache['learningCustomerSelect'];
+  if (!select) return;
+  
+  // Clear existing options except the first two
+  const optionsToKeep = Array.from(select.options).slice(0, 2); // Keep "選択してください" and "新しいお客様を追加"
+  select.innerHTML = '';
+  
+  // Re-add the kept options
+  optionsToKeep.forEach(option => select.appendChild(option));
+  
+  // Add customers from database
+  availableCustomers.forEach(customer => {
+    const option = document.createElement('option');
+    option.value = customer.customerCode;
+    option.textContent = `${customer.displayName}`;
+    if (customer.address) {
+      option.textContent += ` (${customer.address})`;
+    }
+    select.appendChild(option);
+  });
+  
+  console.log(`Populated dropdown with ${availableCustomers.length} customers`);
+}
+
+// Update customer loading status message
+function updateCustomerLoadingStatus(message) {
+  if (domCache['customerLoadingStatus']) {
+    domCache['customerLoadingStatus'].textContent = message;
+  }
+}
+
+// Refresh customers from database
+async function refreshCustomers() {
+  logMessage('🔄 Refreshing customer list...');
+  await loadCustomersFromDatabase();
+}
+
+// Show add customer modal
+function showAddCustomerModal() {
+  if (domCache['addCustomerModal']) {
+    domCache['addCustomerModal'].style.display = 'flex';
+    
+    // Clear form fields
+    if (domCache['newCustomerName']) domCache['newCustomerName'].value = '';
+    if (domCache['newCustomerAddress']) domCache['newCustomerAddress'].value = '';
+    if (domCache['previewCustomerCode']) domCache['previewCustomerCode'].textContent = '---';
+    
+    // Focus on name field
+    setTimeout(() => {
+      if (domCache['newCustomerName']) domCache['newCustomerName'].focus();
+    }, 100);
+  }
+}
+
+// Close add customer modal
+function closeAddCustomerModal() {
+  if (domCache['addCustomerModal']) {
+    domCache['addCustomerModal'].style.display = 'none';
+  }
+}
+
+// Generate customer code preview (same logic as backend)
+function generateCustomerCodePreview(displayName) {
+  if (!displayName || displayName.trim() === '') return '';
+  
+  // Remove common suffixes and clean the name
+  let cleanName = displayName
+    .replace(/株式会社|会社|製作所|工業|産業|紡織/g, '')
+    .trim();
+  
+  // Convert to romaji/english approximation
+  const conversionMap = {
+    'ティーエヌ': 'tn',
+    'トヨタ': 'toyota', 
+    '衣浦': 'kinuura',
+    'アイシン': 'aisin',
+    'デンソー': 'denso',
+    'マツダ': 'mazda',
+    'スバル': 'subaru',
+    'ホンダ': 'honda',
+    'ニッサン': 'nissan',
+    '日産': 'nissan',
+    'スズキ': 'suzuki',
+    'ダイハツ': 'daihatsu',
+    'イスズ': 'isuzu',
+    'ミツビシ': 'mitsubishi',
+    '三菱': 'mitsubishi'
+  };
+  
+  // Check for direct matches first
+  for (const [japanese, romaji] of Object.entries(conversionMap)) {
+    if (cleanName.includes(japanese)) {
+      return romaji;
+    }
+  }
+  
+  // If no direct match, create code from first few characters
+  let code = cleanName
+    .replace(/[^\w\s]/gi, '')
+    .replace(/\s+/g, '')
+    .toLowerCase();
+  
+  // Take first 6 characters or less
+  code = code.substring(0, 6);
+  
+  // If still empty or too short, generate from hash
+  if (code.length < 2) {
+    code = 'cust' + Math.random().toString(36).substr(2, 4);
+  }
+  
+  return code;
+}
+
+// Save new customer to database
+async function saveNewCustomer() {
+  const customerName = domCache['newCustomerName']?.value?.trim();
+  const customerAddress = domCache['newCustomerAddress']?.value?.trim();
+  
+  if (!customerName) {
+    alert('お客様名を入力してください');
+    return;
+  }
+  
+  if (!currentUser) {
+    alert('認証エラー: ユーザー情報がありません');
+    return;
+  }
+  
+  try {
+    logMessage('💾 Saving new customer to database...');
+    
+    const response = await fetch(`${serverURL}/api/labelComparator/customers`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        displayName: customerName,
+        address: customerAddress || '',
+        createdBy: currentUser.username
+      })
+    });
+    
+    const result = await response.json();
+    
+    if (response.ok && result.success) {
+      const newCustomer = result.customer;
+      
+      // Add to local array
+      availableCustomers.push(newCustomer);
+      
+      // Update dropdown
+      populateCustomerDropdown();
+      
+      // Select the new customer
+      if (domCache['learningCustomerSelect']) {
+        domCache['learningCustomerSelect'].value = newCustomer.customerCode;
+        
+        // Trigger change event to enable learning controls
+        const changeEvent = new Event('change');
+        domCache['learningCustomerSelect'].dispatchEvent(changeEvent);
+      }
+      
+      // Close modal
+      closeAddCustomerModal();
+      
+      // Success messages
+      logMessage(`✅ Customer added successfully: ${newCustomer.displayName} (${newCustomer.customerCode})`);
+      alert(`✅ お客様「${newCustomer.displayName}」を追加しました！\n\n` +
+            `お客様コード: ${newCustomer.customerCode}\n\n` +
+            `学習モードを開始できます。`);
+      
+    } else {
+      throw new Error(result.error || 'Failed to save customer');
+    }
+    
+  } catch (error) {
+    console.error('Error saving customer:', error);
+    logMessage(`❌ Failed to save customer: ${error.message}`);
+    alert(`❌ お客様の保存に失敗しました: ${error.message}`);
+  }
+}
+
+// ============================================
+// EDIT CUSTOMER FUNCTIONS
+// ============================================
+
+// Open edit modal for selected customer
+function editSelectedCustomer() {
+  const select = domCache['learningCustomerSelect'];
+  if (!select) return;
+  
+  const selectedCode = select.value;
+  
+  // Validate selection
+  if (!selectedCode || selectedCode === '' || selectedCode === '__ADD_NEW__') {
+    alert('⚠️ 編集するお客様を選択してください。');
+    return;
+  }
+  
+  // Find the customer in the array
+  const customer = availableCustomers.find(c => c.customerCode === selectedCode);
+  
+  if (!customer) {
+    alert('❌ お客様情報が見つかりません。');
+    return;
+  }
+  
+  // Populate edit form
+  if (domCache['editCustomerCode']) {
+    domCache['editCustomerCode'].value = customer.customerCode;
+  }
+  if (domCache['editCustomerName']) {
+    domCache['editCustomerName'].value = customer.displayName;
+  }
+  if (domCache['editCustomerAddress']) {
+    domCache['editCustomerAddress'].value = customer.address || '';
+  }
+  
+  // Show modal
+  if (domCache['editCustomerModal']) {
+    domCache['editCustomerModal'].style.display = 'flex';
+    
+    // Focus on name field
+    setTimeout(() => {
+      if (domCache['editCustomerName']) {
+        domCache['editCustomerName'].focus();
+        domCache['editCustomerName'].select();
+      }
+    }, 100);
+  }
+}
+
+// Close edit customer modal
+function closeEditCustomerModal() {
+  if (domCache['editCustomerModal']) {
+    domCache['editCustomerModal'].style.display = 'none';
+  }
+}
+
+// Save edited customer
+async function saveEditedCustomer() {
+  const customerCode = domCache['editCustomerCode']?.value;
+  const displayName = domCache['editCustomerName']?.value?.trim();
+  const address = domCache['editCustomerAddress']?.value?.trim();
+  
+  // Validation
+  if (!customerCode) {
+    alert('❌ お客様コードが見つかりません。');
+    return;
+  }
+  
+  if (!displayName) {
+    alert('⚠️ お客様名を入力してください。');
+    if (domCache['editCustomerName']) domCache['editCustomerName'].focus();
+    return;
+  }
+  
+  // Confirm with user
+  const confirmMessage = `以下の内容でお客様情報を更新しますか？\n\n` +
+                        `お客様コード: ${customerCode}\n` +
+                        `お客様名: ${displayName}\n` +
+                        `住所: ${address || '(なし)'}`;
+  
+  if (!confirm(confirmMessage)) {
+    return;
+  }
+  
+  try {
+    logMessage(`📝 Updating customer: ${customerCode}...`);
+    
+    const response = await fetch(`${serverURL}/api/labelComparator/customers/${customerCode}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        displayName,
+        address,
+        updatedBy: currentUser
+      })
+    });
+    
+    const result = await response.json();
+    
+    if (response.ok && result.success) {
+      logMessage(`✅ Customer updated: ${displayName}`);
+      
+      // Update local array
+      const customer = availableCustomers.find(c => c.customerCode === customerCode);
+      if (customer) {
+        customer.displayName = displayName;
+        customer.address = address;
+      }
+      
+      // Refresh dropdown to show updated info
+      populateCustomerDropdown();
+      
+      // Re-select the customer
+      if (domCache['learningCustomerSelect']) {
+        domCache['learningCustomerSelect'].value = customerCode;
+      }
+      
+      // Close modal
+      closeEditCustomerModal();
+      
+      // Success message
+      alert(`✅ お客様「${displayName}」の情報を更新しました！`);
+      
+    } else {
+      throw new Error(result.error || 'Failed to update customer');
+    }
+    
+  } catch (error) {
+    console.error('Error updating customer:', error);
+    logMessage(`❌ Failed to update customer: ${error.message}`);
+    alert(`❌ お客様情報の更新に失敗しました: ${error.message}`);
+  }
+}
+
+// Make functions globally available
+window.refreshCustomers = refreshCustomers;
+window.showAddCustomerModal = showAddCustomerModal;
+window.closeAddCustomerModal = closeAddCustomerModal;
+window.saveNewCustomer = saveNewCustomer;
+window.editSelectedCustomer = editSelectedCustomer;
+window.closeEditCustomerModal = closeEditCustomerModal;
+window.saveEditedCustomer = saveEditedCustomer;
 
 // ============================================
 // PAIRED LEARNING SYSTEM

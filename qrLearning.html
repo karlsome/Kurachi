@@ -134,6 +134,114 @@
       </div>
     </div>
   </div>
+  
+  <!-- Add Customer Modal -->
+  <div id="addCustomerModal" class="modal-overlay" style="display:none;">
+    <div class="modal-content">
+      <h2 class="text-2xl font-bold text-blue-600 mb-4">🏢 新しいお客様を追加</h2>
+      
+      <div class="mb-4">
+        <label class="block text-sm font-medium text-gray-700 mb-2">
+          お客様名 <span class="text-red-500">*</span>
+        </label>
+        <input 
+          id="newCustomerName" 
+          type="text" 
+          class="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          placeholder="例: 新日本製鉄株式会社"
+          maxlength="50"
+        />
+        <p class="text-xs text-gray-500 mt-1">お客様コードは自動生成されます</p>
+      </div>
+      
+      <div class="mb-4">
+        <label class="block text-sm font-medium text-gray-700 mb-2">
+          住所
+        </label>
+        <input 
+          id="newCustomerAddress" 
+          type="text" 
+          class="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          placeholder="例: 愛知県名古屋市"
+          maxlength="100"
+        />
+      </div>
+      
+      <div class="mb-6">
+        <div class="bg-blue-50 p-3 rounded-lg">
+          <p class="text-sm text-blue-800">
+            <strong>自動生成されるお客様コード:</strong> <span id="previewCustomerCode" class="font-mono">---</span>
+          </p>
+        </div>
+      </div>
+      
+      <div class="flex gap-2">
+        <button onclick="saveNewCustomer()" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg">
+          保存して学習開始
+        </button>
+        <button onclick="closeAddCustomerModal()" class="flex-1 bg-gray-500 hover:bg-gray-600 text-white py-2 px-4 rounded-lg">
+          キャンセル
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Customer Modal -->
+  <div id="editCustomerModal" class="modal-overlay" style="display:none;">
+    <div class="modal-content">
+      <h2 class="text-2xl font-bold text-purple-600 mb-4">✏️ お客様情報の編集</h2>
+      
+      <div class="mb-4">
+        <label class="block text-sm font-medium text-gray-700 mb-2">
+          お客様コード
+        </label>
+        <input 
+          id="editCustomerCode" 
+          type="text" 
+          class="w-full p-3 border rounded-lg bg-gray-100"
+          disabled
+          readonly
+        />
+        <p class="text-xs text-gray-500 mt-1">コードは変更できません</p>
+      </div>
+      
+      <div class="mb-4">
+        <label class="block text-sm font-medium text-gray-700 mb-2">
+          お客様名 <span class="text-red-500">*</span>
+        </label>
+        <input 
+          id="editCustomerName" 
+          type="text" 
+          class="w-full p-3 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+          placeholder="例: ティーエヌ製作所"
+          maxlength="50"
+          required
+        />
+      </div>
+      
+      <div class="mb-6">
+        <label class="block text-sm font-medium text-gray-700 mb-2">
+          住所
+        </label>
+        <input 
+          id="editCustomerAddress" 
+          type="text" 
+          class="w-full p-3 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+          placeholder="例: 愛知県名古屋市"
+          maxlength="100"
+        />
+      </div>
+      
+      <div class="flex gap-2">
+        <button onclick="saveEditedCustomer()" class="flex-1 bg-purple-600 hover:bg-purple-700 text-white py-2 px-4 rounded-lg">
+          💾 保存
+        </button>
+        <button onclick="closeEditCustomerModal()" class="flex-1 bg-gray-500 hover:bg-gray-600 text-white py-2 px-4 rounded-lg">
+          キャンセル
+        </button>
+      </div>
+    </div>
+  </div>
 
   <div class="max-w-4xl mx-auto">
     <!-- Header -->
@@ -161,12 +269,22 @@
     <!-- Customer Selection -->
     <div class="bg-white rounded-2xl shadow-xl p-6 mb-6">
       <h2 class="text-xl font-bold text-gray-800 mb-4">お客様選択</h2>
-      <select id="learningCustomerSelect" class="w-full p-3 border rounded-lg bg-white text-lg font-medium">
-        <option value="">お客様を選択してください</option>
-        <option value="tn">ティーエヌ製作所</option>
-        <option value="toyota">トヨタ紡織</option>
-        <option value="kinuura">衣浦</option>
-      </select>
+      <div class="flex gap-2">
+        <select id="learningCustomerSelect" class="flex-1 p-3 border rounded-lg bg-white text-lg font-medium">
+          <option value="">お客様を選択してください...</option>
+          <option value="__ADD_NEW__">➕ 新しいお客様を追加</option>
+          <!-- Dynamic customers will be loaded here -->
+        </select>
+        <button onclick="editSelectedCustomer()" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg" title="選択したお客様を編集">
+          ✏️
+        </button>
+        <button onclick="refreshCustomers()" class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-lg" title="お客様リストを更新">
+          🔄
+        </button>
+      </div>
+      <div id="customerLoadingStatus" class="mt-2 text-sm text-gray-600">
+        お客様リストを読み込み中...
+      </div>
     </div>
 
     <!-- Paired Learning Section -->
