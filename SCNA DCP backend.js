@@ -64,8 +64,20 @@ function getCachedIP(machine) {
 function getCurrentTargetMachines() {
   const subDropdown = document.getElementById('sub-dropdown');
   const selectedOption = subDropdown.options[subDropdown.selectedIndex];
+  const currentMachine = document.getElementById('process')?.value;
+  
+  console.log('🎯 getCurrentTargetMachines called:', {
+    subDropdownExists: !!subDropdown,
+    selectedOption: selectedOption?.value,
+    selectedOptionText: selectedOption?.text,
+    currentMachine: currentMachine,
+    datasetType: selectedOption?.dataset?.type,
+    datasetWorkOrderContext: selectedOption?.dataset?.workOrderContext,
+    datasetAssignedTo: selectedOption?.dataset?.assignedTo
+  });
   
   if (!selectedOption || !selectedOption.value) {
+    console.log('🎯 Returning empty array - no selected option');
     return [];
   }
   
@@ -100,10 +112,12 @@ function getCurrentTargetMachines() {
       console.log(`🔍 Parsed machine numbers from "${currentMachine}":`, machineNumbers);
       return machineNumbers.map(num => `AOL-${num}`);
     } else if (currentMachine) {
+      console.log(`🎯 Returning single machine: [${currentMachine}]`);
       return [currentMachine];
     }
   }
   
+  console.log('🎯 Returning empty array - no machine found');
   return [];
 }
 
@@ -276,7 +290,29 @@ function validateAndCollectShotCounts() {
   } else if (targetMachines.length === 1) {
     // Single machine-specific shot input
     const machineId = targetMachines[0].replace('-', '');
-    const shotInput = document.getElementById(`ShotCount-${machineId}`);
+    const expectedId = `ShotCount-${machineId}`;
+    let shotInput = document.getElementById(expectedId);
+    
+    // Fallback: if machine-specific input doesn't exist, check for generic shot input
+    if (!shotInput) {
+      shotInput = document.getElementById('shot');
+      console.log('🔍 Shot Count Validation Debug (fallback to generic):', {
+        targetMachine: targetMachines[0],
+        machineId: machineId,
+        expectedId: expectedId,
+        machineSpecificInputExists: false,
+        genericShotInput: shotInput,
+        genericShotValue: shotInput?.value
+      });
+    } else {
+      console.log('🔍 Shot Count Validation Debug:', {
+        targetMachine: targetMachines[0],
+        machineId: machineId,
+        expectedId: expectedId,
+        shotInput: shotInput,
+        shotInputValue: shotInput?.value
+      });
+    }
     
     if (!shotInput) {
       return { 
