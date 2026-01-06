@@ -1,7 +1,7 @@
 // This is the COMBINED version of `server.js` with all `masterUserServer.js` routes ported into it.
 // Nothing from `masterUserServer.js` is lost — everything is now under the same server, same Express instance.
 // The port used will still be 3000 (same as original `server.js`) unless you change it below.
-
+const jwt = require('jsonwebtoken');
 if (process.env.NODE_ENV !== "production") {
   require("dotenv").config();
   // Disable SSL certificate validation for development (fixes Google API SSL errors)
@@ -3635,7 +3635,210 @@ app.post('/api/search-manufacturing-lot', async (req, res) => {
 
 console.log("📦 Manufacturing lot search route loaded successfully");
 
+// ==================== LABEL COMPARATOR CUSTOMER MANAGEMENT ====================
 
+/**
+ * Get all active customers for label comparator
+ * GET /api/labelComparator/customers
+ */
+app.get('/api/labelComparator/customers', async (req, res) => {
+  try {
+    await client.connect();
+    const database = client.db("Sasaki_Coating_MasterDB");
+    const customersCollection = database.collection("labelComparatorCustomerDB");
+    
+    const customers = await customersCollection
+      .find({ isActive: true })
+      .sort({ displayName: 1 })
+      .toArray();
+    
+    res.json({ success: true, customers });
+    
+  } catch (error) {
+    console.error("Error fetching customers:", error);
+    res.status(500).json({ 
+      success: false, 
+      error: "Failed to fetch customers" 
+    });
+  }
+});
+
+/**
+ * Add new customer for label comparator
+ * POST /api/labelComparator/customers
+ */
+app.post('/api/labelComparator/customers', async (req, res) => {
+  try {
+    const { displayName, address, createdBy } = req.body;
+    
+    if (!displayName || !createdBy) {
+      return res.status(400).json({
+        success: false,
+        error: "Display name and created by are required"
+      });
+    }
+    
+    await client.connect();
+    const database = client.db("Sasaki_Coating_MasterDB");
+    const customersCollection = database.collection("labelComparatorCustomerDB");
+    
+    // Auto-generate customer code from display name
+    const customerCode = generateCustomerCode(displayName);
+    
+    // Check if customer code already exists
+    const existingCustomer = await customersCollection.findOne({ customerCode });
+    if (existingCustomer) {
+      return res.status(400).json({
+        success: false,
+        error: `Customer code '${customerCode}' already exists`
+      });
+    }
+    
+    // Create new customer
+    const newCustomer = {
+      customerCode,
+      displayName,
+      address: address || "",
+      createdAt: new Date().toISOString(),
+      createdBy,
+      isActive: true
+    };
+    
+    const result = await customersCollection.insertOne(newCustomer);
+    
+    if (result.insertedId) {
+      res.json({ 
+        success: true, 
+        customer: newCustomer,
+        message: `Customer '${displayName}' added successfully`
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: "Failed to create customer"
+      });
+    }
+    
+  } catch (error) {
+    console.error("Error adding customer:", error);
+    res.status(500).json({ 
+      success: false, 
+      error: "Failed to add customer" 
+    });
+  }
+});
+
+/**
+ * Update customer (status, display name, address)
+ * PUT /api/labelComparator/customers/:code
+ */
+app.put('/api/labelComparator/customers/:code', async (req, res) => {
+  try {
+    const { code } = req.params;
+    const { isActive, displayName, address, updatedBy } = req.body;
+    
+    await client.connect();
+    const database = client.db("Sasaki_Coating_MasterDB");
+    const customersCollection = database.collection("labelComparatorCustomerDB");
+    
+    // Build update object dynamically based on what fields are provided
+    const updateFields = {
+      updatedAt: new Date().toISOString(),
+      updatedBy: updatedBy || 'system'
+    };
+    
+    // Only add fields that are provided
+    if (isActive !== undefined) {
+      updateFields.isActive = isActive;
+    }
+    if (displayName !== undefined && displayName.trim() !== '') {
+      updateFields.displayName = displayName.trim();
+    }
+    if (address !== undefined) {
+      updateFields.address = address.trim();
+    }
+    
+    const result = await customersCollection.updateOne(
+      { customerCode: code },
+      { $set: updateFields }
+    );
+    
+    if (result.modifiedCount > 0) {
+      res.json({ 
+        success: true, 
+        message: 'Customer updated successfully'
+      });
+    } else {
+      res.status(404).json({
+        success: false,
+        error: "Customer not found or no changes made"
+      });
+    }
+    
+  } catch (error) {
+    console.error("Error updating customer:", error);
+    res.status(500).json({ 
+      success: false, 
+      error: "Failed to update customer" 
+    });
+  }
+});
+
+/**
+ * Generate customer code from display name
+ * Converts Japanese/English to alphanumeric code
+ */
+function generateCustomerCode(displayName) {
+  // Remove common suffixes and clean the name
+  let cleanName = displayName
+    .replace(/株式会社|会社|製作所|工業|産業|紡織/g, '')
+    .trim();
+  
+  // Convert to romaji/english approximation
+  const conversionMap = {
+    'ティーエヌ': 'tn',
+    'トヨタ': 'toyota', 
+    '衣浦': 'kinuura',
+    'アイシン': 'aisin',
+    'デンソー': 'denso',
+    'マツダ': 'mazda',
+    'スバル': 'subaru',
+    'ホンダ': 'honda',
+    'ニッサン': 'nissan',
+    '日産': 'nissan',
+    'スズキ': 'suzuki',
+    'ダイハツ': 'daihatsu',
+    'イスズ': 'isuzu',
+    'ミツビシ': 'mitsubishi',
+    '三菱': 'mitsubishi'
+  };
+  
+  // Check for direct matches first
+  for (const [japanese, romaji] of Object.entries(conversionMap)) {
+    if (cleanName.includes(japanese)) {
+      return romaji;
+    }
+  }
+  
+  // If no direct match, create code from first few characters
+  // Remove spaces and special characters, convert to lowercase
+  let code = cleanName
+    .replace(/[^\w\s]/gi, '')
+    .replace(/\s+/g, '')
+    .toLowerCase();
+  
+  // Take first 6 characters or less
+  code = code.substring(0, 6);
+  
+  // If still empty or too short, generate from hash
+  if (code.length < 2) {
+    code = 'cust' + Math.random().toString(36).substr(2, 4);
+  }
+  
+  return code;
+}
+
+console.log("🏢 Label Comparator Customer routes loaded successfully");
 
 // ==================== MATERIAL LOT LOOKUP ====================
 /**
@@ -6311,6 +6514,103 @@ app.get('/api/production-goals/summary', async (req, res) => {
 
 
 //FREYA ACESS BACKEND
+// Token validation endpoint
+app.post("/validateToken", async (req, res) => {
+  const token = req.headers.authorization?.replace('Bearer ', '');
+  
+  if (!token) {
+    return res.status(401).json({ error: 'No token provided' });
+  }
+  
+  try {
+    // If you're using JWT
+    const jwt = require('jsonwebtoken');
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
+    
+    // Fetch user from database
+    await client.connect();
+    const database = client.db("Sasaki_Coating_MasterDB");
+    const masterUsers = database.collection("masterUsers");
+    
+    const user = await masterUsers.findOne({ 
+      username: decoded.username 
+    }, {
+      projection: { password: 0 } // Exclude password
+    });
+    
+    if (!user) {
+      return res.status(401).json({ error: 'User not found' });
+    }
+    
+    res.json(user);
+    
+  } catch (error) {
+    console.error('Token validation error:', error);
+    res.status(401).json({ error: 'Invalid token' });
+  }
+});
+
+
+// app.post("/loginCustomer", async (req, res) => {
+//   const { username, password } = req.body;
+
+//   try {
+//     await client.connect();
+
+//     const globalDB = client.db("Sasaki_Coating_MasterDB");
+//     const masterUser = await globalDB.collection("masterUsers").findOne({ username });
+
+//     // 1️⃣ MasterUser login
+//     if (masterUser) {
+//       const passwordMatch = await bcrypt.compare(password, masterUser.password);
+//       if (!passwordMatch) return res.status(401).json({ error: "Invalid password" });
+
+//       const today = new Date();
+//       const validUntil = new Date(masterUser.validUntil);
+//       if (today > validUntil) return res.status(403).json({ error: "Account expired. Contact support." });
+
+//       return res.status(200).json({
+//         username: masterUser.username,
+//         role: masterUser.role,
+//         dbName: masterUser.dbName
+//       });
+//     }
+
+//     // 2️⃣ Sub-user login (loop all master users)
+//     const allMasterUsers = await globalDB.collection("masterUsers").find({}).toArray();
+
+//     for (const mu of allMasterUsers) {
+//       const customerDB = client.db(mu.dbName);
+//       const subUser = await customerDB.collection("users").findOne({ username });
+
+//       if (subUser) {
+//         // Check password
+//         const passwordMatch = await bcrypt.compare(password, subUser.password);
+//         if (!passwordMatch) return res.status(401).json({ error: "Invalid password" });
+
+//         // Check if master account is valid
+//         const today = new Date();
+//         const validUntil = new Date(mu.validUntil);
+//         if (today > validUntil) return res.status(403).json({ error: "Account expired. Contact support." });
+
+//         return res.status(200).json({
+//           username: subUser.username,
+//           role: subUser.role,
+//           dbName: mu.dbName,
+//           masterUsername: mu.username
+//         });
+//       }
+//     }
+
+//     // Not found
+//     return res.status(401).json({ error: "Account not found" });
+
+//   } catch (err) {
+//     console.error("Login error:", err);
+//     res.status(500).json({ error: "Internal server error" });
+//   }
+// });
+
 app.post("/loginCustomer", async (req, res) => {
   const { username, password } = req.body;
 
@@ -6319,6 +6619,10 @@ app.post("/loginCustomer", async (req, res) => {
 
     const globalDB = client.db("Sasaki_Coating_MasterDB");
     const masterUser = await globalDB.collection("masterUsers").findOne({ username });
+
+    // JWT Secret (use environment variable in production)
+    const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+    const jwt = require('jsonwebtoken');
 
     // 1️⃣ MasterUser login
     if (masterUser) {
@@ -6329,10 +6633,25 @@ app.post("/loginCustomer", async (req, res) => {
       const validUntil = new Date(masterUser.validUntil);
       if (today > validUntil) return res.status(403).json({ error: "Account expired. Contact support." });
 
+      // Generate JWT token
+      const token = jwt.sign(
+        { 
+          username: masterUser.username, 
+          role: masterUser.role,
+          company: masterUser.company || masterUser.dbName,
+          dbName: masterUser.dbName
+        },
+        JWT_SECRET,
+        { expiresIn: '24h' }
+      );
+
       return res.status(200).json({
         username: masterUser.username,
         role: masterUser.role,
-        dbName: masterUser.dbName
+        dbName: masterUser.dbName,
+        company: masterUser.company || masterUser.dbName,
+        token: token,
+        authToken: token
       });
     }
 
@@ -6353,11 +6672,27 @@ app.post("/loginCustomer", async (req, res) => {
         const validUntil = new Date(mu.validUntil);
         if (today > validUntil) return res.status(403).json({ error: "Account expired. Contact support." });
 
+        // Generate JWT token for sub-user
+        const token = jwt.sign(
+          { 
+            username: subUser.username, 
+            role: subUser.role,
+            company: mu.company || mu.dbName,
+            dbName: mu.dbName,
+            masterUsername: mu.username
+          },
+          JWT_SECRET,
+          { expiresIn: '24h' }
+        );
+
         return res.status(200).json({
           username: subUser.username,
           role: subUser.role,
           dbName: mu.dbName,
-          masterUsername: mu.username
+          company: mu.company || mu.dbName,
+          masterUsername: mu.username,
+          token: token,
+          authToken: token
         });
       }
     }
@@ -6371,46 +6706,6 @@ app.post("/loginCustomer", async (req, res) => {
   }
 });
 
-// app.post("/createUser", async (req, res) => {
-//   const { firstName, lastName, email, username, password, role } = req.body;
-
-//   // Validate required fields
-//   if (!firstName || !lastName || !email || !username || !password || !role) {
-//     console.log("missing required fields!!!:", { firstName, lastName, email, username, password, role });
-//     return res.status(400).json({ error: "Missing required fields" });
-
-//   }
-
-//   try {
-//     await client.connect();
-//     const db = client.db("Sasaki_Coating_MasterDB");
-//     const masterUsers = db.collection("users");
-
-//     // Check if username already exists
-//     const existing = await masterUsers.findOne({ username });
-//     if (existing) return res.status(400).json({ error: "Username already exists" });
-
-//     // Hash password
-//     const hashedPassword = await bcrypt.hash(password, 10);
-
-//     // Insert master user
-//     await masterUsers.insertOne({
-//       firstName,
-//       lastName,
-//       email,
-//       username,
-//       password: hashedPassword,
-//       role,
-//       createdAt: new Date()
-//     });
-
-//     console.log("✅ New master user created:", username);
-//     res.json({ message: "Master user created successfully" });
-//   } catch (err) {
-//     console.error("❌ Error creating master user:", err);
-//     res.status(500).json({ error: "Internal server error" });
-//   }
-// });
 
 app.post("/createUser", async (req, res) => {
   const { firstName, lastName, email, username, password, role, factory } = req.body;
