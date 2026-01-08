@@ -8239,14 +8239,14 @@ app.post("/api/noda-requests", async (req, res) => {
             query['背番号'] = filters['背番号'];
           }
 
-          // Date range filter
+          // Date range filter (using 納入指示日 deadline field)
           if (filters.dateRange) {
-            query['date'] = {};
+            query['納入指示日'] = {};
             if (filters.dateRange.from) {
-              query['date'].$gte = filters.dateRange.from;
+              query['納入指示日'].$gte = filters.dateRange.from;
             }
             if (filters.dateRange.to) {
-              query['date'].$lte = filters.dateRange.to;
+              query['納入指示日'].$lte = filters.dateRange.to;
             }
           }
 
@@ -9007,6 +9007,25 @@ app.post("/api/noda-requests", async (req, res) => {
             return res.status(400).json({ error: "Request ID and data are required" });
           }
 
+          // Handle pickup date updates for bulk requests
+          if (data.pickupDate) {
+            const result = await requestsCollection.updateOne(
+              { _id: new ObjectId(requestId) },
+              { 
+                $set: { 
+                  pickupDate: data.pickupDate,
+                  updatedAt: new Date()
+                } 
+              }
+            );
+
+            if (result.matchedCount === 0) {
+              return res.status(404).json({ error: "Request not found" });
+            }
+
+            return res.json({ success: true, message: "Pickup date updated successfully" });
+          }
+
           // If quantity or back number changed, check inventory
           if (data.quantity || data.背番号) {
             const existingRequest = await requestsCollection.findOne({ _id: new ObjectId(requestId) });
@@ -9379,6 +9398,272 @@ app.post("/api/noda-requests", async (req, res) => {
         } catch (error) {
           console.error("Error in updateLineItemStatus:", error);
           res.status(500).json({ error: "Failed to update line item status", details: error.message });
+        }
+        break;
+
+      case 'updateLineItemQuantity':
+        try {
+          if (!requestId || !data || !data.lineNumber || !data.newQuantity || !data.originalQuantity || !data.背番号) {
+            return res.status(400).json({ error: "Missing required fields" });
+          }
+
+          const newQuantity = parseInt(data.newQuantity);
+          const originalQuantity = parseInt(data.originalQuantity);
+          const quantityDiff = newQuantity - originalQuantity;
+
+          if (newQuantity <= 0) {
+            return res.status(400).json({ error: "Quantity must be greater than 0" });
+          }
+
+          // Get the bulk request
+          const bulkRequest = await requestsCollection.findOne({ _id: new ObjectId(requestId) });
+          if (!bulkRequest) {
+            return res.status(404).json({ error: "Request not found" });
+          }
+
+          // Find the line item
+          const lineItem = bulkRequest.lineItems.find(item => item.lineNumber === data.lineNumber);
+          if (!lineItem) {
+            return res.status(404).json({ error: "Line item not found" });
+          }
+
+          const userName = req.body.userName || 'Unknown User';
+
+          // Get current inventory state
+          const inventoryResults = await inventoryCollection.aggregate([
+            { $match: { 背番号: data.背番号 } },
+            {
+              $addFields: {
+                timeStampDate: {
+                  $cond: {
+                    if: { $type: "$timeStamp" },
+                    then: {
+                      $cond: {
+                        if: { $eq: [{ $type: "$timeStamp" }, "string"] },
+                        then: { $dateFromString: { dateString: "$timeStamp" } },
+                        else: "$timeStamp"
+                      }
+                    },
+                    else: new Date()
+                  }
+                }
+              }
+            },
+            { $sort: { timeStampDate: -1 } },
+            { $limit: 1 }
+          ]).toArray();
+
+          if (inventoryResults.length === 0) {
+            return res.status(404).json({ error: "Item not found in inventory" });
+          }
+
+          const currentInventory = inventoryResults[0];
+          const currentPhysical = currentInventory.physicalQuantity || currentInventory.runningQuantity || 0;
+          const currentReserved = currentInventory.reservedQuantity || 0;
+          const currentAvailable = currentInventory.availableQuantity || currentInventory.runningQuantity || 0;
+
+          // Handle inventory adjustment based on quantity difference
+          let newReservedQuantity, newAvailableQuantity;
+          let action, note;
+
+          if (quantityDiff > 0) {
+            // Increasing quantity - check availability and reserve more
+            if (currentAvailable < quantityDiff) {
+              return res.status(400).json({ 
+                error: "Insufficient inventory available",
+                availableQuantity: currentAvailable,
+                requestedIncrease: quantityDiff
+              });
+            }
+
+            newReservedQuantity = currentReserved + quantityDiff;
+            newAvailableQuantity = currentAvailable - quantityDiff;
+            action = `Bulk Reservation (+${quantityDiff})`;
+            note = `Increased reservation by ${quantityDiff} units for line ${data.lineNumber} in request ${bulkRequest.requestNumber}`;
+          } else {
+            // Decreasing quantity - unreserve the difference
+            const unreserveAmount = Math.abs(quantityDiff);
+            newReservedQuantity = Math.max(0, currentReserved - unreserveAmount);
+            newAvailableQuantity = currentAvailable + unreserveAmount;
+            action = `Bulk Unreservation (-${unreserveAmount})`;
+            note = `Decreased reservation by ${unreserveAmount} units for line ${data.lineNumber} in request ${bulkRequest.requestNumber}`;
+          }
+
+          console.log(`📦 Updating line item quantity: ${originalQuantity} → ${newQuantity} (diff: ${quantityDiff})`);
+          console.log(`   Inventory: Reserved ${currentReserved} → ${newReservedQuantity}, Available ${currentAvailable} → ${newAvailableQuantity}`);
+
+          // Create inventory transaction
+          const inventoryTransaction = {
+            背番号: data.背番号,
+            品番: lineItem.品番,
+            timeStamp: new Date(),
+            Date: new Date().toISOString().split('T')[0],
+            
+            physicalQuantity: currentPhysical,
+            reservedQuantity: newReservedQuantity,
+            availableQuantity: newAvailableQuantity,
+            
+            runningQuantity: newAvailableQuantity,
+            lastQuantity: currentAvailable,
+            
+            action: action,
+            source: `Freya Admin - ${userName}`,
+            requestId: requestId,
+            bulkRequestNumber: bulkRequest.requestNumber,
+            note: note
+          };
+
+          await inventoryCollection.insertOne(inventoryTransaction);
+
+          // Update the line item quantity in the request
+          const updateResult = await requestsCollection.updateOne(
+            { 
+              _id: new ObjectId(requestId),
+              'lineItems.lineNumber': data.lineNumber
+            },
+            {
+              $set: {
+                'lineItems.$.quantity': newQuantity,
+                'lineItems.$.updatedAt': new Date()
+              }
+            }
+          );
+
+          if (updateResult.modifiedCount === 0) {
+            return res.status(500).json({ error: "Failed to update line item quantity" });
+          }
+
+          res.json({
+            success: true,
+            message: "Line item quantity updated successfully",
+            lineNumber: data.lineNumber,
+            originalQuantity: originalQuantity,
+            newQuantity: newQuantity,
+            quantityDiff: quantityDiff,
+            inventoryUpdated: true
+          });
+
+        } catch (error) {
+          console.error("Error in updateLineItemQuantity:", error);
+          res.status(500).json({ error: "Failed to update line item quantity", details: error.message });
+        }
+        break;
+
+      case 'deleteLineItem':
+        try {
+          if (!requestId || !data || !data.lineNumber || !data.背番号 || !data.quantity) {
+            return res.status(400).json({ error: "Missing required fields" });
+          }
+
+          // Get the bulk request
+          const bulkRequest = await requestsCollection.findOne({ _id: new ObjectId(requestId) });
+          if (!bulkRequest) {
+            return res.status(404).json({ error: "Request not found" });
+          }
+
+          // Check if this is the last line item
+          if (bulkRequest.lineItems.length <= 1) {
+            return res.status(400).json({ 
+              error: "Cannot delete the last line item. Please delete the entire request instead." 
+            });
+          }
+
+          // Find the line item
+          const lineItem = bulkRequest.lineItems.find(item => item.lineNumber === data.lineNumber);
+          if (!lineItem) {
+            return res.status(404).json({ error: "Line item not found" });
+          }
+
+          const userName = req.body.userName || 'Unknown User';
+
+          // Get current inventory state
+          const inventoryResults = await inventoryCollection.aggregate([
+            { $match: { 背番号: data.背番号 } },
+            {
+              $addFields: {
+                timeStampDate: {
+                  $cond: {
+                    if: { $type: "$timeStamp" },
+                    then: {
+                      $cond: {
+                        if: { $eq: [{ $type: "$timeStamp" }, "string"] },
+                        then: { $dateFromString: { dateString: "$timeStamp" } },
+                        else: "$timeStamp"
+                      }
+                    },
+                    else: new Date()
+                  }
+                }
+              }
+            },
+            { $sort: { timeStampDate: -1 } },
+            { $limit: 1 }
+          ]).toArray();
+
+          if (inventoryResults.length > 0) {
+            const currentInventory = inventoryResults[0];
+            const currentPhysical = currentInventory.physicalQuantity || currentInventory.runningQuantity || 0;
+            const currentReserved = currentInventory.reservedQuantity || 0;
+            const currentAvailable = currentInventory.availableQuantity || currentInventory.runningQuantity || 0;
+
+            // Unreserve the quantity
+            const newReservedQuantity = Math.max(0, currentReserved - data.quantity);
+            const newAvailableQuantity = currentAvailable + data.quantity;
+
+            console.log(`🗑️ Deleting line item ${data.lineNumber}, unreserving ${data.quantity} units`);
+            console.log(`   Inventory: Reserved ${currentReserved} → ${newReservedQuantity}, Available ${currentAvailable} → ${newAvailableQuantity}`);
+
+            // Create inventory transaction to unreserve
+            const unreserveTransaction = {
+              背番号: data.背番号,
+              品番: lineItem.品番,
+              timeStamp: new Date(),
+              Date: new Date().toISOString().split('T')[0],
+              
+              physicalQuantity: currentPhysical,
+              reservedQuantity: newReservedQuantity,
+              availableQuantity: newAvailableQuantity,
+              
+              runningQuantity: newAvailableQuantity,
+              lastQuantity: currentAvailable,
+              
+              action: `Bulk Unreservation (-${data.quantity})`,
+              source: `Freya Admin - ${userName}`,
+              requestId: requestId,
+              bulkRequestNumber: bulkRequest.requestNumber,
+              note: `Unreserved ${data.quantity} units - deleted line ${data.lineNumber} from request ${bulkRequest.requestNumber}`
+            };
+
+            await inventoryCollection.insertOne(unreserveTransaction);
+          }
+
+          // Remove the line item from the request
+          const updateResult = await requestsCollection.updateOne(
+            { _id: new ObjectId(requestId) },
+            {
+              $pull: { lineItems: { lineNumber: data.lineNumber } },
+              $set: { 
+                updatedAt: new Date(),
+                totalItems: bulkRequest.lineItems.length - 1
+              }
+            }
+          );
+
+          if (updateResult.modifiedCount === 0) {
+            return res.status(500).json({ error: "Failed to delete line item" });
+          }
+
+          res.json({
+            success: true,
+            message: "Line item deleted successfully",
+            lineNumber: data.lineNumber,
+            inventoryUnreserved: data.quantity,
+            remainingItems: bulkRequest.lineItems.length - 1
+          });
+
+        } catch (error) {
+          console.error("Error in deleteLineItem:", error);
+          res.status(500).json({ error: "Failed to delete line item", details: error.message });
         }
         break;
 
@@ -9755,13 +10040,14 @@ app.post("/api/noda-requests", async (req, res) => {
             query['背番号'] = filters['背番号'];
           }
 
+          // Date range filter (using 納入指示日 deadline field)
           if (filters.dateRange) {
-            query['date'] = {};
+            query['納入指示日'] = {};
             if (filters.dateRange.from) {
-              query['date'].$gte = filters.dateRange.from;
+              query['納入指示日'].$gte = filters.dateRange.from;
             }
             if (filters.dateRange.to) {
-              query['date'].$lte = filters.dateRange.to;
+              query['納入指示日'].$lte = filters.dateRange.to;
             }
           }
 
