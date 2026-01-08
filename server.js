@@ -8524,20 +8524,31 @@ app.post("/api/noda-requests", async (req, res) => {
           }
 
           // Generate bulk request number
-          const today = new Date().toISOString().split('T')[0].replace(/-/g, '');
-          const todayStart = new Date();
-          todayStart.setHours(0, 0, 0, 0);
-          const todayEnd = new Date();
-          todayEnd.setHours(23, 59, 59, 999);
+          let bulkRequestNumber;
+          
+          // Check if we have delivery order (便) and delivery note (納品書番号) for new format
+          if (data.deliveryNote && data.deliveryOrder && data.deadlineDate) {
+            // New format: 納品書番号-YYYYMMDD-便
+            const deadlineFormatted = data.deadlineDate.replace(/-/g, ''); // Convert YYYY-MM-DD to YYYYMMDD
+            bulkRequestNumber = `${data.deliveryNote}-${deadlineFormatted}-${data.deliveryOrder}`;
+          } else {
+            // Fallback to old format: NODAPO-YYYYMMDD-001
+            const deadlineDate = data.deadlineDate || new Date().toISOString().split('T')[0];
+            const deadlineFormatted = deadlineDate.replace(/-/g, '');
+            const todayStart = new Date();
+            todayStart.setHours(0, 0, 0, 0);
+            const todayEnd = new Date();
+            todayEnd.setHours(23, 59, 59, 999);
 
-          const todayCount = await requestsCollection.countDocuments({
-            createdAt: {
-              $gte: todayStart,
-              $lte: todayEnd
-            }
-          });
+            const todayCount = await requestsCollection.countDocuments({
+              createdAt: {
+                $gte: todayStart,
+                $lte: todayEnd
+              }
+            });
 
-          const bulkRequestNumber = `NODAPO-${today}-${String(todayCount + 1).padStart(3, '0')}`;
+            bulkRequestNumber = `NODAPO-${deadlineFormatted}-${String(todayCount + 1).padStart(3, '0')}`;
+          }
 
           // Create bulk request with line items
           const bulkRequest = {
@@ -8549,6 +8560,11 @@ app.post("/api/noda-requests", async (req, res) => {
             createdAt: new Date(),
             updatedAt: new Date(),
             totalItems: validItems.length,
+            
+            // Additional fields from CSV import
+            便: data.deliveryOrder || null,
+            納品書番号: data.deliveryNote || null,
+            納入指示日: data.deadlineDate || null,
             
             // Line items with individual statuses
             lineItems: validItems.map((item, index) => ({
