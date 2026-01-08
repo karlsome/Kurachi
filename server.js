@@ -8428,6 +8428,50 @@ app.post("/api/noda-requests", async (req, res) => {
         }
         break;
 
+      case 'checkDuplicateRequest':
+        try {
+          const { deliveryNote, deliveryOrder, deadlineDate } = req.body;
+          
+          if (!deliveryNote || !deliveryOrder || !deadlineDate) {
+            return res.json({ success: true, exists: false });
+          }
+
+          // Search for existing request with same 納品書番号, 便, and 納入指示日
+          const existingRequest = await requestsCollection.findOne({
+            納品書番号: deliveryNote,
+            便: deliveryOrder,
+            納入指示日: deadlineDate
+          });
+
+          if (existingRequest) {
+            res.json({
+              success: true,
+              exists: true,
+              request: {
+                _id: existingRequest._id.toString(),
+                requestNumber: existingRequest.requestNumber,
+                status: existingRequest.status,
+                納品書番号: existingRequest.納品書番号,
+                便: existingRequest.便,
+                納入指示日: existingRequest.納入指示日,
+                totalItems: existingRequest.totalItems || (existingRequest.lineItems ? existingRequest.lineItems.length : 0),
+                createdAt: existingRequest.createdAt,
+                createdBy: existingRequest.createdBy
+              }
+            });
+          } else {
+            res.json({
+              success: true,
+              exists: false
+            });
+          }
+
+        } catch (error) {
+          console.error("Error in checkDuplicateRequest:", error);
+          res.status(500).json({ error: "Failed to check duplicate", details: error.message });
+        }
+        break;
+
       case 'bulkCreateRequests':
         try {
           if (!data || !Array.isArray(data.items) || data.items.length === 0) {
@@ -8440,6 +8484,97 @@ app.post("/api/noda-requests", async (req, res) => {
 
           // Get user information from request body
           const userName = req.body.userName || 'Unknown User';
+          
+          // Get mode and existingRequestId for duplicate handling
+          const mode = data.mode || 'create'; // 'create', 'overwrite', or 'createNew'
+          const existingRequestId = data.existingRequestId || null;
+          
+          let oldRequestNumber = null; // Store the old request number for overwrite mode
+          
+          // CRITICAL: Handle overwrite mode FIRST - unreserve inventory before validation
+          if (mode === 'overwrite' && existingRequestId) {
+            try {
+              const existingRequest = await requestsCollection.findOne({ _id: new ObjectId(existingRequestId) });
+              if (existingRequest) {
+                // Store the old request number to reuse it
+                oldRequestNumber = existingRequest.requestNumber;
+                console.log(`🔄 Overwriting existing request: ${oldRequestNumber}`);
+                
+                // Reverse inventory reservations for existing request
+                if (existingRequest.lineItems && existingRequest.lineItems.length > 0) {
+                  console.log(`📦 Unreserving ${existingRequest.lineItems.length} items from old request`);
+                  for (const lineItem of existingRequest.lineItems) {
+                    // Get the latest inventory state for this item
+                    const latestInventory = await inventoryCollection.aggregate([
+                      { $match: { 背番号: lineItem.背番号 } },
+                      {
+                        $addFields: {
+                          timeStampDate: {
+                            $cond: {
+                              if: { $type: "$timeStamp" },
+                              then: {
+                                $cond: {
+                                  if: { $eq: [{ $type: "$timeStamp" }, "string"] },
+                                  then: { $dateFromString: { dateString: "$timeStamp" } },
+                                  else: "$timeStamp"
+                                }
+                              },
+                              else: new Date()
+                            }
+                          }
+                        }
+                      },
+                      { $sort: { timeStampDate: -1 } },
+                      { $limit: 1 }
+                    ]).toArray();
+
+                    if (latestInventory.length > 0) {
+                      const currentInventory = latestInventory[0];
+                      const currentPhysical = currentInventory.physicalQuantity || currentInventory.runningQuantity || 0;
+                      const currentReserved = currentInventory.reservedQuantity || 0;
+                      const currentAvailable = currentInventory.availableQuantity || currentInventory.runningQuantity || 0;
+
+                      // Unreserve the quantity
+                      const newReservedQuantity = Math.max(0, currentReserved - lineItem.quantity);
+                      const newAvailableQuantity = currentAvailable + lineItem.quantity;
+
+                      console.log(`  📤 ${lineItem.背番号}: Unreserving ${lineItem.quantity} units (Reserved: ${currentReserved} → ${newReservedQuantity}, Available: ${currentAvailable} → ${newAvailableQuantity})`);
+
+                      // Create inventory transaction to unreserve
+                      const unreserveTransaction = {
+                        背番号: lineItem.背番号,
+                        品番: lineItem.品番,
+                        timeStamp: new Date(),
+                        Date: new Date().toISOString().split('T')[0],
+                        
+                        physicalQuantity: currentPhysical,
+                        reservedQuantity: newReservedQuantity,
+                        availableQuantity: newAvailableQuantity,
+                        
+                        runningQuantity: newAvailableQuantity,
+                        lastQuantity: currentAvailable,
+                        
+                        action: `Bulk Unreservation (-${lineItem.quantity})`,
+                        source: `Freya Admin - ${userName}`,
+                        requestId: existingRequestId,
+                        bulkRequestNumber: existingRequest.requestNumber,
+                        note: `Unreserved ${lineItem.quantity} units - overwriting request ${existingRequest.requestNumber}`
+                      };
+
+                      await inventoryCollection.insertOne(unreserveTransaction);
+                    }
+                  }
+                }
+
+                // Delete the existing request
+                await requestsCollection.deleteOne({ _id: new ObjectId(existingRequestId) });
+                console.log(`✅ Deleted existing request ${existingRequestId} for overwrite`);
+              }
+            } catch (error) {
+              console.error("❌ Error handling overwrite mode:", error);
+              return res.status(500).json({ error: "Failed to overwrite existing request", details: error.message });
+            }
+          }
 
           let failedItems = [];
           let validItems = [];
@@ -8526,11 +8661,47 @@ app.post("/api/noda-requests", async (req, res) => {
           // Generate bulk request number
           let bulkRequestNumber;
           
-          // Check if we have delivery order (便) and delivery note (納品書番号) for new format
-          if (data.deliveryNote && data.deliveryOrder && data.deadlineDate) {
+          // Generate request number based on mode
+          if (mode === 'overwrite' && oldRequestNumber) {
+            // Reuse the old request number for overwrite
+            bulkRequestNumber = oldRequestNumber;
+          } else if (data.deliveryNote && data.deliveryOrder && data.deadlineDate) {
             // New format: 納品書番号-YYYYMMDD-便
             const deadlineFormatted = data.deadlineDate.replace(/-/g, ''); // Convert YYYY-MM-DD to YYYYMMDD
             bulkRequestNumber = `${data.deliveryNote}-${deadlineFormatted}-${data.deliveryOrder}`;
+            
+            // Handle createNew mode - find highest suffix and increment
+            if (mode === 'createNew') {
+              const baseRequestNumber = bulkRequestNumber;
+              let suffix = 1;
+              
+              // Find all requests with this base number (with or without suffix)
+              const existingRequests = await requestsCollection.find({
+                requestNumber: { $regex: `^${baseRequestNumber.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}` }
+              }).toArray();
+              
+              console.log(`Found ${existingRequests.length} existing requests with base: ${baseRequestNumber}`);
+              
+              // Find the highest suffix
+              for (const req of existingRequests) {
+                console.log(`Checking request: ${req.requestNumber}`);
+                const match = req.requestNumber.match(/\((\d+)\)$/);
+                if (match) {
+                  const currentSuffix = parseInt(match[1]);
+                  console.log(`Found suffix: ${currentSuffix}`);
+                  if (currentSuffix >= suffix) {
+                    suffix = currentSuffix + 1;
+                  }
+                } else if (req.requestNumber === baseRequestNumber) {
+                  // Base request exists without suffix, next should be (1)
+                  console.log(`Found base request without suffix`);
+                  // suffix is already 1
+                }
+              }
+              
+              bulkRequestNumber = `${baseRequestNumber}(${suffix})`;
+              console.log(`Created new request number with suffix: ${bulkRequestNumber}`);
+            }
           } else {
             // Fallback to old format: NODAPO-YYYYMMDD-001
             const deadlineDate = data.deadlineDate || new Date().toISOString().split('T')[0];
