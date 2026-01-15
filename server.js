@@ -3841,25 +3841,25 @@ function generateCustomerCode(displayName) {
 console.log("🏢 Label Comparator Customer routes loaded successfully");
 
 // ==================== MATERIAL LOT LOOKUP ====================
+
 /**
- * Lookup materialRequestDB records by 材料ロット
- * This endpoint is used in the factory details sidebar to find material request info
- * POST /api/material-lot-lookup
+ * Check if a 品番 has multiple 材料背番号 values
+ * POST /api/check-material-sebanggo
  */
-app.post('/api/material-lot-lookup', async (req, res) => {
+app.post('/api/check-material-sebanggo', async (req, res) => {
     try {
-        const { 品番, 材料ロット } = req.body;
+        const { 品番 } = req.body;
         
-        console.log('🔍 Material lot lookup request:', { 品番, 材料ロット });
+        console.log('🔍 Checking material sebanggo for:', { 品番 });
         
-        if (!品番 || !材料ロット) {
+        if (!品番) {
             return res.status(400).json({ 
                 success: false, 
-                error: 'Missing required fields: 品番 and 材料ロット' 
+                error: 'Missing required field: 品番' 
             });
         }
         
-        // Step 1: Get 材料背番号 from masterDB
+        // Get 材料背番号 from masterDB
         const masterDb = client.db('Sasaki_Coating_MasterDB');
         const masterCollection = masterDb.collection('masterDB');
         
@@ -3869,12 +3869,96 @@ app.post('/api/material-lot-lookup', async (req, res) => {
             return res.json({ 
                 success: false, 
                 error: '品番 not found in masterDB or missing 材料背番号',
-                results: []
+                multiple: false,
+                材料背番号Array: []
             });
         }
         
-        const 材料背番号 = masterDoc.材料背番号;
-        console.log(`✅ Found 材料背番号: ${材料背番号} for 品番: ${品番}`);
+        // Split 材料背番号 by comma and trim whitespace
+        const 材料背番号Array = masterDoc.材料背番号
+            .split(',')
+            .map(s => s.trim())
+            .filter(s => s.length > 0);
+        
+        console.log(`✅ Found ${材料背番号Array.length} 材料背番号 values:`, 材料背番号Array);
+        
+        res.json({ 
+            success: true, 
+            multiple: 材料背番号Array.length > 1,
+            材料背番号Array: 材料背番号Array,
+            original: masterDoc.材料背番号
+        });
+        
+    } catch (error) {
+        console.error('❌ Error checking material sebanggo:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: error.message 
+        });
+    }
+});
+
+/**
+ * Lookup materialRequestDB records by 材料ロット
+ * This endpoint is used in the factory details sidebar to find material request info
+ * Supports multiple 材料背番号 values by accepting an optional specific 材料背番号 parameter
+ * POST /api/material-lot-lookup
+ */
+app.post('/api/material-lot-lookup', async (req, res) => {
+    try {
+        const { 品番, 材料ロット, 材料背番号: specified材料背番号 } = req.body;
+        
+        console.log('🔍 Material lot lookup request:', { 品番, 材料ロット, specified材料背番号 });
+        
+        if (!品番 || !材料ロット) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Missing required fields: 品番 and 材料ロット' 
+            });
+        }
+        
+        // Step 1: Get 材料背番号 from masterDB (or use specified one)
+        let 材料背番号;
+        
+        if (specified材料背番号) {
+            // Use the specific 材料背番号 provided by the user
+            材料背番号 = specified材料背番号;
+            console.log(`✅ Using specified 材料背番号: ${材料背番号}`);
+        } else {
+            // Get from masterDB
+            const masterDb = client.db('Sasaki_Coating_MasterDB');
+            const masterCollection = masterDb.collection('masterDB');
+            
+            const masterDoc = await masterCollection.findOne({ 品番 });
+            
+            if (!masterDoc || !masterDoc.材料背番号) {
+                return res.json({ 
+                    success: false, 
+                    error: '品番 not found in masterDB or missing 材料背番号',
+                    results: []
+                });
+            }
+            
+            材料背番号 = masterDoc.材料背番号;
+            
+            // Check if there are multiple values
+            if (材料背番号.includes(',')) {
+                // Multiple values found - should prompt user to select one
+                const 材料背番号Array = 材料背番号.split(',').map(s => s.trim()).filter(s => s.length > 0);
+                console.log(`⚠️ Multiple 材料背番号 values found: ${材料背番号Array.join(', ')}`);
+                
+                return res.json({
+                    success: false,
+                    error: '該当する材料リクエストが見つかりませんでした',
+                    材料背番号: `Multiple values: ${材料背番号Array.join(', ')}`,
+                    results: [],
+                    multipleValues: true,
+                    材料背番号Array: 材料背番号Array
+                });
+            }
+            
+            console.log(`✅ Found 材料背番号: ${材料背番号} for 品番: ${品番}`);
+        }
         
         // Step 2: Query materialRequestDB
         const submittedDb = client.db('submittedDB');
@@ -8579,7 +8663,7 @@ app.post("/api/noda-requests", async (req, res) => {
           let failedItems = [];
           let validItems = [];
 
-          // First pass: Validate all items and check inventory
+          // First pass: Validate all items and check inventory (ALLOW PARTIAL/NO INVENTORY)
           for (const item of data.items) {
             try {
               // Validate required fields
@@ -8616,35 +8700,57 @@ app.post("/api/noda-requests", async (req, res) => {
               ]).toArray();
 
               if (inventoryResults.length === 0) {
-                failedItems.push({
-                  背番号: item.背番号,
-                  error: 'Item not found in inventory'
+                // ✅ NEW: Item not in inventory, but still add it with 0 availability
+                console.log(`⚠️ ${item.背番号} not found in inventory - adding with 0 availability`);
+                validItems.push({
+                  ...item,
+                  inventoryItem: null,
+                  availableQuantity: 0,
+                  reservedQuantity: 0,
+                  shortfallQuantity: parseInt(item.quantity),
+                  inventoryStatus: 'none'
                 });
                 continue;
               }
 
               const inventoryItem = inventoryResults[0];
               const availableQuantity = inventoryItem.availableQuantity || inventoryItem.runningQuantity || 0;
+              const requestedQuantity = parseInt(item.quantity);
               
-              if (availableQuantity < parseInt(item.quantity)) {
-                failedItems.push({
-                  背番号: item.背番号,
-                  error: `Insufficient inventory (Available: ${availableQuantity}, Requested: ${item.quantity})`
-                });
-                continue;
+              // ✅ NEW: Calculate partial reservation amounts
+              const reservedQuantity = Math.min(availableQuantity, requestedQuantity);
+              const shortfallQuantity = Math.max(0, requestedQuantity - availableQuantity);
+              
+              // Determine line item inventory status
+              let inventoryStatus;
+              if (availableQuantity === 0) {
+                inventoryStatus = 'none'; // No inventory available
+              } else if (availableQuantity < requestedQuantity) {
+                inventoryStatus = 'insufficient'; // Partial inventory
+              } else {
+                inventoryStatus = 'sufficient'; // Full inventory available
               }
 
-              // Item is valid
+              // ✅ Item is always valid - we allow requests without inventory
               validItems.push({
                 ...item,
                 inventoryItem: inventoryItem,
-                availableQuantity: availableQuantity
+                availableQuantity: availableQuantity,
+                reservedQuantity: reservedQuantity,
+                shortfallQuantity: shortfallQuantity,
+                inventoryStatus: inventoryStatus
               });
 
             } catch (error) {
-              failedItems.push({
-                背番号: item.背番号 || 'Unknown',
-                error: error.message
+              // ✅ NEW: Even if inventory check fails, still add item with 0 inventory
+              console.log(`⚠️ Error checking inventory for ${item.背番号}: ${error.message} - Adding with 0 inventory`);
+              validItems.push({
+                ...item,
+                inventoryItem: null,
+                availableQuantity: 0,
+                reservedQuantity: 0,
+                shortfallQuantity: parseInt(item.quantity),
+                inventoryStatus: 'none'
               });
             }
           }
@@ -8721,12 +8827,31 @@ app.post("/api/noda-requests", async (req, res) => {
             bulkRequestNumber = `NODAPO-${deadlineFormatted}-${String(todayCount + 1).padStart(3, '0')}`;
           }
 
+          // ✅ Calculate overall inventory status for the request
+          const hasNoInventory = validItems.every(item => item.inventoryStatus === 'none');
+          const hasPartialInventory = validItems.some(item => item.inventoryStatus === 'insufficient' || item.inventoryStatus === 'none');
+          const hasSufficientInventory = validItems.every(item => item.inventoryStatus === 'sufficient');
+          
+          let overallInventoryStatus;
+          let requestStatus;
+          if (hasNoInventory) {
+            overallInventoryStatus = 'waiting-for-inventory';
+            requestStatus = 'waiting-for-inventory';
+          } else if (hasPartialInventory) {
+            overallInventoryStatus = 'partial-inventory';
+            requestStatus = 'partial-inventory';
+          } else {
+            overallInventoryStatus = 'sufficient';
+            requestStatus = 'pending';
+          }
+
           // Create bulk request with line items
           const bulkRequest = {
             requestNumber: bulkRequestNumber,
             requestType: 'bulk',
             pickupDate: data.pickupDate,
-            status: 'pending', // Overall bulk request status
+            status: requestStatus, // Overall request status based on inventory
+            overallInventoryStatus: overallInventoryStatus, // NEW: Track inventory availability
             createdBy: userName,
             createdAt: new Date(),
             updatedAt: new Date(),
@@ -8743,6 +8868,9 @@ app.post("/api/noda-requests", async (req, res) => {
               品番: item.品番,
               背番号: item.背番号,
               quantity: parseInt(item.quantity),
+              reservedQuantity: item.reservedQuantity, // NEW: Amount actually reserved
+              shortfallQuantity: item.shortfallQuantity, // NEW: Amount still needed
+              inventoryStatus: item.inventoryStatus, // NEW: 'none', 'insufficient', 'sufficient'
               status: 'pending', // Individual line item status
               createdAt: new Date(),
               updatedAt: new Date()
@@ -8753,38 +8881,45 @@ app.post("/api/noda-requests", async (req, res) => {
           const bulkResult = await requestsCollection.insertOne(bulkRequest);
           const bulkRequestId = bulkResult.insertedId.toString();
 
-          // Process inventory transactions for all valid items
+          // Process inventory transactions for all valid items (including partial reservations)
           for (const item of validItems) {
-            const currentPhysical = item.inventoryItem.physicalQuantity || item.inventoryItem.runningQuantity || 0;
-            const currentReserved = item.inventoryItem.reservedQuantity || 0;
-            const currentAvailable = item.availableQuantity;
+            // ✅ Only create transaction if there's inventory to reserve
+            if (item.reservedQuantity > 0) {
+              const currentPhysical = item.inventoryItem.physicalQuantity || item.inventoryItem.runningQuantity || 0;
+              const currentReserved = item.inventoryItem.reservedQuantity || 0;
+              const currentAvailable = item.availableQuantity;
 
-            const newReservedQuantity = currentReserved + parseInt(item.quantity);
-            const newAvailableQuantity = currentAvailable - parseInt(item.quantity);
+              const newReservedQuantity = currentReserved + item.reservedQuantity;
+              const newAvailableQuantity = currentAvailable - item.reservedQuantity;
 
-            const inventoryTransaction = {
-              背番号: item.背番号,
-              品番: item.品番,
-              timeStamp: new Date(),
-              Date: data.pickupDate,
-              
-              // Two-stage inventory fields
-              physicalQuantity: currentPhysical, // Physical stock unchanged
-              reservedQuantity: newReservedQuantity, // Increase reserved
-              availableQuantity: newAvailableQuantity, // Decrease available
-              
-              // Legacy field for compatibility
-              runningQuantity: newAvailableQuantity,
-              lastQuantity: currentAvailable,
-              
-              action: `Bulk Reservation (+${item.quantity})`,
-              source: `Freya Admin - ${userName}`,
-              requestId: bulkRequestId,
-              bulkRequestNumber: bulkRequestNumber,
-              note: `Reserved ${item.quantity} units for bulk picking request ${bulkRequestNumber}`
-            };
+              const inventoryTransaction = {
+                背番号: item.背番号,
+                品番: item.品番,
+                timeStamp: new Date(),
+                Date: data.pickupDate,
+                
+                // Two-stage inventory fields
+                physicalQuantity: currentPhysical, // Physical stock unchanged
+                reservedQuantity: newReservedQuantity, // Increase reserved
+                availableQuantity: newAvailableQuantity, // Decrease available
+                
+                // Legacy field for compatibility
+                runningQuantity: newAvailableQuantity,
+                lastQuantity: currentAvailable,
+                
+                action: `Bulk Reservation (+${item.reservedQuantity})`,
+                source: `Freya Admin - ${userName}`,
+                requestId: bulkRequestId,
+                bulkRequestNumber: bulkRequestNumber,
+                note: item.shortfallQuantity > 0 
+                  ? `Partial reservation: ${item.reservedQuantity}/${item.quantity} units for ${bulkRequestNumber} (Shortfall: ${item.shortfallQuantity})`
+                  : `Reserved ${item.reservedQuantity} units for bulk picking request ${bulkRequestNumber}`
+              };
 
-            await inventoryCollection.insertOne(inventoryTransaction);
+              await inventoryCollection.insertOne(inventoryTransaction);
+            } else {
+              console.log(`⏳ No inventory available for ${item.背番号} - waiting for inventory`);
+            }
           }
 
           res.json({
@@ -9877,6 +10012,200 @@ app.post("/api/noda-requests", async (req, res) => {
         } catch (error) {
           console.error("Error in deleteRequest:", error);
           res.status(500).json({ error: "Failed to delete request", details: error.message });
+        }
+        break;
+
+      case 'autoCheckInventory':
+        try {
+          console.log('🔍 Starting auto-check inventory process...');
+          
+          // Get user information
+          const userName = req.body.userName || 'System Auto-Check';
+          
+          // Find all requests waiting for inventory or with partial inventory
+          // Sort by createdAt for first-come-first-served priority
+          const requestsNeedingInventory = await requestsCollection.find({
+            $or: [
+              { overallInventoryStatus: 'waiting-for-inventory' },
+              { overallInventoryStatus: 'partial-inventory' }
+            ],
+            status: { $nin: ['completed', 'cancelled'] } // Only active requests
+          }).sort({ createdAt: 1 }).toArray(); // First-come-first-served
+          
+          console.log(`📋 Found ${requestsNeedingInventory.length} requests needing inventory check`);
+          
+          let totalReservations = 0;
+          let updatedRequests = 0;
+          const updateResults = [];
+          
+          // Process each request
+          for (const request of requestsNeedingInventory) {
+            let requestUpdated = false;
+            let requestReservations = 0;
+            
+            // Check each line item with shortfall
+            for (const lineItem of request.lineItems) {
+              if (lineItem.shortfallQuantity > 0) {
+                // Get current inventory availability
+                const inventoryResults = await inventoryCollection.aggregate([
+                  { $match: { 背番号: lineItem.背番号 } },
+                  {
+                    $addFields: {
+                      timeStampDate: {
+                        $cond: {
+                          if: { $type: "$timeStamp" },
+                          then: {
+                            $cond: {
+                              if: { $eq: [{ $type: "$timeStamp" }, "string"] },
+                              then: { $dateFromString: { dateString: "$timeStamp" } },
+                              else: "$timeStamp"
+                            }
+                          },
+                          else: new Date()
+                        }
+                      }
+                    }
+                  },
+                  { $sort: { timeStampDate: -1 } },
+                  { $limit: 1 }
+                ]).toArray();
+                
+                if (inventoryResults.length > 0) {
+                  const currentInventory = inventoryResults[0];
+                  const availableQty = currentInventory.availableQuantity || currentInventory.runningQuantity || 0;
+                  
+                  if (availableQty > 0) {
+                    // Calculate how much we can reserve
+                    const canReserve = Math.min(availableQty, lineItem.shortfallQuantity);
+                    
+                    console.log(`  ✅ ${lineItem.背番号}: Can reserve ${canReserve}/${lineItem.shortfallQuantity} units (Available: ${availableQty})`);
+                    
+                    // Update inventory - reserve the amount
+                    const currentPhysical = currentInventory.physicalQuantity || currentInventory.runningQuantity || 0;
+                    const currentReserved = currentInventory.reservedQuantity || 0;
+                    const newReservedQuantity = currentReserved + canReserve;
+                    const newAvailableQuantity = availableQty - canReserve;
+                    
+                    // Create inventory transaction
+                    const reservationTransaction = {
+                      背番号: lineItem.背番号,
+                      品番: lineItem.品番,
+                      timeStamp: new Date(),
+                      Date: request.pickupDate,
+                      
+                      physicalQuantity: currentPhysical,
+                      reservedQuantity: newReservedQuantity,
+                      availableQuantity: newAvailableQuantity,
+                      
+                      runningQuantity: newAvailableQuantity,
+                      lastQuantity: availableQty,
+                      
+                      action: `Auto-Check Reservation (+${canReserve})`,
+                      source: `Freya Admin - ${userName}`,
+                      requestId: request._id.toString(),
+                      bulkRequestNumber: request.requestNumber,
+                      note: `Auto-reserved ${canReserve} units for ${request.requestNumber} (${lineItem.reservedQuantity + canReserve}/${lineItem.quantity} total)`
+                    };
+                    
+                    await inventoryCollection.insertOne(reservationTransaction);
+                    
+                    // Update line item in request
+                    const newReservedQty = lineItem.reservedQuantity + canReserve;
+                    const newShortfallQty = lineItem.shortfallQuantity - canReserve;
+                    
+                    // Determine new inventory status for line item
+                    let newInventoryStatus;
+                    if (newShortfallQty === 0) {
+                      newInventoryStatus = 'sufficient';
+                    } else if (newReservedQty > 0) {
+                      newInventoryStatus = 'insufficient';
+                    } else {
+                      newInventoryStatus = 'none';
+                    }
+                    
+                    // Update the line item
+                    await requestsCollection.updateOne(
+                      { 
+                        _id: request._id,
+                        'lineItems.lineNumber': lineItem.lineNumber
+                      },
+                      {
+                        $set: {
+                          'lineItems.$.reservedQuantity': newReservedQty,
+                          'lineItems.$.shortfallQuantity': newShortfallQty,
+                          'lineItems.$.inventoryStatus': newInventoryStatus,
+                          'lineItems.$.updatedAt': new Date()
+                        }
+                      }
+                    );
+                    
+                    requestUpdated = true;
+                    requestReservations++;
+                    totalReservations++;
+                  }
+                }
+              }
+            }
+            
+            // If request was updated, recalculate overall inventory status
+            if (requestUpdated) {
+              // Get updated request
+              const updatedRequest = await requestsCollection.findOne({ _id: request._id });
+              
+              // Calculate new overall status
+              const hasNoInventory = updatedRequest.lineItems.every(item => item.inventoryStatus === 'none');
+              const hasPartialInventory = updatedRequest.lineItems.some(item => 
+                item.inventoryStatus === 'insufficient' || item.inventoryStatus === 'none'
+              );
+              
+              let newOverallStatus;
+              let newRequestStatus;
+              if (hasNoInventory) {
+                newOverallStatus = 'waiting-for-inventory';
+                newRequestStatus = 'waiting-for-inventory';
+              } else if (hasPartialInventory) {
+                newOverallStatus = 'partial-inventory';
+                newRequestStatus = 'partial-inventory';
+              } else {
+                newOverallStatus = 'sufficient';
+                newRequestStatus = 'pending';
+              }
+              
+              // Update overall status
+              await requestsCollection.updateOne(
+                { _id: request._id },
+                {
+                  $set: {
+                    overallInventoryStatus: newOverallStatus,
+                    status: newRequestStatus,
+                    updatedAt: new Date()
+                  }
+                }
+              );
+              
+              updatedRequests++;
+              updateResults.push({
+                requestNumber: request.requestNumber,
+                reservations: requestReservations,
+                newStatus: newOverallStatus
+              });
+              
+              console.log(`  📦 Updated ${request.requestNumber}: ${requestReservations} line items reserved, status: ${newOverallStatus}`);
+            }
+          }
+          
+          console.log(`✅ Auto-check complete: ${totalReservations} reservations across ${updatedRequests} requests`);
+          
+          res.json({
+            success: true,
+            totalReservations: totalReservations,
+            updatedRequests: updatedRequests,
+            details: updateResults
+          });
+
+        } catch (error) {
+          console.error("Error in autoCheckInventory:", error);
+          res.status(500).json({ error: "Failed to auto-check inventory", details: error.message });
         }
         break;
 
