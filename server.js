@@ -8618,11 +8618,15 @@ app.post("/api/noda-requests", async (req, res) => {
                       const currentReserved = currentInventory.reservedQuantity || 0;
                       const currentAvailable = currentInventory.availableQuantity || currentInventory.runningQuantity || 0;
 
-                      // Unreserve the quantity
-                      const newReservedQuantity = Math.max(0, currentReserved - lineItem.quantity);
-                      const newAvailableQuantity = currentAvailable + lineItem.quantity;
+                      // ✅ FIXED: Unreserve the FULL requested quantity (not just what was available)
+                      // The lineItem.quantity contains the full requested amount
+                      const unreserveAmount = lineItem.quantity;
+                      const newReservedQuantity = Math.max(0, currentReserved - unreserveAmount);
+                      // Only add back to available what was actually reserved from it
+                      const actualReservedFromAvailable = lineItem.reservedQuantity || Math.min(currentReserved, unreserveAmount);
+                      const newAvailableQuantity = currentAvailable + actualReservedFromAvailable;
 
-                      console.log(`  📤 ${lineItem.背番号}: Unreserving ${lineItem.quantity} units (Reserved: ${currentReserved} → ${newReservedQuantity}, Available: ${currentAvailable} → ${newAvailableQuantity})`);
+                      console.log(`  📤 ${lineItem.背番号}: Unreserving ${unreserveAmount} units (Reserved: ${currentReserved} → ${newReservedQuantity}, Available: ${currentAvailable} → ${newAvailableQuantity})`);
 
                       // Create inventory transaction to unreserve
                       const unreserveTransaction = {
@@ -8632,17 +8636,17 @@ app.post("/api/noda-requests", async (req, res) => {
                         Date: new Date().toISOString().split('T')[0],
                         
                         physicalQuantity: currentPhysical,
-                        reservedQuantity: newReservedQuantity,
-                        availableQuantity: newAvailableQuantity,
+                        reservedQuantity: newReservedQuantity, // Decrease by FULL requested amount
+                        availableQuantity: newAvailableQuantity, // Increase by what was actually taken from available
                         
                         runningQuantity: newAvailableQuantity,
                         lastQuantity: currentAvailable,
                         
-                        action: `Bulk Unreservation (-${lineItem.quantity})`,
+                        action: `Bulk Unreservation (-${unreserveAmount})`,
                         source: `Freya Admin - ${userName}`,
                         requestId: existingRequestId,
                         bulkRequestNumber: existingRequest.requestNumber,
-                        note: `Unreserved ${lineItem.quantity} units - overwriting request ${existingRequest.requestNumber}`
+                        note: `Unreserved ${unreserveAmount} units - overwriting request ${existingRequest.requestNumber}`
                       };
 
                       await inventoryCollection.insertOne(unreserveTransaction);
@@ -8883,42 +8887,43 @@ app.post("/api/noda-requests", async (req, res) => {
 
           // Process inventory transactions for all valid items (including partial reservations)
           for (const item of validItems) {
-            // ✅ Only create transaction if there's inventory to reserve
-            if (item.reservedQuantity > 0) {
-              const currentPhysical = item.inventoryItem.physicalQuantity || item.inventoryItem.runningQuantity || 0;
-              const currentReserved = item.inventoryItem.reservedQuantity || 0;
-              const currentAvailable = item.availableQuantity;
+            const currentPhysical = item.inventoryItem ? (item.inventoryItem.physicalQuantity || item.inventoryItem.runningQuantity || 0) : 0;
+            const currentReserved = item.inventoryItem ? (item.inventoryItem.reservedQuantity || 0) : 0;
+            const currentAvailable = item.availableQuantity;
+            const requestedQuantity = parseInt(item.quantity);
 
-              const newReservedQuantity = currentReserved + item.reservedQuantity;
-              const newAvailableQuantity = currentAvailable - item.reservedQuantity;
+            // ✅ FIXED: reservedQuantity in inventory should be the FULL requested amount, not just what's available
+            const newReservedQuantity = currentReserved + requestedQuantity; // Reserve FULL amount (including shortfall)
+            const newAvailableQuantity = Math.max(0, currentAvailable - item.reservedQuantity); // Only deduct what's actually available
 
-              const inventoryTransaction = {
-                背番号: item.背番号,
-                品番: item.品番,
-                timeStamp: new Date(),
-                Date: data.pickupDate,
-                
-                // Two-stage inventory fields
-                physicalQuantity: currentPhysical, // Physical stock unchanged
-                reservedQuantity: newReservedQuantity, // Increase reserved
-                availableQuantity: newAvailableQuantity, // Decrease available
-                
-                // Legacy field for compatibility
-                runningQuantity: newAvailableQuantity,
-                lastQuantity: currentAvailable,
-                
-                action: `Bulk Reservation (+${item.reservedQuantity})`,
-                source: `Freya Admin - ${userName}`,
-                requestId: bulkRequestId,
-                bulkRequestNumber: bulkRequestNumber,
-                note: item.shortfallQuantity > 0 
-                  ? `Partial reservation: ${item.reservedQuantity}/${item.quantity} units for ${bulkRequestNumber} (Shortfall: ${item.shortfallQuantity})`
-                  : `Reserved ${item.reservedQuantity} units for bulk picking request ${bulkRequestNumber}`
-              };
+            const inventoryTransaction = {
+              背番号: item.背番号,
+              品番: item.品番,
+              timeStamp: new Date(),
+              Date: data.pickupDate,
+              
+              // Two-stage inventory fields
+              physicalQuantity: currentPhysical, // Physical stock unchanged
+              reservedQuantity: newReservedQuantity, // Reserve FULL requested amount (450)
+              availableQuantity: newAvailableQuantity, // Deduct only what's available (300 → 0)
+              
+              // Legacy field for compatibility
+              runningQuantity: newAvailableQuantity,
+              lastQuantity: currentAvailable,
+              
+              action: `Bulk Reservation (+${requestedQuantity})`,
+              source: `Freya Admin - ${userName}`,
+              requestId: bulkRequestId,
+              bulkRequestNumber: bulkRequestNumber,
+              note: item.shortfallQuantity > 0 
+                ? `Partial reservation: ${item.reservedQuantity}/${requestedQuantity} units available for ${bulkRequestNumber} (Shortfall: ${item.shortfallQuantity} - will be fulfilled when inventory arrives)`
+                : `Reserved ${requestedQuantity} units for bulk picking request ${bulkRequestNumber}`
+            };
 
-              await inventoryCollection.insertOne(inventoryTransaction);
-            } else {
-              console.log(`⏳ No inventory available for ${item.背番号} - waiting for inventory`);
+            await inventoryCollection.insertOne(inventoryTransaction);
+            
+            if (item.shortfallQuantity > 0) {
+              console.log(`⏳ ${item.背番号}: Reserved ${item.reservedQuantity} available, waiting for ${item.shortfallQuantity} more units`);
             }
           }
 
@@ -9023,20 +9028,30 @@ app.post("/api/noda-requests", async (req, res) => {
 
               const inventoryItem = inventoryResults[0];
               const availableQuantity = inventoryItem.availableQuantity || inventoryItem.runningQuantity || 0;
+              const requestedQuantity = parseInt(item.quantity);
               
-              if (availableQuantity < parseInt(item.quantity)) {
-                failedItems.push({
-                  背番号: item.背番号,
-                  error: `Insufficient inventory (Available: ${availableQuantity}, Requested: ${item.quantity})`
-                });
-                continue;
+              // ✅ NEW: Calculate partial reservation amounts (same as bulk creation)
+              const reservedQuantity = Math.min(availableQuantity, requestedQuantity);
+              const shortfallQuantity = Math.max(0, requestedQuantity - availableQuantity);
+              
+              // Determine line item inventory status
+              let inventoryStatus;
+              if (availableQuantity === 0) {
+                inventoryStatus = 'none';
+              } else if (availableQuantity < requestedQuantity) {
+                inventoryStatus = 'insufficient';
+              } else {
+                inventoryStatus = 'sufficient';
               }
 
-              // Item is valid
+              // ✅ Item is always valid - we allow requests without full inventory
               validItems.push({
                 ...item,
                 inventoryItem: inventoryItem,
-                availableQuantity: availableQuantity
+                availableQuantity: availableQuantity,
+                reservedQuantity: reservedQuantity,
+                shortfallQuantity: shortfallQuantity,
+                inventoryStatus: inventoryStatus
               });
 
             } catch (error) {
@@ -9065,6 +9080,9 @@ app.post("/api/noda-requests", async (req, res) => {
             品番: item.品番,
             背番号: item.背番号,
             quantity: parseInt(item.quantity),
+            reservedQuantity: item.reservedQuantity, // NEW: Amount actually reserved
+            shortfallQuantity: item.shortfallQuantity, // NEW: Amount still needed
+            inventoryStatus: item.inventoryStatus, // NEW: 'none', 'insufficient', 'sufficient'
             status: 'pending',
             createdAt: new Date(),
             updatedAt: new Date()
@@ -9092,9 +9110,11 @@ app.post("/api/noda-requests", async (req, res) => {
             const currentPhysical = item.inventoryItem.physicalQuantity || item.inventoryItem.runningQuantity || 0;
             const currentReserved = item.inventoryItem.reservedQuantity || 0;
             const currentAvailable = item.availableQuantity;
+            const requestedQuantity = parseInt(item.quantity);
 
-            const newReservedQuantity = currentReserved + parseInt(item.quantity);
-            const newAvailableQuantity = currentAvailable - parseInt(item.quantity);
+            // ✅ FIXED: Reserve FULL requested amount in inventory
+            const newReservedQuantity = currentReserved + requestedQuantity; // Reserve FULL amount (including shortfall)
+            const newAvailableQuantity = Math.max(0, currentAvailable - item.reservedQuantity); // Only deduct what's actually available
 
             const inventoryTransaction = {
               背番号: item.背番号,
@@ -9104,18 +9124,20 @@ app.post("/api/noda-requests", async (req, res) => {
               
               // Two-stage inventory fields
               physicalQuantity: currentPhysical, // Physical stock unchanged
-              reservedQuantity: newReservedQuantity, // Increase reserved
-              availableQuantity: newAvailableQuantity, // Decrease available
+              reservedQuantity: newReservedQuantity, // Reserve FULL requested amount
+              availableQuantity: newAvailableQuantity, // Decrease available by what's actually reserved
               
               // Legacy field for compatibility
               runningQuantity: newAvailableQuantity,
               lastQuantity: currentAvailable,
               
-              action: `Additional Reservation (+${item.quantity})`,
+              action: `Additional Reservation (+${requestedQuantity})`,
               source: `Freya Admin - ${userName}`,
               requestId: requestId,
               bulkRequestNumber: existingRequest.requestNumber,
-              note: `Added ${item.quantity} units to existing bulk picking request ${existingRequest.requestNumber}`
+              note: item.shortfallQuantity > 0
+                ? `Added ${item.reservedQuantity}/${requestedQuantity} units to ${existingRequest.requestNumber} (Shortfall: ${item.shortfallQuantity})`
+                : `Added ${requestedQuantity} units to existing bulk picking request ${existingRequest.requestNumber}`
             };
 
             await inventoryCollection.insertOne(inventoryTransaction);
