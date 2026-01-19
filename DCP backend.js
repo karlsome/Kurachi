@@ -4003,6 +4003,7 @@ function printLabel() {
       const Date2 = document.getElementById('Lot No.').value;
       const 品番収容数 = `${品番},${value}`;
       const SRS = document.getElementById("SRS").value;
+      const 設備名 = document.getElementById("process").value;
       let filename = "";
 
       // Get current time for DateT
@@ -4033,6 +4034,7 @@ function printLabel() {
         `&text_材料=${encodeURIComponent(材料)}` +
         `&text_色=${encodeURIComponent(色)}` +
         `&text_DateT=${encodeURIComponent(WorkDate)}` +
+        `&text_setsubi=${encodeURIComponent(設備名)}` +
         `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
 
       console.log(WorkDate);
@@ -4053,6 +4055,7 @@ function printLabel() {
   const Date2 = document.getElementById('Lot No.').value;
   const 品番収容数 = `${品番},${収容数}`;
   const SRS = document.getElementById("SRS").value;
+  const 設備名 = document.getElementById("process").value;
   let filename = "";
 
   // Get current time for DateT
@@ -4083,6 +4086,7 @@ function printLabel() {
     `&text_材料=${encodeURIComponent(材料)}` +
     `&text_色=${encodeURIComponent(色)}` +
     `&text_DateT=${encodeURIComponent(WorkDate)}` +
+    `&text_setsubi=${encodeURIComponent(設備名)}` +
     `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
 
   console.log(WorkDate);
