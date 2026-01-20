@@ -12322,6 +12322,142 @@ app.post('/api/scna/machine-analytics', async (req, res) => {
     }
 });
 
+// ==================== EQUIPMENT PAGE OPTIMIZED ENDPOINTS ====================
+
+/**
+ * GET /api/equipment/list
+ * Returns unique equipment names grouped by factory
+ * Optimized: Uses aggregation instead of fetching all records
+ */
+app.get('/api/equipment/list', async (req, res) => {
+    try {
+        console.log('🔧 Fetching equipment list (optimized)...');
+        
+        const db = client.db('submittedDB');
+        const collection = db.collection('pressDB');
+        
+        // Use aggregation to get unique equipment-factory combinations efficiently
+        const results = await collection.aggregate([
+            {
+                $match: {
+                    設備: { $exists: true, $ne: null, $ne: '' },
+                    工場: { $exists: true, $ne: null, $ne: '' }
+                }
+            },
+            {
+                $group: {
+                    _id: { equipment: '$設備', factory: '$工場' }
+                }
+            },
+            {
+                $group: {
+                    _id: '$_id.factory',
+                    equipment: { $addToSet: '$_id.equipment' }
+                }
+            },
+            {
+                $project: {
+                    _id: 0,
+                    factory: '$_id',
+                    equipment: 1
+                }
+            },
+            { $sort: { factory: 1 } }
+        ]).toArray();
+        
+        // Transform to object format: { factory: [equipment1, equipment2, ...] }
+        const equipmentByFactory = {};
+        const allEquipment = [];
+        
+        results.forEach(item => {
+            equipmentByFactory[item.factory] = item.equipment.sort();
+            allEquipment.push(...item.equipment);
+        });
+        
+        console.log(`✅ Found ${allEquipment.length} unique equipment across ${results.length} factories`);
+        
+        res.json({
+            success: true,
+            equipmentByFactory: equipmentByFactory,
+            allEquipment: [...new Set(allEquipment)].sort(),
+            factoryCount: results.length
+        });
+        
+    } catch (error) {
+        console.error('❌ Error fetching equipment list:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch equipment list: ' + error.message
+        });
+    }
+});
+
+/**
+ * POST /api/equipment/data
+ * Returns filtered equipment data with server-side aggregation
+ * Optimized: Only fetches needed fields and performs grouping on server
+ */
+app.post('/api/equipment/data', async (req, res) => {
+    try {
+        const { startDate, endDate, equipment } = req.body;
+        
+        console.log('📊 Fetching equipment data (optimized)...');
+        console.log(`   Date range: ${startDate} to ${endDate}`);
+        console.log(`   Equipment count: ${equipment?.length || 'all'}`);
+        
+        const db = client.db('submittedDB');
+        const collection = db.collection('pressDB');
+        
+        // Build match query
+        const matchQuery = {};
+        
+        if (startDate || endDate) {
+            matchQuery.Date = {};
+            if (startDate) matchQuery.Date.$gte = startDate;
+            if (endDate) matchQuery.Date.$lte = endDate;
+        }
+        
+        if (equipment && equipment.length > 0) {
+            matchQuery.設備 = { $in: equipment };
+        }
+        
+        // Fetch data with only needed fields (projection)
+        const results = await collection.find(matchQuery, {
+            projection: {
+                設備: 1,
+                工場: 1,
+                Date: 1,
+                品番: 1,
+                背番号: 1,
+                ショット数: 1,
+                Process_Quantity: 1,
+                Total_NG: 1,
+                Time_start: 1,
+                Time_end: 1,
+                作業者: 1,
+                STATUS: 1
+            }
+        }).toArray();
+        
+        console.log(`✅ Found ${results.length} records`);
+        
+        res.json({
+            success: true,
+            data: results,
+            count: results.length
+        });
+        
+    } catch (error) {
+        console.error('❌ Error fetching equipment data:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch equipment data: ' + error.message
+        });
+    }
+});
+
+// ==================== END EQUIPMENT PAGE ENDPOINTS ====================
+
 // Get unique machine names for filter dropdown
 app.get('/api/scna/machines', async (req, res) => {
     let client;
