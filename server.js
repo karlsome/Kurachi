@@ -8367,12 +8367,179 @@ app.post("/api/noda-requests", async (req, res) => {
             .limit(parseInt(limit))
             .toArray();
 
+          // ===== FIFO INVENTORY CALCULATION =====
+          // Calculate which requests can actually be picked based on physical inventory
+          // Priority: oldest requests first (by createdAt)
+          
+          // Step 1: Get ALL active requests sorted by createdAt (for FIFO calculation)
+          const allActiveRequests = await requestsCollection
+            .find({ status: { $nin: ['completed', 'cancelled'] } })
+            .sort({ createdAt: 1 }) // Oldest first
+            .toArray();
+          
+          // Step 2: Get current PHYSICAL inventory for all unique 背番号
+          const allBackNumbers = [...new Set(allActiveRequests.flatMap(r => 
+            r.lineItems ? r.lineItems.map(li => li.背番号) : [r.背番号]
+          ).filter(Boolean))];
+          
+          // Get latest inventory record for each 背番号
+          const inventoryMap = new Map();
+          for (const backNumber of allBackNumbers) {
+            const inventoryResults = await inventoryCollection.aggregate([
+              { $match: { 背番号: backNumber } },
+              {
+                $addFields: {
+                  timeStampDate: {
+                    $cond: {
+                      if: { $type: "$timeStamp" },
+                      then: {
+                        $cond: {
+                          if: { $eq: [{ $type: "$timeStamp" }, "string"] },
+                          then: { $dateFromString: { dateString: "$timeStamp" } },
+                          else: "$timeStamp"
+                        }
+                      },
+                      else: new Date()
+                    }
+                  }
+                }
+              },
+              { $sort: { timeStampDate: -1 } },
+              { $limit: 1 }
+            ]).toArray();
+            
+            if (inventoryResults.length > 0) {
+              const inv = inventoryResults[0];
+              inventoryMap.set(backNumber, {
+                physicalQuantity: inv.physicalQuantity || inv.runningQuantity || 0,
+                reservedQuantity: inv.reservedQuantity || 0,
+                availableQuantity: inv.availableQuantity || inv.runningQuantity || 0
+              });
+            } else {
+              inventoryMap.set(backNumber, { physicalQuantity: 0, reservedQuantity: 0, availableQuantity: 0 });
+            }
+          }
+          
+          // Step 3: Calculate FIFO allocation for each request
+          // Track remaining physical inventory per 背番号 as we allocate
+          const remainingPhysical = new Map();
+          for (const [backNumber, inv] of inventoryMap) {
+            remainingPhysical.set(backNumber, inv.physicalQuantity);
+          }
+          
+          // Calculate pickable quantities for each request in FIFO order
+          const fifoAllocation = new Map(); // requestId -> { canPick, totalNeeded, shortfall, lineItemStatus }
+          
+          for (const request of allActiveRequests) {
+            const requestId = request._id.toString();
+            const lineItems = request.lineItems || [{ 背番号: request.背番号, quantity: request.quantity, status: 'pending' }];
+            
+            let totalCanPick = 0;
+            let totalNeeded = 0;
+            let lineItemStatuses = [];
+            
+            for (const lineItem of lineItems) {
+              const backNumber = lineItem.背番号;
+              const lineStatus = lineItem.status || 'pending';
+              
+              // ✅ FIX: Skip completed/cancelled line items - they don't need physical inventory
+              if (lineStatus === 'completed' || lineStatus === 'cancelled') {
+                lineItemStatuses.push({
+                  背番号: backNumber,
+                  lineNumber: lineItem.lineNumber,
+                  needed: 0,
+                  canPick: 0,
+                  shortfall: 0,
+                  fifoStatus: 'completed' // Mark as completed
+                });
+                continue;
+              }
+              
+              // For pending/in-progress items, use the full quantity
+              const needed = lineItem.quantity || 0;
+              const remaining = remainingPhysical.get(backNumber) || 0;
+              const canPick = Math.min(remaining, needed);
+              
+              totalCanPick += canPick;
+              totalNeeded += needed;
+              
+              // Deduct from remaining physical for next requests
+              remainingPhysical.set(backNumber, Math.max(0, remaining - canPick));
+              
+              lineItemStatuses.push({
+                背番号: backNumber,
+                lineNumber: lineItem.lineNumber,
+                needed: needed,
+                canPick: canPick,
+                shortfall: needed - canPick,
+                fifoStatus: canPick === 0 ? 'waiting' : canPick < needed ? 'partial' : 'sufficient'
+              });
+            }
+            
+            // Determine overall FIFO status for this request
+            let fifoStatus;
+            if (totalNeeded === 0) {
+              // All line items are completed
+              fifoStatus = 'completed';
+            } else if (totalCanPick === 0) {
+              fifoStatus = 'waiting-for-inventory';
+            } else if (totalCanPick < totalNeeded) {
+              fifoStatus = 'partial-inventory';
+            } else {
+              fifoStatus = 'sufficient';
+            }
+            
+            fifoAllocation.set(requestId, {
+              fifoStatus: fifoStatus,
+              totalCanPick: totalCanPick,
+              totalNeeded: totalNeeded,
+              shortfall: totalNeeded - totalCanPick,
+              lineItemStatuses: lineItemStatuses
+            });
+          }
+          
+          // Step 4: Enrich the paginated requests with FIFO allocation data
+          const enrichedRequests = requests.map(request => {
+            const requestId = request._id.toString();
+            
+            // ✅ FIX: Completed/cancelled requests don't need FIFO calculation
+            // They're already done - no inventory allocation needed
+            if (request.status === 'completed' || request.status === 'cancelled') {
+              return {
+                ...request,
+                fifoAllocation: {
+                  fifoStatus: 'completed', // Special status for completed
+                  totalCanPick: 0,
+                  totalNeeded: 0,
+                  shortfall: 0,
+                  lineItemStatuses: []
+                },
+                dynamicInventoryStatus: 'completed' // Don't show inventory warnings
+              };
+            }
+            
+            const fifoData = fifoAllocation.get(requestId) || {
+              fifoStatus: request.overallInventoryStatus || 'unknown',
+              totalCanPick: 0,
+              totalNeeded: 0,
+              shortfall: 0,
+              lineItemStatuses: []
+            };
+            
+            return {
+              ...request,
+              fifoAllocation: fifoData,
+              // Add a computed field for display
+              dynamicInventoryStatus: fifoData.fifoStatus
+            };
+          });
+
           // Calculate statistics
           const statistics = await calculateNodaStatistics(requestsCollection, query);
 
           res.json({
             success: true,
-            data: requests,
+            data: enrichedRequests,
             statistics: statistics,
             pagination: {
               currentPage: page,
