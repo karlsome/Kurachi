@@ -8382,11 +8382,12 @@ app.post("/api/noda-requests", async (req, res) => {
             r.lineItems ? r.lineItems.map(li => li.背番号) : [r.背番号]
           ).filter(Boolean))];
           
-          // Get latest inventory record for each 背番号
+          // ✅ OPTIMIZED: Single batch query for ALL inventory records instead of N separate queries
           const inventoryMap = new Map();
-          for (const backNumber of allBackNumbers) {
-            const inventoryResults = await inventoryCollection.aggregate([
-              { $match: { 背番号: backNumber } },
+          
+          if (allBackNumbers.length > 0) {
+            const batchInventoryResults = await inventoryCollection.aggregate([
+              { $match: { 背番号: { $in: allBackNumbers } } },
               {
                 $addFields: {
                   timeStampDate: {
@@ -8405,18 +8406,30 @@ app.post("/api/noda-requests", async (req, res) => {
                 }
               },
               { $sort: { timeStampDate: -1 } },
-              { $limit: 1 }
+              // Group by 背番号 and take the latest record for each
+              {
+                $group: {
+                  _id: "$背番号",
+                  latestRecord: { $first: "$$ROOT" }
+                }
+              }
             ]).toArray();
             
-            if (inventoryResults.length > 0) {
-              const inv = inventoryResults[0];
-              inventoryMap.set(backNumber, {
+            // Build inventory map from batch results
+            for (const result of batchInventoryResults) {
+              const inv = result.latestRecord;
+              inventoryMap.set(result._id, {
                 physicalQuantity: inv.physicalQuantity || inv.runningQuantity || 0,
                 reservedQuantity: inv.reservedQuantity || 0,
                 availableQuantity: inv.availableQuantity || inv.runningQuantity || 0
               });
-            } else {
-              inventoryMap.set(backNumber, { physicalQuantity: 0, reservedQuantity: 0, availableQuantity: 0 });
+            }
+            
+            // Set default for any back numbers not found in inventory
+            for (const backNumber of allBackNumbers) {
+              if (!inventoryMap.has(backNumber)) {
+                inventoryMap.set(backNumber, { physicalQuantity: 0, reservedQuantity: 0, availableQuantity: 0 });
+              }
             }
           }
           
