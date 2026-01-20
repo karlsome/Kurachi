@@ -12458,6 +12458,223 @@ app.post('/api/equipment/data', async (req, res) => {
 
 // ==================== END EQUIPMENT PAGE ENDPOINTS ====================
 
+// ==================== FACTORY OVERVIEW OPTIMIZED ENDPOINTS ====================
+
+/**
+ * GET /api/factory-overview/stats
+ * Returns production stats (total, totalNG, defectRate) for ALL factories in ONE query
+ * Optimized: Single aggregation instead of 8 separate queries
+ */
+app.get('/api/factory-overview/stats', async (req, res) => {
+    try {
+        const date = req.query.date || new Date().toISOString().split('T')[0];
+        
+        console.log(`🏭 Fetching factory overview stats for date: ${date}`);
+        
+        const db = client.db('submittedDB');
+        const collection = db.collection('kensaDB');
+        
+        // Single aggregation to get stats for ALL factories
+        const results = await collection.aggregate([
+            {
+                $match: { Date: date }
+            },
+            {
+                $group: {
+                    _id: '$工場',
+                    total: { $sum: { $ifNull: ['$Process_Quantity', 0] } },
+                    totalNG: { $sum: { $ifNull: ['$Total_NG', 0] } },
+                    recordCount: { $sum: 1 }
+                }
+            },
+            {
+                $project: {
+                    _id: 0,
+                    factory: '$_id',
+                    total: 1,
+                    totalNG: 1,
+                    recordCount: 1,
+                    defectRate: {
+                        $cond: {
+                            if: { $gt: ['$total', 0] },
+                            then: { $round: [{ $multiply: [{ $divide: ['$totalNG', '$total'] }, 100] }, 2] },
+                            else: 0
+                        }
+                    }
+                }
+            },
+            { $sort: { factory: 1 } }
+        ]).toArray();
+        
+        // Convert to object keyed by factory name for easy lookup
+        const factoryStats = {};
+        results.forEach(item => {
+            if (item.factory) {
+                factoryStats[item.factory] = {
+                    total: item.total,
+                    totalNG: item.totalNG,
+                    defectRate: item.defectRate,
+                    recordCount: item.recordCount
+                };
+            }
+        });
+        
+        console.log(`✅ Factory stats loaded for ${Object.keys(factoryStats).length} factories`);
+        
+        res.json({
+            success: true,
+            date: date,
+            data: factoryStats
+        });
+        
+    } catch (error) {
+        console.error('❌ Error fetching factory overview stats:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch factory stats: ' + error.message
+        });
+    }
+});
+
+/**
+ * GET /api/factory-overview/sensors
+ * Returns sensor data for ALL factories in ONE query
+ * Optimized: Single query instead of 8+ separate queries
+ */
+app.get('/api/factory-overview/sensors', async (req, res) => {
+    try {
+        const date = req.query.date || new Date().toISOString().split('T')[0];
+        
+        console.log(`🌡️ Fetching sensor data for all factories on date: ${date}`);
+        
+        const db = client.db('submittedDB');
+        const collection = db.collection('tempHumidityDB');
+        
+        // Get latest sensor readings for each device, grouped by factory
+        const results = await collection.aggregate([
+            {
+                $match: { Date: date }
+            },
+            {
+                $addFields: {
+                    temperatureNum: {
+                        $toDouble: {
+                            $trim: {
+                                input: { $replaceAll: { input: { $ifNull: ['$Temperature', '0'] }, find: '°C', replacement: '' } }
+                            }
+                        }
+                    },
+                    humidityNum: {
+                        $toDouble: {
+                            $trim: {
+                                input: { $replaceAll: { input: { $ifNull: ['$Humidity', '0'] }, find: '%', replacement: '' } }
+                            }
+                        }
+                    }
+                }
+            },
+            {
+                $sort: { Date: -1, Time: -1 }
+            },
+            {
+                $group: {
+                    _id: { factory: '$工場', device: '$device' },
+                    latestReading: { $first: '$$ROOT' }
+                }
+            },
+            {
+                $group: {
+                    _id: '$_id.factory',
+                    sensors: { $push: '$latestReading' },
+                    highestTemp: { $max: '$latestReading.temperatureNum' },
+                    avgTemp: { $avg: '$latestReading.temperatureNum' },
+                    avgHumidity: { $avg: '$latestReading.humidityNum' },
+                    sensorCount: { $sum: 1 }
+                }
+            },
+            {
+                $project: {
+                    _id: 0,
+                    factory: '$_id',
+                    highestTemp: { $round: ['$highestTemp', 2] },
+                    avgTemp: { $round: ['$avgTemp', 2] },
+                    avgHumidity: { $round: ['$avgHumidity', 1] },
+                    sensorCount: 1,
+                    hasData: { $gt: ['$sensorCount', 0] }
+                }
+            }
+        ]).toArray();
+        
+        // Convert to object keyed by factory
+        const sensorData = {};
+        results.forEach(item => {
+            if (item.factory) {
+                // Calculate WBGT (simplified formula)
+                let wbgt = null;
+                if (item.highestTemp !== null && item.avgHumidity !== null) {
+                    // Simplified indoor WBGT formula
+                    wbgt = Math.round((0.7 * item.highestTemp + 0.3 * (item.avgHumidity / 100 * item.highestTemp)) * 10) / 10;
+                }
+                
+                sensorData[item.factory] = {
+                    highestTemp: item.highestTemp,
+                    avgTemp: item.avgTemp,
+                    avgHumidity: item.avgHumidity,
+                    wbgt: wbgt,
+                    sensorCount: item.sensorCount,
+                    hasData: item.hasData
+                };
+            }
+        });
+        
+        // Also check which factories have ANY historical data (last 30 days)
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        const startDateStr = thirtyDaysAgo.toISOString().split('T')[0];
+        
+        const historicalCheck = await collection.aggregate([
+            {
+                $match: {
+                    Date: { $gte: startDateStr }
+                }
+            },
+            {
+                $group: {
+                    _id: '$工場',
+                    hasHistory: { $sum: 1 }
+                }
+            }
+        ]).toArray();
+        
+        const factoriesWithHistory = new Set(
+            historicalCheck.filter(h => h.hasHistory > 0).map(h => h._id)
+        );
+        
+        // Add hasHistory flag to each factory
+        Object.keys(sensorData).forEach(factory => {
+            sensorData[factory].hasHistory = factoriesWithHistory.has(factory);
+        });
+        
+        console.log(`✅ Sensor data loaded for ${Object.keys(sensorData).length} factories`);
+        
+        res.json({
+            success: true,
+            date: date,
+            data: sensorData,
+            factoriesWithHistory: Array.from(factoriesWithHistory)
+        });
+        
+    } catch (error) {
+        console.error('❌ Error fetching sensor data:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch sensor data: ' + error.message
+        });
+    }
+});
+
+// ==================== END FACTORY OVERVIEW ENDPOINTS ====================
+
 // Get unique machine names for filter dropdown
 app.get('/api/scna/machines', async (req, res) => {
     let client;
