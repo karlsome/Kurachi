@@ -10622,22 +10622,26 @@ async function calculateNodaStatistics(collection, baseQuery = {}) {
     ]).toArray();
 
     const statistics = {
+      all: 0,
       pending: 0,
-      active: 0,
-      complete: 0,
-      failed: 0
+      'in-progress': 0,
+      completed: 0,
+      'partial-inventory': 0,
+      cancelled: 0
     };
 
     stats.forEach(stat => {
-      if (statistics.hasOwnProperty(stat._id)) {
+      if (stat._id && statistics.hasOwnProperty(stat._id)) {
         statistics[stat._id] = stat.count;
       }
+      // Count all requests
+      statistics.all += stat.count;
     });
 
     return statistics;
   } catch (error) {
     console.error("Error calculating NODA statistics:", error);
-    return { pending: 0, active: 0, complete: 0, failed: 0 };
+    return { all: 0, pending: 0, 'in-progress': 0, completed: 0, 'partial-inventory': 0, cancelled: 0 };
   }
 }
 
