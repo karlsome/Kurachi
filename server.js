@@ -8547,8 +8547,11 @@ app.post("/api/noda-requests", async (req, res) => {
             };
           });
 
-          // Calculate statistics
-          const statistics = await calculateNodaStatistics(requestsCollection, query);
+          // Calculate statistics - use base query WITHOUT status filter
+          // so card counts always show totals, not filtered counts
+          const statsQuery = { ...query };
+          delete statsQuery.status; // Remove status filter for statistics
+          const statistics = await calculateNodaStatistics(requestsCollection, statsQuery);
 
           res.json({
             success: true,
