@@ -230,15 +230,15 @@ async function loadInProgressData() {
                 collectionName: 'tabletLogDB',
                 query: {
                     工場: factoryId,
-                    Date: currentDate,
-                    Status: 'in-progress'
+                    Date: currentDate
+                    // Don't filter by Status here - we need all records to determine active sessions
                 }
             })
         });
         
         const records = await response.json();
         
-        // Get latest in-progress record per equipment
+        // Process records to get active in-progress sessions per equipment
         inProgressData = processInProgressData(records);
         
         console.log('✅ In-progress data loaded:', inProgressData);
@@ -249,22 +249,89 @@ async function loadInProgressData() {
     }
 }
 
-// Process in-progress data to get latest per equipment
+// Process in-progress data - group by equipment and sessionID, then filter for active sessions
 function processInProgressData(records) {
-    const latest = {};
+    if (!records || records.length === 0) return {};
+    
+    // Group by equipment and sessionID
+    const sessionData = {};
     
     records.forEach(record => {
-        const equipment = record.設備;
-        if (!equipment) return;
+        const equipment = record['設備'];
+        const sessionID = record['sessionID'];
+        const status = record['Status'];
+        const timestamp = record['Timestamp'];
+        const seiban = record['背番号'];
         
-        // Keep equipment name exactly as-is (including commas)
-        // Keep only the latest record per equipment
-        if (!latest[equipment] || new Date(record.Timestamp) > new Date(latest[equipment].Timestamp)) {
-            latest[equipment] = record;
+        if (!equipment || !sessionID || !timestamp) return;
+        
+        if (!sessionData[equipment]) {
+            sessionData[equipment] = {};
+        }
+        
+        if (!sessionData[equipment][sessionID]) {
+            sessionData[equipment][sessionID] = {
+                背番号: seiban,
+                品番: record['品番'],
+                firstTimestamp: timestamp,
+                lastTimestamp: timestamp,
+                lastStatus: status
+            };
+        } else {
+            // Update if this is a more recent record
+            const existingLast = new Date(sessionData[equipment][sessionID].lastTimestamp);
+            const currentTime = new Date(timestamp);
+            
+            if (currentTime > existingLast) {
+                sessionData[equipment][sessionID].lastTimestamp = timestamp;
+                sessionData[equipment][sessionID].lastStatus = status;
+            }
+            
+            // Update first timestamp if earlier
+            const existingFirst = new Date(sessionData[equipment][sessionID].firstTimestamp);
+            if (currentTime < existingFirst) {
+                sessionData[equipment][sessionID].firstTimestamp = timestamp;
+            }
         }
     });
     
-    return latest;
+    // For each equipment, return only active sessions (not Completed or Reset)
+    const activeData = {};
+    
+    for (const equipment in sessionData) {
+        for (const sessionID in sessionData[equipment]) {
+            const session = sessionData[equipment][sessionID];
+            
+            // Skip if session is completed or reset
+            if (session.lastStatus === 'Completed' || session.lastStatus === 'Reset') {
+                continue;
+            }
+            
+            // Keep the first active session for this equipment (or most recent if multiple)
+            if (!activeData[equipment]) {
+                activeData[equipment] = {
+                    背番号: session['背番号'],
+                    品番: session['品番'],
+                    sessionID: sessionID,
+                    Timestamp: session.lastTimestamp
+                };
+            } else {
+                // If multiple active sessions, keep the most recent one
+                const existingTime = new Date(activeData[equipment].Timestamp);
+                const currentTime = new Date(session.lastTimestamp);
+                if (currentTime > existingTime) {
+                    activeData[equipment] = {
+                        背番号: session['背番号'],
+                        品番: session['品番'],
+                        sessionID: sessionID,
+                        Timestamp: session.lastTimestamp
+                    };
+                }
+            }
+        }
+    }
+    
+    return activeData;
 }
 
 // ============================================
@@ -390,7 +457,7 @@ function renderEquipmentCard(equipment) {
             <div class="equipment-card idle">
                 <div class="equipment-name">
                     ${equipment}
-                    ${isInProgress ? `<span class="in-progress-badge">🔄 ${inProgressSebanggo || ''}</span>` : ''}
+                    ${isInProgress ? `<span class="in-progress-badge">${inProgressSebanggo || ''}</span>` : ''}
                 </div>
                 
                 <div class="sebanggo-display">
@@ -411,7 +478,7 @@ function renderEquipmentCard(equipment) {
                 </div>
                 
                 <div class="time-status idle">
-                    <span class="time-icon">💤</span>
+                    <span class="time-icon"></span>
                     <div class="time-message">生産予定なし</div>
                 </div>
             </div>
@@ -420,6 +487,9 @@ function renderEquipmentCard(equipment) {
     
     const sebanggo = plannedProduct.背番号;
     const goalQuantity = plannedProduct.quantity || 0;
+    
+    // Prioritize in-progress sebanggo over planned sebanggo
+    const displaySebanggo = isInProgress && inProgressSebanggo ? inProgressSebanggo : sebanggo;
     
     console.log(`📊 Equipment ${equipment}: Goal=${goalQuantity}, Actual=${actualQuantity}, HasData=${!!actual}`);
     
@@ -440,11 +510,11 @@ function renderEquipmentCard(equipment) {
         <div class="${cardClass}">
             <div class="equipment-name">
                 ${equipment}
-                ${isInProgress ? `<span class="in-progress-badge">🔄 ${inProgressSebanggo || ''}</span>` : ''}
+                ${isInProgress ? `<span class="in-progress-badge">${inProgressSebanggo || ''}</span>` : ''}
             </div>
             
             <div class="sebanggo-display">
-                ${sebanggo}
+                ${displaySebanggo}
             </div>
             
             <div class="progress-section">
@@ -495,7 +565,7 @@ function calculateTimeStatus(product, actualQuantity) {
     if (currentMinutes < startMinutes) {
         return {
             status: 'idle',
-            icon: '⏳',
+            icon: '',
             message: `開始予定: ${startTime}`
         };
     }
@@ -523,21 +593,21 @@ function calculateTimeStatus(product, actualQuantity) {
         // Ahead of schedule
         return {
             status: 'ahead',
-            icon: '🚀',
+            icon: '',
             message: `予定より ${timeDiffMinutes}分 早い`
         };
     } else if (difference < 0) {
         // Behind schedule
         return {
             status: 'behind',
-            icon: '⚠️',
+            icon: '',
             message: `予定より ${timeDiffMinutes}分 遅れ`
         };
     } else {
         // On track
         return {
             status: 'on-track',
-            icon: '✓',
+            icon: '',
             message: '予定通り'
         };
     }
