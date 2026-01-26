@@ -3528,7 +3528,7 @@ async function printLabel() {
 
   // Function to determine filename based on 背番号 and SRS
   function getFilename(currentSebanggo, currentSRS) {
-    const amPattern = /^AM0[1-9]$/; // Matches AM01 to AM09
+    const amPattern = /^AM(0[1-9]|[12][0-9]|3[0-6])$/; // Matches AM01 to AM36
     if (amPattern.test(currentSebanggo)) {
       return "2TN5.lbx";
     } else if (currentSRS === "有り") {
