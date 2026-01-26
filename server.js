@@ -36,6 +36,9 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 // Store connected clients for each machine
 const machineConnections = new Map();
 
+// Store connected clients for each factory (for production TV)
+const factoryConnections = new Map();
+
 // Helper function to send SSE message to specific machine clients
 function broadcastToMachine(machineId, data) {
   const clients = machineConnections.get(machineId) || [];
@@ -50,6 +53,22 @@ function broadcastToMachine(machineId, data) {
   });
   
   console.log(`📡 Broadcasted to ${clients.length} client(s) on ${machineId}:`, data);
+}
+
+// Helper function to send SSE message to all factory TV clients
+function broadcastToFactory(factoryId, data) {
+  const clients = factoryConnections.get(factoryId) || [];
+  const message = `data: ${JSON.stringify(data)}\n\n`;
+  
+  clients.forEach(client => {
+    try {
+      client.write(message);
+    } catch (error) {
+      console.error(`Error sending to client for factory ${factoryId}:`, error);
+    }
+  });
+  
+  console.log(`📡 Broadcasted to ${clients.length} factory TV client(s) on ${factoryId}:`, data);
 }
 
 const uri = process.env.MONGODB_URI;
@@ -100,15 +119,44 @@ app.get("/sse/machine/:machineId", (req, res) => {
   req.on('close', () => {
     const clients = machineConnections.get(machineId) || [];
     const index = clients.indexOf(res);
+    if (index > -1) {
+      clients.splice(index, 1);
+    }
+    console.log(`❌ SSE client disconnected from ${machineId}. Remaining: ${clients.length}`);
+  });
+});
+
+// SSE endpoint for factory TV - monitors all equipment in a factory
+app.get("/sse/factory/:factoryId", (req, res) => {
+  const factoryId = req.params.factoryId;
+  
+  console.log(`🏭 New factory TV connection request for: ${factoryId}`);
+  
+  // Set SSE headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  
+  // Add this client to factory connections
+  if (!factoryConnections.has(factoryId)) {
+    factoryConnections.set(factoryId, []);
+  }
+  factoryConnections.get(factoryId).push(res);
+  
+  console.log(`✅ New factory TV connected to ${factoryId}. Total TVs: ${factoryConnections.get(factoryId).length}`);
+  
+  // Send initial connection message
+  res.write(`data: ${JSON.stringify({ type: 'connected', factoryId, timestamp: new Date().toISOString() })}\n\n`);
+  
+  // Handle client disconnect
+  req.on('close', () => {
+    const clients = factoryConnections.get(factoryId) || [];
+    const index = clients.indexOf(res);
     if (index !== -1) {
       clients.splice(index, 1);
     }
-    
-    if (clients.length === 0) {
-      machineConnections.delete(machineId);
-    }
-    
-    console.log(`❌ SSE client disconnected from ${machineId}. Remaining clients: ${clients.length}`);
+    console.log(`❌ Factory TV disconnected from ${factoryId}. Remaining: ${clients.length}`);
   });
 });
 
@@ -293,6 +341,21 @@ app.post("/api/tablet-log", async (req, res) => {
     const result = await tabletLogDB.insertOne(logEntry);
     
     console.log(`📝 Tablet log inserted: ${背番号} - ${Action} (Session: ${sessionID})`);
+    
+    // Broadcast to factory TV via SSE for in-progress updates
+    if (工場) {
+      broadcastToFactory(工場, {
+        type: 'in_progress_update',
+        collection: 'tabletLogDB',
+        equipment: 設備,
+        sebanggo: 背番号,
+        hinban: 品番,
+        action: Action,
+        status: Status,
+        sessionID: sessionID,
+        timestamp: currentDate.toISOString()
+      });
+    }
     
     res.json({
       success: true,
@@ -869,6 +932,19 @@ app.post("/submitTopressDBiReporter", async (req, res) => {
 
     console.log(`✅ Successfully saved Press Cutting record with ID: ${result.insertedId}`);
 
+    // === PHASE 6: Broadcast to factory TV via SSE ===
+    if (formData.工場) {
+      broadcastToFactory(formData.工場, {
+        type: 'production_update',
+        collection: 'pressDB',
+        equipment: formData.設備,
+        sebanggo: formData.背番号,
+        hinban: formData.品番,
+        quantity: formData.Total,
+        timestamp: new Date().toISOString()
+      });
+    }
+
     res.status(201).json({
       message: "Data and images successfully saved to pressDB",
       insertedId: result.insertedId,
@@ -1260,6 +1336,19 @@ app.post('/submitToDCP', async (req, res) => {
         
         const pressResult = await pressDB.insertOne(pressDBData);
         console.log(`✅ Data saved to pressDB with ID: ${pressResult.insertedId}`);
+
+        // Broadcast to factory TV via SSE
+        if (pressDBData.工場) {
+          broadcastToFactory(pressDBData.工場, {
+            type: 'production_update',
+            collection: 'pressDB',
+            equipment: pressDBData.設備,
+            sebanggo: pressDBData.背番号,
+            hinban: pressDBData.品番,
+            quantity: pressDBData.Total,
+            timestamp: new Date().toISOString()
+          });
+        }
 
         let kensaResult = null;
         
