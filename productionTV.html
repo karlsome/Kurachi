@@ -51,6 +51,51 @@
             font-weight: 500;
         }
 
+        .goal-actual-display {
+            display: flex;
+            align-items: center;
+            gap: 1.5vw;
+            padding: 0.5vh 1vw;
+            background: linear-gradient(135deg, #667eea15 0%, #764ba215 100%);
+            border-radius: 8px;
+            border: 2px solid #667eea40;
+        }
+
+        .goal-actual-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.2vh;
+        }
+
+        .goal-actual-label {
+            font-size: clamp(0.6rem, 1vh, 0.75rem);
+            color: #666;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .goal-actual-value {
+            font-size: clamp(1rem, 2vh, 1.5rem);
+            font-weight: 700;
+            line-height: 1;
+        }
+
+        .goal-actual-value.goal {
+            color: #667eea;
+        }
+
+        .goal-actual-value.actual {
+            color: #10b981;
+        }
+
+        .goal-actual-separator {
+            font-size: clamp(1rem, 2vh, 1.5rem);
+            color: #999;
+            font-weight: 300;
+        }
+
         .connection-status {
             display: flex;
             align-items: center;
@@ -355,6 +400,17 @@
         <div>
             <div class="factory-name" id="factoryDisplay">Loading...</div>
             <div class="date-display" id="dateDisplay">-</div>
+        </div>
+        <div class="goal-actual-display" id="goalActualDisplay">
+            <div class="goal-actual-item">
+                <div class="goal-actual-label">Goal / 目標</div>
+                <div class="goal-actual-value goal" id="totalGoal">-</div>
+            </div>
+            <div class="goal-actual-separator">/</div>
+            <div class="goal-actual-item">
+                <div class="goal-actual-label">Actual / 実績</div>
+                <div class="goal-actual-value actual" id="totalActual">-</div>
+            </div>
         </div>
         <div class="connection-status">
             <span class="status-dot" id="statusDot"></span>

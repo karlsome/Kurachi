@@ -23,6 +23,8 @@ const statusText = document.getElementById('statusText');
 const mainContent = document.getElementById('mainContent');
 const loadingIndicator = document.getElementById('loadingIndicator');
 const refreshTime = document.getElementById('refreshTime');
+const totalGoalElement = document.getElementById('totalGoal');
+const totalActualElement = document.getElementById('totalActual');
 
 // ============================================
 // INITIALIZATION
@@ -423,6 +425,7 @@ function renderEquipmentGrid() {
                 </div>
             </div>
         `;
+        updateGoalActualDisplay();
         return;
     }
     
@@ -436,6 +439,9 @@ function renderEquipmentGrid() {
     html += '</div>';
     
     mainContent.innerHTML = html;
+    
+    // Update goal vs actual in header
+    updateGoalActualDisplay();
 }
 
 function renderEquipmentCard(equipment) {
@@ -635,6 +641,32 @@ function updateRefreshTime() {
         second: '2-digit'
     });
     refreshTime.textContent = `最終更新: ${timeStr}`;
+}
+
+function updateGoalActualDisplay() {
+    // Calculate total goal from production plan
+    let totalGoal = 0;
+    if (productionPlan && productionPlan.products) {
+        totalGoal = productionPlan.products.reduce((sum, product) => {
+            return sum + (product.quantity || 0);
+        }, 0);
+    }
+    
+    // Calculate total actual from actual production (sum of all equipment)
+    let totalActual = 0;
+    for (const equipment in actualProduction) {
+        totalActual += actualProduction[equipment].totalQuantity || 0;
+    }
+    
+    // Update display
+    if (totalGoalElement) {
+        totalGoalElement.textContent = totalGoal > 0 ? totalGoal.toLocaleString() : '-';
+    }
+    if (totalActualElement) {
+        totalActualElement.textContent = totalActual > 0 ? totalActual.toLocaleString() : '-';
+    }
+    
+    console.log(`📊 Total Goal: ${totalGoal}, Total Actual: ${totalActual}`);
 }
 
 function showError(message) {
