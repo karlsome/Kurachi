@@ -608,6 +608,56 @@ app.get("/getSetsubiList", async (req, res) => {
   }
 });
 
+// Get actual production totals by equipment for production TV
+app.get("/getActualProductionByEquipment", async (req, res) => {
+  try {
+    await client.connect();
+    const database = client.db("submittedDB");
+    const collection = database.collection("pressDB");
+
+    const factory = req.query.factory;
+    const date = req.query.date; // yyyy-mm-dd format
+    
+    if (!factory || !date) {
+      return res.status(400).json({ error: "Factory and date parameters are required" });
+    }
+    
+    const query = { 
+      工場: factory,
+      Date: date
+    };
+
+    console.log(`📊 Fetching actual production for factory: ${factory}, date: ${date}`);
+
+    // Use aggregation pipeline to sum Total by equipment
+    const result = await collection.aggregate([
+      { $match: query },
+      { $group: { 
+          _id: "$設備",
+          totalQuantity: { $sum: "$Total" },
+          recordCount: { $sum: 1 }
+        } 
+      },
+      { $sort: { _id: 1 } },
+      { $project: { 
+          設備: "$_id", 
+          totalQuantity: 1,
+          recordCount: 1,
+          _id: 0 
+        } 
+      }
+    ]).toArray();
+    
+    console.log(`✅ Found production data for ${result.length} equipment:`, result);
+    
+    res.json(result);
+  } catch (error) {
+    console.error("❌ Error retrieving actual production:", error);
+    console.error("Error details:", error.message);
+    res.status(500).json({ error: "Error retrieving production data", details: error.message });
+  }
+});
+
 //get sebanggo from mongoDB
 app.get("/getSetsubiByProcess", async (req, res) => {
   try {

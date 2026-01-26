@@ -99,7 +99,7 @@ async function loadEquipmentList() {
         
         const data = await response.json();
         
-        // Get unique equipment values
+        // Get unique equipment values (keep comma-separated names intact)
         const equipmentSet = new Set();
         data.forEach(item => {
             if (item.設備) {
@@ -184,60 +184,41 @@ async function loadProductionPlan() {
 // Load actual production from pressDB
 async function loadActualProduction() {
     try {
-        const response = await fetch(`${SERVER_URL}/queries`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                dbName: 'submittedDB',
-                collectionName: 'pressDB',
-                query: {
-                    工場: factoryId,
-                    Date: currentDate
-                }
-            })
-        });
+        const response = await fetch(`${SERVER_URL}/getActualProductionByEquipment?factory=${factoryId}&date=${currentDate}`);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
         
         const records = await response.json();
         
-        // Group by equipment and sebanggo
-        actualProduction = processActualProductionData(records);
+        console.log('📦 Raw actual production data from server:', records);
         
-        console.log('✅ Actual production loaded:', actualProduction);
+        // Convert array to object for easy lookup by equipment name
+        // Keep equipment names EXACTLY as they are (don't split comma-separated names)
+        actualProduction = {};
+        records.forEach(record => {
+            if (record.設備) {
+                const equipmentName = record.設備; // Keep exact name including commas
+                
+                console.log(`  ➡️ Mapping equipment "${equipmentName}" to quantity: ${record.totalQuantity}`);
+                
+                actualProduction[equipmentName] = {
+                    totalQuantity: record.totalQuantity || 0,
+                    recordCount: record.recordCount || 0
+                };
+            }
+        });
+        
+        console.log('✅ Actual production mapped by equipment:', actualProduction);
         
     } catch (error) {
         console.error('❌ Error loading actual production:', error);
-        throw error;
+        actualProduction = {};
     }
 }
 
 // Process actual production data by equipment and sebanggo
-function processActualProductionData(records) {
-    const grouped = {};
-    
-    records.forEach(record => {
-        const equipment = record.設備;
-        const sebanggo = record.背番号;
-        
-        if (!equipment || !sebanggo) return;
-        
-        const key = `${equipment}_${sebanggo}`;
-        
-        if (!grouped[key]) {
-            grouped[key] = {
-                equipment: equipment,
-                sebanggo: sebanggo,
-                totalQuantity: 0,
-                records: []
-            };
-        }
-        
-        grouped[key].totalQuantity += (record.Total || 0);
-        grouped[key].records.push(record);
-    });
-    
-    return grouped;
-}
-
 // Load in-progress data from tabletLogDB
 async function loadInProgressData() {
     try {
@@ -276,6 +257,7 @@ function processInProgressData(records) {
         const equipment = record.設備;
         if (!equipment) return;
         
+        // Keep equipment name exactly as-is (including commas)
         // Keep only the latest record per equipment
         if (!latest[equipment] || new Date(record.Timestamp) > new Date(latest[equipment].Timestamp)) {
             latest[equipment] = record;
@@ -335,18 +317,7 @@ function handleSSEMessage(data) {
     }
     
     if (data.type === 'production_update') {
-        // Update actual production data
-        const key = `${data.equipment}_${data.sebanggo}`;
-        
-        if (!actualProduction[key]) {
-            actualProduction[key] = {
-                equipment: data.equipment,
-                sebanggo: data.sebanggo,
-                totalQuantity: 0,
-                records: []
-            };
-        }
-        
+        console.log('🔄 Production update received, reloading actual production...');
         // Reload actual production data for accurate count
         loadActualProduction().then(() => {
             renderEquipmentGrid();
@@ -356,6 +327,7 @@ function handleSSEMessage(data) {
     if (data.type === 'in_progress_update') {
         // Update in-progress data
         if (data.equipment) {
+            console.log(`🔄 In-progress update for ${data.equipment}:`, data.sebanggo);
             inProgressData[data.equipment] = {
                 背番号: data.sebanggo,
                 品番: data.hinban,
@@ -403,16 +375,26 @@ function renderEquipmentCard(equipment) {
     // Find production plan for this equipment
     const plannedProduct = productionPlan?.products?.find(p => p.equipment === equipment);
     
-    // If no plan, show idle state
+    // Get actual production for this equipment (even if no plan)
+    const actual = actualProduction[equipment];
+    const actualQuantity = actual ? actual.totalQuantity : 0;
+    
+    // Get in-progress status
+    const inProgress = inProgressData[equipment];
+    const isInProgress = !!inProgress;
+    const inProgressSebanggo = inProgress ? inProgress.背番号 : null;
+    
+    // If no plan, show idle state but still show actual production
     if (!plannedProduct) {
         return `
             <div class="equipment-card idle">
                 <div class="equipment-name">
                     ${equipment}
+                    ${isInProgress ? `<span class="in-progress-badge">🔄 ${inProgressSebanggo || ''}</span>` : ''}
                 </div>
                 
                 <div class="sebanggo-display">
-                    -
+                    ${isInProgress ? inProgressSebanggo : '-'}
                 </div>
                 
                 <div class="progress-section">
@@ -423,14 +405,14 @@ function renderEquipmentCard(equipment) {
                         </div>
                         <div class="progress-item">
                             <div class="progress-label">Actual / 実績</div>
-                            <div class="progress-value actual">-</div>
+                            <div class="progress-value actual">${actualQuantity || '-'}</div>
                         </div>
                     </div>
                 </div>
                 
                 <div class="time-status idle">
                     <span class="time-icon">💤</span>
-                    生産予定なし
+                    <div class="time-message">生産予定なし</div>
                 </div>
             </div>
         `;
@@ -439,14 +421,7 @@ function renderEquipmentCard(equipment) {
     const sebanggo = plannedProduct.背番号;
     const goalQuantity = plannedProduct.quantity || 0;
     
-    // Get actual production
-    const actualKey = `${equipment}_${sebanggo}`;
-    const actual = actualProduction[actualKey];
-    const actualQuantity = actual ? actual.totalQuantity : 0;
-    
-    // Get in-progress status
-    const inProgress = inProgressData[equipment];
-    const isInProgress = inProgress && inProgress.背番号 === sebanggo;
+    console.log(`📊 Equipment ${equipment}: Goal=${goalQuantity}, Actual=${actualQuantity}, HasData=${!!actual}`);
     
     // Calculate time status
     const timeStatus = calculateTimeStatus(plannedProduct, actualQuantity);
@@ -465,7 +440,7 @@ function renderEquipmentCard(equipment) {
         <div class="${cardClass}">
             <div class="equipment-name">
                 ${equipment}
-                ${isInProgress ? '<span class="in-progress-badge">🔄 作業中</span>' : ''}
+                ${isInProgress ? `<span class="in-progress-badge">🔄 ${inProgressSebanggo || ''}</span>` : ''}
             </div>
             
             <div class="sebanggo-display">
@@ -487,7 +462,7 @@ function renderEquipmentCard(equipment) {
             
             <div class="time-status ${timeStatus.status}">
                 <span class="time-icon">${timeStatus.icon}</span>
-                ${timeStatus.message}
+                <div class="time-message">${timeStatus.message}</div>
             </div>
         </div>
     `;
