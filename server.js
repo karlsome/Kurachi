@@ -577,18 +577,34 @@ const storage = admin.storage();
 app.get("/getSetsubiList", async (req, res) => {
   try {
     await client.connect();
-    const database = client.db("Sasaki_Coating_MasterDB");
-    const collection = database.collection("setsubiList");
+    const database = client.db("submittedDB");
+    const collection = database.collection("pressDB");
 
     const factory = req.query.factory;
+    
+    if (!factory) {
+      return res.status(400).json({ error: "Factory parameter is required" });
+    }
+    
     const query = { 工場: factory };
-    const projection = { 設備: 1, _id: 0 };
 
-    const result = await collection.find(query).project(projection).toArray();
+    console.log(`📋 Fetching unique equipment for factory: ${factory}`);
+
+    // Use aggregation pipeline to get unique equipment (API v1 compatible)
+    const result = await collection.aggregate([
+      { $match: query },
+      { $group: { _id: "$設備" } },
+      { $sort: { _id: 1 } },
+      { $project: { 設備: "$_id", _id: 0 } }
+    ]).toArray();
+    
+    console.log(`✅ Found ${result.length} unique equipment:`, result.map(r => r.設備).join(', '));
+    
     res.json(result);
   } catch (error) {
-    console.error("Error retrieving data:", error);
-    res.status(500).send("Error retrieving data");
+    console.error("❌ Error retrieving equipment list:", error);
+    console.error("Error details:", error.message);
+    res.status(500).json({ error: "Error retrieving data", details: error.message });
   }
 });
 

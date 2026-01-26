@@ -95,15 +95,7 @@ async function loadInitialData() {
 // Load equipment list from setsubiList (master equipment list)
 async function loadEquipmentList() {
     try {
-        const response = await fetch(`${SERVER_URL}/queries`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                dbName: 'Sasaki_Coating_MasterDB',
-                collectionName: 'setsubiList',
-                query: { 工場: factoryId }
-            })
-        });
+        const response = await fetch(`${SERVER_URL}/getSetsubiList?factory=${factoryId}`);
         
         const data = await response.json();
         
