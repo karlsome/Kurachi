@@ -8523,13 +8523,22 @@ app.post("/api/noda-requests", async (req, res) => {
             .toArray();
 
           // ===== FIFO INVENTORY CALCULATION =====
-          // Calculate which requests can actually be picked based on physical inventory
-          // Priority: oldest requests first (by createdAt)
+          // Calculate which requests can actually be picked based on PHYSICAL inventory
+          // Priority: deadline date (納入指示日) - earliest deadline first
+          // IMPORTANT: Only consider requests with deadline >= today (ignore past deadlines)
           
-          // Step 1: Get ALL active requests sorted by createdAt (for FIFO calculation)
+          // Get today's date in YYYY/MM/DD format (matching the 納入指示日 format)
+          const today = new Date();
+          const todayStr = `${today.getFullYear()}/${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}`;
+          
+          // Step 1: Get ALL active requests with deadline >= today, sorted by deadline (for FIFO calculation)
           const allActiveRequests = await requestsCollection
-            .find({ status: { $nin: ['completed', 'cancelled'] } })
-            .sort({ createdAt: 1 }) // Oldest first
+            .find({ 
+              status: { $nin: ['completed', 'cancelled'] },
+              // Only include requests where deadline is today or in the future
+              納入指示日: { $gte: todayStr }
+            })
+            .sort({ '納入指示日': 1, createdAt: 1 }) // Sort by deadline first, then createdAt for same deadline
             .toArray();
           
           // Step 2: Get current PHYSICAL inventory for all unique 背番号
@@ -8738,9 +8747,189 @@ app.post("/api/noda-requests", async (req, res) => {
             return res.status(404).json({ error: "Request not found" });
           }
 
+          // ===== DYNAMICALLY RECALCULATE RESERVED & SHORTFALL =====
+          // Based on PHYSICAL inventory and deadline-based FIFO allocation
+          
+          // Get today's date in YYYY/MM/DD format
+          const detailToday = new Date();
+          const detailTodayStr = `${detailToday.getFullYear()}/${String(detailToday.getMonth() + 1).padStart(2, '0')}/${String(detailToday.getDate()).padStart(2, '0')}`;
+          
+          // Get all active requests with deadline >= today, sorted by deadline
+          const activeRequestsForFifo = await requestsCollection
+            .find({ 
+              status: { $nin: ['completed', 'cancelled'] },
+              納入指示日: { $gte: detailTodayStr }
+            })
+            .sort({ '納入指示日': 1, createdAt: 1 })
+            .toArray();
+          
+          // Get all unique 背番号 from active requests
+          const allSebanForFifo = [...new Set(activeRequestsForFifo.flatMap(r => 
+            r.lineItems ? r.lineItems.map(li => li.背番号) : [r.背番号]
+          ).filter(Boolean))];
+          
+          // Get current PHYSICAL inventory for all 背番号
+          const fifoInventoryMap = new Map();
+          if (allSebanForFifo.length > 0) {
+            const invResults = await inventoryCollection.aggregate([
+              { $match: { 背番号: { $in: allSebanForFifo } } },
+              {
+                $addFields: {
+                  timeStampDate: {
+                    $cond: {
+                      if: { $type: "$timeStamp" },
+                      then: {
+                        $cond: {
+                          if: { $eq: [{ $type: "$timeStamp" }, "string"] },
+                          then: { $dateFromString: { dateString: "$timeStamp" } },
+                          else: "$timeStamp"
+                        }
+                      },
+                      else: new Date()
+                    }
+                  }
+                }
+              },
+              { $sort: { timeStampDate: -1 } },
+              { $group: { _id: "$背番号", latestRecord: { $first: "$$ROOT" } } }
+            ]).toArray();
+            
+            for (const result of invResults) {
+              const inv = result.latestRecord;
+              fifoInventoryMap.set(result._id, inv.physicalQuantity || inv.runningQuantity || 0);
+            }
+          }
+          
+          // Track remaining physical inventory as we allocate in FIFO order
+          const remainingPhysicalForFifo = new Map(fifoInventoryMap);
+          
+          // Process all requests in deadline order to calculate what's available for THIS request
+          let enrichedLineItems = null;
+          
+          for (const activeReq of activeRequestsForFifo) {
+            const isCurrentRequest = activeReq._id.toString() === requestId;
+            const lineItems = activeReq.lineItems || [{ 背番号: activeReq.背番号, quantity: activeReq.quantity, status: 'pending' }];
+            
+            if (isCurrentRequest && request.lineItems) {
+              // Calculate reserved/shortfall for THIS request's line items
+              enrichedLineItems = request.lineItems.map(lineItem => {
+                const lineStatus = lineItem.status || 'pending';
+                
+                // Completed/cancelled line items don't need inventory
+                if (lineStatus === 'completed' || lineStatus === 'cancelled') {
+                  return {
+                    ...lineItem,
+                    reservedQuantity: lineItem.quantity, // Already picked
+                    shortfallQuantity: 0,
+                    inventoryStatus: 'sufficient'
+                  };
+                }
+                
+                const backNumber = lineItem.背番号;
+                const needed = lineItem.quantity || 0;
+                const remaining = remainingPhysicalForFifo.get(backNumber) || 0;
+                const canReserve = Math.min(remaining, needed);
+                const shortfall = Math.max(0, needed - remaining);
+                
+                // Deduct from remaining for next requests
+                remainingPhysicalForFifo.set(backNumber, Math.max(0, remaining - canReserve));
+                
+                // Determine inventory status
+                let inventoryStatus;
+                if (remaining === 0) {
+                  inventoryStatus = 'none';
+                } else if (remaining < needed) {
+                  inventoryStatus = 'insufficient';
+                } else {
+                  inventoryStatus = 'sufficient';
+                }
+                
+                return {
+                  ...lineItem,
+                  reservedQuantity: canReserve,
+                  shortfallQuantity: shortfall,
+                  inventoryStatus: inventoryStatus
+                };
+              });
+              
+              // We've processed the current request, can break if we only need this one
+              break;
+            } else {
+              // This is a prior request (earlier deadline) - deduct its quantities
+              for (const lineItem of lineItems) {
+                const lineStatus = lineItem.status || 'pending';
+                if (lineStatus === 'completed' || lineStatus === 'cancelled') continue;
+                
+                const backNumber = lineItem.背番号;
+                const needed = lineItem.quantity || 0;
+                const remaining = remainingPhysicalForFifo.get(backNumber) || 0;
+                const deduct = Math.min(remaining, needed);
+                remainingPhysicalForFifo.set(backNumber, Math.max(0, remaining - deduct));
+              }
+            }
+          }
+          
+          // If request has past deadline, still show inventory info but mark it
+          if (!enrichedLineItems && request.lineItems) {
+            // Request has past deadline - show physical inventory without FIFO deduction
+            enrichedLineItems = await Promise.all(request.lineItems.map(async (lineItem) => {
+              const lineStatus = lineItem.status || 'pending';
+              
+              if (lineStatus === 'completed' || lineStatus === 'cancelled') {
+                return {
+                  ...lineItem,
+                  reservedQuantity: lineItem.quantity,
+                  shortfallQuantity: 0,
+                  inventoryStatus: 'sufficient'
+                };
+              }
+              
+              // Get current physical inventory for this item
+              const invResult = await inventoryCollection.aggregate([
+                { $match: { 背番号: lineItem.背番号 } },
+                {
+                  $addFields: {
+                    timeStampDate: {
+                      $cond: {
+                        if: { $type: "$timeStamp" },
+                        then: {
+                          $cond: {
+                            if: { $eq: [{ $type: "$timeStamp" }, "string"] },
+                            then: { $dateFromString: { dateString: "$timeStamp" } },
+                            else: "$timeStamp"
+                          }
+                        },
+                        else: new Date()
+                      }
+                    }
+                  }
+                },
+                { $sort: { timeStampDate: -1 } },
+                { $limit: 1 }
+              ]).toArray();
+              
+              const physicalQty = invResult.length > 0 ? (invResult[0].physicalQuantity || invResult[0].runningQuantity || 0) : 0;
+              const needed = lineItem.quantity || 0;
+              
+              return {
+                ...lineItem,
+                reservedQuantity: Math.min(physicalQty, needed),
+                shortfallQuantity: Math.max(0, needed - physicalQty),
+                inventoryStatus: physicalQty === 0 ? 'none' : physicalQty < needed ? 'insufficient' : 'sufficient',
+                pastDeadline: true // Mark as past deadline
+              };
+            }));
+          }
+          
+          // Return enriched request
+          const enrichedRequest = {
+            ...request,
+            lineItems: enrichedLineItems || request.lineItems
+          };
+
           res.json({
             success: true,
-            data: request
+            data: enrichedRequest
           });
 
         } catch (error) {
