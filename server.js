@@ -36,6 +36,9 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 // Store connected clients for each machine
 const machineConnections = new Map();
 
+// Store connected clients for each factory (for production TV)
+const factoryConnections = new Map();
+
 // Helper function to send SSE message to specific machine clients
 function broadcastToMachine(machineId, data) {
   const clients = machineConnections.get(machineId) || [];
@@ -50,6 +53,22 @@ function broadcastToMachine(machineId, data) {
   });
   
   console.log(`📡 Broadcasted to ${clients.length} client(s) on ${machineId}:`, data);
+}
+
+// Helper function to send SSE message to all factory TV clients
+function broadcastToFactory(factoryId, data) {
+  const clients = factoryConnections.get(factoryId) || [];
+  const message = `data: ${JSON.stringify(data)}\n\n`;
+  
+  clients.forEach(client => {
+    try {
+      client.write(message);
+    } catch (error) {
+      console.error(`Error sending to client for factory ${factoryId}:`, error);
+    }
+  });
+  
+  console.log(`📡 Broadcasted to ${clients.length} factory TV client(s) on ${factoryId}:`, data);
 }
 
 const uri = process.env.MONGODB_URI;
@@ -100,15 +119,44 @@ app.get("/sse/machine/:machineId", (req, res) => {
   req.on('close', () => {
     const clients = machineConnections.get(machineId) || [];
     const index = clients.indexOf(res);
+    if (index > -1) {
+      clients.splice(index, 1);
+    }
+    console.log(`❌ SSE client disconnected from ${machineId}. Remaining: ${clients.length}`);
+  });
+});
+
+// SSE endpoint for factory TV - monitors all equipment in a factory
+app.get("/sse/factory/:factoryId", (req, res) => {
+  const factoryId = req.params.factoryId;
+  
+  console.log(`🏭 New factory TV connection request for: ${factoryId}`);
+  
+  // Set SSE headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  
+  // Add this client to factory connections
+  if (!factoryConnections.has(factoryId)) {
+    factoryConnections.set(factoryId, []);
+  }
+  factoryConnections.get(factoryId).push(res);
+  
+  console.log(`✅ New factory TV connected to ${factoryId}. Total TVs: ${factoryConnections.get(factoryId).length}`);
+  
+  // Send initial connection message
+  res.write(`data: ${JSON.stringify({ type: 'connected', factoryId, timestamp: new Date().toISOString() })}\n\n`);
+  
+  // Handle client disconnect
+  req.on('close', () => {
+    const clients = factoryConnections.get(factoryId) || [];
+    const index = clients.indexOf(res);
     if (index !== -1) {
       clients.splice(index, 1);
     }
-    
-    if (clients.length === 0) {
-      machineConnections.delete(machineId);
-    }
-    
-    console.log(`❌ SSE client disconnected from ${machineId}. Remaining clients: ${clients.length}`);
+    console.log(`❌ Factory TV disconnected from ${factoryId}. Remaining: ${clients.length}`);
   });
 });
 
@@ -293,6 +341,21 @@ app.post("/api/tablet-log", async (req, res) => {
     const result = await tabletLogDB.insertOne(logEntry);
     
     console.log(`📝 Tablet log inserted: ${背番号} - ${Action} (Session: ${sessionID})`);
+    
+    // Broadcast to factory TV via SSE for in-progress updates
+    if (工場) {
+      broadcastToFactory(工場, {
+        type: 'in_progress_update',
+        collection: 'tabletLogDB',
+        equipment: 設備,
+        sebanggo: 背番号,
+        hinban: 品番,
+        action: Action,
+        status: Status,
+        sessionID: sessionID,
+        timestamp: currentDate.toISOString()
+      });
+    }
     
     res.json({
       success: true,
@@ -514,18 +577,84 @@ const storage = admin.storage();
 app.get("/getSetsubiList", async (req, res) => {
   try {
     await client.connect();
-    const database = client.db("Sasaki_Coating_MasterDB");
-    const collection = database.collection("setsubiList");
+    const database = client.db("submittedDB");
+    const collection = database.collection("pressDB");
 
     const factory = req.query.factory;
+    
+    if (!factory) {
+      return res.status(400).json({ error: "Factory parameter is required" });
+    }
+    
     const query = { 工場: factory };
-    const projection = { 設備: 1, _id: 0 };
 
-    const result = await collection.find(query).project(projection).toArray();
+    console.log(`📋 Fetching unique equipment for factory: ${factory}`);
+
+    // Use aggregation pipeline to get unique equipment (API v1 compatible)
+    const result = await collection.aggregate([
+      { $match: query },
+      { $group: { _id: "$設備" } },
+      { $sort: { _id: 1 } },
+      { $project: { 設備: "$_id", _id: 0 } }
+    ]).toArray();
+    
+    console.log(`✅ Found ${result.length} unique equipment:`, result.map(r => r.設備).join(', '));
+    
     res.json(result);
   } catch (error) {
-    console.error("Error retrieving data:", error);
-    res.status(500).send("Error retrieving data");
+    console.error("❌ Error retrieving equipment list:", error);
+    console.error("Error details:", error.message);
+    res.status(500).json({ error: "Error retrieving data", details: error.message });
+  }
+});
+
+// Get actual production totals by equipment for production TV
+app.get("/getActualProductionByEquipment", async (req, res) => {
+  try {
+    await client.connect();
+    const database = client.db("submittedDB");
+    const collection = database.collection("pressDB");
+
+    const factory = req.query.factory;
+    const date = req.query.date; // yyyy-mm-dd format
+    
+    if (!factory || !date) {
+      return res.status(400).json({ error: "Factory and date parameters are required" });
+    }
+    
+    const query = { 
+      工場: factory,
+      Date: date
+    };
+
+    console.log(`📊 Fetching actual production for factory: ${factory}, date: ${date}`);
+
+    // Use aggregation pipeline to sum Total by equipment
+    const result = await collection.aggregate([
+      { $match: query },
+      { $group: { 
+          _id: "$設備",
+          totalQuantity: { $sum: "$Total" },
+          recordCount: { $sum: 1 }
+        } 
+      },
+      { $sort: { _id: 1 } },
+      { $project: { 
+          設備: "$_id", 
+          totalQuantity: 1,
+          recordCount: 1,
+          _id: 0 
+        } 
+      }
+    ]).toArray();
+    
+    console.log(`✅ Found production data for ${result.length} equipment:`, result);
+    
+    res.json(result);
+  } catch (error) {
+    console.error("❌ Error retrieving actual production:", error);
+    console.error("Error details:", error.message);
+    res.status(500).json({ error: "Error retrieving production data", details: error.message });
   }
 });
 
@@ -868,6 +997,19 @@ app.post("/submitTopressDBiReporter", async (req, res) => {
     const result = await pressDB.insertOne(formData);
 
     console.log(`✅ Successfully saved Press Cutting record with ID: ${result.insertedId}`);
+
+    // === PHASE 6: Broadcast to factory TV via SSE ===
+    if (formData.工場) {
+      broadcastToFactory(formData.工場, {
+        type: 'production_update',
+        collection: 'pressDB',
+        equipment: formData.設備,
+        sebanggo: formData.背番号,
+        hinban: formData.品番,
+        quantity: formData.Total,
+        timestamp: new Date().toISOString()
+      });
+    }
 
     res.status(201).json({
       message: "Data and images successfully saved to pressDB",
@@ -1260,6 +1402,19 @@ app.post('/submitToDCP', async (req, res) => {
         
         const pressResult = await pressDB.insertOne(pressDBData);
         console.log(`✅ Data saved to pressDB with ID: ${pressResult.insertedId}`);
+
+        // Broadcast to factory TV via SSE
+        if (pressDBData.工場) {
+          broadcastToFactory(pressDBData.工場, {
+            type: 'production_update',
+            collection: 'pressDB',
+            equipment: pressDBData.設備,
+            sebanggo: pressDBData.背番号,
+            hinban: pressDBData.品番,
+            quantity: pressDBData.Total,
+            timestamp: new Date().toISOString()
+          });
+        }
 
         let kensaResult = null;
         
@@ -8368,13 +8523,22 @@ app.post("/api/noda-requests", async (req, res) => {
             .toArray();
 
           // ===== FIFO INVENTORY CALCULATION =====
-          // Calculate which requests can actually be picked based on physical inventory
-          // Priority: oldest requests first (by createdAt)
+          // Calculate which requests can actually be picked based on PHYSICAL inventory
+          // Priority: deadline date (納入指示日) - earliest deadline first
+          // IMPORTANT: Only consider requests with deadline >= today (ignore past deadlines)
           
-          // Step 1: Get ALL active requests sorted by createdAt (for FIFO calculation)
+          // Get today's date in YYYY/MM/DD format (matching the 納入指示日 format)
+          const today = new Date();
+          const todayStr = `${today.getFullYear()}/${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}`;
+          
+          // Step 1: Get ALL active requests with deadline >= today, sorted by deadline (for FIFO calculation)
           const allActiveRequests = await requestsCollection
-            .find({ status: { $nin: ['completed', 'cancelled'] } })
-            .sort({ createdAt: 1 }) // Oldest first
+            .find({ 
+              status: { $nin: ['completed', 'cancelled'] },
+              // Only include requests where deadline is today or in the future
+              納入指示日: { $gte: todayStr }
+            })
+            .sort({ '納入指示日': 1, createdAt: 1 }) // Sort by deadline first, then createdAt for same deadline
             .toArray();
           
           // Step 2: Get current PHYSICAL inventory for all unique 背番号
@@ -8583,9 +8747,189 @@ app.post("/api/noda-requests", async (req, res) => {
             return res.status(404).json({ error: "Request not found" });
           }
 
+          // ===== DYNAMICALLY RECALCULATE RESERVED & SHORTFALL =====
+          // Based on PHYSICAL inventory and deadline-based FIFO allocation
+          
+          // Get today's date in YYYY/MM/DD format
+          const detailToday = new Date();
+          const detailTodayStr = `${detailToday.getFullYear()}/${String(detailToday.getMonth() + 1).padStart(2, '0')}/${String(detailToday.getDate()).padStart(2, '0')}`;
+          
+          // Get all active requests with deadline >= today, sorted by deadline
+          const activeRequestsForFifo = await requestsCollection
+            .find({ 
+              status: { $nin: ['completed', 'cancelled'] },
+              納入指示日: { $gte: detailTodayStr }
+            })
+            .sort({ '納入指示日': 1, createdAt: 1 })
+            .toArray();
+          
+          // Get all unique 背番号 from active requests
+          const allSebanForFifo = [...new Set(activeRequestsForFifo.flatMap(r => 
+            r.lineItems ? r.lineItems.map(li => li.背番号) : [r.背番号]
+          ).filter(Boolean))];
+          
+          // Get current PHYSICAL inventory for all 背番号
+          const fifoInventoryMap = new Map();
+          if (allSebanForFifo.length > 0) {
+            const invResults = await inventoryCollection.aggregate([
+              { $match: { 背番号: { $in: allSebanForFifo } } },
+              {
+                $addFields: {
+                  timeStampDate: {
+                    $cond: {
+                      if: { $type: "$timeStamp" },
+                      then: {
+                        $cond: {
+                          if: { $eq: [{ $type: "$timeStamp" }, "string"] },
+                          then: { $dateFromString: { dateString: "$timeStamp" } },
+                          else: "$timeStamp"
+                        }
+                      },
+                      else: new Date()
+                    }
+                  }
+                }
+              },
+              { $sort: { timeStampDate: -1 } },
+              { $group: { _id: "$背番号", latestRecord: { $first: "$$ROOT" } } }
+            ]).toArray();
+            
+            for (const result of invResults) {
+              const inv = result.latestRecord;
+              fifoInventoryMap.set(result._id, inv.physicalQuantity || inv.runningQuantity || 0);
+            }
+          }
+          
+          // Track remaining physical inventory as we allocate in FIFO order
+          const remainingPhysicalForFifo = new Map(fifoInventoryMap);
+          
+          // Process all requests in deadline order to calculate what's available for THIS request
+          let enrichedLineItems = null;
+          
+          for (const activeReq of activeRequestsForFifo) {
+            const isCurrentRequest = activeReq._id.toString() === requestId;
+            const lineItems = activeReq.lineItems || [{ 背番号: activeReq.背番号, quantity: activeReq.quantity, status: 'pending' }];
+            
+            if (isCurrentRequest && request.lineItems) {
+              // Calculate reserved/shortfall for THIS request's line items
+              enrichedLineItems = request.lineItems.map(lineItem => {
+                const lineStatus = lineItem.status || 'pending';
+                
+                // Completed/cancelled line items don't need inventory
+                if (lineStatus === 'completed' || lineStatus === 'cancelled') {
+                  return {
+                    ...lineItem,
+                    reservedQuantity: lineItem.quantity, // Already picked
+                    shortfallQuantity: 0,
+                    inventoryStatus: 'sufficient'
+                  };
+                }
+                
+                const backNumber = lineItem.背番号;
+                const needed = lineItem.quantity || 0;
+                const remaining = remainingPhysicalForFifo.get(backNumber) || 0;
+                const canReserve = Math.min(remaining, needed);
+                const shortfall = Math.max(0, needed - remaining);
+                
+                // Deduct from remaining for next requests
+                remainingPhysicalForFifo.set(backNumber, Math.max(0, remaining - canReserve));
+                
+                // Determine inventory status
+                let inventoryStatus;
+                if (remaining === 0) {
+                  inventoryStatus = 'none';
+                } else if (remaining < needed) {
+                  inventoryStatus = 'insufficient';
+                } else {
+                  inventoryStatus = 'sufficient';
+                }
+                
+                return {
+                  ...lineItem,
+                  reservedQuantity: canReserve,
+                  shortfallQuantity: shortfall,
+                  inventoryStatus: inventoryStatus
+                };
+              });
+              
+              // We've processed the current request, can break if we only need this one
+              break;
+            } else {
+              // This is a prior request (earlier deadline) - deduct its quantities
+              for (const lineItem of lineItems) {
+                const lineStatus = lineItem.status || 'pending';
+                if (lineStatus === 'completed' || lineStatus === 'cancelled') continue;
+                
+                const backNumber = lineItem.背番号;
+                const needed = lineItem.quantity || 0;
+                const remaining = remainingPhysicalForFifo.get(backNumber) || 0;
+                const deduct = Math.min(remaining, needed);
+                remainingPhysicalForFifo.set(backNumber, Math.max(0, remaining - deduct));
+              }
+            }
+          }
+          
+          // If request has past deadline, still show inventory info but mark it
+          if (!enrichedLineItems && request.lineItems) {
+            // Request has past deadline - show physical inventory without FIFO deduction
+            enrichedLineItems = await Promise.all(request.lineItems.map(async (lineItem) => {
+              const lineStatus = lineItem.status || 'pending';
+              
+              if (lineStatus === 'completed' || lineStatus === 'cancelled') {
+                return {
+                  ...lineItem,
+                  reservedQuantity: lineItem.quantity,
+                  shortfallQuantity: 0,
+                  inventoryStatus: 'sufficient'
+                };
+              }
+              
+              // Get current physical inventory for this item
+              const invResult = await inventoryCollection.aggregate([
+                { $match: { 背番号: lineItem.背番号 } },
+                {
+                  $addFields: {
+                    timeStampDate: {
+                      $cond: {
+                        if: { $type: "$timeStamp" },
+                        then: {
+                          $cond: {
+                            if: { $eq: [{ $type: "$timeStamp" }, "string"] },
+                            then: { $dateFromString: { dateString: "$timeStamp" } },
+                            else: "$timeStamp"
+                          }
+                        },
+                        else: new Date()
+                      }
+                    }
+                  }
+                },
+                { $sort: { timeStampDate: -1 } },
+                { $limit: 1 }
+              ]).toArray();
+              
+              const physicalQty = invResult.length > 0 ? (invResult[0].physicalQuantity || invResult[0].runningQuantity || 0) : 0;
+              const needed = lineItem.quantity || 0;
+              
+              return {
+                ...lineItem,
+                reservedQuantity: Math.min(physicalQty, needed),
+                shortfallQuantity: Math.max(0, needed - physicalQty),
+                inventoryStatus: physicalQty === 0 ? 'none' : physicalQty < needed ? 'insufficient' : 'sufficient',
+                pastDeadline: true // Mark as past deadline
+              };
+            }));
+          }
+          
+          // Return enriched request
+          const enrichedRequest = {
+            ...request,
+            lineItems: enrichedLineItems || request.lineItems
+          };
+
           res.json({
             success: true,
-            data: request
+            data: enrichedRequest
           });
 
         } catch (error) {
