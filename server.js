@@ -8531,19 +8531,48 @@ app.post("/api/noda-requests", async (req, res) => {
               };
             }
             
-            const fifoData = fifoAllocation.get(requestId) || {
-              fifoStatus: request.overallInventoryStatus || 'unknown',
-              totalCanPick: 0,
-              totalNeeded: 0,
-              shortfall: 0,
-              lineItemStatuses: []
-            };
+            // ✅ NEW: Check if deadline has passed
+            const requestDeadline = request.納入指示日;
+            const isPastDeadline = requestDeadline && requestDeadline < todayStr;
             
+            if (isPastDeadline) {
+              // Past deadline - mark as missed/overdue, don't show inventory status
+              return {
+                ...request,
+                fifoAllocation: {
+                  fifoStatus: 'past-deadline',
+                  totalCanPick: 0,
+                  totalNeeded: 0,
+                  shortfall: 0,
+                  lineItemStatuses: []
+                },
+                dynamicInventoryStatus: 'past-deadline',
+                isPastDeadline: true
+              };
+            }
+            
+            const fifoData = fifoAllocation.get(requestId);
+            
+            if (fifoData) {
+              return {
+                ...request,
+                fifoAllocation: fifoData,
+                // Add a computed field for display
+                dynamicInventoryStatus: fifoData.fifoStatus
+              };
+            }
+            
+            // Fallback for requests not in FIFO (shouldn't happen for active requests with valid deadlines)
             return {
               ...request,
-              fifoAllocation: fifoData,
-              // Add a computed field for display
-              dynamicInventoryStatus: fifoData.fifoStatus
+              fifoAllocation: {
+                fifoStatus: request.overallInventoryStatus || 'unknown',
+                totalCanPick: 0,
+                totalNeeded: 0,
+                shortfall: 0,
+                lineItemStatuses: []
+              },
+              dynamicInventoryStatus: request.overallInventoryStatus || 'unknown'
             };
           });
 
