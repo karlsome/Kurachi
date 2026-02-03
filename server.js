@@ -8527,9 +8527,9 @@ app.post("/api/noda-requests", async (req, res) => {
           // Priority: deadline date (納入指示日) - earliest deadline first
           // IMPORTANT: Only consider requests with deadline >= today (ignore past deadlines)
           
-          // Get today's date in YYYY/MM/DD format (matching the 納入指示日 format)
+          // Get today's date in YYYY-MM-DD format (matching the 納入指示日 format)
           const today = new Date();
-          const todayStr = `${today.getFullYear()}/${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}`;
+          const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
           
           // Step 1: Get ALL active requests with deadline >= today, sorted by deadline (for FIFO calculation)
           const allActiveRequests = await requestsCollection
@@ -8779,9 +8779,9 @@ app.post("/api/noda-requests", async (req, res) => {
           // ===== DYNAMICALLY RECALCULATE RESERVED & SHORTFALL =====
           // Based on PHYSICAL inventory and deadline-based FIFO allocation
           
-          // Get today's date in YYYY/MM/DD format
+          // Get today's date in YYYY-MM-DD format
           const detailToday = new Date();
-          const detailTodayStr = `${detailToday.getFullYear()}/${String(detailToday.getMonth() + 1).padStart(2, '0')}/${String(detailToday.getDate()).padStart(2, '0')}`;
+          const detailTodayStr = `${detailToday.getFullYear()}-${String(detailToday.getMonth() + 1).padStart(2, '0')}-${String(detailToday.getDate()).padStart(2, '0')}`;
           
           // Get all active requests with deadline >= today, sorted by deadline
           const activeRequestsForFifo = await requestsCollection
