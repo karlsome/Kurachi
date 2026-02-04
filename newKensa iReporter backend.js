@@ -1307,7 +1307,7 @@ async function redirectHidaseRotary(selected収容数, labelMarking, product) {
   const 品番収容数 = `${品番},${selected収容数}`;
   
   // Use hidaseRotary.lbx for special 品番
-  const filename = "hidaseRotary.lbx";
+  const filename = "hidaseRotary2.lbx";
   const size = "RollW62";
   const copies = 1;
   
