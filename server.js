@@ -11311,10 +11311,11 @@ app.post("/api/inventory-management", async (req, res) => {
                 bVal = Number(bVal) || 0;
               }
               
-              // Handle date fields
+              // Handle date fields - use the already-parsed timeStampDate for proper sorting
               if (['timeStamp', 'lastUpdated'].includes(sort.column)) {
-                aVal = new Date(aVal || 0);
-                bVal = new Date(bVal || 0);
+                // Use the timeStampDate field which was already converted in aggregation
+                aVal = a.timeStampDate || new Date(0);
+                bVal = b.timeStampDate || new Date(0);
               }
               
               if (aVal < bVal) return -sort.direction;
@@ -11338,7 +11339,8 @@ app.post("/api/inventory-management", async (req, res) => {
             physicalQuantity: item.physicalQuantity || item.runningQuantity || 0,
             reservedQuantity: item.reservedQuantity || 0,
             availableQuantity: item.availableQuantity || item.runningQuantity || 0,
-            lastUpdated: item.timeStamp
+            lastUpdated: item.timeStamp,
+            timeStampDate: item.timeStampDate // Add parsed date for sorting
           }));
 
           res.json({
