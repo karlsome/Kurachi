@@ -11517,6 +11517,192 @@ app.post("/api/inventory-management", async (req, res) => {
         }
         break;
 
+      case 'getBatchResetItems':
+        try {
+          const { filters } = req.body;
+
+          // Separate モデル filters from other filters (モデル is not in nodaInventoryDB)
+          const modelFilters = filters && filters.filter(f => f.field === 'モデル');
+          const nonModelFilters = filters && filters.filter(f => f.field !== 'モデル');
+
+          // Build MongoDB query from non-モデル filters only
+          let matchQuery = {};
+
+          if (nonModelFilters && nonModelFilters.length > 0) {
+            matchQuery = { $and: [] };
+
+            for (const filter of nonModelFilters) {
+              const { field, operator, value } = filter;
+              
+              if (operator === 'equals') {
+                matchQuery.$and.push({ [field]: value });
+              } else if (operator === 'contains') {
+                matchQuery.$and.push({ [field]: { $regex: value, $options: 'i' } });
+              }
+            }
+          }
+          // If no filters, matchQuery is {} which gets all documents
+
+          // Get latest inventory state for each unique 背番号
+          const pipeline = [
+            { $match: matchQuery },
+            {
+              $addFields: {
+                timeStampDate: {
+                  $cond: {
+                    if: { $type: "$timeStamp" },
+                    then: { $toDate: "$timeStamp" },
+                    else: new Date()
+                  }
+                }
+              }
+            },
+            { $sort: { 背番号: 1, timeStampDate: -1 } },
+            {
+              $group: {
+                _id: "$背番号",
+                latestRecord: { $first: "$$ROOT" }
+              }
+            },
+            { $replaceRoot: { newRoot: "$latestRecord" } }
+          ];
+
+          let items = await inventoryCollection.aggregate(pipeline).toArray();
+
+          console.log(`📋 Found ${items.length} inventory items after initial query`);
+
+          // Fetch モデル from masterDB if needed
+          if (modelFilters && modelFilters.length > 0) {
+            const masterDB = client.db("Sasaki_Coating_MasterDB");
+            const masterCollection = masterDB.collection("masterDB");
+            
+            console.log(`📝 Enriching ${items.length} items with モデル data from masterDB`);
+            
+            // Enrich ALL items with モデル data
+            for (const item of items) {
+              const masterData = await masterCollection.findOne(
+                { 背番号: item.背番号 },
+                { projection: { モデル: 1 } }
+              );
+              if (masterData) {
+                item.モデル = masterData.モデル;
+              }
+            }
+            
+            console.log(`📝 Sample inventory item after enrichment:`, items[0] ? {
+              背番号: items[0].背番号,
+              品番: items[0].品番,
+              モデル: items[0].モデル
+            } : 'No items');
+            
+            // Now filter by モデル
+            for (const modelFilter of modelFilters) {
+              items = items.filter(item => {
+                if (modelFilter.operator === 'equals') {
+                  return item.モデル === modelFilter.value;
+                } else if (modelFilter.operator === 'contains') {
+                  return item.モデル && item.モデル.toLowerCase().includes(modelFilter.value.toLowerCase());
+                }
+                return true;
+              });
+            }
+            
+            console.log(`📋 After モデル filtering: ${items.length} items remaining`);
+          }
+
+          console.log(`📋 Batch reset filter returned ${items.length} items`);
+
+          res.json({
+            success: true,
+            data: items
+          });
+
+        } catch (error) {
+          console.error("Error in getBatchResetItems:", error);
+          res.status(500).json({ error: "Failed to fetch items for batch reset", details: error.message });
+        }
+        break;
+
+      case 'batchResetInventory':
+        try {
+          const { items, submittedBy, fullName } = req.body;
+
+          if (!items || items.length === 0) {
+            return res.status(400).json({ error: "No items provided" });
+          }
+
+          const batchResetId = `batch-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+          const now = new Date();
+          const timeStamp = now.toISOString();
+          const dateField = now.toISOString().split('T')[0];
+          const source = `Freya Admin - ${fullName || submittedBy}`;
+          const note = 'Inventory Reset by admin';
+
+          let successCount = 0;
+          const results = [];
+
+          for (const item of items) {
+            try {
+              // Calculate differences
+              const actionParts = [];
+              
+              if (item.physicalQuantity !== 0) {
+                actionParts.push(`物理在庫 ${-item.physicalQuantity}`);
+              }
+              if (item.reservedQuantity !== 0) {
+                actionParts.push(`引当在庫 ${-item.reservedQuantity}`);
+              }
+              if (item.availableQuantity !== 0) {
+                actionParts.push(`利用可能 ${-item.availableQuantity}`);
+              }
+
+              const actionString = `バッチリセット (${actionParts.join(', ')})`;
+
+              // Create transaction document
+              const transactionDoc = {
+                背番号: item.背番号,
+                品番: item.品番,
+                工場: item.工場,
+                physicalQuantity: 0,
+                reservedQuantity: 0,
+                availableQuantity: 0,
+                runningQuantity: 0,
+                action: actionString,
+                timeStamp: timeStamp,
+                Date: dateField,
+                submittedBy: submittedBy,
+                source: source,
+                note: note,
+                batchResetId: batchResetId
+              };
+
+              await inventoryCollection.insertOne(transactionDoc);
+              successCount++;
+              results.push({ 背番号: item.背番号, success: true });
+
+            } catch (itemError) {
+              console.error(`Error resetting ${item.背番号}:`, itemError);
+              results.push({ 背番号: item.背番号, success: false, error: itemError.message });
+            }
+          }
+
+          console.log(`✅ Batch reset completed: ${successCount}/${items.length} items reset (Batch ID: ${batchResetId})`);
+
+          res.json({
+            success: true,
+            message: `Batch reset completed`,
+            successCount: successCount,
+            totalCount: items.length,
+            batchResetId: batchResetId,
+            results: results
+          });
+
+        } catch (error) {
+          console.error("Error in batchResetInventory:", error);
+          res.status(500).json({ error: "Failed to execute batch reset", details: error.message });
+        }
+        break;
+
       case 'exportInventoryData':
         try {
           // Get latest inventory state for all items (no pagination for export)
