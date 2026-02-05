@@ -1368,7 +1368,8 @@ app.post('/submitToDCP', async (req, res) => {
         const pressDBData = {
             ...formData,
             ...uploadedImageURLs, // Add cycle check image URLs
-            Maintenance_Data: processedMaintenanceData // Add maintenance data with photo URLs
+            Maintenance_Data: processedMaintenanceData, // Add maintenance data with photo URLs
+            createdAt: new Date().toISOString() // Add server timestamp
         };
 
         console.log(`🔍 pressDBData before cleanup contains these image fields:`, {
@@ -1455,7 +1456,8 @@ app.post('/submitToDCP', async (req, res) => {
                 Maintenance_Data: processedMaintenanceData, // Same maintenance data with photos
                 Total_Trouble_Minutes: formData.Total_Trouble_Minutes,
                 Total_Trouble_Hours: formData.Total_Trouble_Hours,
-                Total_Work_Hours: formData.Total_Work_Hours
+                Total_Work_Hours: formData.Total_Work_Hours,
+                createdAt: new Date().toISOString() // Add server timestamp
             };
 
             kensaResult = await kensaDB.insertOne(kensaDBData);
@@ -1526,6 +1528,9 @@ app.post("/submitToKensaDBiReporter", async (req, res) => {
         error: `Missing required fields: ${missingFields.join(", ")}`,
       });
     }
+
+    // Add createdAt timestamp
+    formData.createdAt = new Date().toISOString();
 
     // Insert form data into kensaDB
     const result = await kensaDB.insertOne(formData);
@@ -1621,6 +1626,9 @@ app.post("/submitToSlitDBiReporter", async (req, res) => {
         error: `Missing required fields: ${missingFields.join(", ")}`
       });
     }
+
+    // Add createdAt timestamp
+    formData.createdAt = new Date().toISOString();
 
     const result = await slitDB.insertOne(formData);
 
@@ -1737,6 +1745,9 @@ app.post("/submitToSRSDBiReporter", async (req, res) => {
 
       formData[fieldName] = publicUrl;
     }
+
+    // Add createdAt timestamp
+    formData.createdAt = new Date().toISOString();
 
     const result = await SRSDB.insertOne(formData);
 
@@ -2475,6 +2486,7 @@ app.post("/submitToSRSDB", async (req, res) => {
     const deductionLogDB = database.collection("deduction_LogDB"); // Deduction Log collection
 
     // Step 1: Insert the new record into SRSDB
+    formData.createdAt = new Date().toISOString(); // Add server timestamp
     const result = await SRSDB.insertOne(formData);
 
     // Step 2: Fetch current counts from currentCountDB
@@ -2740,6 +2752,7 @@ app.post("/submitToSlitDB", async (req, res) => {
     const deductionLogDB = database.collection("deduction_LogDB"); // New collection
 
     // Step 1: Insert the new record into slitDB
+    formData.createdAt = new Date().toISOString(); // Add server timestamp
     const result = await slitDB.insertOne(formData);
 
     // Step 2: Insert a new record into deduction_LogDB
@@ -3009,6 +3022,7 @@ app.post("/submitToKensaDB", async (req, res) => {
     const deductionLogDB = database.collection("deduction_LogDB"); // Deduction Log collection
 
     // Step 1: Insert the new record into kensaDB
+    formData.createdAt = new Date().toISOString(); // Add server timestamp
     const result = await kensaDB.insertOne(formData);
 
     // Step 2: Aggregate total process quantity in kensaDB
