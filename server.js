@@ -4472,6 +4472,24 @@ app.post('/api/sensor-history', async (req, res) => {
 /**
  * Specialized approval data pagination
  * POST /api/approval-paginate
+ * 
+ * IMPORTANT: Uses MongoDB ObjectId timestamp as the source of truth for date filtering
+ * instead of the user-entered "Date" field. This prevents issues where workers input
+ * the wrong date (e.g., entering 2/4 when it's actually 2/5).
+ * 
+ * ObjectId contains a 4-byte timestamp (Unix epoch) representing when the document was created.
+ * This is reliable and cannot be manipulated by users.
+ * 
+ * TIMEZONE SUPPORT: Accepts timezoneOffset from frontend (in minutes) to filter by user's
+ * local timezone. Supports global users (Japan JST, USA EST/PST, etc.)
+ * - JST (UTC+9): timezoneOffset = -540
+ * - EST (UTC-5): timezoneOffset = -300
+ * - PST (UTC-8): timezoneOffset = -480
+ * 
+ * SMART SORTING (Priority-based FIFO):
+ * 1. 🔴 Date mismatches (CRITICAL) - Always appear first
+ * 2. ⚠️ Time mismatches (WARNING) - Appear second
+ * 3. ✅ Correct data - Sorted OLDEST FIRST (FIFO queue for approvals)
  */
 app.post('/api/approval-paginate', async (req, res) => {
   console.log("🟢 Received POST request to /api/approval-paginate");
@@ -4506,37 +4524,149 @@ app.post('/api/approval-paginate', async (req, res) => {
     console.log(`✅ Approval pagination: ${collectionName}, Page ${currentPage}, Limit ${itemsPerPage}/${maxAllowedLimit}`);
 
     // Build query based on filters and user access
-    let query = { ...filters };
+    let matchStage = {};
 
     // Apply factory access restrictions based on user role
     if (userRole !== 'admin' && userRole !== '部長' && factoryAccess.length > 0) {
-      query.工場 = { $in: factoryAccess };
+      matchStage.工場 = { $in: factoryAccess };
     }
 
-    // Convert string _id to ObjectId if present
-    if (query._id && typeof query._id === "string") {
-      try {
-        query._id = new ObjectId(query._id);
-      } catch (err) {
-        return res.status(400).json({ 
-          error: "Invalid _id format provided in query.",
-          success: false
-        });
+    // Add non-date filters
+    Object.keys(filters).forEach(key => {
+      if (key !== 'Date' && key !== 'timezoneOffset') {
+        matchStage[key] = filters[key];
       }
+    });
+
+    // Handle Date filter using ObjectId timestamp instead of user-entered Date
+    // Use user's browser timezone for accurate filtering (supports global users)
+    let dateMatchStage = {};
+    if (filters.Date) {
+      const targetDate = filters.Date; // Format: "YYYY-MM-DD"
+      const timezoneOffset = filters.timezoneOffset || -540; // Default to JST (-540 min = UTC+9)
+      
+      // Convert timezone offset to hours (e.g., -480 min = -8 hours = PST)
+      const offsetHours = -timezoneOffset / 60;
+      const offsetSign = offsetHours >= 0 ? '+' : '';
+      const offsetString = `${offsetSign}${String(Math.floor(Math.abs(offsetHours))).padStart(2, '0')}:${String(Math.abs(offsetHours) % 1 * 60).padStart(2, '0')}`;
+      
+      // Create date range in user's timezone
+      const startOfDayLocal = new Date(targetDate + 'T00:00:00' + offsetString);
+      const endOfDayLocal = new Date(targetDate + 'T23:59:59.999' + offsetString);
+      
+      // Create ObjectIds at start and end of the day for timestamp-based filtering
+      const startObjectId = ObjectId.createFromTime(Math.floor(startOfDayLocal.getTime() / 1000));
+      const endObjectId = ObjectId.createFromTime(Math.floor(endOfDayLocal.getTime() / 1000));
+      
+      dateMatchStage._id = { $gte: startObjectId, $lte: endObjectId };
+      console.log(`📅 Date filter: ${targetDate} (Offset: ${offsetString}) → ObjectId range [${startObjectId}, ${endObjectId}]`);
+      console.log(`   Start: ${startOfDayLocal.toISOString()} | End: ${endOfDayLocal.toISOString()}`);
     }
 
-    // Sort by date (newest first) and approval status
-    const sort = { Date: -1, _id: -1 };
+    // Combine match stages
+    const finalMatchStage = { ...matchStage, ...dateMatchStage };
+
+    // Use aggregation pipeline with smart sorting:
+    // 1. Prioritize date mismatches (critical errors)
+    // 2. Then time mismatches (warnings)
+    // 3. Then FIFO - oldest submissions first
+    const aggregationPipeline = [
+      { $match: finalMatchStage },
+      {
+        $addFields: {
+          // Extract date from ObjectId for comparison
+          _objectIdDate: {
+            $dateToString: {
+              format: "%Y-%m-%d",
+              date: { $toDate: "$_id" }
+            }
+          },
+          // Flag if user-entered Date doesn't match ObjectId date
+          _hasDateMismatch: {
+            $cond: {
+              if: { $ne: ["$Date", { $dateToString: { format: "%Y-%m-%d", date: { $toDate: "$_id" } } }] },
+              then: 1,
+              else: 0
+            }
+          },
+          // Extract end time in minutes for time mismatch detection
+          _objectIdTime: {
+            $dateToString: {
+              format: "%H:%M",
+              date: { $toDate: "$_id" }
+            }
+          },
+          // Flag if Time_end is off by more than 30 minutes
+          _hasTimeMismatch: {
+            $cond: {
+              if: {
+                $and: [
+                  { $ne: ["$Time_end", null] },
+                  { $ne: ["$Time_end", ""] }
+                ]
+              },
+              then: {
+                $cond: {
+                  if: {
+                    $gt: [
+                      {
+                        $abs: {
+                          $subtract: [
+                            // Convert Time_end to minutes
+                            {
+                              $add: [
+                                { $multiply: [{ $toInt: { $substr: ["$Time_end", 0, 2] } }, 60] },
+                                { $toInt: { $substr: ["$Time_end", 3, 2] } }
+                              ]
+                            },
+                            // Convert ObjectId time to minutes
+                            {
+                              $add: [
+                                { $multiply: [{ $hour: { $toDate: "$_id" } }, 60] },
+                                { $minute: { $toDate: "$_id" } }
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      30 // 30 minutes threshold
+                    ]
+                  },
+                  then: 1,
+                  else: 0
+                }
+              },
+              else: 0
+            }
+          }
+        }
+      },
+      {
+        // Sort with priority: Date errors → Time warnings → FIFO (oldest first)
+        $sort: {
+          _hasDateMismatch: -1,  // Date errors first (1 = error, 0 = no error)
+          _hasTimeMismatch: -1,  // Time warnings second
+          _id: 1                 // Then OLDEST first (ascending = FIFO)
+        }
+      },
+      { $skip: skip },
+      { $limit: itemsPerPage }
+    ];
 
     const [dataResult, countResult] = await Promise.all([
-      collection.find(query).sort(sort).skip(skip).limit(itemsPerPage).toArray(),
-      collection.countDocuments(query)
+      collection.aggregate(aggregationPipeline).toArray(),
+      collection.countDocuments(finalMatchStage)
     ]);
 
     // Calculate pagination info
     const totalPages = Math.ceil(countResult / itemsPerPage);
 
+    // Count errors in current page for logging
+    const dateErrors = dataResult.filter(doc => doc._hasDateMismatch === 1).length;
+    const timeWarnings = dataResult.filter(doc => doc._hasTimeMismatch === 1).length;
+
     console.log(`✅ Approval Pagination: ${collectionName}, Page ${currentPage}/${totalPages}, ${dataResult.length}/${countResult} records`);
+    console.log(`   🔴 Date errors: ${dateErrors}, ⚠️ Time warnings: ${timeWarnings}, ✅ Sorted by FIFO (oldest first)`);
 
     res.json({
       data: dataResult,
@@ -4550,7 +4680,7 @@ app.post('/api/approval-paginate', async (req, res) => {
         startIndex: skip + 1,
         endIndex: Math.min(skip + itemsPerPage, countResult)
       },
-      filters: query,
+      filters: finalMatchStage,
       success: true
     });
 
@@ -4663,6 +4793,11 @@ console.log("📄 Pagination routes loaded successfully");
 /**
  * Get approval statistics using MongoDB aggregation
  * POST /api/approval-stats
+ * 
+ * IMPORTANT: Uses MongoDB ObjectId timestamp for date filtering instead of user-entered "Date" field.
+ * This ensures accurate statistics based on actual document creation time, not user input.
+ * 
+ * TIMEZONE SUPPORT: Accepts timezoneOffset from frontend for accurate statistics in user's timezone.
  */
 app.post('/api/approval-stats', async (req, res) => {
   console.log("🟢 Received POST request to /api/approval-stats");
@@ -4689,27 +4824,50 @@ app.post('/api/approval-stats', async (req, res) => {
     console.log(`📊 Computing approval stats for: ${collectionName}, Role: ${userRole}`);
 
     // Build base query based on user access and filters
-    let baseQuery = { ...filters };
+    let baseQuery = {};
 
     // Apply factory access restrictions based on user role
     if (userRole !== 'admin' && userRole !== '部長' && factoryAccess.length > 0) {
       baseQuery.工場 = { $in: factoryAccess };
     }
 
-    // Convert string _id to ObjectId if present
-    if (baseQuery._id && typeof baseQuery._id === "string") {
-      try {
-        baseQuery._id = new ObjectId(baseQuery._id);
-      } catch (err) {
-        return res.status(400).json({ 
-          error: "Invalid _id format provided in query.",
-          success: false
-        });
+    // Add non-date filters
+    Object.keys(filters).forEach(key => {
+      if (key !== 'Date' && key !== 'timezoneOffset') {
+        baseQuery[key] = filters[key];
       }
+    });
+
+    // Handle Date filter using ObjectId timestamp (User's timezone)
+    if (filters.Date) {
+      const targetDate = filters.Date; // Format: "YYYY-MM-DD"
+      const timezoneOffset = filters.timezoneOffset || -540; // Default to JST
+      
+      const offsetHours = -timezoneOffset / 60;
+      const offsetSign = offsetHours >= 0 ? '+' : '';
+      const offsetString = `${offsetSign}${String(Math.floor(Math.abs(offsetHours))).padStart(2, '0')}:${String(Math.abs(offsetHours) % 1 * 60).padStart(2, '0')}`;
+      
+      const startOfDayLocal = new Date(targetDate + 'T00:00:00' + offsetString);
+      const endOfDayLocal = new Date(targetDate + 'T23:59:59.999' + offsetString);
+      
+      const startObjectId = ObjectId.createFromTime(Math.floor(startOfDayLocal.getTime() / 1000));
+      const endObjectId = ObjectId.createFromTime(Math.floor(endOfDayLocal.getTime() / 1000));
+      
+      baseQuery._id = { $gte: startObjectId, $lte: endObjectId };
+      console.log(`📅 Stats date filter: ${targetDate} (Offset: ${offsetString}) → ObjectId range`);
     }
 
-    // Get today's date for today's total calculation
+    // Get today's date for today's total calculation using ObjectId (User's timezone)
     const today = new Date().toISOString().split('T')[0];
+    const todayTimezoneOffset = filters.timezoneOffset || -540;
+    const todayOffsetHours = -todayTimezoneOffset / 60;
+    const todayOffsetSign = todayOffsetHours >= 0 ? '+' : '';
+    const todayOffsetString = `${todayOffsetSign}${String(Math.floor(Math.abs(todayOffsetHours))).padStart(2, '0')}:${String(Math.abs(todayOffsetHours) % 1 * 60).padStart(2, '0')}`;
+    
+    const todayStartLocal = new Date(today + 'T00:00:00' + todayOffsetString);
+    const todayEndLocal = new Date(today + 'T23:59:59.999' + todayOffsetString);
+    const todayStartObjectId = ObjectId.createFromTime(Math.floor(todayStartLocal.getTime() / 1000));
+    const todayEndObjectId = ObjectId.createFromTime(Math.floor(todayEndLocal.getTime() / 1000));
 
     // Create aggregation pipeline for statistics
     const statsAggregation = [
@@ -4756,10 +4914,15 @@ app.post('/api/approval-stats', async (req, res) => {
               }
             }
           ],
-          // Today's submissions
+          // Today's submissions (based on ObjectId timestamp)
           todayStats: [
             {
-              $match: { Date: today }
+              $match: { 
+                _id: { 
+                  $gte: todayStartObjectId, 
+                  $lte: todayEndObjectId 
+                } 
+              }
             },
             {
               $group: {
