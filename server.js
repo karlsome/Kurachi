@@ -11429,6 +11429,94 @@ app.post("/api/inventory-management", async (req, res) => {
         }
         break;
 
+      case 'resetInventory':
+        try {
+          const {
+            backNumber,
+            partNumber,
+            currentPhysical,
+            currentReserved,
+            currentAvailable,
+            resetPhysical,
+            resetReserved,
+            resetAvailable,
+            factory,
+            submittedBy,
+            fullName
+          } = req.body;
+
+          if (!backNumber || !partNumber) {
+            return res.status(400).json({ error: "背番号 and 品番 are required" });
+          }
+
+          // Calculate differences and build action string
+          const actionParts = [];
+          let newPhysical = currentPhysical;
+          let newReserved = currentReserved;
+          let newAvailable = currentAvailable;
+
+          if (resetPhysical) {
+            const diff = 0 - currentPhysical;
+            actionParts.push(`物理在庫 ${diff >= 0 ? '+' : ''}${diff}`);
+            newPhysical = 0;
+          }
+
+          if (resetReserved) {
+            const diff = 0 - currentReserved;
+            actionParts.push(`引当在庫 ${diff >= 0 ? '+' : ''}${diff}`);
+            newReserved = 0;
+          }
+
+          if (resetAvailable) {
+            const diff = 0 - currentAvailable;
+            actionParts.push(`利用可能 ${diff >= 0 ? '+' : ''}${diff}`);
+            newAvailable = 0;
+          }
+
+          const actionString = `アドミンリセット (${actionParts.join(', ')})`;
+          const now = new Date();
+          const timeStamp = now.toISOString();
+          const dateField = now.toISOString().split('T')[0]; // yyyy-mm-dd format
+          const source = `Freya Admin - ${fullName || submittedBy}`;
+          const note = 'Inventory Reset by admin';
+
+          // Create transaction document
+          const transactionDoc = {
+            背番号: backNumber,
+            品番: partNumber,
+            工場: factory,
+            physicalQuantity: newPhysical,
+            reservedQuantity: newReserved,
+            availableQuantity: newAvailable,
+            runningQuantity: newPhysical, // For backward compatibility
+            action: actionString,
+            timeStamp: timeStamp,
+            Date: dateField,
+            submittedBy: submittedBy,
+            source: source,
+            note: note
+          };
+
+          // Insert transaction
+          const result = await inventoryCollection.insertOne(transactionDoc);
+
+          console.log(`✅ Admin reset: ${backNumber} - ${actionString} by ${submittedBy}`);
+
+          res.json({
+            success: true,
+            message: 'Inventory reset successfully',
+            transaction: {
+              ...transactionDoc,
+              _id: result.insertedId
+            }
+          });
+
+        } catch (error) {
+          console.error("Error in resetInventory:", error);
+          res.status(500).json({ error: "Failed to reset inventory", details: error.message });
+        }
+        break;
+
       case 'exportInventoryData':
         try {
           // Get latest inventory state for all items (no pagination for export)
