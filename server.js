@@ -11489,6 +11489,7 @@ app.post("/api/inventory-management", async (req, res) => {
             reservedQuantity: newReserved,
             availableQuantity: newAvailable,
             runningQuantity: newPhysical, // For backward compatibility
+            lastQuantity: newPhysical, // Add lastQuantity to track the last physical quantity
             action: actionString,
             timeStamp: timeStamp,
             Date: dateField,
@@ -11667,6 +11668,7 @@ app.post("/api/inventory-management", async (req, res) => {
                 reservedQuantity: 0,
                 availableQuantity: 0,
                 runningQuantity: 0,
+                lastQuantity: 0, // Add lastQuantity to track the last physical quantity
                 action: actionString,
                 timeStamp: timeStamp,
                 Date: dateField,
@@ -11797,7 +11799,7 @@ function calculateInventorySummary(inventoryItems) {
 // Add Inventory API Route
 app.post("/api/inventory/add", async (req, res) => {
   try {
-    const { 品番, 背番号, physicalQuantityChange, action, source, Date, timeStamp } = req.body;
+    const { 品番, 背番号, 工場, physicalQuantityChange, action, source, Date, timeStamp } = req.body;
 
     // Validation
     if (!品番 || !背番号 || !physicalQuantityChange || physicalQuantityChange <= 0) {
@@ -11818,23 +11820,64 @@ app.post("/api/inventory/add", async (req, res) => {
     const db = client.db("submittedDB");
     const inventoryCollection = db.collection("nodaInventoryDB");
 
+    console.log(`🔍 [ADD INVENTORY] Looking up latest inventory for 背番号: ${背番号}, 工場: ${工場}`);
+
     // Get current inventory state for this item
-    const currentInventory = await inventoryCollection.findOne(
-      { 背番号: 背番号 },
-      { sort: { timeStamp: -1 } }
-    );
+    // Use aggregation pipeline to properly handle timeStamp conversion and sorting
+    const query = { 背番号: 背番号 };
+    if (工場 !== undefined) {
+      query.工場 = 工場;
+    }
+    
+    console.log(`🔍 [ADD INVENTORY] Query:`, JSON.stringify(query));
+    
+    // Use aggregation to get the latest record with proper date handling
+    const latestRecords = await inventoryCollection.aggregate([
+      { $match: query },
+      {
+        $addFields: {
+          timeStampDate: {
+            $cond: {
+              if: { $eq: [{ $type: "$timeStamp" }, "string"] },
+              then: { $dateFromString: { dateString: "$timeStamp" } },
+              else: { $toDate: "$timeStamp" }
+            }
+          }
+        }
+      },
+      { $sort: { timeStampDate: -1 } },
+      { $limit: 1 }
+    ]).toArray();
+    
+    const currentInventory = latestRecords.length > 0 ? latestRecords[0] : null;
+
+    console.log(`📊 [ADD INVENTORY] Current inventory found:`, currentInventory ? {
+      _id: currentInventory._id,
+      背番号: currentInventory.背番号,
+      品番: currentInventory.品番,
+      timeStamp: currentInventory.timeStamp,
+      physicalQuantity: currentInventory.physicalQuantity,
+      lastQuantity: currentInventory.lastQuantity,
+      action: currentInventory.action
+    } : 'NO RECORD FOUND');
 
     const currentPhysicalQuantity = currentInventory ? (currentInventory.physicalQuantity || currentInventory.runningQuantity || 0) : 0;
     const currentReservedQuantity = currentInventory ? (currentInventory.reservedQuantity || 0) : 0;
+
+    console.log(`📊 [ADD INVENTORY] Current quantities - Physical: ${currentPhysicalQuantity}, Reserved: ${currentReservedQuantity}`);
+    console.log(`➕ [ADD INVENTORY] Adding ${physicalQuantityChange} units`);
 
     // Calculate new quantities
     const newPhysicalQuantity = currentPhysicalQuantity + physicalQuantityChange;
     const newAvailableQuantity = newPhysicalQuantity - currentReservedQuantity;
 
+    console.log(`📊 [ADD INVENTORY] New quantities - Physical: ${newPhysicalQuantity}, Available: ${newAvailableQuantity}, LastQuantity: ${currentPhysicalQuantity}`);
+
     // Create new inventory transaction record
     const inventoryTransaction = {
       背番号: 背番号,
       品番: 品番,
+      工場: 工場,
       timeStamp: timeStamp || new Date(),
       Date: Date,
       physicalQuantity: newPhysicalQuantity,
