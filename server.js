@@ -8619,6 +8619,77 @@ app.get('/api/masterdb/filters', async (req, res) => {
     }
 });
 
+// ==================== PLANNER PRINT API ROUTE ====================
+
+/**
+ * Get master data for a specific product by 背番号 (seiban)
+ * Used by planner print functionality to get material info, 送りピッチ, pcPerCycle, etc.
+ * GET /api/masterdb/product?seiban=B0399
+ */
+app.get('/api/masterdb/product', async (req, res) => {
+    const { seiban } = req.query;
+
+    if (!seiban) {
+        return res.status(400).json({ 
+            success: false,
+            error: 'Missing required parameter: seiban' 
+        });
+    }
+
+    try {
+        await client.connect();
+        const database = client.db(DB_NAME);
+        const masterCollection = database.collection('masterDB');
+
+        // Find product by 背番号
+        const product = await masterCollection.findOne(
+            { '背番号': seiban },
+            {
+                projection: {
+                    '品番': 1,
+                    '背番号': 1,
+                    '品名': 1,
+                    'モデル': 1,
+                    '材料': 1,
+                    '材料背番号': 1,
+                    '送りピッチ': 1,
+                    'pcPerCycle': 1,
+                    '収容数': 1,
+                    '工場': 1,
+                    '備考': 1,
+                    'imageURL': 1,
+                    'machineConfig': 1,
+                    '_id': 0
+                }
+            }
+        );
+
+        if (!product) {
+            return res.status(404).json({ 
+                success: false,
+                error: `Product not found with 背番号: ${seiban}` 
+            });
+        }
+
+        res.json({ 
+            success: true,
+            data: product
+        });
+
+    } catch (error) {
+        console.error('❌ Error fetching product from Master DB:', error);
+        res.status(500).json({ 
+            success: false,
+            error: 'Failed to fetch product data',
+            message: error.message
+        });
+    }
+});
+
+console.log("🖨️ Planner print API route loaded successfully");
+
+// ==================== END PLANNER PRINT API ROUTE ====================
+
 
 
 // ==================== NODA WAREHOUSE MANAGEMENT API ROUTES ====================
