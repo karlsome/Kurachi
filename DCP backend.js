@@ -5356,6 +5356,50 @@ document.getElementById('submit').addEventListener('click', async (event) => {
             return;
         }
 
+        // ==================== NEW: Validate Material Label Photos vs Lot Count ====================
+        // Count unique lot numbers (comma-separated values)
+        const lotNumbers = 材料ロット.split(',').map(lot => lot.trim()).filter(lot => lot !== '');
+        const uniqueLotCount = lotNumbers.length;
+        const materialPhotoCount = materialLabelPhotos.length;
+
+        console.log('Material lot validation:', {
+            材料ロット,
+            lotNumbers,
+            uniqueLotCount,
+            materialPhotoCount
+        });
+
+        // Check if material label photo count is sufficient
+        if (materialPhotoCount < uniqueLotCount) {
+            uploadingModal.style.display = 'none';
+            showAlert(
+                `材料ラベルの写真が不足しています\n\n` +
+                `ロット数: ${uniqueLotCount}個\n` +
+                `写真数: ${materialPhotoCount}枚\n\n` +
+                `各ロットの材料ラベル写真を撮影してください\n\n` +
+                `---\n\n` +
+                `Insufficient material label photos\n\n` +
+                `Lot count: ${uniqueLotCount}\n` +
+                `Photo count: ${materialPhotoCount}\n\n` +
+                `Please capture a material label photo for each lot`
+            );
+            
+            // Log the validation failure
+            logTabletAction('Material label photo validation failed', 'error', {
+                lotCount: uniqueLotCount,
+                photoCount: materialPhotoCount,
+                lotNumbers: lotNumbers
+            });
+            
+            return;
+        }
+
+        console.log('✅ Material label photo validation passed:', {
+            uniqueLotCount,
+            materialPhotoCount
+        });
+        // ==================== END Material Label Photos Validation ====================
+
         // 2. Validate Time fields
         if (!Time_start || Time_start.trim() === '') {
             uploadingModal.style.display = 'none';
