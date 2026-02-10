@@ -6300,10 +6300,42 @@ app.post('/api/production-goals/batch', async (req, res) => {
         const db = client.db('submittedDB');
         const collection = db.collection('productionGoalsDB');
         
+        // Helper function to convert date format from yyyy/m/d to yyyy-mm-dd with zero-padding
+        function normalizeDate(dateString) {
+            if (!dateString) return dateString;
+            
+            // If date contains slashes, split and convert with zero-padding
+            if (dateString.includes('/')) {
+                const parts = dateString.split('/');
+                if (parts.length === 3) {
+                    const [year, month, day] = parts;
+                    // Zero-pad month and day to 2 digits
+                    const paddedMonth = month.padStart(2, '0');
+                    const paddedDay = day.padStart(2, '0');
+                    return `${year}-${paddedMonth}-${paddedDay}`;
+                }
+                // Fallback: just replace slashes
+                return dateString.replace(/\//g, '-');
+            }
+            
+            // If already using hyphens, check if it needs zero-padding
+            if (dateString.includes('-')) {
+                const parts = dateString.split('-');
+                if (parts.length === 3) {
+                    const [year, month, day] = parts;
+                    const paddedMonth = month.padStart(2, '0');
+                    const paddedDay = day.padStart(2, '0');
+                    return `${year}-${paddedMonth}-${paddedDay}`;
+                }
+            }
+            
+            return dateString;
+        }
+        
         // Process each goal
         const goalsToInsert = goals.map(g => ({
             factory: g.factory,
-            date: g.date,
+            date: normalizeDate(g.date), // Convert date format
             背番号: g.背番号 || '',
             品番: g.品番 || '',
             品名: g.品名 || '',
@@ -6786,13 +6818,13 @@ app.post('/api/production-goals/press-history', async (req, res) => {
         const db = client.db('submittedDB');
         const collection = db.collection('pressDB');
         
-        // Get last 30 days in YYYY-MM-DD format (pressDB uses Date field as string)
+        // Get last 90 days in YYYY-MM-DD format (pressDB uses Date field as string)
         const today = new Date();
-        const thirtyDaysAgo = new Date();
-        thirtyDaysAgo.setDate(today.getDate() - 30);
-        const dateThreshold = thirtyDaysAgo.toISOString().split('T')[0]; // "YYYY-MM-DD"
+        const ninetyDaysAgo = new Date();
+        ninetyDaysAgo.setDate(today.getDate() - 90);
+        const dateThreshold = ninetyDaysAgo.toISOString().split('T')[0]; // "YYYY-MM-DD"
         
-        console.log('Date threshold (30 days ago):', dateThreshold);
+        console.log('Date threshold (90 days ago):', dateThreshold);
         
         const trends = {};
         
