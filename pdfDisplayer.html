@@ -14,12 +14,13 @@
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
             background: url('https://4kwallpapers.com/images/walls/thumbs_2t/22674.jpg') center center / cover no-repeat fixed;
-            min-height: 100vh;
+            height: 100vh;
             display: flex;
             flex-direction: column;
             padding: 20px;
             position: relative;
             overflow: hidden;
+            box-sizing: border-box;
         }
 
         /* Dark overlay for better readability */
@@ -57,9 +58,9 @@
         }
 
         .header {
-            padding: 25px 35px;
-            border-radius: 20px;
-            margin-bottom: 20px;
+            padding: 8px 20px;
+            border-radius: 10px;
+            margin-bottom: 8px;
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -68,28 +69,28 @@
         }
 
         .machine-name {
-            font-size: 3em;
+            font-size: 1.1em;
             font-weight: 700;
             color: #ffffff;
-            letter-spacing: 2px;
+            letter-spacing: 1px;
             text-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
         }
 
         .connection-status {
             display: flex;
             align-items: center;
-            gap: 12px;
-            padding: 12px 20px;
+            gap: 8px;
+            padding: 6px 12px;
             background: rgba(255, 255, 255, 0.2);
             border-radius: 50px;
-            font-size: 0.95em;
+            font-size: 0.75em;
             color: #ffffff;
             font-weight: 500;
         }
 
         .status-dot {
-            width: 12px;
-            height: 12px;
+            width: 10px;
+            height: 10px;
             border-radius: 50%;
             background-color: rgba(255, 255, 255, 0.5);
             position: relative;
@@ -129,42 +130,43 @@
         }
 
         .main-content {
-            border-radius: 20px;
-            padding: 40px;
+            border-radius: 15px;
+            padding: 10px;
             flex: 1;
             display: flex;
             flex-direction: column;
             position: relative;
             z-index: 1;
-            min-height: 500px;
+            min-height: 0;
+            overflow: hidden;
         }
 
         .info-section {
-            margin-bottom: 30px;
+            margin-bottom: 8px;
         }
 
         .info-title {
-            font-size: 1.4em;
+            font-size: 0.8em;
             font-weight: 600;
             color: #ffffff;
-            margin-bottom: 20px;
-            padding-bottom: 12px;
+            margin-bottom: 6px;
+            padding-bottom: 4px;
             border-bottom: 2px solid rgba(255, 255, 255, 0.3);
             letter-spacing: 0.5px;
         }
 
         .product-info {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 20px;
-            margin-bottom: 25px;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 8px;
+            margin-bottom: 8px;
         }
 
         .info-card {
             background: rgba(255, 255, 255, 0.06);
             backdrop-filter: blur(10px);
-            padding: 25px;
-            border-radius: 15px;
+            padding: 8px 12px;
+            border-radius: 8px;
             border: 1px solid rgba(255, 255, 255, 0.15);
             transition: all 0.3s ease;
             position: relative;
@@ -176,28 +178,28 @@
             position: absolute;
             top: 0;
             left: 0;
-            width: 5px;
+            width: 3px;
             height: 100%;
             background: linear-gradient(180deg, #667eea 0%, #764ba2 100%);
         }
 
         .info-card:hover {
-            transform: translateY(-5px);
+            transform: translateY(-2px);
             background: rgba(255, 255, 255, 0.1);
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
         }
 
         .info-label {
-            font-size: 0.85em;
+            font-size: 0.65em;
             color: rgba(255, 255, 255, 0.7);
-            margin-bottom: 8px;
+            margin-bottom: 3px;
             font-weight: 500;
             text-transform: uppercase;
-            letter-spacing: 1px;
+            letter-spacing: 0.5px;
         }
 
         .info-value {
-            font-size: 1.8em;
+            font-size: 0.9em;
             font-weight: 700;
             color: #ffffff;
             text-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
@@ -220,13 +222,18 @@
 
         .pdf-section {
             display: none;
-            margin-top: 20px;
+            margin-top: 5px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            overflow: hidden;
         }
 
         .pdf-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-            gap: 20px;
+            display: flex;
+            width: 100%;
+            height: 100%;
         }
 
         .pdf-card {
@@ -380,9 +387,14 @@
         }
 
         const MACHINE_ID = getMachineIdFromURL();
-        const SERVER_URL = 'https://kurachi.onrender.com';
-        //const SERVER_URL = 'http://localhost:3000';
+        //const SERVER_URL = 'https://kurachi.onrender.com';
+        const SERVER_URL = 'http://localhost:3000';
         //const SERVER_URL = 'http://192.168.1.176:3000';
+
+        // localStorage key for persisting scan data
+        function getStorageKey() {
+            return `machine_${MACHINE_ID}_lastScan`;
+        }
 
         let eventSource = null;
         const statusDot = document.getElementById('statusDot');
@@ -406,6 +418,13 @@
             machineNameDisplay.textContent = MACHINE_ID;
             document.title = `${MACHINE_ID} - Machine Display`;
             
+            // Try to restore last scan from localStorage
+            const lastScan = loadScanFromStorage();
+            if (lastScan) {
+                console.log('🔄 Restoring last scan from localStorage');
+                updateDisplay(lastScan);
+            }
+            
             // Start SSE connection
             connectSSE();
         }
@@ -417,6 +436,41 @@
             errorMessage.style.display = 'block';
             errorText.innerHTML = message;
             machineNameDisplay.textContent = 'ERROR';
+        }
+
+        // Save scan data to localStorage
+        function saveScanToStorage(data) {
+            try {
+                localStorage.setItem(getStorageKey(), JSON.stringify(data));
+                console.log('💾 Saved scan data to localStorage:', data);
+            } catch (error) {
+                console.error('Error saving to localStorage:', error);
+            }
+        }
+
+        // Load scan data from localStorage
+        function loadScanFromStorage() {
+            try {
+                const stored = localStorage.getItem(getStorageKey());
+                if (stored) {
+                    const data = JSON.parse(stored);
+                    console.log('📂 Loaded scan data from localStorage:', data);
+                    return data;
+                }
+            } catch (error) {
+                console.error('Error loading from localStorage:', error);
+            }
+            return null;
+        }
+
+        // Clear scan data from localStorage
+        function clearScanFromStorage() {
+            try {
+                localStorage.removeItem(getStorageKey());
+                console.log('🗑️ Cleared scan data from localStorage');
+            } catch (error) {
+                console.error('Error clearing localStorage:', error);
+            }
         }
 
         // Connect to SSE endpoint
@@ -487,6 +541,9 @@
         function clearDisplay() {
             console.log('🧹 Clearing display - reset triggered');
             
+            // Clear localStorage
+            clearScanFromStorage();
+            
             // Hide product info, show waiting message
             productSection.style.display = 'none';
             waitingMessage.style.display = 'block';
@@ -501,7 +558,10 @@
         }
 
         // Update the display with scan data
-        function updateDisplay(data) {
+        async function updateDisplay(data) {
+            // Save to localStorage for persistence
+            saveScanToStorage(data);
+            
             // Hide waiting message, show product info
             waitingMessage.style.display = 'none';
             productSection.style.display = 'block';
@@ -521,12 +581,135 @@
                 second: '2-digit'
             });
 
-            // Show PDF section (placeholder for now)
-            pdfSection.style.display = 'block';
-
-            // TODO: Fetch and display PDFs from Firebase based on sebanggo
-            console.log(`📄 TODO: Load PDFs for 背番号: ${data.sebanggo}`);
+            // Fetch and display PDFs
+            await fetchAndDisplayPDFs(data.sebanggo);
         }
+
+        // PDF Display System
+        let pdfPages = []; // Array of {type, imageURL, name}
+        let currentPDFIndex = 0;
+
+        async function fetchAndDisplayPDFs(sebanggo) {
+            try {
+                console.log(`📄 Fetching PDFs for 背番号: ${sebanggo}`);
+                
+                const response = await fetch(`${SERVER_URL}/api/product-pdfs/${sebanggo}`);
+                const pdfs = await response.json();
+                
+                // Build pages array
+                pdfPages = [];
+                
+                if (pdfs.梱包 && pdfs.梱包.imageURL) {
+                    pdfPages.push({
+                        type: '梱包',
+                        imageURL: pdfs.梱包.imageURL,
+                        name: '梱包 (Packing)'
+                    });
+                }
+                
+                if (pdfs.検査基準 && pdfs.検査基準.imageURL) {
+                    pdfPages.push({
+                        type: '検査基準',
+                        imageURL: pdfs.検査基準.imageURL,
+                        name: '検査基準 (Inspection Standards)'
+                    });
+                }
+                
+                if (pdfs['3点総合'] && pdfs['3点総合'].imageURL) {
+                    pdfPages.push({
+                        type: '3点総合',
+                        imageURL: pdfs['3点総合'].imageURL,
+                        name: '3点総合 (3-Point Comprehensive)'
+                    });
+                }
+                
+                // Add placeholders for missing PDFs
+                if (!pdfs.梱包 || !pdfs.梱包.imageURL) {
+                    pdfPages.push({
+                        type: '梱包',
+                        imageURL: null,
+                        name: '梱包 (Packing)'
+                    });
+                }
+                
+                if (!pdfs.検査基準 || !pdfs.検査基準.imageURL) {
+                    pdfPages.push({
+                        type: '検査基準',
+                        imageURL: null,
+                        name: '検査基準 (Inspection Standards)'
+                    });
+                }
+                
+                if (!pdfs['3点総合'] || !pdfs['3点総合'].imageURL) {
+                    pdfPages.push({
+                        type: '3点総合',
+                        imageURL: null,
+                        name: '3点総合 (3-Point Comprehensive)'
+                    });
+                }
+                
+                console.log(`✅ Loaded ${pdfPages.length} PDF pages`, pdfPages);
+                
+                // Show first page
+                currentPDFIndex = 0;
+                displayCurrentPDF();
+                
+            } catch (error) {
+                console.error('❌ Error fetching PDFs:', error);
+                pdfSection.style.display = 'none';
+            }
+        }
+
+        function displayCurrentPDF() {
+            if (pdfPages.length === 0) {
+                pdfSection.style.display = 'none';
+                return;
+            }
+            
+            pdfSection.style.display = 'block';
+            const currentPage = pdfPages[currentPDFIndex];
+            
+            const pdfGrid = document.getElementById('pdfGrid');
+            
+            if (currentPage.imageURL) {
+                // Display PDF image - full screen with overlay title
+                pdfGrid.innerHTML = `
+                    <div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.5); border-radius: 10px; padding: 15px; position: relative;">
+                        <div style="position: absolute; top: 15px; left: 15px; background: rgba(0, 0, 0, 0.8); color: white; font-size: 0.9em; font-weight: 600; padding: 8px 16px; border-radius: 6px; z-index: 10; backdrop-filter: blur(10px);">
+                            ${currentPage.name}
+                        </div>
+                        <img src="${currentPage.imageURL}" alt="${currentPage.name}" style="width: 100%; height: 100%; object-fit: contain; border-radius: 8px; box-shadow: 0 10px 40px rgba(0,0,0,0.5);" />
+                    </div>
+                `;
+            } else {
+                // Display placeholder
+                pdfGrid.innerHTML = `
+                    <div style="width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(255, 255, 255, 0.06); border-radius: 10px;">
+                        <div style="font-size: 1.2em; font-weight: 600; color: white; margin-bottom: 20px;">
+                            ${currentPage.name}
+                        </div>
+                        <div style="font-size: 4em; margin-bottom: 20px;">📄</div>
+                        <div style="color: rgba(255, 255, 255, 0.7); font-size: 1em;">
+                            No ${currentPage.type} available
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        function nextPDF() {
+            if (pdfPages.length === 0) return;
+            currentPDFIndex = (currentPDFIndex + 1) % pdfPages.length;
+            displayCurrentPDF();
+        }
+
+        // Keyboard navigation - ANY key advances to next page
+        document.addEventListener('keydown', (event) => {
+            // Only handle keyboard if we have PDFs loaded
+            if (pdfPages.length > 0) {
+                nextPDF();
+            }
+        });
 
         // Initialize connection on page load
         window.addEventListener('DOMContentLoaded', () => {
