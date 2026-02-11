@@ -130,8 +130,7 @@
         }
 
         .main-content {
-            border-radius: 15px;
-            padding: 10px;
+            padding: 0;
             flex: 1;
             display: flex;
             flex-direction: column;
@@ -143,6 +142,7 @@
 
         .info-section {
             margin-bottom: 8px;
+            flex-shrink: 0;
         }
 
         .info-title {
@@ -153,6 +153,7 @@
             padding-bottom: 4px;
             border-bottom: 2px solid rgba(255, 255, 255, 0.3);
             letter-spacing: 0.5px;
+            flex-shrink: 0;
         }
 
         .product-info {
@@ -160,6 +161,7 @@
             grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
             gap: 8px;
             margin-bottom: 8px;
+            flex-shrink: 0;
         }
 
         .info-card {
@@ -233,7 +235,8 @@
         .pdf-grid {
             display: flex;
             width: 100%;
-            height: 100%;
+            flex: 1;
+            min-height: 0;
         }
 
         .pdf-card {
@@ -331,7 +334,7 @@
         </div>
     </div>
 
-    <div class="main-content glass">
+    <div class="main-content">
         <div class="error-message" id="errorMessage" style="display: none;">
             <div class="icon">⚠️</div>
             <div id="errorText"></div>
@@ -362,12 +365,7 @@
 
             <div class="pdf-section" id="pdfSection">
                 <div class="info-title">関連資料 / Related Documents</div>
-                <div class="pdf-grid" id="pdfGrid">
-                    <!-- PDF cards will be dynamically inserted here -->
-                    <div class="pdf-card">
-                        <div class="pdf-icon">📄</div>
-                        <div class="pdf-name">Coming Soon: PDF Display</div>
-                    </div>
+                <div id="pdfGrid">
                 </div>
             </div>
         </div>
@@ -672,19 +670,19 @@
             const pdfGrid = document.getElementById('pdfGrid');
             
             if (currentPage.imageURL) {
-                // Display PDF image - full screen with overlay title
+                // Display PDF image with overlay title, constrained to viewport
                 pdfGrid.innerHTML = `
-                    <div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.5); border-radius: 10px; padding: 15px; position: relative;">
-                        <div style="position: absolute; top: 15px; left: 15px; background: rgba(0, 0, 0, 0.8); color: white; font-size: 0.9em; font-weight: 600; padding: 8px 16px; border-radius: 6px; z-index: 10; backdrop-filter: blur(10px);">
+                    <div style="position: relative; display: inline-block;">
+                        <div style="position: absolute; top: 10px; left: 10px; background: rgba(0, 0, 0, 0.8); color: white; font-size: 0.9em; font-weight: 600; padding: 8px 16px; border-radius: 6px; z-index: 10; backdrop-filter: blur(10px);">
                             ${currentPage.name}
                         </div>
-                        <img src="${currentPage.imageURL}" alt="${currentPage.name}" style="width: 100%; height: 100%; object-fit: contain; border-radius: 8px; box-shadow: 0 10px 40px rgba(0,0,0,0.5);" />
+                        <img src="${currentPage.imageURL}" alt="${currentPage.name}" style="max-height: calc(100vh - 250px); max-width: 100%; object-fit: contain; border-radius: 8px; box-shadow: 0 10px 40px rgba(0,0,0,0.5); display: block;" />
                     </div>
                 `;
             } else {
                 // Display placeholder
                 pdfGrid.innerHTML = `
-                    <div style="width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(255, 255, 255, 0.06); border-radius: 10px;">
+                    <div style="height: calc(100vh - 250px); display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(255, 255, 255, 0.06); border-radius: 10px;">
                         <div style="font-size: 1.2em; font-weight: 600; color: white; margin-bottom: 20px;">
                             ${currentPage.name}
                         </div>
