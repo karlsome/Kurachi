@@ -39,6 +39,9 @@ const machineConnections = new Map();
 // Store connected clients for each factory (for production TV)
 const factoryConnections = new Map();
 
+// Store last scan data for each machine (for persistence)
+const machineLastScan = new Map();
+
 // Helper function to send SSE message to specific machine clients
 function broadcastToMachine(machineId, data) {
   const clients = machineConnections.get(machineId) || [];
@@ -94,6 +97,19 @@ app.get("/", (req, res) => {
 // SSE ROUTES - Machine Display Pages
 // ============================================
 
+// Debug endpoint to check stored machine states
+app.get("/api/machine-state/:machineId", (req, res) => {
+  const machineId = req.params.machineId.toUpperCase();
+  const lastScan = machineLastScan.get(machineId);
+  
+  res.json({
+    machineId,
+    hasStoredData: machineLastScan.has(machineId),
+    lastScan: lastScan || null,
+    connectedClients: (machineConnections.get(machineId) || []).length
+  });
+});
+
 // SSE endpoint - clients connect here to receive real-time updates
 app.get("/sse/machine/:machineId", (req, res) => {
   const machineId = req.params.machineId.toUpperCase();
@@ -114,6 +130,13 @@ app.get("/sse/machine/:machineId", (req, res) => {
   
   // Send initial connection message
   res.write(`data: ${JSON.stringify({ type: 'connected', machineId, timestamp: new Date().toISOString() })}\n\n`);
+  
+  // Send last scan data if available (for persistence on page reload)
+  if (machineLastScan.has(machineId)) {
+    const lastScan = machineLastScan.get(machineId);
+    console.log(`📤 Sending last scan data to new client for ${machineId}:`, lastScan);
+    res.write(`data: ${JSON.stringify(lastScan)}\n\n`);
+  }
   
   // Handle client disconnect
   req.on('close', () => {
@@ -173,15 +196,29 @@ app.post("/api/broadcast-scan", async (req, res) => {
   
   const normalizedMachineId = machineId.toUpperCase();
   
-  // Broadcast to all clients listening to this machine
-  broadcastToMachine(normalizedMachineId, {
+  const scanData = {
     type: 'scan',
     machineId: normalizedMachineId,
     sebanggo,
     hinban: hinban || '',
     timestamp: timestamp || new Date().toISOString(),
     additionalData: additionalData || {}
-  });
+  };
+  
+  // Store last scan for persistence (or clear it if action is 'clear')
+  if (isClearAction) {
+    machineLastScan.delete(normalizedMachineId);
+    console.log(`🗑️ Cleared last scan data for ${normalizedMachineId}`);
+  } else if (sebanggo && hinban) {
+    // Only store if we have valid sebanggo and hinban
+    machineLastScan.set(normalizedMachineId, scanData);
+    console.log(`💾 Stored last scan for ${normalizedMachineId}:`, { sebanggo, hinban });
+  } else {
+    console.log(`⚠️ Skipping storage for ${normalizedMachineId} - missing sebanggo or hinban`);
+  }
+  
+  // Broadcast to all clients listening to this machine
+  broadcastToMachine(normalizedMachineId, scanData);
   
   // ✅ Insert log to tabletLogDB in parallel with SSE broadcast
   if (sebanggo && hinban) {
@@ -370,6 +407,467 @@ app.post("/api/tablet-log", async (req, res) => {
     });
   }
 });
+
+// ============================================
+// PRODUCT PDFs ROUTES (梱包 / 検査基準 / 3点総合)
+// ============================================
+
+// Upload PDF and convert to image
+app.post("/api/upload-product-pdf", async (req, res) => {
+  try {
+    const { pdfType, 背番号Array, pdfBase64, fileName, uploadedBy } = req.body;
+    
+    if (!pdfType || !背番号Array || !pdfBase64 || !fileName) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    // Validate pdfType
+    const validTypes = ["梱包", "検査基準", "3点総合"];
+    if (!validTypes.includes(pdfType)) {
+      return res.status(400).json({ error: "Invalid PDF type" });
+    }
+
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const productPDFsDB = database.collection("productPDFsDB");
+
+    // Generate unique document ID
+    const docId = new ObjectId();
+    const timestamp = Date.now();
+
+    // Convert base64 to buffer
+    const pdfBuffer = Buffer.from(pdfBase64.split(',')[1] || pdfBase64, 'base64');
+
+    // Upload original PDF to Firebase
+    const pdfFileName = `${pdfType}_${docId}_${timestamp}.pdf`;
+    const pdfFile = admin.storage().bucket().file(`productPDFs/originals/${pdfType}/${pdfFileName}`);
+    
+    await pdfFile.save(pdfBuffer, {
+      metadata: {
+        contentType: 'application/pdf',
+        metadata: {
+          firebaseStorageDownloadTokens: 'masterDBToken69'
+        }
+      },
+      public: true
+    });
+
+    const pdfURL = `https://storage.googleapis.com/${pdfFile.bucket.name}/${encodeURIComponent(pdfFile.name)}?alt=media&token=masterDBToken69`;
+
+    // For now, we'll store the PDF URL and handle conversion client-side or via external service
+    // Alternative: Use pdf-poppler or pdf2pic if you want server-side conversion
+    // For simplicity, we'll use client-side conversion in the admin UI
+    
+    // Store metadata in MongoDB
+    const pdfDocument = {
+      _id: docId,
+      pdfType,
+      背番号Array,
+      fileName,
+      pdfURL,
+      imageURL: null, // Will be updated after image conversion
+      uploadedBy: uploadedBy || 'admin',
+      uploadedAt: new Date().toISOString(),
+      isActive: true
+    };
+
+    await productPDFsDB.insertOne(pdfDocument);
+
+    res.status(201).json({
+      success: true,
+      message: "PDF uploaded successfully",
+      documentId: docId,
+      pdfURL
+    });
+
+  } catch (error) {
+    console.error("❌ Error uploading product PDF:", error);
+    res.status(500).json({ error: "Error uploading PDF", details: error.message });
+  }
+});
+
+// Upload converted image for PDF
+app.post("/api/upload-pdf-image", async (req, res) => {
+  try {
+    const { documentId, imageBase64, pdfType } = req.body;
+    
+    if (!documentId || !imageBase64 || !pdfType) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const productPDFsDB = database.collection("productPDFsDB");
+
+    // Convert base64 to buffer
+    const imageBuffer = Buffer.from(imageBase64.split(',')[1] || imageBase64, 'base64');
+
+    // Upload image to Firebase
+    const timestamp = Date.now();
+    const imageFileName = `${pdfType}_${documentId}_${timestamp}.jpg`;
+    const imageFile = admin.storage().bucket().file(`productPDFs/images/${pdfType}/${imageFileName}`);
+    
+    await imageFile.save(imageBuffer, {
+      metadata: {
+        contentType: 'image/jpeg',
+        metadata: {
+          firebaseStorageDownloadTokens: 'masterDBToken69'
+        }
+      },
+      public: true
+    });
+
+    const imageURL = `https://storage.googleapis.com/${imageFile.bucket.name}/${encodeURIComponent(imageFile.name)}?alt=media&token=masterDBToken69`;
+
+    // Update document with image URL
+    await productPDFsDB.updateOne(
+      { _id: new ObjectId(documentId) },
+      { $set: { imageURL } }
+    );
+
+    res.status(200).json({
+      success: true,
+      message: "Image uploaded successfully",
+      imageURL
+    });
+
+  } catch (error) {
+    console.error("❌ Error uploading PDF image:", error);
+    res.status(500).json({ error: "Error uploading image", details: error.message });
+  }
+});
+
+// Get PDFs by 背番号
+app.get("/api/product-pdfs/:sebanggo", async (req, res) => {
+  try {
+    const { sebanggo } = req.params;
+    
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const productPDFsDB = database.collection("productPDFsDB");
+
+    // Find all active PDFs that include this 背番号
+    const pdfs = await productPDFsDB.find({
+      背番号Array: sebanggo,
+      isActive: true
+    }).toArray();
+
+    // Organize by type
+    const result = {
+      梱包: pdfs.find(p => p.pdfType === "梱包") || null,
+      検査基準: pdfs.find(p => p.pdfType === "検査基準") || null,
+      "3点総合": pdfs.find(p => p.pdfType === "3点総合") || null
+    };
+
+    res.json(result);
+
+  } catch (error) {
+    console.error("❌ Error fetching product PDFs:", error);
+    res.status(500).json({ error: "Error fetching PDFs", details: error.message });
+  }
+});
+
+// Get all PDFs by type
+app.get("/api/product-pdfs-by-type/:pdfType", async (req, res) => {
+  try {
+    const { pdfType } = req.params;
+    
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const productPDFsDB = database.collection("productPDFsDB");
+
+    const pdfs = await productPDFsDB.find({
+      pdfType,
+      isActive: true
+    }).sort({ uploadedAt: -1 }).toArray();
+
+    res.json(pdfs);
+
+  } catch (error) {
+    console.error("❌ Error fetching PDFs by type:", error);
+    res.status(500).json({ error: "Error fetching PDFs", details: error.message });
+  }
+});
+
+// Delete PDF (soft delete - moved to trash)
+app.delete("/api/product-pdf/:documentId", async (req, res) => {
+  try {
+    const { documentId } = req.params;
+    
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const productPDFsDB = database.collection("productPDFsDB");
+
+    // Soft delete - move to trash
+    await productPDFsDB.updateOne(
+      { _id: new ObjectId(documentId) },
+      { $set: { isActive: false, deletedAt: new Date().toISOString() } }
+    );
+
+    console.log(`🗑️ PDF moved to trash: ${documentId}`);
+    res.json({ success: true, message: "PDF moved to trash" });
+
+  } catch (error) {
+    console.error("❌ Error deleting PDF:", error);
+    res.status(500).json({ error: "Error deleting PDF", details: error.message });
+  }
+});
+
+// Get trash items
+app.get("/api/product-pdfs-trash", async (req, res) => {
+  try {
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const productPDFsDB = database.collection("productPDFsDB");
+
+    const trashedPDFs = await productPDFsDB.find({
+      isActive: false
+    }).sort({ deletedAt: -1 }).toArray();
+
+    res.json(trashedPDFs);
+
+  } catch (error) {
+    console.error("❌ Error fetching trash:", error);
+    res.status(500).json({ error: "Error fetching trash", details: error.message });
+  }
+});
+
+// Recover PDF from trash
+app.post("/api/product-pdf-recover/:documentId", async (req, res) => {
+  try {
+    const { documentId } = req.params;
+    
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const productPDFsDB = database.collection("productPDFsDB");
+
+    // Restore PDF
+    await productPDFsDB.updateOne(
+      { _id: new ObjectId(documentId) },
+      { 
+        $set: { isActive: true },
+        $unset: { deletedAt: "" }
+      }
+    );
+
+    console.log(`♻️ PDF recovered from trash: ${documentId}`);
+    res.json({ success: true, message: "PDF recovered successfully" });
+
+  } catch (error) {
+    console.error("❌ Error recovering PDF:", error);
+    res.status(500).json({ error: "Error recovering PDF", details: error.message });
+  }
+});
+
+// Permanently delete PDF (delete from MongoDB and Firebase)
+app.delete("/api/product-pdf-permanent/:documentId", async (req, res) => {
+  try {
+    const { documentId } = req.params;
+    
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const productPDFsDB = database.collection("productPDFsDB");
+
+    // Get PDF data to find Firebase file paths
+    const pdf = await productPDFsDB.findOne({ _id: new ObjectId(documentId) });
+    
+    if (!pdf) {
+      return res.status(404).json({ error: "PDF not found" });
+    }
+
+    // Delete from Firebase Storage
+    const bucket = admin.storage().bucket();
+    
+    // Helper function to extract file path from Firebase URL
+    function extractFirebasePath(url) {
+      if (!url || typeof url !== 'string') return null;
+      
+      try {
+        // Remove query string first
+        const urlWithoutQuery = url.split('?')[0];
+        
+        // Handle format: https://storage.googleapis.com/bucket-name/path/to/file
+        if (urlWithoutQuery.includes('storage.googleapis.com/')) {
+          const parts = urlWithoutQuery.split('storage.googleapis.com/');
+          if (parts[1]) {
+            // Split by first slash to separate bucket from path
+            const pathParts = parts[1].split('/');
+            if (pathParts.length > 1) {
+              // Remove bucket name, keep the path
+              pathParts.shift();
+              return decodeURIComponent(pathParts.join('/'));
+            }
+          }
+        }
+        
+        // Handle firebasestorage.googleapis.com format with /o/
+        if (urlWithoutQuery.includes('/o/')) {
+          const parts = urlWithoutQuery.split('/o/');
+          if (parts[1]) {
+            return decodeURIComponent(parts[1]);
+          }
+        }
+        
+        // Handle direct path format: productPDFs/originals/...
+        if (urlWithoutQuery.startsWith('productPDFs/')) {
+          return urlWithoutQuery;
+        }
+        
+        return null;
+      } catch (error) {
+        console.error('Error parsing Firebase URL:', error);
+        return null;
+      }
+    }
+    
+    // Delete original PDF
+    if (pdf.pdfURL) {
+      try {
+        const pdfPath = extractFirebasePath(pdf.pdfURL);
+        if (pdfPath) {
+          await bucket.file(pdfPath).delete();
+          console.log(`🔥 Deleted original PDF from Firebase: ${pdfPath}`);
+        } else {
+          console.warn(`⚠️ Could not parse PDF URL: ${pdf.pdfURL}`);
+        }
+      } catch (error) {
+        console.warn(`⚠️ Could not delete original PDF: ${error.message}`);
+      }
+    } else {
+      console.log('📝 No PDF URL found, skipping original PDF deletion');
+    }
+    
+    // Delete converted image
+    if (pdf.imageURL) {
+      try {
+        const imagePath = extractFirebasePath(pdf.imageURL);
+        if (imagePath) {
+          await bucket.file(imagePath).delete();
+          console.log(`🔥 Deleted image from Firebase: ${imagePath}`);
+        } else {
+          console.warn(`⚠️ Could not parse image URL: ${pdf.imageURL}`);
+        }
+      } catch (error) {
+        console.warn(`⚠️ Could not delete image: ${error.message}`);
+      }
+    }
+
+    // Delete from MongoDB
+    await productPDFsDB.deleteOne({ _id: new ObjectId(documentId) });
+
+    console.log(`💀 PDF permanently deleted: ${documentId}`);
+    res.json({ success: true, message: "PDF permanently deleted from all locations" });
+
+  } catch (error) {
+    console.error("❌ Error permanently deleting PDF:", error);
+    res.status(500).json({ error: "Error permanently deleting PDF", details: error.message });
+  }
+});
+
+// Cleanup old trash items (PDFs deleted > 30 days ago)
+async function cleanupOldTrash() {
+  try {
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const productPDFsDB = database.collection("productPDFsDB");
+
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    // Find items deleted more than 30 days ago
+    const oldItems = await productPDFsDB.find({
+      isActive: false,
+      deletedAt: { $lt: thirtyDaysAgo.toISOString() }
+    }).toArray();
+
+    console.log(`🧹 Found ${oldItems.length} items to permanently delete (>30 days old)`);
+
+    const bucket = admin.storage().bucket();
+    
+    // Helper function to extract file path from Firebase URL
+    function extractFirebasePath(url) {
+      if (!url || typeof url !== 'string') return null;
+      
+      try {
+        // Remove query string first
+        const urlWithoutQuery = url.split('?')[0];
+        
+        // Handle format: https://storage.googleapis.com/bucket-name/path/to/file
+        if (urlWithoutQuery.includes('storage.googleapis.com/')) {
+          const parts = urlWithoutQuery.split('storage.googleapis.com/');
+          if (parts[1]) {
+            // Split by first slash to separate bucket from path
+            const pathParts = parts[1].split('/');
+            if (pathParts.length > 1) {
+              // Remove bucket name, keep the path
+              pathParts.shift();
+              return decodeURIComponent(pathParts.join('/'));
+            }
+          }
+        }
+        
+        // Handle firebasestorage.googleapis.com format with /o/
+        if (urlWithoutQuery.includes('/o/')) {
+          const parts = urlWithoutQuery.split('/o/');
+          if (parts[1]) {
+            return decodeURIComponent(parts[1]);
+          }
+        }
+        
+        // Handle direct path format: productPDFs/originals/...
+        if (urlWithoutQuery.startsWith('productPDFs/')) {
+          return urlWithoutQuery;
+        }
+        
+        return null;
+      } catch (error) {
+        console.error('Error parsing Firebase URL:', error);
+        return null;
+      }
+    }
+
+    for (const item of oldItems) {
+      // Delete from Firebase
+      if (item.pdfURL) {
+        try {
+          const pdfPath = extractFirebasePath(item.pdfURL);
+          if (pdfPath) {
+            await bucket.file(pdfPath).delete();
+          }
+        } catch (error) {
+          console.warn(`⚠️ Could not delete PDF: ${error.message}`);
+        }
+      }
+      
+      if (item.imageURL) {
+        try {
+          const imagePath = extractFirebasePath(item.imageURL);
+          if (imagePath) {
+            await bucket.file(imagePath).delete();
+          }
+        } catch (error) {
+          console.warn(`⚠️ Could not delete image: ${error.message}`);
+        }
+      }
+
+      // Delete from MongoDB
+      await productPDFsDB.deleteOne({ _id: item._id });
+      console.log(`💀 Auto-deleted old PDF: ${item._id}`);
+    }
+
+    if (oldItems.length > 0) {
+      console.log(`✅ Cleanup complete: ${oldItems.length} items permanently deleted`);
+    }
+
+  } catch (error) {
+    console.error('❌ Error during trash cleanup:', error);
+  }
+}
+
+// Run cleanup daily at 3 AM
+setInterval(cleanupOldTrash, 24 * 60 * 60 * 1000); // Every 24 hours
+// Run cleanup on server start
+cleanupOldTrash();
 
 // Fetch all master users
 app.get("/masterUsers", async (req, res) => {
