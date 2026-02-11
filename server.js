@@ -412,10 +412,68 @@ app.post("/api/tablet-log", async (req, res) => {
 // PRODUCT PDFs ROUTES (梱包 / 検査基準 / 3点総合)
 // ============================================
 
+// Check for existing PDFs before upload
+app.post("/api/check-existing-pdfs", async (req, res) => {
+  try {
+    const { pdfType, 背番号Array } = req.body;
+    
+    if (!pdfType || !背番号Array) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const productPDFsDB = database.collection("productPDFsDB");
+
+    // Check which products already have PDFs of this type
+    const existingPDFs = await productPDFsDB.find({
+      pdfType,
+      背番号Array: { $in: 背番号Array },
+      isActive: true
+    }).toArray();
+
+    // Build conflict map
+    const conflictMap = {};
+    existingPDFs.forEach(pdf => {
+      pdf.背番号Array.forEach(sebanggo => {
+        if (背番号Array.includes(sebanggo)) {
+          if (!conflictMap[sebanggo]) {
+            conflictMap[sebanggo] = [];
+          }
+          conflictMap[sebanggo].push({
+            _id: pdf._id,
+            uploadedAt: pdf.uploadedAt,
+            uploadedBy: pdf.uploadedBy,
+            fileName: pdf.fileName
+          });
+        }
+      });
+    });
+
+    const existing = Object.keys(conflictMap).map(sebanggo => ({
+      背番号: sebanggo,
+      pdfs: conflictMap[sebanggo]
+    }));
+
+    const newProducts = 背番号Array.filter(s => !conflictMap[s]);
+
+    res.json({
+      hasConflicts: existing.length > 0,
+      existing,
+      newProducts,
+      pdfType
+    });
+
+  } catch (error) {
+    console.error("❌ Error checking existing PDFs:", error);
+    res.status(500).json({ error: "Error checking existing PDFs", details: error.message });
+  }
+});
+
 // Upload PDF and convert to image
 app.post("/api/upload-product-pdf", async (req, res) => {
   try {
-    const { pdfType, 背番号Array, pdfBase64, fileName, uploadedBy } = req.body;
+    const { pdfType, 背番号Array, pdfBase64, fileName, uploadedBy, resolutions } = req.body;
     
     if (!pdfType || !背番号Array || !pdfBase64 || !fileName) {
       return res.status(400).json({ error: "Missing required fields" });
@@ -430,6 +488,53 @@ app.post("/api/upload-product-pdf", async (req, res) => {
     await client.connect();
     const database = client.db(DB_NAME);
     const productPDFsDB = database.collection("productPDFsDB");
+    
+    // Handle conflict resolutions if provided
+    let finalSebanggoArray = [...背番号Array];
+    
+    if (resolutions && Object.keys(resolutions).length > 0) {
+      for (const [sebanggo, action] of Object.entries(resolutions)) {
+        if (action === 'skip') {
+          // Remove from array
+          finalSebanggoArray = finalSebanggoArray.filter(s => s !== sebanggo);
+          continue;
+        }
+        
+        // Find existing PDFs for this sebanggo
+        const existingPDFs = await productPDFsDB.find({
+          pdfType,
+          背番号Array: sebanggo,
+          isActive: true
+        }).sort({ uploadedAt: -1 }).toArray();
+        
+        if (existingPDFs.length > 0) {
+          if (action === 'overwrite' || action === 'all') {
+            // Deactivate all existing PDFs for this sebanggo+type
+            for (const pdf of existingPDFs) {
+              await productPDFsDB.updateOne(
+                { _id: pdf._id },
+                { $set: { isActive: false, deletedAt: new Date().toISOString() } }
+              );
+            }
+          } else if (action === 'newest') {
+            // Deactivate only the newest
+            await productPDFsDB.updateOne(
+              { _id: existingPDFs[0]._id },
+              { $set: { isActive: false, deletedAt: new Date().toISOString() } }
+            );
+          }
+        }
+      }
+    }
+    
+    // If all products were skipped, return early
+    if (finalSebanggoArray.length === 0) {
+      return res.json({
+        success: true,
+        message: "All products were skipped",
+        skipped: true
+      });
+    }
 
     // Generate unique document ID
     const docId = new ObjectId();
@@ -462,7 +567,7 @@ app.post("/api/upload-product-pdf", async (req, res) => {
     const pdfDocument = {
       _id: docId,
       pdfType,
-      背番号Array,
+      背番号Array: finalSebanggoArray,
       fileName,
       pdfURL,
       imageURL: null, // Will be updated after image conversion
