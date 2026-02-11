@@ -213,13 +213,26 @@
             color: rgba(255, 255, 255, 0.8);
             font-size: 1.3em;
             font-weight: 300;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            flex: 1;
         }
 
         .waiting-message .icon {
-            font-size: 5em;
             margin-bottom: 25px;
             filter: drop-shadow(0 5px 15px rgba(0, 0, 0, 0.3));
             animation: float 3s ease-in-out infinite;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+        }
+
+        .waiting-message .icon img {
+            width: 160px;
+            height: auto;
+            display: block;
         }
 
         .pdf-section {
@@ -341,7 +354,9 @@
         </div>
 
         <div class="waiting-message no-data" id="waitingMessage">
-            <div class="icon">📱</div>
+            <div class="icon">
+                <img src="https://cdn3d.iconscout.com/3d/premium/thumb/tapping-on-tablet-screen-3d-icon-png-download-6666067.png" alt="Tablet tapping icon" />
+            </div>
             <div>QRコードのスキャンを待っています...</div>
             <div style="font-size: 0.7em; margin-top: 15px; opacity: 0.8;">Waiting for QR code scan...</div>
         </div>
@@ -364,7 +379,6 @@
             </div>
 
             <div class="pdf-section" id="pdfSection">
-                <div class="info-title">関連資料 / Related Documents</div>
                 <div id="pdfGrid" style="text-align: center;">
                 </div>
             </div>
@@ -385,8 +399,8 @@
         }
 
         const MACHINE_ID = getMachineIdFromURL();
-        //const SERVER_URL = 'https://kurachi.onrender.com';
-        const SERVER_URL = 'http://localhost:3000';
+        const SERVER_URL = 'https://kurachi.onrender.com';
+        //const SERVER_URL = 'http://localhost:3000';
         //const SERVER_URL = 'http://192.168.1.176:3000';
 
         // localStorage key for persisting scan data
