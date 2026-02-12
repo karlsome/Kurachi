@@ -562,6 +562,7 @@ app.post("/api/upload-product-pdf", async (req, res) => {
     // Generate unique document ID
     const docId = new ObjectId();
     const timestamp = Date.now();
+    const nowIso = new Date().toISOString();
 
     // Convert base64 to buffer
     const pdfBuffer = Buffer.from(pdfBase64.split(',')[1] || pdfBase64, 'base64');
@@ -595,7 +596,8 @@ app.post("/api/upload-product-pdf", async (req, res) => {
       pdfURL,
       imageURL: null, // Will be updated after image conversion
       uploadedBy: uploadedBy || 'admin',
-      uploadedAt: new Date().toISOString(),
+      uploadedAt: nowIso,
+      updatedAt: nowIso,
       isActive: true
     };
 
@@ -651,7 +653,7 @@ app.post("/api/upload-pdf-image", async (req, res) => {
     // Update document with image URL
     await productPDFsDB.updateOne(
       { _id: new ObjectId(documentId) },
-      { $set: { imageURL } }
+      { $set: { imageURL, updatedAt: new Date().toISOString() } }
     );
 
     res.status(200).json({
@@ -709,6 +711,7 @@ app.get("/api/product-pdfs/:sebanggo", async (req, res) => {
 app.get("/api/product-pdfs-by-type/:pdfType", async (req, res) => {
   try {
     const { pdfType } = req.params;
+    const includeHinban = req.query.includeHinban === '1';
 
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 25, 1), 200);
@@ -729,20 +732,60 @@ app.get("/api/product-pdfs-by-type/:pdfType", async (req, res) => {
     const totalPages = Math.max(Math.ceil(total / limit), 1);
     const skip = (page - 1) * limit;
 
-    const items = await productPDFsDB.find(filter)
-      .project({
-        pdfType: 1,
-        背番号Array: 1,
-        fileName: 1,
-        pdfURL: 1,
-        imageURL: 1,
-        uploadedBy: 1,
-        uploadedAt: 1
-      })
-      .sort({ uploadedAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .toArray();
+    let items = [];
+
+    if (includeHinban) {
+      items = await productPDFsDB.aggregate([
+        { $match: filter },
+        { $sort: { uploadedAt: -1 } },
+        { $skip: skip },
+        { $limit: limit },
+        {
+          $lookup: {
+            from: "masterDB",
+            localField: "背番号Array",
+            foreignField: "背番号",
+            pipeline: [{ $project: { 背番号: 1, 品番: 1, _id: 0 } }],
+            as: "masterDocs"
+          }
+        },
+        {
+          $project: {
+            pdfType: 1,
+            背番号Array: 1,
+            fileName: 1,
+            pdfURL: 1,
+            imageURL: 1,
+            uploadedBy: 1,
+            uploadedAt: 1,
+            updatedAt: 1,
+            hinbanList: {
+              $map: {
+                input: "$masterDocs",
+                as: "doc",
+                in: { 背番号: "$$doc.背番号", 品番: "$$doc.品番" }
+              }
+            }
+          }
+        }
+      ]).toArray();
+    } else {
+      items = await productPDFsDB.find(filter)
+        .project({
+          pdfType: 1,
+          背番号Array: 1,
+          fileName: 1,
+          pdfURL: 1,
+          imageURL: 1,
+          uploadedBy: 1,
+          uploadedAt: 1,
+          updatedAt: 1
+        })
+        .sort({ uploadedAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .toArray();
+    }
 
     res.json({
       items,
@@ -780,6 +823,33 @@ app.delete("/api/product-pdf/:documentId", async (req, res) => {
   } catch (error) {
     console.error("❌ Error deleting PDF:", error);
     res.status(500).json({ error: "Error deleting PDF", details: error.message });
+  }
+});
+
+// Batch delete PDFs (soft delete to trash)
+app.post("/api/product-pdf-batch-delete", async (req, res) => {
+  try {
+    const { documentIds } = req.body;
+
+    if (!Array.isArray(documentIds) || documentIds.length === 0) {
+      return res.status(400).json({ error: "documentIds is required" });
+    }
+
+    await ensureProductPdfIndexes();
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const productPDFsDB = database.collection("productPDFsDB");
+
+    const objectIds = documentIds.map(id => new ObjectId(id));
+    const result = await productPDFsDB.updateMany(
+      { _id: { $in: objectIds } },
+      { $set: { isActive: false, deletedAt: new Date().toISOString() } }
+    );
+
+    res.json({ success: true, modifiedCount: result.modifiedCount });
+  } catch (error) {
+    console.error("❌ Error batch deleting PDFs:", error);
+    res.status(500).json({ error: "Error batch deleting PDFs", details: error.message });
   }
 });
 
