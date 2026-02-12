@@ -712,6 +712,10 @@ app.get("/api/product-pdfs-by-type/:pdfType", async (req, res) => {
   try {
     const { pdfType } = req.params;
     const includeHinban = req.query.includeHinban === '1';
+    const searchQuery = String(req.query.q || '').trim();
+    const modelFilter = String(req.query.model || '').trim();
+    const sortField = String(req.query.sortField || 'uploadedAt');
+    const sortDir = req.query.sortDir === 'asc' ? 1 : -1;
 
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 25, 1), 200);
@@ -728,48 +732,35 @@ app.get("/api/product-pdfs-by-type/:pdfType", async (req, res) => {
     const productPDFsDB = database.collection("productPDFsDB");
 
     const filter = { pdfType, isActive: true };
-    const total = await productPDFsDB.countDocuments(filter);
-    const totalPages = Math.max(Math.ceil(total / limit), 1);
     const skip = (page - 1) * limit;
 
-    let items = [];
+    const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const tokens = searchQuery ? searchQuery.split(/[\s,]+/).filter(Boolean) : [];
+    const regexes = tokens.map((token) => new RegExp(escapeRegex(token), "i"));
 
-    if (includeHinban) {
-      items = await productPDFsDB.aggregate([
-        { $match: filter },
-        { $sort: { uploadedAt: -1 } },
-        { $skip: skip },
-        { $limit: limit },
-        {
-          $lookup: {
-            from: "masterDB",
-            localField: "背番号Array",
-            foreignField: "背番号",
-            pipeline: [{ $project: { 背番号: 1, 品番: 1, _id: 0 } }],
-            as: "masterDocs"
-          }
-        },
-        {
-          $project: {
-            pdfType: 1,
-            背番号Array: 1,
-            fileName: 1,
-            pdfURL: 1,
-            imageURL: 1,
-            uploadedBy: 1,
-            uploadedAt: 1,
-            updatedAt: 1,
-            hinbanList: {
-              $map: {
-                input: "$masterDocs",
-                as: "doc",
-                in: { 背番号: "$$doc.背番号", 品番: "$$doc.品番" }
-              }
-            }
-          }
-        }
-      ]).toArray();
-    } else {
+    const needsLookup = includeHinban || regexes.length > 0 || Boolean(modelFilter);
+    const sortMap = {
+      sebanggo: "背番号Array",
+      hinban: "masterDocs.品番",
+      model: "masterDocs.モデル",
+      fileName: "fileName",
+      uploader: "uploadedBy",
+      uploadedAt: "uploadedAt",
+      updatedAt: "updatedAt"
+    };
+
+    let sortKey = sortMap[sortField] || "uploadedAt";
+    if (!needsLookup && sortKey.startsWith("masterDocs")) {
+      sortKey = "uploadedAt";
+    }
+
+    const sortStage = { [sortKey]: sortDir };
+    let items = [];
+    let total = 0;
+
+    if (!needsLookup) {
+      const totalCount = await productPDFsDB.countDocuments(filter);
+      total = totalCount;
       items = await productPDFsDB.find(filter)
         .project({
           pdfType: 1,
@@ -781,11 +772,83 @@ app.get("/api/product-pdfs-by-type/:pdfType", async (req, res) => {
           uploadedAt: 1,
           updatedAt: 1
         })
-        .sort({ uploadedAt: -1 })
+        .sort(sortStage)
         .skip(skip)
         .limit(limit)
         .toArray();
+    } else {
+      const pipeline = [{ $match: filter }];
+
+      pipeline.push({
+        $lookup: {
+          from: "masterDB",
+          localField: "背番号Array",
+          foreignField: "背番号",
+          pipeline: [{ $project: { 背番号: 1, 品番: 1, モデル: 1, _id: 0 } }],
+          as: "masterDocs"
+        }
+      });
+
+      if (modelFilter) {
+        pipeline.push({ $match: { "masterDocs.モデル": modelFilter } });
+      }
+
+      if (regexes.length > 0) {
+        const orFilters = [];
+        regexes.forEach((regex) => {
+          orFilters.push({ fileName: regex });
+          orFilters.push({ uploadedBy: regex });
+          orFilters.push({ 背番号Array: { $in: [regex] } });
+          orFilters.push({ "masterDocs.品番": regex });
+          orFilters.push({ "masterDocs.モデル": regex });
+        });
+
+        pipeline.push({ $match: { $or: orFilters } });
+      }
+
+      pipeline.push({
+        $facet: {
+          items: [
+            { $sort: sortStage },
+            { $skip: skip },
+            { $limit: limit },
+            {
+              $project: {
+                pdfType: 1,
+                背番号Array: 1,
+                fileName: 1,
+                pdfURL: 1,
+                imageURL: 1,
+                uploadedBy: 1,
+                uploadedAt: 1,
+                updatedAt: 1,
+                hinbanList: {
+                  $map: {
+                    input: "$masterDocs",
+                    as: "doc",
+                    in: { 背番号: "$$doc.背番号", 品番: "$$doc.品番" }
+                  }
+                },
+                modelList: {
+                  $map: {
+                    input: "$masterDocs",
+                    as: "doc",
+                    in: "$$doc.モデル"
+                  }
+                }
+              }
+            }
+          ],
+          totalCount: [{ $count: "count" }]
+        }
+      });
+
+      const result = await productPDFsDB.aggregate(pipeline).toArray();
+      items = result[0]?.items || [];
+      total = result[0]?.totalCount?.[0]?.count || 0;
     }
+
+    const totalPages = Math.max(Math.ceil(total / limit), 1);
 
     res.json({
       items,
