@@ -412,6 +412,30 @@ app.post("/api/tablet-log", async (req, res) => {
 // PRODUCT PDFs ROUTES (梱包 / 検査基準 / 3点総合)
 // ============================================
 
+let productPdfIndexesEnsured = false;
+
+async function ensureProductPdfIndexes() {
+  if (productPdfIndexesEnsured) return;
+
+  await client.connect();
+  const database = client.db(DB_NAME);
+  const productPDFsDB = database.collection("productPDFsDB");
+
+  await productPDFsDB.createIndexes([
+    { key: { pdfType: 1, isActive: 1, uploadedAt: -1 } },
+    { key: { pdfType: 1, "背番号Array": 1, isActive: 1 } },
+    { key: { "背番号Array": 1, isActive: 1 } },
+    { key: { isActive: 1, deletedAt: -1 } }
+  ]);
+
+  productPdfIndexesEnsured = true;
+  console.log("✅ productPDFsDB indexes ensured");
+}
+
+ensureProductPdfIndexes().catch((error) => {
+  console.error("❌ Failed to ensure productPDFsDB indexes:", error);
+});
+
 // Check for existing PDFs before upload
 app.post("/api/check-existing-pdfs", async (req, res) => {
   try {
@@ -421,6 +445,7 @@ app.post("/api/check-existing-pdfs", async (req, res) => {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
+    await ensureProductPdfIndexes();
     await client.connect();
     const database = client.db(DB_NAME);
     const productPDFsDB = database.collection("productPDFsDB");
@@ -430,7 +455,7 @@ app.post("/api/check-existing-pdfs", async (req, res) => {
       pdfType,
       背番号Array: { $in: 背番号Array },
       isActive: true
-    }).toArray();
+    }).project({ 背番号Array: 1, uploadedAt: 1, uploadedBy: 1, fileName: 1 }).toArray();
 
     // Build conflict map
     const conflictMap = {};
@@ -485,6 +510,7 @@ app.post("/api/upload-product-pdf", async (req, res) => {
       return res.status(400).json({ error: "Invalid PDF type" });
     }
 
+    await ensureProductPdfIndexes();
     await client.connect();
     const database = client.db(DB_NAME);
     const productPDFsDB = database.collection("productPDFsDB");
@@ -499,27 +525,24 @@ app.post("/api/upload-product-pdf", async (req, res) => {
           finalSebanggoArray = finalSebanggoArray.filter(s => s !== sebanggo);
           continue;
         }
-        
-        // Find existing PDFs for this sebanggo
-        const existingPDFs = await productPDFsDB.find({
-          pdfType,
-          背番号Array: sebanggo,
-          isActive: true
-        }).sort({ uploadedAt: -1 }).toArray();
-        
-        if (existingPDFs.length > 0) {
-          if (action === 'overwrite' || action === 'all') {
-            // Deactivate all existing PDFs for this sebanggo+type
-            for (const pdf of existingPDFs) {
-              await productPDFsDB.updateOne(
-                { _id: pdf._id },
-                { $set: { isActive: false, deletedAt: new Date().toISOString() } }
-              );
-            }
-          } else if (action === 'newest') {
-            // Deactivate only the newest
+
+        if (action === 'overwrite' || action === 'all') {
+          await productPDFsDB.updateMany(
+            { pdfType, 背番号Array: sebanggo, isActive: true },
+            { $set: { isActive: false, deletedAt: new Date().toISOString() } }
+          );
+          continue;
+        }
+
+        if (action === 'newest') {
+          const newest = await productPDFsDB.findOne(
+            { pdfType, 背番号Array: sebanggo, isActive: true },
+            { sort: { uploadedAt: -1 }, projection: { _id: 1 } }
+          );
+
+          if (newest) {
             await productPDFsDB.updateOne(
-              { _id: existingPDFs[0]._id },
+              { _id: newest._id },
               { $set: { isActive: false, deletedAt: new Date().toISOString() } }
             );
           }
@@ -600,6 +623,7 @@ app.post("/api/upload-pdf-image", async (req, res) => {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
+    await ensureProductPdfIndexes();
     await client.connect();
     const database = client.db(DB_NAME);
     const productPDFsDB = database.collection("productPDFsDB");
@@ -646,7 +670,8 @@ app.post("/api/upload-pdf-image", async (req, res) => {
 app.get("/api/product-pdfs/:sebanggo", async (req, res) => {
   try {
     const { sebanggo } = req.params;
-    
+
+    await ensureProductPdfIndexes();
     await client.connect();
     const database = client.db(DB_NAME);
     const productPDFsDB = database.collection("productPDFsDB");
@@ -655,6 +680,14 @@ app.get("/api/product-pdfs/:sebanggo", async (req, res) => {
     const pdfs = await productPDFsDB.find({
       背番号Array: sebanggo,
       isActive: true
+    }).project({
+      pdfType: 1,
+      背番号Array: 1,
+      fileName: 1,
+      pdfURL: 1,
+      imageURL: 1,
+      uploadedBy: 1,
+      uploadedAt: 1
     }).toArray();
 
     // Organize by type
@@ -676,17 +709,48 @@ app.get("/api/product-pdfs/:sebanggo", async (req, res) => {
 app.get("/api/product-pdfs-by-type/:pdfType", async (req, res) => {
   try {
     const { pdfType } = req.params;
-    
+
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 25, 1), 200);
+
+    // Validate pdfType
+    const validTypes = ["梱包", "検査基準", "3点総合"];
+    if (!validTypes.includes(pdfType)) {
+      return res.status(400).json({ error: "Invalid PDF type" });
+    }
+
+    await ensureProductPdfIndexes();
     await client.connect();
     const database = client.db(DB_NAME);
     const productPDFsDB = database.collection("productPDFsDB");
 
-    const pdfs = await productPDFsDB.find({
-      pdfType,
-      isActive: true
-    }).sort({ uploadedAt: -1 }).toArray();
+    const filter = { pdfType, isActive: true };
+    const total = await productPDFsDB.countDocuments(filter);
+    const totalPages = Math.max(Math.ceil(total / limit), 1);
+    const skip = (page - 1) * limit;
 
-    res.json(pdfs);
+    const items = await productPDFsDB.find(filter)
+      .project({
+        pdfType: 1,
+        背番号Array: 1,
+        fileName: 1,
+        pdfURL: 1,
+        imageURL: 1,
+        uploadedBy: 1,
+        uploadedAt: 1
+      })
+      .sort({ uploadedAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .toArray();
+
+    res.json({
+      items,
+      page,
+      limit,
+      total,
+      totalPages
+    });
 
   } catch (error) {
     console.error("❌ Error fetching PDFs by type:", error);
@@ -698,7 +762,8 @@ app.get("/api/product-pdfs-by-type/:pdfType", async (req, res) => {
 app.delete("/api/product-pdf/:documentId", async (req, res) => {
   try {
     const { documentId } = req.params;
-    
+
+    await ensureProductPdfIndexes();
     await client.connect();
     const database = client.db(DB_NAME);
     const productPDFsDB = database.collection("productPDFsDB");
@@ -721,15 +786,42 @@ app.delete("/api/product-pdf/:documentId", async (req, res) => {
 // Get trash items
 app.get("/api/product-pdfs-trash", async (req, res) => {
   try {
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 25, 1), 200);
+
+    await ensureProductPdfIndexes();
     await client.connect();
     const database = client.db(DB_NAME);
     const productPDFsDB = database.collection("productPDFsDB");
 
-    const trashedPDFs = await productPDFsDB.find({
-      isActive: false
-    }).sort({ deletedAt: -1 }).toArray();
+    const filter = { isActive: false };
+    const total = await productPDFsDB.countDocuments(filter);
+    const totalPages = Math.max(Math.ceil(total / limit), 1);
+    const skip = (page - 1) * limit;
 
-    res.json(trashedPDFs);
+    const items = await productPDFsDB.find(filter)
+      .project({
+        pdfType: 1,
+        背番号Array: 1,
+        fileName: 1,
+        pdfURL: 1,
+        imageURL: 1,
+        uploadedBy: 1,
+        uploadedAt: 1,
+        deletedAt: 1
+      })
+      .sort({ deletedAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .toArray();
+
+    res.json({
+      items,
+      page,
+      limit,
+      total,
+      totalPages
+    });
 
   } catch (error) {
     console.error("❌ Error fetching trash:", error);
