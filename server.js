@@ -5907,6 +5907,545 @@ console.log("📊 Approval statistics routes loaded successfully");
 //ANALYTICS START
 
 /**
+ * Financials API
+ * POST /api/financials
+ */
+app.post('/api/financials', async (req, res) => {
+  const {
+    fromDate,
+    toDate,
+    model = '',
+    hinban = '',
+    hinbans = [],
+    bans = [],
+    process = 'all',
+    factory = '',
+    page = 1,
+    limit = 10,
+    sortField = 'date',
+    sortDir = 'asc',
+    includeAllNg = true
+  } = req.body || {};
+
+  if (!fromDate || !toDate) {
+    return res.status(400).json({
+      success: false,
+      error: 'fromDate and toDate are required'
+    });
+  }
+
+  const normalizeLotDate = (lot) => {
+    if (!lot) return null;
+    const digits = String(lot).replace(/\D/g, '');
+    if (digits.length >= 8) {
+      const y = digits.slice(0, 4);
+      const m = digits.slice(4, 6);
+      const d = digits.slice(6, 8);
+      return `${y}-${m}-${d}`;
+    }
+    if (digits.length >= 6) {
+      const y = `20${digits.slice(0, 2)}`;
+      const m = digits.slice(2, 4);
+      const d = digits.slice(4, 6);
+      return `${y}-${m}-${d}`;
+    }
+    return null;
+  };
+
+  const normalizeLotDateBody = `
+    function(lot) {
+      if (!lot) return null;
+      var digits = String(lot).replace(/\\D/g, '');
+      if (digits.length >= 8) {
+        var y = digits.slice(0, 4);
+        var m = digits.slice(4, 6);
+        var d = digits.slice(6, 8);
+        return y + '-' + m + '-' + d;
+      }
+      if (digits.length >= 6) {
+        var y2 = '20' + digits.slice(0, 2);
+        var m2 = digits.slice(2, 4);
+        var d2 = digits.slice(4, 6);
+        return y2 + '-' + m2 + '-' + d2;
+      }
+      return null;
+    }
+  `;
+
+  try {
+    const submittedDb = client.db('submittedDB');
+    const masterDb = client.db('Sasaki_Coating_MasterDB');
+    const masterCollection = masterDb.collection('masterDB');
+
+    let allowedHinbans = null;
+    const trimmedModel = String(model || '').trim();
+    const trimmedHinban = String(hinban || '').trim();
+    const trimmedFactory = String(factory || '').trim();
+    const hinbansArray = Array.isArray(hinbans) ? hinbans.filter(h => h && String(h).trim()) : [];
+    const bansArray = Array.isArray(bans) ? bans.filter(b => b && String(b).trim()) : [];
+    const pageNumber = Math.max(parseInt(page, 10) || 1, 1);
+    const limitNumber = Math.min(Math.max(parseInt(limit, 10) || 10, 1), 100);
+    const sortKey = String(sortField || 'date');
+    const sortDirection = sortDir === 'desc' ? 'desc' : 'asc';
+
+    // If bans (背番号) are specified, look up corresponding 品番 from masterDB
+    // This is the primary filter - convert 背番号 to 品番 for production DB queries
+    if (bansArray.length > 0) {
+      const banDocs = await masterCollection
+        .find({ 背番号: { $in: bansArray.map(b => String(b).trim()) } }, { projection: { 品番: 1, _id: 0 } })
+        .toArray();
+      const hinbansFromBans = Array.from(new Set(banDocs.map(doc => doc.品番).filter(Boolean)));
+      
+      if (hinbansFromBans.length > 0) {
+        allowedHinbans = hinbansFromBans;
+      } else {
+        // No matching 品番 found for the selected 背番号
+        return res.json({
+          success: true,
+          summary: {
+            totalValue: 0,
+            scrapLoss: 0,
+            totalCreated: 0,
+            finalGood: 0,
+            totalLoss: 0,
+            defectRate: 0,
+            yieldPercent: 0
+          },
+          scrapByProcess: { press: 0, slit: 0, srs: 0, kensa: 0 },
+          factoryTotals: { factories: [], created: [], finalGood: [], totalValue: [], scrapLoss: [] },
+          rows: [],
+          page: pageNumber,
+          limit: limitNumber,
+          totalRows: 0,
+          totalPages: 0,
+          sortField: sortKey,
+          sortDir: sortDirection
+        });
+      }
+    } else if (trimmedModel) {
+      const modelDocs = await masterCollection
+        .find({ モデル: trimmedModel }, { projection: { 品番: 1, _id: 0 } })
+        .toArray();
+      allowedHinbans = Array.from(new Set(modelDocs.map(doc => doc.品番).filter(Boolean)));
+    }
+
+    let hinbanMatch = { 品番: { $exists: true, $ne: '' } };
+    
+    // Priority: hinbansArray > trimmedHinban > allowedHinbans (from model or bans lookup)
+    if (hinbansArray.length > 0) {
+      hinbanMatch = { 品番: { $in: hinbansArray } };
+    } else if (trimmedHinban) {
+      hinbanMatch = { 品番: trimmedHinban };
+    } else if (allowedHinbans) {
+      if (!allowedHinbans.length) {
+        return res.json({
+          success: true,
+          summary: {
+            totalValue: 0,
+            scrapLoss: 0,
+            totalCreated: 0,
+            finalGood: 0,
+            totalLoss: 0,
+            defectRate: 0,
+            yieldPercent: 0
+          },
+          scrapByProcess: { press: 0, slit: 0, srs: 0, kensa: 0 },
+          factoryTotals: { factories: [], created: [], finalGood: [], totalValue: [], scrapLoss: [] },
+          rows: [],
+          page: pageNumber,
+          limit: limitNumber,
+          totalRows: 0,
+          totalPages: 0,
+          sortField: sortKey,
+          sortDir: sortDirection
+        });
+      }
+      hinbanMatch = { 品番: { $in: allowedHinbans } };
+    }
+
+    const baseProcess = process === 'all' ? 'pressDB' : process;
+
+    // Simple aggregation: sum by hinban (品番) only
+    const buildPressSimplePipeline = (factoryFilter) => {
+      const matchStage = {
+        ...hinbanMatch,
+        Date: { $gte: fromDate, $lte: toDate }
+      };
+      if (factoryFilter) {
+        matchStage['工場'] = factoryFilter;
+      }
+      return [
+        { $match: matchStage },
+        {
+          $group: {
+            _id: { hinban: "$品番", ban: "$背番号", factory: "$工場" },
+            created: { $sum: { $ifNull: ["$Process_Quantity", 0] } },
+            pressNg: { $sum: { $ifNull: ["$Total_NG", 0] } }
+          }
+        }
+      ];
+    };
+
+    const buildKensaSimplePipeline = (factoryFilter) => {
+      const matchStage = {
+        ...hinbanMatch,
+        製造ロット: { $exists: true, $ne: '' }
+      };
+      if (factoryFilter) {
+        matchStage['工場'] = factoryFilter;
+      }
+      return [
+        { $match: matchStage },
+        {
+          $addFields: {
+            normalizedLotDate: {
+              $function: {
+                body: normalizeLotDateBody,
+                args: ["$製造ロット"],
+                lang: "js"
+              }
+            }
+          }
+        },
+        { $match: { normalizedLotDate: { $gte: fromDate, $lte: toDate } } },
+        {
+          $group: {
+            _id: { hinban: "$品番", ban: "$背番号", factory: "$工場" },
+            finalGood: { $sum: { $ifNull: ["$Total", 0] } },
+            kensaNg: { $sum: { $ifNull: ["$Total_NG", 0] } }
+          }
+        }
+      ];
+    };
+
+    const buildSlitNgPipeline = (factoryFilter) => {
+      const matchStage = {
+        ...hinbanMatch,
+        製造ロット: { $exists: true, $ne: '' }
+      };
+      if (factoryFilter) {
+        matchStage['工場'] = factoryFilter;
+      }
+      return [
+        { $match: matchStage },
+        {
+          $addFields: {
+            normalizedLotDate: {
+              $function: {
+                body: normalizeLotDateBody,
+                args: ["$製造ロット"],
+                lang: "js"
+              }
+            }
+          }
+        },
+        { $match: { normalizedLotDate: { $gte: fromDate, $lte: toDate } } },
+        {
+          $group: {
+            _id: { hinban: "$品番", ban: "$背番号", factory: "$工場" },
+            slitNg: { $sum: { $ifNull: ["$Total_NG", 0] } }
+          }
+        }
+      ];
+    };
+
+    const buildSrsNgPipeline = (factoryFilter) => {
+      const matchStage = {
+        ...hinbanMatch,
+        製造ロット: { $exists: true, $ne: '' }
+      };
+      if (factoryFilter) {
+        matchStage['工場'] = factoryFilter;
+      }
+      return [
+        { $match: matchStage },
+        {
+          $addFields: {
+            normalizedLotDate: {
+              $function: {
+                body: normalizeLotDateBody,
+                args: ["$製造ロット"],
+                lang: "js"
+              }
+            }
+          }
+        },
+        { $match: { normalizedLotDate: { $gte: fromDate, $lte: toDate } } },
+        {
+          $group: {
+            _id: { hinban: "$品番", ban: "$背番号", factory: "$工場" },
+            srsNg: { $sum: { $ifNull: ["$SRS_Total_NG", 0] } }
+          }
+        }
+      ];
+    };
+
+    // Fetch all data
+    const [pressRows, kensaRows, slitNgRows, srsNgRows] = await Promise.all([
+      submittedDb.collection('pressDB').aggregate(
+        buildPressSimplePipeline(trimmedFactory),
+        { allowDiskUse: true }
+      ).toArray(),
+      submittedDb.collection('kensaDB').aggregate(
+        buildKensaSimplePipeline(trimmedFactory),
+        { allowDiskUse: true }
+      ).toArray(),
+      submittedDb.collection('slitDB').aggregate(
+        buildSlitNgPipeline(trimmedFactory),
+        { allowDiskUse: true }
+      ).toArray(),
+      submittedDb.collection('SRSDB').aggregate(
+        buildSrsNgPipeline(trimmedFactory),
+        { allowDiskUse: true }
+      ).toArray()
+    ]);
+
+    // Build maps by hinban + ban + factory
+    const pressMap = new Map();
+    pressRows.forEach(row => {
+      const hinban = row._id.hinban;
+      const ban = row._id.ban || '';
+      const factory = row._id.factory || 'Unknown';
+      const key = `${hinban}__${ban}__${factory}`;
+      pressMap.set(key, {
+        hinban,
+        ban,
+        factory,
+        created: row.created || 0,
+        pressNg: row.pressNg || 0
+      });
+    });
+
+    const kensaMap = new Map();
+    kensaRows.forEach(row => {
+      const hinban = row._id.hinban;
+      const ban = row._id.ban || '';
+      const factory = row._id.factory || 'Unknown';
+      const key = `${hinban}__${ban}__${factory}`;
+      kensaMap.set(key, {
+        hinban,
+        ban,
+        factory,
+        kensaNg: row.kensaNg || 0
+      });
+    });
+
+    const slitNgMap = new Map();
+    slitNgRows.forEach(row => {
+      const hinban = row._id.hinban;
+      const ban = row._id.ban || '';
+      const factory = row._id.factory || 'Unknown';
+      const key = `${hinban}__${ban}__${factory}`;
+      slitNgMap.set(key, row.slitNg || 0);
+    });
+
+    const srsNgMap = new Map();
+    srsNgRows.forEach(row => {
+      const hinban = row._id.hinban;
+      const ban = row._id.ban || '';
+      const factory = row._id.factory || 'Unknown';
+      const key = `${hinban}__${ban}__${factory}`;
+      srsNgMap.set(key, row.srsNg || 0);
+    });
+
+    // Collect all unique hinban+ban+factory keys from all processes
+    const allKeys = new Set([...pressMap.keys(), ...kensaMap.keys(), ...slitNgMap.keys(), ...srsNgMap.keys()]);
+    const hinbanSet = new Set();
+    allKeys.forEach(key => {
+      const parts = key.split('__');
+      const hinban = parts[0];
+      if (hinban) hinbanSet.add(hinban);
+    });
+
+    const masterDocs = await masterCollection.find(
+      { 品番: { $in: Array.from(hinbanSet) } },
+      { projection: { 品番: 1, モデル: 1, 背番号: 1, pricePerPc: 1 } }
+    ).toArray();
+
+    const masterMap = new Map(masterDocs.map(doc => [doc.品番, doc]));
+
+    const rows = [];
+    let totalValue = 0;
+    let totalScrapLoss = 0;
+    let totalCreated = 0;
+    let totalFinalGood = 0;
+    let totalLoss = 0;
+    const scrapByProcess = { press: 0, slit: 0, srs: 0, kensa: 0 };
+    const factoryTotalsMap = new Map();
+
+    // Iterate over all hinban+ban+factory combinations
+    allKeys.forEach((key) => {
+      const parts = key.split('__');
+      const keyHinban = parts[0];
+      const keyBan = parts[1] || '';
+      const keyFactory = parts[2] || 'Unknown';
+      
+      const pressData = pressMap.get(key) || { hinban: keyHinban, ban: keyBan, factory: keyFactory, created: 0, pressNg: 0 };
+      const kensaData = kensaMap.get(key) || { kensaNg: 0 };
+      
+      const hinban = pressData.hinban || keyHinban;
+      const ban = pressData.ban || keyBan;
+      const factory = pressData.factory || keyFactory;
+      const pricePerPc = masterMap.get(hinban)?.pricePerPc || 0;
+      
+      // Skip items without pricePerPc - they ruin the calculation
+      if (!pricePerPc || pricePerPc <= 0) {
+        return;
+      }
+      
+      const modelValue = masterMap.get(hinban)?.モデル || '';
+
+      // Created = pressDB.Process_Quantity
+      const created = pressData.created || 0;
+      
+      // NG from each process
+      const pressNg = pressData.pressNg || 0;
+      const slitNg = slitNgMap.get(key) || 0;
+      const srsNg = srsNgMap.get(key) || 0;
+      const kensaNg = kensaData.kensaNg || 0;
+
+      // Loss = sum of all Total_NG across processes
+      const totalNg = pressNg + slitNg + srsNg + kensaNg;
+      
+      // Final Good = Created - Total NG
+      const finalGood = created - totalNg;
+      
+      // Loss is the total NG
+      const loss = totalNg;
+
+      // Yield and Defect Rate
+      const yieldPercent = created > 0 ? (finalGood / created) * 100 : 0;
+      const defectRate = created > 0 ? (loss / created) * 100 : 0;
+
+      // Cost and Scrap Loss calculations
+      const cost = created * pricePerPc;
+      const scrapLoss = loss * pricePerPc;
+
+      // Accumulate totals
+      totalValue += cost;
+      totalScrapLoss += scrapLoss;
+      totalCreated += created;
+      totalFinalGood += finalGood;
+      totalLoss += loss;
+
+      // Scrap by process (for pie chart)
+      scrapByProcess.press += pressNg * pricePerPc;
+      scrapByProcess.slit += slitNg * pricePerPc;
+      scrapByProcess.srs += srsNg * pricePerPc;
+      scrapByProcess.kensa += kensaNg * pricePerPc;
+
+      // Factory totals
+      const factoryEntry = factoryTotalsMap.get(factory) || { created: 0, finalGood: 0, totalValue: 0, scrapLoss: 0 };
+      factoryEntry.created += created;
+      factoryEntry.finalGood += finalGood;
+      factoryEntry.totalValue += cost;
+      factoryEntry.scrapLoss += scrapLoss;
+      factoryTotalsMap.set(factory, factoryEntry);
+
+      // Value = Cost - Scrap Loss
+      const value = cost - scrapLoss;
+
+      // Add row for detail table (only if there's any data)
+      if (created > 0 || totalNg > 0) {
+        rows.push({
+          hinban,
+          ban,
+          model: modelValue,
+          factory,
+          created,
+          pressNg,
+          slitNg,
+          srsNg,
+          kensaNg,
+          totalNg,
+          finalGood,
+          yieldPercent: Number(yieldPercent.toFixed(2)),
+          pricePerPc: Number(pricePerPc.toFixed(2)),
+          cost: Number(cost.toFixed(2)),
+          scrapLoss: Number(scrapLoss.toFixed(2)),
+          value: Number(value.toFixed(2))
+        });
+      }
+    });
+
+    const sorters = {
+      hinban: (a, b) => String(a.hinban || '').localeCompare(String(b.hinban || '')),
+      ban: (a, b) => String(a.ban || '').localeCompare(String(b.ban || '')),
+      model: (a, b) => String(a.model || '').localeCompare(String(b.model || '')),
+      factory: (a, b) => String(a.factory || '').localeCompare(String(b.factory || '')),
+      created: (a, b) => (a.created || 0) - (b.created || 0),
+      pressNg: (a, b) => (a.pressNg || 0) - (b.pressNg || 0),
+      slitNg: (a, b) => (a.slitNg || 0) - (b.slitNg || 0),
+      srsNg: (a, b) => (a.srsNg || 0) - (b.srsNg || 0),
+      kensaNg: (a, b) => (a.kensaNg || 0) - (b.kensaNg || 0),
+      totalNg: (a, b) => (a.totalNg || 0) - (b.totalNg || 0),
+      finalGood: (a, b) => (a.finalGood || 0) - (b.finalGood || 0),
+      yieldPercent: (a, b) => (a.yieldPercent || 0) - (b.yieldPercent || 0),
+      pricePerPc: (a, b) => (a.pricePerPc || 0) - (b.pricePerPc || 0),
+      cost: (a, b) => (a.cost || 0) - (b.cost || 0),
+      scrapLoss: (a, b) => (a.scrapLoss || 0) - (b.scrapLoss || 0),
+      value: (a, b) => (a.value || 0) - (b.value || 0)
+    };
+
+    const sortFn = sorters[sortKey] || sorters.hinban;
+    rows.sort((a, b) => {
+      const result = sortFn(a, b);
+      if (result !== 0) {
+        return sortDirection === 'desc' ? -result : result;
+      }
+      return String(a.hinban || '').localeCompare(String(b.hinban || ''));
+    });
+
+    const totalRows = rows.length;
+    const totalPages = totalRows ? Math.ceil(totalRows / limitNumber) : 0;
+    const safePage = totalPages ? Math.min(pageNumber, totalPages) : 1;
+    const startIndex = (safePage - 1) * limitNumber;
+    const pagedRows = totalRows ? rows.slice(startIndex, startIndex + limitNumber) : [];
+
+    const factoryTotals = Array.from(factoryTotalsMap.entries())
+      .map(([factoryName, totals]) => ({ factoryName, ...totals }))
+      .sort((a, b) => b.totalValue - a.totalValue);
+
+    const factoryTotalsPayload = {
+      factories: factoryTotals.map(item => item.factoryName),
+      created: factoryTotals.map(item => Number(item.created)),
+      finalGood: factoryTotals.map(item => Number(item.finalGood)),
+      totalValue: factoryTotals.map(item => Number(item.totalValue.toFixed(2))),
+      scrapLoss: factoryTotals.map(item => Number(item.scrapLoss.toFixed(2)))
+    };
+
+    res.json({
+      success: true,
+      summary: {
+        totalValue: Number(totalValue.toFixed(2)),
+        scrapLoss: Number(totalScrapLoss.toFixed(2)),
+        totalCreated: Number(totalCreated),
+        finalGood: Number(totalFinalGood),
+        totalLoss: Number(totalLoss),
+        defectRate: totalCreated > 0 ? Number(((totalLoss / totalCreated) * 100).toFixed(2)) : 0,
+        yieldPercent: totalCreated > 0 ? Number(((totalFinalGood / totalCreated) * 100).toFixed(2)) : 0
+      },
+      scrapByProcess,
+      factoryTotals: factoryTotalsPayload,
+      rows: pagedRows,
+      page: safePage,
+      limit: limitNumber,
+      totalRows,
+      totalPages,
+      sortField: sortKey,
+      sortDir: sortDirection
+    });
+  } catch (error) {
+    console.error('❌ Error building financials:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to build financials',
+      message: error.message
+    });
+  }
+});
+
+/**
  * Get comprehensive analytics data from kensaDB
  * POST /api/analytics-data
  */
@@ -9302,6 +9841,42 @@ app.get('/api/masterdb/models', async (req, res) => {
         console.error('❌ Error fetching models from Master DB:', error);
         res.status(500).json({ 
             error: 'Failed to fetch model list',
+            message: error.message
+        });
+    }
+});
+
+// Route to get products (品番/背番号) for a specific model from Master DB
+app.get('/api/masterdb/products', async (req, res) => {
+    try {
+        const { model } = req.query;
+        console.log(`📋 Fetching products for model: ${model || 'all'}`);
+
+        const db = client.db('Sasaki_Coating_MasterDB');
+        const collection = db.collection('masterDB');
+
+        const matchStage = { 品番: { $exists: true, $ne: null, $ne: '' } };
+        if (model) {
+            matchStage['モデル'] = model;
+        }
+
+        const products = await collection.find(matchStage, {
+            projection: { 品番: 1, 背番号: 1, モデル: 1, _id: 0 }
+        }).toArray();
+
+        console.log(`✅ Found ${products.length} products for model: ${model || 'all'}`);
+
+        res.json({
+            success: true,
+            data: products,
+            count: products.length
+        });
+
+    } catch (error) {
+        console.error('❌ Error fetching products from Master DB:', error);
+        res.status(500).json({ 
+            success: false,
+            error: 'Failed to fetch products',
             message: error.message
         });
     }
