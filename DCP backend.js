@@ -5267,7 +5267,20 @@ function ensureDateChoiceModal() {
       max-width: 520px;
       text-align: center;
       box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+      position: relative;
     ">
+      <button id="closeDateChoiceModal" style="
+        position: absolute;
+        top: 8px;
+        right: 10px;
+        background: transparent;
+        border: none;
+        font-size: 24px;
+        font-weight: bold;
+        color: #666;
+        cursor: pointer;
+        line-height: 1;
+      ">×</button>
       <style>
         @keyframes dateBlink {
           0%, 49% { opacity: 1; }
@@ -5350,6 +5363,7 @@ function showDateChoiceModal(enteredDate, currentDate) {
     const message = modal.querySelector('#dateChoiceMessage');
     const enteredBtn = modal.querySelector('#useEnteredDateBtn');
     const currentBtn = modal.querySelector('#useCurrentDateBtn');
+    const closeBtn = modal.querySelector('#closeDateChoiceModal');
 
     message.innerHTML = `入力日付: <strong class="date-mismatch">${enteredDate}</strong><br>現在日付: <strong>${currentDate}</strong><br><br>どちらの日付を使用しますか？<br>Which date should be used?`;
     enteredBtn.innerHTML = `<span class="date-btn-label">Entered</span><span class="date-btn-date date-mismatch-button">${enteredDate}</span>`;
@@ -5358,6 +5372,7 @@ function showDateChoiceModal(enteredDate, currentDate) {
     const cleanup = () => {
       enteredBtn.onclick = null;
       currentBtn.onclick = null;
+      closeBtn.onclick = null;
       modal.style.display = 'none';
     };
 
@@ -5369,6 +5384,11 @@ function showDateChoiceModal(enteredDate, currentDate) {
     currentBtn.onclick = () => {
       cleanup();
       resolve('current');
+    };
+
+    closeBtn.onclick = () => {
+      cleanup();
+      resolve('cancel');
     };
 
     modal.style.display = 'flex';
@@ -5501,6 +5521,9 @@ document.getElementById('submit').addEventListener('click', async (event) => {
         if (WorkDate !== currentDate) {
           uploadingModal.style.display = 'none';
           const choice = await showDateChoiceModal(WorkDate, currentDate);
+          if (choice === 'cancel') {
+            return;
+          }
           if (choice === 'current') {
             WorkDate = currentDate;
             const dateInput = document.getElementById('Lot No.');
