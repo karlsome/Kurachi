@@ -3562,6 +3562,11 @@ function renderMaterialLotTags() {
 
 // Add scanned lot
 function addScannedLot(lotNumber) {
+  // Check for maximum limit (10 lots)
+  if (materialLots.length >= 10) {
+    showAlert(`最大10個のロット番号のみ追加可能です\n\nMaximum 10 lot numbers allowed\n\nCurrent: ${materialLots.length} lots`);
+    return false; // At maximum
+  }
   // Check for duplicates
   if (materialLots.some(lot => lot.lotNumber === lotNumber)) {
     return false; // Duplicate
@@ -3577,6 +3582,11 @@ function addManualLot(lotNumber) {
   if (!lotNumber || !lotNumber.trim()) return false;
   lotNumber = lotNumber.trim();
   
+  // Check for maximum limit (10 lots)
+  if (materialLots.length >= 10) {
+    showAlert(`最大10個のロット番号のみ追加可能です\n\nMaximum 10 lot numbers allowed\n\nCurrent: ${materialLots.length} lots`);
+    return false; // At maximum
+  }
   // Check for duplicates
   if (materialLots.some(lot => lot.lotNumber === lotNumber)) {
     return false; // Duplicate

@@ -1554,6 +1554,42 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
       return;
     }
 
+    // ==================== Validate Material Label Photos vs Lot Count ====================
+    // Count unique lot numbers (comma-separated values)
+    const lotNumbers = formData.材料ロット.split(',').map(lot => lot.trim()).filter(lot => lot !== '');
+    const uniqueLotCount = lotNumbers.length;
+    const materialPhotoCount = materialLabelPhotos.length;
+
+    console.log('Material lot validation:', {
+      材料ロット: formData.材料ロット,
+      lotNumbers,
+      uniqueLotCount,
+      materialPhotoCount
+    });
+
+    // Check if material label photo count is sufficient
+    if (materialPhotoCount < uniqueLotCount) {
+      document.getElementById('uploadingModal').style.display = 'none';
+      showAlert(
+        `材料ラベルの写真が不足しています\n\n` +
+        `ロット数: ${uniqueLotCount}個\n` +
+        `写真数: ${materialPhotoCount}枚\n\n` +
+        `各ロットの材料ラベル写真を撮影してください\n\n` +
+        `---\n\n` +
+        `Insufficient material label photos\n\n` +
+        `Lot count: ${uniqueLotCount}\n` +
+        `Photo count: ${materialPhotoCount}\n\n` +
+        `Please capture a material label photo for each lot`
+      );
+      return;
+    }
+
+    console.log('✅ Material label photo validation passed:', {
+      uniqueLotCount,
+      materialPhotoCount
+    });
+    // ==================== END Material Label Photos Validation ====================
+
     if (!formData.ショット数 || formData.ショット数 < 1) {
       showAlert('ショット数 (Shot Count) is required and must be at least 1.');
       document.getElementById('uploadingModal').style.display = 'none';
@@ -3082,6 +3118,12 @@ function addScannedLot(lotNumber) {
   console.log('addScannedLot called with:', lotNumber);
   console.log('Current materialLots array:', materialLots);
   
+  // Check for maximum limit (10 lots)
+  if (materialLots.length >= 10) {
+    showAlert(`最大10個のロット番号のみ追加可能です\n\nMaximum 10 lot numbers allowed\n\nCurrent: ${materialLots.length} lots`);
+    return false; // At maximum
+  }
+  
   // Check for duplicates
   const isDuplicate = materialLots.some(lot => lot.lotNumber === lotNumber);
   console.log('Duplicate check result:', isDuplicate);
@@ -3103,6 +3145,12 @@ function addScannedLot(lotNumber) {
 function addManualLot(lotNumber) {
   if (!lotNumber || !lotNumber.trim()) return false;
   lotNumber = lotNumber.trim();
+  
+  // Check for maximum limit (10 lots)
+  if (materialLots.length >= 10) {
+    showAlert(`最大10個のロット番号のみ追加可能です\n\nMaximum 10 lot numbers allowed\n\nCurrent: ${materialLots.length} lots`);
+    return false; // At maximum
+  }
   
   // Check for duplicates
   if (materialLots.some(lot => lot.lotNumber === lotNumber)) {
