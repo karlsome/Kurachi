@@ -223,6 +223,218 @@
                 font-size: 18px;
             }
         }
+
+        /* 背番号/品番 Selection Modal Styles */
+        #sebanggoModal {
+            display: none;
+            position: fixed;
+            z-index: 1001;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(3px);
+        }
+
+        #sebanggoModal > div {
+            background-color: white;
+            margin: 2% auto;
+            padding: 20px;
+            border-radius: 15px;
+            width: 90%;
+            max-width: 600px;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            animation: modalSlideIn 0.3s ease-out;
+        }
+
+        @keyframes modalSlideIn {
+            from {
+                transform: translateY(-50px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        #sebanggoModal h2 {
+            margin: 0 0 20px 0;
+            text-align: center;
+            color: #333;
+            font-size: 1.5em;
+        }
+
+        #sebanggoModal .search-container {
+            margin-bottom: 20px;
+            position: relative;
+        }
+
+        #sebanggoModal .search-container input {
+            width: 100%;
+            padding: 12px 40px 12px 15px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+
+        #sebanggoModal .search-container input:focus {
+            outline: none;
+            border-color: #4CAF50;
+        }
+
+        #sebanggoModal .search-icon {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #666;
+            font-size: 18px;
+        }
+
+        #sebanggoModal .sebanggo-container {
+            margin-bottom: 20px;
+        }
+
+        #sebanggoModal .sebanggo-section {
+            margin-bottom: 20px;
+        }
+
+        #sebanggoModal .sebanggo-section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 2px solid #4CAF50;
+            margin-bottom: 12px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        #sebanggoModal .sebanggo-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            gap: 8px;
+        }
+
+        #sebanggoModal .sebanggo-grid > div {
+            flex: 1;
+            min-width: 0;
+        }
+
+        #sebanggoModal .sebanggo-btn {
+            width: 100%;
+            padding: 12px 8px;
+            background: #f0f0f0;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            color: #333;
+            transition: all 0.2s;
+            white-space: normal;
+            word-wrap: break-word;
+        }
+
+        #sebanggoModal .sebanggo-btn:active {
+            transform: scale(0.95);
+        }
+
+        #sebanggoModal .sebanggo-btn:hover {
+            background: #e0e0e0;
+            border-color: #4CAF50;
+        }
+
+        #sebanggoModal .recent-section .sebanggo-btn {
+            background: #e8f5e9;
+            border-color: #4CAF50;
+        }
+
+        #sebanggoModal .recent-section .sebanggo-section-header {
+            color: #2e7d32;
+        }
+
+        #sebanggoModal .delete-recent-btn {
+            background: #ff6b6b;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            padding: 6px 12px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            flex-shrink: 0;
+            margin-left: auto;
+        }
+
+        #sebanggoModal .delete-recent-btn:hover {
+            background: #ff5252;
+        }
+
+        #sebanggoModal .delete-recent-btn:active {
+            transform: scale(0.95);
+        }
+
+        #sebanggoModal .close-modal-btn {
+            width: 100%;
+            padding: 12px;
+            background: #e74c3c;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            margin-top: 15px;
+            transition: all 0.2s;
+        }
+
+        #sebanggoModal .close-modal-btn:hover {
+            background: #c0392b;
+        }
+
+        #sebanggoModal .close-modal-btn:active {
+            transform: scale(0.95);
+        }
+
+        #sebanggoModal .no-results {
+            text-align: center;
+            color: #999;
+            font-style: italic;
+            padding: 20px;
+            background: #f9f9f9;
+            border-radius: 8px;
+            margin: 10px 0;
+        }
+
+        /* Responsive adjustments for sebanggo modal */
+        @media (max-width: 768px) {
+            #sebanggoModal .sebanggo-grid {
+                grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+                gap: 6px;
+            }
+            
+            #sebanggoModal .sebanggo-btn {
+                font-size: 12px;
+                padding: 6px 8px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            #sebanggoModal > div {
+                width: 95%;
+                margin: 5% auto;
+            }
+            
+            #sebanggoModal .sebanggo-grid {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
     </style>
 </head>
 <body>
@@ -274,9 +486,7 @@
             
             
 
-            <select id="sub-dropdown" name="背番号">  
-                <!-- options will be populated dynamically based on the selected value of #dropdown -->
-            </select>
+            <input id="sub-dropdown-input" name="背番号" required readonly style="cursor: pointer; background: white;" placeholder="Select 背番号 or 品番">
 
             
 
@@ -562,6 +772,41 @@
         <div style="background: white; padding: 30px; border-radius: 10px; text-align: center;">
             <div class="loader" style="margin-bottom: 20px;"></div>
             <p style="font-size: 18px;">Uploading, please wait...</p>
+        </div>
+    </div>
+
+    <!-- 背番号/品番 Selection Modal -->
+    <div id="sebanggoModal">
+        <div>
+            <h2>Select 背番号 / 品番</h2>
+            
+            <div class="search-container">
+                <input type="text" id="sebanggo-search" placeholder="Search 背番号 or 品番..." autocomplete="off">
+                <span class="search-icon">🔍</span>
+            </div>
+            
+            <div class="sebanggo-container">
+                <div id="recent-sebanggo-section" class="sebanggo-section recent-section" style="display: none;">
+                    <div class="sebanggo-section-header">
+                        <span>Recent Selection</span>
+                        <button class="delete-recent-btn" id="clear-recent-sebanggo">🗑️ Clear</button>
+                    </div>
+                    <div class="sebanggo-grid" id="recent-sebanggo-grid"></div>
+                </div>
+                
+                <div id="all-sebanggo-section" class="sebanggo-section">
+                    <div class="sebanggo-section-header">
+                        <span>All 背番号 / 品番</span>
+                    </div>
+                    <div class="sebanggo-grid" id="all-sebanggo-grid"></div>
+                </div>
+                
+                <div id="no-results" class="no-results" style="display: none;">
+                    No matching results found
+                </div>
+            </div>
+            
+            <button class="close-modal-btn" id="close-sebanggo-modal">Close</button>
         </div>
     </div>
 

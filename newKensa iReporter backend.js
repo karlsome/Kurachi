@@ -4,6 +4,11 @@ const serverURL = "https://kurachi.onrender.com";
 // link for pictures database
 const picURL = 'https://script.google.com/macros/s/AKfycbwHUW1ia8hNZG-ljsguNq8K4LTPVnB6Ng_GLXIHmtJTdUgGGd2WoiQo9ToF-7PvcJh9bA/exec';
 
+// 背番号/品番 Selection Modal Variables
+let sebanggoData = [];
+const RECENT_SEBANGGO_KEY = 'recentSebanggoSelection';
+const MAX_RECENT_SEBANGGO = 6;
+
 
 //this code listens to incoming parameters passed
 function getQueryParam(param) {
@@ -235,6 +240,12 @@ document.addEventListener('DOMContentLoaded', () => {
                   if (inputKey === key) {
                       if (input.type === 'checkbox' || input.type === 'radio') {
                           input.checked = savedValue === 'true'; // Restore checkbox/radio state
+                      } else if (input.id === 'sub-dropdown-input') {
+                          // Special handling for sebanggo input field
+                          input.value = savedValue;
+                          console.log(`Restored ${input.id || input.name}:`, savedValue);
+                          fetchProductDetails(); // for info
+                          updateTotal(); // for total value
                       } else if (input.tagName === 'SELECT') {
                           // For select elements, wait for options to populate
                           setTimeout(() => {
@@ -305,68 +316,47 @@ document.addEventListener('DOMContentLoaded', () => {
 // Function to fetch 背番号 and 品番 from the server
 // using dynamic api on the server.js
 async function fetchSebanggoAndHinban() {
-  const subDropdown = document.getElementById("sub-dropdown");
-
-  // Clear dropdown before populating
-  subDropdown.innerHTML = "";
-
-  // Add default option
-  const defaultOption = document.createElement("option");
-  defaultOption.value = "";
-  defaultOption.textContent = "Select 背番号 / 品番";
-  defaultOption.disabled = true;
-  defaultOption.selected = true;
-  subDropdown.appendChild(defaultOption);
+  // Get the selected 工場 from the dropdown
+  const 工場 = document.getElementById("selected工場").value;
+  blankInfo();
 
   try {
-    const response = await fetch(`${serverURL}/queries`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        dbName: "Sasaki_Coating_MasterDB",
-        collectionName: "masterDB",
-        query: {},
-        projection: { 背番号: 1, 品番: 1, _id: 0 },
-      }),
-    });
-
+    // Fetch 背番号 and 品番 values from the server
+    const response = await fetch(`${serverURL}/getSeBanggoListPressAndHinban?工場=${encodeURIComponent(工場)}`);
     const data = await response.json();
+    console.log(data);
 
-    // Extract 背番号 and 品番
-    const sebanggoList = [...new Set(data.map((item) => item.背番号).filter(Boolean))];
-    const hinbanList = [...new Set(data.map((item) => item.品番).filter(Boolean))];
+    // Separate 背番号 and 品番 into different arrays
+    const sebanggoList = data.map(item => item.背番号).filter(Boolean); // Remove null/undefined
+    const hinbanList = data.map(item => item.品番).filter(Boolean); // Remove null/undefined
 
-    // Sort alphabetically (Japanese)
-    sebanggoList.sort((a, b) => a.localeCompare(b, "ja"));
-    hinbanList.sort((a, b) => a.localeCompare(b, "ja"));
+    // Sort both lists alphabetically
+    sebanggoList.sort((a, b) => a.localeCompare(b, 'ja')); // 'ja' for Japanese sorting
+    hinbanList.sort((a, b) => a.localeCompare(b, 'ja'));
 
-    // Populate 背番号 options
-    sebanggoList.forEach((sebanggo) => {
-      const option = document.createElement("option");
-      option.value = sebanggo;
-      option.textContent = sebanggo;
-      subDropdown.appendChild(option);
-    });
+    // Combine both lists for the modal
+    const combinedList = [...sebanggoList, ...hinbanList];
+    sebanggoData = combinedList;
 
-    // Add separator
-    if (hinbanList.length > 0) {
-      const separatorOption = document.createElement("option");
-      separatorOption.textContent = "------ 品番 ------";
-      separatorOption.disabled = true;
-      subDropdown.appendChild(separatorOption);
+    console.log("Sebanggo data loaded for modal:", { sebanggoList, hinbanList, combinedList });
+    
+    // Always initialize modal functionality (with safety check)
+    if (typeof initializeSebanggoModal === 'function') {
+        initializeSebanggoModal();
+    } else {
+        console.warn('initializeSebanggoModal function not yet available, will retry later');
+        // Retry after a short delay to allow functions to be defined
+        setTimeout(() => {
+            if (typeof initializeSebanggoModal === 'function') {
+                initializeSebanggoModal();
+            } else {
+                console.error('initializeSebanggoModal still not available after delay');
+            }
+        }, 100);
     }
 
-    // Populate 品番 options
-    hinbanList.forEach((hinban) => {
-      const option = document.createElement("option");
-      option.value = hinban;
-      option.textContent = hinban;
-      subDropdown.appendChild(option);
-    });
-
-    console.log("Dropdown populated with 背番号 and 品番");
   } catch (error) {
-    console.error("Error fetching data:", error);
+    console.error("Error fetching 背番号 and 品番 data:", error);
   }
 }
 
@@ -513,7 +503,7 @@ function blankInfo() {
 
 // Updated function to fetch product details from masterDB (with imageURL)
 async function fetchProductDetails() {
-  const subDropdown = document.getElementById("sub-dropdown");
+  const subDropdown = document.getElementById("sub-dropdown-input");
   const serialNumber = subDropdown.value;
   const factory = document.getElementById("selected工場").value;
   const dynamicImage = document.getElementById("dynamicImage");
@@ -603,7 +593,16 @@ async function fetchProductDetails() {
   }
 }
 
- document.getElementById("sub-dropdown").addEventListener("change", fetchProductDetails);
+// Add change event listener to sub-dropdown-input
+document.addEventListener('DOMContentLoaded', () => {
+  const inputElement = document.getElementById("sub-dropdown-input");
+  if (inputElement) {
+    inputElement.addEventListener("change", fetchProductDetails);
+    console.log('Change event listener attached to sub-dropdown-input');
+  } else {
+    console.warn('sub-dropdown-input element not found');
+  }
+});
 
 // Function to get link from Google Drive
 function picLINK(headerValue) {
@@ -687,14 +686,9 @@ document.addEventListener("DOMContentLoaded", async function() {
       if (!response.ok) throw new Error("Failed to fetch worker names");
 
       const workerNames = await response.json();
-      const dataList = document.getElementById("machine-operator-suggestions");
-      dataList.innerHTML = ""; // Clear any existing options
-
-      workerNames.forEach(name => {
-        const option = document.createElement("option");
-        option.value = name;
-        dataList.appendChild(option);
-      });
+      
+      // Store worker names for modal
+      workerNamesData = workerNames;
     } catch (error) {
       console.error("Error fetching worker names:", error);
     }
@@ -790,7 +784,7 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
     // Get form data
     const 品番 = document.getElementById('product-number').value;
     const 工場 = document.getElementById('selected工場').value;
-    const 背番号 = document.getElementById('sub-dropdown').value;
+    const 背番号 = document.getElementById('sub-dropdown-input').value;
     const Total = parseInt(document.getElementById('total').value, 10) || 0;
     const Worker_Name = document.getElementById('Machine Operator').value;
     const Process_Quantity = parseInt(document.getElementById('ProcessQuantity').value, 10) || 0;
@@ -2779,3 +2773,263 @@ document.addEventListener("DOMContentLoaded", async function() {
 });
 
 // ===== END OF WORKER NAME MODAL FUNCTIONALITY =====
+
+// ========== 背番号/品番 Modal Functions ==========
+
+// Initialize 背番号/品番 modal functionality
+function initializeSebanggoModal() {
+  const input = document.getElementById('sub-dropdown-input');
+  const modal = document.getElementById('sebanggoModal');
+  const closeBtn = document.getElementById('close-sebanggo-modal');
+  const searchInput = document.getElementById('sebanggo-search');
+  const clearRecentBtn = document.getElementById('clear-recent-sebanggo');
+  
+  // Check if all required elements exist
+  if (!input || !modal || !closeBtn || !searchInput || !clearRecentBtn) {
+    console.error('Sebanggo modal elements not found:', {
+      input: !!input,
+      modal: !!modal,
+      closeBtn: !!closeBtn,
+      searchInput: !!searchInput,
+      clearRecentBtn: !!clearRecentBtn
+    });
+    return;
+  }
+  
+  // Prevent duplicate event listeners
+  if (input.hasEventListener) {
+    console.log('Sebanggo modal already initialized');
+    return;
+  }
+  
+  console.log('Initializing sebanggo modal...');
+  
+  // Mark that event listener has been added
+  input.hasEventListener = true;
+  
+  // Open modal when input is clicked
+  input.addEventListener('click', (e) => {
+    e.preventDefault();
+    console.log('Input field clicked');
+    openSebanggoModal();
+  });
+  
+  // Close modal
+  closeBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    console.log('Close button clicked');
+    closeSebanggoModal();
+  });
+  
+  // Close modal when clicking outside
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) {
+      console.log('Modal background clicked');
+      closeSebanggoModal();
+    }
+  });
+  
+  // Search functionality
+  searchInput.addEventListener('input', (e) => {
+    console.log('Search input changed:', e.target.value);
+    filterSebanggoList();
+  });
+  
+  // Clear recent selections
+  clearRecentBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    console.log('Clear recent button clicked');
+    clearRecentSebanggo();
+  });
+  
+  console.log('All event listeners attached successfully');
+}
+
+// Open sebanggo modal
+function openSebanggoModal() {
+  console.log('Opening sebanggo modal...');
+  const modal = document.getElementById('sebanggoModal');
+  
+  if (!modal) {
+    console.error('Sebanggo modal not found');
+    return;
+  }
+  
+  if (sebanggoData.length === 0) {
+    console.error('Sebanggo data is empty');
+    return;
+  }
+  
+  modal.style.display = 'block';
+  console.log('Modal display set to block, rendering list...');
+  renderSebanggoList();
+}
+
+// Close sebanggo modal
+function closeSebanggoModal() {
+  const modal = document.getElementById('sebanggoModal');
+  modal.style.display = 'none';
+  
+  // Clear search
+  document.getElementById('sebanggo-search').value = '';
+}
+
+// Render sebanggo list in modal
+function renderSebanggoList() {
+  console.log('Rendering sebanggo list...');
+  const recentSection = document.getElementById('recent-sebanggo-section');
+  const recentGrid = document.getElementById('recent-sebanggo-grid');
+  const allGrid = document.getElementById('all-sebanggo-grid');
+  
+  if (!recentSection || !recentGrid || !allGrid) {
+    console.error('Sebanggo grid elements not found:', {
+      recentSection: !!recentSection,
+      recentGrid: !!recentGrid,
+      allGrid: !!allGrid
+    });
+    return;
+  }
+  
+  // Load recent selections
+  const recentSebanggo = getRecentSebanggo();
+  console.log('Recent sebanggo:', recentSebanggo);
+  console.log('Total sebanggo data:', sebanggoData.length);
+  
+  // Show/hide recent section
+  if (recentSebanggo.length > 0) {
+    recentSection.style.display = 'block';
+    recentGrid.innerHTML = '';
+    
+    recentSebanggo.forEach(item => {
+      const button = createSebanggoButton(item, true);
+      recentGrid.appendChild(button);
+    });
+  } else {
+    recentSection.style.display = 'none';
+  }
+  
+  // Render all items
+  allGrid.innerHTML = '';
+  sebanggoData.forEach(item => {
+    const button = createSebanggoButton(item, false);
+    allGrid.appendChild(button);
+  });
+}
+
+// Create sebanggo button element
+function createSebanggoButton(item, isRecent = false) {
+  const div = document.createElement('div');
+  const button = document.createElement('button');
+  
+  button.className = 'sebanggo-btn';
+  button.textContent = item;
+  button.onclick = () => selectSebanggo(item);
+  
+  div.appendChild(button);
+  return div;
+}
+
+// Select sebanggo item
+function selectSebanggo(value) {
+  const input = document.getElementById('sub-dropdown-input');
+  input.value = value;
+  
+  // Add to recent selections
+  addToRecentSebanggo(value);
+  
+  // Close modal
+  closeSebanggoModal();
+  
+  // Save to localStorage
+  const pageName = location.pathname.split('/').pop();
+  const selected工場 = document.getElementById('selected工場').value;
+  if (pageName && selected工場) {
+    const key = `${pageName}_${selected工場}_${input.id || input.name}`;
+    localStorage.setItem(key, value);
+  }
+  
+  // Trigger change event to fetch product details
+  input.dispatchEvent(new Event('change'));
+}
+
+// Filter sebanggo list based on search input
+function filterSebanggoList() {
+  const searchInput = document.getElementById('sebanggo-search');
+  const searchTerm = searchInput.value.toLowerCase();
+  
+  const allGrid = document.getElementById('all-sebanggo-grid');
+  const noResults = document.getElementById('no-results');
+  
+  let visibleCount = 0;
+  
+  // Filter all items
+  const items = allGrid.querySelectorAll('.sebanggo-btn');
+  items.forEach(btn => {
+    const text = btn.textContent.toLowerCase();
+    if (text.includes(searchTerm)) {
+      btn.parentElement.style.display = 'block';
+      visibleCount++;
+    } else {
+      btn.parentElement.style.display = 'none';
+    }
+  });
+  
+  // Show no results message if needed
+  if (visibleCount === 0 && searchTerm.length > 0) {
+    noResults.style.display = 'block';
+  } else {
+    noResults.style.display = 'none';
+  }
+}
+
+// Get recent sebanggo selections from localStorage
+function getRecentSebanggo() {
+  try {
+    const recent = localStorage.getItem(RECENT_SEBANGGO_KEY);
+    return recent ? JSON.parse(recent) : [];
+  } catch (error) {
+    console.error('Error loading recent sebanggo:', error);
+    return [];
+  }
+}
+
+// Add item to recent sebanggo selections
+function addToRecentSebanggo(value) {
+  try {
+    let recent = getRecentSebanggo();
+    
+    // Remove if already exists
+    recent = recent.filter(item => item !== value);
+    
+    // Add to beginning
+    recent.unshift(value);
+    
+    // Limit to MAX_RECENT_SEBANGGO items
+    if (recent.length > MAX_RECENT_SEBANGGO) {
+      recent = recent.slice(0, MAX_RECENT_SEBANGGO);
+    }
+    
+    localStorage.setItem(RECENT_SEBANGGO_KEY, JSON.stringify(recent));
+  } catch (error) {
+    console.error('Error saving recent sebanggo:', error);
+  }
+}
+
+// Clear recent sebanggo selections
+function clearRecentSebanggo() {
+  if (confirm('Clear all recent selections?')) {
+    localStorage.removeItem(RECENT_SEBANGGO_KEY);
+    renderSebanggoList();
+  }
+}
+
+// Initialize sebanggo modal on page load
+setTimeout(function() {
+  if (typeof initializeSebanggoModal === 'function') {
+    initializeSebanggoModal();
+  } else {
+    console.warn('initializeSebanggoModal function not yet available');
+  }
+}, 100);
+
+// ===== END OF SEBANGGO MODAL FUNCTIONALITY =====
