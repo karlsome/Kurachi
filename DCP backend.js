@@ -5872,7 +5872,16 @@ document.getElementById('submit').addEventListener('click', async (event) => {
         setTimeout(() => {
             uploadingModal.style.display = 'none'; scanAlertText.innerText = 'Form submitted successfully / 保存しました';
             scanAlertModal.style.display = 'block'; document.body.classList.add('flash-green');
+            
+            // Auto-close after 5 seconds to prevent duplicate submissions
+            const autoCloseTimer = setTimeout(() => {
+                scanAlertModal.style.display = 'none'; document.body.classList.remove('flash-green');
+                window.location.reload(); resetForm();
+            }, 5000);
+            
+            // Allow manual close by clicking the × button
             document.getElementById('closeScanModalButton').onclick = function() {
+                clearTimeout(autoCloseTimer); // Cancel auto-close if user clicks manually
                 scanAlertModal.style.display = 'none'; document.body.classList.remove('flash-green');
                 window.location.reload(); resetForm();
             };
