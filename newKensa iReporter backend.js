@@ -23,6 +23,173 @@ const selected工場 = document.getElementById('selected工場').value; // Get t
 const pageName = location.pathname.split('/').pop(); // Get the current HTML file name
 const uniquePrefix = `${pageName}_${selected工場}_`;
 
+// ==================== DATE CHOICE MODAL ====================
+function getTodayDateString() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function ensureDateChoiceModal() {
+  let modal = document.getElementById('dateChoiceModal');
+  if (modal) {
+    return modal;
+  }
+
+  modal = document.createElement('div');
+  modal.id = 'dateChoiceModal';
+  modal.style.cssText = `
+    display: none;
+    position: fixed;
+    z-index: 10050;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0,0,0,0.7);
+    justify-content: center;
+    align-items: center;
+  `;
+
+  modal.innerHTML = `
+    <div style="
+      background: white;
+      padding: 25px;
+      border-radius: 12px;
+      width: 90%;
+      max-width: 520px;
+      text-align: center;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+      position: relative;
+    ">
+      <button id="closeDateChoiceModal" style="
+        position: absolute;
+        top: 8px;
+        right: 10px;
+        background: transparent;
+        border: none;
+        font-size: 24px;
+        font-weight: bold;
+        color: #666;
+        cursor: pointer;
+        line-height: 1;
+      ">×</button>
+      <style>
+        @keyframes dateBlink {
+          0%, 49% { opacity: 1; }
+          50%, 100% { opacity: 0.2; }
+        }
+        .date-mismatch {
+          color: #dc3545;
+          font-weight: 800;
+          animation: dateBlink 1s infinite;
+        }
+        .date-mismatch-button {
+          font-weight: 800;
+          animation: dateBlink 1s infinite;
+        }
+        .date-btn-label {
+          line-height: 1;
+          margin: 0;
+          padding: 0;
+          display: block;
+        }
+        .date-btn-date {
+          line-height: 1;
+          margin: 0;
+          padding: 0;
+          display: block;
+        }
+      </style>
+      <h2 style="margin: 0 0 10px;">日付確認 / Date Confirmation</h2>
+      <p id="dateChoiceMessage" style="margin: 0 0 20px; color: #444; line-height: 1.5;"></p>
+      <div style="display: flex; gap: 15px; justify-content: center; flex-wrap: wrap;">
+        <button id="useEnteredDateBtn" style="
+          width: 160px;
+          height: 160px;
+          background: #dc3545;
+          color: white;
+          border: none;
+          border-radius: 10px;
+          font-size: 16px;
+          font-weight: bold;
+          cursor: pointer;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          text-align: center;
+          white-space: nowrap;
+          gap: 0;
+          padding: 6px 10px;
+        ">Entered Date</button>
+        <button id="useCurrentDateBtn" style="
+          width: 160px;
+          height: 160px;
+          background: #28a745;
+          color: white;
+          border: none;
+          border-radius: 10px;
+          font-size: 16px;
+          font-weight: bold;
+          cursor: pointer;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          text-align: center;
+          white-space: nowrap;
+          gap: 0;
+          padding: 6px 10px;
+        ">Current Date</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+  return modal;
+}
+
+function showDateChoiceModal(enteredDate, currentDate) {
+  return new Promise((resolve) => {
+    const modal = ensureDateChoiceModal();
+    const message = modal.querySelector('#dateChoiceMessage');
+    const enteredBtn = modal.querySelector('#useEnteredDateBtn');
+    const currentBtn = modal.querySelector('#useCurrentDateBtn');
+    const closeBtn = modal.querySelector('#closeDateChoiceModal');
+
+    message.innerHTML = `入力日付: <strong class="date-mismatch">${enteredDate}</strong><br>現在日付: <strong>${currentDate}</strong><br><br>どちらの日付を使用しますか？<br>Which date should be used?`;
+    enteredBtn.innerHTML = `<span class="date-btn-label">Entered</span><span class="date-btn-date date-mismatch-button">${enteredDate}</span>`;
+    currentBtn.innerHTML = `<span class="date-btn-label">Current</span><span class="date-btn-date">${currentDate}</span>`;
+
+    const cleanup = () => {
+      enteredBtn.onclick = null;
+      currentBtn.onclick = null;
+      closeBtn.onclick = null;
+      modal.style.display = 'none';
+    };
+
+    enteredBtn.onclick = () => {
+      cleanup();
+      resolve('entered');
+    };
+
+    currentBtn.onclick = () => {
+      cleanup();
+      resolve('current');
+    };
+
+    closeBtn.onclick = () => {
+      cleanup();
+      resolve('cancel');
+    };
+
+    modal.style.display = 'flex';
+  });
+}
+
 // Save the value of each input to localStorage on change
 inputs.forEach(input => {
     input.addEventListener('input', () => {
@@ -610,6 +777,7 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
   const alertSound = document.getElementById('alert-sound');
   const scanAlertModal = document.getElementById('scanAlertModal');
   const scanAlertText = document.getElementById('scanAlertText');
+  const uploadingModal = document.getElementById('uploadingModal');
 
   // Preload the alert sound without playing it
   if (alertSound) {
@@ -790,6 +958,23 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
       return;
     }
 
+    // Compare entered date vs current date and ask user which to use
+    const currentDate = getTodayDateString();
+    if (WorkDate !== currentDate) {
+      const choice = await showDateChoiceModal(WorkDate, currentDate);
+      if (choice === 'cancel') {
+        return;
+      }
+      if (choice === 'current') {
+        const dateInput = document.getElementById('Lot No.');
+        WorkDate = currentDate;
+        if (dateInput) {
+          dateInput.value = currentDate;
+          localStorage.setItem(`${uniquePrefix}${dateInput.id}`, currentDate);
+        }
+      }
+    }
+
     if (!製造ロット || 製造ロット.trim() === '') {
       scanAlertText.innerText = '製造ロットが必要です / Manufacturing Lot is required';
       scanAlertModal.style.display = 'block';
@@ -934,6 +1119,10 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
     console.log('Data to save to kensaDB:', formData);
 
     // Save to kensaDB
+    if (uploadingModal) {
+      uploadingModal.style.display = 'flex';
+    }
+
     const saveResponse = await fetch(`${serverURL}/submitToKensaDBiReporter`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -946,6 +1135,10 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
     }
 
     console.log('Form data saved to kensaDB successfully.');
+
+    if (uploadingModal) {
+      uploadingModal.style.display = 'none';
+    }
 
     // Show success modal with blinking green background
     scanAlertText.innerText = 'Form submitted successfully / 保存しました';
@@ -962,6 +1155,10 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
     };
   } catch (error) {
     console.error('Error during submission:', error);
+
+    if (uploadingModal) {
+      uploadingModal.style.display = 'none';
+    }
 
     // Show error modal with blinking red background
     scanAlertText.innerText = 'An error occurred. Please try again.';
