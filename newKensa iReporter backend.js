@@ -28,6 +28,49 @@ const selected工場 = document.getElementById('selected工場').value; // Get t
 const pageName = location.pathname.split('/').pop(); // Get the current HTML file name
 const uniquePrefix = `${pageName}_${selected工場}_`;
 
+// Add CSS styles for time input fields and edit buttons
+const timeInputStyles = `
+<style>
+  .time-input-wrapper {
+    display: inline-block;
+    position: relative;
+    margin-bottom: 10px;
+  }
+  
+  .time-input-wrapper input[type="time"] {
+    padding: 5px 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    transition: border-color 0.2s;
+  }
+  
+  .time-input-wrapper input[type="time"].locked {
+    background-color: #f8f9fa;
+    border-color: #dee2e6;
+    color: #495057;
+  }
+  
+  .time-input-wrapper .edit-btn {
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 12px;
+    cursor: pointer;
+    margin-left: 5px;
+    transition: background-color 0.2s;
+    vertical-align: middle;
+  }
+  
+  .time-input-wrapper .edit-btn:hover {
+    background-color: #0069d9;
+  }
+</style>`;
+
+// Inject styles into document head
+document.head.insertAdjacentHTML('beforeend', timeInputStyles);
+
 // ==================== DATE CHOICE MODAL ====================
 function getTodayDateString() {
   const now = new Date();
@@ -270,6 +313,62 @@ document.addEventListener('DOMContentLoaded', () => {
   // Log the restored value for debugging (Optional)
   if (processElement) {
       console.log('Process value after restoration:', processElement.value); // Debugging the restored process value
+  }
+
+  // Set up processing time inputs with edit buttons
+  const startTimeInput = document.getElementById('Start Time');
+  const endTimeInput = document.getElementById('End Time');
+
+  if (startTimeInput) {
+    // Wrap start time input in a container if not already wrapped
+    if (!startTimeInput.closest('.time-input-wrapper')) {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'time-input-wrapper';
+      startTimeInput.parentNode.insertBefore(wrapper, startTimeInput);
+      wrapper.appendChild(startTimeInput);
+
+      // Add edit button
+      const editBtn = document.createElement('button');
+      editBtn.type = 'button';
+      editBtn.className = 'edit-btn';
+      editBtn.id = 'edit-start-time';
+      editBtn.textContent = 'Edit';
+      editBtn.style.display = 'none';
+      editBtn.onclick = function() { unlockProcessingTime('start'); };
+      wrapper.appendChild(editBtn);
+
+      // Update focus handler to use custom handler
+      startTimeInput.onfocus = function() { handleProcessingTimeFocus(this); };
+
+      // Update lock status based on current value
+      updateProcessingTimeLockStatus('start');
+    }
+  }
+
+  if (endTimeInput) {
+    // Wrap end time input in a container if not already wrapped
+    if (!endTimeInput.closest('.time-input-wrapper')) {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'time-input-wrapper';
+      endTimeInput.parentNode.insertBefore(wrapper, endTimeInput);
+      wrapper.appendChild(endTimeInput);
+
+      // Add edit button
+      const editBtn = document.createElement('button');
+      editBtn.type = 'button';
+      editBtn.className = 'edit-btn';
+      editBtn.id = 'edit-end-time';
+      editBtn.textContent = 'Edit';
+      editBtn.style.display = 'none';
+      editBtn.onclick = function() { unlockProcessingTime('end'); };
+      wrapper.appendChild(editBtn);
+
+      // Update focus handler to use custom handler
+      endTimeInput.onfocus = function() { handleProcessingTimeFocus(this); };
+
+      // Update lock status based on current value
+      updateProcessingTimeLockStatus('end');
+    }
   }
 });
 
@@ -650,6 +749,92 @@ function setDefaultTime(input) {
 
   // Save the time to local storage with unique prefix
   localStorage.setItem(`${uniquePrefix}${input.id}`, timeValue);
+
+  // If this is the Start Time input, lock it to prevent accidental changes
+  if (input.id === 'Start Time') {
+    setTimeout(() => {
+      updateProcessingTimeLockStatus('start');
+    }, 100);
+  }
+
+  // If this is the End Time input, lock it to prevent accidental changes
+  if (input.id === 'End Time') {
+    setTimeout(() => {
+      updateProcessingTimeLockStatus('end');
+    }, 100);
+  }
+}
+
+// Handle processing time input focus - check if locked before setting time
+function handleProcessingTimeFocus(input) {
+  // Check if the input is locked
+  if (input.classList.contains('locked') || input.readOnly) {
+    console.log(`🔒 Processing time input ${input.id} is locked - focus ignored to prevent accidental changes`);
+    input.blur(); // Remove focus to prevent interaction
+    return;
+  }
+
+  // If not locked, proceed with normal setDefaultTime behavior
+  setDefaultTime(input);
+}
+
+// Processing time lock functions
+// Function to lock processing time inputs when they have values
+function lockProcessingTime(timeType) {
+  const timeInput = document.getElementById(timeType === 'start' ? 'Start Time' : 'End Time');
+  const editBtn = document.getElementById(timeType === 'start' ? 'edit-start-time' : 'edit-end-time');
+
+  if (timeInput) {
+    // Add locked class and disable input
+    timeInput.classList.add('locked');
+    timeInput.readOnly = true;
+    timeInput.style.pointerEvents = 'none';
+
+    // Show edit button
+    if (editBtn) {
+      editBtn.style.display = 'inline-block';
+    }
+  }
+}
+
+// Function to unlock processing time inputs for editing
+function unlockProcessingTime(timeType) {
+  const timeInput = document.getElementById(timeType === 'start' ? 'Start Time' : 'End Time');
+  const editBtn = document.getElementById(timeType === 'start' ? 'edit-start-time' : 'edit-end-time');
+
+  if (timeInput) {
+    // Remove locked class and enable input
+    timeInput.classList.remove('locked');
+    timeInput.readOnly = false;
+    timeInput.style.pointerEvents = 'auto';
+
+    // Hide edit button
+    if (editBtn) {
+      editBtn.style.display = 'none';
+    }
+  }
+}
+
+// Function to check and update lock status for processing times
+function updateProcessingTimeLockStatus(timeType) {
+  const timeInput = document.getElementById(timeType === 'start' ? 'Start Time' : 'End Time');
+
+  if (timeInput) {
+    const timeValue = timeInput.value;
+
+    // Lock only if time has a value
+    if (timeValue && timeValue.trim() !== '') {
+      lockProcessingTime(timeType);
+    } else {
+      unlockProcessingTime(timeType);
+    }
+  }
+}
+
+// Function to update all processing time lock statuses
+function updateAllProcessingTimeLockStatus() {
+  updateProcessingTimeLockStatus('start');
+  updateProcessingTimeLockStatus('end');
 }
 
 
