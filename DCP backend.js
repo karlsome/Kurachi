@@ -5228,6 +5228,153 @@ function uploadPhotou() {
 //   }
 // });
 
+// ==================== DATE CHOICE MODAL ====================
+function getTodayDateString() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function ensureDateChoiceModal() {
+  let modal = document.getElementById('dateChoiceModal');
+  if (modal) {
+    return modal;
+  }
+
+  modal = document.createElement('div');
+  modal.id = 'dateChoiceModal';
+  modal.style.cssText = `
+    display: none;
+    position: fixed;
+    z-index: 10050;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0,0,0,0.7);
+    justify-content: center;
+    align-items: center;
+  `;
+
+  modal.innerHTML = `
+    <div style="
+      background: white;
+      padding: 25px;
+      border-radius: 12px;
+      width: 90%;
+      max-width: 520px;
+      text-align: center;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+    ">
+      <style>
+        @keyframes dateBlink {
+          0%, 49% { opacity: 1; }
+          50%, 100% { opacity: 0.2; }
+        }
+        .date-mismatch {
+          color: #dc3545;
+          font-weight: 800;
+          animation: dateBlink 1s infinite;
+        }
+        .date-mismatch-button {
+          font-weight: 800;
+          animation: dateBlink 1s infinite;
+        }
+        .date-btn-label {
+          line-height: 1;
+          margin: 0;
+          padding: 0;
+          display: block;
+        }
+        .date-btn-date {
+          line-height: 1;
+          margin: 0;
+          padding: 0;
+          display: block;
+        }
+      </style>
+      <h2 style="margin: 0 0 10px;">日付確認 / Date Confirmation</h2>
+      <p id="dateChoiceMessage" style="margin: 0 0 20px; color: #444; line-height: 1.5;"></p>
+      <div style="display: flex; gap: 15px; justify-content: center; flex-wrap: wrap;">
+        <button id="useEnteredDateBtn" style="
+          width: 160px;
+          height: 160px;
+          background: #dc3545;
+          color: white;
+          border: none;
+          border-radius: 10px;
+          font-size: 16px;
+          font-weight: bold;
+          cursor: pointer;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          text-align: center;
+          white-space: nowrap;
+          gap: 0;
+          padding: 6px 10px;
+        ">Entered Date</button>
+        <button id="useCurrentDateBtn" style="
+          width: 160px;
+          height: 160px;
+          background: #28a745;
+          color: white;
+          border: none;
+          border-radius: 10px;
+          font-size: 16px;
+          font-weight: bold;
+          cursor: pointer;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          text-align: center;
+          white-space: nowrap;
+          gap: 0;
+          padding: 6px 10px;
+        ">Current Date</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+  return modal;
+}
+
+function showDateChoiceModal(enteredDate, currentDate) {
+  return new Promise((resolve) => {
+    const modal = ensureDateChoiceModal();
+    const message = modal.querySelector('#dateChoiceMessage');
+    const enteredBtn = modal.querySelector('#useEnteredDateBtn');
+    const currentBtn = modal.querySelector('#useCurrentDateBtn');
+
+    message.innerHTML = `入力日付: <strong class="date-mismatch">${enteredDate}</strong><br>現在日付: <strong>${currentDate}</strong><br><br>どちらの日付を使用しますか？<br>Which date should be used?`;
+    enteredBtn.innerHTML = `<span class="date-btn-label">Entered</span><span class="date-btn-date date-mismatch-button">${enteredDate}</span>`;
+    currentBtn.innerHTML = `<span class="date-btn-label">Current</span><span class="date-btn-date">${currentDate}</span>`;
+
+    const cleanup = () => {
+      enteredBtn.onclick = null;
+      currentBtn.onclick = null;
+      modal.style.display = 'none';
+    };
+
+    enteredBtn.onclick = () => {
+      cleanup();
+      resolve('entered');
+    };
+
+    currentBtn.onclick = () => {
+      cleanup();
+      resolve('current');
+    };
+
+    modal.style.display = 'flex';
+  });
+}
+
 // Locate your document.getElementById('submit').addEventListener('click', async (event) => { ... }
 document.getElementById('submit').addEventListener('click', async (event) => {
     event.preventDefault();
@@ -5287,7 +5434,7 @@ document.getElementById('submit').addEventListener('click', async (event) => {
         const Total_NG = 疵引不良 + 加工不良 + その他;
         const Total_PressDB = Process_Quantity - Total_NG;
         const Worker_Name = document.getElementById('Machine Operator').value;
-        const WorkDate = document.getElementById('Lot No.').value;
+        let WorkDate = document.getElementById('Lot No.').value;
         const Time_start = document.getElementById('Start Time').value;
         const Time_end = document.getElementById('End Time').value;
         const 材料ロット = document.getElementById('材料ロット').value;
@@ -5347,6 +5494,22 @@ document.getElementById('submit').addEventListener('click', async (event) => {
             showAlert('加工日が必要です / Work Date is required');
             document.getElementById('Lot No.').focus();
             return;
+        }
+
+        // Compare entered date vs current date and ask user which to use
+        const currentDate = getTodayDateString();
+        if (WorkDate !== currentDate) {
+          uploadingModal.style.display = 'none';
+          const choice = await showDateChoiceModal(WorkDate, currentDate);
+          if (choice === 'current') {
+            WorkDate = currentDate;
+            const dateInput = document.getElementById('Lot No.');
+            if (dateInput) {
+              dateInput.value = currentDate;
+              localStorage.setItem(`${uniquePrefix}${dateInput.id}`, currentDate);
+            }
+          }
+          uploadingModal.style.display = 'flex';
         }
 
         if (!材料ロット || 材料ロット.trim() === '') {
