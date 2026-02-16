@@ -72,6 +72,172 @@ inputs.forEach(input => {
 });
 
 
+function getTodayDateString() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function ensureDateChoiceModal() {
+  let modal = document.getElementById('dateChoiceModal');
+  if (modal) {
+    return modal;
+  }
+
+  modal = document.createElement('div');
+  modal.id = 'dateChoiceModal';
+  modal.style.cssText = `
+    display: none;
+    position: fixed;
+    z-index: 10050;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0,0,0,0.7);
+    justify-content: center;
+    align-items: center;
+  `;
+
+  modal.innerHTML = `
+    <div style="
+      background: white;
+      padding: 25px;
+      border-radius: 12px;
+      width: 90%;
+      max-width: 520px;
+      text-align: center;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+      position: relative;
+    ">
+      <button id="closeDateChoiceModal" style="
+        position: absolute;
+        top: 8px;
+        right: 10px;
+        background: transparent;
+        border: none;
+        font-size: 24px;
+        font-weight: bold;
+        color: #666;
+        cursor: pointer;
+        line-height: 1;
+      ">×</button>
+      <style>
+        @keyframes dateBlink {
+          0%, 49% { opacity: 1; }
+          50%, 100% { opacity: 0.2; }
+        }
+        .date-mismatch {
+          color: #dc3545;
+          font-weight: 800;
+          animation: dateBlink 1s infinite;
+        }
+        .date-mismatch-button {
+          font-weight: 800;
+          animation: dateBlink 1s infinite;
+        }
+        .date-btn-label {
+          line-height: 1;
+          margin: 0;
+          padding: 0;
+          display: block;
+        }
+        .date-btn-date {
+          line-height: 1;
+          margin: 0;
+          padding: 0;
+          display: block;
+        }
+      </style>
+      <h2 style="margin: 0 0 10px;">日付確認 / Date Confirmation</h2>
+      <p id="dateChoiceMessage" style="margin: 0 0 20px; color: #444; line-height: 1.5;"></p>
+      <div style="display: flex; gap: 15px; justify-content: center; flex-wrap: wrap;">
+        <button id="useEnteredDateBtn" style="
+          width: 160px;
+          height: 160px;
+          background: #dc3545;
+          color: white;
+          border: none;
+          border-radius: 10px;
+          font-size: 16px;
+          font-weight: bold;
+          cursor: pointer;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          text-align: center;
+          white-space: nowrap;
+          gap: 0;
+          padding: 6px 10px;
+        ">Entered Date</button>
+        <button id="useCurrentDateBtn" style="
+          width: 160px;
+          height: 160px;
+          background: #28a745;
+          color: white;
+          border: none;
+          border-radius: 10px;
+          font-size: 16px;
+          font-weight: bold;
+          cursor: pointer;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          text-align: center;
+          white-space: nowrap;
+          gap: 0;
+          padding: 6px 10px;
+        ">Current Date</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+  return modal;
+}
+
+function showDateChoiceModal(enteredDate, currentDate) {
+  return new Promise((resolve) => {
+    const modal = ensureDateChoiceModal();
+    const message = modal.querySelector('#dateChoiceMessage');
+    const enteredBtn = modal.querySelector('#useEnteredDateBtn');
+    const currentBtn = modal.querySelector('#useCurrentDateBtn');
+    const closeBtn = modal.querySelector('#closeDateChoiceModal');
+
+    message.innerHTML = `入力日付: <strong class="date-mismatch">${enteredDate}</strong><br>現在日付: <strong>${currentDate}</strong><br><br>どちらの日付を使用しますか？<br>Which date should be used?`;
+    enteredBtn.innerHTML = `<span class="date-btn-label">Entered</span><span class="date-btn-date date-mismatch-button">${enteredDate}</span>`;
+    currentBtn.innerHTML = `<span class="date-btn-label">Current</span><span class="date-btn-date">${currentDate}</span>`;
+
+    const cleanup = () => {
+      enteredBtn.onclick = null;
+      currentBtn.onclick = null;
+      closeBtn.onclick = null;
+      modal.style.display = 'none';
+    };
+
+    enteredBtn.onclick = () => {
+      cleanup();
+      resolve('entered');
+    };
+
+    currentBtn.onclick = () => {
+      cleanup();
+      resolve('current');
+    };
+
+    closeBtn.onclick = () => {
+      cleanup();
+      resolve('cancel');
+    };
+
+    modal.style.display = 'flex';
+  });
+}
+
 
 // Restore the values of input fields, images, and textContent from localStorage on page load
 document.addEventListener('DOMContentLoaded', () => {
@@ -218,6 +384,9 @@ document.addEventListener('DOMContentLoaded', () => {
   if (materialField) {
     autoResizeTextarea(materialField);
   }
+
+  // Load material label photos from localStorage
+  loadMaterialLabelPhotos();
 
   // Log the restored value for debugging (Optional)
   if (processElement) {
@@ -1355,6 +1524,29 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
       return;
     }
 
+    // Check for date mismatch and show modal if needed
+    const currentDate = getTodayDateString();
+    const enteredDate = formData.Date.trim();
+    
+    if (enteredDate !== currentDate) {
+      document.getElementById('uploadingModal').style.display = 'none';
+      const choice = await showDateChoiceModal(enteredDate, currentDate);
+      
+      if (choice === 'current') {
+        formData.Date = currentDate;
+        const dateInput = document.getElementById('Lot No.');
+        if (dateInput) {
+          dateInput.value = currentDate;
+          localStorage.setItem(`${uniquePrefix}${dateInput.id}`, currentDate);
+        }
+      } else if (choice === 'cancel') {
+        return;
+      }
+      // 'entered' means keep the entered date as-is
+      
+      document.getElementById('uploadingModal').style.display = 'flex';
+    }
+
     if (!formData.材料ロット || formData.材料ロット.trim() === '') {
       showAlert('材料ロットが必要です / Material Lot is required');
       document.getElementById('uploadingModal').style.display = 'none';
@@ -1561,17 +1753,29 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
       throw new Error(errorData.error || 'Failed to save data');
     }
 
-    scanAlertText.innerText = 'Form submitted successfully / 保存しました';
-    scanAlertModal.style.display = 'block';
-    document.body.classList.add('flash-green');
+    setTimeout(() => {
+      uploadingModal.style.display = 'none';
+      scanAlertText.innerText = 'Form submitted successfully / 保存しました';
+      scanAlertModal.style.display = 'block';
+      document.body.classList.add('flash-green');
 
-    document.getElementById('closeScanModalButton').onclick = function () {
-      scanAlertModal.style.display = 'none';
-      document.body.classList.remove('flash-green');
-      document.getElementById('uploadingModal').style.display = 'none';
-      window.location.reload();
-      resetForm(true); // Skip confirmation dialog after successful submission
-    };
+      // Auto-close after 5 seconds to prevent duplicate submissions
+      const autoCloseTimer = setTimeout(() => {
+        scanAlertModal.style.display = 'none';
+        document.body.classList.remove('flash-green');
+        window.location.reload();
+        resetForm(true);
+      }, 5000);
+
+      // Allow manual close by clicking the × button
+      document.getElementById('closeScanModalButton').onclick = function () {
+        clearTimeout(autoCloseTimer); // Cancel auto-close if user clicks manually
+        scanAlertModal.style.display = 'none';
+        document.body.classList.remove('flash-green');
+        window.location.reload();
+        resetForm(true);
+      };
+    }, 3000);
 
   } catch (error) {
     document.getElementById('uploadingModal').style.display = 'none';
@@ -4149,31 +4353,47 @@ async function processPhotoCapture(base64Image, mapping, buttonId) {
     const compressedImage = await compressBase64Image(base64Image, 1024, 0.8);
     console.log(`Compressed image size: ${(compressedImage.length / 1024).toFixed(2)} KB`);
     
-    // Handle material label photos with single photo functionality
+    // Handle material label photos with MULTI-PHOTO functionality
     if (buttonId === 'makerLabelButton') {
-      // Set the traditional elements for compatibility
-      const imgElement = document.getElementById(mapping.imgId);
-      const labelElement = document.getElementById(mapping.labelId);
+      console.log('📸 Processing material label photo (multi-photo system)');
       
-      if (imgElement) {
-        imgElement.src = compressedImage;
-        imgElement.style.display = 'block';
+      // Add to multi-photo array
+      const added = await addMaterialLabelPhoto(compressedImage);
+      
+      if (added) {
+        console.log('✅ Successfully added material label photo to array');
+        
+        // Also update legacy elements for backward compatibility
+        const imgElement = document.getElementById(mapping.imgId);
+        const labelElement = document.getElementById(mapping.labelId);
+        
+        if (imgElement && materialLabelPhotos.length > 0) {
+          // Display the first photo in the legacy image element
+          imgElement.src = materialLabelPhotos[0].displayURL || materialLabelPhotos[0].base64;
+          imgElement.style.display = 'block';
+        }
+        
+        if (labelElement) {
+          labelElement.textContent = 'TRUE';
+          labelElement.style.color = 'green';
+        }
+        
+        // Update button appearance
+        const button = document.getElementById(buttonId);
+        if (button) {
+          button.classList.add('has-photos');
+        }
+        
+        // Render thumbnails to show all photos
+        renderMaterialPhotoThumbnails();
+        updateMaterialPhotoCount();
+        
+        console.log(`✅ Material label now has ${materialLabelPhotos.length} photos`);
+      } else {
+        console.error('❌ Failed to add material label photo');
       }
-      
-      if (labelElement) {
-        labelElement.textContent = 'TRUE';
-        labelElement.style.color = 'green';
-      }
-      
-      // Update button appearance
-      const button = document.getElementById(buttonId);
-      if (button) {
-        button.classList.add('has-photos');
-      }
-      
-      console.log('Material label photo processed successfully');
     } else {
-      // Handle hatsumono and atomono photos
+      // Handle hatsumono and atomono photos (single photo each)
       const imgElement = document.getElementById(mapping.imgId);
       const labelElement = document.getElementById(mapping.labelId);
       
@@ -5230,7 +5450,7 @@ const MAX_MAINTENANCE_PHOTOS = 5; // Maximum photos per maintenance record
 
 // Material Label Photo System
 let materialLabelPhotos = []; // Array to store multiple material label photos
-const MAX_MATERIAL_PHOTOS = 5; // Maximum number of photos allowed
+const MAX_MATERIAL_PHOTOS = 10; // Maximum number of photos allowed
 
 // Load maintenance records from localStorage
 function loadMaintenanceRecords() {
@@ -5750,16 +5970,24 @@ function addMaterialLabelPhoto(photoDataURL) {
   
   console.log('Adding material label photo:', typeof photoDataURL, photoDataURL ? photoDataURL.substring(0, 50) + '...' : 'undefined');
   
+  // SIMPLIFIED validation - just check if it's not empty
+  if (!photoDataURL || photoDataURL.length === 0) {
+    console.error('❌ addMaterialLabelPhoto ERROR: Empty photo data');
+    showAlert('無効な画像データです。再試行してください。');
+    return false;
+  }
+  
   let base64Data = photoDataURL;
   let displayURL;
   
   if (typeof photoDataURL === 'string') {
     if (photoDataURL.startsWith('data:image')) {
       displayURL = photoDataURL;
-      base64Data = photoDataURL.split(',')[1];
+      base64Data = photoDataURL.split(',')[1] || photoDataURL;
       console.log('Extracted base64 data from data URL');
     } else {
       displayURL = `data:image/jpeg;base64,${photoDataURL}`;
+      base64Data = photoDataURL;
       console.log('Created display URL from base64 data');
     }
   } else {
@@ -5770,21 +5998,65 @@ function addMaterialLabelPhoto(photoDataURL) {
   const photoData = {
     base64: base64Data,
     timestamp: new Date().toISOString(),
-    displayURL: displayURL
+    displayURL: displayURL,
+    id: `material_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
   };
 
   materialLabelPhotos.push(photoData);
-  console.log(`Added material label photo #${materialLabelPhotos.length}`);
+  console.log(`📷 Added material label photo #${materialLabelPhotos.length}, total photos: ${materialLabelPhotos.length}`);
   
   renderMaterialPhotoThumbnails();
   updateMaterialPhotoCount();
   updateMaterialLabelElement();
   
+  // Save to localStorage
   const prefix = `${location.pathname.split('/').pop()}_${document.getElementById('selected工場')?.value}_`;
-  localStorage.setItem(`${prefix}materialLabelPhotos`, JSON.stringify(materialLabelPhotos));
-  console.log('Saved material label photos to localStorage');
+  const key = `${prefix}materialLabelPhotos`;
+  try {
+    localStorage.setItem(key, JSON.stringify(materialLabelPhotos));
+    console.log(`✅ Saved ${materialLabelPhotos.length} material label photos to localStorage`);
+  } catch (error) {
+    console.warn('⚠️ Could not save material label photos to localStorage:', error);
+    // Continue anyway - photo is still in memory
+  }
   
   return true;
+}
+
+// Function to load material label photos from localStorage
+function loadMaterialLabelPhotos() {
+  console.log('Loading material label photos from localStorage');
+  const prefix = `${location.pathname.split('/').pop()}_${document.getElementById('selected工場')?.value}_`;
+  const key = `${prefix}materialLabelPhotos`;
+  const saved = localStorage.getItem(key);
+  
+  if (saved) {
+    try {
+      materialLabelPhotos = JSON.parse(saved);
+      console.log(`Loaded ${materialLabelPhotos.length} material label photos from localStorage`);
+      
+      // Ensure all photos have display URLs
+      materialLabelPhotos = materialLabelPhotos.map(photo => {
+        if (!photo.displayURL && photo.base64) {
+          return {
+            ...photo,
+            displayURL: `data:image/jpeg;base64,${photo.base64}`
+          };
+        }
+        return photo;
+      });
+      
+      renderMaterialPhotoThumbnails();
+      updateMaterialPhotoCount();
+      updateMaterialLabelElement();
+    } catch (error) {
+      console.error('Error loading material label photos from localStorage:', error);
+      materialLabelPhotos = [];
+    }
+  } else {
+    console.log('No material label photos found in localStorage');
+    materialLabelPhotos = [];
+  }
 }
 
 function removeMaterialLabelPhoto(index) {
