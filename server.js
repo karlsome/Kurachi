@@ -5253,6 +5253,7 @@ app.post('/api/sensor-history', async (req, res) => {
     // Transform sensor data for frontend
     const transformedData = dataResult.map(record => ({
       id: record._id,
+      _id: record._id?.toString() || '',
       date: record.Date,
       time: record.Time,
       temperature: parseFloat((record.Temperature || '0').toString().replace('°C', '').trim()),
@@ -5260,7 +5261,18 @@ app.post('/api/sensor-history', async (req, res) => {
       status: record.sensorStatus || 'OK',
       factory: record.工場,
       device: record.device,
-      timestamp: new Date(`${record.Date} ${record.Time}`)
+      timestamp: new Date(`${record.Date} ${record.Time}`),
+      // Include raw fields for CSV export
+      rawData: {
+        _id: record._id?.toString() || '',
+        工場: record.工場,
+        Date: record.Date,
+        Time: record.Time,
+        Temperature: record.Temperature,
+        Humidity: record.Humidity,
+        device: record.device,
+        sensorStatus: record.sensorStatus || 'OK'
+      }
     }));
 
     // Calculate pagination info
@@ -5296,6 +5308,114 @@ app.post('/api/sensor-history', async (req, res) => {
       details: error.message,
       success: false
     });
+  }
+});
+
+/**
+ * Export sensor history to CSV
+ * POST /api/sensor-history/export-csv
+ * Returns CSV file for all records in the specified date range
+ */
+app.post('/api/sensor-history/export-csv', async (req, res) => {
+  console.log("🟢 Received POST request to /api/sensor-history/export-csv");
+  
+  const { 
+    deviceId,
+    startDate = null,
+    endDate = null,
+    factoryName = null,
+    dbName = "submittedDB",
+    collectionName = "tempHumidityDB"
+  } = req.body;
+
+  try {
+    if (!deviceId) {
+      return res.status(400).json({ 
+        error: "deviceId is required",
+        success: false
+      });
+    }
+
+    // Build date range query
+    const queryEndDate = endDate ? new Date(endDate) : new Date();
+    const queryStartDate = startDate ? new Date(startDate) : new Date();
+    if (!startDate) {
+      queryStartDate.setDate(queryStartDate.getDate() - 30);
+    }
+
+    const query = {
+      device: deviceId,
+      Date: {
+        $gte: queryStartDate.toISOString().split("T")[0],
+        $lte: queryEndDate.toISOString().split("T")[0]
+      }
+    };
+
+    if (factoryName) {
+      query.工場 = factoryName;
+    }
+
+    const database = client.db(dbName);
+    const collection = database.collection(collectionName);
+
+    console.log(`📥 Exporting sensor data: Device ${deviceId}, Range ${queryStartDate.toISOString().split("T")[0]} to ${queryEndDate.toISOString().split("T")[0]}`);
+
+    // Fetch ALL records (no pagination for CSV export)
+    const allRecords = await collection
+      .find(query)
+      .sort({ Date: -1, Time: -1 })
+      .toArray();
+
+    console.log(`✅ Retrieved ${allRecords.length} records for CSV export`);
+
+    // Create CSV content
+    const headers = ['_id', '工場', 'Date', 'Time', 'Temperature', 'Humidity', 'device', 'sensorStatus'];
+    const csvRows = allRecords.map(record => [
+      record._id?.toString() || '',
+      record.工場 || '',
+      record.Date || '',
+      record.Time || '',
+      record.Temperature || '',
+      record.Humidity || '',
+      record.device || '',
+      record.sensorStatus || 'OK'
+    ]);
+
+    // Escape CSV values and combine
+    const csvContent = [
+      headers.join(','),
+      ...csvRows.map(row => 
+        row.map(cell => {
+          // Escape quotes and wrap in quotes if contains comma, newline, or quotes
+          const escaped = String(cell).replace(/"/g, '""');
+          return /[,"\n]/.test(cell) ? `"${escaped}"` : escaped;
+        }).join(',')
+      )
+    ].join('\n');
+
+    // Set response headers for file download
+    const filename = `sensor_history_${deviceId}_${queryStartDate.toISOString().split("T")[0]}_${queryEndDate.toISOString().split("T")[0]}.csv`;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('X-Records-Count', allRecords.length);
+    
+    console.log(`📤 Sending CSV file: ${filename} (${allRecords.length} records)`);
+    
+    res.send(csvContent);
+
+  } catch (error) {
+    console.error("❌ Error exporting sensor history to CSV:", error);
+    
+    // Only send JSON error if headers haven't been sent
+    if (!res.headersSent) {
+      res.status(500).json({ 
+        error: "Error exporting sensor history", 
+        details: error.message,
+        success: false
+      });
+    } else {
+      res.end();
+    }
   }
 });
 
@@ -6288,7 +6408,7 @@ app.post('/api/financials', async (req, res) => {
       const hinban = pressData.hinban || keyHinban;
       const ban = pressData.ban || keyBan;
       const factory = pressData.factory || keyFactory;
-      const pricePerPc = masterMap.get(hinban)?.pricePerPc || 0;
+      const pricePerPc = parseFloat(masterMap.get(hinban)?.pricePerPc) || 0;
       
       // Skip items without pricePerPc - they ruin the calculation
       if (!pricePerPc || pricePerPc <= 0) {
@@ -14930,22 +15050,41 @@ app.get('/api/factory-overview/sensors', async (req, res) => {
         // Get latest sensor readings for each device, grouped by factory
         const results = await collection.aggregate([
             {
-                $match: { Date: date }
+                $match: { 
+                    Date: date,
+                    // Exclude sensor failure readings
+                    Temperature: { 
+                        $not: { $regex: 'SENSOR|FAILURE|ERROR|error|fault|FAULT' }
+                    },
+                    Humidity: { 
+                        $not: { $regex: 'SENSOR|FAILURE|ERROR|error|fault|FAULT' }
+                    }
+                }
             },
             {
                 $addFields: {
                     temperatureNum: {
-                        $toDouble: {
-                            $trim: {
-                                input: { $replaceAll: { input: { $ifNull: ['$Temperature', '0'] }, find: '°C', replacement: '' } }
-                            }
+                        $convert: {
+                            input: {
+                                $trim: {
+                                    input: { $replaceAll: { input: { $toString: { $ifNull: ['$Temperature', '0'] } }, find: '°C', replacement: '' } }
+                                }
+                            },
+                            to: 'double',
+                            onError: 0,
+                            onNull: 0
                         }
                     },
                     humidityNum: {
-                        $toDouble: {
-                            $trim: {
-                                input: { $replaceAll: { input: { $ifNull: ['$Humidity', '0'] }, find: '%', replacement: '' } }
-                            }
+                        $convert: {
+                            input: {
+                                $trim: {
+                                    input: { $replaceAll: { input: { $toString: { $ifNull: ['$Humidity', '0'] } }, find: '%', replacement: '' } }
+                                }
+                            },
+                            to: 'double',
+                            onError: 0,
+                            onNull: 0
                         }
                     }
                 }
