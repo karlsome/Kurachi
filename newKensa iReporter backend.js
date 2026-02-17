@@ -1559,8 +1559,9 @@ document.addEventListener('keydown', (event) => {
 // Handles QR scan for both methods
 function handleQRScan(qrCodeMessage) {
   
-  const subDropdown = document.getElementById("sub-dropdown");
-  const options = [...subDropdown.options].map(option => option.value);
+  const subDropdownInput = document.getElementById("sub-dropdown-input");
+  // Check against sebanggoData array instead of dropdown options
+  const options = sebanggoData || [];
   const scanAlertModal = document.getElementById("scanAlertModal");
   const scanAlertText = document.getElementById("scanAlertText");
   const alertSound = document.getElementById("alert-sound");
@@ -1591,8 +1592,8 @@ function handleQRScan(qrCodeMessage) {
     return;
   }
 
-  if (subDropdown && subDropdown.value !== qrCodeMessage) {
-    subDropdown.value = qrCodeMessage;
+  if (subDropdownInput && subDropdownInput.value !== qrCodeMessage) {
+    subDropdownInput.value = qrCodeMessage;
     fetchProductDetails();
   }
 
@@ -1763,8 +1764,8 @@ function printLabel() {
   const alertSound = document.getElementById('alert-sound');
   const scanAlertModal = document.getElementById('scanAlertModal');
   const scanAlertText = document.getElementById('scanAlertText');
-  const 背番号 = document.getElementById("sub-dropdown").value;
-  const 品番 = document.getElementById("product-number").value;
+  const 背番号 = document.getElementById("sub-dropdown-input")?.value;
+  const 品番 = document.getElementById("product-number")?.value;
 
   // Preload the alert sound without playing it
   if (alertSound) {
