@@ -4404,9 +4404,15 @@ async function processPhotoCapture(base64Image, mapping, buttonId) {
     // Handle material label photos with MULTI-PHOTO functionality
     if (buttonId === 'makerLabelButton') {
       console.log('📸 Processing material label photo (multi-photo system)');
+      console.log('📸 Current materialLabelPhotos array length BEFORE adding:', materialLabelPhotos.length);
+      console.log('📸 Photo data type:', typeof compressedImage);
+      console.log('📸 Photo data length:', compressedImage ? compressedImage.length : 'null/undefined');
       
       // Add to multi-photo array
-      const added = await addMaterialLabelPhoto(compressedImage);
+      const added = addMaterialLabelPhoto(compressedImage);
+      
+      console.log('📸 addMaterialLabelPhoto returned:', added);
+      console.log('📸 Current materialLabelPhotos array length AFTER adding:', materialLabelPhotos.length);
       
       if (added) {
         console.log('✅ Successfully added material label photo to array');
@@ -4437,8 +4443,10 @@ async function processPhotoCapture(base64Image, mapping, buttonId) {
         updateMaterialPhotoCount();
         
         console.log(`✅ Material label now has ${materialLabelPhotos.length} photos`);
+        console.log(`✅ Photo count element should show: ${materialLabelPhotos.length}`);
       } else {
         console.error('❌ Failed to add material label photo');
+        console.error('❌ Reason: addMaterialLabelPhoto returned false');
       }
     } else {
       // Handle hatsumono and atomono photos (single photo each)
@@ -6011,12 +6019,17 @@ function clearMaterialLabelPhotos() {
 }
 
 function addMaterialLabelPhoto(photoDataURL) {
+  console.log('🔵 addMaterialLabelPhoto called');
+  console.log('🔵 Current array length:', materialLabelPhotos.length);
+  console.log('🔵 MAX_MATERIAL_PHOTOS:', MAX_MATERIAL_PHOTOS);
+  
   if (materialLabelPhotos.length >= MAX_MATERIAL_PHOTOS) {
     showAlert(`最大${MAX_MATERIAL_PHOTOS}枚まで撮影できます / Maximum ${MAX_MATERIAL_PHOTOS} photos allowed`);
+    console.log('🔴 Rejected: Maximum photos reached');
     return false;
   }
   
-  console.log('Adding material label photo:', typeof photoDataURL, photoDataURL ? photoDataURL.substring(0, 50) + '...' : 'undefined');
+  console.log('🔵 Adding material label photo:', typeof photoDataURL, photoDataURL ? photoDataURL.substring(0, 50) + '...' : 'undefined');
   
   // SIMPLIFIED validation - just check if it's not empty
   if (!photoDataURL || photoDataURL.length === 0) {
