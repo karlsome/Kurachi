@@ -420,10 +420,10 @@ async function fetchSebanggoAndHinban() {
   blankInfo();
 
   try {
-    // Fetch 背番号 and 品番 values from the server
-    const response = await fetch(`${serverURL}/getSeBanggoListPressAndHinban?工場=${encodeURIComponent(工場)}`);
+    // Fetch ALL 背番号 and 品番 values from the server (not filtered by 工場)
+    const response = await fetch(`${serverURL}/getSeBanggoListPressAndHinban?all=true`);
     const data = await response.json();
-    console.log(data);
+    console.log(`Fetched ALL data (not filtered by 工場)`, data);
 
     // Separate 背番号 and 品番 into different arrays
     const sebanggoList = data.map(item => item.背番号).filter(Boolean); // Remove null/undefined
@@ -437,7 +437,15 @@ async function fetchSebanggoAndHinban() {
     const combinedList = [...sebanggoList, ...hinbanList];
     sebanggoData = combinedList;
 
-    console.log("Sebanggo data loaded for modal:", { sebanggoList, hinbanList, combinedList });
+    console.log("Sebanggo data loaded for modal (ALL factories):", { 
+      sebanggoCount: sebanggoList.length, 
+      hinbanCount: hinbanList.length, 
+      totalCount: combinedList.length 
+    });
+    
+    if (combinedList.length === 0) {
+      console.warn(`⚠️ No sebanggo or hinban data found in database`);
+    }
     
     // Always initialize modal functionality (with safety check)
     if (typeof initializeSebanggoModal === 'function') {
@@ -3042,6 +3050,7 @@ function openSebanggoModal() {
   
   if (sebanggoData.length === 0) {
     console.error('Sebanggo data is empty');
+    alert(`データがありません。\nNo data available.`);
     return;
   }
   
