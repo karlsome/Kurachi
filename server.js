@@ -2708,10 +2708,12 @@ app.get("/getSeBanggoListPressAndHinban", async (req, res) => {
     const collection = database.collection("masterDB");
 
     let 工場 = req.query.工場; // Retrieve the 工場 value from the query
+    const fetchAll = req.query.all === 'true'; // Check if we should fetch all data
 
-    // Check if 工場 is "小瀬" or "倉知"
-    const query =
-      工場 === "小瀬" || 工場 === "倉知"
+    // If 'all' parameter is true, don't filter by 工場
+    const query = fetchAll
+      ? {} // Fetch all documents
+      : 工場 === "小瀬" || 工場 === "倉知"
         ? { 工場: { $in: ["小瀬", "倉知"] } } // Combine values for 小瀬 and 倉知
         : { 工場 }; // Otherwise, match the specific 工場 value
 
