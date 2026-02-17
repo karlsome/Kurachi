@@ -4636,6 +4636,8 @@ buttonMappings.forEach(mapping => {
       // If value is selected, proceed with photo capture
       // Show photo option modal for desktop or directly use camera for mobile
       if (isMobileDevice()) {
+        currentButtonId = mapping.buttonId;  // Set buttonId for mobile native camera
+        currentPhotoMapping = mapping;  // Set mapping for photo processing
         const fileInput = document.getElementById(mapping.fileInputId);
         fileInput.click();
       } else {
