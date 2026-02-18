@@ -7977,7 +7977,7 @@ document.getElementById('startStep1Scan').addEventListener('click', function(eve
       localStorage.setItem(`${uniquePrefix}cached-materialCode`, currentProductDetails.materialCode);
       
       // 🔴 BROADCAST SCAN TO SSE - Send to machine display page (includes logging)
-      const machineNameForSSE = getMachineName(); // Get the current machine name
+      const machineNameForSSE = getMachineName(); // Get the current machine name (e.g., "OZNC04,OZNC06" or "OZNC09")
       const currentFactory = document.getElementById('selected工場')?.value || '';
       
       // Generate sessionID for this scan session
@@ -7997,14 +7997,23 @@ document.getElementById('startStep1Scan').addEventListener('click', function(eve
         console.warn('⚠️ Failed to generate sessionID');
       }
       
+      // 🔊 GROUPED MACHINE SUPPORT
+      // If using DCP Grouping.html with grouped machines (e.g., "OZNC04,OZNC06"),
+      // server will split and send SSE to both machines
+      // If using DCP iReporter.html with solo machines (e.g., "OZNC09"),
+      // server will send SSE to only that single machine
       if (machineNameForSSE) {
+        const isGrouped = machineNameForSSE.includes(',');
+        const machineList = machineNameForSSE.split(',').map(m => m.trim());
+        console.log(`📡 Broadcasting QR scan to ${isGrouped ? 'grouped' : 'solo'} machine(s):`, machineList);
+        
         fetch(`${serverURL}/api/broadcast-scan`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            machineId: machineNameForSSE,
+            machineId: machineNameForSSE, // Full string sent (e.g., "OZNC04,OZNC06" or "OZNC09")
             sebanggo: currentProductDetails.sebanggo,
             hinban: currentProductDetails.hinban,
             timestamp: new Date().toISOString(),
@@ -8604,15 +8613,20 @@ window.addEventListener('load', function() {
       console.log('Empty dropdown detected - showing Step 1 and broadcasting clear');
       saveCurrentStep(0);
       
-      // Broadcast clear message to pdfDisplayer
+      // Broadcast clear message to pdfDisplayer(s)
+      // If grouped machine (OZNC04,OZNC06), broadcasts to both
+      // If solo machine (OZNC09), broadcasts to only that one
       if (machineNameForSSE) {
+        const machineIds = machineNameForSSE.split(',').map(m => m.trim());
+        console.log(`🔊 Broadcasting clear action to ${machineIds.length} machine(s):`, machineIds);
+        
         fetch(`${serverURL}/api/broadcast-scan`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            machineId: machineNameForSSE,
+            machineId: machineNameForSSE, // Send full string (e.g., "OZNC04,OZNC06" or "OZNC09")
             sebanggo: '',
             hinban: '',
             timestamp: new Date().toISOString(),

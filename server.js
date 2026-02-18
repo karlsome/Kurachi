@@ -183,7 +183,8 @@ app.get("/sse/factory/:factoryId", (req, res) => {
   });
 });
 
-// API endpoint to broadcast scan data to specific machine
+// API endpoint to broadcast scan data to specific machine(s)
+// Supports both single machines (OZNC09) and grouped machines (OZNC04,OZNC06)
 app.post("/api/broadcast-scan", async (req, res) => {
   const { machineId, sebanggo, hinban, timestamp, additionalData } = req.body;
   
@@ -194,31 +195,44 @@ app.post("/api/broadcast-scan", async (req, res) => {
     return res.status(400).json({ error: "machineId and sebanggo are required (unless action is 'clear')" });
   }
   
-  const normalizedMachineId = machineId.toUpperCase();
+  // Parse machine IDs: handle both "OZNC09" and "OZNC04,OZNC06"
+  const machineIds = machineId
+    .split(',')
+    .map(m => m.trim().toUpperCase())
+    .filter(m => m.length > 0);
   
-  const scanData = {
-    type: 'scan',
-    machineId: normalizedMachineId,
-    sebanggo,
-    hinban: hinban || '',
-    timestamp: timestamp || new Date().toISOString(),
-    additionalData: additionalData || {}
-  };
-  
-  // Store last scan for persistence (or clear it if action is 'clear')
-  if (isClearAction) {
-    machineLastScan.delete(normalizedMachineId);
-    console.log(`🗑️ Cleared last scan data for ${normalizedMachineId}`);
-  } else if (sebanggo && hinban) {
-    // Only store if we have valid sebanggo and hinban
-    machineLastScan.set(normalizedMachineId, scanData);
-    console.log(`💾 Stored last scan for ${normalizedMachineId}:`, { sebanggo, hinban });
-  } else {
-    console.log(`⚠️ Skipping storage for ${normalizedMachineId} - missing sebanggo or hinban`);
+  if (machineIds.length === 0) {
+    return res.status(400).json({ error: "Invalid machineId format" });
   }
   
-  // Broadcast to all clients listening to this machine
-  broadcastToMachine(normalizedMachineId, scanData);
+  console.log(`📡 Broadcasting to machine(s): ${machineIds.join(', ')}`);
+  
+  // For each machine, create and store scan data
+  machineIds.forEach(normalizedMachineId => {
+    const scanData = {
+      type: 'scan',
+      machineId: machineId.toUpperCase(), // Keep original format (e.g., "OZNC04,OZNC06" for grouped)
+      sebanggo,
+      hinban: hinban || '',
+      timestamp: timestamp || new Date().toISOString(),
+      additionalData: additionalData || {}
+    };
+    
+    // Store last scan for persistence (or clear it if action is 'clear')
+    if (isClearAction) {
+      machineLastScan.delete(normalizedMachineId);
+      console.log(`🗑️ Cleared last scan data for ${normalizedMachineId}`);
+    } else if (sebanggo && hinban) {
+      // Only store if we have valid sebanggo and hinban
+      machineLastScan.set(normalizedMachineId, scanData);
+      console.log(`💾 Stored last scan for ${normalizedMachineId}:`, { sebanggo, hinban });
+    } else {
+      console.log(`⚠️ Skipping storage for ${normalizedMachineId} - missing sebanggo or hinban`);
+    }
+    
+    // Broadcast to all clients listening to this specific machine
+    broadcastToMachine(normalizedMachineId, scanData);
+  });
   
   // ✅ Insert log to tabletLogDB in parallel with SSE broadcast
   if (sebanggo && hinban) {
@@ -239,32 +253,42 @@ app.post("/api/broadcast-scan", async (req, res) => {
       delete cleanedAdditionalData.factory;
       delete cleanedAdditionalData.sessionID;
       
-      const logEntry = {
-        sessionID: sessionID,
-        背番号: sebanggo,
-        品番: hinban,
-        工場: 工場,
-        設備: normalizedMachineId,
-        Action: 'Scanned kanban (Step 1)',
-        Status: 'in-progress',
-        Timestamp: currentDate.toISOString(), // ISO string format
-        Date: dateYYYYMMDD, // yyyy-mm-dd
-        Time: timeHHMMSS, // HH:mm:ss
-        AdditionalData: cleanedAdditionalData
-      };
-      
-      await tabletLogDB.insertOne(logEntry);
-      console.log(`📝 Tablet log inserted: ${sebanggo} - Scanned kanban (Session: ${sessionID})`);
+      // Create log entries for each machine in the list
+      for (const normalizedMachineId of machineIds) {
+        const logEntry = {
+          sessionID: sessionID,
+          背番号: sebanggo,
+          品番: hinban,
+          工場: 工場,
+          設備: normalizedMachineId,
+          設備_原形式: machineId.toUpperCase(), // Keep original format (e.g., "OZNC04,OZNC06")
+          Action: 'Scanned kanban (Step 1)',
+          Status: 'in-progress',
+          Timestamp: currentDate.toISOString(), // ISO string format
+          Date: dateYYYYMMDD, // yyyy-mm-dd
+          Time: timeHHMMSS, // HH:mm:ss
+          AdditionalData: cleanedAdditionalData
+        };
+        
+        await tabletLogDB.insertOne(logEntry);
+      }
+      console.log(`📝 Tablet logs inserted for ${machineIds.length} machine(s): ${sebanggo} - Scanned kanban (Session: ${sessionID})`);
     } catch (error) {
       console.error('❌ Error inserting tablet log:', error);
       // Don't block the response if logging fails
     }
   }
   
+  // Calculate total client count across all machines
+  const totalClientCount = machineIds.reduce((count, id) => {
+    return count + (machineConnections.get(id) || []).length;
+  }, 0);
+  
   res.json({ 
     success: true, 
-    message: `Broadcasted to ${normalizedMachineId}`,
-    clientCount: (machineConnections.get(normalizedMachineId) || []).length
+    message: `Broadcasted to ${machineIds.length} machine(s): ${machineIds.join(', ')}`,
+    machines: machineIds,
+    clientCount: totalClientCount
   });
 });
 
