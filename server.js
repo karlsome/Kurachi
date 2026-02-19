@@ -529,7 +529,7 @@ app.post("/api/upload-product-pdf", async (req, res) => {
     }
 
     // Validate pdfType
-    const validTypes = ["梱包", "検査基準", "3点総合"];
+    const validTypes = ["梱包", "検査基準", "3点総合", "ワンポイント確認票", "作業要領書"];
     if (!validTypes.includes(pdfType)) {
       return res.status(400).json({ error: "Invalid PDF type" });
     }
@@ -745,7 +745,7 @@ app.get("/api/product-pdfs-by-type/:pdfType", async (req, res) => {
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 25, 1), 200);
 
     // Validate pdfType
-    const validTypes = ["梱包", "検査基準", "3点総合"];
+    const validTypes = ["梱包", "検査基準", "3点総合", "ワンポイント確認票", "作業要領書"];
     if (!validTypes.includes(pdfType)) {
       return res.status(400).json({ error: "Invalid PDF type" });
     }
