@@ -13,7 +13,7 @@
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            background: url('https://4kwallpapers.com/images/walls/thumbs_2t/22674.jpg') center center / cover no-repeat fixed;
+            background: linear-gradient(180deg, #b8d4e8 0%, #d6e8f2 40%, #e8f1f8 70%, #f5f9fc 100%);
             height: 100vh;
             display: flex;
             flex-direction: column;
@@ -25,15 +25,7 @@
 
         /* Dark overlay for better readability */
         body::before {
-            content: '';
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.3);
-            pointer-events: none;
-            z-index: 0;
+            display: none;
         }
 
         /* Icon float animation */
@@ -48,13 +40,13 @@
 
         /* Glass morphism effect */
         .glass {
-            background: rgba(255, 255, 255, 0.08);
+            background: rgba(0, 0, 0, 0.05);
             backdrop-filter: blur(20px);
             -webkit-backdrop-filter: blur(20px);
-            border: 1px solid rgba(255, 255, 255, 0.15);
+            border: 1px solid rgba(0, 0, 0, 0.1);
             box-shadow: 
-                0 8px 32px 0 rgba(0, 0, 0, 0.5),
-                inset 0 1px 1px 0 rgba(255, 255, 255, 0.1);
+                0 8px 32px 0 rgba(0, 0, 0, 0.08),
+                inset 0 1px 1px 0 rgba(255, 255, 255, 0.5);
         }
 
         .header {
@@ -71,9 +63,9 @@
         .machine-name {
             font-size: 1.1em;
             font-weight: 700;
-            color: #ffffff;
+            color: rgba(0, 0, 0, 0.8);
             letter-spacing: 1px;
-            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+            text-shadow: none;
         }
 
         .connection-status {
@@ -81,18 +73,19 @@
             align-items: center;
             gap: 8px;
             padding: 6px 12px;
-            background: rgba(255, 255, 255, 0.2);
+            background: rgba(255, 255, 255, 0.5);
             border-radius: 50px;
             font-size: 0.75em;
-            color: #ffffff;
+            color: rgba(0, 0, 0, 0.6);
             font-weight: 500;
+            border: 1px solid rgba(255, 255, 255, 0.7);
         }
 
         .status-dot {
             width: 10px;
             height: 10px;
             border-radius: 50%;
-            background-color: rgba(255, 255, 255, 0.5);
+            background-color: rgba(0, 0, 0, 0.3);
             position: relative;
         }
 
@@ -159,10 +152,10 @@
         .info-title {
             font-size: 0.8em;
             font-weight: 600;
-            color: #ffffff;
+            color: rgba(0, 0, 0, 0.7);
             margin-bottom: 6px;
             padding-bottom: 4px;
-            border-bottom: 2px solid rgba(255, 255, 255, 0.3);
+            border-bottom: 2px solid rgba(0, 0, 0, 0.15);
             letter-spacing: 0.5px;
             flex-shrink: 0;
         }
@@ -202,14 +195,14 @@
         }
 
         .info-card {
-            background: rgba(255, 255, 255, 0.06);
-            backdrop-filter: blur(10px);
+            background: rgba(255, 255, 255, 0.55);
             padding: 8px 12px;
             border-radius: 8px;
-            border: 1px solid rgba(255, 255, 255, 0.15);
+            border: 1px solid rgba(255, 255, 255, 0.7);
             transition: all 0.3s ease;
             position: relative;
             overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
         }
 
         .info-card::before {
@@ -219,20 +212,20 @@
             left: 0;
             width: 3px;
             height: 100%;
-            background: linear-gradient(180deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(180deg, #4a90d9 0%, #357abd 100%);
         }
 
         .info-card:hover {
             transform: translateY(-2px);
-            background: rgba(255, 255, 255, 0.1);
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            background: rgba(255, 255, 255, 0.7);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
         }
 
         .status-dot {
             width: 10px;
             height: 10px;
             border-radius: 50%;
-            background-color: rgba(255, 255, 255, 0.5);
+            background-color: rgba(0, 0, 0, 0.2);
             position: relative;
             display: inline-block;
             margin-right: 8px;
@@ -285,7 +278,7 @@
 
         .info-label {
             font-size: 0.65em;
-            color: rgba(255, 255, 255, 0.7);
+            color: rgba(0, 0, 0, 0.5);
             margin-bottom: 3px;
             font-weight: 500;
             text-transform: uppercase;
@@ -295,14 +288,14 @@
         .info-value {
             font-size: 0.9em;
             font-weight: 700;
-            color: #ffffff;
-            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+            color: rgba(0, 0, 0, 0.85);
+            text-shadow: none;
         }
 
         .waiting-message {
             text-align: center;
             padding: 80px 20px;
-            color: rgba(255, 255, 255, 0.8);
+            color: rgba(0, 0, 0, 0.4);
             font-size: 1.3em;
             font-weight: 300;
             display: flex;
@@ -357,11 +350,11 @@
         }
 
         .pdf-card {
-            background: rgba(255, 255, 255, 0.06);
+            background: rgba(0, 0, 0, 0.04);
             backdrop-filter: blur(10px);
             padding: 30px 25px;
             border-radius: 15px;
-            border: 1px solid rgba(255, 255, 255, 0.15);
+            border: 1px solid rgba(0, 0, 0, 0.1);
             transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
             cursor: pointer;
             text-align: center;
@@ -369,9 +362,9 @@
 
         .pdf-card:hover {
             transform: translateY(-8px) scale(1.02);
-            background: rgba(255, 255, 255, 0.12);
-            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.4);
-            border-color: rgba(255, 255, 255, 0.3);
+            background: rgba(0, 0, 0, 0.08);
+            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.1);
+            border-color: rgba(0, 0, 0, 0.2);
         }
 
         .pdf-icon {
@@ -382,7 +375,7 @@
 
         .pdf-name {
             font-weight: 600;
-            color: #ffffff;
+            color: rgba(0, 0, 0, 0.8);
             font-size: 1.05em;
         }
 
@@ -412,7 +405,7 @@
         .error-message {
             text-align: center;
             padding: 80px 30px;
-            color: rgba(255, 255, 255, 0.9);
+            color: rgba(0, 0, 0, 0.7);
             font-size: 1.2em;
         }
 
@@ -458,6 +451,9 @@
 
         <!-- Waiting message shown when no scan -->
         <div class="waiting-message no-data" id="waitingMessage">
+            <div style="margin-bottom: 30px;">
+                <img src="src/pdfBG.png" alt="Sasaki Coating" style="height: 60px; opacity: 0.3;" />
+            </div>
             <div class="icon">
                 <img src="https://cdn3d.iconscout.com/3d/premium/thumb/tapping-on-tablet-screen-3d-icon-png-download-6666067.png" alt="Tablet tapping icon" />
             </div>
@@ -853,12 +849,12 @@
             } else {
                 // Display placeholder
                 pdfGrid.innerHTML = `
-                    <div style="height: calc(100vh - 60px); display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(255, 255, 255, 0.06); border-radius: 10px;">
-                        <div style="font-size: 1.2em; font-weight: 600; color: white; margin-bottom: 20px;">
+                    <div style="height: calc(100vh - 60px); display: flex; flex-direction: column; align-items: center; justify-content: center;">
+                        <div style="font-size: 1.2em; font-weight: 600; color: rgba(0, 0, 0, 0.8); margin-bottom: 20px;">
                             ${currentPage.name}
                         </div>
                         <div style="font-size: 4em; margin-bottom: 20px;">📄</div>
-                        <div style="color: rgba(255, 255, 255, 0.7); font-size: 1em;">
+                        <div style="color: rgba(0, 0, 0, 0.5); font-size: 1em;">
                             No ${currentPage.type} available
                         </div>
                     </div>
