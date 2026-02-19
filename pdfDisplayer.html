@@ -764,52 +764,19 @@
                 // Build pages array
                 pdfPages = [];
                 
-                if (pdfs.梱包 && pdfs.梱包.imageURL) {
+                const pdfTypes = [
+                    { key: '梱包',           name: '梱包 (Packing)' },
+                    { key: '検査基準',        name: '検査基準 (Inspection Standards)' },
+                    { key: '3点総合',         name: '3点総合 (3-Point Comprehensive)' },
+                    { key: 'ワンポイント確認票', name: 'ワンポイント確認票' },
+                    { key: '作業要領書',       name: '作業要領書' },
+                ];
+
+                for (const t of pdfTypes) {
                     pdfPages.push({
-                        type: '梱包',
-                        imageURL: pdfs.梱包.imageURL,
-                        name: '梱包 (Packing)'
-                    });
-                }
-                
-                if (pdfs.検査基準 && pdfs.検査基準.imageURL) {
-                    pdfPages.push({
-                        type: '検査基準',
-                        imageURL: pdfs.検査基準.imageURL,
-                        name: '検査基準 (Inspection Standards)'
-                    });
-                }
-                
-                if (pdfs['3点総合'] && pdfs['3点総合'].imageURL) {
-                    pdfPages.push({
-                        type: '3点総合',
-                        imageURL: pdfs['3点総合'].imageURL,
-                        name: '3点総合 (3-Point Comprehensive)'
-                    });
-                }
-                
-                // Add placeholders for missing PDFs
-                if (!pdfs.梱包 || !pdfs.梱包.imageURL) {
-                    pdfPages.push({
-                        type: '梱包',
-                        imageURL: null,
-                        name: '梱包 (Packing)'
-                    });
-                }
-                
-                if (!pdfs.検査基準 || !pdfs.検査基準.imageURL) {
-                    pdfPages.push({
-                        type: '検査基準',
-                        imageURL: null,
-                        name: '検査基準 (Inspection Standards)'
-                    });
-                }
-                
-                if (!pdfs['3点総合'] || !pdfs['3点総合'].imageURL) {
-                    pdfPages.push({
-                        type: '3点総合',
-                        imageURL: null,
-                        name: '3点総合 (3-Point Comprehensive)'
+                        type: t.key,
+                        imageURL: (pdfs[t.key] && pdfs[t.key].imageURL) ? pdfs[t.key].imageURL : null,
+                        name: t.name
                     });
                 }
                 
