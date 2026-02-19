@@ -17,7 +17,7 @@
             height: 100vh;
             display: flex;
             flex-direction: column;
-            padding: 20px;
+            padding: 0;
             position: relative;
             overflow: hidden;
             box-sizing: border-box;
@@ -141,8 +141,19 @@
         }
 
         .info-section {
-            margin-bottom: 8px;
+            margin-bottom: 0;
             flex-shrink: 0;
+            /* padding: 10px 10px 0 10px; */
+            padding:0;
+        }
+
+        .info-section.has-data {
+            flex: 1;
+            padding: 0;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
         }
 
         .info-title {
@@ -158,10 +169,36 @@
 
         .product-info {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            grid-template-columns: repeat(2, 1fr);
             gap: 8px;
-            margin-bottom: 8px;
+            margin-bottom: 0;
             flex-shrink: 0;
+            /* padding: 10px 10px 10px 10px; */
+            padding:0;
+            transition: grid-template-columns 0.5s ease;
+        }
+
+        .product-info.expanded {
+            grid-template-columns: repeat(5, 1fr);
+        }
+
+        .info-card.burst {
+            animation: bubbleBurst 0.5s ease-out;
+        }
+
+        @keyframes bubbleBurst {
+            0% {
+                transform: scale(0);
+                opacity: 0;
+            }
+            50% {
+                transform: scale(1.1);
+                opacity: 0.8;
+            }
+            100% {
+                transform: scale(1);
+                opacity: 1;
+            }
         }
 
         .info-card {
@@ -189,6 +226,61 @@
             transform: translateY(-2px);
             background: rgba(255, 255, 255, 0.1);
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background-color: rgba(255, 255, 255, 0.5);
+            position: relative;
+            display: inline-block;
+            margin-right: 8px;
+        }
+
+        .status-dot.connected {
+            background-color: #4CAF50;
+            box-shadow: 0 0 15px rgba(76, 175, 80, 0.8);
+        }
+
+        .status-dot.connected::before {
+            content: '';
+            position: absolute;
+            top: -3px;
+            left: -3px;
+            right: -3px;
+            bottom: -3px;
+            border-radius: 50%;
+            border: 2px solid rgba(76, 175, 80, 0.4);
+            animation: pulse 2s infinite;
+        }
+
+        .status-dot.disconnected {
+            background-color: #f44336;
+            box-shadow: 0 0 15px rgba(244, 67, 54, 0.8);
+        }
+
+        .status-dot.disconnected::before {
+            content: '';
+            position: absolute;
+            top: -3px;
+            left: -3px;
+            right: -3px;
+            bottom: -3px;
+            border-radius: 50%;
+            border: 2px solid rgba(244, 67, 54, 0.4);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { 
+                transform: scale(1);
+                opacity: 1;
+            }
+            50% { 
+                transform: scale(1.3);
+                opacity: 0;
+            }
         }
 
         .info-label {
@@ -236,19 +328,31 @@
         }
 
         .pdf-section {
-            display: none;
-            margin-top: 5px;
+            margin: 0;
+            padding: 0;
             flex: 1;
             display: flex;
             flex-direction: column;
             min-height: 0;
             overflow: hidden;
+            width: 100%;
+            height: 100%;
         }
 
         .pdf-grid {
             display: flex;
             width: 100%;
             flex: 1;
+            min-height: 0;
+        }
+
+        #pdfGrid {
+            display: flex;
+            flex: 1;
+            width: 100%;
+            height: 100%;
+            align-items: center;
+            justify-content: center;
             min-height: 0;
         }
 
@@ -339,20 +443,20 @@
     </style>
 </head>
 <body>
-    <div class="header glass">
-        <div class="machine-name" id="machineNameDisplay">Loading...</div>
-        <div class="connection-status">
-            <span class="status-dot" id="statusDot"></span>
-            <span id="statusText">接続中...</span>
-        </div>
-    </div>
-
     <div class="main-content">
         <div class="error-message" id="errorMessage" style="display: none;">
             <div class="icon">⚠️</div>
             <div id="errorText"></div>
         </div>
 
+        <!-- Cards always visible at top -->
+        <div class="info-section" style="flex-shrink: 0;">
+            <div class="product-info" id="productInfo">
+                <!-- Cards will be dynamically populated -->
+            </div>
+        </div>
+
+        <!-- Waiting message shown when no scan -->
         <div class="waiting-message no-data" id="waitingMessage">
             <div class="icon">
                 <img src="https://cdn3d.iconscout.com/3d/premium/thumb/tapping-on-tablet-screen-3d-icon-png-download-6666067.png" alt="Tablet tapping icon" />
@@ -361,22 +465,8 @@
             <div style="font-size: 0.7em; margin-top: 15px; opacity: 0.8;">Waiting for QR code scan...</div>
         </div>
 
+        <!-- PDF section shown only when data received -->
         <div class="info-section has-data" id="productSection">
-            <div class="info-title">製品情報 / Product Information</div>
-            <div class="product-info">
-                <div class="info-card">
-                    <div class="info-label">背番号 / Serial Number</div>
-                    <div class="info-value" id="sebanggoDisplay">-</div>
-                </div>
-                <div class="info-card">
-                    <div class="info-label">品番 / Part Number</div>
-                    <div class="info-value" id="hinbanDisplay">-</div>
-                </div>
-                <div class="info-card">
-                    <div class="info-label">スキャン時間 / Scan Time</div>
-                    <div class="info-value" id="timestampDisplay">-</div>
-                </div>
-            </div>
 
             <div class="pdf-section" id="pdfSection">
                 <div id="pdfGrid" style="text-align: center;">
@@ -409,14 +499,9 @@
         }
 
         let eventSource = null;
-        const statusDot = document.getElementById('statusDot');
-        const statusText = document.getElementById('statusText');
-        const machineNameDisplay = document.getElementById('machineNameDisplay');
         const waitingMessage = document.getElementById('waitingMessage');
         const productSection = document.getElementById('productSection');
-        const sebanggoDisplay = document.getElementById('sebanggoDisplay');
-        const hinbanDisplay = document.getElementById('hinbanDisplay');
-        const timestampDisplay = document.getElementById('timestampDisplay');
+        const productInfo = document.getElementById('productInfo');
         const pdfSection = document.getElementById('pdfSection');
         const mainContent = document.querySelector('.main-content');
         const errorMessage = document.getElementById('errorMessage');
@@ -426,9 +511,10 @@
         if (!MACHINE_ID) {
             showError('❌ Machine parameter is missing!<br><br>Please use: <code>?machine=OZNC01</code>');
         } else {
-            // Update machine name in header
-            machineNameDisplay.textContent = MACHINE_ID;
             document.title = `${MACHINE_ID} - Machine Display`;
+            
+            // Initialize with 2 cards (machine name + connection status)
+            initializeWaitingCards();
             
             // Try to restore last scan from localStorage
             const lastScan = loadScanFromStorage();
@@ -439,6 +525,46 @@
             
             // Start SSE connection
             connectSSE();
+        }
+
+        function initializeWaitingCards() {
+            productInfo.innerHTML = `
+                <div class="info-card">
+                    <div class="info-label">Machine / マシン</div>
+                    <div class="info-value">${MACHINE_ID}</div>
+                </div>
+                <div class="info-card">
+                    <div class="info-label">Status / ステータス</div>
+                    <div class="info-value" id="statusValue"><span class="status-dot" id="statusDot"></span>接続中...</div>
+                </div>
+            `;
+        }
+
+        function updateStatusCard(status) {
+            const statusDot = document.getElementById('statusDot');
+            const statusValue = document.getElementById('statusValue');
+            if (statusDot) {
+                if (status === '接続済み') {
+                    statusDot.classList.add('connected');
+                    statusDot.classList.remove('disconnected');
+                } else {
+                    statusDot.classList.remove('connected');
+                    statusDot.classList.add('disconnected');
+                }
+            }
+            if (statusValue) {
+                const dotHTML = statusDot ? '<span class="status-dot" id="statusDot"></span>' : '';
+                statusValue.innerHTML = dotHTML + status;
+                // Reapply classes if we just recreated the dot
+                if (statusDot) {
+                    const newDot = document.getElementById('statusDot');
+                    if (status === '接続済み') {
+                        newDot.classList.add('connected');
+                    } else {
+                        newDot.classList.add('disconnected');
+                    }
+                }
+            }
         }
 
         // Show error message
@@ -493,16 +619,20 @@
 
             eventSource.onopen = function() {
                 console.log('✅ SSE Connection opened');
-                statusDot.classList.add('connected');
-                statusDot.classList.remove('disconnected');
-                statusText.textContent = '接続済み / Connected';
+                const statusDot = document.getElementById('statusDot');
+                if (statusDot) {
+                    statusDot.classList.add('connected');
+                    statusDot.classList.remove('disconnected');
+                }
             };
 
             eventSource.onerror = function(error) {
                 console.error('❌ SSE Connection error:', error);
-                statusDot.classList.remove('connected');
-                statusDot.classList.add('disconnected');
-                statusText.textContent = '接続エラー / Connection Error';
+                const statusDot = document.getElementById('statusDot');
+                if (statusDot) {
+                    statusDot.classList.remove('connected');
+                    statusDot.classList.add('disconnected');
+                }
                 
                 // Attempt to reconnect after 5 seconds
                 setTimeout(() => {
@@ -556,17 +686,14 @@
             // Clear localStorage
             clearScanFromStorage();
             
-            // Hide product info, show waiting message
-            productSection.style.display = 'none';
-            waitingMessage.style.display = 'block';
-            
-            // Reset values
-            sebanggoDisplay.textContent = '-';
-            hinbanDisplay.textContent = '-';
-            timestampDisplay.textContent = '-';
-            
             // Hide PDF section
             pdfSection.style.display = 'none';
+            
+            // Show waiting message
+            waitingMessage.style.display = 'block';
+            
+            // Reset cards to 2-column state
+            initializeWaitingCards();
         }
 
         // Update the display with scan data
@@ -574,17 +701,13 @@
             // Save to localStorage for persistence
             saveScanToStorage(data);
             
-            // Hide waiting message, show product info
+            // Hide waiting message, show PDF section
             waitingMessage.style.display = 'none';
             productSection.style.display = 'block';
 
-            // Update product information
-            sebanggoDisplay.textContent = data.sebanggo || '-';
-            hinbanDisplay.textContent = data.hinban || '-';
-            
-            // Format timestamp
-            const scanTime = new Date(data.timestamp);
-            timestampDisplay.textContent = scanTime.toLocaleString('ja-JP', {
+            // Create all 5 cards with burst animation
+            productInfo.classList.remove('expanded');
+            const formattedTime = new Date(data.timestamp).toLocaleString('ja-JP', {
                 year: 'numeric',
                 month: '2-digit',
                 day: '2-digit',
@@ -592,6 +715,40 @@
                 minute: '2-digit',
                 second: '2-digit'
             });
+            
+            productInfo.innerHTML = `
+                <div class="info-card burst">
+                    <div class="info-label">Machine / マシン</div>
+                    <div class="info-value">${MACHINE_ID}</div>
+                </div>
+                <div class="info-card burst">
+                    <div class="info-label">Status / ステータス</div>
+                    <div class="info-value" id="statusValue"><span class="status-dot" id="statusDot"></span>接続済み</div>
+                </div>
+                <div class="info-card burst">
+                    <div class="info-label">背番号 / Serial Number</div>
+                    <div class="info-value">${data.sebanggo || '-'}</div>
+                </div>
+                <div class="info-card burst">
+                    <div class="info-label">品番 / Part Number</div>
+                    <div class="info-value">${data.hinban || '-'}</div>
+                </div>
+                <div class="info-card burst">
+                    <div class="info-label">スキャン時間 / Scan Time</div>
+                    <div class="info-value">${formattedTime}</div>
+                </div>
+            `;
+            
+            // Trigger expansion animation after burst
+            setTimeout(() => {
+                productInfo.classList.add('expanded');
+                // Make sure status dot has correct class after burst animation
+                const statusDot = document.getElementById('statusDot');
+                if (statusDot) {
+                    statusDot.classList.add('connected');
+                    statusDot.classList.remove('disconnected');
+                }
+            }, 50);
 
             // Fetch and display PDFs
             await fetchAndDisplayPDFs(data.sebanggo);
@@ -686,17 +843,17 @@
             if (currentPage.imageURL) {
                 // Display PDF image with overlay title, constrained to viewport
                 pdfGrid.innerHTML = `
-                    <div style="position: relative; display: inline-block; margin: 0 auto;">
+                    <div style="position: relative; width: 100%; height: calc(100vh - 60px); display: flex; align-items: center; justify-content: center;">
                         <div style="position: absolute; top: 10px; left: 10px; background: rgba(0, 0, 0, 0.8); color: white; font-size: 0.9em; font-weight: 600; padding: 8px 16px; border-radius: 6px; z-index: 10; backdrop-filter: blur(10px);">
                             ${currentPage.name}
                         </div>
-                        <img src="${currentPage.imageURL}" alt="${currentPage.name}" style="max-height: calc(100vh - 250px); max-width: 100%; object-fit: contain; border-radius: 8px; box-shadow: 0 10px 40px rgba(0,0,0,0.5); display: block;" />
+                        <img src="${currentPage.imageURL}" alt="${currentPage.name}" style="width: 100%; height: 100%; object-fit: contain; display: block;" />
                     </div>
                 `;
             } else {
                 // Display placeholder
                 pdfGrid.innerHTML = `
-                    <div style="height: calc(100vh - 250px); display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(255, 255, 255, 0.06); border-radius: 10px;">
+                    <div style="height: calc(100vh - 60px); display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(255, 255, 255, 0.06); border-radius: 10px;">
                         <div style="font-size: 1.2em; font-weight: 600; color: white; margin-bottom: 20px;">
                             ${currentPage.name}
                         </div>

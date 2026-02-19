@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Machine Display</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            background: #1a1a1a;
+            color: #ffffff;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            padding: 10px;
+        }
+
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            overflow: hidden;
+        }
+
+        .waiting-message {
+            text-align: center;
+            padding: 100px 20px;
+            font-size: 1.5em;
+        }
+
+        /* Bubble burst animation */
+        @keyframes bubbleBurst {
+            0% {
+                transform: scale(0);
+                opacity: 0;
+            }
+            50% {
+                transform: scale(1.1);
+                opacity: 0.8;
+            }
+            100% {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+
+        .product-info {
+            padding: 10px;
+            margin-bottom: 10px;
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            transition: grid-template-columns 0.5s ease;
+        }
+
+        .product-info.expanded {
+            grid-template-columns: repeat(5, 1fr);
+        }
+
+        .info-card {
+            background: rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            padding: 12px;
+            border-radius: 8px;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+        }
+
+        .info-card.burst {
+            animation: bubbleBurst 0.5s ease-out;
+        }
+
+        .info-label {
+            font-size: 0.75em;
+            color: rgba(255, 255, 255, 0.6);
+            margin-bottom: 6px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .info-value {
+            font-size: 1em;
+            font-weight: bold;
+            color: #ffffff;
+        }
+
+        .pdf-section {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 0;
+            overflow: hidden;
+        }
+
+        .pdf-section img {
+            max-width: 100%;
+            max-height: calc(100vh - 200px);
+            object-fit: contain;
+        }
+
+        .pdf-title {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 5px;
+            font-size: 1.1em;
+        }
+
+        .no-data {
+            display: block;
+        }
+
+        .has-data {
+            display: none;
+        }
+
+        .error-message {
+            text-align: center;
+            padding: 100px 30px;
+            font-size: 1.2em;
+            color: #f44336;
+        }
+    </style>
+</head>
+<body>
+    <div class="main-content">
+        <div class="error-message" id="errorMessage" style="display: none;">
+            <div id="errorText"></div>
+        </div>
+
+        <div class="waiting-message no-data" id="waitingMessage">
+            QRコードのスキャンを待っています...<br>
+            <div style="font-size: 0.6em; margin-top: 10px;">Waiting for QR code scan...</div>
+        </div>
+
+        <div class="has-data" id="productSection">
+            <div class="product-info" id="productInfo">
+                <!-- Cards will be dynamically populated -->
+            </div>
+
+            <div class="pdf-section" id="pdfSection" style="position: relative;">
+                <div class="pdf-title" id="pdfTitle"></div>
+                <div id="pdfGrid"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function getMachineIdFromURL() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const machineParam = urlParams.get('machine');
+            if (!machineParam) return null;
+            return machineParam.toUpperCase();
+        }
+
+        const MACHINE_ID = getMachineIdFromURL();
+        const SERVER_URL = 'https://kurachi.onrender.com';
+        
+        function getStorageKey() {
+            return `machine_${MACHINE_ID}_lastScan`;
+        }
+
+        let eventSource = null;
+        const machineNameDisplay = MACHINE_ID;
+        const waitingMessage = document.getElementById('waitingMessage');
+        const productSection = document.getElementById('productSection');
+        const productInfo = document.getElementById('productInfo');
+        const pdfSection = document.getElementById('pdfSection');
+        const pdfTitle = document.getElementById('pdfTitle');
+        const errorMessage = document.getElementById('errorMessage');
+        const errorText = document.getElementById('errorText');
+
+        if (!MACHINE_ID) {
+            showError('Machine parameter is missing! Use: ?machine=OZNC01');
+        } else {
+            document.title = `${MACHINE_ID} - Display`;
+            
+            // Initialize with 2 cards (machine name + connection status)
+            initializeWaitingCards();
+            
+            const lastScan = loadScanFromStorage();
+            if (lastScan) {
+                updateDisplay(lastScan);
+            }
+            
+            connectSSE();
+        }
+
+        function initializeWaitingCards() {
+            productInfo.innerHTML = `
+                <div class="info-card">
+                    <div class="info-label">Machine</div>
+                    <div class="info-value">${MACHINE_ID}</div>
+                </div>
+                <div class="info-card">
+                    <div class="info-label">Status</div>
+                    <div class="info-value" id="statusValue">接続中...</div>
+                </div>
+            `;
+        }
+
+        function showError(message) {
+            waitingMessage.style.display = 'none';
+            productSection.style.display = 'none';
+            errorMessage.style.display = 'block';
+            errorText.innerHTML = message;
+        }
+
+        function saveScanToStorage(data) {
+            try {
+                localStorage.setItem(getStorageKey(), JSON.stringify(data));
+            } catch (error) {
+                console.error('Storage error:', error);
+            }
+        }
+
+        function loadScanFromStorage() {
+            try {
+                const stored = localStorage.getItem(getStorageKey());
+                if (stored) return JSON.parse(stored);
+            } catch (error) {
+                console.error('Storage error:', error);
+            }
+            return null;
+        }
+
+        function clearScanFromStorage() {
+            try {
+                localStorage.removeItem(getStorageKey());
+            } catch (error) {
+                console.error('Storage error:', error);
+            }
+        }
+
+        function connectSSE() {
+            eventSource = new EventSource(`${SERVER_URL}/sse/machine/${MACHINE_ID}`);
+
+            eventSource.onopen = function() {
+                updateStatusCard('接続済み');
+            };
+
+            eventSource.onerror = function(error) {
+                updateStatusCard('接続エラー');
+                
+                setTimeout(() => {
+                    eventSource.close();
+                    connectSSE();
+                }, 5000);
+            };
+
+            eventSource.onmessage = function(event) {
+                try {
+                    const data = JSON.parse(event.data);
+                    handleMessage(data);
+                } catch (error) {
+                    console.error('Parse error:', error);
+                }
+            };
+        }
+
+        function updateStatusCard(status) {
+            const statusValue = document.getElementById('statusValue');
+            if (statusValue) {
+                statusValue.textContent = status;
+            }
+        }
+
+        function handleMessage(data) {
+            if (data.type === 'connected') return;
+
+            if (data.type === 'scan') {
+                if (data.additionalData && data.additionalData.action === 'clear') {
+                    clearDisplay();
+                    return;
+                }
+                updateDisplay(data);
+            }
+        }
+
+        function clearDisplay() {
+            clearScanFromStorage();
+            productSection.style.display = 'none';
+            waitingMessage.style.display = 'block';
+            initializeWaitingCards();
+        }
+
+        async function updateDisplay(data) {
+            saveScanToStorage(data);
+            
+            waitingMessage.style.display = 'none';
+            productSection.style.display = 'block';
+
+            // Create all 5 cards with burst animation
+            productInfo.classList.remove('expanded');
+            productInfo.innerHTML = `
+                <div class="info-card burst">
+                    <div class="info-label">Machine</div>
+                    <div class="info-value">${MACHINE_ID}</div>
+                </div>
+                <div class="info-card burst">
+                    <div class="info-label">Status</div>
+                    <div class="info-value" id="statusValue">接続済み</div>
+                </div>
+                <div class="info-card burst">
+                    <div class="info-label">背番号</div>
+                    <div class="info-value">${data.sebanggo || '-'}</div>
+                </div>
+                <div class="info-card burst">
+                    <div class="info-label">品番</div>
+                    <div class="info-value">${data.hinban || '-'}</div>
+                </div>
+                <div class="info-card burst">
+                    <div class="info-label">スキャン時間</div>
+                    <div class="info-value">${formatTimestamp(data.timestamp)}</div>
+                </div>
+            `;
+            
+            // Trigger expansion animation after burst
+            setTimeout(() => {
+                productInfo.classList.add('expanded');
+            }, 50);
+
+            await fetchAndDisplayPDFs(data.sebanggo);
+        }
+
+        function formatTimestamp(timestamp) {
+            const scanTime = new Date(timestamp);
+            return scanTime.toLocaleString('ja-JP', {
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        }
+
+        let pdfPages = [];
+        let currentPDFIndex = 0;
+
+        async function fetchAndDisplayPDFs(sebanggo) {
+            try {
+                const response = await fetch(`${SERVER_URL}/api/product-pdfs/${sebanggo}`);
+                const pdfs = await response.json();
+                
+                pdfPages = [];
+                
+                if (pdfs.梱包 && pdfs.梱包.imageURL) {
+                    pdfPages.push({
+                        type: '梱包',
+                        imageURL: pdfs.梱包.imageURL,
+                        name: '梱包 (Packing)'
+                    });
+                }
+                
+                if (pdfs.検査基準 && pdfs.検査基準.imageURL) {
+                    pdfPages.push({
+                        type: '検査基準',
+                        imageURL: pdfs.検査基準.imageURL,
+                        name: '検査基準 (Inspection)'
+                    });
+                }
+                
+                if (pdfs['3点総合'] && pdfs['3点総合'].imageURL) {
+                    pdfPages.push({
+                        type: '3点総合',
+                        imageURL: pdfs['3点総合'].imageURL,
+                        name: '3点総合 (3-Point)'
+                    });
+                }
+                
+                currentPDFIndex = 0;
+                displayCurrentPDF();
+                
+            } catch (error) {
+                console.error('PDF fetch error:', error);
+            }
+        }
+
+        function displayCurrentPDF() {
+            if (pdfPages.length === 0) {
+                pdfSection.style.display = 'none';
+                return;
+            }
+            
+            pdfSection.style.display = 'flex';
+            const currentPage = pdfPages[currentPDFIndex];
+            const pdfGrid = document.getElementById('pdfGrid');
+            
+            pdfTitle.textContent = currentPage.name;
+            
+            if (currentPage.imageURL) {
+                pdfGrid.innerHTML = `<img src="${currentPage.imageURL}" alt="${currentPage.name}" />`;
+            } else {
+                pdfGrid.innerHTML = `<div style="color: #666; font-size: 1.5em;">No ${currentPage.type} available</div>`;
+            }
+        }
+
+        function nextPDF() {
+            if (pdfPages.length === 0) return;
+            currentPDFIndex = (currentPDFIndex + 1) % pdfPages.length;
+            displayCurrentPDF();
+        }
+
+        document.addEventListener('keydown', (event) => {
+            if (pdfPages.length > 0) {
+                nextPDF();
+            }
+        });
+
+        window.addEventListener('beforeunload', () => {
+            if (eventSource) {
+                eventSource.close();
+            }
+        });
+    </script>
+</body>
+</html>
