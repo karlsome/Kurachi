@@ -720,7 +720,9 @@ app.get("/api/product-pdfs/:sebanggo", async (req, res) => {
     const result = {
       梱包: pdfs.find(p => p.pdfType === "梱包") || null,
       検査基準: pdfs.find(p => p.pdfType === "検査基準") || null,
-      "3点総合": pdfs.find(p => p.pdfType === "3点総合") || null
+      "3点総合": pdfs.find(p => p.pdfType === "3点総合") || null,
+      ワンポイント確認票: pdfs.find(p => p.pdfType === "ワンポイント確認票") || null,
+      作業要領書: pdfs.find(p => p.pdfType === "作業要領書") || null,
     };
 
     res.json(result);
