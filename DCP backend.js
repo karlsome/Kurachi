@@ -5749,28 +5749,22 @@ document.getElementById('submit').addEventListener('click', async (event) => {
                 continue;
             }
             
-            // Ensure base64 data has proper data URL prefix
-            const photoDataURL = photo.base64.startsWith('data:') 
-                ? photo.base64 
-                : `data:image/jpeg;base64,${photo.base64}`;
+            // Use already-compressed base64 directly (no second compression)
+            // Image was already compressed at 60% quality / 800px on capture
+            const base64Only = photo.base64.startsWith('data:')
+                ? photo.base64.split(',')[1]
+                : photo.base64;
             
-            // Compress material label photo for upload (80% quality, max 1024px)
-            const originalSize = (photo.base64.length / 1024).toFixed(2);
-            const compressedDataURL = await compressBase64Image(photoDataURL, 1024, 0.8);
-            const compressedSize = (compressedDataURL.length / 1024).toFixed(2);
-            console.log(`✅ Material label ${i+1}/${materialLabelPhotos.length}: ${originalSize} KB → ${compressedSize} KB`);
-            
-            // Extract just the base64 part (remove data:image/jpeg;base64, prefix) for server upload
-            const compressedBase64Only = compressedDataURL.split(',')[1] || compressedDataURL;
+            console.log(`✅ Material label ${i+1}/${materialLabelPhotos.length}: ${(base64Only.length / 1024).toFixed(2)} KB (no re-compression)`);
             
             materialLabelImages.push({
-                base64: compressedBase64Only, // Server expects base64 without prefix
+                base64: base64Only, // Server expects base64 without prefix
                 id: `material-label-${i}-${photo.timestamp || new Date().getTime()}`,
                 timestamp: photo.timestamp || new Date().getTime(),
                 description: `材料ラベル ${i+1}/${materialLabelPhotos.length}`
             });
             
-            console.log(`   📦 Added to upload queue: ${(compressedBase64Only.length / 1024).toFixed(2)} KB compressed`);
+            console.log(`   📦 Added to upload queue: ${(base64Only.length / 1024).toFixed(2)} KB`);
         }
         
         console.log(`📊 Total material label images prepared for upload: ${materialLabelImages.length}`);
