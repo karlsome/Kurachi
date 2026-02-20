@@ -529,7 +529,7 @@ app.post("/api/upload-product-pdf", async (req, res) => {
     }
 
     // Validate pdfType
-    const validTypes = ["梱包", "検査基準", "3点総合", "ワンポイント確認票", "作業要領書"];
+    const validTypes = ["梱包", "検査基準", "3点総合", "ワンポイント確認票", "作業要領書", "その他1", "その他2", "その他3"];
     if (!validTypes.includes(pdfType)) {
       return res.status(400).json({ error: "Invalid PDF type" });
     }
@@ -723,6 +723,9 @@ app.get("/api/product-pdfs/:sebanggo", async (req, res) => {
       "3点総合": pdfs.find(p => p.pdfType === "3点総合") || null,
       ワンポイント確認票: pdfs.find(p => p.pdfType === "ワンポイント確認票") || null,
       作業要領書: pdfs.find(p => p.pdfType === "作業要領書") || null,
+      "その他1": pdfs.find(p => p.pdfType === "その他1") || null,
+      "その他2": pdfs.find(p => p.pdfType === "その他2") || null,
+      "その他3": pdfs.find(p => p.pdfType === "その他3") || null,
     };
 
     res.json(result);
@@ -747,7 +750,7 @@ app.get("/api/product-pdfs-by-type/:pdfType", async (req, res) => {
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 25, 1), 200);
 
     // Validate pdfType
-    const validTypes = ["梱包", "検査基準", "3点総合", "ワンポイント確認票", "作業要領書"];
+    const validTypes = ["梱包", "検査基準", "3点総合", "ワンポイント確認票", "作業要領書", "その他1", "その他2", "その他3"];
     if (!validTypes.includes(pdfType)) {
       return res.status(400).json({ error: "Invalid PDF type" });
     }
