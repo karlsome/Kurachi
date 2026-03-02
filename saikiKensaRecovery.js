@@ -922,18 +922,6 @@ function deleteRecoveryItem(index) {
     }
 }
 
-function resetRecoveryForm() {
-    document.getElementById('recovery-quantity').value = '';
-    selectedDefectType = null;
-    selectedPressMatch = null;
-    lastLookupSource = '';
-    lastLookupKey = '';
-    updatePressLookupStatus('');
-    document.querySelectorAll('.recovery-defect-btn').forEach(b => {
-        b.classList.remove('selected');
-    });
-}
-
 function clearAllRecovery() {
     if (confirm('Clear all recovery entries? (This cannot be undone)')) {
         recoveryList = [];
