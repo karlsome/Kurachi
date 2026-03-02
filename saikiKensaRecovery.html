@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <link rel="stylesheet" href="Google Sheet.css">
+    <link rel="icon" type="image/png" href="src/favicon2.png">
+    <title>再検査 - 品質不良回収システム</title>
+    
+    <style>
+        /* Worker Name Modal Styles */
+        #workerNameModal {
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100% !important;
+            height: 100% !important;
+            background: rgba(0, 0, 0, 0.8) !important;
+            z-index: 10001 !important;
+            display: none;
+            overflow: auto !important;
+            transform: none !important;
+            padding: 0 !important;
+            border-radius: 0 !important;
+            max-width: none !important;
+        }
+
+        #workerNameModal > div {
+            background: white;
+            border-radius: 20px;
+            padding: clamp(15px, 3vh, 30px);
+            max-width: 600px;
+            width: 90%;
+            max-height: calc(100vh - 40px);
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            overflow: hidden;
+        }
+
+        #workerNameModal h2 {
+            text-align: center;
+            margin: 0 0 20px 0;
+            font-size: clamp(20px, 4vw, 26px);
+            color: #333;
+            flex-shrink: 0;
+        }
+
+        #workerNameModal .worker-names-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px 0;
+            min-height: 0;
+        }
+
+        #workerNameModal .worker-section {
+            margin-bottom: 20px;
+        }
+
+        #workerNameModal .worker-section-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 8px 15px;
+            border-radius: 8px;
+            font-size: clamp(14px, 2.5vw, 16px);
+            font-weight: 600;
+            margin-bottom: 10px;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+
+        #workerNameModal .worker-names-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 10px;
+            padding: 0 5px;
+        }
+
+        #workerNameModal .worker-names-grid > div {
+            position: relative;
+            width: 100%;
+        }
+
+        #workerNameModal .worker-name-btn {
+            width: 100%;
+            background: white;
+            border: 2px solid #ddd;
+            border-radius: 10px;
+            padding: 15px 10px;
+            font-size: clamp(14px, 2.5vw, 16px);
+            font-weight: 500;
+            color: #333;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: center;
+            word-wrap: break-word;
+            min-height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #workerNameModal .worker-name-btn:active {
+            transform: scale(0.95);
+        }
+
+        #workerNameModal .worker-name-btn:hover {
+            background: #f0f8ff;
+            border-color: #667eea;
+        }
+
+        #workerNameModal .recent-section .worker-name-btn {
+            background: linear-gradient(135deg, #fff9e6 0%, #ffe6cc 100%);
+            border-color: #ffb366;
+        }
+
+        #workerNameModal .recent-section .worker-section-header {
+            background: linear-gradient(135deg, #ff9800 0%, #ff6f00 100%);
+        }
+
+        #workerNameModal .delete-recent-btn {
+            position: absolute;
+            top: -6px;
+            right: -6px;
+            background: #e74c3c;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            font-size: 18px;
+            line-height: 1;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            transition: all 0.2s;
+            z-index: 2;
+            padding: 0;
+        }
+
+        #workerNameModal .delete-recent-btn:hover {
+            background: #c0392b;
+            transform: scale(1.1);
+        }
+
+        #workerNameModal .delete-recent-btn:active {
+            transform: scale(0.95);
+        }
+
+        #workerNameModal .manual-entry-btn {
+            background: linear-gradient(135deg, #4CAF50, #45a049);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            padding: 18px 20px;
+            font-size: clamp(15px, 3vw, 18px);
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-top: 15px;
+            flex-shrink: 0;
+        }
+
+        #workerNameModal .manual-entry-btn:active {
+            transform: scale(0.95);
+        }
+
+        #workerNameModal .close-modal-btn {
+            background: #e74c3c;
+            color: white;
+            border: none;
+            border-radius: 10px;
+            padding: 12px 20px;
+            font-size: clamp(14px, 2.5vw, 16px);
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-top: 10px;
+            flex-shrink: 0;
+        }
+
+        #workerNameModal .close-modal-btn:active {
+            transform: scale(0.95);
+        }
+
+        /* Responsive adjustments for worker modal */
+        @media (max-width: 768px) {
+            #workerNameModal > div {
+                width: 95%;
+                padding: 20px 15px;
+            }
+
+            #workerNameModal .worker-names-grid {
+                grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+                gap: 8px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            #workerNameModal > div {
+                width: 98%;
+                padding: 15px 10px;
+            }
+
+            #workerNameModal .worker-names-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        @media (max-height: 600px) {
+            #workerNameModal > div {
+                padding: 10px;
+                max-height: calc(100vh - 20px);
+            }
+
+            #workerNameModal h2 {
+                margin-bottom: 10px;
+                font-size: 18px;
+            }
+        }
+
+        /* 背番号/品番 Selection Modal Styles */
+        #sebanggoModal {
+            display: none;
+            position: fixed;
+            z-index: 1001;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(3px);
+        }
+
+        #sebanggoModal > div {
+            background-color: white;
+            margin: 2% auto;
+            padding: 20px;
+            border-radius: 15px;
+            width: 90%;
+            max-width: 600px;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            animation: modalSlideIn 0.3s ease-out;
+        }
+
+        @keyframes modalSlideIn {
+            from {
+                transform: translateY(-50px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        #sebanggoModal h2 {
+            margin: 0 0 20px 0;
+            text-align: center;
+            color: #333;
+            font-size: 1.5em;
+        }
+
+        #sebanggoModal .search-container {
+            margin-bottom: 20px;
+            position: relative;
+        }
+
+        #sebanggoModal .search-container input {
+            width: 100%;
+            padding: 12px 40px 12px 15px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+
+        #sebanggoModal .search-container input:focus {
+            outline: none;
+            border-color: #4CAF50;
+        }
+
+        #sebanggoModal .search-icon {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #666;
+            font-size: 18px;
+        }
+
+        #sebanggoModal .sebanggo-container {
+            margin-bottom: 20px;
+        }
+
+        #sebanggoModal .sebanggo-section {
+            margin-bottom: 20px;
+        }
+
+        #sebanggoModal .sebanggo-section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 2px solid #4CAF50;
+            margin-bottom: 12px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        #sebanggoModal .sebanggo-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            gap: 8px;
+        }
+
+        #sebanggoModal .sebanggo-grid > div {
+            flex: 1;
+            min-width: 0;
+        }
+
+        #sebanggoModal .sebanggo-btn {
+            width: 100%;
+            padding: 12px 8px;
+            background: #f0f0f0;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            color: #333;
+            transition: all 0.2s;
+            white-space: normal;
+            word-wrap: break-word;
+        }
+
+        #sebanggoModal .sebanggo-btn:active {
+            transform: scale(0.95);
+        }
+
+        #sebanggoModal .sebanggo-btn:hover {
+            background: #e0e0e0;
+            border-color: #4CAF50;
+        }
+
+        #sebanggoModal .recent-section .sebanggo-btn {
+            background: #e8f5e9;
+            border-color: #4CAF50;
+        }
+
+        #sebanggoModal .recent-section .sebanggo-section-header {
+            color: #2e7d32;
+        }
+
+        #sebanggoModal .delete-recent-btn {
+            background: #ff6b6b;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            padding: 6px 12px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            flex-shrink: 0;
+            margin-left: auto;
+        }
+
+        #sebanggoModal .delete-recent-btn:hover {
+            background: #ff5252;
+        }
+
+        #sebanggoModal .delete-recent-btn:active {
+            transform: scale(0.95);
+        }
+
+        #sebanggoModal .close-modal-btn {
+            width: 100%;
+            padding: 12px;
+            background: #e74c3c;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            margin-top: 15px;
+            transition: all 0.2s;
+        }
+
+        #sebanggoModal .close-modal-btn:hover {
+            background: #c0392b;
+        }
+
+        #sebanggoModal .close-modal-btn:active {
+            transform: scale(0.95);
+        }
+
+        #sebanggoModal .no-results {
+            text-align: center;
+            color: #999;
+            font-style: italic;
+            padding: 20px;
+            background: #f9f9f9;
+            border-radius: 8px;
+            margin: 10px 0;
+        }
+
+        /* Responsive adjustments for sebanggo modal */
+        @media (max-width: 768px) {
+            #sebanggoModal .sebanggo-grid {
+                grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+                gap: 6px;
+            }
+            
+            #sebanggoModal .sebanggo-btn {
+                font-size: 12px;
+                padding: 6px 8px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            #sebanggoModal > div {
+                width: 95%;
+                margin: 5% auto;
+            }
+            
+            #sebanggoModal .sebanggo-grid {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+
+        /* Recovery-specific styles */
+        .recovery-defect-container {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin: 15px 0;
+        }
+
+        .recovery-defect-btn {
+            padding: 15px 10px;
+            border: 3px solid #ddd;
+            border-radius: 8px;
+            background: white;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: center;
+        }
+
+        .recovery-defect-btn:hover {
+            border-color: #4CAF50;
+            background: #f0f8ff;
+        }
+
+        .recovery-defect-btn.selected {
+            background: #4CAF50;
+            color: white;
+            border-color: #4CAF50;
+        }
+
+        .recovery-defect-btn:active {
+            transform: scale(0.95);
+        }
+
+        .recovery-section-divider {
+            border-top: 3px solid #FFA500;
+            margin: 20px 0;
+            padding-top: 20px;
+        }
+
+        .recovery-list-item {
+            background: #f9f9f9;
+            border-left: 4px solid #FFA500;
+            padding: 12px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .recovery-list-item-text {
+            flex: 1;
+        }
+
+        .recovery-list-item-text strong {
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        .recovery-list-item-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .recovery-list-item-actions button {
+            padding: 6px 12px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .recovery-edit-btn {
+            background: #2196F3;
+            color: white;
+        }
+
+        .recovery-delete-btn {
+            background: #e74c3c;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <!-- this code is for process -->
+     
+<div class="kensacontainer">
+    <form method="post" action="" name="recovery-form">
+    <h4 id="nippoTitle">再検査 - 品質不良回収システム / Defect Recovery System</h4>
+
+    <input type="hidden" name="工場" id="selected工場" value="小瀬">
+    <input type="hidden" name="factory" id="factory" value="小瀬">
+    <audio id="alert-sound" src="src/alert.mp3" preload="auto"></audio>
+
+    <!-- Basic Information Section -->
+    <input id="sub-dropdown-input" name="背番号" required readonly style="cursor: pointer; background: white;" placeholder="Select 背番号 or 品番">
+    <button id="scan-button" type="button">Scan 背番号 / スキャン</button>
+    <br><br>
+
+    <label for="process">検査テーブル名 / Inspection Table:</label>
+    <select id="process" name="検査テーブル名" required>
+        <option value="">選択してください / Select</option>
+        <option value="検査テーブル 1">検査テーブル 1</option>
+        <option value="検査テーブル 2">検査テーブル 2</option>
+        <option value="検査テーブル 3">検査テーブル 3</option>
+        <option value="検査テーブル 4">検査テーブル 4</option>
+        <option value="検査テーブル 5">検査テーブル 5</option>
+        <option value="検査テーブル 6">検査テーブル 6</option>
+        <option value="検査テーブル 7">検査テーブル 7</option>
+        <option value="検査テーブル 8">検査テーブル 8</option>
+        <option value="検査テーブル 9">検査テーブル 9</option>
+        <option value="検査テーブル 10">検査テーブル 10</option>
+        <option value="検査テーブル 11">検査テーブル 11</option>
+        <option value="検査テーブル 12">検査テーブル 12</option>
+    </select>
+    <br><br>
+
+    <input placeholder="作業者 / Worker's Name" id="Machine Operator" name="Worker_Name" required readonly style="cursor: pointer; background: white;">
+    <br><br>
+
+    <label for="製造ロット">製造ロット / Manufacturing Lot:</label>
+    <input type="text" name="製造ロット" id="製造ロット" placeholder="Click to enter" required>
+    <br><br>
+
+    <!-- Recovery Section -->
+    <div class="recovery-section-divider">
+        <h3 style="color: #FFA500; margin-top: 0;">不良回収 / Defect Recovery</h3>
+    </div>
+
+    <label>回収対象の不良タイプ / Select Defect Type to Recover:</label>
+    <div class="recovery-defect-container">
+        <button type="button" class="recovery-defect-btn" data-defect="疵引不良" onclick="selectRecoveryDefect(this)">疵引不良</button>
+        <button type="button" class="recovery-defect-btn" data-defect="加工不良" onclick="selectRecoveryDefect(this)">加工不良</button>
+        <button type="button" class="recovery-defect-btn" data-defect="その他" onclick="selectRecoveryDefect(this)">その他</button>
+    </div>
+
+    <label for="recovery-quantity">回収数量 / Recovery Quantity:</label>
+    <input type="number" name="recovery-quantity" id="recovery-quantity" placeholder="Enter quantity" min="1">
+    <br><br>
+
+    <button type="button" id="add-recovery-btn" style="background: #4CAF50; color: white; border: none; padding: 12px; border-radius: 4px; width: 100%; font-weight: 600; cursor: pointer;">追加 / Add to Recovery List</button>
+
+    <!-- Recovery List Display -->
+    <div style="margin-top: 20px; padding: 15px; border: 2px solid #FFA500; border-radius: 4px; background: #fff9e6;">
+        <h4 style="margin-top: 0; color: #FFA500;">回収リスト / Recovery List (<span id="recovery-count">0</span>)</h4>
+        <div id="recovery-list-container">
+            <p style="color: #999; text-align: center;">リストに追加していません / No items added</p>
+        </div>
+    </div>
+
+    <!-- Action Buttons -->
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 20px;">
+        <button type="button" id="reset-form-btn" onclick="resetRecoveryForm()" style="background: #2196F3; color: white; border: none; padding: 12px; border-radius: 4px; font-weight: 600; cursor: pointer;">もう一つ / Add Another</button>
+        <button type="button" id="clear-all-btn" onclick="clearAllRecovery()" style="background: #e74c3c; color: white; border: none; padding: 12px; border-radius: 4px; font-weight: 600; cursor: pointer;">全てクリア / Clear All</button>
+    </div>
+    <br>
+    <input type="submit" value="送信 / Submit All" id="submit" style="width: 100%; background: #FFA500; color: white; padding: 15px; border: none; border-radius: 4px; font-weight: 600; cursor: pointer; font-size: 16px;">
+    <br><br>
+
+    </form>
+</div>
+
+<!-- Uploading Modal -->
+<div id="uploadingModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.6); z-index: 9999; justify-content: center; align-items: center;">
+    <div style="background: white; padding: 30px; border-radius: 10px; text-align: center;">
+        <div class="loader" style="margin-bottom: 20px;"></div>
+        <p style="font-size: 18px;">Submitting, please wait...</p>
+    </div>
+</div>
+
+<!-- Worker Name Modal -->
+<div id="workerNameModal">
+    <div>
+        <h2>作業者を選択 / Select Worker</h2>
+        <div class="worker-names-container" id="workerNamesContainer"></div>
+        <button class="manual-entry-btn" id="manualEntryBtn">
+            ✏️ 手動入力 / Manual Entry
+        </button>
+        <button class="close-modal-btn" id="closeWorkerModal">
+            ✕ 閉じる / Close
+        </button>
+    </div>
+</div>
+
+<!-- 背番号/品番 Selection Modal -->
+<div id="sebanggoModal">
+    <div>
+        <h2>Select 背番号 / 品番</h2>
+        
+        <div class="search-container">
+            <input type="text" id="sebanggo-search" placeholder="Search 背番号 or 品番..." autocomplete="off">
+            <span class="search-icon">🔍</span>
+        </div>
+        
+        <div class="sebanggo-container">
+            <div id="recent-sebanggo-section" class="sebanggo-section recent-section" style="display: none;">
+                <div class="sebanggo-section-header">
+                    <span>Recent Selection</span>
+                    <button class="delete-recent-btn" id="clear-recent-sebanggo">🗑️ Clear</button>
+                </div>
+                <div class="sebanggo-grid" id="recent-sebanggo-grid"></div>
+            </div>
+            
+            <div id="all-sebanggo-section" class="sebanggo-section">
+                <div class="sebanggo-section-header">
+                    <span>All 背番号 / 品番</span>
+                </div>
+                <div class="sebanggo-grid" id="all-sebanggo-grid"></div>
+            </div>
+            
+            <div id="no-results" class="no-results" style="display: none;">
+                No matching results found
+            </div>
+        </div>
+        
+        <button class="close-modal-btn" id="close-sebanggo-modal">Close</button>
+    </div>
+</div>
+
+<style>
+    .loader {
+        border: 6px solid #f3f3f3;
+        border-top: 6px solid #FFA500;
+        border-radius: 50%;
+        width: 40px;
+        height: 40px;
+        animation: spin 1s linear infinite;
+        margin: auto;
+    }
+
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+</style>
+
+<script src="saikiKensaRecovery.js"></script>
+<script src="html5-qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsqr/dist/jsQR.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
+</body>
+</html>
