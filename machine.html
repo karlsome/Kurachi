@@ -1429,6 +1429,26 @@
                 kensaCard.appendChild(kensaImg);
                 kensaCard.appendChild(kensaLabel);
                 containers.appendChild(kensaCard);
+
+                // Create card for 再検査 (Recovery)
+                const saikiKensaCard = document.createElement('div');
+                saikiKensaCard.classList.add('card');
+                saikiKensaCard.style.background = 'linear-gradient(135deg, #FFE082 0%, #FFC107 100%)';
+                saikiKensaCard.addEventListener('click', () => {
+                    window.location.href = `saiKensa.html?filter=${filterValue}`;
+                });
+
+                const saikiKensaImg = document.createElement('img');
+                saikiKensaImg.src = 'src/machines/kensa.jpg';
+                saikiKensaImg.alt = '再検査';
+
+                const saikiKensaLabel = document.createElement('div');
+                saikiKensaLabel.classList.add('label');
+                saikiKensaLabel.textContent = '再検査';
+
+                saikiKensaCard.appendChild(saikiKensaImg);
+                saikiKensaCard.appendChild(saikiKensaLabel);
+                containers.appendChild(saikiKensaCard);
             } else if (filterValue === 'NFH') {
                 const containers = document.getElementById('containers');
 
