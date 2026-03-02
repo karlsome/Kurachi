@@ -1,5 +1,5 @@
-//const serverURL = "https://kurachi.onrender.com";
-const serverURL = "http://localhost:3000";
+const serverURL = "https://kurachi.onrender.com";
+//const serverURL = "http://localhost:3000";
 
 // link for pictures database
 const picURL = 'https://script.google.com/macros/s/AKfycbwHUW1ia8hNZG-ljsguNq8K4LTPVnB6Ng_GLXIHmtJTdUgGGd2WoiQo9ToF-7PvcJh9bA/exec';

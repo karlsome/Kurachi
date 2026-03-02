@@ -1,5 +1,5 @@
-//const serverURL = "https://kurachi.onrender.com";
-const serverURL = "http://localhost:3000";
+const serverURL = "https://kurachi.onrender.com";
+//const serverURL = "http://localhost:3000";
 
 // Recovery System Backend
 let allWorkers = [];
@@ -19,6 +19,74 @@ function getQueryParam(param) {
   return urlParams.get(param);
 }
 const selectedFactory = getQueryParam('filter') || '小瀬';
+const PAGE_PREFIX = `${location.pathname.split('/').pop()}_${selectedFactory}_`;
+
+// ========== PERSISTENCE HELPERS ==========
+
+function saveFieldsToStorage() {
+    ['sub-dropdown-input', 'process', 'Machine Operator', '製造ロット'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) localStorage.setItem(PAGE_PREFIX + id, el.value);
+    });
+}
+
+function saveListToStorage() {
+    localStorage.setItem(PAGE_PREFIX + '_recoveryList', JSON.stringify(recoveryList));
+    localStorage.setItem(PAGE_PREFIX + '_selectedPressMatch', JSON.stringify(selectedPressMatch));
+    localStorage.setItem(PAGE_PREFIX + '_selectedDefectType', selectedDefectType || '');
+}
+
+function clearStorage() {
+    Object.keys(localStorage)
+        .filter(k => k.startsWith(PAGE_PREFIX))
+        .forEach(k => localStorage.removeItem(k));
+}
+
+function restoreFromStorage() {
+    // Restore simple fields
+    ['sub-dropdown-input', 'process', 'Machine Operator', '製造ロット'].forEach(id => {
+        const val = localStorage.getItem(PAGE_PREFIX + id);
+        const el = document.getElementById(id);
+        if (val && el) el.value = val;
+    });
+
+    // Restore selectedPressMatch
+    try {
+        const pm = localStorage.getItem(PAGE_PREFIX + '_selectedPressMatch');
+        if (pm) selectedPressMatch = JSON.parse(pm);
+    } catch(e) {}
+
+    // Restore selectedDefectType
+    const sdt = localStorage.getItem(PAGE_PREFIX + '_selectedDefectType');
+    if (sdt) {
+        selectedDefectType = sdt;
+        document.querySelectorAll('.recovery-defect-btn').forEach(b => {
+            b.classList.toggle('selected', b.dataset.defect === sdt);
+        });
+        updateDefectLimit();
+    }
+
+    // Restore press lookup status
+    if (selectedPressMatch) {
+        const sourceLabel = (lastLookupSource === 'exact') ? '完全一致' : '±2日候補';
+        const dateText = selectedPressMatch.Date || selectedPressMatch['製造ロット'] || '-';
+        const defects = [
+            `疵引不良: ${selectedPressMatch['疵引不良'] ?? '-'}`,
+            `加工不良: ${selectedPressMatch['加工不良'] ?? '-'}`,
+            `その他: ${selectedPressMatch['その他'] ?? '-'}`
+        ].join('　｜　');
+        updatePressLookupStatus(`pressDB ${sourceLabel}を選択済み: ${dateText}　｜　${defects}`, 'success');
+    }
+
+    // Restore recovery list
+    try {
+        const list = localStorage.getItem(PAGE_PREFIX + '_recoveryList');
+        if (list) {
+            recoveryList = JSON.parse(list);
+            displayRecoveryList();
+        }
+    } catch(e) {}
+}
 
 // Initialize when page loads
 document.addEventListener('DOMContentLoaded', async function() {
@@ -43,6 +111,9 @@ document.addEventListener('DOMContentLoaded', async function() {
     
     // Setup form submission
     document.querySelector('form').addEventListener('submit', submitRecovery);
+
+    // Restore persisted data
+    restoreFromStorage();
 });
 
 // ========== WORKER MANAGEMENT ==========
@@ -202,11 +273,7 @@ function selectWorker(name) {
     localStorage.setItem('recentWorkers', JSON.stringify(recentWorkers));
     
     // Save to localStorage
-    const pageName = location.pathname.split('/').pop();
-    if (pageName && selectedFactory) {
-        const key = `${pageName}_${selectedFactory}_${input.id || input.name}`;
-        localStorage.setItem(key, name);
-    }
+    localStorage.setItem(PAGE_PREFIX + (input.id || input.name), name);
     
     // Close modal
     closeWorkerModal();
@@ -419,11 +486,18 @@ function setupRecoveryForm() {
 
     const sebanggoInput = document.getElementById('sub-dropdown-input');
     const lotInput = document.getElementById('製造ロット');
+    const processSelect = document.getElementById('process');
 
     ['input', 'change', 'blur'].forEach(eventType => {
         sebanggoInput.addEventListener(eventType, schedulePressLookup);
         lotInput.addEventListener(eventType, schedulePressLookup);
     });
+
+    // Persist fields on every change
+    sebanggoInput.addEventListener('input', saveFieldsToStorage);
+    lotInput.addEventListener('input', saveFieldsToStorage);
+    processSelect.addEventListener('change', saveFieldsToStorage);
+    // Worker_Name is saved inside selectWorker() — covered
 }
 
 function initializePressLookupUI() {
@@ -844,6 +918,7 @@ function addToRecoveryList() {
 
     recoveryList.push(entry);
     displayRecoveryList();
+    saveListToStorage();
     
     // Reset defect selection and quantity
     selectedDefectType = null;
@@ -934,12 +1009,15 @@ function editRecoveryItem(index) {
     // Remove from list
     recoveryList.splice(index, 1);
     displayRecoveryList();
+    saveListToStorage();
+    saveFieldsToStorage();
 }
 
 function deleteRecoveryItem(index) {
     if (confirm('Are you sure you want to delete this entry?')) {
         recoveryList.splice(index, 1);
         displayRecoveryList();
+        saveListToStorage();
     }
 }
 
@@ -947,6 +1025,7 @@ function clearAllRecovery() {
     if (confirm('Clear all recovery entries? (This cannot be undone)')) {
         recoveryList = [];
         displayRecoveryList();
+        clearStorage();
     }
 }
 
@@ -1003,7 +1082,10 @@ async function submitRecovery(e) {
         if (response.ok) {
             alert('Recovery data submitted successfully!');
             recoveryList = [];
+            selectedPressMatch = null;
+            selectedDefectType = null;
             displayRecoveryList();
+            clearStorage();
             document.querySelector('form').reset();
             document.getElementById('selected工場').value = selectedFactory;
             document.getElementById('factory').value = selectedFactory;
