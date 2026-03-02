@@ -17619,6 +17619,365 @@ app.post('/extract-tokens', async (req, res) => {
     }
 });
 
+// ============================================
+// RECOVERY SYSTEM ROUTES (再検査)
+// ============================================
+
+function normalizeLotCandidates(rawLot) {
+  const lot = (rawLot || '').toString().trim();
+  if (!lot) {
+    return {
+      raw: '',
+      isoDate: null,
+      compact6: null,
+      compact8: null,
+      dateObject: null
+    };
+  }
+
+  const compact = lot.replace(/[\s\-\/.]/g, '');
+  let isoDate = null;
+  let compact6 = null;
+  let compact8 = null;
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(lot)) {
+    isoDate = lot;
+    compact8 = lot.replace(/-/g, '');
+    compact6 = compact8.slice(2);
+  } else if (/^\d{6}$/.test(compact)) {
+    compact6 = compact;
+    const yyyy = `20${compact.slice(0, 2)}`;
+    const mm = compact.slice(2, 4);
+    const dd = compact.slice(4, 6);
+    isoDate = `${yyyy}-${mm}-${dd}`;
+    compact8 = `${yyyy}${mm}${dd}`;
+  } else if (/^\d{8}$/.test(compact)) {
+    compact8 = compact;
+    const yyyy = compact.slice(0, 4);
+    const mm = compact.slice(4, 6);
+    const dd = compact.slice(6, 8);
+    isoDate = `${yyyy}-${mm}-${dd}`;
+    compact6 = `${yyyy.slice(2)}${mm}${dd}`;
+  } else {
+    const parsed = new Date(lot);
+    if (!Number.isNaN(parsed.getTime())) {
+      isoDate = parsed.toISOString().split('T')[0];
+      compact8 = isoDate.replace(/-/g, '');
+      compact6 = compact8.slice(2);
+    }
+  }
+
+  let dateObject = null;
+  if (isoDate) {
+    const parsedIso = new Date(`${isoDate}T00:00:00.000Z`);
+    if (!Number.isNaN(parsedIso.getTime())) {
+      dateObject = parsedIso;
+    }
+  }
+
+  return {
+    raw: lot,
+    isoDate,
+    compact6,
+    compact8,
+    dateObject
+  };
+}
+
+// Search pressDB for exact match by 背番号 + 製造ロット (Date)
+app.post('/api/search-pressdb-exact', async (req, res) => {
+  const { 背番号, 製造ロット } = req.body;
+
+  console.log('[pressDB-exact] Received body:', JSON.stringify(req.body));
+
+  if (!背番号 || !製造ロット) {
+    console.warn('[pressDB-exact] Missing fields — 背番号:', 背番号, '製造ロット:', 製造ロット);
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+
+  try {
+    await client.connect();
+    const database = client.db('submittedDB');
+    const pressDB = database.collection('pressDB');
+
+    const lotCandidates = normalizeLotCandidates(製造ロット);
+    console.log('[pressDB-exact] normalizeLotCandidates result:', JSON.stringify(lotCandidates));
+
+    const lotValues = Array.from(new Set([
+      lotCandidates.raw,
+      lotCandidates.isoDate,
+      lotCandidates.compact6,
+      lotCandidates.compact8
+    ].filter(Boolean)));
+    console.log('[pressDB-exact] lotValues for $in query:', lotValues);
+
+    const dateConditions = [];
+    if (lotValues.length > 0) {
+      dateConditions.push({ Date: { $in: lotValues } });
+      dateConditions.push({ 製造ロット: { $in: lotValues } });
+    }
+    if (lotCandidates.dateObject) {
+      dateConditions.push({ Date: lotCandidates.dateObject });
+      dateConditions.push({ 製造ロット: lotCandidates.dateObject });
+    }
+
+    const query = {
+      背番号: 背番号,
+      $or: dateConditions.length > 0 ? dateConditions : [
+        { Date: 製造ロット },
+        { 製造ロット: 製造ロット }
+      ]
+    };
+    console.log('[pressDB-exact] DB name: submittedDB | MongoDB query:', JSON.stringify(query, null, 2));
+
+    const results = await pressDB.find(query).toArray();
+    console.log('[pressDB-exact] Results count:', results.length);
+    if (results.length > 0) {
+      console.log('[pressDB-exact] First result Date:', results[0].Date, '背番号:', results[0].背番号);
+    }
+
+    res.json(results);
+  } catch (error) {
+    console.error('Error searching pressDB (exact):', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Search pressDB for nearby dates (±2 days)
+app.post('/api/search-pressdb-nearby', async (req, res) => {
+  const { 背番号, date } = req.body;
+
+  console.log('[pressDB-nearby] Received body:', JSON.stringify(req.body));
+
+  if (!背番号 || !date) {
+    console.warn('[pressDB-nearby] Missing fields — 背番号:', 背番号, 'date:', date);
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+
+  try {
+    await client.connect();
+    const database = client.db('submittedDB');
+    const pressDB = database.collection('pressDB');
+
+    const parsed = normalizeLotCandidates(date);
+    console.log('[pressDB-nearby] normalizeLotCandidates result:', JSON.stringify(parsed));
+
+    if (!parsed.isoDate) {
+      console.warn('[pressDB-nearby] Could not parse date, returning empty');
+      return res.json([]);
+    }
+
+    const inputDate = new Date(`${parsed.isoDate}T00:00:00.000Z`);
+    if (Number.isNaN(inputDate.getTime())) {
+      console.warn('[pressDB-nearby] inputDate is NaN, returning empty');
+      return res.json([]);
+    }
+
+    const startDate = new Date(inputDate);
+    startDate.setDate(startDate.getDate() - 2);
+    const endDate = new Date(inputDate);
+    endDate.setDate(endDate.getDate() + 2);
+
+    // Format dates as YYYY-MM-DD for comparison
+    const formatDate = (d) => d.toISOString().split('T')[0];
+    const startStr = formatDate(startDate);
+    const endStr = formatDate(endDate);
+    console.log('[pressDB-nearby] Date range:', startStr, '→', endStr);
+
+    const startObj = new Date(`${startStr}T00:00:00.000Z`);
+    const endObj = new Date(`${endStr}T23:59:59.999Z`);
+
+    const query = {
+      背番号: 背番号,
+      $or: [
+        {
+          Date: {
+            $gte: startStr,
+            $lte: endStr
+          }
+        },
+        {
+          Date: {
+            $gte: startObj,
+            $lte: endObj
+          }
+        }
+      ]
+    };
+    console.log('[pressDB-nearby] MongoDB query:', JSON.stringify(query, null, 2));
+
+    const results = await pressDB.find(query).sort({ Date: -1 }).toArray();
+    console.log('[pressDB-nearby] Results count:', results.length);
+    if (results.length > 0) {
+      console.log('[pressDB-nearby] Dates found:', results.map(r => r.Date));
+    }
+
+    res.json(results);
+  } catch (error) {
+    console.error('Error searching pressDB (nearby):', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Save recovery entries to recoveryDB
+app.post('/api/save-recovery', async (req, res) => {
+  const { recoveries } = req.body;
+
+  if (!recoveries || recoveries.length === 0) {
+    return res.status(400).json({ error: 'No recovery data provided' });
+  }
+
+  try {
+    await client.connect();
+    const database = client.db('submittedDB');
+    const recoveryDB = database.collection('recoveryDB');
+
+    const results = [];
+
+    for (const item of recoveries) {
+      const {
+        背番号,
+        品番,
+        製造ロット,
+        recoveries: recoveryItems,
+        userId,
+        検査テーブル名,
+        factory,
+        timestamp
+      } = item;
+
+      // Check if entry already exists for this lot
+      const existingEntry = await recoveryDB.findOne({
+        背番号,
+        製造ロット,
+        factory
+      });
+
+      if (existingEntry) {
+        // Merge recovery items
+        const updatedRecoveries = [...existingEntry.recoveries];
+
+        for (const recovery of recoveryItems) {
+          const existingRecovery = updatedRecoveries.findIndex(
+            r => r.defectType === recovery.defectType
+          );
+
+          if (existingRecovery >= 0) {
+            updatedRecoveries[existingRecovery].quantity += recovery.quantity;
+          } else {
+            updatedRecoveries.push(recovery);
+          }
+        }
+
+        const updateResult = await recoveryDB.updateOne(
+          { _id: existingEntry._id },
+          {
+            $set: {
+              recoveries: updatedRecoveries,
+              updatedAt: new Date().toISOString(),
+              updatedBy: userId
+            }
+          }
+        );
+
+        results.push({ _id: existingEntry._id, action: 'updated' });
+      } else {
+        // Create new entry
+        const rawLot = 製造ロット || '';
+        const lotNorm = normalizeLotCandidates(rawLot);
+        const insertResult = await recoveryDB.insertOne({
+          品番,
+          背番号,
+          製造ロット,
+          lotDate: lotNorm.isoDate || null,
+          recoveries: recoveryItems,
+          userId,
+          検査テーブル名,
+          factory,
+          timestamp,
+          pressMatch: item.pressMatch || null,
+          pressDB_id: item.pressDB_id || null,
+          createdAt: new Date().toISOString()
+        });
+
+        results.push({ _id: insertResult.insertedId, action: 'created' });
+      }
+    }
+
+    res.json({ success: true, results, message: 'Recovery data saved successfully' });
+  } catch (error) {
+    console.error('Error saving recovery:', error);
+    res.status(500).json({ error: 'Server error', details: error.message });
+  }
+});
+
+// Fetch recovery entries for a specific lot
+app.get('/api/get-recovery/:背番号/:製造ロット', async (req, res) => {
+  const { 背番号, 製造ロット } = req.params;
+
+  try {
+    await client.connect();
+    const database = client.db('submittedDB');
+    const recoveryDB = database.collection('recoveryDB');
+
+    const result = await recoveryDB.findOne({
+      背番号,
+      製造ロット
+    });
+
+    if (!result) {
+      return res.json({ recovery: null });
+    }
+
+    res.json({ recovery: result });
+  } catch (error) {
+    console.error('Error fetching recovery:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Get all recovery entries for admin (with filtering)
+app.get('/api/get-all-recoveries', async (req, res) => {
+  const { factory, 背番号, startDate, endDate } = req.query;
+
+  try {
+    await client.connect();
+    const database = client.db('submittedDB');
+    const recoveryDB = database.collection('recoveryDB');
+
+    let query = {};
+    
+    if (factory) query.factory = factory;
+    if (背番号) query.背番号 = 背番号;
+    
+    // Date range filtering by lotDate (normalized yyyy-mm-dd stored at save time)
+    // Falls back to createdAt range for older records that predate lotDate field
+    if (startDate || endDate) {
+      const dateConditions = [];
+      const lotDateRange = {};
+      const createdAtRange = {};
+      if (startDate) {
+        lotDateRange.$gte = startDate;
+        createdAtRange.$gte = `${startDate}T00:00:00.000Z`;
+      }
+      if (endDate) {
+        lotDateRange.$lte = endDate;
+        createdAtRange.$lte = `${endDate}T23:59:59.999Z`;
+      }
+      dateConditions.push({ lotDate: lotDateRange });
+      dateConditions.push({ lotDate: { $exists: false }, createdAt: createdAtRange });
+      query.$or = dateConditions;
+    }
+
+    const results = await recoveryDB.find(query).sort({ createdAt: -1 }).toArray();
+
+    res.json({ recoveries: results });
+  } catch (error) {
+    console.error('Error fetching recoveries:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // GEN Health check endpoint
 app.get('/gen-health', (req, res) => {
     res.json({ 
