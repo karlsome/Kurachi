@@ -514,11 +514,23 @@
         .recovery-edit-btn {
             background: #2196F3;
             color: white;
+            padding: 3px 7px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 10px;
+            font-weight: 600;
         }
 
         .recovery-delete-btn {
             background: #e74c3c;
             color: white;
+            padding: 3px 7px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 10px;
+            font-weight: 600;
         }
 
         /* ── Landscape tablet layout ── */
@@ -745,11 +757,11 @@
         }
 
         .recovery-list-item-actions button {
-            padding: 5px 9px;
+            padding: 3px 7px;
             border: none;
             border-radius: 4px;
             cursor: pointer;
-            font-size: 11px;
+            font-size: 10px;
             font-weight: 600;
         }
 
@@ -793,6 +805,66 @@
             font-size: 12px;
             padding: 20px 0;
         }
+
+        /* ── Recovery table ── */
+        .recovery-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+
+        .recovery-table thead tr {
+            background: #FFA500;
+            color: white;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+
+        .recovery-table th {
+            padding: 6px 8px;
+            text-align: left;
+            font-size: 12px;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+
+        .recovery-table td {
+            padding: 7px 8px;
+            border-bottom: 1px solid #f0d080;
+            vertical-align: middle;
+            font-size: 12px;
+        }
+
+        .recovery-table tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        .recovery-table tbody tr:nth-child(even) {
+            background: #fff3cc;
+        }
+
+        .recovery-table tbody tr:nth-child(odd) {
+            background: white;
+        }
+
+        .col-sebanggo { font-weight: 700; color: #333; }
+        .col-hinban   { color: #555; }
+        .col-lot      { font-family: monospace; font-size: 12px; color: #444; }
+        .col-qty      { font-weight: 700; text-align: right; white-space: nowrap; }
+        .col-actions  { white-space: nowrap; text-align: right; }
+
+        .defect-badge {
+            display: inline-block;
+            padding: 2px 7px;
+            border-radius: 10px;
+            font-size: 12px;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+        .defect-kizu  { background: #fde8e8; color: #c0392b; }
+        .defect-kako  { background: #e8f0fe; color: #1a73e8; }
+        .defect-other { background: #e8f5e9; color: #2e7d32; }
     </style>
 </head>
 <body>

@@ -832,6 +832,7 @@ function addToRecoveryList() {
     const entry = {
         id: Date.now(),
         sebanggo,
+        hinban: (selectedPressMatch && selectedPressMatch.品番) ? selectedPressMatch.品番 : '',
         table,
         worker,
         lot,
@@ -856,30 +857,50 @@ function addToRecoveryList() {
 function displayRecoveryList() {
     const container = document.getElementById('recovery-list-container');
     const count = document.getElementById('recovery-count');
-    
+
     count.textContent = recoveryList.length;
-    
+
     if (recoveryList.length === 0) {
-        container.innerHTML = '<p style="color: #999; text-align: center;">リストに追加していません / No items added</p>';
+        container.innerHTML = '<p class="empty-msg">リストに追加していません / No items added</p>';
         return;
     }
 
-    container.innerHTML = '';
+    let html = `
+    <table class="recovery-table">
+        <thead>
+            <tr>
+                <th>背番号</th>
+                <th>品番</th>
+                <th>製造ロット</th>
+                <th>不良タイプ</th>
+                <th>数量</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+    `;
+
     recoveryList.forEach((entry, index) => {
-        const item = document.createElement('div');
-        item.className = 'recovery-list-item';
-        item.innerHTML = `
-            <div class="recovery-list-item-text">
-                <strong>${entry.sebanggo} - ${entry.defectType} (${entry.quantity}個)</strong>
-                <small>Lot: ${entry.lot} | Table: ${entry.table} | Worker: ${entry.worker}</small>
-            </div>
-            <div class="recovery-list-item-actions">
-                <button type="button" class="recovery-edit-btn" onclick="editRecoveryItem(${index})">Edit</button>
-                <button type="button" class="recovery-delete-btn" onclick="deleteRecoveryItem(${index})">Delete</button>
-            </div>
+        const defectClass = entry.defectType === '疵引不良' ? 'defect-kizu'
+                          : entry.defectType === '加工不良' ? 'defect-kako'
+                          : 'defect-other';
+        html += `
+            <tr>
+                <td class="col-sebanggo">${entry.sebanggo}</td>
+                <td class="col-hinban">${entry.hinban || '-'}</td>
+                <td class="col-lot">${entry.lot}</td>
+                <td><span class="defect-badge ${defectClass}">${entry.defectType}</span></td>
+                <td class="col-qty">${entry.quantity}<span style="font-size:10px;margin-left:1px;font-weight:400">個</span></td>
+                <td class="col-actions">
+                    <button type="button" class="recovery-edit-btn" onclick="editRecoveryItem(${index})">Edit</button>
+                    <button type="button" class="recovery-delete-btn" onclick="deleteRecoveryItem(${index})">Del</button>
+                </td>
+            </tr>
         `;
-        container.appendChild(item);
     });
+
+    html += '</tbody></table>';
+    container.innerHTML = html;
 }
 
 function editRecoveryItem(index) {
