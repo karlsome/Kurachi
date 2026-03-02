@@ -955,16 +955,36 @@ async function submitRecovery(e) {
     uploadingModal.style.display = 'flex';
 
     try {
+        // Group flat entries by 背番号 + 製造ロット to match server structure
+        const grouped = {};
+        for (const entry of recoveryList) {
+            const key = `${entry.sebanggo}__${entry.lot}`;
+            if (!grouped[key]) {
+                grouped[key] = {
+                    背番号: entry.sebanggo,
+                    品番: entry.pressMatch ? entry.pressMatch.品番 : '',
+                    製造ロット: entry.lot,
+                    検査テーブル名: entry.table,
+                    userId: entry.worker,
+                    factory: selectedFactory,
+                    timestamp: new Date().toISOString(),
+                    pressMatch: entry.pressMatch || null,
+                    pressDB_id: entry.pressMatch ? entry.pressMatch.id : null,
+                    recoveries: []
+                };
+            }
+            grouped[key].recoveries.push({
+                defectType: entry.defectType,
+                quantity: entry.quantity
+            });
+        }
+
+        const payload = { recoveries: Object.values(grouped) };
+
         const response = await fetch(`${serverURL}/api/save-recovery`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                entries: recoveryList,
-                factory: selectedFactory,
-                timestamp: new Date()
-            })
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
         });
 
         const result = await response.json();
