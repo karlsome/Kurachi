@@ -6948,6 +6948,52 @@ app.post('/api/financials', async (req, res) => {
         adjustedSummary.defectRate  = mergedTotalCreated > 0 ? Number(((adjTotalLoss  / mergedTotalCreated) * 100).toFixed(2)) : 0;
         adjustedSummary.yieldPercent= mergedTotalCreated > 0 ? Number(((adjFinalGood  / mergedTotalCreated) * 100).toFixed(2)) : 0;
       }
+
+      // --- Previous period recovery adjustment ---
+      const prevRecoveryQuery = {};
+      if (trimmedFactory) prevRecoveryQuery.factory = trimmedFactory;
+      const prevLotRange = { $gte: prevFromStr, $lte: prevToStr };
+      const prevCreatedRange = { $gte: `${prevFromStr}T00:00:00.000Z`, $lte: `${prevToStr}T23:59:59.999Z` };
+      prevRecoveryQuery.$or = [
+        { lotDate: prevLotRange },
+        { lotDate: { $exists: false }, createdAt: prevCreatedRange }
+      ];
+      const prevRecoveries = await recoveryCollection.find(prevRecoveryQuery).toArray();
+      const recoveryByBanPrev = new Map();
+      prevRecoveries.forEach(item => {
+        const ban = item.背番号;
+        if (!ban) return;
+        const qty = Array.isArray(item.recoveries)
+          ? item.recoveries.reduce((s, r) => s + (r.quantity || 0), 0)
+          : 0;
+        recoveryByBanPrev.set(ban, (recoveryByBanPrev.get(ban) || 0) + qty);
+      });
+      if (recoveryByBanPrev.size > 0) {
+        // Rebuild previousSummary scrap/loss with recovery applied.
+        // We need per-ban breakdown — re-derive from prevPressHinbanMap using masterMap.
+        // We only have hinban-level prev data, so we reduce scrapLoss by (recoveredNg * price)
+        // summed across all bans that appear in recoveryByBanPrev.
+        let prevRecoveredScrap = 0;
+        let prevRecoveredLoss  = 0;
+        recoveryByBanPrev.forEach((qty, ban) => {
+          // find matching hinban from masterMap
+          const masterEntry = masterDocs.find(d => d.背番号 === ban);
+          if (!masterEntry) return;
+          const price = parseFloat(masterEntry.pricePerPc) || 0;
+          if (!price) return;
+          prevRecoveredScrap += qty * price;
+          prevRecoveredLoss  += qty;
+        });
+        const adjPrevScrapLoss   = Math.max(previousSummary.scrapLoss - prevRecoveredScrap, 0);
+        const adjPrevTotalLoss   = Math.max(previousSummary.totalLoss  - prevRecoveredLoss,  0);
+        const adjPrevFinalGood   = previousSummary.totalCreated - adjPrevTotalLoss;
+        previousSummary.scrapLoss    = Number(adjPrevScrapLoss.toFixed(2));
+        previousSummary.totalLoss    = adjPrevTotalLoss;
+        previousSummary.finalGood    = adjPrevFinalGood;
+        previousSummary.defectRate   = previousSummary.totalCreated > 0 ? Number(((adjPrevTotalLoss / previousSummary.totalCreated) * 100).toFixed(2)) : 0;
+        previousSummary.yieldPercent = previousSummary.totalCreated > 0 ? Number(((adjPrevFinalGood  / previousSummary.totalCreated) * 100).toFixed(2)) : 0;
+        previousSummary.costRecoveryRate = previousSummary.totalValue > 0 ? Number((((previousSummary.totalValue - adjPrevScrapLoss) / previousSummary.totalValue) * 100).toFixed(2)) : 0;
+      }
     } catch (recoveryErr) {
       console.warn('⚠️ Could not fetch recovery data for summary adjustment:', recoveryErr.message);
     }
