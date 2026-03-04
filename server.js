@@ -1852,6 +1852,7 @@ app.post("/submitTopressDBiReporter", async (req, res) => {
 
     // === PHASE 5: Insert to MongoDB ===
     const result = await pressDB.insertOne(formData);
+    _invalidateFinancialsCache('pressDB insert');
 
     console.log(`✅ Successfully saved Press Cutting record with ID: ${result.insertedId}`);
 
@@ -2259,6 +2260,7 @@ app.post('/submitToDCP', async (req, res) => {
         const pressDB = database.collection("pressDB");
         
         const pressResult = await pressDB.insertOne(pressDBData);
+        _invalidateFinancialsCache('pressDB insert (DCP)');
         console.log(`✅ Data saved to pressDB with ID: ${pressResult.insertedId}`);
 
         // Broadcast to factory TV via SSE
@@ -2318,6 +2320,7 @@ app.post('/submitToDCP', async (req, res) => {
             };
 
             kensaResult = await kensaDB.insertOne(kensaDBData);
+            _invalidateFinancialsCache('kensaDB insert (DCP)');
             console.log(`✅ Data saved to kensaDB with ID: ${kensaResult.insertedId}`);
         }
 
@@ -2391,6 +2394,7 @@ app.post("/submitToKensaDBiReporter", async (req, res) => {
 
     // Insert form data into kensaDB
     const result = await kensaDB.insertOne(formData);
+    _invalidateFinancialsCache('kensaDB insert');
     if (!result.insertedId) {
       throw new Error("Failed to save data to kensaDB");
     }
@@ -2488,6 +2492,7 @@ app.post("/submitToSlitDBiReporter", async (req, res) => {
     formData.createdAt = new Date().toISOString();
 
     const result = await slitDB.insertOne(formData);
+    _invalidateFinancialsCache('slitDB insert');
 
     res.status(201).json({
       message: "Data and images successfully saved to slitDB",
@@ -2607,6 +2612,7 @@ app.post("/submitToSRSDBiReporter", async (req, res) => {
     formData.createdAt = new Date().toISOString();
 
     const result = await SRSDB.insertOne(formData);
+    _invalidateFinancialsCache('SRSDB insert');
 
     res.status(201).json({
       message: "Data and images successfully saved to SRSDB",
@@ -3125,6 +3131,7 @@ app.post("/submitPressData", async (req, res) => {
 
     // Insert into pressDB
     const result = await pressDB.insertOne(document);
+    _invalidateFinancialsCache('pressDB insert (tablet)');
 
     // Check if uniqueID exists in currentCountDB
     let currentCountEntry = await currentCountDB.findOne({ uniqueID });
@@ -3347,6 +3354,7 @@ app.post("/submitToSRSDB", async (req, res) => {
     // Step 1: Insert the new record into SRSDB
     formData.createdAt = new Date().toISOString(); // Add server timestamp
     const result = await SRSDB.insertOne(formData);
+    _invalidateFinancialsCache('SRSDB insert (tablet)');
 
     // Step 2: Fetch current counts from currentCountDB
     const currentCountEntry = await currentCountDB.findOne({ uniqueID });
@@ -3613,6 +3621,7 @@ app.post("/submitToSlitDB", async (req, res) => {
     // Step 1: Insert the new record into slitDB
     formData.createdAt = new Date().toISOString(); // Add server timestamp
     const result = await slitDB.insertOne(formData);
+    _invalidateFinancialsCache('slitDB insert (tablet)');
 
     // Step 2: Insert a new record into deduction_LogDB
     const now = new global.Date(); // Current date and time
@@ -3883,6 +3892,7 @@ app.post("/submitToKensaDB", async (req, res) => {
     // Step 1: Insert the new record into kensaDB
     formData.createdAt = new Date().toISOString(); // Add server timestamp
     const result = await kensaDB.insertOne(formData);
+    _invalidateFinancialsCache('kensaDB insert (tablet)');
 
     // Step 2: Aggregate total process quantity in kensaDB
     const kensaAggregation = await kensaDB
@@ -6061,8 +6071,20 @@ console.log("📊 Approval statistics routes loaded successfully");
 // Key = filter params only (dates / model / factory / bans).
 // Value = { ts, allRows, staticData } — page/sort are NOT part of the key so
 // pagination and sort changes are served instantly without hitting MongoDB.
-const _financialsCache = new Map();
+const _financialsCache   = new Map();
+const _financialsInflight = new Map(); // stampede guard: in-progress DB fetches keyed by cache key
 const _FINANCIALS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Call after any write to pressDB / kensaDB / slitDB / SRSDB / recoveryDB.
+ * Clears all financials cache entries so the next request fetches fresh data.
+ */
+function _invalidateFinancialsCache(reason) {
+  const n = _financialsCache.size;
+  _financialsCache.clear();
+  _financialsInflight.clear(); // also clear any in-flight promises to avoid serving stale
+  if (n > 0) console.log(`🗑️  financials cache invalidated (${n} entr${n === 1 ? 'y' : 'ies'}) — reason: ${reason || 'write'}`);
+}
 
 // Sorters extracted to module level so the cache-hit path can reuse them
 const _FINANCIALS_SORTERS = {
@@ -6232,6 +6254,8 @@ app.post('/api/financials', async (req, res) => {
     }
   `;
 
+  // Hoisted so the catch block can access them for stampede cleanup
+  let _cacheKey, _inflightResolve, _inflightReject;
   try {
     const submittedDb = client.db('submittedDB');
     const masterDb = client.db('Sasaki_Coating_MasterDB');
@@ -6251,7 +6275,7 @@ app.post('/api/financials', async (req, res) => {
     // ── Cache check ──────────────────────────────────────────────────────────
     // Key covers only the filter dimensions that affect which rows are fetched.
     // Page, limit, sort are intentionally excluded so those changes are free.
-    const _cacheKey = JSON.stringify({
+    _cacheKey = JSON.stringify({
       f:  fromDate,
       t:  toDate,
       mo: trimmedModel,
@@ -6288,6 +6312,49 @@ app.post('/api/financials', async (req, res) => {
         sortDir:    sortDirection
       });
     }
+
+    // ── Stampede guard ────────────────────────────────────────────────────────
+    // If another request is already running the DB queries for this exact cache
+    // key, wait for its Promise to resolve and serve from that result directly.
+    // This prevents N concurrent requests from each firing their own DB queries
+    // when the TTL expires simultaneously.
+    const _inflight = _financialsInflight.get(_cacheKey);
+    if (_inflight) {
+      const _result = await _inflight.catch(() => null);
+      if (_result) {
+        const _rows2 = _result.allRows.slice();
+        const _sf2 = _FINANCIALS_SORTERS[sortKey] || _FINANCIALS_SORTERS.hinban;
+        _rows2.sort((a, b) => {
+          const r = _sf2(a, b);
+          return (r !== 0 ? (sortDirection === 'desc' ? -r : r) : 0) ||
+                 String(a.hinban || '').localeCompare(String(b.hinban || ''));
+        });
+        const _total2  = _rows2.length;
+        const _pages2  = _total2 ? Math.ceil(_total2 / limitNumber) : 0;
+        const _page2   = _pages2 ? Math.min(pageNumber, _pages2) : 1;
+        const _paged2  = _total2 ? _rows2.slice((_page2 - 1) * limitNumber, _page2 * limitNumber) : [];
+        console.log(`⚡ financials stampede WAIT resolved (${_total2} rows)`);
+        return res.json({
+          success: true,
+          ..._result.staticData,
+          rows:       _paged2,
+          page:       _page2,
+          limit:      limitNumber,
+          totalRows:  _total2,
+          totalPages: _pages2,
+          sortField:  sortKey,
+          sortDir:    sortDirection
+        });
+      }
+      // Leader request failed — fall through and try ourselves
+    }
+    // Register this request as the leader; all concurrent waiters will await
+    // this promise instead of launching their own DB queries.
+    const _inflightPromise = new Promise((res, rej) => {
+      _inflightResolve = res;
+      _inflightReject  = rej;
+    });
+    _financialsInflight.set(_cacheKey, _inflightPromise);
     // ─────────────────────────────────────────────────────────────────────────
 
     // If bans (背番号) are specified, look up corresponding 品番 from masterDB
@@ -7036,6 +7103,8 @@ app.post('/api/financials', async (req, res) => {
       factoryTotals: factoryTotalsPayload
     };
     _financialsCache.set(_cacheKey, { ts: Date.now(), allRows: rows, staticData: _staticData });
+    _financialsInflight.delete(_cacheKey);
+    if (_inflightResolve) _inflightResolve({ allRows: rows, staticData: _staticData });
     console.log(`💾 financials cache STORED (${rows.length} rows)`);
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -7051,6 +7120,9 @@ app.post('/api/financials', async (req, res) => {
       sortDir: sortDirection
     });
   } catch (error) {
+    // Clean up inflight entry so future requests don't wait on a failed promise
+    if (_cacheKey) _financialsInflight.delete(_cacheKey);
+    if (_inflightReject) _inflightReject(error);
     console.error('❌ Error building financials:', error);
     res.status(500).json({
       success: false,
@@ -18333,6 +18405,7 @@ app.post('/api/save-recovery', async (req, res) => {
           }
         }
 
+        _invalidateFinancialsCache('recoveryDB update');
         const updateResult = await recoveryDB.updateOne(
           { _id: existingEntry._id },
           {
@@ -18349,6 +18422,7 @@ app.post('/api/save-recovery', async (req, res) => {
         // Create new entry
         const rawLot = 製造ロット || '';
         const lotNorm = normalizeLotCandidates(rawLot);
+        _invalidateFinancialsCache('recoveryDB insert');
         const insertResult = await recoveryDB.insertOne({
           品番,
           背番号,
