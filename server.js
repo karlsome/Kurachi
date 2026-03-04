@@ -6331,8 +6331,95 @@ app.post('/api/financials', async (req, res) => {
       ];
     };
 
-    // Fetch all data
-    const [pressRows, kensaRows, slitNgRows, srsNgRows] = await Promise.all([
+    // --- Previous period date range (same duration, immediately before current range) ---
+    const _msPerDay  = 24 * 60 * 60 * 1000;
+    const _rangeDays = Math.round((new Date(toDate + 'T00:00:00Z') - new Date(fromDate + 'T00:00:00Z')) / _msPerDay) + 1;
+    const _prevTo    = new Date(new Date(fromDate + 'T00:00:00Z').getTime() - _msPerDay);
+    const _prevFrom  = new Date(_prevTo.getTime() - (_rangeDays - 1) * _msPerDay);
+    const prevFromStr = _prevFrom.toISOString().slice(0, 10);
+    const prevToStr   = _prevTo.toISOString().slice(0, 10);
+
+    // Lightweight prev-period pipelines (summary by 品番 only, no factory breakdown needed)
+    const buildPrevPressPipeline = () => {
+      const m = { ...hinbanMatch, Date: { $gte: prevFromStr, $lte: prevToStr } };
+      if (trimmedFactory) m['工場'] = trimmedFactory;
+      return [
+        { $match: m },
+        { $group: { _id: '$品番', created: { $sum: { $ifNull: ['$Process_Quantity', 0] } }, pressNg: { $sum: { $ifNull: ['$Total_NG', 0] } } } }
+      ];
+    };
+    const buildPrevKensaPipeline = () => {
+      const m = { ...hinbanMatch, 製造ロット: { $exists: true, $ne: '' } };
+      if (trimmedFactory) m['工場'] = trimmedFactory;
+      return [
+        { $match: m },
+        { $addFields: { nld: { $function: { body: normalizeLotDateBody, args: ['$製造ロット'], lang: 'js' } } } },
+        { $match: { nld: { $gte: prevFromStr, $lte: prevToStr } } },
+        { $group: { _id: '$品番', kensaNg: { $sum: { $ifNull: ['$Total_NG', 0] } } } }
+      ];
+    };
+    const buildPrevSlitPipeline = () => {
+      const m = { ...hinbanMatch, 製造ロット: { $exists: true, $ne: '' } };
+      if (trimmedFactory) m['工場'] = trimmedFactory;
+      return [
+        { $match: m },
+        { $addFields: { nld: { $function: { body: normalizeLotDateBody, args: ['$製造ロット'], lang: 'js' } } } },
+        { $match: { nld: { $gte: prevFromStr, $lte: prevToStr } } },
+        { $group: { _id: '$品番', slitNg: { $sum: { $ifNull: ['$Total_NG', 0] } } } }
+      ];
+    };
+    const buildPrevSrsPipeline = () => {
+      const m = { ...hinbanMatch, 製造ロット: { $exists: true, $ne: '' } };
+      if (trimmedFactory) m['工場'] = trimmedFactory;
+      return [
+        { $match: m },
+        { $addFields: { nld: { $function: { body: normalizeLotDateBody, args: ['$製造ロット'], lang: 'js' } } } },
+        { $match: { nld: { $gte: prevFromStr, $lte: prevToStr } } },
+        { $group: { _id: '$品番', srsNg: { $sum: { $ifNull: ['$SRS_Total_NG', 0] } } } }
+      ];
+    };
+    // Trend: press by (Date, 品番) — used to build daily/weekly cost+scrap trend chart
+    const buildTrendPipeline = () => {
+      const m = { ...hinbanMatch, Date: { $gte: fromDate, $lte: toDate } };
+      if (trimmedFactory) m['工場'] = trimmedFactory;
+      return [
+        { $match: m },
+        { $group: { _id: { date: '$Date', hinban: '$品番' }, created: { $sum: { $ifNull: ['$Process_Quantity', 0] } }, pressNg: { $sum: { $ifNull: ['$Total_NG', 0] } } } }
+      ];
+    };
+    const buildKensaTrendPipeline = () => {
+      const m = { ...hinbanMatch, 製造ロット: { $exists: true, $ne: '' } };
+      if (trimmedFactory) m['工場'] = trimmedFactory;
+      return [
+        { $match: m },
+        { $addFields: { nld: { $function: { body: normalizeLotDateBody, args: ['$製造ロット'], lang: 'js' } } } },
+        { $match: { nld: { $gte: fromDate, $lte: toDate } } },
+        { $group: { _id: { date: '$nld', hinban: '$品番' }, kensaNg: { $sum: { $ifNull: ['$Total_NG', 0] } } } }
+      ];
+    };
+    const buildSlitTrendPipeline = () => {
+      const m = { ...hinbanMatch, 製造ロット: { $exists: true, $ne: '' } };
+      if (trimmedFactory) m['工場'] = trimmedFactory;
+      return [
+        { $match: m },
+        { $addFields: { nld: { $function: { body: normalizeLotDateBody, args: ['$製造ロット'], lang: 'js' } } } },
+        { $match: { nld: { $gte: fromDate, $lte: toDate } } },
+        { $group: { _id: { date: '$nld', hinban: '$品番' }, slitNg: { $sum: { $ifNull: ['$Total_NG', 0] } } } }
+      ];
+    };
+    const buildSrsTrendPipeline = () => {
+      const m = { ...hinbanMatch, 製造ロット: { $exists: true, $ne: '' } };
+      if (trimmedFactory) m['工場'] = trimmedFactory;
+      return [
+        { $match: m },
+        { $addFields: { nld: { $function: { body: normalizeLotDateBody, args: ['$製造ロット'], lang: 'js' } } } },
+        { $match: { nld: { $gte: fromDate, $lte: toDate } } },
+        { $group: { _id: { date: '$nld', hinban: '$品番' }, srsNg: { $sum: { $ifNull: ['$SRS_Total_NG', 0] } } } }
+      ];
+    };
+
+    // Fetch all data (main 4 + prev period 4 + trend 4 — all in parallel)
+    const [pressRows, kensaRows, slitNgRows, srsNgRows, prevPressRows, prevKensaRows, prevSlitRows, prevSrsRows, trendPressRows, trendKensaRows, trendSlitRows, trendSrsRows] = await Promise.all([
       submittedDb.collection('pressDB').aggregate(
         buildPressSimplePipeline(trimmedFactory),
         { allowDiskUse: true }
@@ -6348,7 +6435,15 @@ app.post('/api/financials', async (req, res) => {
       submittedDb.collection('SRSDB').aggregate(
         buildSrsNgPipeline(trimmedFactory),
         { allowDiskUse: true }
-      ).toArray()
+      ).toArray(),
+      submittedDb.collection('pressDB').aggregate(buildPrevPressPipeline(),  { allowDiskUse: true }).toArray(),
+      submittedDb.collection('kensaDB').aggregate(buildPrevKensaPipeline(),  { allowDiskUse: true }).toArray(),
+      submittedDb.collection('slitDB').aggregate(buildPrevSlitPipeline(),    { allowDiskUse: true }).toArray(),
+      submittedDb.collection('SRSDB').aggregate(buildPrevSrsPipeline(),       { allowDiskUse: true }).toArray(),
+      submittedDb.collection('pressDB').aggregate(buildTrendPipeline(),       { allowDiskUse: true }).toArray(),
+      submittedDb.collection('kensaDB').aggregate(buildKensaTrendPipeline(), { allowDiskUse: true }).toArray(),
+      submittedDb.collection('slitDB').aggregate(buildSlitTrendPipeline(),   { allowDiskUse: true }).toArray(),
+      submittedDb.collection('SRSDB').aggregate(buildSrsTrendPipeline(),     { allowDiskUse: true }).toArray()
     ]);
 
     // Build maps by hinban + ban + factory
@@ -6414,6 +6509,41 @@ app.post('/api/financials', async (req, res) => {
     ).toArray();
 
     const masterMap = new Map(masterDocs.map(doc => [doc.品番, doc]));
+
+    // --- Previous period summary (for card deltas) ---
+    const prevPressHinbanMap = new Map(prevPressRows.map(r => [String(r._id), { created: r.created || 0, pressNg: r.pressNg || 0 }]));
+    const prevKensaHinbanMap = new Map(prevKensaRows.map(r => [String(r._id), r.kensaNg || 0]));
+    const prevSlitHinbanMap  = new Map(prevSlitRows.map(r =>  [String(r._id), r.slitNg  || 0]));
+    const prevSrsHinbanMap   = new Map(prevSrsRows.map(r =>   [String(r._id), r.srsNg   || 0]));
+    const allPrevHinbans     = new Set([
+      ...prevPressRows.map(r => String(r._id)), ...prevKensaRows.map(r => String(r._id)),
+      ...prevSlitRows.map(r  => String(r._id)), ...prevSrsRows.map(r  => String(r._id))
+    ]);
+    let prevTotalCreated = 0, prevTotalCost = 0, prevTotalLoss = 0, prevScrapLoss = 0;
+    allPrevHinbans.forEach(hinban => {
+      const price = parseFloat(masterMap.get(hinban)?.pricePerPc) || 0;
+      if (!price) return;
+      const pd      = prevPressHinbanMap.get(hinban) || { created: 0, pressNg: 0 };
+      if (pd.created <= 0) return; // same rule: skip if nothing was pressed in prev period
+      const kensaNg = prevKensaHinbanMap.get(hinban) || 0;
+      const slitNg  = prevSlitHinbanMap.get(hinban)  || 0;
+      const srsNg   = prevSrsHinbanMap.get(hinban)   || 0;
+      const ng      = pd.pressNg + kensaNg + slitNg + srsNg;
+      prevTotalCreated += pd.created;
+      prevTotalCost    += pd.created * price;
+      prevTotalLoss    += ng;
+      prevScrapLoss    += ng * price;
+    });
+    const previousSummary = {
+      totalCreated: prevTotalCreated,
+      totalValue:   Number(prevTotalCost.toFixed(2)),
+      scrapLoss:    Number(prevScrapLoss.toFixed(2)),
+      finalGood:    prevTotalCreated - prevTotalLoss,
+      totalLoss:    prevTotalLoss,
+      defectRate:   prevTotalCreated > 0 ? Number(((prevTotalLoss / prevTotalCreated) * 100).toFixed(2)) : 0,
+      yieldPercent: prevTotalCreated > 0 ? Number((((prevTotalCreated - prevTotalLoss) / prevTotalCreated) * 100).toFixed(2)) : 0,
+      costRecoveryRate: prevTotalCost > 0 ? Number((((prevTotalCost - prevScrapLoss) / prevTotalCost) * 100).toFixed(2)) : 0
+    };
 
     const rows = [];
     let totalValue = 0;
@@ -6591,6 +6721,71 @@ app.post('/api/financials', async (req, res) => {
       return String(a.hinban || '').localeCompare(String(b.hinban || ''));
     });
 
+    // --- Top 5 worst-performing 背番号 by scrap loss (derived from merged rows, no extra DB query) ---
+    const top5 = [...rows]
+      .sort((a, b) => (b.scrapLoss || 0) - (a.scrapLoss || 0))
+      .slice(0, 5)
+      .map(r => ({ ban: r.ban, hinban: r.hinban, model: r.model, factory: r.factory,
+                   scrapLoss: r.scrapLoss, totalNg: r.totalNg, yieldPercent: r.yieldPercent,
+                   pricePerPc: r.pricePerPc, created: r.created }));
+
+    // --- Trend: aggregate all 4 NG sources into daily/weekly buckets using masterMap prices ---
+    const useWeekly = _rangeDays > 31;
+    // Step 1: build a merged map keyed by 'date__hinban' accumulating all NG types
+    const trendHinbanDayMap = new Map();
+    const _trendMerge = (r, field) => {
+      const dateStr = r._id.date;
+      const hinban  = r._id.hinban;
+      if (!dateStr || !hinban) return;
+      const k = `${dateStr}__${hinban}`;
+      const e = trendHinbanDayMap.get(k) || { date: dateStr, hinban, created: 0, pressNg: 0, kensaNg: 0, slitNg: 0, srsNg: 0 };
+      if (field === 'press')  { e.created += r.created || 0; e.pressNg += r.pressNg || 0; }
+      if (field === 'kensa')  { e.kensaNg += r.kensaNg || 0; }
+      if (field === 'slit')   { e.slitNg  += r.slitNg  || 0; }
+      if (field === 'srs')    { e.srsNg   += r.srsNg   || 0; }
+      trendHinbanDayMap.set(k, e);
+    };
+    trendPressRows.forEach(r => _trendMerge(r, 'press'));
+    trendKensaRows.forEach(r => _trendMerge(r, 'kensa'));
+    trendSlitRows.forEach(r  => _trendMerge(r, 'slit'));
+    trendSrsRows.forEach(r   => _trendMerge(r, 'srs'));
+    // Step 2: roll up by date, applying price per piece
+    const trendDayMap = new Map();
+    trendHinbanDayMap.forEach(e => {
+      const price = parseFloat(masterMap.get(e.hinban)?.pricePerPc) || 0;
+      if (!price) return;
+      const entry = trendDayMap.get(e.date) || { label: e.date, cost: 0, scrapLoss: 0, created: 0 };
+      entry.created   += e.created;
+      entry.cost      += e.created * price;
+      entry.scrapLoss += (e.pressNg + e.kensaNg + e.slitNg + e.srsNg) * price;
+      trendDayMap.set(e.date, entry);
+    });
+    let trendPoints = Array.from(trendDayMap.values()).sort((a, b) => a.label.localeCompare(b.label));
+    if (useWeekly) {
+      const weekMap = new Map();
+      trendPoints.forEach(d => {
+        const dt   = new Date(d.label + 'T00:00:00Z');
+        const year = dt.getUTCFullYear();
+        const jan4 = new Date(Date.UTC(year, 0, 4));
+        const startOfWeek1 = new Date(jan4.getTime() - ((jan4.getUTCDay() || 7) - 1) * _msPerDay);
+        const weekNum = Math.max(Math.floor((dt - startOfWeek1) / (_msPerDay * 7)) + 1, 1);
+        const wk  = `${year}-W${String(weekNum).padStart(2, '0')}`;
+        const w   = weekMap.get(wk) || { label: wk, cost: 0, scrapLoss: 0, created: 0 };
+        w.cost      += d.cost;
+        w.scrapLoss += d.scrapLoss;
+        w.created   += d.created;
+        weekMap.set(wk, w);
+      });
+      trendPoints = Array.from(weekMap.values()).sort((a, b) => a.label.localeCompare(b.label));
+    }
+    const trend = {
+      granularity: useWeekly ? 'weekly' : 'daily',
+      labels:    trendPoints.map(d => d.label),
+      cost:      trendPoints.map(d => Number(d.cost.toFixed(2))),
+      scrapLoss: trendPoints.map(d => Number(d.scrapLoss.toFixed(2))),
+      created:   trendPoints.map(d => d.created)
+    };
+
     const totalRows = rows.length;
     const totalPages = totalRows ? Math.ceil(totalRows / limitNumber) : 0;
     const safePage = totalPages ? Math.min(pageNumber, totalPages) : 1;
@@ -6691,7 +6886,10 @@ app.post('/api/financials', async (req, res) => {
         defectRate:   mergedTotalCreated > 0 ? Number(((mergedTotalLoss / mergedTotalCreated) * 100).toFixed(2)) : 0,
         yieldPercent: mergedTotalCreated > 0 ? Number(((mergedTotalGood  / mergedTotalCreated) * 100).toFixed(2)) : 0
       },
+      previousSummary,
       adjustedSummary,
+      trend,
+      top5,
       scrapByProcess,
       factoryTotals: factoryTotalsPayload,
       rows: pagedRows,
