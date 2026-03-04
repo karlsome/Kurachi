@@ -6085,41 +6085,122 @@ app.post('/api/financials', async (req, res) => {
     });
   }
 
+  // Supported 製造ロット formats (from DB survey):
+  //   yymmddxx   : 8 digits, last 2 = sequence  (e.g. 25031717 → 2025-03-17)
+  //   yyyymmdd   : 8 digits, real calendar date  (e.g. 20251205 → 2025-12-05)
+  //   yymmdd+    : 6+ digits stripped            (e.g. 250901   → 2025-09-01)
+  //   yymmdd-xx  : 6 digits dash sequence        (e.g. 251215-06 → 2025-12-15)
+  //   yyyymm-dd  : 6-digit year+month, dash day  (e.g. 202603-04 → 2026-03-04)
+  //   yymm-dd    : 4-digit yymm, dash day        (e.g. 2502-10  → 2025-02-10)
+  //   yyyy-mm-dd : ISO                           (e.g. 2026-01-23 → as-is)
   const normalizeLotDate = (lot) => {
     if (!lot) return null;
-    const digits = String(lot).replace(/\D/g, '');
-    if (digits.length >= 8) {
-      const y = digits.slice(0, 4);
-      const m = digits.slice(4, 6);
-      const d = digits.slice(6, 8);
-      return `${y}-${m}-${d}`;
+    const s = String(lot).trim();
+    let yr, mo, dy;
+    // 1. Already ISO yyyy-mm-dd
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+      yr = parseInt(s.slice(0, 4), 10);
+      mo = parseInt(s.slice(5, 7), 10);
+      dy = parseInt(s.slice(8, 10), 10);
+    // 2. Single-dash patterns: yymmdd-xx, yyyymm-dd, yymm-dd
+    } else if (/^\d+-\d+$/.test(s)) {
+      const [left, right] = s.split('-');
+      if (left.length === 6) {
+        const py = parseInt(left.slice(0, 4), 10);
+        const pm = parseInt(left.slice(4, 6), 10);
+        const pd = parseInt(right.slice(0, 2), 10);
+        if (py >= 2020 && py <= 2099 && pm >= 1 && pm <= 12 && pd >= 1 && pd <= 31) {
+          yr = py; mo = pm; dy = pd; // yyyymm-dd
+        } else {
+          yr = 2000 + parseInt(left.slice(0, 2), 10);
+          mo = parseInt(left.slice(2, 4), 10);
+          dy = parseInt(left.slice(4, 6), 10); // yymmdd-xx
+        }
+      } else if (left.length === 4) {
+        yr = 2000 + parseInt(left.slice(0, 2), 10);
+        mo = parseInt(left.slice(2, 4), 10);
+        dy = parseInt(right.slice(0, 2), 10); // yymm-dd
+      } else { return null; }
+    // 3. Strip non-digits and parse
+    } else {
+      const digits = s.replace(/\D/g, '');
+      if (digits.length >= 8) {
+        const py = parseInt(digits.slice(0, 4), 10);
+        const pm = parseInt(digits.slice(4, 6), 10);
+        const pd = parseInt(digits.slice(6, 8), 10);
+        if (py >= 2020 && py <= 2099 && pm >= 1 && pm <= 12 && pd >= 1 && pd <= 31) {
+          yr = py; mo = pm; dy = pd; // true yyyymmdd (e.g. 20251205)
+        } else {
+          yr = 2000 + parseInt(digits.slice(0, 2), 10);
+          mo = parseInt(digits.slice(2, 4), 10);
+          dy = parseInt(digits.slice(4, 6), 10); // yymmddxx (e.g. 25031717)
+        }
+      } else if (digits.length >= 6) {
+        yr = 2000 + parseInt(digits.slice(0, 2), 10);
+        mo = parseInt(digits.slice(2, 4), 10);
+        dy = parseInt(digits.slice(4, 6), 10); // yymmdd
+      } else { return null; }
     }
-    if (digits.length >= 6) {
-      const y = `20${digits.slice(0, 2)}`;
-      const m = digits.slice(2, 4);
-      const d = digits.slice(4, 6);
-      return `${y}-${m}-${d}`;
-    }
-    return null;
+    if (!yr || mo < 1 || mo > 12 || dy < 1 || dy > 31) return null;
+    const dt = new Date(Date.UTC(yr, mo - 1, dy));
+    if (dt.getUTCFullYear() !== yr || dt.getUTCMonth() + 1 !== mo || dt.getUTCDate() !== dy) return null;
+    return `${yr}-${String(mo).padStart(2, '0')}-${String(dy).padStart(2, '0')}`;
   };
 
   const normalizeLotDateBody = `
     function(lot) {
       if (!lot) return null;
-      var digits = String(lot).replace(/\\D/g, '');
-      if (digits.length >= 8) {
-        var y = digits.slice(0, 4);
-        var m = digits.slice(4, 6);
-        var d = digits.slice(6, 8);
-        return y + '-' + m + '-' + d;
+      var s = String(lot).trim();
+      var yr, mo, dy;
+      // 1. Already ISO yyyy-mm-dd
+      if (/^\\d{4}-\\d{2}-\\d{2}$/.test(s)) {
+        yr = parseInt(s.slice(0,4), 10);
+        mo = parseInt(s.slice(5,7), 10);
+        dy = parseInt(s.slice(8,10), 10);
+      // 2. Single-dash: yymmdd-xx, yyyymm-dd, yymm-dd
+      } else if (/^\\d+-\\d+$/.test(s)) {
+        var parts = s.split('-');
+        var left = parts[0], right = parts[1];
+        if (left.length === 6) {
+          var py = parseInt(left.slice(0,4), 10);
+          var pm = parseInt(left.slice(4,6), 10);
+          var pd = parseInt(right.slice(0,2), 10);
+          if (py >= 2020 && py <= 2099 && pm >= 1 && pm <= 12 && pd >= 1 && pd <= 31) {
+            yr = py; mo = pm; dy = pd;
+          } else {
+            yr = 2000 + parseInt(left.slice(0,2), 10);
+            mo = parseInt(left.slice(2,4), 10);
+            dy = parseInt(left.slice(4,6), 10);
+          }
+        } else if (left.length === 4) {
+          yr = 2000 + parseInt(left.slice(0,2), 10);
+          mo = parseInt(left.slice(2,4), 10);
+          dy = parseInt(right.slice(0,2), 10);
+        } else { return null; }
+      // 3. Strip non-digits
+      } else {
+        var digits = s.replace(/\\D/g, '');
+        if (digits.length >= 8) {
+          var py2 = parseInt(digits.slice(0,4), 10);
+          var pm2 = parseInt(digits.slice(4,6), 10);
+          var pd2 = parseInt(digits.slice(6,8), 10);
+          if (py2 >= 2020 && py2 <= 2099 && pm2 >= 1 && pm2 <= 12 && pd2 >= 1 && pd2 <= 31) {
+            yr = py2; mo = pm2; dy = pd2;
+          } else {
+            yr = 2000 + parseInt(digits.slice(0,2), 10);
+            mo = parseInt(digits.slice(2,4), 10);
+            dy = parseInt(digits.slice(4,6), 10);
+          }
+        } else if (digits.length >= 6) {
+          yr = 2000 + parseInt(digits.slice(0,2), 10);
+          mo = parseInt(digits.slice(2,4), 10);
+          dy = parseInt(digits.slice(4,6), 10);
+        } else { return null; }
       }
-      if (digits.length >= 6) {
-        var y2 = '20' + digits.slice(0, 2);
-        var m2 = digits.slice(2, 4);
-        var d2 = digits.slice(4, 6);
-        return y2 + '-' + m2 + '-' + d2;
-      }
-      return null;
+      if (!yr || mo < 1 || mo > 12 || dy < 1 || dy > 31) return null;
+      var dt = new Date(Date.UTC(yr, mo - 1, dy));
+      if (dt.getUTCFullYear() !== yr || dt.getUTCMonth() + 1 !== mo || dt.getUTCDate() !== dy) return null;
+      return yr + '-' + (mo < 10 ? '0' : '') + mo + '-' + (dy < 10 ? '0' : '') + dy;
     }
   `;
 
@@ -6731,12 +6812,20 @@ app.post('/api/financials', async (req, res) => {
 
     // --- Trend: aggregate all 4 NG sources into daily/weekly buckets using masterMap prices ---
     const useWeekly = _rangeDays > 31;
+    // Helper: reject invalid calendar dates (e.g. '2026-02-40' from lot sequence numbers)
+    const _isValidDate = (s) => {
+      if (!s || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+      const [y, mo, d] = s.split('-').map(Number);
+      const dt = new Date(Date.UTC(y, mo - 1, d));
+      return dt.getUTCFullYear() === y && dt.getUTCMonth() + 1 === mo && dt.getUTCDate() === d;
+    };
     // Step 1: build a merged map keyed by 'date__hinban' accumulating all NG types
     const trendHinbanDayMap = new Map();
     const _trendMerge = (r, field) => {
       const dateStr = r._id.date;
       const hinban  = r._id.hinban;
       if (!dateStr || !hinban) return;
+      if (!_isValidDate(dateStr)) return; // skip lot numbers that encode sequence, not calendar day
       const k = `${dateStr}__${hinban}`;
       const e = trendHinbanDayMap.get(k) || { date: dateStr, hinban, created: 0, pressNg: 0, kensaNg: 0, slitNg: 0, srsNg: 0 };
       if (field === 'press')  { e.created += r.created || 0; e.pressNg += r.pressNg || 0; }
