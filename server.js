@@ -2321,6 +2321,7 @@ app.post('/submitToDCP', async (req, res) => {
 
             kensaResult = await kensaDB.insertOne(kensaDBData);
             _invalidateFinancialsCache('kensaDB insert (DCP)');
+            _invalidateFactoryOverviewCache('kensaDB insert (DCP)');
             console.log(`✅ Data saved to kensaDB with ID: ${kensaResult.insertedId}`);
         }
 
@@ -2395,6 +2396,7 @@ app.post("/submitToKensaDBiReporter", async (req, res) => {
     // Insert form data into kensaDB
     const result = await kensaDB.insertOne(formData);
     _invalidateFinancialsCache('kensaDB insert');
+    _invalidateFactoryOverviewCache('kensaDB insert');
     if (!result.insertedId) {
       throw new Error("Failed to save data to kensaDB");
     }
@@ -3893,6 +3895,7 @@ app.post("/submitToKensaDB", async (req, res) => {
     formData.createdAt = new Date().toISOString(); // Add server timestamp
     const result = await kensaDB.insertOne(formData);
     _invalidateFinancialsCache('kensaDB insert (tablet)');
+    _invalidateFactoryOverviewCache('kensaDB insert (tablet)');
 
     // Step 2: Aggregate total process quantity in kensaDB
     const kensaAggregation = await kensaDB
@@ -6073,7 +6076,7 @@ console.log("📊 Approval statistics routes loaded successfully");
 // pagination and sort changes are served instantly without hitting MongoDB.
 const _financialsCache   = new Map();
 const _financialsInflight = new Map(); // stampede guard: in-progress DB fetches keyed by cache key
-const _FINANCIALS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const _FINANCIALS_CACHE_TTL = 15 * 60 * 1000; // 15 minutes
 
 /**
  * Call after any write to pressDB / kensaDB / slitDB / SRSDB / recoveryDB.
@@ -15522,15 +15525,53 @@ app.post('/api/equipment/data', async (req, res) => {
 
 // ==================== FACTORY OVERVIEW OPTIMIZED ENDPOINTS ====================
 
+// ── Factory Overview in-memory cache ─────────────────────────────────────────
+// Separate caches for stats (kensaDB) and sensors (tempHumidityDB).
+// Key = date string (YYYY-MM-DD).  TTL = 15 minutes.
+// Stats cache is also invalidated immediately on any kensaDB write.
+// Sensor cache is TTL-only (data written directly by IoT devices).
+const _factoryStatsCache    = new Map();
+const _factoryStatsInflight = new Map();
+const _factorySensorsCache    = new Map();
+const _factorySensorsInflight = new Map();
+const _FACTORY_OVERVIEW_TTL = 15 * 60 * 1000; // 15 minutes
+
+function _invalidateFactoryOverviewCache(reason) {
+  const ns = _factoryStatsCache.size;
+  _factoryStatsCache.clear();
+  _factoryStatsInflight.clear();
+  if (ns > 0) console.log(`🗑️  factory stats cache invalidated (${ns} entr${ns === 1 ? 'y' : 'ies'}) — ${reason || 'write'}`);
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
  * GET /api/factory-overview/stats
  * Returns production stats (total, totalNG, defectRate) for ALL factories in ONE query
  * Optimized: Single aggregation instead of 8 separate queries
  */
 app.get('/api/factory-overview/stats', async (req, res) => {
+    let _statsCacheKey, _statsInflightResolve, _statsInflightReject;
     try {
         const date = req.query.date || new Date().toISOString().split('T')[0];
-        
+        _statsCacheKey = date;
+
+        // ── Cache check ──
+        const _sc = _factoryStatsCache.get(_statsCacheKey);
+        if (_sc && (Date.now() - _sc.ts) < _FACTORY_OVERVIEW_TTL) {
+            console.log(`⚡ factory stats cache HIT (date: ${date}, age: ${Math.round((Date.now()-_sc.ts)/1000)}s)`);
+            return res.json(_sc.payload);
+        }
+
+        // ── Stampede guard ──
+        const _si = _factoryStatsInflight.get(_statsCacheKey);
+        if (_si) {
+            const _r = await _si.catch(() => null);
+            if (_r) { console.log(`⚡ factory stats stampede WAIT resolved`); return res.json(_r); }
+        }
+        const _statsInflightPromise = new Promise((res, rej) => { _statsInflightResolve = res; _statsInflightReject = rej; });
+        _factoryStatsInflight.set(_statsCacheKey, _statsInflightPromise);
+        // ─────────────────────
+
         console.log(`🏭 Fetching factory overview stats for date: ${date}`);
         
         const db = client.db('submittedDB');
@@ -15583,13 +15624,16 @@ app.get('/api/factory-overview/stats', async (req, res) => {
         
         console.log(`✅ Factory stats loaded for ${Object.keys(factoryStats).length} factories`);
         
-        res.json({
-            success: true,
-            date: date,
-            data: factoryStats
-        });
+        const _statsPayload = { success: true, date: date, data: factoryStats };
+        _factoryStatsCache.set(_statsCacheKey, { ts: Date.now(), payload: _statsPayload });
+        _factoryStatsInflight.delete(_statsCacheKey);
+        if (_statsInflightResolve) _statsInflightResolve(_statsPayload);
+        console.log(`💾 factory stats cache STORED (date: ${date})`);
+        res.json(_statsPayload);
         
     } catch (error) {
+        if (_statsCacheKey) _factoryStatsInflight.delete(_statsCacheKey);
+        if (_statsInflightReject) _statsInflightReject(error);
         console.error('❌ Error fetching factory overview stats:', error);
         res.status(500).json({
             success: false,
@@ -15604,9 +15648,28 @@ app.get('/api/factory-overview/stats', async (req, res) => {
  * Optimized: Single query instead of 8+ separate queries
  */
 app.get('/api/factory-overview/sensors', async (req, res) => {
+    let _sensCacheKey, _sensInflightResolve, _sensInflightReject;
     try {
         const date = req.query.date || new Date().toISOString().split('T')[0];
-        
+        _sensCacheKey = date;
+
+        // ── Cache check ──
+        const _sc = _factorySensorsCache.get(_sensCacheKey);
+        if (_sc && (Date.now() - _sc.ts) < _FACTORY_OVERVIEW_TTL) {
+            console.log(`⚡ factory sensors cache HIT (date: ${date}, age: ${Math.round((Date.now()-_sc.ts)/1000)}s)`);
+            return res.json(_sc.payload);
+        }
+
+        // ── Stampede guard ──
+        const _si = _factorySensorsInflight.get(_sensCacheKey);
+        if (_si) {
+            const _r = await _si.catch(() => null);
+            if (_r) { console.log(`⚡ factory sensors stampede WAIT resolved`); return res.json(_r); }
+        }
+        const _sensInflightPromise = new Promise((res, rej) => { _sensInflightResolve = res; _sensInflightReject = rej; });
+        _factorySensorsInflight.set(_sensCacheKey, _sensInflightPromise);
+        // ─────────────────────
+
         console.log(`🌡️ Fetching sensor data for all factories on date: ${date}`);
         
         const db = client.db('submittedDB');
@@ -15738,14 +15801,16 @@ app.get('/api/factory-overview/sensors', async (req, res) => {
         
         console.log(`✅ Sensor data loaded for ${Object.keys(sensorData).length} factories`);
         
-        res.json({
-            success: true,
-            date: date,
-            data: sensorData,
-            factoriesWithHistory: Array.from(factoriesWithHistory)
-        });
+        const _sensPayload = { success: true, date: date, data: sensorData, factoriesWithHistory: Array.from(factoriesWithHistory) };
+        _factorySensorsCache.set(_sensCacheKey, { ts: Date.now(), payload: _sensPayload });
+        _factorySensorsInflight.delete(_sensCacheKey);
+        if (_sensInflightResolve) _sensInflightResolve(_sensPayload);
+        console.log(`💾 factory sensors cache STORED (date: ${date})`);
+        res.json(_sensPayload);
         
     } catch (error) {
+        if (_sensCacheKey) _factorySensorsInflight.delete(_sensCacheKey);
+        if (_sensInflightReject) _sensInflightReject(error);
         console.error('❌ Error fetching sensor data:', error);
         res.status(500).json({
             success: false,
