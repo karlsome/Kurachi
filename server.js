@@ -6519,6 +6519,50 @@ app.post('/api/financials', async (req, res) => {
       }
     });
 
+    // Merge rows where created=0 into the matching ban row with the highest created,
+    // then drop them. Their NG values are real but have no cost basis on their own.
+    const zeroCreatedRows = rows.filter(r => r.created === 0);
+    const nonZeroRows = rows.filter(r => r.created > 0);
+
+    zeroCreatedRows.forEach(zRow => {
+      // Find the best target: same ban, created > 0, highest created
+      let target = null;
+      nonZeroRows.forEach(r => {
+        if (r.ban === zRow.ban) {
+          if (!target || r.created > target.created) target = r;
+        }
+      });
+
+      if (target) {
+        // Add NG values from zRow into target
+        target.pressNg  += zRow.pressNg  || 0;
+        target.slitNg   += zRow.slitNg   || 0;
+        target.srsNg    += zRow.srsNg    || 0;
+        target.kensaNg  += zRow.kensaNg  || 0;
+        target.totalNg   = target.pressNg + target.slitNg + target.srsNg + target.kensaNg;
+        target.finalGood = target.created - target.totalNg;
+        target.scrapLoss = Number((target.totalNg * target.pricePerPc).toFixed(2));
+        target.value     = Number((target.cost - target.scrapLoss).toFixed(2));
+        target.yieldPercent = Number((target.created > 0 ? (target.finalGood / target.created) * 100 : 0).toFixed(2));
+      }
+      // If no matching non-zero row exists for this ban, the row is simply dropped
+    });
+
+    // Replace rows array with only non-zero-created rows (already mutated above)
+    rows.length = 0;
+    nonZeroRows.forEach(r => rows.push(r));
+
+    // Rebuild factoryTotalsMap from merged rows so chart data is also consistent
+    factoryTotalsMap.clear();
+    rows.forEach(r => {
+      const fe = factoryTotalsMap.get(r.factory) || { created: 0, finalGood: 0, totalValue: 0, scrapLoss: 0 };
+      fe.created    += r.created   || 0;
+      fe.finalGood  += r.finalGood || 0;
+      fe.totalValue += r.cost      || 0;
+      fe.scrapLoss  += r.scrapLoss || 0;
+      factoryTotalsMap.set(r.factory, fe);
+    });
+
     const sorters = {
       hinban: (a, b) => String(a.hinban || '').localeCompare(String(b.hinban || '')),
       ban: (a, b) => String(a.ban || '').localeCompare(String(b.ban || '')),
@@ -6553,6 +6597,77 @@ app.post('/api/financials', async (req, res) => {
     const startIndex = (safePage - 1) * limitNumber;
     const pagedRows = totalRows ? rows.slice(startIndex, startIndex + limitNumber) : [];
 
+    // Fetch recovery data for ALL rows and compute recovery-adjusted summary
+    // Recompute base totals from the MERGED rows (zero-created rows are now gone)
+    let mergedTotalCreated = 0;
+    let mergedTotalLoss    = 0;
+    let mergedTotalGood    = 0;
+    let mergedTotalCost    = 0;
+    let mergedScrapLoss    = 0;
+    rows.forEach(r => {
+      mergedTotalCreated += r.created  || 0;
+      mergedTotalLoss    += r.totalNg  || 0;
+      mergedTotalGood    += r.finalGood|| 0;
+      mergedTotalCost    += r.cost     || 0;
+      mergedScrapLoss    += r.scrapLoss|| 0;
+    });
+    let adjustedSummary = {
+      totalValue:   Number(mergedTotalCost.toFixed(2)),
+      scrapLoss:    Number(mergedScrapLoss.toFixed(2)),
+      totalCreated: mergedTotalCreated,
+      finalGood:    mergedTotalGood,
+      totalLoss:    mergedTotalLoss,
+      defectRate:   mergedTotalCreated > 0 ? Number(((mergedTotalLoss / mergedTotalCreated) * 100).toFixed(2)) : 0,
+      yieldPercent: mergedTotalCreated > 0 ? Number(((mergedTotalGood  / mergedTotalCreated) * 100).toFixed(2)) : 0
+    };
+    try {
+      const recoveryDb = client.db('submittedDB');
+      const recoveryCollection = recoveryDb.collection('recoveryDB');
+      const recoveryQuery = {};
+      if (trimmedFactory) recoveryQuery.factory = trimmedFactory;
+      const recoveryDateConditions = [];
+      if (fromDate || toDate) {
+        const lotRange = {};
+        const createdRange = {};
+        if (fromDate) { lotRange.$gte = fromDate; createdRange.$gte = `${fromDate}T00:00:00.000Z`; }
+        if (toDate)   { lotRange.$lte = toDate;   createdRange.$lte = `${toDate}T23:59:59.999Z`; }
+        recoveryDateConditions.push({ lotDate: lotRange });
+        recoveryDateConditions.push({ lotDate: { $exists: false }, createdAt: createdRange });
+        recoveryQuery.$or = recoveryDateConditions;
+      }
+      const allRecoveries = await recoveryCollection.find(recoveryQuery).toArray();
+      // Build a map: ban -> total recovered quantity
+      const recoveryByBan = new Map();
+      allRecoveries.forEach(item => {
+        const ban = item.背番号;
+        if (!ban) return;
+        const qty = Array.isArray(item.recoveries)
+          ? item.recoveries.reduce((s, r) => s + (r.quantity || 0), 0)
+          : 0;
+        recoveryByBan.set(ban, (recoveryByBan.get(ban) || 0) + qty);
+      });
+      // Apply recovery adjustment to ALL rows (pre-pagination)
+      if (recoveryByBan.size > 0) {
+        let adjTotalLoss = 0;
+        let adjFinalGood = 0;
+        let adjScrapLoss = 0;
+        rows.forEach(row => {
+          const recoveredNg = recoveryByBan.get(row.ban) || 0;
+          const ngAfterRecovery = Math.max((row.totalNg || 0) - recoveredNg, 0);
+          adjTotalLoss  += ngAfterRecovery;
+          adjFinalGood  += (row.created || 0) - ngAfterRecovery;
+          adjScrapLoss  += ngAfterRecovery * (row.pricePerPc || 0);
+        });
+        adjustedSummary.totalLoss   = adjTotalLoss;
+        adjustedSummary.finalGood   = adjFinalGood;
+        adjustedSummary.scrapLoss   = Number(adjScrapLoss.toFixed(2));
+        adjustedSummary.defectRate  = mergedTotalCreated > 0 ? Number(((adjTotalLoss  / mergedTotalCreated) * 100).toFixed(2)) : 0;
+        adjustedSummary.yieldPercent= mergedTotalCreated > 0 ? Number(((adjFinalGood  / mergedTotalCreated) * 100).toFixed(2)) : 0;
+      }
+    } catch (recoveryErr) {
+      console.warn('⚠️ Could not fetch recovery data for summary adjustment:', recoveryErr.message);
+    }
+
     const factoryTotals = Array.from(factoryTotalsMap.entries())
       .map(([factoryName, totals]) => ({ factoryName, ...totals }))
       .sort((a, b) => b.totalValue - a.totalValue);
@@ -6568,14 +6683,15 @@ app.post('/api/financials', async (req, res) => {
     res.json({
       success: true,
       summary: {
-        totalValue: Number(totalValue.toFixed(2)),
-        scrapLoss: Number(totalScrapLoss.toFixed(2)),
-        totalCreated: Number(totalCreated),
-        finalGood: Number(totalFinalGood),
-        totalLoss: Number(totalLoss),
-        defectRate: totalCreated > 0 ? Number(((totalLoss / totalCreated) * 100).toFixed(2)) : 0,
-        yieldPercent: totalCreated > 0 ? Number(((totalFinalGood / totalCreated) * 100).toFixed(2)) : 0
+        totalValue:   Number(mergedTotalCost.toFixed(2)),
+        scrapLoss:    Number(mergedScrapLoss.toFixed(2)),
+        totalCreated: mergedTotalCreated,
+        finalGood:    mergedTotalGood,
+        totalLoss:    mergedTotalLoss,
+        defectRate:   mergedTotalCreated > 0 ? Number(((mergedTotalLoss / mergedTotalCreated) * 100).toFixed(2)) : 0,
+        yieldPercent: mergedTotalCreated > 0 ? Number(((mergedTotalGood  / mergedTotalCreated) * 100).toFixed(2)) : 0
       },
+      adjustedSummary,
       scrapByProcess,
       factoryTotals: factoryTotalsPayload,
       rows: pagedRows,
