@@ -6085,41 +6085,122 @@ app.post('/api/financials', async (req, res) => {
     });
   }
 
+  // Supported 製造ロット formats (from DB survey):
+  //   yymmddxx   : 8 digits, last 2 = sequence  (e.g. 25031717 → 2025-03-17)
+  //   yyyymmdd   : 8 digits, real calendar date  (e.g. 20251205 → 2025-12-05)
+  //   yymmdd+    : 6+ digits stripped            (e.g. 250901   → 2025-09-01)
+  //   yymmdd-xx  : 6 digits dash sequence        (e.g. 251215-06 → 2025-12-15)
+  //   yyyymm-dd  : 6-digit year+month, dash day  (e.g. 202603-04 → 2026-03-04)
+  //   yymm-dd    : 4-digit yymm, dash day        (e.g. 2502-10  → 2025-02-10)
+  //   yyyy-mm-dd : ISO                           (e.g. 2026-01-23 → as-is)
   const normalizeLotDate = (lot) => {
     if (!lot) return null;
-    const digits = String(lot).replace(/\D/g, '');
-    if (digits.length >= 8) {
-      const y = digits.slice(0, 4);
-      const m = digits.slice(4, 6);
-      const d = digits.slice(6, 8);
-      return `${y}-${m}-${d}`;
+    const s = String(lot).trim();
+    let yr, mo, dy;
+    // 1. Already ISO yyyy-mm-dd
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+      yr = parseInt(s.slice(0, 4), 10);
+      mo = parseInt(s.slice(5, 7), 10);
+      dy = parseInt(s.slice(8, 10), 10);
+    // 2. Single-dash patterns: yymmdd-xx, yyyymm-dd, yymm-dd
+    } else if (/^\d+-\d+$/.test(s)) {
+      const [left, right] = s.split('-');
+      if (left.length === 6) {
+        const py = parseInt(left.slice(0, 4), 10);
+        const pm = parseInt(left.slice(4, 6), 10);
+        const pd = parseInt(right.slice(0, 2), 10);
+        if (py >= 2020 && py <= 2099 && pm >= 1 && pm <= 12 && pd >= 1 && pd <= 31) {
+          yr = py; mo = pm; dy = pd; // yyyymm-dd
+        } else {
+          yr = 2000 + parseInt(left.slice(0, 2), 10);
+          mo = parseInt(left.slice(2, 4), 10);
+          dy = parseInt(left.slice(4, 6), 10); // yymmdd-xx
+        }
+      } else if (left.length === 4) {
+        yr = 2000 + parseInt(left.slice(0, 2), 10);
+        mo = parseInt(left.slice(2, 4), 10);
+        dy = parseInt(right.slice(0, 2), 10); // yymm-dd
+      } else { return null; }
+    // 3. Strip non-digits and parse
+    } else {
+      const digits = s.replace(/\D/g, '');
+      if (digits.length >= 8) {
+        const py = parseInt(digits.slice(0, 4), 10);
+        const pm = parseInt(digits.slice(4, 6), 10);
+        const pd = parseInt(digits.slice(6, 8), 10);
+        if (py >= 2020 && py <= 2099 && pm >= 1 && pm <= 12 && pd >= 1 && pd <= 31) {
+          yr = py; mo = pm; dy = pd; // true yyyymmdd (e.g. 20251205)
+        } else {
+          yr = 2000 + parseInt(digits.slice(0, 2), 10);
+          mo = parseInt(digits.slice(2, 4), 10);
+          dy = parseInt(digits.slice(4, 6), 10); // yymmddxx (e.g. 25031717)
+        }
+      } else if (digits.length >= 6) {
+        yr = 2000 + parseInt(digits.slice(0, 2), 10);
+        mo = parseInt(digits.slice(2, 4), 10);
+        dy = parseInt(digits.slice(4, 6), 10); // yymmdd
+      } else { return null; }
     }
-    if (digits.length >= 6) {
-      const y = `20${digits.slice(0, 2)}`;
-      const m = digits.slice(2, 4);
-      const d = digits.slice(4, 6);
-      return `${y}-${m}-${d}`;
-    }
-    return null;
+    if (!yr || mo < 1 || mo > 12 || dy < 1 || dy > 31) return null;
+    const dt = new Date(Date.UTC(yr, mo - 1, dy));
+    if (dt.getUTCFullYear() !== yr || dt.getUTCMonth() + 1 !== mo || dt.getUTCDate() !== dy) return null;
+    return `${yr}-${String(mo).padStart(2, '0')}-${String(dy).padStart(2, '0')}`;
   };
 
   const normalizeLotDateBody = `
     function(lot) {
       if (!lot) return null;
-      var digits = String(lot).replace(/\\D/g, '');
-      if (digits.length >= 8) {
-        var y = digits.slice(0, 4);
-        var m = digits.slice(4, 6);
-        var d = digits.slice(6, 8);
-        return y + '-' + m + '-' + d;
+      var s = String(lot).trim();
+      var yr, mo, dy;
+      // 1. Already ISO yyyy-mm-dd
+      if (/^\\d{4}-\\d{2}-\\d{2}$/.test(s)) {
+        yr = parseInt(s.slice(0,4), 10);
+        mo = parseInt(s.slice(5,7), 10);
+        dy = parseInt(s.slice(8,10), 10);
+      // 2. Single-dash: yymmdd-xx, yyyymm-dd, yymm-dd
+      } else if (/^\\d+-\\d+$/.test(s)) {
+        var parts = s.split('-');
+        var left = parts[0], right = parts[1];
+        if (left.length === 6) {
+          var py = parseInt(left.slice(0,4), 10);
+          var pm = parseInt(left.slice(4,6), 10);
+          var pd = parseInt(right.slice(0,2), 10);
+          if (py >= 2020 && py <= 2099 && pm >= 1 && pm <= 12 && pd >= 1 && pd <= 31) {
+            yr = py; mo = pm; dy = pd;
+          } else {
+            yr = 2000 + parseInt(left.slice(0,2), 10);
+            mo = parseInt(left.slice(2,4), 10);
+            dy = parseInt(left.slice(4,6), 10);
+          }
+        } else if (left.length === 4) {
+          yr = 2000 + parseInt(left.slice(0,2), 10);
+          mo = parseInt(left.slice(2,4), 10);
+          dy = parseInt(right.slice(0,2), 10);
+        } else { return null; }
+      // 3. Strip non-digits
+      } else {
+        var digits = s.replace(/\\D/g, '');
+        if (digits.length >= 8) {
+          var py2 = parseInt(digits.slice(0,4), 10);
+          var pm2 = parseInt(digits.slice(4,6), 10);
+          var pd2 = parseInt(digits.slice(6,8), 10);
+          if (py2 >= 2020 && py2 <= 2099 && pm2 >= 1 && pm2 <= 12 && pd2 >= 1 && pd2 <= 31) {
+            yr = py2; mo = pm2; dy = pd2;
+          } else {
+            yr = 2000 + parseInt(digits.slice(0,2), 10);
+            mo = parseInt(digits.slice(2,4), 10);
+            dy = parseInt(digits.slice(4,6), 10);
+          }
+        } else if (digits.length >= 6) {
+          yr = 2000 + parseInt(digits.slice(0,2), 10);
+          mo = parseInt(digits.slice(2,4), 10);
+          dy = parseInt(digits.slice(4,6), 10);
+        } else { return null; }
       }
-      if (digits.length >= 6) {
-        var y2 = '20' + digits.slice(0, 2);
-        var m2 = digits.slice(2, 4);
-        var d2 = digits.slice(4, 6);
-        return y2 + '-' + m2 + '-' + d2;
-      }
-      return null;
+      if (!yr || mo < 1 || mo > 12 || dy < 1 || dy > 31) return null;
+      var dt = new Date(Date.UTC(yr, mo - 1, dy));
+      if (dt.getUTCFullYear() !== yr || dt.getUTCMonth() + 1 !== mo || dt.getUTCDate() !== dy) return null;
+      return yr + '-' + (mo < 10 ? '0' : '') + mo + '-' + (dy < 10 ? '0' : '') + dy;
     }
   `;
 
@@ -6331,8 +6412,95 @@ app.post('/api/financials', async (req, res) => {
       ];
     };
 
-    // Fetch all data
-    const [pressRows, kensaRows, slitNgRows, srsNgRows] = await Promise.all([
+    // --- Previous period date range (same duration, immediately before current range) ---
+    const _msPerDay  = 24 * 60 * 60 * 1000;
+    const _rangeDays = Math.round((new Date(toDate + 'T00:00:00Z') - new Date(fromDate + 'T00:00:00Z')) / _msPerDay) + 1;
+    const _prevTo    = new Date(new Date(fromDate + 'T00:00:00Z').getTime() - _msPerDay);
+    const _prevFrom  = new Date(_prevTo.getTime() - (_rangeDays - 1) * _msPerDay);
+    const prevFromStr = _prevFrom.toISOString().slice(0, 10);
+    const prevToStr   = _prevTo.toISOString().slice(0, 10);
+
+    // Lightweight prev-period pipelines (summary by 品番 only, no factory breakdown needed)
+    const buildPrevPressPipeline = () => {
+      const m = { ...hinbanMatch, Date: { $gte: prevFromStr, $lte: prevToStr } };
+      if (trimmedFactory) m['工場'] = trimmedFactory;
+      return [
+        { $match: m },
+        { $group: { _id: '$品番', created: { $sum: { $ifNull: ['$Process_Quantity', 0] } }, pressNg: { $sum: { $ifNull: ['$Total_NG', 0] } } } }
+      ];
+    };
+    const buildPrevKensaPipeline = () => {
+      const m = { ...hinbanMatch, 製造ロット: { $exists: true, $ne: '' } };
+      if (trimmedFactory) m['工場'] = trimmedFactory;
+      return [
+        { $match: m },
+        { $addFields: { nld: { $function: { body: normalizeLotDateBody, args: ['$製造ロット'], lang: 'js' } } } },
+        { $match: { nld: { $gte: prevFromStr, $lte: prevToStr } } },
+        { $group: { _id: '$品番', kensaNg: { $sum: { $ifNull: ['$Total_NG', 0] } } } }
+      ];
+    };
+    const buildPrevSlitPipeline = () => {
+      const m = { ...hinbanMatch, 製造ロット: { $exists: true, $ne: '' } };
+      if (trimmedFactory) m['工場'] = trimmedFactory;
+      return [
+        { $match: m },
+        { $addFields: { nld: { $function: { body: normalizeLotDateBody, args: ['$製造ロット'], lang: 'js' } } } },
+        { $match: { nld: { $gte: prevFromStr, $lte: prevToStr } } },
+        { $group: { _id: '$品番', slitNg: { $sum: { $ifNull: ['$Total_NG', 0] } } } }
+      ];
+    };
+    const buildPrevSrsPipeline = () => {
+      const m = { ...hinbanMatch, 製造ロット: { $exists: true, $ne: '' } };
+      if (trimmedFactory) m['工場'] = trimmedFactory;
+      return [
+        { $match: m },
+        { $addFields: { nld: { $function: { body: normalizeLotDateBody, args: ['$製造ロット'], lang: 'js' } } } },
+        { $match: { nld: { $gte: prevFromStr, $lte: prevToStr } } },
+        { $group: { _id: '$品番', srsNg: { $sum: { $ifNull: ['$SRS_Total_NG', 0] } } } }
+      ];
+    };
+    // Trend: press by (Date, 品番) — used to build daily/weekly cost+scrap trend chart
+    const buildTrendPipeline = () => {
+      const m = { ...hinbanMatch, Date: { $gte: fromDate, $lte: toDate } };
+      if (trimmedFactory) m['工場'] = trimmedFactory;
+      return [
+        { $match: m },
+        { $group: { _id: { date: '$Date', hinban: '$品番' }, created: { $sum: { $ifNull: ['$Process_Quantity', 0] } }, pressNg: { $sum: { $ifNull: ['$Total_NG', 0] } } } }
+      ];
+    };
+    const buildKensaTrendPipeline = () => {
+      const m = { ...hinbanMatch, 製造ロット: { $exists: true, $ne: '' } };
+      if (trimmedFactory) m['工場'] = trimmedFactory;
+      return [
+        { $match: m },
+        { $addFields: { nld: { $function: { body: normalizeLotDateBody, args: ['$製造ロット'], lang: 'js' } } } },
+        { $match: { nld: { $gte: fromDate, $lte: toDate } } },
+        { $group: { _id: { date: '$nld', hinban: '$品番' }, kensaNg: { $sum: { $ifNull: ['$Total_NG', 0] } } } }
+      ];
+    };
+    const buildSlitTrendPipeline = () => {
+      const m = { ...hinbanMatch, 製造ロット: { $exists: true, $ne: '' } };
+      if (trimmedFactory) m['工場'] = trimmedFactory;
+      return [
+        { $match: m },
+        { $addFields: { nld: { $function: { body: normalizeLotDateBody, args: ['$製造ロット'], lang: 'js' } } } },
+        { $match: { nld: { $gte: fromDate, $lte: toDate } } },
+        { $group: { _id: { date: '$nld', hinban: '$品番' }, slitNg: { $sum: { $ifNull: ['$Total_NG', 0] } } } }
+      ];
+    };
+    const buildSrsTrendPipeline = () => {
+      const m = { ...hinbanMatch, 製造ロット: { $exists: true, $ne: '' } };
+      if (trimmedFactory) m['工場'] = trimmedFactory;
+      return [
+        { $match: m },
+        { $addFields: { nld: { $function: { body: normalizeLotDateBody, args: ['$製造ロット'], lang: 'js' } } } },
+        { $match: { nld: { $gte: fromDate, $lte: toDate } } },
+        { $group: { _id: { date: '$nld', hinban: '$品番' }, srsNg: { $sum: { $ifNull: ['$SRS_Total_NG', 0] } } } }
+      ];
+    };
+
+    // Fetch all data (main 4 + prev period 4 + trend 4 — all in parallel)
+    const [pressRows, kensaRows, slitNgRows, srsNgRows, prevPressRows, prevKensaRows, prevSlitRows, prevSrsRows, trendPressRows, trendKensaRows, trendSlitRows, trendSrsRows] = await Promise.all([
       submittedDb.collection('pressDB').aggregate(
         buildPressSimplePipeline(trimmedFactory),
         { allowDiskUse: true }
@@ -6348,7 +6516,15 @@ app.post('/api/financials', async (req, res) => {
       submittedDb.collection('SRSDB').aggregate(
         buildSrsNgPipeline(trimmedFactory),
         { allowDiskUse: true }
-      ).toArray()
+      ).toArray(),
+      submittedDb.collection('pressDB').aggregate(buildPrevPressPipeline(),  { allowDiskUse: true }).toArray(),
+      submittedDb.collection('kensaDB').aggregate(buildPrevKensaPipeline(),  { allowDiskUse: true }).toArray(),
+      submittedDb.collection('slitDB').aggregate(buildPrevSlitPipeline(),    { allowDiskUse: true }).toArray(),
+      submittedDb.collection('SRSDB').aggregate(buildPrevSrsPipeline(),       { allowDiskUse: true }).toArray(),
+      submittedDb.collection('pressDB').aggregate(buildTrendPipeline(),       { allowDiskUse: true }).toArray(),
+      submittedDb.collection('kensaDB').aggregate(buildKensaTrendPipeline(), { allowDiskUse: true }).toArray(),
+      submittedDb.collection('slitDB').aggregate(buildSlitTrendPipeline(),   { allowDiskUse: true }).toArray(),
+      submittedDb.collection('SRSDB').aggregate(buildSrsTrendPipeline(),     { allowDiskUse: true }).toArray()
     ]);
 
     // Build maps by hinban + ban + factory
@@ -6414,6 +6590,41 @@ app.post('/api/financials', async (req, res) => {
     ).toArray();
 
     const masterMap = new Map(masterDocs.map(doc => [doc.品番, doc]));
+
+    // --- Previous period summary (for card deltas) ---
+    const prevPressHinbanMap = new Map(prevPressRows.map(r => [String(r._id), { created: r.created || 0, pressNg: r.pressNg || 0 }]));
+    const prevKensaHinbanMap = new Map(prevKensaRows.map(r => [String(r._id), r.kensaNg || 0]));
+    const prevSlitHinbanMap  = new Map(prevSlitRows.map(r =>  [String(r._id), r.slitNg  || 0]));
+    const prevSrsHinbanMap   = new Map(prevSrsRows.map(r =>   [String(r._id), r.srsNg   || 0]));
+    const allPrevHinbans     = new Set([
+      ...prevPressRows.map(r => String(r._id)), ...prevKensaRows.map(r => String(r._id)),
+      ...prevSlitRows.map(r  => String(r._id)), ...prevSrsRows.map(r  => String(r._id))
+    ]);
+    let prevTotalCreated = 0, prevTotalCost = 0, prevTotalLoss = 0, prevScrapLoss = 0;
+    allPrevHinbans.forEach(hinban => {
+      const price = parseFloat(masterMap.get(hinban)?.pricePerPc) || 0;
+      if (!price) return;
+      const pd      = prevPressHinbanMap.get(hinban) || { created: 0, pressNg: 0 };
+      if (pd.created <= 0) return; // same rule: skip if nothing was pressed in prev period
+      const kensaNg = prevKensaHinbanMap.get(hinban) || 0;
+      const slitNg  = prevSlitHinbanMap.get(hinban)  || 0;
+      const srsNg   = prevSrsHinbanMap.get(hinban)   || 0;
+      const ng      = pd.pressNg + kensaNg + slitNg + srsNg;
+      prevTotalCreated += pd.created;
+      prevTotalCost    += pd.created * price;
+      prevTotalLoss    += ng;
+      prevScrapLoss    += ng * price;
+    });
+    const previousSummary = {
+      totalCreated: prevTotalCreated,
+      totalValue:   Number(prevTotalCost.toFixed(2)),
+      scrapLoss:    Number(prevScrapLoss.toFixed(2)),
+      finalGood:    prevTotalCreated - prevTotalLoss,
+      totalLoss:    prevTotalLoss,
+      defectRate:   prevTotalCreated > 0 ? Number(((prevTotalLoss / prevTotalCreated) * 100).toFixed(2)) : 0,
+      yieldPercent: prevTotalCreated > 0 ? Number((((prevTotalCreated - prevTotalLoss) / prevTotalCreated) * 100).toFixed(2)) : 0,
+      costRecoveryRate: prevTotalCost > 0 ? Number((((prevTotalCost - prevScrapLoss) / prevTotalCost) * 100).toFixed(2)) : 0
+    };
 
     const rows = [];
     let totalValue = 0;
@@ -6591,6 +6802,79 @@ app.post('/api/financials', async (req, res) => {
       return String(a.hinban || '').localeCompare(String(b.hinban || ''));
     });
 
+    // --- Top 5 worst-performing 背番号 by scrap loss (derived from merged rows, no extra DB query) ---
+    const top5 = [...rows]
+      .sort((a, b) => (b.scrapLoss || 0) - (a.scrapLoss || 0))
+      .slice(0, 5)
+      .map(r => ({ ban: r.ban, hinban: r.hinban, model: r.model, factory: r.factory,
+                   scrapLoss: r.scrapLoss, totalNg: r.totalNg, yieldPercent: r.yieldPercent,
+                   pricePerPc: r.pricePerPc, created: r.created }));
+
+    // --- Trend: aggregate all 4 NG sources into daily/weekly buckets using masterMap prices ---
+    const useWeekly = _rangeDays > 31;
+    // Helper: reject invalid calendar dates (e.g. '2026-02-40' from lot sequence numbers)
+    const _isValidDate = (s) => {
+      if (!s || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+      const [y, mo, d] = s.split('-').map(Number);
+      const dt = new Date(Date.UTC(y, mo - 1, d));
+      return dt.getUTCFullYear() === y && dt.getUTCMonth() + 1 === mo && dt.getUTCDate() === d;
+    };
+    // Step 1: build a merged map keyed by 'date__hinban' accumulating all NG types
+    const trendHinbanDayMap = new Map();
+    const _trendMerge = (r, field) => {
+      const dateStr = r._id.date;
+      const hinban  = r._id.hinban;
+      if (!dateStr || !hinban) return;
+      if (!_isValidDate(dateStr)) return; // skip lot numbers that encode sequence, not calendar day
+      const k = `${dateStr}__${hinban}`;
+      const e = trendHinbanDayMap.get(k) || { date: dateStr, hinban, created: 0, pressNg: 0, kensaNg: 0, slitNg: 0, srsNg: 0 };
+      if (field === 'press')  { e.created += r.created || 0; e.pressNg += r.pressNg || 0; }
+      if (field === 'kensa')  { e.kensaNg += r.kensaNg || 0; }
+      if (field === 'slit')   { e.slitNg  += r.slitNg  || 0; }
+      if (field === 'srs')    { e.srsNg   += r.srsNg   || 0; }
+      trendHinbanDayMap.set(k, e);
+    };
+    trendPressRows.forEach(r => _trendMerge(r, 'press'));
+    trendKensaRows.forEach(r => _trendMerge(r, 'kensa'));
+    trendSlitRows.forEach(r  => _trendMerge(r, 'slit'));
+    trendSrsRows.forEach(r   => _trendMerge(r, 'srs'));
+    // Step 2: roll up by date, applying price per piece
+    const trendDayMap = new Map();
+    trendHinbanDayMap.forEach(e => {
+      const price = parseFloat(masterMap.get(e.hinban)?.pricePerPc) || 0;
+      if (!price) return;
+      const entry = trendDayMap.get(e.date) || { label: e.date, cost: 0, scrapLoss: 0, created: 0 };
+      entry.created   += e.created;
+      entry.cost      += e.created * price;
+      entry.scrapLoss += (e.pressNg + e.kensaNg + e.slitNg + e.srsNg) * price;
+      trendDayMap.set(e.date, entry);
+    });
+    let trendPoints = Array.from(trendDayMap.values()).sort((a, b) => a.label.localeCompare(b.label));
+    if (useWeekly) {
+      const weekMap = new Map();
+      trendPoints.forEach(d => {
+        const dt   = new Date(d.label + 'T00:00:00Z');
+        const year = dt.getUTCFullYear();
+        const jan4 = new Date(Date.UTC(year, 0, 4));
+        const startOfWeek1 = new Date(jan4.getTime() - ((jan4.getUTCDay() || 7) - 1) * _msPerDay);
+        const weekNum = Math.max(Math.floor((dt - startOfWeek1) / (_msPerDay * 7)) + 1, 1);
+        const wk  = `${year}-W${String(weekNum).padStart(2, '0')}`;
+        const w   = weekMap.get(wk) || { label: wk, cost: 0, scrapLoss: 0, created: 0 };
+        w.cost      += d.cost;
+        w.scrapLoss += d.scrapLoss;
+        w.created   += d.created;
+        weekMap.set(wk, w);
+      });
+      trendPoints = Array.from(weekMap.values()).sort((a, b) => a.label.localeCompare(b.label));
+    }
+    const trend = {
+      granularity: useWeekly ? 'weekly' : 'daily',
+      labels:    trendPoints.map(d => d.label),
+      cost:      trendPoints.map(d => Number(d.cost.toFixed(2))),
+      scrapLoss: trendPoints.map(d => Number(d.scrapLoss.toFixed(2))),
+      created:   trendPoints.map(d => d.created)
+    };
+
     const totalRows = rows.length;
     const totalPages = totalRows ? Math.ceil(totalRows / limitNumber) : 0;
     const safePage = totalPages ? Math.min(pageNumber, totalPages) : 1;
@@ -6664,6 +6948,52 @@ app.post('/api/financials', async (req, res) => {
         adjustedSummary.defectRate  = mergedTotalCreated > 0 ? Number(((adjTotalLoss  / mergedTotalCreated) * 100).toFixed(2)) : 0;
         adjustedSummary.yieldPercent= mergedTotalCreated > 0 ? Number(((adjFinalGood  / mergedTotalCreated) * 100).toFixed(2)) : 0;
       }
+
+      // --- Previous period recovery adjustment ---
+      const prevRecoveryQuery = {};
+      if (trimmedFactory) prevRecoveryQuery.factory = trimmedFactory;
+      const prevLotRange = { $gte: prevFromStr, $lte: prevToStr };
+      const prevCreatedRange = { $gte: `${prevFromStr}T00:00:00.000Z`, $lte: `${prevToStr}T23:59:59.999Z` };
+      prevRecoveryQuery.$or = [
+        { lotDate: prevLotRange },
+        { lotDate: { $exists: false }, createdAt: prevCreatedRange }
+      ];
+      const prevRecoveries = await recoveryCollection.find(prevRecoveryQuery).toArray();
+      const recoveryByBanPrev = new Map();
+      prevRecoveries.forEach(item => {
+        const ban = item.背番号;
+        if (!ban) return;
+        const qty = Array.isArray(item.recoveries)
+          ? item.recoveries.reduce((s, r) => s + (r.quantity || 0), 0)
+          : 0;
+        recoveryByBanPrev.set(ban, (recoveryByBanPrev.get(ban) || 0) + qty);
+      });
+      if (recoveryByBanPrev.size > 0) {
+        // Rebuild previousSummary scrap/loss with recovery applied.
+        // We need per-ban breakdown — re-derive from prevPressHinbanMap using masterMap.
+        // We only have hinban-level prev data, so we reduce scrapLoss by (recoveredNg * price)
+        // summed across all bans that appear in recoveryByBanPrev.
+        let prevRecoveredScrap = 0;
+        let prevRecoveredLoss  = 0;
+        recoveryByBanPrev.forEach((qty, ban) => {
+          // find matching hinban from masterMap
+          const masterEntry = masterDocs.find(d => d.背番号 === ban);
+          if (!masterEntry) return;
+          const price = parseFloat(masterEntry.pricePerPc) || 0;
+          if (!price) return;
+          prevRecoveredScrap += qty * price;
+          prevRecoveredLoss  += qty;
+        });
+        const adjPrevScrapLoss   = Math.max(previousSummary.scrapLoss - prevRecoveredScrap, 0);
+        const adjPrevTotalLoss   = Math.max(previousSummary.totalLoss  - prevRecoveredLoss,  0);
+        const adjPrevFinalGood   = previousSummary.totalCreated - adjPrevTotalLoss;
+        previousSummary.scrapLoss    = Number(adjPrevScrapLoss.toFixed(2));
+        previousSummary.totalLoss    = adjPrevTotalLoss;
+        previousSummary.finalGood    = adjPrevFinalGood;
+        previousSummary.defectRate   = previousSummary.totalCreated > 0 ? Number(((adjPrevTotalLoss / previousSummary.totalCreated) * 100).toFixed(2)) : 0;
+        previousSummary.yieldPercent = previousSummary.totalCreated > 0 ? Number(((adjPrevFinalGood  / previousSummary.totalCreated) * 100).toFixed(2)) : 0;
+        previousSummary.costRecoveryRate = previousSummary.totalValue > 0 ? Number((((previousSummary.totalValue - adjPrevScrapLoss) / previousSummary.totalValue) * 100).toFixed(2)) : 0;
+      }
     } catch (recoveryErr) {
       console.warn('⚠️ Could not fetch recovery data for summary adjustment:', recoveryErr.message);
     }
@@ -6691,7 +7021,10 @@ app.post('/api/financials', async (req, res) => {
         defectRate:   mergedTotalCreated > 0 ? Number(((mergedTotalLoss / mergedTotalCreated) * 100).toFixed(2)) : 0,
         yieldPercent: mergedTotalCreated > 0 ? Number(((mergedTotalGood  / mergedTotalCreated) * 100).toFixed(2)) : 0
       },
+      previousSummary,
       adjustedSummary,
+      trend,
+      top5,
       scrapByProcess,
       factoryTotals: factoryTotalsPayload,
       rows: pagedRows,
