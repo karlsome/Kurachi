@@ -6057,6 +6057,34 @@ console.log("📊 Approval statistics routes loaded successfully");
 
 //ANALYTICS START
 
+// ── Financials in-memory cache ──────────────────────────────────────────────
+// Key = filter params only (dates / model / factory / bans).
+// Value = { ts, allRows, staticData } — page/sort are NOT part of the key so
+// pagination and sort changes are served instantly without hitting MongoDB.
+const _financialsCache = new Map();
+const _FINANCIALS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+// Sorters extracted to module level so the cache-hit path can reuse them
+const _FINANCIALS_SORTERS = {
+  hinban:      (a, b) => String(a.hinban      || '').localeCompare(String(b.hinban      || '')),
+  ban:         (a, b) => String(a.ban         || '').localeCompare(String(b.ban         || '')),
+  model:       (a, b) => String(a.model       || '').localeCompare(String(b.model       || '')),
+  factory:     (a, b) => String(a.factory     || '').localeCompare(String(b.factory     || '')),
+  created:     (a, b) => (a.created     || 0) - (b.created     || 0),
+  pressNg:     (a, b) => (a.pressNg     || 0) - (b.pressNg     || 0),
+  slitNg:      (a, b) => (a.slitNg      || 0) - (b.slitNg      || 0),
+  srsNg:       (a, b) => (a.srsNg       || 0) - (b.srsNg       || 0),
+  kensaNg:     (a, b) => (a.kensaNg     || 0) - (b.kensaNg     || 0),
+  totalNg:     (a, b) => (a.totalNg     || 0) - (b.totalNg     || 0),
+  finalGood:   (a, b) => (a.finalGood   || 0) - (b.finalGood   || 0),
+  yieldPercent:(a, b) => (a.yieldPercent|| 0) - (b.yieldPercent|| 0),
+  pricePerPc:  (a, b) => (a.pricePerPc  || 0) - (b.pricePerPc  || 0),
+  cost:        (a, b) => (a.cost        || 0) - (b.cost        || 0),
+  scrapLoss:   (a, b) => (a.scrapLoss   || 0) - (b.scrapLoss   || 0),
+  value:       (a, b) => (a.value       || 0) - (b.value       || 0)
+};
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
  * Financials API
  * POST /api/financials
@@ -6216,9 +6244,51 @@ app.post('/api/financials', async (req, res) => {
     const hinbansArray = Array.isArray(hinbans) ? hinbans.filter(h => h && String(h).trim()) : [];
     const bansArray = Array.isArray(bans) ? bans.filter(b => b && String(b).trim()) : [];
     const pageNumber = Math.max(parseInt(page, 10) || 1, 1);
-    const limitNumber = Math.min(Math.max(parseInt(limit, 10) || 10, 1), 100);
+    const limitNumber = Math.min(Math.max(parseInt(limit, 10) || 100, 1), 100);
     const sortKey = String(sortField || 'date');
     const sortDirection = sortDir === 'desc' ? 'desc' : 'asc';
+
+    // ── Cache check ──────────────────────────────────────────────────────────
+    // Key covers only the filter dimensions that affect which rows are fetched.
+    // Page, limit, sort are intentionally excluded so those changes are free.
+    const _cacheKey = JSON.stringify({
+      f:  fromDate,
+      t:  toDate,
+      mo: trimmedModel,
+      hi: trimmedHinban,
+      his: hinbansArray.slice().sort().join(','),
+      ba:  bansArray.slice().sort().join(','),
+      fa:  trimmedFactory,
+      pr:  process
+    });
+    const _cached = _financialsCache.get(_cacheKey);
+    if (_cached && (Date.now() - _cached.ts) < _FINANCIALS_CACHE_TTL) {
+      // Sort a shallow copy so we never mutate the cached array
+      const _rows = _cached.allRows.slice();
+      const _sf = _FINANCIALS_SORTERS[sortKey] || _FINANCIALS_SORTERS.hinban;
+      _rows.sort((a, b) => {
+        const r = _sf(a, b);
+        return (r !== 0 ? (sortDirection === 'desc' ? -r : r) : 0) ||
+               String(a.hinban || '').localeCompare(String(b.hinban || ''));
+      });
+      const _total  = _rows.length;
+      const _pages  = _total ? Math.ceil(_total / limitNumber) : 0;
+      const _page   = _pages ? Math.min(pageNumber, _pages) : 1;
+      const _paged  = _total ? _rows.slice((_page - 1) * limitNumber, _page * limitNumber) : [];
+      console.log(`⚡ financials cache HIT (${_total} rows, key age ${Math.round((Date.now()-_cached.ts)/1000)}s)`);
+      return res.json({
+        success: true,
+        ..._cached.staticData,
+        rows:       _paged,
+        page:       _page,
+        limit:      limitNumber,
+        totalRows:  _total,
+        totalPages: _pages,
+        sortField:  sortKey,
+        sortDir:    sortDirection
+      });
+    }
+    // ─────────────────────────────────────────────────────────────────────────
 
     // If bans (背番号) are specified, look up corresponding 品番 from masterDB
     // This is the primary filter - convert 背番号 to 品番 for production DB queries
@@ -6725,24 +6795,7 @@ app.post('/api/financials', async (req, res) => {
       factoryTotalsMap.set(r.factory, fe);
     });
 
-    const sorters = {
-      hinban: (a, b) => String(a.hinban || '').localeCompare(String(b.hinban || '')),
-      ban: (a, b) => String(a.ban || '').localeCompare(String(b.ban || '')),
-      model: (a, b) => String(a.model || '').localeCompare(String(b.model || '')),
-      factory: (a, b) => String(a.factory || '').localeCompare(String(b.factory || '')),
-      created: (a, b) => (a.created || 0) - (b.created || 0),
-      pressNg: (a, b) => (a.pressNg || 0) - (b.pressNg || 0),
-      slitNg: (a, b) => (a.slitNg || 0) - (b.slitNg || 0),
-      srsNg: (a, b) => (a.srsNg || 0) - (b.srsNg || 0),
-      kensaNg: (a, b) => (a.kensaNg || 0) - (b.kensaNg || 0),
-      totalNg: (a, b) => (a.totalNg || 0) - (b.totalNg || 0),
-      finalGood: (a, b) => (a.finalGood || 0) - (b.finalGood || 0),
-      yieldPercent: (a, b) => (a.yieldPercent || 0) - (b.yieldPercent || 0),
-      pricePerPc: (a, b) => (a.pricePerPc || 0) - (b.pricePerPc || 0),
-      cost: (a, b) => (a.cost || 0) - (b.cost || 0),
-      scrapLoss: (a, b) => (a.scrapLoss || 0) - (b.scrapLoss || 0),
-      value: (a, b) => (a.value || 0) - (b.value || 0)
-    };
+    const sorters = _FINANCIALS_SORTERS;
 
     const sortFn = sorters[sortKey] || sorters.hinban;
     rows.sort((a, b) => {
@@ -6882,8 +6935,8 @@ app.post('/api/financials', async (req, res) => {
           : 0;
         recoveryByBan.set(ban, (recoveryByBan.get(ban) || 0) + qty);
       });
-      // Stamp recoveredNg on each paged row so the client needs no second HTTP call
-      pagedRows.forEach(row => { row.recoveredNg = recoveryByBan.get(row.ban) || 0; });
+      // Stamp recoveredNg on ALL rows (not just current page) so the cache is self-contained
+      rows.forEach(row => { row.recoveredNg = recoveryByBan.get(row.ban) || 0; });
       // Apply recovery adjustment to ALL rows (pre-pagination)
       if (recoveryByBan.size > 0) {
         let adjTotalLoss = 0;
@@ -6964,8 +7017,8 @@ app.post('/api/financials', async (req, res) => {
       scrapLoss: factoryTotals.map(item => Number(item.scrapLoss.toFixed(2)))
     };
 
-    res.json({
-      success: true,
+    // ── Store to cache before responding ─────────────────────────────────────
+    const _staticData = {
       summary: {
         totalValue:   Number(mergedTotalCost.toFixed(2)),
         scrapLoss:    Number(mergedScrapLoss.toFixed(2)),
@@ -6980,7 +7033,15 @@ app.post('/api/financials', async (req, res) => {
       trend,
       top5,
       scrapByProcess,
-      factoryTotals: factoryTotalsPayload,
+      factoryTotals: factoryTotalsPayload
+    };
+    _financialsCache.set(_cacheKey, { ts: Date.now(), allRows: rows, staticData: _staticData });
+    console.log(`💾 financials cache STORED (${rows.length} rows)`);
+    // ─────────────────────────────────────────────────────────────────────────
+
+    res.json({
+      success: true,
+      ..._staticData,
       rows: pagedRows,
       page: safePage,
       limit: limitNumber,
