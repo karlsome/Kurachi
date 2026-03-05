@@ -13932,7 +13932,10 @@ app.post("/api/inventory-management", async (req, res) => {
           if (filters['品番']) {
             matchStage['品番'] = filters['品番'];
           }
-          if (filters['背番号']) {
+          // sebanggoArray: model-based tag filter (array of 背番号 from model selection)
+          if (filters.sebanggoArray && Array.isArray(filters.sebanggoArray) && filters.sebanggoArray.length > 0) {
+            matchStage['背番号'] = { $in: filters.sebanggoArray };
+          } else if (filters['背番号']) {
             matchStage['背番号'] = filters['背番号'];
           }
           if (filters.search) {
