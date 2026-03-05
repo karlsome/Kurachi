@@ -10736,6 +10736,7 @@ app.post('/api/masterdb/ids', async (req, res) => {
 
 // Route to get unique factory values from Master DB
 app.get('/api/masterdb/factories', async (req, res) => {
+    const _ck = 'masterdb:factories';
     const _hit = _masterFiltersCache.get(_ck);
     if (_hit && (Date.now() - _hit.ts) < _MASTER_DB_TTL) return res.json(_hit.data);
     try {
@@ -16280,6 +16281,148 @@ app.get('/api/factory-overview/sensors', async (req, res) => {
             success: false,
             message: 'Failed to fetch sensor data: ' + error.message
         });
+    }
+});
+
+/**
+ * GET /api/factory-overview/env
+ * Returns weather-based environmental data (temperature, humidity, simulated CO2)
+ * for ALL factories in ONE server-side batch.
+ * - Fetches all factory coordinates from factoryDB in a single MongoDB query.
+ * - Calls Open-Meteo in parallel for all factories that have coordinates.
+ * - Server-side TTL cache: 15 minutes (weather doesn't change that fast).
+ * - Cache key: date (YYYY-MM-DD) — refreshes at midnight automatically.
+ */
+const _factoryEnvCache    = new Map();
+const _factoryEnvInflight = new Map();
+// Re-uses _FACTORY_OVERVIEW_TTL (15 min) defined above.
+
+app.get('/api/factory-overview/env', async (req, res) => {
+    let _envCacheKey, _envInflightResolve, _envInflightReject;
+    try {
+        const date = req.query.date || new Date().toISOString().split('T')[0];
+        _envCacheKey = date;
+
+        // ── Cache check ──
+        const _sc = _factoryEnvCache.get(_envCacheKey);
+        if (_sc && (Date.now() - _sc.ts) < _FACTORY_OVERVIEW_TTL) {
+            console.log(`⚡ factory env cache HIT (date: ${date}, age: ${Math.round((Date.now()-_sc.ts)/1000)}s)`);
+            return res.json(_sc.payload);
+        }
+
+        // ── Stampede guard ──
+        const _si = _factoryEnvInflight.get(_envCacheKey);
+        if (_si) {
+            const _r = await _si.catch(() => null);
+            if (_r) { console.log(`⚡ factory env stampede WAIT resolved`); return res.json(_r); }
+        }
+        const _envInflightPromise = new Promise((res, rej) => { _envInflightResolve = res; _envInflightReject = rej; });
+        _factoryEnvInflight.set(_envCacheKey, _envInflightPromise);
+        // ─────────────────────
+
+        const factoryNames = ['第一工場', '第二工場', '肥田瀬', '天徳', '倉知', '小瀬', 'SCNA', 'NFH'];
+        console.log(`🌤️  Fetching factory env data for ${factoryNames.length} factories (date: ${date})`);
+
+        // 1. Single MongoDB query for all factory locations
+        const masterDb = client.db('Sasaki_Coating_MasterDB');
+        const factoryDocs = await masterDb.collection('factoryDB')
+            .find({ 工場: { $in: factoryNames } }, { projection: { 工場: 1, geotag: 1, coordinates: 1, location: 1 } })
+            .toArray();
+
+        // Build coordinate map
+        const coordMap = {};
+        factoryDocs.forEach(f => {
+            let coords = null;
+            if (f.geotag) {
+                const parts = f.geotag.split(',');
+                if (parts.length === 2) {
+                    const lat = parseFloat(parts[0].trim());
+                    const lon = parseFloat(parts[1].trim());
+                    if (!isNaN(lat) && !isNaN(lon)) coords = { lat, lon };
+                }
+            } else if (f.coordinates && f.coordinates.lat && f.coordinates.lon) {
+                coords = { lat: f.coordinates.lat, lon: f.coordinates.lon };
+            }
+            if (coords) coordMap[f.工場] = coords;
+        });
+
+        // Helper: simulate CO2 based on hour
+        function _simCO2() {
+            const hour = new Date().getHours();
+            const isWork = hour >= 8 && hour <= 18;
+            const base = isWork
+                ? 500 + Math.random() * 250
+                : 400 + Math.random() * 100;
+            return Math.round(base + Math.sin((hour * Math.PI) / 12) * 50);
+        }
+
+        // Helper: default env when no weather available
+        function _defaultEnv() {
+            const hour = new Date().getHours();
+            const temp = Math.round((22 + Math.sin((hour - 6) * Math.PI / 12) * 4 + (Math.random() - 0.5) * 2) * 10) / 10;
+            const hum  = Math.round(50 + Math.sin(hour * Math.PI / 12) * 10 + (Math.random() - 0.5) * 10);
+            return { temperature: Math.max(18, Math.min(26, temp)), humidity: Math.max(40, Math.min(60, hum)), co2: _simCO2(), isDefault: true };
+        }
+
+        // 2. Parallel Open-Meteo calls for all factories that have coordinates
+        const weatherResults = await Promise.allSettled(
+            factoryNames.map(async factory => {
+                const coords = coordMap[factory];
+                if (!coords) return { factory, env: _defaultEnv() };
+                try {
+                    const url = `https://api.open-meteo.com/v1/forecast?latitude=${coords.lat}&longitude=${coords.lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,weather_code&timezone=Asia/Tokyo`;
+                    const weatherRes = await fetch(url, { signal: AbortSignal.timeout(6000) });
+                    const weatherData = await weatherRes.json();
+                    if (weatherData.current) {
+                        return {
+                            factory,
+                            env: {
+                                temperature: Math.round(weatherData.current.temperature_2m * 10) / 10,
+                                humidity: Math.round(weatherData.current.relative_humidity_2m),
+                                co2: _simCO2(),
+                                apparentTemperature: weatherData.current.apparent_temperature != null
+                                    ? Math.round(weatherData.current.apparent_temperature * 10) / 10 : null,
+                                isDay: weatherData.current.is_day,
+                                weatherCode: weatherData.current.weather_code,
+                                isDefault: false
+                            }
+                        };
+                    }
+                    return { factory, env: _defaultEnv() };
+                } catch (_e) {
+                    console.warn(`⚠️  Weather fetch failed for ${factory}:`, _e.message);
+                    return { factory, env: _defaultEnv() };
+                }
+            })
+        );
+
+        // 3. Assemble response map
+        const envData = {};
+        weatherResults.forEach(result => {
+            // allSettled always fulfills for us since we catch inside — but guard anyway
+            if (result.status === 'fulfilled' && result.value?.factory) {
+                const { factory, env } = result.value;
+                envData[factory] = { ...env, timestamp: Date.now() };
+            }
+        });
+
+        // Fill any still-missing factories with defaults
+        factoryNames.forEach(f => { if (!envData[f]) envData[f] = { ..._defaultEnv(), timestamp: Date.now() }; });
+
+        console.log(`✅ Factory env data loaded for ${Object.keys(envData).length} factories`);
+
+        const _envPayload = { success: true, date, data: envData };
+        _factoryEnvCache.set(_envCacheKey, { ts: Date.now(), payload: _envPayload });
+        _factoryEnvInflight.delete(_envCacheKey);
+        if (_envInflightResolve) _envInflightResolve(_envPayload);
+        console.log(`💾 factory env cache STORED (date: ${date})`);
+        res.json(_envPayload);
+
+    } catch (error) {
+        if (_envCacheKey) _factoryEnvInflight.delete(_envCacheKey);
+        if (_envInflightReject) _envInflightReject(error);
+        console.error('❌ Error fetching factory env data:', error);
+        res.status(500).json({ success: false, message: 'Failed to fetch factory env data: ' + error.message });
     }
 });
 
