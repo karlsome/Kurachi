@@ -627,6 +627,9 @@ app.post("/api/upload-product-pdf", async (req, res) => {
 
     await productPDFsDB.insertOne(pdfDocument);
 
+    // Invalidate product-PDFs cache – new document was added
+    _invalidateProductPDFsCache('upload-product-pdf insert');
+
     res.status(201).json({
       success: true,
       message: "PDF uploaded successfully",
@@ -679,6 +682,9 @@ app.post("/api/upload-pdf-image", async (req, res) => {
       { _id: new ObjectId(documentId) },
       { $set: { imageURL, updatedAt: new Date().toISOString() } }
     );
+
+    // Invalidate product-PDFs cache – imageURL updated
+    _invalidateProductPDFsCache('upload-pdf-image update');
 
     res.status(200).json({
       success: true,
@@ -738,23 +744,41 @@ app.get("/api/product-pdfs/:sebanggo", async (req, res) => {
 
 // Get all PDFs by type
 app.get("/api/product-pdfs-by-type/:pdfType", async (req, res) => {
+  const { pdfType } = req.params;
+  const includeHinban = req.query.includeHinban === '1';
+  const searchQuery = String(req.query.q || '').trim();
+  const modelFilter = String(req.query.model || '').trim();
+  const sortField = String(req.query.sortField || 'uploadedAt');
+  const sortDir = req.query.sortDir === 'asc' ? 1 : -1;
+  const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 25, 1), 200);
+
+  const _pdfCacheKey = `productpdfs:${pdfType}:${page}:${limit}:${includeHinban}:${searchQuery}:${modelFilter}:${sortField}:${sortDir}`;
+  let _pdfInflightResolve, _pdfInflightReject;
+
+  // Validate pdfType before touching cache
+  const validTypes = ["梱包", "検査基準", "3点総合", "ワンポイント確認票", "作業要領書", "その他1", "その他2", "その他3"];
+  if (!validTypes.includes(pdfType)) {
+    return res.status(400).json({ error: "Invalid PDF type" });
+  }
+
+  // Cache HIT
+  const _pdfCached = _productPDFsCache.get(_pdfCacheKey);
+  if (_pdfCached && (Date.now() - _pdfCached.ts) < _MASTER_DB_TTL) {
+    console.log(`📦 productPDFs cache HIT: ${_pdfCacheKey}`);
+    return res.json(_pdfCached.data);
+  }
+
+  // Stampede guard
+  const _pdfExisting = _productPDFsInflight.get(_pdfCacheKey);
+  if (_pdfExisting) {
+    const _r = await _pdfExisting.catch(() => null);
+    if (_r) return res.json(_r);
+  }
+  const _pdfInflightPromise = new Promise((resolve, reject) => { _pdfInflightResolve = resolve; _pdfInflightReject = reject; });
+  _productPDFsInflight.set(_pdfCacheKey, _pdfInflightPromise);
+
   try {
-    const { pdfType } = req.params;
-    const includeHinban = req.query.includeHinban === '1';
-    const searchQuery = String(req.query.q || '').trim();
-    const modelFilter = String(req.query.model || '').trim();
-    const sortField = String(req.query.sortField || 'uploadedAt');
-    const sortDir = req.query.sortDir === 'asc' ? 1 : -1;
-
-    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
-    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 25, 1), 200);
-
-    // Validate pdfType
-    const validTypes = ["梱包", "検査基準", "3点総合", "ワンポイント確認票", "作業要領書", "その他1", "その他2", "その他3"];
-    if (!validTypes.includes(pdfType)) {
-      return res.status(400).json({ error: "Invalid PDF type" });
-    }
-
     await ensureProductPdfIndexes();
     await client.connect();
     const database = client.db(DB_NAME);
@@ -879,15 +903,16 @@ app.get("/api/product-pdfs-by-type/:pdfType", async (req, res) => {
 
     const totalPages = Math.max(Math.ceil(total / limit), 1);
 
-    res.json({
-      items,
-      page,
-      limit,
-      total,
-      totalPages
-    });
+    const _pdfResult = { items, page, limit, total, totalPages };
+    _productPDFsCache.set(_pdfCacheKey, { ts: Date.now(), data: _pdfResult });
+    _productPDFsInflight.delete(_pdfCacheKey);
+    if (_pdfInflightResolve) _pdfInflightResolve(_pdfResult);
+
+    res.json(_pdfResult);
 
   } catch (error) {
+    _productPDFsInflight.delete(_pdfCacheKey);
+    if (_pdfInflightReject) _pdfInflightReject(error);
     console.error("❌ Error fetching PDFs by type:", error);
     res.status(500).json({ error: "Error fetching PDFs", details: error.message });
   }
@@ -909,6 +934,8 @@ app.delete("/api/product-pdf/:documentId", async (req, res) => {
       { $set: { isActive: false, deletedAt: new Date().toISOString() } }
     );
 
+    // Invalidate product-PDFs cache – document soft-deleted
+    _invalidateProductPDFsCache('product-pdf soft-delete');
     console.log(`🗑️ PDF moved to trash: ${documentId}`);
     res.json({ success: true, message: "PDF moved to trash" });
 
@@ -938,6 +965,8 @@ app.post("/api/product-pdf-batch-delete", async (req, res) => {
       { $set: { isActive: false, deletedAt: new Date().toISOString() } }
     );
 
+    // Invalidate product-PDFs cache – batch soft-delete
+    _invalidateProductPDFsCache('product-pdf-batch-delete');
     res.json({ success: true, modifiedCount: result.modifiedCount });
   } catch (error) {
     console.error("❌ Error batch deleting PDFs:", error);
@@ -1009,6 +1038,8 @@ app.post("/api/product-pdf-recover/:documentId", async (req, res) => {
       }
     );
 
+    // Invalidate product-PDFs cache – document restored to active
+    _invalidateProductPDFsCache('product-pdf-recover');
     console.log(`♻️ PDF recovered from trash: ${documentId}`);
     res.json({ success: true, message: "PDF recovered successfully" });
 
@@ -1114,6 +1145,8 @@ app.delete("/api/product-pdf-permanent/:documentId", async (req, res) => {
     // Delete from MongoDB
     await productPDFsDB.deleteOne({ _id: new ObjectId(documentId) });
 
+    // Invalidate product-PDFs cache – document fully removed
+    _invalidateProductPDFsCache('product-pdf-permanent-delete');
     console.log(`💀 PDF permanently deleted: ${documentId}`);
     res.json({ success: true, message: "PDF permanently deleted from all locations" });
 
@@ -9793,6 +9826,8 @@ app.post("/updateMasterRecord", async (req, res) => {
       newData: updates
     });
 
+    // Invalidate master data cache for this collection – record was updated
+    _invalidateMasterDataCache(collectionName, 'updateMasterRecord');
     res.json({ success: true, modifiedCount: updateResult.modifiedCount });
   } catch (err) {
     console.error("Update failed:", err);
@@ -9849,6 +9884,8 @@ app.post("/batchUpdateMasterRecords", async (req, res) => {
 
     await logColl.insertMany(logEntries);
 
+    // Invalidate master data cache for this collection – records were batch-updated
+    _invalidateMasterDataCache(collectionName, 'batchUpdateMasterRecords');
     res.json({ 
       success: true, 
       modifiedCount: updateResult.modifiedCount,
@@ -9983,6 +10020,8 @@ app.post("/uploadMasterImage", async (req, res) => {
       newData: { imageURL: firebaseUrl }
     });
 
+    // Invalidate master data cache – imageURL field updated
+    _invalidateMasterDataCache(collectionName, 'uploadMasterImage');
     res.json({ message: "Image uploaded and record updated", imageURL: firebaseUrl });
   } catch (error) {
     console.error("Error uploading master image:", error);
@@ -10056,6 +10095,9 @@ app.post("/submitToMasterDB", async (req, res) => {
       newData: data
     });
 
+    // Invalidate master data and filter caches – new record may add new field values
+    _invalidateMasterDataCache(collectionName, 'submitToMasterDB insert');
+    _invalidateMasterFiltersCache('submitToMasterDB insert');
     res.status(201).json({
       message: "Data inserted and logged successfully",
       insertedId: result.insertedId,
@@ -10301,8 +10343,313 @@ app.post('/api/factories/batch', async (req, res) => {
 });
 
 
+// ==================== MASTER DB CACHE ====================
+// Shared in-memory caches with 1-day TTL + single-flight stampede protection.
+// Four independent cache namespaces:
+//   _masterDataCache      – full collection data (legacy / materialMasterDB2)
+//   _masterPaginateCache  – server-side paginated results
+//   _masterFiltersCache   – filter dropdown values (factories, colors, RL, etc.)
+//   _productPDFsCache     – paginated product-PDF list results
+const _masterDataCache      = new Map();
+const _masterDataInflight   = new Map();
+const _masterPaginateCache  = new Map();
+const _masterPaginateInflight = new Map();
+const _masterFiltersCache   = new Map();
+const _masterFiltersInflight = new Map();
+const _productPDFsCache     = new Map();
+const _productPDFsInflight  = new Map();
+const _MASTER_DB_TTL = 24 * 60 * 60 * 1000; // 1 day
+
+// Invalidate full-data cache (per collection, or all when no arg).
+// Also clears the paginate cache for the same collection.
+// Called on every insert / update / image-upload to a master collection.
+function _invalidateMasterDataCache(collectionName, reason = '') {
+  let n = 0;
+  for (const key of _masterDataCache.keys()) {
+    if (!collectionName || key.startsWith(collectionName + ':')) {
+      _masterDataCache.delete(key);
+      _masterDataInflight.delete(key);
+      n++;
+    }
+  }
+  // Also clear paginate cache for same collection
+  for (const key of _masterPaginateCache.keys()) {
+    if (!collectionName || key.includes(`"collectionName":"${collectionName}"`)) {
+      _masterPaginateCache.delete(key);
+      _masterPaginateInflight.delete(key);
+      n++;
+    }
+  }
+  if (n > 0) console.log(`🗑️  masterData cache invalidated (${collectionName || 'all'})${reason ? ' — ' + reason : ''}: ${n} entries`);
+}
+
+// Invalidate filter dropdown cache entirely.
+// Called on insert (new field values may have been added).
+function _invalidateMasterFiltersCache(reason = '') {
+  const n = _masterFiltersCache.size;
+  _masterFiltersCache.clear();
+  _masterFiltersInflight.clear();
+  if (n > 0) console.log(`🗑️  masterFilters cache invalidated${reason ? ' — ' + reason : ''}: ${n} entries`);
+}
+
+// Invalidate product-PDF list cache.
+// Called on every PDF upload, image update, or delete.
+function _invalidateProductPDFsCache(reason = '') {
+  const n = _productPDFsCache.size;
+  _productPDFsCache.clear();
+  _productPDFsInflight.clear();
+  if (n > 0) console.log(`🗑️  productPDFs cache invalidated${reason ? ' — ' + reason : ''}: ${n} entries`);
+}
+// =========================================================
+
+// Dedicated Master DB data endpoint (replaces generic /queries for masterDB page).
+// POST /api/masterdb/data
+// Body: { collectionName, query?, projection? }
+// Caches the full result set per (collectionName + query) with 1-day TTL.
+app.post('/api/masterdb/data', async (req, res) => {
+  const { collectionName, query = {}, projection = {} } = req.body;
+  if (!collectionName) return res.status(400).json({ error: 'collectionName required' });
+
+  const _cacheKey = `${collectionName}:${JSON.stringify(query)}`;
+  let _inflightResolve, _inflightReject;
+
+  try {
+    // Cache HIT
+    const _cached = _masterDataCache.get(_cacheKey);
+    if (_cached && (Date.now() - _cached.ts) < _MASTER_DB_TTL) {
+      console.log(`📦 masterDB data cache HIT: ${_cacheKey}`);
+      return res.json(_cached.data);
+    }
+
+    // Stampede guard – await the already-running leader promise
+    const _existing = _masterDataInflight.get(_cacheKey);
+    if (_existing) {
+      console.log(`⏳ masterDB data inflight wait: ${_cacheKey}`);
+      const _r = await _existing.catch(() => null);
+      if (_r) return res.json(_r);
+    }
+
+    // Become the leader
+    const _inflightPromise = new Promise((resolve, reject) => {
+      _inflightResolve = resolve;
+      _inflightReject = reject;
+    });
+    _masterDataInflight.set(_cacheKey, _inflightPromise);
+
+    await client.connect();
+    const db = client.db('Sasaki_Coating_MasterDB');
+    const collection = db.collection(collectionName);
+
+    console.log(`🔍 masterDB data fetch: ${collectionName}, query: ${JSON.stringify(query)}`);
+    const data = await collection.find(query, { projection }).toArray();
+
+    // Store cache + resolve all waiting inflight requests
+    _masterDataCache.set(_cacheKey, { ts: Date.now(), data });
+    _masterDataInflight.delete(_cacheKey);
+    if (_inflightResolve) _inflightResolve(data);
+
+    console.log(`✅ masterDB data cached: ${collectionName} — ${data.length} records (TTL 1 day)`);
+    return res.json(data);
+
+  } catch (error) {
+    if (_cacheKey) _masterDataInflight.delete(_cacheKey);
+    if (_inflightReject) _inflightReject(error);
+    console.error('❌ Error in /api/masterdb/data:', error);
+    res.status(500).json({ error: 'Failed to fetch master data', details: error.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/masterdb/paginate
+// Server-side pagination, sorting, filtering and search for the masterDB page.
+// Body: {
+//   collectionName,     // 'masterDB' | 'materialMasterDB2'
+//   baseQuery?,         // e.g. { 工程名: '粘着工程' } for materialDB
+//   page?,              // 1-based page number (default 1)
+//   limit?,             // records per page (default 25)
+//   sort?,              // { column: string, direction: 1|-1 }
+//   simpleFilters?,     // { factory, rl, color, process, shape, material, model }
+//   advancedFilters?,   // raw MongoDB query object
+//   searchTags?,        // string[] — text search terms
+//   searchFields?,      // string[] — fields to search across
+//   searchLogicMode?,   // 'OR' | 'AND'
+// }
+// Returns: { data, filteredCount, totalCount, withImageCount, page, limit, totalPages }
+app.post('/api/masterdb/paginate', async (req, res) => {
+  const {
+    collectionName,
+    baseQuery = {},
+    page = 1,
+    limit = 25,
+    sort = { column: null, direction: 1 },
+    simpleFilters = {},
+    advancedFilters = null,
+    searchTags = [],
+    searchFields = [],
+    searchLogicMode = 'OR',
+  } = req.body;
+
+  if (!collectionName) return res.status(400).json({ error: 'collectionName required' });
+
+  const _cacheKey = JSON.stringify({ collectionName, baseQuery, page, limit, sort, simpleFilters, advancedFilters, searchTags, searchFields, searchLogicMode });
+  let _inflightResolve, _inflightReject;
+
+  // Cache hit
+  const _hit = _masterPaginateCache.get(_cacheKey);
+  if (_hit && (Date.now() - _hit.ts) < _MASTER_DB_TTL) return res.json(_hit.data);
+
+  // Stampede guard
+  if (_masterPaginateInflight.has(_cacheKey)) {
+    try {
+      const _result = await new Promise((resolve, reject) => {
+        const _existing = _masterPaginateInflight.get(_cacheKey);
+        _existing.push({ resolve, reject });
+      });
+      return res.json(_result);
+    } catch (e) {
+      return res.status(500).json({ error: 'Failed to fetch paginated data', details: e.message });
+    }
+  }
+  _masterPaginateInflight.set(_cacheKey, []);
+  const _notifyInflight = (val, isErr) => {
+    const _waiters = _masterPaginateInflight.get(_cacheKey) || [];
+    _masterPaginateInflight.delete(_cacheKey);
+    for (const w of _waiters) isErr ? w.reject(val) : w.resolve(val);
+  };
+
+  try {
+    const dbClient = await MongoClient.connect(uri, { useNewUrlParser: true, useUnifiedTopology: true });
+    const collection = dbClient.db('Sasaki_Coating_MasterDB').collection(collectionName);
+
+    // ── Build combined query ──────────────────────────────────────────────────
+    const conditions = [{ ...baseQuery }];
+
+    // Simple dropdown filters
+    const filterFieldMap = {
+      factory: '工場',
+      rl:      'R/L',
+      color:   '色',
+      process: '加工設備',
+      shape:   '形状',
+      material: '材料',
+      model:   '機種名',
+    };
+    for (const [key, field] of Object.entries(filterFieldMap)) {
+      const val = simpleFilters[key];
+      if (val && val !== 'all') conditions.push({ [field]: val });
+    }
+
+    // Advanced filter object
+    if (advancedFilters && Object.keys(advancedFilters).length > 0) {
+      conditions.push(advancedFilters);
+    }
+
+    // Tag / text search
+    if (searchTags.length > 0 && searchFields.length > 0) {
+      const tagConditions = searchTags.map(tag => {
+        const fieldClauses = searchFields.map(field => ({
+          [field]: { $regex: tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' }
+        }));
+        return fieldClauses.length === 1 ? fieldClauses[0] : { $or: fieldClauses };
+      });
+      conditions.push(searchLogicMode === 'AND' ? { $and: tagConditions } : { $or: tagConditions });
+    }
+
+    const fullQuery = conditions.length > 1 ? { $and: conditions } : conditions[0];
+
+    // ── Sort stage ────────────────────────────────────────────────────────────
+    const sortStage = sort.column ? { [sort.column]: sort.direction } : { _id: 1 };
+
+    // ── Parallel queries ──────────────────────────────────────────────────────
+    const skip = (page - 1) * limit;
+    const [filteredCount, totalCount, withImageCount, pageData] = await Promise.all([
+      collection.countDocuments(fullQuery),
+      collection.countDocuments(baseQuery),
+      collection.countDocuments({ ...baseQuery, imageURL: { $exists: true, $ne: '' } }),
+      collection.find(fullQuery).sort(sortStage).skip(skip).limit(limit).toArray(),
+    ]);
+    await dbClient.close();
+
+    const result = {
+      data: pageData,
+      filteredCount,
+      totalCount,
+      withImageCount,
+      page,
+      limit,
+      totalPages: Math.ceil(filteredCount / limit),
+    };
+
+    _masterPaginateCache.set(_cacheKey, { ts: Date.now(), data: result });
+    _notifyInflight(result, false);
+    console.log(`✅ masterDB paginate: ${collectionName} p${page}/${Math.ceil(filteredCount / limit)} (${filteredCount} matching)`);
+    return res.json(result);
+
+  } catch (error) {
+    _notifyInflight(error, true);
+    console.error('❌ Error in /api/masterdb/paginate:', error);
+    res.status(500).json({ error: 'Failed to fetch paginated data', details: error.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/masterdb/schema?collection=masterDB
+// Returns distinct field names by sampling up to 200 documents.
+// Used by the dynamic filter builder — avoids downloading the whole collection.
+app.get('/api/masterdb/schema', async (req, res) => {
+  const { collection: collectionName, query: rawQuery } = req.query;
+  if (!collectionName) return res.status(400).json({ error: 'collection required' });
+
+  const baseQuery = rawQuery ? JSON.parse(rawQuery) : {};
+  const _cacheKey = `schema:${collectionName}:${JSON.stringify(baseQuery)}`;
+  const _hit = _masterFiltersCache.get(_cacheKey);
+  if (_hit && (Date.now() - _hit.ts) < _MASTER_DB_TTL) return res.json(_hit.data);
+
+  try {
+    const dbClient = await MongoClient.connect(uri, { useNewUrlParser: true, useUnifiedTopology: true });
+    const collection = dbClient.db('Sasaki_Coating_MasterDB').collection(collectionName);
+    const sample = await collection.find(baseQuery).limit(200).toArray();
+    await dbClient.close();
+
+    const fieldSet = new Set();
+    for (const doc of sample) {
+      for (const key of Object.keys(doc)) {
+        if (key !== '_id') fieldSet.add(key);
+      }
+    }
+    const fields = Array.from(fieldSet).sort();
+    _masterFiltersCache.set(_cacheKey, { ts: Date.now(), data: fields });
+    return res.json(fields);
+  } catch (error) {
+    console.error('❌ Error in /api/masterdb/schema:', error);
+    res.status(500).json({ error: 'Failed to fetch schema', details: error.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/masterdb/ids
+// Returns only _id values matching a query — used by batch-edit to get all IDs
+// without fetching full documents.
+// Body: { collectionName, query? }
+app.post('/api/masterdb/ids', async (req, res) => {
+  const { collectionName, query = {} } = req.body;
+  if (!collectionName) return res.status(400).json({ error: 'collectionName required' });
+  try {
+    const dbClient = await MongoClient.connect(uri, { useNewUrlParser: true, useUnifiedTopology: true });
+    const collection = dbClient.db('Sasaki_Coating_MasterDB').collection(collectionName);
+    const docs = await collection.find(query, { projection: { _id: 1 } }).toArray();
+    await dbClient.close();
+    return res.json(docs.map(d => d._id.toString()));
+  } catch (error) {
+    console.error('❌ Error in /api/masterdb/ids:', error);
+    res.status(500).json({ error: 'Failed to fetch IDs', details: error.message });
+  }
+});
+
 // Route to get unique factory values from Master DB
 app.get('/api/masterdb/factories', async (req, res) => {
+    const _hit = _masterFiltersCache.get(_ck);
+    if (_hit && (Date.now() - _hit.ts) < _MASTER_DB_TTL) return res.json(_hit.data);
     try {
         console.log('📋 Fetching unique factory values from Master DB...');
 
@@ -10333,11 +10680,9 @@ app.get('/api/masterdb/factories', async (req, res) => {
 
         console.log(`✅ Found ${uniqueFactories.length} unique factories in Master DB`);
 
-        res.json({
-            success: true,
-            data: uniqueFactories.map(item => item.value),
-            count: uniqueFactories.length
-        });
+        const _result = { success: true, data: uniqueFactories.map(item => item.value), count: uniqueFactories.length };
+        _masterFiltersCache.set('masterdb:factories', { ts: Date.now(), data: _result });
+        res.json(_result);
 
     } catch (error) {
         console.error('❌ Error fetching factories from Master DB:', error);
@@ -10350,6 +10695,9 @@ app.get('/api/masterdb/factories', async (req, res) => {
 
 // Route to get unique R/L values from Master DB
 app.get('/api/masterdb/rl', async (req, res) => {
+    const _ck = 'masterdb:rl';
+    const _hit = _masterFiltersCache.get(_ck);
+    if (_hit && (Date.now() - _hit.ts) < _MASTER_DB_TTL) return res.json(_hit.data);
     try {
         console.log('📋 Fetching unique R/L values from Master DB...');
 
@@ -10380,11 +10728,9 @@ app.get('/api/masterdb/rl', async (req, res) => {
 
         console.log(`✅ Found ${uniqueRL.length} unique R/L values in Master DB`);
 
-        res.json({
-            success: true,
-            data: uniqueRL.map(item => item.value),
-            count: uniqueRL.length
-        });
+        const _result = { success: true, data: uniqueRL.map(item => item.value), count: uniqueRL.length };
+        _masterFiltersCache.set('masterdb:rl', { ts: Date.now(), data: _result });
+        res.json(_result);
 
     } catch (error) {
         console.error('❌ Error fetching R/L values from Master DB:', error);
@@ -10397,6 +10743,9 @@ app.get('/api/masterdb/rl', async (req, res) => {
 
 // Route to get unique color values from Master DB
 app.get('/api/masterdb/colors', async (req, res) => {
+    const _ck = 'masterdb:colors';
+    const _hit = _masterFiltersCache.get(_ck);
+    if (_hit && (Date.now() - _hit.ts) < _MASTER_DB_TTL) return res.json(_hit.data);
     try {
         console.log('📋 Fetching unique color values from Master DB...');
 
@@ -10427,11 +10776,9 @@ app.get('/api/masterdb/colors', async (req, res) => {
 
         console.log(`✅ Found ${uniqueColors.length} unique colors in Master DB`);
 
-        res.json({
-            success: true,
-            data: uniqueColors.map(item => item.value),
-            count: uniqueColors.length
-        });
+        const _result = { success: true, data: uniqueColors.map(item => item.value), count: uniqueColors.length };
+        _masterFiltersCache.set('masterdb:colors', { ts: Date.now(), data: _result });
+        res.json(_result);
 
     } catch (error) {
         console.error('❌ Error fetching colors from Master DB:', error);
@@ -10444,6 +10791,9 @@ app.get('/api/masterdb/colors', async (req, res) => {
 
 // Route to get unique equipment values from Master DB
 app.get('/api/masterdb/equipment', async (req, res) => {
+    const _ck = 'masterdb:equipment';
+    const _hit = _masterFiltersCache.get(_ck);
+    if (_hit && (Date.now() - _hit.ts) < _MASTER_DB_TTL) return res.json(_hit.data);
     try {
         console.log('📋 Fetching unique equipment values from Master DB...');
 
@@ -10474,11 +10824,9 @@ app.get('/api/masterdb/equipment', async (req, res) => {
 
         console.log(`✅ Found ${uniqueEquipment.length} unique equipment values in Master DB`);
 
-        res.json({
-            success: true,
-            data: uniqueEquipment.map(item => item.value),
-            count: uniqueEquipment.length
-        });
+        const _result = { success: true, data: uniqueEquipment.map(item => item.value), count: uniqueEquipment.length };
+        _masterFiltersCache.set('masterdb:equipment', { ts: Date.now(), data: _result });
+        res.json(_result);
 
     } catch (error) {
         console.error('❌ Error fetching equipment from Master DB:', error);
@@ -10491,6 +10839,9 @@ app.get('/api/masterdb/equipment', async (req, res) => {
 
 // Route to get unique model values from Master DB
 app.get('/api/masterdb/models', async (req, res) => {
+    const _ck = 'masterdb:models';
+    const _hit = _masterFiltersCache.get(_ck);
+    if (_hit && (Date.now() - _hit.ts) < _MASTER_DB_TTL) return res.json(_hit.data);
     try {
         console.log('📋 Fetching unique model values from Master DB...');
 
@@ -10521,11 +10872,9 @@ app.get('/api/masterdb/models', async (req, res) => {
 
         console.log(`✅ Found ${uniqueModels.length} unique models in Master DB`);
 
-        res.json({
-            success: true,
-            data: uniqueModels.map(item => item.value),
-            count: uniqueModels.length
-        });
+        const _result = { success: true, data: uniqueModels.map(item => item.value), count: uniqueModels.length };
+        _masterFiltersCache.set('masterdb:models', { ts: Date.now(), data: _result });
+        res.json(_result);
 
     } catch (error) {
         console.error('❌ Error fetching models from Master DB:', error);
@@ -10574,6 +10923,9 @@ app.get('/api/masterdb/products', async (req, res) => {
 
 // Route to get unique shape values from Master DB
 app.get('/api/masterdb/shapes', async (req, res) => {
+    const _ck = 'masterdb:shapes';
+    const _hit = _masterFiltersCache.get(_ck);
+    if (_hit && (Date.now() - _hit.ts) < _MASTER_DB_TTL) return res.json(_hit.data);
     try {
         console.log('📋 Fetching unique shape values from Master DB...');
 
@@ -10604,11 +10956,9 @@ app.get('/api/masterdb/shapes', async (req, res) => {
 
         console.log(`✅ Found ${uniqueShapes.length} unique shapes in Master DB`);
 
-        res.json({
-            success: true,
-            data: uniqueShapes.map(item => item.value),
-            count: uniqueShapes.length
-        });
+        const _result = { success: true, data: uniqueShapes.map(item => item.value), count: uniqueShapes.length };
+        _masterFiltersCache.set('masterdb:shapes', { ts: Date.now(), data: _result });
+        res.json(_result);
 
     } catch (error) {
         console.error('❌ Error fetching shapes from Master DB:', error);
@@ -10621,6 +10971,9 @@ app.get('/api/masterdb/shapes', async (req, res) => {
 
 // Route to get unique material values from Master DB
 app.get('/api/masterdb/materials', async (req, res) => {
+    const _ck = 'masterdb:materials';
+    const _hit = _masterFiltersCache.get(_ck);
+    if (_hit && (Date.now() - _hit.ts) < _MASTER_DB_TTL) return res.json(_hit.data);
     try {
         console.log('📋 Fetching unique material values from Master DB...');
 
@@ -10651,11 +11004,9 @@ app.get('/api/masterdb/materials', async (req, res) => {
 
         console.log(`✅ Found ${uniqueMaterials.length} unique materials in Master DB`);
 
-        res.json({
-            success: true,
-            data: uniqueMaterials.map(item => item.value),
-            count: uniqueMaterials.length
-        });
+        const _result = { success: true, data: uniqueMaterials.map(item => item.value), count: uniqueMaterials.length };
+        _masterFiltersCache.set('masterdb:materials', { ts: Date.now(), data: _result });
+        res.json(_result);
 
     } catch (error) {
         console.error('❌ Error fetching materials from Master DB:', error);
@@ -10667,7 +11018,25 @@ app.get('/api/masterdb/materials', async (req, res) => {
 });
 
 // Batch route to get all filter values at once (more efficient)
+// Cached with 1-day TTL + single-flight stampede protection
 app.get('/api/masterdb/filters', async (req, res) => {
+    const _ck = 'masterdb:filters';
+    const _cachedBatch = _masterFiltersCache.get(_ck);
+    if (_cachedBatch && (Date.now() - _cachedBatch.ts) < _MASTER_DB_TTL) {
+        console.log('📦 masterDB filters cache HIT');
+        return res.json(_cachedBatch.data);
+    }
+
+    // Stampede guard
+    const _existingBatch = _masterFiltersInflight.get(_ck);
+    if (_existingBatch) {
+        const _r = await _existingBatch.catch(() => null);
+        if (_r) return res.json(_r);
+    }
+    let _batchResolve, _batchReject;
+    const _batchPromise = new Promise((resolve, reject) => { _batchResolve = resolve; _batchReject = reject; });
+    _masterFiltersInflight.set(_ck, _batchPromise);
+
     try {
         console.log('📋 Fetching all filter values from Master DB...');
 
@@ -10729,13 +11098,20 @@ app.get('/api/masterdb/filters', async (req, res) => {
             }
         }
 
-        res.json({
+        const _batchResult = {
             success: true,
             filters: results,
             timestamp: new Date().toISOString()
-        });
+        };
+        _masterFiltersCache.set(_ck, { ts: Date.now(), data: _batchResult });
+        _masterFiltersInflight.delete(_ck);
+        if (_batchResolve) _batchResolve(_batchResult);
+        console.log('✅ masterDB batch filters cached (TTL 1 day)');
+        res.json(_batchResult);
 
     } catch (error) {
+        _masterFiltersInflight.delete(_ck);
+        if (_batchReject) _batchReject(error);
         console.error('❌ Error fetching all filter values from Master DB:', error);
         res.status(500).json({ 
             error: 'Failed to fetch filter values',
