@@ -7181,6 +7181,7 @@ app.post('/api/analytics-data', async (req, res) => {
     userRole = 'member',
     factoryAccess = [],
     factoryFilter, // CRITICAL: Factory filter parameter
+    bans,          // Optional: array of 背番号 to restrict results to
     collectionName = 'kensaDB',
     dbName = "submittedDB"
   } = req.body;
@@ -7215,6 +7216,12 @@ app.post('/api/analytics-data', async (req, res) => {
       // Apply user role restrictions if no specific factory filter is provided
       baseQuery['工場'] = { $in: factoryAccess };
       console.log(`🔐 Applied role-based factory restriction: ${factoryAccess.join(', ')}`);
+    }
+
+    // Apply 背番号 (serial number) filter when user has selected specific products
+    if (Array.isArray(bans) && bans.length > 0) {
+      baseQuery['背番号'] = { $in: bans };
+      console.log(`🔖 Applied 背番号 filter: ${bans.length} products`);
     }
 
     // Build climate data query (for temperature/humidity)
@@ -7571,7 +7578,38 @@ app.post('/api/analytics-data', async (req, res) => {
                   }
                 ];
             }
-          })()
+          })(),
+
+          // Per-factory per-背番号 counter breakdown (kensaDB only — used by Top 5 Defects per Factory chart)
+          factoryCountersByModel: collectionName === 'kensaDB' ? [
+            {
+              $group: {
+                _id: { factory: '$工場', sebanggo: '$背番号' },
+                c1:  { $sum: { $ifNull: ['$Counters.counter-1',  0] } },
+                c2:  { $sum: { $ifNull: ['$Counters.counter-2',  0] } },
+                c3:  { $sum: { $ifNull: ['$Counters.counter-3',  0] } },
+                c4:  { $sum: { $ifNull: ['$Counters.counter-4',  0] } },
+                c5:  { $sum: { $ifNull: ['$Counters.counter-5',  0] } },
+                c6:  { $sum: { $ifNull: ['$Counters.counter-6',  0] } },
+                c7:  { $sum: { $ifNull: ['$Counters.counter-7',  0] } },
+                c8:  { $sum: { $ifNull: ['$Counters.counter-8',  0] } },
+                c9:  { $sum: { $ifNull: ['$Counters.counter-9',  0] } },
+                c10: { $sum: { $ifNull: ['$Counters.counter-10', 0] } },
+                c11: { $sum: { $ifNull: ['$Counters.counter-11', 0] } },
+                c12: { $sum: { $ifNull: ['$Counters.counter-12', 0] } }
+              }
+            },
+            {
+              $project: {
+                _id: 0,
+                factory:  '$_id.factory',
+                sebanggo: '$_id.sebanggo',
+                c1: 1, c2: 1, c3: 1, c4: 1, c5: 1, c6: 1,
+                c7: 1, c8: 1, c9: 1, c10: 1, c11: 1, c12: 1
+              }
+            },
+            { $sort: { factory: 1, sebanggo: 1 } }
+          ] : []
         }
       }
     ];
@@ -7733,11 +7771,13 @@ app.post('/api/analytics-data', async (req, res) => {
       }
     ];
 
-    // Execute both aggregations in parallel
+    // Execute aggregations + defect definitions lookup in parallel
     console.log('🔄 Running production analytics aggregation...');
-    const [productionResult, climateResult] = await Promise.all([
+    const masterDb = client.db('Sasaki_Coating_MasterDB');
+    const [productionResult, climateResult, defectDefinitionsResult] = await Promise.all([
       collection.aggregate(analyticsAggregation).toArray(),
-      tempHumidityCollection.aggregate(climateAggregation).toArray()
+      tempHumidityCollection.aggregate(climateAggregation).toArray(),
+      masterDb.collection('defectDefinitions').find({}).toArray().catch(() => [])
     ]);
     
     // Handle empty climate results
@@ -7759,9 +7799,11 @@ app.post('/api/analytics-data', async (req, res) => {
         workerStats: [],
         equipmentStats: [],
         defectAnalysis: [{}],
+        factoryCountersByModel: [],
         temperatureTrend: climateData.temperatureTrend || [],
         humidityTrend: climateData.humidityTrend || [],
-        factoryClimate: climateData.factoryClimate || []
+        factoryClimate: climateData.factoryClimate || [],
+        defectDefinitions: defectDefinitionsResult || []
       };
 
       return res.json({
@@ -7782,15 +7824,17 @@ app.post('/api/analytics-data', async (req, res) => {
       factoryStats: [],
       workerStats: [],
       equipmentStats: [],
-      defectAnalysis: [{}]
+      defectAnalysis: [{}],
+      factoryCountersByModel: []
     };
 
-    // Combine production and climate data
+    // Combine production, climate, and defect definitions data
     const combinedData = {
       ...productionData,
       temperatureTrend: climateData.temperatureTrend || [],
       humidityTrend: climateData.humidityTrend || [],
-      factoryClimate: climateData.factoryClimate || []
+      factoryClimate: climateData.factoryClimate || [],
+      defectDefinitions: defectDefinitionsResult || []
     };
     
     console.log('✅ Analytics data computed successfully');
@@ -10107,6 +10151,50 @@ app.post("/submitToMasterDB", async (req, res) => {
     res.status(500).json({ error: "Error inserting to masterDB" });
   }
 });
+
+// ==================== DEFECT DEFINITIONS ====================
+
+// GET /defectDefinitions  — fetch all, or ?model=XXX for one
+app.get('/defectDefinitions', async (req, res) => {
+  const { model } = req.query;
+  try {
+    await client.connect();
+    const db = client.db('Sasaki_Coating_MasterDB');
+    const coll = db.collection('defectDefinitions');
+    const query = model ? { モデル: model } : {};
+    const docs = await coll.find(query).toArray();
+    res.json(docs);
+  } catch (err) {
+    console.error('Error fetching defectDefinitions:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /defectDefinitions  — upsert a model's counter definitions
+app.post('/defectDefinitions', async (req, res) => {
+  const { model, counters, counters_en, username } = req.body;
+  if (!model || !counters || !username) {
+    return res.status(400).json({ error: 'Missing required fields: model, counters, username' });
+  }
+  try {
+    await client.connect();
+    const db = client.db('Sasaki_Coating_MasterDB');
+    const coll = db.collection('defectDefinitions');
+    const setDoc = { モデル: model, counters, updatedAt: new Date(), updatedBy: username };
+    if (counters_en) setDoc.counters_en = counters_en;
+    const result = await coll.updateOne(
+      { モデル: model },
+      { $set: setDoc },
+      { upsert: true }
+    );
+    res.json({ success: true, upsertedId: result.upsertedId, modifiedCount: result.modifiedCount });
+  } catch (err) {
+    console.error('Error upserting defectDefinitions:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==================== END DEFECT DEFINITIONS ====================
 
 // API Route for Fetching Unique Factory Values from Different Collections
 // Usage: GET /api/factories/:collection
