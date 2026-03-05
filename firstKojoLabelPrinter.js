@@ -1580,7 +1580,13 @@ async function printLabel() {
       } catch (error) {
         showModalAlert(`印刷エラー (${i}/${copiesToPrintNow}): ${error.message}`, true);
         if (printingStatusModal) printingStatusModal.style.display = 'none';
-        // Stop on first error
+        // Save any labels that were already successfully printed before this error
+        if (printSuccessCount > 0) {
+          localStorage.setItem(storageKey, JSON.stringify(printSessionData));
+          const imagesToSubmit = typeof window.getTakenPictures === 'function' ? window.getTakenPictures() : [];
+          console.log(`Error mid-print at ${i}/${copiesToPrintNow}. Saving ${printSuccessCount} successful print(s) to DB before stopping.`);
+          await updateMongoDBAfterPrint(品番, sagyoubi_yyMMdd, successfullyPrintedLotNumbers, imagesToSubmit, printSuccessCount);
+        }
         return;
       }
     }
