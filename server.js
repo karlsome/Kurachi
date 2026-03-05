@@ -16304,14 +16304,16 @@ app.get('/api/factory-overview/sensors', async (req, res) => {
             {
                 $group: {
                     _id: { factory: '$工場', device: '$device' },
-                    latestReading: { $first: '$$ROOT' }
+                    latestReading: { $first: '$$ROOT' },
+                    maxTempForDevice: { $max: '$temperatureNum' } // true daily max for this device
                 }
             },
             {
                 $group: {
                     _id: '$_id.factory',
                     sensors: { $push: '$latestReading' },
-                    highestTemp: { $max: '$latestReading.temperatureNum' },
+                    highestTemp: { $max: '$latestReading.temperatureNum' }, // current (latest per device)
+                    highestTempToday: { $max: '$maxTempForDevice' }, // true daily max across all readings
                     avgTemp: { $avg: '$latestReading.temperatureNum' },
                     avgHumidity: { $avg: '$latestReading.humidityNum' },
                     sensorCount: { $sum: 1 }
@@ -16322,6 +16324,7 @@ app.get('/api/factory-overview/sensors', async (req, res) => {
                     _id: 0,
                     factory: '$_id',
                     highestTemp: { $round: ['$highestTemp', 2] },
+                    highestTempToday: { $round: ['$highestTempToday', 2] },
                     avgTemp: { $round: ['$avgTemp', 2] },
                     avgHumidity: { $round: ['$avgHumidity', 1] },
                     sensorCount: 1,
@@ -16343,6 +16346,7 @@ app.get('/api/factory-overview/sensors', async (req, res) => {
                 
                 sensorData[item.factory] = {
                     highestTemp: item.highestTemp,
+                    highestTempToday: item.highestTempToday,
                     avgTemp: item.avgTemp,
                     avgHumidity: item.avgHumidity,
                     wbgt: wbgt,
@@ -16397,6 +16401,86 @@ app.get('/api/factory-overview/sensors', async (req, res) => {
             success: false,
             message: 'Failed to fetch sensor data: ' + error.message
         });
+    }
+});
+
+/**
+ * GET /api/sensor-details
+ * Returns current per-sensor readings AND true daily max temperature for a specific factory.
+ * Dedicated optimized route — avoids using /queries generic endpoint.
+ */
+app.get('/api/sensor-details', async (req, res) => {
+    try {
+        const factory = req.query.factory;
+        const date = req.query.date || new Date().toISOString().split('T')[0];
+
+        if (!factory) {
+            return res.status(400).json({ success: false, message: 'factory query param required' });
+        }
+
+        console.log(`🌡️ /api/sensor-details: factory=${factory}, date=${date}`);
+
+        const db = client.db('submittedDB');
+        const collection = db.collection('tempHumidityDB');
+
+        // Fetch all readings for the factory today (needed for true daily max)
+        const allReadings = await collection.find({
+            工場: factory,
+            Date: date,
+            Temperature: { $not: { $regex: 'SENSOR|FAILURE|ERROR|error|fault|FAULT' } },
+            Humidity:    { $not: { $regex: 'SENSOR|FAILURE|ERROR|error|fault|FAULT' } }
+        }, {
+            projection: { device: 1, Date: 1, Time: 1, Temperature: 1, Humidity: 1, sensorStatus: 1 }
+        }).sort({ Time: -1 }).toArray();
+
+        if (!allReadings.length) {
+            return res.json({ success: true, factory, date, sensors: [], highestTempToday: null, sensorCount: 0, avgHumidity: null });
+        }
+
+        // Helper: parse numeric value from "23.5°C" or "23.5"
+        const parseTemp = v => parseFloat((v || '').toString().replace('°C','').trim());
+        const parseHum  = v => parseFloat((v || '').toString().replace('%','').trim());
+
+        // True daily max across ALL readings
+        const allTemps = allReadings.map(r => parseTemp(r.Temperature)).filter(t => !isNaN(t));
+        const highestTempToday = allTemps.length > 0 ? Math.round(Math.max(...allTemps) * 100) / 100 : null;
+
+        // Latest reading per device (current state)
+        const latestMap = new Map();
+        allReadings.forEach(r => {
+            if (!latestMap.has(r.device)) latestMap.set(r.device, r); // sorted by Time:-1 so first = latest
+        });
+
+        const sensors = Array.from(latestMap.values()).map(r => ({
+            deviceId: r.device,
+            temperature: parseTemp(r.Temperature),
+            humidity:    parseHum(r.Humidity),
+            status:      r.sensorStatus || 'OK',
+            lastUpdate:  `${r.Date} ${r.Time}`
+        }));
+
+        const humidities = sensors.map(s => s.humidity).filter(h => !isNaN(h));
+        const avgHumidity = humidities.length > 0
+            ? Math.round(humidities.reduce((a, b) => a + b, 0) / humidities.length * 10) / 10
+            : null;
+
+        console.log(`✅ /api/sensor-details: ${sensors.length} sensors, highestTempToday=${highestTempToday}°C`);
+
+        res.json({
+            success: true,
+            factory,
+            date,
+            sensors,
+            highestTempToday,
+            sensorCount: sensors.length,
+            averageHumidity: avgHumidity,
+            avgHumidity,
+            hasCurrentDateData: sensors.length > 0
+        });
+
+    } catch (error) {
+        console.error('❌ Error in /api/sensor-details:', error);
+        res.status(500).json({ success: false, message: 'Failed to fetch sensor details: ' + error.message });
     }
 });
 
