@@ -1583,9 +1583,13 @@ async function printLabel() {
         // Save any labels that were already successfully printed before this error
         if (printSuccessCount > 0) {
           localStorage.setItem(storageKey, JSON.stringify(printSessionData));
+          // ✅ Clear midPrint snapshot — data is now being committed (to DB or pending queue)
+          localStorage.removeItem(storageKey + '_midPrint');
           const imagesToSubmit = typeof window.getTakenPictures === 'function' ? window.getTakenPictures() : [];
           console.log(`Error mid-print at ${i}/${copiesToPrintNow}. Saving ${printSuccessCount} successful print(s) to DB before stopping.`);
           await updateMongoDBAfterPrint(品番, sagyoubi_yyMMdd, successfullyPrintedLotNumbers, imagesToSubmit, printSuccessCount);
+        } else {
+          localStorage.removeItem(storageKey + '_midPrint');
         }
         return;
       }
@@ -1596,11 +1600,37 @@ async function printLabel() {
         printSessionData.extension++; // Officially increment the extension
         successfullyPrintedLotNumbers.push(currentLotNo);
         printSuccessCount++;
+
+        // ✅ Save localStorage immediately on each success to preserve lot counter
+        // (prevents lot number collisions if user refreshes mid-batch)
+        localStorage.setItem(storageKey, JSON.stringify(printSessionData));
+
+        // ✅ Save a mid-print recovery snapshot so DB can be synced after a page refresh
+        const midPrintPayload = {
+            品番,
+            作業日: sagyoubi_yyMMdd,
+            生産順番: selectedProductionOrder,
+            numJustPrinted: printSuccessCount,
+            printLogEntry: {
+                timestamp: new Date().toISOString(),
+                lotNumbers: [...successfullyPrintedLotNumbers],
+                count: printSuccessCount,
+                printedBy: 'LabelPrinterUser',
+                factory: document.getElementById('selected工場')?.value || 'N/A',
+                machine: document.getElementById('hidden設備')?.value || 'N/A'
+            },
+            lastPrintTimestamp: new Date().toISOString(),
+            imagesToUpload: [],
+            targetProductionCountForStatusUpdate: parseInt(document.getElementById('targetProductionCount')?.value, 10) || 0
+        };
+        localStorage.setItem(storageKey + '_midPrint', JSON.stringify(midPrintPayload));
     }
   }
 
   // Finalize localStorage with the actual number of prints
   localStorage.setItem(storageKey, JSON.stringify(printSessionData));
+  // ✅ Clear midPrint snapshot — loop completed normally, committing to DB now
+  localStorage.removeItem(storageKey + '_midPrint');
 
   // ✅ SINGLE DATABASE UPDATE AFTER ALL PRINTING IS DONE
   if (printSuccessCount > 0) {
@@ -1622,6 +1652,89 @@ async function printLabel() {
 }
 
 
+
+// === Pending Sync Queue (DB failure recovery) ===
+const PENDING_SYNC_KEY = 'pendingPrintSyncQueue';
+
+const MAX_PENDING_QUEUE_SIZE = 50;
+
+function updatePendingSyncBadge() {
+    try {
+        const queue = JSON.parse(localStorage.getItem(PENDING_SYNC_KEY) || '[]');
+        const count = queue.length;
+        let badge = document.getElementById('pendingSyncBadge');
+        if (count > 0) {
+            if (!badge) {
+                badge = document.createElement('div');
+                badge.id = 'pendingSyncBadge';
+                badge.style.cssText = 'position:fixed;bottom:16px;right:16px;background:#f59e0b;color:#000;padding:6px 14px;border-radius:8px;font-size:13px;font-weight:bold;z-index:9999;box-shadow:0 2px 8px rgba(0,0,0,0.35);cursor:default';
+                document.body.appendChild(badge);
+            }
+            badge.textContent = `⚠ ${count} unsynced print${count > 1 ? 's' : ''} — syncing...`;
+            badge.style.display = 'block';
+        } else if (badge) {
+            badge.style.display = 'none';
+        }
+    } catch (e) {}
+}
+
+function saveToPendingSyncQueue(payload) {
+    try {
+        const queue = JSON.parse(localStorage.getItem(PENDING_SYNC_KEY) || '[]');
+        if (queue.length >= MAX_PENDING_QUEUE_SIZE) {
+            console.error(`[PendingSync] Queue full (${MAX_PENDING_QUEUE_SIZE}). Dropping oldest entry.`);
+            queue.shift();
+        }
+        queue.push({ payload, savedAt: new Date().toISOString() });
+        localStorage.setItem(PENDING_SYNC_KEY, JSON.stringify(queue));
+        console.warn(`[PendingSync] Saved 1 item to queue. Total queued: ${queue.length}`);
+        updatePendingSyncBadge();
+    } catch (e) {
+        console.error('[PendingSync] Failed to save to queue:', e);
+    }
+}
+
+async function flushPendingSyncQueue() {
+    const raw = localStorage.getItem(PENDING_SYNC_KEY);
+    if (!raw) return;
+    let queue;
+    try {
+        queue = JSON.parse(raw);
+    } catch (e) {
+        localStorage.removeItem(PENDING_SYNC_KEY);
+        return;
+    }
+    if (!Array.isArray(queue) || queue.length === 0) return;
+
+    console.log(`[PendingSync] Attempting to flush ${queue.length} queued item(s)...`);
+    const remaining = [];
+    for (const entry of queue) {
+        try {
+            const response = await fetch(`${serverURL}/logPrintAndUpdateMaterialRequest`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(entry.payload)
+            });
+            const result = await response.json();
+            if (response.ok && result.status === 'success') {
+                console.log(`[PendingSync] Successfully flushed queued item saved at ${entry.savedAt}`);
+            } else {
+                throw new Error(result.message || result.error || 'DB update failed');
+            }
+        } catch (e) {
+            console.warn(`[PendingSync] Item still failing (saved at ${entry.savedAt}):`, e.message);
+            remaining.push(entry);
+        }
+    }
+    if (remaining.length === 0) {
+        localStorage.removeItem(PENDING_SYNC_KEY);
+        console.log('[PendingSync] Queue fully flushed.');
+    } else {
+        localStorage.setItem(PENDING_SYNC_KEY, JSON.stringify(remaining));
+        console.warn(`[PendingSync] ${remaining.length} item(s) still pending after flush attempt.`);
+    }
+    updatePendingSyncBadge();
+}
 
 async function updateMongoDBAfterPrint(品番, sagyoubi_yyMMdd, printedLotNumbersArray, imagesToUploadArray, numJustPrinted) {
     const targetProdCountEl = document.getElementById('targetProductionCount');
@@ -1661,6 +1774,9 @@ async function updateMongoDBAfterPrint(品番, sagyoubi_yyMMdd, printedLotNumber
         targetProductionCountForStatusUpdate: targetForCompletion,
     };
 
+    // Flush any previously failed payloads now that we have a live connection attempt
+    await flushPendingSyncQueue();
+
     try {
         const response = await fetch(`${serverURL}/logPrintAndUpdateMaterialRequest`, {
             method: "POST",
@@ -1692,7 +1808,9 @@ async function updateMongoDBAfterPrint(品番, sagyoubi_yyMMdd, printedLotNumber
         }
     } catch (error) {
         console.error("Error in updateMongoDBAfterPrint:", error);
-        showModalAlert(`DB更新エラー: ${error.message}`, true);
+        // Save to queue so it retries automatically in the background
+        saveToPendingSyncQueue(payloadForBackend);
+        showModalAlert(`DB更新エラー: ${error.message}\n印刷データはローカルに保存され、自動的に再送されます。(Print data saved locally and will sync automatically.)`, true);
     }
 }
 
@@ -1974,7 +2092,35 @@ function resetForm() {
 // === DOMContentLoaded Main Setup ===
 document.addEventListener('DOMContentLoaded', async () => {
     updateUniquePrefix(); 
-    setupInputSaving();   
+    setupInputSaving();
+
+    // ✅ Recover any mid-print snapshots left by a page refresh during a print loop
+    // Scan all localStorage keys for orphaned _midPrint entries and queue them for DB sync
+    (() => {
+        const midPrintKeys = Object.keys(localStorage).filter(k => k.endsWith('_midPrint'));
+        for (const key of midPrintKeys) {
+            try {
+                const orphan = JSON.parse(localStorage.getItem(key));
+                if (orphan && orphan.品番 && orphan.numJustPrinted > 0) {
+                    console.warn(`[MidPrintRecovery] Found orphaned mid-print snapshot: ${key} (${orphan.numJustPrinted} prints). Queuing for DB sync.`);
+                    saveToPendingSyncQueue(orphan);
+                }
+            } catch (e) {
+                console.error('[MidPrintRecovery] Failed to parse orphaned key:', key, e);
+            }
+            localStorage.removeItem(key);
+        }
+    })();
+
+    // Attempt to flush any DB payloads that failed in a previous session
+    flushPendingSyncQueue();
+    // Keep retrying in the background every 60 seconds
+    setInterval(flushPendingSyncQueue, 60000);
+    // Best-effort flush when user navigates away or closes the tab
+    window.addEventListener('beforeunload', () => { flushPendingSyncQueue(); });
+    // Update badge on load so any leftover queue from previous session is visible
+    updatePendingSyncBadge();
+
 
     const factoryParam = getQueryParam('filter');
     const factorySelect = document.getElementById('selected工場');
