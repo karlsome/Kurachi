@@ -442,7 +442,15 @@
             formFields.innerHTML = generateFormFields(docData, sourceCollection);
             
             // Store document info for submission
-            modal.dataset.documentId = docData._id;
+            // Always coerce _id to string — ObjectId may not serialize to a plain string in all driver versions
+            const rawId = docData._id;
+            const cleanId = (rawId && typeof rawId === 'object') ? (rawId.$oid || rawId.toString()) : String(rawId || '');
+            if (!cleanId || !/^[0-9a-fA-F]{24}$/.test(cleanId)) {
+                console.error('❌ Invalid document _id received from server:', rawId);
+                alert('ドキュメントIDが取得できませんでした。ページを再読み込みしてください。');
+                return;
+            }
+            modal.dataset.documentId = cleanId;
             modal.dataset.sourceCollection = sourceCollection;
             modal.dataset.factory = factory;
             modal.dataset.originalData = JSON.stringify(docData); // Store original data for comparison
@@ -695,6 +703,12 @@
             const documentId = modal.dataset.documentId;
             const sourceCollection = modal.dataset.sourceCollection;
             const factory = modal.dataset.factory;
+
+            // Guard: ensure we have a valid MongoDB ObjectId before submitting
+            if (!documentId || !/^[0-9a-fA-F]{24}$/.test(documentId)) {
+                alert('ドキュメントIDが不正です。モーダルを閉じて再度「修正する」を押してください。\n(Document ID invalid — please close and retry)');
+                return;
+            }
             
             // Get correction comment and validate
             const correctionComment = document.getElementById('correctionComment').value.trim();

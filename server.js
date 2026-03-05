@@ -2352,10 +2352,43 @@ app.post('/submitToDCP', async (req, res) => {
                 createdAt: new Date().toISOString() // Add server timestamp
             };
 
-            kensaResult = await kensaDB.insertOne(kensaDBData);
+            // Check for correction_needed doc before inserting (prevents duplicate on re-submit)
+            const _dcpExistingCorrection = await kensaDB.findOne({
+                背番号:         kensaDBData.背番号,
+                工場:           kensaDBData.工場,
+                Date:           kensaDBData.Date,
+                approvalStatus: { $in: ['correction_needed', 'correction_needed_from_kacho'] }
+            });
+
+            if (_dcpExistingCorrection) {
+                const _dcpDataFields = { ...kensaDBData };
+                ['_id','approvalStatus','approvalHistory','correctionBy','correctionAt',
+                 'correctionComment','correctionTarget','correctionResponseBy','correctionResponseAt'].forEach(k => delete _dcpDataFields[k]);
+                _dcpDataFields.correctionAppliedAt  = new Date().toISOString();
+                _dcpDataFields.correctionAppliedVia = 'dcp_resubmit';
+
+                await kensaDB.updateOne(
+                    { _id: _dcpExistingCorrection._id },
+                    {
+                        $set: { ..._dcpDataFields, approvalStatus: 'pending' },
+                        $push: {
+                            approvalHistory: {
+                                action:    '修正済み（DCP再提出）',
+                                user:      kensaDBData.Worker_Name || 'DCP',
+                                timestamp: new Date(),
+                                comment:   '⚠️ 修正要求に対してDCP再提出で修正されました（重複防止）'
+                            }
+                        }
+                    }
+                );
+                kensaResult = { insertedId: _dcpExistingCorrection._id };
+                console.log(`🔄 /submitToDCP: updated existing correction_needed doc ${_dcpExistingCorrection._id} instead of inserting duplicate`);
+            } else {
+                kensaResult = await kensaDB.insertOne(kensaDBData);
+                console.log(`✅ Data saved to kensaDB with ID: ${kensaResult.insertedId}`);
+            }
             _invalidateFinancialsCache('kensaDB insert (DCP)');
             _invalidateFactoryOverviewCache('kensaDB insert (DCP)');
-            console.log(`✅ Data saved to kensaDB with ID: ${kensaResult.insertedId}`);
         }
 
         // 6. Send success response
@@ -2426,10 +2459,49 @@ app.post("/submitToKensaDBiReporter", async (req, res) => {
     // Add createdAt timestamp
     formData.createdAt = new Date().toISOString();
 
-    // Insert form data into kensaDB
-    const result = await kensaDB.insertOne(formData);
-    _invalidateFinancialsCache('kensaDB insert');
-    _invalidateFactoryOverviewCache('kensaDB insert');
+    // Check for correction_needed doc before inserting (prevents duplicate on re-submit)
+    const _iRExistingCorrection = (formData.背番号 && formData.工場 && formData.Date)
+        ? await kensaDB.findOne({
+              背番号:         formData.背番号,
+              工場:           formData.工場,
+              Date:           formData.Date,
+              approvalStatus: { $in: ['correction_needed', 'correction_needed_from_kacho'] }
+          })
+        : null;
+
+    let result;
+    if (_iRExistingCorrection) {
+        const _iRDataFields = { ...formData };
+        ['_id','approvalStatus','approvalHistory','correctionBy','correctionAt',
+         'correctionComment','correctionTarget','correctionResponseBy','correctionResponseAt'].forEach(k => delete _iRDataFields[k]);
+        _iRDataFields.createdAt = _iRExistingCorrection.createdAt;
+        _iRDataFields.correctionAppliedAt  = new Date().toISOString();
+        _iRDataFields.correctionAppliedVia = 'ireporter_resubmit';
+
+        await kensaDB.updateOne(
+            { _id: _iRExistingCorrection._id },
+            {
+                $set: { ..._iRDataFields, approvalStatus: 'pending' },
+                $push: {
+                    approvalHistory: {
+                        action:    '修正済み（iReporter再提出）',
+                        user:      formData.Worker_Name || 'iReporter',
+                        timestamp: new Date(),
+                        comment:   '⚠️ 修正要求に対してiReporter再提出で修正されました（重複防止）'
+                    }
+                }
+            }
+        );
+        _invalidateFinancialsCache('kensaDB correction update (iReporter)');
+        _invalidateFactoryOverviewCache('kensaDB correction update (iReporter)');
+        console.log(`🔄 /submitToKensaDBiReporter: updated existing correction_needed doc ${_iRExistingCorrection._id} instead of inserting duplicate`);
+        result = { insertedId: _iRExistingCorrection._id };
+    } else {
+        result = await kensaDB.insertOne(formData);
+        _invalidateFinancialsCache('kensaDB insert');
+        _invalidateFactoryOverviewCache('kensaDB insert');
+    }
+
     if (!result.insertedId) {
       throw new Error("Failed to save data to kensaDB");
     }
@@ -3924,11 +3996,52 @@ app.post("/submitToKensaDB", async (req, res) => {
     const pressDB = database.collection("pressDB"); // Add pressDB collection
     const deductionLogDB = database.collection("deduction_LogDB"); // Deduction Log collection
 
-    // Step 1: Insert the new record into kensaDB
-    formData.createdAt = new Date().toISOString(); // Add server timestamp
-    const result = await kensaDB.insertOne(formData);
-    _invalidateFinancialsCache('kensaDB insert (tablet)');
-    _invalidateFactoryOverviewCache('kensaDB insert (tablet)');
+    // Step 1: Check for an existing correction_needed document for the same 背番号/工場/Date.
+    // If found, UPDATE it (resolving the correction) instead of inserting a new duplicate.
+    const _existingCorrection = (formData.背番号 && formData.工場 && formData.Date)
+        ? await kensaDB.findOne({
+              背番号: formData.背番号,
+              工場:   formData.工場,
+              Date:   formData.Date,
+              approvalStatus: { $in: ['correction_needed', 'correction_needed_from_kacho'] }
+          })
+        : null;
+
+    let result;
+    if (_existingCorrection) {
+        // Build update payload — strip approval metadata so we don't clobber history
+        const _dataFields = { ...formData };
+        ['_id','approvalStatus','approvalHistory','correctionBy','correctionAt',
+         'correctionComment','correctionTarget','correctionResponseBy','correctionResponseAt'].forEach(k => delete _dataFields[k]);
+        _dataFields.createdAt = _existingCorrection.createdAt; // preserve original createdAt
+        _dataFields.correctionAppliedAt  = new Date().toISOString();
+        _dataFields.correctionAppliedVia = 'tablet_resubmit';
+
+        await kensaDB.updateOne(
+            { _id: _existingCorrection._id },
+            {
+                $set: { ..._dataFields, approvalStatus: 'pending' },
+                $push: {
+                    approvalHistory: {
+                        action:    '修正済み（タブレット再提出）',
+                        user:      formData.Worker_Name || 'tablet',
+                        timestamp: new Date(),
+                        comment:   '⚠️ 修正要求に対してタブレスト再提出で修正されました（重複防止）'
+                    }
+                }
+            }
+        );
+        _invalidateFinancialsCache('kensaDB correction update (tablet)');
+        _invalidateFactoryOverviewCache('kensaDB correction update (tablet)');
+        console.log(`🔄 /submitToKensaDB: updated existing correction_needed doc ${_existingCorrection._id} instead of inserting duplicate`);
+        result = { insertedId: _existingCorrection._id };
+    } else {
+        // Normal insert — no correction pending for this 背番号/工場/Date
+        formData.createdAt = new Date().toISOString(); // Add server timestamp
+        result = await kensaDB.insertOne(formData);
+        _invalidateFinancialsCache('kensaDB insert (tablet)');
+        _invalidateFactoryOverviewCache('kensaDB insert (tablet)');
+    }
 
     // Step 2: Aggregate total process quantity in kensaDB
     const kensaAggregation = await kensaDB
