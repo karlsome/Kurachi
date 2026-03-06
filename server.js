@@ -19314,6 +19314,275 @@ app.get('/gen-health', (req, res) => {
 });
 
 
+// GET /api/approvals/masterdb-products?q=searchTerm
+// Searches Sasaki_Coating_MasterDB by 品番 or 背番号 (case-insensitive)
+app.get('/api/approvals/masterdb-products', async (req, res) => {
+    const q = (req.query.q || '').trim();
+    try {
+        await client.connect();
+        const coll = client.db('Sasaki_Coating_MasterDB').collection('masterDB');
+        const query = q
+            ? { $or: [
+                { '品番':  { $regex: q, $options: 'i' } },
+                { '背番号': { $regex: q, $options: 'i' } }
+              ]}
+            : {};
+        const docs = await coll
+            .find(query, { projection: { '品番': 1, '背番号': 1, _id: 0 } })
+            .limit(100)
+            .toArray();
+        res.json({ success: true, data: docs });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// ─── DOCUMENT EDIT ROUTES ────────────────────────────────────────────────────
+// Collections allowed for editing
+// (reuses _ALLOWED_APPROVAL_COLLECTIONS defined just below, duplicated here for hoisting)
+const _EDITABLE_COLLECTIONS = ['kensaDB', 'pressDB', 'slitDB', 'SRSDB'];
+// Fields that must never be overwritten by an edit (system/approval metadata)
+const _EDIT_PROTECTED_FIELDS = [
+    '_id', 'approvalStatus', 'approvalHistory', 'editHistory',
+    'approvedBy', 'approvedAt', 'correctionBy', 'correctionAt', 'correctionComment',
+    'hanchoApprovedAt', 'hanchoApprovedBy', 'deleteRequestStatus', 'deleteRequestedBy',
+    'deleteRequestReason', 'deleteRequestAt', 'createdAt'
+];
+
+// POST /api/approvals/edit-document
+app.post('/api/approvals/edit-document', async (req, res) => {
+    const { collection, docId, changes, editedBy, editedByUsername, editNote, pendingImageOps } = req.body;
+    if (!collection || !docId || !changes || !editedBy) {
+        return res.status(400).json({ success: false, error: 'Missing required fields' });
+    }
+    if (!_EDITABLE_COLLECTIONS.includes(collection)) {
+        return res.status(400).json({ success: false, error: 'Invalid collection' });
+    }
+    // Strip protected fields from changes
+    _EDIT_PROTECTED_FIELDS.forEach(f => delete changes[f]);
+
+    try {
+        await client.connect();
+        const coll    = client.db('submittedDB').collection(collection);
+        const logColl = client.db('submittedDB').collection('approvalsLogs');
+        const oid = new ObjectId(docId);
+
+        const doc = await coll.findOne({ _id: oid });
+        if (!doc) return res.status(404).json({ success: false, error: 'Document not found' });
+
+        // ── Process pending image operations (server-side Firebase Admin upload) ──
+        if (Array.isArray(pendingImageOps) && pendingImageOps.length > 0) {
+            const downloadToken = 'masterDBToken69';
+            const bucket = admin.storage().bucket();
+
+            // Work on a mutable copy of the image array
+            const currentImages = Array.isArray(doc.materialLabelImages)
+                ? [...doc.materialLabelImages]
+                : [];
+
+            // Process adds and replaces first (need Firebase upload)
+            for (const op of pendingImageOps) {
+                if (op.type === 'delete') continue; // handled below
+                if (!op.base64) continue;
+
+                const buffer = Buffer.from(op.base64, 'base64');
+                const ext = (op.mimeType || 'image/jpeg').includes('png') ? '.png' : '.jpg';
+                const corrN = pendingImageOps.filter(o => o.type !== 'delete' && o.field === op.field && pendingImageOps.indexOf(o) <= pendingImageOps.indexOf(op)).length;
+                const fileName = `${doc.背番号 || 'unknown'}_${doc.Date || Date.now()}_${doc.Worker_Name || 'unknown'}_${doc.工場 || 'factory'}_Correction${corrN}_${Date.now()}${ext}`;
+                const filePath = `materialLabel/${doc.工場 || 'factory'}/${doc.設備 || 'setsubi'}/${fileName}`;
+                const file = bucket.file(filePath);
+
+                await file.save(buffer, {
+                    metadata: {
+                        contentType: op.mimeType || 'image/jpeg',
+                        metadata: { firebaseStorageDownloadTokens: downloadToken }
+                    }
+                });
+
+                const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${file.bucket.name}/o/${encodeURIComponent(file.name)}?alt=media&token=${downloadToken}`;
+
+                if (op.type === 'replace' && op.index != null && currentImages[op.index] !== undefined) {
+                    currentImages[op.index] = publicUrl;
+                } else if (op.type === 'add') {
+                    currentImages.push(publicUrl);
+                }
+            }
+
+            // Apply deletes in reverse index order
+            const deletes = pendingImageOps
+                .filter(op => op.type === 'delete')
+                .sort((a, b) => b.index - a.index);
+            deletes.forEach(op => {
+                if (currentImages[op.index] !== undefined) {
+                    currentImages.splice(op.index, 1);
+                }
+            });
+
+            // Inject final image state into changes
+            changes['materialLabelImages'] = currentImages;
+            changes['materialLabelImageCount'] = currentImages.length;
+            if (currentImages.length > 0) {
+                changes['材料ラベル画像'] = currentImages[0];
+            }
+        }
+
+        const jstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
+
+        // Build $set and changedFields (support dot-notation for nested fields)
+        const setFields = {};
+        const changedFields = [];
+        for (const [field, newVal] of Object.entries(changes)) {
+            const oldVal = field.split('.').reduce((o, k) => (o != null ? o[k] : undefined), doc);
+            if (JSON.stringify(oldVal) !== JSON.stringify(newVal)) {
+                setFields[field] = newVal;
+                changedFields.push({ field, before: oldVal !== undefined ? oldVal : null, after: newVal });
+            }
+        }
+        if (changedFields.length === 0) {
+            return res.json({ success: true, logId: null, message: 'No changes detected' });
+        }
+
+        // Build before/after snapshots (exclude _id)
+        const before = { ...doc }; delete before._id;
+        const after  = JSON.parse(JSON.stringify(before));
+        for (const [field, newVal] of Object.entries(setFields)) {
+            const parts = field.split('.');
+            let obj = after;
+            for (let i = 0; i < parts.length - 1; i++) {
+                if (typeof obj[parts[i]] !== 'object' || obj[parts[i]] === null) obj[parts[i]] = {};
+                obj = obj[parts[i]];
+            }
+            obj[parts[parts.length - 1]] = newVal;
+        }
+
+        // Insert log entry into approvalsLogs
+        const logResult = await logColl.insertOne({
+            type: 'edit',
+            collection,
+            docId: docId.toString(),
+            editedBy,
+            editedByUsername: editedByUsername || null,
+            timestamp: jstNow,
+            editNote: editNote || null,
+            changedFields,
+            before,
+            after
+        });
+        const logId = logResult.insertedId.toString();
+
+        // Apply to document
+        await coll.updateOne(
+            { _id: oid },
+            {
+                $set: setFields,
+                $push: {
+                    approvalHistory: {
+                        action:    '修正（管理編集）',
+                        user:      editedBy,
+                        timestamp: jstNow,
+                        comment:   editNote || `${changedFields.length}件のフィールドを変更`,
+                        logId
+                    },
+                    editHistory: logId
+                }
+            }
+        );
+
+        res.json({ success: true, logId });
+    } catch (err) {
+        console.error('edit-document error:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// GET /api/approvals/edit-history/:collection/:docId
+app.get('/api/approvals/edit-history/:collection/:docId', async (req, res) => {
+    const { collection, docId } = req.params;
+    if (!_EDITABLE_COLLECTIONS.includes(collection)) {
+        return res.status(400).json({ success: false, error: 'Invalid collection' });
+    }
+    try {
+        await client.connect();
+        const logColl = client.db('submittedDB').collection('approvalsLogs');
+        const logs = await logColl
+            .find({ collection, docId: docId.toString() })
+            .sort({ timestamp: -1 })
+            .toArray();
+        res.json({ success: true, data: logs });
+    } catch (err) {
+        console.error('edit-history error:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// POST /api/approvals/revert-document
+app.post('/api/approvals/revert-document', async (req, res) => {
+    const { collection, docId, logId, revertedBy, revertedByUsername } = req.body;
+    if (!collection || !docId || !logId || !revertedBy) {
+        return res.status(400).json({ success: false, error: 'Missing required fields' });
+    }
+    if (!_EDITABLE_COLLECTIONS.includes(collection)) {
+        return res.status(400).json({ success: false, error: 'Invalid collection' });
+    }
+    try {
+        await client.connect();
+        const coll    = client.db('submittedDB').collection(collection);
+        const logColl = client.db('submittedDB').collection('approvalsLogs');
+
+        const logEntry = await logColl.findOne({ _id: new ObjectId(logId) });
+        if (!logEntry) return res.status(404).json({ success: false, error: 'Log entry not found' });
+
+        const oid = new ObjectId(docId);
+        const currentDoc = await coll.findOne({ _id: oid });
+        if (!currentDoc) return res.status(404).json({ success: false, error: 'Document not found' });
+
+        const jstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
+
+        // Only restore data fields — keep approval/system fields from current doc
+        const revertFields = {};
+        for (const [k, v] of Object.entries(logEntry.before)) {
+            if (!_EDIT_PROTECTED_FIELDS.includes(k)) revertFields[k] = v;
+        }
+
+        // Log the revert itself for traceability
+        const currentBefore = { ...currentDoc }; delete currentBefore._id;
+        const revertLog = await logColl.insertOne({
+            type: 'revert',
+            collection,
+            docId: docId.toString(),
+            revertedBy,
+            revertedByUsername: revertedByUsername || null,
+            timestamp: jstNow,
+            revertToLogId: logId,
+            before: currentBefore,
+            after: revertFields
+        });
+
+        await coll.updateOne(
+            { _id: oid },
+            {
+                $set: revertFields,
+                $push: {
+                    approvalHistory: {
+                        action:    '修正取消（過去の状態に復元）',
+                        user:      revertedBy,
+                        timestamp: jstNow,
+                        comment:   `編集ログ #${logId} の状態に復元`,
+                        logId:     revertLog.insertedId.toString()
+                    },
+                    editHistory: revertLog.insertedId.toString()
+                }
+            }
+        );
+
+        res.json({ success: true, logId: revertLog.insertedId.toString() });
+    } catch (err) {
+        console.error('revert-document error:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+
 // ─── SOFT DELETE / RECYCLE BIN ROUTES ────────────────────────────────────────
 
 const _ALLOWED_APPROVAL_COLLECTIONS = ['kensaDB', 'pressDB', 'slitDB', 'SRSDB'];
