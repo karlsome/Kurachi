@@ -16304,16 +16304,14 @@ app.get('/api/factory-overview/sensors', async (req, res) => {
             {
                 $group: {
                     _id: { factory: '$工場', device: '$device' },
-                    latestReading: { $first: '$$ROOT' },
-                    maxTempForDevice: { $max: '$temperatureNum' } // true daily max for this device
+                    latestReading: { $first: '$$ROOT' }
                 }
             },
             {
                 $group: {
                     _id: '$_id.factory',
                     sensors: { $push: '$latestReading' },
-                    highestTemp: { $max: '$latestReading.temperatureNum' }, // current (latest per device)
-                    highestTempToday: { $max: '$maxTempForDevice' }, // true daily max across all readings
+                    highestTemp: { $max: '$latestReading.temperatureNum' },
                     avgTemp: { $avg: '$latestReading.temperatureNum' },
                     avgHumidity: { $avg: '$latestReading.humidityNum' },
                     sensorCount: { $sum: 1 }
@@ -16324,7 +16322,6 @@ app.get('/api/factory-overview/sensors', async (req, res) => {
                     _id: 0,
                     factory: '$_id',
                     highestTemp: { $round: ['$highestTemp', 2] },
-                    highestTempToday: { $round: ['$highestTempToday', 2] },
                     avgTemp: { $round: ['$avgTemp', 2] },
                     avgHumidity: { $round: ['$avgHumidity', 1] },
                     sensorCount: 1,
@@ -16346,7 +16343,6 @@ app.get('/api/factory-overview/sensors', async (req, res) => {
                 
                 sensorData[item.factory] = {
                     highestTemp: item.highestTemp,
-                    highestTempToday: item.highestTempToday,
                     avgTemp: item.avgTemp,
                     avgHumidity: item.avgHumidity,
                     wbgt: wbgt,
@@ -16401,86 +16397,6 @@ app.get('/api/factory-overview/sensors', async (req, res) => {
             success: false,
             message: 'Failed to fetch sensor data: ' + error.message
         });
-    }
-});
-
-/**
- * GET /api/sensor-details
- * Returns current per-sensor readings AND true daily max temperature for a specific factory.
- * Dedicated optimized route — avoids using /queries generic endpoint.
- */
-app.get('/api/sensor-details', async (req, res) => {
-    try {
-        const factory = req.query.factory;
-        const date = req.query.date || new Date().toISOString().split('T')[0];
-
-        if (!factory) {
-            return res.status(400).json({ success: false, message: 'factory query param required' });
-        }
-
-        console.log(`🌡️ /api/sensor-details: factory=${factory}, date=${date}`);
-
-        const db = client.db('submittedDB');
-        const collection = db.collection('tempHumidityDB');
-
-        // Fetch all readings for the factory today (needed for true daily max)
-        const allReadings = await collection.find({
-            工場: factory,
-            Date: date,
-            Temperature: { $not: { $regex: 'SENSOR|FAILURE|ERROR|error|fault|FAULT' } },
-            Humidity:    { $not: { $regex: 'SENSOR|FAILURE|ERROR|error|fault|FAULT' } }
-        }, {
-            projection: { device: 1, Date: 1, Time: 1, Temperature: 1, Humidity: 1, sensorStatus: 1 }
-        }).sort({ Time: -1 }).toArray();
-
-        if (!allReadings.length) {
-            return res.json({ success: true, factory, date, sensors: [], highestTempToday: null, sensorCount: 0, avgHumidity: null });
-        }
-
-        // Helper: parse numeric value from "23.5°C" or "23.5"
-        const parseTemp = v => parseFloat((v || '').toString().replace('°C','').trim());
-        const parseHum  = v => parseFloat((v || '').toString().replace('%','').trim());
-
-        // True daily max across ALL readings
-        const allTemps = allReadings.map(r => parseTemp(r.Temperature)).filter(t => !isNaN(t));
-        const highestTempToday = allTemps.length > 0 ? Math.round(Math.max(...allTemps) * 100) / 100 : null;
-
-        // Latest reading per device (current state)
-        const latestMap = new Map();
-        allReadings.forEach(r => {
-            if (!latestMap.has(r.device)) latestMap.set(r.device, r); // sorted by Time:-1 so first = latest
-        });
-
-        const sensors = Array.from(latestMap.values()).map(r => ({
-            deviceId: r.device,
-            temperature: parseTemp(r.Temperature),
-            humidity:    parseHum(r.Humidity),
-            status:      r.sensorStatus || 'OK',
-            lastUpdate:  `${r.Date} ${r.Time}`
-        }));
-
-        const humidities = sensors.map(s => s.humidity).filter(h => !isNaN(h));
-        const avgHumidity = humidities.length > 0
-            ? Math.round(humidities.reduce((a, b) => a + b, 0) / humidities.length * 10) / 10
-            : null;
-
-        console.log(`✅ /api/sensor-details: ${sensors.length} sensors, highestTempToday=${highestTempToday}°C`);
-
-        res.json({
-            success: true,
-            factory,
-            date,
-            sensors,
-            highestTempToday,
-            sensorCount: sensors.length,
-            averageHumidity: avgHumidity,
-            avgHumidity,
-            hasCurrentDateData: sensors.length > 0
-        });
-
-    } catch (error) {
-        console.error('❌ Error in /api/sensor-details:', error);
-        res.status(500).json({ success: false, message: 'Failed to fetch sensor details: ' + error.message });
     }
 });
 
@@ -19396,6 +19312,447 @@ app.get('/gen-health', (req, res) => {
         message: 'GEN CSV Download functionality is active'
     });
 });
+
+
+// ─── SOFT DELETE / RECYCLE BIN ROUTES ────────────────────────────────────────
+
+const _ALLOWED_APPROVAL_COLLECTIONS = ['kensaDB', 'pressDB', 'slitDB', 'SRSDB'];
+const _SENIOR_ROLES = ['admin', '課長', '係長', '部長'];
+const _ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
+
+// GET /api/approvals/recycle-bin — fetch all bin docs, lazy-purge 1yr expired
+app.get('/api/approvals/recycle-bin', async (req, res) => {
+    try {
+        await client.connect();
+        const recycleColl = client.db('recycleBinDB').collection('deleted_approvals');
+        const now = new Date();
+
+        // Lazy purge: permanently delete docs that have passed their 1-year expiry
+        const expired = await recycleColl.find({ expiresAt: { $lte: now } }).toArray();
+        if (expired.length > 0) {
+            const jstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
+            const logColl = client.db('Sasaki_Coating_MasterDB').collection('masterDB_Log');
+            const logEntries = expired.map(doc => ({
+                _id: new ObjectId(),
+                action: 'auto_purged',
+                docId: doc._id.toString(),
+                originalCollection: doc.originalCollection,
+                performedBy: 'system',
+                requestedBy: doc.deletedBy || null,
+                timestamp: jstNow,
+                originalDoc: doc.originalDoc
+            }));
+            await logColl.insertMany(logEntries);
+            await recycleColl.deleteMany({ _id: { $in: expired.map(d => d._id) } });
+        }
+
+        const items = await recycleColl.find({}).sort({ deletedAt: -1 }).toArray();
+        res.json({ success: true, data: items, purgedCount: expired.length });
+    } catch (err) {
+        console.error('recycle-bin GET error:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// POST /api/approvals/soft-delete — senior roles direct soft-delete
+app.post('/api/approvals/soft-delete', async (req, res) => {
+    const { itemId, collectionName, reason, deletedBy, deletedByUsername } = req.body;
+    if (!itemId || !collectionName || !reason || !deletedBy) {
+        return res.status(400).json({ error: 'Missing required fields' });
+    }
+    if (!_ALLOWED_APPROVAL_COLLECTIONS.includes(collectionName)) {
+        return res.status(400).json({ error: 'Invalid collection' });
+    }
+    try {
+        await client.connect();
+        const submitColl = client.db('submittedDB').collection(collectionName);
+        const recycleColl = client.db('recycleBinDB').collection('deleted_approvals');
+        const logColl = client.db('Sasaki_Coating_MasterDB').collection('masterDB_Log');
+
+        const docId = new ObjectId(itemId);
+        const doc = await submitColl.findOne({ _id: docId });
+        if (!doc) return res.status(404).json({ error: 'Document not found' });
+
+        const jstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
+        const expiresAt = new Date(Date.now() + _ONE_YEAR_MS);
+
+        // Push history entry into the live doc, then re-fetch to store the updated copy in bin
+        await submitColl.updateOne(
+            { _id: docId },
+            { $push: { approvalHistory: { action: 'ソフト削除', user: deletedBy, timestamp: jstNow, comment: reason } } }
+        );
+        const updatedDoc = await submitColl.findOne({ _id: docId });
+
+        await recycleColl.insertOne({
+            originalDb: 'submittedDB',
+            originalCollection: collectionName,
+            originalDoc: updatedDoc,
+            deletedBy,
+            deletedByUsername: deletedByUsername || null,
+            deletedAt: jstNow,
+            deleteReason: reason,
+            deletedVia: 'direct',
+            requestedBy: null,
+            expiresAt
+        });
+        await submitColl.deleteOne({ _id: docId });
+        await logColl.insertOne({
+            _id: new ObjectId(),
+            action: 'soft_deleted',
+            docId: itemId,
+            originalCollection: collectionName,
+            performedBy: deletedBy,
+            requestedBy: null,
+            timestamp: jstNow,
+            deleteReason: reason,
+            originalDoc: updatedDoc
+        });
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error('soft-delete error:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// POST /api/approvals/request-delete — 班長 flags doc for deletion
+app.post('/api/approvals/request-delete', async (req, res) => {
+    const { itemId, collectionName, reason, requestedBy, requestedByUsername } = req.body;
+    if (!itemId || !collectionName || !reason || !requestedBy) {
+        return res.status(400).json({ error: 'Missing required fields' });
+    }
+    if (!_ALLOWED_APPROVAL_COLLECTIONS.includes(collectionName)) {
+        return res.status(400).json({ error: 'Invalid collection' });
+    }
+    try {
+        await client.connect();
+        const submitColl = client.db('submittedDB').collection(collectionName);
+        const logColl = client.db('Sasaki_Coating_MasterDB').collection('masterDB_Log');
+        const docId = new ObjectId(itemId);
+        const jstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
+
+        const result = await submitColl.updateOne(
+            { _id: docId },
+            {
+                $set: {
+                    deleteRequestStatus: 'pending_delete',
+                    deleteRequestedBy: requestedBy,
+                    deleteRequestedByUsername: requestedByUsername || null,
+                    deleteRequestedAt: jstNow,
+                    deleteRequestReason: reason
+                },
+                $push: {
+                    approvalHistory: {
+                        action: '削除要求',
+                        user: requestedBy,
+                        timestamp: jstNow,
+                        comment: reason
+                    }
+                }
+            }
+        );
+        if (result.matchedCount === 0) return res.status(404).json({ error: 'Document not found' });
+
+        await logColl.insertOne({
+            _id: new ObjectId(),
+            action: 'soft_delete_request',
+            docId: itemId,
+            originalCollection: collectionName,
+            performedBy: requestedBy,
+            requestedBy,
+            timestamp: jstNow,
+            deleteReason: reason
+        });
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error('request-delete error:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// POST /api/approvals/approve-delete-request — senior approves 班長 delete request
+app.post('/api/approvals/approve-delete-request', async (req, res) => {
+    const { itemId, collectionName, approvedBy, approvedByUsername } = req.body;
+    if (!itemId || !collectionName || !approvedBy) {
+        return res.status(400).json({ error: 'Missing required fields' });
+    }
+    if (!_ALLOWED_APPROVAL_COLLECTIONS.includes(collectionName)) {
+        return res.status(400).json({ error: 'Invalid collection' });
+    }
+    try {
+        await client.connect();
+        const submitColl = client.db('submittedDB').collection(collectionName);
+        const recycleColl = client.db('recycleBinDB').collection('deleted_approvals');
+        const logColl = client.db('Sasaki_Coating_MasterDB').collection('masterDB_Log');
+
+        const docId = new ObjectId(itemId);
+        const doc = await submitColl.findOne({ _id: docId });
+        if (!doc) return res.status(404).json({ error: 'Document not found' });
+        if (doc.deleteRequestStatus !== 'pending_delete') {
+            return res.status(400).json({ error: 'Document is not in pending_delete state' });
+        }
+
+        const jstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
+        const expiresAt = new Date(Date.now() + _ONE_YEAR_MS);
+
+        // Push history entry into the live doc, then re-fetch to store the updated copy in bin
+        await submitColl.updateOne(
+            { _id: docId },
+            { $push: { approvalHistory: { action: '削除承認', user: approvedBy, timestamp: jstNow, comment: doc.deleteRequestReason || '' } } }
+        );
+        const updatedDoc = await submitColl.findOne({ _id: docId });
+
+        await recycleColl.insertOne({
+            originalDb: 'submittedDB',
+            originalCollection: collectionName,
+            originalDoc: updatedDoc,
+            deletedBy: approvedBy,
+            deletedByUsername: approvedByUsername || null,
+            deletedAt: jstNow,
+            deleteReason: doc.deleteRequestReason,
+            deletedVia: 'approved_request',
+            requestedBy: doc.deleteRequestedBy,
+            requestedByUsername: doc.deleteRequestedByUsername || null,
+            expiresAt
+        });
+        await submitColl.deleteOne({ _id: docId });
+        await logColl.insertMany([
+            {
+                _id: new ObjectId(),
+                action: 'soft_delete_approved',
+                docId: itemId,
+                originalCollection: collectionName,
+                performedBy: approvedBy,
+                requestedBy: doc.deleteRequestedBy,
+                timestamp: jstNow,
+                deleteReason: doc.deleteRequestReason
+            },
+            {
+                _id: new ObjectId(),
+                action: 'soft_deleted',
+                docId: itemId,
+                originalCollection: collectionName,
+                performedBy: approvedBy,
+                requestedBy: doc.deleteRequestedBy,
+                timestamp: jstNow,
+                deleteReason: doc.deleteRequestReason,
+                originalDoc: doc
+            }
+        ]);
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error('approve-delete-request error:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// POST /api/approvals/reject-delete-request — senior rejects 班長 delete request
+app.post('/api/approvals/reject-delete-request', async (req, res) => {
+    const { itemId, collectionName, rejectedBy, rejectedByUsername, rejectReason } = req.body;
+    if (!itemId || !collectionName || !rejectedBy) {
+        return res.status(400).json({ error: 'Missing required fields' });
+    }
+    if (!_ALLOWED_APPROVAL_COLLECTIONS.includes(collectionName)) {
+        return res.status(400).json({ error: 'Invalid collection' });
+    }
+    try {
+        await client.connect();
+        const submitColl = client.db('submittedDB').collection(collectionName);
+        const logColl = client.db('Sasaki_Coating_MasterDB').collection('masterDB_Log');
+        const docId = new ObjectId(itemId);
+        const jstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
+
+        const result = await submitColl.updateOne(
+            { _id: docId, deleteRequestStatus: 'pending_delete' },
+            {
+                $unset: {
+                    deleteRequestStatus: '',
+                    deleteRequestedBy: '',
+                    deleteRequestedByUsername: '',
+                    deleteRequestedAt: '',
+                    deleteRequestReason: ''
+                },
+                $push: {
+                    approvalHistory: {
+                        action: '削除要求却下',
+                        user: rejectedBy,
+                        timestamp: jstNow,
+                        comment: rejectReason || ''
+                    }
+                }
+            }
+        );
+        if (result.matchedCount === 0) {
+            return res.status(404).json({ error: 'Document not found or not in pending_delete state' });
+        }
+
+        await logColl.insertOne({
+            _id: new ObjectId(),
+            action: 'soft_delete_rejected',
+            docId: itemId,
+            originalCollection: collectionName,
+            performedBy: rejectedBy,
+            timestamp: jstNow,
+            rejectReason: rejectReason || ''
+        });
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error('reject-delete-request error:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// POST /api/approvals/cancel-delete-request — 班長 cancels their own pending delete request
+app.post('/api/approvals/cancel-delete-request', async (req, res) => {
+    const { itemId, collectionName, canceledBy, canceledByUsername } = req.body;
+    if (!itemId || !collectionName || !canceledBy) {
+        return res.status(400).json({ error: 'Missing required fields' });
+    }
+    if (!_ALLOWED_APPROVAL_COLLECTIONS.includes(collectionName)) {
+        return res.status(400).json({ error: 'Invalid collection' });
+    }
+    try {
+        await client.connect();
+        const submitColl = client.db('submittedDB').collection(collectionName);
+        const logColl = client.db('Sasaki_Coating_MasterDB').collection('masterDB_Log');
+        const docId = new ObjectId(itemId);
+        const jstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
+
+        const result = await submitColl.updateOne(
+            { _id: docId, deleteRequestStatus: 'pending_delete' },
+            {
+                $unset: {
+                    deleteRequestStatus: '',
+                    deleteRequestedBy: '',
+                    deleteRequestedByUsername: '',
+                    deleteRequestedAt: '',
+                    deleteRequestReason: ''
+                },
+                $push: {
+                    approvalHistory: {
+                        action: '削除要求取り消し',
+                        user: canceledBy,
+                        timestamp: jstNow
+                    }
+                }
+            }
+        );
+        if (result.matchedCount === 0) {
+            return res.status(404).json({ error: 'Document not found or not in pending_delete state' });
+        }
+
+        await logColl.insertOne({
+            _id: new ObjectId(),
+            action: 'soft_delete_canceled',
+            docId: itemId,
+            originalCollection: collectionName,
+            performedBy: canceledBy,
+            timestamp: jstNow
+        });
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error('cancel-delete-request error:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// POST /api/approvals/restore — restore doc from recycleBin to original collection
+app.post('/api/approvals/restore', async (req, res) => {
+    const { binDocId, restoredBy, restoredByUsername } = req.body;
+    if (!binDocId || !restoredBy) {
+        return res.status(400).json({ error: 'Missing required fields' });
+    }
+    try {
+        await client.connect();
+        const recycleColl = client.db('recycleBinDB').collection('deleted_approvals');
+        const logColl = client.db('Sasaki_Coating_MasterDB').collection('masterDB_Log');
+
+        const binDocObjId = new ObjectId(binDocId);
+        const binDoc = await recycleColl.findOne({ _id: binDocObjId });
+        if (!binDoc) return res.status(404).json({ error: 'Recycle bin document not found' });
+
+        const origColl = client.db(binDoc.originalDb).collection(binDoc.originalCollection);
+        const jstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
+
+        // Restore original doc, strip any pending_delete flags, append restore history entry
+        const docToRestore = { ...binDoc.originalDoc };
+        delete docToRestore.deleteRequestStatus;
+        delete docToRestore.deleteRequestedBy;
+        delete docToRestore.deleteRequestedByUsername;
+        delete docToRestore.deleteRequestedAt;
+        delete docToRestore.deleteRequestReason;
+        // Ensure _id is ObjectId
+        if (docToRestore._id && typeof docToRestore._id === 'string') {
+            docToRestore._id = new ObjectId(docToRestore._id);
+        }
+        // Append restore event to approvalHistory
+        if (!Array.isArray(docToRestore.approvalHistory)) docToRestore.approvalHistory = [];
+        docToRestore.approvalHistory.push({ action: 'ゴミ箱から復元', user: restoredBy, timestamp: jstNow });
+
+        await origColl.insertOne(docToRestore);
+        await recycleColl.deleteOne({ _id: binDocObjId });
+
+        await logColl.insertOne({
+            _id: new ObjectId(),
+            action: 'restored_from_bin',
+            docId: binDoc.originalDoc._id ? binDoc.originalDoc._id.toString() : null,
+            originalCollection: binDoc.originalCollection,
+            performedBy: restoredBy,
+            requestedBy: binDoc.requestedBy || null,
+            timestamp: jstNow,
+            restoredBy,
+            originalDoc: binDoc.originalDoc
+        });
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error('restore error:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// DELETE /api/approvals/permanent-delete — admin only instant hard delete from bin
+app.delete('/api/approvals/permanent-delete', async (req, res) => {
+    const { binDocId, deletedBy } = req.body;
+    if (!binDocId || !deletedBy) {
+        return res.status(400).json({ error: 'Missing required fields' });
+    }
+    try {
+        await client.connect();
+        const recycleColl = client.db('recycleBinDB').collection('deleted_approvals');
+        const logColl = client.db('Sasaki_Coating_MasterDB').collection('masterDB_Log');
+
+        const binDocObjId = new ObjectId(binDocId);
+        const binDoc = await recycleColl.findOne({ _id: binDocObjId });
+        if (!binDoc) return res.status(404).json({ error: 'Recycle bin document not found' });
+
+        await recycleColl.deleteOne({ _id: binDocObjId });
+
+        const jstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
+        await logColl.insertOne({
+            _id: new ObjectId(),
+            action: 'permanently_deleted',
+            docId: binDoc.originalDoc._id ? binDoc.originalDoc._id.toString() : null,
+            originalCollection: binDoc.originalCollection,
+            performedBy: deletedBy,
+            requestedBy: binDoc.requestedBy || null,
+            timestamp: jstNow,
+            deleteReason: binDoc.deleteReason,
+            originalDoc: binDoc.originalDoc
+        });
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error('permanent-delete error:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 
 app.listen(port, () => {
