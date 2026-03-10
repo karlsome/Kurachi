@@ -1951,7 +1951,7 @@ if(confirmReprintButton) {
           printFields = {
             品番: specialMaterial.お客様品番 || 品番,           // 品番 ← お客様品番
             背番号: specialMaterial.品名 || "",              // 背番号 ← 品名  
-            収容数: specialMaterial.length || length,        // 収容数 ← length
+            収容数: orderVal,                               // 収容数 ← orderVal (from 生産順番 / 10)
             色: specialMaterial.色 || 色,                    // 色 stays the same
           };
           // ✅ For special QR reprint: barcode is ONLY the お客様品番 (no concatenation)
