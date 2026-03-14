@@ -21390,6 +21390,7 @@ app.get('/api/factory/video-manuals', async (req, res) => {
       {
         $project: {
           title: 1,
+          description: 1,
           playlistId: 1,
           thumbnailUrl: 1,
           duration: 1,
