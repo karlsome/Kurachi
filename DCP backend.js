@@ -7784,17 +7784,21 @@ function getVideoManualSelectedProjectTitle() {
 function setVideoManualMode(mode = 'picker') {
   videoManualState.mode = mode;
   const projectGrid = document.getElementById('videoManualProjectGrid');
+  const detailPanel = document.getElementById('videoManualDetailPanel');
   const controllerPanel = document.getElementById('videoManualControllerPanel');
   const footerAction = document.getElementById('videoManualSelectButton');
   const footerCancel = document.getElementById('videoManualCloseFooterButton');
+  const footer = document.querySelector('#videoManualModal .video-manual-modal__footer');
   const subtitle = document.getElementById('videoManualSubtitle');
 
   if (projectGrid) projectGrid.style.display = mode === 'picker' ? 'grid' : 'none';
+  if (detailPanel) detailPanel.style.display = mode === 'detail' ? 'block' : 'none';
   if (controllerPanel) controllerPanel.style.display = mode === 'controller' ? 'grid' : 'none';
-  if (footerAction) footerAction.style.display = mode === 'picker' ? 'inline-flex' : 'none';
-  if (footerCancel) footerCancel.textContent = mode === 'picker' ? 'Cancel' : 'Close';
+  if (footerAction) footerAction.style.display = 'none';
+  if (footer) footer.style.display = mode === 'picker' ? 'flex' : 'none';
+  if (footerCancel) footerCancel.textContent = 'Cancel';
   if (subtitle && mode === 'controller') {
-    subtitle.textContent = `${getVideoManualSelectedProjectTitle()} · Monitor remote control`;
+    subtitle.textContent = `${getVideoManualSelectedProjectTitle()} · Remote`;
   }
 }
 
@@ -8000,8 +8004,8 @@ function syncVideoManualLauncherState() {
   button.disabled = !enabled;
   button.className = `video-manual-launcher${enabled ? '' : ' is-disabled'}`;
   button.innerHTML = enabled
-    ? `<span class="video-manual-launcher__icon">🎬</span><span>Video Manual</span>`
-    : `<span class="video-manual-launcher__icon">🎬</span><span>Video Manual</span><small>Scan product first</small>`;
+    ? `<span class="video-manual-launcher__icon">🎬</span><span>Manual</span>`
+    : `<span class="video-manual-launcher__icon">🎬</span><span>Manual</span><small>Scan first</small>`;
 }
 
 function renderVideoManualProjects() {
@@ -8046,18 +8050,72 @@ function renderVideoManualProjects() {
 
     grid.querySelectorAll('[data-project-id]').forEach(card => {
       card.addEventListener('click', () => {
-        videoManualState.selectedProjectId = card.dataset.projectId;
-        renderVideoManualProjects();
+        openVideoManualDetail(card.dataset.projectId);
       });
     });
   }
 
-  const selectedProject = getSelectedVideoManualProject();
-  selectedLabel.textContent = selectedProject
-    ? `Selected: ${selectedProject.title || 'Untitled Project'}`
-    : 'Select a video manual project';
-  actionButton.disabled = !selectedProject;
   updateVideoManualControllerUi();
+}
+
+function openVideoManualDetail(projectId) {
+  videoManualState.selectedProjectId = projectId;
+  const project = getSelectedVideoManualProject();
+  if (!project) return;
+
+  const detailPanel = document.getElementById('videoManualDetailPanel');
+  if (!detailPanel) return;
+
+  const subtitle = document.getElementById('videoManualSubtitle');
+  if (subtitle) subtitle.textContent = project.title || 'Untitled Project';
+
+  const rev = project.deployedRevision || project.revision || null;
+  const revBadge = rev != null ? `<span class="vmd-badge">Rev ${rev}</span>` : '';
+  const updatedDate = project.updatedAt || project.deployedAt
+    ? new Date(project.updatedAt || project.deployedAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+    : null;
+  const deployedDate = project.deployedAt
+    ? new Date(project.deployedAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+    : null;
+
+  const rows = [
+    { label: 'Steps', value: String(project.stepsCount || 0) },
+    project.duration ? { label: 'Duration', value: formatVideoManualDuration(project.duration) } : null,
+    rev != null ? { label: 'Revision', value: `Rev ${rev}` } : null,
+    deployedDate ? { label: 'Deployed', value: deployedDate } : null,
+    updatedDate ? { label: 'Updated', value: updatedDate } : null,
+  ].filter(Boolean);
+
+  const rowsHtml = rows.map(r =>
+    `<div class="vmd-row"><span class="vmd-row__label">${r.label}</span><span class="vmd-row__value">${r.value}</span></div>`
+  ).join('');
+
+  detailPanel.innerHTML = `
+    <div class="vmd">
+      <button type="button" class="vmd-back" id="videoManualDetailBackBtn">&#8592; Projects</button>
+      <div class="vmd-header">
+        <span class="vmd-title">${project.title || 'Untitled Project'}</span>
+        ${revBadge}
+      </div>
+      <div class="vmd-table">${rowsHtml}</div>
+      ${project.description ? `<p class="vmd-desc">${project.description}</p>` : ''}
+      <button type="button" class="vmd-play" id="videoManualDetailPlayBtn">Play on Monitor</button>
+    </div>
+  `;
+
+  document.getElementById('videoManualDetailBackBtn')?.addEventListener('click', () => {
+    const model = String(getCurrentProductModel() || '').trim();
+    const sub = document.getElementById('videoManualSubtitle');
+    if (sub) sub.textContent = model
+      ? `${model} · ${videoManualState.projects.length} deployed project${videoManualState.projects.length === 1 ? '' : 's'}`
+      : 'No scanned model';
+    setVideoManualMode('picker');
+  });
+  document.getElementById('videoManualDetailPlayBtn')?.addEventListener('click', () => {
+    handleVideoManualSelection();
+  });
+
+  setVideoManualMode('detail');
 }
 
 async function loadVideoManualProjects() {
@@ -8209,34 +8267,35 @@ function ensureVideoManualPickerUi() {
   style.textContent = `
     .video-manual-launcher {
       position: fixed;
-      right: 16px;
-      bottom: 92px;
+      left: max(12px, env(safe-area-inset-left));
+      top: max(12px, env(safe-area-inset-top));
       z-index: 9998;
       display: inline-flex;
       align-items: center;
-      gap: 10px;
-      padding: 14px 18px;
+      gap: 8px;
+      min-height: 40px;
+      padding: 8px 14px;
       border: none;
-      border-radius: 999px;
-      background: linear-gradient(135deg, #0f766e 0%, #155e75 100%);
+      border-radius: 8px;
+      background: #0f766e;
       color: white;
-      box-shadow: 0 14px 32px rgba(15, 118, 110, 0.28);
+      font-size: 13px;
       font-weight: 700;
       cursor: pointer;
+      touch-action: manipulation;
     }
     .video-manual-launcher small {
       display: block;
-      font-size: 11px;
+      font-size: 10px;
       font-weight: 500;
-      opacity: 0.82;
+      opacity: 0.75;
     }
     .video-manual-launcher.is-disabled {
-      background: linear-gradient(135deg, #9ca3af 0%, #6b7280 100%);
-      box-shadow: none;
+      background: #94a3b8;
       cursor: not-allowed;
     }
     .video-manual-launcher__icon {
-      font-size: 20px;
+      font-size: 16px;
     }
     .video-manual-modal {
       position: fixed;
@@ -8245,157 +8304,275 @@ function ensureVideoManualPickerUi() {
       display: none;
       align-items: center;
       justify-content: center;
-      background: rgba(2, 6, 23, 0.72);
-      backdrop-filter: blur(10px);
-      padding: 18px;
+      background: rgba(0, 0, 0, 0.5);
+      padding: 12px;
     }
     .video-manual-modal__panel {
-      width: min(1100px, 100%);
-      max-height: calc(100vh - 36px);
+      width: min(960px, 100%);
+      max-height: calc(100vh - 24px);
       overflow: hidden;
       display: flex;
       flex-direction: column;
-      background: linear-gradient(180deg, #f8fafc 0%, #e2e8f0 100%);
-      border-radius: 28px;
-      box-shadow: 0 30px 70px rgba(15, 23, 42, 0.3);
+      background: #ffffff;
+      border-radius: 16px;
+      border: 1px solid #e2e8f0;
     }
     .video-manual-modal__header {
       display: flex;
       justify-content: space-between;
       align-items: flex-start;
-      gap: 16px;
-      padding: 22px 24px 16px;
-      border-bottom: 1px solid rgba(148, 163, 184, 0.3);
+      gap: 12px;
+      padding: 16px 20px 14px;
+      border-bottom: 1px solid #e2e8f0;
     }
     .video-manual-modal__eyebrow {
-      font-size: 12px;
-      letter-spacing: 0.18em;
-      font-weight: 800;
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      font-weight: 700;
       color: #0f766e;
       text-transform: uppercase;
-      margin-bottom: 8px;
+      margin-bottom: 4px;
     }
     .video-manual-modal__title {
-      font-size: clamp(28px, 4vw, 40px);
-      line-height: 1;
-      font-weight: 900;
+      font-size: clamp(20px, 2.5vw, 28px);
+      line-height: 1.1;
+      font-weight: 800;
       color: #0f172a;
       margin: 0;
     }
     .video-manual-modal__subtitle {
-      margin-top: 10px;
-      color: #475569;
+      margin-top: 4px;
+      font-size: 13px;
+      color: #64748b;
       font-weight: 600;
     }
     .video-manual-modal__close {
-      border: none;
-      background: rgba(255, 255, 255, 0.7);
+      border: 1px solid #e2e8f0;
+      background: white;
       color: #334155;
-      border-radius: 999px;
-      padding: 10px 16px;
+      border-radius: 8px;
+      min-height: 38px;
+      padding: 8px 14px;
+      font-size: 14px;
       font-weight: 700;
       cursor: pointer;
+      touch-action: manipulation;
     }
     .video-manual-modal__body {
       position: relative;
-      padding: 20px 24px 24px;
+      padding: 16px 20px;
       overflow: auto;
-      min-height: 360px;
+      flex: 1;
+      min-height: 260px;
     }
     .video-manual-project-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-      gap: 18px;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+    }
+    .video-manual-detail-panel {
+      display: none;
+    }
+    .vmd {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      max-width: 560px;
+      margin: 0 auto;
+    }
+    .vmd-back {
+      align-self: flex-start;
+      background: none;
+      border: none;
+      padding: 0;
+      font-size: 13px;
+      font-weight: 600;
+      color: #64748b;
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+    .vmd-back:hover { color: #0f766e; }
+    .vmd-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .vmd-title {
+      font-size: 24px;
+      font-weight: 800;
+      color: #0f172a;
+      line-height: 1.1;
+    }
+    .vmd-badge {
+      font-size: 12px;
+      font-weight: 700;
+      color: #0f766e;
+      background: #f0fdf4;
+      border: 1px solid #bbf7d0;
+      border-radius: 6px;
+      padding: 3px 8px;
+      white-space: nowrap;
+    }
+    .vmd-table {
+      display: flex;
+      flex-direction: column;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .vmd-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      border-bottom: 1px solid #f1f5f9;
+    }
+    .vmd-row:last-child { border-bottom: none; }
+    .vmd-row__label {
+      font-size: 13px;
+      font-weight: 600;
+      color: #94a3b8;
+    }
+    .vmd-row__value {
+      font-size: 14px;
+      font-weight: 700;
+      color: #1e293b;
+    }
+    .vmd-desc {
+      font-size: 14px;
+      color: #475569;
+      line-height: 1.6;
+      margin: 0;
+      padding: 14px 16px;
+      background: #f8fafc;
+      border-radius: 10px;
+      border: 1px solid #e2e8f0;
+    }
+    .vmd-play {
+      width: 100%;
+      min-height: 52px;
+      border: none;
+      border-radius: 10px;
+      background: #0f766e;
+      color: white;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      touch-action: manipulation;
     }
     .video-manual-controller-panel {
       display: none;
       grid-template-columns: 1fr;
-      gap: 18px;
+      gap: 12px;
     }
     .video-manual-controller-shell {
       background: white;
-      border-radius: 24px;
-      padding: 22px;
-      box-shadow: 0 18px 30px rgba(15, 23, 42, 0.08);
+      border-radius: 12px;
+      padding: 16px;
+      border: 1px solid #e2e8f0;
     }
     .video-manual-controller-title {
-      font-size: 24px;
-      font-weight: 900;
-      color: #0f172a;
-      margin-bottom: 8px;
+      font-size: 11px;
+      font-weight: 700;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 14px;
     }
     .video-manual-controller-status {
-      display: flex;
-      justify-content: space-between;
-      gap: 12px;
-      align-items: center;
-      color: #475569;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .video-manual-controller-status span {
+      display: block;
+      min-height: 52px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      color: #0f172a;
+      font-size: 13px;
       font-weight: 700;
-      margin-bottom: 18px;
-      flex-wrap: wrap;
+      line-height: 1.3;
     }
     .video-manual-controller-timeline {
       display: grid;
-      gap: 8px;
-      margin-bottom: 18px;
+      gap: 6px;
+      margin-bottom: 16px;
     }
     .video-manual-controller-timeline input[type="range"] {
       width: 100%;
       accent-color: #0f766e;
+      height: 28px;
     }
     .video-manual-controller-time-row {
       display: flex;
       justify-content: space-between;
-      color: #64748b;
-      font-weight: 700;
-      font-size: 13px;
+      color: #94a3b8;
+      font-weight: 600;
+      font-size: 12px;
     }
     .video-manual-controller-buttons {
       display: grid;
-      grid-template-columns: repeat(5, minmax(0, 1fr));
-      gap: 12px;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
     }
     .video-manual-controller-button {
-      border: none;
-      border-radius: 18px;
-      padding: 16px 12px;
-      font-weight: 900;
-      font-size: 15px;
+      border: 1px solid #e2e8f0;
+      min-height: 52px;
+      border-radius: 10px;
+      padding: 12px;
+      font-weight: 700;
+      font-size: 14px;
       cursor: pointer;
-      background: linear-gradient(135deg, #0f172a 0%, #334155 100%);
-      color: white;
-      box-shadow: 0 12px 24px rgba(15, 23, 42, 0.12);
+      background: #f8fafc;
+      color: #1e293b;
+      touch-action: manipulation;
     }
     .video-manual-controller-button--play {
-      background: linear-gradient(135deg, #0f766e 0%, #155e75 100%);
+      background: #0f766e;
+      color: white;
+      border-color: #0f766e;
+    }
+    .video-manual-controller-button#videoManualPlayPauseButton {
+      grid-column: span 2;
     }
     .video-manual-controller-button--exit {
-      background: linear-gradient(135deg, #b91c1c 0%, #ef4444 100%);
+      background: #fff5f5;
+      color: #dc2626;
+      border-color: #fecaca;
     }
     .video-manual-controller-button:disabled {
-      background: #94a3b8;
+      opacity: 0.4;
       cursor: not-allowed;
-      box-shadow: none;
     }
     .video-manual-card {
       padding: 0;
-      border: 2px solid transparent;
+      border: 1px solid #e2e8f0;
       background: white;
-      border-radius: 24px;
+      border-radius: 12px;
       overflow: hidden;
       text-align: left;
       cursor: pointer;
-      box-shadow: 0 18px 30px rgba(15, 23, 42, 0.08);
-      transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+      min-height: 100%;
+      transition: border-color 0.15s ease;
+      touch-action: manipulation;
     }
-    .video-manual-card.is-selected {
+    .video-manual-card:hover,
+    .video-manual-card:focus {
       border-color: #0f766e;
-      transform: translateY(-2px);
-      box-shadow: 0 22px 44px rgba(15, 118, 110, 0.18);
+    }
+    .video-manual-card.__thumb {
+      height: 108px;
+      background: #f1f5f9;
+      overflow: hidden;
     }
     .video-manual-card__thumb {
-      height: 150px;
-      background: #cbd5e1;
+      height: 108px;
+      background: #f1f5f9;
       overflow: hidden;
     }
     .video-manual-card__thumb img {
@@ -8408,51 +8585,58 @@ function ensureVideoManualPickerUi() {
       display: flex;
       align-items: center;
       justify-content: center;
-      background: linear-gradient(135deg, #e2e8f0 0%, #cbd5e1 100%);
-      padding: 16px;
+      background: #f1f5f9;
+      height: 100%;
+      padding: 12px;
     }
     .video-manual-card__fallback-title {
-      font-size: 28px;
-      font-weight: 900;
-      line-height: 1.05;
+      font-size: 20px;
+      font-weight: 800;
+      line-height: 1.1;
       color: #1e293b;
       word-break: break-word;
     }
     .video-manual-card__body {
-      padding: 16px 18px 18px;
+      padding: 12px 14px 14px;
     }
     .video-manual-card__title {
-      font-size: 20px;
-      font-weight: 800;
+      font-size: 15px;
+      font-weight: 700;
       color: #0f172a;
-      margin-bottom: 8px;
+      margin-bottom: 6px;
+      line-height: 1.2;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
     }
     .video-manual-card__meta {
-      font-size: 13px;
+      font-size: 12px;
+      line-height: 1.3;
       color: #64748b;
-      margin-top: 4px;
+      margin-top: 3px;
     }
     .video-manual-loading,
     .video-manual-empty-state {
-      min-height: 280px;
+      min-height: 220px;
       display: none;
       align-items: center;
       justify-content: center;
       flex-direction: column;
       text-align: center;
       color: #334155;
-      gap: 12px;
+      gap: 10px;
     }
     .video-manual-empty-state__icon {
-      font-size: 44px;
+      font-size: 36px;
     }
     .video-manual-empty-state__title {
-      font-size: 24px;
-      font-weight: 900;
-      max-width: 520px;
+      font-size: 18px;
+      font-weight: 700;
+      max-width: 480px;
     }
     .video-manual-empty-state__body {
-      font-size: 14px;
+      font-size: 13px;
       color: #64748b;
     }
     .video-manual-modal__footer {
@@ -8460,17 +8644,17 @@ function ensureVideoManualPickerUi() {
       align-items: center;
       justify-content: space-between;
       gap: 12px;
-      padding: 16px 24px 24px;
-      border-top: 1px solid rgba(148, 163, 184, 0.25);
-      background: rgba(255, 255, 255, 0.6);
+      padding: 12px 20px;
+      border-top: 1px solid #e2e8f0;
     }
     .video-manual-modal__selection {
       font-weight: 700;
+      font-size: 14px;
       color: #0f172a;
     }
     .video-manual-modal__helper {
-      margin-top: 6px;
-      font-size: 13px;
+      margin-top: 4px;
+      font-size: 12px;
       color: #64748b;
     }
     .video-manual-modal__actions {
@@ -8478,23 +8662,58 @@ function ensureVideoManualPickerUi() {
       gap: 10px;
     }
     .video-manual-modal__button {
-      border: none;
-      border-radius: 999px;
-      padding: 12px 18px;
-      font-weight: 800;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      min-height: 40px;
+      padding: 8px 16px;
+      font-size: 14px;
+      font-weight: 700;
       cursor: pointer;
+      touch-action: manipulation;
+      background: white;
+      color: #334155;
     }
     .video-manual-modal__button--ghost {
-      background: rgba(148, 163, 184, 0.18);
+      background: white;
       color: #334155;
     }
     .video-manual-modal__button--primary {
-      background: linear-gradient(135deg, #0f766e 0%, #155e75 100%);
+      background: #0f766e;
       color: white;
+      border-color: #0f766e;
     }
     .video-manual-modal__button--primary:disabled {
       background: #94a3b8;
+      border-color: #94a3b8;
       cursor: not-allowed;
+    }
+    @media (max-width: 900px) {
+      .video-manual-modal {
+        padding: 8px;
+      }
+      .video-manual-modal__panel {
+        width: 100%;
+        max-height: calc(100vh - 16px);
+        border-radius: 14px;
+      }
+      .video-manual-modal__header,
+      .video-manual-modal__body,
+      .video-manual-modal__footer {
+        padding-left: 14px;
+        padding-right: 14px;
+      }
+      .video-manual-project-grid {
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      }
+      .video-manual-controller-status {
+        grid-template-columns: 1fr;
+      }
+      .video-manual-controller-buttons {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .video-manual-controller-button#videoManualPlayPauseButton {
+        grid-column: span 2;
+      }
     }
   `;
   document.head.appendChild(style);
@@ -8513,7 +8732,7 @@ function ensureVideoManualPickerUi() {
       <div class="video-manual-modal__header">
         <div>
           <div class="video-manual-modal__eyebrow">Factory Video Manuals</div>
-          <h2 class="video-manual-modal__title">Video Manual</h2>
+          <h2 class="video-manual-modal__title">Manual Picker</h2>
           <div id="videoManualSubtitle" class="video-manual-modal__subtitle">Loading deployed projects…</div>
         </div>
         <button type="button" class="video-manual-modal__close" id="videoManualCloseButton">Close</button>
@@ -8529,9 +8748,10 @@ function ensureVideoManualPickerUi() {
           <div class="video-manual-empty-state__body">Only deployed manuals appear here.</div>
         </div>
         <div id="videoManualProjectGrid" class="video-manual-project-grid"></div>
+        <div id="videoManualDetailPanel" class="video-manual-detail-panel"></div>
         <div id="videoManualControllerPanel" class="video-manual-controller-panel">
           <div class="video-manual-controller-shell">
-            <div class="video-manual-controller-title">Monitor Controller</div>
+            <div class="video-manual-controller-title">Monitor Remote</div>
             <div class="video-manual-controller-status">
               <span id="videoManualControllerStateLabel">Idle</span>
               <span id="videoManualControllerStepLabel">Step information unavailable</span>
