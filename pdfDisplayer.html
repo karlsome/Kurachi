@@ -376,7 +376,6 @@
             flex-shrink: 0;
             overflow: hidden;
             background: #020617;
-            box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.95);
         }
 
         .manual-preview-canvas {
@@ -384,14 +383,6 @@
             inset: 0;
             display: block;
             z-index: 0;
-        }
-
-        .manual-debug-video-rect {
-            position: absolute;
-            pointer-events: none;
-            box-sizing: border-box;
-            border: 3px solid rgba(34, 255, 0, 0.95);
-            z-index: 2;
         }
 
         .manual-shell::before {
@@ -426,6 +417,10 @@
             overflow: hidden;
             pointer-events: none;
             z-index: 2;
+            display: none;
+        }
+
+        .manual-media-cache {
             display: none;
         }
 
@@ -710,8 +705,8 @@
                         <div class="manual-project-viewport" id="manualProjectViewport">
                             <div class="manual-project-stage" id="manualProjectStage">
                                 <canvas id="manualPreviewCanvas" class="manual-preview-canvas"></canvas>
-                                <div id="manualDebugVideoRect" class="manual-debug-video-rect"></div>
                                 <video id="manualVideo" class="manual-video display-mode-hidden" playsinline muted preload="auto"></video>
+                                <div id="manualMediaCache" class="manual-media-cache"></div>
                                 <div id="manualElements" class="manual-elements"></div>
                             </div>
                         </div>
@@ -773,8 +768,8 @@
         const manualProjectViewport = document.getElementById('manualProjectViewport');
         const manualProjectStage = document.getElementById('manualProjectStage');
         const manualPreviewCanvas = document.getElementById('manualPreviewCanvas');
-        const manualDebugVideoRect = document.getElementById('manualDebugVideoRect');
         const manualVideo = document.getElementById('manualVideo');
+        const manualMediaCache = document.getElementById('manualMediaCache');
         const manualElements = document.getElementById('manualElements');
         const manualBlankState = document.getElementById('manualBlankState');
         const manualTitle = document.getElementById('manualTitle');
@@ -799,10 +794,357 @@
             lastStateSentAt: 0,
             previewRaf: null,
             videoRect: null,
+            activeVideoEl: null,
+            mediaCache: null,
+            mediaPreloadQueue: [],
+            mediaPreloading: false,
         };
 
         manualVideo.defaultMuted = true;
         manualVideo.muted = true;
+
+        function manualPrimaryVideo() {
+            return manualVideo;
+        }
+
+        function getManualVideo() {
+            return manualState.activeVideoEl || manualPrimaryVideo();
+        }
+
+        function ensureManualMediaCacheStore() {
+            if (!(manualState.mediaCache instanceof Map)) manualState.mediaCache = new Map();
+            return manualState.mediaCache;
+        }
+
+        function clearManualManagedMedia() {
+            const primaryVideo = manualPrimaryVideo();
+            const cache = ensureManualMediaCacheStore();
+            cache.forEach((entry) => {
+                const video = entry.video;
+                if (!video) return;
+                video.pause();
+                video.removeAttribute('src');
+                video.load();
+                if (video !== primaryVideo) video.remove();
+            });
+            cache.clear();
+            manualState.activeVideoEl = primaryVideo || null;
+            manualState.activeSourceKey = '';
+            manualState.mediaPreloadQueue = [];
+            manualState.mediaPreloading = false;
+            manualState.pendingSwitch = null;
+        }
+
+        function onManagedVideoLoadedData(video) {
+            const activeVideo = getManualVideo();
+            if (video !== activeVideo) return;
+
+            manualBlankState.classList.add('display-mode-hidden');
+            manualVideo.classList.remove('display-mode-hidden');
+            syncManualStageLayout();
+            renderManualFrame();
+            void queueManualProjectMediaPreloads();
+            void preloadManualMediaQueue();
+
+            if (manualState.pendingSwitch) {
+                const pending = manualState.pendingSwitch;
+                manualState.pendingSwitch = null;
+                void manualSeekTo(pending.timelineTime, { autoplay: pending.autoplay });
+                return;
+            }
+
+            setManualStatus('Ready on monitor. Waiting for play.', 'ready');
+            void postMachinePlayerState({
+                mode: 'ready',
+                statusText: 'Ready on monitor. Waiting for play.',
+                canPlay: true,
+                isPlaying: false,
+            }, { force: true });
+        }
+
+        function onManagedVideoTimeUpdate(video) {
+            const activeVideo = getManualVideo();
+            if (video !== activeVideo) return;
+            if (!manualState.project?.steps?.length) return;
+
+            const steps = manualState.project.steps;
+            const step = steps[manualState.currentStepIndex] || steps[0];
+            if (!step) return;
+
+            const sourceStart = step.sourceStart ?? step.startTime;
+            const sourceEnd = step.sourceEnd ?? step.endTime;
+            const timelineTime = Math.max(step.startTime, Math.min(step.endTime, step.startTime + Math.max(0, video.currentTime - sourceStart)));
+
+            manualState.currentTime = timelineTime;
+            const stepIndex = findManualStepIndexAtTime(timelineTime, manualState.project);
+            if (stepIndex >= 0) {
+                manualState.currentStepIndex = stepIndex;
+            }
+            updateManualStepLabel();
+            renderManualFrame();
+            void queueManualProjectMediaPreloads();
+            void preloadManualMediaQueue();
+            void postMachinePlayerState({
+                mode: manualState.playing ? 'playing' : 'paused',
+                statusText: manualState.playing ? 'Playing on monitor' : 'Paused on monitor',
+                currentTime: manualState.currentTime,
+                currentStepIndex: manualState.currentStepIndex,
+                stepCount: manualState.project?.steps?.length || 0,
+                canPlay: true,
+                isPlaying: manualState.playing,
+            });
+
+            if (manualState.playing && video.currentTime >= sourceEnd - 0.05) {
+                const nextStep = steps[manualState.currentStepIndex + 1];
+                if (nextStep) {
+                    void manualSeekTo(nextStep.startTime, { autoplay: true });
+                } else {
+                    video.pause();
+                    manualState.playing = false;
+                    manualState.currentTime = manualState.duration;
+                    updateManualStepLabel();
+                    setManualStatus('Playback complete. Waiting for next command.', 'ready');
+                    void postMachinePlayerState({
+                        mode: 'paused',
+                        statusText: 'Playback complete. Waiting for next command.',
+                        currentTime: manualState.currentTime,
+                        currentStepIndex: manualState.currentStepIndex,
+                        canPlay: true,
+                        isPlaying: false,
+                    }, { force: true });
+                }
+            }
+        }
+
+        function onManagedVideoPause(video) {
+            const activeVideo = getManualVideo();
+            if (video !== activeVideo) return;
+            if (manualState.mode === 'manual' && !manualState.pendingSwitch) {
+                manualState.playing = false;
+                stopManualRenderLoop();
+                renderManualFrame();
+                void postMachinePlayerState({
+                    mode: 'paused',
+                    statusText: 'Paused on monitor',
+                    canPlay: true,
+                    isPlaying: false,
+                }, { force: true });
+            }
+        }
+
+        function onManagedVideoPlay(video) {
+            const activeVideo = getManualVideo();
+            if (video !== activeVideo) return;
+            if (manualState.mode === 'manual') {
+                manualState.playing = true;
+                setManualStatus('Playing on monitor', 'ready');
+                startManualRenderLoop();
+                void postMachinePlayerState({
+                    mode: 'playing',
+                    statusText: 'Playing on monitor',
+                    canPlay: true,
+                    isPlaying: true,
+                }, { force: true });
+            }
+        }
+
+        function onManagedVideoError(video) {
+            const activeVideo = getManualVideo();
+            if (video !== activeVideo) return;
+            manualState.playing = false;
+            setManualStatus('Failed to load video on monitor', 'error');
+            manualBlankState.classList.remove('display-mode-hidden');
+            manualVideo.classList.add('display-mode-hidden');
+            renderManualFrame();
+            void postMachinePlayerState({
+                mode: 'error',
+                statusText: 'Failed to load video on monitor',
+                canPlay: false,
+                isPlaying: false,
+                error: 'Failed to load video on monitor',
+            }, { force: true });
+        }
+
+        function attachManualManagedVideo(video) {
+            if (!video || video.dataset.manualBound === '1') return;
+            video.dataset.manualBound = '1';
+            video.playsInline = true;
+            video.preload = 'auto';
+            video.defaultMuted = true;
+            video.muted = true;
+            video.classList.add('display-mode-hidden');
+            video.addEventListener('loadedmetadata', () => {
+                const entry = ensureManualMediaCacheStore().get(video.dataset.sourceKey || '');
+                if (entry) entry.metadataReady = true;
+                if (video !== getManualVideo()) return;
+                syncManualStageLayout();
+            });
+            video.addEventListener('loadeddata', () => onManagedVideoLoadedData(video));
+            video.addEventListener('timeupdate', () => onManagedVideoTimeUpdate(video));
+            video.addEventListener('pause', () => onManagedVideoPause(video));
+            video.addEventListener('play', () => onManagedVideoPlay(video));
+            video.addEventListener('error', () => onManagedVideoError(video));
+        }
+
+        function createManualManagedVideo() {
+            const video = document.createElement('video');
+            video.className = 'manual-video display-mode-hidden';
+            video.style.left = '0';
+            video.style.top = '0';
+            attachManualManagedVideo(video);
+            manualMediaCache?.appendChild(video);
+            return video;
+        }
+
+        function initManualManagedMedia() {
+            const primaryVideo = manualPrimaryVideo();
+            if (!primaryVideo) return;
+            attachManualManagedVideo(primaryVideo);
+            manualState.activeVideoEl = primaryVideo;
+            ensureManualMediaCacheStore();
+        }
+
+        function ensureManualMediaEntry(url, { sourceKey = '', local = false, usePrimary = false } = {}) {
+            if (!url) return null;
+            const key = sourceKey || `url:${url}`;
+            const cache = ensureManualMediaCacheStore();
+            const existing = cache.get(key);
+            if (existing) return existing;
+
+            const video = usePrimary ? manualPrimaryVideo() : createManualManagedVideo();
+            if (!video) return null;
+            attachManualManagedVideo(video);
+            video.crossOrigin = local ? '' : 'anonymous';
+            video.dataset.sourceKey = key;
+            const entry = { key, url, local, video, status: 'idle', metadataReady: false, readyPromise: null };
+            cache.set(key, entry);
+            return entry;
+        }
+
+        function loadManualMediaEntry(entry) {
+            if (!entry) return Promise.reject(new Error('Missing manual media entry'));
+            if (entry.status === 'ready') return Promise.resolve(entry);
+            if (entry.readyPromise) return entry.readyPromise;
+
+            entry.status = 'loading';
+            entry.readyPromise = new Promise((resolve, reject) => {
+                const onReady = () => {
+                    cleanup();
+                    entry.status = 'ready';
+                    entry.readyPromise = null;
+                    resolve(entry);
+                };
+                const onError = () => {
+                    cleanup();
+                    entry.status = 'error';
+                    entry.readyPromise = null;
+                    reject(new Error('Failed to load manual clip'));
+                };
+                const cleanup = () => {
+                    entry.video.removeEventListener('loadeddata', onReady);
+                    entry.video.removeEventListener('error', onError);
+                };
+                entry.video.addEventListener('loadeddata', onReady);
+                entry.video.addEventListener('error', onError);
+            });
+
+            entry.video.pause();
+            entry.video.crossOrigin = entry.local ? '' : 'anonymous';
+            entry.video.dataset.sourceKey = entry.key;
+            entry.video.src = entry.local ? entry.url : resolveManualMediaUrl(entry.url);
+            entry.video.load();
+            return entry.readyPromise;
+        }
+
+        function setManualActiveEntry(entry) {
+            if (!entry?.video) return;
+            const previous = manualState.activeVideoEl;
+            if (previous && previous !== entry.video) previous.pause();
+            manualState.activeVideoEl = entry.video;
+            manualState.activeSourceKey = entry.key;
+            manualState.videoRect = null;
+            if (entry.video.videoWidth && entry.video.videoHeight) {
+                syncManualStageLayout();
+            }
+        }
+
+        function getManualUniqueProjectSources(project = manualState.project) {
+            const sources = [];
+            const seen = new Set();
+            (project?.steps || []).forEach((step, index) => {
+                const url = getManualStepVideoUrl(step, project);
+                const key = getManualStepSourceKey(step, project);
+                if (!url || !key || seen.has(key)) return;
+                seen.add(key);
+                sources.push({ key, url, local: typeof url === 'string' && url.startsWith('blob:'), usePrimary: index === 0 });
+            });
+            if (!sources.length) {
+                const fallbackUrl = getManualStepVideoUrl(project?.steps?.[0], project);
+                if (fallbackUrl) {
+                    sources.push({
+                        key: getManualStepSourceKey(project?.steps?.[0], project) || `url:${fallbackUrl}`,
+                        url: fallbackUrl,
+                        local: typeof fallbackUrl === 'string' && fallbackUrl.startsWith('blob:'),
+                        usePrimary: true,
+                    });
+                }
+            }
+            return sources;
+        }
+
+        function queueManualProjectMediaPreloads(project = manualState.project, fromStepIndex = manualState.currentStepIndex, lookahead = 2) {
+            const cache = ensureManualMediaCacheStore();
+            const queuedKeys = new Set(manualState.mediaPreloadQueue.map((item) => item.key));
+            const selected = [];
+            const seen = new Set();
+            const steps = project?.steps || [];
+
+            for (let index = Math.max(0, fromStepIndex); index < steps.length && selected.length < lookahead; index++) {
+                const step = steps[index];
+                const url = getManualStepVideoUrl(step, project);
+                const key = getManualStepSourceKey(step, project);
+                if (!url || !key || key === manualState.activeSourceKey || seen.has(key) || queuedKeys.has(key)) continue;
+                const existing = cache.get(key);
+                if (existing?.status === 'ready' || existing?.status === 'loading') continue;
+                selected.push({ key, url, local: typeof url === 'string' && url.startsWith('blob:') });
+                seen.add(key);
+            }
+
+            selected.forEach((source) => manualState.mediaPreloadQueue.push(source));
+        }
+
+        async function preloadManualMediaQueue() {
+            if (manualState.mediaPreloading) return;
+            manualState.mediaPreloading = true;
+            try {
+                while (manualState.mediaPreloadQueue.length) {
+                    const source = manualState.mediaPreloadQueue.shift();
+                    const entry = ensureManualMediaEntry(source.url, source);
+                    if (!entry || entry.status === 'ready') continue;
+                    try {
+                        await loadManualMediaEntry(entry);
+                    } catch (error) {
+                        console.warn('Manual preload failed:', error);
+                    }
+                }
+            } finally {
+                manualState.mediaPreloading = false;
+            }
+        }
+
+        function primeManualProjectMedia(project = manualState.project) {
+            clearManualManagedMedia();
+            const sources = getManualUniqueProjectSources(project);
+            if (!sources.length) return;
+            const [first] = sources;
+            const firstEntry = ensureManualMediaEntry(first.url, { ...first, usePrimary: true });
+            if (firstEntry) {
+                setManualActiveEntry(firstEntry);
+                void loadManualMediaEntry(firstEntry).catch((error) => console.error('Primary manual media load error:', error));
+            }
+            queueManualProjectMediaPreloads(project, 0, 2);
+            void preloadManualMediaQueue();
+        }
 
         // Check if machine ID is valid
         if (!MACHINE_ID) {
@@ -1047,30 +1389,23 @@
             }
 
             const rect = getManualVideoDrawRect(
-                manualVideo.videoWidth || projectW,
-                manualVideo.videoHeight || projectH,
+                getManualVideo().videoWidth || projectW,
+                getManualVideo().videoHeight || projectH,
                 projectW,
                 projectH
             );
 
             manualState.videoRect = rect;
 
-            manualVideo.style.left = `${rect.drawX}px`;
-            manualVideo.style.top = `${rect.drawY}px`;
-            manualVideo.style.width = `${rect.drawW}px`;
-            manualVideo.style.height = `${rect.drawH}px`;
-            manualVideo.style.position = 'absolute';
-            manualVideo.style.margin = '0';
-            manualVideo.style.padding = '0';
-            manualVideo.style.objectFit = 'contain';
-
-            if (manualDebugVideoRect) {
-                manualDebugVideoRect.style.left = `${rect.drawX}px`;
-                manualDebugVideoRect.style.top = `${rect.drawY}px`;
-                manualDebugVideoRect.style.width = `${rect.drawW}px`;
-                manualDebugVideoRect.style.height = `${rect.drawH}px`;
-                manualDebugVideoRect.style.display = 'block';
-            }
+            const activeVideo = getManualVideo();
+            activeVideo.style.left = `${rect.drawX}px`;
+            activeVideo.style.top = `${rect.drawY}px`;
+            activeVideo.style.width = `${rect.drawW}px`;
+            activeVideo.style.height = `${rect.drawH}px`;
+            activeVideo.style.position = 'absolute';
+            activeVideo.style.margin = '0';
+            activeVideo.style.padding = '0';
+            activeVideo.style.objectFit = 'contain';
         }
 
         function renderManualElements() {
@@ -1164,7 +1499,7 @@
 
         function renderManualFrame() {
             const canvas = manualPreviewCanvas;
-            const video = manualVideo;
+            const video = getManualVideo();
             if (!canvas || !video || !manualState.project) return;
             const ctx = canvas.getContext('2d');
             if (!ctx) return;
@@ -1297,9 +1632,7 @@
         }
 
         function resetManualPlayer({ restorePdf = true } = {}) {
-            manualVideo.pause();
-            manualVideo.removeAttribute('src');
-            manualVideo.load();
+            clearManualManagedMedia();
             manualVideo.classList.add('display-mode-hidden');
             manualBlankState.classList.remove('display-mode-hidden');
             manualState.project = null;
@@ -1323,9 +1656,6 @@
                 manualProjectStage.style.transform = 'scale(1)';
             }
             manualState.videoRect = null;
-            if (manualDebugVideoRect) {
-                manualDebugVideoRect.style.display = 'none';
-            }
             if (manualElements) {
                 manualElements.innerHTML = '';
             }
@@ -1359,12 +1689,23 @@
             if (!desiredUrl) return true;
 
             const desiredKey = getManualStepSourceKey(step);
-            if (manualState.activeSourceKey === desiredKey && manualVideo.getAttribute('src')) {
+            const activeVideo = getManualVideo();
+            if (manualState.activeSourceKey === desiredKey && activeVideo?.getAttribute('src')) {
+                return true;
+            }
+
+            const entry = ensureManualMediaEntry(desiredUrl, {
+                sourceKey: desiredKey,
+                local: typeof desiredUrl === 'string' && desiredUrl.startsWith('blob:'),
+                usePrimary: desiredKey === manualState.activeSourceKey || !manualState.activeSourceKey,
+            });
+            if (!entry) return true;
+
+            if (manualState.activeSourceKey === desiredKey && (entry.status === 'ready' || entry.metadataReady)) {
                 return true;
             }
 
             manualState.pendingSwitch = { timelineTime, autoplay, sourceKey: desiredKey };
-            manualState.activeSourceKey = desiredKey;
             manualVideo.classList.add('display-mode-hidden');
             manualBlankState.classList.remove('display-mode-hidden');
             setManualStatus('Loading selected manual on monitor…', 'loading');
@@ -1374,8 +1715,12 @@
                 canPlay: false,
                 isPlaying: false,
             }, { force: true });
-            manualVideo.src = resolveManualMediaUrl(desiredUrl);
-            manualVideo.load();
+            if (entry.status === 'ready' || entry.metadataReady) {
+                setManualActiveEntry(entry);
+                return true;
+            }
+            setManualActiveEntry(entry);
+            void loadManualMediaEntry(entry).catch((error) => console.error('Manual step switch load error:', error));
             return false;
         }
 
@@ -1396,25 +1741,30 @@
                 return;
             }
 
+            const video = getManualVideo();
+            if (!video) return;
+
             const offset = Math.max(0, timelineTime - step.startTime);
             const sourceStart = step.sourceStart ?? step.startTime;
             const sourceEnd = step.sourceEnd ?? step.endTime;
-            const nextTime = Math.max(0, Math.min(sourceStart + offset, sourceEnd, manualVideo.duration || sourceEnd));
+            const nextTime = Math.max(0, Math.min(sourceStart + offset, sourceEnd, video.duration || sourceEnd));
 
             if (Number.isFinite(nextTime)) {
                 try {
-                    manualVideo.currentTime = nextTime;
+                    video.currentTime = nextTime;
                 } catch (_) {
                     // Ignore DOM exceptions while metadata is still settling.
                 }
             }
 
             updateManualStepLabel();
+            void queueManualProjectMediaPreloads();
+            void preloadManualMediaQueue();
             if (autoplay) {
                 try {
-                    manualVideo.defaultMuted = true;
-                    manualVideo.muted = true;
-                    await manualVideo.play();
+                    video.defaultMuted = true;
+                    video.muted = true;
+                    await video.play();
                     manualState.playing = true;
                     setManualStatus('Playing on monitor', 'ready');
                     void postMachinePlayerState({
@@ -1436,7 +1786,7 @@
                     }, { force: true });
                 }
             } else {
-                manualVideo.pause();
+                video.pause();
                 manualState.playing = false;
                 setManualStatus('Ready on monitor. Waiting for play.', 'ready');
                 void postMachinePlayerState({
@@ -1496,6 +1846,7 @@
                 manualState.pendingSwitch = null;
                 manualState.playing = false;
                 hydrateManualProjectMedia(manualState.project);
+                primeManualProjectMedia(manualState.project);
                 syncManualStageLayout();
                 renderManualFrame();
 
@@ -1575,7 +1926,8 @@
             }
 
             if (action === 'video-manual-pause') {
-                manualVideo.pause();
+                const video = getManualVideo();
+                if (video) video.pause();
                 manualState.playing = false;
                 setManualStatus('Paused on monitor', 'ready');
                 void postMachinePlayerState({
@@ -1903,120 +2255,6 @@
             }
         });
 
-        manualVideo.addEventListener('loadeddata', () => {
-            manualBlankState.classList.add('display-mode-hidden');
-            manualVideo.classList.remove('display-mode-hidden');
-            syncManualStageLayout();
-            renderManualFrame();
-
-            if (manualState.pendingSwitch) {
-                const pending = manualState.pendingSwitch;
-                manualState.pendingSwitch = null;
-                void manualSeekTo(pending.timelineTime, { autoplay: pending.autoplay });
-                return;
-            }
-
-            setManualStatus('Ready on monitor. Waiting for play.', 'ready');
-            void postMachinePlayerState({
-                mode: 'ready',
-                statusText: 'Ready on monitor. Waiting for play.',
-                canPlay: true,
-                isPlaying: false,
-            }, { force: true });
-        });
-
-        manualVideo.addEventListener('timeupdate', () => {
-            if (!manualState.project?.steps?.length) return;
-
-            const steps = manualState.project.steps;
-            const step = steps[manualState.currentStepIndex] || steps[0];
-            if (!step) return;
-
-            const sourceStart = step.sourceStart ?? step.startTime;
-            const sourceEnd = step.sourceEnd ?? step.endTime;
-            const timelineTime = Math.max(step.startTime, Math.min(step.endTime, step.startTime + Math.max(0, manualVideo.currentTime - sourceStart)));
-
-            manualState.currentTime = timelineTime;
-            const stepIndex = findManualStepIndexAtTime(timelineTime, manualState.project);
-            if (stepIndex >= 0) {
-                manualState.currentStepIndex = stepIndex;
-            }
-            updateManualStepLabel();
-            renderManualFrame();
-            void postMachinePlayerState({
-                mode: manualState.playing ? 'playing' : 'paused',
-                statusText: manualState.playing ? 'Playing on monitor' : 'Paused on monitor',
-                currentTime: manualState.currentTime,
-                currentStepIndex: manualState.currentStepIndex,
-                stepCount: manualState.project?.steps?.length || 0,
-                canPlay: true,
-                isPlaying: manualState.playing,
-            });
-
-            if (manualState.playing && manualVideo.currentTime >= sourceEnd - 0.05) {
-                const nextStep = steps[manualState.currentStepIndex + 1];
-                if (nextStep) {
-                    void manualSeekTo(nextStep.startTime, { autoplay: true });
-                } else {
-                    manualVideo.pause();
-                    manualState.playing = false;
-                    manualState.currentTime = manualState.duration;
-                    updateManualStepLabel();
-                    setManualStatus('Playback complete. Waiting for next command.', 'ready');
-                    void postMachinePlayerState({
-                        mode: 'paused',
-                        statusText: 'Playback complete. Waiting for next command.',
-                        currentTime: manualState.currentTime,
-                        currentStepIndex: manualState.currentStepIndex,
-                        canPlay: true,
-                        isPlaying: false,
-                    }, { force: true });
-                }
-            }
-        });
-
-        manualVideo.addEventListener('pause', () => {
-            if (manualState.mode === 'manual' && !manualState.pendingSwitch) {
-                manualState.playing = false;
-                renderManualFrame();
-                void postMachinePlayerState({
-                    mode: 'paused',
-                    statusText: 'Paused on monitor',
-                    canPlay: true,
-                    isPlaying: false,
-                }, { force: true });
-            }
-        });
-
-        manualVideo.addEventListener('play', () => {
-            if (manualState.mode === 'manual') {
-                manualState.playing = true;
-                setManualStatus('Playing on monitor', 'ready');
-                startManualRenderLoop();
-                void postMachinePlayerState({
-                    mode: 'playing',
-                    statusText: 'Playing on monitor',
-                    canPlay: true,
-                    isPlaying: true,
-                }, { force: true });
-            }
-        });
-
-        manualVideo.addEventListener('error', () => {
-            manualState.playing = false;
-            setManualStatus('Failed to load video on monitor', 'error');
-            manualBlankState.classList.remove('display-mode-hidden');
-            manualVideo.classList.add('display-mode-hidden');
-            renderManualFrame();
-            void postMachinePlayerState({
-                mode: 'error',
-                statusText: 'Failed to load video on monitor',
-                canPlay: false,
-                isPlaying: false,
-                error: 'Failed to load video on monitor',
-            }, { force: true });
-        });
-
         window.addEventListener('resize', () => {
             if (manualState.mode === 'manual' && manualState.project) {
                 syncManualStageLayout();
@@ -2026,6 +2264,7 @@
 
         // Initialize connection on page load
         window.addEventListener('DOMContentLoaded', () => {
+            initManualManagedMedia();
             if (MACHINE_ID) {
                 console.log(`🚀 Starting ${MACHINE_ID} display page...`);
             }
@@ -2033,6 +2272,7 @@
 
         // Cleanup on page unload
         window.addEventListener('beforeunload', () => {
+            clearManualManagedMedia();
             if (eventSource) {
                 eventSource.close();
             }
