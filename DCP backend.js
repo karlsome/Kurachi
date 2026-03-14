@@ -8041,6 +8041,7 @@ function renderVideoManualProjects() {
           ${thumb}
           <div class="video-manual-card__body">
             <div class="video-manual-card__title">${project.title || 'Untitled Project'}</div>
+            ${project.description ? `<div class="video-manual-card__desc">${project.description}</div>` : ''}
             <div class="video-manual-card__meta">${project.stepsCount || 0} steps${project.duration ? ` · ${formatVideoManualDuration(project.duration)}` : ''}</div>
             <div class="video-manual-card__meta">Updated ${new Date(project.updatedAt || project.deployedAt || Date.now()).toLocaleDateString()}</div>
           </div>
@@ -8097,8 +8098,8 @@ function openVideoManualDetail(projectId) {
         <span class="vmd-title">${project.title || 'Untitled Project'}</span>
         ${revBadge}
       </div>
-      <div class="vmd-table">${rowsHtml}</div>
       ${project.description ? `<p class="vmd-desc">${project.description}</p>` : ''}
+      <div class="vmd-table">${rowsHtml}</div>
       <button type="button" class="vmd-play" id="videoManualDetailPlayBtn">Play on Monitor</button>
     </div>
   `;
@@ -8443,7 +8444,7 @@ function ensureVideoManualPickerUi() {
       font-size: 14px;
       color: #475569;
       line-height: 1.6;
-      margin: 0;
+      margin: 0 0 12px;
       padding: 14px 16px;
       background: #f8fafc;
       border-radius: 10px;
@@ -8586,7 +8587,7 @@ function ensureVideoManualPickerUi() {
       align-items: center;
       justify-content: center;
       background: #f1f5f9;
-      height: 100%;
+      height: 108px;
       padding: 12px;
     }
     .video-manual-card__fallback-title {
@@ -8615,6 +8616,16 @@ function ensureVideoManualPickerUi() {
       line-height: 1.3;
       color: #64748b;
       margin-top: 3px;
+    }
+    .video-manual-card__desc {
+      font-size: 11px;
+      line-height: 1.35;
+      color: #475569;
+      margin-bottom: 6px;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
     }
     .video-manual-loading,
     .video-manual-empty-state {
