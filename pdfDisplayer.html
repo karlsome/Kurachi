@@ -868,11 +868,24 @@
             if (!manualState.project?.steps?.length) return;
 
             const steps = manualState.project.steps;
-            const step = steps[manualState.currentStepIndex] || steps[0];
+            const activeStepIndex = manualState.currentStepIndex;
+            const step = steps[activeStepIndex] || steps[0];
             if (!step) return;
 
-            const sourceStart = step.sourceStart ?? step.startTime;
-            const sourceEnd = step.sourceEnd ?? step.endTime;
+            const sourceStart = getManualStepSourceStart(step);
+            const sourceEnd = getManualStepSourceEnd(step);
+
+            if (step && !video.paused) {
+                if (video.currentTime >= sourceEnd - 0.05) {
+                    void advanceManualStepPlayback(activeStepIndex);
+                    return;
+                }
+                if (video.currentTime < sourceStart) {
+                    video.currentTime = sourceStart;
+                    return;
+                }
+            }
+
             const timelineTime = Math.max(step.startTime, Math.min(step.endTime, step.startTime + Math.max(0, video.currentTime - sourceStart)));
 
             manualState.currentTime = timelineTime;
@@ -893,27 +906,6 @@
                 canPlay: true,
                 isPlaying: manualState.playing,
             });
-
-            if (manualState.playing && video.currentTime >= sourceEnd - 0.05) {
-                const nextStep = steps[manualState.currentStepIndex + 1];
-                if (nextStep) {
-                    void manualSeekTo(nextStep.startTime, { autoplay: true });
-                } else {
-                    video.pause();
-                    manualState.playing = false;
-                    manualState.currentTime = manualState.duration;
-                    updateManualStepLabel();
-                    setManualStatus('Playback complete. Waiting for next command.', 'ready');
-                    void postMachinePlayerState({
-                        mode: 'paused',
-                        statusText: 'Playback complete. Waiting for next command.',
-                        currentTime: manualState.currentTime,
-                        currentStepIndex: manualState.currentStepIndex,
-                        canPlay: true,
-                        isPlaying: false,
-                    }, { force: true });
-                }
-            }
         }
 
         function onManagedVideoPause(video) {
@@ -1146,6 +1138,36 @@
             void preloadManualMediaQueue();
         }
 
+        async function advanceManualStepPlayback(fromStepIndex) {
+            const steps = manualState.project?.steps || [];
+            const video = getManualVideo();
+            if (!video || !steps.length) return;
+
+            const currentIndex = Number.isInteger(fromStepIndex) ? fromStepIndex : manualState.currentStepIndex;
+            const nextIndex = currentIndex + 1;
+
+            if (nextIndex >= steps.length) {
+                const lastStep = steps[Math.max(0, currentIndex)] || steps[steps.length - 1];
+                video.pause();
+                video.currentTime = getManualStepSourceEnd(lastStep);
+                manualState.playing = false;
+                manualState.currentTime = manualState.duration;
+                updateManualStepLabel();
+                setManualStatus('Playback complete. Waiting for next command.', 'ready');
+                void postMachinePlayerState({
+                    mode: 'paused',
+                    statusText: 'Playback complete. Waiting for next command.',
+                    currentTime: manualState.currentTime,
+                    currentStepIndex: manualState.currentStepIndex,
+                    canPlay: true,
+                    isPlaying: false,
+                }, { force: true });
+                return;
+            }
+
+            await manualSeekTo(steps[nextIndex].startTime, { autoplay: true });
+        }
+
         // Check if machine ID is valid
         if (!MACHINE_ID) {
             showError('❌ Machine parameter is missing!<br><br>Please use: <code>?machine=OZNC01</code>');
@@ -1342,6 +1364,19 @@
                 endX: endNormX * (el.width || 0),
                 endY: endNormY * (el.height || 0),
             };
+        }
+
+        function getManualStepSourceStart(step) {
+            return step?.sourceStart ?? step?.startTime ?? 0;
+        }
+
+        function getManualStepSourceEnd(step) {
+            if (!step) return 0;
+            if (Number.isFinite(step.sourceEnd)) return step.sourceEnd;
+            if (Number.isFinite(step.endTime) && Number.isFinite(step.startTime)) {
+                return getManualStepSourceStart(step) + Math.max(0, step.endTime - step.startTime);
+            }
+            return step.endTime ?? getManualStepSourceStart(step);
         }
 
         function getManualProjectMetrics() {
