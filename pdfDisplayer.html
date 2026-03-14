@@ -507,6 +507,40 @@
 
         .manual-bottombar {
             display: flex;
+            flex-direction: column;
+            align-items: stretch;
+            gap: 10px;
+        }
+
+        .manual-description-card {
+            align-self: center;
+            width: min(960px, 100%);
+            background: rgba(15, 23, 42, 0.44);
+            padding: 10px 14px;
+            border-radius: 16px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #e2e8f0;
+            text-align: center;
+        }
+
+        .manual-description-label {
+            font-size: 0.62rem;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: rgba(148, 163, 184, 0.9);
+            margin-bottom: 4px;
+            font-weight: 800;
+        }
+
+        .manual-description-text {
+            font-size: 1rem;
+            line-height: 1.3;
+            font-weight: 600;
+            color: #f8fafc;
+        }
+
+        .manual-status-row {
+            display: flex;
             justify-content: space-between;
             align-items: flex-end;
             gap: 16px;
@@ -514,29 +548,43 @@
 
         .manual-status-card,
         .manual-step-card {
-            min-width: 220px;
+            min-width: 200px;
             max-width: 48%;
             background: rgba(15, 23, 42, 0.44);
-            padding: 14px 16px;
-            border-radius: 20px;
+            padding: 10px 14px;
+            border-radius: 16px;
             border: 1px solid rgba(255, 255, 255, 0.12);
             color: #e2e8f0;
         }
 
         .manual-card-label {
-            font-size: 0.72rem;
+            font-size: 0.6rem;
             letter-spacing: 0.14em;
             text-transform: uppercase;
             color: rgba(148, 163, 184, 0.94);
-            margin-bottom: 8px;
+            margin-bottom: 4px;
             font-weight: 800;
         }
 
         .manual-card-value {
-            font-size: 1.05rem;
-            line-height: 1.35;
+            font-size: 0.88rem;
+            line-height: 1.25;
             font-weight: 700;
             color: #f8fafc;
+        }
+
+        @media (max-width: 900px) {
+            .manual-status-row {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .manual-status-card,
+            .manual-step-card,
+            .manual-description-card {
+                max-width: 100%;
+                width: 100%;
+            }
         }
 
         .manual-status-card.is-loading {
@@ -739,13 +787,19 @@
                             </div>
                         </div>
                         <div class="manual-bottombar">
-                            <div class="manual-status-card" id="manualStatusCard">
-                                <div class="manual-card-label">Playback Status</div>
-                                <div class="manual-card-value" id="manualStatusText">Idle</div>
+                            <div class="manual-description-card" id="manualDescriptionCard">
+                                <div class="manual-description-label">Step Description</div>
+                                <div class="manual-description-text" id="manualStepDescription">Waiting for project selection…</div>
                             </div>
-                            <div class="manual-step-card">
-                                <div class="manual-card-label">Current Step</div>
-                                <div class="manual-card-value" id="manualStepText">Waiting for project selection…</div>
+                            <div class="manual-status-row">
+                                <div class="manual-status-card" id="manualStatusCard">
+                                    <div class="manual-card-label">Playback Status</div>
+                                    <div class="manual-card-value" id="manualStatusText">Idle</div>
+                                </div>
+                                <div class="manual-step-card">
+                                    <div class="manual-card-label">Current Step</div>
+                                    <div class="manual-card-value" id="manualStepText">Waiting for project selection…</div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -796,6 +850,7 @@
         const manualStatusCard = document.getElementById('manualStatusCard');
         const manualStatusText = document.getElementById('manualStatusText');
         const manualStepText = document.getElementById('manualStepText');
+        const manualStepDescription = document.getElementById('manualStepDescription');
         const mainContent = document.querySelector('.main-content');
         const errorMessage = document.getElementById('errorMessage');
         const errorText = document.getElementById('errorText');
@@ -1750,6 +1805,9 @@
         function updateManualStepLabel() {
             if (!manualState.project?.steps?.length) {
                 manualStepText.textContent = 'Waiting for project selection…';
+                if (manualStepDescription) {
+                    manualStepDescription.textContent = 'Waiting for project selection…';
+                }
                 renderManualElements();
                 return;
             }
@@ -1758,6 +1816,9 @@
             const label = step?.label || `Step ${manualState.currentStepIndex + 1}`;
             const total = manualState.project.steps.length;
             manualStepText.textContent = `${label} · ${manualState.currentStepIndex + 1}/${total} · ${formatManualTime(manualState.currentTime)} / ${formatManualTime(manualState.duration)}`;
+            if (manualStepDescription) {
+                manualStepDescription.textContent = step?.description || step?.label || 'No description';
+            }
             renderManualElements();
         }
 
