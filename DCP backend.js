@@ -8001,11 +8001,12 @@ function syncVideoManualLauncherState() {
 
   const model = String(getCurrentProductModel() || '').trim();
   const enabled = !!model;
-  button.disabled = !enabled;
-  button.className = `video-manual-launcher${enabled ? '' : ' is-disabled'}`;
-  button.innerHTML = enabled
-    ? `<span class="video-manual-launcher__icon">🎬</span><span>Manual</span>`
-    : `<span class="video-manual-launcher__icon">🎬</span><span>Manual</span><small>Scan first</small>`;
+  button.disabled = false; // never truly disable — we handle it in click
+  button.className = `video-manual-launcher${enabled ? '' : ' is-disabled'}${button.classList.contains('is-expanded') ? ' is-expanded' : ''}`;
+  button.innerHTML = `
+    <span class="video-manual-launcher__icon">🎬</span>
+    <span class="video-manual-launcher__label">${enabled ? 'Manual' : 'Manual<small>Scan first</small>'}</span>
+  `;
 }
 
 function renderVideoManualProjects() {
@@ -8268,35 +8269,63 @@ function ensureVideoManualPickerUi() {
   style.textContent = `
     .video-manual-launcher {
       position: fixed;
-      left: max(12px, env(safe-area-inset-left));
-      top: max(12px, env(safe-area-inset-top));
+      right: max(12px, env(safe-area-inset-right));
+      bottom: max(12px, env(safe-area-inset-bottom));
       z-index: 9998;
       display: inline-flex;
       align-items: center;
-      gap: 8px;
-      min-height: 40px;
-      padding: 8px 14px;
+      gap: 0;
+      overflow: hidden;
+      min-height: 48px;
+      width: 48px;
+      padding: 0;
       border: none;
-      border-radius: 8px;
+      border-radius: 24px;
       background: #0f766e;
       color: white;
       font-size: 13px;
       font-weight: 700;
       cursor: pointer;
       touch-action: manipulation;
+      transition: width 0.3s cubic-bezier(0.34, 1.56, 0.64, 1),
+                  border-radius 0.3s ease,
+                  box-shadow 0.2s ease;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+      white-space: nowrap;
+    }
+    .video-manual-launcher__icon {
+      flex-shrink: 0;
+      width: 48px;
+      height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+    }
+    .video-manual-launcher__label {
+      padding-right: 14px;
+      opacity: 0;
+      transition: opacity 0.15s ease 0.1s;
+      pointer-events: none;
+    }
+    .video-manual-launcher.is-expanded {
+      width: 130px;
+      border-radius: 12px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+    }
+    .video-manual-launcher.is-expanded .video-manual-launcher__label {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .video-manual-launcher.is-disabled {
+      background: #94a3b8;
+      cursor: not-allowed;
     }
     .video-manual-launcher small {
       display: block;
       font-size: 10px;
       font-weight: 500;
       opacity: 0.75;
-    }
-    .video-manual-launcher.is-disabled {
-      background: #94a3b8;
-      cursor: not-allowed;
-    }
-    .video-manual-launcher__icon {
-      font-size: 16px;
     }
     .video-manual-modal {
       position: fixed;
@@ -8732,7 +8761,26 @@ function ensureVideoManualPickerUi() {
   const launcher = document.createElement('button');
   launcher.id = 'videoManualLauncher';
   launcher.type = 'button';
-  launcher.addEventListener('click', openVideoManualPicker);
+  launcher.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isExpanded = launcher.classList.contains('is-expanded');
+    if (!isExpanded) {
+      // First tap: expand
+      launcher.classList.add('is-expanded');
+      // Auto-collapse if user clicks elsewhere
+      const collapse = (ev) => {
+        if (!launcher.contains(ev.target)) {
+          launcher.classList.remove('is-expanded');
+          document.removeEventListener('click', collapse);
+        }
+      };
+      setTimeout(() => document.addEventListener('click', collapse), 10);
+    } else {
+      // Second tap: open picker
+      launcher.classList.remove('is-expanded');
+      void openVideoManualPicker();
+    }
+  });
   document.body.appendChild(launcher);
 
   const modal = document.createElement('div');
