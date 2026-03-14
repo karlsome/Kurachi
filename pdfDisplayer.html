@@ -332,6 +332,217 @@
             height: 100%;
         }
 
+        .display-mode-hidden {
+            display: none !important;
+        }
+
+        .manual-section {
+            margin: 0;
+            padding: 0;
+            flex: 1;
+            min-height: 0;
+            display: none;
+            width: 100%;
+            height: 100%;
+        }
+
+        .manual-shell {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            border-radius: 0;
+            overflow: hidden;
+            background: #020617;
+        }
+
+        .manual-media-stage {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            z-index: 0;
+        }
+
+        .manual-project-viewport {
+            position: relative;
+            flex-shrink: 0;
+            overflow: hidden;
+        }
+
+        .manual-project-stage {
+            position: relative;
+            flex-shrink: 0;
+            overflow: hidden;
+            background: #020617;
+        }
+
+        .manual-shell::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(
+                180deg,
+                rgba(2, 6, 23, 0.1) 0%,
+                rgba(2, 6, 23, 0.02) 12%,
+                rgba(2, 6, 23, 0) 24%,
+                rgba(2, 6, 23, 0) 76%,
+                rgba(2, 6, 23, 0.06) 88%,
+                rgba(2, 6, 23, 0.16) 100%
+            );
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        .manual-video {
+            position: absolute;
+            display: block;
+            background: #020617;
+            z-index: 0;
+        }
+
+        .manual-elements {
+            position: absolute;
+            inset: 0;
+            overflow: hidden;
+            pointer-events: none;
+            z-index: 2;
+        }
+
+        .manual-overlay {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 16px;
+            z-index: 2;
+            pointer-events: none;
+        }
+
+        .manual-topbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 16px;
+        }
+
+        .manual-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 14px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.14);
+            backdrop-filter: blur(12px);
+            color: rgba(255, 255, 255, 0.92);
+            font-size: 0.82em;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            border: 1px solid rgba(255, 255, 255, 0.16);
+        }
+
+        .manual-title-block {
+            max-width: min(780px, 90%);
+            background: rgba(15, 23, 42, 0.36);
+            backdrop-filter: blur(18px);
+            padding: 14px 18px;
+            border-radius: 18px;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+
+        .manual-title {
+            font-size: clamp(1.5rem, 3vw, 2.6rem);
+            line-height: 1.05;
+            font-weight: 900;
+            color: #f8fafc;
+        }
+
+        .manual-meta {
+            margin-top: 8px;
+            color: rgba(226, 232, 240, 0.82);
+            font-size: 0.95rem;
+            font-weight: 600;
+        }
+
+        .manual-bottombar {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            gap: 16px;
+        }
+
+        .manual-status-card,
+        .manual-step-card {
+            min-width: 220px;
+            max-width: 48%;
+            background: rgba(15, 23, 42, 0.44);
+            backdrop-filter: blur(16px);
+            padding: 14px 16px;
+            border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            color: #e2e8f0;
+        }
+
+        .manual-card-label {
+            font-size: 0.72rem;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: rgba(148, 163, 184, 0.94);
+            margin-bottom: 8px;
+            font-weight: 800;
+        }
+
+        .manual-card-value {
+            font-size: 1.05rem;
+            line-height: 1.35;
+            font-weight: 700;
+            color: #f8fafc;
+        }
+
+        .manual-status-card.is-loading {
+            border-color: rgba(59, 130, 246, 0.3);
+        }
+
+        .manual-status-card.is-ready {
+            border-color: rgba(16, 185, 129, 0.3);
+        }
+
+        .manual-status-card.is-error {
+            border-color: rgba(248, 113, 113, 0.36);
+        }
+
+        .manual-blank {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            z-index: 0;
+            color: rgba(226, 232, 240, 0.9);
+            text-align: center;
+            padding: 24px;
+        }
+
+        .manual-blank-icon {
+            font-size: 3.8rem;
+        }
+
+        .manual-blank-title {
+            font-size: clamp(1.4rem, 2.4vw, 2.2rem);
+            font-weight: 900;
+        }
+
+        .manual-blank-body {
+            font-size: 1rem;
+            color: rgba(203, 213, 225, 0.84);
+            max-width: 620px;
+        }
+
         .pdf-grid {
             display: flex;
             width: 100%;
@@ -468,6 +679,43 @@
                 <div id="pdfGrid" style="text-align: center;">
                 </div>
             </div>
+
+            <div class="manual-section" id="manualSection">
+                <div class="manual-shell">
+                    <div class="manual-blank" id="manualBlankState">
+                        <div class="manual-blank-icon">🎬</div>
+                        <div class="manual-blank-title">Waiting for a deployed video manual</div>
+                        <div class="manual-blank-body">The monitor will switch here when the tablet selects a deployed project for this scanned product.</div>
+                    </div>
+                    <div class="manual-media-stage" id="manualMediaStage">
+                        <div class="manual-project-viewport" id="manualProjectViewport">
+                            <div class="manual-project-stage" id="manualProjectStage">
+                                <video id="manualVideo" class="manual-video display-mode-hidden" playsinline muted preload="auto"></video>
+                                <div id="manualElements" class="manual-elements"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="manual-overlay">
+                        <div class="manual-topbar">
+                            <div class="manual-title-block">
+                                <div class="manual-badge">Monitor Player</div>
+                                <div class="manual-title" id="manualTitle">Video Manual</div>
+                                <div class="manual-meta" id="manualMeta">Waiting for project selection…</div>
+                            </div>
+                        </div>
+                        <div class="manual-bottombar">
+                            <div class="manual-status-card" id="manualStatusCard">
+                                <div class="manual-card-label">Playback Status</div>
+                                <div class="manual-card-value" id="manualStatusText">Idle</div>
+                            </div>
+                            <div class="manual-step-card">
+                                <div class="manual-card-label">Current Step</div>
+                                <div class="manual-card-value" id="manualStepText">Waiting for project selection…</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -485,8 +733,8 @@
         }
 
         const MACHINE_ID = getMachineIdFromURL();
-        const SERVER_URL = 'https://kurachi.onrender.com';
-        //const SERVER_URL = 'http://localhost:3000';
+        //const SERVER_URL = 'https://kurachi.onrender.com';
+        const SERVER_URL = 'http://localhost:3000';
         //const SERVER_URL = 'http://192.168.1.176:3000';
 
         // localStorage key for persisting scan data
@@ -499,9 +747,37 @@
         const productSection = document.getElementById('productSection');
         const productInfo = document.getElementById('productInfo');
         const pdfSection = document.getElementById('pdfSection');
+        const manualSection = document.getElementById('manualSection');
+        const manualMediaStage = document.getElementById('manualMediaStage');
+        const manualProjectViewport = document.getElementById('manualProjectViewport');
+        const manualProjectStage = document.getElementById('manualProjectStage');
+        const manualVideo = document.getElementById('manualVideo');
+        const manualElements = document.getElementById('manualElements');
+        const manualBlankState = document.getElementById('manualBlankState');
+        const manualTitle = document.getElementById('manualTitle');
+        const manualMeta = document.getElementById('manualMeta');
+        const manualStatusCard = document.getElementById('manualStatusCard');
+        const manualStatusText = document.getElementById('manualStatusText');
+        const manualStepText = document.getElementById('manualStepText');
         const mainContent = document.querySelector('.main-content');
         const errorMessage = document.getElementById('errorMessage');
         const errorText = document.getElementById('errorText');
+        const manualState = {
+            mode: 'pdf',
+            project: null,
+            duration: 0,
+            currentTime: 0,
+            currentStepIndex: 0,
+            activeSourceKey: '',
+            pendingSwitch: null,
+            playing: false,
+            resumePdfIndex: 0,
+            sessionKey: MACHINE_ID,
+            lastStateSentAt: 0,
+        };
+
+        manualVideo.defaultMuted = true;
+        manualVideo.muted = true;
 
         // Check if machine ID is valid
         if (!MACHINE_ID) {
@@ -569,7 +845,600 @@
             productSection.style.display = 'none';
             errorMessage.style.display = 'block';
             errorText.innerHTML = message;
-            machineNameDisplay.textContent = 'ERROR';
+        }
+
+        function resolveManualMediaUrl(url) {
+            if (!url || url.startsWith('blob:') || url.startsWith('data:')) {
+                return url;
+            }
+
+            try {
+                const parsed = new URL(url, window.location.href);
+                const needsProxy = parsed.hostname === 'firebasestorage.googleapis.com' || parsed.hostname === 'storage.googleapis.com';
+                if (!needsProxy) return parsed.toString();
+                return `${SERVER_URL}/api/video-manual-media?url=${encodeURIComponent(parsed.toString())}`;
+            } catch (_) {
+                return url;
+            }
+        }
+
+        function escapeManualHtml(value) {
+            return String(value ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function getManualProjectAssetById(assetId, project = manualState.project) {
+            if (!assetId || !Array.isArray(project?.assets)) return null;
+            return project.assets.find((item) => String(item.assetId || item._id) === String(assetId)) || null;
+        }
+
+        function getManualStepAssetId(step, project = manualState.project) {
+            return step?.assetId || project?.currentAssetId || null;
+        }
+
+        function getManualStepVideoUrl(step, project = manualState.project) {
+            const asset = getManualProjectAssetById(getManualStepAssetId(step, project), project);
+            return asset?.downloadUrl || asset?.url || step?.videoUrl || project?.videoUrl || null;
+        }
+
+        function getManualStepSourceKey(step, project = manualState.project) {
+            const assetId = getManualStepAssetId(step, project);
+            if (assetId) return `asset:${assetId}`;
+            const url = getManualStepVideoUrl(step, project);
+            return url ? `url:${url}` : '';
+        }
+
+        function findManualStepIndexAtTime(timelineTime, project = manualState.project) {
+            const steps = project?.steps || [];
+            if (!steps.length) return -1;
+
+            for (let index = 0; index < steps.length; index++) {
+                const step = steps[index];
+                const isLast = index === steps.length - 1;
+                if (timelineTime < step.startTime) continue;
+                if (timelineTime < step.endTime || (isLast && timelineTime <= step.endTime)) {
+                    return index;
+                }
+            }
+
+            if (timelineTime <= steps[0].startTime) return 0;
+            return steps.length - 1;
+        }
+
+        function getManualSequenceDuration(project = manualState.project) {
+            if (!project) return 0;
+            if (Array.isArray(project.steps) && project.steps.length) {
+                return project.steps.reduce((maxEnd, step) => Math.max(maxEnd, step?.endTime || 0), 0);
+            }
+            return project.duration || 0;
+        }
+
+        function getManualVideoDrawRect(nativeW, nativeH, projectW, projectH) {
+            if (!nativeW || !nativeH || !projectW || !projectH) {
+                return { drawX: 0, drawY: 0, drawW: projectW || 0, drawH: projectH || 0 };
+            }
+
+            const videoRatio = nativeW / nativeH;
+            const projectRatio = projectW / projectH;
+
+            if (videoRatio > projectRatio) {
+                const drawW = projectW;
+                const drawH = projectW / videoRatio;
+                return {
+                    drawX: 0,
+                    drawY: (projectH - drawH) / 2,
+                    drawW,
+                    drawH,
+                };
+            }
+
+            const drawH = projectH;
+            const drawW = projectH * videoRatio;
+            return {
+                drawX: (projectW - drawW) / 2,
+                drawY: 0,
+                drawW,
+                drawH,
+            };
+        }
+
+        function getManualShapeLocalEndpoints(el) {
+            const startNormX = el.startNormX ?? 0;
+            const startNormY = el.startNormY ?? 1;
+            const endNormX = el.endNormX ?? 1;
+            const endNormY = el.endNormY ?? 0;
+
+            return {
+                startX: startNormX * (el.width || 0),
+                startY: startNormY * (el.height || 0),
+                endX: endNormX * (el.width || 0),
+                endY: endNormY * (el.height || 0),
+            };
+        }
+
+        function getManualProjectMetrics() {
+            const projectW = Math.max(1, Number(manualState.project?.width) || 1920);
+            const projectH = Math.max(1, Number(manualState.project?.height) || 1080);
+            const containerW = manualMediaStage?.clientWidth || manualSection?.clientWidth || window.innerWidth || projectW;
+            const containerH = manualMediaStage?.clientHeight || manualSection?.clientHeight || window.innerHeight || projectH;
+            const scale = Math.min(containerW / projectW, containerH / projectH, 1);
+            return {
+                projectW,
+                projectH,
+                scale,
+                stageW: projectW * scale,
+                stageH: projectH * scale,
+            };
+        }
+
+        function isManualElementVisibleAtTime(el, time) {
+            const startTime = Number(el?.startTime);
+            const endTime = Number(el?.endTime);
+            const hasTiming = Number.isFinite(startTime) && Number.isFinite(endTime);
+            const withinTiming = hasTiming ? (time >= startTime && time < endTime) : true;
+            if (!withinTiming) return false;
+            if (!el?.blink) return true;
+
+            const elapsed = Math.max(0, time - (hasTiming ? startTime : 0));
+            return (elapsed % 1) < 0.5;
+        }
+
+        function syncManualStageLayout() {
+            if (!manualProjectStage || !manualProjectViewport || !manualState.project) return;
+            const { projectW, projectH, scale, stageW, stageH } = getManualProjectMetrics();
+            manualProjectViewport.style.width = `${stageW}px`;
+            manualProjectViewport.style.height = `${stageH}px`;
+            manualProjectStage.style.width = `${projectW}px`;
+            manualProjectStage.style.height = `${projectH}px`;
+            manualProjectStage.style.transform = `scale(${scale})`;
+            manualProjectStage.style.transformOrigin = 'top left';
+
+            const rect = getManualVideoDrawRect(
+                manualVideo.videoWidth || projectW,
+                manualVideo.videoHeight || projectH,
+                projectW,
+                projectH
+            );
+
+            manualVideo.style.left = `${rect.drawX}px`;
+            manualVideo.style.top = `${rect.drawY}px`;
+            manualVideo.style.width = `${rect.drawW}px`;
+            manualVideo.style.height = `${rect.drawH}px`;
+        }
+
+        function renderManualElements() {
+            if (!manualElements) return;
+            manualElements.innerHTML = '';
+            if (!manualState.project?.steps?.length) return;
+
+            const elements = manualState.project.steps
+                .reduce((acc, step) => acc.concat(step?.elements || []), [])
+                .filter((item) => item && item.type !== 'audio' && isManualElementVisibleAtTime(item, manualState.currentTime))
+                .filter((item) => item && item.type !== 'audio')
+                .slice()
+                .sort((a, b) => (Number(b.layer) || 0) - (Number(a.layer) || 0));
+
+            elements.forEach((el) => {
+                const div = document.createElement('div');
+                div.className = 'absolute pointer-events-none';
+                div.style.left = `${Number(el.x) || 0}px`;
+                div.style.top = `${Number(el.y) || 0}px`;
+                div.style.width = `${Math.max(0, Number(el.width) || 0)}px`;
+                div.style.height = `${Math.max(0, Number(el.height) || 0)}px`;
+                div.style.opacity = String(((Number(el.opacity) || 100) / 100));
+                div.style.transform = `rotate(${Number(el.rotation) || 0}deg)`;
+                div.style.transformOrigin = 'center center';
+
+                if (el.type === 'text') {
+                    const justify = el.textAlign === 'left' ? 'flex-start' : el.textAlign === 'right' ? 'flex-end' : 'center';
+                    div.innerHTML = `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:${justify};font-size:${Math.max(1, Number(el.fontSize) || 16)}px;font-family:${escapeManualHtml(el.fontFamily || 'sans-serif')};font-weight:${escapeManualHtml(el.fontWeight || '400')};color:${escapeManualHtml(el.color || '#ffffff')};background:${escapeManualHtml(el.backgroundColor || 'transparent')};text-align:${escapeManualHtml(el.textAlign || 'center')};padding:8px;box-sizing:border-box;overflow:hidden;white-space:pre-wrap;">${escapeManualHtml(el.text || '')}</div>`;
+                } else if (el.type === 'shape') {
+                    const strokeWidth = Math.max(1, Number(el.strokeWidth) || 1);
+                    const strokeColor = escapeManualHtml(el.strokeColor || '#ffffff');
+                    if (el.subtype === 'rect') {
+                        div.innerHTML = `<div style="width:100%;height:100%;background:${el.fill ? strokeColor : 'transparent'};border:${strokeWidth}px solid ${strokeColor};border-radius:4px;box-sizing:border-box;"></div>`;
+                    } else if (el.subtype === 'circle') {
+                        div.innerHTML = `<div style="width:100%;height:100%;background:${el.fill ? strokeColor : 'transparent'};border:${strokeWidth}px solid ${strokeColor};border-radius:50%;box-sizing:border-box;"></div>`;
+                    } else if (el.subtype === 'arrow' || el.subtype === 'line') {
+                        const { startX, startY, endX, endY } = getManualShapeLocalEndpoints(el);
+                        const markerId = `manual-arrow-${el.id || Math.random().toString(36).slice(2, 8)}`;
+                        div.innerHTML = `<svg width="100%" height="100%" viewBox="0 0 ${Math.max(1, Number(el.width) || 1)} ${Math.max(1, Number(el.height) || 1)}" style="overflow:visible;"><defs><marker id="${markerId}" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="${strokeColor}" /></marker></defs><line x1="${startX}" y1="${startY}" x2="${endX}" y2="${endY}" stroke="${strokeColor}" stroke-width="${Math.max(1, Number(el.strokeWidth) || 1)}" ${el.subtype === 'arrow' ? `marker-end="url(#${markerId})"` : ''} /></svg>`;
+                    }
+                } else if (el.type === 'image' && el.imageUrl) {
+                    div.innerHTML = `<img src="${escapeManualHtml(resolveManualMediaUrl(el.imageUrl))}" crossorigin="anonymous" style="width:100%;height:100%;object-fit:contain;" />`;
+                }
+
+                if (div.innerHTML) {
+                    manualElements.appendChild(div);
+                }
+            });
+        }
+
+        function formatManualTime(seconds) {
+            const safe = Number.isFinite(Number(seconds)) ? Math.max(0, Number(seconds)) : 0;
+            const minutes = Math.floor(safe / 60);
+            const secs = Math.floor(safe % 60);
+            return `${minutes}:${String(secs).padStart(2, '0')}`;
+        }
+
+        function setManualStatus(text, tone = 'idle') {
+            manualStatusText.textContent = text;
+            manualStatusCard.classList.remove('is-loading', 'is-ready', 'is-error');
+            if (tone === 'loading') manualStatusCard.classList.add('is-loading');
+            if (tone === 'ready') manualStatusCard.classList.add('is-ready');
+            if (tone === 'error') manualStatusCard.classList.add('is-error');
+        }
+
+        async function postMachinePlayerState(patch = {}, { force = false } = {}) {
+            const sessionKey = manualState.sessionKey || MACHINE_ID;
+            const now = Date.now();
+            if (!force && now - manualState.lastStateSentAt < 250) {
+                return;
+            }
+            manualState.lastStateSentAt = now;
+
+            const baseState = {
+                mode: manualState.mode === 'manual'
+                    ? (manualState.playing ? 'playing' : (manualState.project ? 'ready' : 'idle'))
+                    : 'idle',
+                projectId: manualState.project?._id || null,
+                title: manualState.project?.title || '',
+                statusText: manualStatusText.textContent || 'Idle',
+                currentTime: manualState.currentTime || 0,
+                duration: manualState.duration || 0,
+                currentStepIndex: manualState.currentStepIndex || 0,
+                stepCount: manualState.project?.steps?.length || 0,
+                canPlay: !!manualState.project,
+                isPlaying: !!manualState.playing,
+                error: '',
+            };
+
+            try {
+                await fetch(`${SERVER_URL}/api/machine-player/state`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        machineId: sessionKey,
+                        state: {
+                            ...baseState,
+                            ...patch,
+                        },
+                    }),
+                });
+            } catch (error) {
+                console.error('❌ Failed to post machine player state:', error);
+            }
+        }
+
+        function updateManualStepLabel() {
+            if (!manualState.project?.steps?.length) {
+                manualStepText.textContent = 'Waiting for project selection…';
+                renderManualElements();
+                return;
+            }
+
+            const step = manualState.project.steps[manualState.currentStepIndex] || manualState.project.steps[0];
+            const label = step?.label || `Step ${manualState.currentStepIndex + 1}`;
+            const total = manualState.project.steps.length;
+            manualStepText.textContent = `${label} · ${manualState.currentStepIndex + 1}/${total} · ${formatManualTime(manualState.currentTime)} / ${formatManualTime(manualState.duration)}`;
+            renderManualElements();
+        }
+
+        function enterPdfMode() {
+            manualState.mode = 'pdf';
+            manualSection.style.display = 'none';
+            pdfSection.style.display = 'block';
+            currentPDFIndex = manualState.resumePdfIndex || 0;
+            if (pdfPages.length) {
+                displayCurrentPDF();
+            }
+        }
+
+        function enterManualMode() {
+            manualState.mode = 'manual';
+            waitingMessage.style.display = 'none';
+            productSection.style.display = 'block';
+            pdfSection.style.display = 'none';
+            manualSection.style.display = 'flex';
+        }
+
+        function resetManualPlayer({ restorePdf = true } = {}) {
+            manualVideo.pause();
+            manualVideo.removeAttribute('src');
+            manualVideo.load();
+            manualVideo.classList.add('display-mode-hidden');
+            manualBlankState.classList.remove('display-mode-hidden');
+            manualState.project = null;
+            manualState.duration = 0;
+            manualState.currentTime = 0;
+            manualState.currentStepIndex = 0;
+            manualState.activeSourceKey = '';
+            manualState.pendingSwitch = null;
+            manualState.playing = false;
+            manualTitle.textContent = 'Video Manual';
+            manualMeta.textContent = 'Waiting for project selection…';
+            setManualStatus('Idle', 'idle');
+            if (manualProjectViewport) {
+                manualProjectViewport.style.width = '0px';
+                manualProjectViewport.style.height = '0px';
+            }
+            if (manualProjectStage) {
+                manualProjectStage.style.width = '0px';
+                manualProjectStage.style.height = '0px';
+                manualProjectStage.style.transform = 'scale(1)';
+            }
+            if (manualElements) {
+                manualElements.innerHTML = '';
+            }
+            updateManualStepLabel();
+            void postMachinePlayerState({
+                mode: 'idle',
+                projectId: null,
+                title: '',
+                statusText: 'Idle',
+                currentTime: 0,
+                duration: 0,
+                currentStepIndex: 0,
+                stepCount: 0,
+                canPlay: false,
+                isPlaying: false,
+                error: '',
+            }, { force: true });
+            if (restorePdf) {
+                enterPdfMode();
+            }
+        }
+
+        function ensureManualStepSource(step, timelineTime, { autoplay = false } = {}) {
+            if (!step) return true;
+
+            const desiredUrl = getManualStepVideoUrl(step);
+            if (!desiredUrl) return true;
+
+            const desiredKey = getManualStepSourceKey(step);
+            if (manualState.activeSourceKey === desiredKey && manualVideo.getAttribute('src')) {
+                return true;
+            }
+
+            manualState.pendingSwitch = { timelineTime, autoplay, sourceKey: desiredKey };
+            manualState.activeSourceKey = desiredKey;
+            manualVideo.classList.add('display-mode-hidden');
+            manualBlankState.classList.remove('display-mode-hidden');
+            setManualStatus('Loading selected manual on monitor…', 'loading');
+            void postMachinePlayerState({
+                mode: 'loading',
+                statusText: 'Loading on monitor...',
+                canPlay: false,
+                isPlaying: false,
+            }, { force: true });
+            manualVideo.src = resolveManualMediaUrl(desiredUrl);
+            manualVideo.load();
+            return false;
+        }
+
+        async function manualSeekTo(timelineTime, { autoplay = false } = {}) {
+            if (!manualState.project) return;
+
+            timelineTime = Math.max(0, Math.min(timelineTime, manualState.duration));
+            const stepIndex = findManualStepIndexAtTime(timelineTime, manualState.project);
+            const steps = manualState.project.steps || [];
+            const step = stepIndex >= 0 ? steps[stepIndex] : steps[0];
+            if (!step) return;
+
+            manualState.currentStepIndex = stepIndex >= 0 ? stepIndex : 0;
+            manualState.currentTime = timelineTime;
+
+            if (!ensureManualStepSource(step, timelineTime, { autoplay })) {
+                updateManualStepLabel();
+                return;
+            }
+
+            const offset = Math.max(0, timelineTime - step.startTime);
+            const sourceStart = step.sourceStart ?? step.startTime;
+            const sourceEnd = step.sourceEnd ?? step.endTime;
+            const nextTime = Math.max(0, Math.min(sourceStart + offset, sourceEnd, manualVideo.duration || sourceEnd));
+
+            if (Number.isFinite(nextTime)) {
+                try {
+                    manualVideo.currentTime = nextTime;
+                } catch (_) {
+                    // Ignore DOM exceptions while metadata is still settling.
+                }
+            }
+
+            updateManualStepLabel();
+            if (autoplay) {
+                try {
+                    manualVideo.defaultMuted = true;
+                    manualVideo.muted = true;
+                    await manualVideo.play();
+                    manualState.playing = true;
+                    setManualStatus('Playing on monitor', 'ready');
+                    void postMachinePlayerState({
+                        mode: 'playing',
+                        statusText: 'Playing on monitor',
+                        canPlay: true,
+                        isPlaying: true,
+                    }, { force: true });
+                } catch (error) {
+                    manualState.playing = false;
+                    console.error('Monitor autoplay failed:', error);
+                    setManualStatus(`Playback blocked on monitor: ${error.message || 'autoplay rejected'}`, 'error');
+                    void postMachinePlayerState({
+                        mode: 'error',
+                        statusText: 'Playback blocked on monitor',
+                        canPlay: false,
+                        isPlaying: false,
+                        error: error.message || 'autoplay rejected',
+                    }, { force: true });
+                }
+            } else {
+                manualVideo.pause();
+                manualState.playing = false;
+                setManualStatus('Ready on monitor. Waiting for play.', 'ready');
+                void postMachinePlayerState({
+                    mode: 'ready',
+                    statusText: 'Ready on monitor. Waiting for play.',
+                    canPlay: true,
+                    isPlaying: false,
+                }, { force: true });
+            }
+        }
+
+        async function loadVideoManualProject(projectId) {
+            if (!projectId) return;
+
+            manualState.resumePdfIndex = currentPDFIndex;
+            enterManualMode();
+            manualBlankState.classList.remove('display-mode-hidden');
+            manualVideo.classList.add('display-mode-hidden');
+            manualTitle.textContent = 'Loading Video Manual';
+            manualMeta.textContent = 'Fetching deployed revision…';
+            setManualStatus('Loading selected manual on monitor…', 'loading');
+            manualStepText.textContent = 'Preparing project…';
+            void postMachinePlayerState({
+                mode: 'loading',
+                projectId,
+                title: 'Loading Video Manual',
+                statusText: 'Loading on monitor...',
+                currentTime: 0,
+                duration: 0,
+                currentStepIndex: 0,
+                stepCount: 0,
+                canPlay: false,
+                isPlaying: false,
+                error: '',
+            }, { force: true });
+
+            try {
+                const response = await fetch(`${SERVER_URL}/api/factory/video-manuals/projects/${encodeURIComponent(projectId)}`);
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || `HTTP ${response.status}`);
+                }
+
+                const snapshot = data.snapshot || {};
+                manualState.project = {
+                    ...snapshot,
+                    _id: data.projectId,
+                    playlistId: data.playlistId,
+                    title: data.title || snapshot.title || 'Video Manual',
+                    thumbnailUrl: data.thumbnailUrl || snapshot.thumbnailUrl || null,
+                    steps: Array.isArray(snapshot.steps) ? snapshot.steps : [],
+                };
+                manualState.duration = getManualSequenceDuration(manualState.project);
+                manualState.currentTime = 0;
+                manualState.currentStepIndex = 0;
+                manualState.activeSourceKey = '';
+                manualState.pendingSwitch = null;
+                manualState.playing = false;
+                syncManualStageLayout();
+
+                manualTitle.textContent = data.title || snapshot.title || 'Video Manual';
+                manualMeta.textContent = `${manualState.project.steps.length || 0} steps · ${data.deployedRevisionName || `Rev ${data.deployedRevisionNumber || '?'}`} · Ready on monitor`;
+
+                if (!manualState.project.steps.length && !getManualStepVideoUrl(null, manualState.project)) {
+                    manualBlankState.classList.remove('display-mode-hidden');
+                    manualVideo.classList.add('display-mode-hidden');
+                    setManualStatus('No playable clips found in deployed revision', 'error');
+                    manualStepText.textContent = 'This deployed project has no playable video.';
+                    void postMachinePlayerState({
+                        mode: 'error',
+                        statusText: 'No playable clips found in deployed revision',
+                        canPlay: false,
+                        isPlaying: false,
+                        error: 'No playable clips found in deployed revision',
+                    }, { force: true });
+                    return;
+                }
+
+                await manualSeekTo(0, { autoplay: false });
+            } catch (error) {
+                console.error('❌ Failed to load deployed video manual:', error);
+                manualBlankState.classList.remove('display-mode-hidden');
+                manualVideo.classList.add('display-mode-hidden');
+                manualTitle.textContent = 'Video Manual';
+                manualMeta.textContent = 'Could not load deployed project';
+                setManualStatus(`Failed to load video manual: ${error.message}`, 'error');
+                manualStepText.textContent = 'Waiting for another project selection…';
+                void postMachinePlayerState({
+                    mode: 'error',
+                    statusText: 'Failed to load video manual',
+                    canPlay: false,
+                    isPlaying: false,
+                    error: error.message,
+                }, { force: true });
+            }
+        }
+
+        function goToPreviousManualStep() {
+            if (!manualState.project?.steps?.length) return;
+            const nextIndex = Math.max(0, manualState.currentStepIndex - 1);
+            void manualSeekTo(manualState.project.steps[nextIndex].startTime, { autoplay: false });
+        }
+
+        function goToNextManualStep({ autoplay = false } = {}) {
+            if (!manualState.project?.steps?.length) return;
+            const nextIndex = Math.min(manualState.project.steps.length - 1, manualState.currentStepIndex + 1);
+            void manualSeekTo(manualState.project.steps[nextIndex].startTime, { autoplay });
+        }
+
+        async function handlePlayerCommand(data) {
+            const action = data?.additionalData?.action;
+            if (!action) return;
+            if (data.machineId) {
+                manualState.sessionKey = data.machineId;
+            }
+
+            if (action === 'video-manual-load' && data.additionalData.projectId) {
+                await loadVideoManualProject(data.additionalData.projectId);
+                return;
+            }
+
+            if (action === 'video-manual-exit') {
+                resetManualPlayer({ restorePdf: true });
+                return;
+            }
+
+            if (!manualState.project) {
+                return;
+            }
+
+            if (action === 'video-manual-play') {
+                await manualSeekTo(manualState.currentTime, { autoplay: true });
+                return;
+            }
+
+            if (action === 'video-manual-pause') {
+                manualVideo.pause();
+                manualState.playing = false;
+                setManualStatus('Paused on monitor', 'ready');
+                void postMachinePlayerState({
+                    mode: 'paused',
+                    statusText: 'Paused on monitor',
+                    canPlay: true,
+                    isPlaying: false,
+                }, { force: true });
+                return;
+            }
+
+            if (action === 'video-manual-seek') {
+                await manualSeekTo(Number(data.additionalData.timelineTime) || 0, { autoplay: false });
+                return;
+            }
+
+            if (action === 'video-manual-next-step') {
+                goToNextManualStep({ autoplay: false });
+                return;
+            }
+
+            if (action === 'video-manual-prev-step') {
+                goToPreviousManualStep();
+            }
         }
 
         // Save scan data to localStorage
@@ -660,9 +1529,24 @@
             }
 
             if (data.type === 'scan') {
+                if (data.machineId) {
+                    manualState.sessionKey = data.machineId;
+                }
                 // Check if this is a clear action
                 if (data.additionalData && data.additionalData.action === 'clear') {
                     clearDisplay();
+                    resetManualPlayer({ restorePdf: false });
+                    manualSection.style.display = 'none';
+                    return;
+                }
+
+                if (data.additionalData && data.additionalData.action === 'video-manual-load' && data.additionalData.projectId) {
+                    void loadVideoManualProject(data.additionalData.projectId);
+                    return;
+                }
+
+                if (data.additionalData && data.additionalData.action === 'video-manual-exit') {
+                    resetManualPlayer({ restorePdf: true });
                     return;
                 }
 
@@ -672,6 +1556,10 @@
 
                 // Update display
                 updateDisplay(data);
+            }
+
+            if (data.type === 'player-command') {
+                void handlePlayerCommand(data);
             }
         }
 
@@ -684,6 +1572,7 @@
             
             // Hide PDF section
             pdfSection.style.display = 'none';
+            manualSection.style.display = 'none';
             
             // Show waiting message
             waitingMessage.style.display = 'block';
@@ -695,6 +1584,8 @@
 
         // Update the display with scan data
         async function updateDisplay(data) {
+            resetManualPlayer({ restorePdf: false });
+
             // Save to localStorage for persistence
             saveScanToStorage(data);
             
@@ -801,6 +1692,10 @@
                 pdfSection.style.display = 'none';
                 return;
             }
+
+            if (manualState.mode === 'manual') {
+                return;
+            }
             
             pdfSection.style.display = 'block';
             const currentPage = pdfPages[currentPDFIndex];
@@ -842,8 +1737,125 @@
         // Keyboard navigation - ANY key advances to next page
         document.addEventListener('keydown', (event) => {
             // Only handle keyboard if we have PDFs loaded
-            if (pdfPages.length > 0) {
+            if (manualState.mode !== 'manual' && pdfPages.length > 0) {
                 nextPDF();
+            }
+        });
+
+        manualVideo.addEventListener('loadeddata', () => {
+            manualBlankState.classList.add('display-mode-hidden');
+            manualVideo.classList.remove('display-mode-hidden');
+            syncManualStageLayout();
+            renderManualElements();
+
+            if (manualState.pendingSwitch) {
+                const pending = manualState.pendingSwitch;
+                manualState.pendingSwitch = null;
+                void manualSeekTo(pending.timelineTime, { autoplay: pending.autoplay });
+                return;
+            }
+
+            setManualStatus('Ready on monitor. Waiting for play.', 'ready');
+            void postMachinePlayerState({
+                mode: 'ready',
+                statusText: 'Ready on monitor. Waiting for play.',
+                canPlay: true,
+                isPlaying: false,
+            }, { force: true });
+        });
+
+        manualVideo.addEventListener('timeupdate', () => {
+            if (!manualState.project?.steps?.length) return;
+
+            const steps = manualState.project.steps;
+            const step = steps[manualState.currentStepIndex] || steps[0];
+            if (!step) return;
+
+            const sourceStart = step.sourceStart ?? step.startTime;
+            const sourceEnd = step.sourceEnd ?? step.endTime;
+            const timelineTime = Math.max(step.startTime, Math.min(step.endTime, step.startTime + Math.max(0, manualVideo.currentTime - sourceStart)));
+
+            manualState.currentTime = timelineTime;
+            const stepIndex = findManualStepIndexAtTime(timelineTime, manualState.project);
+            if (stepIndex >= 0) {
+                manualState.currentStepIndex = stepIndex;
+            }
+            updateManualStepLabel();
+            void postMachinePlayerState({
+                mode: manualState.playing ? 'playing' : 'paused',
+                statusText: manualState.playing ? 'Playing on monitor' : 'Paused on monitor',
+                currentTime: manualState.currentTime,
+                currentStepIndex: manualState.currentStepIndex,
+                stepCount: manualState.project?.steps?.length || 0,
+                canPlay: true,
+                isPlaying: manualState.playing,
+            });
+
+            if (manualState.playing && manualVideo.currentTime >= sourceEnd - 0.05) {
+                const nextStep = steps[manualState.currentStepIndex + 1];
+                if (nextStep) {
+                    void manualSeekTo(nextStep.startTime, { autoplay: true });
+                } else {
+                    manualVideo.pause();
+                    manualState.playing = false;
+                    manualState.currentTime = manualState.duration;
+                    updateManualStepLabel();
+                    setManualStatus('Playback complete. Waiting for next command.', 'ready');
+                    void postMachinePlayerState({
+                        mode: 'paused',
+                        statusText: 'Playback complete. Waiting for next command.',
+                        currentTime: manualState.currentTime,
+                        currentStepIndex: manualState.currentStepIndex,
+                        canPlay: true,
+                        isPlaying: false,
+                    }, { force: true });
+                }
+            }
+        });
+
+        manualVideo.addEventListener('pause', () => {
+            if (manualState.mode === 'manual' && !manualState.pendingSwitch) {
+                manualState.playing = false;
+                void postMachinePlayerState({
+                    mode: 'paused',
+                    statusText: 'Paused on monitor',
+                    canPlay: true,
+                    isPlaying: false,
+                }, { force: true });
+            }
+        });
+
+        manualVideo.addEventListener('play', () => {
+            if (manualState.mode === 'manual') {
+                manualState.playing = true;
+                setManualStatus('Playing on monitor', 'ready');
+                void postMachinePlayerState({
+                    mode: 'playing',
+                    statusText: 'Playing on monitor',
+                    canPlay: true,
+                    isPlaying: true,
+                }, { force: true });
+            }
+        });
+
+        manualVideo.addEventListener('error', () => {
+            manualState.playing = false;
+            setManualStatus('Failed to load video on monitor', 'error');
+            manualBlankState.classList.remove('display-mode-hidden');
+            manualVideo.classList.add('display-mode-hidden');
+            void postMachinePlayerState({
+                mode: 'error',
+                statusText: 'Failed to load video on monitor',
+                canPlay: false,
+                isPlaying: false,
+                error: 'Failed to load video on monitor',
+            }, { force: true });
+        });
+
+        window.addEventListener('resize', () => {
+            if (manualState.mode === 'manual' && manualState.project) {
+                syncManualStageLayout();
+                renderManualElements();
             }
         });
 

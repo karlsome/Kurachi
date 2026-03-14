@@ -10,8 +10,8 @@ const googleSheetLiveStatusURL = 'https://script.google.com/macros/s/AKfycbwbL30
 // Link for Rikeshi (up/down color info) - This was missing in the original, adding it here.
 const dbURL = 'https://script.google.com/macros/s/AKfycbx0qBw0_wF5X-hA2t1yY-d5h5M7Z_a8z_V9R5D6k/exec'; // Placeholder, replace with your actual URL if different.
 
-const serverURL = "https://kurachi.onrender.com";
-//const serverURL = "http://localhost:3000";
+//const serverURL = "https://kurachi.onrender.com";
+const serverURL = "http://localhost:3000";
 
 // Global variable to track if sendtoNC button has been pressed
 let sendtoNCButtonisPressed = false;
@@ -3802,6 +3802,15 @@ function resetForm() {
   
   // Clear session AFTER logging
   clearSessionID();
+  closeVideoManualPicker();
+  currentProductDetails = {
+    sebanggo: '',
+    hinban: '',
+    materialCode: '',
+    model: ''
+  };
+  localStorage.removeItem(`${uniquePrefix}cached-model`);
+  syncVideoManualLauncherState();
 
   const excludedInputs = ['process', 'languageSelector']; // IDs or names of inputs to exclude from reset
 
@@ -7704,8 +7713,912 @@ let currentStep = 0;
 let currentProductDetails = {
   sebanggo: '',
   hinban: '',
-  materialCode: ''
+  materialCode: '',
+  model: ''
 };
+
+const videoManualState = {
+  projects: [],
+  selectedProjectId: null,
+  loading: false,
+  mode: 'picker',
+  controllerId: `vmc_${Math.random().toString(36).slice(2, 10)}`,
+  sessionKey: '',
+  claimed: false,
+  controlStream: null,
+  heartbeatTimer: null,
+  loadingTimer: null,
+  playerState: {
+    mode: 'idle',
+    projectId: null,
+    title: '',
+    statusText: 'Idle',
+    currentTime: 0,
+    duration: 0,
+    currentStepIndex: 0,
+    stepCount: 0,
+    canPlay: false,
+    isPlaying: false,
+    error: ''
+  },
+};
+
+function normalizeVideoManualMachineId(machineId = '') {
+  return String(machineId)
+    .split(',')
+    .map(value => value.trim().toUpperCase())
+    .filter(Boolean)
+    .join(',');
+}
+
+function getVideoManualSessionKey() {
+  return normalizeVideoManualMachineId(getMachineName());
+}
+
+function getCurrentProductModel() {
+  return currentProductDetails.model
+    || document.getElementById('model')?.value
+    || localStorage.getItem(`${uniquePrefix}cached-model`)
+    || '';
+}
+
+function formatVideoManualDuration(seconds) {
+  const safeSeconds = Number.isFinite(Number(seconds)) ? Math.max(0, Number(seconds)) : 0;
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  const secs = Math.floor(safeSeconds % 60);
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  }
+  return `${minutes}:${String(secs).padStart(2, '0')}`;
+}
+
+function getSelectedVideoManualProject() {
+  return videoManualState.projects.find(project => String(project._id) === String(videoManualState.selectedProjectId)) || null;
+}
+
+function getVideoManualSelectedProjectTitle() {
+  return getSelectedVideoManualProject()?.title || videoManualState.playerState.title || 'Video Manual';
+}
+
+function setVideoManualMode(mode = 'picker') {
+  videoManualState.mode = mode;
+  const projectGrid = document.getElementById('videoManualProjectGrid');
+  const controllerPanel = document.getElementById('videoManualControllerPanel');
+  const footerAction = document.getElementById('videoManualSelectButton');
+  const footerCancel = document.getElementById('videoManualCloseFooterButton');
+  const subtitle = document.getElementById('videoManualSubtitle');
+
+  if (projectGrid) projectGrid.style.display = mode === 'picker' ? 'grid' : 'none';
+  if (controllerPanel) controllerPanel.style.display = mode === 'controller' ? 'grid' : 'none';
+  if (footerAction) footerAction.style.display = mode === 'picker' ? 'inline-flex' : 'none';
+  if (footerCancel) footerCancel.textContent = mode === 'picker' ? 'Cancel' : 'Close';
+  if (subtitle && mode === 'controller') {
+    subtitle.textContent = `${getVideoManualSelectedProjectTitle()} · Monitor remote control`;
+  }
+}
+
+function stopVideoManualLoadingTimeout() {
+  if (videoManualState.loadingTimer) {
+    clearTimeout(videoManualState.loadingTimer);
+    videoManualState.loadingTimer = null;
+  }
+}
+
+function stopVideoManualHeartbeat() {
+  if (videoManualState.heartbeatTimer) {
+    clearInterval(videoManualState.heartbeatTimer);
+    videoManualState.heartbeatTimer = null;
+  }
+}
+
+function disconnectVideoManualControlStream() {
+  if (videoManualState.controlStream) {
+    videoManualState.controlStream.close();
+    videoManualState.controlStream = null;
+  }
+}
+
+function updateVideoManualControllerUi() {
+  const playPauseButton = document.getElementById('videoManualPlayPauseButton');
+  const prevStepButton = document.getElementById('videoManualPrevStepButton');
+  const nextStepButton = document.getElementById('videoManualNextStepButton');
+  const exitButton = document.getElementById('videoManualExitButton');
+  const seekSlider = document.getElementById('videoManualSeekSlider');
+  const seekCurrent = document.getElementById('videoManualSeekCurrent');
+  const seekDuration = document.getElementById('videoManualSeekDuration');
+  const stateLabel = document.getElementById('videoManualControllerStateLabel');
+  const stepLabel = document.getElementById('videoManualControllerStepLabel');
+  const selectedLabel = document.getElementById('videoManualSelectedLabel');
+  const helper = document.getElementById('videoManualSelectionHelper');
+  const project = getSelectedVideoManualProject();
+  const playerState = videoManualState.playerState;
+  const canControl = videoManualState.claimed && ['ready', 'paused', 'playing'].includes(playerState.mode);
+
+  if (selectedLabel) {
+    selectedLabel.textContent = videoManualState.mode === 'controller'
+      ? `Project: ${getVideoManualSelectedProjectTitle()}`
+      : (project ? `Selected: ${project.title || 'Untitled Project'}` : 'Select a video manual project');
+  }
+
+  if (helper) {
+    if (videoManualState.mode === 'picker') {
+      helper.textContent = 'Choose a deployed manual for the scanned model.';
+    } else if (playerState.mode === 'loading') {
+      helper.textContent = 'Loading on monitor...';
+    } else if (playerState.mode === 'error') {
+      helper.textContent = playerState.error || 'Monitor not responding. Please try again.';
+    } else {
+      helper.textContent = playerState.statusText || 'Ready on monitor. Waiting for play.';
+    }
+  }
+
+  if (stateLabel) {
+    stateLabel.textContent = playerState.statusText || 'Idle';
+  }
+
+  if (stepLabel) {
+    const currentStep = Math.min((playerState.currentStepIndex || 0) + 1, Math.max(playerState.stepCount || 0, 1));
+    stepLabel.textContent = playerState.stepCount
+      ? `Step ${currentStep} / ${playerState.stepCount}`
+      : 'Step information unavailable';
+  }
+
+  if (seekSlider) {
+    const duration = Number(playerState.duration) || 0;
+    const currentTime = Number(playerState.currentTime) || 0;
+    seekSlider.max = duration > 0 ? String(duration) : '0';
+    seekSlider.value = String(Math.min(currentTime, duration));
+    seekSlider.disabled = !canControl || duration <= 0;
+  }
+
+  if (seekCurrent) seekCurrent.textContent = formatVideoManualDuration(playerState.currentTime || 0);
+  if (seekDuration) seekDuration.textContent = formatVideoManualDuration(playerState.duration || 0);
+
+  if (playPauseButton) {
+    playPauseButton.disabled = !canControl;
+    playPauseButton.textContent = playerState.isPlaying ? 'Pause' : 'Play';
+  }
+  if (prevStepButton) prevStepButton.disabled = !canControl;
+  if (nextStepButton) nextStepButton.disabled = !canControl;
+  if (exitButton) exitButton.disabled = !videoManualState.claimed;
+}
+
+function connectVideoManualControlStream() {
+  const sessionKey = getVideoManualSessionKey();
+  if (!sessionKey) return;
+  if (videoManualState.controlStream && videoManualState.sessionKey === sessionKey) return;
+
+  disconnectVideoManualControlStream();
+  videoManualState.sessionKey = sessionKey;
+  videoManualState.controlStream = new EventSource(`${serverURL}/sse/machine-player/${encodeURIComponent(sessionKey)}`);
+  videoManualState.controlStream.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      if (data.type === 'player-state') {
+        videoManualState.playerState = {
+          ...videoManualState.playerState,
+          ...(data.playback || {}),
+        };
+        if (data.activeControllerId === videoManualState.controllerId) {
+          videoManualState.claimed = true;
+        } else if (data.activeControllerId && data.activeControllerId !== videoManualState.controllerId) {
+          videoManualState.claimed = false;
+        }
+        if (['ready', 'paused', 'playing', 'error', 'idle'].includes(videoManualState.playerState.mode)) {
+          stopVideoManualLoadingTimeout();
+        }
+        updateVideoManualControllerUi();
+      }
+    } catch (error) {
+      console.error('❌ Failed to parse machine player SSE message:', error);
+    }
+  };
+}
+
+async function claimVideoManualControl() {
+  const sessionKey = getVideoManualSessionKey();
+  if (!sessionKey) return false;
+
+  connectVideoManualControlStream();
+
+  const response = await fetch(`${serverURL}/api/machine-player/claim`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      machineId: sessionKey,
+      controllerId: videoManualState.controllerId,
+      controllerLabel: `Tablet ${getSessionID() || currentProductDetails.sebanggo || sessionKey}`,
+    }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || 'Unable to claim machine control');
+  }
+
+  videoManualState.claimed = true;
+  stopVideoManualHeartbeat();
+  videoManualState.heartbeatTimer = setInterval(() => {
+    fetch(`${serverURL}/api/machine-player/heartbeat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ machineId: sessionKey, controllerId: videoManualState.controllerId }),
+    }).catch((error) => console.error('❌ Machine player heartbeat failed:', error));
+  }, 30000);
+  return true;
+}
+
+async function releaseVideoManualControl() {
+  stopVideoManualHeartbeat();
+  stopVideoManualLoadingTimeout();
+
+  if (videoManualState.claimed && videoManualState.sessionKey) {
+    try {
+      await fetch(`${serverURL}/api/machine-player/release`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ machineId: videoManualState.sessionKey, controllerId: videoManualState.controllerId }),
+        keepalive: true,
+      });
+    } catch (error) {
+      console.error('❌ Failed to release machine player control:', error);
+    }
+  }
+
+  videoManualState.claimed = false;
+  disconnectVideoManualControlStream();
+}
+
+async function sendVideoManualCommand(command, payload = {}) {
+  if (!videoManualState.claimed || !videoManualState.sessionKey) {
+    throw new Error('Machine control session is not active');
+  }
+
+  const response = await fetch(`${serverURL}/api/machine-player/command`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      machineId: videoManualState.sessionKey,
+      controllerId: videoManualState.controllerId,
+      command,
+      payload,
+    }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || `Command failed: ${command}`);
+  }
+  return data;
+}
+
+function syncVideoManualLauncherState() {
+  const button = document.getElementById('videoManualLauncher');
+  if (!button) return;
+
+  const model = String(getCurrentProductModel() || '').trim();
+  const enabled = !!model;
+  button.disabled = !enabled;
+  button.className = `video-manual-launcher${enabled ? '' : ' is-disabled'}`;
+  button.innerHTML = enabled
+    ? `<span class="video-manual-launcher__icon">🎬</span><span>Video Manual</span>`
+    : `<span class="video-manual-launcher__icon">🎬</span><span>Video Manual</span><small>Scan product first</small>`;
+}
+
+function renderVideoManualProjects() {
+  const grid = document.getElementById('videoManualProjectGrid');
+  const empty = document.getElementById('videoManualEmptyState');
+  const loading = document.getElementById('videoManualLoadingState');
+  const subtitle = document.getElementById('videoManualSubtitle');
+  const selectedLabel = document.getElementById('videoManualSelectedLabel');
+  const actionButton = document.getElementById('videoManualSelectButton');
+  const model = String(getCurrentProductModel() || '').trim();
+
+  if (!grid || !empty || !loading || !subtitle || !selectedLabel || !actionButton) return;
+
+  subtitle.textContent = model
+    ? `${model} · ${videoManualState.projects.length} deployed project${videoManualState.projects.length === 1 ? '' : 's'}`
+    : 'No scanned model';
+
+  loading.style.display = videoManualState.loading ? 'flex' : 'none';
+
+  if (!videoManualState.loading && videoManualState.projects.length === 0) {
+    empty.style.display = 'flex';
+    grid.innerHTML = '';
+  } else {
+    empty.style.display = 'none';
+    grid.innerHTML = videoManualState.projects.map(project => {
+      const isSelected = String(project._id) === String(videoManualState.selectedProjectId);
+      const thumb = project.thumbnailUrl
+        ? `<div class="video-manual-card__thumb"><img src="${project.thumbnailUrl}" alt="${project.title || 'Video manual thumbnail'}"></div>`
+        : `<div class="video-manual-card__thumb video-manual-card__thumb--fallback"><div class="video-manual-card__fallback-title">${project.title || 'Untitled Project'}</div></div>`;
+
+      return `
+        <button type="button" class="video-manual-card${isSelected ? ' is-selected' : ''}" data-project-id="${project._id}">
+          ${thumb}
+          <div class="video-manual-card__body">
+            <div class="video-manual-card__title">${project.title || 'Untitled Project'}</div>
+            <div class="video-manual-card__meta">${project.stepsCount || 0} steps${project.duration ? ` · ${formatVideoManualDuration(project.duration)}` : ''}</div>
+            <div class="video-manual-card__meta">Updated ${new Date(project.updatedAt || project.deployedAt || Date.now()).toLocaleDateString()}</div>
+          </div>
+        </button>
+      `;
+    }).join('');
+
+    grid.querySelectorAll('[data-project-id]').forEach(card => {
+      card.addEventListener('click', () => {
+        videoManualState.selectedProjectId = card.dataset.projectId;
+        renderVideoManualProjects();
+      });
+    });
+  }
+
+  const selectedProject = getSelectedVideoManualProject();
+  selectedLabel.textContent = selectedProject
+    ? `Selected: ${selectedProject.title || 'Untitled Project'}`
+    : 'Select a video manual project';
+  actionButton.disabled = !selectedProject;
+  updateVideoManualControllerUi();
+}
+
+async function loadVideoManualProjects() {
+  const model = String(getCurrentProductModel() || '').trim();
+  videoManualState.loading = true;
+  videoManualState.projects = [];
+  videoManualState.selectedProjectId = null;
+  renderVideoManualProjects();
+
+  if (!model) {
+    videoManualState.loading = false;
+    renderVideoManualProjects();
+    return;
+  }
+
+  try {
+    const response = await fetch(`${serverURL}/api/factory/video-manuals?model=${encodeURIComponent(model)}`);
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || `HTTP ${response.status}`);
+    }
+    videoManualState.projects = Array.isArray(data.projects) ? data.projects : [];
+  } catch (error) {
+    console.error('❌ Failed to load factory video manuals:', error);
+    videoManualState.projects = [];
+  } finally {
+    videoManualState.loading = false;
+    renderVideoManualProjects();
+  }
+}
+
+async function closeVideoManualPicker({ sendExit = true } = {}) {
+  const modal = document.getElementById('videoManualModal');
+  const shouldExit = sendExit && videoManualState.mode === 'controller' && !!videoManualState.playerState.projectId;
+  if (shouldExit && videoManualState.claimed) {
+    try {
+      await sendVideoManualCommand('exit');
+    } catch (error) {
+      console.error('❌ Failed to send exit command while closing modal:', error);
+    }
+  }
+  if (modal) {
+    modal.style.display = 'none';
+  }
+  setVideoManualMode('picker');
+  videoManualState.playerState = {
+    ...videoManualState.playerState,
+    mode: 'idle',
+    projectId: null,
+    title: '',
+    statusText: 'Idle',
+    currentTime: 0,
+    duration: 0,
+    currentStepIndex: 0,
+    stepCount: 0,
+    canPlay: false,
+    isPlaying: false,
+    error: ''
+  };
+  videoManualState.selectedProjectId = null;
+  updateVideoManualControllerUi();
+  await releaseVideoManualControl();
+}
+
+async function openVideoManualPicker() {
+  const model = String(getCurrentProductModel() || '').trim();
+  if (!model) {
+    showAlert('No Video Manuals found. Please call leader for assistance');
+    return;
+  }
+
+  const modal = document.getElementById('videoManualModal');
+  if (!modal) return;
+
+  try {
+    await claimVideoManualControl();
+  } catch (error) {
+    showAlert(error.message || 'Another tablet is already controlling this machine');
+    return;
+  }
+
+  modal.style.display = 'flex';
+  setVideoManualMode('picker');
+  await loadVideoManualProjects();
+  updateVideoManualControllerUi();
+
+  if (!videoManualState.projects.length) {
+    const empty = document.getElementById('videoManualEmptyState');
+    if (empty) {
+      empty.innerHTML = '<div class="video-manual-empty-state__icon">🎬</div><div class="video-manual-empty-state__title">No Video Manuals found. Please call leader for assistance</div><div class="video-manual-empty-state__body">Only explicitly deployed manuals appear here.</div>';
+    }
+  }
+}
+
+function handleVideoManualSelection() {
+  const selectedProject = getSelectedVideoManualProject();
+  if (!selectedProject) return;
+
+  videoManualState.playerState = {
+    ...videoManualState.playerState,
+    mode: 'loading',
+    projectId: selectedProject._id,
+    title: selectedProject.title || 'Video Manual',
+    statusText: 'Loading on monitor...',
+    currentTime: 0,
+    duration: selectedProject.duration || 0,
+    currentStepIndex: 0,
+    stepCount: selectedProject.stepsCount || 0,
+    canPlay: false,
+    isPlaying: false,
+    error: '',
+  };
+  setVideoManualMode('controller');
+  updateVideoManualControllerUi();
+
+  stopVideoManualLoadingTimeout();
+  videoManualState.loadingTimer = setTimeout(() => {
+    videoManualState.playerState = {
+      ...videoManualState.playerState,
+      mode: 'error',
+      statusText: 'Monitor not responding. Please try again.',
+      error: 'Monitor not responding. Please try again.',
+    };
+    updateVideoManualControllerUi();
+  }, 12000);
+
+  sendVideoManualCommand('load', {
+    projectId: selectedProject._id,
+    title: selectedProject.title || 'Video Manual',
+  }).catch((error) => {
+    stopVideoManualLoadingTimeout();
+    videoManualState.playerState = {
+      ...videoManualState.playerState,
+      mode: 'error',
+      statusText: error.message,
+      error: error.message,
+    };
+    updateVideoManualControllerUi();
+  });
+}
+
+function ensureVideoManualPickerUi() {
+  if (document.getElementById('videoManualModal')) {
+    syncVideoManualLauncherState();
+    return;
+  }
+
+  const style = document.createElement('style');
+  style.textContent = `
+    .video-manual-launcher {
+      position: fixed;
+      right: 16px;
+      bottom: 92px;
+      z-index: 9998;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 14px 18px;
+      border: none;
+      border-radius: 999px;
+      background: linear-gradient(135deg, #0f766e 0%, #155e75 100%);
+      color: white;
+      box-shadow: 0 14px 32px rgba(15, 118, 110, 0.28);
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .video-manual-launcher small {
+      display: block;
+      font-size: 11px;
+      font-weight: 500;
+      opacity: 0.82;
+    }
+    .video-manual-launcher.is-disabled {
+      background: linear-gradient(135deg, #9ca3af 0%, #6b7280 100%);
+      box-shadow: none;
+      cursor: not-allowed;
+    }
+    .video-manual-launcher__icon {
+      font-size: 20px;
+    }
+    .video-manual-modal {
+      position: fixed;
+      inset: 0;
+      z-index: 10001;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(2, 6, 23, 0.72);
+      backdrop-filter: blur(10px);
+      padding: 18px;
+    }
+    .video-manual-modal__panel {
+      width: min(1100px, 100%);
+      max-height: calc(100vh - 36px);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      background: linear-gradient(180deg, #f8fafc 0%, #e2e8f0 100%);
+      border-radius: 28px;
+      box-shadow: 0 30px 70px rgba(15, 23, 42, 0.3);
+    }
+    .video-manual-modal__header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      padding: 22px 24px 16px;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.3);
+    }
+    .video-manual-modal__eyebrow {
+      font-size: 12px;
+      letter-spacing: 0.18em;
+      font-weight: 800;
+      color: #0f766e;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .video-manual-modal__title {
+      font-size: clamp(28px, 4vw, 40px);
+      line-height: 1;
+      font-weight: 900;
+      color: #0f172a;
+      margin: 0;
+    }
+    .video-manual-modal__subtitle {
+      margin-top: 10px;
+      color: #475569;
+      font-weight: 600;
+    }
+    .video-manual-modal__close {
+      border: none;
+      background: rgba(255, 255, 255, 0.7);
+      color: #334155;
+      border-radius: 999px;
+      padding: 10px 16px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .video-manual-modal__body {
+      position: relative;
+      padding: 20px 24px 24px;
+      overflow: auto;
+      min-height: 360px;
+    }
+    .video-manual-project-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 18px;
+    }
+    .video-manual-controller-panel {
+      display: none;
+      grid-template-columns: 1fr;
+      gap: 18px;
+    }
+    .video-manual-controller-shell {
+      background: white;
+      border-radius: 24px;
+      padding: 22px;
+      box-shadow: 0 18px 30px rgba(15, 23, 42, 0.08);
+    }
+    .video-manual-controller-title {
+      font-size: 24px;
+      font-weight: 900;
+      color: #0f172a;
+      margin-bottom: 8px;
+    }
+    .video-manual-controller-status {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      color: #475569;
+      font-weight: 700;
+      margin-bottom: 18px;
+      flex-wrap: wrap;
+    }
+    .video-manual-controller-timeline {
+      display: grid;
+      gap: 8px;
+      margin-bottom: 18px;
+    }
+    .video-manual-controller-timeline input[type="range"] {
+      width: 100%;
+      accent-color: #0f766e;
+    }
+    .video-manual-controller-time-row {
+      display: flex;
+      justify-content: space-between;
+      color: #64748b;
+      font-weight: 700;
+      font-size: 13px;
+    }
+    .video-manual-controller-buttons {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .video-manual-controller-button {
+      border: none;
+      border-radius: 18px;
+      padding: 16px 12px;
+      font-weight: 900;
+      font-size: 15px;
+      cursor: pointer;
+      background: linear-gradient(135deg, #0f172a 0%, #334155 100%);
+      color: white;
+      box-shadow: 0 12px 24px rgba(15, 23, 42, 0.12);
+    }
+    .video-manual-controller-button--play {
+      background: linear-gradient(135deg, #0f766e 0%, #155e75 100%);
+    }
+    .video-manual-controller-button--exit {
+      background: linear-gradient(135deg, #b91c1c 0%, #ef4444 100%);
+    }
+    .video-manual-controller-button:disabled {
+      background: #94a3b8;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+    .video-manual-card {
+      padding: 0;
+      border: 2px solid transparent;
+      background: white;
+      border-radius: 24px;
+      overflow: hidden;
+      text-align: left;
+      cursor: pointer;
+      box-shadow: 0 18px 30px rgba(15, 23, 42, 0.08);
+      transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+    }
+    .video-manual-card.is-selected {
+      border-color: #0f766e;
+      transform: translateY(-2px);
+      box-shadow: 0 22px 44px rgba(15, 118, 110, 0.18);
+    }
+    .video-manual-card__thumb {
+      height: 150px;
+      background: #cbd5e1;
+      overflow: hidden;
+    }
+    .video-manual-card__thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .video-manual-card__thumb--fallback {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #e2e8f0 0%, #cbd5e1 100%);
+      padding: 16px;
+    }
+    .video-manual-card__fallback-title {
+      font-size: 28px;
+      font-weight: 900;
+      line-height: 1.05;
+      color: #1e293b;
+      word-break: break-word;
+    }
+    .video-manual-card__body {
+      padding: 16px 18px 18px;
+    }
+    .video-manual-card__title {
+      font-size: 20px;
+      font-weight: 800;
+      color: #0f172a;
+      margin-bottom: 8px;
+    }
+    .video-manual-card__meta {
+      font-size: 13px;
+      color: #64748b;
+      margin-top: 4px;
+    }
+    .video-manual-loading,
+    .video-manual-empty-state {
+      min-height: 280px;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      text-align: center;
+      color: #334155;
+      gap: 12px;
+    }
+    .video-manual-empty-state__icon {
+      font-size: 44px;
+    }
+    .video-manual-empty-state__title {
+      font-size: 24px;
+      font-weight: 900;
+      max-width: 520px;
+    }
+    .video-manual-empty-state__body {
+      font-size: 14px;
+      color: #64748b;
+    }
+    .video-manual-modal__footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 16px 24px 24px;
+      border-top: 1px solid rgba(148, 163, 184, 0.25);
+      background: rgba(255, 255, 255, 0.6);
+    }
+    .video-manual-modal__selection {
+      font-weight: 700;
+      color: #0f172a;
+    }
+    .video-manual-modal__helper {
+      margin-top: 6px;
+      font-size: 13px;
+      color: #64748b;
+    }
+    .video-manual-modal__actions {
+      display: flex;
+      gap: 10px;
+    }
+    .video-manual-modal__button {
+      border: none;
+      border-radius: 999px;
+      padding: 12px 18px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+    .video-manual-modal__button--ghost {
+      background: rgba(148, 163, 184, 0.18);
+      color: #334155;
+    }
+    .video-manual-modal__button--primary {
+      background: linear-gradient(135deg, #0f766e 0%, #155e75 100%);
+      color: white;
+    }
+    .video-manual-modal__button--primary:disabled {
+      background: #94a3b8;
+      cursor: not-allowed;
+    }
+  `;
+  document.head.appendChild(style);
+
+  const launcher = document.createElement('button');
+  launcher.id = 'videoManualLauncher';
+  launcher.type = 'button';
+  launcher.addEventListener('click', openVideoManualPicker);
+  document.body.appendChild(launcher);
+
+  const modal = document.createElement('div');
+  modal.id = 'videoManualModal';
+  modal.className = 'video-manual-modal';
+  modal.innerHTML = `
+    <div class="video-manual-modal__panel">
+      <div class="video-manual-modal__header">
+        <div>
+          <div class="video-manual-modal__eyebrow">Factory Video Manuals</div>
+          <h2 class="video-manual-modal__title">Video Manual</h2>
+          <div id="videoManualSubtitle" class="video-manual-modal__subtitle">Loading deployed projects…</div>
+        </div>
+        <button type="button" class="video-manual-modal__close" id="videoManualCloseButton">Close</button>
+      </div>
+      <div class="video-manual-modal__body">
+        <div id="videoManualLoadingState" class="video-manual-loading">
+          <div class="video-manual-empty-state__icon">⏳</div>
+          <div class="video-manual-empty-state__title">Loading deployed video manuals…</div>
+        </div>
+        <div id="videoManualEmptyState" class="video-manual-empty-state">
+          <div class="video-manual-empty-state__icon">🎬</div>
+          <div class="video-manual-empty-state__title">No Video Manuals found. Please call leader for assistance</div>
+          <div class="video-manual-empty-state__body">Only deployed manuals appear here.</div>
+        </div>
+        <div id="videoManualProjectGrid" class="video-manual-project-grid"></div>
+        <div id="videoManualControllerPanel" class="video-manual-controller-panel">
+          <div class="video-manual-controller-shell">
+            <div class="video-manual-controller-title">Monitor Controller</div>
+            <div class="video-manual-controller-status">
+              <span id="videoManualControllerStateLabel">Idle</span>
+              <span id="videoManualControllerStepLabel">Step information unavailable</span>
+            </div>
+            <div class="video-manual-controller-timeline">
+              <input type="range" id="videoManualSeekSlider" min="0" max="0" step="0.1" value="0" disabled />
+              <div class="video-manual-controller-time-row">
+                <span id="videoManualSeekCurrent">0:00</span>
+                <span id="videoManualSeekDuration">0:00</span>
+              </div>
+            </div>
+            <div class="video-manual-controller-buttons">
+              <button type="button" class="video-manual-controller-button" id="videoManualPrevStepButton">Prev Step</button>
+              <button type="button" class="video-manual-controller-button video-manual-controller-button--play" id="videoManualPlayPauseButton">Play</button>
+              <button type="button" class="video-manual-controller-button" id="videoManualNextStepButton">Next Step</button>
+              <button type="button" class="video-manual-controller-button" id="videoManualBackToPickerButton">Projects</button>
+              <button type="button" class="video-manual-controller-button video-manual-controller-button--exit" id="videoManualExitButton">Exit</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="video-manual-modal__footer">
+        <div>
+          <div id="videoManualSelectedLabel" class="video-manual-modal__selection">Select a video manual project</div>
+          <div id="videoManualSelectionHelper" class="video-manual-modal__helper">Choose a deployed manual for the scanned model.</div>
+        </div>
+        <div class="video-manual-modal__actions">
+          <button type="button" class="video-manual-modal__button video-manual-modal__button--ghost" id="videoManualCloseFooterButton">Cancel</button>
+          <button type="button" class="video-manual-modal__button video-manual-modal__button--primary" id="videoManualSelectButton" disabled>Select</button>
+        </div>
+      </div>
+    </div>
+  `;
+  modal.addEventListener('click', (event) => {
+    if (event.target === modal) {
+      void closeVideoManualPicker();
+    }
+  });
+  document.body.appendChild(modal);
+
+  document.getElementById('videoManualCloseButton')?.addEventListener('click', () => { void closeVideoManualPicker(); });
+  document.getElementById('videoManualCloseFooterButton')?.addEventListener('click', () => { void closeVideoManualPicker(); });
+  document.getElementById('videoManualSelectButton')?.addEventListener('click', handleVideoManualSelection);
+  document.getElementById('videoManualBackToPickerButton')?.addEventListener('click', () => {
+    setVideoManualMode('picker');
+    updateVideoManualControllerUi();
+  });
+  document.getElementById('videoManualPlayPauseButton')?.addEventListener('click', async () => {
+    try {
+      await sendVideoManualCommand(videoManualState.playerState.isPlaying ? 'pause' : 'play');
+    } catch (error) {
+      showAlert(error.message);
+    }
+  });
+  document.getElementById('videoManualPrevStepButton')?.addEventListener('click', async () => {
+    try {
+      await sendVideoManualCommand('prev-step');
+    } catch (error) {
+      showAlert(error.message);
+    }
+  });
+  document.getElementById('videoManualNextStepButton')?.addEventListener('click', async () => {
+    try {
+      await sendVideoManualCommand('next-step');
+    } catch (error) {
+      showAlert(error.message);
+    }
+  });
+  document.getElementById('videoManualExitButton')?.addEventListener('click', async () => {
+    try {
+      await sendVideoManualCommand('exit');
+    } catch (error) {
+      console.error('❌ Failed to send exit command:', error);
+    } finally {
+      void closeVideoManualPicker({ sendExit: false });
+    }
+  });
+  document.getElementById('videoManualSeekSlider')?.addEventListener('change', async (event) => {
+    try {
+      await sendVideoManualCommand('seek', { timelineTime: Number(event.target.value) || 0 });
+    } catch (error) {
+      showAlert(error.message);
+    }
+  });
+
+  syncVideoManualLauncherState();
+}
 
 // Function to get machine name
 function getMachineName() {
@@ -7852,19 +8765,22 @@ function resetAllSteps() {
   currentProductDetails = {
     sebanggo: '',
     hinban: '',
-    materialCode: ''
+    materialCode: '',
+    model: ''
   };
   
   // Clear cached product details from localStorage
   localStorage.removeItem(`${uniquePrefix}cached-sebanggo`);
   localStorage.removeItem(`${uniquePrefix}cached-hinban`);
   localStorage.removeItem(`${uniquePrefix}cached-materialCode`);
+  localStorage.removeItem(`${uniquePrefix}cached-model`);
   
   // Reset step to 0 and clear from localStorage
   saveCurrentStep(0);
   
   // Call resetForm() to clear all form data
   resetForm();
+  syncVideoManualLauncherState();
 }
 
 // Step 1: Start Scan Button
@@ -7960,7 +8876,8 @@ document.getElementById('startStep1Scan').addEventListener('click', function(eve
       currentProductDetails = {
         sebanggo: qrCodeMessage,
         hinban: document.getElementById('product-number')?.value || '',
-        materialCode: document.getElementById('material-code')?.value || ''
+        materialCode: document.getElementById('material-code')?.value || '',
+        model: document.getElementById('model')?.value || ''
       };
       
       console.log('Cached product details:', currentProductDetails);
@@ -7969,6 +8886,8 @@ document.getElementById('startStep1Scan').addEventListener('click', function(eve
       localStorage.setItem(`${uniquePrefix}cached-sebanggo`, currentProductDetails.sebanggo);
       localStorage.setItem(`${uniquePrefix}cached-hinban`, currentProductDetails.hinban);
       localStorage.setItem(`${uniquePrefix}cached-materialCode`, currentProductDetails.materialCode);
+      localStorage.setItem(`${uniquePrefix}cached-model`, currentProductDetails.model);
+      syncVideoManualLauncherState();
       
       // 🔴 BROADCAST SCAN TO SSE - Send to machine display page (includes logging)
       const machineNameForSSE = getMachineName(); // Get the current machine name (e.g., "OZNC04,OZNC06" or "OZNC09")
@@ -8644,7 +9563,8 @@ window.addEventListener('load', function() {
       currentProductDetails = {
         sebanggo: subDropdown.value,
         hinban: document.getElementById('product-number')?.value || '',
-        materialCode: document.getElementById('material-code')?.value || ''
+        materialCode: document.getElementById('material-code')?.value || '',
+        model: document.getElementById('model')?.value || localStorage.getItem(`${uniquePrefix}cached-model`) || ''
       };
       
       console.log('Incomplete workflow detected (step ' + savedStep + ') - Restarting from Step 1');
@@ -8658,7 +9578,29 @@ window.addEventListener('load', function() {
     } else {
       console.log('Unknown savedStep:', savedStep);
     }
+
+    currentProductDetails.model = currentProductDetails.model || document.getElementById('model')?.value || localStorage.getItem(`${uniquePrefix}cached-model`) || '';
+    syncVideoManualLauncherState();
   }, 2000); // Increased timeout to 2 seconds to ensure dropdown is fully restored
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+  ensureVideoManualPickerUi();
+  currentProductDetails.model = document.getElementById('model')?.value || localStorage.getItem(`${uniquePrefix}cached-model`) || currentProductDetails.model || '';
+  syncVideoManualLauncherState();
+});
+
+window.addEventListener('beforeunload', () => {
+  stopVideoManualHeartbeat();
+  disconnectVideoManualControlStream();
+  if (videoManualState.claimed && videoManualState.sessionKey) {
+    fetch(`${serverURL}/api/machine-player/release`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ machineId: videoManualState.sessionKey, controllerId: videoManualState.controllerId }),
+      keepalive: true,
+    }).catch(() => {});
+  }
 });
 
 // ==========================
