@@ -20809,7 +20809,7 @@ app.get('/api/video-playlists/:id/projects', async (req, res) => {
       { $sort: { order: 1, createdAt: 1 } },
       {
         $project: {
-          title: 1, order: 1, status: 1,
+          title: 1, description: 1, order: 1, status: 1,
           currentAssetId: 1, thumbnailUrl: 1,
           createdBy: 1, createdAt: 1, updatedAt: 1,
           lastEditedBy: 1, lastEditedAt: 1,
@@ -20931,7 +20931,7 @@ app.patch('/api/video-projects/:id', async (req, res) => {
 
     // Whitelist the fields that can be patched to prevent privilege escalation
     const allowed = [
-      'title', 'status', 'steps', 'width', 'height', 'duration',
+      'title', 'description', 'status', 'steps', 'width', 'height', 'duration',
       'videoUrl', 'assets', 'currentAssetId', 'thumbnailUrl', 'order',
     ];
     const updates = { lastEditedAt: new Date(), lastEditedBy: username, updatedAt: new Date() };
