@@ -378,13 +378,6 @@
             background: #020617;
         }
 
-        .manual-preview-canvas {
-            position: absolute;
-            inset: 0;
-            display: block;
-            z-index: 0;
-        }
-
         .manual-shell::before {
             content: '';
             position: absolute;
@@ -404,11 +397,15 @@
 
         .manual-video {
             position: absolute;
+            inset: 0;
             display: block;
+            width: 100%;
+            height: 100%;
             background: #020617;
             z-index: 0;
-            opacity: 0;
+            opacity: 1;
             pointer-events: none;
+            object-fit: contain;
         }
 
         .manual-elements {
@@ -417,11 +414,43 @@
             overflow: hidden;
             pointer-events: none;
             z-index: 2;
-            display: none;
+            display: block;
         }
 
         .manual-media-cache {
-            display: none;
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .manual-overlay-node {
+            position: absolute;
+            transform-origin: center center;
+            pointer-events: none;
+            will-change: transform;
+        }
+
+        .manual-overlay-text {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            white-space: pre-wrap;
+            overflow: hidden;
+        }
+
+        .manual-overlay-image {
+            width: 100%;
+            height: 100%;
+            object-fit: fill;
+            display: block;
+        }
+
+        .manual-overlay-svg {
+            position: absolute;
+            inset: 0;
+            overflow: visible;
+            pointer-events: none;
         }
 
         .manual-overlay {
@@ -704,7 +733,6 @@
                     <div class="manual-media-stage" id="manualMediaStage">
                         <div class="manual-project-viewport" id="manualProjectViewport">
                             <div class="manual-project-stage" id="manualProjectStage">
-                                <canvas id="manualPreviewCanvas" class="manual-preview-canvas"></canvas>
                                 <video id="manualVideo" class="manual-video display-mode-hidden" playsinline muted preload="auto"></video>
                                 <div id="manualMediaCache" class="manual-media-cache"></div>
                                 <div id="manualElements" class="manual-elements"></div>
@@ -823,6 +851,7 @@
                 const video = entry.video;
                 if (!video) return;
                 video.pause();
+                video.classList.add('display-mode-hidden');
                 video.removeAttribute('src');
                 video.load();
                 if (video !== primaryVideo) video.remove();
@@ -835,14 +864,26 @@
             manualState.pendingSwitch = null;
         }
 
+        function hideAllManualVideos() {
+            ensureManualMediaCacheStore().forEach((entry) => {
+                if (entry?.video) {
+                    entry.video.classList.add('display-mode-hidden');
+                }
+            });
+            const primaryVideo = manualPrimaryVideo();
+            if (primaryVideo) {
+                primaryVideo.classList.add('display-mode-hidden');
+            }
+        }
+
         function onManagedVideoLoadedData(video) {
             const activeVideo = getManualVideo();
             if (video !== activeVideo) return;
 
             manualBlankState.classList.add('display-mode-hidden');
-            manualVideo.classList.remove('display-mode-hidden');
+            activeVideo.classList.remove('display-mode-hidden');
             syncManualStageLayout();
-            renderManualFrame();
+            renderManualElements();
             void queueManualProjectMediaPreloads();
             void preloadManualMediaQueue();
 
@@ -894,7 +935,7 @@
                 manualState.currentStepIndex = stepIndex;
             }
             updateManualStepLabel();
-            renderManualFrame();
+            renderManualElements();
             void queueManualProjectMediaPreloads();
             void preloadManualMediaQueue();
             void postMachinePlayerState({
@@ -914,7 +955,7 @@
             if (manualState.mode === 'manual' && !manualState.pendingSwitch) {
                 manualState.playing = false;
                 stopManualRenderLoop();
-                renderManualFrame();
+                renderManualElements();
                 void postMachinePlayerState({
                     mode: 'paused',
                     statusText: 'Paused on monitor',
@@ -946,8 +987,8 @@
             manualState.playing = false;
             setManualStatus('Failed to load video on monitor', 'error');
             manualBlankState.classList.remove('display-mode-hidden');
-            manualVideo.classList.add('display-mode-hidden');
-            renderManualFrame();
+            hideAllManualVideos();
+            renderManualElements();
             void postMachinePlayerState({
                 mode: 'error',
                 statusText: 'Failed to load video on monitor',
@@ -1051,10 +1092,14 @@
         function setManualActiveEntry(entry) {
             if (!entry?.video) return;
             const previous = manualState.activeVideoEl;
-            if (previous && previous !== entry.video) previous.pause();
+            if (previous && previous !== entry.video) {
+                previous.pause();
+                previous.classList.add('display-mode-hidden');
+            }
             manualState.activeVideoEl = entry.video;
             manualState.activeSourceKey = entry.key;
             manualState.videoRect = null;
+            entry.video.classList.remove('display-mode-hidden');
             if (entry.video.videoWidth && entry.video.videoHeight) {
                 syncManualStageLayout();
             }
@@ -1411,40 +1456,91 @@
             const { projectW, projectH, scale, stageW, stageH } = getManualProjectMetrics();
             manualProjectViewport.style.width = `${stageW}px`;
             manualProjectViewport.style.height = `${stageH}px`;
-            manualProjectStage.style.width = `${projectW}px`;
-            manualProjectStage.style.height = `${projectH}px`;
-            manualProjectStage.style.transform = `scale(${scale})`;
+            manualProjectStage.style.width = `${stageW}px`;
+            manualProjectStage.style.height = `${stageH}px`;
+            manualProjectStage.style.transform = 'none';
             manualProjectStage.style.transformOrigin = 'top left';
 
-            if (manualPreviewCanvas) {
-                manualPreviewCanvas.width = projectW;
-                manualPreviewCanvas.height = projectH;
-                manualPreviewCanvas.style.width = `${projectW}px`;
-                manualPreviewCanvas.style.height = `${projectH}px`;
-            }
-
-            const rect = getManualVideoDrawRect(
-                getManualVideo().videoWidth || projectW,
-                getManualVideo().videoHeight || projectH,
-                projectW,
-                projectH
-            );
-
-            manualState.videoRect = rect;
-
             const activeVideo = getManualVideo();
-            activeVideo.style.left = `${rect.drawX}px`;
-            activeVideo.style.top = `${rect.drawY}px`;
-            activeVideo.style.width = `${rect.drawW}px`;
-            activeVideo.style.height = `${rect.drawH}px`;
+            activeVideo.style.left = '0';
+            activeVideo.style.top = '0';
+            activeVideo.style.width = '100%';
+            activeVideo.style.height = '100%';
             activeVideo.style.position = 'absolute';
             activeVideo.style.margin = '0';
             activeVideo.style.padding = '0';
             activeVideo.style.objectFit = 'contain';
+
+            manualState.videoRect = getManualOverlayMetrics(activeVideo, manualProjectStage, projectW, projectH);
         }
 
         function renderManualElements() {
-            renderManualFrame();
+            const overlay = manualElements;
+            if (!overlay) return;
+
+            if (!manualState.project || manualState.mode !== 'manual') {
+                overlay.replaceChildren();
+                return;
+            }
+
+            const video = getManualVideo();
+            const metrics = getManualOverlayMetrics(
+                video,
+                manualProjectStage,
+                Number(manualState.project?.width) || video?.videoWidth || 1920,
+                Number(manualState.project?.height) || video?.videoHeight || 1080
+            );
+
+            manualState.videoRect = metrics;
+            overlay.replaceChildren();
+
+            const fragment = document.createDocumentFragment();
+            getManualVisibleElements().forEach((el) => {
+                const node = createManualOverlayNode(el, metrics);
+                if (node) {
+                    fragment.appendChild(node);
+                }
+            });
+            overlay.appendChild(fragment);
+        }
+
+        function getManualOverlayMetrics(videoEl = getManualVideo(), overlayHost = manualProjectStage, designWidth, designHeight) {
+            const hostRect = overlayHost?.getBoundingClientRect?.() || { left: 0, top: 0, width: 0, height: 0 };
+            const videoRect = videoEl?.getBoundingClientRect?.() || hostRect;
+            const boxWidth = Math.max(1, videoRect.width || hostRect.width || 1);
+            const boxHeight = Math.max(1, videoRect.height || hostRect.height || 1);
+            const intrinsicWidth = Math.max(1, Number(videoEl?.videoWidth) || Number(designWidth) || boxWidth);
+            const intrinsicHeight = Math.max(1, Number(videoEl?.videoHeight) || Number(designHeight) || boxHeight);
+            const authoredWidth = Math.max(1, Number(designWidth) || intrinsicWidth);
+            const authoredHeight = Math.max(1, Number(designHeight) || intrinsicHeight);
+            const videoAspect = intrinsicWidth / intrinsicHeight;
+            const boxAspect = boxWidth / boxHeight;
+
+            let contentWidth = boxWidth;
+            let contentHeight = boxHeight;
+            let innerOffsetX = 0;
+            let innerOffsetY = 0;
+
+            if (videoAspect > boxAspect) {
+                contentHeight = boxWidth / videoAspect;
+                innerOffsetY = (boxHeight - contentHeight) / 2;
+            } else {
+                contentWidth = boxHeight * videoAspect;
+                innerOffsetX = (boxWidth - contentWidth) / 2;
+            }
+
+            return {
+                hostWidth: boxWidth,
+                hostHeight: boxHeight,
+                offsetX: (videoRect.left - hostRect.left) + innerOffsetX,
+                offsetY: (videoRect.top - hostRect.top) + innerOffsetY,
+                contentWidth,
+                contentHeight,
+                scaleX: contentWidth / authoredWidth,
+                scaleY: contentHeight / authoredHeight,
+                designWidth: authoredWidth,
+                designHeight: authoredHeight,
+            };
         }
 
         function getManualVisibleElements() {
@@ -1456,118 +1552,146 @@
                 .sort((a, b) => (Number(b.layer) || 0) - (Number(a.layer) || 0));
         }
 
-        function drawManualElementOnCanvas(ctx, el, sx = 1, sy = 1, ox = 0, oy = 0) {
-            const x = (Number(el.x) - ox) * sx;
-            const y = (Number(el.y) - oy) * sy;
-            const w = (Number(el.width) || 0) * sx;
-            const h = (Number(el.height) || 0) * sy;
-
-            ctx.save();
-            ctx.globalAlpha = (Number(el.opacity) || 100) / 100;
-
-            if (el.rotation) {
-                ctx.translate(x + w / 2, y + h / 2);
-                ctx.rotate((Number(el.rotation) || 0) * Math.PI / 180);
-                ctx.translate(-(x + w / 2), -(y + h / 2));
-            }
+        function createManualOverlayNode(el, metrics) {
+            const x = metrics.offsetX + (Number(el.x) || 0) * metrics.scaleX;
+            const y = metrics.offsetY + (Number(el.y) || 0) * metrics.scaleY;
+            const w = Math.max(0, (Number(el.width) || 0) * metrics.scaleX);
+            const h = Math.max(0, (Number(el.height) || 0) * metrics.scaleY);
+            const opacity = Math.max(0, Math.min(1, (Number(el.opacity) || 100) / 100));
+            const layer = Number(el.layer) || 0;
+            const rotation = Number(el.rotation) || 0;
 
             if (el.type === 'text') {
-                ctx.fillStyle = el.color || '#ffffff';
-                ctx.textAlign = el.textAlign || 'center';
-                ctx.textBaseline = 'middle';
-                ctx.font = `${el.fontWeight || 'normal'} ${Math.max(1, Number(el.fontSize) || 16) * sy}px ${el.fontFamily || 'system-ui'}`;
-                const textX = el.textAlign === 'left' ? x : el.textAlign === 'right' ? x + w : x + w / 2;
-                if (el.backgroundColor && el.backgroundColor !== 'transparent') {
-                    ctx.fillStyle = el.backgroundColor;
-                    ctx.fillRect(x, y, w, h);
-                    ctx.fillStyle = el.color || '#ffffff';
+                const node = document.createElement('div');
+                node.className = 'manual-overlay-node manual-overlay-text';
+                node.textContent = String(el.text || '');
+                node.style.left = `${x}px`;
+                node.style.top = `${y}px`;
+                node.style.width = `${w}px`;
+                node.style.height = `${h}px`;
+                node.style.opacity = String(opacity);
+                node.style.zIndex = String(layer);
+                node.style.color = el.color || '#ffffff';
+                node.style.background = el.backgroundColor && el.backgroundColor !== 'transparent' ? el.backgroundColor : 'transparent';
+                node.style.fontFamily = el.fontFamily || 'system-ui';
+                node.style.fontWeight = el.fontWeight || 'normal';
+                node.style.fontSize = `${Math.max(1, (Number(el.fontSize) || 16) * Math.min(metrics.scaleX, metrics.scaleY))}px`;
+                node.style.justifyContent = el.textAlign === 'left' ? 'flex-start' : el.textAlign === 'right' ? 'flex-end' : 'center';
+                node.style.textAlign = el.textAlign || 'center';
+                if (rotation) {
+                    node.style.transform = `rotate(${rotation}deg)`;
                 }
-                ctx.fillText(String(el.text || ''), textX, y + h / 2);
-            } else if (el.type === 'shape') {
-                ctx.strokeStyle = el.strokeColor || '#ffffff';
-                ctx.lineWidth = (Number(el.strokeWidth) || 3) * Math.min(sx, sy);
-                if (el.subtype === 'rect') {
-                    if (el.fill) {
-                        ctx.fillStyle = el.strokeColor || '#ffffff';
-                        ctx.fillRect(x, y, w, h);
-                    } else {
-                        ctx.strokeRect(x, y, w, h);
-                    }
-                } else if (el.subtype === 'circle') {
-                    ctx.beginPath();
-                    ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
-                    if (el.fill) {
-                        ctx.fillStyle = el.strokeColor || '#ffffff';
-                        ctx.fill();
-                    } else {
-                        ctx.stroke();
-                    }
-                } else if (el.subtype === 'arrow' || el.subtype === 'line') {
-                    const localPoints = getManualShapeLocalEndpoints(el);
-                    const startX = x + localPoints.startX * sx;
-                    const startY = y + localPoints.startY * sy;
-                    const endX = x + localPoints.endX * sx;
-                    const endY = y + localPoints.endY * sy;
+                return node;
+            }
 
-                    ctx.beginPath();
-                    ctx.moveTo(startX, startY);
-                    ctx.lineTo(endX, endY);
-                    ctx.stroke();
+            if (el.type === 'image') {
+                const node = document.createElement('div');
+                node.className = 'manual-overlay-node';
+                node.style.left = `${x}px`;
+                node.style.top = `${y}px`;
+                node.style.width = `${w}px`;
+                node.style.height = `${h}px`;
+                node.style.opacity = String(opacity);
+                node.style.zIndex = String(layer);
+                if (rotation) {
+                    node.style.transform = `rotate(${rotation}deg)`;
+                }
+                const img = document.createElement('img');
+                img.className = 'manual-overlay-image';
+                img.alt = '';
+                img.src = resolveManualMediaUrl(el.imageUrl || el.src || '');
+                node.appendChild(img);
+                return node;
+            }
+
+            if (el.type === 'shape') {
+                if (el.subtype === 'rect' || el.subtype === 'circle') {
+                    const node = document.createElement('div');
+                    node.className = 'manual-overlay-node';
+                    node.style.left = `${x}px`;
+                    node.style.top = `${y}px`;
+                    node.style.width = `${w}px`;
+                    node.style.height = `${h}px`;
+                    node.style.opacity = String(opacity);
+                    node.style.zIndex = String(layer);
+                    node.style.border = `${Math.max(1, (Number(el.strokeWidth) || 3) * Math.min(metrics.scaleX, metrics.scaleY))}px solid ${el.strokeColor || '#ffffff'}`;
+                    node.style.background = el.fill ? (el.strokeColor || '#ffffff') : 'transparent';
+                    if (el.subtype === 'circle') {
+                        node.style.borderRadius = '999px';
+                    }
+                    if (rotation) {
+                        node.style.transform = `rotate(${rotation}deg)`;
+                    }
+                    return node;
+                }
+
+                if (el.subtype === 'line' || el.subtype === 'arrow') {
+                    const svgNS = 'http://www.w3.org/2000/svg';
+                    const wrapper = document.createElement('div');
+                    wrapper.className = 'manual-overlay-node';
+                    wrapper.style.left = '0';
+                    wrapper.style.top = '0';
+                    wrapper.style.width = '100%';
+                    wrapper.style.height = '100%';
+                    wrapper.style.opacity = String(opacity);
+                    wrapper.style.zIndex = String(layer);
+                    const svg = document.createElementNS(svgNS, 'svg');
+                    svg.setAttribute('class', 'manual-overlay-svg');
+                    svg.setAttribute('width', String(metrics.hostWidth));
+                    svg.setAttribute('height', String(metrics.hostHeight));
+                    svg.setAttribute('viewBox', `0 0 ${metrics.hostWidth} ${metrics.hostHeight}`);
+                    const line = document.createElementNS(svgNS, 'line');
+                    const localPoints = getManualShapeLocalEndpoints(el);
+                    const startX = x + localPoints.startX * metrics.scaleX;
+                    const startY = y + localPoints.startY * metrics.scaleY;
+                    const endX = x + localPoints.endX * metrics.scaleX;
+                    const endY = y + localPoints.endY * metrics.scaleY;
+                    line.setAttribute('x1', String(startX));
+                    line.setAttribute('y1', String(startY));
+                    line.setAttribute('x2', String(endX));
+                    line.setAttribute('y2', String(endY));
+                    line.setAttribute('stroke', el.strokeColor || '#ffffff');
+                    line.setAttribute('stroke-width', String(Math.max(1, (Number(el.strokeWidth) || 3) * Math.min(metrics.scaleX, metrics.scaleY))));
+                    line.setAttribute('stroke-linecap', 'round');
+                    svg.appendChild(line);
 
                     if (el.subtype === 'arrow') {
                         const angle = Math.atan2(endY - startY, endX - startX);
-                        const headLen = 15 * Math.min(sx, sy);
-                        ctx.beginPath();
-                        ctx.moveTo(endX, endY);
-                        ctx.lineTo(endX - headLen * Math.cos(angle - Math.PI / 6), endY - headLen * Math.sin(angle - Math.PI / 6));
-                        ctx.moveTo(endX, endY);
-                        ctx.lineTo(endX - headLen * Math.cos(angle + Math.PI / 6), endY - headLen * Math.sin(angle + Math.PI / 6));
-                        ctx.stroke();
+                        const headLen = Math.max(8, 15 * Math.min(metrics.scaleX, metrics.scaleY));
+                        const arrowA = document.createElementNS(svgNS, 'line');
+                        arrowA.setAttribute('x1', String(endX));
+                        arrowA.setAttribute('y1', String(endY));
+                        arrowA.setAttribute('x2', String(endX - headLen * Math.cos(angle - Math.PI / 6)));
+                        arrowA.setAttribute('y2', String(endY - headLen * Math.sin(angle - Math.PI / 6)));
+                        arrowA.setAttribute('stroke', el.strokeColor || '#ffffff');
+                        arrowA.setAttribute('stroke-width', line.getAttribute('stroke-width'));
+                        arrowA.setAttribute('stroke-linecap', 'round');
+                        const arrowB = document.createElementNS(svgNS, 'line');
+                        arrowB.setAttribute('x1', String(endX));
+                        arrowB.setAttribute('y1', String(endY));
+                        arrowB.setAttribute('x2', String(endX - headLen * Math.cos(angle + Math.PI / 6)));
+                        arrowB.setAttribute('y2', String(endY - headLen * Math.sin(angle + Math.PI / 6)));
+                        arrowB.setAttribute('stroke', el.strokeColor || '#ffffff');
+                        arrowB.setAttribute('stroke-width', line.getAttribute('stroke-width'));
+                        arrowB.setAttribute('stroke-linecap', 'round');
+                        svg.appendChild(arrowA);
+                        svg.appendChild(arrowB);
                     }
+
+                    wrapper.appendChild(svg);
+                    return wrapper;
                 }
-            } else if (el.type === 'image' && el._imgElement) {
-                ctx.drawImage(el._imgElement, x, y, w, h);
             }
 
-            ctx.restore();
+            return null;
         }
 
         function renderManualFrame() {
-            const canvas = manualPreviewCanvas;
-            const video = getManualVideo();
-            if (!canvas || !video || !manualState.project) return;
-            const ctx = canvas.getContext('2d');
-            if (!ctx) return;
-
-            const projectW = Math.max(1, Number(manualState.project.width) || 1920);
-            const projectH = Math.max(1, Number(manualState.project.height) || 1080);
-            const rect = manualState.videoRect || getManualVideoDrawRect(
-                video.videoWidth || projectW,
-                video.videoHeight || projectH,
-                projectW,
-                projectH
-            );
-
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.fillStyle = '#1a1a2e';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-            if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && !video.seeking && rect.drawW > 0 && rect.drawH > 0) {
-                ctx.drawImage(video, rect.drawX, rect.drawY, rect.drawW, rect.drawH);
-            }
-
-            getManualVisibleElements().forEach((el) => {
-                drawManualElementOnCanvas(ctx, el, 1, 1, 0, 0);
-            });
+            renderManualElements();
         }
 
         function startManualRenderLoop() {
-            if (manualState.previewRaf) return;
-            const tick = () => {
-                manualState.previewRaf = requestAnimationFrame(tick);
-                renderManualFrame();
-            };
-            tick();
+            renderManualElements();
         }
 
         function stopManualRenderLoop() {
@@ -1688,15 +1812,11 @@
             if (manualProjectStage) {
                 manualProjectStage.style.width = '0px';
                 manualProjectStage.style.height = '0px';
-                manualProjectStage.style.transform = 'scale(1)';
+                manualProjectStage.style.transform = 'none';
             }
             manualState.videoRect = null;
             if (manualElements) {
-                manualElements.innerHTML = '';
-            }
-            if (manualPreviewCanvas) {
-                const ctx = manualPreviewCanvas.getContext('2d');
-                if (ctx) ctx.clearRect(0, 0, manualPreviewCanvas.width, manualPreviewCanvas.height);
+                manualElements.replaceChildren();
             }
             updateManualStepLabel();
             void postMachinePlayerState({
@@ -1741,7 +1861,7 @@
             }
 
             manualState.pendingSwitch = { timelineTime, autoplay, sourceKey: desiredKey };
-            manualVideo.classList.add('display-mode-hidden');
+            hideAllManualVideos();
             manualBlankState.classList.remove('display-mode-hidden');
             setManualStatus('Loading selected manual on monitor…', 'loading');
             void postMachinePlayerState({
@@ -1839,7 +1959,7 @@
             manualState.resumePdfIndex = currentPDFIndex;
             enterManualMode();
             manualBlankState.classList.remove('display-mode-hidden');
-            manualVideo.classList.add('display-mode-hidden');
+            hideAllManualVideos();
             manualTitle.textContent = 'Loading Video Manual';
             manualMeta.textContent = 'Fetching deployed revision…';
             setManualStatus('Loading selected manual on monitor…', 'loading');
@@ -1890,7 +2010,7 @@
 
                 if (!manualState.project.steps.length && !getManualStepVideoUrl(null, manualState.project)) {
                     manualBlankState.classList.remove('display-mode-hidden');
-                    manualVideo.classList.add('display-mode-hidden');
+                    hideAllManualVideos();
                     setManualStatus('No playable clips found in deployed revision', 'error');
                     manualStepText.textContent = 'This deployed project has no playable video.';
                     void postMachinePlayerState({
@@ -1907,7 +2027,7 @@
             } catch (error) {
                 console.error('❌ Failed to load deployed video manual:', error);
                 manualBlankState.classList.remove('display-mode-hidden');
-                manualVideo.classList.add('display-mode-hidden');
+                hideAllManualVideos();
                 manualTitle.textContent = 'Video Manual';
                 manualMeta.textContent = 'Could not load deployed project';
                 setManualStatus(`Failed to load video manual: ${error.message}`, 'error');
