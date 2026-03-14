@@ -36,26 +36,130 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 // Store connected clients for each machine
 const machineConnections = new Map();
 
+// Store connected controller clients for each machine player session
+const machinePlayerConnections = new Map();
+
 // Store connected clients for each factory (for production TV)
 const factoryConnections = new Map();
 
 // Store last scan data for each machine (for persistence)
 const machineLastScan = new Map();
 
+// Store machine player state and active controller ownership for each machine session
+const machinePlayerState = new Map();
+const MACHINE_PLAYER_CONTROLLER_TTL_MS = 2 * 60 * 1000;
+
+function normalizeMachineSessionKey(machineId = '') {
+  return String(machineId)
+    .split(',')
+    .map((value) => value.trim().toUpperCase())
+    .filter(Boolean)
+    .join(',');
+}
+
+function getOrCreateMachinePlayerState(machineId) {
+  const sessionKey = normalizeMachineSessionKey(machineId);
+  const now = Date.now();
+  const existing = machinePlayerState.get(sessionKey);
+  const baseState = existing || {
+    machineId: sessionKey,
+    activeControllerId: null,
+    activeControllerLabel: null,
+    controllerExpiresAt: 0,
+    playback: {
+      mode: 'idle',
+      projectId: null,
+      title: '',
+      statusText: 'Idle',
+      currentTime: 0,
+      duration: 0,
+      currentStepIndex: 0,
+      stepCount: 0,
+      canPlay: false,
+      isPlaying: false,
+      error: '',
+      updatedAt: new Date(now).toISOString(),
+    },
+  };
+
+  if (baseState.activeControllerId && baseState.controllerExpiresAt <= now) {
+    baseState.activeControllerId = null;
+    baseState.activeControllerLabel = null;
+    baseState.controllerExpiresAt = 0;
+  }
+
+  machinePlayerState.set(sessionKey, baseState);
+  return baseState;
+}
+
+function sanitizeMachinePlayerState(state) {
+  return {
+    machineId: state.machineId,
+    activeControllerId: state.activeControllerId,
+    activeControllerLabel: state.activeControllerLabel,
+    controllerExpiresAt: state.controllerExpiresAt,
+    playback: {
+      mode: state.playback?.mode || 'idle',
+      projectId: state.playback?.projectId || null,
+      title: state.playback?.title || '',
+      statusText: state.playback?.statusText || 'Idle',
+      currentTime: Number(state.playback?.currentTime) || 0,
+      duration: Number(state.playback?.duration) || 0,
+      currentStepIndex: Number(state.playback?.currentStepIndex) || 0,
+      stepCount: Number(state.playback?.stepCount) || 0,
+      canPlay: !!state.playback?.canPlay,
+      isPlaying: !!state.playback?.isPlaying,
+      error: state.playback?.error || '',
+      updatedAt: state.playback?.updatedAt || new Date().toISOString(),
+    },
+  };
+}
+
+function broadcastToMachinePlayer(machineId, data) {
+  const sessionKey = normalizeMachineSessionKey(machineId);
+  const clients = machinePlayerConnections.get(sessionKey) || [];
+  const message = `data: ${JSON.stringify(data)}\n\n`;
+
+  clients.forEach((client) => {
+    try {
+      client.write(message);
+    } catch (error) {
+      console.error(`Error sending player state to ${sessionKey}:`, error);
+    }
+  });
+
+  console.log(`📡 Broadcasted player state to ${clients.length} controller client(s) on ${sessionKey}:`, data.type || 'message');
+}
+
+function emitMachinePlayerState(machineId) {
+  const state = sanitizeMachinePlayerState(getOrCreateMachinePlayerState(machineId));
+  broadcastToMachinePlayer(machineId, {
+    type: 'player-state',
+    ...state,
+  });
+}
+
+function touchMachineController(state, controllerId, controllerLabel = null) {
+  state.activeControllerId = controllerId;
+  if (controllerLabel !== null) state.activeControllerLabel = controllerLabel;
+  state.controllerExpiresAt = Date.now() + MACHINE_PLAYER_CONTROLLER_TTL_MS;
+}
+
 // Helper function to send SSE message to specific machine clients
 function broadcastToMachine(machineId, data) {
-  const clients = machineConnections.get(machineId) || [];
+  const normalizedMachineId = normalizeMachineSessionKey(machineId);
+  const clients = machineConnections.get(normalizedMachineId) || [];
   const message = `data: ${JSON.stringify(data)}\n\n`;
   
   clients.forEach(client => {
     try {
       client.write(message);
     } catch (error) {
-      console.error(`Error sending to client for ${machineId}:`, error);
+      console.error(`Error sending to client for ${normalizedMachineId}:`, error);
     }
   });
   
-  console.log(`📡 Broadcasted to ${clients.length} client(s) on ${machineId}:`, data);
+  console.log(`📡 Broadcasted to ${clients.length} client(s) on ${normalizedMachineId}:`, data);
 }
 
 // Helper function to send SSE message to all factory TV clients
@@ -99,20 +203,195 @@ app.get("/", (req, res) => {
 
 // Debug endpoint to check stored machine states
 app.get("/api/machine-state/:machineId", (req, res) => {
-  const machineId = req.params.machineId.toUpperCase();
+  const machineId = normalizeMachineSessionKey(req.params.machineId);
   const lastScan = machineLastScan.get(machineId);
+  const playerState = sanitizeMachinePlayerState(getOrCreateMachinePlayerState(machineId));
   
   res.json({
     machineId,
     hasStoredData: machineLastScan.has(machineId),
     lastScan: lastScan || null,
-    connectedClients: (machineConnections.get(machineId) || []).length
+    connectedClients: (machineConnections.get(machineId) || []).length,
+    playerState,
   });
+});
+
+// SSE endpoint for tablet controller state updates
+app.get('/sse/machine-player/:machineId', (req, res) => {
+  const machineId = normalizeMachineSessionKey(req.params.machineId);
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+
+  if (!machinePlayerConnections.has(machineId)) {
+    machinePlayerConnections.set(machineId, []);
+  }
+  machinePlayerConnections.get(machineId).push(res);
+
+  const initialState = sanitizeMachinePlayerState(getOrCreateMachinePlayerState(machineId));
+  res.write(`data: ${JSON.stringify({ type: 'connected', machineId, timestamp: new Date().toISOString() })}\n\n`);
+  res.write(`data: ${JSON.stringify({ type: 'player-state', ...initialState })}\n\n`);
+
+  req.on('close', () => {
+    const clients = machinePlayerConnections.get(machineId) || [];
+    const index = clients.indexOf(res);
+    if (index > -1) {
+      clients.splice(index, 1);
+    }
+    console.log(`❌ Machine player SSE client disconnected from ${machineId}. Remaining: ${clients.length}`);
+  });
+});
+
+app.post('/api/machine-player/claim', (req, res) => {
+  const machineId = normalizeMachineSessionKey(req.body?.machineId || '');
+  const controllerId = String(req.body?.controllerId || '').trim();
+  const controllerLabel = String(req.body?.controllerLabel || '').trim() || 'Factory tablet';
+
+  if (!machineId || !controllerId) {
+    return res.status(400).json({ error: 'machineId and controllerId are required' });
+  }
+
+  const state = getOrCreateMachinePlayerState(machineId);
+  if (state.activeControllerId && state.activeControllerId !== controllerId) {
+    return res.status(409).json({
+      error: 'Another tablet is already controlling this machine',
+      activeControllerLabel: state.activeControllerLabel || 'Another tablet',
+      controllerExpiresAt: state.controllerExpiresAt,
+    });
+  }
+
+  touchMachineController(state, controllerId, controllerLabel);
+  emitMachinePlayerState(machineId);
+  return res.json({ claimed: true, machineId, controllerId, controllerLabel, controllerExpiresAt: state.controllerExpiresAt });
+});
+
+app.post('/api/machine-player/heartbeat', (req, res) => {
+  const machineId = normalizeMachineSessionKey(req.body?.machineId || '');
+  const controllerId = String(req.body?.controllerId || '').trim();
+  if (!machineId || !controllerId) {
+    return res.status(400).json({ error: 'machineId and controllerId are required' });
+  }
+
+  const state = getOrCreateMachinePlayerState(machineId);
+  if (state.activeControllerId !== controllerId) {
+    return res.status(409).json({ error: 'Controller lock not held by this tablet' });
+  }
+
+  touchMachineController(state, controllerId);
+  emitMachinePlayerState(machineId);
+  return res.json({ ok: true, controllerExpiresAt: state.controllerExpiresAt });
+});
+
+app.post('/api/machine-player/release', (req, res) => {
+  const machineId = normalizeMachineSessionKey(req.body?.machineId || '');
+  const controllerId = String(req.body?.controllerId || '').trim();
+  if (!machineId || !controllerId) {
+    return res.status(400).json({ error: 'machineId and controllerId are required' });
+  }
+
+  const state = getOrCreateMachinePlayerState(machineId);
+  if (state.activeControllerId === controllerId) {
+    state.activeControllerId = null;
+    state.activeControllerLabel = null;
+    state.controllerExpiresAt = 0;
+    emitMachinePlayerState(machineId);
+  }
+
+  return res.json({ released: true });
+});
+
+app.post('/api/machine-player/command', (req, res) => {
+  const machineId = normalizeMachineSessionKey(req.body?.machineId || '');
+  const controllerId = String(req.body?.controllerId || '').trim();
+  const command = String(req.body?.command || '').trim();
+  const payload = req.body?.payload && typeof req.body.payload === 'object' ? req.body.payload : {};
+
+  if (!machineId || !controllerId || !command) {
+    return res.status(400).json({ error: 'machineId, controllerId, and command are required' });
+  }
+
+  const state = getOrCreateMachinePlayerState(machineId);
+  if (state.activeControllerId !== controllerId) {
+    return res.status(409).json({ error: 'Controller lock not held by this tablet' });
+  }
+
+  touchMachineController(state, controllerId);
+
+  if (command === 'load') {
+    state.playback = {
+      ...state.playback,
+      mode: 'loading',
+      projectId: payload.projectId || null,
+      title: payload.title || '',
+      statusText: 'Loading on monitor...',
+      canPlay: false,
+      isPlaying: false,
+      error: '',
+      updatedAt: new Date().toISOString(),
+    };
+    emitMachinePlayerState(machineId);
+  }
+
+  if (command === 'exit') {
+    state.playback = {
+      ...state.playback,
+      mode: 'idle',
+      projectId: null,
+      title: '',
+      statusText: 'Idle',
+      currentTime: 0,
+      duration: 0,
+      currentStepIndex: 0,
+      stepCount: 0,
+      canPlay: false,
+      isPlaying: false,
+      error: '',
+      updatedAt: new Date().toISOString(),
+    };
+    emitMachinePlayerState(machineId);
+  }
+
+  const machineIds = machineId.split(',').map((value) => value.trim()).filter(Boolean);
+  const relayData = {
+    type: 'player-command',
+    machineId,
+    timestamp: new Date().toISOString(),
+    additionalData: {
+      action: `video-manual-${command}`,
+      controllerId,
+      ...payload,
+    },
+  };
+
+  machineIds.forEach((normalizedMachineId) => {
+    broadcastToMachine(normalizedMachineId, relayData);
+  });
+
+  return res.json({ ok: true });
+});
+
+app.post('/api/machine-player/state', (req, res) => {
+  const machineId = normalizeMachineSessionKey(req.body?.machineId || '');
+  const patch = req.body?.state && typeof req.body.state === 'object' ? req.body.state : null;
+  if (!machineId || !patch) {
+    return res.status(400).json({ error: 'machineId and state are required' });
+  }
+
+  const state = getOrCreateMachinePlayerState(machineId);
+  state.playback = {
+    ...state.playback,
+    ...patch,
+    updatedAt: new Date().toISOString(),
+  };
+  emitMachinePlayerState(machineId);
+  return res.json({ ok: true });
 });
 
 // SSE endpoint - clients connect here to receive real-time updates
 app.get("/sse/machine/:machineId", (req, res) => {
-  const machineId = req.params.machineId.toUpperCase();
+  const machineId = normalizeMachineSessionKey(req.params.machineId);
   
   // Set headers for SSE
   res.setHeader('Content-Type', 'text/event-stream');
@@ -209,9 +488,10 @@ app.post("/api/broadcast-scan", async (req, res) => {
   
   // For each machine, create and store scan data
   machineIds.forEach(normalizedMachineId => {
+    const normalizedSessionKey = machineIds.join(',');
     const scanData = {
       type: 'scan',
-      machineId: machineId.toUpperCase(), // Keep original format (e.g., "OZNC04,OZNC06" for grouped)
+      machineId: normalizedSessionKey,
       sebanggo,
       hinban: hinban || '',
       timestamp: timestamp || new Date().toISOString(),
@@ -343,6 +623,62 @@ app.get("/api/generate-session-id", async (req, res) => {
       error: "Error generating sessionID", 
       details: error.message 
     });
+  }
+});
+
+// ============================================
+// CREATOMATE API PROXY (keeps API key server-side)
+// ============================================
+app.post("/api/creatomate/renders", async (req, res) => {
+  try {
+    const CREATOMATE_API_KEY = process.env.CREATOMATE_API_KEY;
+    if (!CREATOMATE_API_KEY) {
+      return res.status(500).json({ error: "Creatomate API key not configured" });
+    }
+    
+    const response = await fetch("https://api.creatomate.com/v1/renders", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${CREATOMATE_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(req.body),
+    });
+    
+    const data = await response.json();
+    
+    if (!response.ok) {
+      return res.status(response.status).json(data);
+    }
+    
+    res.json(data);
+  } catch (error) {
+    console.error("❌ Creatomate render error:", error);
+    res.status(500).json({ error: "Creatomate render failed", details: error.message });
+  }
+});
+
+app.get("/api/creatomate/renders/:id", async (req, res) => {
+  try {
+    const CREATOMATE_API_KEY = process.env.CREATOMATE_API_KEY;
+    if (!CREATOMATE_API_KEY) {
+      return res.status(500).json({ error: "Creatomate API key not configured" });
+    }
+    
+    const response = await fetch(`https://api.creatomate.com/v1/renders/${req.params.id}`, {
+      headers: { "Authorization": `Bearer ${CREATOMATE_API_KEY}` },
+    });
+    
+    const data = await response.json();
+    
+    if (!response.ok) {
+      return res.status(response.status).json(data);
+    }
+    
+    res.json(data);
+  } catch (error) {
+    console.error("❌ Creatomate status check error:", error);
+    res.status(500).json({ error: "Creatomate status check failed", details: error.message });
   }
 });
 
@@ -20022,6 +20358,1301 @@ app.delete('/api/approvals/permanent-delete', async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ==================== VIDEO MANUAL API ====================
+const VM_DB         = 'Sasaki_Coating_MasterDB';
+const VM_COLLECTION = 'videoManuals';
+const VM_REVISIONS_COLLECTION = 'videoRevisions';
+
+function vmBuildNextUntitledTitle(titles = []) {
+  let maxNumber = 0;
+  titles.forEach((title) => {
+    const match = /^Untitled(\d+)$/.exec(String(title || '').trim());
+    if (!match) return;
+    maxNumber = Math.max(maxNumber, Number(match[1]) || 0);
+  });
+  return `Untitled${maxNumber + 1}`;
+}
+
+function vmNormalizeFileName(fileName = '') {
+  return String(fileName)
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]+/g, '_')
+    .replace(/^_+|_+$/g, '') || `asset_${Date.now()}`;
+}
+
+// GET /api/video-manuals/next-untitled — find the next UntitledN name
+app.get('/api/video-manuals/next-untitled', async (req, res) => {
+  try {
+    const col = client.db(VM_DB).collection(VM_COLLECTION);
+    const docs = await col.find(
+      { title: { $regex: '^Untitled\\d+$', $options: 'i' } },
+      { projection: { title: 1 } }
+    ).toArray();
+    res.json({ title: vmBuildNextUntitledTitle(docs.map((doc) => doc.title)) });
+  } catch (err) {
+    console.error('❌ video-manuals next untitled error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/video-manuals — list all projects (summary fields only)
+app.get('/api/video-manuals', async (req, res) => {
+  try {
+    const col  = client.db(VM_DB).collection(VM_COLLECTION);
+    const list = await col.aggregate([
+      { $sort: { updatedAt: -1, createdAt: -1 } },
+      { $limit: 100 },
+      {
+        $project: {
+          title: 1,
+          folder: 1,
+          createdBy: 1,
+          createdAt: 1,
+          updatedAt: 1,
+          videoUrl: 1,
+          currentRevisionNumber: { $ifNull: ['$currentRevisionNumber', 0] },
+          lastRevisionId: 1,
+          stepsCount: { $size: { $ifNull: ['$steps', []] } }
+        }
+      }
+    ]).toArray();
+    res.json(list);
+  } catch (err) {
+    console.error('❌ video-manuals list error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/video-manuals/:id — fetch single project
+app.get('/api/video-manuals/:id', async (req, res) => {
+  try {
+    const col = client.db(VM_DB).collection(VM_COLLECTION);
+    const doc = await col.findOne({ _id: new ObjectId(req.params.id) });
+    if (!doc) return res.status(404).json({ error: 'Not found' });
+    res.json(doc);
+  } catch (err) {
+    console.error('❌ video-manuals get error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/video-manuals — insert or update a project
+app.post('/api/video-manuals', async (req, res) => {
+  try {
+    const col  = client.db(VM_DB).collection(VM_COLLECTION);
+    const body = req.body;
+    const now = new Date();
+
+    if (body._id) {
+      // Update existing
+      const { _id, ...rest } = body;
+      const result = await col.updateOne(
+        { _id: new ObjectId(_id) },
+        { $set: { ...rest, updatedAt: now } }
+      );
+      const updatedDoc = await col.findOne(
+        { _id: new ObjectId(_id) },
+        { projection: { currentRevisionNumber: 1, lastRevisionId: 1, updatedAt: 1 } }
+      );
+      res.json({
+        updated: result.modifiedCount,
+        _id,
+        currentRevisionNumber: updatedDoc?.currentRevisionNumber || 0,
+        lastRevisionId: updatedDoc?.lastRevisionId || null,
+        updatedAt: updatedDoc?.updatedAt || now,
+      });
+    } else {
+      // Insert new
+      const doc = {
+        folder: 'root',
+        currentRevisionNumber: 0,
+        lastRevisionId: null,
+        ...body,
+        createdAt: now,
+        updatedAt: now,
+      };
+      const result = await col.insertOne(doc);
+      res.json({
+        insertedId: result.insertedId,
+        currentRevisionNumber: doc.currentRevisionNumber,
+        lastRevisionId: doc.lastRevisionId,
+        updatedAt: doc.updatedAt,
+      });
+    }
+  } catch (err) {
+    console.error('❌ video-manuals save error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/video-manuals/:id/revisions — list revisions for a project
+app.get('/api/video-manuals/:id/revisions', async (req, res) => {
+  try {
+    const revisions = client.db(VM_DB).collection(VM_REVISIONS_COLLECTION);
+    const docs = await revisions.find(
+      { projectId: new ObjectId(req.params.id) },
+      {
+        projection: {
+          projectId: 1,
+          revisionName: 1,
+          revisionNumber: 1,
+          folder: 1,
+          createdAt: 1,
+          createdBy: 1,
+        }
+      }
+    ).sort({ revisionNumber: -1, createdAt: -1 }).toArray();
+    res.json(docs);
+  } catch (err) {
+    console.error('❌ video-manual revisions list error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/video-manuals/:id/revisions — save an immutable revision snapshot
+app.post('/api/video-manuals/:id/revisions', async (req, res) => {
+  try {
+    const projects = client.db(VM_DB).collection(VM_COLLECTION);
+    const revisions = client.db(VM_DB).collection(VM_REVISIONS_COLLECTION);
+    const projectId = new ObjectId(req.params.id);
+    const project = await projects.findOne({ _id: projectId });
+
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    const snapshot = req.body?.snapshot;
+    if (!snapshot || typeof snapshot !== 'object') {
+      return res.status(400).json({ error: 'snapshot is required' });
+    }
+
+    const now = new Date();
+    const revisionNumber = (project.currentRevisionNumber || 0) + 1;
+    const revisionName = String(req.body?.revisionName || '').trim() || `Revision ${String(revisionNumber).padStart(2, '0')}`;
+    const folder = String(req.body?.folder || project.folder || 'root').trim() || 'root';
+
+    const revisionDoc = {
+      projectId,
+      revisionName,
+      revisionNumber,
+      folder,
+      snapshot,
+      createdAt: now,
+      createdBy: snapshot.createdBy || project.createdBy || 'admin',
+    };
+
+    const insertResult = await revisions.insertOne(revisionDoc);
+
+    await projects.updateOne(
+      { _id: projectId },
+      {
+        $set: {
+          folder,
+          currentRevisionNumber: revisionNumber,
+          lastRevisionId: insertResult.insertedId,
+          updatedAt: now,
+        }
+      }
+    );
+
+    res.json({
+      revisionId: insertResult.insertedId,
+      revisionNumber,
+      revisionName,
+      folder,
+    });
+  } catch (err) {
+    console.error('❌ video-manual revision save error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/video-revisions/:id — fetch one immutable revision snapshot
+app.get('/api/video-revisions/:id', async (req, res) => {
+  try {
+    const revisions = client.db(VM_DB).collection(VM_REVISIONS_COLLECTION);
+    const doc = await revisions.findOne({ _id: new ObjectId(req.params.id) });
+    if (!doc) return res.status(404).json({ error: 'Not found' });
+    res.json(doc);
+  } catch (err) {
+    console.error('❌ video revision get error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/video-manuals/:id — delete a project
+app.delete('/api/video-manuals/:id', async (req, res) => {
+  try {
+    const col = client.db(VM_DB).collection(VM_COLLECTION);
+    await col.deleteOne({ _id: new ObjectId(req.params.id) });
+    res.json({ deleted: true });
+  } catch (err) {
+    console.error('❌ video-manuals delete error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+console.log('🎬 Video Manual API routes loaded');
+// ==================== END VIDEO MANUAL API ====================
+
+
+// ==================== VIDEO MANUAL PLAYLISTS API ====================
+// Collections:
+//   videoManualPlaylists  — top-level groupings (e.g. "Toyota Land Cruiser 250")
+//   videoManualProjects   — projects belonging to a playlist
+//   videoManualAssets     — shared media assets scoped to a playlist
+//   videoRevisions        — already exists, unchanged
+
+const VM_PLAYLISTS_COLLECTION = 'videoManualPlaylists';
+const VM_PROJECTS_COLLECTION  = 'videoManualProjects';
+const VM_ASSETS_COLLECTION    = 'videoManualAssets';
+
+// Roles that can manage (create/edit/delete) playlists and assign access
+const VM_MANAGE_ROLES = new Set(['admin', '課長', '部長', '係長']);
+const VM_DEPLOY_ROLES = new Set(['admin', '班長', '課長', '部長', '係長']);
+
+/**
+ * Returns true if the given user (from req) has edit access to a playlist doc.
+ * Edit access = user's role is in playlist.access.editRoles
+ *             OR user's username is in playlist.access.editUsers
+ */
+function vmCanEdit(playlist, username, role) {
+  if (!playlist) return false;
+  const { access = {} } = playlist;
+  const editRoles = Array.isArray(access.editRoles) ? access.editRoles : [];
+  const editUsers = Array.isArray(access.editUsers) ? access.editUsers : [];
+  return editRoles.includes(role) || editUsers.includes(username);
+}
+
+/**
+ * Returns true if the user can view (read) the playlist.
+ * View access = privacy is 'public'
+ *             OR privacy is 'internal' (any logged-in user)
+ *             OR user's role is in access.viewRoles
+ *             OR user's username is in access.viewUsers
+ *             OR user has edit access
+ */
+function vmCanView(playlist, username, role) {
+  if (!playlist) return false;
+  if (playlist.privacy === 'public') return true;
+  if (vmCanEdit(playlist, username, role)) return true;
+  const { access = {} } = playlist;
+  if (playlist.privacy === 'internal') return true; // any authenticated user
+  const viewRoles = Array.isArray(access.viewRoles) ? access.viewRoles : [];
+  const viewUsers = Array.isArray(access.viewUsers) ? access.viewUsers : [];
+  return viewRoles.includes(role) || viewUsers.includes(username);
+}
+
+/**
+ * Extract current user identity from the Authorization header or a query param.
+ * Client sends: Authorization: Bearer <base64(JSON)>  (mirrors how authUser is stored)
+ * Falls back to 'unknown' / 'viewer' so unauthenticated requests still get 403'd
+ * by the role checks on restricted playlists.
+ */
+function vmGetRequester(req) {
+  try {
+    const raw = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    if (raw) {
+      const parsed = JSON.parse(Buffer.from(raw, 'base64').toString('utf8'));
+      return { username: parsed.username || 'unknown', role: parsed.role || 'viewer' };
+    }
+  } catch (_) {}
+  return { username: 'unknown', role: 'viewer' };
+}
+
+// ── Playlists ────────────────────────────────────────────────────────────────
+
+// GET /api/video-playlists
+// Returns playlists the requester can view (summary fields only).
+app.get('/api/video-playlists', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const db = client.db(VM_DB);
+    const col = db.collection(VM_PLAYLISTS_COLLECTION);
+    const all = await col.find({}, {
+      projection: {
+        name: 1, description: 1, thumbnailUrl: 1,
+        privacy: 1, access: 1, model: 1,
+        createdBy: 1, createdAt: 1, updatedAt: 1,
+      }
+    }).sort({ updatedAt: -1 }).toArray();
+
+    const visible = all.filter(p => vmCanView(p, username, role));
+    const visibleIds = visible.map((playlist) => playlist._id).filter(Boolean);
+    const projectCounts = visibleIds.length
+      ? await db.collection(VM_PROJECTS_COLLECTION).aggregate([
+          { $match: { playlistId: { $in: visibleIds }, deleted: { $ne: true } } },
+          { $group: { _id: '$playlistId', projectCount: { $sum: 1 } } },
+        ]).toArray()
+      : [];
+    const projectCountMap = new Map(projectCounts.map((entry) => [String(entry._id), entry.projectCount || 0]));
+
+    res.json(visible.map((playlist) => ({
+      ...playlist,
+      projectCount: projectCountMap.get(String(playlist._id)) || 0,
+    })));
+  } catch (err) {
+    console.error('❌ video-playlists list error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/video-playlists
+// Create a new playlist. Requires a management role.
+app.post('/api/video-playlists', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    if (!VM_MANAGE_ROLES.has(role)) {
+      return res.status(403).json({ error: 'Insufficient role to create playlists' });
+    }
+
+    const { name, description = '', privacy = 'internal', access = {}, model = null } = req.body || {};
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({ error: 'name is required' });
+    }
+
+    const now = new Date();
+    const doc = {
+      name: String(name).trim(),
+      description: String(description).trim(),
+      model: model ? String(model).trim() : null,
+      privacy, // 'public' | 'internal' | 'private'
+      access: {
+        editRoles: Array.isArray(access.editRoles) ? access.editRoles : ['admin', '課長', '部長', '係長'],
+        editUsers: Array.isArray(access.editUsers) ? access.editUsers : [],
+        viewRoles: Array.isArray(access.viewRoles) ? access.viewRoles : [],
+        viewUsers: Array.isArray(access.viewUsers) ? access.viewUsers : [],
+      },
+      createdBy: username,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const result = await client.db(VM_DB).collection(VM_PLAYLISTS_COLLECTION).insertOne(doc);
+    res.json({ insertedId: result.insertedId, ...doc });
+  } catch (err) {
+    console.error('❌ video-playlists create error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /api/video-playlists/:id
+// Update name, description, privacy, or access settings.
+app.patch('/api/video-playlists/:id', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const col = client.db(VM_DB).collection(VM_PLAYLISTS_COLLECTION);
+    const playlist = await col.findOne({ _id: new ObjectId(req.params.id) });
+    if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
+    if (!VM_MANAGE_ROLES.has(role) || !vmCanEdit(playlist, username, role)) {
+      return res.status(403).json({ error: 'No edit access to this playlist' });
+    }
+
+    const allowed = role === 'admin'
+      ? ['name', 'description', 'privacy', 'access', 'thumbnailUrl', 'model']
+      : ['name', 'description', 'model'];
+    const updates = {};
+    allowed.forEach(key => {
+      if (req.body[key] !== undefined) updates[key] = req.body[key];
+    });
+    updates.updatedAt = new Date();
+
+    await col.updateOne({ _id: new ObjectId(req.params.id) }, { $set: updates });
+    res.json({ updated: true });
+  } catch (err) {
+    console.error('❌ video-playlists update error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/video-playlists/:id
+// Deletes playlist + all its projects + all its assets (cascade).
+app.delete('/api/video-playlists/:id', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const col = client.db(VM_DB).collection(VM_PLAYLISTS_COLLECTION);
+    const playlist = await col.findOne({ _id: new ObjectId(req.params.id) });
+    if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
+    if (role !== 'admin') {
+      return res.status(403).json({ error: 'Only admin can delete playlists' });
+    }
+
+    const playlistOid = new ObjectId(req.params.id);
+    await client.db(VM_DB).collection(VM_PROJECTS_COLLECTION).deleteMany({ playlistId: playlistOid });
+    await client.db(VM_DB).collection(VM_ASSETS_COLLECTION).deleteMany({ playlistId: playlistOid });
+    await col.deleteOne({ _id: playlistOid });
+
+    res.json({ deleted: true });
+  } catch (err) {
+    console.error('❌ video-playlists delete error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Projects (playlist-scoped) ────────────────────────────────────────────────
+
+// GET /api/video-playlists/:id/projects
+// List all projects in a playlist (summary only).
+app.get('/api/video-playlists/:id/projects', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const playlist = await client.db(VM_DB).collection(VM_PLAYLISTS_COLLECTION)
+      .findOne({ _id: new ObjectId(req.params.id) });
+    if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
+    if (!vmCanView(playlist, username, role)) {
+      return res.status(403).json({ error: 'No view access to this playlist' });
+    }
+
+    const projects = await client.db(VM_DB).collection(VM_PROJECTS_COLLECTION).aggregate([
+      { $match: { playlistId: new ObjectId(req.params.id), deleted: { $ne: true } } },
+      { $sort: { order: 1, createdAt: 1 } },
+      {
+        $project: {
+          title: 1, description: 1, order: 1, status: 1,
+          currentAssetId: 1, thumbnailUrl: 1,
+          createdBy: 1, createdAt: 1, updatedAt: 1,
+          lastEditedBy: 1, lastEditedAt: 1,
+          deployedRevisionId: 1,
+          deployedRevisionNumber: 1,
+          deployedRevisionName: 1,
+          deployedAt: 1,
+          deployedBy: 1,
+          currentRevisionNumber: { $ifNull: ['$currentRevisionNumber', 0] },
+          stepsCount: { $size: { $ifNull: ['$steps', []] } },
+        }
+      }
+    ]).toArray();
+
+    res.json(projects);
+  } catch (err) {
+    console.error('❌ video-projects list error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/video-playlists/:id/projects
+// Create a new project inside a playlist. Requires edit access.
+app.post('/api/video-playlists/:id/projects', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const playlist = await client.db(VM_DB).collection(VM_PLAYLISTS_COLLECTION)
+      .findOne({ _id: new ObjectId(req.params.id) });
+    if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
+    if (!vmCanEdit(playlist, username, role)) {
+      return res.status(403).json({ error: 'No edit access to this playlist' });
+    }
+
+    const { title } = req.body || {};
+    if (!title || !String(title).trim()) {
+      return res.status(400).json({ error: 'title is required' });
+    }
+
+    // Determine next order index
+    const lastProject = await client.db(VM_DB).collection(VM_PROJECTS_COLLECTION)
+      .find({ playlistId: new ObjectId(req.params.id) })
+      .sort({ order: -1 }).limit(1).toArray();
+    const order = lastProject.length > 0 ? (lastProject[0].order || 0) + 1 : 0;
+
+    const now = new Date();
+    const doc = {
+      playlistId: new ObjectId(req.params.id),
+      title: String(title).trim(),
+      order,
+      status: 'draft',
+      currentAssetId: null,
+      steps: [],
+      width: 1920,
+      height: 1080,
+      duration: 0,
+      currentRevisionNumber: 0,
+      lastRevisionId: null,
+      deployedRevisionId: null,
+      deployedRevisionNumber: null,
+      deployedRevisionName: null,
+      deployedAt: null,
+      deployedBy: null,
+      thumbnailUrl: null,
+      createdBy: username,
+      createdAt: now,
+      updatedAt: now,
+      lastEditedAt: now,
+      lastEditedBy: username,
+    };
+
+    const result = await client.db(VM_DB).collection(VM_PROJECTS_COLLECTION).insertOne(doc);
+    res.json({ insertedId: result.insertedId, ...doc });
+  } catch (err) {
+    console.error('❌ video-projects create error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/video-projects/:id
+// Fetch a single project (full document).
+app.get('/api/video-projects/:id', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const project = await client.db(VM_DB).collection(VM_PROJECTS_COLLECTION)
+      .findOne({ _id: new ObjectId(req.params.id) });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    // Check playlist-level view access
+    const playlist = await client.db(VM_DB).collection(VM_PLAYLISTS_COLLECTION)
+      .findOne({ _id: project.playlistId });
+    if (!playlist || !vmCanView(playlist, username, role)) {
+      return res.status(403).json({ error: 'No view access to this project' });
+    }
+
+    res.json({
+      ...project,
+      isDeployed: !!project.deployedRevisionId,
+    });
+  } catch (err) {
+    console.error('❌ video-projects get error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /api/video-projects/:id
+// Save working copy (steps, elements, asset assignments). Used by autosave.
+app.patch('/api/video-projects/:id', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const project = await client.db(VM_DB).collection(VM_PROJECTS_COLLECTION)
+      .findOne({ _id: new ObjectId(req.params.id) });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const playlist = await client.db(VM_DB).collection(VM_PLAYLISTS_COLLECTION)
+      .findOne({ _id: project.playlistId });
+    if (!playlist || !vmCanEdit(playlist, username, role)) {
+      return res.status(403).json({ error: 'No edit access to this project' });
+    }
+
+    // Whitelist the fields that can be patched to prevent privilege escalation
+    const allowed = [
+      'title', 'description', 'status', 'steps', 'width', 'height', 'duration',
+      'videoUrl', 'assets', 'currentAssetId', 'thumbnailUrl', 'order',
+    ];
+    const updates = { lastEditedAt: new Date(), lastEditedBy: username, updatedAt: new Date() };
+    allowed.forEach(key => {
+      if (req.body[key] !== undefined) updates[key] = req.body[key];
+    });
+
+    await client.db(VM_DB).collection(VM_PROJECTS_COLLECTION)
+      .updateOne({ _id: new ObjectId(req.params.id) }, { $set: updates });
+
+    const updated = await client.db(VM_DB).collection(VM_PROJECTS_COLLECTION)
+      .findOne({ _id: new ObjectId(req.params.id) }, {
+        projection: { currentRevisionNumber: 1, lastRevisionId: 1, updatedAt: 1 }
+      });
+
+    res.json({
+      updated: true,
+      currentRevisionNumber: updated?.currentRevisionNumber || 0,
+      lastRevisionId: updated?.lastRevisionId || null,
+    });
+  } catch (err) {
+    console.error('❌ video-projects patch error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Soft-delete helpers ──────────────────────────────────────────────────────
+
+const VM_TRASH_TTL_DAYS = 30;
+
+// Returns the storagePath for an asset. Checks assets collection first, falls
+// back to parsing the URL the same way the PDF module does.
+function vmExtractStoragePath(url) {
+  if (!url || typeof url !== 'string') return null;
+  try {
+    const withoutQuery = url.split('?')[0];
+    if (withoutQuery.includes('/o/')) {
+      return decodeURIComponent(withoutQuery.split('/o/')[1]);
+    }
+    if (withoutQuery.includes('storage.googleapis.com/')) {
+      const parts = withoutQuery.split('storage.googleapis.com/')[1].split('/');
+      parts.shift(); // remove bucket name
+      return decodeURIComponent(parts.join('/'));
+    }
+  } catch (_) {}
+  return null;
+}
+
+// Permanently deletes a project doc + its revisions.
+// Also deletes the Firebase Storage file for each video asset ONLY when no
+// other non-deleted project in the same playlist still references it.
+async function vmPurgeProject(db, project) {
+  const projectId = project._id;
+
+  // Collect all storage paths referenced by this project.
+  const pathsToPotentiallyDelete = new Set();
+  const urlsToPotentiallyDelete = new Set();
+
+  const addUrl = (url) => {
+    if (!url) return;
+    urlsToPotentiallyDelete.add(url);
+    const path = vmExtractStoragePath(url);
+    if (path) pathsToPotentiallyDelete.add(path);
+  };
+
+  if (project.videoUrl) addUrl(project.videoUrl);
+  (project.assets || []).forEach(a => addUrl(a.downloadUrl || a.url));
+
+  // For each URL check if any OTHER non-deleted project references it.
+  const bucket = admin.storage().bucket();
+  for (const url of urlsToPotentiallyDelete) {
+    const otherUser = await db.collection(VM_PROJECTS_COLLECTION).findOne({
+      _id: { $ne: projectId },
+      deleted: { $ne: true },
+      $or: [
+        { videoUrl: url },
+        { 'assets.downloadUrl': url },
+        { 'assets.url': url },
+      ],
+    });
+    if (otherUser) {
+      console.log(`[VM Purge] Skipping Firebase delete — asset in use: ${url}`);
+      continue;
+    }
+    const storagePath = vmExtractStoragePath(url);
+    if (storagePath) {
+      try {
+        await bucket.file(storagePath).delete();
+        console.log(`[VM Purge] Deleted from Firebase: ${storagePath}`);
+      } catch (err) {
+        console.warn(`[VM Purge] Firebase delete failed (${storagePath}):`, err.message);
+      }
+    }
+  }
+
+  // Hard-delete from MongoDB.
+  await db.collection(VM_REVISIONS_COLLECTION).deleteMany({ projectId });
+  await db.collection(VM_PROJECTS_COLLECTION).deleteOne({ _id: projectId });
+  console.log(`[VM Purge] Project ${projectId} permanently deleted.`);
+}
+
+// Purge any soft-deleted projects that have passed the TTL.
+async function vmAutoPurgeExpired(db) {
+  const cutoff = new Date(Date.now() - VM_TRASH_TTL_DAYS * 24 * 60 * 60 * 1000);
+  const expired = await db.collection(VM_PROJECTS_COLLECTION)
+    .find({ deleted: true, deletedAt: { $lte: cutoff } }).toArray();
+  for (const project of expired) {
+    try { await vmPurgeProject(db, project); } catch (e) { console.error('[VM Purge] Error:', e); }
+  }
+}
+
+// DELETE /api/video-projects/:id  →  SOFT DELETE (move to trash)
+// DELETE /api/video-projects/:id
+app.delete('/api/video-projects/:id', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const project = await client.db(VM_DB).collection(VM_PROJECTS_COLLECTION)
+      .findOne({ _id: new ObjectId(req.params.id) });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const playlist = await client.db(VM_DB).collection(VM_PLAYLISTS_COLLECTION)
+      .findOne({ _id: project.playlistId });
+    if (!playlist || !vmCanEdit(playlist, username, role)) {
+      return res.status(403).json({ error: 'No edit access to this project' });
+    }
+
+    await client.db(VM_DB).collection(VM_PROJECTS_COLLECTION).updateOne(
+      { _id: new ObjectId(req.params.id) },
+      { $set: { deleted: true, deletedAt: new Date(), deletedBy: username } },
+    );
+
+    res.json({ deleted: true, softDelete: true });
+  } catch (err) {
+    console.error('\u274c video-projects soft-delete error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/video-projects/:id/restore  —  restore from trash
+app.post('/api/video-projects/:id/restore', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const project = await client.db(VM_DB).collection(VM_PROJECTS_COLLECTION)
+      .findOne({ _id: new ObjectId(req.params.id) });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const playlist = await client.db(VM_DB).collection(VM_PLAYLISTS_COLLECTION)
+      .findOne({ _id: project.playlistId });
+    if (!playlist || !vmCanEdit(playlist, username, role)) {
+      return res.status(403).json({ error: 'No edit access to this project' });
+    }
+
+    await client.db(VM_DB).collection(VM_PROJECTS_COLLECTION).updateOne(
+      { _id: new ObjectId(req.params.id) },
+      { $unset: { deleted: '', deletedAt: '', deletedBy: '' } },
+    );
+
+    res.json({ restored: true });
+  } catch (err) {
+    console.error('\u274c video-projects restore error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/video-projects/:id/permanent  —  hard delete + optional Firebase cleanup
+app.delete('/api/video-projects/:id/permanent', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const VM_PERM_DELETE_ROLES = new Set(['admin', '課長', '係長', '部長']);
+    if (!VM_PERM_DELETE_ROLES.has(role)) {
+      return res.status(403).json({ error: 'Only admin, 課長, 係長, or 部長 can permanently delete projects.' });
+    }
+    const db = client.db(VM_DB);
+    const project = await db.collection(VM_PROJECTS_COLLECTION)
+      .findOne({ _id: new ObjectId(req.params.id) });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const playlist = await db.collection(VM_PLAYLISTS_COLLECTION)
+      .findOne({ _id: project.playlistId });
+    if (!playlist || !vmCanEdit(playlist, username, role)) {
+      return res.status(403).json({ error: 'No edit access to this project' });
+    }
+
+    await vmPurgeProject(db, project);
+    res.json({ deleted: true, permanent: true });
+  } catch (err) {
+    console.error('\u274c video-projects permanent-delete error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/video-playlists/:id/trash  —  list soft-deleted projects; also auto-purges expired ones
+app.get('/api/video-playlists/:id/trash', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const db = client.db(VM_DB);
+
+    const playlist = await db.collection(VM_PLAYLISTS_COLLECTION)
+      .findOne({ _id: new ObjectId(req.params.id) });
+    if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
+    if (!vmCanView(playlist, username, role)) {
+      return res.status(403).json({ error: 'No view access to this playlist' });
+    }
+
+    // Purge anything expired before returning the list.
+    await vmAutoPurgeExpired(db);
+
+    const now = Date.now();
+    const docs = await db.collection(VM_PROJECTS_COLLECTION).aggregate([
+      { $match: { playlistId: new ObjectId(req.params.id), deleted: true } },
+      { $sort: { deletedAt: -1 } },
+      {
+        $project: {
+          title: 1, deletedAt: 1, deletedBy: 1, currentRevisionNumber: 1,
+          stepsCount: { $size: { $ifNull: ['$steps', []] } },
+        }
+      }
+    ]).toArray();
+
+    const ttlMs = VM_TRASH_TTL_DAYS * 24 * 60 * 60 * 1000;
+    const result = docs.map(d => ({
+      ...d,
+      daysRemaining: Math.max(0, Math.ceil((new Date(d.deletedAt).getTime() + ttlMs - now) / 86400000)),
+    }));
+
+    res.json(result);
+  } catch (err) {
+    console.error('\u274c video-playlists trash error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/video-projects/:id/revisions  (re-routed to new projects collection)
+// Same logic as before but now works with VM_PROJECTS_COLLECTION.
+app.post('/api/video-projects/:id/revisions', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const projects = client.db(VM_DB).collection(VM_PROJECTS_COLLECTION);
+    const revisions = client.db(VM_DB).collection(VM_REVISIONS_COLLECTION);
+    const projectId = new ObjectId(req.params.id);
+    const project = await projects.findOne({ _id: projectId });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const playlist = await client.db(VM_DB).collection(VM_PLAYLISTS_COLLECTION)
+      .findOne({ _id: project.playlistId });
+    if (!playlist || !vmCanEdit(playlist, username, role)) {
+      return res.status(403).json({ error: 'No edit access to this project' });
+    }
+
+    const snapshot = req.body?.snapshot;
+    if (!snapshot || typeof snapshot !== 'object') {
+      return res.status(400).json({ error: 'snapshot is required' });
+    }
+
+    const now = new Date();
+    const revisionNumber = (project.currentRevisionNumber || 0) + 1;
+    const revisionName = String(req.body?.revisionName || '').trim() || `Revision ${String(revisionNumber).padStart(2, '0')}`;
+
+    const revisionDoc = {
+      projectId,
+      playlistId: project.playlistId,
+      revisionName,
+      revisionNumber,
+      snapshot,
+      createdAt: now,
+      createdBy: username,
+    };
+
+    const insertResult = await revisions.insertOne(revisionDoc);
+    await projects.updateOne(
+      { _id: projectId },
+      {
+        $set: {
+          currentRevisionNumber: revisionNumber,
+          lastRevisionId: insertResult.insertedId,
+          updatedAt: now,
+        }
+      }
+    );
+
+    res.json({ revisionId: insertResult.insertedId, revisionNumber, revisionName });
+  } catch (err) {
+    console.error('❌ video-projects revision save error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/video-projects/:id/revisions
+app.get('/api/video-projects/:id/revisions', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const project = await client.db(VM_DB).collection(VM_PROJECTS_COLLECTION)
+      .findOne({ _id: new ObjectId(req.params.id) });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const playlist = await client.db(VM_DB).collection(VM_PLAYLISTS_COLLECTION)
+      .findOne({ _id: project.playlistId });
+    if (!playlist || !vmCanView(playlist, username, role)) {
+      return res.status(403).json({ error: 'No view access' });
+    }
+
+    const docs = await client.db(VM_DB).collection(VM_REVISIONS_COLLECTION)
+      .find({ projectId: new ObjectId(req.params.id) }, {
+        projection: { projectId: 1, playlistId: 1, revisionName: 1, revisionNumber: 1, createdAt: 1, createdBy: 1 }
+      })
+      .sort({ revisionNumber: -1 }).toArray();
+
+    res.json(docs.map((doc) => ({
+      ...doc,
+      isDeployed: String(doc._id) === String(project.deployedRevisionId || ''),
+    })));
+  } catch (err) {
+    console.error('❌ video-projects revisions list error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/video-projects/:id/deploy
+// Deploy a specific revision to the factory side. Replaces any previously deployed revision.
+app.post('/api/video-projects/:id/deploy', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    if (!VM_DEPLOY_ROLES.has(role)) {
+      return res.status(403).json({ error: 'Insufficient role to deploy projects' });
+    }
+
+    const db = client.db(VM_DB);
+    const projects = db.collection(VM_PROJECTS_COLLECTION);
+    const revisions = db.collection(VM_REVISIONS_COLLECTION);
+    const projectId = new ObjectId(req.params.id);
+    const project = await projects.findOne({ _id: projectId });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const playlist = await db.collection(VM_PLAYLISTS_COLLECTION).findOne({ _id: project.playlistId });
+    if (!playlist || !vmCanEdit(playlist, username, role)) {
+      return res.status(403).json({ error: 'No edit access to this project' });
+    }
+
+    const rawRevisionId = String(req.body?.revisionId || '').trim();
+    if (!rawRevisionId) {
+      return res.status(400).json({ error: 'revisionId is required' });
+    }
+
+    let revisionId;
+    try {
+      revisionId = new ObjectId(rawRevisionId);
+    } catch (_) {
+      return res.status(400).json({ error: 'Invalid revisionId' });
+    }
+
+    const revision = await revisions.findOne({ _id: revisionId, projectId });
+    if (!revision) {
+      return res.status(404).json({ error: 'Revision not found for this project' });
+    }
+
+    const deployedAt = new Date();
+    await projects.updateOne(
+      { _id: projectId },
+      {
+        $set: {
+          deployedRevisionId: revision._id,
+          deployedRevisionNumber: revision.revisionNumber || null,
+          deployedRevisionName: revision.revisionName || null,
+          deployedAt,
+          deployedBy: username,
+          updatedAt: deployedAt,
+        }
+      }
+    );
+
+    res.json({
+      deployed: true,
+      projectId,
+      revisionId: revision._id,
+      revisionNumber: revision.revisionNumber || null,
+      revisionName: revision.revisionName || null,
+      deployedAt,
+      deployedBy: username,
+    });
+  } catch (err) {
+    console.error('❌ video-projects deploy error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/video-projects/:id/undeploy
+// Removes the currently deployed revision so the project disappears from factory-side manual lookup.
+app.post('/api/video-projects/:id/undeploy', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    if (!VM_DEPLOY_ROLES.has(role)) {
+      return res.status(403).json({ error: 'Insufficient role to undeploy projects' });
+    }
+
+    const db = client.db(VM_DB);
+    const projects = db.collection(VM_PROJECTS_COLLECTION);
+    const projectId = new ObjectId(req.params.id);
+    const project = await projects.findOne({ _id: projectId });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const playlist = await db.collection(VM_PLAYLISTS_COLLECTION).findOne({ _id: project.playlistId });
+    if (!playlist || !vmCanEdit(playlist, username, role)) {
+      return res.status(403).json({ error: 'No edit access to this project' });
+    }
+
+    await projects.updateOne(
+      { _id: projectId },
+      {
+        $set: { updatedAt: new Date() },
+        $unset: {
+          deployedRevisionId: '',
+          deployedRevisionNumber: '',
+          deployedRevisionName: '',
+          deployedAt: '',
+          deployedBy: '',
+        },
+      }
+    );
+
+    res.json({ undeployed: true, projectId, undeployedBy: username });
+  } catch (err) {
+    console.error('❌ video-projects undeploy error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/factory/video-manuals?model=<masterdb model>
+// Returns only explicitly deployed projects for the exact model value.
+app.get('/api/factory/video-manuals', async (req, res) => {
+  try {
+    const model = String(req.query.model || '').trim();
+    if (!model) {
+      return res.status(400).json({ error: 'model query parameter is required' });
+    }
+
+    const db = client.db(VM_DB);
+    const playlists = await db.collection(VM_PLAYLISTS_COLLECTION)
+      .find({ model }, { projection: { name: 1, model: 1 } })
+      .toArray();
+
+    if (!playlists.length) {
+      return res.json({ model, projects: [] });
+    }
+
+    const playlistIds = playlists.map((playlist) => playlist._id);
+    const playlistById = new Map(playlists.map((playlist) => [String(playlist._id), playlist]));
+    const projects = await db.collection(VM_PROJECTS_COLLECTION).aggregate([
+      {
+        $match: {
+          playlistId: { $in: playlistIds },
+          deleted: { $ne: true },
+          deployedRevisionId: { $exists: true, $ne: null },
+        }
+      },
+      { $sort: { order: 1, updatedAt: -1, createdAt: 1 } },
+      {
+        $project: {
+          title: 1,
+          description: 1,
+          playlistId: 1,
+          thumbnailUrl: 1,
+          duration: 1,
+          updatedAt: 1,
+          deployedAt: 1,
+          deployedRevisionId: 1,
+          deployedRevisionNumber: 1,
+          deployedRevisionName: 1,
+          stepsCount: { $size: { $ifNull: ['$steps', []] } },
+        }
+      }
+    ]).toArray();
+
+    res.json({
+      model,
+      projects: projects.map((project) => ({
+        ...project,
+        playlistName: playlistById.get(String(project.playlistId))?.name || '',
+      })),
+    });
+  } catch (err) {
+    console.error('❌ factory video-manuals lookup error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/factory/video-manuals/projects/:id
+// Returns the deployed revision snapshot for factory playback, never the live working copy.
+app.get('/api/factory/video-manuals/projects/:id', async (req, res) => {
+  try {
+    const db = client.db(VM_DB);
+    const projects = db.collection(VM_PROJECTS_COLLECTION);
+    const revisions = db.collection(VM_REVISIONS_COLLECTION);
+    const projectId = new ObjectId(req.params.id);
+    const project = await projects.findOne({ _id: projectId, deleted: { $ne: true } });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+    if (!project.deployedRevisionId) {
+      return res.status(404).json({ error: 'No deployed revision for this project' });
+    }
+
+    const revision = await revisions.findOne({ _id: new ObjectId(project.deployedRevisionId), projectId });
+    if (!revision?.snapshot) {
+      return res.status(404).json({ error: 'Deployed revision snapshot not found' });
+    }
+
+    res.json({
+      projectId: project._id,
+      title: project.title,
+      playlistId: project.playlistId,
+      thumbnailUrl: project.thumbnailUrl || null,
+      deployedRevisionId: revision._id,
+      deployedRevisionNumber: revision.revisionNumber || project.deployedRevisionNumber || null,
+      deployedRevisionName: revision.revisionName || project.deployedRevisionName || null,
+      deployedAt: project.deployedAt || null,
+      snapshot: revision.snapshot,
+    });
+  } catch (err) {
+    console.error('❌ factory video-manual project get error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Shared Assets (playlist-scoped) ──────────────────────────────────────────
+
+// GET /api/video-playlists/:id/assets
+// List all shared media assets in a playlist.
+app.get('/api/video-playlists/:id/assets', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const playlist = await client.db(VM_DB).collection(VM_PLAYLISTS_COLLECTION)
+      .findOne({ _id: new ObjectId(req.params.id) });
+    if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
+    if (!vmCanView(playlist, username, role)) {
+      return res.status(403).json({ error: 'No view access to this playlist' });
+    }
+
+    const assets = await client.db(VM_DB).collection(VM_ASSETS_COLLECTION)
+      .find({ playlistId: new ObjectId(req.params.id) })
+      .sort({ uploadedAt: -1 })
+      .toArray();
+
+    res.json(assets);
+  } catch (err) {
+    console.error('❌ video-playlist assets list error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/video-playlists/:id/assets/:assetId
+app.delete('/api/video-playlists/:id/assets/:assetId', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const playlist = await client.db(VM_DB).collection(VM_PLAYLISTS_COLLECTION)
+      .findOne({ _id: new ObjectId(req.params.id) });
+    if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
+    if (!vmCanEdit(playlist, username, role)) {
+      return res.status(403).json({ error: 'No edit access to this playlist' });
+    }
+
+    await client.db(VM_DB).collection(VM_ASSETS_COLLECTION)
+      .deleteOne({ playlistId: new ObjectId(req.params.id), assetId: req.params.assetId });
+
+    res.json({ deleted: true });
+  } catch (err) {
+    console.error('❌ video-playlist asset delete error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+console.log('🎬 Video Manual Playlists/Projects/Assets API routes loaded');
+// ==================== END VIDEO MANUAL PLAYLISTS API ====================
+
+
+// ==================== VIDEO MANUAL UPLOAD ====================
+// Accepts a raw binary video file and uploads it to Firebase Storage.
+// Returns the public download URL so Creatomate can fetch it for rendering.
+// Route: POST /api/upload-video-manual
+// Headers: X-File-Name: <filename>  Content-Type: video/*
+// Body: raw binary file bytes
+app.get('/api/video-manual-media', async (req, res) => {
+  try {
+    const rawUrl = String(req.query.url || '');
+    if (!rawUrl) {
+      return res.status(400).json({ error: 'url query parameter is required' });
+    }
+
+    const assetUrl = new URL(rawUrl);
+    const allowedHosts = new Set([
+      'firebasestorage.googleapis.com',
+      'storage.googleapis.com',
+    ]);
+
+    if (!allowedHosts.has(assetUrl.hostname)) {
+      return res.status(400).json({ error: 'Unsupported media host' });
+    }
+
+    const upstreamHeaders = {};
+    if (req.headers.range) upstreamHeaders.range = req.headers.range;
+
+    const upstream = await fetch(assetUrl.toString(), {
+      method: 'GET',
+      headers: upstreamHeaders,
+    });
+
+    if (!upstream.ok && upstream.status !== 206) {
+      const bodyText = await upstream.text().catch(() => '');
+      return res.status(upstream.status).send(bodyText || 'Failed to fetch media');
+    }
+
+    res.status(upstream.status);
+    res.setHeader('Access-Control-Allow-Origin', '*');
+
+    const passthroughHeaders = [
+      'content-type',
+      'content-length',
+      'content-range',
+      'accept-ranges',
+      'cache-control',
+      'etag',
+      'last-modified',
+    ];
+
+    passthroughHeaders.forEach((headerName) => {
+      const value = upstream.headers.get(headerName);
+      if (value) res.setHeader(headerName, value);
+    });
+
+    if (!upstream.body) {
+      return res.end();
+    }
+
+    upstream.body.pipe(res);
+  } catch (err) {
+    console.error('❌ video manual media proxy error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/upload-video-manual',
+  express.raw({ type: '*/*', limit: '500mb' }),
+  async (req, res) => {
+    try {
+      const { username, role } = vmGetRequester(req);
+      const fileName  = vmNormalizeFileName(req.headers['x-file-name'] || `video_${Date.now()}.mp4`);
+      const mimeType  = req.headers['content-type'] || 'video/mp4';
+      const buffer    = req.body; // Buffer from express.raw()
+      const assetId   = new ObjectId().toString();
+      const uploadedAt = new Date();
+
+      // Optional: register under a playlist's shared asset pool.
+      // Client sends X-Playlist-Id header when uploading from the new playlist-scoped editor.
+      const rawPlaylistId = req.headers['x-playlist-id'];
+
+      if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
+        return res.status(400).json({ error: 'No file data received' });
+      }
+
+      // If a playlistId is provided, verify edit access before uploading.
+      if (rawPlaylistId) {
+        try {
+          const playlist = await client.db(VM_DB).collection(VM_PLAYLISTS_COLLECTION)
+            .findOne({ _id: new ObjectId(rawPlaylistId) });
+          if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
+          if (!vmCanEdit(playlist, username, role)) {
+            return res.status(403).json({ error: 'No edit access to this playlist' });
+          }
+        } catch (idErr) {
+          return res.status(400).json({ error: 'Invalid x-playlist-id' });
+        }
+      }
+
+      const storagePath = `videoManuals/${Date.now()}_${assetId}_${fileName}`;
+      const bucket      = admin.storage().bucket();
+      const fileRef     = bucket.file(storagePath);
+      const downloadToken = `vm_${Date.now()}`;
+
+      await fileRef.save(buffer, {
+        metadata: {
+          contentType: mimeType,
+          metadata: { firebaseStorageDownloadTokens: downloadToken },
+        },
+      });
+
+      const publicUrl =
+        `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/` +
+        `${encodeURIComponent(storagePath)}?alt=media&token=${downloadToken}`;
+
+      console.log(`✅ Video uploaded to Firebase Storage: ${storagePath}`);
+
+      // Register in the playlist asset pool if a playlistId was supplied.
+      if (rawPlaylistId) {
+        const assetDoc = {
+          playlistId: new ObjectId(rawPlaylistId),
+          assetId,
+          name: fileName,
+          type: 'video',
+          mimeType,
+          storagePath,
+          downloadUrl: publicUrl,
+          size: buffer.length,
+          uploadedBy: username,
+          uploadedAt,
+          usedByProjectIds: [],
+        };
+        await client.db(VM_DB).collection(VM_ASSETS_COLLECTION).insertOne(assetDoc);
+      }
+
+      res.json({
+        assetId,
+        fileName,
+        mimeType,
+        storagePath,
+        uploadedAt: uploadedAt.toISOString(),
+        url: publicUrl,
+      });
+    } catch (err) {
+      console.error('❌ Video manual upload failed:', err);
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
+// ==================== END VIDEO MANUAL UPLOAD ====================
 
 
 app.listen(port, () => {
