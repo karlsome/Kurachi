@@ -1551,39 +1551,23 @@
         }
 
         function getManualOverlayMetrics(videoEl = getManualVideo(), overlayHost = manualProjectStage, designWidth, designHeight) {
-            const hostRect = overlayHost?.getBoundingClientRect?.() || { left: 0, top: 0, width: 0, height: 0 };
-            const videoRect = videoEl?.getBoundingClientRect?.() || hostRect;
-            const boxWidth = Math.max(1, videoRect.width || hostRect.width || 1);
-            const boxHeight = Math.max(1, videoRect.height || hostRect.height || 1);
-            const intrinsicWidth = Math.max(1, Number(videoEl?.videoWidth) || Number(designWidth) || boxWidth);
-            const intrinsicHeight = Math.max(1, Number(videoEl?.videoHeight) || Number(designHeight) || boxHeight);
-            const authoredWidth = Math.max(1, Number(designWidth) || intrinsicWidth);
-            const authoredHeight = Math.max(1, Number(designHeight) || intrinsicHeight);
-            const videoAspect = intrinsicWidth / intrinsicHeight;
-            const boxAspect = boxWidth / boxHeight;
-
-            let contentWidth = boxWidth;
-            let contentHeight = boxHeight;
-            let innerOffsetX = 0;
-            let innerOffsetY = 0;
-
-            if (videoAspect > boxAspect) {
-                contentHeight = boxWidth / videoAspect;
-                innerOffsetY = (boxHeight - contentHeight) / 2;
-            } else {
-                contentWidth = boxHeight * videoAspect;
-                innerOffsetX = (boxWidth - contentWidth) / 2;
-            }
-
+            // Elements in the editor are authored in design/canvas pixel coordinates
+            // (e.g. left: el.x px on a 1920×1080 canvas). The stage here is sized to
+            // projectW*scale × projectH*scale, which is a 1:1 mapping of that canvas.
+            // So we simply scale design coords → stage pixels with no letterbox offset.
+            const stageW = Math.max(1, overlayHost?.clientWidth || 1);
+            const stageH = Math.max(1, overlayHost?.clientHeight || 1);
+            const authoredWidth = Math.max(1, Number(designWidth) || 1920);
+            const authoredHeight = Math.max(1, Number(designHeight) || 1080);
             return {
-                hostWidth: boxWidth,
-                hostHeight: boxHeight,
-                offsetX: (videoRect.left - hostRect.left) + innerOffsetX,
-                offsetY: (videoRect.top - hostRect.top) + innerOffsetY,
-                contentWidth,
-                contentHeight,
-                scaleX: contentWidth / authoredWidth,
-                scaleY: contentHeight / authoredHeight,
+                hostWidth: stageW,
+                hostHeight: stageH,
+                offsetX: 0,
+                offsetY: 0,
+                contentWidth: stageW,
+                contentHeight: stageH,
+                scaleX: stageW / authoredWidth,
+                scaleY: stageH / authoredHeight,
                 designWidth: authoredWidth,
                 designHeight: authoredHeight,
             };
