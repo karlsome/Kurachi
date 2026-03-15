@@ -7359,7 +7359,8 @@ app.post('/api/financials', async (req, res) => {
     });
 
     // --- Top 5 worst-performing 背番号 by scrap loss (derived from merged rows, no extra DB query) ---
-    const top5 = [...rows]
+    // NOTE: declared as `let` so the recovery block can reassign with adjusted values.
+    let top5 = [...rows]
       .sort((a, b) => (b.scrapLoss || 0) - (a.scrapLoss || 0))
       .slice(0, 5)
       .map(r => ({ ban: r.ban, hinban: r.hinban, model: r.model, factory: r.factory,
@@ -7489,6 +7490,35 @@ app.post('/api/financials', async (req, res) => {
       });
       // Stamp recoveredNg on ALL rows (not just current page) so the cache is self-contained
       rows.forEach(row => { row.recoveredNg = recoveryByBan.get(row.ban) || 0; });
+
+      // Rebuild factoryTotalsMap with recovery-adjusted finalGood and scrapLoss
+      factoryTotalsMap.clear();
+      rows.forEach(r => {
+        const adjNg       = Math.max((r.totalNg || 0) - (r.recoveredNg || 0), 0);
+        const adjFinalGood = (r.created || 0) - adjNg;
+        const adjScrapLoss = adjNg * (r.pricePerPc || 0);
+        const fe = factoryTotalsMap.get(r.factory) || { created: 0, finalGood: 0, totalValue: 0, scrapLoss: 0 };
+        fe.created    += r.created   || 0;
+        fe.finalGood  += adjFinalGood;
+        fe.totalValue += r.cost      || 0;
+        fe.scrapLoss  += adjScrapLoss;
+        factoryTotalsMap.set(r.factory, fe);
+      });
+
+      // Rebuild top5 with recovery-adjusted scrapLoss
+      top5 = [...rows]
+        .map(r => {
+          const adjNg       = Math.max((r.totalNg || 0) - (r.recoveredNg || 0), 0);
+          const adjScrap    = Number((adjNg * (r.pricePerPc || 0)).toFixed(2));
+          const adjFinalGood = (r.created || 0) - adjNg;
+          const adjYield    = r.created > 0 ? Number(((adjFinalGood / r.created) * 100).toFixed(2)) : 0;
+          return { ban: r.ban, hinban: r.hinban, model: r.model, factory: r.factory,
+                   scrapLoss: adjScrap, totalNg: adjNg,
+                   yieldPercent: adjYield, pricePerPc: r.pricePerPc, created: r.created };
+        })
+        .sort((a, b) => b.scrapLoss - a.scrapLoss)
+        .slice(0, 5);
+
       // Apply recovery adjustment to ALL rows (pre-pagination)
       if (recoveryByBan.size > 0) {
         let adjTotalLoss = 0;
