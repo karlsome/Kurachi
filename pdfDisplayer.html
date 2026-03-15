@@ -1644,10 +1644,13 @@
                     node.style.height = `${h}px`;
                     node.style.opacity = String(opacity);
                     node.style.zIndex = String(layer);
+                    node.style.boxSizing = 'border-box';
                     node.style.border = `${Math.max(1, (Number(el.strokeWidth) || 3) * Math.min(metrics.scaleX, metrics.scaleY))}px solid ${el.strokeColor || '#ffffff'}`;
                     node.style.background = el.fill ? (el.strokeColor || '#ffffff') : 'transparent';
                     if (el.subtype === 'circle') {
-                        node.style.borderRadius = '999px';
+                        node.style.borderRadius = '50%';
+                    } else {
+                        node.style.borderRadius = '4px';
                     }
                     if (rotation) {
                         node.style.transform = `rotate(${rotation}deg)`;
