@@ -874,6 +874,10 @@
             mediaPreloading: false,
         };
 
+        function getMachinePlayerStateThrottleMs() {
+            return manualState.mode === 'manual' && manualState.playing ? 1000 : 250;
+        }
+
         manualVideo.defaultMuted = true;
         manualVideo.muted = true;
 
@@ -930,8 +934,10 @@
             activeVideo.classList.remove('display-mode-hidden');
             syncManualStageLayout();
             renderManualElements();
-            void queueManualProjectMediaPreloads();
-            void preloadManualMediaQueue();
+            if (!isManualFlattenedPlayback()) {
+                void queueManualProjectMediaPreloads();
+                void preloadManualMediaQueue();
+            }
 
             if (manualState.pendingSwitch) {
                 const pending = manualState.pendingSwitch;
@@ -953,6 +959,26 @@
             const activeVideo = getManualVideo();
             if (video !== activeVideo) return;
             if (!manualState.project?.steps?.length) return;
+
+            if (isManualFlattenedPlayback()) {
+                const timelineTime = Math.max(0, Math.min(video.currentTime || 0, manualState.duration || 0));
+                manualState.currentTime = timelineTime;
+                const stepIndex = findManualStepIndexAtTime(timelineTime, manualState.project);
+                if (stepIndex >= 0) {
+                    manualState.currentStepIndex = stepIndex;
+                }
+                updateManualStepLabel();
+                void postMachinePlayerState({
+                    mode: manualState.playing ? 'playing' : 'paused',
+                    statusText: manualState.playing ? 'Playing on monitor' : 'Paused on monitor',
+                    currentTime: manualState.currentTime,
+                    currentStepIndex: manualState.currentStepIndex,
+                    stepCount: manualState.project?.steps?.length || 0,
+                    canPlay: true,
+                    isPlaying: manualState.playing,
+                });
+                return;
+            }
 
             const steps = manualState.project.steps;
             const activeStepIndex = manualState.currentStepIndex;
@@ -1011,6 +1037,26 @@
             }
         }
 
+        function onManagedVideoEnded(video) {
+            const activeVideo = getManualVideo();
+            if (video !== activeVideo) return;
+            if (manualState.mode !== 'manual') return;
+
+            manualState.playing = false;
+            manualState.currentTime = manualState.duration || video.duration || 0;
+            manualState.currentStepIndex = Math.max(0, (manualState.project?.steps?.length || 1) - 1);
+            updateManualStepLabel();
+            setManualStatus('Playback complete. Waiting for next command.', 'ready');
+            void postMachinePlayerState({
+                mode: 'paused',
+                statusText: 'Playback complete. Waiting for next command.',
+                currentTime: manualState.currentTime,
+                currentStepIndex: manualState.currentStepIndex,
+                canPlay: true,
+                isPlaying: false,
+            }, { force: true });
+        }
+
         function onManagedVideoPlay(video) {
             const activeVideo = getManualVideo();
             if (video !== activeVideo) return;
@@ -1062,6 +1108,7 @@
             video.addEventListener('timeupdate', () => onManagedVideoTimeUpdate(video));
             video.addEventListener('pause', () => onManagedVideoPause(video));
             video.addEventListener('play', () => onManagedVideoPlay(video));
+            video.addEventListener('ended', () => onManagedVideoEnded(video));
             video.addEventListener('error', () => onManagedVideoError(video));
         }
 
@@ -1152,6 +1199,16 @@
         }
 
         function getManualUniqueProjectSources(project = manualState.project) {
+            if (isManualFlattenedPlayback(project)) {
+                const flattenedUrl = getManualStepVideoUrl(project?.steps?.[0], project);
+                if (!flattenedUrl) return [];
+                return [{
+                    key: getManualStepSourceKey(project?.steps?.[0], project) || `url:${flattenedUrl}`,
+                    url: flattenedUrl,
+                    local: typeof flattenedUrl === 'string' && flattenedUrl.startsWith('blob:'),
+                    usePrimary: true,
+                }];
+            }
             const sources = [];
             const seen = new Set();
             (project?.steps || []).forEach((step, index) => {
@@ -1176,6 +1233,7 @@
         }
 
         function queueManualProjectMediaPreloads(project = manualState.project, fromStepIndex = manualState.currentStepIndex, lookahead = 2) {
+            if (isManualFlattenedPlayback(project)) return;
             const cache = ensureManualMediaCacheStore();
             const queuedKeys = new Set(manualState.mediaPreloadQueue.map((item) => item.key));
             const selected = [];
@@ -1197,6 +1255,7 @@
         }
 
         async function preloadManualMediaQueue() {
+            if (isManualFlattenedPlayback()) return;
             if (manualState.mediaPreloading) return;
             manualState.mediaPreloading = true;
             try {
@@ -1225,11 +1284,14 @@
                 setManualActiveEntry(firstEntry);
                 void loadManualMediaEntry(firstEntry).catch((error) => console.error('Primary manual media load error:', error));
             }
-            queueManualProjectMediaPreloads(project, 0, 2);
-            void preloadManualMediaQueue();
+            if (!isManualFlattenedPlayback(project)) {
+                queueManualProjectMediaPreloads(project, 0, 2);
+                void preloadManualMediaQueue();
+            }
         }
 
         async function advanceManualStepPlayback(fromStepIndex) {
+            if (isManualFlattenedPlayback()) return;
             const steps = manualState.project?.steps || [];
             const video = getManualVideo();
             if (!video || !steps.length) return;
@@ -1773,7 +1835,7 @@
         async function postMachinePlayerState(patch = {}, { force = false } = {}) {
             const sessionKey = manualState.sessionKey || MACHINE_ID;
             const now = Date.now();
-            if (!force && now - manualState.lastStateSentAt < 250) {
+            if (!force && now - manualState.lastStateSentAt < getMachinePlayerStateThrottleMs()) {
                 return;
             }
             manualState.lastStateSentAt = now;
@@ -1960,10 +2022,14 @@
             const video = getManualVideo();
             if (!video) return;
 
-            const offset = Math.max(0, timelineTime - step.startTime);
-            const sourceStart = step.sourceStart ?? step.startTime;
-            const sourceEnd = step.sourceEnd ?? step.endTime;
-            const nextTime = Math.max(0, Math.min(sourceStart + offset, sourceEnd, video.duration || sourceEnd));
+            const nextTime = isManualFlattenedPlayback()
+                ? Math.max(0, Math.min(timelineTime, video.duration || manualState.duration || timelineTime))
+                : (() => {
+                    const offset = Math.max(0, timelineTime - step.startTime);
+                    const sourceStart = getManualStepSourceStart(step);
+                    const sourceEnd = getManualStepSourceEnd(step);
+                    return Math.max(0, Math.min(sourceStart + offset, sourceEnd, video.duration || sourceEnd));
+                })();
 
             if (Number.isFinite(nextTime)) {
                 try {
@@ -1974,8 +2040,10 @@
             }
 
             updateManualStepLabel();
-            void queueManualProjectMediaPreloads();
-            void preloadManualMediaQueue();
+            if (!isManualFlattenedPlayback()) {
+                void queueManualProjectMediaPreloads();
+                void preloadManualMediaQueue();
+            }
             if (autoplay) {
                 try {
                     video.defaultMuted = true;
