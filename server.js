@@ -7367,6 +7367,14 @@ app.post('/api/financials', async (req, res) => {
       .slice(0, 5)
       .map(r => ({ ban: r.ban, hinban: r.hinban, model: r.model, factory: r.factory,
                    scrapLoss: r.scrapLoss, totalNg: r.totalNg, yieldPercent: r.yieldPercent,
+                   pricePerPc: r.pricePerPc, created: r.created, value: r.value }));
+
+    // --- Top 5 best-performing 背番号 by Final Good ¥ (value = cost - scrapLoss) ---
+    let top5Value = [...rows]
+      .sort((a, b) => (b.value || 0) - (a.value || 0))
+      .slice(0, 5)
+      .map(r => ({ ban: r.ban, hinban: r.hinban, model: r.model, factory: r.factory,
+                   value: r.value, finalGood: r.finalGood, yieldPercent: r.yieldPercent,
                    pricePerPc: r.pricePerPc, created: r.created }));
 
     // --- Trend: aggregate all 4 NG sources into daily/weekly buckets using masterMap prices ---
@@ -7510,15 +7518,31 @@ app.post('/api/financials', async (req, res) => {
       // Rebuild top5 with recovery-adjusted scrapLoss
       top5 = [...rows]
         .map(r => {
-          const adjNg       = Math.max((r.totalNg || 0) - (r.recoveredNg || 0), 0);
-          const adjScrap    = Number((adjNg * (r.pricePerPc || 0)).toFixed(2));
+          const adjNg        = Math.max((r.totalNg || 0) - (r.recoveredNg || 0), 0);
+          const adjScrap     = Number((adjNg * (r.pricePerPc || 0)).toFixed(2));
           const adjFinalGood = (r.created || 0) - adjNg;
-          const adjYield    = r.created > 0 ? Number(((adjFinalGood / r.created) * 100).toFixed(2)) : 0;
+          const adjValue     = Number(((r.cost || 0) - adjScrap).toFixed(2));
+          const adjYield     = r.created > 0 ? Number(((adjFinalGood / r.created) * 100).toFixed(2)) : 0;
           return { ban: r.ban, hinban: r.hinban, model: r.model, factory: r.factory,
                    scrapLoss: adjScrap, totalNg: adjNg,
-                   yieldPercent: adjYield, pricePerPc: r.pricePerPc, created: r.created };
+                   yieldPercent: adjYield, pricePerPc: r.pricePerPc, created: r.created, value: adjValue };
         })
         .sort((a, b) => b.scrapLoss - a.scrapLoss)
+        .slice(0, 5);
+
+      // Rebuild top5Value with recovery-adjusted value
+      top5Value = [...rows]
+        .map(r => {
+          const adjNg        = Math.max((r.totalNg || 0) - (r.recoveredNg || 0), 0);
+          const adjScrap     = Number((adjNg * (r.pricePerPc || 0)).toFixed(2));
+          const adjFinalGood = (r.created || 0) - adjNg;
+          const adjValue     = Number(((r.cost || 0) - adjScrap).toFixed(2));
+          const adjYield     = r.created > 0 ? Number(((adjFinalGood / r.created) * 100).toFixed(2)) : 0;
+          return { ban: r.ban, hinban: r.hinban, model: r.model, factory: r.factory,
+                   value: adjValue, finalGood: adjFinalGood,
+                   yieldPercent: adjYield, pricePerPc: r.pricePerPc, created: r.created };
+        })
+        .sort((a, b) => b.value - a.value)
         .slice(0, 5);
 
       // Apply recovery adjustment to ALL rows (pre-pagination)
@@ -7616,6 +7640,7 @@ app.post('/api/financials', async (req, res) => {
       adjustedSummary,
       trend,
       top5,
+      top5Value,
       scrapByProcess,
       factoryTotals: factoryTotalsPayload
     };
