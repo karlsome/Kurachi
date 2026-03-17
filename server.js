@@ -21048,9 +21048,77 @@ function vmExtractStoragePath(url) {
 
 // Permanently deletes a project doc + its revisions.
 // Also deletes the Firebase Storage file for each video asset ONLY when no
+
+function vmCollectProjectAssetReferences(project) {
+  const assetIds = new Set();
+  const urls = new Set();
+  const paths = new Set();
+
+  const addAssetId = (assetId) => {
+    if (assetId) assetIds.add(String(assetId));
+  };
+
+  const addUrl = (url) => {
+    if (!url) return;
+    urls.add(url);
+    const path = vmExtractStoragePath(url);
+    if (path) paths.add(path);
+  };
+
+  addAssetId(project?.currentAssetId);
+  addUrl(project?.videoUrl);
+  addUrl(project?.deployedVideoUrl);
+
+  (project?.assets || []).forEach((asset) => {
+    addAssetId(asset?.assetId || asset?._id);
+    addUrl(asset?.downloadUrl || asset?.url);
+    if (asset?.storagePath) paths.add(asset.storagePath);
+  });
+
+  (project?.steps || []).forEach((step) => {
+    addAssetId(step?.assetId);
+  });
+
+  return { assetIds, urls, paths };
+}
+
+async function vmGetPlaylistActiveAssetReferences(db, playlistId, { excludeProjectId = null } = {}) {
+  const query = { playlistId, deleted: { $ne: true } };
+  if (excludeProjectId) {
+    query._id = { $ne: excludeProjectId };
+  }
+
+  const projects = await db.collection(VM_PROJECTS_COLLECTION).find(query, {
+    projection: {
+      currentAssetId: 1,
+      videoUrl: 1,
+      deployedVideoUrl: 1,
+      assets: 1,
+      steps: 1,
+    }
+  }).toArray();
+
+  const combined = {
+    assetIds: new Set(),
+    urls: new Set(),
+    paths: new Set(),
+  };
+
+  projects.forEach((project) => {
+    const refs = vmCollectProjectAssetReferences(project);
+    refs.assetIds.forEach((value) => combined.assetIds.add(value));
+    refs.urls.forEach((value) => combined.urls.add(value));
+    refs.paths.forEach((value) => combined.paths.add(value));
+  });
+
+  return combined;
+}
 // other non-deleted project in the same playlist still references it.
 async function vmPurgeProject(db, project) {
   const projectId = project._id;
+  const playlistId = project.playlistId;
+  const projectRefs = vmCollectProjectAssetReferences(project);
+  const activeRefs = await vmGetPlaylistActiveAssetReferences(db, playlistId, { excludeProjectId: projectId });
 
   // Collect all storage paths referenced by this project.
   const pathsToPotentiallyDelete = new Set();
@@ -21070,20 +21138,12 @@ async function vmPurgeProject(db, project) {
   // For each URL check if any OTHER non-deleted project references it.
   const bucket = admin.storage().bucket();
   for (const url of urlsToPotentiallyDelete) {
-    const otherUser = await db.collection(VM_PROJECTS_COLLECTION).findOne({
-      _id: { $ne: projectId },
-      deleted: { $ne: true },
-      $or: [
-        { videoUrl: url },
-        { 'assets.downloadUrl': url },
-        { 'assets.url': url },
-      ],
-    });
-    if (otherUser) {
+    const storagePath = vmExtractStoragePath(url);
+    if (activeRefs.urls.has(url) || (storagePath && activeRefs.paths.has(storagePath))) {
       console.log(`[VM Purge] Skipping Firebase delete — asset in use: ${url}`);
       continue;
     }
-    const storagePath = vmExtractStoragePath(url);
+
     if (storagePath) {
       try {
         await bucket.file(storagePath).delete();
@@ -21091,6 +21151,27 @@ async function vmPurgeProject(db, project) {
       } catch (err) {
         console.warn(`[VM Purge] Firebase delete failed (${storagePath}):`, err.message);
       }
+    }
+  }
+
+  const removableAssetIds = [...projectRefs.assetIds].filter((assetId) => !activeRefs.assetIds.has(assetId));
+  const removableUrls = [...projectRefs.urls].filter((url) => !activeRefs.urls.has(url));
+  const removablePaths = [...projectRefs.paths].filter((path) => !activeRefs.paths.has(path));
+  const assetDeleteOr = [];
+  if (removableAssetIds.length) assetDeleteOr.push({ assetId: { $in: removableAssetIds } });
+  if (removableUrls.length) {
+    assetDeleteOr.push({ downloadUrl: { $in: removableUrls } });
+    assetDeleteOr.push({ url: { $in: removableUrls } });
+  }
+  if (removablePaths.length) assetDeleteOr.push({ storagePath: { $in: removablePaths } });
+
+  if (assetDeleteOr.length) {
+    const deleteResult = await db.collection(VM_ASSETS_COLLECTION).deleteMany({
+      playlistId,
+      $or: assetDeleteOr,
+    });
+    if (deleteResult.deletedCount) {
+      console.log(`[VM Purge] Removed ${deleteResult.deletedCount} stale asset record(s) from MongoDB.`);
     }
   }
 
@@ -21577,6 +21658,7 @@ app.get('/api/factory/video-manuals/projects/:id', async (req, res) => {
 app.get('/api/video-playlists/:id/assets', async (req, res) => {
   try {
     const { username, role } = vmGetRequester(req);
+    const db = client.db(VM_DB);
     const playlist = await client.db(VM_DB).collection(VM_PLAYLISTS_COLLECTION)
       .findOne({ _id: new ObjectId(req.params.id) });
     if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
@@ -21584,12 +21666,32 @@ app.get('/api/video-playlists/:id/assets', async (req, res) => {
       return res.status(403).json({ error: 'No view access to this playlist' });
     }
 
-    const assets = await client.db(VM_DB).collection(VM_ASSETS_COLLECTION)
-      .find({ playlistId: new ObjectId(req.params.id) })
+    const playlistId = new ObjectId(req.params.id);
+    const activeRefs = await vmGetPlaylistActiveAssetReferences(db, playlistId);
+
+    const assets = await db.collection(VM_ASSETS_COLLECTION)
+      .find({ playlistId })
       .sort({ uploadedAt: -1 })
       .toArray();
 
-    res.json(assets);
+    const visibleAssets = assets.filter((asset) => {
+      const assetId = String(asset.assetId || asset._id || '');
+      return activeRefs.assetIds.has(assetId)
+        || activeRefs.urls.has(asset.downloadUrl || asset.url || '')
+        || activeRefs.paths.has(asset.storagePath || '');
+    });
+
+    const staleAssetMongoIds = assets
+      .filter((asset) => !visibleAssets.includes(asset))
+      .map((asset) => asset._id)
+      .filter(Boolean);
+
+    if (staleAssetMongoIds.length) {
+      await db.collection(VM_ASSETS_COLLECTION).deleteMany({ _id: { $in: staleAssetMongoIds } });
+      console.log(`[VM Assets] Removed ${staleAssetMongoIds.length} stale asset record(s) during asset list cleanup.`);
+    }
+
+    res.json(visibleAssets);
   } catch (err) {
     console.error('❌ video-playlist assets list error:', err);
     res.status(500).json({ error: err.message });
