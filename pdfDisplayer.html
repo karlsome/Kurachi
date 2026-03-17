@@ -1356,7 +1356,12 @@
             return project.assets.find((item) => String(item.assetId || item._id) === String(assetId)) || null;
         }
 
+        function isManualFlattenedPlayback(project = manualState.project) {
+            return !!String(project?.deployedVideoUrl || '').trim();
+        }
+
         function hydrateManualProjectMedia(project = manualState.project) {
+            if (isManualFlattenedPlayback(project)) return;
             if (!project?.steps) return;
             project.steps.forEach((step) => {
                 (step.elements || []).forEach((el) => {
@@ -1378,11 +1383,17 @@
         }
 
         function getManualStepVideoUrl(step, project = manualState.project) {
+            if (isManualFlattenedPlayback(project)) {
+                return project.deployedVideoUrl;
+            }
             const asset = getManualProjectAssetById(getManualStepAssetId(step, project), project);
             return asset?.downloadUrl || asset?.url || step?.videoUrl || project?.videoUrl || null;
         }
 
         function getManualStepSourceKey(step, project = manualState.project) {
+            if (isManualFlattenedPlayback(project)) {
+                return project?._id ? `flattened:${project._id}` : `flattened:${project.deployedVideoUrl || ''}`;
+            }
             const assetId = getManualStepAssetId(step, project);
             if (assetId) return `asset:${assetId}`;
             const url = getManualStepVideoUrl(step, project);
@@ -1458,11 +1469,17 @@
         }
 
         function getManualStepSourceStart(step) {
+            if (isManualFlattenedPlayback()) {
+                return step?.startTime ?? 0;
+            }
             return step?.sourceStart ?? step?.startTime ?? 0;
         }
 
         function getManualStepSourceEnd(step) {
             if (!step) return 0;
+            if (isManualFlattenedPlayback()) {
+                return step?.endTime ?? getManualStepSourceStart(step);
+            }
             if (Number.isFinite(step.sourceEnd)) return step.sourceEnd;
             if (Number.isFinite(step.endTime) && Number.isFinite(step.startTime)) {
                 return getManualStepSourceStart(step) + Math.max(0, step.endTime - step.startTime);
@@ -1525,6 +1542,11 @@
             if (!overlay) return;
 
             if (!manualState.project || manualState.mode !== 'manual') {
+                overlay.replaceChildren();
+                return;
+            }
+
+            if (isManualFlattenedPlayback()) {
                 overlay.replaceChildren();
                 return;
             }
@@ -2031,6 +2053,10 @@
                     playlistId: data.playlistId,
                     title: data.title || snapshot.title || 'Video Manual',
                     thumbnailUrl: data.thumbnailUrl || snapshot.thumbnailUrl || null,
+                    deployedVideoUrl: data.deployedVideoUrl || null,
+                    deployedVideoStoragePath: data.deployedVideoStoragePath || null,
+                    deployedVideoMimeType: data.deployedVideoMimeType || null,
+                    deployedVideoFileName: data.deployedVideoFileName || null,
                     steps: Array.isArray(snapshot.steps) ? snapshot.steps : [],
                 };
                 manualState.duration = getManualSequenceDuration(manualState.project);
@@ -2045,7 +2071,7 @@
                 renderManualFrame();
 
                 manualTitle.textContent = data.title || snapshot.title || 'Video Manual';
-                manualMeta.textContent = `${manualState.project.steps.length || 0} steps · ${data.deployedRevisionName || `Rev ${data.deployedRevisionNumber || '?'}`} · Ready on monitor`;
+                manualMeta.textContent = `${manualState.project.steps.length || 0} steps · ${data.deployedRevisionName || `Rev ${data.deployedRevisionNumber || '?'}`} · ${isManualFlattenedPlayback() ? 'Flattened MP4 ready on monitor' : 'Ready on monitor'}`;
 
                 if (!manualState.project.steps.length && !getManualStepVideoUrl(null, manualState.project)) {
                     manualBlankState.classList.remove('display-mode-hidden');

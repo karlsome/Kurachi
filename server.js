@@ -20664,6 +20664,7 @@ console.log('🎬 Video Manual API routes loaded');
 const VM_PLAYLISTS_COLLECTION = 'videoManualPlaylists';
 const VM_PROJECTS_COLLECTION  = 'videoManualProjects';
 const VM_ASSETS_COLLECTION    = 'videoManualAssets';
+const VM_UPLOAD_FOLDERS       = new Set(['videoManuals', 'videoManualDeployed']);
 
 // Roles that can manage (create/edit/delete) playlists and assign access
 const VM_MANAGE_ROLES = new Set(['admin', '課長', '部長', '係長']);
@@ -20875,6 +20876,10 @@ app.get('/api/video-playlists/:id/projects', async (req, res) => {
           deployedRevisionName: 1,
           deployedAt: 1,
           deployedBy: 1,
+          deployedVideoUrl: 1,
+          deployedVideoStoragePath: 1,
+          deployedVideoMimeType: 1,
+          deployedVideoFileName: 1,
           currentRevisionNumber: { $ifNull: ['$currentRevisionNumber', 0] },
           stepsCount: { $size: { $ifNull: ['$steps', []] } },
         }
@@ -20929,6 +20934,10 @@ app.post('/api/video-playlists/:id/projects', async (req, res) => {
       deployedRevisionName: null,
       deployedAt: null,
       deployedBy: null,
+      deployedVideoUrl: null,
+      deployedVideoStoragePath: null,
+      deployedVideoMimeType: null,
+      deployedVideoFileName: null,
       thumbnailUrl: null,
       createdBy: username,
       createdAt: now,
@@ -21056,6 +21065,7 @@ async function vmPurgeProject(db, project) {
 
   if (project.videoUrl) addUrl(project.videoUrl);
   (project.assets || []).forEach(a => addUrl(a.downloadUrl || a.url));
+  if (project.deployedVideoUrl) addUrl(project.deployedVideoUrl);
 
   // For each URL check if any OTHER non-deleted project references it.
   const bucket = admin.storage().bucket();
@@ -21344,6 +21354,20 @@ app.post('/api/video-projects/:id/deploy', async (req, res) => {
       return res.status(404).json({ error: 'Revision not found for this project' });
     }
 
+    const deployedVideo = req.body?.deployedVideo;
+    if (!deployedVideo || typeof deployedVideo !== 'object') {
+      return res.status(400).json({ error: 'deployedVideo is required' });
+    }
+
+    const deployedVideoUrl = String(deployedVideo.url || '').trim();
+    if (!deployedVideoUrl) {
+      return res.status(400).json({ error: 'deployedVideo.url is required' });
+    }
+
+    const deployedVideoStoragePath = String(deployedVideo.storagePath || '').trim() || null;
+    const deployedVideoMimeType = String(deployedVideo.mimeType || '').trim() || 'video/mp4';
+    const deployedVideoFileName = String(deployedVideo.fileName || '').trim() || null;
+
     const deployedAt = new Date();
     await projects.updateOne(
       { _id: projectId },
@@ -21354,7 +21378,25 @@ app.post('/api/video-projects/:id/deploy', async (req, res) => {
           deployedRevisionName: revision.revisionName || null,
           deployedAt,
           deployedBy: username,
+          deployedVideoUrl,
+          deployedVideoStoragePath,
+          deployedVideoMimeType,
+          deployedVideoFileName,
           updatedAt: deployedAt,
+        }
+      }
+    );
+
+    await revisions.updateOne(
+      { _id: revisionId },
+      {
+        $set: {
+          deployedAt,
+          deployedBy: username,
+          deployedVideoUrl,
+          deployedVideoStoragePath,
+          deployedVideoMimeType,
+          deployedVideoFileName,
         }
       }
     );
@@ -21367,6 +21409,10 @@ app.post('/api/video-projects/:id/deploy', async (req, res) => {
       revisionName: revision.revisionName || null,
       deployedAt,
       deployedBy: username,
+      deployedVideoUrl,
+      deployedVideoStoragePath,
+      deployedVideoMimeType,
+      deployedVideoFileName,
     });
   } catch (err) {
     console.error('❌ video-projects deploy error:', err);
@@ -21404,6 +21450,10 @@ app.post('/api/video-projects/:id/undeploy', async (req, res) => {
           deployedRevisionName: '',
           deployedAt: '',
           deployedBy: '',
+          deployedVideoUrl: '',
+          deployedVideoStoragePath: '',
+          deployedVideoMimeType: '',
+          deployedVideoFileName: '',
         },
       }
     );
@@ -21456,6 +21506,7 @@ app.get('/api/factory/video-manuals', async (req, res) => {
           deployedRevisionId: 1,
           deployedRevisionNumber: 1,
           deployedRevisionName: 1,
+          deployedVideoUrl: 1,
           stepsCount: { $size: { $ifNull: ['$steps', []] } },
         }
       }
@@ -21493,6 +21544,11 @@ app.get('/api/factory/video-manuals/projects/:id', async (req, res) => {
       return res.status(404).json({ error: 'Deployed revision snapshot not found' });
     }
 
+    const deployedVideoUrl = revision.deployedVideoUrl || project.deployedVideoUrl || null;
+    const deployedVideoStoragePath = revision.deployedVideoStoragePath || project.deployedVideoStoragePath || null;
+    const deployedVideoMimeType = revision.deployedVideoMimeType || project.deployedVideoMimeType || null;
+    const deployedVideoFileName = revision.deployedVideoFileName || project.deployedVideoFileName || null;
+
     res.json({
       projectId: project._id,
       title: project.title,
@@ -21502,6 +21558,10 @@ app.get('/api/factory/video-manuals/projects/:id', async (req, res) => {
       deployedRevisionNumber: revision.revisionNumber || project.deployedRevisionNumber || null,
       deployedRevisionName: revision.revisionName || project.deployedRevisionName || null,
       deployedAt: project.deployedAt || null,
+      deployedVideoUrl,
+      deployedVideoStoragePath,
+      deployedVideoMimeType,
+      deployedVideoFileName,
       snapshot: revision.snapshot,
     });
   } catch (err) {
@@ -21636,6 +21696,7 @@ app.post('/api/upload-video-manual',
       const buffer    = req.body; // Buffer from express.raw()
       const assetId   = new ObjectId().toString();
       const uploadedAt = new Date();
+      const uploadFolder = String(req.headers['x-upload-folder'] || 'videoManuals').trim() || 'videoManuals';
 
       // Optional: register under a playlist's shared asset pool.
       // Client sends X-Playlist-Id header when uploading from the new playlist-scoped editor.
@@ -21643,6 +21704,10 @@ app.post('/api/upload-video-manual',
 
       if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
         return res.status(400).json({ error: 'No file data received' });
+      }
+
+      if (!VM_UPLOAD_FOLDERS.has(uploadFolder)) {
+        return res.status(400).json({ error: 'Unsupported upload folder' });
       }
 
       // If a playlistId is provided, verify edit access before uploading.
@@ -21659,7 +21724,7 @@ app.post('/api/upload-video-manual',
         }
       }
 
-      const storagePath = `videoManuals/${Date.now()}_${assetId}_${fileName}`;
+      const storagePath = `${uploadFolder}/${Date.now()}_${assetId}_${fileName}`;
       const bucket      = admin.storage().bucket();
       const fileRef     = bucket.file(storagePath);
       const downloadToken = `vm_${Date.now()}`;
@@ -21678,7 +21743,7 @@ app.post('/api/upload-video-manual',
       console.log(`✅ Video uploaded to Firebase Storage: ${storagePath}`);
 
       // Register in the playlist asset pool if a playlistId was supplied.
-      if (rawPlaylistId) {
+      if (rawPlaylistId && uploadFolder === 'videoManuals') {
         const assetDoc = {
           playlistId: new ObjectId(rawPlaylistId),
           assetId,
