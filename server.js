@@ -20665,6 +20665,12 @@ const VM_PLAYLISTS_COLLECTION = 'videoManualPlaylists';
 const VM_PROJECTS_COLLECTION  = 'videoManualProjects';
 const VM_ASSETS_COLLECTION    = 'videoManualAssets';
 const VM_UPLOAD_FOLDERS       = new Set(['videoManuals', 'videoManualDeployed']);
+const VM_DEPLOYED_RETENTION_DAYS = 60;
+const VM_DEPLOYED_RETENTION_MS = VM_DEPLOYED_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+const VM_DEPLOYED_CLEANUP_INTERVAL_MS = 12 * 60 * 60 * 1000;
+
+let vmDeployedCleanupPromise = null;
+let vmDeployedCleanupLastRunAt = 0;
 
 // Roles that can manage (create/edit/delete) playlists and assign access
 const VM_MANAGE_ROLES = new Set(['admin', '課長', '部長', '係長']);
@@ -20721,6 +20727,10 @@ function vmGetRequester(req) {
 
 // ── Playlists ────────────────────────────────────────────────────────────────
 
+
+function vmCanManageDeployedFiles(role) {
+  return role === 'admin';
+}
 // GET /api/video-playlists
 // Returns playlists the requester can view (summary fields only).
 app.get('/api/video-playlists', async (req, res) => {
@@ -21084,6 +21094,250 @@ function vmExtractStoragePath(url) {
 
 // Permanently deletes a project doc + its revisions.
 // Also deletes the deployed flattened video ONLY when no other non-deleted
+
+function vmBuildDeployedVideoMetadata(input = {}) {
+  const url = String(input.url || input.deployedVideoUrl || '').trim();
+  const inferredPath = vmExtractStoragePath(url);
+  const storagePath = String(input.storagePath || input.deployedVideoStoragePath || '').trim() || inferredPath || null;
+  if (!url && !storagePath) return null;
+
+  return {
+    url: url || null,
+    storagePath,
+    mimeType: String(input.mimeType || input.deployedVideoMimeType || '').trim() || 'video/mp4',
+    fileName: String(input.fileName || input.deployedVideoFileName || '').trim() || (storagePath ? storagePath.split('/').pop() : null),
+  };
+}
+
+async function vmStorageObjectExists(storagePath) {
+  if (!storagePath) return false;
+  const [exists] = await admin.storage().bucket().file(storagePath).exists();
+  return !!exists;
+}
+
+async function vmResolveReusableDeployedVideo(revision) {
+  const metadata = vmBuildDeployedVideoMetadata(revision || {});
+  if (!metadata?.storagePath) return null;
+  if (!await vmStorageObjectExists(metadata.storagePath)) return null;
+  return metadata;
+}
+
+function vmAddDeployedVideoReference(referenceMap, storagePath, reference) {
+  if (!storagePath) return;
+  let entry = referenceMap.get(storagePath);
+  if (!entry) {
+    entry = { liveProjects: [], revisions: [] };
+    referenceMap.set(storagePath, entry);
+  }
+
+  if (reference.type === 'project') {
+    entry.liveProjects.push(reference);
+  } else if (reference.type === 'revision') {
+    entry.revisions.push(reference);
+  }
+}
+
+async function vmBuildDeployedVideoInventory() {
+  const db = client.db(VM_DB);
+  const bucket = admin.storage().bucket();
+  const [projects, revisions, files] = await Promise.all([
+    db.collection(VM_PROJECTS_COLLECTION).find(
+      { deployedVideoStoragePath: { $exists: true, $ne: null }, deleted: { $ne: true } },
+      { projection: { title: 1, deployedRevisionId: 1, deployedRevisionNumber: 1, deployedRevisionName: 1, deployedVideoStoragePath: 1 } }
+    ).toArray(),
+    db.collection(VM_REVISIONS_COLLECTION).find(
+      { deployedVideoStoragePath: { $exists: true, $ne: null } },
+      { projection: { projectId: 1, revisionNumber: 1, revisionName: 1, deployedVideoStoragePath: 1 } }
+    ).toArray(),
+    bucket.getFiles({ prefix: 'videoManualDeployed/' }),
+  ]);
+
+  const projectTitleById = new Map(projects.map((project) => [String(project._id), project.title || 'Untitled Project']));
+  const missingProjectIds = Array.from(new Set(revisions
+    .map((revision) => String(revision.projectId || ''))
+    .filter((projectId) => projectId && !projectTitleById.has(projectId))));
+
+  if (missingProjectIds.length) {
+    const extraProjects = await db.collection(VM_PROJECTS_COLLECTION).find(
+      { _id: { $in: missingProjectIds.map((projectId) => new ObjectId(projectId)) } },
+      { projection: { title: 1 } }
+    ).toArray();
+
+    extraProjects.forEach((project) => {
+      projectTitleById.set(String(project._id), project.title || 'Untitled Project');
+    });
+  }
+
+  const referenceMap = new Map();
+
+  projects.forEach((project) => {
+    const storagePath = String(project.deployedVideoStoragePath || '').trim();
+    if (!storagePath || !project.deployedRevisionId) return;
+    vmAddDeployedVideoReference(referenceMap, storagePath, {
+      type: 'project',
+      projectId: String(project._id),
+      projectTitle: project.title || 'Untitled Project',
+      deployedRevisionId: String(project.deployedRevisionId || ''),
+      deployedRevisionNumber: project.deployedRevisionNumber || null,
+      deployedRevisionName: project.deployedRevisionName || null,
+    });
+  });
+
+  revisions.forEach((revision) => {
+    const storagePath = String(revision.deployedVideoStoragePath || '').trim();
+    if (!storagePath) return;
+    vmAddDeployedVideoReference(referenceMap, storagePath, {
+      type: 'revision',
+      revisionId: String(revision._id),
+      projectId: String(revision.projectId || ''),
+      projectTitle: projectTitleById.get(String(revision.projectId || '')) || 'Untitled Project',
+      revisionNumber: revision.revisionNumber || null,
+      revisionName: revision.revisionName || null,
+    });
+  });
+
+  const storageFiles = Array.isArray(files?.[0]) ? files[0] : [];
+  const inventory = await Promise.all(storageFiles
+    .filter((file) => file?.name && !file.name.endsWith('/'))
+    .map(async (file) => {
+      let metadata = null;
+      try {
+        [metadata] = await file.getMetadata();
+      } catch (_) {}
+
+      const refs = referenceMap.get(file.name) || { liveProjects: [], revisions: [] };
+      const createdAt = metadata?.timeCreated || metadata?.updated || null;
+      const createdAtMs = createdAt ? new Date(createdAt).getTime() : 0;
+      const ageMs = createdAtMs ? Math.max(0, Date.now() - createdAtMs) : 0;
+      const isLive = refs.liveProjects.length > 0;
+
+      return {
+        storagePath: file.name,
+        fileName: file.name.split('/').pop() || file.name,
+        size: Number(metadata?.size || 0),
+        mimeType: metadata?.contentType || 'video/mp4',
+        createdAt,
+        updatedAt: metadata?.updated || null,
+        ageDays: createdAtMs ? Math.floor(ageMs / (24 * 60 * 60 * 1000)) : null,
+        isLive,
+        reusableRevisionCount: refs.revisions.length,
+        liveProjects: refs.liveProjects,
+        revisions: refs.revisions,
+        eligibleForAutoDelete: !isLive && !!createdAtMs && ageMs >= VM_DEPLOYED_RETENTION_MS,
+        autoDeleteAt: createdAtMs ? new Date(createdAtMs + VM_DEPLOYED_RETENTION_MS).toISOString() : null,
+      };
+    }));
+
+  return inventory.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+}
+
+async function vmDeleteDeployedVideoStoragePath(storagePath, { deletedBy = 'system', allowLive = false } = {}) {
+  const normalizedPath = String(storagePath || '').trim();
+  if (!normalizedPath) {
+    const err = new Error('storagePath is required');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const db = client.db(VM_DB);
+  const liveProjects = await db.collection(VM_PROJECTS_COLLECTION).find(
+    {
+      deployedVideoStoragePath: normalizedPath,
+      deleted: { $ne: true },
+      deployedRevisionId: { $exists: true, $ne: null },
+    },
+    { projection: { _id: 1, title: 1 } }
+  ).toArray();
+
+  if (liveProjects.length && !allowLive) {
+    const err = new Error('Cannot delete a currently deployed factory video');
+    err.statusCode = 409;
+    throw err;
+  }
+
+  try {
+    await admin.storage().bucket().file(normalizedPath).delete();
+  } catch (err) {
+    const missingFile = err?.code === 404 || /No such object/i.test(String(err?.message || ''));
+    if (!missingFile) throw err;
+  }
+
+  await Promise.all([
+    db.collection(VM_REVISIONS_COLLECTION).updateMany(
+      { deployedVideoStoragePath: normalizedPath },
+      {
+        $unset: {
+          deployedVideoUrl: '',
+          deployedVideoStoragePath: '',
+          deployedVideoMimeType: '',
+          deployedVideoFileName: '',
+          deployedAt: '',
+          deployedBy: '',
+        },
+      }
+    ),
+    db.collection(VM_PROJECTS_COLLECTION).updateMany(
+      { deployedVideoStoragePath: normalizedPath },
+      {
+        $set: { updatedAt: new Date() },
+        $unset: {
+          deployedRevisionId: '',
+          deployedRevisionNumber: '',
+          deployedRevisionName: '',
+          deployedAt: '',
+          deployedBy: '',
+          deployedVideoUrl: '',
+          deployedVideoStoragePath: '',
+          deployedVideoMimeType: '',
+          deployedVideoFileName: '',
+        },
+      }
+    ),
+  ]);
+
+  console.log(`[VM Deployments] Deleted deployed video (${deletedBy}): ${normalizedPath}`);
+  return {
+    deleted: true,
+    storagePath: normalizedPath,
+    clearedLiveProjects: liveProjects.length,
+  };
+}
+
+async function vmCleanupExpiredDeployedVideos({ force = false } = {}) {
+  const now = Date.now();
+  if (vmDeployedCleanupPromise) return vmDeployedCleanupPromise;
+  if (!force && now - vmDeployedCleanupLastRunAt < VM_DEPLOYED_CLEANUP_INTERVAL_MS) {
+    return { skipped: true, reason: 'recently-ran' };
+  }
+
+  vmDeployedCleanupPromise = (async () => {
+    const inventory = await vmBuildDeployedVideoInventory();
+    const expiredFiles = inventory.filter((file) => file.eligibleForAutoDelete);
+    let deletedCount = 0;
+
+    for (const file of expiredFiles) {
+      try {
+        await vmDeleteDeployedVideoStoragePath(file.storagePath, { deletedBy: 'retention', allowLive: false });
+        deletedCount += 1;
+      } catch (err) {
+        console.warn(`[VM Deployments] Retention delete failed for ${file.storagePath}:`, err.message);
+      }
+    }
+
+    return {
+      scanned: inventory.length,
+      expired: expiredFiles.length,
+      deleted: deletedCount,
+    };
+  })();
+
+  try {
+    return await vmDeployedCleanupPromise;
+  } finally {
+    vmDeployedCleanupLastRunAt = Date.now();
+    vmDeployedCleanupPromise = null;
+  }
+}
 // project in the same playlist still references it. Shared source assets stay
 // in the playlist library until explicitly deleted.
 
@@ -21528,19 +21782,35 @@ app.post('/api/video-projects/:id/deploy', async (req, res) => {
       return res.status(404).json({ error: 'Revision not found for this project' });
     }
 
-    const deployedVideo = req.body?.deployedVideo;
-    if (!deployedVideo || typeof deployedVideo !== 'object') {
+    const requestedReuse = req.body?.reuseExistingDeployment === true;
+    let deployedVideoMetadata = null;
+
+    if (req.body?.deployedVideo && typeof req.body.deployedVideo === 'object') {
+      deployedVideoMetadata = vmBuildDeployedVideoMetadata(req.body.deployedVideo);
+    }
+
+    if (!deployedVideoMetadata && requestedReuse) {
+      deployedVideoMetadata = await vmResolveReusableDeployedVideo(revision);
+      if (!deployedVideoMetadata) {
+        return res.status(409).json({
+          error: 'Reusable deployed video not available',
+          code: 'DEPLOYED_VIDEO_REUSE_MISSING',
+        });
+      }
+    }
+
+    if (!deployedVideoMetadata) {
       return res.status(400).json({ error: 'deployedVideo is required' });
     }
 
-    const deployedVideoUrl = String(deployedVideo.url || '').trim();
+    const deployedVideoUrl = String(deployedVideoMetadata.url || '').trim();
     if (!deployedVideoUrl) {
       return res.status(400).json({ error: 'deployedVideo.url is required' });
     }
 
-    const deployedVideoStoragePath = String(deployedVideo.storagePath || '').trim() || null;
-    const deployedVideoMimeType = String(deployedVideo.mimeType || '').trim() || 'video/mp4';
-    const deployedVideoFileName = String(deployedVideo.fileName || '').trim() || null;
+    const deployedVideoStoragePath = String(deployedVideoMetadata.storagePath || '').trim() || null;
+    const deployedVideoMimeType = String(deployedVideoMetadata.mimeType || '').trim() || 'video/mp4';
+    const deployedVideoFileName = String(deployedVideoMetadata.fileName || '').trim() || null;
 
     const deployedAt = new Date();
     await projects.updateOne(
@@ -21577,6 +21847,7 @@ app.post('/api/video-projects/:id/deploy', async (req, res) => {
 
     res.json({
       deployed: true,
+      reusedExistingVideo: requestedReuse && !req.body?.deployedVideo,
       projectId,
       revisionId: revision._id,
       revisionNumber: revision.revisionNumber || null,
@@ -21632,10 +21903,67 @@ app.post('/api/video-projects/:id/undeploy', async (req, res) => {
       }
     );
 
+    void vmCleanupExpiredDeployedVideos().catch((err) => {
+      console.warn('[VM Deployments] Post-undeploy cleanup check failed:', err.message);
+    });
+
     res.json({ undeployed: true, projectId, undeployedBy: username });
   } catch (err) {
     console.error('❌ video-projects undeploy error:', err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/video-deployed-files
+// Admin-only inventory of non-live flattened deployment files kept for possible redeploy reuse.
+app.get('/api/video-deployed-files', async (req, res) => {
+  try {
+    const { role } = vmGetRequester(req);
+    if (!vmCanManageDeployedFiles(role)) {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+
+    await vmCleanupExpiredDeployedVideos();
+    const inventory = await vmBuildDeployedVideoInventory();
+    const inactiveFiles = inventory.filter((file) => !file.isLive);
+
+    res.json({
+      retentionDays: VM_DEPLOYED_RETENTION_DAYS,
+      files: inactiveFiles,
+    });
+  } catch (err) {
+    console.error('❌ video deployed files list error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/video-deployed-files
+// Admin-only manual deletion of a non-live flattened deployment file.
+app.delete('/api/video-deployed-files', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    if (!vmCanManageDeployedFiles(role)) {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+
+    const storagePath = String(req.body?.storagePath || '').trim();
+    if (!storagePath) {
+      return res.status(400).json({ error: 'storagePath is required' });
+    }
+
+    const result = await vmDeleteDeployedVideoStoragePath(storagePath, {
+      deletedBy: username || 'admin',
+      allowLive: false,
+    });
+
+    res.json({
+      ...result,
+      deletedBy: username || 'admin',
+    });
+  } catch (err) {
+    const status = err?.statusCode || 500;
+    console.error('❌ video deployed file delete error:', err);
+    res.status(status).json({ error: err.message });
   }
 });
 
@@ -21991,6 +22319,18 @@ app.post('/api/upload-video-manual',
   }
 );
 // ==================== END VIDEO MANUAL UPLOAD ====================
+
+setInterval(() => {
+  void vmCleanupExpiredDeployedVideos().catch((err) => {
+    console.warn('[VM Deployments] Scheduled retention cleanup failed:', err.message);
+  });
+}, VM_DEPLOYED_CLEANUP_INTERVAL_MS);
+
+setTimeout(() => {
+  void vmCleanupExpiredDeployedVideos({ force: true }).catch((err) => {
+    console.warn('[VM Deployments] Initial retention cleanup failed:', err.message);
+  });
+}, 15000);
 
 
 app.listen(port, () => {
