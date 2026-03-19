@@ -1,6 +1,6 @@
 // This is the COMBINED version of `server.js` with all `masterUserServer.js` routes ported into it.
 // Nothing from `masterUserServer.js` is lost — everything is now under the same server, same Express instance.
-// The port used will still be 3000 (same as original `server.js`) unless you change it below. kkkkkkkkk
+// The port used will still be 3000 (same as original `server.js`) unless you change it below.
 const jwt = require("jsonwebtoken");
 if (process.env.NODE_ENV !== "production") {
   require("dotenv").config();
@@ -538,11 +538,9 @@ app.post("/api/broadcast-scan", async (req, res) => {
   const isClearAction = additionalData?.action === "clear";
 
   if (!machineId || (!sebanggo && !isClearAction)) {
-    return res
-      .status(400)
-      .json({
-        error: "machineId and sebanggo are required (unless action is 'clear')",
-      });
+    return res.status(400).json({
+      error: "machineId and sebanggo are required (unless action is 'clear')",
+    });
   }
 
   // Parse machine IDs: handle both "OZNC09" and "OZNC04,OZNC06"
@@ -769,12 +767,10 @@ app.get("/api/creatomate/renders/:id", async (req, res) => {
     res.json(data);
   } catch (error) {
     console.error("❌ Creatomate status check error:", error);
-    res
-      .status(500)
-      .json({
-        error: "Creatomate status check failed",
-        details: error.message,
-      });
+    res.status(500).json({
+      error: "Creatomate status check failed",
+      details: error.message,
+    });
   }
 });
 
@@ -1669,12 +1665,10 @@ app.delete("/api/product-pdf-permanent/:documentId", async (req, res) => {
     });
   } catch (error) {
     console.error("❌ Error permanently deleting PDF:", error);
-    res
-      .status(500)
-      .json({
-        error: "Error permanently deleting PDF",
-        details: error.message,
-      });
+    res.status(500).json({
+      error: "Error permanently deleting PDF",
+      details: error.message,
+    });
   }
 });
 
@@ -2099,12 +2093,10 @@ app.get("/getActualProductionByEquipment", async (req, res) => {
   } catch (error) {
     console.error("❌ Error retrieving actual production:", error);
     console.error("Error details:", error.message);
-    res
-      .status(500)
-      .json({
-        error: "Error retrieving production data",
-        details: error.message,
-      });
+    res.status(500).json({
+      error: "Error retrieving production data",
+      details: error.message,
+    });
   }
 });
 
@@ -2680,13 +2672,11 @@ app.post("/logPrintAndUpdateMaterialRequest", async (req, res) => {
     });
   } catch (error) {
     console.error("❌ Error in /logPrintAndUpdateMaterialRequest:", error);
-    res
-      .status(500)
-      .json({
-        status: "error",
-        message: "Error processing print log and update.",
-        details: error.message,
-      });
+    res.status(500).json({
+      status: "error",
+      message: "Error processing print log and update.",
+      details: error.message,
+    });
   }
   // finally { /* Handle client connection closing if necessary */ }
 });
@@ -5237,13 +5227,11 @@ app.post("/queries", async (req, res) => {
 
       if (updateResult.matchedCount === 0) {
         // This is the specific condition for "not found"
-        return res
-          .status(404)
-          .json({
-            message: "更新対象のデータが見つかりませんでした。",
-            modifiedCount: 0,
-            matchedCount: 0,
-          });
+        return res.status(404).json({
+          message: "更新対象のデータが見つかりませんでした。",
+          modifiedCount: 0,
+          matchedCount: 0,
+        });
       }
       res.json({
         message: "Data updated successfully",
@@ -5257,12 +5245,10 @@ app.post("/queries", async (req, res) => {
       // 🔴 ARCHIVE (or delete) logic
       // query._id is already an ObjectId if it was provided, due to the centralized conversion
       if (!username) {
-        return res
-          .status(400)
-          .json({
-            error:
-              "Username is required when attempting to delete (archive) data.",
-          });
+        return res.status(400).json({
+          error:
+            "Username is required when attempting to delete (archive) data.",
+        });
       }
       console.log(
         `🔴 User "${username}" requested to archive/delete matching documents with query:`,
@@ -8705,13 +8691,11 @@ app.post("/api/financials/export", async (req, res) => {
   }
 
   if (!cached) {
-    return res
-      .status(500)
-      .json({
-        success: false,
-        error:
-          "Could not build export data. Please load the Financials page first.",
-      });
+    return res.status(500).json({
+      success: false,
+      error:
+        "Could not build export data. Please load the Financials page first.",
+    });
   }
 
   // Sort all rows (same logic as paginated route)
@@ -11454,11 +11438,9 @@ app.post("/resetUserPassword", async (req, res) => {
       return res.status(404).json({ error: "User not found" });
     }
     if (result.modifiedCount === 0) {
-      return res
-        .status(200)
-        .json({
-          message: "Password is the same as the old one, no update needed.",
-        });
+      return res.status(200).json({
+        message: "Password is the same as the old one, no update needed.",
+      });
     }
 
     res.json({ message: "Password reset successfully" });
@@ -12756,12 +12738,10 @@ app.post("/api/masterdb/paginate", async (req, res) => {
   } catch (error) {
     _notifyInflight(error, true);
     console.error("❌ Error in /api/masterdb/paginate:", error);
-    res
-      .status(500)
-      .json({
-        error: "Failed to fetch paginated data",
-        details: error.message,
-      });
+    res.status(500).json({
+      error: "Failed to fetch paginated data",
+      details: error.message,
+    });
   }
 });
 
@@ -13808,12 +13788,10 @@ app.post("/api/noda-requests", async (req, res) => {
           });
         } catch (error) {
           console.error("Error in getNodaRequests:", error);
-          res
-            .status(500)
-            .json({
-              error: "Failed to fetch requests",
-              details: error.message,
-            });
+          res.status(500).json({
+            error: "Failed to fetch requests",
+            details: error.message,
+          });
         }
         break;
 
@@ -14192,12 +14170,10 @@ app.post("/api/noda-requests", async (req, res) => {
           });
         } catch (error) {
           console.error("Error in createRequest:", error);
-          res
-            .status(500)
-            .json({
-              error: "Failed to create request",
-              details: error.message,
-            });
+          res.status(500).json({
+            error: "Failed to create request",
+            details: error.message,
+          });
         }
         break;
 
@@ -14244,12 +14220,10 @@ app.post("/api/noda-requests", async (req, res) => {
           }
         } catch (error) {
           console.error("Error in checkDuplicateRequest:", error);
-          res
-            .status(500)
-            .json({
-              error: "Failed to check duplicate",
-              details: error.message,
-            });
+          res.status(500).json({
+            error: "Failed to check duplicate",
+            details: error.message,
+          });
         }
         break;
 
@@ -14395,12 +14369,10 @@ app.post("/api/noda-requests", async (req, res) => {
               }
             } catch (error) {
               console.error("❌ Error handling overwrite mode:", error);
-              return res
-                .status(500)
-                .json({
-                  error: "Failed to overwrite existing request",
-                  details: error.message,
-                });
+              return res.status(500).json({
+                error: "Failed to overwrite existing request",
+                details: error.message,
+              });
             }
           }
 
@@ -14726,12 +14698,10 @@ app.post("/api/noda-requests", async (req, res) => {
           });
         } catch (error) {
           console.error("Error in bulkCreateRequests:", error);
-          res
-            .status(500)
-            .json({
-              error: "Failed to create bulk request",
-              details: error.message,
-            });
+          res.status(500).json({
+            error: "Failed to create bulk request",
+            details: error.message,
+          });
         }
         break;
 
@@ -14980,12 +14950,10 @@ app.post("/api/noda-requests", async (req, res) => {
           });
         } catch (error) {
           console.error("Error in addItemsToRequest:", error);
-          res
-            .status(500)
-            .json({
-              error: "Failed to add items to request",
-              details: error.message,
-            });
+          res.status(500).json({
+            error: "Failed to add items to request",
+            details: error.message,
+          });
         }
         break;
 
@@ -15066,12 +15034,10 @@ app.post("/api/noda-requests", async (req, res) => {
           res.json({ success: true });
         } catch (error) {
           console.error("Error in updateRequest:", error);
-          res
-            .status(500)
-            .json({
-              error: "Failed to update request",
-              details: error.message,
-            });
+          res.status(500).json({
+            error: "Failed to update request",
+            details: error.message,
+          });
         }
         break;
 
@@ -15211,23 +15177,19 @@ app.post("/api/noda-requests", async (req, res) => {
           });
         } catch (error) {
           console.error("Error in changeRequestStatus:", error);
-          res
-            .status(500)
-            .json({
-              error: "Failed to change request status",
-              details: error.message,
-            });
+          res.status(500).json({
+            error: "Failed to change request status",
+            details: error.message,
+          });
         }
         break;
 
       case "updateLineItemStatus":
         try {
           if (!requestId || !data || !data.lineNumber || !data.status) {
-            return res
-              .status(400)
-              .json({
-                error: "Request ID, line number, and status are required",
-              });
+            return res.status(400).json({
+              error: "Request ID, line number, and status are required",
+            });
           }
 
           // Find the bulk request
@@ -15460,12 +15422,10 @@ app.post("/api/noda-requests", async (req, res) => {
           });
         } catch (error) {
           console.error("Error in updateLineItemStatus:", error);
-          res
-            .status(500)
-            .json({
-              error: "Failed to update line item status",
-              details: error.message,
-            });
+          res.status(500).json({
+            error: "Failed to update line item status",
+            details: error.message,
+          });
         }
         break;
 
@@ -15646,12 +15606,10 @@ app.post("/api/noda-requests", async (req, res) => {
           });
         } catch (error) {
           console.error("Error in updateLineItemQuantity:", error);
-          res
-            .status(500)
-            .json({
-              error: "Failed to update line item quantity",
-              details: error.message,
-            });
+          res.status(500).json({
+            error: "Failed to update line item quantity",
+            details: error.message,
+          });
         }
         break;
 
@@ -15798,12 +15756,10 @@ app.post("/api/noda-requests", async (req, res) => {
           });
         } catch (error) {
           console.error("Error in deleteLineItem:", error);
-          res
-            .status(500)
-            .json({
-              error: "Failed to delete line item",
-              details: error.message,
-            });
+          res.status(500).json({
+            error: "Failed to delete line item",
+            details: error.message,
+          });
         }
         break;
 
@@ -16068,12 +16024,10 @@ app.post("/api/noda-requests", async (req, res) => {
           });
         } catch (error) {
           console.error("Error in deleteRequest:", error);
-          res
-            .status(500)
-            .json({
-              error: "Failed to delete request",
-              details: error.message,
-            });
+          res.status(500).json({
+            error: "Failed to delete request",
+            details: error.message,
+          });
         }
         break;
 
@@ -16301,12 +16255,10 @@ app.post("/api/noda-requests", async (req, res) => {
           });
         } catch (error) {
           console.error("Error in autoCheckInventory:", error);
-          res
-            .status(500)
-            .json({
-              error: "Failed to auto-check inventory",
-              details: error.message,
-            });
+          res.status(500).json({
+            error: "Failed to auto-check inventory",
+            details: error.message,
+          });
         }
         break;
 
@@ -16341,12 +16293,10 @@ app.post("/api/noda-requests", async (req, res) => {
           });
         } catch (error) {
           console.error("Error in getFilterOptions:", error);
-          res
-            .status(500)
-            .json({
-              error: "Failed to fetch filter options",
-              details: error.message,
-            });
+          res.status(500).json({
+            error: "Failed to fetch filter options",
+            details: error.message,
+          });
         }
         break;
 
@@ -16428,12 +16378,10 @@ app.post("/api/noda-requests", async (req, res) => {
           });
         } catch (error) {
           console.error("Error in checkInventory:", error);
-          res
-            .status(500)
-            .json({
-              error: "Failed to check inventory",
-              details: error.message,
-            });
+          res.status(500).json({
+            error: "Failed to check inventory",
+            details: error.message,
+          });
         }
         break;
 
@@ -16480,12 +16428,10 @@ app.post("/api/noda-requests", async (req, res) => {
           });
         } catch (error) {
           console.error("Error in lookupMasterData:", error);
-          res
-            .status(500)
-            .json({
-              error: "Failed to lookup master data",
-              details: error.message,
-            });
+          res.status(500).json({
+            error: "Failed to lookup master data",
+            details: error.message,
+          });
         }
         break;
 
@@ -16539,12 +16485,10 @@ app.post("/api/noda-requests", async (req, res) => {
           });
         } catch (error) {
           console.error("Error in exportRequests:", error);
-          res
-            .status(500)
-            .json({
-              error: "Failed to export requests",
-              details: error.message,
-            });
+          res.status(500).json({
+            error: "Failed to export requests",
+            details: error.message,
+          });
         }
         break;
 
@@ -16770,12 +16714,10 @@ app.post("/api/inventory-management", async (req, res) => {
           });
         } catch (error) {
           console.error("Error in getInventoryData:", error);
-          res
-            .status(500)
-            .json({
-              error: "Failed to fetch inventory data",
-              details: error.message,
-            });
+          res.status(500).json({
+            error: "Failed to fetch inventory data",
+            details: error.message,
+          });
         }
         break;
 
@@ -16805,12 +16747,10 @@ app.post("/api/inventory-management", async (req, res) => {
           });
         } catch (error) {
           console.error("Error in getItemTransactions:", error);
-          res
-            .status(500)
-            .json({
-              error: "Failed to fetch item transactions",
-              details: error.message,
-            });
+          res.status(500).json({
+            error: "Failed to fetch item transactions",
+            details: error.message,
+          });
         }
         break;
 
@@ -16856,12 +16796,10 @@ app.post("/api/inventory-management", async (req, res) => {
           });
         } catch (error) {
           console.error("Error in getFilterOptions:", error);
-          res
-            .status(500)
-            .json({
-              error: "Failed to fetch filter options",
-              details: error.message,
-            });
+          res.status(500).json({
+            error: "Failed to fetch filter options",
+            details: error.message,
+          });
         }
         break;
 
@@ -16953,12 +16891,10 @@ app.post("/api/inventory-management", async (req, res) => {
           });
         } catch (error) {
           console.error("Error in resetInventory:", error);
-          res
-            .status(500)
-            .json({
-              error: "Failed to reset inventory",
-              details: error.message,
-            });
+          res.status(500).json({
+            error: "Failed to reset inventory",
+            details: error.message,
+          });
         }
         break;
 
@@ -17083,12 +17019,10 @@ app.post("/api/inventory-management", async (req, res) => {
           });
         } catch (error) {
           console.error("Error in getBatchResetItems:", error);
-          res
-            .status(500)
-            .json({
-              error: "Failed to fetch items for batch reset",
-              details: error.message,
-            });
+          res.status(500).json({
+            error: "Failed to fetch items for batch reset",
+            details: error.message,
+          });
         }
         break;
 
@@ -17173,12 +17107,10 @@ app.post("/api/inventory-management", async (req, res) => {
           });
         } catch (error) {
           console.error("Error in batchResetInventory:", error);
-          res
-            .status(500)
-            .json({
-              error: "Failed to execute batch reset",
-              details: error.message,
-            });
+          res.status(500).json({
+            error: "Failed to execute batch reset",
+            details: error.message,
+          });
         }
         break;
 
@@ -17239,12 +17171,10 @@ app.post("/api/inventory-management", async (req, res) => {
           });
         } catch (error) {
           console.error("Error in exportInventoryData:", error);
-          res
-            .status(500)
-            .json({
-              error: "Failed to export inventory data",
-              details: error.message,
-            });
+          res.status(500).json({
+            error: "Failed to export inventory data",
+            details: error.message,
+          });
         }
         break;
 
@@ -17818,12 +17748,10 @@ app.get("/api/workorders/assignees", async (req, res) => {
     });
   } catch (error) {
     console.error("Error getting assignee options:", error);
-    res
-      .status(500)
-      .json({
-        error: "Error getting assignee options",
-        details: error.message,
-      });
+    res.status(500).json({
+      error: "Error getting assignee options",
+      details: error.message,
+    });
   }
 });
 
@@ -19448,12 +19376,10 @@ app.get("/api/factory-overview/env", async (req, res) => {
     if (_envCacheKey) _factoryEnvInflight.delete(_envCacheKey);
     if (_envInflightReject) _envInflightReject(error);
     console.error("❌ Error fetching factory env data:", error);
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to fetch factory env data: " + error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch factory env data: " + error.message,
+    });
   }
 });
 
@@ -19798,11 +19724,9 @@ app.post("/customerCreateUser", async (req, res) => {
         username: normalizedUsername,
       });
       if (existsElsewhere) {
-        return res
-          .status(400)
-          .json({
-            error: "Username already exists in another customer company",
-          });
+        return res.status(400).json({
+          error: "Username already exists in another customer company",
+        });
       }
     }
 
@@ -20061,11 +19985,9 @@ app.post("/customerResetUserPassword", async (req, res) => {
       return res.status(404).json({ error: "User not found" });
     }
     if (result.modifiedCount === 0) {
-      return res
-        .status(200)
-        .json({
-          message: "Password is the same as the old one, no update needed.",
-        });
+      return res.status(200).json({
+        message: "Password is the same as the old one, no update needed.",
+      });
     }
 
     res.json({ message: "Password reset successfully" });
@@ -20106,12 +20028,10 @@ app.post("/aggregateCustomerDashboardWidgetData", async (req, res) => {
     !queryConfig.sourceField ||
     !queryConfig.summaryType
   ) {
-    return res
-      .status(400)
-      .json({
-        error:
-          "Missing required fields in request (dbName or queryConfig details).",
-      });
+    return res.status(400).json({
+      error:
+        "Missing required fields in request (dbName or queryConfig details).",
+    });
   }
 
   try {
@@ -20206,11 +20126,9 @@ app.post("/aggregateCustomerDashboardWidgetData", async (req, res) => {
         break;
 
       default:
-        return res
-          .status(400)
-          .json({
-            error: `Unsupported summaryType: ${queryConfig.summaryType}`,
-          });
+        return res.status(400).json({
+          error: `Unsupported summaryType: ${queryConfig.summaryType}`,
+        });
     }
 
     console.log(
@@ -20223,12 +20141,10 @@ app.post("/aggregateCustomerDashboardWidgetData", async (req, res) => {
       `❌ Error in /aggregateDashboardWidgetData for ${queryConfig.sourceField}:`,
       error,
     );
-    res
-      .status(500)
-      .json({
-        error: "Error aggregating dashboard widget data",
-        details: error.message,
-      });
+    res.status(500).json({
+      error: "Error aggregating dashboard widget data",
+      details: error.message,
+    });
   }
 });
 
@@ -24781,12 +24697,10 @@ app.delete("/api/video-projects/:id/permanent", async (req, res) => {
     const { username, role } = vmGetRequester(req);
     const VM_PERM_DELETE_ROLES = new Set(["admin", "課長", "係長", "部長"]);
     if (!VM_PERM_DELETE_ROLES.has(role)) {
-      return res
-        .status(403)
-        .json({
-          error:
-            "Only admin, 課長, 係長, or 部長 can permanently delete projects.",
-        });
+      return res.status(403).json({
+        error:
+          "Only admin, 課長, 係長, or 部長 can permanently delete projects.",
+      });
     }
     const db = client.db(VM_DB);
     const project = await db
