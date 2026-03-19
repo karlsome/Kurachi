@@ -7675,6 +7675,140 @@ app.post('/api/financials', async (req, res) => {
 });
 
 /**
+ * Financials CSV Export — all rows, no pagination
+ * POST /api/financials/export
+ * Accepts the same filter params as POST /api/financials.
+ * Reuses the in-memory cache when available; warms it via an internal
+ * call to /api/financials if the cache is cold.
+ */
+app.post('/api/financials/export', async (req, res) => {
+  const {
+    fromDate,
+    toDate,
+    model = '',
+    bans = [],
+    factory = '',
+    sortField = 'hinban',
+    sortDir = 'asc',
+  } = req.body || {};
+
+  if (!fromDate || !toDate) {
+    return res.status(400).json({ success: false, error: 'fromDate and toDate are required' });
+  }
+
+  // Build the same cache key used by /api/financials
+  const trimmedModel   = String(model   || '').trim();
+  const trimmedFactory = String(factory || '').trim();
+  const bansArray      = Array.isArray(bans) ? bans.filter(b => b && String(b).trim()) : [];
+  const cacheKey = JSON.stringify({
+    f:  fromDate,
+    t:  toDate,
+    mo: trimmedModel,
+    hi: '',
+    his: '',
+    ba:  bansArray.slice().sort().join(','),
+    fa:  trimmedFactory,
+    pr:  'all'
+  });
+
+  // Check cache; warm via internal call if cold
+  let cached = _financialsCache.get(cacheKey);
+  if (!cached || (Date.now() - cached.ts) >= _FINANCIALS_CACHE_TTL) {
+    try {
+      // Fire a minimal /api/financials call (limit=1) to populate the cache
+      const baseUrl = `http://localhost:${port}`;
+      await fetch(`${baseUrl}/api/financials`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fromDate, toDate, model, bans, factory, page: 1, limit: 1, sortField, sortDir }),
+      });
+      cached = _financialsCache.get(cacheKey);
+    } catch (warmErr) {
+      console.error('❌ financials/export cache warm failed:', warmErr.message);
+    }
+  }
+
+  if (!cached) {
+    return res.status(500).json({ success: false, error: 'Could not build export data. Please load the Financials page first.' });
+  }
+
+  // Sort all rows (same logic as paginated route)
+  const sortFn  = _FINANCIALS_SORTERS[sortField] || _FINANCIALS_SORTERS.hinban;
+  const direction = sortDir === 'desc' ? -1 : 1;
+  const allRows = cached.allRows.slice().sort((a, b) => {
+    const r = sortFn(a, b);
+    return (r !== 0 ? direction * r : 0) || String(a.hinban || '').localeCompare(String(b.hinban || ''));
+  });
+
+  // Apply the same recovery math the frontend applies per row
+  const csvRows = allRows.map(row => {
+    const recoveredNg     = row.recoveredNg   || 0;
+    const pricePerPc      = row.pricePerPc    || 0;
+    const created         = row.created       || 0;
+    const ngAfterRecovery = Math.max((row.totalNg || 0) - recoveredNg, 0);
+    const finalGood       = created - ngAfterRecovery;
+    const scrapLoss       = ngAfterRecovery * pricePerPc;
+    const value           = (row.cost || 0) - scrapLoss;
+    const yieldPct        = created > 0 ? Math.round((finalGood / created) * 10000) / 100 : 0;
+    return {
+      hinban:          row.hinban   || '',
+      ban:             row.ban      || '',
+      model:           row.model    || '',
+      factory:         row.factory  || '',
+      created,
+      pressNg:         row.pressNg  || 0,
+      slitNg:          row.slitNg   || 0,
+      srsNg:           row.srsNg    || 0,
+      kensaNg:         row.kensaNg  || 0,
+      totalNg:         row.totalNg  || 0,
+      recoveredNg,
+      ngAfterRecovery,
+      finalGood,
+      yieldPercent:    yieldPct,
+      pricePerPc:      Number(pricePerPc.toFixed(2)),
+      cost:            Number((row.cost || 0).toFixed(2)),
+      scrapLoss:       Number(scrapLoss.toFixed(2)),
+      value:           Number(value.toFixed(2)),
+    };
+  });
+
+  // Build CSV with UTF-8 BOM (for Excel Japanese character support)
+  const headers = [
+    '品番', '背番号', 'Model', '工場',
+    'Created (pcs)', 'Press NG', 'Slit NG', 'SRS NG', 'Kensa NG', 'Total NG',
+    'Recovered NG', 'NG After Recovery', 'Final Good (pcs)', 'Yield %',
+    'Price Per Piece (¥)', 'Cost (¥)', 'Scrap Loss (¥)', 'Value (¥)',
+  ];
+
+  const escape = (v) => {
+    const s = String(v ?? '');
+    // Wrap in quotes if it contains comma, double-quote, or newline
+    if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+      return '"' + s.replace(/"/g, '""') + '"';
+    }
+    return s;
+  };
+
+  const lines = [
+    headers.map(escape).join(','),
+    ...csvRows.map(r => [
+      r.hinban, r.ban, r.model, r.factory,
+      r.created, r.pressNg, r.slitNg, r.srsNg, r.kensaNg, r.totalNg,
+      r.recoveredNg, r.ngAfterRecovery, r.finalGood, r.yieldPercent,
+      r.pricePerPc, r.cost, r.scrapLoss, r.value,
+    ].map(escape).join(',')),
+  ];
+
+  const bom = '\uFEFF';
+  const csv = bom + lines.join('\r\n');
+
+  const filename = `financials_${fromDate}_to_${toDate}.csv`;
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.send(csv);
+});
+
+/**
  * Get comprehensive analytics data from kensaDB
  * POST /api/analytics-data
  */
