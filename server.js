@@ -19798,7 +19798,7 @@ app.get('/api/get-all-recoveries', async (req, res) => {
     const database = client.db('submittedDB');
     const recoveryDB = database.collection('recoveryDB');
 
-    let query = {};
+    let query = { isDeleted: { $ne: true } };
     
     if (factory) query.factory = factory;
     if (背番号) query.背番号 = 背番号;
@@ -19830,6 +19830,687 @@ app.get('/api/get-all-recoveries', async (req, res) => {
     res.status(500).json({ error: 'Server error' });
   }
 });
+
+const _RECOVERY_EDIT_ROLES = ['係長', '課長', '部長', 'admin'];
+
+function _recoveryCanEdit(role) {
+  return _RECOVERY_EDIT_ROLES.includes(String(role || '').trim());
+}
+
+function _getRecoveryExpiryDate() {
+  const expiry = new Date();
+  expiry.setMonth(expiry.getMonth() + 2);
+  return expiry;
+}
+
+function _sanitizeRecoveryItems(recoveries) {
+  if (!Array.isArray(recoveries)) return [];
+  return recoveries
+    .map(item => ({
+      defectType: String(item?.defectType || '').trim(),
+      quantity: Number(item?.quantity) || 0
+    }))
+    .filter(item => item.defectType && item.quantity > 0);
+}
+
+function _sanitizeRecoveryChanges(changes) {
+  const sanitized = {};
+  if (!changes || typeof changes !== 'object') return sanitized;
+
+  if (Object.prototype.hasOwnProperty.call(changes, '品番')) {
+    sanitized['品番'] = String(changes['品番'] || '').trim();
+  }
+  if (Object.prototype.hasOwnProperty.call(changes, '背番号')) {
+    sanitized['背番号'] = String(changes['背番号'] || '').trim();
+  }
+  if (Object.prototype.hasOwnProperty.call(changes, '製造ロット')) {
+    sanitized['製造ロット'] = String(changes['製造ロット'] || '').trim();
+  }
+  if (Object.prototype.hasOwnProperty.call(changes, 'lotDate')) {
+    const lotDate = String(changes.lotDate || '').trim();
+    sanitized.lotDate = /^\d{4}-\d{2}-\d{2}$/.test(lotDate) ? lotDate : null;
+  }
+  if (Object.prototype.hasOwnProperty.call(changes, 'factory')) {
+    sanitized.factory = String(changes.factory || '').trim();
+  }
+  if (Object.prototype.hasOwnProperty.call(changes, 'userId')) {
+    sanitized.userId = String(changes.userId || '').trim();
+  }
+  if (Object.prototype.hasOwnProperty.call(changes, '検査テーブル名')) {
+    sanitized['検査テーブル名'] = String(changes['検査テーブル名'] || '').trim();
+  }
+  if (Object.prototype.hasOwnProperty.call(changes, 'timestamp')) {
+    sanitized.timestamp = String(changes.timestamp || '').trim();
+  }
+  if (Object.prototype.hasOwnProperty.call(changes, 'recoveries')) {
+    sanitized.recoveries = _sanitizeRecoveryItems(changes.recoveries);
+  }
+
+  if (sanitized['製造ロット'] && !sanitized.lotDate) {
+    const normalizedLot = normalizeLotCandidates(sanitized['製造ロット']);
+    sanitized.lotDate = normalizedLot.isoDate || null;
+  }
+
+  return sanitized;
+}
+
+function _transformRecoveryDetailDoc(doc, masterDoc = {}) {
+  const recoveries = Array.isArray(doc?.recoveries) ? doc.recoveries : [];
+  return {
+    id: String(doc?._id || ''),
+    品番: doc?.品番 || masterDoc.品番 || '',
+    背番号: doc?.背番号 || masterDoc.背番号 || '',
+    モデル: masterDoc.モデル || '',
+    製造ロット: doc?.製造ロット || '',
+    lotDate: doc?.lotDate || '',
+    factory: doc?.factory || '',
+    userId: doc?.userId || '',
+    検査テーブル名: doc?.検査テーブル名 || '',
+    timestamp: doc?.timestamp || '',
+    createdAt: doc?.createdAt || '',
+    updatedAt: doc?.updatedAt || '',
+    updatedBy: doc?.updatedBy || '',
+    totalRecoveredQty: recoveries.reduce((sum, item) => sum + (Number(item?.quantity) || 0), 0),
+    recoveries: recoveries.map(item => ({
+      defectType: item?.defectType || '',
+      quantity: Number(item?.quantity) || 0
+    })),
+    pressMatch: doc?.pressMatch || null,
+    pressDB_id: doc?.pressDB_id || null,
+    recoveryHistory: Array.isArray(doc?.recoveryHistory) ? doc.recoveryHistory : [],
+    editHistory: Array.isArray(doc?.editHistory) ? doc.editHistory : [],
+    deleteReason: doc?.deleteReason || '',
+    trashExpiresAt: doc?.trashExpiresAt || ''
+  };
+}
+
+app.post('/api/recovery-details', async (req, res) => {
+  const {
+    fromDate,
+    toDate,
+    model = '',
+    bans = [],
+    factory = '',
+    page = 1,
+    limit = 10,
+    sortField = 'recordedAt',
+    sortDir = 'desc'
+  } = req.body || {};
+
+  if (!fromDate || !toDate) {
+    return res.status(400).json({
+      success: false,
+      error: 'fromDate and toDate are required'
+    });
+  }
+
+  try {
+    const submittedDb = client.db('submittedDB');
+    const recoveryCollection = submittedDb.collection('recoveryDB');
+    const masterCollection = client.db('Sasaki_Coating_MasterDB').collection('masterDB');
+
+    const trimmedFactory = String(factory || '').trim();
+    const trimmedModel = String(model || '').trim();
+    const bansArray = Array.isArray(bans)
+      ? bans.map(ban => String(ban || '').trim()).filter(Boolean)
+      : [];
+    const pageNumber = Math.max(parseInt(page, 10) || 1, 1);
+    const limitNumber = Math.min(Math.max(parseInt(limit, 10) || 10, 1), 100);
+    const sortKey = String(sortField || 'recordedAt');
+    const sortDirection = sortDir === 'asc' ? 'asc' : 'desc';
+
+    const query = { isDeleted: { $ne: true } };
+    if (trimmedFactory) {
+      query.factory = trimmedFactory;
+    }
+
+    if (bansArray.length > 0) {
+      query.背番号 = { $in: bansArray };
+    } else if (trimmedModel) {
+      const modelDocs = await masterCollection
+        .find({ モデル: trimmedModel }, { projection: { 品番: 1, 背番号: 1, _id: 0 } })
+        .toArray();
+      const modelHinbans = Array.from(new Set(modelDocs.map(doc => doc.品番).filter(Boolean)));
+      const modelBans = Array.from(new Set(modelDocs.map(doc => doc.背番号).filter(Boolean)));
+
+      if (!modelHinbans.length && !modelBans.length) {
+        return res.json({
+          success: true,
+          summary: {
+            totalEntries: 0,
+            totalRecoveredQty: 0,
+            affectedLots: 0,
+            affectedProducts: 0,
+            affectedFactories: 0,
+            distinctDefectTypes: 0
+          },
+          rows: [],
+          page: pageNumber,
+          limit: limitNumber,
+          totalRows: 0,
+          totalPages: 0,
+          sortField: sortKey,
+          sortDir: sortDirection
+        });
+      }
+
+      query.$or = [
+        { 品番: { $in: modelHinbans } },
+        { 背番号: { $in: modelBans } }
+      ];
+    }
+
+    const lotDateRange = {};
+    const createdAtRange = {};
+    if (fromDate) {
+      lotDateRange.$gte = fromDate;
+      createdAtRange.$gte = `${fromDate}T00:00:00.000Z`;
+    }
+    if (toDate) {
+      lotDateRange.$lte = toDate;
+      createdAtRange.$lte = `${toDate}T23:59:59.999Z`;
+    }
+
+    const existingOr = Array.isArray(query.$or) ? query.$or : null;
+    const dateFilter = {
+      $or: [
+        { lotDate: lotDateRange },
+        { lotDate: { $exists: false }, createdAt: createdAtRange }
+      ]
+    };
+
+    let finalQuery;
+    if (existingOr) {
+      delete query.$or;
+      finalQuery = {
+        ...query,
+        $and: [
+          { $or: existingOr },
+          dateFilter
+        ]
+      };
+    } else {
+      finalQuery = {
+        ...query,
+        ...dateFilter
+      };
+    }
+
+    const docs = await recoveryCollection.find(finalQuery).toArray();
+
+    const hinbanSet = new Set();
+    const banSet = new Set();
+    docs.forEach(doc => {
+      if (doc.品番) hinbanSet.add(String(doc.品番));
+      if (doc.背番号) banSet.add(String(doc.背番号));
+    });
+
+    const masterDocs = (hinbanSet.size || banSet.size)
+      ? await masterCollection.find(
+          {
+            $or: [
+              { 品番: { $in: Array.from(hinbanSet) } },
+              { 背番号: { $in: Array.from(banSet) } }
+            ]
+          },
+          { projection: { 品番: 1, 背番号: 1, モデル: 1, _id: 0 } }
+        ).toArray()
+      : [];
+
+    const masterByHinban = new Map();
+    const masterByBan = new Map();
+    masterDocs.forEach(doc => {
+      if (doc.品番 && !masterByHinban.has(doc.品番)) {
+        masterByHinban.set(doc.品番, doc);
+      }
+      if (doc.背番号 && !masterByBan.has(doc.背番号)) {
+        masterByBan.set(doc.背番号, doc);
+      }
+    });
+
+    const rows = docs.map(doc => {
+      const recoveries = Array.isArray(doc.recoveries) ? doc.recoveries : [];
+      const masterDoc = masterByHinban.get(doc.品番) || masterByBan.get(doc.背番号) || {};
+      const totalRecoveredQty = recoveries.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
+      const recordedAt = doc.updatedAt || doc.createdAt || doc.timestamp || '';
+      const lotDateValue = doc.lotDate || (recordedAt ? String(recordedAt).slice(0, 10) : '');
+
+      return {
+        id: String(doc._id),
+        hinban: doc.品番 || masterDoc.品番 || '',
+        ban: doc.背番号 || masterDoc.背番号 || '',
+        model: masterDoc.モデル || '',
+        factory: doc.factory || '',
+        manufacturingLot: doc.製造ロット || '',
+        lotDate: lotDateValue,
+        totalRecoveredQty,
+        recoveryCount: recoveries.length,
+        recoveries: recoveries.map(item => ({
+          defectType: item.defectType || '',
+          quantity: Number(item.quantity) || 0
+        })),
+        inspectionTable: doc.検査テーブル名 || '',
+        matchedPressQty: Number(doc.pressMatch?.Process_Quantity) || 0,
+        recordedBy: doc.updatedBy || doc.userId || '',
+        recordedAt,
+        pressMatchSource: doc.pressMatch?.source || ''
+      };
+    });
+
+    const defectTypeSet = new Set();
+    const lotSet = new Set();
+    const productSet = new Set();
+    const factorySet = new Set();
+    let totalRecoveredQty = 0;
+
+    rows.forEach(row => {
+      totalRecoveredQty += row.totalRecoveredQty || 0;
+      if (row.manufacturingLot || row.lotDate) {
+        lotSet.add(`${row.ban || ''}__${row.manufacturingLot || row.lotDate}`);
+      }
+      if (row.ban) {
+        productSet.add(row.ban);
+      } else if (row.hinban) {
+        productSet.add(row.hinban);
+      }
+      if (row.factory) {
+        factorySet.add(row.factory);
+      }
+      (row.recoveries || []).forEach(item => {
+        if (item.defectType) {
+          defectTypeSet.add(item.defectType);
+        }
+      });
+    });
+
+    const sorters = {
+      lotDate: (a, b) => String(a.lotDate || '').localeCompare(String(b.lotDate || '')),
+      manufacturingLot: (a, b) => String(a.manufacturingLot || '').localeCompare(String(b.manufacturingLot || '')),
+      hinban: (a, b) => String(a.hinban || '').localeCompare(String(b.hinban || '')),
+      ban: (a, b) => String(a.ban || '').localeCompare(String(b.ban || '')),
+      model: (a, b) => String(a.model || '').localeCompare(String(b.model || '')),
+      factory: (a, b) => String(a.factory || '').localeCompare(String(b.factory || '')),
+      totalRecoveredQty: (a, b) => (a.totalRecoveredQty || 0) - (b.totalRecoveredQty || 0),
+      recoveryCount: (a, b) => (a.recoveryCount || 0) - (b.recoveryCount || 0),
+      inspectionTable: (a, b) => String(a.inspectionTable || '').localeCompare(String(b.inspectionTable || '')),
+      matchedPressQty: (a, b) => (a.matchedPressQty || 0) - (b.matchedPressQty || 0),
+      recordedBy: (a, b) => String(a.recordedBy || '').localeCompare(String(b.recordedBy || '')),
+      recordedAt: (a, b) => String(a.recordedAt || '').localeCompare(String(b.recordedAt || ''))
+    };
+
+    const sortFn = sorters[sortKey] || sorters.recordedAt;
+    rows.sort((a, b) => {
+      const result = sortFn(a, b);
+      if (result !== 0) {
+        return sortDirection === 'asc' ? result : -result;
+      }
+      return String(a.recordedAt || '').localeCompare(String(b.recordedAt || ''));
+    });
+
+    const totalRows = rows.length;
+    const totalPages = totalRows ? Math.ceil(totalRows / limitNumber) : 0;
+    const safePage = totalPages ? Math.min(pageNumber, totalPages) : 1;
+    const startIndex = (safePage - 1) * limitNumber;
+    const pagedRows = totalRows ? rows.slice(startIndex, startIndex + limitNumber) : [];
+
+    res.json({
+      success: true,
+      summary: {
+        totalEntries: totalRows,
+        totalRecoveredQty,
+        affectedLots: lotSet.size,
+        affectedProducts: productSet.size,
+        affectedFactories: factorySet.size,
+        distinctDefectTypes: defectTypeSet.size
+      },
+      rows: pagedRows,
+      page: safePage,
+      limit: limitNumber,
+      totalRows,
+      totalPages,
+      sortField: sortKey,
+      sortDir: sortDirection
+    });
+  } catch (error) {
+    console.error('Error fetching recovery details:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch recovery details',
+      message: error.message
+    });
+  }
+});
+
+app.get('/api/recovery-details/:docId', async (req, res) => {
+  try {
+    const { docId } = req.params;
+    await client.connect();
+
+    const submittedDb = client.db('submittedDB');
+    const recoveryCollection = submittedDb.collection('recoveryDB');
+    const logsCollection = submittedDb.collection('recoveryLogs');
+    const masterCollection = client.db('Sasaki_Coating_MasterDB').collection('masterDB');
+
+    const doc = await recoveryCollection.findOne({ _id: new ObjectId(docId), isDeleted: { $ne: true } });
+    if (!doc) {
+      return res.status(404).json({ success: false, error: 'Recovery record not found' });
+    }
+
+    const masterDoc = await masterCollection.findOne(
+      {
+        $or: [
+          { 品番: doc.品番 || '' },
+          { 背番号: doc.背番号 || '' }
+        ]
+      },
+      { projection: { 品番: 1, 背番号: 1, モデル: 1, _id: 0 } }
+    );
+
+    const logs = await logsCollection
+      .find({ collection: 'recoveryDB', docId: String(doc._id) })
+      .sort({ timestamp: -1 })
+      .toArray();
+
+    res.json({
+      success: true,
+      data: _transformRecoveryDetailDoc(doc, masterDoc || {}),
+      logs
+    });
+  } catch (error) {
+    console.error('Error fetching recovery detail:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch recovery detail', message: error.message });
+  }
+});
+
+app.post('/api/recovery-details/update', async (req, res) => {
+  const { docId, changes, editedBy, editedByRole, editedByUsername, editNote } = req.body || {};
+  if (!docId || !changes || !editedBy) {
+    return res.status(400).json({ success: false, error: 'Missing required fields' });
+  }
+  if (!_recoveryCanEdit(editedByRole)) {
+    return res.status(403).json({ success: false, error: 'Insufficient role to edit recovery records' });
+  }
+
+  try {
+    await client.connect();
+    const submittedDb = client.db('submittedDB');
+    const recoveryCollection = submittedDb.collection('recoveryDB');
+    const logsCollection = submittedDb.collection('recoveryLogs');
+
+    const oid = new ObjectId(docId);
+    const doc = await recoveryCollection.findOne({ _id: oid, isDeleted: { $ne: true } });
+    if (!doc) {
+      return res.status(404).json({ success: false, error: 'Recovery record not found' });
+    }
+
+    const sanitizedChanges = _sanitizeRecoveryChanges(changes);
+    const setFields = {};
+    const changedFields = [];
+
+    Object.entries(sanitizedChanges).forEach(([field, value]) => {
+      const oldValue = doc[field];
+      if (JSON.stringify(oldValue) !== JSON.stringify(value)) {
+        setFields[field] = value;
+        changedFields.push({ field, before: oldValue !== undefined ? oldValue : null, after: value });
+      }
+    });
+
+    if (!changedFields.length) {
+      return res.json({ success: true, logId: null, message: 'No changes detected' });
+    }
+
+    const jstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
+    setFields.updatedAt = jstNow.toISOString();
+    setFields.updatedBy = editedBy;
+
+    const before = { ...doc };
+    delete before._id;
+    const after = { ...before, ...setFields };
+
+    const logResult = await logsCollection.insertOne({
+      type: 'edit',
+      collection: 'recoveryDB',
+      docId: String(doc._id),
+      editedBy,
+      editedByRole: editedByRole || null,
+      editedByUsername: editedByUsername || null,
+      timestamp: jstNow,
+      editNote: editNote || null,
+      changedFields,
+      before,
+      after
+    });
+
+    const logId = String(logResult.insertedId);
+
+    await recoveryCollection.updateOne(
+      { _id: oid },
+      {
+        $set: setFields,
+        $push: {
+          recoveryHistory: {
+            action: '修正（リカバリー管理編集）',
+            user: editedBy,
+            timestamp: jstNow,
+            comment: editNote || `${changedFields.length}件のフィールドを変更`,
+            logId
+          },
+          editHistory: logId
+        }
+      }
+    );
+
+    _invalidateFinancialsCache('recoveryDB edit');
+    res.json({ success: true, logId });
+  } catch (error) {
+    console.error('Error updating recovery detail:', error);
+    res.status(500).json({ success: false, error: 'Failed to update recovery detail', message: error.message });
+  }
+});
+
+app.post('/api/recovery-details/delete', async (req, res) => {
+  const { ids, deletedBy, deletedByRole, deletedByUsername, reason } = req.body || {};
+  if (!Array.isArray(ids) || !ids.length || !deletedBy) {
+    return res.status(400).json({ success: false, error: 'ids and deletedBy are required' });
+  }
+  if (!_recoveryCanEdit(deletedByRole)) {
+    return res.status(403).json({ success: false, error: 'Insufficient role to delete recovery records' });
+  }
+
+  try {
+    await client.connect();
+    const submittedDb = client.db('submittedDB');
+    const recoveryCollection = submittedDb.collection('recoveryDB');
+    const logsCollection = submittedDb.collection('recoveryLogs');
+
+    const objectIds = ids.map(id => new ObjectId(id));
+    const docs = await recoveryCollection.find({ _id: { $in: objectIds }, isDeleted: { $ne: true } }).toArray();
+    if (!docs.length) {
+      return res.status(404).json({ success: false, error: 'No active recovery records found' });
+    }
+
+    const jstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
+    const trashExpiresAt = _getRecoveryExpiryDate().toISOString();
+
+    await recoveryCollection.updateMany(
+      { _id: { $in: docs.map(doc => doc._id) } },
+      {
+        $set: {
+          isDeleted: true,
+          deletedAt: jstNow.toISOString(),
+          deletedBy,
+          deletedByRole: deletedByRole || null,
+          deletedByUsername: deletedByUsername || null,
+          deleteReason: reason || '',
+          trashExpiresAt,
+          updatedAt: jstNow.toISOString(),
+          updatedBy: deletedBy
+        },
+        $push: {
+          recoveryHistory: {
+            action: 'ソフト削除',
+            user: deletedBy,
+            timestamp: jstNow,
+            comment: reason || ''
+          }
+        }
+      }
+    );
+
+    if (docs.length) {
+      await logsCollection.insertMany(docs.map(doc => ({
+        type: 'soft_delete',
+        collection: 'recoveryDB',
+        docId: String(doc._id),
+        deletedBy,
+        deletedByRole: deletedByRole || null,
+        deletedByUsername: deletedByUsername || null,
+        timestamp: jstNow,
+        deleteReason: reason || '',
+        before: { ...doc, _id: undefined }
+      })));
+    }
+
+    _invalidateFinancialsCache('recoveryDB soft-delete');
+    res.json({ success: true, modifiedCount: docs.length });
+  } catch (error) {
+    console.error('Error soft deleting recovery details:', error);
+    res.status(500).json({ success: false, error: 'Failed to soft delete recovery details', message: error.message });
+  }
+});
+
+app.get('/api/recovery-trash', async (req, res) => {
+  try {
+    await client.connect();
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 25, 1), 200);
+    const recoveryCollection = client.db('submittedDB').collection('recoveryDB');
+
+    const filter = { isDeleted: true };
+    const total = await recoveryCollection.countDocuments(filter);
+    const totalPages = total ? Math.ceil(total / limit) : 0;
+    const items = await recoveryCollection.find(filter)
+      .project({ 品番: 1, 背番号: 1, 製造ロット: 1, lotDate: 1, factory: 1, deletedAt: 1, deletedBy: 1, deleteReason: 1, trashExpiresAt: 1 })
+      .sort({ deletedAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .toArray();
+
+    res.json({ success: true, items, page, limit, total, totalPages });
+  } catch (error) {
+    console.error('Error fetching recovery trash:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch recovery trash', message: error.message });
+  }
+});
+
+app.post('/api/recovery-trash/restore', async (req, res) => {
+  const { ids, restoredBy, restoredByRole, restoredByUsername } = req.body || {};
+  if (!Array.isArray(ids) || !ids.length || !restoredBy) {
+    return res.status(400).json({ success: false, error: 'ids and restoredBy are required' });
+  }
+  if (!_recoveryCanEdit(restoredByRole)) {
+    return res.status(403).json({ success: false, error: 'Insufficient role to restore recovery records' });
+  }
+
+  try {
+    await client.connect();
+    const submittedDb = client.db('submittedDB');
+    const recoveryCollection = submittedDb.collection('recoveryDB');
+    const logsCollection = submittedDb.collection('recoveryLogs');
+    const objectIds = ids.map(id => new ObjectId(id));
+    const docs = await recoveryCollection.find({ _id: { $in: objectIds }, isDeleted: true }).toArray();
+    if (!docs.length) {
+      return res.status(404).json({ success: false, error: 'No deleted recovery records found' });
+    }
+
+    const jstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
+    await recoveryCollection.updateMany(
+      { _id: { $in: docs.map(doc => doc._id) } },
+      {
+        $set: {
+          isDeleted: false,
+          updatedAt: jstNow.toISOString(),
+          updatedBy: restoredBy,
+          restoredAt: jstNow.toISOString(),
+          restoredBy,
+          restoredByUsername: restoredByUsername || null
+        },
+        $unset: {
+          deletedAt: '',
+          deletedBy: '',
+          deletedByRole: '',
+          deletedByUsername: '',
+          deleteReason: '',
+          trashExpiresAt: ''
+        },
+        $push: {
+          recoveryHistory: {
+            action: 'ゴミ箱から復元',
+            user: restoredBy,
+            timestamp: jstNow,
+            comment: ''
+          }
+        }
+      }
+    );
+
+    if (docs.length) {
+      await logsCollection.insertMany(docs.map(doc => ({
+        type: 'restore',
+        collection: 'recoveryDB',
+        docId: String(doc._id),
+        restoredBy,
+        restoredByRole: restoredByRole || null,
+        restoredByUsername: restoredByUsername || null,
+        timestamp: jstNow,
+        before: { ...doc, _id: undefined }
+      })));
+    }
+
+    _invalidateFinancialsCache('recoveryDB restore');
+    res.json({ success: true, modifiedCount: docs.length });
+  } catch (error) {
+    console.error('Error restoring recovery details:', error);
+    res.status(500).json({ success: false, error: 'Failed to restore recovery details', message: error.message });
+  }
+});
+
+async function cleanupOldRecoveryTrash() {
+  try {
+    await client.connect();
+    const submittedDb = client.db('submittedDB');
+    const recoveryCollection = submittedDb.collection('recoveryDB');
+    const logsCollection = submittedDb.collection('recoveryLogs');
+    const nowIso = new Date().toISOString();
+
+    const expiredDocs = await recoveryCollection.find({
+      isDeleted: true,
+      trashExpiresAt: { $lt: nowIso }
+    }).toArray();
+
+    if (!expiredDocs.length) {
+      return;
+    }
+
+    await recoveryCollection.deleteMany({ _id: { $in: expiredDocs.map(doc => doc._id) } });
+    await logsCollection.insertMany(expiredDocs.map(doc => ({
+      type: 'permanent_delete',
+      collection: 'recoveryDB',
+      docId: String(doc._id),
+      timestamp: new Date(),
+      deleteReason: doc.deleteReason || '',
+      before: { ...doc, _id: undefined }
+    })));
+
+    console.log(`🧹 Recovery trash cleanup removed ${expiredDocs.length} expired record(s)`);
+    _invalidateFinancialsCache('recoveryDB permanent cleanup');
+  } catch (error) {
+    console.error('❌ Error during recovery trash cleanup:', error);
+  }
+}
+
+setInterval(cleanupOldRecoveryTrash, 24 * 60 * 60 * 1000);
+cleanupOldRecoveryTrash();
 
 // GEN Health check endpoint
 app.get('/gen-health', (req, res) => {
@@ -20802,6 +21483,10 @@ const VM_UPLOAD_FOLDERS       = new Set(['videoManuals', 'videoManualDeployed'])
 const VM_DEPLOYED_RETENTION_DAYS = 60;
 const VM_DEPLOYED_RETENTION_MS = VM_DEPLOYED_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 const VM_DEPLOYED_CLEANUP_INTERVAL_MS = 12 * 60 * 60 * 1000;
+const VM_SHOTSTACK_API_BASE = 'https://api.shotstack.io/edit';
+const VM_SHOTSTACK_STAGE = String(process.env.SHOTSTACK_STAGE || 'stage').trim() === 'v1' ? 'v1' : 'stage';
+const VM_SHOTSTACK_POLL_INTERVAL_MS = 5000;
+const VM_SHOTSTACK_TIMEOUT_MS = 10 * 60 * 1000;
 
 let vmDeployedCleanupPromise = null;
 let vmDeployedCleanupLastRunAt = 0;
@@ -20864,6 +21549,468 @@ function vmGetRequester(req) {
 
 function vmCanManageDeployedFiles(role) {
   return role === 'admin';
+}
+
+function vmShotstackEnabled() {
+  return !!String(process.env.SHOTSTACK_API_KEY || '').trim();
+}
+
+function vmClampNumber(value, fallback = 0, { min = -Infinity, max = Infinity } = {}) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.min(max, Math.max(min, numeric));
+}
+
+function vmNormalizeOpacity(value, fallback = 1) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  if (numeric > 1) return vmClampNumber(numeric / 100, fallback, { min: 0, max: 1 });
+  return vmClampNumber(numeric, fallback, { min: 0, max: 1 });
+}
+
+function vmNormalizeHexColor(value, fallback = '#ffffff') {
+  const color = String(value || '').trim();
+  return /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(color) ? color : fallback;
+}
+
+function vmNormalizeFontWeight(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.round(value);
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return 400;
+  if (normalized === 'bold') return 700;
+  if (normalized === 'normal') return 400;
+  const numeric = Number(normalized);
+  return Number.isFinite(numeric) ? Math.round(numeric) : 400;
+}
+
+function vmShotstackGetProjectAssetById(project, assetId) {
+  if (!assetId || !Array.isArray(project?.assets)) return null;
+  return project.assets.find((item) => String(item.assetId || item._id) === String(assetId)) || null;
+}
+
+function vmShotstackGetStepAssetId(step, project) {
+  return step?.assetId || project?.currentAssetId || null;
+}
+
+function vmShotstackGetStepVideoUrl(step, project) {
+  const asset = vmShotstackGetProjectAssetById(project, vmShotstackGetStepAssetId(step, project));
+  return asset?.downloadUrl || asset?.url || step?.videoUrl || project?.videoUrl || null;
+}
+
+function vmShotstackGetSequenceDuration(project) {
+  if (!Array.isArray(project?.steps) || !project.steps.length) return vmClampNumber(project?.duration, 0, { min: 0 });
+  return project.steps.reduce((maxEnd, step) => Math.max(maxEnd, vmClampNumber(step?.endTime, 0, { min: 0 })), 0);
+}
+
+function vmShotstackGetStepSourceStart(step) {
+  return vmClampNumber(step?.sourceStart ?? step?.startTime, 0, { min: 0 });
+}
+
+function vmShotstackGetStepSourceEnd(step) {
+  if (Number.isFinite(Number(step?.sourceEnd))) return vmClampNumber(step.sourceEnd, 0, { min: 0 });
+  const start = vmShotstackGetStepSourceStart(step);
+  const length = Math.max(0, vmClampNumber(step?.endTime, 0) - vmClampNumber(step?.startTime, 0));
+  return start + length;
+}
+
+function vmShotstackGetFlattenedDeploymentSize(project) {
+  const sourceWidth = Math.max(2, vmClampNumber(project?.width, 1920, { min: 2 }));
+  const sourceHeight = Math.max(2, vmClampNumber(project?.height, 1080, { min: 2 }));
+  const scale = Math.min(1280 / sourceWidth, 720 / sourceHeight, 1);
+  const makeEven = (value) => Math.max(2, Math.round(value / 2) * 2);
+  return {
+    width: makeEven(sourceWidth * scale),
+    height: makeEven(sourceHeight * scale),
+  };
+}
+
+function vmShotstackBuildPlacement(item, project) {
+  const projectWidth = Math.max(2, vmClampNumber(project?.width, 1920, { min: 2 }));
+  const projectHeight = Math.max(2, vmClampNumber(project?.height, 1080, { min: 2 }));
+  const width = Math.max(2, vmClampNumber(item?.width, 2, { min: 2 }));
+  const height = Math.max(2, vmClampNumber(item?.height, 2, { min: 2 }));
+  const centerX = vmClampNumber(item?.x, 0) + (width / 2);
+  const centerY = vmClampNumber(item?.y, 0) + (height / 2);
+  const offsetX = (centerX - (projectWidth / 2)) / projectWidth;
+  const offsetY = ((projectHeight / 2) - centerY) / projectHeight;
+  const clip = {
+    width,
+    height,
+    position: 'center',
+    offset: {
+      x: Number(offsetX.toFixed(4)),
+      y: Number(offsetY.toFixed(4)),
+    },
+    opacity: vmNormalizeOpacity(item?.opacity, 1),
+  };
+  const rotation = vmClampNumber(item?.rotation, 0);
+  if (rotation) {
+    clip.transform = {
+      rotate: {
+        angle: rotation,
+      },
+    };
+  }
+  return clip;
+}
+
+function vmShotstackBuildBlinkWindows(item) {
+  const start = vmClampNumber(item?.startTime, 0, { min: 0 });
+  const end = Math.max(start, vmClampNumber(item?.endTime, start, { min: start }));
+  if (!item?.blink) return [{ start, length: Math.max(0.1, end - start) }];
+
+  const windows = [];
+  let cursor = start;
+  while (cursor < end - 0.001) {
+    const visibleEnd = Math.min(cursor + 0.5, end);
+    if (visibleEnd - cursor >= 0.05) {
+      windows.push({
+        start: Number(cursor.toFixed(3)),
+        length: Number((visibleEnd - cursor).toFixed(3)),
+      });
+    }
+    cursor += 1;
+  }
+  return windows.length ? windows : [{ start, length: Math.max(0.1, end - start) }];
+}
+
+function vmShotstackBuildTextClip(item, project, timing) {
+  const placement = vmShotstackBuildPlacement(item, project);
+  const backgroundColor = String(item?.backgroundColor || '').trim().toLowerCase();
+  const clip = {
+    asset: {
+      type: 'text',
+      text: String(item?.text || ''),
+      font: {
+        family: String(item?.fontFamily || 'Arial').trim() || 'Arial',
+        color: vmNormalizeHexColor(item?.color, '#ffffff'),
+        size: Math.max(8, vmClampNumber(item?.fontSize, 24, { min: 8 })),
+        weight: vmNormalizeFontWeight(item?.fontWeight),
+        opacity: vmNormalizeOpacity(item?.opacity, 1),
+      },
+      alignment: {
+        horizontal: ['left', 'center', 'right'].includes(String(item?.textAlign || '').toLowerCase())
+          ? String(item.textAlign).toLowerCase()
+          : 'center',
+        vertical: 'center',
+      },
+    },
+    start: timing.start,
+    length: timing.length,
+    ...placement,
+  };
+
+  if (backgroundColor && backgroundColor !== 'transparent') {
+    clip.asset.background = {
+      color: vmNormalizeHexColor(backgroundColor, '#000000'),
+      opacity: 1,
+      padding: 8,
+      borderRadius: 4,
+    };
+  }
+
+  return clip;
+}
+
+function vmShotstackBuildImageClip(item, project, timing) {
+  if (!item?.imageUrl) return null;
+  return {
+    asset: {
+      type: 'image',
+      src: String(item.imageUrl),
+    },
+    start: timing.start,
+    length: timing.length,
+    fit: 'contain',
+    ...vmShotstackBuildPlacement(item, project),
+  };
+}
+
+function vmShotstackBuildShapeClip(item, project, timing) {
+  const subtype = String(item?.subtype || '').toLowerCase();
+  const strokeColor = vmNormalizeHexColor(item?.strokeColor || item?.color, '#ef4444');
+  const strokeWidth = Math.max(1, vmClampNumber(item?.strokeWidth, 3, { min: 1 }));
+  const placement = vmShotstackBuildPlacement(item, project);
+  const fillEnabled = !!item?.fill;
+  const fillColor = fillEnabled ? vmNormalizeHexColor(item?.strokeColor || item?.color, '#ef4444') : '#000000';
+
+  if (subtype === 'rect' || subtype === 'circle') {
+    const asset = {
+      type: 'shape',
+      shape: subtype === 'rect' ? 'rectangle' : 'circle',
+      fill: {
+        color: fillColor,
+        opacity: fillEnabled ? placement.opacity : 0,
+      },
+      stroke: {
+        color: strokeColor,
+        width: strokeWidth,
+      },
+    };
+
+    if (subtype === 'rect') {
+      asset.rectangle = {
+        width: placement.width,
+        height: placement.height,
+        cornerRadius: Math.max(0, vmClampNumber(item?.radius, 0, { min: 0 })),
+      };
+    } else {
+      asset.circle = {
+        radius: Math.max(1, Math.round(Math.min(placement.width, placement.height) / 2)),
+      };
+    }
+
+    return {
+      asset,
+      start: timing.start,
+      length: timing.length,
+      ...placement,
+    };
+  }
+
+  const startNormX = vmClampNumber(item?.startNormX, 0, { min: 0, max: 1 });
+  const startNormY = vmClampNumber(item?.startNormY, 1, { min: 0, max: 1 });
+  const endNormX = vmClampNumber(item?.endNormX, 1, { min: 0, max: 1 });
+  const endNormY = vmClampNumber(item?.endNormY, 0, { min: 0, max: 1 });
+  const dx = (endNormX - startNormX) * placement.width;
+  const dy = (endNormY - startNormY) * placement.height;
+  const lineLength = Math.max(4, Math.sqrt((dx * dx) + (dy * dy)));
+  const angle = (Math.atan2(dy, dx) * 180 / Math.PI) + vmClampNumber(item?.rotation, 0);
+
+  return {
+    asset: {
+      type: 'shape',
+      shape: 'line',
+      fill: {
+        color: '#000000',
+        opacity: 0,
+      },
+      stroke: {
+        color: strokeColor,
+        width: strokeWidth,
+      },
+      line: {
+        length: lineLength,
+        thickness: strokeWidth,
+      },
+    },
+    start: timing.start,
+    length: timing.length,
+    ...placement,
+    transform: {
+      rotate: {
+        angle,
+      },
+    },
+  };
+}
+
+function vmShotstackBuildOverlayTracks(project) {
+  const timelineElements = [];
+  (project?.steps || []).forEach((step) => {
+    (step?.elements || []).forEach((element) => {
+      if (!element || element.type === 'audio') return;
+      timelineElements.push(element);
+    });
+  });
+
+  timelineElements.sort((a, b) => {
+    const layerDiff = vmClampNumber(a?.layer, 0) - vmClampNumber(b?.layer, 0);
+    if (layerDiff !== 0) return layerDiff;
+    const startDiff = vmClampNumber(a?.startTime, 0) - vmClampNumber(b?.startTime, 0);
+    if (startDiff !== 0) return startDiff;
+    return String(a?.id || '').localeCompare(String(b?.id || ''));
+  });
+
+  return timelineElements.map((element) => {
+    const clips = vmShotstackBuildBlinkWindows(element)
+      .map((timing) => {
+        if (element.type === 'text') return vmShotstackBuildTextClip(element, project, timing);
+        if (element.type === 'image') return vmShotstackBuildImageClip(element, project, timing);
+        if (element.type === 'shape') return vmShotstackBuildShapeClip(element, project, timing);
+        return null;
+      })
+      .filter(Boolean);
+
+    return clips.length ? { clips } : null;
+  }).filter(Boolean);
+}
+
+function vmShotstackBuildVideoTrack(project) {
+  const clips = (project?.steps || []).map((step) => {
+    const src = vmShotstackGetStepVideoUrl(step, project);
+    if (!src) return null;
+    const start = vmClampNumber(step?.startTime, 0, { min: 0 });
+    const end = vmClampNumber(step?.endTime, start, { min: start });
+    const length = Math.max(0.1, end - start);
+    return {
+      asset: {
+        type: 'video',
+        src,
+        trim: vmShotstackGetStepSourceStart(step),
+        volume: step?.muted ? 0 : 1,
+        transcode: true,
+      },
+      start,
+      length,
+      fit: 'contain',
+      position: 'center',
+    };
+  }).filter(Boolean);
+
+  return clips.length ? { clips } : null;
+}
+
+function vmShotstackBuildEdit(project, revision) {
+  const size = vmShotstackGetFlattenedDeploymentSize(project);
+  const tracks = [];
+  const videoTrack = vmShotstackBuildVideoTrack(project);
+  if (videoTrack) tracks.push(videoTrack);
+  tracks.push(...vmShotstackBuildOverlayTracks(project));
+
+  if (!tracks.length) {
+    throw new Error('Selected revision has no renderable media');
+  }
+
+  const edit = {
+    timeline: {
+      background: '#1a1a2e',
+      tracks,
+      cache: true,
+    },
+    output: {
+      format: 'mp4',
+      fps: 25,
+      size,
+      quality: 'medium',
+      mute: false,
+    },
+    disk: 'local',
+    merge: [],
+  };
+
+  const callbackUrl = String(process.env.SHOTSTACK_CALLBACK_URL || '').trim();
+  if (callbackUrl) {
+    edit.callback = callbackUrl;
+  }
+
+  return edit;
+}
+
+async function vmShotstackRequest(method, path, body = null) {
+  const apiKey = String(process.env.SHOTSTACK_API_KEY || '').trim();
+  if (!apiKey) throw new Error('Shotstack is not configured on the server');
+
+  const response = await fetch(`${VM_SHOTSTACK_API_BASE}/${VM_SHOTSTACK_STAGE}${path}`, {
+    method,
+    headers: {
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const validationDetails = Array.isArray(payload?.errors)
+      ? payload.errors
+          .map((entry) => String(entry?.detail || entry?.title || '').trim())
+          .filter(Boolean)
+      : [];
+    const message = validationDetails.length
+      ? validationDetails.join('; ')
+      : payload?.response?.message || payload?.message || payload?.error || `Shotstack request failed (${response.status})`;
+    throw new Error(message);
+  }
+  return payload;
+}
+
+async function vmShotstackQueueRender(edit) {
+  const payload = await vmShotstackRequest('POST', '/render', edit);
+  const renderId = String(payload?.response?.id || '').trim();
+  if (!renderId) throw new Error('Shotstack did not return a render id');
+  return renderId;
+}
+
+async function vmShotstackGetRender(renderId) {
+  const payload = await vmShotstackRequest('GET', `/render/${encodeURIComponent(renderId)}`);
+  return payload?.response || null;
+}
+
+async function vmShotstackWaitForRender(renderId) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < VM_SHOTSTACK_TIMEOUT_MS) {
+    const response = await vmShotstackGetRender(renderId);
+    const status = String(response?.status || '').toLowerCase();
+    if (status === 'done' && response?.url) return response;
+    if (status === 'failed') {
+      throw new Error(response?.error || 'Shotstack render failed');
+    }
+    await new Promise((resolve) => setTimeout(resolve, VM_SHOTSTACK_POLL_INTERVAL_MS));
+  }
+  throw new Error('Timed out waiting for Shotstack render');
+}
+
+async function vmUploadVideoBuffer(buffer, { fileName, mimeType = 'video/mp4', uploadFolder = 'videoManualDeployed' } = {}) {
+  if (!Buffer.isBuffer(buffer) || !buffer.length) {
+    throw new Error('No video buffer provided');
+  }
+
+  if (!VM_UPLOAD_FOLDERS.has(uploadFolder)) {
+    throw new Error('Unsupported upload folder');
+  }
+
+  const normalizedFileName = vmNormalizeFileName(fileName || `video_${Date.now()}.mp4`);
+  const assetId = new ObjectId().toString();
+  const uploadedAt = new Date();
+  const storagePath = `${uploadFolder}/${Date.now()}_${assetId}_${normalizedFileName}`;
+  const bucket = admin.storage().bucket();
+  const fileRef = bucket.file(storagePath);
+  const downloadToken = `vm_${Date.now()}`;
+
+  await fileRef.save(buffer, {
+    metadata: {
+      contentType: mimeType,
+      metadata: { firebaseStorageDownloadTokens: downloadToken },
+    },
+  });
+
+  return {
+    assetId,
+    fileName: normalizedFileName,
+    mimeType,
+    storagePath,
+    uploadedAt: uploadedAt.toISOString(),
+    url: `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(storagePath)}?alt=media&token=${downloadToken}`,
+  };
+}
+
+async function vmShotstackRenderToFirebase(project, revision) {
+  const edit = vmShotstackBuildEdit(project, revision);
+  const renderId = await vmShotstackQueueRender(edit);
+  const render = await vmShotstackWaitForRender(renderId);
+  const downloadUrl = String(render?.url || '').trim();
+  if (!downloadUrl) throw new Error('Shotstack render completed without an output URL');
+
+  const downloadResponse = await fetch(downloadUrl, { method: 'GET' });
+  if (!downloadResponse.ok) {
+    throw new Error(`Failed to download Shotstack render (${downloadResponse.status})`);
+  }
+
+  const arrayBuffer = await downloadResponse.arrayBuffer();
+  const safeTitle = vmNormalizeFileName(`${project?.title || 'video-manual'}-rev-${revision?.revisionNumber || 'deploy'}.mp4`);
+  const upload = await vmUploadVideoBuffer(Buffer.from(arrayBuffer), {
+    fileName: safeTitle,
+    mimeType: 'video/mp4',
+    uploadFolder: 'videoManualDeployed',
+  });
+
+  return {
+    ...upload,
+    shotstackRenderId: renderId,
+    shotstackStatus: render?.status || 'done',
+  };
 }
 // GET /api/video-playlists
 // Returns playlists the requester can view (summary fields only).
@@ -22098,6 +23245,71 @@ app.delete('/api/video-deployed-files', async (req, res) => {
     const status = err?.statusCode || 500;
     console.error('❌ video deployed file delete error:', err);
     res.status(status).json({ error: err.message });
+  }
+});
+
+// POST /api/video-projects/:id/render-shotstack
+// Server-side flatten/render path using Shotstack, then uploads the MP4 to Firebase.
+app.post('/api/video-projects/:id/render-shotstack', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    if (!VM_DEPLOY_ROLES.has(role)) {
+      return res.status(403).json({ error: 'Insufficient role to deploy projects' });
+    }
+    if (!vmShotstackEnabled()) {
+      return res.status(503).json({ error: 'Shotstack is not configured on the server' });
+    }
+
+    const rawRevisionId = String(req.body?.revisionId || '').trim();
+    if (!rawRevisionId) {
+      return res.status(400).json({ error: 'revisionId is required' });
+    }
+
+    let projectId;
+    let revisionId;
+    try {
+      projectId = new ObjectId(req.params.id);
+      revisionId = new ObjectId(rawRevisionId);
+    } catch (_) {
+      return res.status(400).json({ error: 'Invalid project or revision id' });
+    }
+
+    const db = client.db(VM_DB);
+    const projects = db.collection(VM_PROJECTS_COLLECTION);
+    const revisions = db.collection(VM_REVISIONS_COLLECTION);
+    const project = await projects.findOne({ _id: projectId, deleted: { $ne: true } });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const playlist = await db.collection(VM_PLAYLISTS_COLLECTION).findOne({ _id: project.playlistId });
+    if (!playlist || !vmCanEdit(playlist, username, role)) {
+      return res.status(403).json({ error: 'No edit access to this project' });
+    }
+
+    const revision = await revisions.findOne({ _id: revisionId, projectId });
+    if (!revision?.snapshot) {
+      return res.status(404).json({ error: 'Revision not found for this project' });
+    }
+
+    const renderProject = {
+      ...revision.snapshot,
+      _id: project._id,
+      playlistId: project.playlistId,
+      title: revision.snapshot?.title || project.title || 'video-manual',
+      videoUrl: project.videoUrl || revision.snapshot?.videoUrl || '',
+      assets: Array.isArray(project.assets) && project.assets.length
+        ? project.assets
+        : (Array.isArray(revision.snapshot?.assets) ? revision.snapshot.assets : []),
+    };
+
+    if (!Array.isArray(renderProject.steps) || !renderProject.steps.length) {
+      return res.status(400).json({ error: 'Selected revision has no steps to deploy.' });
+    }
+
+    const upload = await vmShotstackRenderToFirebase(renderProject, revision);
+    res.json(upload);
+  } catch (err) {
+    console.error('❌ Shotstack render error:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 
