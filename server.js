@@ -21253,6 +21253,13 @@ function vmNormalizeFileName(fileName = '') {
     .replace(/^_+|_+$/g, '') || `asset_${Date.now()}`;
 }
 
+function vmInferAssetTypeFromMimeType(mimeType = '') {
+  const normalized = String(mimeType || '').toLowerCase();
+  if (normalized.startsWith('image/')) return 'image';
+  if (normalized.startsWith('audio/')) return 'audio';
+  return 'video';
+}
+
 // GET /api/video-manuals/next-untitled — find the next UntitledN name
 app.get('/api/video-manuals/next-untitled', async (req, res) => {
   try {
@@ -21479,7 +21486,11 @@ console.log('🎬 Video Manual API routes loaded');
 const VM_PLAYLISTS_COLLECTION = 'videoManualPlaylists';
 const VM_PROJECTS_COLLECTION  = 'videoManualProjects';
 const VM_ASSETS_COLLECTION    = 'videoManualAssets';
-const VM_UPLOAD_FOLDERS       = new Set(['videoManuals', 'videoManualDeployed']);
+const VMSS_PLAYLISTS_COLLECTION = 'videoManualShotstackPlaylists';
+const VMSS_PROJECTS_COLLECTION = 'videoManualShotstackProjects';
+const VMSS_REVISIONS_COLLECTION = 'videoManualShotstackRevisions';
+const VMSS_ASSETS_COLLECTION = 'videoManualShotstackAssets';
+const VM_UPLOAD_FOLDERS       = new Set(['videoManuals', 'videoManuals/shotstackAssets', 'videoManualDeployed']);
 const VM_DEPLOYED_RETENTION_DAYS = 60;
 const VM_DEPLOYED_RETENTION_MS = VM_DEPLOYED_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 const VM_DEPLOYED_CLEANUP_INTERVAL_MS = 12 * 60 * 60 * 1000;
@@ -21544,7 +21555,545 @@ function vmGetRequester(req) {
   return { username: 'unknown', role: 'viewer' };
 }
 
+function vmssCountTracks(project) {
+  return Array.isArray(project?.edit?.timeline?.tracks) ? project.edit.timeline.tracks.length : 0;
+}
+
+function vmssAssetUsageMatches(project, asset) {
+  if (!project || !asset) return false;
+  const assetId = String(asset.assetId || asset._id || '');
+  const storagePath = String(asset.storagePath || '');
+  const downloadUrl = String(asset.downloadUrl || asset.url || '');
+  const haystack = JSON.stringify({ edit: project.edit || null, assetSourceMap: project.assetSourceMap || null });
+  if (assetId && haystack.includes(assetId)) return true;
+  if (storagePath && haystack.includes(storagePath)) return true;
+  if (downloadUrl && haystack.includes(downloadUrl)) return true;
+  return false;
+}
+
+async function vmssBuildAssetUsageMap(db, playlistId) {
+  const projects = await db.collection(VMSS_PROJECTS_COLLECTION)
+    .find({ playlistId, deleted: { $ne: true } }, { projection: { edit: 1, assetSourceMap: 1 } })
+    .toArray();
+  const assets = await db.collection(VMSS_ASSETS_COLLECTION)
+    .find({ playlistId }, { projection: { _id: 1, assetId: 1, storagePath: 1, downloadUrl: 1, url: 1 } })
+    .toArray();
+
+  const usageMap = new Map();
+  assets.forEach((asset) => {
+    const usageCount = projects.reduce((count, project) => (
+      count + (vmssAssetUsageMatches(project, asset) ? 1 : 0)
+    ), 0);
+    usageMap.set(String(asset._id), usageCount);
+  });
+
+  return usageMap;
+}
+
 // ── Playlists ────────────────────────────────────────────────────────────────
+
+// ==================== VIDEO MANUAL SHOTSTACK API ====================
+
+app.get('/api/video-manuals-studio/playlists', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const db = client.db(VM_DB);
+    const all = await db.collection(VMSS_PLAYLISTS_COLLECTION).find({}, {
+      projection: {
+        name: 1, description: 1, model: 1, privacy: 1, access: 1,
+        createdBy: 1, createdAt: 1, updatedAt: 1,
+      }
+    }).sort({ updatedAt: -1 }).toArray();
+
+    const visible = all.filter((playlist) => vmCanView(playlist, username, role));
+    const visibleIds = visible.map((playlist) => playlist._id).filter(Boolean);
+    const projectCounts = visibleIds.length
+      ? await db.collection(VMSS_PROJECTS_COLLECTION).aggregate([
+          { $match: { playlistId: { $in: visibleIds }, deleted: { $ne: true } } },
+          { $group: { _id: '$playlistId', projectCount: { $sum: 1 } } },
+        ]).toArray()
+      : [];
+    const projectCountMap = new Map(projectCounts.map((entry) => [String(entry._id), entry.projectCount || 0]));
+
+    res.json(visible.map((playlist) => ({
+      ...playlist,
+      projectCount: projectCountMap.get(String(playlist._id)) || 0,
+    })));
+  } catch (err) {
+    console.error('❌ video-manuals-studio playlists list error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/video-manuals-studio/playlists', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    if (!VM_MANAGE_ROLES.has(role)) {
+      return res.status(403).json({ error: 'Insufficient role to create playlists' });
+    }
+
+    const { name, description = '', privacy = 'internal', access = {}, model = null } = req.body || {};
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({ error: 'name is required' });
+    }
+
+    const now = new Date();
+    const doc = {
+      name: String(name).trim(),
+      description: String(description).trim(),
+      model: model ? String(model).trim() : null,
+      privacy,
+      access: {
+        editRoles: Array.isArray(access.editRoles) ? access.editRoles : ['admin', '課長', '部長', '係長'],
+        editUsers: Array.isArray(access.editUsers) ? access.editUsers : [],
+        viewRoles: Array.isArray(access.viewRoles) ? access.viewRoles : [],
+        viewUsers: Array.isArray(access.viewUsers) ? access.viewUsers : [],
+      },
+      createdBy: username,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const result = await client.db(VM_DB).collection(VMSS_PLAYLISTS_COLLECTION).insertOne(doc);
+    res.json({ insertedId: result.insertedId, ...doc });
+  } catch (err) {
+    console.error('❌ video-manuals-studio playlists create error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/video-manuals-studio/playlists/:id/projects', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const db = client.db(VM_DB);
+    const playlistId = new ObjectId(req.params.id);
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: playlistId });
+    if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
+    if (!vmCanView(playlist, username, role)) {
+      return res.status(403).json({ error: 'No view access to this playlist' });
+    }
+
+    const projects = await db.collection(VMSS_PROJECTS_COLLECTION).find(
+      { playlistId, deleted: { $ne: true } },
+      {
+        projection: {
+          title: 1, description: 1, order: 1, status: 1,
+          currentRevisionNumber: 1, lastRevisionId: 1,
+          createdBy: 1, createdAt: 1, updatedAt: 1,
+          lastEditedBy: 1, lastEditedAt: 1, edit: 1,
+        }
+      }
+    ).sort({ order: 1, createdAt: 1 }).toArray();
+
+    res.json(projects.map((project) => ({
+      ...project,
+      tracksCount: vmssCountTracks(project),
+    })));
+  } catch (err) {
+    console.error('❌ video-manuals-studio projects list error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/video-manuals-studio/playlists/:id/projects', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const db = client.db(VM_DB);
+    const playlistId = new ObjectId(req.params.id);
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: playlistId });
+    if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
+    if (!vmCanEdit(playlist, username, role)) {
+      return res.status(403).json({ error: 'No edit access to this playlist' });
+    }
+
+    const { title, description = '' } = req.body || {};
+    if (!title || !String(title).trim()) {
+      return res.status(400).json({ error: 'title is required' });
+    }
+
+    const lastProject = await db.collection(VMSS_PROJECTS_COLLECTION)
+      .find({ playlistId })
+      .sort({ order: -1 })
+      .limit(1)
+      .toArray();
+    const order = lastProject.length > 0 ? (lastProject[0].order || 0) + 1 : 0;
+    const now = new Date();
+    const doc = {
+      playlistId,
+      title: String(title).trim(),
+      description: String(description).trim(),
+      order,
+      status: 'draft',
+      schemaVersion: 1,
+      edit: null,
+      assetSourceMap: {},
+      settings: { output: null },
+      currentRevisionNumber: 0,
+      lastRevisionId: null,
+      createdBy: username,
+      createdAt: now,
+      updatedAt: now,
+      lastEditedAt: now,
+      lastEditedBy: username,
+    };
+
+    const result = await db.collection(VMSS_PROJECTS_COLLECTION).insertOne(doc);
+    res.json({ insertedId: result.insertedId, ...doc });
+  } catch (err) {
+    console.error('❌ video-manuals-studio projects create error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/video-manuals-studio/projects/:id', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const db = client.db(VM_DB);
+    const project = await db.collection(VMSS_PROJECTS_COLLECTION).findOne({ _id: new ObjectId(req.params.id) });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: project.playlistId });
+    if (!playlist || !vmCanView(playlist, username, role)) {
+      return res.status(403).json({ error: 'No view access to this project' });
+    }
+
+    res.json(project);
+  } catch (err) {
+    console.error('❌ video-manuals-studio project get error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.patch('/api/video-manuals-studio/projects/:id', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const db = client.db(VM_DB);
+    const projectId = new ObjectId(req.params.id);
+    const project = await db.collection(VMSS_PROJECTS_COLLECTION).findOne({ _id: projectId });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: project.playlistId });
+    if (!playlist || !vmCanEdit(playlist, username, role)) {
+      return res.status(403).json({ error: 'No edit access to this project' });
+    }
+
+    const allowed = ['title', 'description', 'status', 'edit', 'assetSourceMap', 'settings', 'schemaVersion', 'order'];
+    const now = new Date();
+    const updates = {
+      updatedAt: now,
+      lastEditedAt: now,
+      lastEditedBy: username,
+    };
+    allowed.forEach((key) => {
+      if (req.body[key] !== undefined) updates[key] = req.body[key];
+    });
+
+    await db.collection(VMSS_PROJECTS_COLLECTION).updateOne({ _id: projectId }, { $set: updates });
+    const updated = await db.collection(VMSS_PROJECTS_COLLECTION).findOne(
+      { _id: projectId },
+      { projection: { currentRevisionNumber: 1, lastRevisionId: 1, updatedAt: 1, lastEditedAt: 1 } }
+    );
+
+    res.json({
+      updated: true,
+      currentRevisionNumber: updated?.currentRevisionNumber || 0,
+      lastRevisionId: updated?.lastRevisionId || null,
+      updatedAt: updated?.updatedAt || now,
+      lastEditedAt: updated?.lastEditedAt || now,
+    });
+  } catch (err) {
+    console.error('❌ video-manuals-studio project patch error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/video-manuals-studio/projects/:id', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const db = client.db(VM_DB);
+    const projectId = new ObjectId(req.params.id);
+    const project = await db.collection(VMSS_PROJECTS_COLLECTION).findOne({ _id: projectId });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: project.playlistId });
+    if (!playlist || !vmCanEdit(playlist, username, role)) {
+      return res.status(403).json({ error: 'No edit access to this project' });
+    }
+
+    await db.collection(VMSS_PROJECTS_COLLECTION).updateOne(
+      { _id: projectId },
+      { $set: { deleted: true, deletedAt: new Date(), deletedBy: username } }
+    );
+    res.json({ deleted: true, softDelete: true });
+  } catch (err) {
+    console.error('❌ video-manuals-studio project delete error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/video-manuals-studio/projects/:id/restore', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const db = client.db(VM_DB);
+    const projectId = new ObjectId(req.params.id);
+    const project = await db.collection(VMSS_PROJECTS_COLLECTION).findOne({ _id: projectId });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: project.playlistId });
+    if (!playlist || !vmCanEdit(playlist, username, role)) {
+      return res.status(403).json({ error: 'No edit access to this project' });
+    }
+
+    await db.collection(VMSS_PROJECTS_COLLECTION).updateOne(
+      { _id: projectId },
+      { $unset: { deleted: '', deletedAt: '', deletedBy: '' } }
+    );
+    res.json({ restored: true });
+  } catch (err) {
+    console.error('❌ video-manuals-studio project restore error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/video-manuals-studio/projects/:id/permanent', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const allowedRoles = new Set(['admin', '課長', '係長', '部長']);
+    if (!allowedRoles.has(role)) {
+      return res.status(403).json({ error: 'Only admin, 課長, 係長, or 部長 can permanently delete projects.' });
+    }
+
+    const db = client.db(VM_DB);
+    const projectId = new ObjectId(req.params.id);
+    const project = await db.collection(VMSS_PROJECTS_COLLECTION).findOne({ _id: projectId });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: project.playlistId });
+    if (!playlist || !vmCanEdit(playlist, username, role)) {
+      return res.status(403).json({ error: 'No edit access to this project' });
+    }
+
+    await db.collection(VMSS_REVISIONS_COLLECTION).deleteMany({ projectId });
+    await db.collection(VMSS_PROJECTS_COLLECTION).deleteOne({ _id: projectId });
+    res.json({ deleted: true, permanent: true });
+  } catch (err) {
+    console.error('❌ video-manuals-studio project permanent-delete error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/video-manuals-studio/playlists/:id/trash', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const db = client.db(VM_DB);
+    const playlistId = new ObjectId(req.params.id);
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: playlistId });
+    if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
+    if (!vmCanView(playlist, username, role)) {
+      return res.status(403).json({ error: 'No view access to this playlist' });
+    }
+
+    const docs = await db.collection(VMSS_PROJECTS_COLLECTION).find(
+      { playlistId, deleted: true },
+      { projection: { title: 1, deletedAt: 1, deletedBy: 1, currentRevisionNumber: 1 } }
+    ).sort({ deletedAt: -1 }).toArray();
+
+    res.json(docs);
+  } catch (err) {
+    console.error('❌ video-manuals-studio trash error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/video-manuals-studio/projects/:id/revisions', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const db = client.db(VM_DB);
+    const projectId = new ObjectId(req.params.id);
+    const project = await db.collection(VMSS_PROJECTS_COLLECTION).findOne({ _id: projectId });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: project.playlistId });
+    if (!playlist || !vmCanEdit(playlist, username, role)) {
+      return res.status(403).json({ error: 'No edit access to this project' });
+    }
+
+    const snapshot = req.body?.snapshot;
+    if (!snapshot || typeof snapshot !== 'object') {
+      return res.status(400).json({ error: 'snapshot is required' });
+    }
+
+    const now = new Date();
+    const revisionNumber = (project.currentRevisionNumber || 0) + 1;
+    const revisionName = String(req.body?.revisionName || '').trim() || `Revision ${String(revisionNumber).padStart(2, '0')}`;
+    const revisionDoc = {
+      projectId,
+      playlistId: project.playlistId,
+      revisionName,
+      revisionNumber,
+      snapshot,
+      createdAt: now,
+      createdBy: username,
+    };
+
+    const insertResult = await db.collection(VMSS_REVISIONS_COLLECTION).insertOne(revisionDoc);
+    await db.collection(VMSS_PROJECTS_COLLECTION).updateOne(
+      { _id: projectId },
+      { $set: { currentRevisionNumber: revisionNumber, lastRevisionId: insertResult.insertedId, updatedAt: now } }
+    );
+
+    res.json({ revisionId: insertResult.insertedId, revisionNumber, revisionName });
+  } catch (err) {
+    console.error('❌ video-manuals-studio revision save error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/video-manuals-studio/projects/:id/revisions', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const db = client.db(VM_DB);
+    const projectId = new ObjectId(req.params.id);
+    const project = await db.collection(VMSS_PROJECTS_COLLECTION).findOne({ _id: projectId });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: project.playlistId });
+    if (!playlist || !vmCanView(playlist, username, role)) {
+      return res.status(403).json({ error: 'No view access' });
+    }
+
+    const docs = await db.collection(VMSS_REVISIONS_COLLECTION).find(
+      { projectId },
+      { projection: { projectId: 1, playlistId: 1, revisionName: 1, revisionNumber: 1, createdAt: 1, createdBy: 1 } }
+    ).sort({ revisionNumber: -1 }).toArray();
+
+    res.json(docs);
+  } catch (err) {
+    console.error('❌ video-manuals-studio revisions list error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/video-manuals-studio/revisions/:id', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const db = client.db(VM_DB);
+    const revision = await db.collection(VMSS_REVISIONS_COLLECTION).findOne({ _id: new ObjectId(req.params.id) });
+    if (!revision) return res.status(404).json({ error: 'Revision not found' });
+
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: revision.playlistId });
+    if (!playlist || !vmCanView(playlist, username, role)) {
+      return res.status(403).json({ error: 'No view access to this revision' });
+    }
+
+    res.json(revision);
+  } catch (err) {
+    console.error('❌ video-manuals-studio revision get error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/video-manuals-studio/playlists/:id/assets', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const db = client.db(VM_DB);
+    const playlistId = new ObjectId(req.params.id);
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: playlistId });
+    if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
+    if (!vmCanView(playlist, username, role)) {
+      return res.status(403).json({ error: 'No view access to this playlist' });
+    }
+
+    const usageMap = await vmssBuildAssetUsageMap(db, playlistId);
+    const assets = await db.collection(VMSS_ASSETS_COLLECTION).find({ playlistId }).sort({ uploadedAt: -1 }).toArray();
+    res.json(assets.map((asset) => {
+      const usageCount = usageMap.get(String(asset._id)) || 0;
+      return {
+        ...asset,
+        usageCount,
+        isUnused: usageCount === 0,
+        canDelete: usageCount === 0,
+      };
+    }));
+  } catch (err) {
+    console.error('❌ video-manuals-studio assets list error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/video-manuals-studio/upload-asset',
+  express.raw({ type: '*/*', limit: '500mb' }),
+  async (req, res) => {
+    try {
+      const { username, role } = vmGetRequester(req);
+      const rawPlaylistId = req.headers['x-playlist-id'];
+      if (!rawPlaylistId) {
+        return res.status(400).json({ error: 'x-playlist-id is required' });
+      }
+
+      const playlistId = new ObjectId(String(rawPlaylistId));
+      const playlist = await client.db(VM_DB).collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: playlistId });
+      if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
+      if (!vmCanEdit(playlist, username, role)) {
+        return res.status(403).json({ error: 'No edit access to this playlist' });
+      }
+
+      const fileName = vmNormalizeFileName(req.headers['x-file-name'] || `asset_${Date.now()}`);
+      const mimeType = req.headers['content-type'] || 'application/octet-stream';
+      const uploadFolder = 'videoManuals/shotstackAssets';
+      const buffer = req.body;
+      if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
+        return res.status(400).json({ error: 'No file data received' });
+      }
+
+      const assetId = new ObjectId().toString();
+      const uploadedAt = new Date();
+      const storagePath = `${uploadFolder}/${Date.now()}_${assetId}_${fileName}`;
+      const bucket = admin.storage().bucket();
+      const fileRef = bucket.file(storagePath);
+      const downloadToken = `vmss_${Date.now()}`;
+
+      await fileRef.save(buffer, {
+        metadata: {
+          contentType: mimeType,
+          metadata: { firebaseStorageDownloadTokens: downloadToken },
+        },
+      });
+
+      const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(storagePath)}?alt=media&token=${downloadToken}`;
+      const assetDoc = {
+        playlistId,
+        assetId,
+        name: fileName,
+        type: vmInferAssetTypeFromMimeType(mimeType),
+        mimeType,
+        storagePath,
+        downloadUrl: publicUrl,
+        size: buffer.length,
+        uploadedBy: username,
+        uploadedAt,
+      };
+
+      await client.db(VM_DB).collection(VMSS_ASSETS_COLLECTION).insertOne(assetDoc);
+      res.json({
+        assetId,
+        fileName,
+        mimeType,
+        storagePath,
+        uploadedAt: uploadedAt.toISOString(),
+        type: assetDoc.type,
+        url: publicUrl,
+      });
+    } catch (err) {
+      console.error('❌ video-manuals-studio upload error:', err);
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
+
+console.log('🎬 Video Manual Shotstack API routes loaded');
+
+// ==================== END VIDEO MANUAL SHOTSTACK API ====================
 
 
 function vmCanManageDeployedFiles(role) {
@@ -22012,6 +22561,97 @@ async function vmShotstackRenderToFirebase(project, revision) {
     shotstackStatus: render?.status || 'done',
   };
 }
+
+// POST /api/video-manuals/render
+// Queues a browser-export render on Shotstack using the sandbox/stage API key from .env.
+app.post('/api/video-manuals/render', async (req, res) => {
+  try {
+    if (!vmShotstackEnabled()) {
+      return res.status(503).json({ error: 'Shotstack is not configured on the server' });
+    }
+
+    const editJson = req.body?.editJson;
+    if (!editJson || typeof editJson !== 'object') {
+      return res.status(400).json({ error: 'editJson is required' });
+    }
+
+    const renderId = await vmShotstackQueueRender(editJson);
+    res.json({
+      renderId,
+      provider: 'shotstack',
+      stage: VM_SHOTSTACK_STAGE,
+      queued: true,
+    });
+  } catch (err) {
+    console.error('❌ video-manuals render queue error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/video-manuals/render-status/:id
+// Polls Shotstack for the current render state used by the VM2 export UI.
+app.get('/api/video-manuals/render-status/:id', async (req, res) => {
+  try {
+    if (!vmShotstackEnabled()) {
+      return res.status(503).json({ error: 'Shotstack is not configured on the server' });
+    }
+
+    const renderId = String(req.params.id || '').trim();
+    if (!renderId) {
+      return res.status(400).json({ error: 'render id is required' });
+    }
+
+    const result = await vmShotstackGetRender(renderId);
+    if (!result) {
+      return res.status(404).json({ error: 'Render not found' });
+    }
+
+    res.json({
+      renderId,
+      status: String(result.status || '').toLowerCase() || 'unknown',
+      progress: Number.isFinite(Number(result.progress)) ? Number(result.progress) : null,
+      downloadUrl: result.url || null,
+      message: result.error || result.message || null,
+      stage: VM_SHOTSTACK_STAGE,
+    });
+  } catch (err) {
+    console.error('❌ video-manuals render status error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/video-manuals/download/:id
+// Redirects the browser to the finished Shotstack output URL once rendering is complete.
+app.get('/api/video-manuals/download/:id', async (req, res) => {
+  try {
+    if (!vmShotstackEnabled()) {
+      return res.status(503).json({ error: 'Shotstack is not configured on the server' });
+    }
+
+    const renderId = String(req.params.id || '').trim();
+    if (!renderId) {
+      return res.status(400).json({ error: 'render id is required' });
+    }
+
+    const result = await vmShotstackGetRender(renderId);
+    if (!result) {
+      return res.status(404).json({ error: 'Render not found' });
+    }
+
+    const status = String(result.status || '').toLowerCase();
+    if (status !== 'done' || !result.url) {
+      return res.status(409).json({
+        error: 'Render is not ready for download',
+        status,
+      });
+    }
+
+    res.redirect(result.url);
+  } catch (err) {
+    console.error('❌ video-manuals download redirect error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
 // GET /api/video-playlists
 // Returns playlists the requester can view (summary fields only).
 app.get('/api/video-playlists', async (req, res) => {
@@ -23632,13 +24272,13 @@ app.post('/api/upload-video-manual',
 
       console.log(`✅ Video uploaded to Firebase Storage: ${storagePath}`);
 
-      // Register in the playlist asset pool if a playlistId was supplied.
-      if (rawPlaylistId && uploadFolder === 'videoManuals') {
+      // Register any playlist-scoped source asset so the Shotstack editor can reuse it.
+      if (rawPlaylistId && uploadFolder !== 'videoManualDeployed') {
         const assetDoc = {
           playlistId: new ObjectId(rawPlaylistId),
           assetId,
           name: fileName,
-          type: 'video',
+          type: vmInferAssetTypeFromMimeType(mimeType),
           mimeType,
           storagePath,
           downloadUrl: publicUrl,
