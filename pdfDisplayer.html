@@ -958,14 +958,17 @@
         function onManagedVideoTimeUpdate(video) {
             const activeVideo = getManualVideo();
             if (video !== activeVideo) return;
-            if (!manualState.project?.steps?.length) return;
 
             if (isManualFlattenedPlayback()) {
-                const timelineTime = Math.max(0, Math.min(video.currentTime || 0, manualState.duration || 0));
+                const effectiveDuration = Number(video.duration) || manualState.duration || 0;
+                const timelineTime = Math.max(0, Math.min(video.currentTime || 0, effectiveDuration || video.currentTime || 0));
+                manualState.duration = effectiveDuration;
                 manualState.currentTime = timelineTime;
-                const stepIndex = findManualStepIndexAtTime(timelineTime, manualState.project);
-                if (stepIndex >= 0) {
-                    manualState.currentStepIndex = stepIndex;
+                if (manualState.project?.steps?.length) {
+                    const stepIndex = findManualStepIndexAtTime(timelineTime, manualState.project);
+                    if (stepIndex >= 0) {
+                        manualState.currentStepIndex = stepIndex;
+                    }
                 }
                 updateManualStepLabel();
                 void postMachinePlayerState({
@@ -1874,6 +1877,16 @@
         }
 
         function updateManualStepLabel() {
+            if (isManualFlattenedPlayback() && manualState.project) {
+                const duration = manualState.duration || Number(getManualVideo()?.duration) || 0;
+                manualStepText.textContent = `Flattened video · ${formatManualTime(manualState.currentTime)} / ${formatManualTime(duration)}`;
+                if (manualStepDescription) {
+                    manualStepDescription.textContent = manualState.project.description || manualState.project.title || 'Flattened deployed video';
+                }
+                renderManualElements();
+                return;
+            }
+
             if (!manualState.project?.steps?.length) {
                 manualStepText.textContent = 'Waiting for project selection…';
                 if (manualStepDescription) {
@@ -2005,21 +2018,25 @@
         async function manualSeekTo(timelineTime, { autoplay = false } = {}) {
             if (!manualState.project) return;
 
-            timelineTime = Math.max(0, Math.min(timelineTime, manualState.duration));
-            const stepIndex = findManualStepIndexAtTime(timelineTime, manualState.project);
+            const video = getManualVideo();
+            const effectiveDuration = Number(video?.duration) || manualState.duration || 0;
+            timelineTime = Math.max(0, Math.min(timelineTime, effectiveDuration || timelineTime));
+
             const steps = manualState.project.steps || [];
+            const flattenedWithoutSteps = isManualFlattenedPlayback() && !steps.length;
+            const stepIndex = flattenedWithoutSteps ? -1 : findManualStepIndexAtTime(timelineTime, manualState.project);
             const step = stepIndex >= 0 ? steps[stepIndex] : steps[0];
-            if (!step) return;
+            if (!flattenedWithoutSteps && !step) return;
 
             manualState.currentStepIndex = stepIndex >= 0 ? stepIndex : 0;
             manualState.currentTime = timelineTime;
+            manualState.duration = effectiveDuration || manualState.duration;
 
             if (!ensureManualStepSource(step, timelineTime, { autoplay })) {
                 updateManualStepLabel();
                 return;
             }
 
-            const video = getManualVideo();
             if (!video) return;
 
             const nextTime = isManualFlattenedPlayback()
