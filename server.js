@@ -24306,53 +24306,111 @@ app.post('/api/video-projects/:id/render-shotstack', async (req, res) => {
 app.get('/api/factory/video-manuals', async (req, res) => {
   try {
     const model = String(req.query.model || '').trim();
+    const requestedSource = String(req.query.source || '').trim();
     if (!model) {
       return res.status(400).json({ error: 'model query parameter is required' });
     }
+    if (requestedSource && !['classic', 'shotstack-studio'].includes(requestedSource)) {
+      return res.status(400).json({ error: 'source must be either classic or shotstack-studio' });
+    }
 
     const db = client.db(VM_DB);
-    const playlists = await db.collection(VM_PLAYLISTS_COLLECTION)
-      .find({ model }, { projection: { name: 1, model: 1 } })
-      .toArray();
+    const [classicPlaylists, studioPlaylists] = await Promise.all([
+      requestedSource === 'shotstack-studio'
+        ? Promise.resolve([])
+        : db.collection(VM_PLAYLISTS_COLLECTION)
+          .find({ model }, { projection: { name: 1, model: 1 } })
+          .toArray(),
+      requestedSource === 'classic'
+        ? Promise.resolve([])
+        : db.collection(VMSS_PLAYLISTS_COLLECTION)
+          .find({ model }, { projection: { name: 1, model: 1 } })
+          .toArray(),
+    ]);
+
+    const playlists = [
+      ...classicPlaylists.map((playlist) => ({ ...playlist, source: 'classic' })),
+      ...studioPlaylists.map((playlist) => ({ ...playlist, source: 'shotstack-studio' })),
+    ];
 
     if (!playlists.length) {
       return res.json({ model, projects: [] });
     }
 
-    const playlistIds = playlists.map((playlist) => playlist._id);
-    const playlistById = new Map(playlists.map((playlist) => [String(playlist._id), playlist]));
-    const projects = await db.collection(VM_PROJECTS_COLLECTION).aggregate([
-      {
-        $match: {
-          playlistId: { $in: playlistIds },
-          deleted: { $ne: true },
-          deployedRevisionId: { $exists: true, $ne: null },
-        }
-      },
-      { $sort: { order: 1, updatedAt: -1, createdAt: 1 } },
-      {
-        $project: {
-          title: 1,
-          description: 1,
-          playlistId: 1,
-          thumbnailUrl: 1,
-          duration: 1,
-          updatedAt: 1,
-          deployedAt: 1,
-          deployedRevisionId: 1,
-          deployedRevisionNumber: 1,
-          deployedRevisionName: 1,
-          deployedVideoUrl: 1,
-          stepsCount: { $size: { $ifNull: ['$steps', []] } },
-        }
-      }
-    ]).toArray();
+    const classicPlaylistIds = classicPlaylists.map((playlist) => playlist._id);
+    const studioPlaylistIds = studioPlaylists.map((playlist) => playlist._id);
+    const playlistByKey = new Map(playlists.map((playlist) => [`${playlist.source}:${String(playlist._id)}`, playlist]));
+
+    const [classicProjects, studioProjects] = await Promise.all([
+      classicPlaylistIds.length
+        ? db.collection(VM_PROJECTS_COLLECTION).aggregate([
+          {
+            $match: {
+              playlistId: { $in: classicPlaylistIds },
+              deleted: { $ne: true },
+              deployedRevisionId: { $exists: true, $ne: null },
+            }
+          },
+          { $sort: { order: 1, updatedAt: -1, createdAt: 1 } },
+          {
+            $project: {
+              title: 1,
+              description: 1,
+              playlistId: 1,
+              thumbnailUrl: 1,
+              duration: 1,
+              updatedAt: 1,
+              deployedAt: 1,
+              deployedRevisionId: 1,
+              deployedRevisionNumber: 1,
+              deployedRevisionName: 1,
+              deployedVideoUrl: 1,
+              stepsCount: { $size: { $ifNull: ['$steps', []] } },
+            }
+          }
+        ]).toArray()
+        : Promise.resolve([]),
+      studioPlaylistIds.length
+        ? db.collection(VMSS_PROJECTS_COLLECTION).aggregate([
+          {
+            $match: {
+              playlistId: { $in: studioPlaylistIds },
+              deleted: { $ne: true },
+              deployedRevisionId: { $exists: true, $ne: null },
+            }
+          },
+          { $sort: { order: 1, updatedAt: -1, createdAt: 1 } },
+          {
+            $project: {
+              title: 1,
+              description: 1,
+              playlistId: 1,
+              thumbnailUrl: 1,
+              duration: 1,
+              updatedAt: 1,
+              deployedAt: 1,
+              deployedRevisionId: 1,
+              deployedRevisionNumber: 1,
+              deployedRevisionName: 1,
+              deployedVideoUrl: 1,
+              stepsCount: { $size: { $ifNull: ['$steps', []] } },
+            }
+          }
+        ]).toArray()
+        : Promise.resolve([]),
+    ]);
+
+    const projects = [
+      ...classicProjects.map((project) => ({ ...project, source: 'classic' })),
+      ...studioProjects.map((project) => ({ ...project, source: 'shotstack-studio' })),
+    ];
 
     res.json({
       model,
+      source: requestedSource || 'all',
       projects: projects.map((project) => ({
         ...project,
-        playlistName: playlistById.get(String(project.playlistId))?.name || '',
+        playlistName: playlistByKey.get(`${project.source}:${String(project.playlistId)}`)?.name || '',
       })),
     });
   } catch (err) {
@@ -24366,15 +24424,19 @@ app.get('/api/factory/video-manuals', async (req, res) => {
 app.get('/api/factory/video-manuals/projects/:id', async (req, res) => {
   try {
     const db = client.db(VM_DB);
-    const projects = db.collection(VM_PROJECTS_COLLECTION);
-    const revisions = db.collection(VM_REVISIONS_COLLECTION);
     const projectId = new ObjectId(req.params.id);
-    const project = await projects.findOne({ _id: projectId, deleted: { $ne: true } });
+    const [classicProject, studioProject] = await Promise.all([
+      db.collection(VM_PROJECTS_COLLECTION).findOne({ _id: projectId, deleted: { $ne: true } }),
+      db.collection(VMSS_PROJECTS_COLLECTION).findOne({ _id: projectId, deleted: { $ne: true } }),
+    ]);
+    const isStudioProject = !classicProject && !!studioProject;
+    const project = classicProject || studioProject;
     if (!project) return res.status(404).json({ error: 'Project not found' });
     if (!project.deployedRevisionId) {
       return res.status(404).json({ error: 'No deployed revision for this project' });
     }
 
+    const revisions = db.collection(isStudioProject ? VMSS_REVISIONS_COLLECTION : VM_REVISIONS_COLLECTION);
     const revision = await revisions.findOne({ _id: new ObjectId(project.deployedRevisionId), projectId });
     if (!revision?.snapshot) {
       return res.status(404).json({ error: 'Deployed revision snapshot not found' });
@@ -24387,6 +24449,7 @@ app.get('/api/factory/video-manuals/projects/:id', async (req, res) => {
 
     res.json({
       projectId: project._id,
+      source: isStudioProject ? 'shotstack-studio' : 'classic',
       title: project.title,
       playlistId: project.playlistId,
       thumbnailUrl: project.thumbnailUrl || null,
