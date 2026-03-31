@@ -24568,7 +24568,7 @@ console.log('🎬 Video Manual Playlists/Projects/Assets API routes loaded');
 // Route: POST /api/upload-video-manual
 // Headers: X-File-Name: <filename>  Content-Type: video/*
 // Body: raw binary file bytes
-app.get('/api/video-manual-media', async (req, res) => {
+app.get(['/api/video-manual-media', '/api/video-manual-media/:assetName'], async (req, res) => {
   try {
     const rawUrl = String(req.query.url || '');
     if (!rawUrl) {
@@ -24576,12 +24576,11 @@ app.get('/api/video-manual-media', async (req, res) => {
     }
 
     const assetUrl = new URL(rawUrl);
-    const allowedHosts = new Set([
-      'firebasestorage.googleapis.com',
-      'storage.googleapis.com',
-    ]);
+    const isAllowedHost = assetUrl.hostname === 'firebasestorage.googleapis.com'
+      || assetUrl.hostname === 'storage.googleapis.com'
+      || assetUrl.hostname.endsWith('.amazonaws.com');
 
-    if (!allowedHosts.has(assetUrl.hostname)) {
+    if (!isAllowedHost) {
       return res.status(400).json({ error: 'Unsupported media host' });
     }
 
