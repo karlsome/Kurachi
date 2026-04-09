@@ -6005,6 +6005,11 @@ app.post('/api/approval-paginate', async (req, res) => {
       matchStage.工場 = { $in: factoryAccess };
     }
 
+    const timezoneOffset = filters.timezoneOffset || -540;
+    const offsetHours = -timezoneOffset / 60;
+    const offsetSign = offsetHours >= 0 ? '+' : '';
+    const offsetString = `${offsetSign}${String(Math.floor(Math.abs(offsetHours))).padStart(2, '0')}:${String(Math.round((Math.abs(offsetHours) % 1) * 60)).padStart(2, '0')}`;
+
     // Add non-date filters
     Object.keys(filters).forEach(key => {
       if (key !== 'Date' && key !== 'timezoneOffset') {
@@ -6017,12 +6022,6 @@ app.post('/api/approval-paginate', async (req, res) => {
     let dateMatchStage = {};
     if (filters.Date) {
       const targetDate = filters.Date; // Format: "YYYY-MM-DD"
-      const timezoneOffset = filters.timezoneOffset || -540; // Default to JST (-540 min = UTC+9)
-      
-      // Convert timezone offset to hours (e.g., -480 min = -8 hours = PST)
-      const offsetHours = -timezoneOffset / 60;
-      const offsetSign = offsetHours >= 0 ? '+' : '';
-      const offsetString = `${offsetSign}${String(Math.floor(Math.abs(offsetHours))).padStart(2, '0')}:${String(Math.abs(offsetHours) % 1 * 60).padStart(2, '0')}`;
       
       // Create date range in user's timezone
       const startOfDayLocal = new Date(targetDate + 'T00:00:00' + offsetString);
@@ -6052,13 +6051,14 @@ app.post('/api/approval-paginate', async (req, res) => {
           _objectIdDate: {
             $dateToString: {
               format: "%Y-%m-%d",
-              date: { $toDate: "$_id" }
+              date: { $toDate: "$_id" },
+              timezone: offsetString,
             }
           },
           // Flag if user-entered Date doesn't match ObjectId date
           _hasDateMismatch: {
             $cond: {
-              if: { $ne: ["$Date", { $dateToString: { format: "%Y-%m-%d", date: { $toDate: "$_id" } } }] },
+              if: { $ne: ["$Date", { $dateToString: { format: "%Y-%m-%d", date: { $toDate: "$_id" }, timezone: offsetString } }] },
               then: 1,
               else: 0
             }
@@ -6067,7 +6067,8 @@ app.post('/api/approval-paginate', async (req, res) => {
           _objectIdTime: {
             $dateToString: {
               format: "%H:%M",
-              date: { $toDate: "$_id" }
+              date: { $toDate: "$_id" },
+              timezone: offsetString,
             }
           },
           // Flag if Time_end is off by more than 30 minutes
@@ -6096,8 +6097,29 @@ app.post('/api/approval-paginate', async (req, res) => {
                             // Convert ObjectId time to minutes
                             {
                               $add: [
-                                { $multiply: [{ $hour: { $toDate: "$_id" } }, 60] },
-                                { $minute: { $toDate: "$_id" } }
+                                {
+                                  $multiply: [
+                                    {
+                                      $toInt: {
+                                        $dateToString: {
+                                          format: "%H",
+                                          date: { $toDate: "$_id" },
+                                          timezone: offsetString,
+                                        }
+                                      }
+                                    },
+                                    60
+                                  ]
+                                },
+                                {
+                                  $toInt: {
+                                    $dateToString: {
+                                      format: "%M",
+                                      date: { $toDate: "$_id" },
+                                      timezone: offsetString,
+                                    }
+                                  }
+                                }
                               ]
                             }
                           ]
@@ -8980,7 +9002,24 @@ app.post("/login", async (req, res) => {
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
-    res.json({ username: user.username, role: user.role });
+    const assignedFactories = Array.isArray(user.工場 || user.factory)
+      ? (user.工場 || user.factory).filter(Boolean)
+      : user.工場 || user.factory
+        ? [user.工場 || user.factory]
+        : [];
+
+    res.json({
+      _id: user._id,
+      username: user.username,
+      role: user.role,
+      firstName: user.firstName || "",
+      lastName: user.lastName || "",
+      email: user.email || "",
+      factory: assignedFactories,
+      工場: assignedFactories,
+      department: user.department || user.部署 || "",
+      部署: user.部署 || user.department || "",
+    });
   } catch (err) {
     console.error("Login error:", err);
     res.status(500).json({ error: "Server error" });
