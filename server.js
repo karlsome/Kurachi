@@ -15220,57 +15220,74 @@ function normalizeInventoryDateValue(value) {
 }
 
 function matchesInventoryAdvancedFilters(item = {}, filters = []) {
-  return filters.every((filter) => {
+  if (!filters || filters.length === 0) return true;
+
+  // Group filters by field - same field filters use OR, different fields use AND
+  const groupedFilters = new Map();
+  filters.forEach((filter) => {
     const field = filter?.field;
-    const operator = filter?.operator;
-    const type = filter?.type;
-    const rawValue = item?.[field];
-
-    if (!field || !operator) return true;
-
-    if (type === 'number') {
-      const itemValue = Number(rawValue) || 0;
-      const nextValue = Number(filter?.value);
-      const nextFrom = Number(filter?.valueFrom);
-      const nextTo = Number(filter?.valueTo);
-
-      if (operator === 'equals') return itemValue === nextValue;
-      if (operator === 'greater') return itemValue > nextValue;
-      if (operator === 'less') return itemValue < nextValue;
-      if (operator === 'range') return itemValue >= nextFrom && itemValue <= nextTo;
-      return true;
+    if (!field) return;
+    if (!groupedFilters.has(field)) {
+      groupedFilters.set(field, []);
     }
+    groupedFilters.get(field).push(filter);
+  });
 
-    if (type === 'date') {
-      const itemDate = normalizeInventoryDateValue(rawValue);
-      if (!itemDate) return false;
+  // Check that every field group has at least one matching filter (AND across fields)
+  return Array.from(groupedFilters.values()).every((fieldFilters) => {
+    // Within a field group, check if any filter matches (OR within field)
+    return fieldFilters.some((filter) => {
+      const field = filter?.field;
+      const operator = filter?.operator;
+      const type = filter?.type;
+      const rawValue = item?.[field];
 
-      if (operator === 'equals') return itemDate === filter?.value;
-      if (operator === 'greater') return itemDate > filter?.value;
-      if (operator === 'less') return itemDate < filter?.value;
-      if (operator === 'range') {
-        return itemDate >= filter?.valueFrom && itemDate <= filter?.valueTo;
+      if (!field || !operator) return true;
+
+      if (type === 'number') {
+        const itemValue = Number(rawValue) || 0;
+        const nextValue = Number(filter?.value);
+        const nextFrom = Number(filter?.valueFrom);
+        const nextTo = Number(filter?.valueTo);
+
+        if (operator === 'equals') return itemValue === nextValue;
+        if (operator === 'greater') return itemValue > nextValue;
+        if (operator === 'less') return itemValue < nextValue;
+        if (operator === 'range') return itemValue >= nextFrom && itemValue <= nextTo;
+        return true;
       }
+
+      if (type === 'date') {
+        const itemDate = normalizeInventoryDateValue(rawValue);
+        if (!itemDate) return false;
+
+        if (operator === 'equals') return itemDate === filter?.value;
+        if (operator === 'greater') return itemDate > filter?.value;
+        if (operator === 'less') return itemDate < filter?.value;
+        if (operator === 'range') {
+          return itemDate >= filter?.valueFrom && itemDate <= filter?.valueTo;
+        }
+        return true;
+      }
+
+      const itemValue = String(rawValue ?? '').trim().toLowerCase();
+
+      if (operator === 'in') {
+        const candidateValues = Array.isArray(filter?.value)
+          ? filter.value
+          : String(filter?.value || '')
+              .split(',')
+              .map((value) => value.trim())
+              .filter(Boolean);
+
+        return candidateValues.some((value) => itemValue === String(value).trim().toLowerCase());
+      }
+
+      const compareValue = String(filter?.value || '').trim().toLowerCase();
+      if (operator === 'equals') return itemValue === compareValue;
+      if (operator === 'contains') return itemValue.includes(compareValue);
       return true;
-    }
-
-    const itemValue = String(rawValue ?? '').trim().toLowerCase();
-
-    if (operator === 'in') {
-      const candidateValues = Array.isArray(filter?.value)
-        ? filter.value
-        : String(filter?.value || '')
-            .split(',')
-            .map((value) => value.trim())
-            .filter(Boolean);
-
-      return candidateValues.some((value) => itemValue === String(value).trim().toLowerCase());
-    }
-
-    const compareValue = String(filter?.value || '').trim().toLowerCase();
-    if (operator === 'equals') return itemValue === compareValue;
-    if (operator === 'contains') return itemValue.includes(compareValue);
-    return true;
+    });
   });
 }
 
