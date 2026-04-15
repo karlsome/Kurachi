@@ -14687,19 +14687,24 @@ app.post("/api/inventory-management", async (req, res) => {
 
           // Get filtered results
           const inventoryItems = await inventoryCollection.aggregate(pipeline).toArray();
+
+          const advancedFilters = Array.isArray(filters.advancedFilters) ? filters.advancedFilters : [];
+          const filteredInventoryItems = advancedFilters.length
+            ? inventoryItems.filter((item) => matchesInventoryAdvancedFilters(item, advancedFilters))
+            : inventoryItems;
           
           // Debug logging
-          console.log(`📊 Found ${inventoryItems.length} inventory items`);
-          if (inventoryItems.length > 0) {
-            console.log('📝 Sample inventory item:', JSON.stringify(inventoryItems[0], null, 2));
+          console.log(`📊 Found ${filteredInventoryItems.length} inventory items`);
+          if (filteredInventoryItems.length > 0) {
+            console.log('📝 Sample inventory item:', JSON.stringify(filteredInventoryItems[0], null, 2));
           }
 
           // Calculate summary statistics
-          const summary = calculateInventorySummary(inventoryItems);
+          const summary = calculateInventorySummary(filteredInventoryItems);
 
           // Apply sorting
           if (sort.column) {
-            inventoryItems.sort((a, b) => {
+            filteredInventoryItems.sort((a, b) => {
               let aVal = a[sort.column];
               let bVal = b[sort.column];
               
@@ -14723,11 +14728,11 @@ app.post("/api/inventory-management", async (req, res) => {
           }
 
           // Apply pagination
-          const totalItems = inventoryItems.length;
+          const totalItems = filteredInventoryItems.length;
           const totalPages = Math.ceil(totalItems / limit);
           const startIndex = (page - 1) * limit;
           const endIndex = startIndex + limit;
-          const paginatedItems = inventoryItems.slice(startIndex, endIndex);
+          const paginatedItems = filteredInventoryItems.slice(startIndex, endIndex);
 
           // Format data for frontend
           const formattedItems = paginatedItems.map(item => ({
@@ -14812,12 +14817,14 @@ app.post("/api/inventory-management", async (req, res) => {
 
           const partNumbers = [...new Set(latestInventory.map(item => item.品番).filter(Boolean))].sort();
           const backNumbers = [...new Set(latestInventory.map(item => item.背番号).filter(Boolean))].sort();
+          const factories = [...new Set(latestInventory.map(item => item.工場).filter(Boolean))].sort();
 
           res.json({
             success: true,
             data: {
               partNumbers: partNumbers,
-              backNumbers: backNumbers
+              backNumbers: backNumbers,
+              factories: factories
             }
           });
 
@@ -15126,7 +15133,9 @@ app.post("/api/inventory-management", async (req, res) => {
           if (filters['品番']) {
             matchStage['品番'] = filters['品番'];
           }
-          if (filters['背番号']) {
+          if (filters.sebanggoArray && Array.isArray(filters.sebanggoArray) && filters.sebanggoArray.length > 0) {
+            matchStage['背番号'] = { $in: filters.sebanggoArray };
+          } else if (filters['背番号']) {
             matchStage['背番号'] = filters['背番号'];
           }
           if (filters.search) {
@@ -15142,9 +15151,13 @@ app.post("/api/inventory-management", async (req, res) => {
           }
 
           const inventoryItems = await inventoryCollection.aggregate(pipeline).toArray();
+          const advancedFilters = Array.isArray(filters.advancedFilters) ? filters.advancedFilters : [];
+          const filteredInventoryItems = advancedFilters.length
+            ? inventoryItems.filter((item) => matchesInventoryAdvancedFilters(item, advancedFilters))
+            : inventoryItems;
 
           // Format data for export
-          const exportData = inventoryItems.map(item => ({
+          const exportData = filteredInventoryItems.map(item => ({
             品番: item.品番,
             背番号: item.背番号,
             physicalQuantity: item.physicalQuantity || item.runningQuantity || 0,
@@ -15192,6 +15205,73 @@ function calculateInventorySummary(inventoryItems) {
   });
 
   return summary;
+}
+
+function toInventoryDate(value) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function normalizeInventoryDateValue(value) {
+  const date = toInventoryDate(value);
+  if (!date) return "";
+  return date.toISOString().split('T')[0];
+}
+
+function matchesInventoryAdvancedFilters(item = {}, filters = []) {
+  return filters.every((filter) => {
+    const field = filter?.field;
+    const operator = filter?.operator;
+    const type = filter?.type;
+    const rawValue = item?.[field];
+
+    if (!field || !operator) return true;
+
+    if (type === 'number') {
+      const itemValue = Number(rawValue) || 0;
+      const nextValue = Number(filter?.value);
+      const nextFrom = Number(filter?.valueFrom);
+      const nextTo = Number(filter?.valueTo);
+
+      if (operator === 'equals') return itemValue === nextValue;
+      if (operator === 'greater') return itemValue > nextValue;
+      if (operator === 'less') return itemValue < nextValue;
+      if (operator === 'range') return itemValue >= nextFrom && itemValue <= nextTo;
+      return true;
+    }
+
+    if (type === 'date') {
+      const itemDate = normalizeInventoryDateValue(rawValue);
+      if (!itemDate) return false;
+
+      if (operator === 'equals') return itemDate === filter?.value;
+      if (operator === 'greater') return itemDate > filter?.value;
+      if (operator === 'less') return itemDate < filter?.value;
+      if (operator === 'range') {
+        return itemDate >= filter?.valueFrom && itemDate <= filter?.valueTo;
+      }
+      return true;
+    }
+
+    const itemValue = String(rawValue ?? '').trim().toLowerCase();
+
+    if (operator === 'in') {
+      const candidateValues = Array.isArray(filter?.value)
+        ? filter.value
+        : String(filter?.value || '')
+            .split(',')
+            .map((value) => value.trim())
+            .filter(Boolean);
+
+      return candidateValues.some((value) => itemValue === String(value).trim().toLowerCase());
+    }
+
+    const compareValue = String(filter?.value || '').trim().toLowerCase();
+    if (operator === 'equals') return itemValue === compareValue;
+    if (operator === 'contains') return itemValue.includes(compareValue);
+    return true;
+  });
 }
 
 // Add Inventory API Route
