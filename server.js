@@ -11979,9 +11979,14 @@ app.post("/api/noda-requests", async (req, res) => {
         try {
           // Build MongoDB query from filters
           let query = {};
+          const today = new Date();
+          const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
           // Status filter
-          if (filters.status) {
+          if (filters.pastDeadline) {
+            query.status = { $nin: ['completed', 'cancelled'] };
+            query['納入指示日'] = { ...(query['納入指示日'] || {}), $lt: todayStr };
+          } else if (filters.status) {
             query.status = filters.status;
           }
 
@@ -11997,7 +12002,7 @@ app.post("/api/noda-requests", async (req, res) => {
 
           // Date range filter (using 納入指示日 deadline field)
           if (filters.dateRange) {
-            query['納入指示日'] = {};
+            query['納入指示日'] = query['納入指示日'] || {};
             if (filters.dateRange.from) {
               query['納入指示日'].$gte = filters.dateRange.from;
             }
@@ -12043,10 +12048,8 @@ app.post("/api/noda-requests", async (req, res) => {
           // Calculate which requests can actually be picked based on PHYSICAL inventory
           // Priority: deadline date (納入指示日) - earliest deadline first
           // IMPORTANT: Only consider requests with deadline >= today (ignore past deadlines)
-          
+
           // Get today's date in YYYY-MM-DD format (matching the 納入指示日 format)
-          const today = new Date();
-          const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
           
           // Step 1: Get ALL active requests with deadline >= today, sorted by deadline (for FIFO calculation)
           const allActiveRequests = await requestsCollection
@@ -12259,8 +12262,36 @@ app.post("/api/noda-requests", async (req, res) => {
 
           // Calculate statistics - use base query WITHOUT status filter
           // so card counts always show totals, not filtered counts
-          const statsQuery = { ...query };
-          delete statsQuery.status; // Remove status filter for statistics
+          const statsQuery = {};
+
+          if (filters['品番']) {
+            statsQuery['品番'] = filters['品番'];
+          }
+
+          if (filters['背番号']) {
+            statsQuery['背番号'] = filters['背番号'];
+          }
+
+          if (filters.dateRange) {
+            statsQuery['納入指示日'] = {};
+            if (filters.dateRange.from) {
+              statsQuery['納入指示日'].$gte = filters.dateRange.from;
+            }
+            if (filters.dateRange.to) {
+              statsQuery['納入指示日'].$lte = filters.dateRange.to;
+            }
+          }
+
+          if (filters.search) {
+            const searchRegex = new RegExp(filters.search, 'i');
+            statsQuery.$or = [
+              { 'requestNumber': searchRegex },
+              { '品番': searchRegex },
+              { '背番号': searchRegex },
+              { 'status': searchRegex }
+            ];
+          }
+
           const statistics = await calculateNodaStatistics(requestsCollection, statsQuery);
 
           res.json({
@@ -14451,8 +14482,13 @@ app.post("/api/noda-requests", async (req, res) => {
         try {
           // Build query from filters (same as getNodaRequests)
           let query = {};
+          const today = new Date();
+          const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
-          if (filters.status) {
+          if (filters.pastDeadline) {
+            query.status = { $nin: ['completed', 'cancelled'] };
+            query['納入指示日'] = { ...(query['納入指示日'] || {}), $lt: todayStr };
+          } else if (filters.status) {
             query.status = filters.status;
           }
 
@@ -14466,7 +14502,7 @@ app.post("/api/noda-requests", async (req, res) => {
 
           // Date range filter (using 納入指示日 deadline field)
           if (filters.dateRange) {
-            query['納入指示日'] = {};
+            query['納入指示日'] = query['納入指示日'] || {};
             if (filters.dateRange.from) {
               query['納入指示日'].$gte = filters.dateRange.from;
             }
@@ -14517,11 +14553,29 @@ app.post("/api/noda-requests", async (req, res) => {
  */
 async function calculateNodaStatistics(collection, baseQuery = {}) {
   try {
+    const today = new Date();
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     const stats = await collection.aggregate([
       { $match: baseQuery },
       {
+        $addFields: {
+          computedStatStatus: {
+            $cond: [
+              {
+                $and: [
+                  { $lt: ['$納入指示日', todayStr] },
+                  { $not: [{ $in: ['$status', ['completed', 'cancelled']] }] }
+                ]
+              },
+              'past-deadline',
+              '$status'
+            ]
+          }
+        }
+      },
+      {
         $group: {
-          _id: "$status",
+          _id: "$computedStatStatus",
           count: { $sum: 1 }
         }
       }
@@ -14532,6 +14586,7 @@ async function calculateNodaStatistics(collection, baseQuery = {}) {
       pending: 0,
       'in-progress': 0,
       completed: 0,
+      'past-deadline': 0,
       'partial-inventory': 0,
       cancelled: 0
     };
@@ -14547,7 +14602,7 @@ async function calculateNodaStatistics(collection, baseQuery = {}) {
     return statistics;
   } catch (error) {
     console.error("Error calculating NODA statistics:", error);
-    return { all: 0, pending: 0, 'in-progress': 0, completed: 0, 'partial-inventory': 0, cancelled: 0 };
+    return { all: 0, pending: 0, 'in-progress': 0, completed: 0, 'past-deadline': 0, 'partial-inventory': 0, cancelled: 0 };
   }
 }
 
