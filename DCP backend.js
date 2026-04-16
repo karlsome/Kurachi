@@ -246,6 +246,7 @@ async function logTabletAction(action, status = 'in-progress', additionalData = 
     const 品番 = document.getElementById('product-number')?.value || '';
     const 工場 = document.getElementById('selected工場')?.value || '';
     const 設備 = document.getElementById('process')?.value || '';
+    const Worker_Name = document.getElementById('Machine Operator')?.value || '';
     const lotNumber = document.getElementById('Lot No.')?.value || '';
     
     // Don't log if machine info is missing - tablet not initialized yet
@@ -289,6 +290,7 @@ async function logTabletAction(action, status = 'in-progress', additionalData = 
       品番,
       工場,
       設備,
+      Worker_Name,
       Action: action,
       Status: status,
       sessionID: sessionID,
@@ -314,11 +316,12 @@ async function logTabletAction(action, status = 'in-progress', additionalData = 
       const 品番 = document.getElementById('product-number')?.value || '';
       const 工場 = document.getElementById('selected工場')?.value || '';
       const 設備 = document.getElementById('process')?.value || '';
+      const Worker_Name = document.getElementById('Machine Operator')?.value || '';
       const sessionID = getSessionID();
       
       if (設備 && sessionID) {
         addToLogQueue({
-          背番号, 品番, 工場, 設備,
+          背番号, 品番, 工場, 設備, Worker_Name,
           Action: action,
           Status: status,
           sessionID: sessionID,
@@ -9213,6 +9216,7 @@ document.getElementById('startStep1Scan').addEventListener('click', function(eve
               materialCode: currentProductDetails.materialCode,
               factory: currentFactory,
               工場: currentFactory,
+              Worker_Name: document.getElementById('Machine Operator')?.value || '',
               sessionID: newSessionID
             }
           })
