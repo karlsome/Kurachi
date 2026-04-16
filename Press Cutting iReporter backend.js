@@ -2,6 +2,9 @@
 const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
 
+//add this to the end of the link to reveal debug info: 
+// ?tabletLogDebug=1 or &tabletLogDebug=1
+
 // link for pictures database
 const picURL = 'https://script.google.com/macros/s/AKfycbwHUW1ia8hNZG-ljsguNq8K4LTPVnB6Ng_GLXIHmtJTdUgGGd2WoiQo9ToF-7PvcJh9bA/exec';
 
@@ -14,6 +17,788 @@ const MAX_RECENT_WORKERS = 6;
 let sebanggoData = [];
 const RECENT_SEBANGGO_KEY = 'recentSebanggoSelection';
 const MAX_RECENT_SEBANGGO = 6;
+
+// ============================================
+// SESSION ID MANAGEMENT SYSTEM
+// ============================================
+function getSessionID() {
+  return localStorage.getItem(`${uniquePrefix}sessionID`);
+}
+
+function setSessionID(sessionID) {
+  localStorage.setItem(`${uniquePrefix}sessionID`, sessionID);
+  console.log(`📌 SessionID saved to localStorage: ${sessionID}`);
+}
+
+function clearSessionID() {
+  const oldSessionID = localStorage.getItem(`${uniquePrefix}sessionID`);
+  localStorage.removeItem(`${uniquePrefix}sessionID`);
+  console.log(`🗑️ SessionID cleared from localStorage: ${oldSessionID}`);
+}
+
+async function generateSessionID(背番号, 設備, 工場, date) {
+  try {
+    const response = await fetch(
+      `${serverURL}/api/generate-session-id?背番号=${encodeURIComponent(背番号)}&設備=${encodeURIComponent(設備)}&工場=${encodeURIComponent(工場)}&Date=${encodeURIComponent(date)}`
+    );
+    const data = await response.json();
+
+    if (data.success) {
+      console.log(`✅ Generated new sessionID: ${data.sessionID} (Order #${data.orderNumber})`);
+      return data.sessionID;
+    }
+
+    console.error('❌ Failed to generate sessionID:', data.error);
+    return null;
+  } catch (error) {
+    console.error('❌ Error generating sessionID:', error);
+    return null;
+  }
+}
+
+function doesSessionMatchCurrentContext(sessionID, 背番号, 設備, 工場) {
+  if (!sessionID || !背番号 || !設備 || !工場) {
+    return false;
+  }
+
+  return sessionID.startsWith(`${背番号}_${設備}_${工場}_`);
+}
+
+async function ensureTabletSessionStarted(trigger = 'product-context') {
+  const 背番号 = getSebanggoValue();
+  const 工場 = document.getElementById('selected工場')?.value || '';
+  const 設備 = document.getElementById('process')?.value || '';
+  const date = document.getElementById('Lot No.')?.value || getTodayDateString();
+  const existingSessionID = getSessionID();
+
+  if (!背番号 || !工場 || !設備) {
+    console.warn(`⚠️ Cannot start tablet session yet (${trigger})`, { 背番号, 工場, 設備 });
+    return { sessionID: null, created: false };
+  }
+
+  if (doesSessionMatchCurrentContext(existingSessionID, 背番号, 設備, 工場)) {
+    return { sessionID: existingSessionID, created: false };
+  }
+
+  if (existingSessionID) {
+    console.log(`🔄 Replacing stale sessionID for ${背番号}: ${existingSessionID}`);
+    clearSessionID();
+  }
+
+  const newSessionID = await generateSessionID(背番号, 設備, 工場, date);
+  if (!newSessionID) {
+    console.warn(`⚠️ Failed to start tablet session (${trigger})`);
+    return { sessionID: null, created: false };
+  }
+
+  setSessionID(newSessionID);
+  console.log(`✅ Tablet session started (${trigger}): ${newSessionID}`);
+  return { sessionID: newSessionID, created: true };
+}
+
+// ============================================
+// TABLET LOGGING SYSTEM WITH 30-SECOND BATCH UPLOAD
+// ============================================
+let pendingTabletLogBatch = [];
+let tabletLogFlushTimer = null;
+let scheduledTabletLogFlushAt = 0;
+let tabletLogRetryAttempt = 0;
+let isFlushingTabletLogBatch = false;
+let tabletLogStatusBadge = null;
+let tabletLogStatusInterval = null;
+let lastTabletLogUploadAt = '';
+let lastTabletLogStatusMessage = 'idle';
+let isTabletLogBatchEndpointAvailable = null;
+
+const TABLET_LOG_BATCH_FLUSH_MS = 30000;
+const TABLET_LOG_RECOVERY_FLUSH_MS = 3000;
+const TABLET_LOG_RETRY_BASE_DELAY_MS = 30000;
+const TABLET_LOG_RETRY_MAX_DELAY_MS = 5 * 60 * 1000;
+const TABLET_LOG_REQUEST_TIMEOUT_MS = 15000;
+
+function getLogQueueKey() {
+  const currentPageName = location.pathname.split('/').pop();
+  return `${currentPageName}_tabletLogBatchQueue`;
+}
+
+function isTabletLogDebugStatusEnabled() {
+  const params = new URLSearchParams(window.location.search);
+  const queryFlag = params.get('tabletLogDebug');
+  const storedFlag = localStorage.getItem('tabletLogDebugStatusVisible');
+
+  return queryFlag === '1'
+    || queryFlag === 'true'
+    || storedFlag === 'true';
+}
+
+function formatTabletLogElapsed(ms) {
+  if (!Number.isFinite(ms) || ms <= 0) {
+    return '0s';
+  }
+
+  const totalSeconds = Math.ceil(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  if (minutes <= 0) {
+    return `${seconds}s`;
+  }
+
+  return `${minutes}m ${seconds}s`;
+}
+
+function formatTabletLogClock(isoString) {
+  if (!isoString) {
+    return '--:--:--';
+  }
+
+  const parsed = new Date(isoString);
+  if (Number.isNaN(parsed.getTime())) {
+    return '--:--:--';
+  }
+
+  return parsed.toLocaleTimeString('ja-JP', {
+    hour12: false,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  });
+}
+
+function ensureTabletLogStatusBadge() {
+  if (!isTabletLogDebugStatusEnabled()) {
+    return null;
+  }
+
+  if (tabletLogStatusBadge) {
+    return tabletLogStatusBadge;
+  }
+
+  const styleId = 'tablet-log-status-style';
+  if (!document.getElementById(styleId)) {
+    const style = document.createElement('style');
+    style.id = styleId;
+    style.textContent = `
+      #tablet-log-status-badge {
+        position: fixed;
+        right: 10px;
+        bottom: 10px;
+        z-index: 9999;
+        min-width: 148px;
+        max-width: 180px;
+        padding: 8px 10px;
+        border-radius: 10px;
+        background: rgba(8, 22, 36, 0.86);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        color: #f4f7fb;
+        font: 11px/1.35 monospace;
+        letter-spacing: 0.02em;
+        box-shadow: 0 10px 24px rgba(0, 0, 0, 0.24);
+        pointer-events: none;
+        opacity: 0.8;
+        backdrop-filter: blur(8px);
+      }
+
+      #tablet-log-status-badge .tablet-log-status-title {
+        display: block;
+        margin-bottom: 4px;
+        color: #9fd3ff;
+        font-weight: 700;
+      }
+
+      #tablet-log-status-badge .tablet-log-status-line {
+        display: block;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  tabletLogStatusBadge = document.createElement('div');
+  tabletLogStatusBadge.id = 'tablet-log-status-badge';
+  tabletLogStatusBadge.innerHTML = `
+    <span class="tablet-log-status-title">Tablet Log</span>
+    <span class="tablet-log-status-line" data-role="state">state: idle</span>
+    <span class="tablet-log-status-line" data-role="pending">pending: 0</span>
+    <span class="tablet-log-status-line" data-role="next">next: --</span>
+    <span class="tablet-log-status-line" data-role="last">last: --:--:--</span>
+  `;
+
+  document.body.appendChild(tabletLogStatusBadge);
+  return tabletLogStatusBadge;
+}
+
+function updateTabletLogStatusBadge() {
+  const badge = ensureTabletLogStatusBadge();
+  if (!badge) {
+    return;
+  }
+
+  const stateLine = badge.querySelector('[data-role="state"]');
+  const pendingLine = badge.querySelector('[data-role="pending"]');
+  const nextLine = badge.querySelector('[data-role="next"]');
+  const lastLine = badge.querySelector('[data-role="last"]');
+
+  const pendingCount = pendingTabletLogBatch.length;
+  const isOnline = navigator.onLine;
+  const nextDelay = scheduledTabletLogFlushAt ? scheduledTabletLogFlushAt - Date.now() : 0;
+  const nextLabel = pendingCount === 0
+    ? '--'
+    : isFlushingTabletLogBatch
+      ? 'sending'
+      : !isOnline
+        ? 'offline'
+        : formatTabletLogElapsed(nextDelay);
+
+  if (stateLine) {
+    stateLine.textContent = `state: ${lastTabletLogStatusMessage}`;
+  }
+  if (pendingLine) {
+    pendingLine.textContent = `pending: ${pendingCount}`;
+  }
+  if (nextLine) {
+    nextLine.textContent = `next: ${nextLabel}`;
+  }
+  if (lastLine) {
+    lastLine.textContent = `last: ${formatTabletLogClock(lastTabletLogUploadAt)}`;
+  }
+}
+
+function setTabletLogStatusMessage(message) {
+  lastTabletLogStatusMessage = message;
+  updateTabletLogStatusBadge();
+}
+
+function startTabletLogStatusTicker() {
+  if (!isTabletLogDebugStatusEnabled() || tabletLogStatusInterval) {
+    return;
+  }
+
+  tabletLogStatusInterval = setInterval(updateTabletLogStatusBadge, 1000);
+}
+
+function loadLogQueue() {
+  try {
+    const saved = localStorage.getItem(getLogQueueKey());
+    if (saved) {
+      const parsedQueue = JSON.parse(saved);
+      pendingTabletLogBatch = Array.isArray(parsedQueue) ? parsedQueue : [];
+      console.log(`📦 Loaded ${pendingTabletLogBatch.length} pending tablet logs from localStorage`);
+    } else {
+      pendingTabletLogBatch = [];
+    }
+    setTabletLogStatusMessage(pendingTabletLogBatch.length > 0 ? 'queued' : 'idle');
+  } catch (error) {
+    console.error('❌ Error loading log queue:', error);
+    pendingTabletLogBatch = [];
+    setTabletLogStatusMessage('load-error');
+  }
+}
+
+function saveLogQueue() {
+  try {
+    localStorage.setItem(getLogQueueKey(), JSON.stringify(pendingTabletLogBatch));
+  } catch (error) {
+    console.error('❌ Error saving log queue:', error);
+  }
+}
+
+function clearScheduledTabletLogFlush() {
+  if (tabletLogFlushTimer) {
+    clearTimeout(tabletLogFlushTimer);
+    tabletLogFlushTimer = null;
+  }
+  scheduledTabletLogFlushAt = 0;
+}
+
+function scheduleTabletLogFlush(delayMs = TABLET_LOG_BATCH_FLUSH_MS, options = {}) {
+  const { reset = false } = options;
+
+  if (pendingTabletLogBatch.length === 0) {
+    clearScheduledTabletLogFlush();
+    return;
+  }
+
+  const safeDelay = Math.max(0, delayMs);
+  const desiredFlushAt = Date.now() + safeDelay;
+
+  if (
+    tabletLogFlushTimer &&
+    !reset &&
+    scheduledTabletLogFlushAt &&
+    scheduledTabletLogFlushAt <= desiredFlushAt
+  ) {
+    return;
+  }
+
+  clearScheduledTabletLogFlush();
+  scheduledTabletLogFlushAt = desiredFlushAt;
+  tabletLogFlushTimer = setTimeout(() => {
+    flushQueuedTabletLogs({ reason: 'scheduled' });
+  }, safeDelay);
+
+  console.log(`⏰ Next tablet log upload scheduled in ${(safeDelay / 1000).toFixed(1)}s`);
+}
+
+function getTabletLogRetryDelay(attempt) {
+  return Math.min(
+    TABLET_LOG_RETRY_MAX_DELAY_MS,
+    TABLET_LOG_RETRY_BASE_DELAY_MS * Math.pow(2, Math.max(0, attempt - 1))
+  );
+}
+
+function removeQueuedTabletLogEntries(entryIds = []) {
+  if (!entryIds.length) {
+    return;
+  }
+
+  const entryIdSet = new Set(entryIds);
+  pendingTabletLogBatch = pendingTabletLogBatch.filter(entry => !entryIdSet.has(entry.id));
+  saveLogQueue();
+  updateTabletLogStatusBadge();
+}
+
+function addToLogQueue(logData) {
+  const clientLogId = logData.ClientLogID || `${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+  const queueEntry = {
+    id: clientLogId,
+    queuedAt: new Date().toISOString(),
+    logData: {
+      ...logData,
+      ClientLogID: clientLogId,
+      ClientTimestamp: logData.ClientTimestamp || new Date().toISOString()
+    }
+  };
+
+  pendingTabletLogBatch.push(queueEntry);
+  saveLogQueue();
+  console.log(`📥 Queued tablet log: ${logData.Action} (Batch size: ${pendingTabletLogBatch.length})`);
+  setTabletLogStatusMessage('queued');
+  scheduleTabletLogFlush(TABLET_LOG_BATCH_FLUSH_MS);
+}
+
+async function sendLogToServer(logEntries, timeoutMs = TABLET_LOG_REQUEST_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(`${serverURL}/api/tablet-log/batch`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        logs: logEntries.map(entry => entry.logData)
+      }),
+      signal: controller.signal
+    });
+
+    clearTimeout(timeoutId);
+
+    let responseData = null;
+    try {
+      responseData = await response.json();
+    } catch (parseError) {
+      responseData = null;
+    }
+
+    if (response.ok) {
+      return { success: true, data: responseData };
+    }
+
+    return {
+      success: false,
+      error: responseData?.error || `HTTP ${response.status}`,
+      status: response.status,
+      data: responseData
+    };
+  } catch (error) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      return { success: false, error: 'Request timeout' };
+    }
+    return { success: false, error: error.message };
+  }
+}
+
+async function sendSingleTabletLogToLegacyEndpoint(logData, timeoutMs = TABLET_LOG_REQUEST_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(`${serverURL}/api/tablet-log`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(logData),
+      signal: controller.signal
+    });
+
+    clearTimeout(timeoutId);
+
+    let responseData = null;
+    try {
+      responseData = await response.json();
+    } catch (parseError) {
+      responseData = null;
+    }
+
+    if (response.ok) {
+      return { success: true, data: responseData };
+    }
+
+    return {
+      success: false,
+      error: responseData?.error || `HTTP ${response.status}`,
+      status: response.status,
+      data: responseData
+    };
+  } catch (error) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      return { success: false, error: 'Request timeout' };
+    }
+    return { success: false, error: error.message };
+  }
+}
+
+async function sendLogToLegacyFallback(logEntries) {
+  console.warn('⚠️ /api/tablet-log/batch is not available on this server. Falling back to the legacy single-log endpoint.');
+
+  const results = [];
+  let insertedCount = 0;
+
+  for (let index = 0; index < logEntries.length; index += 1) {
+    const entry = logEntries[index];
+    const singleResult = await sendSingleTabletLogToLegacyEndpoint(entry.logData);
+
+    if (singleResult.success) {
+      insertedCount += 1;
+      results.push({
+        index,
+        success: true,
+        duplicate: false,
+        insertedId: singleResult.data?.insertedId || null
+      });
+      continue;
+    }
+
+    results.push({
+      index,
+      success: false,
+      retriable: singleResult.status !== 400,
+      error: singleResult.error || 'Legacy log upload failed'
+    });
+  }
+
+  return {
+    success: results.some(result => result.success),
+    data: {
+      insertedCount,
+      duplicateCount: 0,
+      failedCount: results.filter(result => !result.success).length,
+      results
+    }
+  };
+}
+
+function scheduleTabletLogRetry(errorMessage = 'Batch upload failed') {
+  tabletLogRetryAttempt += 1;
+  const retryDelay = getTabletLogRetryDelay(tabletLogRetryAttempt);
+  console.warn(`⚠️ ${errorMessage}. Retrying tablet log batch in ${(retryDelay / 1000).toFixed(1)}s`);
+  setTabletLogStatusMessage('retry-wait');
+  scheduleTabletLogFlush(retryDelay, { reset: true });
+}
+
+async function flushQueuedTabletLogs(options = {}) {
+  const { reason = 'scheduled' } = options;
+
+  if (isFlushingTabletLogBatch || pendingTabletLogBatch.length === 0) {
+    return;
+  }
+
+  if (!navigator.onLine) {
+    clearScheduledTabletLogFlush();
+    console.warn('📴 Network is offline. Pending tablet logs will upload automatically when the connection returns.');
+    setTabletLogStatusMessage('offline');
+    return;
+  }
+
+  isFlushingTabletLogBatch = true;
+  clearScheduledTabletLogFlush();
+  setTabletLogStatusMessage(`sending ${pendingTabletLogBatch.length}`);
+
+  const entriesToFlush = [...pendingTabletLogBatch];
+  console.log(`📤 Uploading tablet log batch (${entriesToFlush.length} entries, reason: ${reason})...`);
+
+  try {
+    let result;
+
+    if (isTabletLogBatchEndpointAvailable === false) {
+      result = await sendLogToLegacyFallback(entriesToFlush);
+    } else {
+      result = await sendLogToServer(entriesToFlush);
+
+      if (result.success) {
+        isTabletLogBatchEndpointAvailable = true;
+      }
+    }
+
+    if (!result.success && result.status === 404) {
+      isTabletLogBatchEndpointAvailable = false;
+      result = await sendLogToLegacyFallback(entriesToFlush);
+    }
+
+    if (!result.success) {
+      scheduleTabletLogRetry(result.error || 'Tablet log batch upload failed');
+      return;
+    }
+
+    const batchResults = Array.isArray(result.data?.results) ? result.data.results : [];
+    const removableEntryIds = [];
+    let retriableFailureCount = 0;
+
+    if (batchResults.length === entriesToFlush.length) {
+      batchResults.forEach((batchResult, index) => {
+        const entry = entriesToFlush[index];
+        if (!entry) {
+          return;
+        }
+
+        if (batchResult?.success) {
+          removableEntryIds.push(entry.id);
+          return;
+        }
+
+        if (batchResult?.retriable === false) {
+          removableEntryIds.push(entry.id);
+          console.error(`❌ Dropping invalid tablet log entry: ${entry.logData.Action} - ${batchResult.error || 'Unknown validation error'}`);
+          return;
+        }
+
+        retriableFailureCount += 1;
+      });
+    } else {
+      removableEntryIds.push(...entriesToFlush.map(entry => entry.id));
+    }
+
+    removeQueuedTabletLogEntries(removableEntryIds);
+
+    if (retriableFailureCount > 0) {
+      scheduleTabletLogRetry(`${retriableFailureCount} tablet log entries still need retry`);
+      return;
+    }
+
+    tabletLogRetryAttempt = 0;
+    const insertedCount = Number.isFinite(Number(result.data?.insertedCount))
+      ? Number(result.data.insertedCount)
+      : removableEntryIds.length;
+    const duplicateCount = Number.isFinite(Number(result.data?.duplicateCount))
+      ? Number(result.data.duplicateCount)
+      : 0;
+    console.log(`✅ Tablet log batch processed: ${insertedCount} inserted, ${duplicateCount} deduplicated`);
+    lastTabletLogUploadAt = new Date().toISOString();
+    setTabletLogStatusMessage(
+      duplicateCount > 0 && insertedCount === 0
+        ? `dedup ${duplicateCount}`
+        : insertedCount > 0
+          ? `sent ${insertedCount}`
+          : 'idle'
+    );
+
+    if (pendingTabletLogBatch.length > 0) {
+      scheduleTabletLogFlush(TABLET_LOG_BATCH_FLUSH_MS);
+    }
+  } catch (error) {
+    scheduleTabletLogRetry(error.message || 'Unexpected tablet log batch error');
+  } finally {
+    isFlushingTabletLogBatch = false;
+  }
+}
+
+async function logTabletAction(action, status = 'in-progress', additionalData = {}) {
+  try {
+    const 背番号 = getSebanggoValue();
+    const 品番 = document.getElementById('product-number')?.value || '';
+    const 工場 = document.getElementById('selected工場')?.value || '';
+    const 設備 = document.getElementById('process')?.value || '';
+    const Worker_Name = document.getElementById('Machine Operator')?.value || '';
+    const lotNumber = document.getElementById('Lot No.')?.value || getTodayDateString();
+
+    if (!設備) {
+      console.log('⚠️ Skipping log: Machine (設備) not selected yet');
+      return;
+    }
+
+    const setupActions = ['Kensa mode checkbox toggled', 'Break time', 'Reset'];
+    const isSetupAction = setupActions.some(setupAction => action.includes(setupAction));
+
+    if (!背番号 && !isSetupAction) {
+      console.log('⚠️ Skipping log: Sebanggo (背番号) not selected yet');
+      return;
+    }
+
+    let sessionID = getSessionID();
+
+    if (!sessionID) {
+      console.warn(`⚠️ No sessionID found! Auto-generating for action: ${action}`);
+      sessionID = await generateSessionID(背番号 || 'setup', 設備, 工場, lotNumber);
+
+      if (sessionID) {
+        setSessionID(sessionID);
+        console.log(`✅ Emergency sessionID created: ${sessionID}`);
+      } else {
+        console.error(`❌ CRITICAL: Failed to generate sessionID for action: ${action}`);
+        console.error('❌ Logging blocked - cannot proceed without sessionID');
+        return;
+      }
+    }
+
+    const logData = {
+      背番号,
+      品番,
+      工場,
+      設備,
+      Worker_Name,
+      Action: action,
+      Status: status,
+      sessionID,
+      ClientTimestamp: new Date().toISOString(),
+      AdditionalData: additionalData
+    };
+
+    addToLogQueue(logData);
+    console.log(`📝 Tablet action queued: ${action}`);
+  } catch (error) {
+    console.error('❌ Error in logTabletAction:', error);
+
+    try {
+      const 背番号 = getSebanggoValue();
+      const 品番 = document.getElementById('product-number')?.value || '';
+      const 工場 = document.getElementById('selected工場')?.value || '';
+      const 設備 = document.getElementById('process')?.value || '';
+      const Worker_Name = document.getElementById('Machine Operator')?.value || '';
+      const sessionID = getSessionID();
+
+      if (設備 && sessionID) {
+        addToLogQueue({
+          背番号,
+          品番,
+          工場,
+          設備,
+          Worker_Name,
+          Action: action,
+          Status: status,
+          sessionID,
+          ClientTimestamp: new Date().toISOString(),
+          AdditionalData: additionalData
+        });
+      }
+    } catch (queueError) {
+      console.error('❌ Failed to queue log entry:', queueError);
+    }
+  }
+}
+
+function setupExplicitTabletLogging() {
+  const workerField = document.getElementById('Machine Operator');
+  if (workerField && !workerField.dataset.tabletLogBound) {
+    workerField.dataset.tabletLogBound = 'true';
+    workerField.addEventListener('change', function() {
+      const workerName = (this.value || '').trim();
+      if (workerName) {
+        logTabletAction('Worker name selected', 'in-progress', {
+          workerName
+        });
+      }
+    });
+  }
+
+  const inspectorField = document.getElementById('kensa-dropdown');
+  if (inspectorField && !inspectorField.dataset.tabletLogBound) {
+    inspectorField.dataset.tabletLogBound = 'true';
+    inspectorField.addEventListener('change', function() {
+      const inspectorName = (this.value || '').trim();
+      if (inspectorName) {
+        logTabletAction('Inspector name selected', 'in-progress', {
+          inspectorName
+        });
+      }
+    });
+  }
+
+  const comments1 = document.querySelector('textarea[name="Comments1"]');
+  if (comments1 && !comments1.dataset.tabletLogBound) {
+    comments1.dataset.tabletLogBound = 'true';
+    comments1.addEventListener('blur', function() {
+      if (this.value.trim().length > 0) {
+        logTabletAction('Comments entered', 'in-progress', {
+          commentLength: this.value.length,
+          hasContent: true,
+          comment: this.value
+        });
+      }
+    });
+  }
+
+  const shotInput = document.getElementById('shot');
+  if (shotInput && !shotInput.dataset.tabletLogBound) {
+    shotInput.dataset.tabletLogBound = 'true';
+    shotInput.addEventListener('input', function() {
+      logTabletAction('Shot count set', 'in-progress', {
+        shotCount: this.value
+      });
+    });
+  }
+
+  const spareInput = document.getElementById('spare');
+  if (spareInput && !spareInput.dataset.tabletLogBound) {
+    spareInput.dataset.tabletLogBound = 'true';
+    spareInput.addEventListener('input', function() {
+      logTabletAction('Spare count set', 'in-progress', {
+        spareCount: this.value
+      });
+    });
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  ensureTabletLogStatusBadge();
+  startTabletLogStatusTicker();
+  loadLogQueue();
+  setupExplicitTabletLogging();
+  updateTabletLogStatusBadge();
+
+  if (pendingTabletLogBatch.length > 0) {
+    console.log(`🚀 Pending tablet logs detected: ${pendingTabletLogBatch.length}`);
+    if (navigator.onLine) {
+      setTabletLogStatusMessage('resume-queued');
+      scheduleTabletLogFlush(TABLET_LOG_RECOVERY_FLUSH_MS, { reset: true });
+    } else {
+      console.warn('📴 Pending tablet logs are waiting for network recovery.');
+      setTabletLogStatusMessage('offline');
+    }
+  }
+});
+
+window.addEventListener('online', () => {
+  if (pendingTabletLogBatch.length === 0) {
+    return;
+  }
+
+  tabletLogRetryAttempt = 0;
+  console.log('🌐 Network restored. Scheduling pending tablet log upload.');
+  setTabletLogStatusMessage('online-resume');
+  scheduleTabletLogFlush(TABLET_LOG_RECOVERY_FLUSH_MS, { reset: true });
+});
+
+window.addEventListener('offline', () => {
+  console.warn('📴 Network connection lost. Tablet logs will remain in localStorage until the connection returns.');
+  setTabletLogStatusMessage('offline');
+});
 
 
 // Auto-resize textarea based on content
@@ -49,6 +834,38 @@ const inputs = document.querySelectorAll('input, select, button,textarea');
 const selected工場 = document.getElementById('selected工場').value; // Get the current factory value
 const pageName = location.pathname.split('/').pop(); // Get the current HTML file name
 const uniquePrefix = `${pageName}_${selected工場}_`;
+
+function getSebanggoField() {
+  return document.getElementById('sub-dropdown-input') || document.getElementById('sub-dropdown');
+}
+
+function getSebanggoFieldId() {
+  return getSebanggoField()?.id || 'sub-dropdown-input';
+}
+
+function getSebanggoValue() {
+  return getSebanggoField()?.value || '';
+}
+
+function setSebanggoValue(value) {
+  const field = getSebanggoField();
+  if (!field) {
+    return;
+  }
+
+  if (field.tagName === 'SELECT' && value && !Array.from(field.options).some(option => option.value === value)) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = value;
+    field.appendChild(option);
+  }
+
+  field.value = value;
+}
+
+function storeSebanggoValue(value) {
+  localStorage.setItem(`${uniquePrefix}${getSebanggoFieldId()}`, value);
+}
 
 
 
@@ -597,6 +1414,7 @@ function disableInputs() {
       if (
           input.id !== 'scan-button' && 
           input.id !== 'sub-dropdown-input' && 
+          input.id !== 'sub-dropdown' && 
           input.id !== 'process' && 
           input.id !== 'reset-button'&& // Specifically exclude the reset button
           input.id !== "selectBluetooth"&&
@@ -610,7 +1428,7 @@ function disableInputs() {
 
 function enableInputs() {
   inputs.forEach(input => {
-      if (input.id !== 'sub-dropdown-input') { // Keep sub-dropdown-input enabled
+      if (input.id !== 'sub-dropdown-input' && input.id !== 'sub-dropdown') { // Keep sebanggo selector enabled
           input.disabled = false;
       }
   });
@@ -886,13 +1704,15 @@ function enableInputs() {
 // }
 
 // Function to fetch product details based on 背番号 or 品番
-async function fetchProductDetails() {
+async function fetchProductDetails(options = {}) {
     // REMOVED initial checkProcessCondition and enableInputs calls for better central control.
     // Let the calling functions (handleQRScan, DOMContentLoaded for restore) manage UI state updates
     // after fetchProductDetails completes its primary job.
 
-    const subDropdownInput = document.getElementById("sub-dropdown-input");
-    const serialNumber = subDropdownInput.value;
+  const { startSession = false, sessionTrigger = 'product-context', logSelection = false } = options;
+
+    const subDropdownInput = getSebanggoField();
+    const serialNumber = getSebanggoValue();
     // const factory = document.getElementById("selected工場").value; // 'factory' variable not used elsewhere in this scope
     const dynamicImage = document.getElementById("dynamicImage");
     const expectedBoardDataInputElement = document.getElementById("expectedBoardDataQR");
@@ -907,7 +1727,7 @@ async function fetchProductDetails() {
         dynamicImage.style.display = "none";
     }
 
-    if (!serialNumber) {
+    if (!subDropdownInput || !serialNumber) {
         console.warn("[fetchProductDetails] No serialNumber (from sub-dropdown) selected.");
         // Since this function is often called from event listeners, ensure calling code handles 'false'
         if (document.getElementById("selected工場").value === '第二工場' || isSecondScanCurrentlyRequired(document.getElementById("selected工場").value, document.getElementById("process")?.value)) {
@@ -952,9 +1772,8 @@ async function fetchProductDetails() {
                 const matched = result[0];
                 if (matched.背番号) {
                     console.log("[fetchProductDetails] Found by 品番, updating input to 背番号:", matched.背番号);
-                    subDropdownInput.value = matched.背番号;
-                    // Update localStorage as well to maintain consistency
-                    localStorage.setItem(`${uniquePrefix}sub-dropdown-input`, matched.背番号);
+                  setSebanggoValue(matched.背番号);
+                  storeSebanggoValue(matched.背番号);
                 }
             }
         }
@@ -1022,11 +1841,26 @@ async function fetchProductDetails() {
             console.warn("[fetchProductDetails] 'boardData' not found in product. Product:", product);
         }
 
+        const finalizeProductContext = async () => {
+          if (startSession) {
+            await ensureTabletSessionStarted(sessionTrigger);
+          }
+
+          if (logSelection) {
+            await logTabletAction('Sebanggo selected', 'in-progress', {
+              selectedValue: getSebanggoValue(),
+              selectionMethod: sessionTrigger
+            });
+          }
+
+          return true;
+        };
+
         if (expectedBoardDataInputElement) {
             if (boardDataStringForQR !== null) {
                 expectedBoardDataInputElement.value = boardDataStringForQR;
                 console.log("[fetchProductDetails] Successfully set hidden 'expectedBoardDataQR' to:", `"${boardDataStringForQR}"`);
-                return true;
+            return finalizeProductContext();
             } else {
                 expectedBoardDataInputElement.value = "";
                 console.warn("[fetchProductDetails] 'expectedBoardDataQR' is cleared as 'boardData' was invalid/missing/empty.");
@@ -1039,7 +1873,7 @@ async function fetchProductDetails() {
                     return false;
                 } else {
                     console.log(`[fetchProductDetails] boardData is missing/invalid, but a second scan is NOT currently required for Factory: ${currentFactory}, Process: ${currentProcess}. Returning true as product was fetched.`);
-                    return true;
+                  return finalizeProductContext();
                 }
             }
         } else {
@@ -1053,10 +1887,17 @@ async function fetchProductDetails() {
     }
 }
 
-document.getElementById("sub-dropdown-input").addEventListener("change", async () => {
-    await fetchProductDetails();
+const sebanggoField = getSebanggoField();
+if (sebanggoField) {
+  sebanggoField.addEventListener("change", async () => {
+    await fetchProductDetails({
+        startSession: true,
+        sessionTrigger: 'manual-selection',
+        logSelection: true
+    });
     checkProcessCondition(); // Update input states after fetching product details
-});
+  });
+}
 
 
 // Function to fetch image link from Google Sheets
@@ -1132,6 +1973,21 @@ function setDefaultTime(input) {
 
   // Save the time to local storage with unique prefix
   localStorage.setItem(`${uniquePrefix}${input.id}`, timeValue);
+
+  if (input.id === 'Start Time') {
+    logTabletAction('Start time set', 'in-progress', {
+      startTime: timeValue
+    });
+  } else if (input.id === 'End Time') {
+    logTabletAction('End time set', 'in-progress', {
+      endTime: timeValue
+    });
+  } else if (input.id.includes('break')) {
+    logTabletAction(`Break time ${input.id} set`, 'in-progress', {
+      breakTimeField: input.id,
+      time: timeValue
+    });
+  }
 }
 
 
@@ -1252,6 +2108,11 @@ function incrementCounter(counterId) {
   // Save the updated value to local storage with the unique prefix
   localStorage.setItem(`${uniquePrefix}counter-${counterId}`, currentValue);
 
+  logTabletAction(`Counter ${counterId} incremented`, 'in-progress', {
+    counterId,
+    newValue: currentValue
+  });
+
   updateTotal();
 }
 
@@ -1266,6 +2127,11 @@ function decrementCounter(counterId) {
 
       // Save the updated value to local storage with the unique prefix
       localStorage.setItem(`${uniquePrefix}counter-${counterId}`, currentValue);
+
+      logTabletAction(`Counter ${counterId} decremented`, 'in-progress', {
+        counterId,
+        newValue: currentValue
+      });
 
       updateTotal();
   }
@@ -1451,7 +2317,7 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
 
     const formData = {
       品番: document.getElementById('product-number').value,
-      背番号: document.getElementById('sub-dropdown-input').value,
+      背番号: getSebanggoValue(),
       設備: document.getElementById('process').value,
       Total: parseInt(document.getElementById('total').value, 10) || 0,
       工場: document.getElementById('selected工場').value,
@@ -1788,6 +2654,16 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
       const errorData = await response.json();
       throw new Error(errorData.error || 'Failed to save data');
     }
+
+    await logTabletAction('Submit button pressed', 'Completed', {
+      total: formData.Total,
+      processQuantity: formData.Process_Quantity,
+      totalNg: formData.Total_NG,
+      materialLotCount: materialLots.length,
+      maintenanceRecordCount: maintenanceRecords.length,
+      materialLabelImageCount: materialLabelPhotos.length
+    });
+    clearSessionID();
 
     setTimeout(() => {
       uploadingModal.style.display = 'none';
@@ -2207,7 +3083,7 @@ function checkProcessCondition() {
     } else {
         // --- This configuration requires ONLY ONE SCAN (or second is skipped) ---
         // Inputs should be enabled if the first scan is done OR if dropdown has a value selected.
-        const subDropdownInput = document.getElementById('sub-dropdown-input');
+      const subDropdownInput = getSebanggoField();
         const subDropdownValue = subDropdownInput ? subDropdownInput.value : "";
         if (firstScanActualValue || subDropdownValue) { // If first scan is done OR dropdown selection exists, that's enough for a 1-scan process
             console.log(`Inputs enabled: Single scan requirement met or second scan not needed (Factory: ${currentFactory}, Process: ${currentProcess}).`);
@@ -2226,7 +3102,7 @@ let firstScanValue = localStorage.getItem(`${uniquePrefix}firstScanValue`) || ""
 let secondScanValue = localStorage.getItem(`${uniquePrefix}secondScanValue`) || "";
 
 document.addEventListener('DOMContentLoaded', () => {
-  const subDropdownInput = document.getElementById('sub-dropdown-input');
+  const subDropdownInput = getSebanggoField();
   const processDropdown = document.getElementById("process");
   // Initialize from localStorage again to ensure consistency within this scope
   firstScanValue = localStorage.getItem(`${uniquePrefix}firstScanValue`) || "";
@@ -2437,7 +3313,7 @@ function comparePartsConsideringBluetooth(expectedPart, scannedPart, isBluetooth
 async function handleQRScan(qrCodeMessage) {
     console.log("Scanned QR (Raw):", qrCodeMessage);
 
-    const subDropdownInput = document.getElementById('sub-dropdown-input');
+  const subDropdownInput = getSebanggoField();
     const factoryValue = document.getElementById("selected工場")?.value || "";
     const processValue = document.getElementById("process")?.value || "";
     const isNFH_RLC = factoryValue === "NFH" && processValue === "RLC";
@@ -2456,8 +3332,8 @@ async function handleQRScan(qrCodeMessage) {
             firstScanValue = cleanedQR;
             localStorage.setItem(`${uniquePrefix}firstScanValue`, firstScanValue);
             document.getElementById("firstScanValue").value = firstScanValue;
-            subDropdownInput.value = firstScanValue;
-            localStorage.setItem(`${uniquePrefix}sub-dropdown-input`, firstScanValue);
+          setSebanggoValue(firstScanValue);
+          storeSebanggoValue(firstScanValue);
             
             // Add to recent selections (with safety check)
             if (typeof addToRecentSebanggo === 'function') {
@@ -2485,9 +3361,17 @@ async function handleQRScan(qrCodeMessage) {
             }
             // ---- END MODIFICATION ----
 
-            const detailsFetchedSuccessfully = await fetchProductDetails();
+            const detailsFetchedSuccessfully = await fetchProductDetails({
+              startSession: true,
+              sessionTrigger: 'qr-first-scan'
+            });
 
             if (detailsFetchedSuccessfully) {
+              await logTabletAction('First QR scanned', 'in-progress', {
+                scannedValue: firstScanValue,
+                scanMethod: lastScanMethod
+              });
+
                 // Get current factory and process to pass to the helper function
                 const currentFactoryForCheck = document.getElementById("selected工場")?.value || "";
                 const currentProcessForCheck = document.getElementById("process")?.value || "";
@@ -2595,6 +3479,10 @@ async function handleQRScan(qrCodeMessage) {
             document.getElementById("secondScanValue").value = secondScanValue;
             enableInputs();
             console.log("Second scan successful (comparison logic applied). Inputs enabled.");
+          await logTabletAction('Tomson board scanned', 'in-progress', {
+            scannedValue: qrCodeMessage,
+            scanMethod: lastScanMethod
+          });
             localStorage.removeItem(`${uniquePrefix}scannerChoice`); // Clear choice after successful sequence
             closeActiveScannerModal(); // This will stop camera if it was used for 2nd scan
         } else {
@@ -2903,6 +3791,13 @@ function resetForm(skipConfirmation = false) {
     if (!userConfirmed) {
       return;
     }
+
+    logTabletAction('Reset button pressed', 'Reset', {
+      currentSebanggo: getSebanggoValue(),
+      currentWorker: document.getElementById('Machine Operator')?.value || '',
+      currentProcess: document.getElementById('process')?.value || '',
+      currentDate: document.getElementById('Lot No.')?.value || ''
+    });
   }
 
   const excludedInputs = ['process']; // IDs or names of inputs to exclude from reset
@@ -3006,6 +3901,8 @@ function resetForm(skipConfirmation = false) {
   }
   console.log('Cleared break times from localStorage');
 
+  clearSessionID();
+
   // Reload the page
   window.location.reload();
 }
@@ -3088,9 +3985,14 @@ function renderMaterialLotTags() {
         margin-left: 4px;
       `;
       deleteBtn.onclick = () => {
+        const removedLot = materialLots[index]?.lotNumber || '';
         materialLots.splice(index, 1);
         saveMaterialLots();
         renderMaterialLotTags();
+        logTabletAction('Material lot removed', 'in-progress', {
+          lotNumber: removedLot,
+          source: 'manual'
+        });
       };
       tag.appendChild(deleteBtn);
     } else {
@@ -3137,6 +4039,10 @@ function addScannedLot(lotNumber) {
   materialLots.push({ lotNumber, source: 'scanned' });
   saveMaterialLots();
   renderMaterialLotTags();
+  logTabletAction('Material lot added (scanned)', 'in-progress', {
+    lotNumber,
+    totalLots: materialLots.length
+  });
   console.log('Lot added successfully, returning true');
   return true; // Success
 }
@@ -3159,6 +4065,10 @@ function addManualLot(lotNumber) {
   materialLots.push({ lotNumber, source: 'manual' });
   saveMaterialLots();
   renderMaterialLotTags();
+  logTabletAction('Material lot added (manual)', 'in-progress', {
+    lotNumber,
+    totalLots: materialLots.length
+  });
   return true; // Success
 }
 
@@ -3166,7 +4076,13 @@ function addManualLot(lotNumber) {
 
 // Intercept 材料ロット input click to open scan modal instead of keypad
 const materialLotInput = document.getElementById('材料ロット');
-if (materialLotInput) {
+const hasMaterialLotScanModal = Boolean(
+  document.getElementById('scanLotModal') &&
+  document.getElementById('scanLotStatus') &&
+  document.getElementById('lotQrReader')
+);
+
+if (materialLotInput && hasMaterialLotScanModal) {
   // Always prevent keypad from appearing
   materialLotInput.readOnly = true;
   materialLotInput.style.cursor = 'pointer';
@@ -3193,7 +4109,7 @@ if (materialLotInput) {
   // Function to open the modal with validation
   function openMaterialLotModal() {
     // Check if sebanggo has a value
-    const subDropdownInput = document.getElementById('sub-dropdown-input');
+    const subDropdownInput = getSebanggoField();
     if (!subDropdownInput || !subDropdownInput.value) {
       alert('背番号を選択してください / Please select a Sebanggo first');
       return;
@@ -3214,6 +4130,13 @@ if (materialLotInput) {
 function openScanLotModal() {
   const scanLotModal = document.getElementById('scanLotModal');
   const scanLotStatus = document.getElementById('scanLotStatus');
+  const lotQrReader = document.getElementById('lotQrReader');
+
+  if (!scanLotModal || !scanLotStatus || !lotQrReader) {
+    console.warn('Scan lot modal UI is not available on this page.');
+    showAlert('Material lot scan modal is not available on this page.');
+    return;
+  }
   
   scanLotModal.style.display = 'block';
   scanLotStatus.innerHTML = '<span style="color: #3498db;">🔍 QRコードをスキャンしてください<br>Please scan QR code</span>';
@@ -3670,7 +4593,7 @@ async function printLabel() {
   const alertSound = document.getElementById('alert-sound');
   const scanAlertModal = document.getElementById('scanAlertModal');
   const scanAlertText = document.getElementById('scanAlertText');
-  const 背番号 = document.getElementById("sub-dropdown-input").value;
+  const 背番号 = getSebanggoValue();
 
   // Function to check if the device is iOS
   function isIOS() {
@@ -4470,6 +5393,10 @@ async function processPhotoCapture(base64Image, mapping, buttonId) {
       }
       
       console.log(`${mapping.labelText} photo processed successfully`);
+      logTabletAction(`Photo captured: ${mapping.labelText}`, 'in-progress', {
+        source: buttonId,
+        photoType: mapping.labelText
+      });
     }
     
     // Save compressed image to localStorage for persistence
@@ -4593,8 +5520,7 @@ buttonMappings.forEach(mapping => {
   const button = document.getElementById(mapping.buttonId);
   if (button) {
     button.addEventListener('click', () => {
-      const subDropdownInput = document.getElementById('sub-dropdown-input');
-      const selectedValue = subDropdownInput?.value;
+      const selectedValue = getSebanggoValue();
 
       if (!selectedValue) {
         // Trigger modal message instead of alert
@@ -4745,7 +5671,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
      
 async function uploadPhotou() {
-  const selectedSebanggo = document.getElementById("sub-dropdown-input").value;
+  const selectedSebanggo = getSebanggoValue();
   const currentDate = document.getElementById("Lot No.").value;
   const selectedWorker = document.getElementById("Machine Operator").value;
   const selectedFactory = document.getElementById("selected工場").value;
@@ -4800,7 +5726,7 @@ async function uploadPhotou() {
 
 
 async function collectImagesForUpload() {
-  const selectedSebanggo = document.getElementById("sub-dropdown-input").value;
+  const selectedSebanggo = getSebanggoValue();
   const currentDate = document.getElementById("Lot No.").value;
   const selectedWorker = document.getElementById("Machine Operator").value;
   const selectedFactory = document.getElementById("selected工場").value;
@@ -5483,6 +6409,14 @@ function calculateTotalBreakTime() {
 function resetBreakTime(breakNumber) {
   const startInput = document.getElementById(`break${breakNumber}-start`);
   const endInput = document.getElementById(`break${breakNumber}-end`);
+
+  if (startInput && endInput && (startInput.value || endInput.value)) {
+    logTabletAction(`Break time ${breakNumber} reset`, 'Reset', {
+      breakNumber,
+      previousStart: startInput.value,
+      previousEnd: endInput.value
+    });
+  }
   
   if (startInput) startInput.value = '';
   if (endInput) endInput.value = '';
@@ -5557,6 +6491,10 @@ function addMaintenancePhoto(base64Data) {
   
   maintenancePhotos.push(photoData);
   console.log(`📷 Photo added: ID=${photoData.id}, base64Length=${base64Data.length}`);
+  logTabletAction('Maintenance photo captured', 'in-progress', {
+    photoId: photoData.id,
+    totalPhotos: maintenancePhotos.length
+  });
   
   renderMaintenancePhotoThumbnails();
   return true;
@@ -5906,6 +6844,18 @@ function showMaintenanceModal(editIndex = -1) {
       maintenanceRecords.push(record);
     }
 
+    logTabletAction(
+      currentEditingIndex >= 0 ? 'Maintenance record edited' : 'Maintenance record added',
+      'Completed',
+      {
+        maintenanceId: record.id,
+        startTime,
+        endTime,
+        comment: record.comment,
+        photoCount: record.photos.length
+      }
+    );
+
     saveMaintenanceRecords();
     renderMaintenanceRecords();
     calculateTotalMachineTroubleTime();
@@ -5922,10 +6872,17 @@ function showMaintenanceModal(editIndex = -1) {
   if (deleteBtn) {
     deleteBtn.addEventListener('click', () => {
       if (confirm('この機械故障記録を削除しますか？ / Delete this maintenance record?')) {
+        const deletedRecord = maintenanceRecords[currentEditingIndex];
         maintenanceRecords.splice(currentEditingIndex, 1);
         saveMaintenanceRecords();
         renderMaintenanceRecords();
         calculateTotalMachineTroubleTime();
+        logTabletAction('Maintenance record deleted', 'Reset', {
+          maintenanceId: deletedRecord?.id,
+          startTime: deletedRecord?.startTime || '',
+          endTime: deletedRecord?.endTime || '',
+          comment: deletedRecord?.comment || ''
+        });
         
         maintenancePhotos = [];
         document.body.removeChild(modal);
@@ -6067,6 +7024,11 @@ function addMaterialLabelPhoto(photoDataURL) {
 
   materialLabelPhotos.push(photoData);
   console.log(`📷 Added material label photo #${materialLabelPhotos.length}, total photos: ${materialLabelPhotos.length}`);
+  logTabletAction('Material label photo captured', 'in-progress', {
+    photoId: photoData.id,
+    totalPhotos: materialLabelPhotos.length,
+    timestamp: photoData.timestamp
+  });
   
   renderMaterialPhotoThumbnails();
   updateMaterialPhotoCount();
@@ -6124,12 +7086,17 @@ function loadMaterialLabelPhotos() {
 
 function removeMaterialLabelPhoto(index) {
   if (index >= 0 && index < materialLabelPhotos.length) {
+    const removedPhoto = materialLabelPhotos[index];
     materialLabelPhotos.splice(index, 1);
     const prefix = `${location.pathname.split('/').pop()}_${document.getElementById('selected工場')?.value}_`;
     localStorage.setItem(`${prefix}materialLabelPhotos`, JSON.stringify(materialLabelPhotos));
     renderMaterialPhotoThumbnails();
     updateMaterialPhotoCount();
     updateMaterialLabelElement();
+    logTabletAction('Material label photo removed', 'in-progress', {
+      photoId: removedPhoto?.id || '',
+      totalPhotos: materialLabelPhotos.length
+    });
   }
 }
 
@@ -6789,7 +7756,7 @@ function selectWorkerName(name) {
   }
   
   closeWorkerModal();
-  input.dispatchEvent(new Event('change'));
+  input.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
 // Open worker modal
@@ -6980,7 +7947,7 @@ function selectSebanggo(value) {
   }
   
   // Trigger change event to fetch product details
-  input.dispatchEvent(new Event('change'));
+  input.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
 // Filter sebanggo list based on search

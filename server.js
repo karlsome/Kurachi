@@ -528,6 +528,7 @@ app.post("/api/broadcast-scan", async (req, res) => {
       // Extract 工場 and sessionID from additionalData
       const 工場 = additionalData?.工場 || additionalData?.factory || '';
       const sessionID = additionalData?.sessionID || '';
+      const Worker_Name = additionalData?.Worker_Name || additionalData?.workerName || additionalData?.worker || '';
       const cleanedAdditionalData = { ...additionalData };
       delete cleanedAdditionalData.工場;
       delete cleanedAdditionalData.factory;
@@ -542,6 +543,7 @@ app.post("/api/broadcast-scan", async (req, res) => {
           工場: 工場,
           設備: normalizedMachineId,
           設備_原形式: machineId.toUpperCase(), // Keep original format (e.g., "OZNC04,OZNC06")
+          Worker_Name,
           Action: 'Scanned kanban (Step 1)',
           Status: 'in-progress',
           Timestamp: currentDate.toISOString(), // ISO string format
@@ -683,87 +685,269 @@ app.get("/api/creatomate/renders/:id", async (req, res) => {
 });
 
 // API endpoint to insert tablet action logs
+function isTabletLogSetupAction(action = '') {
+  const setupActions = ['Kensa mode checkbox toggled', 'Break time', 'Reset'];
+  return setupActions.some(setupAction => String(action || '').includes(setupAction));
+}
+
+function resolveTabletLogEventTimestamp(clientTimestamp) {
+  if (!clientTimestamp) {
+    return new Date();
+  }
+
+  const parsedTimestamp = new Date(clientTimestamp);
+  if (Number.isNaN(parsedTimestamp.getTime())) {
+    return new Date();
+  }
+
+  return parsedTimestamp;
+}
+
+async function prepareTabletLogEntry(tabletLogDB, payload = {}, sessionOperatorMap = null) {
+  const {
+    背番号,
+    品番,
+    工場,
+    設備,
+    Action,
+    Status,
+    sessionID,
+    AdditionalData,
+    Worker_Name: requestWorkerName,
+    ClientTimestamp,
+    ClientLogID,
+  } = payload;
+
+  let Worker_Name = requestWorkerName
+    || AdditionalData?.Worker_Name
+    || AdditionalData?.workerName
+    || AdditionalData?.worker
+    || AdditionalData?.inspectorName
+    || '';
+
+  if (!設備 || !Action) {
+    return {
+      success: false,
+      retriable: false,
+      error: '設備 and Action are required',
+      action: Action,
+      設備,
+    };
+  }
+
+  if (!背番号 && !isTabletLogSetupAction(Action)) {
+    return {
+      success: false,
+      retriable: false,
+      error: '背番号 is required for this action',
+      action: Action,
+      設備,
+    };
+  }
+
+  if (!sessionID) {
+    return {
+      success: false,
+      retriable: false,
+      error: 'sessionID is required. Frontend must generate and provide sessionID.',
+      action: Action,
+      設備,
+    };
+  }
+
+  const normalizedSessionID = normalizeFactoryStatusText(sessionID);
+
+  if (!Worker_Name && normalizedSessionID) {
+    if (sessionOperatorMap?.has(normalizedSessionID)) {
+      Worker_Name = sessionOperatorMap.get(normalizedSessionID) || '';
+    } else {
+      const { operatorMap } = await collectFactoryStatusSessionOperators(tabletLogDB, [normalizedSessionID]);
+      Worker_Name = operatorMap.get(normalizedSessionID) || '';
+    }
+  }
+
+  Worker_Name = normalizeFactoryStatusText(Worker_Name);
+
+  const eventTimestamp = resolveTabletLogEventTimestamp(ClientTimestamp);
+  const jstDate = new Date(eventTimestamp.getTime() + (9 * 60 * 60 * 1000));
+
+  const logEntry = {
+    sessionID: normalizedSessionID,
+    背番号: 背番号 || '',
+    品番: 品番 || '',
+    工場: 工場 || '',
+    設備: 設備 || '',
+    Worker_Name,
+    Action,
+    Status: Status || 'in-progress',
+    Timestamp: eventTimestamp.toISOString(),
+    Date: jstDate.toISOString().split('T')[0],
+    Time: jstDate.toISOString().split('T')[1].split('.')[0],
+    AdditionalData: AdditionalData || {},
+    ...(ClientLogID ? { ClientLogID } : {}),
+  };
+
+  return {
+    success: true,
+    logEntry,
+    broadcastPayload: {
+      type: 'in_progress_update',
+      collection: 'tabletLogDB',
+      equipment: 設備,
+      sebanggo: 背番号 || '',
+      hinban: 品番 || '',
+      workerName: Worker_Name,
+      action: Action,
+      status: Status || 'in-progress',
+      sessionID: normalizedSessionID,
+      timestamp: eventTimestamp.toISOString(),
+    },
+  };
+}
+
+async function insertPreparedTabletLog(tabletLogDB, preparedLog) {
+  const clientLogID = preparedLog.logEntry?.ClientLogID || '';
+
+  if (clientLogID) {
+    const existingLog = await tabletLogDB.findOne(
+      { ClientLogID: clientLogID },
+      { projection: { _id: 1 } }
+    );
+
+    if (existingLog) {
+      return {
+        insertedId: existingLog._id,
+        duplicate: true,
+      };
+    }
+  }
+
+  const result = await tabletLogDB.insertOne(preparedLog.logEntry);
+  return {
+    insertedId: result.insertedId,
+    duplicate: false,
+  };
+}
+
 app.post("/api/tablet-log", async (req, res) => {
   try {
-    const { 背番号, 品番, 工場, 設備, Action, Status, sessionID, AdditionalData } = req.body;
-    
-    // Validate required fields - 設備 and Action are always required
-    if (!設備 || !Action) {
-      return res.status(400).json({ error: "設備 and Action are required" });
-    }
-    
-    // 背番号 is required for most actions, but not for setup actions
-    const setupActions = ['Kensa mode checkbox toggled', 'Break time', 'Reset'];
-    const isSetupAction = setupActions.some(setupAction => Action.includes(setupAction));
-    
-    if (!背番号 && !isSetupAction) {
-      return res.status(400).json({ error: "背番号 is required for this action" });
-    }
-    
-    // ✅ STRICT REQUIREMENT: sessionID must be provided by frontend
-    if (!sessionID) {
-      console.error(`❌ REJECTED: No sessionID provided for action: ${Action}`);
-      return res.status(400).json({ 
-        error: "sessionID is required. Frontend must generate and provide sessionID.",
-        action: Action,
-        設備: 設備
-      });
-    }
-    
     await client.connect();
     const database = client.db("submittedDB");
     const tabletLogDB = database.collection("tabletLogDB");
-    
-    const currentDate = new Date();
-    
-    // Convert to JST (UTC+9) for Date and Time fields
-    const jstDate = new Date(currentDate.getTime() + (9 * 60 * 60 * 1000));
-    const dateYYYYMMDD = jstDate.toISOString().split('T')[0]; // yyyy-mm-dd in JST
-    const timeHHMMSS = jstDate.toISOString().split('T')[1].split('.')[0]; // HH:mm:ss in JST
-    
-    const logEntry = {
-      sessionID: sessionID,
-      背番号: 背番号 || '',
-      品番: 品番 || '',
-      工場: 工場 || '',
-      設備: 設備 || '',
-      Action: Action,
-      Status: Status || 'in-progress',
-      Timestamp: currentDate.toISOString(), // ISO string format in UTC (for consistency)
-      Date: dateYYYYMMDD, // yyyy-mm-dd in JST
-      Time: timeHHMMSS, // HH:mm:ss in JST
-      AdditionalData: AdditionalData || {}
-    };
-    
-    const result = await tabletLogDB.insertOne(logEntry);
-    
-    console.log(`📝 Tablet log inserted: ${背番号} - ${Action} (Session: ${sessionID})`);
-    
-    // Broadcast to factory TV via SSE for in-progress updates
-    if (工場) {
-      broadcastToFactory(工場, {
-        type: 'in_progress_update',
-        collection: 'tabletLogDB',
-        equipment: 設備,
-        sebanggo: 背番号,
-        hinban: 品番,
-        action: Action,
-        status: Status,
-        sessionID: sessionID,
-        timestamp: currentDate.toISOString()
+
+    const preparedLog = await prepareTabletLogEntry(tabletLogDB, req.body);
+
+    if (!preparedLog.success) {
+      if (!req.body?.sessionID) {
+        console.error(`❌ REJECTED: No sessionID provided for action: ${preparedLog.action || req.body?.Action || ''}`);
+      }
+
+      return res.status(400).json({
+        error: preparedLog.error,
+        action: preparedLog.action || req.body?.Action || '',
+        設備: preparedLog.設備 || req.body?.設備 || '',
       });
     }
-    
+
+    const insertResult = await insertPreparedTabletLog(tabletLogDB, preparedLog);
+    const { logEntry, broadcastPayload } = preparedLog;
+
+    console.log(`📝 Tablet log ${insertResult.duplicate ? 'deduplicated' : 'inserted'}: ${logEntry.背番号} - ${logEntry.Action} (Session: ${logEntry.sessionID})`);
+
+    if (!insertResult.duplicate && logEntry.工場) {
+      broadcastToFactory(logEntry.工場, broadcastPayload);
+    }
+
     res.json({
       success: true,
-      message: "Tablet log inserted successfully",
-      insertedId: result.insertedId
+      message: insertResult.duplicate ? "Tablet log already recorded" : "Tablet log inserted successfully",
+      insertedId: insertResult.insertedId,
+      duplicate: insertResult.duplicate,
     });
   } catch (error) {
     console.error("❌ Error inserting tablet log:", error);
     res.status(500).json({ 
       error: "Error inserting tablet log", 
       details: error.message 
+    });
+  }
+});
+
+app.post("/api/tablet-log/batch", async (req, res) => {
+  try {
+    const logs = Array.isArray(req.body?.logs) ? req.body.logs : [];
+
+    if (logs.length === 0) {
+      return res.status(400).json({ error: 'logs array is required' });
+    }
+
+    await client.connect();
+    const database = client.db("submittedDB");
+    const tabletLogDB = database.collection("tabletLogDB");
+
+    const sessionIDs = [...new Set(
+      logs
+        .map(log => normalizeFactoryStatusText(log?.sessionID))
+        .filter(Boolean)
+    )];
+
+    const { operatorMap } = sessionIDs.length > 0
+      ? await collectFactoryStatusSessionOperators(tabletLogDB, sessionIDs)
+      : { operatorMap: new Map() };
+
+    const results = [];
+    let insertedCount = 0;
+    let duplicateCount = 0;
+
+    for (let index = 0; index < logs.length; index += 1) {
+      const preparedLog = await prepareTabletLogEntry(tabletLogDB, logs[index], operatorMap);
+
+      if (!preparedLog.success) {
+        results.push({
+          index,
+          success: false,
+          retriable: false,
+          error: preparedLog.error,
+        });
+        continue;
+      }
+
+      const insertResult = await insertPreparedTabletLog(tabletLogDB, preparedLog);
+      const { logEntry, broadcastPayload } = preparedLog;
+
+      if (insertResult.duplicate) {
+        duplicateCount += 1;
+      } else {
+        insertedCount += 1;
+        if (logEntry.工場) {
+          broadcastToFactory(logEntry.工場, broadcastPayload);
+        }
+      }
+
+      console.log(`📝 Tablet log ${insertResult.duplicate ? 'deduplicated' : 'inserted'}: ${logEntry.背番号} - ${logEntry.Action} (Session: ${logEntry.sessionID})`);
+
+      results.push({
+        index,
+        success: true,
+        duplicate: insertResult.duplicate,
+        insertedId: insertResult.insertedId,
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Tablet log batch processed',
+      totalReceived: logs.length,
+      insertedCount,
+      duplicateCount,
+      failedCount: results.filter(result => !result.success).length,
+      results,
+    });
+  } catch (error) {
+    console.error("❌ Error inserting tablet log batch:", error);
+    res.status(500).json({
+      error: "Error inserting tablet log batch",
+      details: error.message,
     });
   }
 });
@@ -9768,79 +9952,1124 @@ app.get('/api/production-goals/summary', async (req, res) => {
     }
 });
 
+const FACTORY_STATUS_DEFAULT_PAGE_SIZE = 10;
+const FACTORY_STATUS_MAX_PAGE_SIZE = 50;
+const FACTORY_STATUS_STALE_MINUTES = 20;
+const FACTORY_STATUS_TERMINAL_STATUSES = new Set(["completed", "reset"]);
 
+function normalizeFactoryStatusText(value) {
+  if (value == null) return "";
+  return String(value).trim();
+}
 
+function normalizeFactoryStatusTextLower(value) {
+  return normalizeFactoryStatusText(value).toLowerCase();
+}
 
-
-
-
-//FREYA ACESS BACKEND
-// Token validation endpoint
-app.post("/validateToken", async (req, res) => {
-  const token = req.headers.authorization?.replace('Bearer ', '');
-  
-  if (!token) {
-    return res.status(401).json({ error: 'No token provided' });
+function sanitizeFactoryStatusDate(value) {
+  const text = normalizeFactoryStatusText(value);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    return text;
   }
-  
-  try {
-    // If you're using JWT
-    const jwt = require('jsonwebtoken');
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
-    
-    // Fetch user from database
-    await client.connect();
-    const database = client.db("Sasaki_Coating_MasterDB");
-    const masterUsers = database.collection("masterUsers");
-    
-    const user = await masterUsers.findOne({ 
-      username: decoded.username 
-    }, {
-      projection: { password: 0 } // Exclude password
-    });
-    
-    if (!user) {
-      return res.status(401).json({ error: 'User not found' });
+  return new Date().toISOString().split("T")[0];
+}
+
+function sanitizeFactoryStatusList(value) {
+  const values = Array.isArray(value) ? value : [value];
+  return [...new Set(values.map(normalizeFactoryStatusText).filter(Boolean))];
+}
+
+function buildFactoryStatusMapKey(factory, equipment) {
+  return `${factory}::${equipment}`;
+}
+
+function toFactoryStatusIsoTimestamp({ timestamp = "", date = "", time = "" } = {}) {
+  const directTimestamp = normalizeFactoryStatusText(timestamp);
+  if (directTimestamp) {
+    const parsed = new Date(directTimestamp);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toISOString();
     }
-    
-    res.json(user);
-    
+  }
+
+  const dateText = normalizeFactoryStatusText(date);
+  const timeText = normalizeFactoryStatusText(time);
+  if (dateText && timeText) {
+    const parsed = new Date(`${dateText}T${timeText}`);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toISOString();
+    }
+  }
+
+  return "";
+}
+
+function getFactoryStatusMinutesSince(isoTimestamp) {
+  const timestamp = normalizeFactoryStatusText(isoTimestamp);
+  if (!timestamp) return null;
+
+  const parsed = new Date(timestamp);
+  if (Number.isNaN(parsed.getTime())) return null;
+
+  return Math.max(0, Math.round((Date.now() - parsed.getTime()) / 60000));
+}
+
+function getFactoryStatusElapsedMinutes(startTimestamp, endTimestamp = new Date().toISOString()) {
+  const start = new Date(startTimestamp);
+  const end = new Date(endTimestamp);
+
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    return null;
+  }
+
+  return Math.max(0, Math.round((end.getTime() - start.getTime()) / 60000));
+}
+
+function getFactoryStatusCounterValue(additionalData = {}) {
+  const candidate = additionalData?.newValue
+    ?? additionalData?.counterValue
+    ?? additionalData?.currentValue
+    ?? additionalData?.count
+    ?? null;
+
+  const numericCandidate = Number(candidate);
+  return Number.isFinite(numericCandidate) ? numericCandidate : null;
+}
+
+function getFactoryStatusNumericValue(value) {
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) ? numericValue : null;
+}
+
+function matchesFactoryStatusSingleFilter(row = {}, filter = {}) {
+  const field = normalizeFactoryStatusText(filter?.field);
+  const operator = normalizeFactoryStatusText(filter?.operator);
+  const type = normalizeFactoryStatusText(filter?.type);
+
+  if (!field || !operator) return true;
+
+  const rawValue = row?.[field];
+
+  if (type === "number") {
+    const rowValue = getFactoryStatusNumericValue(rawValue);
+    const filterValue = getFactoryStatusNumericValue(filter?.value);
+    const fromValue = getFactoryStatusNumericValue(filter?.valueFrom);
+    const toValue = getFactoryStatusNumericValue(filter?.valueTo);
+
+    if (rowValue == null) return false;
+    if (operator === "equals") return rowValue === filterValue;
+    if (operator === "greater") return filterValue != null && rowValue > filterValue;
+    if (operator === "less") return filterValue != null && rowValue < filterValue;
+    if (operator === "range") return fromValue != null && toValue != null && rowValue >= fromValue && rowValue <= toValue;
+    return true;
+  }
+
+  const rowText = normalizeFactoryStatusTextLower(rawValue);
+
+  if (operator === "in") {
+    const values = Array.isArray(filter?.value)
+      ? filter.value
+      : String(filter?.value || "")
+          .split(",")
+          .map((value) => value.trim())
+          .filter(Boolean);
+
+    return values.some((value) => rowText === normalizeFactoryStatusTextLower(value));
+  }
+
+  const filterText = normalizeFactoryStatusTextLower(filter?.value);
+  if (operator === "equals") return rowText === filterText;
+  if (operator === "contains") return rowText.includes(filterText);
+  return true;
+}
+
+function matchesFactoryStatusAdvancedFilters(row = {}, filters = []) {
+  if (!Array.isArray(filters) || filters.length === 0) return true;
+
+  const groupedFilters = new Map();
+  filters.forEach((filter) => {
+    const field = normalizeFactoryStatusText(filter?.field);
+    if (!field) return;
+
+    if (!groupedFilters.has(field)) {
+      groupedFilters.set(field, []);
+    }
+
+    groupedFilters.get(field).push(filter);
+  });
+
+  return Array.from(groupedFilters.values()).every((fieldFilters) => fieldFilters.some((filter) => matchesFactoryStatusSingleFilter(row, filter)));
+}
+
+function compareFactoryStatusTextValues(left, right) {
+  const leftText = normalizeFactoryStatusText(left);
+  const rightText = normalizeFactoryStatusText(right);
+
+  if (leftText && rightText) return leftText.localeCompare(rightText, 'ja');
+  if (leftText) return -1;
+  if (rightText) return 1;
+  return 0;
+}
+
+function compareFactoryStatusNumericValues(left, right) {
+  const leftNumber = getFactoryStatusNumericValue(left);
+  const rightNumber = getFactoryStatusNumericValue(right);
+
+  if (leftNumber != null && rightNumber != null && leftNumber !== rightNumber) {
+    return leftNumber - rightNumber;
+  }
+  if (leftNumber != null && rightNumber == null) return -1;
+  if (leftNumber == null && rightNumber != null) return 1;
+  return 0;
+}
+
+function compareFactoryStatusTimestampValues(left, right) {
+  const leftTime = normalizeFactoryStatusText(left) ? new Date(left).getTime() : NaN;
+  const rightTime = normalizeFactoryStatusText(right) ? new Date(right).getTime() : NaN;
+  const hasLeftTime = Number.isFinite(leftTime);
+  const hasRightTime = Number.isFinite(rightTime);
+
+  if (hasLeftTime && hasRightTime && leftTime !== rightTime) return leftTime - rightTime;
+  if (hasLeftTime && !hasRightTime) return -1;
+  if (!hasLeftTime && hasRightTime) return 1;
+  return 0;
+}
+
+function compareFactoryStatusStatusValues(left, right) {
+  const statusRank = { running: 0, stale: 1, idle: 2 };
+  const leftRank = statusRank[normalizeFactoryStatusTextLower(left)] ?? 99;
+  const rightRank = statusRank[normalizeFactoryStatusTextLower(right)] ?? 99;
+
+  if (leftRank !== rightRank) return leftRank - rightRank;
+  return 0;
+}
+
+function sortFactoryStatusRowsDefault(left, right) {
+  const statusComparison = compareFactoryStatusStatusValues(left?.statusKey, right?.statusKey);
+  if (statusComparison !== 0) return statusComparison;
+
+  const minutesComparison = compareFactoryStatusNumericValues(left?.lastUpdatedMinutes, right?.lastUpdatedMinutes);
+  if (minutesComparison !== 0) return minutesComparison;
+
+  return compareFactoryStatusTextValues(left?.equipment, right?.equipment);
+}
+
+function sortFactoryStatusRows(left, right, sort = {}) {
+  const sortColumn = normalizeFactoryStatusText(sort?.column);
+  const sortDirection = Number(sort?.direction) === -1 ? -1 : 1;
+  let comparison = 0;
+
+  switch (sortColumn) {
+    case 'equipment':
+      comparison = compareFactoryStatusTextValues(left?.equipment, right?.equipment);
+      break;
+    case 'statusKey':
+      comparison = compareFactoryStatusStatusValues(left?.statusKey, right?.statusKey);
+      break;
+    case 'workerName':
+      comparison = compareFactoryStatusTextValues(left?.workerName, right?.workerName);
+      break;
+    case 'latestAction':
+      comparison = compareFactoryStatusTextValues(left?.latestAction, right?.latestAction);
+      break;
+    case 'partNumber':
+      comparison = compareFactoryStatusTextValues(left?.partNumber, right?.partNumber);
+      break;
+    case 'backNumber':
+      comparison = compareFactoryStatusTextValues(left?.backNumber, right?.backNumber);
+      break;
+    case 'elapsedMinutes':
+      comparison = compareFactoryStatusNumericValues(left?.elapsedMinutes, right?.elapsedMinutes);
+      break;
+    case 'lastUpdatedAt':
+      comparison = compareFactoryStatusTimestampValues(left?.lastUpdatedAt, right?.lastUpdatedAt);
+      break;
+    case 'todayActualQuantity':
+      comparison = compareFactoryStatusNumericValues(left?.todayActualQuantity, right?.todayActualQuantity);
+      break;
+    default:
+      break;
+  }
+
+  if (comparison !== 0) return comparison * sortDirection;
+  return sortFactoryStatusRowsDefault(left, right);
+}
+
+function escapeFactoryStatusRegex(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function buildFactoryStatusLogSortSpec(sort = {}) {
+  const direction = Number(sort?.direction) === 1 ? 1 : -1;
+
+  switch (normalizeFactoryStatusText(sort?.column)) {
+    case 'factory':
+      return { 工場: direction, Timestamp: -1, _id: -1 };
+    case 'equipment':
+      return { 設備: direction, Timestamp: -1, _id: -1 };
+    case 'status':
+      return { Status: direction, Timestamp: -1, _id: -1 };
+    case 'action':
+      return { Action: direction, Timestamp: -1, _id: -1 };
+    case 'workerName':
+      return { Worker_Name: direction, Timestamp: -1, _id: -1 };
+    case 'partNumber':
+      return { 品番: direction, Timestamp: -1, _id: -1 };
+    case 'backNumber':
+      return { 背番号: direction, Timestamp: -1, _id: -1 };
+    case 'sessionID':
+      return { sessionID: direction, Timestamp: -1, _id: -1 };
+    case 'timestamp':
+    default:
+      return { Timestamp: direction, _id: direction };
+  }
+}
+
+async function collectFactoryStatusDistinctValues(collection, field, match = {}) {
+  const results = await collection.aggregate([
+    { $match: match },
+    { $group: { _id: `$${field}` } },
+    { $sort: { _id: 1 } },
+  ]).toArray();
+
+  return results
+    .map((item) => normalizeFactoryStatusText(item?._id))
+    .filter(Boolean);
+}
+
+async function collectFactoryStatusSessionWorkers(collection, sessionIds = []) {
+  const normalizedSessionIds = [...new Set(
+    (Array.isArray(sessionIds) ? sessionIds : [sessionIds])
+      .map((value) => normalizeFactoryStatusText(value))
+      .filter(Boolean)
+  )];
+
+  if (!normalizedSessionIds.length) {
+    return new Map();
+  }
+
+  const results = await collection.aggregate([
+    {
+      $match: {
+        sessionID: { $in: normalizedSessionIds },
+        Worker_Name: { $nin: ["", null] },
+      },
+    },
+    { $sort: { Timestamp: -1 } },
+    {
+      $group: {
+        _id: "$sessionID",
+        workerName: { $first: "$Worker_Name" },
+      },
+    },
+  ]).toArray();
+
+  return new Map(
+    results
+      .map((item) => [
+        normalizeFactoryStatusText(item?._id),
+        normalizeFactoryStatusText(item?.workerName),
+      ])
+      .filter(([sessionID, workerName]) => sessionID && workerName)
+  );
+}
+
+async function collectFactoryStatusSessionInspectors(collection, sessionIds = []) {
+  const normalizedSessionIds = [...new Set(
+    (Array.isArray(sessionIds) ? sessionIds : [sessionIds])
+      .map((value) => normalizeFactoryStatusText(value))
+      .filter(Boolean)
+  )];
+
+  if (!normalizedSessionIds.length) {
+    return new Map();
+  }
+
+  const results = await collection.aggregate([
+    {
+      $match: {
+        sessionID: { $in: normalizedSessionIds },
+        'AdditionalData.inspectorName': { $nin: ["", null] },
+      },
+    },
+    { $sort: { Timestamp: -1 } },
+    {
+      $group: {
+        _id: '$sessionID',
+        inspectorName: { $first: '$AdditionalData.inspectorName' },
+      },
+    },
+  ]).toArray();
+
+  return new Map(
+    results
+      .map((item) => [
+        normalizeFactoryStatusText(item?._id),
+        normalizeFactoryStatusText(item?.inspectorName),
+      ])
+      .filter(([sessionID, inspectorName]) => sessionID && inspectorName)
+  );
+}
+
+async function collectFactoryStatusSessionOperators(collection, sessionIds = []) {
+  const normalizedSessionIds = [...new Set(
+    (Array.isArray(sessionIds) ? sessionIds : [sessionIds])
+      .map((value) => normalizeFactoryStatusText(value))
+      .filter(Boolean)
+  )];
+
+  if (!normalizedSessionIds.length) {
+    return {
+      workerMap: new Map(),
+      inspectorMap: new Map(),
+      operatorMap: new Map(),
+    };
+  }
+
+  const [workerMap, inspectorMap] = await Promise.all([
+    collectFactoryStatusSessionWorkers(collection, normalizedSessionIds),
+    collectFactoryStatusSessionInspectors(collection, normalizedSessionIds),
+  ]);
+
+  const operatorMap = new Map();
+  normalizedSessionIds.forEach((sessionID) => {
+    const operatorName = workerMap.get(sessionID) || inspectorMap.get(sessionID) || '';
+    if (operatorName) {
+      operatorMap.set(sessionID, operatorName);
+    }
+  });
+
+  return {
+    workerMap,
+    inspectorMap,
+    operatorMap,
+  };
+}
+
+async function collectFactoryStatusDistinctOperatorValues(collection, match = {}) {
+  const [workers, inspectors] = await Promise.all([
+    collectFactoryStatusDistinctValues(collection, 'Worker_Name', match),
+    collectFactoryStatusDistinctValues(collection, 'AdditionalData.inspectorName', match),
+  ]);
+
+  return [...new Set(
+    [...workers, ...inspectors]
+      .map((value) => normalizeFactoryStatusText(value))
+      .filter(Boolean)
+  )];
+}
+
+async function collectFactoryStatusMatchingSessionIdsByOperator(collection, match = {}, operatorName = '') {
+  const normalizedOperatorName = normalizeFactoryStatusText(operatorName);
+  if (!normalizedOperatorName) {
+    return [];
+  }
+
+  const regex = new RegExp(escapeFactoryStatusRegex(normalizedOperatorName), 'i');
+  const results = await collection.aggregate([
+    {
+      $match: {
+        $and: [
+          match,
+          { sessionID: { $nin: ['', null] } },
+          {
+            $or: [
+              { Worker_Name: regex },
+              { 'AdditionalData.inspectorName': regex },
+            ],
+          },
+        ],
+      },
+    },
+    {
+      $group: {
+        _id: '$sessionID',
+      },
+    },
+    { $sort: { _id: 1 } },
+  ]).toArray();
+
+  return results
+    .map((item) => normalizeFactoryStatusText(item?._id))
+    .filter(Boolean);
+}
+
+app.post('/api/factory-status/snapshot', async (req, res) => {
+  try {
+    await client.connect();
+
+    const submittedDb = client.db('submittedDB');
+    const pressCollection = submittedDb.collection('pressDB');
+    const tabletLogCollection = submittedDb.collection('tabletLogDB');
+    const goalsCollection = submittedDb.collection('productionGoalsDB');
+
+    const selectedDate = sanitizeFactoryStatusDate(req.body?.date);
+    const selectedFactories = sanitizeFactoryStatusList(req.body?.factories);
+    const advancedFilters = Array.isArray(req.body?.advancedFilters) ? req.body.advancedFilters : [];
+    const pagesByFactory = req.body?.pagesByFactory && typeof req.body.pagesByFactory === 'object'
+      ? req.body.pagesByFactory
+      : {};
+    const sort = req.body?.sort && typeof req.body.sort === 'object'
+      ? req.body.sort
+      : {};
+    const pageSize = Math.min(
+      FACTORY_STATUS_MAX_PAGE_SIZE,
+      Math.max(1, Number.parseInt(req.body?.limit, 10) || FACTORY_STATUS_DEFAULT_PAGE_SIZE)
+    );
+
+    const emptySummary = {
+      totalGoalQuantity: 0,
+      totalActualQuantity: 0,
+      totalGoodQuantity: 0,
+      totalNgQuantity: 0,
+      achievementRate: 0,
+      activeMachines: 0,
+      staleMachines: 0,
+      idleMachines: 0,
+      activeSessions: 0,
+      selectedFactoryCount: selectedFactories.length,
+    };
+
+    if (!selectedFactories.length) {
+      return res.json({
+        success: true,
+        date: selectedDate,
+        generatedAt: new Date().toISOString(),
+        pageSize,
+        summary: emptySummary,
+        groups: [],
+        filterOptions: {
+          equipments: [],
+          workers: [],
+          actions: [],
+        },
+      });
+    }
+
+    const factoryMatch = { $in: selectedFactories };
+
+    const [goalRows, actualRows, equipmentRows, sessionRows] = await Promise.all([
+      goalsCollection.aggregate([
+        { $match: { factory: factoryMatch, date: selectedDate } },
+        {
+          $group: {
+            _id: '$factory',
+            totalTargetQuantity: { $sum: '$targetQuantity' },
+            totalScheduledQuantity: { $sum: '$scheduledQuantity' },
+            totalRemainingQuantity: { $sum: '$remainingQuantity' },
+            goalCount: { $sum: 1 },
+          },
+        },
+        {
+          $project: {
+            _id: 0,
+            factory: '$_id',
+            totalTargetQuantity: 1,
+            totalScheduledQuantity: 1,
+            totalRemainingQuantity: 1,
+            goalCount: 1,
+          },
+        },
+      ]).toArray(),
+      pressCollection.aggregate([
+        {
+          $match: {
+            工場: factoryMatch,
+            Date: selectedDate,
+            設備: { $nin: ['', null] },
+          },
+        },
+        {
+          $group: {
+            _id: { factory: '$工場', equipment: '$設備' },
+            actualQuantity: {
+              $sum: {
+                $convert: { input: '$Process_Quantity', to: 'double', onError: 0, onNull: 0 },
+              },
+            },
+            goodQuantity: {
+              $sum: {
+                $convert: { input: '$Total', to: 'double', onError: 0, onNull: 0 },
+              },
+            },
+            ngQuantity: {
+              $sum: {
+                $convert: { input: '$Total_NG', to: 'double', onError: 0, onNull: 0 },
+              },
+            },
+            recordCount: { $sum: 1 },
+            latestTime: { $max: '$Time_end' },
+          },
+        },
+        {
+          $project: {
+            _id: 0,
+            factory: '$_id.factory',
+            equipment: '$_id.equipment',
+            actualQuantity: 1,
+            goodQuantity: 1,
+            ngQuantity: 1,
+            recordCount: 1,
+            latestTime: 1,
+          },
+        },
+      ]).toArray(),
+      pressCollection.aggregate([
+        {
+          $match: {
+            工場: factoryMatch,
+            設備: { $nin: ['', null] },
+          },
+        },
+        {
+          $group: {
+            _id: { factory: '$工場', equipment: '$設備' },
+          },
+        },
+        {
+          $project: {
+            _id: 0,
+            factory: '$_id.factory',
+            equipment: '$_id.equipment',
+          },
+        },
+      ]).toArray(),
+      tabletLogCollection.aggregate([
+        {
+          $match: {
+            工場: factoryMatch,
+            Date: selectedDate,
+            設備: { $nin: ['', null] },
+            sessionID: { $nin: ['', null] },
+          },
+        },
+        { $sort: { Timestamp: -1 } },
+        {
+          $group: {
+            _id: { factory: '$工場', equipment: '$設備', sessionID: '$sessionID' },
+            latestTimestamp: { $first: '$Timestamp' },
+            latestStatus: { $first: '$Status' },
+            latestAction: { $first: '$Action' },
+            latestWorkerName: { $first: '$Worker_Name' },
+            latestPartNumber: { $first: '$品番' },
+            latestBackNumber: { $first: '$背番号' },
+            latestAdditionalData: { $first: '$AdditionalData' },
+            firstTimestamp: { $last: '$Timestamp' },
+          },
+        },
+        {
+          $project: {
+            _id: 0,
+            factory: '$_id.factory',
+            equipment: '$_id.equipment',
+            sessionID: '$_id.sessionID',
+            latestTimestamp: 1,
+            latestStatus: 1,
+            latestAction: 1,
+            latestWorkerName: 1,
+            latestPartNumber: 1,
+            latestBackNumber: 1,
+            latestAdditionalData: 1,
+            firstTimestamp: 1,
+          },
+        },
+      ]).toArray(),
+    ]);
+
+    const {
+      operatorMap: sessionOperatorMap,
+      inspectorMap: sessionInspectorMap,
+    } = await collectFactoryStatusSessionOperators(
+      tabletLogCollection,
+      sessionRows.map((row) => row.sessionID)
+    );
+
+    const goalsByFactory = new Map(selectedFactories.map((factory) => [factory, {
+      totalTargetQuantity: 0,
+      totalScheduledQuantity: 0,
+      totalRemainingQuantity: 0,
+      goalCount: 0,
+    }]));
+
+    goalRows.forEach((row) => {
+      goalsByFactory.set(normalizeFactoryStatusText(row.factory), {
+        totalTargetQuantity: Number(row.totalTargetQuantity) || 0,
+        totalScheduledQuantity: Number(row.totalScheduledQuantity) || 0,
+        totalRemainingQuantity: Number(row.totalRemainingQuantity) || 0,
+        goalCount: Number(row.goalCount) || 0,
+      });
+    });
+
+    const actualByFactory = new Map(selectedFactories.map((factory) => [factory, {
+      actualQuantity: 0,
+      goodQuantity: 0,
+      ngQuantity: 0,
+      recordCount: 0,
+    }]));
+    const actualByEquipment = new Map();
+
+    actualRows.forEach((row) => {
+      const factory = normalizeFactoryStatusText(row.factory);
+      const equipment = normalizeFactoryStatusText(row.equipment);
+      if (!factory || !equipment) return;
+
+      const nextActual = {
+        factory,
+        equipment,
+        actualQuantity: Number(row.actualQuantity) || 0,
+        goodQuantity: Number(row.goodQuantity) || 0,
+        ngQuantity: Number(row.ngQuantity) || 0,
+        recordCount: Number(row.recordCount) || 0,
+        latestTime: normalizeFactoryStatusText(row.latestTime),
+      };
+
+      actualByEquipment.set(buildFactoryStatusMapKey(factory, equipment), nextActual);
+
+      const bucket = actualByFactory.get(factory) || { actualQuantity: 0, goodQuantity: 0, ngQuantity: 0, recordCount: 0 };
+      bucket.actualQuantity += nextActual.actualQuantity;
+      bucket.goodQuantity += nextActual.goodQuantity;
+      bucket.ngQuantity += nextActual.ngQuantity;
+      bucket.recordCount += nextActual.recordCount;
+      actualByFactory.set(factory, bucket);
+    });
+
+    const equipmentByFactory = new Map(selectedFactories.map((factory) => [factory, new Set()]));
+    equipmentRows.forEach((row) => {
+      const factory = normalizeFactoryStatusText(row.factory);
+      const equipment = normalizeFactoryStatusText(row.equipment);
+      if (!factory || !equipment) return;
+      if (!equipmentByFactory.has(factory)) {
+        equipmentByFactory.set(factory, new Set());
+      }
+      equipmentByFactory.get(factory).add(equipment);
+    });
+
+    const sessionsByEquipment = new Map();
+    sessionRows.forEach((row) => {
+      const factory = normalizeFactoryStatusText(row.factory);
+      const equipment = normalizeFactoryStatusText(row.equipment);
+      const sessionID = normalizeFactoryStatusText(row.sessionID);
+      if (!factory || !equipment || !sessionID) return;
+
+      if (!equipmentByFactory.has(factory)) {
+        equipmentByFactory.set(factory, new Set());
+      }
+      equipmentByFactory.get(factory).add(equipment);
+
+      const normalizedSession = {
+        factory,
+        equipment,
+        sessionID,
+        latestTimestamp: toFactoryStatusIsoTimestamp({ timestamp: row.latestTimestamp }),
+        latestStatus: normalizeFactoryStatusText(row.latestStatus),
+        latestStatusLower: normalizeFactoryStatusTextLower(row.latestStatus),
+        latestAction: normalizeFactoryStatusText(row.latestAction),
+        workerName: normalizeFactoryStatusText(row.latestWorkerName) || sessionOperatorMap.get(sessionID) || '',
+        inspectorName: normalizeFactoryStatusText(row?.latestAdditionalData?.inspectorName) || sessionInspectorMap.get(sessionID) || '',
+        partNumber: normalizeFactoryStatusText(row.latestPartNumber),
+        backNumber: normalizeFactoryStatusText(row.latestBackNumber),
+        firstTimestamp: toFactoryStatusIsoTimestamp({ timestamp: row.firstTimestamp }),
+        additionalData: row.latestAdditionalData || {},
+      };
+
+      const key = buildFactoryStatusMapKey(factory, equipment);
+      const bucket = sessionsByEquipment.get(key) || {
+        latestSession: null,
+        activeSession: null,
+        activeSessionCount: 0,
+      };
+
+      if (!bucket.latestSession || new Date(normalizedSession.latestTimestamp) > new Date(bucket.latestSession.latestTimestamp)) {
+        bucket.latestSession = normalizedSession;
+      }
+
+      if (!FACTORY_STATUS_TERMINAL_STATUSES.has(normalizedSession.latestStatusLower)) {
+        bucket.activeSessionCount += 1;
+        if (!bucket.activeSession || new Date(normalizedSession.latestTimestamp) > new Date(bucket.activeSession.latestTimestamp)) {
+          bucket.activeSession = normalizedSession;
+        }
+      }
+
+      sessionsByEquipment.set(key, bucket);
+    });
+
+    actualRows.forEach((row) => {
+      const factory = normalizeFactoryStatusText(row.factory);
+      const equipment = normalizeFactoryStatusText(row.equipment);
+      if (!factory || !equipment) return;
+      if (!equipmentByFactory.has(factory)) {
+        equipmentByFactory.set(factory, new Set());
+      }
+      equipmentByFactory.get(factory).add(equipment);
+    });
+
+    const allRowsByFactory = new Map();
+    const allRows = [];
+
+    selectedFactories.forEach((factory) => {
+      const equipmentList = Array.from(equipmentByFactory.get(factory) || []).sort((left, right) => left.localeCompare(right, 'ja'));
+
+      const rows = equipmentList.map((equipment) => {
+        const key = buildFactoryStatusMapKey(factory, equipment);
+        const actual = actualByEquipment.get(key) || {
+          actualQuantity: 0,
+          goodQuantity: 0,
+          ngQuantity: 0,
+          recordCount: 0,
+          latestTime: '',
+        };
+        const sessionBucket = sessionsByEquipment.get(key) || {
+          latestSession: null,
+          activeSession: null,
+          activeSessionCount: 0,
+        };
+
+        const activeSession = sessionBucket.activeSession;
+        const latestSession = sessionBucket.latestSession;
+        const lastUpdatedAt = activeSession?.latestTimestamp
+          || latestSession?.latestTimestamp
+          || toFactoryStatusIsoTimestamp({ date: selectedDate, time: actual.latestTime });
+        const lastUpdatedMinutes = getFactoryStatusMinutesSince(lastUpdatedAt);
+
+        let statusKey = 'idle';
+        let statusLabel = 'Idle';
+        if (activeSession) {
+          if (lastUpdatedMinutes != null && lastUpdatedMinutes > FACTORY_STATUS_STALE_MINUTES) {
+            statusKey = 'stale';
+            statusLabel = 'Stale';
+          } else {
+            statusKey = 'running';
+            statusLabel = 'Running';
+          }
+        }
+
+        const row = {
+          factory,
+          equipment,
+          statusKey,
+          statusLabel,
+          workerName: activeSession?.workerName || activeSession?.inspectorName || '',
+          inspectorName: activeSession?.inspectorName || '',
+          latestAction: activeSession?.latestAction || latestSession?.latestAction || '',
+          partNumber: activeSession?.partNumber || '',
+          backNumber: activeSession?.backNumber || '',
+          sessionID: activeSession?.sessionID || '',
+          sessionStartedAt: activeSession?.firstTimestamp || '',
+          elapsedMinutes: activeSession ? getFactoryStatusElapsedMinutes(activeSession.firstTimestamp) : null,
+          lastUpdatedAt,
+          lastUpdatedMinutes,
+          todayActualQuantity: actual.actualQuantity,
+          todayGoodQuantity: actual.goodQuantity,
+          todayNgQuantity: actual.ngQuantity,
+          todayRecordCount: actual.recordCount,
+          latestCounterValue: activeSession ? getFactoryStatusCounterValue(activeSession.additionalData) : null,
+          activeSessionCount: sessionBucket.activeSessionCount,
+        };
+
+        allRows.push(row);
+        return row;
+      }).sort((left, right) => sortFactoryStatusRows(left, right, sort));
+
+      allRowsByFactory.set(factory, rows);
+    });
+
+    const filterOptions = {
+      equipments: [...new Set(allRows.map((row) => row.equipment).filter(Boolean))].sort((left, right) => left.localeCompare(right, 'ja')),
+      workers: [...new Set(allRows.map((row) => row.workerName).filter(Boolean))].sort((left, right) => left.localeCompare(right, 'ja')),
+      actions: [...new Set(allRows.map((row) => row.latestAction).filter(Boolean))].sort((left, right) => left.localeCompare(right, 'ja')),
+    };
+
+    const groups = selectedFactories.map((factory) => {
+      const rows = allRowsByFactory.get(factory) || [];
+      const filteredRows = rows.filter((row) => matchesFactoryStatusAdvancedFilters(row, advancedFilters));
+      const goal = goalsByFactory.get(factory) || {
+        totalTargetQuantity: 0,
+        totalScheduledQuantity: 0,
+        totalRemainingQuantity: 0,
+        goalCount: 0,
+      };
+      const actual = actualByFactory.get(factory) || {
+        actualQuantity: 0,
+        goodQuantity: 0,
+        ngQuantity: 0,
+        recordCount: 0,
+      };
+
+      const runningCount = rows.filter((row) => row.statusKey === 'running').length;
+      const staleCount = rows.filter((row) => row.statusKey === 'stale').length;
+      const idleCount = rows.filter((row) => row.statusKey === 'idle').length;
+      const activeSessions = rows.reduce((sum, row) => sum + (row.activeSessionCount || 0), 0);
+
+      const totalItems = filteredRows.length;
+      const totalPages = totalItems > 0 ? Math.ceil(totalItems / pageSize) : 0;
+      const requestedPage = Math.max(1, Number.parseInt(pagesByFactory[factory], 10) || 1);
+      const currentPage = totalPages > 0 ? Math.min(requestedPage, totalPages) : 1;
+      const startIndex = totalPages > 0 ? (currentPage - 1) * pageSize : 0;
+      const pagedRows = filteredRows.slice(startIndex, startIndex + pageSize);
+
+      return {
+        factory,
+        goal,
+        overview: {
+          machineCount: rows.length,
+          filteredMachineCount: filteredRows.length,
+          activeMachines: runningCount,
+          staleMachines: staleCount,
+          idleMachines: idleCount,
+          activeSessions,
+          actualQuantity: actual.actualQuantity,
+          goodQuantity: actual.goodQuantity,
+          ngQuantity: actual.ngQuantity,
+          recordCount: actual.recordCount,
+          achievementRate: goal.totalTargetQuantity > 0
+            ? Math.round((actual.actualQuantity / goal.totalTargetQuantity) * 1000) / 10
+            : 0,
+        },
+        pagination: {
+          currentPage,
+          totalPages,
+          totalItems,
+          itemsPerPage: pageSize,
+        },
+        rows: pagedRows,
+      };
+    });
+
+    const summary = groups.reduce((accumulator, group) => {
+      accumulator.totalGoalQuantity += group.goal.totalTargetQuantity || 0;
+      accumulator.totalActualQuantity += group.overview.actualQuantity || 0;
+      accumulator.totalGoodQuantity += group.overview.goodQuantity || 0;
+      accumulator.totalNgQuantity += group.overview.ngQuantity || 0;
+      accumulator.activeMachines += group.overview.activeMachines || 0;
+      accumulator.staleMachines += group.overview.staleMachines || 0;
+      accumulator.idleMachines += group.overview.idleMachines || 0;
+      accumulator.activeSessions += group.overview.activeSessions || 0;
+      return accumulator;
+    }, {
+      ...emptySummary,
+      selectedFactoryCount: selectedFactories.length,
+    });
+
+    summary.achievementRate = summary.totalGoalQuantity > 0
+      ? Math.round((summary.totalActualQuantity / summary.totalGoalQuantity) * 1000) / 10
+      : 0;
+
+    res.json({
+      success: true,
+      date: selectedDate,
+      generatedAt: new Date().toISOString(),
+      pageSize,
+      summary,
+      groups,
+      filterOptions,
+    });
   } catch (error) {
-    console.error('Token validation error:', error);
-    res.status(401).json({ error: 'Invalid token' });
+    console.error('Error building factory status snapshot:', error);
+    res.status(500).json({ success: false, error: error.message || 'Failed to build factory status snapshot.' });
   }
 });
 
+app.post('/api/factory-status/logs', async (req, res) => {
+  try {
+    await client.connect();
 
-// app.post("/loginCustomer", async (req, res) => {
-//   const { username, password } = req.body;
+    const submittedDb = client.db('submittedDB');
+    const tabletLogCollection = submittedDb.collection('tabletLogDB');
 
-//   try {
-//     await client.connect();
+    const selectedDate = sanitizeFactoryStatusDate(req.body?.date);
+    const selectedFactories = sanitizeFactoryStatusList(req.body?.factories);
+    const equipment = normalizeFactoryStatusText(req.body?.equipment);
+    const workerName = normalizeFactoryStatusText(req.body?.workerName);
+    const status = normalizeFactoryStatusText(req.body?.status);
+    const sessionID = normalizeFactoryStatusText(req.body?.sessionID);
+    const search = normalizeFactoryStatusText(req.body?.search);
+    const requestedPage = Math.max(1, Number.parseInt(req.body?.page, 10) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number.parseInt(req.body?.limit, 10) || 25));
+    const sortSpec = buildFactoryStatusLogSortSpec(req.body?.sort);
 
-//     const globalDB = client.db("Sasaki_Coating_MasterDB");
-//     const masterUser = await globalDB.collection("masterUsers").findOne({ username });
+    const emptyResponse = {
+      success: true,
+      date: selectedDate,
+      generatedAt: new Date().toISOString(),
+      summary: {
+        totalLogs: 0,
+        equipmentCount: 0,
+        workerCount: 0,
+        sessionCount: 0,
+      },
+      pagination: {
+        currentPage: 1,
+        totalPages: 0,
+        totalItems: 0,
+        itemsPerPage: pageSize,
+      },
+      rows: [],
+      filterOptions: {
+        equipments: [],
+        workers: [],
+        statuses: [],
+      },
+    };
 
-//     // 1️⃣ MasterUser login
-//     if (masterUser) {
-//       const passwordMatch = await bcrypt.compare(password, masterUser.password);
-//       if (!passwordMatch) return res.status(401).json({ error: "Invalid password" });
+    if (!selectedFactories.length) {
+      return res.json(emptyResponse);
+    }
 
-//       const today = new Date();
-//       const validUntil = new Date(masterUser.validUntil);
-//       if (today > validUntil) return res.status(403).json({ error: "Account expired. Contact support." });
+    const factoryMatch = { $in: selectedFactories };
+    const scopeMatch = {
+      工場: factoryMatch,
+      Date: selectedDate,
+    };
 
-//       return res.status(200).json({
-//         username: masterUser.username,
-//         role: masterUser.role,
-//         dbName: masterUser.dbName
-//       });
-//     }
+    const baseMatch = { ...scopeMatch };
 
-//     // 2️⃣ Sub-user login (loop all master users)
-//     const allMasterUsers = await globalDB.collection("masterUsers").find({}).toArray();
+    if (equipment) {
+      baseMatch.設備 = { $regex: escapeFactoryStatusRegex(equipment), $options: 'i' };
+    }
 
-//     for (const mu of allMasterUsers) {
+    if (status) {
+      baseMatch.Status = status;
+    }
+
+    if (sessionID) {
+      baseMatch.sessionID = { $regex: escapeFactoryStatusRegex(sessionID), $options: 'i' };
+    }
+
+    const match = { ...baseMatch };
+    const andClauses = [];
+
+    if (workerName) {
+      const workerNameRegex = { $regex: escapeFactoryStatusRegex(workerName), $options: 'i' };
+      const matchingOperatorSessionIds = await collectFactoryStatusMatchingSessionIdsByOperator(
+        tabletLogCollection,
+        baseMatch,
+        workerName
+      );
+      const operatorClauses = [
+        { Worker_Name: workerNameRegex },
+        { 'AdditionalData.inspectorName': workerNameRegex },
+      ];
+
+      if (matchingOperatorSessionIds.length) {
+        operatorClauses.push({ sessionID: { $in: matchingOperatorSessionIds } });
+      }
+
+      andClauses.push({ $or: operatorClauses });
+    }
+
+    if (search) {
+      const regex = new RegExp(escapeFactoryStatusRegex(search), 'i');
+      andClauses.push({ $or: [
+        { 設備: regex },
+        { Action: regex },
+        { Worker_Name: regex },
+        { 'AdditionalData.inspectorName': regex },
+        { 品番: regex },
+        { 背番号: regex },
+        { sessionID: regex },
+        { Status: regex },
+      ] });
+    }
+
+    if (andClauses.length) {
+      match.$and = andClauses;
+    }
+
+    const [
+      totalItems,
+      scopedEquipments,
+      scopedWorkers,
+      scopedStatuses,
+      matchedEquipments,
+      matchedWorkers,
+      matchedSessions,
+    ] = await Promise.all([
+      tabletLogCollection.countDocuments(match),
+      collectFactoryStatusDistinctValues(tabletLogCollection, '設備', scopeMatch),
+      collectFactoryStatusDistinctOperatorValues(tabletLogCollection, scopeMatch),
+      collectFactoryStatusDistinctValues(tabletLogCollection, 'Status', scopeMatch),
+      collectFactoryStatusDistinctValues(tabletLogCollection, '設備', match),
+      collectFactoryStatusDistinctOperatorValues(tabletLogCollection, match),
+      collectFactoryStatusDistinctValues(tabletLogCollection, 'sessionID', match),
+    ]);
+
+    const totalPages = totalItems > 0 ? Math.ceil(totalItems / pageSize) : 0;
+    const currentPage = totalPages > 0 ? Math.min(requestedPage, totalPages) : 1;
+    const skip = totalPages > 0 ? (currentPage - 1) * pageSize : 0;
+
+    const documents = await tabletLogCollection.find(match, {
+      projection: {
+        Timestamp: 1,
+        Date: 1,
+        Time: 1,
+        工場: 1,
+        設備: 1,
+        Worker_Name: 1,
+        AdditionalData: 1,
+        Action: 1,
+        Status: 1,
+        品番: 1,
+        背番号: 1,
+        sessionID: 1,
+      },
+    }).sort(sortSpec).skip(skip).limit(pageSize).toArray();
+
+    const {
+      operatorMap: sessionOperatorMap,
+      inspectorMap: sessionInspectorMap,
+    } = await collectFactoryStatusSessionOperators(
+      tabletLogCollection,
+      documents.map((document) => document.sessionID)
+    );
+
+    res.json({
+      success: true,
+      date: selectedDate,
+      generatedAt: new Date().toISOString(),
+      summary: {
+        totalLogs: totalItems,
+        equipmentCount: matchedEquipments.filter(Boolean).length,
+        workerCount: matchedWorkers.filter(Boolean).length,
+        sessionCount: matchedSessions.filter(Boolean).length,
+      },
+      pagination: {
+        currentPage,
+        totalPages,
+        totalItems,
+        itemsPerPage: pageSize,
+      },
+      rows: documents.map((document) => ({
+        id: String(document._id),
+        timestamp: document.Timestamp || '',
+        date: document.Date || '',
+        time: document.Time || '',
+        factory: document.工場 || '',
+        equipment: document.設備 || '',
+        workerName: normalizeFactoryStatusText(document.Worker_Name)
+          || sessionOperatorMap.get(normalizeFactoryStatusText(document.sessionID))
+          || normalizeFactoryStatusText(document?.AdditionalData?.inspectorName)
+          || sessionInspectorMap.get(normalizeFactoryStatusText(document.sessionID))
+          || '',
+        inspectorName: normalizeFactoryStatusText(document?.AdditionalData?.inspectorName)
+          || sessionInspectorMap.get(normalizeFactoryStatusText(document.sessionID))
+          || '',
+        action: document.Action || '',
+        status: document.Status || '',
+        partNumber: document.品番 || '',
+        backNumber: document.背番号 || '',
+        sessionID: document.sessionID || '',
+      })),
+      filterOptions: {
+        equipments: scopedEquipments.filter(Boolean).sort((left, right) => String(left).localeCompare(String(right), 'ja')),
+        workers: scopedWorkers.filter(Boolean).sort((left, right) => String(left).localeCompare(String(right), 'ja')),
+        statuses: scopedStatuses.filter(Boolean).sort((left, right) => String(left).localeCompare(String(right), 'ja')),
+      },
+    });
+  } catch (error) {
+    console.error('Error building factory status logs:', error);
+    res.status(500).json({ success: false, error: error.message || 'Failed to load factory status logs.' });
+  }
+});
 //       const customerDB = client.db(mu.dbName);
 //       const subUser = await customerDB.collection("users").findOne({ username });
 
