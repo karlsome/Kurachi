@@ -6,18 +6,20 @@
     <title>First Kojo Fresh Print</title>
     <style>
         :root {
-            --bg: #eef6f8;
-            --panel: #0f3650;
-            --panel-2: #144564;
-            --accent: #1d8ccc;
-            --accent-2: #0fb57a;
-            --danger: #d54f4f;
-            --text: #f7fbff;
-            --muted: #c9dceb;
-            --ink: #153047;
+            --bg: #efefe9;
             --surface: #ffffff;
-            --border: #c8d8e4;
-            --shadow: 0 22px 60px rgba(10, 35, 53, 0.18);
+            --surface-muted: #f7f7f3;
+            --ink: #16212b;
+            --ink-soft: #55616c;
+            --border: #cfd5d9;
+            --border-strong: #9da8b0;
+            --accent: #196aa6;
+            --accent-strong: #0f5687;
+            --success: #1f8b54;
+            --success-soft: #edf7f0;
+            --danger: #b84646;
+            --danger-soft: #fbefef;
+            --info-soft: #eef4f8;
         }
 
         * {
@@ -28,10 +30,7 @@
             margin: 0;
             min-height: 100vh;
             font-family: "Hiragino Sans", "Yu Gothic", sans-serif;
-            background:
-                radial-gradient(circle at top left, rgba(29, 140, 204, 0.18), transparent 32%),
-                radial-gradient(circle at top right, rgba(15, 181, 122, 0.12), transparent 28%),
-                linear-gradient(180deg, #f6fbfd 0%, var(--bg) 100%);
+            background: var(--bg);
             color: var(--ink);
             padding: 12px;
         }
@@ -44,22 +43,23 @@
         .layout {
             display: grid;
             grid-template-columns: 1fr;
-            gap: 14px;
+            gap: 12px;
         }
 
         .panel {
-            background: rgba(255, 255, 255, 0.88);
-            backdrop-filter: blur(12px);
-            border: 1px solid rgba(200, 216, 228, 0.8);
-            border-radius: 20px;
-            padding: 18px;
-            box-shadow: 0 20px 48px rgba(21, 48, 71, 0.08);
+            background: var(--surface);
+            border: 1px solid var(--border-strong);
+            border-radius: 10px;
+            padding: 16px;
+            box-shadow: none;
         }
 
         .panel h2 {
-            margin: 0 0 14px;
-            font-size: 17px;
-            color: #0b2e43;
+            margin: 0 0 16px;
+            font-size: 16px;
+            font-weight: 800;
+            color: var(--ink);
+            letter-spacing: 0;
         }
 
         .field {
@@ -69,31 +69,31 @@
         .field label {
             display: block;
             margin-bottom: 8px;
-            font-size: 13px;
+            font-size: 12px;
             font-weight: 700;
-            letter-spacing: 0.02em;
-            color: #244860;
+            letter-spacing: 0.04em;
+            color: var(--ink-soft);
         }
 
         input {
             width: 100%;
             border: 1px solid var(--border);
-            border-radius: 14px;
-            padding: 14px 16px;
+            border-radius: 8px;
+            padding: 13px 14px;
             font-size: 16px;
             color: var(--ink);
             background: var(--surface);
-            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+            transition: border-color 0.16s ease, background-color 0.16s ease;
         }
 
         input:focus {
             outline: none;
             border-color: var(--accent);
-            box-shadow: 0 0 0 4px rgba(29, 140, 204, 0.12);
+            background: #fcfefe;
         }
 
         input[readonly] {
-            background: #fbfdff;
+            background: var(--surface-muted);
             cursor: pointer;
         }
 
@@ -110,72 +110,92 @@
         }
 
         button {
-            border: 0;
-            border-radius: 14px;
+            border: 1px solid transparent;
+            border-radius: 8px;
             padding: 13px 16px;
-            font-size: 15px;
+            font-size: 14px;
             font-weight: 700;
             cursor: pointer;
-            transition: transform 0.16s ease, box-shadow 0.16s ease, opacity 0.16s ease;
+            transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease, opacity 0.14s ease;
         }
 
         button:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 14px 26px rgba(21, 48, 71, 0.12);
+            box-shadow: none;
         }
 
         button:disabled {
             cursor: wait;
             opacity: 0.65;
-            transform: none;
-            box-shadow: none;
         }
 
         .btn-primary {
-            background: linear-gradient(135deg, var(--accent-2), #10a164);
+            background: var(--success);
             color: white;
+            border-color: var(--success);
+        }
+
+        .btn-primary:hover {
+            background: #177245;
+            border-color: #177245;
         }
 
         .btn-secondary {
-            background: #e6f1f7;
-            color: #0b5078;
+            background: var(--surface-muted);
+            color: var(--ink);
+            border-color: var(--border);
+        }
+
+        .btn-secondary:hover {
+            background: #eceee8;
         }
 
         .btn-inline {
-            background: linear-gradient(135deg, var(--accent), #0d6da5);
+            background: var(--accent);
             color: white;
             min-width: 0;
+            border-color: var(--accent);
         }
 
-        .meta-grid {
+        .btn-inline:hover {
+            background: var(--accent-strong);
+            border-color: var(--accent-strong);
+        }
+
+        .preview-list {
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            overflow: hidden;
+            background: var(--surface);
+        }
+
+        .preview-row {
             display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 10px;
+            grid-template-columns: 96px 1fr;
+            align-items: start;
+            gap: 12px;
+            padding: 11px 12px;
+            border-bottom: 1px solid var(--border);
         }
 
-        .meta-card {
-            background: white;
-            border: 1px solid #d9e4ec;
-            border-radius: 16px;
-            padding: 12px;
-            min-height: 84px;
+        .preview-row:last-child {
+            border-bottom: 0;
         }
 
-        .meta-card .k {
-            display: block;
-            font-size: 12px;
+        .preview-key {
+            font-size: 11px;
             font-weight: 700;
             text-transform: uppercase;
-            letter-spacing: 0.06em;
-            color: #6687a0;
-            margin-bottom: 8px;
+            letter-spacing: 0.08em;
+            color: var(--ink-soft);
+            padding-top: 2px;
         }
 
-        .meta-card .v {
+        .preview-value {
             font-size: 15px;
-            line-height: 1.45;
-            color: #17344a;
+            line-height: 1.4;
+            color: var(--ink);
             word-break: break-word;
+            min-height: 21px;
         }
 
         .actions {
@@ -196,47 +216,48 @@
 
         .status[data-kind="info"] {
             display: block;
-            background: #edf7ff;
-            color: #0c5b89;
-            border: 1px solid #c6e7fb;
+            background: var(--info-soft);
+            color: var(--ink);
+            border: 1px solid var(--border);
         }
 
         .status[data-kind="success"] {
             display: block;
-            background: #ebfaf3;
-            color: #0e7b4f;
-            border: 1px solid #c7efd9;
+            background: var(--success-soft);
+            color: #185438;
+            border: 1px solid #cfe2d5;
         }
 
         .status[data-kind="error"] {
             display: block;
-            background: #fff1f1;
-            color: #a43b3b;
-            border: 1px solid #f1cccc;
+            background: var(--danger-soft);
+            color: #8c3434;
+            border: 1px solid #e7c8c8;
         }
 
         .chooser-modal {
             position: fixed;
             inset: 0;
-            background: rgba(9, 25, 38, 0.78);
+            background: rgba(20, 26, 31, 0.56);
             z-index: 1000;
             display: none;
-            padding: 20px;
+            padding: 12px;
         }
 
         .chooser-dialog {
-            background: white;
-            border-radius: 20px;
+            background: var(--surface);
+            border-radius: 10px;
             width: min(430px, calc(100vw - 24px));
             max-height: calc(100vh - 24px);
             margin: 0 auto;
-            padding: 18px;
+            padding: 14px;
             display: flex;
             flex-direction: column;
             position: absolute;
             inset: 50% auto auto 50%;
             transform: translate(-50%, -50%);
-            box-shadow: 0 30px 80px rgba(0, 0, 0, 0.25);
+            border: 1px solid var(--border-strong);
+            box-shadow: none;
         }
 
         .chooser-header {
@@ -249,16 +270,17 @@
 
         .chooser-header h3 {
             margin: 0;
-            font-size: 20px;
-            color: #153047;
+            font-size: 16px;
+            color: var(--ink);
         }
 
         .close-x {
-            background: #eef4f8;
-            color: #35556c;
-            border-radius: 12px;
-            padding: 10px 14px;
+            background: var(--surface-muted);
+            color: var(--ink);
+            border-radius: 8px;
+            padding: 8px 12px;
             min-width: 52px;
+            border-color: var(--border);
         }
 
         .chooser-search {
@@ -271,7 +293,7 @@
 
         .chooser-status {
             font-size: 13px;
-            color: #547086;
+            color: var(--ink-soft);
             margin-bottom: 10px;
         }
 
@@ -286,11 +308,12 @@
         }
 
         .chooser-section-header {
-            background: linear-gradient(135deg, #0f7bb5, #165d88);
-            color: white;
-            padding: 8px 14px;
-            border-radius: 10px;
-            font-size: 13px;
+            background: var(--surface-muted);
+            color: var(--ink);
+            padding: 8px 10px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 12px;
             font-weight: 700;
             margin-bottom: 10px;
             position: sticky;
@@ -309,9 +332,9 @@
 
         .chooser-item {
             width: 100%;
-            background: white;
-            border: 2px solid #dbe6ee;
-            border-radius: 16px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
             padding: 12px 10px;
             text-align: left;
             min-height: 84px;
@@ -323,24 +346,24 @@
 
         .chooser-item:hover {
             border-color: var(--accent);
-            background: #f5fbff;
+            background: #fbfdff;
         }
 
         .chooser-item.recent {
-            background: linear-gradient(135deg, #fff8e7, #fff1d0);
-            border-color: #f0be66;
+            background: #f4f1e7;
+            border-color: #d4c8a8;
         }
 
         .chooser-item-code {
             font-size: 15px;
             font-weight: 800;
-            color: #163147;
+            color: var(--ink);
         }
 
         .chooser-item-meta {
             font-size: 12px;
             line-height: 1.45;
-            color: #567085;
+            color: var(--ink-soft);
             word-break: break-word;
         }
 
@@ -356,6 +379,7 @@
             color: white;
             font-size: 16px;
             line-height: 1;
+            border-color: var(--danger);
         }
 
         .chooser-footer {
@@ -371,11 +395,11 @@
 
         .empty-state {
             border: 1px dashed #c5d5e1;
-            border-radius: 18px;
+            border-radius: 8px;
             padding: 20px;
             text-align: center;
-            color: #608095;
-            background: #fbfdfe;
+            color: var(--ink-soft);
+            background: var(--surface-muted);
         }
 
         @media (max-width: 640px) {
@@ -405,9 +429,13 @@
         }
 
         @media (max-width: 380px) {
-            .meta-grid,
             .chooser-grid {
                 grid-template-columns: 1fr;
+            }
+
+            .preview-row {
+                grid-template-columns: 1fr;
+                gap: 6px;
             }
         }
     </style>
@@ -448,38 +476,38 @@
             <section class="panel">
                 <h2>Preview</h2>
 
-                <div class="meta-grid">
-                    <div class="meta-card">
-                        <span class="k">品番</span>
-                        <span class="v" id="previewHinban">-</span>
+                <div class="preview-list">
+                    <div class="preview-row">
+                        <div class="preview-key">品番</div>
+                        <div class="preview-value" id="previewHinban">-</div>
                     </div>
-                    <div class="meta-card">
-                        <span class="k">品名</span>
-                        <span class="v" id="previewProductName">-</span>
+                    <div class="preview-row">
+                        <div class="preview-key">品名</div>
+                        <div class="preview-value" id="previewProductName">-</div>
                     </div>
-                    <div class="meta-card">
-                        <span class="k">色</span>
-                        <span class="v" id="previewColor">-</span>
+                    <div class="preview-row">
+                        <div class="preview-key">色</div>
+                        <div class="preview-value" id="previewColor">-</div>
                     </div>
-                    <div class="meta-card">
-                        <span class="k">Location</span>
-                        <span class="v" id="previewLocation">-</span>
+                    <div class="preview-row">
+                        <div class="preview-key">Location</div>
+                        <div class="preview-value" id="previewLocation">-</div>
                     </div>
-                    <div class="meta-card">
-                        <span class="k">梱包数</span>
-                        <span class="v" id="previewLength">-</span>
+                    <div class="preview-row">
+                        <div class="preview-key">梱包数</div>
+                        <div class="preview-value" id="previewLength">-</div>
                     </div>
-                    <div class="meta-card">
-                        <span class="k">Template</span>
-                        <span class="v" id="previewTemplate">-</span>
+                    <div class="preview-row">
+                        <div class="preview-key">Template</div>
+                        <div class="preview-value" id="previewTemplate">-</div>
                     </div>
-                    <div class="meta-card">
-                        <span class="k">Lot No.</span>
-                        <span class="v" id="previewLot">-</span>
+                    <div class="preview-row">
+                        <div class="preview-key">Lot No.</div>
+                        <div class="preview-value" id="previewLot">-</div>
                     </div>
-                    <div class="meta-card">
-                        <span class="k">印刷される順番</span>
-                        <span class="v" id="previewOrder">-</span>
+                    <div class="preview-row">
+                        <div class="preview-key">印刷される順番</div>
+                        <div class="preview-value" id="previewOrder">-</div>
                     </div>
                 </div>
 
