@@ -1,0 +1,1023 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>First Kojo Fresh Print</title>
+    <style>
+        :root {
+            --bg: #eef6f8;
+            --panel: #0f3650;
+            --panel-2: #144564;
+            --accent: #1d8ccc;
+            --accent-2: #0fb57a;
+            --danger: #d54f4f;
+            --text: #f7fbff;
+            --muted: #c9dceb;
+            --ink: #153047;
+            --surface: #ffffff;
+            --border: #c8d8e4;
+            --shadow: 0 22px 60px rgba(10, 35, 53, 0.18);
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: "Hiragino Sans", "Yu Gothic", sans-serif;
+            background:
+                radial-gradient(circle at top left, rgba(29, 140, 204, 0.18), transparent 32%),
+                radial-gradient(circle at top right, rgba(15, 181, 122, 0.12), transparent 28%),
+                linear-gradient(180deg, #f6fbfd 0%, var(--bg) 100%);
+            color: var(--ink);
+            padding: 12px;
+        }
+
+        .shell {
+            max-width: 430px;
+            margin: 0 auto;
+        }
+
+        .layout {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 14px;
+        }
+
+        .panel {
+            background: rgba(255, 255, 255, 0.88);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(200, 216, 228, 0.8);
+            border-radius: 20px;
+            padding: 18px;
+            box-shadow: 0 20px 48px rgba(21, 48, 71, 0.08);
+        }
+
+        .panel h2 {
+            margin: 0 0 14px;
+            font-size: 17px;
+            color: #0b2e43;
+        }
+
+        .field {
+            margin-bottom: 14px;
+        }
+
+        .field label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 13px;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+            color: #244860;
+        }
+
+        input {
+            width: 100%;
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 14px 16px;
+            font-size: 16px;
+            color: var(--ink);
+            background: var(--surface);
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 4px rgba(29, 140, 204, 0.12);
+        }
+
+        input[readonly] {
+            background: #fbfdff;
+            cursor: pointer;
+        }
+
+        .row {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 12px;
+        }
+
+        .input-with-button {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 100px;
+            gap: 10px;
+        }
+
+        button {
+            border: 0;
+            border-radius: 14px;
+            padding: 13px 16px;
+            font-size: 15px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: transform 0.16s ease, box-shadow 0.16s ease, opacity 0.16s ease;
+        }
+
+        button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 14px 26px rgba(21, 48, 71, 0.12);
+        }
+
+        button:disabled {
+            cursor: wait;
+            opacity: 0.65;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent-2), #10a164);
+            color: white;
+        }
+
+        .btn-secondary {
+            background: #e6f1f7;
+            color: #0b5078;
+        }
+
+        .btn-inline {
+            background: linear-gradient(135deg, var(--accent), #0d6da5);
+            color: white;
+            min-width: 0;
+        }
+
+        .meta-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+        }
+
+        .meta-card {
+            background: white;
+            border: 1px solid #d9e4ec;
+            border-radius: 16px;
+            padding: 12px;
+            min-height: 84px;
+        }
+
+        .meta-card .k {
+            display: block;
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: #6687a0;
+            margin-bottom: 8px;
+        }
+
+        .meta-card .v {
+            font-size: 15px;
+            line-height: 1.45;
+            color: #17344a;
+            word-break: break-word;
+        }
+
+        .actions {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 10px;
+            margin-top: 18px;
+        }
+
+        .status {
+            margin-top: 14px;
+            padding: 14px 16px;
+            border-radius: 16px;
+            font-size: 14px;
+            line-height: 1.5;
+            display: none;
+        }
+
+        .status[data-kind="info"] {
+            display: block;
+            background: #edf7ff;
+            color: #0c5b89;
+            border: 1px solid #c6e7fb;
+        }
+
+        .status[data-kind="success"] {
+            display: block;
+            background: #ebfaf3;
+            color: #0e7b4f;
+            border: 1px solid #c7efd9;
+        }
+
+        .status[data-kind="error"] {
+            display: block;
+            background: #fff1f1;
+            color: #a43b3b;
+            border: 1px solid #f1cccc;
+        }
+
+        .chooser-modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(9, 25, 38, 0.78);
+            z-index: 1000;
+            display: none;
+            padding: 20px;
+        }
+
+        .chooser-dialog {
+            background: white;
+            border-radius: 20px;
+            width: min(430px, calc(100vw - 24px));
+            max-height: calc(100vh - 24px);
+            margin: 0 auto;
+            padding: 18px;
+            display: flex;
+            flex-direction: column;
+            position: absolute;
+            inset: 50% auto auto 50%;
+            transform: translate(-50%, -50%);
+            box-shadow: 0 30px 80px rgba(0, 0, 0, 0.25);
+        }
+
+        .chooser-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+
+        .chooser-header h3 {
+            margin: 0;
+            font-size: 20px;
+            color: #153047;
+        }
+
+        .close-x {
+            background: #eef4f8;
+            color: #35556c;
+            border-radius: 12px;
+            padding: 10px 14px;
+            min-width: 52px;
+        }
+
+        .chooser-search {
+            margin-bottom: 14px;
+        }
+
+        .chooser-search input {
+            font-size: 15px;
+        }
+
+        .chooser-status {
+            font-size: 13px;
+            color: #547086;
+            margin-bottom: 10px;
+        }
+
+        .chooser-list {
+            flex: 1;
+            overflow-y: auto;
+            padding-right: 4px;
+        }
+
+        .chooser-section {
+            margin-bottom: 18px;
+        }
+
+        .chooser-section-header {
+            background: linear-gradient(135deg, #0f7bb5, #165d88);
+            color: white;
+            padding: 8px 14px;
+            border-radius: 10px;
+            font-size: 13px;
+            font-weight: 700;
+            margin-bottom: 10px;
+            position: sticky;
+            top: 0;
+        }
+
+        .chooser-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+        }
+
+        .chooser-item-wrap {
+            position: relative;
+        }
+
+        .chooser-item {
+            width: 100%;
+            background: white;
+            border: 2px solid #dbe6ee;
+            border-radius: 16px;
+            padding: 12px 10px;
+            text-align: left;
+            min-height: 84px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            gap: 6px;
+        }
+
+        .chooser-item:hover {
+            border-color: var(--accent);
+            background: #f5fbff;
+        }
+
+        .chooser-item.recent {
+            background: linear-gradient(135deg, #fff8e7, #fff1d0);
+            border-color: #f0be66;
+        }
+
+        .chooser-item-code {
+            font-size: 15px;
+            font-weight: 800;
+            color: #163147;
+        }
+
+        .chooser-item-meta {
+            font-size: 12px;
+            line-height: 1.45;
+            color: #567085;
+            word-break: break-word;
+        }
+
+        .recent-remove {
+            position: absolute;
+            top: -6px;
+            right: -6px;
+            width: 24px;
+            height: 24px;
+            padding: 0;
+            border-radius: 50%;
+            background: var(--danger);
+            color: white;
+            font-size: 16px;
+            line-height: 1;
+        }
+
+        .chooser-footer {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 12px;
+            margin-top: 16px;
+        }
+
+        .chooser-footer button {
+            width: 100%;
+        }
+
+        .empty-state {
+            border: 1px dashed #c5d5e1;
+            border-radius: 18px;
+            padding: 20px;
+            text-align: center;
+            color: #608095;
+            background: #fbfdfe;
+        }
+
+        @media (max-width: 640px) {
+            body {
+                padding: 10px;
+            }
+
+            .panel,
+            .chooser-dialog {
+                padding: 16px;
+            }
+
+            .chooser-dialog {
+                inset: 12px;
+                transform: none;
+                width: auto;
+                max-height: calc(100vh - 24px);
+            }
+
+            .chooser-header {
+                align-items: flex-start;
+            }
+
+            .input-with-button {
+                grid-template-columns: minmax(0, 1fr) 92px;
+            }
+        }
+
+        @media (max-width: 380px) {
+            .meta-grid,
+            .chooser-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="shell">
+        <div class="layout">
+            <section class="panel">
+                <h2>Print</h2>
+
+                <div class="field">
+                    <label for="materialLabelInput">材料背番号</label>
+                    <div class="input-with-button">
+                        <input id="materialLabelInput" type="text" readonly placeholder="モーダルから選択">
+                        <button id="chooseMaterialButton" type="button" class="btn-inline">選ぶ</button>
+                    </div>
+                </div>
+
+                <div class="row">
+                    <div class="field">
+                        <label for="lotNumberInput">Lot No.</label>
+                        <input id="lotNumberInput" type="text" placeholder="例: 260417-1">
+                    </div>
+                    <div class="field">
+                        <label for="orderNumberInput">順番番号</label>
+                        <input id="orderNumberInput" type="text" placeholder="例: 3">
+                    </div>
+                </div>
+
+                <div class="actions">
+                    <button id="reloadMaterialsButton" type="button" class="btn-secondary">材料背番号を再読込</button>
+                    <button id="printButton" type="button" class="btn-primary">Print Fresh Label</button>
+                </div>
+
+                <div id="statusBox" class="status"></div>
+            </section>
+
+            <section class="panel">
+                <h2>Preview</h2>
+
+                <div class="meta-grid">
+                    <div class="meta-card">
+                        <span class="k">品番</span>
+                        <span class="v" id="previewHinban">-</span>
+                    </div>
+                    <div class="meta-card">
+                        <span class="k">品名</span>
+                        <span class="v" id="previewProductName">-</span>
+                    </div>
+                    <div class="meta-card">
+                        <span class="k">色</span>
+                        <span class="v" id="previewColor">-</span>
+                    </div>
+                    <div class="meta-card">
+                        <span class="k">Location</span>
+                        <span class="v" id="previewLocation">-</span>
+                    </div>
+                    <div class="meta-card">
+                        <span class="k">梱包数</span>
+                        <span class="v" id="previewLength">-</span>
+                    </div>
+                    <div class="meta-card">
+                        <span class="k">Template</span>
+                        <span class="v" id="previewTemplate">-</span>
+                    </div>
+                    <div class="meta-card">
+                        <span class="k">Lot No.</span>
+                        <span class="v" id="previewLot">-</span>
+                    </div>
+                    <div class="meta-card">
+                        <span class="k">印刷される順番</span>
+                        <span class="v" id="previewOrder">-</span>
+                    </div>
+                </div>
+
+                <div class="field" style="margin-top: 18px; margin-bottom: 0;">
+                    <label for="barcodePreview">Barcode Preview</label>
+                    <input id="barcodePreview" type="text" readonly value="">
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <div id="materialModal" class="chooser-modal">
+        <div class="chooser-dialog">
+            <div class="chooser-header">
+                <h3>材料背番号を選択</h3>
+                <button id="closeMaterialModalX" type="button" class="close-x">×</button>
+            </div>
+
+            <div class="chooser-search">
+                <input id="materialSearchInput" type="text" placeholder="材料背番号 / 品番 / 品名 で検索">
+            </div>
+
+            <div id="materialListStatus" class="chooser-status">材料背番号を読み込み中です...</div>
+
+            <div id="materialOptionsContainer" class="chooser-list"></div>
+
+            <div class="chooser-footer">
+                <button id="useTypedValueButton" type="button" class="btn-secondary">入力した値を使う</button>
+                <button id="closeMaterialModalButton" type="button" class="btn-inline">閉じる</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const serverURL = "https://kurachi.onrender.com";
+        const IOS_PRINT_ENDPOINT = "brotherwebprint://print";
+        const ANDROID_PRINT_ENDPOINT = "http://localhost:8088/print";
+        const RECENT_LABELS_KEY = "firstKojoFreshPrintRecentLabels";
+
+        const state = {
+            materials: [],
+            selectedMaterial: null,
+            loadingMaterials: false,
+            printing: false
+        };
+
+        const materialLabelInput = document.getElementById("materialLabelInput");
+        const lotNumberInput = document.getElementById("lotNumberInput");
+        const orderNumberInput = document.getElementById("orderNumberInput");
+        const barcodePreview = document.getElementById("barcodePreview");
+        const printButton = document.getElementById("printButton");
+        const statusBox = document.getElementById("statusBox");
+        const materialModal = document.getElementById("materialModal");
+        const materialSearchInput = document.getElementById("materialSearchInput");
+        const materialListStatus = document.getElementById("materialListStatus");
+        const materialOptionsContainer = document.getElementById("materialOptionsContainer");
+
+        function setStatus(message, kind = "info") {
+            if (!message) {
+                statusBox.textContent = "";
+                statusBox.style.display = "none";
+                statusBox.removeAttribute("data-kind");
+                return;
+            }
+            statusBox.textContent = message;
+            statusBox.dataset.kind = kind;
+            statusBox.style.display = "block";
+        }
+
+        function getRecentLabels() {
+            try {
+                return JSON.parse(localStorage.getItem(RECENT_LABELS_KEY) || "[]");
+            } catch (error) {
+                return [];
+            }
+        }
+
+        function saveRecentLabel(labelCode) {
+            if (!labelCode) return;
+            const next = getRecentLabels().filter((item) => item !== labelCode);
+            next.unshift(labelCode);
+            localStorage.setItem(RECENT_LABELS_KEY, JSON.stringify(next.slice(0, 6)));
+        }
+
+        function removeRecentLabel(labelCode) {
+            const next = getRecentLabels().filter((item) => item !== labelCode);
+            localStorage.setItem(RECENT_LABELS_KEY, JSON.stringify(next));
+            renderMaterialOptions(materialSearchInput.value);
+        }
+
+        function getDefaultLotNo() {
+            const now = new Date();
+            const year = String(now.getFullYear()).slice(-2);
+            const month = String(now.getMonth() + 1).padStart(2, "0");
+            const day = String(now.getDate()).padStart(2, "0");
+            return `${year}${month}${day}-1`;
+        }
+
+        function isIOS() {
+            return [
+                "iPad Simulator",
+                "iPhone Simulator",
+                "iPod Simulator",
+                "iPad",
+                "iPhone",
+                "iPod"
+            ].includes(navigator.platform)
+                || (navigator.userAgent.includes("Mac") && "ontouchend" in document);
+        }
+
+        function isAndroid() {
+            return /Android/i.test(navigator.userAgent);
+        }
+
+        function normalizeMaterial(record) {
+            return {
+                labelCode: String(record.ラベル品番 || "").trim(),
+                hinban: String(record.品番 || "").trim(),
+                productName: String(record.品名 || "").trim(),
+                color: String(record.NMOJI_色コード || "").trim(),
+                location: String(record.NMOJI_ユーザー || "").trim(),
+                length: parseInt(record.梱包数, 10) || 50
+            };
+        }
+
+        function sortMaterials(a, b) {
+            return a.labelCode.localeCompare(b.labelCode, "ja");
+        }
+
+        function groupByFirstCharacter(materials) {
+            const grouped = {};
+            materials.forEach((material) => {
+                const first = material.labelCode.charAt(0).toUpperCase() || "#";
+                const key = /[A-Z0-9]/.test(first) ? first : first || "#";
+                if (!grouped[key]) grouped[key] = [];
+                grouped[key].push(material);
+            });
+            return grouped;
+        }
+
+        async function fetchMaterials(force = false) {
+            if (state.loadingMaterials) return;
+            if (!force && state.materials.length > 0) return;
+
+            state.loadingMaterials = true;
+            materialListStatus.textContent = "材料背番号を読み込み中です...";
+            setStatus("材料背番号一覧を読み込んでいます。", "info");
+
+            const payload = {
+                dbName: "Sasaki_Coating_MasterDB",
+                collectionName: "materialMasterDB2",
+                aggregation: [
+                    { $match: { ラベル品番: { $exists: true, $ne: "" } } },
+                    {
+                        $group: {
+                            _id: "$ラベル品番",
+                            ラベル品番: { $first: "$ラベル品番" },
+                            品番: { $first: "$品番" },
+                            品名: { $first: "$品名" },
+                            NMOJI_色コード: { $first: "$NMOJI_色コード" },
+                            NMOJI_ユーザー: { $first: "$NMOJI_ユーザー" },
+                            梱包数: { $first: "$梱包数" }
+                        }
+                    },
+                    {
+                        $project: {
+                            _id: 0,
+                            ラベル品番: 1,
+                            品番: 1,
+                            品名: 1,
+                            NMOJI_色コード: 1,
+                            NMOJI_ユーザー: 1,
+                            梱包数: 1
+                        }
+                    },
+                    { $sort: { ラベル品番: 1 } }
+                ]
+            };
+
+            try {
+                const response = await fetch(`${serverURL}/queries`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`材料一覧の取得に失敗しました: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                if (!Array.isArray(data)) {
+                    throw new Error("材料一覧のデータ形式が不正です。");
+                }
+
+                state.materials = data
+                    .map(normalizeMaterial)
+                    .filter((material) => material.labelCode)
+                    .sort(sortMaterials);
+
+                materialListStatus.textContent = `${state.materials.length} 件の材料背番号を読み込みました。`;
+                renderMaterialOptions(materialSearchInput.value);
+                setStatus("材料背番号一覧を読み込みました。", "success");
+            } catch (error) {
+                materialListStatus.textContent = error.message;
+                materialOptionsContainer.innerHTML = `<div class="empty-state">${error.message}</div>`;
+                setStatus(error.message, "error");
+            } finally {
+                state.loadingMaterials = false;
+            }
+        }
+
+        async function fetchMaterialByLabel(labelCode) {
+            const payload = {
+                dbName: "Sasaki_Coating_MasterDB",
+                collectionName: "materialMasterDB2",
+                query: { ラベル品番: labelCode }
+            };
+
+            const response = await fetch(`${serverURL}/queries`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                throw new Error(`材料詳細の取得に失敗しました: ${response.statusText}`);
+            }
+
+            const data = await response.json();
+            if (!Array.isArray(data) || data.length === 0) {
+                return null;
+            }
+
+            return normalizeMaterial(data[0]);
+        }
+
+        function makeChooserButton(material, isRecent = false) {
+            const wrap = document.createElement("div");
+            wrap.className = "chooser-item-wrap";
+
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = `chooser-item${isRecent ? " recent" : ""}`;
+            button.addEventListener("click", () => selectMaterial(material));
+
+            const code = document.createElement("div");
+            code.className = "chooser-item-code";
+            code.textContent = material.labelCode;
+
+            const meta = document.createElement("div");
+            meta.className = "chooser-item-meta";
+            meta.textContent = [material.hinban, material.productName, material.color].filter(Boolean).join(" | ") || "詳細なし";
+
+            button.appendChild(code);
+            button.appendChild(meta);
+            wrap.appendChild(button);
+
+            if (isRecent) {
+                const deleteButton = document.createElement("button");
+                deleteButton.type = "button";
+                deleteButton.className = "recent-remove";
+                deleteButton.textContent = "×";
+                deleteButton.addEventListener("click", (event) => {
+                    event.stopPropagation();
+                    removeRecentLabel(material.labelCode);
+                });
+                wrap.appendChild(deleteButton);
+            }
+
+            return wrap;
+        }
+
+        function appendSection(container, title, materials, isRecent = false) {
+            if (!materials.length) return;
+
+            const section = document.createElement("div");
+            section.className = "chooser-section";
+
+            const header = document.createElement("div");
+            header.className = "chooser-section-header";
+            header.textContent = title;
+
+            const grid = document.createElement("div");
+            grid.className = "chooser-grid";
+
+            materials.forEach((material) => {
+                grid.appendChild(makeChooserButton(material, isRecent));
+            });
+
+            section.appendChild(header);
+            section.appendChild(grid);
+            container.appendChild(section);
+        }
+
+        function renderMaterialOptions(searchTerm = "") {
+            materialOptionsContainer.innerHTML = "";
+
+            const normalized = searchTerm.trim().toLowerCase();
+            const filtered = state.materials.filter((material) => {
+                if (!normalized) return true;
+                return [material.labelCode, material.hinban, material.productName, material.color]
+                    .join(" ")
+                    .toLowerCase()
+                    .includes(normalized);
+            });
+
+            if (filtered.length === 0) {
+                materialOptionsContainer.innerHTML = '<div class="empty-state">一致する材料背番号がありません。入力した値をそのまま使う場合は下のボタンを押してください。</div>';
+                return;
+            }
+
+            const recentCodes = getRecentLabels();
+            const filteredByCode = new Map(filtered.map((material) => [material.labelCode, material]));
+            const recentMaterials = recentCodes
+                .map((code) => filteredByCode.get(code))
+                .filter(Boolean);
+
+            appendSection(materialOptionsContainer, "最近使用 / Recent", recentMaterials, true);
+
+            const remaining = filtered.filter((material) => !recentCodes.includes(material.labelCode));
+            const grouped = groupByFirstCharacter(remaining);
+            Object.keys(grouped)
+                .sort((a, b) => a.localeCompare(b, "ja"))
+                .forEach((key) => appendSection(materialOptionsContainer, key, grouped[key]));
+        }
+
+        function getTemplateName(material) {
+            return material && material.labelCode === "NC2" ? "NC21.lbx" : "firstkojo4.lbx";
+        }
+
+        function getBarcodePreview() {
+            if (!state.selectedMaterial) return "";
+            const lotNo = lotNumberInput.value.trim();
+            const length = state.selectedMaterial.length || 50;
+            return `${state.selectedMaterial.labelCode},${lotNo},${length}`;
+        }
+
+        function updatePreview() {
+            const material = state.selectedMaterial;
+            document.getElementById("previewHinban").textContent = material ? material.hinban || "-" : "-";
+            document.getElementById("previewProductName").textContent = material ? material.productName || "-" : "-";
+            document.getElementById("previewColor").textContent = material ? material.color || "-" : "-";
+            document.getElementById("previewLocation").textContent = material ? material.location || "-" : "-";
+            document.getElementById("previewLength").textContent = material ? String(material.length || 50) : "-";
+            document.getElementById("previewTemplate").textContent = material ? getTemplateName(material) : "-";
+            document.getElementById("previewLot").textContent = lotNumberInput.value.trim() || "-";
+            document.getElementById("previewOrder").textContent = orderNumberInput.value.trim() || "-";
+            barcodePreview.value = material ? getBarcodePreview() : "";
+        }
+
+        function selectMaterial(material) {
+            state.selectedMaterial = material;
+            materialLabelInput.value = material.labelCode;
+            saveRecentLabel(material.labelCode);
+            localStorage.setItem("firstKojoFreshPrintLastLabel", material.labelCode);
+            closeMaterialModal();
+            updatePreview();
+            setStatus(`材料背番号 ${material.labelCode} を選択しました。`, "success");
+        }
+
+        function openMaterialModal() {
+            materialModal.style.display = "block";
+            renderMaterialOptions(materialSearchInput.value);
+            materialSearchInput.focus();
+            fetchMaterials();
+        }
+
+        function closeMaterialModal() {
+            materialModal.style.display = "none";
+        }
+
+        async function useTypedValue() {
+            const typed = materialSearchInput.value.trim();
+            if (!typed) {
+                materialListStatus.textContent = "値を入力してください。";
+                return;
+            }
+
+            let material = state.materials.find((item) => item.labelCode === typed);
+
+            if (!material) {
+                materialListStatus.textContent = `${typed} を materialMasterDB2 から確認しています...`;
+                try {
+                    material = await fetchMaterialByLabel(typed);
+                } catch (error) {
+                    materialListStatus.textContent = error.message;
+                    setStatus(error.message, "error");
+                    return;
+                }
+            }
+
+            if (!material) {
+                materialListStatus.textContent = `${typed} は見つかりませんでした。`;
+                setStatus(`${typed} は materialMasterDB2 に見つかりませんでした。`, "error");
+                return;
+            }
+
+            if (!state.materials.some((item) => item.labelCode === material.labelCode)) {
+                state.materials.push(material);
+                state.materials.sort(sortMaterials);
+            }
+
+            selectMaterial(material);
+        }
+
+        async function restoreLastSelection() {
+            const lastLabel = localStorage.getItem("firstKojoFreshPrintLastLabel");
+            if (!lastLabel) return;
+
+            await fetchMaterials();
+            let material = state.materials.find((item) => item.labelCode === lastLabel);
+            if (!material) {
+                try {
+                    material = await fetchMaterialByLabel(lastLabel);
+                } catch (error) {
+                    return;
+                }
+            }
+
+            if (material) {
+                state.selectedMaterial = material;
+                materialLabelInput.value = material.labelCode;
+                updatePreview();
+            }
+        }
+
+        async function printFreshLabel() {
+            if (state.printing) return;
+
+            const material = state.selectedMaterial;
+            const lotNo = lotNumberInput.value.trim();
+            const orderNo = orderNumberInput.value.trim();
+
+            if (!material) {
+                setStatus("先に材料背番号を選択してください。", "error");
+                openMaterialModal();
+                return;
+            }
+
+            if (!lotNo) {
+                setStatus("Lot No. を入力してください。", "error");
+                lotNumberInput.focus();
+                return;
+            }
+
+            if (!orderNo) {
+                setStatus("順番番号を入力してください。", "error");
+                orderNumberInput.focus();
+                return;
+            }
+
+            const filename = getTemplateName(material);
+            const barcodeValue = `${material.labelCode},${lotNo},${material.length || 50}`;
+            const params = new URLSearchParams({
+                filename,
+                size: "RollW62",
+                copies: "1",
+                text_品番: material.hinban || "",
+                text_背番号: material.labelCode || "",
+                text_収容数: orderNo,
+                text_color: material.color || "",
+                text_品名: material.productName || "",
+                text_location: `${material.location || ""}へ`,
+                text_DateT: lotNo,
+                barcode_barcode: barcodeValue
+            });
+
+            const isIOSDevice = isIOS();
+            const isAndroidDevice = isAndroid();
+            const printBaseUrl = isIOSDevice ? IOS_PRINT_ENDPOINT : ANDROID_PRINT_ENDPOINT;
+            const printUrl = `${printBaseUrl}?${params.toString()}`;
+
+            state.printing = true;
+            printButton.disabled = true;
+            setStatus(`印刷中です... Template: ${filename}`, "info");
+
+            try {
+                if (isIOSDevice) {
+                    window.location.href = printUrl;
+                    setStatus("Brother アプリへ印刷を送信しました。", "success");
+                    return;
+                }
+
+                if (!isAndroidDevice) {
+                    console.warn("Non-iOS/Android device detected. Falling back to Android/local Brother print URL.");
+                }
+
+                const responseText = await Promise.race([
+                    fetch(printUrl).then((response) => {
+                        if (!response.ok) {
+                            throw new Error(`HTTP error: ${response.status}`);
+                        }
+                        return response.text();
+                    }),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout: printer did not respond")), 30000))
+                ]);
+
+                if (!responseText.includes("<result>SUCCESS</result>")) {
+                    if (responseText.includes("PrinterStatusErrorCoverOpen")) {
+                        throw new Error("Printer cover is open");
+                    }
+                    throw new Error(responseText.slice(0, 160) || "Unknown printer error");
+                }
+
+                setStatus(`印刷成功: ${material.labelCode} / ${lotNo}`, "success");
+            } catch (error) {
+                setStatus(`印刷失敗: ${error.message}`, "error");
+            } finally {
+                state.printing = false;
+                printButton.disabled = false;
+            }
+        }
+
+        document.getElementById("chooseMaterialButton").addEventListener("click", openMaterialModal);
+        materialLabelInput.addEventListener("click", openMaterialModal);
+        document.getElementById("reloadMaterialsButton").addEventListener("click", () => fetchMaterials(true));
+        document.getElementById("closeMaterialModalButton").addEventListener("click", closeMaterialModal);
+        document.getElementById("closeMaterialModalX").addEventListener("click", closeMaterialModal);
+        document.getElementById("useTypedValueButton").addEventListener("click", useTypedValue);
+        materialSearchInput.addEventListener("input", (event) => renderMaterialOptions(event.target.value));
+        materialSearchInput.addEventListener("keydown", (event) => {
+            if (event.key === "Enter") {
+                event.preventDefault();
+                useTypedValue();
+            }
+        });
+        lotNumberInput.addEventListener("input", updatePreview);
+        orderNumberInput.addEventListener("input", updatePreview);
+        printButton.addEventListener("click", printFreshLabel);
+        materialModal.addEventListener("click", (event) => {
+            if (event.target === materialModal) closeMaterialModal();
+        });
+
+        lotNumberInput.value = getDefaultLotNo();
+        updatePreview();
+        fetchMaterials();
+        restoreLastSelection();
+    </script>
+</body>
+</html>
