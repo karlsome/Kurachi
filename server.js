@@ -16293,6 +16293,112 @@ app.post("/api/inventory-management", async (req, res) => {
         }
         break;
 
+      case 'adjustInventory':
+        try {
+          const {
+            backNumber,
+            partNumber,
+            factory,
+            newPhysicalQuantity,
+            submittedBy,
+            fullName,
+            role
+          } = req.body;
+
+          if (role !== 'admin') {
+            return res.status(403).json({ error: 'Only admin can adjust inventory' });
+          }
+
+          if (!backNumber || !partNumber) {
+            return res.status(400).json({ error: '背番号 and 品番 are required' });
+          }
+
+          const normalizedNewPhysicalQuantity = Math.floor(Number(newPhysicalQuantity));
+          if (!Number.isFinite(normalizedNewPhysicalQuantity) || normalizedNewPhysicalQuantity < 0) {
+            return res.status(400).json({ error: 'A valid new physical quantity is required' });
+          }
+
+          const latestRecordResults = await inventoryCollection.aggregate([
+            { $match: { 背番号: backNumber } },
+            {
+              $addFields: {
+                timeStampDate: {
+                  $cond: {
+                    if: { $eq: [{ $type: '$timeStamp' }, 'string'] },
+                    then: { $dateFromString: { dateString: '$timeStamp' } },
+                    else: { $toDate: '$timeStamp' }
+                  }
+                }
+              }
+            },
+            { $sort: { timeStampDate: -1 } },
+            { $limit: 1 }
+          ]).toArray();
+
+          const latestRecord = latestRecordResults[0] || null;
+          const currentPhysicalQuantity = latestRecord?.physicalQuantity ?? latestRecord?.runningQuantity ?? 0;
+          const currentReservedQuantity = latestRecord?.reservedQuantity ?? 0;
+          const currentRunningQuantity = latestRecord?.runningQuantity ?? currentPhysicalQuantity;
+          const currentFactory = latestRecord?.工場 || factory || '野田倉庫';
+          const difference = normalizedNewPhysicalQuantity - currentPhysicalQuantity;
+          const newAvailableQuantity = normalizedNewPhysicalQuantity - currentReservedQuantity;
+          const newRunningQuantity = latestRecord ? currentRunningQuantity + difference : normalizedNewPhysicalQuantity;
+
+          let action;
+          let note;
+          if (!latestRecord) {
+            action = `棚卸し (+${normalizedNewPhysicalQuantity})`;
+            note = `added ${normalizedNewPhysicalQuantity} because missing from inventory`;
+          } else if (difference > 0) {
+            action = `棚卸し (+${difference})`;
+            note = `added ${difference} pieces because lacking`;
+          } else if (difference < 0) {
+            action = `棚卸し (${difference})`;
+            note = `deducted ${Math.abs(difference)} pieces because excess`;
+          } else {
+            action = '棚卸し (±0)';
+            note = 'count matches inventory';
+          }
+
+          const now = new Date();
+          const timeStamp = now.toISOString();
+          const dateField = timeStamp.split('T')[0];
+
+          const transactionDoc = {
+            背番号: backNumber,
+            品番: latestRecord?.品番 || partNumber,
+            工場: currentFactory,
+            physicalQuantity: normalizedNewPhysicalQuantity,
+            reservedQuantity: currentReservedQuantity,
+            availableQuantity: newAvailableQuantity,
+            runningQuantity: newRunningQuantity,
+            lastQuantity: currentPhysicalQuantity,
+            action: action,
+            timeStamp: timeStamp,
+            Date: dateField,
+            submittedBy: submittedBy,
+            source: `Freya Admin 棚卸し - ${fullName || submittedBy}`,
+            note: note
+          };
+
+          const result = await inventoryCollection.insertOne(transactionDoc);
+
+          console.log(`✅ Admin inventory adjustment: ${backNumber} ${currentPhysicalQuantity} -> ${normalizedNewPhysicalQuantity} by ${submittedBy}`);
+
+          res.json({
+            success: true,
+            message: 'Inventory adjusted successfully',
+            transaction: {
+              ...transactionDoc,
+              _id: result.insertedId
+            }
+          });
+        } catch (error) {
+          console.error('Error in adjustInventory:', error);
+          res.status(500).json({ error: 'Failed to adjust inventory', details: error.message });
+        }
+        break;
+
       case 'getBatchResetItems':
         try {
           const { filters } = req.body;
