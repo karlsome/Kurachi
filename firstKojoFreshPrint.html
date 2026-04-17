@@ -606,6 +606,12 @@
             return `${year}${month}${day}-1`;
         }
 
+        function buildEncodedQuery(params) {
+            return Object.entries(params)
+                .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value ?? "")}`)
+                .join("&");
+        }
+
         function isIOS() {
             return [
                 "iPad Simulator",
@@ -962,7 +968,7 @@
 
             const filename = getTemplateName(material);
             const barcodeValue = `${material.labelCode},${lotNo},${material.length || 50}`;
-            const params = new URLSearchParams({
+            const params = {
                 filename,
                 size: "RollW62",
                 copies: "1",
@@ -974,12 +980,12 @@
                 text_location: `${material.location || ""}へ`,
                 text_DateT: lotNo,
                 barcode_barcode: barcodeValue
-            });
+            };
 
             const isIOSDevice = isIOS();
             const isAndroidDevice = isAndroid();
             const printBaseUrl = isIOSDevice ? IOS_PRINT_ENDPOINT : ANDROID_PRINT_ENDPOINT;
-            const printUrl = `${printBaseUrl}?${params.toString()}`;
+            const printUrl = `${printBaseUrl}?${buildEncodedQuery(params)}`;
 
             state.printing = true;
             printButton.disabled = true;
