@@ -13193,6 +13193,132 @@ console.log("🖨️ Planner print API route loaded successfully");
 // ==================== NODA WAREHOUSE MANAGEMENT API ROUTES ====================
 // Copy this entire section to your server.js file
 
+function parseNodaPositiveNumber(value) {
+  const numericValue = Number(typeof value === 'string' ? value.replace(/,/g, '').trim() : value);
+  return Number.isFinite(numericValue) && numericValue > 0 ? numericValue : null;
+}
+
+function buildNodaMasterLineItemKey(partNumber = '', backNumber = '') {
+  return `${String(partNumber || '').trim()}::${String(backNumber || '').trim()}`;
+}
+
+async function attachNodaBoxCounts(masterCollection, lineItems = []) {
+  if (!Array.isArray(lineItems) || lineItems.length === 0) {
+    return lineItems;
+  }
+
+  const pairQueries = new Map();
+  const backNumbers = new Set();
+
+  for (const lineItem of lineItems) {
+    const partNumber = String(lineItem.品番 || '').trim();
+    const backNumber = String(lineItem.背番号 || '').trim();
+
+    if (!backNumber) {
+      continue;
+    }
+
+    backNumbers.add(backNumber);
+
+    if (partNumber) {
+      pairQueries.set(buildNodaMasterLineItemKey(partNumber, backNumber), {
+        品番: partNumber,
+        背番号: backNumber
+      });
+    }
+  }
+
+  if (pairQueries.size === 0 && backNumbers.size === 0) {
+    return lineItems.map((lineItem) => ({
+      ...lineItem,
+      箱数: null,
+      '箱数足りない': null
+    }));
+  }
+
+  const masterRows = await masterCollection.find(
+    {
+      $or: [
+        ...pairQueries.values(),
+        ...(backNumbers.size > 0 ? [{ 背番号: { $in: Array.from(backNumbers) } }] : [])
+      ]
+    },
+    {
+      projection: {
+        品番: 1,
+        背番号: 1,
+        収容数: 1,
+        _id: 0
+      }
+    }
+  ).toArray();
+
+  const capacityByPair = new Map();
+  const capacityByBackNumber = new Map();
+
+  for (const masterRow of masterRows) {
+    const partNumber = String(masterRow.品番 || '').trim();
+    const backNumber = String(masterRow.背番号 || '').trim();
+    const capacity = parseNodaPositiveNumber(masterRow.収容数);
+
+    if (!backNumber || !capacity) {
+      continue;
+    }
+
+    if (partNumber) {
+      const pairKey = buildNodaMasterLineItemKey(partNumber, backNumber);
+      if (!capacityByPair.has(pairKey)) {
+        capacityByPair.set(pairKey, capacity);
+      }
+    }
+
+    if (!capacityByBackNumber.has(backNumber)) {
+      capacityByBackNumber.set(backNumber, capacity);
+    }
+  }
+
+  return lineItems.map((lineItem) => {
+    const partNumber = String(lineItem.品番 || '').trim();
+    const backNumber = String(lineItem.背番号 || '').trim();
+    const capacity =
+      capacityByPair.get(buildNodaMasterLineItemKey(partNumber, backNumber)) ??
+      capacityByBackNumber.get(backNumber) ??
+      null;
+    const quantity = parseNodaPositiveNumber(lineItem.quantity);
+    const rawShortfallQuantity = Number(
+      typeof lineItem.shortfallQuantity === 'string'
+        ? lineItem.shortfallQuantity.replace(/,/g, '').trim()
+        : lineItem.shortfallQuantity
+    );
+    const shortfallQuantity = Number.isFinite(rawShortfallQuantity) && rawShortfallQuantity >= 0
+      ? rawShortfallQuantity
+      : null;
+
+    if (!capacity || !quantity) {
+      return {
+        ...lineItem,
+        箱数: null,
+        '箱数足りない': shortfallQuantity === 0 ? 0 : null
+      };
+    }
+
+    const calculatedBoxes = quantity / capacity;
+    const calculatedShortfallBoxes = shortfallQuantity === null ? null : shortfallQuantity / capacity;
+
+    return {
+      ...lineItem,
+      箱数: Number.isInteger(calculatedBoxes)
+        ? calculatedBoxes
+        : Number(calculatedBoxes.toFixed(2)),
+      '箱数足りない': calculatedShortfallBoxes === null
+        ? null
+        : Number.isInteger(calculatedShortfallBoxes)
+          ? calculatedShortfallBoxes
+          : Number(calculatedShortfallBoxes.toFixed(2))
+    };
+  });
+}
+
 // NODA Requests API Route
 app.post("/api/noda-requests", async (req, res) => {
   const { action, filters = {}, page = 1, limit = 10, sort = {}, requestId, data } = req.body;
@@ -13202,6 +13328,7 @@ app.post("/api/noda-requests", async (req, res) => {
     const db = client.db("submittedDB");
     const requestsCollection = db.collection("nodaRequestDB");
     const inventoryCollection = db.collection("nodaInventoryDB");
+    const masterCollection = client.db("Sasaki_Coating_MasterDB").collection("masterDB");
 
     switch (action) {
       case 'getNodaRequests':
@@ -13728,9 +13855,14 @@ app.post("/api/noda-requests", async (req, res) => {
           }
           
           // Return enriched request
+          const lineItemsWithBoxCounts = await attachNodaBoxCounts(
+            masterCollection,
+            enrichedLineItems || request.lineItems
+          );
+
           const enrichedRequest = {
             ...request,
-            lineItems: enrichedLineItems || request.lineItems
+            lineItems: lineItemsWithBoxCounts || request.lineItems
           };
 
           res.json({
@@ -14715,7 +14847,7 @@ app.post("/api/noda-requests", async (req, res) => {
           }
 
           // Handle inventory transactions when changing from completed to pending/in-progress
-          if (currentStatus === 'completed' && (newStatus === 'pending' || newStatus === 'in-progress')) {
+          if (currentStatus === 'completed' && (newStatus === 'pending' || newStatus === 'paused' || newStatus === 'in-progress')) {
             console.log(`🔄 Reversing inventory transaction for line item ${data.lineNumber}: ${currentStatus} → ${newStatus}`);
             
             // Get current inventory state
@@ -14821,6 +14953,7 @@ app.post("/api/noda-requests", async (req, res) => {
           const updatedRequest = await requestsCollection.findOne({ _id: new ObjectId(requestId) });
           const allCompleted = updatedRequest.lineItems.every(item => item.status === 'completed');
           const anyInProgress = updatedRequest.lineItems.some(item => item.status === 'in-progress');
+          const anyPaused = updatedRequest.lineItems.some(item => item.status === 'paused');
 
           let newBulkStatus = updatedRequest.status;
           let bulkUpdateFields = { updatedAt: new Date() };
@@ -14836,6 +14969,14 @@ app.post("/api/noda-requests", async (req, res) => {
             if (updatedRequest.status !== 'in-progress') {
               bulkUpdateFields.status = 'in-progress';
               // Clear completion timestamp if moving away from completed
+              if (updatedRequest.status === 'completed') {
+                bulkUpdateFields.completedAt = null;
+              }
+            }
+          } else if (anyPaused) {
+            newBulkStatus = 'paused';
+            if (updatedRequest.status !== 'paused') {
+              bulkUpdateFields.status = 'paused';
               if (updatedRequest.status === 'completed') {
                 bulkUpdateFields.completedAt = null;
               }
@@ -14882,7 +15023,7 @@ app.post("/api/noda-requests", async (req, res) => {
             previousStatus: currentStatus,
             newStatus: data.status,
             bulkStatus: newBulkStatus,
-            inventoryReversed: currentStatus === 'completed' && (newStatus === 'pending' || newStatus === 'in-progress')
+            inventoryReversed: currentStatus === 'completed' && (newStatus === 'pending' || newStatus === 'paused' || newStatus === 'in-progress')
           });
 
         } catch (error) {
