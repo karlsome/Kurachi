@@ -16123,14 +16123,13 @@ app.post("/api/inventory-management", async (req, res) => {
             const reservedQuantity = Number(item.reservedQuantity || 0);
             const availableQuantity = Number(item.availableQuantity || item.runningQuantity || 0);
             const capacityPerBox = getInventoryCapacityPerBox(masterCapacityMap, item);
-            const availableBoxCount = calculateInventoryAvailableBoxCount(availableQuantity, capacityPerBox);
+            const stockBoxCount = capacityPerBox > 0 ? physicalQuantity / capacityPerBox : null;
             const model = getInventoryModel(masterModelMap, item);
             const thresholdState = resolveInventoryThreshold(
               {
                 ...item,
                 モデル: model,
-                availableQuantity,
-                availableBoxCount
+                stockBoxCount
               },
               thresholdConfig,
               thresholdRuleMap
@@ -16143,8 +16142,7 @@ app.post("/api/inventory-management", async (req, res) => {
               reservedQuantity,
               availableQuantity,
               capacityPerBox: capacityPerBox || null,
-              stockBoxCount: capacityPerBox > 0 ? physicalQuantity / capacityPerBox : null,
-              availableBoxCount,
+              stockBoxCount,
               thresholdStatus: thresholdState.status,
               thresholdWarning: thresholdState.warning,
               thresholdCritical: thresholdState.critical,
@@ -16215,7 +16213,6 @@ app.post("/api/inventory-management", async (req, res) => {
             stockBoxCount: item.stockBoxCount,
             reservedQuantity: item.reservedQuantity || 0,
             availableQuantity: item.availableQuantity || item.runningQuantity || 0,
-            availableBoxCount: item.availableBoxCount,
             thresholdStatus: item.thresholdStatus,
             thresholdWarning: item.thresholdWarning,
             thresholdCritical: item.thresholdCritical,
@@ -16856,16 +16853,15 @@ app.post("/api/inventory-management", async (req, res) => {
               const physicalQuantity = Number(item.physicalQuantity || item.runningQuantity || 0);
               const reservedQuantity = Number(item.reservedQuantity || 0);
               const availableQuantity = Number(item.availableQuantity || item.runningQuantity || 0);
-              const availableBoxCount = calculateInventoryAvailableBoxCount(
-                availableQuantity,
-                getInventoryCapacityPerBox(masterCapacityMap, item)
-              );
+              const stockBoxCount = (() => {
+                const capacityPerBox = getInventoryCapacityPerBox(masterCapacityMap, item);
+                return capacityPerBox > 0 ? physicalQuantity / capacityPerBox : null;
+              })();
               const thresholdState = resolveInventoryThreshold(
                 {
                   ...item,
                   モデル: model,
-                  availableQuantity,
-                  availableBoxCount
+                  stockBoxCount
                 },
                 thresholdConfig,
                 thresholdRuleMap
@@ -16877,7 +16873,7 @@ app.post("/api/inventory-management", async (req, res) => {
                 physicalQuantity,
                 reservedQuantity,
                 availableQuantity,
-                availableBoxCount,
+                stockBoxCount,
                 thresholdStatus: thresholdState.status,
                 thresholdWarning: thresholdState.warning,
                 thresholdCritical: thresholdState.critical,
@@ -16898,9 +16894,9 @@ app.post("/api/inventory-management", async (req, res) => {
             背番号: item.背番号,
             model: item.model || '',
             physicalQuantity: item.physicalQuantity || item.runningQuantity || 0,
+            stockBoxCount: item.stockBoxCount,
             reservedQuantity: item.reservedQuantity || 0,
             availableQuantity: item.availableQuantity || item.runningQuantity || 0,
-            availableBoxCount: item.availableBoxCount,
             thresholdStatus: item.thresholdStatus,
             thresholdWarning: item.thresholdWarning,
             thresholdCritical: item.thresholdCritical,
@@ -17140,21 +17136,6 @@ function getInventoryModel(modelMap, item = {}) {
   return modelMap.get(baseKey) || '';
 }
 
-function calculateInventoryAvailableBoxCount(availableQuantity, capacityPerBox) {
-  const numericAvailableQuantity = Number(availableQuantity) || 0;
-  const numericCapacityPerBox = Number(capacityPerBox) || 0;
-
-  if (numericAvailableQuantity <= 0) {
-    return 0;
-  }
-
-  if (numericCapacityPerBox <= 0) {
-    return null;
-  }
-
-  return numericAvailableQuantity / numericCapacityPerBox;
-}
-
 function resolveInventoryThreshold(item = {}, config = DEFAULT_INVENTORY_THRESHOLD_CONFIG, ruleMap = null) {
   const normalizedConfig = normalizeInventoryThresholdConfig(config);
   const normalizedRuleMap = ruleMap instanceof Map
@@ -17163,12 +17144,12 @@ function resolveInventoryThreshold(item = {}, config = DEFAULT_INVENTORY_THRESHO
   const model = String(item?.モデル || item?.model || '').trim();
   const matchingRule = model ? normalizedRuleMap.get(model) : null;
   const appliedRule = matchingRule || normalizedConfig.global;
-  const availableBoxCount = item?.availableBoxCount;
+  const stockBoxCount = item?.stockBoxCount;
 
   let status = 'healthy';
-  if (Number.isFinite(availableBoxCount) && availableBoxCount <= appliedRule.critical) {
+  if (Number.isFinite(stockBoxCount) && stockBoxCount <= appliedRule.critical) {
     status = 'critical';
-  } else if (Number.isFinite(availableBoxCount) && availableBoxCount <= appliedRule.warning) {
+  } else if (Number.isFinite(stockBoxCount) && stockBoxCount <= appliedRule.warning) {
     status = 'warning';
   }
 
