@@ -3398,8 +3398,12 @@ app.get("/getSCNAWorkOrders", async (req, res) => {
     const database = client.db("submittedDB");
     const collection = database.collection("SCNAWorkOrderDB");
 
-    // Fetch all work orders, sorted by date (newest first)
-    const result = await collection.find({}).sort({ "Date and time": -1 }).toArray();
+    // Fetch latest 100 work orders only, sorted by date (newest first)
+    const result = await collection
+      .find({})
+      .sort({ "Date and time": -1 })
+      .limit(100)
+      .toArray();
 
     res.json(result);
   } catch (error) {
