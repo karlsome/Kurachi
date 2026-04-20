@@ -16019,6 +16019,7 @@ app.post("/api/inventory-management", async (req, res) => {
     await client.connect();
     const db = client.db("submittedDB");
     const inventoryCollection = db.collection("nodaInventoryDB");
+    const thresholdCollection = db.collection("inventoryThresholdSettings");
     const masterCollection = client.db("Sasaki_Coating_MasterDB").collection("masterDB");
 
     switch (action) {
@@ -16087,6 +16088,9 @@ app.post("/api/inventory-management", async (req, res) => {
             ? inventoryItems.filter((item) => matchesInventoryAdvancedFilters(item, advancedFilters))
             : inventoryItems;
 
+          const thresholdConfig = await getInventoryThresholdConfig(thresholdCollection);
+          const thresholdRuleMap = new Map(thresholdConfig.models.map((rule) => [rule.model, rule]));
+
           const masterLookupPairs = Array.from(
             new Map(
               filteredInventoryItems
@@ -16099,49 +16103,86 @@ app.post("/api/inventory-management", async (req, res) => {
           );
 
           let masterCapacityMap = new Map();
+          let masterModelMap = new Map();
           if (masterLookupPairs.length > 0) {
             const masterRecords = await masterCollection.find(
               {
                 $or: masterLookupPairs.map(({ 品番, 背番号 }) => ({ 品番, 背番号 }))
               },
               {
-                projection: { 品番: 1, 背番号: 1, 工場: 1, 収容数: 1 }
+                projection: { 品番: 1, 背番号: 1, 工場: 1, 収容数: 1, モデル: 1 }
               }
             ).toArray();
 
             masterCapacityMap = buildInventoryMasterCapacityMap(masterRecords);
+            masterModelMap = buildInventoryModelMap(masterRecords);
           }
 
-          const inventoryItemsWithBoxCount = filteredInventoryItems.map((item) => {
+          const inventoryItemsWithThresholds = filteredInventoryItems.map((item) => {
             const physicalQuantity = Number(item.physicalQuantity || item.runningQuantity || 0);
+            const reservedQuantity = Number(item.reservedQuantity || 0);
+            const availableQuantity = Number(item.availableQuantity || item.runningQuantity || 0);
             const capacityPerBox = getInventoryCapacityPerBox(masterCapacityMap, item);
+            const availableBoxCount = calculateInventoryAvailableBoxCount(availableQuantity, capacityPerBox);
+            const model = getInventoryModel(masterModelMap, item);
+            const thresholdState = resolveInventoryThreshold(
+              {
+                ...item,
+                モデル: model,
+                availableQuantity,
+                availableBoxCount
+              },
+              thresholdConfig,
+              thresholdRuleMap
+            );
 
             return {
               ...item,
+              モデル: model,
+              physicalQuantity,
+              reservedQuantity,
+              availableQuantity,
               capacityPerBox: capacityPerBox || null,
-              stockBoxCount: capacityPerBox > 0 ? physicalQuantity / capacityPerBox : null
+              stockBoxCount: capacityPerBox > 0 ? physicalQuantity / capacityPerBox : null,
+              availableBoxCount,
+              thresholdStatus: thresholdState.status,
+              thresholdWarning: thresholdState.warning,
+              thresholdCritical: thresholdState.critical,
+              thresholdSource: thresholdState.source
             };
           });
+
+          const thresholdSummary = calculateInventoryThresholdSummary(inventoryItemsWithThresholds);
+          const thresholdStatusFilter = String(filters.thresholdStatus || '').trim().toLowerCase();
+          const visibleInventoryItems = thresholdStatusFilter && thresholdStatusFilter !== 'all'
+            ? inventoryItemsWithThresholds.filter((item) => item.thresholdStatus === thresholdStatusFilter)
+            : inventoryItemsWithThresholds;
           
           // Debug logging
-          console.log(`📊 Found ${inventoryItemsWithBoxCount.length} inventory items`);
-          if (inventoryItemsWithBoxCount.length > 0) {
-            console.log('📝 Sample inventory item:', JSON.stringify(inventoryItemsWithBoxCount[0], null, 2));
+          console.log(`📊 Found ${visibleInventoryItems.length} visible inventory items`);
+          if (visibleInventoryItems.length > 0) {
+            console.log('📝 Sample inventory item:', JSON.stringify(visibleInventoryItems[0], null, 2));
           }
 
           // Calculate summary statistics
-          const summary = calculateInventorySummary(inventoryItemsWithBoxCount);
+          const summary = calculateInventorySummary(visibleInventoryItems);
 
           // Apply sorting
           if (sort.column) {
-            inventoryItemsWithBoxCount.sort((a, b) => {
+            visibleInventoryItems.sort((a, b) => {
               let aVal = a[sort.column];
               let bVal = b[sort.column];
               
               // Handle numeric fields
-              if (['physicalQuantity', 'reservedQuantity', 'availableQuantity', 'runningQuantity', 'stockBoxCount'].includes(sort.column)) {
+              if (['physicalQuantity', 'reservedQuantity', 'availableQuantity', 'runningQuantity', 'stockBoxCount', 'thresholdWarning', 'thresholdCritical'].includes(sort.column)) {
                 aVal = Number(aVal) || 0;
                 bVal = Number(bVal) || 0;
+              }
+
+              if (sort.column === 'thresholdStatus') {
+                const severity = { critical: 0, warning: 1, healthy: 2 };
+                aVal = severity[a.thresholdStatus] ?? 99;
+                bVal = severity[b.thresholdStatus] ?? 99;
               }
               
               // Handle date fields - use the already-parsed timeStampDate for proper sorting
@@ -16158,21 +16199,27 @@ app.post("/api/inventory-management", async (req, res) => {
           }
 
           // Apply pagination
-          const totalItems = inventoryItemsWithBoxCount.length;
-          const totalPages = Math.ceil(totalItems / limit);
+          const totalItems = visibleInventoryItems.length;
+          const totalPages = totalItems > 0 ? Math.ceil(totalItems / limit) : 0;
           const startIndex = (page - 1) * limit;
           const endIndex = startIndex + limit;
-          const paginatedItems = inventoryItemsWithBoxCount.slice(startIndex, endIndex);
+          const paginatedItems = visibleInventoryItems.slice(startIndex, endIndex);
 
           // Format data for frontend
           const formattedItems = paginatedItems.map(item => ({
             品番: item.品番,
             背番号: item.背番号,
             工場: item.工場,
+            model: item.モデル || '',
             physicalQuantity: item.physicalQuantity || item.runningQuantity || 0,
             stockBoxCount: item.stockBoxCount,
             reservedQuantity: item.reservedQuantity || 0,
             availableQuantity: item.availableQuantity || item.runningQuantity || 0,
+            availableBoxCount: item.availableBoxCount,
+            thresholdStatus: item.thresholdStatus,
+            thresholdWarning: item.thresholdWarning,
+            thresholdCritical: item.thresholdCritical,
+            thresholdSource: item.thresholdSource,
             lastUpdated: item.timeStamp,
             timeStampDate: item.timeStampDate // Add parsed date for sorting
           }));
@@ -16181,6 +16228,7 @@ app.post("/api/inventory-management", async (req, res) => {
             success: true,
             data: formattedItems,
             summary: summary,
+            thresholdSummary,
             pagination: {
               currentPage: page,
               totalPages: totalPages,
@@ -16288,6 +16336,58 @@ app.post("/api/inventory-management", async (req, res) => {
         } catch (error) {
           console.error("Error in getFilterOptions:", error);
           res.status(500).json({ error: "Failed to fetch filter options", details: error.message });
+        }
+        break;
+
+      case 'getThresholdConfig':
+        try {
+          const thresholdConfig = await getInventoryThresholdConfig(thresholdCollection);
+
+          res.json({
+            success: true,
+            data: thresholdConfig
+          });
+        } catch (error) {
+          console.error('Error in getThresholdConfig:', error);
+          res.status(500).json({ error: 'Failed to fetch threshold config', details: error.message });
+        }
+        break;
+
+      case 'saveThresholdConfig':
+        try {
+          const { role, submittedBy, fullName, config } = req.body;
+
+          if (role !== 'admin') {
+            return res.status(403).json({ error: 'Only admin can update threshold rules' });
+          }
+
+          const validationError = validateInventoryThresholdConfigInput(config);
+          if (validationError) {
+            return res.status(400).json({ error: validationError });
+          }
+
+          const normalizedConfig = normalizeInventoryThresholdConfig(config);
+          const savedConfig = {
+            _id: INVENTORY_THRESHOLD_CONFIG_ID,
+            global: normalizedConfig.global,
+            models: normalizedConfig.models,
+            updatedAt: new Date().toISOString(),
+            updatedBy: fullName || submittedBy || 'admin'
+          };
+
+          await thresholdCollection.replaceOne(
+            { _id: INVENTORY_THRESHOLD_CONFIG_ID },
+            savedConfig,
+            { upsert: true }
+          );
+
+          res.json({
+            success: true,
+            data: savedConfig
+          });
+        } catch (error) {
+          console.error('Error in saveThresholdConfig:', error);
+          res.status(500).json({ error: 'Failed to save threshold config', details: error.message });
         }
         break;
 
@@ -16719,13 +16819,92 @@ app.post("/api/inventory-management", async (req, res) => {
             ? inventoryItems.filter((item) => matchesInventoryAdvancedFilters(item, advancedFilters))
             : inventoryItems;
 
+          const thresholdConfig = await getInventoryThresholdConfig(thresholdCollection);
+          const thresholdRuleMap = new Map(thresholdConfig.models.map((rule) => [rule.model, rule]));
+
+          const masterLookupPairs = Array.from(
+            new Map(
+              filteredInventoryItems
+                .filter((item) => item?.品番 && item?.背番号)
+                .map((item) => {
+                  const key = buildInventoryMasterLookupKey(item.品番, item.背番号);
+                  return [key, { 品番: item.品番, 背番号: item.背番号 }];
+                })
+            ).values()
+          );
+
+          let masterCapacityMap = new Map();
+          let masterModelMap = new Map();
+          if (masterLookupPairs.length > 0) {
+            const masterRecords = await masterCollection.find(
+              {
+                $or: masterLookupPairs.map(({ 品番, 背番号 }) => ({ 品番, 背番号 }))
+              },
+              {
+                projection: { 品番: 1, 背番号: 1, 工場: 1, 収容数: 1, モデル: 1 }
+              }
+            ).toArray();
+
+            masterCapacityMap = buildInventoryMasterCapacityMap(masterRecords);
+            masterModelMap = buildInventoryModelMap(masterRecords);
+          }
+
+          const thresholdStatusFilter = String(filters.thresholdStatus || '').trim().toLowerCase();
+          const exportItems = filteredInventoryItems
+            .map((item) => {
+              const model = getInventoryModel(masterModelMap, item);
+              const physicalQuantity = Number(item.physicalQuantity || item.runningQuantity || 0);
+              const reservedQuantity = Number(item.reservedQuantity || 0);
+              const availableQuantity = Number(item.availableQuantity || item.runningQuantity || 0);
+              const availableBoxCount = calculateInventoryAvailableBoxCount(
+                availableQuantity,
+                getInventoryCapacityPerBox(masterCapacityMap, item)
+              );
+              const thresholdState = resolveInventoryThreshold(
+                {
+                  ...item,
+                  モデル: model,
+                  availableQuantity,
+                  availableBoxCount
+                },
+                thresholdConfig,
+                thresholdRuleMap
+              );
+
+              return {
+                ...item,
+                model,
+                physicalQuantity,
+                reservedQuantity,
+                availableQuantity,
+                availableBoxCount,
+                thresholdStatus: thresholdState.status,
+                thresholdWarning: thresholdState.warning,
+                thresholdCritical: thresholdState.critical,
+                thresholdSource: thresholdState.source
+              };
+            })
+            .filter((item) => {
+              if (!thresholdStatusFilter || thresholdStatusFilter === 'all') {
+                return true;
+              }
+
+              return item.thresholdStatus === thresholdStatusFilter;
+            });
+
           // Format data for export
-          const exportData = filteredInventoryItems.map(item => ({
+          const exportData = exportItems.map(item => ({
             品番: item.品番,
             背番号: item.背番号,
+            model: item.model || '',
             physicalQuantity: item.physicalQuantity || item.runningQuantity || 0,
             reservedQuantity: item.reservedQuantity || 0,
             availableQuantity: item.availableQuantity || item.runningQuantity || 0,
+            availableBoxCount: item.availableBoxCount,
+            thresholdStatus: item.thresholdStatus,
+            thresholdWarning: item.thresholdWarning,
+            thresholdCritical: item.thresholdCritical,
+            thresholdSource: item.thresholdSource,
             lastUpdated: item.timeStamp
           }));
 
@@ -16749,6 +16928,126 @@ app.post("/api/inventory-management", async (req, res) => {
     res.status(500).json({ error: "Internal server error", details: error.message });
   }
 });
+
+const INVENTORY_THRESHOLD_CONFIG_ID = 'inventory-thresholds';
+const DEFAULT_INVENTORY_THRESHOLD_CONFIG = Object.freeze({
+  global: {
+    warning: 10,
+    critical: 3
+  },
+  models: []
+});
+
+function parseInventoryThresholdNumber(value) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue) || numericValue < 0) {
+    return null;
+  }
+
+  return Math.round(numericValue * 100) / 100;
+}
+
+function validateInventoryThresholdConfigInput(config = {}) {
+  if (!config || typeof config !== 'object') {
+    return 'Threshold config is required.';
+  }
+
+  const globalWarning = parseInventoryThresholdNumber(config?.global?.warning);
+  const globalCritical = parseInventoryThresholdNumber(config?.global?.critical);
+
+  if (globalWarning === null) {
+    return 'Global warning threshold must be 0 or higher.';
+  }
+
+  if (globalCritical === null) {
+    return 'Global critical threshold must be 0 or higher.';
+  }
+
+  if (globalCritical > globalWarning) {
+    return 'Global critical threshold cannot exceed the warning threshold.';
+  }
+
+  const seenModels = new Set();
+  const modelRules = Array.isArray(config?.models) ? config.models : [];
+
+  for (const rule of modelRules) {
+    const model = String(rule?.model || '').trim();
+    if (!model) {
+      return 'Each model override must include a model.';
+    }
+
+    if (seenModels.has(model)) {
+      return `Duplicate threshold rule for model: ${model}`;
+    }
+
+    seenModels.add(model);
+
+    const warning = parseInventoryThresholdNumber(rule?.warning);
+    const critical = parseInventoryThresholdNumber(rule?.critical);
+
+    if (warning === null) {
+      return `Warning threshold must be 0 or higher for ${model}.`;
+    }
+
+    if (critical === null) {
+      return `Critical threshold must be 0 or higher for ${model}.`;
+    }
+
+    if (critical > warning) {
+      return `Critical threshold cannot exceed warning threshold for ${model}.`;
+    }
+  }
+
+  return null;
+}
+
+function normalizeInventoryThresholdNumber(value, fallback = 0) {
+  const parsedValue = parseInventoryThresholdNumber(value);
+  return parsedValue === null ? fallback : parsedValue;
+}
+
+function normalizeInventoryThresholdConfig(config = {}) {
+  const fallbackGlobal = DEFAULT_INVENTORY_THRESHOLD_CONFIG.global;
+  const globalWarning = normalizeInventoryThresholdNumber(config?.global?.warning, fallbackGlobal.warning);
+  const globalCritical = normalizeInventoryThresholdNumber(
+    config?.global?.critical,
+    Math.min(fallbackGlobal.critical, globalWarning)
+  );
+
+  const modelRules = new Map();
+  (Array.isArray(config?.models) ? config.models : []).forEach((rule) => {
+    const model = String(rule?.model || '').trim();
+    if (!model) return;
+
+    const warning = normalizeInventoryThresholdNumber(rule?.warning, globalWarning);
+    const critical = normalizeInventoryThresholdNumber(rule?.critical, Math.min(globalCritical, warning));
+
+    modelRules.set(model, {
+      model,
+      warning,
+      critical: Math.min(critical, warning)
+    });
+  });
+
+  return {
+    global: {
+      warning: globalWarning,
+      critical: Math.min(globalCritical, globalWarning)
+    },
+    models: Array.from(modelRules.values()).sort((left, right) => left.model.localeCompare(right.model)),
+    updatedAt: config?.updatedAt || null,
+    updatedBy: config?.updatedBy || ''
+  };
+}
+
+async function getInventoryThresholdConfig(thresholdCollection) {
+  const savedConfig = await thresholdCollection.findOne({ _id: INVENTORY_THRESHOLD_CONFIG_ID });
+  if (!savedConfig) {
+    return normalizeInventoryThresholdConfig(DEFAULT_INVENTORY_THRESHOLD_CONFIG);
+  }
+
+  return normalizeInventoryThresholdConfig(savedConfig);
+}
 
 /**
  * Build a masterDB lookup key for inventory box-count calculations
@@ -16807,6 +17106,80 @@ function getInventoryCapacityPerBox(capacityMap, item = {}) {
   return capacityMap.get(baseKey) || 0;
 }
 
+function buildInventoryModelMap(masterRecords = []) {
+  const modelMap = new Map();
+
+  masterRecords.forEach((record) => {
+    const model = String(record?.モデル || '').trim();
+    if (!model) return;
+
+    const baseKey = buildInventoryMasterLookupKey(record?.品番, record?.背番号);
+    const factoryKey = buildInventoryMasterLookupKey(record?.品番, record?.背番号, record?.工場);
+
+    if (record?.工場) {
+      modelMap.set(factoryKey, model);
+    }
+
+    if (!modelMap.has(baseKey)) {
+      modelMap.set(baseKey, model);
+    }
+  });
+
+  return modelMap;
+}
+
+function getInventoryModel(modelMap, item = {}) {
+  if (!(modelMap instanceof Map)) return '';
+
+  const factoryKey = buildInventoryMasterLookupKey(item?.品番, item?.背番号, item?.工場);
+  if (item?.工場 && modelMap.has(factoryKey)) {
+    return modelMap.get(factoryKey) || '';
+  }
+
+  const baseKey = buildInventoryMasterLookupKey(item?.品番, item?.背番号);
+  return modelMap.get(baseKey) || '';
+}
+
+function calculateInventoryAvailableBoxCount(availableQuantity, capacityPerBox) {
+  const numericAvailableQuantity = Number(availableQuantity) || 0;
+  const numericCapacityPerBox = Number(capacityPerBox) || 0;
+
+  if (numericAvailableQuantity <= 0) {
+    return 0;
+  }
+
+  if (numericCapacityPerBox <= 0) {
+    return null;
+  }
+
+  return numericAvailableQuantity / numericCapacityPerBox;
+}
+
+function resolveInventoryThreshold(item = {}, config = DEFAULT_INVENTORY_THRESHOLD_CONFIG, ruleMap = null) {
+  const normalizedConfig = normalizeInventoryThresholdConfig(config);
+  const normalizedRuleMap = ruleMap instanceof Map
+    ? ruleMap
+    : new Map(normalizedConfig.models.map((rule) => [rule.model, rule]));
+  const model = String(item?.モデル || item?.model || '').trim();
+  const matchingRule = model ? normalizedRuleMap.get(model) : null;
+  const appliedRule = matchingRule || normalizedConfig.global;
+  const availableBoxCount = item?.availableBoxCount;
+
+  let status = 'healthy';
+  if (Number.isFinite(availableBoxCount) && availableBoxCount <= appliedRule.critical) {
+    status = 'critical';
+  } else if (Number.isFinite(availableBoxCount) && availableBoxCount <= appliedRule.warning) {
+    status = 'warning';
+  }
+
+  return {
+    status,
+    warning: appliedRule.warning,
+    critical: appliedRule.critical,
+    source: matchingRule ? 'model' : 'global'
+  };
+}
+
 /**
  * Calculate inventory summary statistics
  */
@@ -16822,6 +17195,31 @@ function calculateInventorySummary(inventoryItems) {
     summary.totalPhysicalStock += item.physicalQuantity || item.runningQuantity || 0;
     summary.totalReservedStock += item.reservedQuantity || 0;
     summary.totalAvailableStock += item.availableQuantity || item.runningQuantity || 0;
+  });
+
+  return summary;
+}
+
+function calculateInventoryThresholdSummary(inventoryItems = []) {
+  const summary = {
+    totalItems: inventoryItems.length,
+    healthyCount: 0,
+    warningCount: 0,
+    criticalCount: 0
+  };
+
+  inventoryItems.forEach((item) => {
+    if (item?.thresholdStatus === 'critical') {
+      summary.criticalCount += 1;
+      return;
+    }
+
+    if (item?.thresholdStatus === 'warning') {
+      summary.warningCount += 1;
+      return;
+    }
+
+    summary.healthyCount += 1;
   });
 
   return summary;
