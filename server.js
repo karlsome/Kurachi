@@ -15778,12 +15778,31 @@ app.post("/api/noda-requests", async (req, res) => {
           }
 
           const inventoryItem = inventoryResults[0];
+          let capacityPerBox = null;
+
+          if (inventoryItem.品番 && inventoryItem.背番号) {
+            const masterRecords = await masterCollection.find(
+              {
+                品番: inventoryItem.品番,
+                背番号: inventoryItem.背番号
+              },
+              {
+                projection: { 品番: 1, 背番号: 1, 工場: 1, 収容数: 1 }
+              }
+            ).toArray();
+
+            const masterCapacityMap = buildInventoryMasterCapacityMap(masterRecords);
+            capacityPerBox = getInventoryCapacityPerBox(masterCapacityMap, inventoryItem) || null;
+          }
+
+          const physicalQuantity = inventoryItem.physicalQuantity || inventoryItem.runningQuantity || 0;
 
           // Return two-stage inventory information
           const inventoryInfo = {
             背番号: inventoryItem.背番号,
             品番: inventoryItem.品番,
-            physicalQuantity: inventoryItem.physicalQuantity || inventoryItem.runningQuantity || 0,
+            physicalQuantity,
+            stockBoxCount: capacityPerBox ? physicalQuantity / capacityPerBox : null,
             reservedQuantity: inventoryItem.reservedQuantity || 0,
             availableQuantity: inventoryItem.availableQuantity || inventoryItem.runningQuantity || 0,
             lastUpdated: inventoryItem.timeStamp,
