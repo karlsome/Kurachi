@@ -15996,6 +15996,7 @@ app.post("/api/inventory-management", async (req, res) => {
     await client.connect();
     const db = client.db("submittedDB");
     const inventoryCollection = db.collection("nodaInventoryDB");
+    const masterCollection = client.db("Sasaki_Coating_MasterDB").collection("masterDB");
 
     switch (action) {
       case 'getInventoryData':
@@ -16062,24 +16063,60 @@ app.post("/api/inventory-management", async (req, res) => {
           const filteredInventoryItems = advancedFilters.length
             ? inventoryItems.filter((item) => matchesInventoryAdvancedFilters(item, advancedFilters))
             : inventoryItems;
+
+          const masterLookupPairs = Array.from(
+            new Map(
+              filteredInventoryItems
+                .filter((item) => item?.品番 && item?.背番号)
+                .map((item) => {
+                  const key = buildInventoryMasterLookupKey(item.品番, item.背番号);
+                  return [key, { 品番: item.品番, 背番号: item.背番号 }];
+                })
+            ).values()
+          );
+
+          let masterCapacityMap = new Map();
+          if (masterLookupPairs.length > 0) {
+            const masterRecords = await masterCollection.find(
+              {
+                $or: masterLookupPairs.map(({ 品番, 背番号 }) => ({ 品番, 背番号 }))
+              },
+              {
+                projection: { 品番: 1, 背番号: 1, 工場: 1, 収容数: 1 }
+              }
+            ).toArray();
+
+            masterCapacityMap = buildInventoryMasterCapacityMap(masterRecords);
+          }
+
+          const inventoryItemsWithBoxCount = filteredInventoryItems.map((item) => {
+            const physicalQuantity = Number(item.physicalQuantity || item.runningQuantity || 0);
+            const capacityPerBox = getInventoryCapacityPerBox(masterCapacityMap, item);
+
+            return {
+              ...item,
+              capacityPerBox: capacityPerBox || null,
+              stockBoxCount: capacityPerBox > 0 ? physicalQuantity / capacityPerBox : null
+            };
+          });
           
           // Debug logging
-          console.log(`📊 Found ${filteredInventoryItems.length} inventory items`);
-          if (filteredInventoryItems.length > 0) {
-            console.log('📝 Sample inventory item:', JSON.stringify(filteredInventoryItems[0], null, 2));
+          console.log(`📊 Found ${inventoryItemsWithBoxCount.length} inventory items`);
+          if (inventoryItemsWithBoxCount.length > 0) {
+            console.log('📝 Sample inventory item:', JSON.stringify(inventoryItemsWithBoxCount[0], null, 2));
           }
 
           // Calculate summary statistics
-          const summary = calculateInventorySummary(filteredInventoryItems);
+          const summary = calculateInventorySummary(inventoryItemsWithBoxCount);
 
           // Apply sorting
           if (sort.column) {
-            filteredInventoryItems.sort((a, b) => {
+            inventoryItemsWithBoxCount.sort((a, b) => {
               let aVal = a[sort.column];
               let bVal = b[sort.column];
               
               // Handle numeric fields
-              if (['physicalQuantity', 'reservedQuantity', 'availableQuantity', 'runningQuantity'].includes(sort.column)) {
+              if (['physicalQuantity', 'reservedQuantity', 'availableQuantity', 'runningQuantity', 'stockBoxCount'].includes(sort.column)) {
                 aVal = Number(aVal) || 0;
                 bVal = Number(bVal) || 0;
               }
@@ -16098,11 +16135,11 @@ app.post("/api/inventory-management", async (req, res) => {
           }
 
           // Apply pagination
-          const totalItems = filteredInventoryItems.length;
+          const totalItems = inventoryItemsWithBoxCount.length;
           const totalPages = Math.ceil(totalItems / limit);
           const startIndex = (page - 1) * limit;
           const endIndex = startIndex + limit;
-          const paginatedItems = filteredInventoryItems.slice(startIndex, endIndex);
+          const paginatedItems = inventoryItemsWithBoxCount.slice(startIndex, endIndex);
 
           // Format data for frontend
           const formattedItems = paginatedItems.map(item => ({
@@ -16110,6 +16147,7 @@ app.post("/api/inventory-management", async (req, res) => {
             背番号: item.背番号,
             工場: item.工場,
             physicalQuantity: item.physicalQuantity || item.runningQuantity || 0,
+            stockBoxCount: item.stockBoxCount,
             reservedQuantity: item.reservedQuantity || 0,
             availableQuantity: item.availableQuantity || item.runningQuantity || 0,
             lastUpdated: item.timeStamp,
@@ -16154,9 +16192,35 @@ app.post("/api/inventory-management", async (req, res) => {
             });
           }
 
+          const latestTransaction = transactions[0] || {};
+          let capacityPerBox = null;
+
+          if (latestTransaction.品番 && latestTransaction.背番号) {
+            const masterRecords = await masterCollection.find(
+              {
+                品番: latestTransaction.品番,
+                背番号: latestTransaction.背番号
+              },
+              {
+                projection: { 品番: 1, 背番号: 1, 工場: 1, 収容数: 1 }
+              }
+            ).toArray();
+
+            const masterCapacityMap = buildInventoryMasterCapacityMap(masterRecords);
+            capacityPerBox = getInventoryCapacityPerBox(masterCapacityMap, latestTransaction) || null;
+          }
+
+          const formattedTransactions = transactions.map((transaction) => ({
+            ...transaction,
+            capacityPerBox,
+            stockBoxCount: capacityPerBox
+              ? Number(transaction.physicalQuantity || transaction.runningQuantity || 0) / capacityPerBox
+              : null
+          }));
+
           res.json({
             success: true,
-            data: transactions
+            data: formattedTransactions
           });
 
         } catch (error) {
@@ -16662,6 +16726,63 @@ app.post("/api/inventory-management", async (req, res) => {
     res.status(500).json({ error: "Internal server error", details: error.message });
   }
 });
+
+/**
+ * Build a masterDB lookup key for inventory box-count calculations
+ */
+function buildInventoryMasterLookupKey(partNumber = '', backNumber = '', factory = '') {
+  return [partNumber || '', backNumber || '', factory || ''].join('::');
+}
+
+function parseInventoryCapacityValue(value) {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) && value > 0 ? value : 0;
+  }
+
+  if (typeof value === 'string') {
+    const normalized = value.replace(/,/g, '').trim();
+    if (!normalized) return 0;
+
+    const parsedValue = Number(normalized);
+    return Number.isFinite(parsedValue) && parsedValue > 0 ? parsedValue : 0;
+  }
+
+  return 0;
+}
+
+function buildInventoryMasterCapacityMap(masterRecords = []) {
+  const capacityMap = new Map();
+
+  masterRecords.forEach((record) => {
+    const capacityPerBox = parseInventoryCapacityValue(record?.収容数);
+    if (!capacityPerBox) return;
+
+    const baseKey = buildInventoryMasterLookupKey(record?.品番, record?.背番号);
+    const factoryKey = buildInventoryMasterLookupKey(record?.品番, record?.背番号, record?.工場);
+
+    if (record?.工場) {
+      capacityMap.set(factoryKey, capacityPerBox);
+    }
+
+    if (!capacityMap.has(baseKey)) {
+      capacityMap.set(baseKey, capacityPerBox);
+    }
+  });
+
+  return capacityMap;
+}
+
+function getInventoryCapacityPerBox(capacityMap, item = {}) {
+  if (!(capacityMap instanceof Map)) return 0;
+
+  const factoryKey = buildInventoryMasterLookupKey(item?.品番, item?.背番号, item?.工場);
+  if (item?.工場 && capacityMap.has(factoryKey)) {
+    return capacityMap.get(factoryKey) || 0;
+  }
+
+  const baseKey = buildInventoryMasterLookupKey(item?.品番, item?.背番号);
+  return capacityMap.get(baseKey) || 0;
+}
 
 /**
  * Calculate inventory summary statistics
