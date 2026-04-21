@@ -12922,6 +12922,1174 @@ app.get('/api/masterdb/products', async (req, res) => {
     }
 });
 
+  // ==================== PRODUCTION CAPABILITY MANAGEMENT ====================
+
+  let productionCapabilityIndexesEnsured = false;
+
+  async function ensureProductionCapabilityIndexes() {
+    if (productionCapabilityIndexesEnsured) {
+      return;
+    }
+
+    const db = client.db('submittedDB');
+    const capabilityCollection = db.collection('productionCapabilityDB');
+
+    await capabilityCollection.createIndex(
+      { 工場: 1, 背番号: 1, 品番: 1 },
+      { unique: true, name: 'factory_sebanggo_hinban_unique' }
+    );
+    await capabilityCollection.createIndex(
+      { 工場: 1, enabled: 1 },
+      { name: 'factory_enabled_idx' }
+    );
+    await capabilityCollection.createIndex(
+      { モデル: 1 },
+      { name: 'model_idx' }
+    );
+
+    productionCapabilityIndexesEnsured = true;
+  }
+
+  function escapeProductionCapabilityRegex(value = '') {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  function buildProductionCapabilityKey(factory = '', sebanggo = '', hinban = '') {
+    return `${factory}::${sebanggo}::${hinban}`;
+  }
+
+  function normalizeProductionCapabilityMachine(machine = {}, index = 0) {
+    const equipment = String(machine?.設備 || machine?.equipment || '').trim();
+    if (!equipment) {
+      return null;
+    }
+
+    const toNullableNumber = (value) => {
+      if (value === '' || value === null || value === undefined) {
+        return null;
+      }
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+
+    return {
+      設備: equipment,
+      priority: index + 1,
+      enabled: machine?.enabled !== false,
+      preferred: machine?.preferred === true,
+      cycleTimeSeconds: toNullableNumber(machine?.cycleTimeSeconds),
+      pcPerCycle: toNullableNumber(machine?.pcPerCycle),
+      boxQuantityOverride: toNullableNumber(machine?.boxQuantityOverride),
+    };
+  }
+
+  function getProductionCapabilityEquipmentNames(equipment = '') {
+    return String(equipment || '')
+      .split(',')
+      .map((name) => name.trim())
+      .filter(Boolean);
+  }
+
+  function getProductionCapabilityMasterNumber(value) {
+    if (value === '' || value === null || value === undefined) {
+      return null;
+    }
+
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  function resolveProductionCapabilityMasterPcPerCycle(masterProduct = {}, equipment = '') {
+    const rootPcPerCycle = getProductionCapabilityMasterNumber(masterProduct?.pcPerCycle);
+    const machineConfig = masterProduct?.machineConfig && typeof masterProduct.machineConfig === 'object'
+      ? masterProduct.machineConfig
+      : null;
+    const equipmentNames = getProductionCapabilityEquipmentNames(equipment);
+
+    if (!machineConfig || equipmentNames.length === 0) {
+      return rootPcPerCycle;
+    }
+
+    if (equipmentNames.length === 1) {
+      const config = machineConfig[equipmentNames[0]];
+      return getProductionCapabilityMasterNumber(config?.pcPerCycle) ?? rootPcPerCycle;
+    }
+
+    const configValues = equipmentNames
+      .map((name) => getProductionCapabilityMasterNumber(machineConfig[name]?.pcPerCycle))
+      .filter((value) => value !== null);
+
+    if (
+      configValues.length === equipmentNames.length
+      && configValues.length > 0
+      && configValues.every((value) => value === configValues[0])
+    ) {
+      return configValues[0];
+    }
+
+    return rootPcPerCycle;
+  }
+
+  function simplifyProductionCapabilityMachineOverrides(machine = {}, masterProduct = {}) {
+    const simplifiedMachine = { ...machine };
+    const masterCycleTimeSeconds = getProductionCapabilityMasterNumber(masterProduct?.['秒数(1pcs何秒)']);
+    const masterPcPerCycle = resolveProductionCapabilityMasterPcPerCycle(masterProduct, simplifiedMachine['設備']);
+    const masterBoxQuantity = getProductionCapabilityMasterNumber(masterProduct?.['収容数']);
+
+    if (
+      simplifiedMachine.cycleTimeSeconds !== null
+      && masterCycleTimeSeconds !== null
+      && Number(simplifiedMachine.cycleTimeSeconds) === masterCycleTimeSeconds
+    ) {
+      simplifiedMachine.cycleTimeSeconds = null;
+    }
+
+    if (
+      simplifiedMachine.pcPerCycle !== null
+      && masterPcPerCycle !== null
+      && Number(simplifiedMachine.pcPerCycle) === masterPcPerCycle
+    ) {
+      simplifiedMachine.pcPerCycle = null;
+    }
+
+    if (
+      simplifiedMachine.boxQuantityOverride !== null
+      && masterBoxQuantity !== null
+      && Number(simplifiedMachine.boxQuantityOverride) === masterBoxQuantity
+    ) {
+      simplifiedMachine.boxQuantityOverride = null;
+    }
+
+    return simplifiedMachine;
+  }
+
+  app.post('/api/production-capability/products', async (req, res) => {
+    try {
+      await client.connect();
+
+      const {
+        page = 1,
+        limit = 25,
+        factory = '',
+        model = '',
+        search = ''
+      } = req.body || {};
+
+      const safePage = Math.max(parseInt(page, 10) || 1, 1);
+      const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 25, 1), 100);
+      const skip = (safePage - 1) * safeLimit;
+
+      const masterDb = client.db('Sasaki_Coating_MasterDB');
+      const productCollection = masterDb.collection('masterDB');
+      const capabilityCollection = client.db('submittedDB').collection('productionCapabilityDB');
+
+      const query = {};
+      if (factory) {
+        query['工場'] = factory;
+      }
+      if (model) {
+        query['モデル'] = model;
+      }
+      if (search && search.trim()) {
+        const regex = new RegExp(escapeProductionCapabilityRegex(search.trim()), 'i');
+        query.$or = [
+          { '背番号': regex },
+          { '品番': regex },
+          { '品名': regex },
+          { 'モデル': regex },
+          { '工場': regex }
+        ];
+      }
+
+      const projection = {
+        背番号: 1,
+        品番: 1,
+        品名: 1,
+        モデル: 1,
+        工場: 1,
+        収容数: 1,
+        材料: 1,
+        材料背番号: 1,
+        imageURL: 1,
+      };
+
+      const [totalCount, products] = await Promise.all([
+        productCollection.countDocuments(query),
+        productCollection
+          .find(query, { projection })
+          .sort({ 工場: 1, モデル: 1, 背番号: 1, 品番: 1 })
+          .skip(skip)
+          .limit(safeLimit)
+          .toArray()
+      ]);
+
+      const capabilityQueries = products.map((product) => ({
+        工場: product['工場'] || '',
+        背番号: product['背番号'] || '',
+        品番: product['品番'] || '',
+      })).filter((item) => item['背番号'] && item['品番']);
+
+      const capabilityDocs = capabilityQueries.length > 0
+        ? await capabilityCollection.find({ $or: capabilityQueries }).toArray()
+        : [];
+
+      const capabilityMap = new Map(
+        capabilityDocs.map((doc) => [
+          buildProductionCapabilityKey(doc['工場'], doc['背番号'], doc['品番']),
+          doc
+        ])
+      );
+
+      const data = products.map((product) => {
+        const key = buildProductionCapabilityKey(product['工場'], product['背番号'], product['品番']);
+        const capability = capabilityMap.get(key);
+        const enabledMachines = (capability?.machines || []).filter((machine) => machine?.enabled !== false);
+        const preferredMachine = enabledMachines.find((machine) => machine?.preferred) || enabledMachines[0] || null;
+
+        return {
+          ...product,
+          capabilityId: capability?._id?.toString() || null,
+          capabilityEnabled: capability?.enabled === true,
+          machineCount: enabledMachines.length,
+          preferredMachine: preferredMachine?.設備 || null,
+          mappingStatus: !capability
+            ? 'unmapped'
+            : capability.enabled === false
+              ? 'disabled'
+              : enabledMachines.length > 0
+                ? 'mapped'
+                : 'empty'
+        };
+      });
+
+      res.json({
+        success: true,
+        data,
+        pagination: {
+          page: safePage,
+          limit: safeLimit,
+          totalCount,
+          totalPages: Math.max(Math.ceil(totalCount / safeLimit), 1),
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error fetching production capability products:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch production capability products',
+        message: error.message,
+      });
+    }
+  });
+
+  app.get('/api/production-capability/detail', async (req, res) => {
+    try {
+      await client.connect();
+
+      const sebanggo = String(req.query.sebanggo || '').trim();
+      const hinban = String(req.query.hinban || '').trim();
+      const factory = String(req.query.factory || '').trim();
+
+      if (!sebanggo || !hinban) {
+        return res.status(400).json({
+          success: false,
+          error: 'sebanggo and hinban are required'
+        });
+      }
+
+      const masterDb = client.db('Sasaki_Coating_MasterDB');
+      const productCollection = masterDb.collection('masterDB');
+      const capabilityCollection = client.db('submittedDB').collection('productionCapabilityDB');
+
+      const productQuery = {
+        背番号: sebanggo,
+        品番: hinban,
+      };
+      if (factory) {
+        productQuery['工場'] = factory;
+      }
+
+      const product = await productCollection.findOne(productQuery, {
+        projection: {
+          背番号: 1,
+          品番: 1,
+          品名: 1,
+          モデル: 1,
+          工場: 1,
+          収容数: 1,
+          '秒数(1pcs何秒)': 1,
+          pcPerCycle: 1,
+          machineConfig: 1,
+          加工設備: 1,
+          送りピッチ: 1,
+          材料: 1,
+          材料背番号: 1,
+          imageURL: 1,
+        }
+      });
+
+      if (!product) {
+        return res.status(404).json({
+          success: false,
+          error: 'Product not found in masterDB'
+        });
+      }
+
+      const capability = await capabilityCollection.findOne({
+        工場: product['工場'] || '',
+        背番号: sebanggo,
+        品番: hinban,
+      });
+
+      res.json({
+        success: true,
+        product,
+        capability: capability
+          ? {
+            ...capability,
+            _id: capability._id.toString(),
+          }
+          : null,
+      });
+    } catch (error) {
+      console.error('❌ Error fetching production capability detail:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch production capability detail',
+        message: error.message,
+      });
+    }
+  });
+
+  app.get('/api/production-capability/equipment', async (req, res) => {
+    try {
+      await client.connect();
+
+      const factory = String(req.query.factory || '').trim();
+      const pressCollection = client.db('submittedDB').collection('pressDB');
+
+      const match = {
+        設備: { $exists: true, $nin: [null, ''] }
+      };
+      if (factory) {
+        match['工場'] = factory;
+      }
+
+      const equipment = await pressCollection.aggregate([
+        { $match: match },
+        { $group: { _id: '$設備' } },
+        { $sort: { _id: 1 } },
+        { $project: { _id: 0, value: '$_id' } }
+      ]).toArray();
+
+      res.json({
+        success: true,
+        data: equipment.map((item) => item.value),
+        count: equipment.length,
+      });
+    } catch (error) {
+      console.error('❌ Error fetching production capability equipment:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch equipment list',
+        message: error.message,
+      });
+    }
+  });
+
+  app.post('/api/production-capability/save', async (req, res) => {
+    try {
+      await client.connect();
+      await ensureProductionCapabilityIndexes();
+
+      const {
+        product = {},
+        enabled = true,
+        machines = [],
+        username = 'system'
+      } = req.body || {};
+
+      const sebanggo = String(product['背番号'] || '').trim();
+      const hinban = String(product['品番'] || '').trim();
+      let factory = String(product['工場'] || '').trim();
+
+      if (!sebanggo || !hinban) {
+        return res.status(400).json({
+          success: false,
+          error: 'Product 背番号 and 品番 are required'
+        });
+      }
+
+      const masterDb = client.db('Sasaki_Coating_MasterDB');
+      const productCollection = masterDb.collection('masterDB');
+      const capabilityDb = client.db('submittedDB');
+      const capabilityCollection = capabilityDb.collection('productionCapabilityDB');
+      const logCollection = capabilityDb.collection('productionCapabilityLogDB');
+
+      const masterQuery = { 背番号: sebanggo, 品番: hinban };
+      if (factory) {
+        masterQuery['工場'] = factory;
+      }
+
+      const masterProduct = await productCollection.findOne(masterQuery, {
+        projection: {
+          背番号: 1,
+          品番: 1,
+          品名: 1,
+          モデル: 1,
+          工場: 1,
+          収容数: 1,
+          材料: 1,
+          材料背番号: 1,
+        }
+      });
+
+      if (!masterProduct) {
+        return res.status(404).json({
+          success: false,
+          error: 'Product not found in masterDB'
+        });
+      }
+
+      factory = String(masterProduct['工場'] || factory || '').trim();
+
+      const seenEquipment = new Set();
+      const sanitizedMachines = machines
+        .map((machine, index) => normalizeProductionCapabilityMachine(machine, index))
+        .filter((machine) => {
+          if (!machine || seenEquipment.has(machine['設備'])) {
+            return false;
+          }
+          seenEquipment.add(machine['設備']);
+          return true;
+        })
+        .map((machine, index) => ({
+          ...simplifyProductionCapabilityMachineOverrides(machine, masterProduct),
+          priority: index + 1,
+        }));
+
+      if (sanitizedMachines.length > 0) {
+        const preferredIndex = sanitizedMachines.findIndex((machine) => machine.preferred === true);
+        sanitizedMachines.forEach((machine, index) => {
+          machine.preferred = preferredIndex === -1 ? index === 0 : index === preferredIndex;
+        });
+      }
+
+      const filter = {
+        工場: factory,
+        背番号: sebanggo,
+        品番: hinban,
+      };
+
+      const existingCapability = await capabilityCollection.findOne(filter);
+      const now = new Date();
+      const nextDocument = {
+        背番号: sebanggo,
+        品番: hinban,
+        品名: masterProduct['品名'] || String(product['品名'] || '').trim(),
+        モデル: masterProduct['モデル'] || String(product['モデル'] || '').trim(),
+        工場: factory,
+        enabled: enabled !== false,
+        machines: sanitizedMachines,
+        updatedAt: now,
+        updatedBy: username,
+      };
+
+      let savedDocument;
+      if (existingCapability) {
+        await capabilityCollection.updateOne(filter, {
+          $set: nextDocument,
+        });
+        savedDocument = await capabilityCollection.findOne(filter);
+      } else {
+        const insertResult = await capabilityCollection.insertOne({
+          ...nextDocument,
+          createdAt: now,
+          createdBy: username,
+        });
+        savedDocument = await capabilityCollection.findOne({ _id: insertResult.insertedId });
+      }
+
+      await logCollection.insertOne({
+        背番号: sebanggo,
+        品番: hinban,
+        工場: factory,
+        username,
+        action: existingCapability ? 'update' : 'create',
+        timestamp: now,
+        previousData: existingCapability || null,
+        newData: nextDocument,
+      });
+
+      res.json({
+        success: true,
+        data: {
+          ...savedDocument,
+          _id: savedDocument._id.toString(),
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error saving production capability:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to save production capability',
+        message: error.message,
+      });
+    }
+  });
+
+  app.post('/api/production-capability/resolve', async (req, res) => {
+    try {
+      await client.connect();
+
+      const defaultFactory = String(req.body?.factory || '').trim();
+      const rawItems = Array.isArray(req.body?.items) ? req.body.items : [];
+
+      const normalizedItems = [];
+      const seenKeys = new Set();
+
+      rawItems.forEach((item = {}) => {
+        const factory = String(item?.工場 || item?.factory || defaultFactory || '').trim();
+        const sebanggo = String(item?.背番号 || '').trim();
+        const hinban = String(item?.品番 || '').trim();
+
+        if (!factory || (!sebanggo && !hinban)) {
+          return;
+        }
+
+        const key = buildProductionCapabilityKey(factory, sebanggo, hinban);
+        if (seenKeys.has(key)) {
+          return;
+        }
+
+        seenKeys.add(key);
+        normalizedItems.push({ factory, sebanggo, hinban });
+      });
+
+      if (normalizedItems.length === 0) {
+        return res.json({
+          success: true,
+          capabilities: {},
+          count: 0,
+          missing: [],
+        });
+      }
+
+      const capabilityCollection = client.db('submittedDB').collection('productionCapabilityDB');
+
+      const exactQueries = normalizedItems
+        .filter((item) => item.sebanggo && item.hinban)
+        .map((item) => ({
+          工場: item.factory,
+          背番号: item.sebanggo,
+          品番: item.hinban,
+        }));
+
+      const capabilityDocs = exactQueries.length > 0
+        ? await capabilityCollection.find({ $or: exactQueries }).toArray()
+        : [];
+
+      const capabilityDocMap = new Map(
+        capabilityDocs.map((doc) => [
+          buildProductionCapabilityKey(doc['工場'], doc['背番号'], doc['品番']),
+          doc,
+        ])
+      );
+
+      const capabilities = {};
+      const missing = [];
+
+      normalizedItems.forEach((item) => {
+        const key = buildProductionCapabilityKey(item.factory, item.sebanggo, item.hinban);
+
+        let capability = capabilityDocMap.get(key) || null;
+        if (!capability && (!item.sebanggo || !item.hinban)) {
+          capability = capabilityDocs.find((doc) => (
+            doc['工場'] === item.factory
+            && (!item.sebanggo || doc['背番号'] === item.sebanggo)
+            && (!item.hinban || doc['品番'] === item.hinban)
+          )) || null;
+        }
+
+        const eligibleMachines = capability?.enabled === false
+          ? []
+          : (capability?.machines || [])
+              .filter((machine) => String(machine?.設備 || '').trim() && machine?.enabled !== false)
+              .sort((left, right) => {
+                const leftPriority = Number.isFinite(Number(left?.priority)) ? Number(left.priority) : 999;
+                const rightPriority = Number.isFinite(Number(right?.priority)) ? Number(right.priority) : 999;
+
+                if (leftPriority !== rightPriority) {
+                  return leftPriority - rightPriority;
+                }
+
+                if ((left?.preferred === true) !== (right?.preferred === true)) {
+                  return left?.preferred === true ? -1 : 1;
+                }
+
+                return String(left?.設備 || '').localeCompare(String(right?.設備 || ''));
+              })
+              .map((machine, index) => {
+                const equipment = String(machine?.設備 || '').trim();
+                return {
+                  equipment,
+                  設備: equipment,
+                  priority: Number.isFinite(Number(machine?.priority)) ? Number(machine.priority) : index + 1,
+                  preferred: machine?.preferred === true,
+                  enabled: machine?.enabled !== false,
+                  cycleTimeSeconds: machine?.cycleTimeSeconds ?? null,
+                  pcPerCycle: machine?.pcPerCycle ?? null,
+                  boxQuantityOverride: machine?.boxQuantityOverride ?? null,
+                };
+              });
+
+        const reason = !capability
+          ? 'unmapped'
+          : capability.enabled === false
+            ? 'disabled'
+            : eligibleMachines.length === 0
+              ? 'empty'
+              : null;
+
+        capabilities[key] = {
+          factory: item.factory,
+          背番号: item.sebanggo,
+          品番: item.hinban,
+          hasMapping: !!capability,
+          capabilityEnabled: capability?.enabled === true,
+          eligibleMachines,
+          preferredMachine: eligibleMachines.find((machine) => machine.preferred)?.equipment || eligibleMachines[0]?.equipment || null,
+          updatedAt: capability?.updatedAt || null,
+          updatedBy: capability?.updatedBy || null,
+          reason,
+        };
+
+        if (reason) {
+          missing.push({
+            factory: item.factory,
+            背番号: item.sebanggo,
+            品番: item.hinban,
+            reason,
+          });
+        }
+      });
+
+      res.json({
+        success: true,
+        capabilities,
+        count: Object.keys(capabilities).length,
+        missing,
+      });
+    } catch (error) {
+      console.error('❌ Error resolving production capabilities:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to resolve production capabilities',
+        message: error.message,
+      });
+    }
+  });
+
+  function normalizeProductionPreviewDate(value = '') {
+    const text = String(value || '').trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+      return text;
+    }
+
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  function addProductionPreviewDays(dateText, dayOffset = 0) {
+    const [year, month, day] = normalizeProductionPreviewDate(dateText).split('-').map(Number);
+    const date = new Date(Date.UTC(year, month - 1, day));
+    date.setUTCDate(date.getUTCDate() + dayOffset);
+    return date.toISOString().split('T')[0];
+  }
+
+  function getProductionPreviewNumericValue(value, fallback = 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
+  function buildProductionPreviewItemKey(sebanggo = '', hinban = '') {
+    return `${String(sebanggo || '').trim()}::${String(hinban || '').trim()}`;
+  }
+
+  function normalizeProductionPreviewStatus(value = '') {
+    return String(value || '').trim().toLowerCase();
+  }
+
+  function isProductionPreviewCompletedStatus(value = '') {
+    const raw = String(value || '').trim();
+    const normalized = normalizeProductionPreviewStatus(value);
+    return raw === '完了' || normalized === 'completed' || normalized === 'complete' || normalized === 'done';
+  }
+
+  function isProductionPreviewCancelledStatus(value = '') {
+    const raw = String(value || '').trim();
+    const normalized = normalizeProductionPreviewStatus(value);
+    return raw === 'キャンセル' || normalized === 'cancelled' || normalized === 'canceled';
+  }
+
+  function getProductionPreviewRequestTimestamp(requestDoc = {}) {
+    const createdAt = requestDoc?.createdAt ? new Date(requestDoc.createdAt) : null;
+    if (createdAt && !Number.isNaN(createdAt.getTime())) {
+      return createdAt.getTime();
+    }
+
+    const objectIdTimestamp = requestDoc?._id?.getTimestamp?.();
+    if (objectIdTimestamp instanceof Date && !Number.isNaN(objectIdTimestamp.getTime())) {
+      return objectIdTimestamp.getTime();
+    }
+
+    return 0;
+  }
+
+  app.get('/api/production-planner/preview', async (req, res) => {
+    try {
+      await client.connect();
+
+      const factory = String(req.query.factory || '').trim();
+      const targetDate = normalizeProductionPreviewDate(req.query.date || '');
+
+      if (!factory) {
+        return res.status(400).json({
+          success: false,
+          error: 'factory is required'
+        });
+      }
+
+      const db = client.db('submittedDB');
+      const requestsCollection = db.collection('nodaRequestDB');
+      const inventoryCollection = db.collection('nodaInventoryDB');
+      const plansCollection = db.collection('productionPlansDB');
+      const capabilityCollection = db.collection('productionCapabilityDB');
+      const masterCollection = client.db('Sasaki_Coating_MasterDB').collection('masterDB');
+
+      const rawRequests = await requestsCollection
+        .find({
+          status: { $nin: ['completed', 'Completed', 'cancelled', 'Cancelled', '完了', 'キャンセル'] }
+        })
+        .sort({ createdAt: 1, requestNumber: 1, _id: 1 })
+        .toArray();
+
+      const activeRequests = rawRequests
+        .filter((requestDoc) => !isProductionPreviewCompletedStatus(requestDoc?.status) && !isProductionPreviewCancelledStatus(requestDoc?.status))
+        .sort((left, right) => {
+          const leftTimestamp = getProductionPreviewRequestTimestamp(left);
+          const rightTimestamp = getProductionPreviewRequestTimestamp(right);
+          if (leftTimestamp !== rightTimestamp) {
+            return leftTimestamp - rightTimestamp;
+          }
+
+          const leftRequestNumber = String(left?.requestNumber || '');
+          const rightRequestNumber = String(right?.requestNumber || '');
+          if (leftRequestNumber !== rightRequestNumber) {
+            return leftRequestNumber.localeCompare(rightRequestNumber);
+          }
+
+          return String(left?._id || '').localeCompare(String(right?._id || ''));
+        });
+
+      const rawLineItems = [];
+      activeRequests.forEach((requestDoc) => {
+        const baseRequestNumber = String(requestDoc?.requestNumber || '').trim();
+        const baseDueDate = normalizeProductionPreviewDate(requestDoc?.['納入指示日'] || targetDate);
+        const baseRequestStatus = String(requestDoc?.status || '').trim();
+        const requestTimestamp = getProductionPreviewRequestTimestamp(requestDoc);
+        const baseLineItems = Array.isArray(requestDoc?.lineItems) && requestDoc.lineItems.length > 0
+          ? requestDoc.lineItems
+          : [{
+              背番号: requestDoc?.背番号 || '',
+              品番: requestDoc?.品番 || '',
+              品名: requestDoc?.品名 || '',
+              quantity: requestDoc?.quantity || 0,
+              status: requestDoc?.status || 'pending'
+            }];
+
+        baseLineItems.forEach((lineItem = {}, lineIndex) => {
+          const lineStatus = String(lineItem?.status || '').trim();
+          if (isProductionPreviewCompletedStatus(lineStatus) || isProductionPreviewCancelledStatus(lineStatus)) {
+            return;
+          }
+
+          const sebanggo = String(lineItem?.背番号 || requestDoc?.背番号 || '').trim();
+          const hinban = String(lineItem?.品番 || requestDoc?.品番 || '').trim();
+          const quantity = getProductionPreviewNumericValue(lineItem?.quantity ?? requestDoc?.quantity, 0);
+
+          if (!sebanggo && !hinban) {
+            return;
+          }
+
+          rawLineItems.push({
+            key: buildProductionPreviewItemKey(sebanggo, hinban),
+            背番号: sebanggo,
+            品番: hinban,
+            品名: String(lineItem?.品名 || requestDoc?.品名 || '').trim(),
+            quantity,
+            dueDate: baseDueDate,
+            requestNumber: baseRequestNumber,
+            lineNumber: lineItem?.lineNumber || lineIndex + 1,
+            lineStatus,
+            requestStatus: baseRequestStatus,
+            requestId: requestDoc?._id?.toString?.() || String(requestDoc?._id || ''),
+            requestCreatedAt: requestDoc?.createdAt || null,
+            requestTimestamp,
+            deliveryOrder: requestDoc?.deliveryOrder ?? null,
+            deliveryNote: String(requestDoc?.deliveryNote || '').trim(),
+            type: String(requestDoc?.type || '').trim(),
+          });
+        });
+      });
+
+      const currentPlan = await plansCollection.findOne({
+        factory,
+        date: targetDate,
+      });
+
+      const plannedProducts = Array.isArray(currentPlan?.products) ? currentPlan.products : [];
+
+      const itemKeys = new Set();
+      const backNumbers = new Set();
+      const partNumbers = new Set();
+
+      rawLineItems.forEach((line) => {
+        itemKeys.add(line.key);
+        if (line['背番号']) backNumbers.add(line['背番号']);
+        if (line['品番']) partNumbers.add(line['品番']);
+      });
+
+      plannedProducts.forEach((product = {}) => {
+        const sebanggo = String(product?.背番号 || '').trim();
+        const hinban = String(product?.品番 || '').trim();
+        const key = buildProductionPreviewItemKey(sebanggo, hinban);
+
+        if (sebanggo || hinban) {
+          itemKeys.add(key);
+        }
+        if (sebanggo) backNumbers.add(sebanggo);
+        if (hinban) partNumbers.add(hinban);
+      });
+
+      const masterQuery = {
+        工場: factory,
+      };
+      const orClauses = [];
+      if (backNumbers.size > 0) {
+        orClauses.push({ 背番号: { $in: Array.from(backNumbers) } });
+      }
+      if (partNumbers.size > 0) {
+        orClauses.push({ 品番: { $in: Array.from(partNumbers) } });
+      }
+      if (orClauses.length > 0) {
+        masterQuery.$or = orClauses;
+      }
+
+      const masterProducts = orClauses.length > 0
+        ? await masterCollection.find(masterQuery, {
+            projection: {
+              背番号: 1,
+              品番: 1,
+              品名: 1,
+              モデル: 1,
+              工場: 1,
+              収容数: 1,
+            }
+          }).toArray()
+        : [];
+
+      const masterProductMap = new Map(
+        masterProducts.map((product) => [
+          buildProductionPreviewItemKey(product?.['背番号'], product?.['品番']),
+          product
+        ])
+      );
+
+      const filteredLineItems = rawLineItems.filter((line) => masterProductMap.has(line.key));
+
+      const filteredBackNumbers = Array.from(new Set(filteredLineItems.map((line) => line['背番号']).filter(Boolean)));
+      const filteredItemKeys = Array.from(new Set(filteredLineItems.map((line) => line.key).filter(Boolean)));
+
+      const inventoryResults = filteredBackNumbers.length > 0
+        ? await inventoryCollection.aggregate([
+            { $match: { 背番号: { $in: filteredBackNumbers } } },
+            {
+              $addFields: {
+                productionPreviewTimestamp: {
+                  $switch: {
+                    branches: [
+                      {
+                        case: { $eq: [{ $type: '$timeStamp' }, 'date'] },
+                        then: '$timeStamp'
+                      },
+                      {
+                        case: { $eq: [{ $type: '$timeStamp' }, 'string'] },
+                        then: { $dateFromString: { dateString: '$timeStamp', onError: new Date(0), onNull: new Date(0) } }
+                      },
+                      {
+                        case: { $eq: [{ $type: '$updatedAt' }, 'date'] },
+                        then: '$updatedAt'
+                      },
+                      {
+                        case: { $eq: [{ $type: '$createdAt' }, 'date'] },
+                        then: '$createdAt'
+                      }
+                    ],
+                    default: new Date(0)
+                  }
+                }
+              }
+            },
+            { $sort: { productionPreviewTimestamp: -1, _id: -1 } },
+            {
+              $group: {
+                _id: '$背番号',
+                latestRecord: { $first: '$$ROOT' }
+              }
+            }
+          ]).toArray()
+        : [];
+
+      const inventoryMap = new Map(
+        inventoryResults.map((row) => {
+          const record = row?.latestRecord || {};
+          const lastUpdated = record?.productionPreviewTimestamp instanceof Date
+            ? record.productionPreviewTimestamp.toISOString()
+            : record?.timeStamp || record?.updatedAt || record?.createdAt || null;
+
+          return [
+            row._id,
+            {
+              physicalQuantity: getProductionPreviewNumericValue(record?.physicalQuantity ?? record?.runningQuantity, 0),
+              reservedQuantity: getProductionPreviewNumericValue(record?.reservedQuantity, 0),
+              availableQuantity: getProductionPreviewNumericValue(record?.availableQuantity ?? record?.runningQuantity, 0),
+              lastUpdated,
+            }
+          ];
+        })
+      );
+
+      const capabilityQueries = filteredItemKeys
+        .map((key) => {
+          const [sebanggo, hinban] = key.split('::');
+          return {
+            工場: factory,
+            背番号: sebanggo,
+            品番: hinban,
+          };
+        })
+        .filter((item) => item.背番号 || item.品番);
+
+      const capabilityDocs = capabilityQueries.length > 0
+        ? await capabilityCollection.find({ $or: capabilityQueries }).toArray()
+        : [];
+
+      const capabilityMap = new Map(
+        capabilityDocs.map((doc) => [
+          buildProductionCapabilityKey(doc?.['工場'], doc?.['背番号'], doc?.['品番']),
+          doc
+        ])
+      );
+
+      const remainingPhysicalByBackNumber = new Map();
+      filteredBackNumbers.forEach((backNumber) => {
+        remainingPhysicalByBackNumber.set(backNumber, getProductionPreviewNumericValue(inventoryMap.get(backNumber)?.physicalQuantity, 0));
+      });
+
+      const priorityRows = [];
+      const priorityShortfallByKey = new Map();
+
+      filteredLineItems.forEach((lineItem, index) => {
+        const masterProduct = masterProductMap.get(lineItem.key) || null;
+        const inventory = inventoryMap.get(lineItem['背番号']) || {
+          physicalQuantity: 0,
+          reservedQuantity: 0,
+          availableQuantity: 0,
+          lastUpdated: null,
+        };
+        const capability = capabilityMap.get(buildProductionCapabilityKey(factory, lineItem['背番号'], lineItem['品番'])) || null;
+        const currentRemaining = getProductionPreviewNumericValue(remainingPhysicalByBackNumber.get(lineItem['背番号']), 0);
+        const requestedQuantity = getProductionPreviewNumericValue(lineItem.quantity, 0);
+        const reservedQuantity = Math.min(currentRemaining, requestedQuantity);
+        const shortfallQuantity = Math.max(0, requestedQuantity - currentRemaining);
+
+        remainingPhysicalByBackNumber.set(lineItem['背番号'], Math.max(0, currentRemaining - reservedQuantity));
+
+        if (shortfallQuantity <= 0) {
+          return;
+        }
+
+        const boxQuantity = getProductionPreviewNumericValue(masterProduct?.['収容数'], 0);
+        const eligibleMachines = capability?.enabled === false
+          ? []
+          : (capability?.machines || [])
+              .filter((machine) => String(machine?.設備 || '').trim() && machine?.enabled !== false)
+              .sort((left, right) => {
+                const leftPriority = Number.isFinite(Number(left?.priority)) ? Number(left.priority) : 999;
+                const rightPriority = Number.isFinite(Number(right?.priority)) ? Number(right.priority) : 999;
+                if (leftPriority !== rightPriority) {
+                  return leftPriority - rightPriority;
+                }
+                if ((left?.preferred === true) !== (right?.preferred === true)) {
+                  return left?.preferred === true ? -1 : 1;
+                }
+                return String(left?.設備 || '').localeCompare(String(right?.設備 || ''));
+              })
+              .map((machine) => ({
+                equipment: String(machine?.設備 || '').trim(),
+                priority: Number.isFinite(Number(machine?.priority)) ? Number(machine.priority) : null,
+                preferred: machine?.preferred === true,
+              }));
+
+        const capabilityStatus = !capability
+          ? 'unmapped'
+          : capability.enabled === false
+            ? 'disabled'
+            : eligibleMachines.length === 0
+              ? 'empty'
+              : 'mapped';
+
+        const priorityRow = {
+          id: `${lineItem.requestId || lineItem.requestNumber || 'request'}:${lineItem.lineNumber}`,
+          priorityRank: priorityRows.length + 1,
+          queueOrder: index + 1,
+          factory,
+          requestId: lineItem.requestId,
+          requestNumber: lineItem.requestNumber,
+          requestStatus: lineItem.requestStatus,
+          requestCreatedAt: lineItem.requestCreatedAt,
+          requestTimestamp: lineItem.requestTimestamp,
+          deliveryDate: lineItem.dueDate,
+          deliveryOrder: lineItem.deliveryOrder,
+          deliveryNote: lineItem.deliveryNote,
+          type: lineItem.type,
+          lineNumber: lineItem.lineNumber,
+          lineStatus: lineItem.lineStatus,
+          背番号: lineItem['背番号'],
+          品番: lineItem['品番'],
+          品名: String(masterProduct?.['品名'] || lineItem['品名'] || '').trim(),
+          モデル: String(masterProduct?.['モデル'] || '').trim(),
+          requestedQuantity,
+          reservedQuantity,
+          shortfallQuantity,
+          shortageBoxes: boxQuantity > 0 ? Math.ceil(shortfallQuantity / boxQuantity) : null,
+          physicalQuantity: getProductionPreviewNumericValue(inventory.physicalQuantity, 0),
+          inventoryStatus: reservedQuantity > 0 ? 'insufficient' : 'none',
+          boxQuantity: boxQuantity > 0 ? boxQuantity : null,
+          inventoryLastUpdated: inventory.lastUpdated || null,
+          eligibleMachines,
+          preferredMachine: eligibleMachines.find((machine) => machine.preferred)?.equipment || eligibleMachines[0]?.equipment || null,
+          capabilityStatus,
+          hasCapabilityMapping: !!capability,
+        };
+
+        priorityRows.push(priorityRow);
+        priorityShortfallByKey.set(lineItem.key, (priorityShortfallByKey.get(lineItem.key) || 0) + shortfallQuantity);
+      });
+
+      const activeLineSummaryByKey = new Map();
+      filteredLineItems.forEach((lineItem) => {
+        if (!activeLineSummaryByKey.has(lineItem.key)) {
+          activeLineSummaryByKey.set(lineItem.key, {
+            requestNumbers: new Set(),
+            activeRequestedQuantity: 0,
+            activeLineCount: 0,
+          });
+        }
+
+        const summary = activeLineSummaryByKey.get(lineItem.key);
+        summary.activeRequestedQuantity += getProductionPreviewNumericValue(lineItem.quantity, 0);
+        summary.activeLineCount += 1;
+        if (lineItem.requestNumber) {
+          summary.requestNumbers.add(lineItem.requestNumber);
+        }
+      });
+
+      const inventoryRows = filteredItemKeys
+        .map((key) => {
+          const [sebanggo, hinban] = key.split('::');
+          const masterProduct = masterProductMap.get(key) || null;
+          const inventory = inventoryMap.get(sebanggo) || {
+            physicalQuantity: 0,
+            reservedQuantity: 0,
+            availableQuantity: 0,
+            lastUpdated: null,
+          };
+          const summary = activeLineSummaryByKey.get(key) || {
+            requestNumbers: new Set(),
+            activeRequestedQuantity: 0,
+            activeLineCount: 0,
+          };
+          const pendingShortfallQuantity = priorityShortfallByKey.get(key) || 0;
+
+          return {
+            key,
+            factory,
+            背番号: sebanggo,
+            品番: hinban,
+            品名: String(masterProduct?.['品名'] || '').trim(),
+            モデル: String(masterProduct?.['モデル'] || '').trim(),
+            physicalQuantity: getProductionPreviewNumericValue(inventory.physicalQuantity, 0),
+            reservedQuantity: getProductionPreviewNumericValue(inventory.reservedQuantity, 0),
+            availableQuantity: getProductionPreviewNumericValue(inventory.availableQuantity, 0),
+            lastUpdated: inventory.lastUpdated || null,
+            activeRequestedQuantity: summary.activeRequestedQuantity,
+            activeLineCount: summary.activeLineCount,
+            requestCount: summary.requestNumbers.size,
+            requestNumbers: Array.from(summary.requestNumbers),
+            pendingShortfallQuantity,
+          };
+        })
+        .sort((left, right) => {
+          if (right.pendingShortfallQuantity !== left.pendingShortfallQuantity) {
+            return right.pendingShortfallQuantity - left.pendingShortfallQuantity;
+          }
+          if (right.activeRequestedQuantity !== left.activeRequestedQuantity) {
+            return right.activeRequestedQuantity - left.activeRequestedQuantity;
+          }
+          return String(left['背番号'] || left['品番']).localeCompare(String(right['背番号'] || right['品番']));
+        });
+
+      const totalShortfallQuantity = priorityRows.reduce((sum, row) => sum + row.shortfallQuantity, 0);
+      const unmappedPriorityCount = priorityRows.filter((row) => row.capabilityStatus !== 'mapped').length;
+
+      res.json({
+        success: true,
+        preview: {
+          factory,
+          targetDate,
+          generatedAt: new Date().toISOString(),
+          currentPlan: {
+            exists: !!currentPlan,
+            id: currentPlan?._id?.toString() || null,
+            productCount: plannedProducts.length,
+          },
+          summary: {
+            priorityRowCount: priorityRows.length,
+            inventoryRowCount: inventoryRows.length,
+            activeLineCount: filteredLineItems.length,
+            totalShortfallQuantity,
+            unmappedPriorityCount,
+            requestCount: activeRequests.length,
+          },
+          priorityRows,
+          inventoryRows,
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error building production planner preview:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to build production planner preview',
+        message: error.message,
+      });
+    }
+  });
+
 // Route to get unique shape values from Master DB
 app.get('/api/masterdb/shapes', async (req, res) => {
     const _ck = 'masterdb:shapes';
