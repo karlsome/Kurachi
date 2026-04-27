@@ -13727,6 +13727,131 @@ app.get('/api/masterdb/products', async (req, res) => {
     return Number(left.lineNumber || 0) - Number(right.lineNumber || 0);
   }
 
+  function buildProductionPreviewDraftBasisKey(row = {}) {
+    const rowId = String(row?.id || '').trim();
+    if (rowId) {
+      return rowId;
+    }
+
+    const requestNumber = String(row?.requestNumber || '').trim();
+    const lineNumber = Number.isFinite(Number(row?.lineNumber)) ? Number(row.lineNumber) : '';
+    const sebanggo = String(row?.['背番号'] || row?.背番号 || '').trim();
+    const hinban = String(row?.['品番'] || row?.品番 || '').trim();
+    return [requestNumber, lineNumber, sebanggo, hinban].join('::');
+  }
+
+  function normalizeProductionPreviewDraftBasisRows(rows = []) {
+    return (Array.isArray(rows) ? rows : [])
+      .map((row = {}) => {
+        const rowId = String(row?.id || row?.sourceRowId || '').trim();
+        const requestId = String(row?.requestId || '').trim();
+        const requestNumber = String(row?.requestNumber || '').trim();
+        const lineNumber = Number.isFinite(Number(row?.lineNumber)) ? Number(row.lineNumber) : null;
+        const sebanggo = String(row?.['背番号'] || row?.背番号 || '').trim();
+        const hinban = String(row?.['品番'] || row?.品番 || '').trim();
+        const shortfallQuantity = getProductionPreviewNumericValue(row?.shortfallQuantity ?? row?.quantity, 0);
+        const key = buildProductionPreviewDraftBasisKey({
+          id: rowId,
+          requestNumber,
+          lineNumber,
+          背番号: sebanggo,
+          品番: hinban,
+        });
+
+        if (!key || (!requestNumber && !requestId && !sebanggo && !hinban)) {
+          return null;
+        }
+
+        return {
+          key,
+          id: rowId || key,
+          requestId: requestId || null,
+          requestNumber,
+          lineNumber,
+          背番号: sebanggo,
+          品番: hinban,
+          shortfallQuantity,
+        };
+      })
+      .filter(Boolean)
+      .sort((left, right) => {
+        const requestNumberCompare = compareProductionPreviewRequestNumbers(left.requestNumber, right.requestNumber);
+        if (requestNumberCompare !== 0) {
+          return requestNumberCompare;
+        }
+
+        const leftLineNumber = Number.isFinite(Number(left.lineNumber)) ? Number(left.lineNumber) : Number.MAX_SAFE_INTEGER;
+        const rightLineNumber = Number.isFinite(Number(right.lineNumber)) ? Number(right.lineNumber) : Number.MAX_SAFE_INTEGER;
+        if (leftLineNumber !== rightLineNumber) {
+          return leftLineNumber - rightLineNumber;
+        }
+
+        return String(left.key || '').localeCompare(String(right.key || ''));
+      });
+  }
+
+  function compareProductionPreviewDraftBasis(savedBasisRows = [], currentPriorityRows = []) {
+    const normalizedSavedBasisRows = normalizeProductionPreviewDraftBasisRows(savedBasisRows);
+    if (normalizedSavedBasisRows.length === 0) {
+      return {
+        tracked: false,
+        status: 'untracked',
+        isStale: null,
+        savedRowCount: 0,
+        currentRowCount: Array.isArray(currentPriorityRows) ? currentPriorityRows.length : 0,
+        missingCount: 0,
+        newCount: 0,
+        changedQuantityCount: 0,
+        sampleMissingRows: [],
+        sampleNewRows: [],
+        sampleChangedRows: [],
+      };
+    }
+
+    const normalizedCurrentRows = normalizeProductionPreviewDraftBasisRows(currentPriorityRows);
+    const savedMap = new Map(normalizedSavedBasisRows.map((row) => [row.key, row]));
+    const currentMap = new Map(normalizedCurrentRows.map((row) => [row.key, row]));
+
+    const missingRows = normalizedSavedBasisRows.filter((row) => !currentMap.has(row.key));
+    const newRows = normalizedCurrentRows.filter((row) => !savedMap.has(row.key));
+    const changedRows = normalizedCurrentRows.reduce((rows, row) => {
+      const savedRow = savedMap.get(row.key);
+      if (!savedRow) {
+        return rows;
+      }
+
+      if (savedRow.shortfallQuantity !== row.shortfallQuantity) {
+        rows.push({
+          key: row.key,
+          requestNumber: row.requestNumber,
+          lineNumber: row.lineNumber,
+          背番号: row['背番号'],
+          品番: row['品番'],
+          savedShortfallQuantity: savedRow.shortfallQuantity,
+          currentShortfallQuantity: row.shortfallQuantity,
+        });
+      }
+
+      return rows;
+    }, []);
+
+    const isStale = missingRows.length > 0 || newRows.length > 0 || changedRows.length > 0;
+
+    return {
+      tracked: true,
+      status: isStale ? 'stale' : 'current',
+      isStale,
+      savedRowCount: normalizedSavedBasisRows.length,
+      currentRowCount: normalizedCurrentRows.length,
+      missingCount: missingRows.length,
+      newCount: newRows.length,
+      changedQuantityCount: changedRows.length,
+      sampleMissingRows: missingRows.slice(0, 5),
+      sampleNewRows: newRows.slice(0, 5),
+      sampleChangedRows: changedRows.slice(0, 5),
+    };
+  }
+
   app.get('/api/production-planner/preview', async (req, res) => {
     try {
       await client.connect();
@@ -13745,6 +13870,7 @@ app.get('/api/masterdb/products', async (req, res) => {
       const requestsCollection = db.collection('nodaRequestDB');
       const inventoryCollection = db.collection('nodaInventoryDB');
       const capabilityCollection = db.collection('productionCapabilityDB');
+      const previewDraftCollection = db.collection('productionPreviewDraftsDB');
       const masterCollection = client.db('Sasaki_Coating_MasterDB').collection('masterDB');
 
       const rawRequests = await requestsCollection
@@ -14142,6 +14268,13 @@ app.get('/api/masterdb/products', async (req, res) => {
 
       const totalShortfallQuantity = priorityRows.reduce((sum, row) => sum + row.shortfallQuantity, 0);
       const unmappedPriorityCount = priorityRows.filter((row) => row.capabilityStatus !== 'mapped').length;
+      const savedDraftDoc = targetDate
+        ? await previewDraftCollection.findOne({ factory, date: targetDate })
+        : null;
+      const savedDraftBasisRows = normalizeProductionPreviewDraftBasisRows(savedDraftDoc?.basisRows || []);
+      const savedDraftBasisComparison = savedDraftDoc
+        ? compareProductionPreviewDraftBasis(savedDraftBasisRows, priorityRows)
+        : null;
 
       res.json({
         success: true,
@@ -14159,6 +14292,21 @@ app.get('/api/masterdb/products', async (req, res) => {
           },
           priorityRows,
           inventoryRows,
+          savedDraft: savedDraftDoc ? {
+            id: savedDraftDoc?._id?.toString?.() || String(savedDraftDoc?._id || ''),
+            factory: savedDraftDoc.factory,
+            date: savedDraftDoc.date,
+            scheduleUntilTime: savedDraftDoc.scheduleUntilTime || null,
+            assignmentCount: Number.isFinite(Number(savedDraftDoc.assignmentCount)) ? Number(savedDraftDoc.assignmentCount) : ((savedDraftDoc.assignments || []).length || 0),
+            assignments: Array.isArray(savedDraftDoc.assignments) ? savedDraftDoc.assignments : [],
+            basisRows: savedDraftBasisRows,
+            basisRowCount: Number.isFinite(Number(savedDraftDoc.basisRowCount)) ? Number(savedDraftDoc.basisRowCount) : savedDraftBasisRows.length,
+            basisComparison: savedDraftBasisComparison,
+            createdBy: savedDraftDoc.createdBy || 'system',
+            createdAt: savedDraftDoc.createdAt || null,
+            updatedBy: savedDraftDoc.updatedBy || savedDraftDoc.createdBy || 'system',
+            updatedAt: savedDraftDoc.updatedAt || savedDraftDoc.createdAt || null,
+          } : null,
         }
       });
     } catch (error) {
@@ -14166,6 +14314,170 @@ app.get('/api/masterdb/products', async (req, res) => {
       res.status(500).json({
         success: false,
         error: 'Failed to build production planner preview',
+        message: error.message,
+      });
+    }
+  });
+
+  app.post('/api/production-planner/preview-draft/save', async (req, res) => {
+    try {
+      await client.connect();
+
+      const factory = String(req.body?.factory || '').trim();
+      const targetDate = normalizeProductionPreviewDate(req.body?.date || '');
+      const scheduleUntilTime = String(req.body?.scheduleUntilTime || '').trim();
+      const updatedBy = String(req.body?.updatedBy || 'system').trim() || 'system';
+      const assignments = Array.isArray(req.body?.assignments) ? req.body.assignments : [];
+      const basisRows = normalizeProductionPreviewDraftBasisRows(req.body?.basisRows || []);
+
+      if (!factory || !targetDate) {
+        return res.status(400).json({
+          success: false,
+          error: 'factory and date are required'
+        });
+      }
+
+      const sanitizeNumber = (value, fallback = null) => {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : fallback;
+      };
+
+      const sanitizedAssignments = assignments.map((assignment = {}, index) => {
+        const equipment = String(assignment?.equipment || '').trim();
+        const startTime = String(assignment?.startTime || '').trim();
+        const previewEndTime = String(assignment?.previewEndTime || '').trim();
+
+        if (!equipment || !startTime || !previewEndTime) {
+          return null;
+        }
+
+        const estimatedTime = assignment?.estimatedTime && typeof assignment.estimatedTime === 'object'
+          ? {
+              totalSeconds: sanitizeNumber(assignment.estimatedTime.totalSeconds, 0),
+              totalMinutes: sanitizeNumber(assignment.estimatedTime.totalMinutes, 0),
+              cycleTimeSeconds: sanitizeNumber(assignment.estimatedTime.cycleTimeSeconds, null),
+              secondsPerPiece: sanitizeNumber(assignment.estimatedTime.secondsPerPiece, null),
+              pcPerCycle: sanitizeNumber(assignment.estimatedTime.pcPerCycle, null),
+              hours: sanitizeNumber(assignment.estimatedTime.hours, 0),
+              minutes: sanitizeNumber(assignment.estimatedTime.minutes, 0),
+              cyclesNeeded: sanitizeNumber(assignment.estimatedTime.cyclesNeeded, 0),
+              formattedTime: String(assignment.estimatedTime.formattedTime || '').trim(),
+            }
+          : null;
+
+        return {
+          draftId: String(assignment?.draftId || `${equipment}::${startTime}::${index}`).trim(),
+          goalId: assignment?.goalId || null,
+          背番号: String(assignment?.背番号 || '').trim(),
+          品番: String(assignment?.品番 || '').trim(),
+          品名: String(assignment?.品名 || '').trim(),
+          モデル: String(assignment?.モデル || '').trim(),
+          quantity: sanitizeNumber(assignment?.quantity, 0),
+          equipment,
+          startTime,
+          previewEndTime,
+          boxes: sanitizeNumber(assignment?.boxes, null),
+          estimatedTime,
+          color: String(assignment?.color || '').trim(),
+          previewSource: String(assignment?.previewSource || 'priority').trim(),
+          requestNumber: String(assignment?.requestNumber || '').trim(),
+          requestNumberLabel: String(assignment?.requestNumberLabel || '').trim(),
+          lineNumber: sanitizeNumber(assignment?.lineNumber, null),
+          requestStatus: String(assignment?.requestStatus || '').trim(),
+          sourceRowId: String(assignment?.sourceRowId || '').trim(),
+          sourceRowIds: Array.isArray(assignment?.sourceRowIds) ? assignment.sourceRowIds.map((value) => String(value || '').trim()).filter(Boolean) : [],
+          groupedRequestNumbers: Array.isArray(assignment?.groupedRequestNumbers) ? assignment.groupedRequestNumbers.map((value) => String(value || '').trim()).filter(Boolean) : [],
+          usedPreferredMachine: assignment?.usedPreferredMachine === true,
+        };
+      }).filter(Boolean);
+
+      const db = client.db('submittedDB');
+      const collection = db.collection('productionPreviewDraftsDB');
+      const now = new Date();
+
+      await collection.updateOne(
+        { factory, date: targetDate },
+        {
+          $set: {
+            factory,
+            date: targetDate,
+            scheduleUntilTime,
+            assignments: sanitizedAssignments,
+            assignmentCount: sanitizedAssignments.length,
+            basisRows,
+            basisRowCount: basisRows.length,
+            updatedBy,
+            updatedAt: now,
+          },
+          $setOnInsert: {
+            createdBy: updatedBy,
+            createdAt: now,
+          }
+        },
+        { upsert: true }
+      );
+
+      const savedDraftDoc = await collection.findOne({ factory, date: targetDate });
+
+      res.json({
+        success: true,
+        data: {
+          id: savedDraftDoc?._id?.toString?.() || String(savedDraftDoc?._id || ''),
+          factory: savedDraftDoc.factory,
+          date: savedDraftDoc.date,
+          scheduleUntilTime: savedDraftDoc.scheduleUntilTime || null,
+          assignmentCount: Number.isFinite(Number(savedDraftDoc.assignmentCount)) ? Number(savedDraftDoc.assignmentCount) : sanitizedAssignments.length,
+          assignments: Array.isArray(savedDraftDoc.assignments) ? savedDraftDoc.assignments : [],
+          basisRows: normalizeProductionPreviewDraftBasisRows(savedDraftDoc.basisRows || []),
+          basisRowCount: Number.isFinite(Number(savedDraftDoc.basisRowCount)) ? Number(savedDraftDoc.basisRowCount) : basisRows.length,
+          basisComparison: compareProductionPreviewDraftBasis(savedDraftDoc.basisRows || [], savedDraftDoc.basisRows || []),
+          createdBy: savedDraftDoc.createdBy || updatedBy,
+          createdAt: savedDraftDoc.createdAt || now,
+          updatedBy: savedDraftDoc.updatedBy || updatedBy,
+          updatedAt: savedDraftDoc.updatedAt || now,
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error saving production preview draft:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to save production preview draft',
+        message: error.message,
+      });
+    }
+  });
+
+  app.delete('/api/production-planner/preview-draft', async (req, res) => {
+    try {
+      await client.connect();
+
+      const factory = String(req.query.factory || '').trim();
+      const targetDate = normalizeProductionPreviewDate(req.query.date || '');
+
+      if (!factory || !targetDate) {
+        return res.status(400).json({
+          success: false,
+          error: 'factory and date are required'
+        });
+      }
+
+      const db = client.db('submittedDB');
+      const collection = db.collection('productionPreviewDraftsDB');
+      const result = await collection.deleteOne({ factory, date: targetDate });
+
+      if (result.deletedCount === 0) {
+        return res.status(404).json({
+          success: false,
+          error: 'Saved preview draft not found'
+        });
+      }
+
+      res.json({ success: true, deletedCount: result.deletedCount });
+    } catch (error) {
+      console.error('❌ Error deleting production preview draft:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to delete production preview draft',
         message: error.message,
       });
     }
