@@ -13649,6 +13649,84 @@ app.get('/api/masterdb/products', async (req, res) => {
     return 0;
   }
 
+  function getProductionPreviewDateSortValue(dateText = '') {
+    const normalizedDate = normalizeProductionPreviewDate(dateText);
+    const [year, month, day] = normalizedDate.split('-').map(Number);
+    return Date.UTC(year, month - 1, day);
+  }
+
+  function getProductionPreviewInternalDeadline(dateText = '') {
+    const normalizedDate = normalizeProductionPreviewDate(dateText);
+    const [year, month, day] = normalizedDate.split('-').map(Number);
+    const deadline = new Date(Date.UTC(year, month - 1, day));
+    deadline.setUTCDate(deadline.getUTCDate() - 1);
+
+    while (deadline.getUTCDay() === 0 || deadline.getUTCDay() === 6) {
+      deadline.setUTCDate(deadline.getUTCDate() - 1);
+    }
+
+    return deadline.toISOString().split('T')[0];
+  }
+
+  function getProductionPreviewDeliveryOrderValue(value = null) {
+    const text = String(value ?? '').trim();
+    if (!text) {
+      return Number.MAX_SAFE_INTEGER;
+    }
+
+    const numericValue = Number(text);
+    if (Number.isFinite(numericValue)) {
+      return numericValue;
+    }
+
+    const numericMatch = text.match(/\d+/);
+    return numericMatch ? Number(numericMatch[0]) : Number.MAX_SAFE_INTEGER;
+  }
+
+  function compareProductionPreviewRequestNumbers(leftValue = '', rightValue = '') {
+    const leftText = String(leftValue || '').trim();
+    const rightText = String(rightValue || '').trim();
+
+    if (!leftText && !rightText) {
+      return 0;
+    }
+    if (!leftText) {
+      return 1;
+    }
+    if (!rightText) {
+      return -1;
+    }
+
+    return leftText.localeCompare(rightText, undefined, { numeric: true, sensitivity: 'base' });
+  }
+
+  function compareProductionPreviewLineItems(left = {}, right = {}) {
+    const leftDeadlineSortValue = getProductionPreviewDateSortValue(left.internalDeadline || left.dueDate || '');
+    const rightDeadlineSortValue = getProductionPreviewDateSortValue(right.internalDeadline || right.dueDate || '');
+    if (leftDeadlineSortValue !== rightDeadlineSortValue) {
+      return leftDeadlineSortValue - rightDeadlineSortValue;
+    }
+
+    const leftDeliveryOrder = getProductionPreviewDeliveryOrderValue(left.deliveryOrder);
+    const rightDeliveryOrder = getProductionPreviewDeliveryOrderValue(right.deliveryOrder);
+    if (leftDeliveryOrder !== rightDeliveryOrder) {
+      return leftDeliveryOrder - rightDeliveryOrder;
+    }
+
+    const requestNumberCompare = compareProductionPreviewRequestNumbers(left.requestNumber, right.requestNumber);
+    if (requestNumberCompare !== 0) {
+      return requestNumberCompare;
+    }
+
+    const leftTimestamp = Number(left.requestTimestamp || 0);
+    const rightTimestamp = Number(right.requestTimestamp || 0);
+    if (leftTimestamp !== rightTimestamp) {
+      return leftTimestamp - rightTimestamp;
+    }
+
+    return Number(left.lineNumber || 0) - Number(right.lineNumber || 0);
+  }
+
   app.get('/api/production-planner/preview', async (req, res) => {
     try {
       await client.connect();
@@ -13666,7 +13744,6 @@ app.get('/api/masterdb/products', async (req, res) => {
       const db = client.db('submittedDB');
       const requestsCollection = db.collection('nodaRequestDB');
       const inventoryCollection = db.collection('nodaInventoryDB');
-      const plansCollection = db.collection('productionPlansDB');
       const capabilityCollection = db.collection('productionCapabilityDB');
       const masterCollection = client.db('Sasaki_Coating_MasterDB').collection('masterDB');
 
@@ -13680,16 +13757,29 @@ app.get('/api/masterdb/products', async (req, res) => {
       const activeRequests = rawRequests
         .filter((requestDoc) => !isProductionPreviewCompletedStatus(requestDoc?.status) && !isProductionPreviewCancelledStatus(requestDoc?.status))
         .sort((left, right) => {
+          const leftDeadline = getProductionPreviewInternalDeadline(left?.['納入指示日'] || targetDate);
+          const rightDeadline = getProductionPreviewInternalDeadline(right?.['納入指示日'] || targetDate);
+          const leftDeadlineSortValue = getProductionPreviewDateSortValue(leftDeadline);
+          const rightDeadlineSortValue = getProductionPreviewDateSortValue(rightDeadline);
+          if (leftDeadlineSortValue !== rightDeadlineSortValue) {
+            return leftDeadlineSortValue - rightDeadlineSortValue;
+          }
+
+          const leftDeliveryOrder = getProductionPreviewDeliveryOrderValue(left?.deliveryOrder ?? left?.['便']);
+          const rightDeliveryOrder = getProductionPreviewDeliveryOrderValue(right?.deliveryOrder ?? right?.['便']);
+          if (leftDeliveryOrder !== rightDeliveryOrder) {
+            return leftDeliveryOrder - rightDeliveryOrder;
+          }
+
+          const requestNumberCompare = compareProductionPreviewRequestNumbers(left?.requestNumber, right?.requestNumber);
+          if (requestNumberCompare !== 0) {
+            return requestNumberCompare;
+          }
+
           const leftTimestamp = getProductionPreviewRequestTimestamp(left);
           const rightTimestamp = getProductionPreviewRequestTimestamp(right);
           if (leftTimestamp !== rightTimestamp) {
             return leftTimestamp - rightTimestamp;
-          }
-
-          const leftRequestNumber = String(left?.requestNumber || '');
-          const rightRequestNumber = String(right?.requestNumber || '');
-          if (leftRequestNumber !== rightRequestNumber) {
-            return leftRequestNumber.localeCompare(rightRequestNumber);
           }
 
           return String(left?._id || '').localeCompare(String(right?._id || ''));
@@ -13699,6 +13789,7 @@ app.get('/api/masterdb/products', async (req, res) => {
       activeRequests.forEach((requestDoc) => {
         const baseRequestNumber = String(requestDoc?.requestNumber || '').trim();
         const baseDueDate = normalizeProductionPreviewDate(requestDoc?.['納入指示日'] || targetDate);
+        const internalDeadline = getProductionPreviewInternalDeadline(baseDueDate);
         const baseRequestStatus = String(requestDoc?.status || '').trim();
         const requestTimestamp = getProductionPreviewRequestTimestamp(requestDoc);
         const baseLineItems = Array.isArray(requestDoc?.lineItems) && requestDoc.lineItems.length > 0
@@ -13732,6 +13823,7 @@ app.get('/api/masterdb/products', async (req, res) => {
             品名: String(lineItem?.品名 || requestDoc?.品名 || '').trim(),
             quantity,
             dueDate: baseDueDate,
+            internalDeadline,
             requestNumber: baseRequestNumber,
             lineNumber: lineItem?.lineNumber || lineIndex + 1,
             lineStatus,
@@ -13739,19 +13831,14 @@ app.get('/api/masterdb/products', async (req, res) => {
             requestId: requestDoc?._id?.toString?.() || String(requestDoc?._id || ''),
             requestCreatedAt: requestDoc?.createdAt || null,
             requestTimestamp,
-            deliveryOrder: requestDoc?.deliveryOrder ?? null,
+            deliveryOrder: lineItem?.deliveryOrder ?? lineItem?.['便'] ?? requestDoc?.deliveryOrder ?? requestDoc?.['便'] ?? null,
             deliveryNote: String(requestDoc?.deliveryNote || '').trim(),
             type: String(requestDoc?.type || '').trim(),
           });
         });
       });
 
-      const currentPlan = await plansCollection.findOne({
-        factory,
-        date: targetDate,
-      });
-
-      const plannedProducts = Array.isArray(currentPlan?.products) ? currentPlan.products : [];
+      rawLineItems.sort(compareProductionPreviewLineItems);
 
       const itemKeys = new Set();
       const backNumbers = new Set();
@@ -13761,18 +13848,6 @@ app.get('/api/masterdb/products', async (req, res) => {
         itemKeys.add(line.key);
         if (line['背番号']) backNumbers.add(line['背番号']);
         if (line['品番']) partNumbers.add(line['品番']);
-      });
-
-      plannedProducts.forEach((product = {}) => {
-        const sebanggo = String(product?.背番号 || '').trim();
-        const hinban = String(product?.品番 || '').trim();
-        const key = buildProductionPreviewItemKey(sebanggo, hinban);
-
-        if (sebanggo || hinban) {
-          itemKeys.add(key);
-        }
-        if (sebanggo) backNumbers.add(sebanggo);
-        if (hinban) partNumbers.add(hinban);
       });
 
       const masterQuery = {
@@ -13798,6 +13873,9 @@ app.get('/api/masterdb/products', async (req, res) => {
               モデル: 1,
               工場: 1,
               収容数: 1,
+              '秒数(1pcs何秒)': 1,
+              pcPerCycle: 1,
+              machineConfig: 1,
             }
           }).toArray()
         : [];
@@ -13943,6 +14021,9 @@ app.get('/api/masterdb/products', async (req, res) => {
                 equipment: String(machine?.設備 || '').trim(),
                 priority: Number.isFinite(Number(machine?.priority)) ? Number(machine.priority) : null,
                 preferred: machine?.preferred === true,
+                cycleTimeSeconds: Number.isFinite(Number(machine?.cycleTimeSeconds)) ? Number(machine.cycleTimeSeconds) : null,
+                pcPerCycle: Number.isFinite(Number(machine?.pcPerCycle)) ? Number(machine.pcPerCycle) : null,
+                boxQuantityOverride: Number.isFinite(Number(machine?.boxQuantityOverride)) ? Number(machine.boxQuantityOverride) : null,
               }));
 
         const capabilityStatus = !capability
@@ -13964,6 +14045,7 @@ app.get('/api/masterdb/products', async (req, res) => {
           requestCreatedAt: lineItem.requestCreatedAt,
           requestTimestamp: lineItem.requestTimestamp,
           deliveryDate: lineItem.dueDate,
+          internalDeadline: lineItem.internalDeadline,
           deliveryOrder: lineItem.deliveryOrder,
           deliveryNote: lineItem.deliveryNote,
           type: lineItem.type,
@@ -13973,6 +14055,10 @@ app.get('/api/masterdb/products', async (req, res) => {
           品番: lineItem['品番'],
           品名: String(masterProduct?.['品名'] || lineItem['品名'] || '').trim(),
           モデル: String(masterProduct?.['モデル'] || '').trim(),
+          収容数: masterProduct?.['収容数'] ?? null,
+          '秒数(1pcs何秒)': masterProduct?.['秒数(1pcs何秒)'] ?? null,
+          pcPerCycle: masterProduct?.pcPerCycle ?? null,
+          machineConfig: masterProduct?.machineConfig || null,
           requestedQuantity,
           reservedQuantity,
           shortfallQuantity,
@@ -14063,11 +14149,6 @@ app.get('/api/masterdb/products', async (req, res) => {
           factory,
           targetDate,
           generatedAt: new Date().toISOString(),
-          currentPlan: {
-            exists: !!currentPlan,
-            id: currentPlan?._id?.toString() || null,
-            productCount: plannedProducts.length,
-          },
           summary: {
             priorityRowCount: priorityRows.length,
             inventoryRowCount: inventoryRows.length,
