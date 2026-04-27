@@ -428,6 +428,8 @@
             const modal = document.getElementById('correctionEditModal');
             const title = document.getElementById('editModalTitle');
             const formFields = document.getElementById('editFormFields');
+            const hadBreakData = !!(docData.Break_Time_Data && typeof docData.Break_Time_Data === 'object');
+            const normalizedDocData = normalizeCorrectionTimeData(docData);
             
             // Set modal title
             const processTypes = {
@@ -439,11 +441,11 @@
             title.textContent = `${processTypes[sourceCollection] || sourceCollection} データ修正`;
             
             // Generate form fields based on process type
-            formFields.innerHTML = generateFormFields(docData, sourceCollection);
+            formFields.innerHTML = generateFormFields(normalizedDocData, sourceCollection);
             
             // Store document info for submission
             // Always coerce _id to string — ObjectId may not serialize to a plain string in all driver versions
-            const rawId = docData._id;
+            const rawId = normalizedDocData._id;
             const cleanId = (rawId && typeof rawId === 'object') ? (rawId.$oid || rawId.toString()) : String(rawId || '');
             if (!cleanId || !/^[0-9a-fA-F]{24}$/.test(cleanId)) {
                 console.error('❌ Invalid document _id received from server:', rawId);
@@ -453,7 +455,8 @@
             modal.dataset.documentId = cleanId;
             modal.dataset.sourceCollection = sourceCollection;
             modal.dataset.factory = factory;
-            modal.dataset.originalData = JSON.stringify(docData); // Store original data for comparison
+            modal.dataset.hadBreakData = hadBreakData ? 'true' : 'false';
+            modal.dataset.originalData = JSON.stringify(normalizedDocData); // Store original data for comparison
             
             modal.style.display = 'block';
             
@@ -463,6 +466,8 @@
                 textareas.forEach(textarea => {
                     autoResize(textarea);
                 });
+                recalculateLive();
+                validateInputs();
             }, 100);
 
             // Add event listener for comment validation after modal is shown
@@ -472,6 +477,78 @@
                     commentField.addEventListener('input', validateInputs);
                 }
             }, 100);
+        }
+
+        function getDefaultBreakTimeData(existing = {}) {
+            const keys = new Set(['break1', 'break2', 'break3', 'break4']);
+            if (existing && typeof existing === 'object') {
+                Object.keys(existing).forEach(key => keys.add(key));
+            }
+
+            return Array.from(keys)
+                .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+                .reduce((normalized, key) => {
+                    const current = existing && typeof existing[key] === 'object' ? existing[key] : {};
+                    normalized[key] = {
+                        start: typeof current.start === 'string' ? current.start : '',
+                        end: typeof current.end === 'string' ? current.end : ''
+                    };
+                    return normalized;
+                }, {});
+        }
+
+        function normalizeCorrectionTimeData(docData) {
+            const normalized = JSON.parse(JSON.stringify(docData || {}));
+            normalized.Break_Time_Data = getDefaultBreakTimeData(normalized.Break_Time_Data);
+
+            if (normalized.Total_Break_Minutes === undefined || normalized.Total_Break_Minutes === null || Number.isNaN(Number(normalized.Total_Break_Minutes))) {
+                normalized.Total_Break_Minutes = 0;
+            }
+            if (normalized.Total_Break_Hours === undefined || normalized.Total_Break_Hours === null || Number.isNaN(Number(normalized.Total_Break_Hours))) {
+                normalized.Total_Break_Hours = Math.round(((Number(normalized.Total_Break_Minutes) || 0) / 60) * 100) / 100;
+            }
+            if (normalized.Total_Trouble_Hours === undefined || normalized.Total_Trouble_Hours === null || Number.isNaN(Number(normalized.Total_Trouble_Hours))) {
+                normalized.Total_Trouble_Hours = Math.round(((Number(normalized.Total_Trouble_Minutes) || 0) / 60) * 100) / 100;
+            }
+            if (normalized.Total_Work_Hours === undefined || normalized.Total_Work_Hours === null || Number.isNaN(Number(normalized.Total_Work_Hours))) {
+                normalized.Total_Work_Hours = 0;
+            }
+
+            return normalized;
+        }
+
+        function parseTimeToMinutes(value) {
+            if (!/^\d{2}:\d{2}$/.test(value || '')) return null;
+            const [hours, minutes] = value.split(':').map(Number);
+            if (hours > 23 || minutes > 59) return null;
+            return hours * 60 + minutes;
+        }
+
+        function buildBreakTimeDataFromForm() {
+            const breakTimeData = {};
+            for (let i = 1; i <= 4; i++) {
+                breakTimeData[`break${i}`] = {
+                    start: document.getElementById(`break${i}-start`)?.value.trim() || '',
+                    end: document.getElementById(`break${i}-end`)?.value.trim() || ''
+                };
+            }
+            return breakTimeData;
+        }
+
+        function calculateBreakSummary(breakTimeData) {
+            let totalMinutes = 0;
+            Object.values(getDefaultBreakTimeData(breakTimeData)).forEach(({ start, end }) => {
+                const startMinutes = parseTimeToMinutes(start);
+                const endMinutes = parseTimeToMinutes(end);
+                if (startMinutes !== null && endMinutes !== null && endMinutes > startMinutes) {
+                    totalMinutes += endMinutes - startMinutes;
+                }
+            });
+
+            return {
+                totalMinutes,
+                totalHours: Math.round((totalMinutes / 60) * 100) / 100
+            };
         }
 
         function generateFormFields(docData, sourceCollection) {
@@ -559,6 +636,47 @@
                     `;
                 }
             });
+
+            const breakTimeData = getDefaultBreakTimeData(docData.Break_Time_Data);
+            html += `
+                <div class="edit-form-field" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #e5e7eb;">
+                    <div style="font-weight: 600; color: #374151;">休憩時間</div>
+                </div>
+            `;
+            Object.entries(breakTimeData).forEach(([breakKey, breakData], index) => {
+                const breakLabel = `休憩 ${index + 1}`;
+                html += `
+                    <div class="edit-form-field">
+                        <label for="${breakKey}-start">${breakLabel} 開始:</label>
+                        <input type="time" name="Break_Time_Data.${breakKey}.start" id="${breakKey}-start" value="${breakData.start ?? ''}"
+                               class="editable-input"
+                               oninput="recalculateLive(); validateInputs();" />
+                    </div>
+                    <div class="edit-form-field">
+                        <label for="${breakKey}-end">${breakLabel} 終了:</label>
+                        <input type="time" name="Break_Time_Data.${breakKey}.end" id="${breakKey}-end" value="${breakData.end ?? ''}"
+                               class="editable-input"
+                               oninput="recalculateLive(); validateInputs();" />
+                    </div>
+                `;
+            });
+            html += `
+                <div class="edit-form-field">
+                    <label for="Total_Break_Minutes">合計休憩（分）:</label>
+                    <input type="number" name="Total_Break_Minutes" id="Total_Break_Minutes" value="${docData.Total_Break_Minutes ?? 0}"
+                           class="editable-input" min="0" readonly />
+                </div>
+                <div class="edit-form-field">
+                    <label for="Total_Break_Hours">合計休憩（時間）:</label>
+                    <input type="number" name="Total_Break_Hours" id="Total_Break_Hours" value="${docData.Total_Break_Hours ?? 0}"
+                           class="editable-input" min="0" step="0.01" readonly />
+                </div>
+                <div class="edit-form-field">
+                    <label for="Total_Work_Hours">稼働時間:</label>
+                    <input type="number" name="Total_Work_Hours" id="Total_Work_Hours" value="${docData.Total_Work_Hours ?? 0}"
+                           class="editable-input" min="0" step="0.01" readonly />
+                </div>
+            `;
             
             html += '<div id="inputError" class="text-red-500 text-sm mt-2"></div>';
             
@@ -610,17 +728,23 @@
                 if (el) el.value = value;
             };
 
-            const start = new Date(`1970-01-01T${get("開始") || "00:00"}:00Z`);
-            const end = new Date(`1970-01-01T${get("終了") || "00:00"}:00Z`);
-            const quantity = Number(get("数量")) || 1;
+            const startMinutes = parseTimeToMinutes(get("開始") || '');
+            const endMinutes = parseTimeToMinutes(get("終了") || '');
+            const quantity = Number(get("数量")) || 0;
+            const breakTimeData = buildBreakTimeDataFromForm();
+            const { totalMinutes: totalBreakMinutes, totalHours: totalBreakHours } = calculateBreakSummary(breakTimeData);
 
-            const durationInSeconds = Math.max(0, (end - start) / 1000);
-            const cycleTime = durationInSeconds / quantity;
-            set("サイクルタイム", cycleTime.toFixed(2));
+            set("Total_Break_Minutes", totalBreakMinutes);
+            set("Total_Break_Hours", totalBreakHours.toFixed(2));
 
             let totalNG = 0;
             const modal = document.getElementById('correctionEditModal');
             const sourceCollection = modal.dataset.sourceCollection;
+            const originalData = JSON.parse(modal.dataset.originalData || '{}');
+            const originalTroubleHours = Number(originalData.Total_Trouble_Hours);
+            const troubleHours = Number.isFinite(originalTroubleHours)
+                ? originalTroubleHours
+                : Math.round(((Number(originalData.Total_Trouble_Minutes) || 0) / 60) * 100) / 100;
             
             if (sourceCollection === 'kensaDB') {
                 for (let i = 1; i <= 12; i++) {
@@ -633,7 +757,16 @@
             }
 
             set("不良数", totalNG);
-            set("Total", quantity - totalNG);
+            set("Total", Math.max(0, quantity - totalNG));
+
+            let totalWorkHours = 0;
+            if (startMinutes !== null && endMinutes !== null && endMinutes > startMinutes) {
+                totalWorkHours = Math.max(0, ((endMinutes - startMinutes) / 60) - totalBreakHours - troubleHours);
+            }
+            set("Total_Work_Hours", totalWorkHours.toFixed(2));
+
+            const cycleTime = quantity > 0 ? (totalWorkHours * 3600) / quantity : 0;
+            set("サイクルタイム", cycleTime.toFixed(2));
         }
 
         // Validate input fields
@@ -642,7 +775,7 @@
             for (let i = 1; i <= 12; i++) intFields.push(`counter-${i}`);
             intFields.push(...["くっつき・めくれ", "シワ", "転写位置ズレ", "転写不良", "文字欠け"]);
             
-            const timeFields = ["開始", "終了"];
+            const requiredTimeFields = new Set(["開始", "終了"]);
             const errorDiv = document.getElementById("inputError");
             
             let isValid = true;
@@ -662,8 +795,17 @@
                     }
                 }
 
-                if (timeFields.includes(label)) {
-                    if (!/^\d{2}:\d{2}$/.test(value) || Number(value.split(":")[0]) > 23 || Number(value.split(":")[1]) > 59) {
+                const isBreakTimeField = label.startsWith('Break_Time_Data.');
+                if (requiredTimeFields.has(label) || isBreakTimeField) {
+                    if (!value) {
+                        if (requiredTimeFields.has(label)) {
+                            isValid = false;
+                            messages.push(`${label} is required`);
+                            input.classList.add("border-red-500");
+                        } else {
+                            input.classList.remove("border-red-500");
+                        }
+                    } else if (!/^\d{2}:\d{2}$/.test(value) || Number(value.split(":")[0]) > 23 || Number(value.split(":")[1]) > 59) {
                         isValid = false;
                         messages.push(`${label} must be in 24-hour HH:mm format`);
                         input.classList.add("border-red-500");
@@ -722,7 +864,8 @@
             commentError.style.display = 'none';
             
             // Get original data for comparison
-            const originalData = JSON.parse(modal.dataset.originalData || '{}');
+            const originalData = normalizeCorrectionTimeData(JSON.parse(modal.dataset.originalData || '{}'));
+            const originalHadBreakData = modal.dataset.hadBreakData === 'true';
             
             // Get form data
             const formData = new FormData(this);
@@ -730,6 +873,9 @@
             const counters = {};
             let processQty = 0;
             const changes = []; // Track what changed
+            const breakTimeData = buildBreakTimeDataFromForm();
+            const { totalMinutes: totalBreakMinutes, totalHours: totalBreakHours } = calculateBreakSummary(breakTimeData);
+            const hasAnyBreakInput = Object.values(breakTimeData).some(({ start, end }) => Boolean(start || end));
 
             const labelToKeyMap = {
                 "品番": "品番", "背番号": "背番号", "工場": "工場", "日付": "Date",
@@ -745,6 +891,8 @@
 
             for (let [label, value] of formData.entries()) {
                 if (label === 'correctionComment') continue; // Skip the comment field
+                if (label.startsWith('Break_Time_Data.')) continue;
+                if (["Total_Break_Minutes", "Total_Break_Hours", "Total_Work_Hours", "サイクルタイム"].includes(label)) continue;
                 
                 // Handle counter fields specially for kensa
                 if (label.startsWith('counter-')) {
@@ -782,17 +930,50 @@
                 }
             }
 
+            Object.entries(breakTimeData).forEach(([breakKey, breakValue], index) => {
+                const breakNumber = index + 1;
+                ['start', 'end'].forEach(part => {
+                    const oldValue = originalData?.Break_Time_Data?.[breakKey]?.[part] || '';
+                    const newValue = breakValue[part] || '';
+                    if (newValue !== oldValue) {
+                        changes.push(`休憩 ${breakNumber} ${part === 'start' ? '開始' : '終了'}: "${oldValue}" → "${newValue}"`);
+                    }
+                });
+            });
+
             // Add counters object if we have counter fields
             if (Object.keys(counters).length > 0) {
                 updatedFields["Counters"] = counters;
             }
 
-            // Calculate cycle time again for final save
-            if (updatedFields["Time_start"] && updatedFields["Time_end"] && processQty > 0) {
-                const start = new Date(`1970-01-01T${updatedFields["Time_start"]}:00Z`);
-                const end = new Date(`1970-01-01T${updatedFields["Time_end"]}:00Z`);
-                const diffSeconds = (end - start) / 1000;
-                updatedFields["Cycle_Time"] = Math.max(diffSeconds / processQty, 0);
+            if (originalHadBreakData || hasAnyBreakInput) {
+                updatedFields["Break_Time_Data"] = breakTimeData;
+                updatedFields["Total_Break_Minutes"] = totalBreakMinutes;
+                updatedFields["Total_Break_Hours"] = totalBreakHours;
+            }
+
+            const effectiveBreakHours = (originalHadBreakData || hasAnyBreakInput)
+                ? totalBreakHours
+                : (Number.isFinite(Number(originalData.Total_Break_Hours))
+                    ? Number(originalData.Total_Break_Hours)
+                    : Math.round(((Number(originalData.Total_Break_Minutes) || 0) / 60) * 100) / 100);
+            const effectiveTroubleHours = Number.isFinite(Number(originalData.Total_Trouble_Hours))
+                ? Number(originalData.Total_Trouble_Hours)
+                : Math.round(((Number(originalData.Total_Trouble_Minutes) || 0) / 60) * 100) / 100;
+            const effectiveStart = updatedFields["Time_start"] || originalData.Time_start || '';
+            const effectiveEnd = updatedFields["Time_end"] || originalData.Time_end || '';
+            const startMinutes = parseTimeToMinutes(effectiveStart);
+            const endMinutes = parseTimeToMinutes(effectiveEnd);
+            const effectiveProcessQty = processQty || Number(updatedFields["Process_Quantity"]) || Number(originalData.Process_Quantity) || 0;
+
+            if (startMinutes !== null && endMinutes !== null && endMinutes > startMinutes) {
+                updatedFields["Total_Work_Hours"] = Math.round(Math.max(0, ((endMinutes - startMinutes) / 60) - effectiveBreakHours - effectiveTroubleHours) * 100) / 100;
+            } else if (originalData.Total_Work_Hours !== undefined) {
+                updatedFields["Total_Work_Hours"] = Number(originalData.Total_Work_Hours) || 0;
+            }
+
+            if (effectiveProcessQty > 0) {
+                updatedFields["Cycle_Time"] = Math.round((((Number(updatedFields["Total_Work_Hours"]) || 0) * 3600) / effectiveProcessQty) * 100) / 100;
             }
 
             // Calculate Total_NG and Total
@@ -806,7 +987,7 @@
             }
 
             updatedFields["Total_NG"] = totalNG;
-            updatedFields["Total"] = processQty - totalNG;
+            updatedFields["Total"] = Math.max(0, effectiveProcessQty - totalNG);
 
             // Get worker name for correction history
             const workerName = updatedFields.Worker_Name || 'Unknown';
