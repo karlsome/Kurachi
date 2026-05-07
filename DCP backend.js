@@ -4095,7 +4095,7 @@ function printLabel() {
   } else if (背番号 === "NC2") {
     filename = "NC21.lbx"
   } else if (背番号 === "RA01" || 背番号 === "RA02") {
-    filename = "311BPlr1.lbx";
+    filename = "311BPlr2.lbx";
   } else {
     filename = "sample6.lbx";
   }
