@@ -17574,7 +17574,7 @@ async function calculateNodaStatistics(collection, baseQuery = {}) {
 
 // Inventory Management API Route
 app.post("/api/inventory-management", async (req, res) => {
-  const { action, filters = {}, page = 1, limit = 10, sort = {}, 背番号 } = req.body;
+  const { action, filters = {}, page = 1, limit = 50, sort = {}, 背番号 } = req.body;
 
   try {
     await client.connect();
@@ -17586,60 +17586,15 @@ app.post("/api/inventory-management", async (req, res) => {
     switch (action) {
       case 'getInventoryData':
         try {
-          // Get latest inventory state for each unique 背番号
-          const pipeline = [
-            // First convert timeStamp to Date for proper sorting
-            {
-              $addFields: {
-                timeStampDate: {
-                  $cond: {
-                    if: { $type: "$timeStamp" },
-                    then: { $toDate: "$timeStamp" },
-                    else: new Date()
-                  }
-                }
-              }
-            },
-            // Sort by 背番号 and timestamp (newest first)
-            {
-              $sort: { 背番号: 1, timeStampDate: -1 }
-            },
-            // Group by 背番号 and get the latest record
-            {
-              $group: {
-                _id: "$背番号",
-                latestRecord: { $first: "$$ROOT" }
-              }
-            },
-            // Replace root with the latest record
-            {
-              $replaceRoot: { newRoot: "$latestRecord" }
-            }
-          ];
+          const normalizedPage = normalizeInventoryPositiveInteger(page, 1);
+          const normalizedLimit = normalizeInventoryPageSize(limit, 50);
+          const snapshotAt = parseInventorySnapshotAt(filters.snapshotAt);
 
-          // Apply filters if provided
-          const matchStage = {};
-          if (filters['品番']) {
-            matchStage['品番'] = filters['品番'];
-          }
-          // sebanggoArray: model-based tag filter (array of 背番号 from model selection)
-          if (filters.sebanggoArray && Array.isArray(filters.sebanggoArray) && filters.sebanggoArray.length > 0) {
-            matchStage['背番号'] = { $in: filters.sebanggoArray };
-          } else if (filters['背番号']) {
-            matchStage['背番号'] = filters['背番号'];
-          }
-          if (filters.search) {
-            const searchRegex = new RegExp(filters.search, 'i');
-            matchStage.$or = [
-              { '品番': searchRegex },
-              { '背番号': searchRegex }
-            ];
+          if (hasInventorySnapshotValue(filters.snapshotAt) && !snapshotAt) {
+            return res.status(400).json({ error: 'Invalid snapshot timestamp' });
           }
 
-          // Add match stage if filters exist
-          if (Object.keys(matchStage).length > 0) {
-            pipeline.unshift({ $match: matchStage });
-          }
+          const pipeline = buildInventoryLatestStatePipeline(filters, { snapshotAt });
 
           // Get filtered results
           const inventoryItems = await inventoryCollection.aggregate(pipeline).toArray();
@@ -17759,9 +17714,9 @@ app.post("/api/inventory-management", async (req, res) => {
 
           // Apply pagination
           const totalItems = visibleInventoryItems.length;
-          const totalPages = totalItems > 0 ? Math.ceil(totalItems / limit) : 0;
-          const startIndex = (page - 1) * limit;
-          const endIndex = startIndex + limit;
+          const totalPages = totalItems > 0 ? Math.ceil(totalItems / normalizedLimit) : 0;
+          const startIndex = (normalizedPage - 1) * normalizedLimit;
+          const endIndex = startIndex + normalizedLimit;
           const paginatedItems = visibleInventoryItems.slice(startIndex, endIndex);
 
           // Format data for frontend
@@ -17787,11 +17742,12 @@ app.post("/api/inventory-management", async (req, res) => {
             data: formattedItems,
             summary: summary,
             thresholdSummary,
+            snapshotAt: snapshotAt ? snapshotAt.toISOString() : null,
             pagination: {
-              currentPage: page,
+              currentPage: normalizedPage,
               totalPages: totalPages,
               totalItems: totalItems,
-              itemsPerPage: limit
+              itemsPerPage: normalizedLimit
             }
           });
 
@@ -18333,43 +18289,13 @@ app.post("/api/inventory-management", async (req, res) => {
 
       case 'exportInventoryData':
         try {
-          // Get latest inventory state for all items (no pagination for export)
-          const pipeline = [
-            {
-              $sort: { 背番号: 1, timeStamp: -1 }
-            },
-            {
-              $group: {
-                _id: "$背番号",
-                latestRecord: { $first: "$$ROOT" }
-              }
-            },
-            {
-              $replaceRoot: { newRoot: "$latestRecord" }
-            }
-          ];
+          const snapshotAt = parseInventorySnapshotAt(filters.snapshotAt);
 
-          // Apply filters if provided
-          const matchStage = {};
-          if (filters['品番']) {
-            matchStage['品番'] = filters['品番'];
-          }
-          if (filters.sebanggoArray && Array.isArray(filters.sebanggoArray) && filters.sebanggoArray.length > 0) {
-            matchStage['背番号'] = { $in: filters.sebanggoArray };
-          } else if (filters['背番号']) {
-            matchStage['背番号'] = filters['背番号'];
-          }
-          if (filters.search) {
-            const searchRegex = new RegExp(filters.search, 'i');
-            matchStage.$or = [
-              { '品番': searchRegex },
-              { '背番号': searchRegex }
-            ];
+          if (hasInventorySnapshotValue(filters.snapshotAt) && !snapshotAt) {
+            return res.status(400).json({ error: 'Invalid snapshot timestamp' });
           }
 
-          if (Object.keys(matchStage).length > 0) {
-            pipeline.unshift({ $match: matchStage });
-          }
+          const pipeline = buildInventoryLatestStatePipeline(filters, { snapshotAt });
 
           const inventoryItems = await inventoryCollection.aggregate(pipeline).toArray();
           const advancedFilters = Array.isArray(filters.advancedFilters) ? filters.advancedFilters : [];
@@ -18777,6 +18703,103 @@ function normalizeInventoryDateValue(value) {
   const date = toInventoryDate(value);
   if (!date) return "";
   return date.toISOString().split('T')[0];
+}
+
+function normalizeInventoryPositiveInteger(value, fallback = 1) {
+  const parsedValue = Number.parseInt(value, 10);
+  return Number.isFinite(parsedValue) && parsedValue > 0 ? parsedValue : fallback;
+}
+
+function normalizeInventoryPageSize(value, fallback = 50) {
+  const parsedValue = normalizeInventoryPositiveInteger(value, fallback);
+  return Math.min(parsedValue, 100);
+}
+
+function hasInventorySnapshotValue(value) {
+  return value !== null && value !== undefined && String(value).trim() !== '';
+}
+
+function parseInventorySnapshotAt(value) {
+  if (!hasInventorySnapshotValue(value)) {
+    return null;
+  }
+
+  return toInventoryDate(value);
+}
+
+function buildInventoryTimeStampDateExpression() {
+  return {
+    $convert: {
+      input: '$timeStamp',
+      to: 'date',
+      onError: new Date(0),
+      onNull: new Date(0)
+    }
+  };
+}
+
+function buildInventoryBaseMatchStage(filters = {}) {
+  const matchStage = {};
+
+  if (filters['品番']) {
+    matchStage['品番'] = filters['品番'];
+  }
+
+  if (filters.sebanggoArray && Array.isArray(filters.sebanggoArray) && filters.sebanggoArray.length > 0) {
+    matchStage['背番号'] = { $in: filters.sebanggoArray };
+  } else if (filters['背番号']) {
+    matchStage['背番号'] = filters['背番号'];
+  }
+
+  if (filters.search) {
+    const searchRegex = new RegExp(filters.search, 'i');
+    matchStage.$or = [
+      { '品番': searchRegex },
+      { '背番号': searchRegex }
+    ];
+  }
+
+  return matchStage;
+}
+
+function buildInventoryLatestStatePipeline(filters = {}, { snapshotAt = null } = {}) {
+  const pipeline = [];
+  const matchStage = buildInventoryBaseMatchStage(filters);
+
+  if (Object.keys(matchStage).length > 0) {
+    pipeline.push({ $match: matchStage });
+  }
+
+  pipeline.push({
+    $addFields: {
+      timeStampDate: buildInventoryTimeStampDateExpression()
+    }
+  });
+
+  if (snapshotAt) {
+    pipeline.push({
+      $match: {
+        timeStampDate: { $lte: snapshotAt }
+      }
+    });
+  }
+
+  pipeline.push(
+    {
+      $sort: { 背番号: 1, timeStampDate: -1 }
+    },
+    {
+      $group: {
+        _id: '$背番号',
+        latestRecord: { $first: '$$ROOT' }
+      }
+    },
+    {
+      $replaceRoot: { newRoot: '$latestRecord' }
+    }
+  );
+
+  return pipeline;
 }
 
 function matchesInventoryAdvancedFilters(item = {}, filters = []) {
