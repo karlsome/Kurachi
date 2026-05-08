@@ -1606,6 +1606,25 @@
                 pressCard.appendChild(pressLabel);
                 containers.appendChild(pressCard);
 
+                // Create card for 小瀬MANAS
+                const manasCard = document.createElement('div');
+                manasCard.classList.add('card');
+                manasCard.addEventListener('click', () => {
+                    window.location.href = `DCP iReporter.html?filter=${filterValue}&machine=OZMANAS`;
+                });
+
+                const manasImg = document.createElement('img');
+                manasImg.src = 'src/machines/MANAS.jpg';
+                manasImg.alt = '小瀬MANAS';
+
+                const manasLabel = document.createElement('div');
+                manasLabel.classList.add('label');
+                manasLabel.textContent = '小瀬MANAS';
+
+                manasCard.appendChild(manasImg);
+                manasCard.appendChild(manasLabel);
+                containers.appendChild(manasCard);
+
                 // Create card for 検査
                 const kensaCard = document.createElement('div');
                 kensaCard.classList.add('card');
