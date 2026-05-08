@@ -17574,7 +17574,7 @@ async function calculateNodaStatistics(collection, baseQuery = {}) {
 
 // Inventory Management API Route
 app.post("/api/inventory-management", async (req, res) => {
-  const { action, filters = {}, page = 1, limit = 50, sort = {}, 背番号 } = req.body;
+  const { action, filters = {}, page = 1, limit, sort = {}, 背番号 } = req.body;
 
   try {
     await client.connect();
@@ -17889,21 +17889,58 @@ app.post("/api/inventory-management", async (req, res) => {
             return res.status(400).json({ error: "背番号 is required" });
           }
 
-          // Get all transactions for the specific item, sorted by timestamp (newest first)
-          const transactions = await inventoryCollection
-            .find({ 背番号: 背番号 })
-            .sort({ timeStamp: -1 })
-            .toArray();
+          const normalizedPage = normalizeInventoryPositiveInteger(page, 1);
+          const requestedLimit = normalizeInventoryPageSize(limit, 10);
+          const normalizedLimit = [10, 50, 100].includes(requestedLimit) ? requestedLimit : 10;
+          const transactionFilter = { 背番号 };
+          const transactionProjection = {
+            品番: 1,
+            背番号: 1,
+            工場: 1,
+            timeStamp: 1,
+            action: 1,
+            physicalQuantity: 1,
+            runningQuantity: 1,
+            reservedQuantity: 1,
+            availableQuantity: 1,
+            source: 1,
+            note: 1,
+            migrationNote: 1
+          };
+          const totalItems = await inventoryCollection.countDocuments(transactionFilter);
 
-          if (transactions.length === 0) {
+          if (totalItems === 0) {
             return res.json({
               success: true,
               data: [],
+              currentItem: null,
+              pagination: {
+                currentPage: 1,
+                totalPages: 0,
+                totalItems: 0,
+                itemsPerPage: normalizedLimit
+              },
               message: `No transactions found for ${背番号}`
             });
           }
 
-          const latestTransaction = transactions[0] || {};
+          const totalPages = Math.ceil(totalItems / normalizedLimit);
+          const currentPage = Math.min(normalizedPage, totalPages);
+          const skip = (currentPage - 1) * normalizedLimit;
+
+          const [latestTransaction, transactions] = await Promise.all([
+            inventoryCollection.findOne(transactionFilter, {
+              sort: { timeStamp: -1, _id: -1 },
+              projection: transactionProjection
+            }),
+            inventoryCollection
+              .find(transactionFilter, { projection: transactionProjection })
+              .sort({ timeStamp: -1, _id: -1 })
+              .skip(skip)
+              .limit(normalizedLimit)
+              .toArray()
+          ]);
+
           let capacityPerBox = null;
 
           if (latestTransaction.品番 && latestTransaction.背番号) {
@@ -17921,17 +17958,26 @@ app.post("/api/inventory-management", async (req, res) => {
             capacityPerBox = getInventoryCapacityPerBox(masterCapacityMap, latestTransaction) || null;
           }
 
-          const formattedTransactions = transactions.map((transaction) => ({
+          const enrichTransaction = (transaction) => ({
             ...transaction,
             capacityPerBox,
             stockBoxCount: capacityPerBox
               ? Number(transaction.physicalQuantity || transaction.runningQuantity || 0) / capacityPerBox
               : null
-          }));
+          });
+
+          const formattedTransactions = transactions.map(enrichTransaction);
 
           res.json({
             success: true,
-            data: formattedTransactions
+            data: formattedTransactions,
+            currentItem: latestTransaction ? enrichTransaction(latestTransaction) : null,
+            pagination: {
+              currentPage,
+              totalPages,
+              totalItems,
+              itemsPerPage: normalizedLimit
+            }
           });
 
         } catch (error) {
