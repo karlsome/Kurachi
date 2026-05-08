@@ -9852,6 +9852,8 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
               }
               errorMsg.style.display = 'block';
             }
+
+            showAlert(`❌ 型番不一致 / 型番 mismatch\n\nCorrect: ${expectedKataban}\nScanned: ${boardCode}`);
             return;
           }
 
@@ -9875,7 +9877,6 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
 
           // Close Step 3 modal (OZMANAS does not send command to machine at this step)
           document.getElementById('step3Modal').style.display = 'none';
-          showAlert(`トムソンボードを確認しました / Thomson board scanned: ${boardCode}`);
         },
         () => {
           // Ignore scan frame errors
