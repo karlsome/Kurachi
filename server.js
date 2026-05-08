@@ -13852,6 +13852,95 @@ app.get('/api/masterdb/products', async (req, res) => {
     };
   }
 
+  function sanitizeProductionPreviewAssignments(assignments = []) {
+    const sanitizeNumber = (value, fallback = null) => {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : fallback;
+    };
+
+    return (Array.isArray(assignments) ? assignments : []).map((assignment = {}, index) => {
+      const equipment = String(assignment?.equipment || '').trim();
+      const startTime = String(assignment?.startTime || '').trim();
+      const previewEndTime = String(assignment?.previewEndTime || '').trim();
+
+      if (!equipment || !startTime || !previewEndTime) {
+        return null;
+      }
+
+      const estimatedTime = assignment?.estimatedTime && typeof assignment.estimatedTime === 'object'
+        ? {
+            totalSeconds: sanitizeNumber(assignment.estimatedTime.totalSeconds, 0),
+            totalMinutes: sanitizeNumber(assignment.estimatedTime.totalMinutes, 0),
+            cycleTimeSeconds: sanitizeNumber(assignment.estimatedTime.cycleTimeSeconds, null),
+            secondsPerPiece: sanitizeNumber(assignment.estimatedTime.secondsPerPiece, null),
+            pcPerCycle: sanitizeNumber(assignment.estimatedTime.pcPerCycle, null),
+            hours: sanitizeNumber(assignment.estimatedTime.hours, 0),
+            minutes: sanitizeNumber(assignment.estimatedTime.minutes, 0),
+            cyclesNeeded: sanitizeNumber(assignment.estimatedTime.cyclesNeeded, 0),
+            formattedTime: String(assignment.estimatedTime.formattedTime || '').trim(),
+          }
+        : null;
+
+      return {
+        draftId: String(assignment?.draftId || `${equipment}::${startTime}::${index}`).trim(),
+        goalId: assignment?.goalId || null,
+        背番号: String(assignment?.背番号 || '').trim(),
+        品番: String(assignment?.品番 || '').trim(),
+        品名: String(assignment?.品名 || '').trim(),
+        モデル: String(assignment?.モデル || '').trim(),
+        quantity: sanitizeNumber(assignment?.quantity, 0),
+        equipment,
+        startTime,
+        previewEndTime,
+        boxes: sanitizeNumber(assignment?.boxes, null),
+        estimatedTime,
+        color: String(assignment?.color || '').trim(),
+        previewSource: String(assignment?.previewSource || 'priority').trim(),
+        requestNumber: String(assignment?.requestNumber || '').trim(),
+        requestNumberLabel: String(assignment?.requestNumberLabel || '').trim(),
+        lineNumber: sanitizeNumber(assignment?.lineNumber, null),
+        requestStatus: String(assignment?.requestStatus || '').trim(),
+        sourceRowId: String(assignment?.sourceRowId || '').trim(),
+        sourceRowIds: Array.isArray(assignment?.sourceRowIds) ? assignment.sourceRowIds.map((value) => String(value || '').trim()).filter(Boolean) : [],
+        groupedRequestNumbers: Array.isArray(assignment?.groupedRequestNumbers) ? assignment.groupedRequestNumbers.map((value) => String(value || '').trim()).filter(Boolean) : [],
+        usedPreferredMachine: assignment?.usedPreferredMachine === true,
+      };
+    }).filter(Boolean);
+  }
+
+  function formatProductionPublishedScheduleDoc(doc = {}, currentPriorityRows = []) {
+    const basisRows = normalizeProductionPreviewDraftBasisRows(doc?.basisRows || []);
+    const assignments = sanitizeProductionPreviewAssignments(doc?.assignments || []);
+
+    return {
+      id: doc?._id?.toString?.() || String(doc?._id || ''),
+      factory: String(doc?.factory || '').trim(),
+      date: normalizeProductionPreviewDate(doc?.date || ''),
+      version: Number.isFinite(Number(doc?.version)) ? Number(doc.version) : 1,
+      isActive: doc?.isActive !== false,
+      sourceMode: String(doc?.sourceMode || 'auto').trim() || 'auto',
+      sourceType: String(doc?.sourceType || 'manual').trim() || 'manual',
+      sourceLabel: String(doc?.sourceLabel || '').trim(),
+      scheduleUntilTime: String(doc?.scheduleUntilTime || '').trim() || null,
+      assignmentCount: Number.isFinite(Number(doc?.assignmentCount)) ? Number(doc.assignmentCount) : assignments.length,
+      assignments,
+      basisRows,
+      basisRowCount: Number.isFinite(Number(doc?.basisRowCount)) ? Number(doc.basisRowCount) : basisRows.length,
+      basisComparison: compareProductionPreviewDraftBasis(basisRows, currentPriorityRows),
+      publishedBy: String(doc?.publishedBy || doc?.updatedBy || doc?.createdBy || 'system').trim() || 'system',
+      publishedAt: doc?.publishedAt || doc?.updatedAt || doc?.createdAt || null,
+      createdBy: String(doc?.createdBy || doc?.publishedBy || 'system').trim() || 'system',
+      createdAt: doc?.createdAt || doc?.publishedAt || null,
+      note: String(doc?.note || '').trim(),
+    };
+  }
+
+  const PRODUCTION_PUBLISHED_MANAGE_ROLES = new Set(['admin', '課長', '部長', '係長']);
+
+  function canManageProductionPublishedSchedules(role = 'viewer') {
+    return PRODUCTION_PUBLISHED_MANAGE_ROLES.has(String(role || 'viewer').trim());
+  }
+
   app.get('/api/production-planner/preview', async (req, res) => {
     try {
       await client.connect();
@@ -14319,6 +14408,241 @@ app.get('/api/masterdb/products', async (req, res) => {
     }
   });
 
+  app.get('/api/production-planner/published', async (req, res) => {
+    try {
+      await client.connect();
+
+      const factory = String(req.query.factory || '').trim();
+      const targetDate = normalizeProductionPreviewDate(req.query.date || '');
+
+      if (!factory || !targetDate) {
+        return res.status(400).json({
+          success: false,
+          error: 'factory and date are required'
+        });
+      }
+
+      const db = client.db('submittedDB');
+      const collection = db.collection('productionPublishedSchedulesDB');
+      const publishedDocs = await collection
+        .find({ factory, date: targetDate })
+        .sort({ version: -1, publishedAt: -1, createdAt: -1, _id: -1 })
+        .toArray();
+
+      const formattedVersions = publishedDocs.map((doc) => formatProductionPublishedScheduleDoc(doc, []));
+      const activeVersion = formattedVersions.find((doc) => doc.isActive) || formattedVersions[0] || null;
+
+      res.json({
+        success: true,
+        data: {
+          factory,
+          date: targetDate,
+          activeVersion,
+          versions: formattedVersions,
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error loading production planner published schedule:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to load production planner published schedule',
+        message: error.message,
+      });
+    }
+  });
+
+  app.post('/api/production-planner/published/publish', async (req, res) => {
+    try {
+      await client.connect();
+      const { username, role } = vmGetRequester(req);
+
+      if (!canManageProductionPublishedSchedules(role)) {
+        return res.status(403).json({
+          success: false,
+          error: 'Insufficient role to publish schedules'
+        });
+      }
+
+      const factory = String(req.body?.factory || '').trim();
+      const targetDate = normalizeProductionPreviewDate(req.body?.date || '');
+      const scheduleUntilTime = String(req.body?.scheduleUntilTime || '').trim();
+      const sourceMode = String(req.body?.sourceMode || 'auto').trim() || 'auto';
+      const sourceType = String(req.body?.sourceType || 'manual').trim() || 'manual';
+      const sourceLabel = String(req.body?.sourceLabel || '').trim();
+      const note = String(req.body?.note || '').trim();
+      const publishedBy = String(req.body?.publishedBy || username || 'system').trim() || 'system';
+      const assignments = sanitizeProductionPreviewAssignments(req.body?.assignments || []);
+      const basisRows = normalizeProductionPreviewDraftBasisRows(req.body?.basisRows || []);
+
+      if (!factory || !targetDate) {
+        return res.status(400).json({
+          success: false,
+          error: 'factory and date are required'
+        });
+      }
+
+      if (assignments.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'at least one assignment is required to publish a schedule'
+        });
+      }
+
+      const db = client.db('submittedDB');
+      const collection = db.collection('productionPublishedSchedulesDB');
+      const now = new Date();
+      const latestVersionDoc = await collection.find({ factory, date: targetDate })
+        .sort({ version: -1, _id: -1 })
+        .limit(1)
+        .next();
+      const nextVersion = Number.isFinite(Number(latestVersionDoc?.version))
+        ? Number(latestVersionDoc.version) + 1
+        : 1;
+
+      await collection.updateMany(
+        { factory, date: targetDate, isActive: true },
+        {
+          $set: {
+            isActive: false,
+            supersededAt: now,
+            supersededBy: publishedBy,
+          }
+        }
+      );
+
+      const publishDoc = {
+        factory,
+        date: targetDate,
+        version: nextVersion,
+        isActive: true,
+        sourceMode: sourceMode === 'draft' ? 'draft' : 'auto',
+        sourceType,
+        sourceLabel,
+        scheduleUntilTime,
+        assignments,
+        assignmentCount: assignments.length,
+        basisRows,
+        basisRowCount: basisRows.length,
+        publishedBy,
+        publishedAt: now,
+        createdBy: publishedBy,
+        createdAt: now,
+        note,
+      };
+
+      const insertResult = await collection.insertOne(publishDoc);
+      const savedDoc = await collection.findOne({ _id: insertResult.insertedId });
+
+      res.json({
+        success: true,
+        data: formatProductionPublishedScheduleDoc(savedDoc, basisRows),
+      });
+    } catch (error) {
+      console.error('❌ Error publishing production planner schedule:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to publish production planner schedule',
+        message: error.message,
+      });
+    }
+  });
+
+  app.post('/api/production-planner/published/restore', async (req, res) => {
+    try {
+      await client.connect();
+      const { username, role } = vmGetRequester(req);
+
+      if (!canManageProductionPublishedSchedules(role)) {
+        return res.status(403).json({
+          success: false,
+          error: 'Insufficient role to restore schedules'
+        });
+      }
+
+      const factory = String(req.body?.factory || '').trim();
+      const targetDate = normalizeProductionPreviewDate(req.body?.date || '');
+      const sourceVersion = Number(req.body?.sourceVersion || 0);
+      const publishedBy = String(req.body?.publishedBy || username || 'system').trim() || 'system';
+      const note = String(req.body?.note || '').trim();
+
+      if (!factory || !targetDate || !Number.isFinite(sourceVersion) || sourceVersion <= 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'factory, date, and sourceVersion are required'
+        });
+      }
+
+      const db = client.db('submittedDB');
+      const collection = db.collection('productionPublishedSchedulesDB');
+      const sourceDoc = await collection.findOne({ factory, date: targetDate, version: sourceVersion });
+
+      if (!sourceDoc) {
+        return res.status(404).json({
+          success: false,
+          error: 'Published schedule version not found'
+        });
+      }
+
+      const now = new Date();
+      const latestVersionDoc = await collection.find({ factory, date: targetDate })
+        .sort({ version: -1, _id: -1 })
+        .limit(1)
+        .next();
+      const nextVersion = Number.isFinite(Number(latestVersionDoc?.version))
+        ? Number(latestVersionDoc.version) + 1
+        : 1;
+
+      await collection.updateMany(
+        { factory, date: targetDate, isActive: true },
+        {
+          $set: {
+            isActive: false,
+            supersededAt: now,
+            supersededBy: publishedBy,
+          }
+        }
+      );
+
+      const restoredAssignments = sanitizeProductionPreviewAssignments(sourceDoc.assignments || []);
+      const restoredBasisRows = normalizeProductionPreviewDraftBasisRows(sourceDoc.basisRows || []);
+      const restoreDoc = {
+        factory,
+        date: targetDate,
+        version: nextVersion,
+        isActive: true,
+        sourceMode: String(sourceDoc.sourceMode || 'auto').trim() === 'draft' ? 'draft' : 'auto',
+        sourceType: 'restore',
+        sourceLabel: `Restored from Version ${sourceVersion}`,
+        scheduleUntilTime: String(sourceDoc.scheduleUntilTime || '').trim(),
+        assignments: restoredAssignments,
+        assignmentCount: restoredAssignments.length,
+        basisRows: restoredBasisRows,
+        basisRowCount: restoredBasisRows.length,
+        publishedBy,
+        publishedAt: now,
+        createdBy: publishedBy,
+        createdAt: now,
+        note,
+        restoredFromVersion: sourceVersion,
+      };
+
+      const insertResult = await collection.insertOne(restoreDoc);
+      const savedDoc = await collection.findOne({ _id: insertResult.insertedId });
+
+      res.json({
+        success: true,
+        data: formatProductionPublishedScheduleDoc(savedDoc, restoredBasisRows),
+      });
+    } catch (error) {
+      console.error('❌ Error restoring production planner schedule:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to restore production planner schedule',
+        message: error.message,
+      });
+    }
+  });
+
   app.post('/api/production-planner/preview-draft/save', async (req, res) => {
     try {
       await client.connect();
@@ -14336,60 +14660,7 @@ app.get('/api/masterdb/products', async (req, res) => {
           error: 'factory and date are required'
         });
       }
-
-      const sanitizeNumber = (value, fallback = null) => {
-        const parsed = Number(value);
-        return Number.isFinite(parsed) ? parsed : fallback;
-      };
-
-      const sanitizedAssignments = assignments.map((assignment = {}, index) => {
-        const equipment = String(assignment?.equipment || '').trim();
-        const startTime = String(assignment?.startTime || '').trim();
-        const previewEndTime = String(assignment?.previewEndTime || '').trim();
-
-        if (!equipment || !startTime || !previewEndTime) {
-          return null;
-        }
-
-        const estimatedTime = assignment?.estimatedTime && typeof assignment.estimatedTime === 'object'
-          ? {
-              totalSeconds: sanitizeNumber(assignment.estimatedTime.totalSeconds, 0),
-              totalMinutes: sanitizeNumber(assignment.estimatedTime.totalMinutes, 0),
-              cycleTimeSeconds: sanitizeNumber(assignment.estimatedTime.cycleTimeSeconds, null),
-              secondsPerPiece: sanitizeNumber(assignment.estimatedTime.secondsPerPiece, null),
-              pcPerCycle: sanitizeNumber(assignment.estimatedTime.pcPerCycle, null),
-              hours: sanitizeNumber(assignment.estimatedTime.hours, 0),
-              minutes: sanitizeNumber(assignment.estimatedTime.minutes, 0),
-              cyclesNeeded: sanitizeNumber(assignment.estimatedTime.cyclesNeeded, 0),
-              formattedTime: String(assignment.estimatedTime.formattedTime || '').trim(),
-            }
-          : null;
-
-        return {
-          draftId: String(assignment?.draftId || `${equipment}::${startTime}::${index}`).trim(),
-          goalId: assignment?.goalId || null,
-          背番号: String(assignment?.背番号 || '').trim(),
-          品番: String(assignment?.品番 || '').trim(),
-          品名: String(assignment?.品名 || '').trim(),
-          モデル: String(assignment?.モデル || '').trim(),
-          quantity: sanitizeNumber(assignment?.quantity, 0),
-          equipment,
-          startTime,
-          previewEndTime,
-          boxes: sanitizeNumber(assignment?.boxes, null),
-          estimatedTime,
-          color: String(assignment?.color || '').trim(),
-          previewSource: String(assignment?.previewSource || 'priority').trim(),
-          requestNumber: String(assignment?.requestNumber || '').trim(),
-          requestNumberLabel: String(assignment?.requestNumberLabel || '').trim(),
-          lineNumber: sanitizeNumber(assignment?.lineNumber, null),
-          requestStatus: String(assignment?.requestStatus || '').trim(),
-          sourceRowId: String(assignment?.sourceRowId || '').trim(),
-          sourceRowIds: Array.isArray(assignment?.sourceRowIds) ? assignment.sourceRowIds.map((value) => String(value || '').trim()).filter(Boolean) : [],
-          groupedRequestNumbers: Array.isArray(assignment?.groupedRequestNumbers) ? assignment.groupedRequestNumbers.map((value) => String(value || '').trim()).filter(Boolean) : [],
-          usedPreferredMachine: assignment?.usedPreferredMachine === true,
-        };
-      }).filter(Boolean);
+      const sanitizedAssignments = sanitizeProductionPreviewAssignments(assignments);
 
       const db = client.db('submittedDB');
       const collection = db.collection('productionPreviewDraftsDB');
