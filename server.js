@@ -17579,6 +17579,7 @@ app.post("/api/inventory-management", async (req, res) => {
   try {
     await client.connect();
     const db = client.db("submittedDB");
+    const requestsCollection = db.collection("nodaRequestDB");
     const inventoryCollection = db.collection("nodaInventoryDB");
     const thresholdCollection = db.collection("inventoryThresholdSettings");
     const masterCollection = client.db("Sasaki_Coating_MasterDB").collection("masterDB");
@@ -17754,6 +17755,131 @@ app.post("/api/inventory-management", async (req, res) => {
         } catch (error) {
           console.error("Error in getInventoryData:", error);
           res.status(500).json({ error: "Failed to fetch inventory data", details: error.message });
+        }
+        break;
+
+      case 'getSnapshotRequestOptions':
+        try {
+          const requestDocuments = await requestsCollection.find(
+            {
+              requestNumber: { $exists: true, $nin: [null, ''] },
+              $or: [
+                { 'lineItems.status': 'completed' },
+                { 'lineItems.completedAt': { $exists: true } },
+                { completedAt: { $exists: true } },
+                { status: 'completed' }
+              ]
+            },
+            {
+              projection: {
+                requestNumber: 1,
+                status: 1,
+                totalItems: 1,
+                createdAt: 1,
+                updatedAt: 1,
+                pickupDate: 1,
+                納入指示日: 1,
+                lineItems: 1
+              }
+            }
+          )
+            .sort({ updatedAt: -1, createdAt: -1, _id: -1 })
+            .limit(250)
+            .toArray();
+
+          const requestOptions = requestDocuments
+            .map((requestDoc) => {
+              const lineItems = Array.isArray(requestDoc?.lineItems) ? requestDoc.lineItems : [];
+              const completedLineItems = lineItems.filter((lineItem) => {
+                if (lineItem?.status === 'completed') {
+                  return true;
+                }
+
+                const completedAt = lineItem?.completedAt ? new Date(lineItem.completedAt) : null;
+                return completedAt instanceof Date && !Number.isNaN(completedAt.getTime());
+              });
+
+              const completionDates = completedLineItems
+                .map((lineItem) => new Date(lineItem.completedAt || 0))
+                .filter((dateValue) => dateValue instanceof Date && !Number.isNaN(dateValue.getTime()))
+                .sort((left, right) => right.getTime() - left.getTime());
+
+              const updatedAt = requestDoc?.updatedAt ? new Date(requestDoc.updatedAt) : null;
+              const createdAt = requestDoc?.createdAt ? new Date(requestDoc.createdAt) : null;
+
+              return {
+                requestNumber: String(requestDoc?.requestNumber || '').trim(),
+                status: String(requestDoc?.status || '').trim(),
+                totalItems: Number(requestDoc?.totalItems) || lineItems.length,
+                completedCount: completedLineItems.length,
+                pickupDate: requestDoc?.pickupDate || '',
+                deliveryDate: requestDoc?.['納入指示日'] || '',
+                updatedAt: updatedAt instanceof Date && !Number.isNaN(updatedAt.getTime())
+                  ? updatedAt.toISOString()
+                  : null,
+                createdAt: createdAt instanceof Date && !Number.isNaN(createdAt.getTime())
+                  ? createdAt.toISOString()
+                  : null,
+                lastCompletedAt: completionDates[0] ? completionDates[0].toISOString() : null
+              };
+            })
+            .filter((requestOption) => requestOption.requestNumber && requestOption.completedCount > 0)
+            .sort((left, right) => {
+              const rightTimestamp = new Date(
+                right.lastCompletedAt || right.updatedAt || right.createdAt || 0
+              ).getTime();
+              const leftTimestamp = new Date(
+                left.lastCompletedAt || left.updatedAt || left.createdAt || 0
+              ).getTime();
+
+              return rightTimestamp - leftTimestamp;
+            });
+
+          res.json({
+            success: true,
+            data: requestOptions
+          });
+        } catch (error) {
+          console.error('Error in getSnapshotRequestOptions:', error);
+          res.status(500).json({ error: 'Failed to fetch snapshot request options', details: error.message });
+        }
+        break;
+
+      case 'resolveSnapshotForRequest':
+        try {
+          const requestReference = String(req.body.requestReference || req.body.requestNumber || '').trim();
+
+          if (!requestReference) {
+            return res.status(400).json({ error: 'Request number is required' });
+          }
+
+          const resolvedSnapshot = await resolveInventorySnapshotForRequestReference(
+            inventoryCollection,
+            requestsCollection,
+            requestReference
+          );
+
+          if (!resolvedSnapshot?.snapshotAt || !resolvedSnapshot?.pickedAt) {
+            return res.status(404).json({
+              error: `No picking transaction found for request ${requestReference}`
+            });
+          }
+
+          res.json({
+            success: true,
+            data: {
+              requestReference,
+              requestId: resolvedSnapshot.requestId,
+              requestNumber: resolvedSnapshot.requestNumber,
+              snapshotAt: resolvedSnapshot.snapshotAt.toISOString(),
+              pickedAt: resolvedSnapshot.pickedAt.toISOString(),
+              lineNumber: resolvedSnapshot.lineNumber,
+              matchedTransactionId: resolvedSnapshot.matchedTransactionId
+            }
+          });
+        } catch (error) {
+          console.error('Error in resolveSnapshotForRequest:', error);
+          res.status(500).json({ error: 'Failed to resolve request snapshot', details: error.message });
         }
         break;
 
@@ -18725,6 +18851,91 @@ function parseInventorySnapshotAt(value) {
   }
 
   return toInventoryDate(value);
+}
+
+async function resolveInventorySnapshotForRequestReference(inventoryCollection, requestsCollection, requestReference) {
+  const normalizedRequestReference = String(requestReference || '').trim();
+  if (!normalizedRequestReference) {
+    return null;
+  }
+
+  const requestDoc = await requestsCollection.findOne(
+    { requestNumber: normalizedRequestReference },
+    { projection: { _id: 1, requestNumber: 1 } }
+  );
+
+  const candidateReferences = Array.from(new Set([
+    normalizedRequestReference,
+    requestDoc?.requestNumber ? String(requestDoc.requestNumber).trim() : '',
+    requestDoc?._id ? String(requestDoc._id) : ''
+  ].filter(Boolean)));
+
+  if (candidateReferences.length === 0) {
+    return null;
+  }
+
+  const [firstPickingTransaction] = await inventoryCollection.aggregate([
+    {
+      $addFields: {
+        timeStampDate: buildInventoryTimeStampDateExpression()
+      }
+    },
+    {
+      $match: {
+        action: { $regex: /^Picking(?: Completed)? \(-/i },
+        $or: [
+          { requestId: { $in: candidateReferences } },
+          { bulkRequestNumber: { $in: candidateReferences } },
+          { requestNumber: { $in: candidateReferences } }
+        ]
+      }
+    },
+    {
+      $sort: { timeStampDate: 1, _id: 1 }
+    },
+    {
+      $limit: 1
+    },
+    {
+      $project: {
+        _id: 1,
+        timeStampDate: 1,
+        requestId: 1,
+        bulkRequestNumber: 1,
+        requestNumber: 1,
+        lineNumber: 1,
+        action: 1
+      }
+    }
+  ]).toArray();
+
+  if (!firstPickingTransaction?.timeStampDate) {
+    return null;
+  }
+
+  const pickedAt = new Date(firstPickingTransaction.timeStampDate);
+  if (Number.isNaN(pickedAt.getTime())) {
+    return null;
+  }
+
+  const snapshotAt = new Date(Math.max(0, pickedAt.getTime() - 1));
+
+  return {
+    requestId: requestDoc?._id ? String(requestDoc._id) : null,
+    requestNumber: String(
+      requestDoc?.requestNumber
+      || firstPickingTransaction.bulkRequestNumber
+      || firstPickingTransaction.requestNumber
+      || firstPickingTransaction.requestId
+      || normalizedRequestReference
+    ).trim(),
+    snapshotAt,
+    pickedAt,
+    lineNumber: Number.isFinite(Number(firstPickingTransaction.lineNumber))
+      ? Number(firstPickingTransaction.lineNumber)
+      : null,
+    matchedTransactionId: firstPickingTransaction._id ? String(firstPickingTransaction._id) : null
+  };
 }
 
 function buildInventoryTimeStampDateExpression() {
