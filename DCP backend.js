@@ -9073,8 +9073,12 @@ function showStep3Modal() {
     scanner = document.createElement('div');
     scanner.id = 'step3Scanner';
     scanner.style.display = 'none';
+    scanner.style.width = '100%';
+    scanner.style.maxWidth = 'min(500px, 80vw)';
     scanner.innerHTML = '<div id="step3QrReader"></div>';
     content.appendChild(scanner);
+  } else if (scanner && !scanner.querySelector('#step3QrReader')) {
+    scanner.innerHTML = '<div id="step3QrReader"></div>';
   }
 
   let errorMsg = document.getElementById('step3ErrorMsg');
@@ -9760,6 +9764,18 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
       const scanner = document.getElementById('step3Scanner');
       const errorMsg = document.getElementById('step3ErrorMsg');
 
+      const restoreStep3Ui = (message = '') => {
+        if (scanner) scanner.style.display = 'none';
+        if (instruction) instruction.style.display = '';
+        if (arrow) arrow.style.display = '';
+        if (actionButton) actionButton.style.display = '';
+        if (errorMsg) {
+          const errorText = errorMsg.querySelector('p');
+          if (errorText) errorText.textContent = message;
+          errorMsg.style.display = message ? 'block' : 'none';
+        }
+      };
+
       if (!scanner) {
         showAlert('Step 3 scanner UI not ready');
         return;
@@ -9776,12 +9792,26 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
       if (actionButton) actionButton.style.display = 'none';
       scanner.style.display = 'block';
 
+      // Always rebuild the reader target before creating a new scanner instance.
+      // This avoids stale DOM state from previous scanner sessions.
+      scanner.innerHTML = '<div id="step3QrReader"></div>';
+
+      // Let DOM apply visibility/layout before starting camera stream.
+      await new Promise(resolve => setTimeout(resolve, 50));
+
       if (step3Scanner) {
         await step3Scanner.stop().catch(() => {});
         step3Scanner = null;
       }
 
-      step3Scanner = new Html5Qrcode('step3QrReader');
+      try {
+        step3Scanner = new Html5Qrcode('step3QrReader');
+      } catch (initErr) {
+        console.error('Failed to initialize Step 3 scanner:', initErr);
+        restoreStep3Ui('❌ スキャナー初期化エラー / Scanner initialization error');
+        return;
+      }
+
       step3Scanner.start(
         { facingMode: 'environment' },
         {
@@ -9803,17 +9833,7 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
           if (!expectedKataban) {
             await step3Scanner.stop();
             step3Scanner = null;
-
-            if (scanner) scanner.style.display = 'none';
-            if (instruction) instruction.style.display = '';
-            if (arrow) arrow.style.display = '';
-            if (actionButton) actionButton.style.display = '';
-
-            if (errorMsg) {
-              const errorText = errorMsg.querySelector('p');
-              if (errorText) errorText.textContent = '❌ 型番データがありません / 型番 is missing in masterDB';
-              errorMsg.style.display = 'block';
-            }
+            restoreStep3Ui('❌ 型番データがありません / 型番 is missing in masterDB');
             return;
           }
 
@@ -9825,7 +9845,6 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
             if (instruction) instruction.style.display = '';
             if (arrow) arrow.style.display = '';
             if (actionButton) actionButton.style.display = '';
-
             if (errorMsg) {
               const errorText = errorMsg.querySelector('p');
               if (errorText) {
@@ -9863,15 +9882,7 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
         }
       ).catch((scanErr) => {
         console.error('Failed to start Step 3 scanner:', scanErr);
-        if (scanner) scanner.style.display = 'none';
-        if (instruction) instruction.style.display = '';
-        if (arrow) arrow.style.display = '';
-        if (actionButton) actionButton.style.display = '';
-        if (errorMsg) {
-          const errorText = errorMsg.querySelector('p');
-          if (errorText) errorText.textContent = '❌ カメラを起動できませんでした / Could not start camera';
-          errorMsg.style.display = 'block';
-        }
+        restoreStep3Ui('❌ カメラを起動できませんでした / Could not start camera');
       });
 
       return;
