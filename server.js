@@ -11987,6 +11987,43 @@ app.post("/uploadMasterImage", async (req, res) => {
 
 
 
+// Upload an image attached to an equipment event (事案) to Firebase Storage.
+// Does NOT update MongoDB — the returned URL is stored by the caller when saving the event record.
+app.post("/api/upload-equipment-event-image", async (req, res) => {
+  const { base64, factoryName, equipmentName, username } = req.body;
+
+  if (!base64) {
+    return res.status(400).json({ error: "base64 image data is required" });
+  }
+
+  try {
+    const timestamp = Date.now();
+    const factory  = (factoryName  || "unknown").replace(/[^a-zA-Z0-9　-鿿]/g, "_");
+    const machine  = (equipmentName || "unknown").replace(/[^a-zA-Z0-9　-鿿]/g, "_");
+    const filePath = `equipmentEvents/${factory}/${machine}/${timestamp}.jpg`;
+
+    const rawBase64 = base64.includes(",") ? base64.split(",")[1] : base64;
+    const buffer = Buffer.from(rawBase64, "base64");
+    const file = admin.storage().bucket().file(filePath);
+    const downloadToken = "masterDBToken69";
+
+    await file.save(buffer, {
+      metadata: {
+        contentType: "image/jpeg",
+        metadata: { firebaseStorageDownloadTokens: downloadToken },
+      },
+    });
+
+    const imageURL = `https://firebasestorage.googleapis.com/v0/b/${file.bucket.name}/o/${encodeURIComponent(file.name)}?alt=media&token=${downloadToken}`;
+
+    console.log(`📸 Equipment event image uploaded by ${username || "unknown"}: ${filePath}`);
+    res.json({ imageURL });
+  } catch (error) {
+    console.error("Error uploading equipment event image:", error);
+    res.status(500).json({ error: "Error uploading image", details: error.message });
+  }
+});
+
 // //inserts data to masterDB
 // app.post("/submitToMasterDB", async (req, res) => {
 //   const { data, username } = req.body;
