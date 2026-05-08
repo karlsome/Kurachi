@@ -758,9 +758,39 @@ async function fetchSebanggo() {
   blankInfo();
 
   try {
-    // Fetch 背番号 values from the server based on the selected process
-    const response = await fetch(`${serverURL}/getSeBanggoListPress?工場=${encodeURIComponent(工場)}`);
-    const data = await response.json();
+    let data = [];
+
+    // OZMANAS-only: show only 背番号 where 加工設備 is OZMANAS in masterDB
+    if (isOZMANASMachine()) {
+      const query = { 加工設備: 'OZMANAS' };
+      if (工場) query.工場 = 工場;
+
+      const response = await fetch(`${serverURL}/queries`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          dbName: "Sasaki_Coating_MasterDB",
+          collectionName: "masterDB",
+          query
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      data = [...new Set((result || [])
+        .map(item => String(item?.背番号 || '').trim())
+        .filter(Boolean))];
+    } else {
+      // Existing behavior for all non-OZMANAS machines
+      const response = await fetch(`${serverURL}/getSeBanggoListPress?工場=${encodeURIComponent(工場)}`);
+      data = await response.json();
+    }
+
     data.sort((a, b) => a.localeCompare(b, 'ja')); // 'ja' for Japanese sorting if needed // sort alphabetically
 
     // Get the sub-dropdown element
@@ -3810,9 +3840,11 @@ function resetForm() {
     sebanggo: '',
     hinban: '',
     materialCode: '',
-    model: ''
+    model: '',
+    kataban: ''
   };
   localStorage.removeItem(`${uniquePrefix}cached-model`);
+  localStorage.removeItem(`${uniquePrefix}cached-kataban`);
   syncVideoManualLauncherState();
 
   const excludedInputs = ['process', 'languageSelector']; // IDs or names of inputs to exclude from reset
@@ -3944,6 +3976,24 @@ function printLabel() {
     };
 
     return; // Stop the submission process
+  }
+
+  // OZMANAS-only rule: label printing must be done from dedicated laptop
+  if (isOZMANASMachine()) {
+    scanAlertText.innerText = 'Please use the dedicated laptop to print this label. / このラベルは専用ノートPCで印刷してください。';
+    scanAlertModal.style.display = 'block';
+
+    const closeScanModalButton = document.getElementById('closeScanModalButton');
+    closeScanModalButton.onclick = function() {
+      scanAlertModal.style.display = 'none';
+    };
+
+    logTabletAction('Print blocked on OZMANAS tablet', 'in-progress', {
+      reason: 'Dedicated laptop printing only',
+      machine: getMachineName(),
+      背番号
+    });
+    return;
   }
 
   // List of 背番号 values requiring 収容数 selection
@@ -7714,6 +7764,7 @@ window.addEventListener('load', function() {
 // Global variables for step tracking
 let step1Scanner = null;
 let step2Scanner = null;
+let step3Scanner = null;
 let currentStep = 0;
 
 // Global variable to store fetched product details
@@ -7721,7 +7772,8 @@ let currentProductDetails = {
   sebanggo: '',
   hinban: '',
   materialCode: '',
-  model: ''
+  model: '',
+  kataban: ''
 };
 
 const videoManualState = {
@@ -8911,6 +8963,13 @@ function getMachineName() {
   return document.getElementById('process')?.value || 'MACHINE';
 }
 
+// OZMANAS-specific flag helper
+function isOZMANASMachine() {
+  const machineFromQuery = String(selectedMachine || '').trim().toUpperCase();
+  const machineFromProcess = String(document.getElementById('process')?.value || '').trim().toUpperCase();
+  return machineFromQuery === 'OZMANAS' || machineFromProcess === 'OZMANAS';
+}
+
 // Helper function to parse and validate material codes (case-sensitive)
 // Returns: { isValid: boolean, matchedCode: string|null, allCodes: string[] }
 function validateMaterialCode(scannedCode, expectedCodeString) {
@@ -9003,6 +9062,69 @@ function showStep2Modal() {
 function showStep3Modal() {
   const modal = document.getElementById('step3Modal');
   const machineName = document.getElementById('step3MachineName');
+  const title = modal?.querySelector('h2');
+  const content = document.getElementById('step3Content');
+  const instruction = content?.querySelector('p');
+  const arrow = content?.querySelector('div');
+  const actionButton = document.getElementById('startStep3Send');
+
+  let scanner = document.getElementById('step3Scanner');
+  if (!scanner && content) {
+    scanner = document.createElement('div');
+    scanner.id = 'step3Scanner';
+    scanner.style.display = 'none';
+    scanner.style.width = '100%';
+    scanner.style.maxWidth = 'min(500px, 80vw)';
+    scanner.innerHTML = '<div id="step3QrReader"></div>';
+    content.appendChild(scanner);
+  } else if (scanner && !scanner.querySelector('#step3QrReader')) {
+    scanner.innerHTML = '<div id="step3QrReader"></div>';
+  }
+
+  let errorMsg = document.getElementById('step3ErrorMsg');
+  if (!errorMsg && content) {
+    errorMsg = document.createElement('div');
+    errorMsg.id = 'step3ErrorMsg';
+    errorMsg.style.display = 'none';
+    errorMsg.style.marginTop = '12px';
+    errorMsg.innerHTML = '<p style="color: #cc0000; font-weight: 700; text-align: center;"></p>';
+    content.appendChild(errorMsg);
+  }
+
+  if (step3Scanner) {
+    step3Scanner.stop().catch(err => console.error('Error stopping step3 scanner:', err));
+    step3Scanner = null;
+  }
+
+  if (content) content.style.display = 'flex';
+  if (scanner) scanner.style.display = 'none';
+  if (errorMsg) errorMsg.style.display = 'none';
+
+  if (instruction) instruction.style.display = '';
+  if (arrow) arrow.style.display = '';
+  if (actionButton) actionButton.style.display = '';
+
+  if (isOZMANASMachine()) {
+    if (title) {
+      title.innerHTML = 'Step <span style="color: #f39c12;">3</span>: scan <strong>トムソンボード</strong> / トムソンボードスキャン';
+    }
+    if (instruction) instruction.textContent = 'Scan トムソンボード / トムソンボードをスキャンしてください';
+    if (actionButton) {
+      actionButton.textContent = 'Scan トムソンボード';
+      actionButton.style.background = 'linear-gradient(135deg, #f39c12, #e67e22)';
+      actionButton.style.boxShadow = '0 4px 15px rgba(243, 156, 18, 0.35)';
+    }
+  } else {
+    if (title) {
+      title.innerHTML = 'Step <span style="color: #f39c12;">3</span>: send to <strong>Machine</strong> / データ送信';
+    }
+    if (instruction) instruction.textContent = 'Press this button / このボタンを押して';
+    if (actionButton) {
+      actionButton.textContent = 'Send to machine';
+      actionButton.style.background = 'linear-gradient(135deg, #4CAF50, #45a049)';
+      actionButton.style.boxShadow = '0 4px 15px rgba(76, 175, 80, 0.4)';
+    }
+  }
   
   // Use cached product details instead of reading from DOM
   document.getElementById('step3Sebanggo').textContent = currentProductDetails.sebanggo;
@@ -9030,6 +9152,10 @@ function closeAllStepModals() {
     step2Scanner.stop().catch(err => console.error("Error stopping step2 scanner:", err));
     step2Scanner = null;
   }
+  if (step3Scanner) {
+    step3Scanner.stop().catch(err => console.error("Error stopping step3 scanner:", err));
+    step3Scanner = null;
+  }
 }
 
 // Function to reset all steps
@@ -9052,7 +9178,8 @@ function resetAllSteps() {
     sebanggo: '',
     hinban: '',
     materialCode: '',
-    model: ''
+    model: '',
+    kataban: ''
   };
   
   // Clear cached product details from localStorage
@@ -9060,6 +9187,7 @@ function resetAllSteps() {
   localStorage.removeItem(`${uniquePrefix}cached-hinban`);
   localStorage.removeItem(`${uniquePrefix}cached-materialCode`);
   localStorage.removeItem(`${uniquePrefix}cached-model`);
+  localStorage.removeItem(`${uniquePrefix}cached-kataban`);
   
   // Reset step to 0 and clear from localStorage
   saveCurrentStep(0);
@@ -9163,7 +9291,8 @@ document.getElementById('startStep1Scan').addEventListener('click', function(eve
         sebanggo: qrCodeMessage,
         hinban: document.getElementById('product-number')?.value || '',
         materialCode: document.getElementById('material-code')?.value || '',
-        model: document.getElementById('model')?.value || ''
+        model: document.getElementById('model')?.value || '',
+        kataban: document.getElementById('kataban')?.value || ''
       };
       
       console.log('Cached product details:', currentProductDetails);
@@ -9173,6 +9302,7 @@ document.getElementById('startStep1Scan').addEventListener('click', function(eve
       localStorage.setItem(`${uniquePrefix}cached-hinban`, currentProductDetails.hinban);
       localStorage.setItem(`${uniquePrefix}cached-materialCode`, currentProductDetails.materialCode);
       localStorage.setItem(`${uniquePrefix}cached-model`, currentProductDetails.model);
+      localStorage.setItem(`${uniquePrefix}cached-kataban`, currentProductDetails.kataban);
       syncVideoManualLauncherState();
       
       // 🔴 BROADCAST SCAN TO SSE - Send to machine display page (includes logging)
@@ -9626,6 +9756,140 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
       return;
     }
     
+    if (isOZMANASMachine()) {
+      const content = document.getElementById('step3Content');
+      const instruction = content?.querySelector('p');
+      const arrow = content?.querySelector('div');
+      const actionButton = document.getElementById('startStep3Send');
+      const scanner = document.getElementById('step3Scanner');
+      const errorMsg = document.getElementById('step3ErrorMsg');
+
+      const restoreStep3Ui = (message = '') => {
+        if (scanner) scanner.style.display = 'none';
+        if (instruction) instruction.style.display = '';
+        if (arrow) arrow.style.display = '';
+        if (actionButton) actionButton.style.display = '';
+        if (errorMsg) {
+          const errorText = errorMsg.querySelector('p');
+          if (errorText) errorText.textContent = message;
+          errorMsg.style.display = message ? 'block' : 'none';
+        }
+      };
+
+      if (!scanner) {
+        showAlert('Step 3 scanner UI not ready');
+        return;
+      }
+
+      if (errorMsg) {
+        const errorText = errorMsg.querySelector('p');
+        if (errorText) errorText.textContent = '';
+        errorMsg.style.display = 'none';
+      }
+
+      if (instruction) instruction.style.display = 'none';
+      if (arrow) arrow.style.display = 'none';
+      if (actionButton) actionButton.style.display = 'none';
+      scanner.style.display = 'block';
+
+      // Always rebuild the reader target before creating a new scanner instance.
+      // This avoids stale DOM state from previous scanner sessions.
+      scanner.innerHTML = '<div id="step3QrReader"></div>';
+
+      // Let DOM apply visibility/layout before starting camera stream.
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      if (step3Scanner) {
+        await step3Scanner.stop().catch(() => {});
+        step3Scanner = null;
+      }
+
+      try {
+        step3Scanner = new Html5Qrcode('step3QrReader');
+      } catch (initErr) {
+        console.error('Failed to initialize Step 3 scanner:', initErr);
+        restoreStep3Ui('❌ スキャナー初期化エラー / Scanner initialization error');
+        return;
+      }
+
+      step3Scanner.start(
+        { facingMode: 'environment' },
+        {
+          fps: 30,
+          qrbox: { width: 800, height: 800 },
+          aspectRatio: 1.0,
+          disableFlip: false,
+          advanced: [{
+            focusMode: 'continuous',
+            focusDistance: { ideal: 0 }
+          }]
+        },
+        async (qrCodeMessage) => {
+          const boardCode = String(qrCodeMessage || '').trim();
+          if (!boardCode) return;
+
+          const expectedKataban = String(currentProductDetails.kataban || document.getElementById('kataban')?.value || '').trim();
+
+          if (!expectedKataban) {
+            await step3Scanner.stop();
+            step3Scanner = null;
+            restoreStep3Ui('❌ 型番データがありません / 型番 is missing in masterDB');
+            return;
+          }
+
+          if (boardCode !== expectedKataban) {
+            await step3Scanner.stop();
+            step3Scanner = null;
+
+            if (scanner) scanner.style.display = 'none';
+            if (instruction) instruction.style.display = '';
+            if (arrow) arrow.style.display = '';
+            if (actionButton) actionButton.style.display = '';
+            if (errorMsg) {
+              const errorText = errorMsg.querySelector('p');
+              if (errorText) {
+                errorText.innerHTML = `❌ 型番不一致 / 型番 mismatch<br>Expected: <strong>${expectedKataban}</strong><br>Scanned: <strong>${boardCode}</strong>`;
+              }
+              errorMsg.style.display = 'block';
+            }
+
+            showAlert(`❌ 型番不一致 / 型番 mismatch\n\nCorrect: ${expectedKataban}\nScanned: ${boardCode}`);
+            return;
+          }
+
+          await step3Scanner.stop();
+          step3Scanner = null;
+
+          await logTabletAction('Scanned トムソンボード (Step 3)', 'Completed', {
+            背番号: currentSebanggo,
+            boardCode,
+            source: 'Step 3 Modal'
+          });
+
+          // Clear cached product details from localStorage
+          localStorage.removeItem(`${uniquePrefix}cached-sebanggo`);
+          localStorage.removeItem(`${uniquePrefix}cached-hinban`);
+          localStorage.removeItem(`${uniquePrefix}cached-materialCode`);
+          localStorage.removeItem(`${uniquePrefix}cached-kataban`);
+
+          // Mark workflow as complete
+          saveCurrentStep(0);
+
+          // Close Step 3 modal (OZMANAS does not send command to machine at this step)
+          document.getElementById('step3Modal').style.display = 'none';
+        },
+        () => {
+          // Ignore scan frame errors
+        }
+      ).catch((scanErr) => {
+        console.error('Failed to start Step 3 scanner:', scanErr);
+        restoreStep3Ui('❌ カメラを起動できませんでした / Could not start camera');
+      });
+
+      return;
+    }
+
+    // Default behavior for non-OZMANAS machines
     // Close Step 3 modal immediately (sending in background)
     document.getElementById('step3Modal').style.display = 'none';
     
@@ -9639,6 +9903,7 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
     localStorage.removeItem(`${uniquePrefix}cached-sebanggo`);
     localStorage.removeItem(`${uniquePrefix}cached-hinban`);
     localStorage.removeItem(`${uniquePrefix}cached-materialCode`);
+    localStorage.removeItem(`${uniquePrefix}cached-kataban`);
     
     // Mark workflow as complete
     saveCurrentStep(0);
