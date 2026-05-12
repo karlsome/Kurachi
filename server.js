@@ -18154,6 +18154,229 @@ app.post("/api/inventory-management", async (req, res) => {
         }
         break;
 
+      case 'getInventoryAddHistoryGroups':
+        try {
+          const normalizedPage = normalizeInventoryPositiveInteger(page, 1);
+          const requestedLimit = normalizeInventoryPageSize(limit, 50);
+          const normalizedLimit = [10, 50, 100].includes(requestedLimit) ? requestedLimit : 50;
+          const skip = (normalizedPage - 1) * normalizedLimit;
+          const inventoryAddHistoryMatch = {
+            timeStampDate: { $gt: new Date(0) },
+            inputQuantity: { $gt: 0 },
+            $or: [
+              { action: { $regex: /^(Warehouse Input|Manual Inventory Add)\s*\(\+/i } },
+              { source: { $regex: /^tablet\s*入庫/i } }
+            ]
+          };
+
+          const groups = await inventoryCollection.aggregate([
+            {
+              $addFields: {
+                timeStampDate: buildInventoryTimeStampDateExpression(),
+                physicalQuantityNumber: {
+                  $convert: {
+                    input: { $ifNull: ['$physicalQuantity', '$runningQuantity'] },
+                    to: 'double',
+                    onError: 0,
+                    onNull: 0
+                  }
+                },
+                lastQuantityNumber: {
+                  $convert: {
+                    input: { $ifNull: ['$lastQuantity', 0] },
+                    to: 'double',
+                    onError: 0,
+                    onNull: 0
+                  }
+                }
+              }
+            },
+            {
+              $addFields: {
+                inputQuantity: {
+                  $subtract: ['$physicalQuantityNumber', '$lastQuantityNumber']
+                }
+              }
+            },
+            {
+              $match: inventoryAddHistoryMatch
+            },
+            {
+              $group: {
+                _id: '$timeStampDate',
+                itemCount: { $sum: 1 },
+                totalInsertedQuantity: { $sum: '$inputQuantity' }
+              }
+            },
+            {
+              $sort: { _id: -1 }
+            },
+            {
+              $facet: {
+                data: [
+                  { $skip: skip },
+                  { $limit: normalizedLimit }
+                ],
+                metadata: [
+                  { $count: 'totalItems' }
+                ]
+              }
+            }
+          ]).toArray();
+
+          const paginationResult = groups[0] || {};
+          const paginatedGroups = Array.isArray(paginationResult.data) ? paginationResult.data : [];
+          const totalItems = Number(paginationResult?.metadata?.[0]?.totalItems) || 0;
+          const totalPages = totalItems > 0 ? Math.ceil(totalItems / normalizedLimit) : 0;
+
+          res.json({
+            success: true,
+            data: paginatedGroups.map((group) => ({
+              timeStamp: group._id instanceof Date && !Number.isNaN(group._id.getTime())
+                ? group._id.toISOString()
+                : null,
+              itemCount: Number(group.itemCount) || 0,
+              totalInsertedQuantity: Number(group.totalInsertedQuantity) || 0
+            })).filter((group) => group.timeStamp),
+            pagination: {
+              currentPage: totalPages > 0 ? Math.min(normalizedPage, totalPages) : 1,
+              totalPages,
+              totalItems,
+              itemsPerPage: normalizedLimit
+            }
+          });
+        } catch (error) {
+          console.error('Error in getInventoryAddHistoryGroups:', error);
+          res.status(500).json({ error: 'Failed to fetch inventory add history groups', details: error.message });
+        }
+        break;
+
+      case 'getInventoryAddHistoryItems':
+        try {
+          const selectedTimeStamp = parseInventorySnapshotAt(req.body.timeStamp || req.body.snapshotAt);
+
+          if (!selectedTimeStamp) {
+            return res.status(400).json({ error: 'A valid history timestamp is required' });
+          }
+
+          const inventoryAddHistoryMatch = {
+            timeStampDate: selectedTimeStamp,
+            inputQuantity: { $gt: 0 },
+            $or: [
+              { action: { $regex: /^(Warehouse Input|Manual Inventory Add)\s*\(\+/i } },
+              { source: { $regex: /^tablet\s*入庫/i } }
+            ]
+          };
+
+          const inventoryAddHistoryItems = await inventoryCollection.aggregate([
+            {
+              $addFields: {
+                timeStampDate: buildInventoryTimeStampDateExpression(),
+                physicalQuantityNumber: {
+                  $convert: {
+                    input: { $ifNull: ['$physicalQuantity', '$runningQuantity'] },
+                    to: 'double',
+                    onError: 0,
+                    onNull: 0
+                  }
+                },
+                lastQuantityNumber: {
+                  $convert: {
+                    input: { $ifNull: ['$lastQuantity', 0] },
+                    to: 'double',
+                    onError: 0,
+                    onNull: 0
+                  }
+                }
+              }
+            },
+            {
+              $addFields: {
+                inputQuantity: {
+                  $subtract: ['$physicalQuantityNumber', '$lastQuantityNumber']
+                }
+              }
+            },
+            {
+              $match: inventoryAddHistoryMatch
+            },
+            {
+              $sort: { 背番号: 1, 品番: 1, _id: 1 }
+            },
+            {
+              $project: {
+                _id: 0,
+                品番: 1,
+                背番号: 1,
+                工場: 1,
+                source: 1,
+                action: 1,
+                inputQuantity: 1,
+                timeStampDate: 1
+              }
+            }
+          ]).toArray();
+
+          const masterLookupPairs = Array.from(
+            new Map(
+              inventoryAddHistoryItems
+                .filter((item) => item?.品番 && item?.背番号)
+                .map((item) => {
+                  const key = buildInventoryMasterLookupKey(item.品番, item.背番号);
+                  return [key, { 品番: item.品番, 背番号: item.背番号 }];
+                })
+            ).values()
+          );
+
+          let masterCapacityMap = new Map();
+          if (masterLookupPairs.length > 0) {
+            const masterRecords = await masterCollection.find(
+              {
+                $or: masterLookupPairs.map(({ 品番, 背番号 }) => ({ 品番, 背番号 }))
+              },
+              {
+                projection: { 品番: 1, 背番号: 1, 工場: 1, 収容数: 1 }
+              }
+            ).toArray();
+
+            masterCapacityMap = buildInventoryMasterCapacityMap(masterRecords);
+          }
+
+          const formattedItems = inventoryAddHistoryItems.map((item) => {
+            const insertedQuantity = Number(item.inputQuantity) || 0;
+            const capacityPerBox = getInventoryCapacityPerBox(masterCapacityMap, item);
+            const insertedBy = extractInventorySourceActor(item.source);
+
+            return {
+              品番: item.品番,
+              背番号: item.背番号,
+              工場: item.工場 || '',
+              insertedQuantity,
+              insertedBy,
+              boxQuantity: capacityPerBox > 0 ? insertedQuantity / capacityPerBox : null,
+              capacityPerBox: capacityPerBox || null,
+              source: item.source || '',
+              action: item.action || '',
+              timeStamp: item.timeStampDate instanceof Date && !Number.isNaN(item.timeStampDate.getTime())
+                ? item.timeStampDate.toISOString()
+                : selectedTimeStamp.toISOString()
+            };
+          });
+
+          res.json({
+            success: true,
+            data: formattedItems,
+            meta: {
+              timeStamp: selectedTimeStamp.toISOString(),
+              itemCount: formattedItems.length
+            }
+          });
+        } catch (error) {
+          console.error('Error in getInventoryAddHistoryItems:', error);
+          res.status(500).json({ error: 'Failed to fetch inventory add history items', details: error.message });
+        }
+        break;
+
       case 'getItemTransactions':
         try {
           if (!背番号) {
@@ -19264,6 +19487,20 @@ function buildInventoryTimeStampDateExpression() {
       onNull: new Date(0)
     }
   };
+}
+
+function extractInventorySourceActor(source = '') {
+  const normalizedSource = String(source || '').trim();
+  if (!normalizedSource) {
+    return '';
+  }
+
+  const separator = ' - ';
+  if (normalizedSource.includes(separator)) {
+    return normalizedSource.split(separator).pop().trim();
+  }
+
+  return normalizedSource;
 }
 
 function buildInventoryBaseMatchStage(filters = {}) {
