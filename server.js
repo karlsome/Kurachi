@@ -11997,10 +11997,18 @@ app.post("/api/upload-equipment-event-image", async (req, res) => {
   }
 
   try {
+    const mimeMatch = base64.match(/^data:([^;]+);base64,/);
+    const mimeType = mimeMatch?.[1] || "image/jpeg";
+    const EXT_MAP = {
+      "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp",
+      "image/gif": "gif",  "video/mp4": "mp4", "video/quicktime": "mov",
+    };
+    const ext = EXT_MAP[mimeType] || "bin";
+
     const timestamp = Date.now();
     const factory  = (factoryName  || "unknown").replace(/[^a-zA-Z0-9　-鿿]/g, "_");
     const machine  = (equipmentName || "unknown").replace(/[^a-zA-Z0-9　-鿿]/g, "_");
-    const filePath = `equipmentEvents/${factory}/${machine}/${timestamp}.jpg`;
+    const filePath = `equipmentEvents/${factory}/${machine}/${timestamp}.${ext}`;
 
     const rawBase64 = base64.includes(",") ? base64.split(",")[1] : base64;
     const buffer = Buffer.from(rawBase64, "base64");
@@ -12009,14 +12017,14 @@ app.post("/api/upload-equipment-event-image", async (req, res) => {
 
     await file.save(buffer, {
       metadata: {
-        contentType: "image/jpeg",
+        contentType: mimeType,
         metadata: { firebaseStorageDownloadTokens: downloadToken },
       },
     });
 
     const imageURL = `https://firebasestorage.googleapis.com/v0/b/${file.bucket.name}/o/${encodeURIComponent(file.name)}?alt=media&token=${downloadToken}`;
 
-    console.log(`📸 Equipment event image uploaded by ${username || "unknown"}: ${filePath}`);
+    console.log(`📎 Equipment event file uploaded by ${username || "unknown"}: ${filePath}`);
     res.json({ imageURL });
   } catch (error) {
     console.error("Error uploading equipment event image:", error);
