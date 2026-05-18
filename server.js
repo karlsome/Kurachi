@@ -17952,9 +17952,9 @@ app.post("/api/inventory-management", async (req, res) => {
           }
 
           const inventoryItemsWithThresholds = filteredInventoryItems.map((item) => {
-            const physicalQuantity = Number(item.physicalQuantity || item.runningQuantity || 0);
+            const physicalQuantity = getInventoryPhysicalQuantityValue(item);
             const reservedQuantity = Number(item.reservedQuantity || 0);
-            const availableQuantity = Number(item.availableQuantity || item.runningQuantity || 0);
+            const availableQuantity = getInventoryAvailableQuantityValue(item);
             const capacityPerBox = getInventoryCapacityPerBox(masterCapacityMap, item);
             const stockBoxCount = capacityPerBox > 0 ? physicalQuantity / capacityPerBox : null;
             const model = getInventoryModel(masterModelMap, item);
@@ -18042,10 +18042,10 @@ app.post("/api/inventory-management", async (req, res) => {
             背番号: item.背番号,
             工場: item.工場,
             model: item.モデル || '',
-            physicalQuantity: item.physicalQuantity || item.runningQuantity || 0,
+            physicalQuantity: getInventoryPhysicalQuantityValue(item),
             stockBoxCount: item.stockBoxCount,
             reservedQuantity: item.reservedQuantity || 0,
-            availableQuantity: item.availableQuantity || item.runningQuantity || 0,
+            availableQuantity: getInventoryAvailableQuantityValue(item),
             thresholdStatus: item.thresholdStatus,
             thresholdWarning: item.thresholdWarning,
             thresholdCritical: item.thresholdCritical,
@@ -18514,7 +18514,7 @@ app.post("/api/inventory-management", async (req, res) => {
             ...transaction,
             capacityPerBox,
             stockBoxCount: capacityPerBox
-              ? Number(transaction.physicalQuantity || transaction.runningQuantity || 0) / capacityPerBox
+              ? getInventoryPhysicalQuantityValue(transaction) / capacityPerBox
               : null
           });
 
@@ -19011,6 +19011,112 @@ app.post("/api/inventory-management", async (req, res) => {
         }
         break;
 
+      case 'previewRepairReservedAvailable':
+        try {
+          const { role, backNumbers = [] } = req.body;
+
+          if (role !== 'admin') {
+            return res.status(403).json({ error: 'Only admin can preview inventory repair' });
+          }
+
+          const repairPreview = await buildInventoryRepairPreviewData({
+            requestsCollection,
+            inventoryCollection,
+            backNumbers
+          });
+
+          res.json({
+            success: true,
+            data: repairPreview.mismatches,
+            summary: repairPreview.summary,
+            scopeBackNumbers: repairPreview.scopeBackNumbers
+          });
+        } catch (error) {
+          console.error('Error in previewRepairReservedAvailable:', error);
+          res.status(500).json({ error: 'Failed to preview inventory repair', details: error.message });
+        }
+        break;
+
+      case 'repairReservedAvailable':
+        try {
+          const { role, selectedBackNumbers = [], submittedBy, fullName } = req.body;
+
+          if (role !== 'admin') {
+            return res.status(403).json({ error: 'Only admin can apply inventory repair' });
+          }
+
+          const normalizedSelectedBackNumbers = normalizeInventoryRepairBackNumbers(selectedBackNumbers);
+          if (normalizedSelectedBackNumbers.length === 0) {
+            return res.status(400).json({ error: 'No items selected for repair' });
+          }
+
+          const repairPreview = await buildInventoryRepairPreviewData({
+            requestsCollection,
+            inventoryCollection,
+            backNumbers: normalizedSelectedBackNumbers
+          });
+
+          const itemsToRepair = repairPreview.mismatches;
+          if (itemsToRepair.length === 0) {
+            return res.json({
+              success: true,
+              message: 'No inventory mismatches found for the selected items.',
+              successCount: 0,
+              selectedCount: normalizedSelectedBackNumbers.length,
+              repairedCount: 0,
+              results: []
+            });
+          }
+
+          const now = new Date();
+          const timeStamp = now.toISOString();
+          const dateField = timeStamp.split('T')[0];
+          const source = `Freya Admin Repair - ${fullName || submittedBy || 'admin'}`;
+          const results = [];
+
+          for (const item of itemsToRepair) {
+            const transactionDoc = {
+              背番号: item.背番号,
+              品番: item.品番,
+              工場: item.工場 || '',
+              physicalQuantity: item.currentPhysicalQuantity,
+              reservedQuantity: item.repairedReservedQuantity,
+              availableQuantity: item.repairedAvailableQuantity,
+              runningQuantity: item.repairedAvailableQuantity,
+              lastQuantity: item.currentAvailableQuantity,
+              action: 'Repair Reserved and Available',
+              timeStamp,
+              Date: dateField,
+              submittedBy,
+              source,
+              note: buildInventoryRepairNote(item)
+            };
+
+            const insertResult = await inventoryCollection.insertOne(transactionDoc);
+
+            results.push({
+              背番号: item.背番号,
+              品番: item.品番,
+              repairedReservedQuantity: item.repairedReservedQuantity,
+              repairedAvailableQuantity: item.repairedAvailableQuantity,
+              transactionId: String(insertResult.insertedId)
+            });
+          }
+
+          res.json({
+            success: true,
+            message: 'Inventory repair completed.',
+            successCount: results.length,
+            selectedCount: normalizedSelectedBackNumbers.length,
+            repairedCount: results.length,
+            results
+          });
+        } catch (error) {
+          console.error('Error in repairReservedAvailable:', error);
+          res.status(500).json({ error: 'Failed to repair reserved and available quantities', details: error.message });
+        }
+        break;
+
       case 'exportInventoryData':
         try {
           const snapshotAt = parseInventorySnapshotAt(filters.snapshotAt);
@@ -19061,9 +19167,9 @@ app.post("/api/inventory-management", async (req, res) => {
           const exportItems = filteredInventoryItems
             .map((item) => {
               const model = getInventoryModel(masterModelMap, item);
-              const physicalQuantity = Number(item.physicalQuantity || item.runningQuantity || 0);
+              const physicalQuantity = getInventoryPhysicalQuantityValue(item);
               const reservedQuantity = Number(item.reservedQuantity || 0);
-              const availableQuantity = Number(item.availableQuantity || item.runningQuantity || 0);
+              const availableQuantity = getInventoryAvailableQuantityValue(item);
               const stockBoxCount = (() => {
                 const capacityPerBox = getInventoryCapacityPerBox(masterCapacityMap, item);
                 return capacityPerBox > 0 ? physicalQuantity / capacityPerBox : null;
@@ -19104,10 +19210,10 @@ app.post("/api/inventory-management", async (req, res) => {
             品番: item.品番,
             背番号: item.背番号,
             model: item.model || '',
-            physicalQuantity: item.physicalQuantity || item.runningQuantity || 0,
+            physicalQuantity: getInventoryPhysicalQuantityValue(item),
             stockBoxCount: item.stockBoxCount,
             reservedQuantity: item.reservedQuantity || 0,
-            availableQuantity: item.availableQuantity || item.runningQuantity || 0,
+            availableQuantity: getInventoryAvailableQuantityValue(item),
             thresholdStatus: item.thresholdStatus,
             thresholdWarning: item.thresholdWarning,
             thresholdCritical: item.thresholdCritical,
@@ -19375,6 +19481,26 @@ function resolveInventoryThreshold(item = {}, config = DEFAULT_INVENTORY_THRESHO
 /**
  * Calculate inventory summary statistics
  */
+function getInventoryPhysicalQuantityValue(item = {}) {
+  const physicalQuantity = Number(item?.physicalQuantity);
+  if (Number.isFinite(physicalQuantity)) {
+    return physicalQuantity;
+  }
+
+  const runningQuantity = Number(item?.runningQuantity);
+  return Number.isFinite(runningQuantity) ? runningQuantity : 0;
+}
+
+function getInventoryAvailableQuantityValue(item = {}) {
+  const availableQuantity = Number(item?.availableQuantity);
+  if (Number.isFinite(availableQuantity)) {
+    return availableQuantity;
+  }
+
+  const runningQuantity = Number(item?.runningQuantity);
+  return Number.isFinite(runningQuantity) ? runningQuantity : 0;
+}
+
 function calculateInventorySummary(inventoryItems) {
   const summary = {
     totalItems: inventoryItems.length,
@@ -19384,9 +19510,9 @@ function calculateInventorySummary(inventoryItems) {
   };
 
   inventoryItems.forEach(item => {
-    summary.totalPhysicalStock += item.physicalQuantity || item.runningQuantity || 0;
+    summary.totalPhysicalStock += getInventoryPhysicalQuantityValue(item);
     summary.totalReservedStock += item.reservedQuantity || 0;
-    summary.totalAvailableStock += item.availableQuantity || item.runningQuantity || 0;
+    summary.totalAvailableStock += getInventoryAvailableQuantityValue(item);
   });
 
   return summary;
@@ -19623,6 +19749,244 @@ function buildInventoryLatestStatePipeline(filters = {}, { snapshotAt = null } =
   );
 
   return pipeline;
+}
+
+const INVENTORY_REPAIR_ACTIVE_LINE_STATUSES = Object.freeze(['pending', 'in-progress', 'paused']);
+const INVENTORY_REPAIR_ACTIVE_REQUEST_STATUSES = Object.freeze([
+  ...INVENTORY_REPAIR_ACTIVE_LINE_STATUSES,
+  'partial-inventory',
+  'waiting-for-inventory'
+]);
+
+function normalizeInventoryRepairBackNumbers(values = []) {
+  const inputValues = Array.isArray(values) ? values : [values];
+  return Array.from(new Set(inputValues.map((value) => String(value || '').trim()).filter(Boolean)));
+}
+
+function normalizeInventoryRepairStatus(value = '') {
+  return String(value || '').trim().toLowerCase();
+}
+
+function isInventoryRepairActiveLineStatus(value = '') {
+  return INVENTORY_REPAIR_ACTIVE_LINE_STATUSES.includes(normalizeInventoryRepairStatus(value));
+}
+
+function isInventoryRepairActiveRequestStatus(value = '') {
+  return INVENTORY_REPAIR_ACTIVE_REQUEST_STATUSES.includes(normalizeInventoryRepairStatus(value));
+}
+
+function getInventoryRepairNumericValue(value, fallback = 0) {
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) ? numericValue : fallback;
+}
+
+function getInventoryRepairOpenLineItems(requestDoc = {}) {
+  const requestNumber = String(requestDoc?.requestNumber || requestDoc?._id || '').trim();
+  const requestStatus = normalizeInventoryRepairStatus(requestDoc?.status || '');
+
+  if (Array.isArray(requestDoc?.lineItems) && requestDoc.lineItems.length > 0) {
+    return requestDoc.lineItems
+      .map((lineItem = {}, index) => ({
+        requestNumber,
+        lineNumber: Number.isFinite(Number(lineItem?.lineNumber)) ? Number(lineItem.lineNumber) : index + 1,
+        背番号: String(lineItem?.背番号 || requestDoc?.背番号 || '').trim(),
+        品番: String(lineItem?.品番 || requestDoc?.品番 || '').trim(),
+        quantity: getInventoryRepairNumericValue(lineItem?.quantity ?? requestDoc?.quantity, 0),
+        status: normalizeInventoryRepairStatus(lineItem?.status || requestStatus || 'pending'),
+        usesRequestStatusFallback: false
+      }))
+      .filter((lineItem) => lineItem.背番号 && lineItem.quantity > 0);
+  }
+
+  const backNumber = String(requestDoc?.背番号 || '').trim();
+  const quantity = getInventoryRepairNumericValue(requestDoc?.quantity, 0);
+  if (!backNumber || quantity <= 0) {
+    return [];
+  }
+
+  return [{
+    requestNumber,
+    lineNumber: 1,
+    背番号: backNumber,
+    品番: String(requestDoc?.品番 || '').trim(),
+    quantity,
+    status: requestStatus || 'pending',
+    usesRequestStatusFallback: true
+  }];
+}
+
+function formatInventoryRepairRequestSummary(requestNumbers = []) {
+  const normalizedRequestNumbers = Array.from(new Set(
+    (Array.isArray(requestNumbers) ? requestNumbers : [])
+      .map((value) => String(value || '').trim())
+      .filter(Boolean)
+  )).sort(compareProductionPreviewRequestNumbers);
+
+  if (normalizedRequestNumbers.length === 0) {
+    return '';
+  }
+
+  if (normalizedRequestNumbers.length <= 6) {
+    return normalizedRequestNumbers.join(', ');
+  }
+
+  return `${normalizedRequestNumbers.slice(0, 6).join(', ')} +${normalizedRequestNumbers.length - 6} more`;
+}
+
+function buildInventoryRepairNote(item = {}) {
+  const requestSummary = formatInventoryRepairRequestSummary(item.requestNumbers);
+  return `Repaired reserved/available from open NODA requests: ${requestSummary || 'n/a'}. Reserved: ${item.currentReservedQuantity} -> ${item.repairedReservedQuantity}. Available: ${item.currentAvailableQuantity} -> ${item.repairedAvailableQuantity}.`;
+}
+
+async function buildInventoryRepairPreviewData({ requestsCollection, inventoryCollection, backNumbers = [] } = {}) {
+  const scopeBackNumbers = normalizeInventoryRepairBackNumbers(backNumbers);
+  const requestFilters = [
+    {
+      $or: [
+        { status: { $in: INVENTORY_REPAIR_ACTIVE_REQUEST_STATUSES } },
+        { 'lineItems.status': { $in: INVENTORY_REPAIR_ACTIVE_LINE_STATUSES } }
+      ]
+    }
+  ];
+
+  if (scopeBackNumbers.length > 0) {
+    requestFilters.push({
+      $or: [
+        { 背番号: { $in: scopeBackNumbers } },
+        { 'lineItems.背番号': { $in: scopeBackNumbers } }
+      ]
+    });
+  }
+
+  const requestQuery = requestFilters.length === 1 ? requestFilters[0] : { $and: requestFilters };
+  const requestDocs = await requestsCollection.find(
+    requestQuery,
+    {
+      projection: {
+        _id: 1,
+        requestNumber: 1,
+        status: 1,
+        lineItems: 1,
+        背番号: 1,
+        品番: 1,
+        quantity: 1
+      }
+    }
+  ).toArray();
+
+  const groupedItems = new Map();
+
+  requestDocs.forEach((requestDoc) => {
+    getInventoryRepairOpenLineItems(requestDoc).forEach((lineItem) => {
+      const isActiveLine = lineItem.usesRequestStatusFallback
+        ? isInventoryRepairActiveRequestStatus(lineItem.status)
+        : isInventoryRepairActiveLineStatus(lineItem.status);
+
+      if (!isActiveLine) {
+        return;
+      }
+
+      if (scopeBackNumbers.length > 0 && !scopeBackNumbers.includes(lineItem.背番号)) {
+        return;
+      }
+
+      if (!groupedItems.has(lineItem.背番号)) {
+        groupedItems.set(lineItem.背番号, {
+          背番号: lineItem.背番号,
+          品番: lineItem.品番,
+          repairedReservedQuantity: 0,
+          openLineCount: 0,
+          requestNumbers: new Set()
+        });
+      }
+
+      const groupedItem = groupedItems.get(lineItem.背番号);
+      groupedItem.品番 = groupedItem.品番 || lineItem.品番;
+      groupedItem.repairedReservedQuantity += lineItem.quantity;
+      groupedItem.openLineCount += 1;
+      if (lineItem.requestNumber) {
+        groupedItem.requestNumbers.add(lineItem.requestNumber);
+      }
+    });
+  });
+
+  const groupedValues = Array.from(groupedItems.values());
+  if (groupedValues.length === 0) {
+    return {
+      items: [],
+      mismatches: [],
+      scopeBackNumbers,
+      summary: {
+        totalTrackedItems: 0,
+        mismatchCount: 0,
+        totalOpenLineCount: 0
+      }
+    };
+  }
+
+  const latestInventoryRecords = await inventoryCollection.aggregate(
+    buildInventoryLatestStatePipeline({ sebanggoArray: groupedValues.map((item) => item.背番号) })
+  ).toArray();
+  const latestInventoryByBackNumber = new Map(
+    latestInventoryRecords.map((record) => [String(record?.背番号 || '').trim(), record])
+  );
+
+  const items = groupedValues.map((groupedItem) => {
+    const latestRecord = latestInventoryByBackNumber.get(groupedItem.背番号);
+    const currentPhysicalQuantity = getInventoryRepairNumericValue(
+      latestRecord?.physicalQuantity ?? latestRecord?.runningQuantity,
+      0
+    );
+    const currentReservedQuantity = getInventoryRepairNumericValue(latestRecord?.reservedQuantity, 0);
+    const currentAvailableQuantity = getInventoryRepairNumericValue(
+      latestRecord?.availableQuantity ?? latestRecord?.runningQuantity,
+      0
+    );
+    const repairedReservedQuantity = Math.max(0, groupedItem.repairedReservedQuantity);
+    const repairedAvailableQuantity = currentPhysicalQuantity - repairedReservedQuantity;
+    const requestNumbers = Array.from(groupedItem.requestNumbers).sort(compareProductionPreviewRequestNumbers);
+    const hasMismatch = currentReservedQuantity !== repairedReservedQuantity
+      || currentAvailableQuantity !== repairedAvailableQuantity;
+
+    return {
+      背番号: groupedItem.背番号,
+      品番: groupedItem.品番 || String(latestRecord?.品番 || '').trim(),
+      工場: String(latestRecord?.工場 || '').trim(),
+      currentPhysicalQuantity,
+      currentReservedQuantity,
+      currentAvailableQuantity,
+      repairedReservedQuantity,
+      repairedAvailableQuantity,
+      deltaReservedQuantity: repairedReservedQuantity - currentReservedQuantity,
+      deltaAvailableQuantity: repairedAvailableQuantity - currentAvailableQuantity,
+      openLineCount: groupedItem.openLineCount,
+      requestNumbers,
+      requestCount: requestNumbers.length,
+      hasMismatch
+    };
+  }).sort((left, right) => {
+    if (left.hasMismatch !== right.hasMismatch) {
+      return left.hasMismatch ? -1 : 1;
+    }
+
+    return String(left.背番号 || '').localeCompare(String(right.背番号 || ''), undefined, {
+      numeric: true,
+      sensitivity: 'base'
+    });
+  });
+
+  const mismatches = items.filter((item) => item.hasMismatch);
+
+  return {
+    items,
+    mismatches,
+    scopeBackNumbers,
+    summary: {
+      totalTrackedItems: items.length,
+      mismatchCount: mismatches.length,
+      totalOpenLineCount: items.reduce((total, item) => total + item.openLineCount, 0)
+    }
+  };
 }
 
 function matchesInventoryAdvancedFilters(item = {}, filters = []) {
