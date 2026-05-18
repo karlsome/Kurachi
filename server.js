@@ -18467,18 +18467,31 @@ app.post("/api/inventory-management", async (req, res) => {
           const currentPage = Math.min(normalizedPage, totalPages);
           const skip = (currentPage - 1) * normalizedLimit;
 
-          const [latestTransaction, transactions] = await Promise.all([
-            inventoryCollection.findOne(transactionFilter, {
-              sort: { timeStamp: -1, _id: -1 },
-              projection: transactionProjection
-            }),
-            inventoryCollection
-              .find(transactionFilter, { projection: transactionProjection })
-              .sort({ timeStamp: -1, _id: -1 })
-              .skip(skip)
-              .limit(normalizedLimit)
-              .toArray()
-          ]);
+          const transactionResults = await inventoryCollection.aggregate([
+            { $match: transactionFilter },
+            {
+              $addFields: {
+                timeStampDate: buildInventoryTimeStampDateExpression()
+              }
+            },
+            { $sort: { timeStampDate: -1, _id: -1 } },
+            {
+              $facet: {
+                latest: [
+                  { $limit: 1 },
+                  { $project: transactionProjection }
+                ],
+                transactions: [
+                  { $skip: skip },
+                  { $limit: normalizedLimit },
+                  { $project: transactionProjection }
+                ]
+              }
+            }
+          ]).toArray();
+
+          const latestTransaction = transactionResults[0]?.latest?.[0] || null;
+          const transactions = transactionResults[0]?.transactions || [];
 
           let capacityPerBox = null;
 
