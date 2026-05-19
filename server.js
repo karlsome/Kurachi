@@ -15268,9 +15268,78 @@ async function getLatestNodaInventorySnapshot(inventoryCollection, backNumber) {
   const latestInventory = inventoryResults[0];
 
   return {
+    found: Boolean(latestInventory),
     physicalQuantity: Number(latestInventory?.physicalQuantity ?? latestInventory?.runningQuantity ?? 0),
     reservedQuantity: Number(latestInventory?.reservedQuantity ?? 0),
     availableQuantity: Number(latestInventory?.availableQuantity ?? latestInventory?.runningQuantity ?? 0)
+  };
+}
+
+function getNodaReservationDetails(currentState = {}, quantity = 0) {
+  const requestedQuantity = Math.max(0, Number(quantity || 0));
+  const currentPhysical = Number(currentState?.physicalQuantity || 0);
+  const currentReserved = Number(currentState?.reservedQuantity || 0);
+  const reservableQuantity = Math.max(0, currentPhysical - currentReserved);
+  const reservedQuantity = Math.min(reservableQuantity, requestedQuantity);
+  const shortfallQuantity = Math.max(0, requestedQuantity - reservedQuantity);
+
+  let inventoryStatus = 'sufficient';
+  if (reservedQuantity <= 0) {
+    inventoryStatus = 'none';
+  } else if (reservedQuantity < requestedQuantity) {
+    inventoryStatus = 'insufficient';
+  }
+
+  return {
+    reservedQuantity,
+    shortfallQuantity,
+    inventoryStatus
+  };
+}
+
+function getNodaBulkRequestStatusFromLineItems(lineItems = []) {
+  const activeLineItems = Array.isArray(lineItems)
+    ? lineItems.filter((lineItem) => !isNodaRequestCompletedStatus(lineItem?.status) && !isNodaRequestCancelledStatus(lineItem?.status))
+    : [];
+
+  if (!activeLineItems.length) {
+    return {
+      overallInventoryStatus: 'sufficient',
+      requestStatus: 'pending'
+    };
+  }
+
+  const anyInProgress = activeLineItems.some((lineItem) => String(lineItem?.status || '').toLowerCase() === 'in-progress');
+  const anyPaused = activeLineItems.some((lineItem) => String(lineItem?.status || '').toLowerCase() === 'paused');
+  const hasNoInventory = activeLineItems.every((lineItem) => String(lineItem?.inventoryStatus || '').toLowerCase() === 'none');
+  const hasPartialInventory = activeLineItems.some((lineItem) => {
+    const inventoryStatus = String(lineItem?.inventoryStatus || '').toLowerCase();
+    return inventoryStatus === 'insufficient' || inventoryStatus === 'none';
+  });
+
+  let overallInventoryStatus;
+  let requestStatus;
+
+  if (hasNoInventory) {
+    overallInventoryStatus = 'waiting-for-inventory';
+    requestStatus = 'waiting-for-inventory';
+  } else if (hasPartialInventory) {
+    overallInventoryStatus = 'partial-inventory';
+    requestStatus = 'partial-inventory';
+  } else {
+    overallInventoryStatus = 'sufficient';
+    requestStatus = 'pending';
+  }
+
+  if (anyInProgress) {
+    requestStatus = 'in-progress';
+  } else if (anyPaused) {
+    requestStatus = 'paused';
+  }
+
+  return {
+    overallInventoryStatus,
+    requestStatus
   };
 }
 
@@ -16904,6 +16973,191 @@ app.post("/api/noda-requests", async (req, res) => {
             return res.json({
               success: true,
               message: `Request status already ${newStatus}`
+            });
+          }
+
+          if (isCancelledStatus(oldStatus) && normalizedNewStatus === 'pending' && data.restoreCancelled) {
+            const restoredAt = new Date();
+            const restoredDate = restoredAt.toISOString().split('T')[0];
+
+            const createUncancelTransaction = async ({ backNumber, partNumber, quantity, lineNumber = null, requestNumber, currentState }) => {
+              const uncancelQuantity = Number(quantity || 0);
+              const reservationDetails = getNodaReservationDetails(currentState, uncancelQuantity);
+
+              if (uncancelQuantity <= 0) {
+                return {
+                  nextState: currentState,
+                  reservationDetails
+                };
+              }
+
+              const currentPhysical = Number(currentState.physicalQuantity || 0);
+              const currentReserved = Number(currentState.reservedQuantity || 0);
+              const currentAvailable = Number(currentState.availableQuantity || 0);
+              const newReservedQuantity = currentReserved + uncancelQuantity;
+              const newAvailableQuantity = currentPhysical - newReservedQuantity;
+
+              const uncancelTransaction = {
+                背番号: backNumber,
+                品番: partNumber,
+                timeStamp: restoredAt,
+                Date: restoredDate,
+                physicalQuantity: currentPhysical,
+                reservedQuantity: newReservedQuantity,
+                availableQuantity: newAvailableQuantity,
+                runningQuantity: newAvailableQuantity,
+                lastQuantity: currentAvailable,
+                action: `Request Uncancel (+${uncancelQuantity} reserved)`,
+                source: `Freya Admin - ${userName}`,
+                requestId: requestId,
+                note: lineNumber !== null
+                  ? `Uncancelled request ${requestNumber} line ${lineNumber}. Reserved: ${currentReserved} → ${newReservedQuantity}. Available recalculated from physical ${currentPhysical}: ${currentAvailable} → ${newAvailableQuantity}.`
+                  : `Uncancelled request ${requestNumber}. Reserved: ${currentReserved} → ${newReservedQuantity}. Available recalculated from physical ${currentPhysical}: ${currentAvailable} → ${newAvailableQuantity}.`
+              };
+
+              if (request.requestType === 'bulk') {
+                uncancelTransaction.bulkRequestNumber = request.requestNumber;
+                if (lineNumber !== null) {
+                  uncancelTransaction.lineNumber = lineNumber;
+                }
+              }
+
+              await inventoryCollection.insertOne(uncancelTransaction);
+
+              return {
+                nextState: {
+                  physicalQuantity: currentPhysical,
+                  reservedQuantity: newReservedQuantity,
+                  availableQuantity: newAvailableQuantity
+                },
+                reservationDetails
+              };
+            };
+
+            if (request.requestType === 'bulk' && Array.isArray(request.lineItems)) {
+              const cancelledLineItems = request.lineItems.filter((lineItem) => isCancelledStatus(lineItem?.status));
+              if (!cancelledLineItems.length) {
+                return res.status(400).json({ error: "No cancelled line items found to restore" });
+              }
+
+              const inventoryStateByBackNumber = new Map();
+              for (const lineItem of cancelledLineItems) {
+                if (!inventoryStateByBackNumber.has(lineItem.背番号)) {
+                  const currentState = await getLatestNodaInventorySnapshot(inventoryCollection, lineItem.背番号);
+                  if (!currentState.found) {
+                    return res.status(404).json({ error: `Inventory not found for back number ${lineItem.背番号}` });
+                  }
+
+                  inventoryStateByBackNumber.set(lineItem.背番号, currentState);
+                }
+              }
+
+              let restoredLineCount = 0;
+              const updatedLineItems = [];
+
+              for (const lineItem of request.lineItems) {
+                if (!isCancelledStatus(lineItem?.status)) {
+                  updatedLineItems.push(lineItem);
+                  continue;
+                }
+
+                const currentState = inventoryStateByBackNumber.get(lineItem.背番号);
+                const { nextState, reservationDetails } = await createUncancelTransaction({
+                  backNumber: lineItem.背番号,
+                  partNumber: lineItem.品番,
+                  quantity: lineItem.quantity,
+                  lineNumber: lineItem.lineNumber,
+                  requestNumber: request.requestNumber,
+                  currentState
+                });
+
+                inventoryStateByBackNumber.set(lineItem.背番号, nextState);
+
+                const {
+                  cancelledAt,
+                  cancelledBy,
+                  ...restoredLineItem
+                } = lineItem;
+
+                restoredLineCount += 1;
+                updatedLineItems.push({
+                  ...restoredLineItem,
+                  status: 'pending',
+                  reservedQuantity: reservationDetails.reservedQuantity,
+                  shortfallQuantity: reservationDetails.shortfallQuantity,
+                  inventoryStatus: reservationDetails.inventoryStatus,
+                  updatedAt: restoredAt
+                });
+              }
+
+              const { overallInventoryStatus, requestStatus } = getNodaBulkRequestStatusFromLineItems(updatedLineItems);
+
+              await requestsCollection.updateOne(
+                withActiveRequestFilter({ _id: new ObjectId(requestId) }),
+                {
+                  $set: {
+                    status: requestStatus,
+                    overallInventoryStatus,
+                    lineItems: updatedLineItems,
+                    updatedAt: restoredAt,
+                    updatedBy: userName
+                  },
+                  $unset: {
+                    cancelledAt: "",
+                    cancelledBy: ""
+                  }
+                }
+              );
+
+              return res.json({
+                success: true,
+                message: `Request uncancelled. ${restoredLineCount} cancelled line items were restored.`,
+                restoredLineItems: restoredLineCount
+              });
+            }
+
+            const currentState = await getLatestNodaInventorySnapshot(inventoryCollection, request.背番号);
+            if (!currentState.found) {
+              return res.status(404).json({ error: `Inventory not found for back number ${request.背番号}` });
+            }
+
+            const { reservationDetails } = await createUncancelTransaction({
+              backNumber: request.背番号,
+              partNumber: request.品番,
+              quantity: request.quantity,
+              requestNumber: request.requestNumber,
+              currentState
+            });
+
+            const { overallInventoryStatus, requestStatus } = getNodaBulkRequestStatusFromLineItems([
+              {
+                status: 'pending',
+                inventoryStatus: reservationDetails.inventoryStatus
+              }
+            ]);
+
+            await requestsCollection.updateOne(
+              withActiveRequestFilter({ _id: new ObjectId(requestId) }),
+              {
+                $set: {
+                  status: requestStatus,
+                  overallInventoryStatus,
+                  reservedQuantity: reservationDetails.reservedQuantity,
+                  shortfallQuantity: reservationDetails.shortfallQuantity,
+                  inventoryStatus: reservationDetails.inventoryStatus,
+                  updatedAt: restoredAt,
+                  updatedBy: userName
+                },
+                $unset: {
+                  cancelledAt: "",
+                  cancelledBy: ""
+                }
+              }
+            );
+
+            return res.json({
+              success: true,
+              message: `Request ${request.requestNumber} uncancelled successfully`
             });
           }
 
