@@ -16588,6 +16588,209 @@ app.post("/api/noda-requests", async (req, res) => {
           const userName = data.userName || 'Unknown User';
           const oldStatus = request.status;
           const newStatus = data.status;
+          const normalizedOldStatus = String(oldStatus || '').toLowerCase();
+          const normalizedNewStatus = String(newStatus || '').toLowerCase();
+          const isCompletedStatus = (value = '') => {
+            const normalizedValue = String(value || '').toLowerCase();
+            return normalizedValue === 'completed' || normalizedValue === 'complete';
+          };
+          const isCancelledStatus = (value = '') => {
+            const normalizedValue = String(value || '').toLowerCase();
+            return normalizedValue === 'cancelled' || normalizedValue === 'canceled';
+          };
+
+          if (normalizedOldStatus === normalizedNewStatus) {
+            return res.json({
+              success: true,
+              message: `Request status already ${newStatus}`
+            });
+          }
+
+          if (normalizedNewStatus === 'cancelled') {
+            if (isCompletedStatus(oldStatus)) {
+              return res.status(400).json({ error: "Completed requests cannot be cancelled" });
+            }
+
+            const cancelledAt = new Date();
+            const cancelledDate = cancelledAt.toISOString().split('T')[0];
+
+            const getLatestInventoryRecord = async (backNumber) => {
+              const inventoryResults = await inventoryCollection.aggregate([
+                { $match: { 背番号: backNumber } },
+                {
+                  $addFields: {
+                    timeStampDate: {
+                      $cond: {
+                        if: { $type: "$timeStamp" },
+                        then: {
+                          $cond: {
+                            if: { $eq: [{ $type: "$timeStamp" }, "string"] },
+                            then: { $dateFromString: { dateString: "$timeStamp" } },
+                            else: "$timeStamp"
+                          }
+                        },
+                        else: new Date()
+                      }
+                    }
+                  }
+                },
+                { $sort: { timeStampDate: -1 } },
+                { $limit: 1 }
+              ]).toArray();
+
+              return inventoryResults[0] || null;
+            };
+
+            const buildInventoryState = (inventoryItem) => ({
+              physicalQuantity: Number(inventoryItem?.physicalQuantity ?? inventoryItem?.runningQuantity ?? 0),
+              reservedQuantity: Number(inventoryItem?.reservedQuantity ?? 0),
+              availableQuantity: Number(inventoryItem?.availableQuantity ?? inventoryItem?.runningQuantity ?? 0)
+            });
+
+            const createCancellationTransaction = async ({ backNumber, partNumber, quantity, lineNumber = null, requestNumber, currentState }) => {
+              const cancelQuantity = Number(quantity || 0);
+              if (cancelQuantity <= 0) {
+                return currentState;
+              }
+
+              const currentPhysical = Number(currentState.physicalQuantity || 0);
+              const currentReserved = Number(currentState.reservedQuantity || 0);
+              const currentAvailable = Number(currentState.availableQuantity || 0);
+              const newReservedQuantity = Math.max(0, currentReserved - cancelQuantity);
+              const newAvailableQuantity = currentPhysical - newReservedQuantity;
+
+              const cancellationTransaction = {
+                背番号: backNumber,
+                品番: partNumber,
+                timeStamp: cancelledAt,
+                Date: cancelledDate,
+                physicalQuantity: currentPhysical,
+                reservedQuantity: newReservedQuantity,
+                availableQuantity: newAvailableQuantity,
+                runningQuantity: newAvailableQuantity,
+                lastQuantity: currentAvailable,
+                action: `Request Cancellation (-${cancelQuantity} reserved)`,
+                source: `Freya Admin - ${userName}`,
+                requestId: requestId,
+                note: lineNumber !== null
+                  ? `Cancelled request ${requestNumber} line ${lineNumber}. Reserved: ${currentReserved} → ${newReservedQuantity}. Available recalculated from physical ${currentPhysical}: ${currentAvailable} → ${newAvailableQuantity}.`
+                  : `Cancelled request ${requestNumber}. Reserved: ${currentReserved} → ${newReservedQuantity}. Available recalculated from physical ${currentPhysical}: ${currentAvailable} → ${newAvailableQuantity}.`
+              };
+
+              if (request.requestType === 'bulk') {
+                cancellationTransaction.bulkRequestNumber = request.requestNumber;
+                if (lineNumber !== null) {
+                  cancellationTransaction.lineNumber = lineNumber;
+                }
+              }
+
+              await inventoryCollection.insertOne(cancellationTransaction);
+
+              return {
+                physicalQuantity: currentPhysical,
+                reservedQuantity: newReservedQuantity,
+                availableQuantity: newAvailableQuantity
+              };
+            };
+
+            if (request.requestType === 'bulk' && Array.isArray(request.lineItems)) {
+              const openLineItems = request.lineItems.filter((lineItem) => !isCompletedStatus(lineItem?.status) && !isCancelledStatus(lineItem?.status));
+              const inventoryStateByBackNumber = new Map();
+
+              for (const lineItem of openLineItems) {
+                if (!inventoryStateByBackNumber.has(lineItem.背番号)) {
+                  const latestInventory = await getLatestInventoryRecord(lineItem.背番号);
+                  if (!latestInventory) {
+                    return res.status(404).json({ error: `Inventory not found for back number ${lineItem.背番号}` });
+                  }
+
+                  inventoryStateByBackNumber.set(lineItem.背番号, buildInventoryState(latestInventory));
+                }
+              }
+
+              let cancelledLineCount = 0;
+              const updatedLineItems = [];
+
+              for (const lineItem of request.lineItems) {
+                const lineStatus = String(lineItem?.status || 'pending').toLowerCase();
+                if (isCompletedStatus(lineStatus) || isCancelledStatus(lineStatus)) {
+                  updatedLineItems.push(lineItem);
+                  continue;
+                }
+
+                const currentState = inventoryStateByBackNumber.get(lineItem.背番号);
+                const nextState = await createCancellationTransaction({
+                  backNumber: lineItem.背番号,
+                  partNumber: lineItem.品番,
+                  quantity: lineItem.quantity,
+                  lineNumber: lineItem.lineNumber,
+                  requestNumber: request.requestNumber,
+                  currentState
+                });
+
+                inventoryStateByBackNumber.set(lineItem.背番号, nextState);
+                cancelledLineCount += 1;
+                updatedLineItems.push({
+                  ...lineItem,
+                  status: 'cancelled',
+                  updatedAt: cancelledAt,
+                  cancelledAt: cancelledAt,
+                  cancelledBy: userName
+                });
+              }
+
+              await requestsCollection.updateOne(
+                { _id: new ObjectId(requestId) },
+                {
+                  $set: {
+                    status: 'cancelled',
+                    lineItems: updatedLineItems,
+                    updatedAt: cancelledAt,
+                    updatedBy: userName,
+                    cancelledAt: cancelledAt,
+                    cancelledBy: userName
+                  }
+                }
+              );
+
+              return res.json({
+                success: true,
+                message: `Request cancelled. ${cancelledLineCount} open line items were cancelled.`,
+                cancelledLineItems: cancelledLineCount
+              });
+            }
+
+            const latestInventory = await getLatestInventoryRecord(request.背番号);
+            if (!latestInventory) {
+              return res.status(404).json({ error: `Inventory not found for back number ${request.背番号}` });
+            }
+
+            await createCancellationTransaction({
+              backNumber: request.背番号,
+              partNumber: request.品番,
+              quantity: request.quantity,
+              requestNumber: request.requestNumber,
+              currentState: buildInventoryState(latestInventory)
+            });
+
+            await requestsCollection.updateOne(
+              { _id: new ObjectId(requestId) },
+              {
+                $set: {
+                  status: 'cancelled',
+                  updatedAt: cancelledAt,
+                  updatedBy: userName,
+                  cancelledAt: cancelledAt,
+                  cancelledBy: userName
+                }
+              }
+            );
+
+            return res.json({
+              success: true,
+              message: `Request ${request.requestNumber} cancelled successfully`
+            });
+          }
 
           // Handle inventory changes based on status transition
           if (oldStatus !== newStatus) {
@@ -17206,8 +17409,9 @@ app.post("/api/noda-requests", async (req, res) => {
             for (const lineItem of request.lineItems) {
               try {
                 // ✅ KEY FIX: Check individual LINE ITEM status, not bulk request status
-                if (lineItem.status === 'completed') {
-                  console.log(`⏭️ Skipping line ${lineItem.lineNumber} (${lineItem.背番号}): Already completed (physically picked)`);
+                const normalizedLineStatus = String(lineItem.status || '').toLowerCase();
+                if (normalizedLineStatus === 'completed' || normalizedLineStatus === 'cancelled' || normalizedLineStatus === 'canceled') {
+                  console.log(`⏭️ Skipping line ${lineItem.lineNumber} (${lineItem.背番号}): Already ${lineItem.status || 'closed'} (no inventory restoration needed)`);
                   continue; // Skip completed items - they were already picked physically
                 }
                 
