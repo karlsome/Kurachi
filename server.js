@@ -15200,6 +15200,155 @@ async function attachNodaBoxCounts(masterCollection, lineItems = []) {
   });
 }
 
+function isNodaRequestCompletedStatus(value = '') {
+  const normalizedValue = String(value || '').toLowerCase();
+  return normalizedValue === 'completed' || normalizedValue === 'complete';
+}
+
+function isNodaRequestCancelledStatus(value = '') {
+  const normalizedValue = String(value || '').toLowerCase();
+  return normalizedValue === 'cancelled' || normalizedValue === 'canceled';
+}
+
+function getNodaTrashExpiryDate(baseDate = new Date()) {
+  const expiryDate = new Date(baseDate);
+  expiryDate.setMonth(expiryDate.getMonth() + 6);
+  return expiryDate;
+}
+
+function getNodaTrashAdjustableItems(request = {}) {
+  if (request?.requestType === 'bulk' && Array.isArray(request.lineItems)) {
+    return request.lineItems
+      .filter((lineItem) => !isNodaRequestCompletedStatus(lineItem?.status) && !isNodaRequestCancelledStatus(lineItem?.status))
+      .map((lineItem) => ({
+        背番号: lineItem.背番号,
+        品番: lineItem.品番,
+        quantity: Number(lineItem.quantity || 0),
+        lineNumber: lineItem.lineNumber ?? null
+      }))
+      .filter((lineItem) => lineItem.背番号 && lineItem.quantity > 0);
+  }
+
+  if (!request?.背番号 || !Number(request?.quantity) || isNodaRequestCompletedStatus(request?.status) || isNodaRequestCancelledStatus(request?.status)) {
+    return [];
+  }
+
+  return [{
+    背番号: request.背番号,
+    品番: request.品番,
+    quantity: Number(request.quantity || 0),
+    lineNumber: null
+  }];
+}
+
+async function getLatestNodaInventorySnapshot(inventoryCollection, backNumber) {
+  const inventoryResults = await inventoryCollection.aggregate([
+    { $match: { 背番号: backNumber } },
+    {
+      $addFields: {
+        timeStampDate: {
+          $cond: {
+            if: { $type: "$timeStamp" },
+            then: {
+              $cond: {
+                if: { $eq: [{ $type: "$timeStamp" }, "string"] },
+                then: { $dateFromString: { dateString: "$timeStamp" } },
+                else: "$timeStamp"
+              }
+            },
+            else: new Date()
+          }
+        }
+      }
+    },
+    { $sort: { timeStampDate: -1 } },
+    { $limit: 1 }
+  ]).toArray();
+
+  const latestInventory = inventoryResults[0];
+
+  return {
+    physicalQuantity: Number(latestInventory?.physicalQuantity ?? latestInventory?.runningQuantity ?? 0),
+    reservedQuantity: Number(latestInventory?.reservedQuantity ?? 0),
+    availableQuantity: Number(latestInventory?.availableQuantity ?? latestInventory?.runningQuantity ?? 0)
+  };
+}
+
+async function applyNodaTrashReservationAdjustment({
+  inventoryCollection,
+  request,
+  requestId,
+  userName,
+  mode = 'trash',
+  eventTime = new Date()
+}) {
+  const adjustableItems = getNodaTrashAdjustableItems(request);
+  const inventoryStateByBackNumber = new Map();
+  const eventDate = eventTime.toISOString().split('T')[0];
+  let adjustedLineItems = 0;
+  let adjustedQuantity = 0;
+
+  for (const item of adjustableItems) {
+    let currentState = inventoryStateByBackNumber.get(item.背番号);
+    if (!currentState) {
+      currentState = await getLatestNodaInventorySnapshot(inventoryCollection, item.背番号);
+    }
+
+    const currentPhysical = Number(currentState.physicalQuantity || 0);
+    const currentReserved = Number(currentState.reservedQuantity || 0);
+    const currentAvailable = Number(currentState.availableQuantity || 0);
+    const quantity = Number(item.quantity || 0);
+
+    const newReservedQuantity = mode === 'restore'
+      ? currentReserved + quantity
+      : Math.max(0, currentReserved - quantity);
+    const newAvailableQuantity = currentPhysical - newReservedQuantity;
+
+    const inventoryTransaction = {
+      背番号: item.背番号,
+      品番: item.品番,
+      timeStamp: eventTime,
+      Date: eventDate,
+      physicalQuantity: currentPhysical,
+      reservedQuantity: newReservedQuantity,
+      availableQuantity: newAvailableQuantity,
+      runningQuantity: newAvailableQuantity,
+      lastQuantity: currentAvailable,
+      action: mode === 'restore'
+        ? `Trash Restore (+${quantity} reserved)`
+        : `Moved to Trash (-${quantity} reserved)`,
+      source: `Freya Admin - ${userName}`,
+      requestId: String(requestId),
+      note: mode === 'restore'
+        ? `Recovered request ${request.requestNumber}${item.lineNumber ? ` line ${item.lineNumber}` : ''} from trash. Reserved: ${currentReserved} → ${newReservedQuantity}. Available recalculated from physical ${currentPhysical}: ${currentAvailable} → ${newAvailableQuantity}.`
+        : `Moved request ${request.requestNumber}${item.lineNumber ? ` line ${item.lineNumber}` : ''} to trash. Reserved: ${currentReserved} → ${newReservedQuantity}. Available recalculated from physical ${currentPhysical}: ${currentAvailable} → ${newAvailableQuantity}.`
+    };
+
+    if (request?.requestType === 'bulk') {
+      inventoryTransaction.bulkRequestNumber = request.requestNumber;
+      if (item.lineNumber !== null) {
+        inventoryTransaction.lineNumber = item.lineNumber;
+      }
+    }
+
+    await inventoryCollection.insertOne(inventoryTransaction);
+
+    inventoryStateByBackNumber.set(item.背番号, {
+      physicalQuantity: currentPhysical,
+      reservedQuantity: newReservedQuantity,
+      availableQuantity: newAvailableQuantity
+    });
+
+    adjustedLineItems += 1;
+    adjustedQuantity += quantity;
+  }
+
+  return {
+    adjustedLineItems,
+    adjustedQuantity
+  };
+}
+
 // NODA Requests API Route
 app.post("/api/noda-requests", async (req, res) => {
   const { action, filters = {}, page = 1, limit = 10, sort = {}, requestId, data } = req.body;
@@ -15210,12 +15359,20 @@ app.post("/api/noda-requests", async (req, res) => {
     const requestsCollection = db.collection("nodaRequestDB");
     const inventoryCollection = db.collection("nodaInventoryDB");
     const masterCollection = client.db("Sasaki_Coating_MasterDB").collection("masterDB");
+    const withActiveRequestFilter = (query = {}) => ({
+      ...query,
+      isDeleted: { $ne: true }
+    });
+    const withTrashedRequestFilter = (query = {}) => ({
+      ...query,
+      isDeleted: true
+    });
 
     switch (action) {
       case 'getNodaRequests':
         try {
           // Build MongoDB query from filters
-          let query = {};
+          let query = withActiveRequestFilter();
           const today = new Date();
           const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
@@ -15290,11 +15447,11 @@ app.post("/api/noda-requests", async (req, res) => {
           
           // Step 1: Get ALL active requests with deadline >= today, sorted by deadline (for FIFO calculation)
           const allActiveRequests = await requestsCollection
-            .find({ 
+            .find(withActiveRequestFilter({ 
               status: { $nin: ['completed', 'cancelled'] },
               // Only include requests where deadline is today or in the future
               納入指示日: { $gte: todayStr }
-            })
+            }))
             .sort({ '納入指示日': 1, createdAt: 1 }) // Sort by deadline first, then createdAt for same deadline
             .toArray();
           
@@ -15499,7 +15656,7 @@ app.post("/api/noda-requests", async (req, res) => {
 
           // Calculate statistics - use base query WITHOUT status filter
           // so card counts always show totals, not filtered counts
-          const statsQuery = {};
+          const statsQuery = withActiveRequestFilter();
 
           if (filters['品番']) {
             statsQuery['品番'] = filters['品番'];
@@ -15555,7 +15712,7 @@ app.post("/api/noda-requests", async (req, res) => {
             return res.status(400).json({ error: "Request ID is required" });
           }
 
-          const request = await requestsCollection.findOne({ _id: new ObjectId(requestId) });
+          const request = await requestsCollection.findOne(withActiveRequestFilter({ _id: new ObjectId(requestId) }));
           
           if (!request) {
             return res.status(404).json({ error: "Request not found" });
@@ -15570,10 +15727,10 @@ app.post("/api/noda-requests", async (req, res) => {
           
           // Get all active requests with deadline >= today, sorted by deadline
           const activeRequestsForFifo = await requestsCollection
-            .find({ 
+            .find(withActiveRequestFilter({ 
               status: { $nin: ['completed', 'cancelled'] },
               納入指示日: { $gte: detailTodayStr }
-            })
+            }))
             .sort({ '納入指示日': 1, createdAt: 1 })
             .toArray();
           
@@ -15757,6 +15914,150 @@ app.post("/api/noda-requests", async (req, res) => {
         }
         break;
 
+      case 'getTrashRequests':
+        try {
+          const userRole = data?.userRole || req.body.userRole || '';
+          if (userRole !== 'admin') {
+            return res.status(403).json({ error: "Only admin can access the NODA trash bin" });
+          }
+
+          const query = withTrashedRequestFilter();
+
+          if (filters.search) {
+            const searchRegex = new RegExp(filters.search, 'i');
+            query.$or = [
+              { requestNumber: searchRegex },
+              { 品番: searchRegex },
+              { 背番号: searchRegex },
+              { status: searchRegex },
+              { deletedBy: searchRegex },
+              { deletedByUsername: searchRegex },
+              { 納品書番号: searchRegex },
+              { 便: searchRegex }
+            ];
+          }
+
+          const totalCount = await requestsCollection.countDocuments(query);
+          const skip = (page - 1) * limit;
+          const sortObj = sort.column
+            ? { [sort.column]: sort.direction || 1 }
+            : { deletedAt: -1 };
+
+          const requests = await requestsCollection
+            .find(query)
+            .sort(sortObj)
+            .skip(skip)
+            .limit(parseInt(limit))
+            .toArray();
+
+          res.json({
+            success: true,
+            data: requests,
+            pagination: {
+              currentPage: page,
+              totalPages: Math.ceil(totalCount / limit),
+              totalItems: totalCount,
+              itemsPerPage: limit
+            }
+          });
+        } catch (error) {
+          console.error("Error in getTrashRequests:", error);
+          res.status(500).json({ error: "Failed to fetch trashed requests", details: error.message });
+        }
+        break;
+
+      case 'restoreDeletedRequest':
+        try {
+          const restoredBy = data?.restoredBy || req.body.restoredBy || 'Unknown User';
+          const restoredByUsername = data?.restoredByUsername || req.body.restoredByUsername || null;
+          const restoredByRole = data?.userRole || req.body.userRole || '';
+
+          if (restoredByRole !== 'admin') {
+            return res.status(403).json({ error: "Only admin can restore NODA trash requests" });
+          }
+
+          if (!requestId) {
+            return res.status(400).json({ error: "Request ID is required" });
+          }
+
+          const request = await requestsCollection.findOne(withTrashedRequestFilter({ _id: new ObjectId(requestId) }));
+          if (!request) {
+            return res.status(404).json({ error: "Deleted request not found" });
+          }
+
+          const restoredAt = new Date();
+          const adjustmentSummary = await applyNodaTrashReservationAdjustment({
+            inventoryCollection,
+            request,
+            requestId,
+            userName: restoredBy,
+            mode: 'restore',
+            eventTime: restoredAt
+          });
+
+          const result = await requestsCollection.updateOne(
+            withTrashedRequestFilter({ _id: new ObjectId(requestId) }),
+            {
+              $set: {
+                isDeleted: false,
+                updatedAt: restoredAt,
+                updatedBy: restoredBy,
+                restoredAt: restoredAt.toISOString(),
+                restoredBy: restoredBy,
+                restoredByUsername: restoredByUsername
+              },
+              $unset: {
+                deletedAt: '',
+                deletedBy: '',
+                deletedByRole: '',
+                deletedByUsername: '',
+                trashExpiresAt: ''
+              }
+            }
+          );
+
+          if (result.matchedCount === 0) {
+            return res.status(404).json({ error: "Deleted request not found" });
+          }
+
+          res.json({
+            success: true,
+            message: `Request ${request.requestNumber} restored successfully`,
+            restoredLineItems: adjustmentSummary.adjustedLineItems,
+            restoredQuantity: adjustmentSummary.adjustedQuantity
+          });
+        } catch (error) {
+          console.error("Error in restoreDeletedRequest:", error);
+          res.status(500).json({ error: "Failed to restore request", details: error.message });
+        }
+        break;
+
+      case 'permanentlyDeleteTrashedRequest':
+        try {
+          const userRole = data?.userRole || req.body.userRole || '';
+          if (userRole !== 'admin') {
+            return res.status(403).json({ error: "Only admin can permanently delete NODA trash requests" });
+          }
+
+          if (!requestId) {
+            return res.status(400).json({ error: "Request ID is required" });
+          }
+
+          const result = await requestsCollection.deleteOne(withTrashedRequestFilter({ _id: new ObjectId(requestId) }));
+          if (result.deletedCount === 0) {
+            return res.status(404).json({ error: "Deleted request not found" });
+          }
+
+          res.json({
+            success: true,
+            message: "Request permanently deleted"
+          });
+        } catch (error) {
+          console.error("Error in permanentlyDeleteTrashedRequest:", error);
+          res.status(500).json({ error: "Failed to permanently delete request", details: error.message });
+        }
+        break;
+
       case 'createRequest':
         try {
           if (!data || !data.品番 || !data.背番号 || !data.quantity || !data.date) {
@@ -15867,11 +16168,11 @@ app.post("/api/noda-requests", async (req, res) => {
           }
 
           // Search for existing request with same 納品書番号, 便, and 納入指示日
-          const existingRequest = await requestsCollection.findOne({
+          const existingRequest = await requestsCollection.findOne(withActiveRequestFilter({
             納品書番号: deliveryNote,
             便: deliveryOrder,
             納入指示日: deadlineDate
-          });
+          }));
 
           if (existingRequest) {
             res.json({
@@ -15924,7 +16225,7 @@ app.post("/api/noda-requests", async (req, res) => {
           // CRITICAL: Handle overwrite mode FIRST - unreserve inventory before validation
           if (mode === 'overwrite' && existingRequestId) {
             try {
-              const existingRequest = await requestsCollection.findOne({ _id: new ObjectId(existingRequestId) });
+              const existingRequest = await requestsCollection.findOne(withActiveRequestFilter({ _id: new ObjectId(existingRequestId) }));
               if (existingRequest) {
                 // Store the old request number to reuse it
                 oldRequestNumber = existingRequest.requestNumber;
@@ -16295,7 +16596,7 @@ app.post("/api/noda-requests", async (req, res) => {
           }
 
           // Get existing request
-          const existingRequest = await requestsCollection.findOne({ _id: new ObjectId(requestId) });
+          const existingRequest = await requestsCollection.findOne(withActiveRequestFilter({ _id: new ObjectId(requestId) }));
           if (!existingRequest) {
             return res.status(404).json({ error: "Request not found" });
           }
@@ -16436,7 +16737,7 @@ app.post("/api/noda-requests", async (req, res) => {
 
           // Update the bulk request with new line items
           const updateResult = await requestsCollection.updateOne(
-            { _id: new ObjectId(requestId) },
+            withActiveRequestFilter({ _id: new ObjectId(requestId) }),
             { 
               $push: { lineItems: { $each: newLineItems } },
               $set: { 
@@ -16531,7 +16832,7 @@ app.post("/api/noda-requests", async (req, res) => {
 
           // If quantity or back number changed, check inventory
           if (data.quantity || data.背番号) {
-            const existingRequest = await requestsCollection.findOne({ _id: new ObjectId(requestId) });
+            const existingRequest = await requestsCollection.findOne(withActiveRequestFilter({ _id: new ObjectId(requestId) }));
             const backNumber = data.背番号 || existingRequest.背番号;
             const quantity = data.quantity || existingRequest.quantity;
 
@@ -16558,7 +16859,7 @@ app.post("/api/noda-requests", async (req, res) => {
           };
 
           const result = await requestsCollection.updateOne(
-            { _id: new ObjectId(requestId) },
+            withActiveRequestFilter({ _id: new ObjectId(requestId) }),
             { $set: updateData }
           );
 
@@ -16580,7 +16881,7 @@ app.post("/api/noda-requests", async (req, res) => {
             return res.status(400).json({ error: "Request ID and status are required" });
           }
 
-          const request = await requestsCollection.findOne({ _id: new ObjectId(requestId) });
+          const request = await requestsCollection.findOne(withActiveRequestFilter({ _id: new ObjectId(requestId) }));
           if (!request) {
             return res.status(404).json({ error: "Request not found" });
           }
@@ -16740,7 +17041,7 @@ app.post("/api/noda-requests", async (req, res) => {
               }
 
               await requestsCollection.updateOne(
-                { _id: new ObjectId(requestId) },
+                withActiveRequestFilter({ _id: new ObjectId(requestId) }),
                 {
                   $set: {
                     status: 'cancelled',
@@ -16774,7 +17075,7 @@ app.post("/api/noda-requests", async (req, res) => {
             });
 
             await requestsCollection.updateOne(
-              { _id: new ObjectId(requestId) },
+              withActiveRequestFilter({ _id: new ObjectId(requestId) }),
               {
                 $set: {
                   status: 'cancelled',
@@ -16905,7 +17206,7 @@ app.post("/api/noda-requests", async (req, res) => {
           }
 
           // Find the bulk request
-          const bulkRequest = await requestsCollection.findOne({ _id: new ObjectId(requestId) });
+          const bulkRequest = await requestsCollection.findOne(withActiveRequestFilter({ _id: new ObjectId(requestId) }));
           if (!bulkRequest) {
             return res.status(404).json({ error: "Bulk request not found" });
           }
@@ -17022,10 +17323,10 @@ app.post("/api/noda-requests", async (req, res) => {
           }
 
           const result = await requestsCollection.updateOne(
-            { 
+            withActiveRequestFilter({ 
               _id: new ObjectId(requestId),
               "lineItems.lineNumber": data.lineNumber
-            },
+            }),
             { $set: updateFields }
           );
 
@@ -17034,7 +17335,7 @@ app.post("/api/noda-requests", async (req, res) => {
           }
 
           // Check if all line items are completed to update bulk request status
-          const updatedRequest = await requestsCollection.findOne({ _id: new ObjectId(requestId) });
+          const updatedRequest = await requestsCollection.findOne(withActiveRequestFilter({ _id: new ObjectId(requestId) }));
           const allCompleted = updatedRequest.lineItems.every(item => item.status === 'completed');
           const anyInProgress = updatedRequest.lineItems.some(item => item.status === 'in-progress');
           const anyPaused = updatedRequest.lineItems.some(item => item.status === 'paused');
@@ -17096,7 +17397,7 @@ app.post("/api/noda-requests", async (req, res) => {
             }
             
             await requestsCollection.updateOne(
-              { _id: new ObjectId(requestId) },
+              withActiveRequestFilter({ _id: new ObjectId(requestId) }),
               updateOperation
             );
           }
@@ -17131,7 +17432,7 @@ app.post("/api/noda-requests", async (req, res) => {
           }
 
           // Get the bulk request
-          const bulkRequest = await requestsCollection.findOne({ _id: new ObjectId(requestId) });
+          const bulkRequest = await requestsCollection.findOne(withActiveRequestFilter({ _id: new ObjectId(requestId) }));
           if (!bulkRequest) {
             return res.status(404).json({ error: "Request not found" });
           }
@@ -17232,10 +17533,10 @@ app.post("/api/noda-requests", async (req, res) => {
 
           // Update the line item quantity in the request
           const updateResult = await requestsCollection.updateOne(
-            { 
+            withActiveRequestFilter({ 
               _id: new ObjectId(requestId),
               'lineItems.lineNumber': data.lineNumber
-            },
+            }),
             {
               $set: {
                 'lineItems.$.quantity': newQuantity,
@@ -17271,7 +17572,7 @@ app.post("/api/noda-requests", async (req, res) => {
           }
 
           // Get the bulk request
-          const bulkRequest = await requestsCollection.findOne({ _id: new ObjectId(requestId) });
+          const bulkRequest = await requestsCollection.findOne(withActiveRequestFilter({ _id: new ObjectId(requestId) }));
           if (!bulkRequest) {
             return res.status(404).json({ error: "Request not found" });
           }
@@ -17354,7 +17655,7 @@ app.post("/api/noda-requests", async (req, res) => {
 
           // Remove the line item from the request
           const updateResult = await requestsCollection.updateOne(
-            { _id: new ObjectId(requestId) },
+            withActiveRequestFilter({ _id: new ObjectId(requestId) }),
             {
               $pull: { lineItems: { lineNumber: data.lineNumber } },
               $set: { 
@@ -17388,206 +17689,64 @@ app.post("/api/noda-requests", async (req, res) => {
             return res.status(400).json({ error: "Request ID is required" });
           }
 
-          // Get the request details first
-          const request = await requestsCollection.findOne({ _id: new ObjectId(requestId) });
+          const request = await requestsCollection.findOne(withActiveRequestFilter({ _id: new ObjectId(requestId) }));
           if (!request) {
             return res.status(404).json({ error: "Request not found" });
           }
 
-          // Get user information for transaction
           const userName = req.body.userName || 'Unknown User';
-          let restoredItems = 0;
-          let totalQuantityRestored = 0;
+          const deletedByUsername = req.body.deletedByUsername || null;
+          const deletedByRole = req.body.deletedByRole || null;
+          const deletedAt = new Date();
+          const trashExpiresAt = getNodaTrashExpiryDate(deletedAt).toISOString();
 
-          const isBulkRequest = request.requestType === 'bulk';
-          
-          if (isBulkRequest && request.lineItems) {
-            // ============ BULK REQUEST DELETION WITH LINE-ITEM-LEVEL RESTORATION ============
-            console.log(`🗑️ Deleting bulk request ${request.requestNumber} with ${request.lineItems.length} line items`);
-            
-            // Loop through each line item and restore inventory ONLY for items that were NOT completed
-            for (const lineItem of request.lineItems) {
-              try {
-                // ✅ KEY FIX: Check individual LINE ITEM status, not bulk request status
-                const normalizedLineStatus = String(lineItem.status || '').toLowerCase();
-                if (normalizedLineStatus === 'completed' || normalizedLineStatus === 'cancelled' || normalizedLineStatus === 'canceled') {
-                  console.log(`⏭️ Skipping line ${lineItem.lineNumber} (${lineItem.背番号}): Already ${lineItem.status || 'closed'} (no inventory restoration needed)`);
-                  continue; // Skip completed items - they were already picked physically
-                }
-                
-                // Only restore inventory for pending/in-progress/active line items
-                console.log(`🔄 Restoring line ${lineItem.lineNumber} (${lineItem.背番号}): Status = ${lineItem.status}`);
-                
-                // Get current inventory state using aggregation pipeline
-                const inventoryResults = await inventoryCollection.aggregate([
-                  { $match: { 背番号: lineItem.背番号 } },
-                  {
-                    $addFields: {
-                      timeStampDate: {
-                        $cond: {
-                          if: { $type: "$timeStamp" },
-                          then: {
-                            $cond: {
-                              if: { $eq: [{ $type: "$timeStamp" }, "string"] },
-                              then: { $dateFromString: { dateString: "$timeStamp" } },
-                              else: "$timeStamp"
-                            }
-                          },
-                          else: new Date()
-                        }
-                      }
-                    }
-                  },
-                  { $sort: { timeStampDate: -1 } },
-                  { $limit: 1 }
-                ]).toArray();
+          const adjustmentSummary = await applyNodaTrashReservationAdjustment({
+            inventoryCollection,
+            request,
+            requestId,
+            userName,
+            mode: 'trash',
+            eventTime: deletedAt
+          });
 
-                if (inventoryResults.length > 0) {
-                  const inventoryItem = inventoryResults[0];
-                  
-                  // Create inventory restoration transaction for this line item
-                  const currentPhysical = inventoryItem.physicalQuantity || inventoryItem.runningQuantity || 0;
-                  const currentReserved = inventoryItem.reservedQuantity || 0;
-                  const currentAvailable = inventoryItem.availableQuantity || inventoryItem.runningQuantity || 0;
-
-                  // Restore inventory: Decrease reserved, Increase available
-                  const newReservedQuantity = Math.max(0, currentReserved - lineItem.quantity);
-                  const newAvailableQuantity = currentAvailable + lineItem.quantity;
-
-                  const restorationTransaction = {
-                    背番号: lineItem.背番号,
-                    品番: lineItem.品番,
-                    timeStamp: new Date(),
-                    Date: new Date().toISOString().split('T')[0],
-                    
-                    // Two-stage inventory fields
-                    physicalQuantity: currentPhysical, // Physical stock unchanged (item was never picked)
-                    reservedQuantity: newReservedQuantity, // Decrease reserved
-                    availableQuantity: newAvailableQuantity, // Increase available
-                    
-                    // Legacy field for compatibility
-                    runningQuantity: newAvailableQuantity,
-                    lastQuantity: currentAvailable,
-                    
-                    action: `Delete Restoration (-${lineItem.quantity} reserved, +${lineItem.quantity} available)`,
-                    source: `Freya Admin - ${userName}`,
-                    requestId: requestId,
-                    bulkRequestNumber: request.requestNumber,
-                    lineNumber: lineItem.lineNumber,
-                    note: `Restored ${lineItem.quantity} units from DELETED request ${request.requestNumber} line ${lineItem.lineNumber} (status: ${lineItem.status}). Reserved: ${currentReserved} → ${newReservedQuantity}, Available: ${currentAvailable} → ${newAvailableQuantity}`
-                  };
-
-                  await inventoryCollection.insertOne(restorationTransaction);
-                  restoredItems++;
-                  totalQuantityRestored += lineItem.quantity;
-                  
-                  console.log(`✅ Restored ${lineItem.quantity} units for ${lineItem.背番号} (line ${lineItem.lineNumber})`);
-                } else {
-                  console.warn(`⚠️ No inventory found for ${lineItem.背番号} (line ${lineItem.lineNumber})`);
-                }
-              } catch (error) {
-                console.error(`❌ Error restoring inventory for line item ${lineItem.lineNumber} (${lineItem.背番号}):`, error);
+          const result = await requestsCollection.updateOne(
+            withActiveRequestFilter({ _id: new ObjectId(requestId) }),
+            {
+              $set: {
+                isDeleted: true,
+                deletedAt: deletedAt.toISOString(),
+                deletedBy: userName,
+                deletedByUsername,
+                deletedByRole,
+                trashExpiresAt,
+                updatedAt: deletedAt,
+                updatedBy: userName
               }
             }
-            
-          } else if (!isBulkRequest) {
-            // ============ SINGLE REQUEST DELETION (ORIGINAL LOGIC) ============
-            console.log(`🗑️ Deleting single request ${request.requestNumber}`);
-            
-            // Only restore inventory if request is still pending/active (not completed)
-            if (request.status === 'pending' || request.status === 'active' || request.status === 'in-progress') {
-              
-              // Get current inventory state using aggregation pipeline
-              const inventoryResults = await inventoryCollection.aggregate([
-                { $match: { 背番号: request.背番号 } },
-                {
-                  $addFields: {
-                    timeStampDate: {
-                      $cond: {
-                        if: { $type: "$timeStamp" },
-                        then: {
-                          $cond: {
-                            if: { $eq: [{ $type: "$timeStamp" }, "string"] },
-                            then: { $dateFromString: { dateString: "$timeStamp" } },
-                            else: "$timeStamp"
-                          }
-                        },
-                        else: new Date()
-                      }
-                    }
-                  }
-                },
-                { $sort: { timeStampDate: -1 } },
-                { $limit: 1 }
-              ]).toArray();
+          );
 
-              if (inventoryResults.length > 0) {
-                const inventoryItem = inventoryResults[0];
-                
-                // Create inventory restoration transaction
-                const currentPhysical = inventoryItem.physicalQuantity || inventoryItem.runningQuantity || 0;
-                const currentReserved = inventoryItem.reservedQuantity || 0;
-                const currentAvailable = inventoryItem.availableQuantity || inventoryItem.runningQuantity || 0;
-
-                const newReservedQuantity = Math.max(0, currentReserved - request.quantity);
-                const newAvailableQuantity = currentAvailable + request.quantity;
-
-                const restorationTransaction = {
-                  背番号: request.背番号,
-                  品番: request.品番,
-                  timeStamp: new Date(),
-                  Date: new Date().toISOString().split('T')[0],
-                  
-                  // Two-stage inventory fields
-                  physicalQuantity: currentPhysical, // Physical stock unchanged
-                  reservedQuantity: newReservedQuantity, // Decrease reserved
-                  availableQuantity: newAvailableQuantity, // Increase available
-                  
-                  // Legacy field for compatibility
-                  runningQuantity: newAvailableQuantity,
-                  lastQuantity: currentAvailable,
-                  
-                  action: `Reservation Cancelled (-${request.quantity})`,
-                  source: `Freya Admin - ${userName}`,
-                  requestId: requestId,
-                  note: `Restored ${request.quantity} units from cancelled request ${request.requestNumber}`
-                };
-
-                await inventoryCollection.insertOne(restorationTransaction);
-                restoredItems = 1;
-                totalQuantityRestored = request.quantity;
-                
-                console.log(`✅ Restored ${request.quantity} units for ${request.背番号}`);
-              }
-            } else {
-              console.log(`⏭️ Skipping restoration: Single request status is '${request.status}' (completed requests are not restored)`);
-            }
+          if (result.matchedCount === 0) {
+            return res.status(404).json({ error: "Request not found" });
           }
 
-          // Delete the request from database
-          const result = await requestsCollection.deleteOne({ _id: new ObjectId(requestId) });
-
-          // Build response message
-          let message = '';
-          if (isBulkRequest) {
-            if (restoredItems > 0) {
-              message = `✅ Bulk request deleted. Restored ${restoredItems} unpicked line items (${totalQuantityRestored} total units). Completed items were not restored.`;
-            } else {
-              message = `✅ Bulk request deleted. All line items were already completed - no inventory restoration needed.`;
-            }
+          let message;
+          if (request.requestType === 'bulk') {
+            message = adjustmentSummary.adjustedLineItems > 0
+              ? `✅ Bulk request moved to trash. Released ${adjustmentSummary.adjustedLineItems} open line items (${adjustmentSummary.adjustedQuantity} total units).`
+              : '✅ Bulk request moved to trash. No open line items required inventory changes.';
           } else {
-            if (restoredItems > 0) {
-              message = `✅ Request deleted and ${totalQuantityRestored} units restored to inventory.`;
-            } else {
-              message = `✅ Request deleted (no inventory restoration - request was already completed).`;
-            }
+            message = adjustmentSummary.adjustedQuantity > 0
+              ? `✅ Request moved to trash and ${adjustmentSummary.adjustedQuantity} units were released from reservation.`
+              : '✅ Request moved to trash. No inventory changes were needed.';
           }
 
-          res.json({ 
+          res.json({
             success: true,
-            message: message,
-            restoredItems: restoredItems,
-            totalQuantityRestored: totalQuantityRestored
+            movedToTrash: true,
+            message,
+            restoredItems: adjustmentSummary.adjustedLineItems,
+            totalQuantityRestored: adjustmentSummary.adjustedQuantity,
+            trashExpiresAt
           });
 
         } catch (error) {
@@ -17605,13 +17764,13 @@ app.post("/api/noda-requests", async (req, res) => {
           
           // Find all requests waiting for inventory or with partial inventory
           // Sort by createdAt for first-come-first-served priority
-          const requestsNeedingInventory = await requestsCollection.find({
+          const requestsNeedingInventory = await requestsCollection.find(withActiveRequestFilter({
             $or: [
               { overallInventoryStatus: 'waiting-for-inventory' },
               { overallInventoryStatus: 'partial-inventory' }
             ],
             status: { $nin: ['completed', 'cancelled'] } // Only active requests
-          }).sort({ createdAt: 1 }).toArray(); // First-come-first-served
+          })).sort({ createdAt: 1 }).toArray(); // First-come-first-served
           
           console.log(`📋 Found ${requestsNeedingInventory.length} requests needing inventory check`);
           
@@ -17706,10 +17865,10 @@ app.post("/api/noda-requests", async (req, res) => {
                     
                     // Update the line item
                     await requestsCollection.updateOne(
-                      { 
+                      withActiveRequestFilter({ 
                         _id: request._id,
                         'lineItems.lineNumber': lineItem.lineNumber
-                      },
+                      }),
                       {
                         $set: {
                           'lineItems.$.reservedQuantity': newReservedQty,
@@ -17731,7 +17890,7 @@ app.post("/api/noda-requests", async (req, res) => {
             // If request was updated, recalculate overall inventory status
             if (requestUpdated) {
               // Get updated request
-              const updatedRequest = await requestsCollection.findOne({ _id: request._id });
+              const updatedRequest = await requestsCollection.findOne(withActiveRequestFilter({ _id: request._id }));
               
               // Calculate new overall status
               const hasNoInventory = updatedRequest.lineItems.every(item => item.inventoryStatus === 'none');
@@ -17754,7 +17913,7 @@ app.post("/api/noda-requests", async (req, res) => {
               
               // Update overall status
               await requestsCollection.updateOne(
-                { _id: request._id },
+                withActiveRequestFilter({ _id: request._id }),
                 {
                   $set: {
                     overallInventoryStatus: newOverallStatus,
@@ -17794,12 +17953,14 @@ app.post("/api/noda-requests", async (req, res) => {
         try {
           // Use aggregation instead of distinct for API Version 1 compatibility
           const partNumbersResult = await requestsCollection.aggregate([
+            { $match: { isDeleted: { $ne: true } } },
             { $group: { _id: "$品番" } },
             { $match: { _id: { $ne: null, $ne: "" } } },
             { $sort: { _id: 1 } }
           ]).toArray();
 
           const backNumbersResult = await requestsCollection.aggregate([
+            { $match: { isDeleted: { $ne: true } } },
             { $group: { _id: "$背番号" } },
             { $match: { _id: { $ne: null, $ne: "" } } },
             { $sort: { _id: 1 } }
@@ -18030,7 +18191,7 @@ async function calculateNodaStatistics(collection, baseQuery = {}) {
     const today = new Date();
     const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     const stats = await collection.aggregate([
-      { $match: baseQuery },
+      { $match: { ...baseQuery, isDeleted: { $ne: true } } },
       {
         $addFields: {
           computedStatStatus: {
@@ -18079,6 +18240,27 @@ async function calculateNodaStatistics(collection, baseQuery = {}) {
     return { all: 0, pending: 0, 'in-progress': 0, completed: 0, 'past-deadline': 0, 'partial-inventory': 0, cancelled: 0 };
   }
 }
+
+async function cleanupOldNodaTrash() {
+  try {
+    await client.connect();
+    const requestsCollection = client.db('submittedDB').collection('nodaRequestDB');
+    const nowIso = new Date().toISOString();
+    const result = await requestsCollection.deleteMany({
+      isDeleted: true,
+      trashExpiresAt: { $lt: nowIso }
+    });
+
+    if (result.deletedCount > 0) {
+      console.log(`🧹 Cleaned up ${result.deletedCount} expired NODA trash request(s)`);
+    }
+  } catch (error) {
+    console.error('Error cleaning up NODA trash:', error.message);
+  }
+}
+
+setInterval(cleanupOldNodaTrash, 24 * 60 * 60 * 1000);
+cleanupOldNodaTrash();
 
 // ==================== END OF NODA API ROUTES ====================
 
