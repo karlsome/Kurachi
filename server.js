@@ -29338,6 +29338,18 @@ function normalizeCheckFormMaybeNumber(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function resolveCheckFormAnswerTimestamp(value = '', fallbackIso = '') {
+  const normalized = normalizeCheckFormText(value);
+  if (!normalized) {
+    return fallbackIso || new Date().toISOString();
+  }
+
+  const parsed = new Date(normalized);
+  return Number.isNaN(parsed.getTime())
+    ? (fallbackIso || new Date().toISOString())
+    : parsed.toISOString();
+}
+
 function normalizeCheckFormStringArray(values = []) {
   if (!Array.isArray(values)) return [];
   return values
@@ -29845,7 +29857,7 @@ app.post('/api/check-forms/submit', async (req, res) => {
           ticketRequired,
           fieldPhotoURL,
           ticket: ticketSummary,
-          answeredAt: nowIso,
+          answeredAt: resolveCheckFormAnswerTimestamp(answerPayload.answeredAt, nowIso),
         });
       }
 

@@ -706,12 +706,27 @@
       align-items: center;
     }
 
+    .field-reset-meta {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-right: auto;
+      min-height: 42px;
+    }
+
     .field-reset-button {
       min-height: 42px;
       padding: 10px 14px;
-      margin-right: auto;
       font-size: 0.86rem;
       box-shadow: none;
+    }
+
+    .field-timestamp {
+      color: var(--muted);
+      font-size: 0.72rem;
+      line-height: 1;
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
     }
 
     .utility-button,
@@ -906,12 +921,25 @@
       margin-bottom: 18px;
     }
 
+    .modal-section--invalid {
+      padding: 14px;
+      border-radius: 22px;
+      border: 1px solid rgba(211, 49, 42, 0.2);
+      background: rgba(255, 246, 245, 0.98);
+      box-shadow: 0 0 0 4px rgba(211, 49, 42, 0.08);
+      animation: modal-invalid-shake 360ms ease;
+    }
+
     .modal-label {
       font-size: 0.84rem;
       font-weight: 700;
       letter-spacing: 0.12em;
       text-transform: uppercase;
       color: var(--muted);
+    }
+
+    .modal-label--danger {
+      color: var(--danger);
     }
 
     .modal-textarea,
@@ -928,6 +956,19 @@
       min-height: 160px;
       resize: vertical;
       line-height: 1.55;
+    }
+
+    .modal-textarea--invalid {
+      border-color: rgba(211, 49, 42, 0.36);
+      box-shadow: 0 0 0 4px rgba(211, 49, 42, 0.08);
+      background: rgba(255, 253, 253, 0.98);
+    }
+
+    .modal-validation {
+      color: var(--danger);
+      font-size: 0.84rem;
+      font-weight: 600;
+      line-height: 1.45;
     }
 
     .worker-list {
@@ -1086,6 +1127,27 @@
       to {
         opacity: 1;
         transform: translateY(0) scale(1);
+      }
+    }
+
+    @keyframes modal-invalid-shake {
+      0% {
+        transform: translateX(0);
+      }
+      20% {
+        transform: translateX(-6px);
+      }
+      40% {
+        transform: translateX(5px);
+      }
+      60% {
+        transform: translateX(-3px);
+      }
+      80% {
+        transform: translateX(2px);
+      }
+      100% {
+        transform: translateX(0);
       }
     }
 

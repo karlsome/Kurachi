@@ -28,6 +28,12 @@ const SCHEDULE_ORDER = {
   monthly: 2,
   unscheduled: 99,
 };
+const FIELD_TIME_FORMATTER = new Intl.DateTimeFormat('ja-JP', {
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: false,
+});
 
 const appState = {
   factory: '',
@@ -223,6 +229,7 @@ function createFieldState(templateId, field, index) {
     max: normalizeNumber(field.max),
     unit: normalizeText(field.unit),
     answerValue: '',
+    lastAnsweredAt: '',
     fieldPhotoAssetId: '',
     ticket: {
       ticketKey: createTicketKey(templateId, fieldId),
@@ -238,6 +245,14 @@ function createFieldState(templateId, field, index) {
 
 function normalizeText(value = '') {
   return String(value ?? '').trim();
+}
+
+function normalizeIsoTimestamp(value = '') {
+  const normalized = normalizeText(value);
+  if (!normalized) return '';
+
+  const parsed = new Date(normalized);
+  return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString();
 }
 
 function normalizeSchedule(value = '') {
@@ -303,6 +318,7 @@ async function restoreDraftState() {
         field.answerValue = field.type === 'number'
           ? normalizeText(fieldDraft.answerValue)
           : String(fieldDraft.answerValue ?? '');
+        field.lastAnsweredAt = normalizeIsoTimestamp(fieldDraft.lastAnsweredAt);
         field.fieldPhotoAssetId = normalizeText(fieldDraft.fieldPhotoAssetId);
         field.ticket.saved = Boolean(fieldDraft.ticket?.saved);
         field.ticket.reason = normalizeText(fieldDraft.ticket?.reason);
@@ -330,6 +346,7 @@ function persistDraftState() {
         fields: template.fields.map((field) => ({
           fieldId: field.fieldId,
           answerValue: field.answerValue,
+          lastAnsweredAt: field.lastAnsweredAt,
           fieldPhotoAssetId: field.fieldPhotoAssetId,
           ticket: {
             saved: field.ticket.saved,
@@ -497,6 +514,7 @@ function renderFieldCard(template, field, templateIndex, fieldIndex) {
   const showTicketButton = shouldShowTicketButton(field);
   const showPhotoSection = field.photoRequired;
   const showResetButton = fieldHasResettableState(field);
+  const answeredTimestampLabel = formatFieldAnswerTimestamp(field.lastAnsweredAt);
   const showFieldActions = showTicketButton || showPhotoSection;
   const showActionRow = showFieldActions || showResetButton;
   const classNames = [
@@ -529,13 +547,16 @@ function renderFieldCard(template, field, templateIndex, fieldIndex) {
         ${showActionRow ? `
         <div class="field-actions">
           ${showResetButton ? `
-          <button
-            type="button"
-            class="utility-button utility-button--danger field-reset-button"
-            data-action="reset-field"
-            data-template-id="${escapeHtml(template.templateId)}"
-            data-field-id="${escapeHtml(field.fieldId)}"
-          >Reset</button>
+          <div class="field-reset-meta">
+            <button
+              type="button"
+              class="utility-button utility-button--danger field-reset-button"
+              data-action="reset-field"
+              data-template-id="${escapeHtml(template.templateId)}"
+              data-field-id="${escapeHtml(field.fieldId)}"
+            >Reset</button>
+            ${answeredTimestampLabel ? `<span class="field-timestamp" title="${escapeHtml(field.lastAnsweredAt)}">${escapeHtml(answeredTimestampLabel)}</span>` : ''}
+          </div>
           ` : ''}
           ${showPhotoSection ? `
           <div class="field-thumb-grid">
@@ -553,7 +574,6 @@ function renderFieldCard(template, field, templateIndex, fieldIndex) {
             >${escapeHtml(field.ticket.saved ? 'Ticket saved' : fieldStatus.ticketNeeded ? 'Ticket required' : 'Open ticket')}</button>
           </div>
           ` : ''}
-          </div>
         </div>
         ` : ''}
         ${renderTicketSummary(field)}
@@ -587,6 +607,29 @@ function fieldHasResettableState(field) {
     || Boolean(field.ticket?.pendingTouched)
     || normalizeText(field.ticket?.pendingReason) !== ''
     || (Array.isArray(field.ticket?.pendingImageAssetIds) && field.ticket.pendingImageAssetIds.length > 0);
+}
+
+function createFieldAnswerTimestamp() {
+  return new Date().toISOString();
+}
+
+function touchFieldAnswerTimestamp(field) {
+  if (!field) return;
+  field.lastAnsweredAt = createFieldAnswerTimestamp();
+}
+
+function syncFieldAnswerTimestamp(field) {
+  if (!field) return;
+  field.lastAnsweredAt = normalizeText(field.answerValue) ? createFieldAnswerTimestamp() : '';
+}
+
+function formatFieldAnswerTimestamp(value = '') {
+  const normalized = normalizeIsoTimestamp(value);
+  if (!normalized) return '';
+
+  const parsed = new Date(normalized);
+  if (Number.isNaN(parsed.getTime())) return '';
+  return FIELD_TIME_FORMATTER.format(parsed);
 }
 
 function renderFieldControl(template, field) {
@@ -815,6 +858,8 @@ function renderTicketModal() {
   }
 
   const { template, field, draft } = getActiveTicketContext();
+  const reasonInvalid = Boolean(draft.reasonInvalid);
+  const imagesInvalid = Boolean(draft.imagesInvalid);
   dom.ticketModal.classList.remove('hidden');
   dom.ticketModal.innerHTML = `
     <div class="modal-panel" role="dialog" aria-modal="true" aria-label="Ticket modal">
@@ -832,18 +877,19 @@ function renderTicketModal() {
           <span class="chip chip--muted">Photos ${draft.imageAssetIds.length} / 5</span>
         </div>
       </div>
-      <div class="modal-section">
-        <label class="modal-label" for="ticketReasonInput">Reason</label>
-        <textarea id="ticketReasonInput" class="modal-textarea" data-ticket-reason placeholder="Why did this answer go out of range or need a ticket?">${escapeHtml(draft.reason)}</textarea>
+      <div class="modal-section ${reasonInvalid ? 'modal-section--invalid' : ''}">
+        <label class="modal-label ${reasonInvalid ? 'modal-label--danger' : ''}" for="ticketReasonInput">Reason</label>
+        <textarea id="ticketReasonInput" class="modal-textarea ${reasonInvalid ? 'modal-textarea--invalid' : ''}" data-ticket-reason placeholder="Why did this answer go out of range or need a ticket?">${escapeHtml(draft.reason)}</textarea>
+        ${reasonInvalid ? '<div class="modal-validation" data-ticket-validation="reason">Reason is required before saving the ticket.</div>' : ''}
       </div>
-      <div class="modal-section">
+      <div class="modal-section ${imagesInvalid ? 'modal-section--invalid' : ''}">
         <div class="field-actions">
           <div>
             <div class="modal-label">Ticket images</div>
             <div class="muted">Up to 5 photos. Tap a thumbnail to open it larger.</div>
           </div>
           <div class="field-option-grid">
-            <button type="button" class="utility-button utility-button--accent" data-action="add-ticket-images">Add photo</button>
+            <button type="button" class="utility-button ${imagesInvalid ? 'utility-button--danger' : 'utility-button--accent'}" data-action="add-ticket-images">Add photo</button>
           </div>
         </div>
         <div class="ticket-thumb-grid">
@@ -854,6 +900,7 @@ function renderTicketModal() {
             </div>
           `).join('')}
         </div>
+        ${imagesInvalid ? '<div class="modal-validation" data-ticket-validation="images">Add at least one ticket photo before saving.</div>' : ''}
       </div>
       <div class="field-option-grid">
         <button type="button" class="modal-button modal-button--ghost" data-action="close-ticket-modal">Close</button>
@@ -984,6 +1031,7 @@ function handleTemplateAreaInput(event) {
   if (!field) return;
 
   field.answerValue = target.value;
+  syncFieldAnswerTimestamp(field);
   clearValidationError(templateId, fieldId);
   persistDraftState();
   renderSummarySection();
@@ -1074,6 +1122,15 @@ function handleTicketModalInput(event) {
   if (!appState.activeTicket) return;
   if (!event.target.matches('[data-ticket-reason]')) return;
   appState.activeTicket.reason = event.target.value;
+
+  if (normalizeText(appState.activeTicket.reason)) {
+    appState.activeTicket.reasonInvalid = false;
+    const section = event.target.closest('.modal-section');
+    section?.classList.remove('modal-section--invalid');
+    section?.querySelector('.modal-label')?.classList.remove('modal-label--danger');
+    event.target.classList.remove('modal-textarea--invalid');
+    section?.querySelector('[data-ticket-validation="reason"]')?.remove();
+  }
 }
 
 function handleKeypadModalClick(event) {
@@ -1129,12 +1186,12 @@ function chooseWorker(workerName) {
   if (!normalized) return;
 
   appState.selectedWorkerName = normalized;
-  syncTemplateWorkersFromSelection(true);
+  syncTemplateWorkersFromSelection(true, true);
   closeWorkerModal();
   showBanner(`Worker set to ${normalized}.`, 'info', 1800);
 }
 
-function syncTemplateWorkersFromSelection(shouldRender) {
+function syncTemplateWorkersFromSelection(shouldRender, shouldStampTimestamp = false) {
   if (!appState.selectedWorkerName) return;
 
   appState.templates.forEach((template) => {
@@ -1142,6 +1199,9 @@ function syncTemplateWorkersFromSelection(shouldRender) {
     template.fields.forEach((field) => {
       if (field.type !== 'name') return;
       field.answerValue = appState.selectedWorkerName;
+      if (shouldStampTimestamp) {
+        touchFieldAnswerTimestamp(field);
+      }
       clearValidationError(template.templateId, field.fieldId);
     });
   });
@@ -1158,6 +1218,7 @@ function setCheckboxValue(templateId, fieldId, value) {
   if (!field) return;
 
   field.answerValue = normalizeText(value).toUpperCase();
+  touchFieldAnswerTimestamp(field);
   clearValidationError(templateId, fieldId);
   persistDraftState();
   renderApp();
@@ -1172,6 +1233,7 @@ function setSelectValue(templateId, fieldId, value) {
   if (!field) return;
 
   field.answerValue = normalizeText(value);
+  touchFieldAnswerTimestamp(field);
   clearValidationError(templateId, fieldId);
   persistDraftState();
   renderApp();
@@ -1264,6 +1326,7 @@ function confirmKeypadValue() {
   }
 
   field.answerValue = normalized;
+  touchFieldAnswerTimestamp(field);
   clearValidationError(templateId, fieldId);
   closeKeypadModal();
   persistDraftState();
@@ -1299,6 +1362,8 @@ function openTicketModal(templateId, fieldId, autoOpened) {
     reason: draft.reason,
     imageAssetIds: [...draft.imageAssetIds],
     autoOpened: Boolean(autoOpened),
+    reasonInvalid: false,
+    imagesInvalid: false,
   };
   renderTicketModal();
 }
@@ -1327,6 +1392,19 @@ function getTicketDraft(field) {
   };
 }
 
+function focusTicketValidationTarget(reasonInvalid, imagesInvalid) {
+  window.requestAnimationFrame(() => {
+    if (reasonInvalid) {
+      dom.ticketModal.querySelector('#ticketReasonInput')?.focus();
+      return;
+    }
+
+    if (imagesInvalid) {
+      dom.ticketModal.querySelector('[data-action="add-ticket-images"]')?.focus();
+    }
+  });
+}
+
 function closeTicketModal(keepDraft) {
   if (appState.activeTicket && keepDraft) {
     const field = getFieldByIds(appState.activeTicket.templateId, appState.activeTicket.fieldId);
@@ -1351,13 +1429,14 @@ function saveTicketModal() {
   if (!field) return;
 
   const reason = normalizeText(appState.activeTicket.reason);
-  if (!reason) {
-    showBanner('Ticket reason is required.', 'danger', 2200);
-    return;
-  }
+  const missingReason = !reason;
+  const missingImages = appState.activeTicket.imageAssetIds.length === 0;
 
-  if (appState.activeTicket.imageAssetIds.length === 0) {
-    showBanner('Add at least one ticket photo before saving.', 'danger', 2200);
+  if (missingReason || missingImages) {
+    appState.activeTicket.reasonInvalid = missingReason;
+    appState.activeTicket.imagesInvalid = missingImages;
+    renderTicketModal();
+    focusTicketValidationTarget(missingReason, missingImages);
     return;
   }
 
@@ -1390,6 +1469,7 @@ async function addTicketImages() {
   const assetId = createAssetId('ticket');
   await saveAsset(assetId, compressedDataUrl);
   appState.activeTicket.imageAssetIds.push(assetId);
+  appState.activeTicket.imagesInvalid = false;
   renderTicketModal();
 }
 
@@ -1753,6 +1833,7 @@ async function buildSubmissionPayload() {
         unit: field.unit,
         value: field.type === 'number' ? normalizeNumber(field.answerValue) : normalizeText(field.answerValue),
         displayValue: field.type === 'number' ? getNumberFieldDisplayValue(field) : normalizeText(field.answerValue),
+        answeredAt: field.lastAnsweredAt || null,
       };
 
       if (field.fieldPhotoAssetId) {
@@ -1834,6 +1915,8 @@ async function resetDraftState(showResetBanner) {
     template.workerName = '';
     template.fields.forEach((field) => {
       field.answerValue = '';
+      field.lastAnsweredAt = '';
+      field.lastAnsweredAt = '';
       field.fieldPhotoAssetId = '';
       field.ticket.saved = false;
       field.ticket.reason = '';
