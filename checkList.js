@@ -1,6 +1,6 @@
 //const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
-const serverURL = "http://192.168.0.186:3000";
+const serverURL = "http://192.168.0.149:3000";
 
 'use strict';
 
@@ -45,6 +45,7 @@ const appState = {
     open: false,
     search: '',
   },
+  footerExpanded: false,
   activeTicket: null,
   activeKeypad: null,
   imagePreview: null,
@@ -145,6 +146,9 @@ function bindStaticEvents() {
   dom.ticketModal.addEventListener('input', handleTicketModalInput);
   dom.keypadModal.addEventListener('click', handleKeypadModalClick);
   dom.imagePreviewModal.addEventListener('click', handleImagePreviewClick);
+  document.addEventListener('click', handleDocumentClick);
+  window.addEventListener('scroll', syncHeaderCondensedState, { passive: true });
+  syncHeaderCondensedState();
 
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') return;
@@ -450,8 +454,13 @@ function renderTemplates() {
 
 function renderTemplatePanel(template, templateIndex) {
   const templateCounts = getTemplateCounts(template);
-  const equipmentMarkup = template.equipmentDetails.length > 0
-    ? template.equipmentDetails.map((equipment) => `
+  const visibleEquipment = appState.machine
+    ? template.equipmentDetails.filter((equipment) =>
+        (equipment.name || '').trim().toLowerCase() === appState.machine.trim().toLowerCase()
+      )
+    : template.equipmentDetails;
+  const equipmentMarkup = visibleEquipment.length > 0
+    ? visibleEquipment.map((equipment) => `
         <div class="equipment-card">
           ${equipment.imageURL ? `<img src="${escapeHtml(equipment.imageURL)}" alt="${escapeHtml(equipment.name)}">` : ''}
           <div class="equipment-card__label">${escapeHtml(equipment.name || 'Unknown equipment')}</div>
@@ -470,7 +479,7 @@ function renderTemplatePanel(template, templateIndex) {
           </div>
           <div class="chip-row">
             <span class="chip">Answered ${templateCounts.complete} / ${templateCounts.total}</span>
-            <span class="chip">Equipment ${template.equipmentNames.length}</span>
+            <span class="chip">Equipment ${visibleEquipment.length}</span>
             ${template.startDate ? `<span class="chip chip--muted">Start ${escapeHtml(template.startDate)}</span>` : ''}
           </div>
         </div>
@@ -489,6 +498,9 @@ function renderTemplatePanel(template, templateIndex) {
 function renderFieldCard(template, field, templateIndex, fieldIndex) {
   const fieldKey = getFieldKey(template.templateId, field.fieldId);
   const fieldStatus = getFieldStatus(field);
+  const showTicketButton = shouldShowTicketButton(field);
+  const showPhotoSection = field.photoRequired;
+  const showFieldActions = showTicketButton || showPhotoSection;
   const classNames = [
     'field-card',
     fieldStatus.complete ? 'field-card--complete' : '',
@@ -516,11 +528,13 @@ function renderFieldCard(template, field, templateIndex, fieldIndex) {
         <div class="field-control">
           ${renderFieldControl(template, field)}
         </div>
+        ${showFieldActions ? `
         <div class="field-actions">
           <div class="field-thumb-grid">
-            ${renderFieldPhotoSection(template, field)}
+            ${showPhotoSection ? renderFieldPhotoSection(template, field) : ''}
           </div>
           <div class="field-option-grid">
+            ${showTicketButton ? `
             <button
               type="button"
               class="utility-button ${fieldStatus.ticketNeeded ? 'utility-button--ticket-required' : 'utility-button--ghost'}"
@@ -528,8 +542,10 @@ function renderFieldCard(template, field, templateIndex, fieldIndex) {
               data-template-id="${escapeHtml(template.templateId)}"
               data-field-id="${escapeHtml(field.fieldId)}"
             >${escapeHtml(field.ticket.saved ? 'Ticket saved' : fieldStatus.ticketNeeded ? 'Ticket required' : 'Open ticket')}</button>
+            ` : ''}
           </div>
         </div>
+        ` : ''}
         ${renderTicketSummary(field)}
       </div>
     </article>
@@ -563,10 +579,10 @@ function renderFieldControl(template, field) {
   if (field.type === 'checkbox') {
     const current = normalizeText(field.answerValue).toUpperCase();
     return `
-      <div class="choice-grid">
+      <div class="choice-grid choice-grid--checkbox">
         <button
           type="button"
-          class="choice-button ${current === 'OK' ? 'is-active' : ''}"
+          class="choice-button choice-button--ok ${current === 'OK' ? 'is-active' : ''}"
           data-action="set-checkbox"
           data-template-id="${escapeHtml(template.templateId)}"
           data-field-id="${escapeHtml(field.fieldId)}"
@@ -703,6 +719,10 @@ function renderFieldPhotoSection(template, field) {
 }
 
 function renderTicketSummary(field) {
+  if (!shouldShowTicketButton(field)) {
+    return '';
+  }
+
   if (!field.ticket.saved) {
     return fieldRequiresTicket(field)
       ? '<div class="ticket-summary"><strong>Ticket needed</strong>Answer is abnormal. Save a ticket before submit.</div>'
@@ -724,6 +744,8 @@ function renderFooter() {
   dom.actionFooter.classList.toggle('hidden', !templatesReady);
 
   if (!templatesReady) return;
+
+  dom.actionFooter.classList.toggle('action-footer--collapsed', !appState.footerExpanded);
 
   if (counts.complete === counts.total && counts.total > 0) {
     dom.footerStatus.textContent = 'All cards are complete. Ready to submit.';
@@ -1299,6 +1321,11 @@ function saveTicketModal() {
     return;
   }
 
+  if (appState.activeTicket.imageAssetIds.length === 0) {
+    showBanner('Add at least one ticket photo before saving.', 'danger', 2200);
+    return;
+  }
+
   field.ticket.saved = true;
   field.ticket.reason = reason;
   field.ticket.imageAssetIds = [...appState.activeTicket.imageAssetIds];
@@ -1425,6 +1452,7 @@ function getChecklistCounts() {
       total += 1;
       if (isFieldComplete(field)) complete += 1;
       if (fieldRequiresTicket(field) && !field.ticket.saved) pendingTickets += 1;
+      if (fieldRequiresTicket(field) && field.ticket.saved && !ticketHasRequiredImage(field)) pendingTickets += 1;
       if (field.photoRequired && !field.fieldPhotoAssetId) pendingPhotos += 1;
     });
   });
@@ -1467,7 +1495,8 @@ function fieldRequiresTicket(field) {
 function isFieldComplete(field) {
   const hasAnswer = isFieldAnswered(field);
   const hasPhoto = !field.photoRequired || Boolean(field.fieldPhotoAssetId);
-  const hasRequiredTicket = !fieldRequiresTicket(field) || (field.ticket.saved && normalizeText(field.ticket.reason).length > 0);
+  const hasRequiredTicket = !fieldRequiresTicket(field)
+    || (field.ticket.saved && normalizeText(field.ticket.reason).length > 0 && ticketHasRequiredImage(field));
   return hasAnswer && hasPhoto && hasRequiredTicket;
 }
 
@@ -1484,6 +1513,15 @@ function getFieldStatus(field) {
   if (fieldRequiresTicket(field) && !field.ticket.saved) {
     return {
       label: 'Ticket needed',
+      className: 'status-pill--ticket',
+      complete: false,
+      ticketNeeded: true,
+    };
+  }
+
+  if (fieldRequiresTicket(field) && field.ticket.saved && !ticketHasRequiredImage(field)) {
+    return {
+      label: 'Ticket photo needed',
       className: 'status-pill--ticket',
       complete: false,
       ticketNeeded: true,
@@ -1539,6 +1577,8 @@ function describeFieldType(field) {
 
 async function handleSubmitRequest() {
   if (appState.submitting || appState.templates.length === 0) return;
+
+  setFooterExpanded(true);
 
   const firstIncomplete = collectValidationErrors();
   renderTemplates();
@@ -1596,6 +1636,8 @@ function collectValidationErrors() {
 function scrollToField(templateId, fieldId) {
   const target = document.getElementById(getFieldDomId(templateId, fieldId));
   if (!target) return;
+  target.classList.add('field-card--attention-live');
+  window.setTimeout(() => target.classList.remove('field-card--attention-live'), 2200);
   target.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
@@ -1624,15 +1666,23 @@ async function buildSubmissionPayload() {
       };
 
       if (field.fieldPhotoAssetId) {
-        answer.fieldPhotoData = await getAsset(field.fieldPhotoAssetId);
+        const fieldPhotoData = await getAsset(field.fieldPhotoAssetId);
+        if (!fieldPhotoData) {
+          throw new Error(`Could not load the saved field photo for ${field.label}. Capture it again before submit.`);
+        }
+        answer.fieldPhotoData = fieldPhotoData;
       }
 
       if (field.ticket.saved) {
+        const ticketImagesData = (await Promise.all(field.ticket.imageAssetIds.map((assetId) => getAsset(assetId)))).filter(Boolean);
+        if (ticketImagesData.length === 0) {
+          throw new Error(`Could not load the saved ticket photo for ${field.label}. Open the ticket and add the photo again.`);
+        }
         answer.ticket = {
           saved: true,
           ticketKey: field.ticket.ticketKey,
           reason: field.ticket.reason,
-          imagesData: await Promise.all(field.ticket.imageAssetIds.map((assetId) => getAsset(assetId))),
+          imagesData: ticketImagesData,
         };
       }
 
@@ -1645,8 +1695,8 @@ async function buildSubmissionPayload() {
       description: template.description,
       schedule: template.schedule,
       startDate: template.startDate,
-      equipmentIds: template.equipmentIds,
-      equipmentNames: template.equipmentNames,
+      equipmentId: resolveTemplateMachineId(template),
+      加工設備: appState.machine,
       selectedMachine: appState.machine,
       selectedMachineId: resolveTemplateMachineId(template),
       workerName: template.workerName || appState.selectedWorkerName,
@@ -1685,6 +1735,7 @@ async function resetDraftState(showResetBanner) {
   removeDraftState();
 
   appState.selectedWorkerName = '';
+  appState.footerExpanded = false;
   appState.validationErrors.clear();
   appState.activeTicket = null;
   appState.activeKeypad = null;
@@ -1711,6 +1762,31 @@ async function resetDraftState(showResetBanner) {
   }
 
   renderApp();
+}
+
+function shouldShowTicketButton(field) {
+  return field.type !== 'name';
+}
+
+function ticketHasRequiredImage(field) {
+  return Array.isArray(field.ticket?.imageAssetIds) && field.ticket.imageAssetIds.length > 0;
+}
+
+function setFooterExpanded(expanded) {
+  appState.footerExpanded = Boolean(expanded);
+  renderFooter();
+}
+
+function syncHeaderCondensedState() {
+  document.body.classList.toggle('header-condensed', window.scrollY > 36);
+}
+
+function handleDocumentClick(event) {
+  if (!appState.footerExpanded) return;
+  if (!dom.actionFooter || dom.actionFooter.classList.contains('hidden')) return;
+  if (dom.actionFooter.contains(event.target)) return;
+  if (dom.workerModal.contains(event.target) || dom.ticketModal.contains(event.target) || dom.keypadModal.contains(event.target) || dom.imagePreviewModal.contains(event.target)) return;
+  setFooterExpanded(false);
 }
 
 function collectAllAssetIds() {
