@@ -562,11 +562,6 @@ function renderReferenceThumb(field) {
       data-title="${escapeHtml(field.label)}"
     >
       <img src="${escapeHtml(field.imageURL)}" alt="${escapeHtml(field.label)} reference image">
-      <div>
-        <span class="reference-thumb__label">Reference image</span>
-        <strong>${escapeHtml(field.label)}</strong>
-        <div class="muted">Tap to view larger</div>
-      </div>
     </button>
   `;
 }
@@ -1008,7 +1003,24 @@ function handleWorkerModalClick(event) {
 function handleWorkerModalInput(event) {
   if (!event.target.matches('[data-worker-search]')) return;
   appState.activeWorkerModal.search = event.target.value;
-  renderWorkerModal();
+  // Partial update: only replace the list, not the whole modal, so the input keeps focus
+  const workerList = dom.workerModal.querySelector('.worker-list');
+  if (!workerList) return;
+  const filteredWorkers = appState.workers.filter((worker) => {
+    if (!appState.activeWorkerModal.search) return true;
+    return worker.name.toLowerCase().includes(appState.activeWorkerModal.search.toLowerCase());
+  });
+  workerList.innerHTML = filteredWorkers.length === 0
+    ? '<div class="chip chip--muted">No workers match this search.</div>'
+    : filteredWorkers.map((worker) => `
+          <button type="button" class="worker-option" data-action="choose-worker" data-worker-name="${escapeHtml(worker.name)}">
+            <div>
+              <div class="worker-option__name">${escapeHtml(worker.name)}</div>
+              <div class="worker-option__dept">${escapeHtml(worker['部署'] || '')}</div>
+            </div>
+            <span>→</span>
+          </button>
+        `).join('');
 }
 
 function handleTicketModalClick(event) {
@@ -1172,6 +1184,12 @@ function getActiveKeypadContext() {
   };
 }
 
+function updateKeypadDisplay() {
+  if (!appState.activeKeypad) return;
+  const displayEl = dom.keypadModal.querySelector('.keypad-display__value');
+  if (displayEl) displayEl.textContent = appState.activeKeypad.value || '0';
+}
+
 function appendKeypadValue(token) {
   if (!appState.activeKeypad) return;
 
@@ -1179,7 +1197,7 @@ function appendKeypadValue(token) {
   if (token === '-') {
     if (current.includes('-')) return;
     appState.activeKeypad.value = current ? current : '-';
-    renderKeypadModal();
+    updateKeypadDisplay();
     return;
   }
 
@@ -1190,24 +1208,24 @@ function appendKeypadValue(token) {
     } else {
       appState.activeKeypad.value = `${current}.`;
     }
-    renderKeypadModal();
+    updateKeypadDisplay();
     return;
   }
 
   appState.activeKeypad.value = `${current}${token}`;
-  renderKeypadModal();
+  updateKeypadDisplay();
 }
 
 function backspaceKeypadValue() {
   if (!appState.activeKeypad) return;
   appState.activeKeypad.value = appState.activeKeypad.value.slice(0, -1);
-  renderKeypadModal();
+  updateKeypadDisplay();
 }
 
 function clearKeypadValue() {
   if (!appState.activeKeypad) return;
   appState.activeKeypad.value = '';
-  renderKeypadModal();
+  updateKeypadDisplay();
 }
 
 function closeKeypadModal() {
