@@ -34,6 +34,9 @@ const FIELD_TIME_FORMATTER = new Intl.DateTimeFormat('ja-JP', {
   second: '2-digit',
   hour12: false,
 });
+const PHOTO_EDITOR_BRUSH_COLOR = '#d3312a';
+const PHOTO_EDITOR_BRUSH_SIZE = 18;
+const PHOTO_EDITOR_OUTPUT_QUALITY = 0.84;
 
 const appState = {
   factory: '',
@@ -53,6 +56,7 @@ const appState = {
   },
   activeTicket: null,
   activeKeypad: null,
+  photoEditor: null,
   imagePreview: null,
 };
 
@@ -133,6 +137,7 @@ function cacheDom() {
   dom.workerModal = document.getElementById('workerModal');
   dom.ticketModal = document.getElementById('ticketModal');
   dom.keypadModal = document.getElementById('keypadModal');
+  dom.photoEditorModal = document.getElementById('photoEditorModal');
   dom.imagePreviewModal = document.getElementById('imagePreviewModal');
   dom.submitOverlay = document.getElementById('submitOverlay');
 }
@@ -148,12 +153,22 @@ function bindStaticEvents() {
   dom.ticketModal.addEventListener('click', handleTicketModalClick);
   dom.ticketModal.addEventListener('input', handleTicketModalInput);
   dom.keypadModal.addEventListener('click', handleKeypadModalClick);
+  dom.photoEditorModal.addEventListener('click', handlePhotoEditorClick);
+  dom.photoEditorModal.addEventListener('pointerdown', handlePhotoEditorPointerDown);
+  dom.photoEditorModal.addEventListener('pointermove', handlePhotoEditorPointerMove);
+  dom.photoEditorModal.addEventListener('pointerup', finishPhotoEditorStroke);
+  dom.photoEditorModal.addEventListener('pointercancel', finishPhotoEditorStroke);
   dom.imagePreviewModal.addEventListener('click', handleImagePreviewClick);
   window.addEventListener('scroll', syncHeaderCondensedState, { passive: true });
+  window.addEventListener('resize', syncPhotoEditorLayout, { passive: true });
   syncHeaderCondensedState();
 
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') return;
+    if (appState.photoEditor) {
+      closePhotoEditor('');
+      return;
+    }
     if (appState.imagePreview) {
       closeImagePreview();
       return;
@@ -379,6 +394,7 @@ function renderApp() {
   renderWorkerModal();
   renderTicketModal();
   renderKeypadModal();
+  renderPhotoEditorModal();
   renderImagePreviewModal();
   renderSubmitOverlay();
 }
@@ -949,6 +965,225 @@ function renderKeypadModal() {
   `;
 }
 
+function renderPhotoEditorModal() {
+  if (!appState.photoEditor) {
+    dom.photoEditorModal.classList.add('hidden');
+    dom.photoEditorModal.innerHTML = '';
+    return;
+  }
+
+  const editor = appState.photoEditor;
+  const hasScribble = editor.strokes.length > 0;
+  const hasRedoHistory = editor.redoStrokes.length > 0;
+  const scribbleActive = editor.activeTool === 'scribble';
+  const helperText = scribbleActive
+    ? 'Draw directly on the photo. The scribble is optional and will be flattened into the saved image.'
+    : hasScribble
+      ? 'Scribble added. Use photo to keep the flattened result, or switch back to Scribble to keep drawing.'
+      : 'Overlay tools are optional. Use photo to keep the original image as-is.';
+
+  dom.photoEditorModal.classList.remove('hidden');
+  dom.photoEditorModal.innerHTML = `
+    <div class="photo-editor" role="dialog" aria-modal="true" aria-label="Photo overlay editor">
+      <div class="modal-head">
+        <div>
+          <h2 class="modal-title">Photo overlay</h2>
+          <p class="modal-subtitle">${escapeHtml(editor.title || 'Captured photo')} · Pick an optional overlay tool below before saving the photo.</p>
+        </div>
+        <button type="button" class="modal-close" data-action="close-photo-editor" aria-label="Close">×</button>
+      </div>
+      <div class="photo-editor__stage">
+        <div class="photo-editor__canvas-stack">
+          <canvas class="photo-editor__canvas" data-photo-editor-canvas="base" width="${editor.sourceImage.width}" height="${editor.sourceImage.height}"></canvas>
+          <canvas class="photo-editor__canvas photo-editor__canvas--overlay ${scribbleActive ? 'photo-editor__canvas--active' : ''}" data-photo-editor-canvas="overlay" width="${editor.sourceImage.width}" height="${editor.sourceImage.height}"></canvas>
+        </div>
+      </div>
+      <div class="photo-editor__tools" aria-label="Photo overlay tools">
+        <button type="button" class="photo-tool ${!scribbleActive ? 'photo-tool--active' : ''}" data-action="select-photo-tool" data-tool="photo">
+          <span class="photo-tool__thumb">
+            <canvas data-photo-editor-preview="photo" width="84" height="84" aria-hidden="true"></canvas>
+          </span>
+          <span class="photo-tool__label">Photo</span>
+        </button>
+        <button type="button" class="photo-tool ${scribbleActive ? 'photo-tool--active' : ''}" data-action="select-photo-tool" data-tool="scribble">
+          <span class="photo-tool__thumb">
+            <canvas data-photo-editor-preview="scribble" width="84" height="84" aria-hidden="true"></canvas>
+          </span>
+          <span class="photo-tool__label">Scribble</span>
+        </button>
+      </div>
+      <div class="photo-editor__footer">
+        <div class="muted">${escapeHtml(helperText)}</div>
+        <div class="photo-editor__actions">
+          <button type="button" class="utility-button utility-button--ghost" data-action="undo-photo-scribble" ${hasScribble ? '' : 'disabled'}>Undo</button>
+          <button type="button" class="utility-button utility-button--ghost" data-action="redo-photo-scribble" ${hasRedoHistory ? '' : 'disabled'}>Redo</button>
+          <button type="button" class="utility-button utility-button--ghost" data-action="clear-photo-scribble" ${hasScribble ? '' : 'disabled'}>Clear scribble</button>
+          <button type="button" class="modal-button modal-button--ghost" data-action="close-photo-editor">Cancel</button>
+          <button type="button" class="modal-button modal-button--primary" data-action="apply-photo-editor">Use photo</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  syncPhotoEditorCanvases();
+  window.requestAnimationFrame(syncPhotoEditorLayout);
+}
+
+function syncPhotoEditorCanvases() {
+  if (!appState.photoEditor) return;
+
+  const baseCanvas = dom.photoEditorModal.querySelector('[data-photo-editor-canvas="base"]');
+  const overlayCanvas = dom.photoEditorModal.querySelector('[data-photo-editor-canvas="overlay"]');
+
+  if (baseCanvas) {
+    const context = baseCanvas.getContext('2d');
+    if (context) {
+      context.clearRect(0, 0, baseCanvas.width, baseCanvas.height);
+      context.drawImage(appState.photoEditor.sourceImage, 0, 0, baseCanvas.width, baseCanvas.height);
+    }
+  }
+
+  if (overlayCanvas) {
+    drawPhotoEditorOverlayCanvas(overlayCanvas);
+  }
+
+  syncPhotoEditorToolPreviews();
+}
+
+function syncPhotoEditorLayout() {
+  if (!appState.photoEditor) return;
+
+  const modal = dom.photoEditorModal.querySelector('.photo-editor');
+  const stage = dom.photoEditorModal.querySelector('.photo-editor__stage');
+  const canvasStack = dom.photoEditorModal.querySelector('.photo-editor__canvas-stack');
+  if (!modal || !stage || !canvasStack) return;
+
+  const overlayStyle = window.getComputedStyle(dom.photoEditorModal);
+  const modalStyle = window.getComputedStyle(modal);
+  const stageStyle = window.getComputedStyle(stage);
+
+  const overlayPadding = (parseFloat(overlayStyle.paddingTop) || 0) + (parseFloat(overlayStyle.paddingBottom) || 0);
+  const modalPadding = (parseFloat(modalStyle.paddingTop) || 0) + (parseFloat(modalStyle.paddingBottom) || 0);
+  const stagePaddingY = (parseFloat(stageStyle.paddingTop) || 0) + (parseFloat(stageStyle.paddingBottom) || 0);
+  const stagePaddingX = (parseFloat(stageStyle.paddingLeft) || 0) + (parseFloat(stageStyle.paddingRight) || 0);
+  const rowGap = parseFloat(modalStyle.rowGap || modalStyle.gap || '0') || 0;
+
+  const availableHeight = Math.max(220, window.innerHeight - overlayPadding);
+  const reservedHeight = modalPadding
+    + stagePaddingY
+    + rowGap * 3
+    + (modal.querySelector('.modal-head')?.offsetHeight || 0)
+    + (modal.querySelector('.photo-editor__tools')?.offsetHeight || 0)
+    + (modal.querySelector('.photo-editor__footer')?.offsetHeight || 0);
+  const stageMaxHeight = Math.max(180, Math.floor(availableHeight - reservedHeight));
+  const stageInnerWidth = Math.max(180, Math.floor(stage.clientWidth - stagePaddingX));
+  const imageRatio = appState.photoEditor.sourceImage.width / Math.max(appState.photoEditor.sourceImage.height, 1);
+
+  let displayWidth = stageInnerWidth;
+  let displayHeight = displayWidth / imageRatio;
+
+  if (displayHeight > stageMaxHeight) {
+    displayHeight = stageMaxHeight;
+    displayWidth = displayHeight * imageRatio;
+  }
+
+  modal.style.setProperty('--photo-editor-stage-max-height', `${stageMaxHeight}px`);
+  modal.style.setProperty('--photo-editor-display-width', `${Math.max(1, Math.floor(displayWidth))}px`);
+  modal.style.setProperty('--photo-editor-display-height', `${Math.max(1, Math.floor(displayHeight))}px`);
+  canvasStack.style.width = `var(--photo-editor-display-width)`;
+  canvasStack.style.height = `var(--photo-editor-display-height)`;
+}
+
+function syncPhotoEditorToolPreviews() {
+  if (!appState.photoEditor) return;
+
+  const previewCanvases = Array.from(dom.photoEditorModal.querySelectorAll('canvas[data-photo-editor-preview]'));
+  previewCanvases.forEach((canvas) => {
+    drawPhotoEditorPreviewCanvas(canvas, normalizeText(canvas.dataset.photoEditorPreview));
+  });
+}
+
+function drawPhotoEditorOverlayCanvas(canvas) {
+  if (!appState.photoEditor) return;
+  const context = canvas.getContext('2d');
+  if (!context) return;
+
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  drawPhotoEditorStrokes(context, appState.photoEditor.strokes);
+}
+
+function drawPhotoEditorPreviewCanvas(canvas, previewType) {
+  if (!appState.photoEditor) return;
+  const context = canvas.getContext('2d');
+  if (!context) return;
+
+  const box = drawImageContain(context, appState.photoEditor.sourceImage, canvas.width, canvas.height, 'rgba(15, 23, 42, 0.92)');
+  if (previewType === 'scribble') {
+    const strokes = appState.photoEditor.strokes.length > 0
+      ? appState.photoEditor.strokes
+      : [createPhotoEditorSampleStroke(appState.photoEditor.sourceImage.width, appState.photoEditor.sourceImage.height)];
+    drawPhotoEditorStrokes(context, strokes, box.scale, box.offsetX, box.offsetY);
+  }
+}
+
+function drawImageContain(context, image, width, height, background) {
+  context.clearRect(0, 0, width, height);
+  context.fillStyle = background;
+  context.fillRect(0, 0, width, height);
+
+  const scale = Math.min(width / image.width, height / image.height);
+  const drawWidth = image.width * scale;
+  const drawHeight = image.height * scale;
+  const offsetX = (width - drawWidth) / 2;
+  const offsetY = (height - drawHeight) / 2;
+
+  context.drawImage(image, offsetX, offsetY, drawWidth, drawHeight);
+  return { scale, offsetX, offsetY };
+}
+
+function drawPhotoEditorStrokes(context, strokes, scale = 1, offsetX = 0, offsetY = 0) {
+  strokes.forEach((stroke) => {
+    if (!stroke || !Array.isArray(stroke.points) || stroke.points.length === 0) return;
+
+    context.save();
+    context.strokeStyle = stroke.color || PHOTO_EDITOR_BRUSH_COLOR;
+    context.fillStyle = stroke.color || PHOTO_EDITOR_BRUSH_COLOR;
+    context.lineWidth = Math.max(2, (stroke.width || PHOTO_EDITOR_BRUSH_SIZE) * scale);
+    context.lineCap = 'round';
+    context.lineJoin = 'round';
+
+    if (stroke.points.length === 1) {
+      const point = stroke.points[0];
+      context.beginPath();
+      context.arc(offsetX + (point.x * scale), offsetY + (point.y * scale), context.lineWidth / 2, 0, Math.PI * 2);
+      context.fill();
+      context.restore();
+      return;
+    }
+
+    context.beginPath();
+    context.moveTo(offsetX + (stroke.points[0].x * scale), offsetY + (stroke.points[0].y * scale));
+    for (let index = 1; index < stroke.points.length; index += 1) {
+      context.lineTo(offsetX + (stroke.points[index].x * scale), offsetY + (stroke.points[index].y * scale));
+    }
+    context.stroke();
+    context.restore();
+  });
+}
+
+function createPhotoEditorSampleStroke(width, height) {
+  return {
+    color: PHOTO_EDITOR_BRUSH_COLOR,
+    width: PHOTO_EDITOR_BRUSH_SIZE,
+    points: [
+      { x: width * 0.18, y: height * 0.72 },
+      { x: width * 0.36, y: height * 0.48 },
+      { x: width * 0.56, y: height * 0.63 },
+      { x: width * 0.78, y: height * 0.3 },
+    ],
+  };
+}
+
 function renderImagePreviewModal() {
   if (!appState.imagePreview) {
     dom.imagePreviewModal.classList.add('hidden');
@@ -1166,6 +1401,175 @@ function handleKeypadModalClick(event) {
 function handleImagePreviewClick(event) {
   if (event.target === dom.imagePreviewModal || event.target.closest('[data-action="close-image-preview"]')) {
     closeImagePreview();
+  }
+}
+
+function handlePhotoEditorClick(event) {
+  if (event.target === dom.photoEditorModal) {
+    closePhotoEditor('');
+    return;
+  }
+
+  const trigger = event.target.closest('[data-action]');
+  if (!trigger) return;
+
+  switch (trigger.dataset.action) {
+    case 'close-photo-editor':
+      closePhotoEditor('');
+      break;
+    case 'apply-photo-editor':
+      closePhotoEditor(buildPhotoEditorOutput());
+      break;
+    case 'select-photo-tool':
+      selectPhotoEditorTool(trigger.dataset.tool);
+      break;
+    case 'undo-photo-scribble':
+      undoPhotoEditorScribble();
+      break;
+    case 'redo-photo-scribble':
+      redoPhotoEditorScribble();
+      break;
+    case 'clear-photo-scribble':
+      clearPhotoEditorScribble();
+      break;
+    default:
+      break;
+  }
+}
+
+function handlePhotoEditorPointerDown(event) {
+  const canvas = event.target.closest('[data-photo-editor-canvas="overlay"]');
+  if (!canvas || !appState.photoEditor || appState.photoEditor.activeTool !== 'scribble') return;
+
+  event.preventDefault();
+  const point = getPhotoEditorCanvasPoint(canvas, event);
+  const stroke = {
+    color: PHOTO_EDITOR_BRUSH_COLOR,
+    width: PHOTO_EDITOR_BRUSH_SIZE,
+    points: [point],
+  };
+
+  appState.photoEditor.redoStrokes = [];
+  appState.photoEditor.strokes.push(stroke);
+  appState.photoEditor.currentStroke = stroke;
+  appState.photoEditor.drawing = true;
+  appState.photoEditor.pointerId = event.pointerId;
+  canvas.setPointerCapture?.(event.pointerId);
+  drawPhotoEditorOverlayCanvas(canvas);
+}
+
+function handlePhotoEditorPointerMove(event) {
+  if (!appState.photoEditor?.drawing) return;
+  if (appState.photoEditor.pointerId !== null && event.pointerId !== appState.photoEditor.pointerId) return;
+
+  const canvas = dom.photoEditorModal.querySelector('[data-photo-editor-canvas="overlay"]');
+  const currentStroke = appState.photoEditor.currentStroke;
+  if (!canvas || !currentStroke) return;
+
+  event.preventDefault();
+  const point = getPhotoEditorCanvasPoint(canvas, event);
+  const lastPoint = currentStroke.points[currentStroke.points.length - 1];
+  if (lastPoint && Math.hypot(lastPoint.x - point.x, lastPoint.y - point.y) < 1.5) return;
+
+  currentStroke.points.push(point);
+  drawPhotoEditorOverlayCanvas(canvas);
+}
+
+function finishPhotoEditorStroke(event) {
+  if (!appState.photoEditor?.drawing) return;
+  if (event.type !== 'pointercancel' && appState.photoEditor.pointerId !== null && event.pointerId !== appState.photoEditor.pointerId) return;
+
+  appState.photoEditor.drawing = false;
+  appState.photoEditor.pointerId = null;
+  appState.photoEditor.currentStroke = null;
+  syncPhotoEditorToolPreviews();
+}
+
+function getPhotoEditorCanvasPoint(canvas, event) {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / Math.max(rect.width, 1);
+  const scaleY = canvas.height / Math.max(rect.height, 1);
+
+  return {
+    x: clampNumber((event.clientX - rect.left) * scaleX, 0, canvas.width),
+    y: clampNumber((event.clientY - rect.top) * scaleY, 0, canvas.height),
+  };
+}
+
+function clampNumber(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function selectPhotoEditorTool(tool) {
+  if (!appState.photoEditor) return;
+  appState.photoEditor.activeTool = tool === 'scribble' ? 'scribble' : 'photo';
+  renderPhotoEditorModal();
+}
+
+function undoPhotoEditorScribble() {
+  if (!appState.photoEditor || appState.photoEditor.strokes.length === 0) return;
+
+  appState.photoEditor.drawing = false;
+  appState.photoEditor.pointerId = null;
+  appState.photoEditor.currentStroke = null;
+  const stroke = appState.photoEditor.strokes.pop();
+  if (stroke) {
+    appState.photoEditor.redoStrokes.push(stroke);
+  }
+  renderPhotoEditorModal();
+}
+
+function redoPhotoEditorScribble() {
+  if (!appState.photoEditor || appState.photoEditor.redoStrokes.length === 0) return;
+
+  appState.photoEditor.drawing = false;
+  appState.photoEditor.pointerId = null;
+  appState.photoEditor.currentStroke = null;
+  const stroke = appState.photoEditor.redoStrokes.pop();
+  if (stroke) {
+    appState.photoEditor.strokes.push(stroke);
+  }
+  renderPhotoEditorModal();
+}
+
+function clearPhotoEditorScribble() {
+  if (!appState.photoEditor) return;
+  appState.photoEditor.strokes = [];
+  appState.photoEditor.redoStrokes = [];
+  appState.photoEditor.currentStroke = null;
+  appState.photoEditor.drawing = false;
+  appState.photoEditor.pointerId = null;
+  renderPhotoEditorModal();
+}
+
+function buildPhotoEditorOutput() {
+  if (!appState.photoEditor) return '';
+  if (appState.photoEditor.strokes.length === 0) {
+    return appState.photoEditor.sourceDataUrl;
+  }
+
+  const canvas = document.createElement('canvas');
+  canvas.width = appState.photoEditor.sourceImage.width;
+  canvas.height = appState.photoEditor.sourceImage.height;
+  const context = canvas.getContext('2d');
+  if (!context) {
+    return appState.photoEditor.sourceDataUrl;
+  }
+
+  context.drawImage(appState.photoEditor.sourceImage, 0, 0, canvas.width, canvas.height);
+  drawPhotoEditorStrokes(context, appState.photoEditor.strokes);
+  return canvas.toDataURL('image/jpeg', PHOTO_EDITOR_OUTPUT_QUALITY);
+}
+
+function closePhotoEditor(result) {
+  if (!appState.photoEditor) return;
+
+  const resolveEditor = appState.photoEditor.resolve;
+  appState.photoEditor = null;
+  renderPhotoEditorModal();
+
+  if (typeof resolveEditor === 'function') {
+    resolveEditor(result || '');
   }
 }
 
@@ -1461,13 +1865,12 @@ async function addTicketImages() {
     return;
   }
 
-  const files = await pickImagesFromDevice(false);
-  if (files.length === 0) return;
+  const field = getFieldByIds(appState.activeTicket.templateId, appState.activeTicket.fieldId);
+  const editedDataUrl = await capturePhotoWithOptionalOverlay(field ? `${field.label} ticket photo` : 'Ticket photo');
+  if (!editedDataUrl) return;
 
-  const file = files[0];
-  const compressedDataUrl = await compressImageFile(file, 1600, 0.78);
   const assetId = createAssetId('ticket');
-  await saveAsset(assetId, compressedDataUrl);
+  await saveAsset(assetId, editedDataUrl);
   appState.activeTicket.imageAssetIds.push(assetId);
   appState.activeTicket.imagesInvalid = false;
   renderTicketModal();
@@ -1504,17 +1907,15 @@ async function captureFieldPhoto(templateId, fieldId) {
   const field = getFieldByIds(templateId, fieldId);
   if (!field) return;
 
-  const files = await pickImagesFromDevice(false);
-  if (files.length === 0) return;
-
-  const compressedDataUrl = await compressImageFile(files[0], 1600, 0.78);
+  const editedDataUrl = await capturePhotoWithOptionalOverlay(`${field.label} photo`);
+  if (!editedDataUrl) return;
 
   if (field.fieldPhotoAssetId) {
     await deleteAsset(field.fieldPhotoAssetId);
   }
 
   const assetId = createAssetId('field');
-  await saveAsset(assetId, compressedDataUrl);
+  await saveAsset(assetId, editedDataUrl);
   field.fieldPhotoAssetId = assetId;
   clearValidationError(templateId, fieldId);
   persistDraftState();
@@ -1909,6 +2310,7 @@ async function resetDraftState(showResetBanner) {
   appState.validationErrors.clear();
   appState.activeTicket = null;
   appState.activeKeypad = null;
+  appState.photoEditor = null;
   appState.imagePreview = null;
 
   appState.templates.forEach((template) => {
@@ -2022,6 +2424,14 @@ async function compressImageFile(file, maxWidth, quality) {
   return canvas.toDataURL('image/jpeg', quality);
 }
 
+async function capturePhotoWithOptionalOverlay(title) {
+  const files = await pickImagesFromDevice(false);
+  if (files.length === 0) return '';
+
+  const compressedDataUrl = await compressImageFile(files[0], 1600, 0.78);
+  return openPhotoEditor(compressedDataUrl, title);
+}
+
 function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -2038,6 +2448,33 @@ function loadImage(src) {
     image.onerror = () => reject(new Error('Failed to load image for compression.'));
     image.src = src;
   });
+}
+
+async function openPhotoEditor(sourceDataUrl, title) {
+  if (!sourceDataUrl) return '';
+
+  try {
+    const sourceImage = await loadImage(sourceDataUrl);
+    return await new Promise((resolve) => {
+      appState.photoEditor = {
+        title: normalizeText(title) || 'Captured photo',
+        sourceDataUrl,
+        sourceImage,
+        activeTool: 'photo',
+        strokes: [],
+        redoStrokes: [],
+        drawing: false,
+        pointerId: null,
+        currentStroke: null,
+        resolve,
+      };
+      renderPhotoEditorModal();
+    });
+  } catch (error) {
+    console.warn('Photo editor initialization failed:', error);
+    showBanner('Photo overlay tools are unavailable. The original photo will be used.', 'warning', 2200);
+    return sourceDataUrl;
+  }
 }
 
 async function openAssetDatabase() {

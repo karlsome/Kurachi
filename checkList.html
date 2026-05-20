@@ -611,6 +611,19 @@
       border-color: rgba(45, 41, 34, 0.2);
     }
 
+    .choice-button:disabled,
+    .surface-button:disabled,
+    .option-chip:disabled,
+    .utility-button:disabled,
+    .footer-button:disabled,
+    .modal-button:disabled,
+    .worker-option:disabled {
+      opacity: 0.44;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+
     .choice-button.is-active,
     .surface-button.is-active,
     .option-chip.is-active {
@@ -871,6 +884,11 @@
       backdrop-filter: blur(8px);
     }
 
+    #photoEditorModal {
+      align-items: stretch;
+      padding: clamp(10px, 2vw, 18px);
+    }
+
     .modal-panel {
       width: min(100%, 720px);
       max-height: min(88vh, 980px);
@@ -1071,6 +1089,129 @@
       line-height: 1.5;
     }
 
+    .photo-editor {
+      width: min(100%, 1120px);
+      max-height: 100%;
+      background: rgba(255, 252, 247, 0.98);
+      border-radius: 28px;
+      padding: 18px;
+      box-shadow: 0 32px 72px rgba(18, 12, 8, 0.24);
+      border: 1px solid rgba(45, 41, 34, 0.1);
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto auto;
+      gap: 16px;
+      overflow: hidden;
+      margin: auto;
+      min-width: 0;
+      --photo-editor-stage-max-height: min(58dvh, 620px);
+    }
+
+    .photo-editor__stage {
+      padding: 12px;
+      border-radius: 22px;
+      background: rgba(21, 18, 14, 0.94);
+      min-height: 0;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .photo-editor__canvas-stack {
+      position: relative;
+      overflow: hidden;
+      border-radius: 18px;
+      background: rgba(21, 18, 14, 0.94);
+      max-height: var(--photo-editor-stage-max-height);
+      width: var(--photo-editor-display-width, 100%);
+      height: var(--photo-editor-display-height, auto);
+      max-width: 100%;
+      flex: 0 0 auto;
+    }
+
+    .photo-editor__canvas {
+      width: 100%;
+      height: 100%;
+      max-height: none;
+      display: block;
+    }
+
+    .photo-editor__canvas--overlay {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+    }
+
+    .photo-editor__canvas--overlay.photo-editor__canvas--active {
+      pointer-events: auto;
+      cursor: crosshair;
+      touch-action: none;
+    }
+
+    .photo-editor__tools {
+      display: flex;
+      gap: 12px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+
+    .photo-tool {
+      width: 108px;
+      flex: 0 0 auto;
+      display: grid;
+      gap: 10px;
+      padding: 10px;
+      border-radius: 18px;
+      background: #fff;
+      color: var(--text);
+      border: 1px solid rgba(45, 41, 34, 0.12);
+      box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+      text-align: left;
+    }
+
+    .photo-tool--active {
+      border-color: rgba(20, 59, 52, 0.26);
+      box-shadow: 0 0 0 4px var(--accent-soft);
+    }
+
+    .photo-tool__thumb {
+      width: 100%;
+      aspect-ratio: 1 / 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      border-radius: 14px;
+      border: 1px solid rgba(45, 41, 34, 0.08);
+      background: var(--bg-strong);
+    }
+
+    .photo-tool__thumb canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    .photo-tool__label {
+      font-size: 0.82rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+    }
+
+    .photo-editor__footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 14px;
+    }
+
+    .photo-editor__actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
     .image-preview {
       width: min(100%, 960px);
       background: rgba(255, 252, 247, 0.96);
@@ -1230,6 +1371,7 @@
 
       .app-header__top,
       .summary-panel__row,
+      .photo-editor__footer,
       .image-preview__caption,
       .modal-head {
         flex-direction: column;
@@ -1258,8 +1400,13 @@
         width: 100%;
       }
 
+      #photoEditorModal {
+        padding: 10px;
+      }
+
       .modal-panel,
       .modal-panel--narrow,
+      .photo-editor,
       .submit-overlay__panel,
       .image-preview {
         padding: 16px;
@@ -1267,6 +1414,25 @@
 
       .keypad-grid {
         grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .photo-editor__stage {
+        padding: 8px;
+      }
+
+      .photo-tool {
+        width: 92px;
+        padding: 8px;
+        gap: 8px;
+      }
+
+      .photo-editor__actions {
+        width: 100%;
+        justify-content: flex-start;
+      }
+
+      .photo-editor__actions > button {
+        flex: 1 1 calc(50% - 10px);
       }
     }
   </style>
@@ -1334,6 +1500,7 @@
   <div class="overlay hidden" id="workerModal" aria-hidden="true"></div>
   <div class="overlay hidden" id="ticketModal" aria-hidden="true"></div>
   <div class="overlay hidden" id="keypadModal" aria-hidden="true"></div>
+  <div class="overlay hidden" id="photoEditorModal" aria-hidden="true"></div>
   <div class="overlay hidden" id="imagePreviewModal" aria-hidden="true"></div>
 
   <div class="submit-overlay hidden" id="submitOverlay" aria-hidden="true">
