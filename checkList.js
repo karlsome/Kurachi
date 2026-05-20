@@ -97,7 +97,6 @@ async function initializeCheckListApp() {
       dom.statusValue.textContent = 'No templates';
     } else {
       hideEmptyState();
-      showBanner(`Loaded ${appState.templates.length} template${appState.templates.length === 1 ? '' : 's'} for ${appState.factory} / ${appState.machine}.`, 'info', 2200);
       dom.statusValue.textContent = 'Ready';
     }
   } catch (error) {
@@ -497,7 +496,9 @@ function renderFieldCard(template, field, templateIndex, fieldIndex) {
   const fieldStatus = getFieldStatus(field);
   const showTicketButton = shouldShowTicketButton(field);
   const showPhotoSection = field.photoRequired;
+  const showResetButton = fieldHasResettableState(field);
   const showFieldActions = showTicketButton || showPhotoSection;
+  const showActionRow = showFieldActions || showResetButton;
   const classNames = [
     'field-card',
     fieldStatus.complete ? 'field-card--complete' : '',
@@ -525,13 +526,24 @@ function renderFieldCard(template, field, templateIndex, fieldIndex) {
         <div class="field-control">
           ${renderFieldControl(template, field)}
         </div>
-        ${showFieldActions ? `
+        ${showActionRow ? `
         <div class="field-actions">
+          ${showResetButton ? `
+          <button
+            type="button"
+            class="utility-button utility-button--danger field-reset-button"
+            data-action="reset-field"
+            data-template-id="${escapeHtml(template.templateId)}"
+            data-field-id="${escapeHtml(field.fieldId)}"
+          >Reset</button>
+          ` : ''}
+          ${showPhotoSection ? `
           <div class="field-thumb-grid">
-            ${showPhotoSection ? renderFieldPhotoSection(template, field) : ''}
+            ${renderFieldPhotoSection(template, field)}
           </div>
+          ` : ''}
+          ${showTicketButton ? `
           <div class="field-option-grid">
-            ${showTicketButton ? `
             <button
               type="button"
               class="utility-button ${fieldStatus.ticketNeeded ? 'utility-button--ticket-required' : 'utility-button--ghost'}"
@@ -539,7 +551,8 @@ function renderFieldCard(template, field, templateIndex, fieldIndex) {
               data-template-id="${escapeHtml(template.templateId)}"
               data-field-id="${escapeHtml(field.fieldId)}"
             >${escapeHtml(field.ticket.saved ? 'Ticket saved' : fieldStatus.ticketNeeded ? 'Ticket required' : 'Open ticket')}</button>
-            ` : ''}
+          </div>
+          ` : ''}
           </div>
         </div>
         ` : ''}
@@ -561,6 +574,19 @@ function renderReferenceThumb(field) {
       <img src="${escapeHtml(field.imageURL)}" alt="${escapeHtml(field.label)} reference image">
     </button>
   `;
+}
+
+function fieldHasResettableState(field) {
+  if (!field) return false;
+
+  return normalizeText(field.answerValue) !== ''
+    || Boolean(field.fieldPhotoAssetId)
+    || Boolean(field.ticket?.saved)
+    || normalizeText(field.ticket?.reason) !== ''
+    || (Array.isArray(field.ticket?.imageAssetIds) && field.ticket.imageAssetIds.length > 0)
+    || Boolean(field.ticket?.pendingTouched)
+    || normalizeText(field.ticket?.pendingReason) !== ''
+    || (Array.isArray(field.ticket?.pendingImageAssetIds) && field.ticket.pendingImageAssetIds.length > 0);
 }
 
 function renderFieldControl(template, field) {
@@ -930,6 +956,9 @@ function handleTemplateAreaClick(event) {
       break;
     case 'remove-field-photo':
       void removeFieldPhoto(templateId, fieldId);
+      break;
+    case 'reset-field':
+      void resetFieldCard(templateId, fieldId);
       break;
     case 'open-ticket':
       openTicketModal(templateId, fieldId, false);
@@ -1399,6 +1428,44 @@ async function removeFieldPhoto(templateId, fieldId) {
 
   await deleteAsset(field.fieldPhotoAssetId);
   field.fieldPhotoAssetId = '';
+  persistDraftState();
+  renderApp();
+}
+
+async function resetFieldCard(templateId, fieldId) {
+  const template = getTemplateById(templateId);
+  const field = getFieldByIds(templateId, fieldId);
+  if (!template || !field || !fieldHasResettableState(field)) return;
+
+  const assetIds = new Set();
+  if (field.fieldPhotoAssetId) {
+    assetIds.add(field.fieldPhotoAssetId);
+  }
+
+  (field.ticket.imageAssetIds || []).forEach((assetId) => {
+    if (assetId) assetIds.add(assetId);
+  });
+  (field.ticket.pendingImageAssetIds || []).forEach((assetId) => {
+    if (assetId) assetIds.add(assetId);
+  });
+
+  await Promise.all(Array.from(assetIds).map((assetId) => deleteAsset(assetId)));
+
+  field.answerValue = '';
+  field.fieldPhotoAssetId = '';
+  field.ticket.saved = false;
+  field.ticket.reason = '';
+  field.ticket.imageAssetIds = [];
+  field.ticket.pendingTouched = false;
+  field.ticket.pendingReason = '';
+  field.ticket.pendingImageAssetIds = [];
+  field.ticket.ticketKey = createTicketKey(templateId, fieldId);
+
+  if (field.type === 'name') {
+    template.workerName = '';
+  }
+
+  clearValidationError(templateId, fieldId);
   persistDraftState();
   renderApp();
 }

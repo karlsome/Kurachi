@@ -88,7 +88,7 @@
     .page-shell {
       width: min(100%, 1120px);
       margin: 0 auto;
-      padding: env(safe-area-inset-top, 0px) 18px calc(92px + env(safe-area-inset-bottom, 0px));
+      padding: env(safe-area-inset-top, 0px) 18px calc(18px + env(safe-area-inset-bottom, 0px));
       animation: page-fade 420ms ease;
     }
 
@@ -239,6 +239,11 @@
       line-height: 1.5;
     }
 
+    .app-header,
+    .summary-panel {
+      display: none;
+    }
+
     .chip-row,
     .equipment-strip,
     .field-tags,
@@ -331,7 +336,7 @@
     .templates-stack {
       display: grid;
       gap: 18px;
-      margin-top: 18px;
+      margin-top: 0;
     }
 
     .template-panel {
@@ -710,6 +715,14 @@
     .field-actions {
       justify-content: space-between;
       align-items: center;
+    }
+
+    .field-reset-button {
+      min-height: 42px;
+      padding: 10px 14px;
+      margin-right: auto;
+      font-size: 0.86rem;
+      box-shadow: none;
     }
 
     .utility-button,
