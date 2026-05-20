@@ -11741,6 +11741,23 @@ app.post('/saveImageURL', async (req, res) => {
 
 
 //updates masterDB
+function sanitizeMasterRecordUpdates(updates = {}) {
+  if (!updates || typeof updates !== "object" || Array.isArray(updates)) {
+    return {};
+  }
+
+  return Object.entries(updates).reduce((sanitized, [key, value]) => {
+    const rawKey = typeof key === "string" ? key : String(key ?? "");
+
+    if (!rawKey.trim() || rawKey === "_id") {
+      return sanitized;
+    }
+
+    sanitized[rawKey] = value;
+    return sanitized;
+  }, {});
+}
+
 app.post("/updateMasterRecord", async (req, res) => {
   const { recordId, updates, username, collectionName } = req.body; // Add collectionName
 
@@ -11762,10 +11779,16 @@ app.post("/updateMasterRecord", async (req, res) => {
       return res.status(404).json({ error: "Record not found" });
     }
 
+    const sanitizedUpdates = sanitizeMasterRecordUpdates(updates);
+
+    if (Object.keys(sanitizedUpdates).length === 0) {
+      return res.json({ success: true, modifiedCount: 0 });
+    }
+
     // Perform update
     const updateResult = await masterColl.updateOne(
       { _id: objectId },
-      { $set: updates }
+      { $set: sanitizedUpdates }
     );
 
     if (updateResult.modifiedCount === 0) {
@@ -11779,7 +11802,7 @@ app.post("/updateMasterRecord", async (req, res) => {
       username,
       timestamp: new Date(Date.now() + 9 * 60 * 60 * 1000), // JST = UTC + 9 hours
       oldData: oldRecord,
-      newData: updates
+      newData: sanitizedUpdates
     });
 
     // Invalidate master data cache for this collection – record was updated
@@ -11817,10 +11840,16 @@ app.post("/batchUpdateMasterRecords", async (req, res) => {
       return res.status(404).json({ error: "No records found" });
     }
 
+    const sanitizedUpdates = sanitizeMasterRecordUpdates(updates);
+
+    if (Object.keys(sanitizedUpdates).length === 0) {
+      return res.json({ success: true, modifiedCount: 0, matchedCount: oldRecords.length });
+    }
+
     // Perform batch update
     const updateResult = await masterColl.updateMany(
       { _id: { $in: objectIds } },
-      { $set: updates }
+      { $set: sanitizedUpdates }
     );
 
     if (updateResult.modifiedCount === 0) {
@@ -11834,7 +11863,7 @@ app.post("/batchUpdateMasterRecords", async (req, res) => {
       username,
       timestamp: new Date(Date.now() + 9 * 60 * 60 * 1000), // JST = UTC + 9 hours
       oldData: oldRecord,
-      newData: updates,
+      newData: sanitizedUpdates,
       batchUpdate: true // Flag to indicate this was part of a batch update
     }));
 
@@ -29278,6 +29307,592 @@ setTimeout(() => {
     console.warn('[VM Deployments] Initial retention cleanup failed:', err.message);
   });
 }, 15000);
+
+
+// ==================== CHECK FORM TABLET UI ====================
+
+const CHECK_FORM_TEMPLATES_COLLECTION = 'checkFormTemplatesDB';
+const CHECK_FORM_RECORDS_COLLECTION = 'checkFormRecordsDB';
+const CHECK_FORM_NG_REPORTS_COLLECTION = 'ngReportsDB';
+const CHECK_FORM_EQUIPMENT_COLLECTION = 'setsubiDB';
+const CHECK_FORM_WORKERS_COLLECTION = 'workerDB';
+const CHECK_FORM_UPLOAD_FOLDER = 'maintenanceForm';
+const CHECK_FORM_SCHEDULE_ORDER = Object.freeze({
+  daily: 0,
+  weekly: 1,
+  monthly: 2,
+});
+
+function normalizeCheckFormText(value = '') {
+  return String(value ?? '').trim();
+}
+
+function normalizeCheckFormSchedule(value = '') {
+  const schedule = normalizeCheckFormText(value).toLowerCase();
+  return CHECK_FORM_SCHEDULE_ORDER[schedule] !== undefined ? schedule : 'unscheduled';
+}
+
+function normalizeCheckFormMaybeNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeCheckFormStringArray(values = []) {
+  if (!Array.isArray(values)) return [];
+  return values
+    .map((value) => normalizeCheckFormText(value))
+    .filter(Boolean);
+}
+
+function escapeCheckFormRegex(value = '') {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function toCheckFormIdString(value) {
+  if (!value) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value?.toHexString === 'function') return value.toHexString();
+  return String(value);
+}
+
+function toCheckFormObjectId(value) {
+  const normalized = normalizeCheckFormText(value);
+  if (!normalized) return null;
+
+  try {
+    return new ObjectId(normalized);
+  } catch (error) {
+    return null;
+  }
+}
+
+function parseCheckFormFactoryMembership(value = '') {
+  return String(value ?? '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function doesWorkerBelongToFactory(departmentValue = '', factory = '') {
+  const normalizedFactory = normalizeCheckFormText(factory);
+  if (!normalizedFactory) return false;
+
+  return parseCheckFormFactoryMembership(departmentValue).includes(normalizedFactory);
+}
+
+function normalizeCheckFormMachineName(value = '') {
+  return normalizeCheckFormText(value).toUpperCase();
+}
+
+function checkFormMachineNamesMatch(left = '', right = '') {
+  const normalizedLeft = normalizeCheckFormMachineName(left);
+  const normalizedRight = normalizeCheckFormMachineName(right);
+  return Boolean(normalizedLeft) && Boolean(normalizedRight) && normalizedLeft === normalizedRight;
+}
+
+function sanitizeCheckFormFileSegment(value = '', fallback = 'item') {
+  const sanitized = normalizeCheckFormText(value).replace(/[^a-zA-Z0-9　-鿿_-]+/g, '_');
+  return sanitized || fallback;
+}
+
+function sanitizeCheckFormField(field = {}) {
+  return {
+    id: normalizeCheckFormText(field.id),
+    label: normalizeCheckFormText(field.label),
+    description: normalizeCheckFormText(field.description),
+    imageURL: normalizeCheckFormText(field.imageURL),
+    type: normalizeCheckFormText(field.type).toLowerCase(),
+    required: !!field.required,
+    locked: !!field.locked,
+    photoRequired: !!field.photoRequired,
+    options: normalizeCheckFormStringArray(field.options),
+    min: normalizeCheckFormMaybeNumber(field.min),
+    max: normalizeCheckFormMaybeNumber(field.max),
+    unit: normalizeCheckFormText(field.unit),
+  };
+}
+
+function sanitizeCheckFormEquipment(equipment = {}) {
+  return {
+    _id: toCheckFormIdString(equipment._id),
+    name: normalizeCheckFormText(equipment.name),
+    工場: normalizeCheckFormText(equipment['工場']),
+    imageURL: normalizeCheckFormText(equipment.imageURL),
+  };
+}
+
+function sanitizeCheckFormTemplate(template = {}, equipmentMap = new Map()) {
+  const equipmentIds = normalizeCheckFormStringArray(template.equipmentIds);
+  const equipmentDetails = equipmentIds
+    .map((equipmentId) => equipmentMap.get(equipmentId))
+    .filter(Boolean);
+
+  return {
+    _id: toCheckFormIdString(template._id),
+    name: normalizeCheckFormText(template.name),
+    description: normalizeCheckFormText(template.description),
+    工場: normalizeCheckFormText(template['工場']),
+    schedule: normalizeCheckFormSchedule(template.schedule),
+    startDate: normalizeCheckFormText(template.startDate),
+    status: normalizeCheckFormText(template.status || 'active'),
+    equipmentIds,
+    equipmentNames: equipmentDetails.map((equipment) => equipment.name).filter(Boolean),
+    equipmentDetails,
+    fields: Array.isArray(template.fields)
+      ? template.fields.map((field) => sanitizeCheckFormField(field))
+      : [],
+  };
+}
+
+function getCheckFormScheduleSortOrder(schedule = '') {
+  const normalized = normalizeCheckFormSchedule(schedule);
+  return CHECK_FORM_SCHEDULE_ORDER[normalized] ?? 99;
+}
+
+function normalizeCheckFormAnswerValue(fieldType = '', value = null) {
+  if (fieldType === 'number') {
+    const parsed = normalizeCheckFormMaybeNumber(value);
+    return parsed === null ? '' : parsed;
+  }
+
+  return typeof value === 'string' ? value.trim() : value;
+}
+
+function isCheckFormAnswered(fieldType = '', value = null) {
+  if (fieldType === 'checkbox') {
+    const normalized = normalizeCheckFormText(value).toUpperCase();
+    return normalized === 'OK' || normalized === 'NG';
+  }
+
+  if (fieldType === 'number') {
+    return normalizeCheckFormMaybeNumber(value) !== null;
+  }
+
+  if (fieldType === 'name' || fieldType === 'text' || fieldType === 'select') {
+    return normalizeCheckFormText(value).length > 0;
+  }
+
+  return value !== null && value !== undefined && normalizeCheckFormText(value).length > 0;
+}
+
+function doesCheckFormAnswerRequireTicket(field = {}, value = null) {
+  const fieldType = normalizeCheckFormText(field.type).toLowerCase();
+
+  if (fieldType === 'checkbox') {
+    return normalizeCheckFormText(value).toUpperCase() === 'NG';
+  }
+
+  if (fieldType === 'number' || fieldType === 'select') {
+    const numericValue = normalizeCheckFormMaybeNumber(value);
+    if (numericValue === null) return false;
+    if (field.min !== null && numericValue < field.min) return true;
+    if (field.max !== null && numericValue > field.max) return true;
+  }
+
+  return false;
+}
+
+function buildCheckFormAnswerStatus(field = {}, value = null, ticketRequired = false) {
+  const fieldType = normalizeCheckFormText(field.type).toLowerCase();
+
+  if (fieldType === 'checkbox') {
+    return normalizeCheckFormText(value).toUpperCase() === 'NG' ? 'ng' : 'ok';
+  }
+
+  if ((fieldType === 'number' || fieldType === 'select') && ticketRequired) {
+    return 'out-of-range';
+  }
+
+  return 'ok';
+}
+
+async function uploadCheckFormImageToFirebase({
+  base64,
+  factory = '',
+  templateName = '',
+  fieldLabel = '',
+  category = 'fields',
+  sequence = 0,
+}) {
+  if (!base64) {
+    throw new Error('base64 image data is required');
+  }
+
+  const mimeMatch = String(base64).match(/^data:([^;]+);base64,/);
+  const mimeType = mimeMatch?.[1] || 'image/jpeg';
+  const extensionMap = {
+    'image/jpeg': 'jpg',
+    'image/png': 'png',
+    'image/webp': 'webp',
+    'image/gif': 'gif',
+  };
+
+  const extension = extensionMap[mimeType] || 'jpg';
+  const rawBase64 = String(base64).includes(',') ? String(base64).split(',')[1] : String(base64);
+  const buffer = Buffer.from(rawBase64, 'base64');
+  const downloadToken = 'masterDBToken69';
+  const timestamp = Date.now();
+  const safeFactory = sanitizeCheckFormFileSegment(factory, 'unknown_factory');
+  const safeTemplate = sanitizeCheckFormFileSegment(templateName, 'template');
+  const safeField = sanitizeCheckFormFileSegment(fieldLabel, 'field');
+  const safeCategory = sanitizeCheckFormFileSegment(category, 'fields');
+  const filePath = `${CHECK_FORM_UPLOAD_FOLDER}/${safeFactory}/${safeCategory}/${safeTemplate}_${safeField}_${timestamp}_${sequence}.${extension}`;
+  const file = admin.storage().bucket().file(filePath);
+
+  await file.save(buffer, {
+    metadata: {
+      contentType: mimeType,
+      metadata: { firebaseStorageDownloadTokens: downloadToken },
+    },
+  });
+
+  return `https://firebasestorage.googleapis.com/v0/b/${file.bucket.name}/o/${encodeURIComponent(file.name)}?alt=media&token=${downloadToken}`;
+}
+
+app.get('/checkList', (req, res) => {
+  res.sendFile(path.join(__dirname, 'checkList.html'));
+});
+
+app.get('/checkList.html', (req, res) => {
+  res.sendFile(path.join(__dirname, 'checkList.html'));
+});
+
+app.get('/checkList.js', (req, res) => {
+  res.sendFile(path.join(__dirname, 'checkList.js'));
+});
+
+app.get('/api/check-forms/templates', async (req, res) => {
+  const factory = normalizeCheckFormText(req.query.factory || req.query.selected);
+  const machine = normalizeCheckFormText(req.query.machine);
+
+  if (!factory) {
+    return res.status(400).json({ error: 'factory is required' });
+  }
+
+  try {
+    await client.connect();
+    const db = client.db(DB_NAME);
+    const templatesCollection = db.collection(CHECK_FORM_TEMPLATES_COLLECTION);
+    const equipmentCollection = db.collection(CHECK_FORM_EQUIPMENT_COLLECTION);
+
+    const rawTemplates = await templatesCollection
+      .find({ 工場: factory, status: 'active' })
+      .toArray();
+
+    const equipmentIds = [];
+    const seenEquipmentIds = new Set();
+
+    rawTemplates.forEach((template) => {
+      normalizeCheckFormStringArray(template.equipmentIds).forEach((equipmentId) => {
+        const objectId = toCheckFormObjectId(equipmentId);
+        if (!objectId) return;
+        const idKey = objectId.toHexString();
+        if (seenEquipmentIds.has(idKey)) return;
+        seenEquipmentIds.add(idKey);
+        equipmentIds.push(objectId);
+      });
+    });
+
+    const equipmentDocs = equipmentIds.length > 0
+      ? await equipmentCollection.find({ _id: { $in: equipmentIds } }).toArray()
+      : [];
+
+    const equipmentMap = new Map(
+      equipmentDocs.map((equipment) => {
+        const sanitized = sanitizeCheckFormEquipment(equipment);
+        return [sanitized._id, sanitized];
+      })
+    );
+
+    const templates = rawTemplates
+      .map((template) => sanitizeCheckFormTemplate(template, equipmentMap))
+      .filter((template) => (
+        !machine || template.equipmentDetails.some((equipment) => checkFormMachineNamesMatch(equipment.name, machine))
+      ))
+      .sort((left, right) => {
+        const scheduleDiff = getCheckFormScheduleSortOrder(left.schedule) - getCheckFormScheduleSortOrder(right.schedule);
+        if (scheduleDiff !== 0) return scheduleDiff;
+        return left.name.localeCompare(right.name, 'ja');
+      });
+
+    return res.json({ factory, machine, templates });
+  } catch (error) {
+    console.error('Error loading check form templates:', error);
+    return res.status(500).json({ error: 'Failed to load check form templates' });
+  }
+});
+
+app.get('/api/check-forms/workers', async (req, res) => {
+  const factory = normalizeCheckFormText(req.query.factory || req.query.selected);
+
+  if (!factory) {
+    return res.status(400).json({ error: 'factory is required' });
+  }
+
+  try {
+    await client.connect();
+    const db = client.db(DB_NAME);
+    const workersCollection = db.collection(CHECK_FORM_WORKERS_COLLECTION);
+    const workers = await workersCollection
+      .find({ 部署: { $regex: new RegExp(escapeCheckFormRegex(factory), 'i') } })
+      .project({ Name: 1, 部署: 1 })
+      .toArray();
+
+    const filteredWorkers = workers
+      .filter((worker) => doesWorkerBelongToFactory(worker['部署'], factory))
+      .map((worker) => ({
+        name: normalizeCheckFormText(worker.Name),
+        部署: normalizeCheckFormText(worker['部署']),
+      }))
+      .filter((worker) => worker.name)
+      .sort((left, right) => left.name.localeCompare(right.name, 'ja'));
+
+    return res.json({ factory, workers: filteredWorkers });
+  } catch (error) {
+    console.error('Error loading check form workers:', error);
+    return res.status(500).json({ error: 'Failed to load workers' });
+  }
+});
+
+app.post('/api/check-forms/submit', async (req, res) => {
+  const payload = req.body || {};
+  const factory = normalizeCheckFormText(payload.factory);
+  const machine = normalizeCheckFormText(payload.machine);
+  const submittedTemplates = Array.isArray(payload.templates) ? payload.templates : [];
+
+  if (!factory) {
+    return res.status(400).json({ error: 'factory is required' });
+  }
+
+  if (!machine) {
+    return res.status(400).json({ error: 'machine is required' });
+  }
+
+  if (submittedTemplates.length === 0) {
+    return res.status(400).json({ error: 'at least one template submission is required' });
+  }
+
+  try {
+    await client.connect();
+    const db = client.db(DB_NAME);
+    const submittedDb = client.db('submittedDB');
+    const recordsCollection = submittedDb.collection(CHECK_FORM_RECORDS_COLLECTION);
+    const ngReportsCollection = submittedDb.collection(CHECK_FORM_NG_REPORTS_COLLECTION);
+    const now = new Date();
+    const nowIso = now.toISOString();
+    const recordDocs = [];
+    const ngReportDocs = [];
+
+    for (let templateIndex = 0; templateIndex < submittedTemplates.length; templateIndex += 1) {
+      const templatePayload = submittedTemplates[templateIndex] || {};
+      const answersPayload = Array.isArray(templatePayload.answers) ? templatePayload.answers : [];
+      const templateId = normalizeCheckFormText(templatePayload.templateId);
+      const templateName = normalizeCheckFormText(templatePayload.templateName);
+      const description = normalizeCheckFormText(templatePayload.description);
+      const schedule = normalizeCheckFormSchedule(templatePayload.schedule);
+      const startDate = normalizeCheckFormText(templatePayload.startDate);
+      const equipmentIds = normalizeCheckFormStringArray(templatePayload.equipmentIds);
+      const equipmentNames = normalizeCheckFormStringArray(templatePayload.equipmentNames);
+      const selectedMachine = normalizeCheckFormText(templatePayload.selectedMachine || machine);
+      const selectedMachineId = normalizeCheckFormText(templatePayload.selectedMachineId);
+      const workerName = normalizeCheckFormText(templatePayload.workerName);
+
+      if (!templateId || !templateName) {
+        return res.status(400).json({ error: `templateId and templateName are required for template index ${templateIndex}` });
+      }
+
+      if (!workerName) {
+        return res.status(400).json({ error: `workerName is required for template ${templateName}` });
+      }
+
+      if (!selectedMachine) {
+        return res.status(400).json({ error: `selectedMachine is required for template ${templateName}` });
+      }
+
+      if (answersPayload.length === 0) {
+        return res.status(400).json({ error: `answers are required for template ${templateName}` });
+      }
+
+      const recordId = new ObjectId();
+      const normalizedAnswers = [];
+      const recordTicketSummaries = [];
+
+      for (let answerIndex = 0; answerIndex < answersPayload.length; answerIndex += 1) {
+        const answerPayload = answersPayload[answerIndex] || {};
+        const field = sanitizeCheckFormField(answerPayload);
+        const rawValue = answerPayload.value;
+        const normalizedValue = normalizeCheckFormAnswerValue(field.type, rawValue);
+        const isAnswered = isCheckFormAnswered(field.type, normalizedValue);
+
+        if (!field.id || !field.label || !field.type) {
+          return res.status(400).json({ error: `field metadata is incomplete for template ${templateName}` });
+        }
+
+        if (!isAnswered) {
+          return res.status(400).json({ error: `field ${field.label} is missing an answer in template ${templateName}` });
+        }
+
+        const fieldPhotoData = normalizeCheckFormText(answerPayload.fieldPhotoData);
+        if (field.photoRequired && !fieldPhotoData) {
+          return res.status(400).json({ error: `field ${field.label} requires a photo in template ${templateName}` });
+        }
+
+        let fieldPhotoURL = '';
+        if (fieldPhotoData) {
+          fieldPhotoURL = await uploadCheckFormImageToFirebase({
+            base64: fieldPhotoData,
+            factory,
+            templateName,
+            fieldLabel: field.label || field.id,
+            category: 'fields',
+            sequence: answerIndex,
+          });
+        }
+
+        const ticketPayload = answerPayload.ticket && typeof answerPayload.ticket === 'object'
+          ? answerPayload.ticket
+          : null;
+        const ticketReason = normalizeCheckFormText(ticketPayload?.reason);
+        const ticketImagesData = Array.isArray(ticketPayload?.imagesData)
+          ? ticketPayload.imagesData.filter(Boolean).slice(0, 5)
+          : [];
+        const ticketRequired = doesCheckFormAnswerRequireTicket(field, normalizedValue);
+        const shouldCreateTicket = ticketRequired || !!ticketPayload?.saved;
+        let ticketSummary = null;
+
+        if (shouldCreateTicket) {
+          if (!ticketReason) {
+            return res.status(400).json({ error: `ticket reason is required for field ${field.label} in template ${templateName}` });
+          }
+
+          const ticketImageURLs = [];
+          for (let imageIndex = 0; imageIndex < ticketImagesData.length; imageIndex += 1) {
+            const imageURL = await uploadCheckFormImageToFirebase({
+              base64: ticketImagesData[imageIndex],
+              factory,
+              templateName,
+              fieldLabel: `${field.label || field.id}_ticket`,
+              category: 'tickets',
+              sequence: imageIndex,
+            });
+            ticketImageURLs.push(imageURL);
+          }
+
+          const ticketKey = normalizeCheckFormText(ticketPayload?.ticketKey) || `ticket_${recordId.toHexString()}_${field.id}`;
+          const reportDoc = {
+            _id: new ObjectId(),
+            source: 'checkForm',
+            factory,
+            machine: selectedMachine,
+            machineId: selectedMachineId || null,
+            templateId,
+            templateName,
+            checkFormRecordId: recordId,
+            equipmentIds,
+            equipmentNames,
+            workerName,
+            fieldId: field.id,
+            fieldLabel: field.label,
+            fieldType: field.type,
+            answerValue: normalizedValue,
+            min: field.min,
+            max: field.max,
+            unit: field.unit,
+            reason: ticketReason,
+            imageURLs: ticketImageURLs,
+            status: 'open',
+            createdAt: now,
+          };
+
+          ngReportDocs.push(reportDoc);
+          ticketSummary = {
+            ticketKey,
+            required: ticketRequired,
+            reason: ticketReason,
+            imageURLs: ticketImageURLs,
+          };
+          recordTicketSummaries.push({
+            fieldId: field.id,
+            fieldLabel: field.label,
+            ...ticketSummary,
+          });
+        }
+
+        normalizedAnswers.push({
+          fieldId: field.id,
+          label: field.label,
+          description: field.description,
+          type: field.type,
+          required: field.required,
+          locked: field.locked,
+          photoRequired: field.photoRequired,
+          options: field.options,
+          min: field.min,
+          max: field.max,
+          unit: field.unit,
+          templateImageURL: field.imageURL,
+          value: normalizedValue,
+          displayValue: normalizeCheckFormText(answerPayload.displayValue) || String(normalizedValue ?? ''),
+          status: buildCheckFormAnswerStatus(field, normalizedValue, ticketRequired),
+          ticketRequired,
+          fieldPhotoURL,
+          ticket: ticketSummary,
+          answeredAt: nowIso,
+        });
+      }
+
+      recordDocs.push({
+        _id: recordId,
+        source: 'checkForm',
+        templateId,
+        templateName,
+        description,
+        schedule,
+        startDate,
+        factory,
+        machine: selectedMachine,
+        machineId: selectedMachineId || null,
+        equipmentIds,
+        equipmentNames,
+        workerName,
+        answers: normalizedAnswers,
+        tickets: recordTicketSummaries,
+        submittedAtClient: normalizeCheckFormText(payload.submittedAtClient),
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    const session = client.startSession();
+
+    try {
+      await session.withTransaction(async () => {
+        if (recordDocs.length > 0) {
+          await recordsCollection.insertMany(recordDocs, { session });
+        }
+
+        if (ngReportDocs.length > 0) {
+          await ngReportsCollection.insertMany(ngReportDocs, { session });
+        }
+      });
+    } finally {
+      await session.endSession();
+    }
+
+    return res.status(201).json({
+      success: true,
+      insertedRecordCount: recordDocs.length,
+      insertedTicketCount: ngReportDocs.length,
+      recordIds: recordDocs.map((record) => record._id.toHexString()),
+    });
+  } catch (error) {
+    console.error('Error submitting check forms:', error);
+    return res.status(500).json({ error: 'Failed to submit check forms', details: error.message });
+  }
+});
+
+console.log('📋 Check form tablet routes loaded');
 
 
 app.listen(port, () => {
