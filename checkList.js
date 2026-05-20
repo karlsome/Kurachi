@@ -1,6 +1,6 @@
 //const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
-const serverURL = "http://192.168.0.149:3000";
+const serverURL = "http://192.168.0.74:3000";
 
 'use strict';
 
@@ -723,7 +723,7 @@ function renderFieldPhotoSection(template, field) {
         data-action="remove-field-photo"
         data-template-id="${escapeHtml(template.templateId)}"
         data-field-id="${escapeHtml(field.fieldId)}"
-      >−</button>
+      >×</button>
       <img
         src=""
         alt="Captured photo for ${escapeHtml(field.label)}"
@@ -849,7 +849,7 @@ function renderTicketModal() {
         <div class="ticket-thumb-grid">
           ${draft.imageAssetIds.length === 0 ? '<span class="chip chip--muted">No ticket photos yet</span>' : draft.imageAssetIds.map((assetId, index) => `
             <div class="ticket-thumb">
-              <button type="button" class="thumb-delete" aria-label="Delete photo" data-action="remove-ticket-image" data-index="${index}">−</button>
+              <button type="button" class="thumb-delete" aria-label="Delete photo" data-action="remove-ticket-image" data-index="${index}">×</button>
               <img src="" alt="Ticket image ${index + 1}" data-thumb-asset-id="${escapeHtml(assetId)}" data-action="preview-asset" data-asset-id="${escapeHtml(assetId)}" data-title="${escapeHtml(field.label)} ticket image ${index + 1}">
             </div>
           `).join('')}
@@ -1396,8 +1396,27 @@ async function addTicketImages() {
 async function removeTicketImage(index) {
   if (!appState.activeTicket) return;
   const assetId = appState.activeTicket.imageAssetIds[index];
+  if (!assetId) return;
+
   appState.activeTicket.imageAssetIds.splice(index, 1);
   await deleteAsset(assetId);
+
+  const field = getFieldByIds(appState.activeTicket.templateId, appState.activeTicket.fieldId);
+  if (field) {
+    field.ticket.pendingTouched = true;
+    field.ticket.pendingReason = appState.activeTicket.reason;
+    field.ticket.pendingImageAssetIds = [...appState.activeTicket.imageAssetIds];
+
+    if (field.ticket.saved && field.ticket.imageAssetIds.includes(assetId)) {
+      field.ticket.imageAssetIds = field.ticket.imageAssetIds.filter((savedAssetId) => savedAssetId !== assetId);
+      if (field.ticket.imageAssetIds.length === 0) {
+        field.ticket.saved = false;
+      }
+    }
+
+    persistDraftState();
+  }
+
   renderTicketModal();
 }
 
