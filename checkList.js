@@ -45,7 +45,6 @@ const appState = {
     open: false,
     search: '',
   },
-  footerExpanded: false,
   activeTicket: null,
   activeKeypad: null,
   imagePreview: null,
@@ -124,7 +123,6 @@ function cacheDom() {
   dom.emptyState = document.getElementById('emptyState');
   dom.templatesContainer = document.getElementById('templatesContainer');
   dom.actionFooter = document.getElementById('actionFooter');
-  dom.footerStatus = document.getElementById('footerStatus');
   dom.resetButton = document.getElementById('resetButton');
   dom.submitButton = document.getElementById('submitButton');
   dom.workerModal = document.getElementById('workerModal');
@@ -146,7 +144,6 @@ function bindStaticEvents() {
   dom.ticketModal.addEventListener('input', handleTicketModalInput);
   dom.keypadModal.addEventListener('click', handleKeypadModalClick);
   dom.imagePreviewModal.addEventListener('click', handleImagePreviewClick);
-  document.addEventListener('click', handleDocumentClick);
   window.addEventListener('scroll', syncHeaderCondensedState, { passive: true });
   syncHeaderCondensedState();
 
@@ -734,19 +731,10 @@ function renderTicketSummary(field) {
 }
 
 function renderFooter() {
-  const counts = getChecklistCounts();
   const templatesReady = appState.templates.length > 0 && !appState.loading;
   dom.actionFooter.classList.toggle('hidden', !templatesReady);
 
   if (!templatesReady) return;
-
-  dom.actionFooter.classList.toggle('action-footer--collapsed', !appState.footerExpanded);
-
-  if (counts.complete === counts.total && counts.total > 0) {
-    dom.footerStatus.textContent = 'All cards are complete. Ready to submit.';
-  } else {
-    dom.footerStatus.textContent = `${counts.complete} of ${counts.total} cards complete. ${counts.pendingTickets} ticket${counts.pendingTickets === 1 ? '' : 's'} pending.`;
-  }
 
   dom.submitButton.disabled = appState.submitting;
   dom.resetButton.disabled = appState.submitting;
@@ -1596,8 +1584,6 @@ function describeFieldType(field) {
 async function handleSubmitRequest() {
   if (appState.submitting || appState.templates.length === 0) return;
 
-  setFooterExpanded(true);
-
   const firstIncomplete = collectValidationErrors();
   renderTemplates();
   renderSummarySection();
@@ -1753,7 +1739,6 @@ async function resetDraftState(showResetBanner) {
   removeDraftState();
 
   appState.selectedWorkerName = '';
-  appState.footerExpanded = false;
   appState.validationErrors.clear();
   appState.activeTicket = null;
   appState.activeKeypad = null;
@@ -1797,14 +1782,6 @@ function setFooterExpanded(expanded) {
 
 function syncHeaderCondensedState() {
   document.body.classList.toggle('header-condensed', window.scrollY > 36);
-}
-
-function handleDocumentClick(event) {
-  if (!appState.footerExpanded) return;
-  if (!dom.actionFooter || dom.actionFooter.classList.contains('hidden')) return;
-  if (dom.actionFooter.contains(event.target)) return;
-  if (dom.workerModal.contains(event.target) || dom.ticketModal.contains(event.target) || dom.keypadModal.contains(event.target) || dom.imagePreviewModal.contains(event.target)) return;
-  setFooterExpanded(false);
 }
 
 function collectAllAssetIds() {

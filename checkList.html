@@ -728,6 +728,13 @@
       box-shadow: 0 16px 30px rgba(35, 71, 63, 0.2);
     }
 
+    .footer-button--danger {
+      background: #d3312a;
+      color: #fff;
+      border-color: #d3312a;
+      box-shadow: 0 16px 30px rgba(211, 49, 42, 0.22);
+    }
+
     .utility-button--danger,
     .modal-button--danger {
       background: rgba(165, 72, 60, 0.08);
@@ -805,48 +812,20 @@
     }
 
     .action-footer {
-      position: sticky;
-      bottom: 12px;
-      z-index: 15;
       margin-top: 22px;
-      padding: 14px;
+      padding: 18px 20px;
       display: flex;
       align-items: center;
-      justify-content: space-between;
+      justify-content: stretch;
       gap: 12px;
-      backdrop-filter: blur(18px);
-      transition: padding 220ms ease, box-shadow 220ms ease, transform 220ms ease;
-    }
-
-    .action-footer__summary {
-      min-width: 0;
-      max-height: 120px;
-      opacity: 1;
-      overflow: hidden;
-      transition: opacity 220ms ease, max-height 220ms ease, transform 220ms ease, margin 220ms ease;
-    }
-
-    .action-footer__title {
-      margin: 0;
-      font-size: 0.84rem;
-      text-transform: uppercase;
-      letter-spacing: 0.14em;
-      color: var(--muted);
-    }
-
-    .action-footer__status {
-      margin: 8px 0 0;
-      font-size: 1rem;
-      font-weight: 700;
-      letter-spacing: -0.02em;
     }
 
     .action-footer__buttons {
       display: flex;
       gap: 10px;
       flex-wrap: nowrap;
-      justify-content: flex-end;
-      width: auto;
+      justify-content: stretch;
+      width: 100%;
     }
 
     .footer-button {
@@ -854,24 +833,6 @@
       min-height: 54px;
       padding-inline: 18px;
       flex: 1 1 0;
-    }
-
-    .action-footer--collapsed {
-      padding: 10px 12px;
-      box-shadow: 0 16px 36px rgba(37, 28, 16, 0.12);
-    }
-
-    .action-footer--collapsed .action-footer__summary {
-      opacity: 0;
-      max-height: 0;
-      transform: translateY(10px);
-      margin: 0;
-      pointer-events: none;
-    }
-
-    .action-footer--collapsed .action-footer__buttons {
-      width: 100%;
-      justify-content: stretch;
     }
 
     .overlay,
@@ -1178,17 +1139,17 @@
       }
     }
 
-    @media (orientation: landscape) and (min-width: 900px) {
+    @media (orientation: landscape) {
       .page-shell {
         width: min(100%, 1280px);
       }
 
       .template-fields {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-columns: minmax(0, 1fr);
       }
 
       .field-card--full {
-        grid-column: span 2;
+        grid-column: 1 / -1;
       }
     }
 
@@ -1297,12 +1258,8 @@
     <main id="templatesContainer" class="templates-stack" aria-live="polite"></main>
 
     <footer class="action-footer hidden" id="actionFooter">
-      <div class="action-footer__summary">
-        <p class="action-footer__title">Submission</p>
-        <p class="action-footer__status" id="footerStatus">Waiting for check form data...</p>
-      </div>
       <div class="action-footer__buttons">
-        <button class="footer-button footer-button--ghost" id="resetButton" type="button">Reset Draft</button>
+        <button class="footer-button footer-button--danger" id="resetButton" type="button">Reset Draft</button>
         <button class="footer-button footer-button--primary" id="submitButton" type="button">Submit All</button>
       </div>
     </footer>
