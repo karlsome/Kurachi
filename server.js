@@ -12100,17 +12100,17 @@ app.post("/api/upload-equipment-event-image", async (req, res) => {
 
 //inserts data to masterDB
 app.post("/submitToMasterDB", async (req, res) => {
-  const { data, username, collectionName } = req.body; // Add collectionName
+  const { data, username, collectionName, dbName } = req.body;
 
-  if (!data || !username || !collectionName) { // Add collectionName to validation
+  if (!data || !username || !collectionName) {
     return res.status(400).json({ error: "Missing data, username, or collectionName" });
   }
 
   try {
     await client.connect();
-    const db = client.db("Sasaki_Coating_MasterDB");
-    const collection = db.collection(collectionName); // Use dynamic collection name
-    const logColl = db.collection(`${collectionName}_Log`); // Use dynamic log collection
+    const db = client.db(dbName || "Sasaki_Coating_MasterDB");
+    const collection = db.collection(collectionName);
+    const logColl = db.collection(`${collectionName}_Log`);
 
     // Insert the data
     const result = await collection.insertOne(data);
