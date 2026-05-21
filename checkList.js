@@ -1,6 +1,6 @@
 //const serverURL = "https://kurachi.onrender.com";
-//const serverURL = "http://localhost:3000";
-const serverURL = "http://192.168.0.74:3000";
+const serverURL = "http://localhost:3000";
+//const serverURL = "http://192.0.0.2:3000";
 
 'use strict';
 
@@ -13,6 +13,8 @@ const CHECKLIST_API = {
 };
 
 const CHECKLIST_DRAFT_PREFIX = 'checkListDraft::';
+const CHECKLIST_RECENT_WORKERS_PREFIX = 'checkListRecentWorkers::';
+const MAX_RECENT_WORKERS = 4;
 const CHECKLIST_DB_NAME = 'kurachi-checklist-assets';
 const CHECKLIST_DB_VERSION = 1;
 const CHECKLIST_ASSET_STORE = 'assets';
@@ -44,6 +46,7 @@ const appState = {
   templates: [],
   workers: [],
   selectedWorkerName: '',
+  recentWorkers: [],
   loading: true,
   submitting: false,
   validationErrors: new Set(),
@@ -90,6 +93,8 @@ async function initializeCheckListApp() {
     return;
   }
 
+  restoreRecentWorkers();
+
   try {
     const [templateData, workerData] = await Promise.all([
       fetchJson(`${CHECKLIST_API.templates}?factory=${encodeURIComponent(appState.factory)}&machine=${encodeURIComponent(appState.machine)}`),
@@ -97,6 +102,8 @@ async function initializeCheckListApp() {
     ]);
 
     appState.workers = Array.isArray(workerData.workers) ? workerData.workers : [];
+  appState.recentWorkers = getVisibleRecentWorkers(appState.recentWorkers);
+  persistRecentWorkers();
     appState.templates = buildTemplateState(Array.isArray(templateData.templates) ? templateData.templates : []);
     await restoreDraftState();
     syncTemplateWorkersFromSelection(false);
@@ -307,6 +314,43 @@ function createTicketKey(templateId, fieldId) {
 function getDraftStorageKey() {
   const machineKey = appState.machine || 'all-machines';
   return `${CHECKLIST_DRAFT_PREFIX}${appState.factory}::${machineKey}`;
+}
+
+function getRecentWorkersStorageKey() {
+  return `${CHECKLIST_RECENT_WORKERS_PREFIX}${appState.factory || 'unknown-factory'}`;
+}
+
+function restoreRecentWorkers() {
+  appState.recentWorkers = [];
+
+  try {
+    const raw = window.localStorage.getItem(getRecentWorkersStorageKey());
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return;
+
+    appState.recentWorkers = normalizeStringArray(parsed)
+      .filter((name, index, list) => list.indexOf(name) === index)
+      .slice(0, MAX_RECENT_WORKERS);
+  } catch (error) {
+    console.warn('Failed to restore recent workers:', error);
+  }
+}
+
+function persistRecentWorkers() {
+  try {
+    window.localStorage.setItem(getRecentWorkersStorageKey(), JSON.stringify(appState.recentWorkers.slice(0, MAX_RECENT_WORKERS)));
+  } catch (error) {
+    console.warn('Failed to persist recent workers:', error);
+  }
+}
+
+function getVisibleRecentWorkers(names) {
+  const normalizedNames = normalizeStringArray(names).slice(0, MAX_RECENT_WORKERS);
+  if (appState.workers.length === 0) return normalizedNames;
+
+  const availableNames = new Set(appState.workers.map((worker) => normalizeText(worker.name)));
+  return normalizedNames.filter((name) => availableNames.has(name));
 }
 
 async function restoreDraftState() {
@@ -832,6 +876,7 @@ function renderWorkerModal() {
     return;
   }
 
+  const recentWorkers = getVisibleRecentWorkers(appState.recentWorkers);
   const filteredWorkers = appState.workers.filter((worker) => {
     if (!appState.activeWorkerModal.search) return true;
     return worker.name.toLowerCase().includes(appState.activeWorkerModal.search.toLowerCase());
@@ -851,6 +896,19 @@ function renderWorkerModal() {
         <label class="modal-label" for="workerSearchInput">Search worker</label>
         <input id="workerSearchInput" class="worker-search" data-worker-search type="search" placeholder="Type a worker name" value="${escapeHtml(appState.activeWorkerModal.search)}">
       </div>
+      ${recentWorkers.length > 0 ? `
+      <div class="modal-section">
+        <div class="modal-label">Recent workers</div>
+        <div class="recent-workers-row">
+          ${recentWorkers.map((name, index) => `
+            <button type="button" class="recent-worker-chip" data-action="choose-worker" data-worker-name="${escapeHtml(name)}" title="Recently selected worker">
+              <span class="recent-worker-chip__name">${escapeHtml(name)}</span>
+              <span class="recent-worker-chip__meta">#${index + 1}</span>
+            </button>
+          `).join('')}
+        </div>
+      </div>
+      ` : ''}
       <div class="worker-list">
         ${filteredWorkers.length === 0 ? '<div class="chip chip--muted">No workers match this search.</div>' : filteredWorkers.map((worker) => `
           <button type="button" class="worker-option" data-action="choose-worker" data-worker-name="${escapeHtml(worker.name)}">
@@ -1589,10 +1647,22 @@ function chooseWorker(workerName) {
   const normalized = normalizeText(workerName);
   if (!normalized) return;
 
+  rememberRecentWorker(normalized);
   appState.selectedWorkerName = normalized;
   syncTemplateWorkersFromSelection(true, true);
   closeWorkerModal();
   showBanner(`Worker set to ${normalized}.`, 'info', 1800);
+}
+
+function rememberRecentWorker(workerName) {
+  const normalized = normalizeText(workerName);
+  if (!normalized) return;
+
+  appState.recentWorkers = [
+    normalized,
+    ...appState.recentWorkers.filter((name) => name !== normalized),
+  ].slice(0, MAX_RECENT_WORKERS);
+  persistRecentWorkers();
 }
 
 function syncTemplateWorkersFromSelection(shouldRender, shouldStampTimestamp = false) {

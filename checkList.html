@@ -1000,6 +1000,44 @@
       overflow: auto;
     }
 
+    .recent-workers-row {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      width: 100%;
+    }
+
+    .recent-worker-chip {
+      min-width: 0;
+      min-height: 64px;
+      padding: 10px;
+      border-radius: 14px;
+      border: 1px solid rgba(45, 41, 34, 0.16);
+      background: rgba(255, 255, 255, 0.98);
+      display: grid;
+      gap: 4px;
+      text-align: left;
+      align-content: center;
+    }
+
+    .recent-worker-chip__name {
+      font-size: clamp(0.72rem, 1.85vw, 0.92rem);
+      line-height: 1.2;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .recent-worker-chip__meta {
+      font-size: clamp(0.62rem, 1.35vw, 0.74rem);
+      color: var(--muted);
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
     .worker-option {
       text-align: left;
       display: flex;
@@ -1433,6 +1471,19 @@
 
       .photo-editor__actions > button {
         flex: 1 1 calc(50% - 10px);
+      }
+
+      .recent-worker-chip {
+        min-height: 58px;
+        padding: 8px;
+      }
+
+      .recent-worker-chip__name {
+        font-size: clamp(0.66rem, 2.3vw, 0.84rem);
+      }
+
+      .recent-worker-chip__meta {
+        font-size: clamp(0.58rem, 1.7vw, 0.68rem);
       }
     }
   </style>
