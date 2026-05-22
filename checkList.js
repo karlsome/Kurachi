@@ -1,6 +1,6 @@
-//const serverURL = "https://kurachi.onrender.com";
-const serverURL = "http://localhost:3000";
-//const serverURL = "http://192.0.0.2:3000";
+const serverURL = "https://kurachi.onrender.com";
+//const serverURL = "http://localhost:3000";
+//const serverURL = "http://192.168.24.60:3000";
 
 'use strict';
 
