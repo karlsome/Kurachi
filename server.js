@@ -29338,6 +29338,18 @@ function normalizeCheckFormMaybeNumber(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function resolveCheckFormAnswerTimestamp(value = '', fallbackIso = '') {
+  const normalized = normalizeCheckFormText(value);
+  if (!normalized) {
+    return fallbackIso || new Date().toISOString();
+  }
+
+  const parsed = new Date(normalized);
+  return Number.isNaN(parsed.getTime())
+    ? (fallbackIso || new Date().toISOString())
+    : parsed.toISOString();
+}
+
 function normalizeCheckFormStringArray(values = []) {
   if (!Array.isArray(values)) return [];
   return values
@@ -29692,10 +29704,15 @@ app.post('/api/check-forms/submit', async (req, res) => {
       const description = normalizeCheckFormText(templatePayload.description);
       const schedule = normalizeCheckFormSchedule(templatePayload.schedule);
       const startDate = normalizeCheckFormText(templatePayload.startDate);
-      const equipmentIds = normalizeCheckFormStringArray(templatePayload.equipmentIds);
-      const equipmentNames = normalizeCheckFormStringArray(templatePayload.equipmentNames);
+      const fallbackEquipmentIds = normalizeCheckFormStringArray(templatePayload.equipmentIds);
+      const fallbackEquipmentNames = normalizeCheckFormStringArray(templatePayload.equipmentNames);
+      const equipmentId = normalizeCheckFormText(
+        templatePayload.equipmentId || templatePayload.selectedMachineId || fallbackEquipmentIds[0]
+      );
+      const processingEquipment = normalizeCheckFormText(
+        templatePayload['加工設備'] || templatePayload.selectedMachine || machine || fallbackEquipmentNames[0]
+      );
       const selectedMachine = normalizeCheckFormText(templatePayload.selectedMachine || machine);
-      const selectedMachineId = normalizeCheckFormText(templatePayload.selectedMachineId);
       const workerName = normalizeCheckFormText(templatePayload.workerName);
 
       if (!templateId || !templateName) {
@@ -29708,6 +29725,10 @@ app.post('/api/check-forms/submit', async (req, res) => {
 
       if (!selectedMachine) {
         return res.status(400).json({ error: `selectedMachine is required for template ${templateName}` });
+      }
+
+      if (!processingEquipment) {
+        return res.status(400).json({ error: `加工設備 is required for template ${templateName}` });
       }
 
       if (answersPayload.length === 0) {
@@ -29784,13 +29805,11 @@ app.post('/api/check-forms/submit', async (req, res) => {
             _id: new ObjectId(),
             source: 'checkForm',
             factory,
-            machine: selectedMachine,
-            machineId: selectedMachineId || null,
+            加工設備: processingEquipment,
+            equipmentId: equipmentId || null,
             templateId,
             templateName,
             checkFormRecordId: recordId,
-            equipmentIds,
-            equipmentNames,
             workerName,
             fieldId: field.id,
             fieldLabel: field.label,
@@ -29838,7 +29857,7 @@ app.post('/api/check-forms/submit', async (req, res) => {
           ticketRequired,
           fieldPhotoURL,
           ticket: ticketSummary,
-          answeredAt: nowIso,
+          answeredAt: resolveCheckFormAnswerTimestamp(answerPayload.answeredAt, nowIso),
         });
       }
 
@@ -29851,10 +29870,8 @@ app.post('/api/check-forms/submit', async (req, res) => {
         schedule,
         startDate,
         factory,
-        machine: selectedMachine,
-        machineId: selectedMachineId || null,
-        equipmentIds,
-        equipmentNames,
+        加工設備: processingEquipment,
+        equipmentId: equipmentId || null,
         workerName,
         answers: normalizedAnswers,
         tickets: recordTicketSummaries,
