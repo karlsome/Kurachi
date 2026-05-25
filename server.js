@@ -20,6 +20,7 @@ const path = require('path');
 const fs = require('fs');
 const { extractGENTokens } = require('./gen-token-extractor');
 const fetch = require('node-fetch');
+const heicConvert = require('heic-convert');
 const https = require('https');
 const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 
@@ -11783,6 +11784,32 @@ function sanitizeMasterRecordUpdates(updates = {}) {
   }, {});
 }
 
+function normalizeCheckFormTemplateWritePayload(payload = {}) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return payload;
+  }
+
+  if (!Array.isArray(payload.fields)) {
+    return payload;
+  }
+
+  return {
+    ...payload,
+    fields: payload.fields.map((field) => {
+      if (!field || typeof field !== "object" || Array.isArray(field)) {
+        return field;
+      }
+
+      const fieldType = typeof field.type === "string" ? field.type.trim().toLowerCase() : field.type;
+
+      return {
+        ...field,
+        type: fieldType === "checkbox" ? "toggle" : fieldType,
+      };
+    }),
+  };
+}
+
 app.post("/updateMasterRecord", async (req, res) => {
   const { recordId, updates, username, collectionName } = req.body; // Add collectionName
 
@@ -11804,7 +11831,10 @@ app.post("/updateMasterRecord", async (req, res) => {
       return res.status(404).json({ error: "Record not found" });
     }
 
-    const sanitizedUpdates = sanitizeMasterRecordUpdates(updates);
+    const normalizedUpdates = collectionName === "checkFormTemplatesDB"
+      ? normalizeCheckFormTemplateWritePayload(updates)
+      : updates;
+    const sanitizedUpdates = sanitizeMasterRecordUpdates(normalizedUpdates);
 
     if (Object.keys(sanitizedUpdates).length === 0) {
       return res.json({ success: true, modifiedCount: 0 });
@@ -12005,7 +12035,7 @@ app.post("/uploadMasterImage", async (req, res) => {
     // Use a random token or constant token (example below)
     const downloadToken = "masterDBToken69";
 
-    await file.save(buffer, {
+    await file.save(uploadBuffer, {
       metadata: {
         contentType: "image/jpeg",
         metadata: {
@@ -12041,6 +12071,75 @@ app.post("/uploadMasterImage", async (req, res) => {
 
 
 
+const FIREBASE_DOWNLOAD_TOKEN = 'masterDBToken69';
+const FIREBASE_HEIC_MIME_TYPES = new Set([
+  'image/heic',
+  'image/heif',
+  'image/heic-sequence',
+  'image/heif-sequence',
+]);
+const FIREBASE_EXTENSION_MAP = {
+  'image/jpeg': 'jpg',
+  'image/jpg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+  'image/avif': 'avif',
+  'image/heic': 'heic',
+  'image/heif': 'heif',
+  'video/mp4': 'mp4',
+  'video/quicktime': 'mov',
+};
+
+function buildFirebaseDownloadUrl(file, downloadToken = FIREBASE_DOWNLOAD_TOKEN) {
+  return `https://firebasestorage.googleapis.com/v0/b/${file.bucket.name}/o/${encodeURIComponent(file.name)}?alt=media&token=${downloadToken}`;
+}
+
+async function saveBase64AssetToFirebase({
+  base64,
+  filePathPrefix,
+  downloadToken = FIREBASE_DOWNLOAD_TOKEN,
+}) {
+  if (!base64) {
+    throw new Error('base64 image data is required');
+  }
+
+  const mimeMatch = String(base64).match(/^data:([^;]+);base64,/);
+  const mimeType = mimeMatch?.[1] || 'image/jpeg';
+  const rawBase64 = String(base64).includes(',') ? String(base64).split(',')[1] : String(base64);
+  const originalBuffer = Buffer.from(rawBase64, 'base64');
+  let uploadBuffer = originalBuffer;
+  let uploadMimeType = mimeType;
+
+  if (FIREBASE_HEIC_MIME_TYPES.has(mimeType)) {
+    uploadBuffer = Buffer.from(await heicConvert({
+      buffer: originalBuffer,
+      format: 'PNG',
+    }));
+    uploadMimeType = 'image/png';
+  }
+
+  const extension = FIREBASE_EXTENSION_MAP[uploadMimeType]
+    || uploadMimeType.split('/')[1]?.replace(/[^a-zA-Z0-9.+-]/g, '')
+    || 'bin';
+  const filePath = `${String(filePathPrefix || '').replace(/\/+$/, '')}.${extension}`;
+  const file = admin.storage().bucket().file(filePath);
+
+  await file.save(uploadBuffer, {
+    metadata: {
+      contentType: uploadMimeType,
+      metadata: { firebaseStorageDownloadTokens: downloadToken },
+    },
+  });
+
+  return {
+    file,
+    filePath,
+    imageURL: buildFirebaseDownloadUrl(file, downloadToken),
+    contentType: uploadMimeType,
+  };
+}
+
 // Upload an image attached to an equipment event (事案) to Firebase Storage.
 // Does NOT update MongoDB — the returned URL is stored by the caller when saving the event record.
 app.post("/api/upload-equipment-event-image", async (req, res) => {
@@ -12051,32 +12150,11 @@ app.post("/api/upload-equipment-event-image", async (req, res) => {
   }
 
   try {
-    const mimeMatch = base64.match(/^data:([^;]+);base64,/);
-    const mimeType = mimeMatch?.[1] || "image/jpeg";
-    const EXT_MAP = {
-      "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp",
-      "image/gif": "gif",  "video/mp4": "mp4", "video/quicktime": "mov",
-    };
-    const ext = EXT_MAP[mimeType] || "bin";
-
     const timestamp = Date.now();
     const factory  = (factoryName  || "unknown").replace(/[^a-zA-Z0-9　-鿿]/g, "_");
     const machine  = (equipmentName || "unknown").replace(/[^a-zA-Z0-9　-鿿]/g, "_");
-    const filePath = `equipmentEvents/${factory}/${machine}/${timestamp}.${ext}`;
-
-    const rawBase64 = base64.includes(",") ? base64.split(",")[1] : base64;
-    const buffer = Buffer.from(rawBase64, "base64");
-    const file = admin.storage().bucket().file(filePath);
-    const downloadToken = "masterDBToken69";
-
-    await file.save(buffer, {
-      metadata: {
-        contentType: mimeType,
-        metadata: { firebaseStorageDownloadTokens: downloadToken },
-      },
-    });
-
-    const imageURL = `https://firebasestorage.googleapis.com/v0/b/${file.bucket.name}/o/${encodeURIComponent(file.name)}?alt=media&token=${downloadToken}`;
+    const filePathPrefix = `equipmentEvents/${factory}/${machine}/${timestamp}`;
+    const { filePath, imageURL } = await saveBase64AssetToFirebase({ base64, filePathPrefix });
 
     console.log(`📎 Equipment event file uploaded by ${username || "unknown"}: ${filePath}`);
     res.json({ imageURL });
@@ -12136,9 +12214,12 @@ app.post("/submitToMasterDB", async (req, res) => {
     const db = client.db(dbName || "Sasaki_Coating_MasterDB");
     const collection = db.collection(collectionName);
     const logColl = db.collection(`${collectionName}_Log`);
+    const insertData = collectionName === "checkFormTemplatesDB"
+      ? normalizeCheckFormTemplateWritePayload(data)
+      : data;
 
     // Insert the data
-    const result = await collection.insertOne(data);
+    const result = await collection.insertOne(insertData);
 
     // Log the insert
     await logColl.insertOne({
@@ -12147,7 +12228,7 @@ app.post("/submitToMasterDB", async (req, res) => {
       action: "insert",
       username,
       timestamp: new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" })),
-      newData: data
+      newData: insertData
     });
 
     // Invalidate master data and filter caches – new record may add new field values
@@ -16488,31 +16569,22 @@ app.post("/api/noda-requests", async (req, res) => {
               }
 
               const inventoryItem = inventoryResults[0];
-              const availableQuantity = inventoryItem.availableQuantity || inventoryItem.runningQuantity || 0;
-              const requestedQuantity = parseInt(item.quantity);
-              
-              // ✅ NEW: Calculate partial reservation amounts
-              const reservedQuantity = Math.min(availableQuantity, requestedQuantity);
-              const shortfallQuantity = Math.max(0, requestedQuantity - availableQuantity);
-              
-              // Determine line item inventory status
-              let inventoryStatus;
-              if (availableQuantity === 0) {
-                inventoryStatus = 'none'; // No inventory available
-              } else if (availableQuantity < requestedQuantity) {
-                inventoryStatus = 'insufficient'; // Partial inventory
-              } else {
-                inventoryStatus = 'sufficient'; // Full inventory available
-              }
+              const currentState = {
+                physicalQuantity: Number(inventoryItem.physicalQuantity ?? inventoryItem.runningQuantity ?? 0),
+                reservedQuantity: Number(inventoryItem.reservedQuantity ?? 0)
+              };
+              const availableQuantity = Number(inventoryItem.availableQuantity ?? inventoryItem.runningQuantity ?? 0);
+              const requestedQuantity = Math.max(0, parseInt(item.quantity, 10) || 0);
+              const reservationDetails = getNodaReservationDetails(currentState, requestedQuantity);
 
               // ✅ Item is always valid - we allow requests without inventory
               validItems.push({
                 ...item,
                 inventoryItem: inventoryItem,
                 availableQuantity: availableQuantity,
-                reservedQuantity: reservedQuantity,
-                shortfallQuantity: shortfallQuantity,
-                inventoryStatus: inventoryStatus
+                reservedQuantity: reservationDetails.reservedQuantity,
+                shortfallQuantity: reservationDetails.shortfallQuantity,
+                inventoryStatus: reservationDetails.inventoryStatus
               });
 
             } catch (error) {
@@ -16657,14 +16729,14 @@ app.post("/api/noda-requests", async (req, res) => {
 
           // Process inventory transactions for all valid items (including partial reservations)
           for (const item of validItems) {
-            const currentPhysical = item.inventoryItem ? (item.inventoryItem.physicalQuantity || item.inventoryItem.runningQuantity || 0) : 0;
-            const currentReserved = item.inventoryItem ? (item.inventoryItem.reservedQuantity || 0) : 0;
-            const currentAvailable = item.availableQuantity;
-            const requestedQuantity = parseInt(item.quantity);
+            const currentPhysical = Number(item.inventoryItem?.physicalQuantity ?? item.inventoryItem?.runningQuantity ?? 0);
+            const currentReserved = Number(item.inventoryItem?.reservedQuantity ?? 0);
+            const currentAvailable = Number(item.availableQuantity ?? (currentPhysical - currentReserved));
+            const requestedQuantity = Math.max(0, parseInt(item.quantity, 10) || 0);
 
             // ✅ FIXED: reservedQuantity in inventory should be the FULL requested amount, not just what's available
             const newReservedQuantity = currentReserved + requestedQuantity; // Reserve FULL amount (including shortfall)
-            const newAvailableQuantity = Math.max(0, currentAvailable - item.reservedQuantity); // Only deduct what's actually available
+            const newAvailableQuantity = currentPhysical - newReservedQuantity; // Available is always physical - reserved, even when negative
 
             const inventoryTransaction = {
               背番号: item.背番号,
@@ -16675,7 +16747,7 @@ app.post("/api/noda-requests", async (req, res) => {
               // Two-stage inventory fields
               physicalQuantity: currentPhysical, // Physical stock unchanged
               reservedQuantity: newReservedQuantity, // Reserve FULL requested amount (450)
-              availableQuantity: newAvailableQuantity, // Deduct only what's available (300 → 0)
+              availableQuantity: newAvailableQuantity, // Recalculate from physical - reserved (can go negative)
               
               // Legacy field for compatibility
               runningQuantity: newAvailableQuantity,
@@ -16797,31 +16869,22 @@ app.post("/api/noda-requests", async (req, res) => {
               }
 
               const inventoryItem = inventoryResults[0];
-              const availableQuantity = inventoryItem.availableQuantity || inventoryItem.runningQuantity || 0;
-              const requestedQuantity = parseInt(item.quantity);
-              
-              // ✅ NEW: Calculate partial reservation amounts (same as bulk creation)
-              const reservedQuantity = Math.min(availableQuantity, requestedQuantity);
-              const shortfallQuantity = Math.max(0, requestedQuantity - availableQuantity);
-              
-              // Determine line item inventory status
-              let inventoryStatus;
-              if (availableQuantity === 0) {
-                inventoryStatus = 'none';
-              } else if (availableQuantity < requestedQuantity) {
-                inventoryStatus = 'insufficient';
-              } else {
-                inventoryStatus = 'sufficient';
-              }
+              const currentState = {
+                physicalQuantity: Number(inventoryItem.physicalQuantity ?? inventoryItem.runningQuantity ?? 0),
+                reservedQuantity: Number(inventoryItem.reservedQuantity ?? 0)
+              };
+              const availableQuantity = Number(inventoryItem.availableQuantity ?? inventoryItem.runningQuantity ?? 0);
+              const requestedQuantity = Math.max(0, parseInt(item.quantity, 10) || 0);
+              const reservationDetails = getNodaReservationDetails(currentState, requestedQuantity);
 
               // ✅ Item is always valid - we allow requests without full inventory
               validItems.push({
                 ...item,
                 inventoryItem: inventoryItem,
                 availableQuantity: availableQuantity,
-                reservedQuantity: reservedQuantity,
-                shortfallQuantity: shortfallQuantity,
-                inventoryStatus: inventoryStatus
+                reservedQuantity: reservationDetails.reservedQuantity,
+                shortfallQuantity: reservationDetails.shortfallQuantity,
+                inventoryStatus: reservationDetails.inventoryStatus
               });
 
             } catch (error) {
@@ -16877,14 +16940,14 @@ app.post("/api/noda-requests", async (req, res) => {
 
           // Process inventory transactions for all valid items
           for (const item of validItems) {
-            const currentPhysical = item.inventoryItem.physicalQuantity || item.inventoryItem.runningQuantity || 0;
-            const currentReserved = item.inventoryItem.reservedQuantity || 0;
-            const currentAvailable = item.availableQuantity;
-            const requestedQuantity = parseInt(item.quantity);
+            const currentPhysical = Number(item.inventoryItem?.physicalQuantity ?? item.inventoryItem?.runningQuantity ?? 0);
+            const currentReserved = Number(item.inventoryItem?.reservedQuantity ?? 0);
+            const currentAvailable = Number(item.availableQuantity ?? (currentPhysical - currentReserved));
+            const requestedQuantity = Math.max(0, parseInt(item.quantity, 10) || 0);
 
             // ✅ FIXED: Reserve FULL requested amount in inventory
             const newReservedQuantity = currentReserved + requestedQuantity; // Reserve FULL amount (including shortfall)
-            const newAvailableQuantity = Math.max(0, currentAvailable - item.reservedQuantity); // Only deduct what's actually available
+            const newAvailableQuantity = currentPhysical - newReservedQuantity; // Available is always physical - reserved, even when negative
 
             const inventoryTransaction = {
               背番号: item.背番号,
@@ -16895,7 +16958,7 @@ app.post("/api/noda-requests", async (req, res) => {
               // Two-stage inventory fields
               physicalQuantity: currentPhysical, // Physical stock unchanged
               reservedQuantity: newReservedQuantity, // Reserve FULL requested amount
-              availableQuantity: newAvailableQuantity, // Decrease available by what's actually reserved
+              availableQuantity: newAvailableQuantity, // Recalculate from physical - reserved (can go negative)
               
               // Legacy field for compatibility
               runningQuantity: newAvailableQuantity,
@@ -29342,6 +29405,7 @@ const CHECK_FORM_NG_REPORTS_COLLECTION = 'ngReportsDB';
 const CHECK_FORM_EQUIPMENT_COLLECTION = 'setsubiDB';
 const CHECK_FORM_WORKERS_COLLECTION = 'workerDB';
 const CHECK_FORM_UPLOAD_FOLDER = 'maintenanceForm';
+const CHECK_FORM_REFERENCE_IMAGE_PATTERN = /\.(?:avif|gif|jpe?g|png|webp)$/i;
 const CHECK_FORM_SCHEDULE_ORDER = Object.freeze({
   daily: 0,
   weekly: 1,
@@ -29433,12 +29497,76 @@ function sanitizeCheckFormFileSegment(value = '', fallback = 'item') {
   return sanitized || fallback;
 }
 
+function decodeCheckFormUrlComponentRepeatedly(value = '', attempts = 3) {
+  let nextValue = normalizeCheckFormText(value);
+
+  for (let index = 0; index < attempts; index += 1) {
+    try {
+      const decoded = decodeURIComponent(nextValue);
+      if (decoded === nextValue) break;
+      nextValue = decoded;
+    } catch (error) {
+      break;
+    }
+  }
+
+  return nextValue;
+}
+
+function extractCheckFormReferenceFolderKey(imageURL = '') {
+  const normalizedImageURL = normalizeCheckFormText(imageURL);
+  if (!normalizedImageURL) return '';
+
+  try {
+    const parsed = new URL(normalizedImageURL);
+    const objectPath = decodeCheckFormUrlComponentRepeatedly(parsed.pathname.split('/o/')[1] || '');
+    const segments = objectPath.split('/').filter(Boolean);
+
+    if (segments[0] !== 'equipmentEvents' || segments[1] !== 'checkform' || !segments[2]) {
+      return '';
+    }
+
+    return sanitizeCheckFormFileSegment(segments[2], '');
+  } catch (error) {
+    return '';
+  }
+}
+
+function extractCheckFormReferenceStoragePath(imageURL = '') {
+  const normalizedImageURL = normalizeCheckFormText(imageURL);
+  if (!normalizedImageURL) return '';
+
+  try {
+    const parsed = new URL(normalizedImageURL);
+    const objectPath = decodeCheckFormUrlComponentRepeatedly(parsed.pathname.split('/o/')[1] || '');
+    return objectPath.startsWith('equipmentEvents/checkform/') ? objectPath : '';
+  } catch (error) {
+    return '';
+  }
+}
+
+function buildCheckFormFieldImageFolderKey(field = {}) {
+  const explicitKey = sanitizeCheckFormFileSegment(field.imageFolderKey, '');
+  if (explicitKey) return explicitKey;
+
+  const imageKey = extractCheckFormReferenceFolderKey(field.imageURL);
+  if (imageKey) return imageKey;
+
+  const safeLabel = sanitizeCheckFormFileSegment(field.label, 'field');
+  const safeId = sanitizeCheckFormFileSegment(field.id, 'id');
+  const suffix = safeId.slice(-8) || safeId || String(Date.now());
+  return safeLabel === 'field' ? `field_${suffix}` : `${safeLabel}_${suffix}`;
+}
+
 function sanitizeCheckFormField(field = {}) {
+  const imageURL = normalizeCheckFormText(field.imageURL);
+
   return {
     id: normalizeCheckFormText(field.id),
     label: normalizeCheckFormText(field.label),
     description: normalizeCheckFormText(field.description),
-    imageURL: normalizeCheckFormText(field.imageURL),
+    imageURL,
+    imageFolderKey: buildCheckFormFieldImageFolderKey({ ...field, imageURL }),
     type: normalizeCheckFormText(field.type).toLowerCase(),
     required: !!field.required,
     locked: !!field.locked,
@@ -29555,36 +29683,14 @@ async function uploadCheckFormImageToFirebase({
   if (!base64) {
     throw new Error('base64 image data is required');
   }
-
-  const mimeMatch = String(base64).match(/^data:([^;]+);base64,/);
-  const mimeType = mimeMatch?.[1] || 'image/jpeg';
-  const extensionMap = {
-    'image/jpeg': 'jpg',
-    'image/png': 'png',
-    'image/webp': 'webp',
-    'image/gif': 'gif',
-  };
-
-  const extension = extensionMap[mimeType] || 'jpg';
-  const rawBase64 = String(base64).includes(',') ? String(base64).split(',')[1] : String(base64);
-  const buffer = Buffer.from(rawBase64, 'base64');
-  const downloadToken = 'masterDBToken69';
   const timestamp = Date.now();
   const safeFactory = sanitizeCheckFormFileSegment(factory, 'unknown_factory');
   const safeTemplate = sanitizeCheckFormFileSegment(templateName, 'template');
   const safeField = sanitizeCheckFormFileSegment(fieldLabel, 'field');
   const safeCategory = sanitizeCheckFormFileSegment(category, 'fields');
-  const filePath = `${CHECK_FORM_UPLOAD_FOLDER}/${safeFactory}/${safeCategory}/${safeTemplate}_${safeField}_${timestamp}_${sequence}.${extension}`;
-  const file = admin.storage().bucket().file(filePath);
-
-  await file.save(buffer, {
-    metadata: {
-      contentType: mimeType,
-      metadata: { firebaseStorageDownloadTokens: downloadToken },
-    },
-  });
-
-  return `https://firebasestorage.googleapis.com/v0/b/${file.bucket.name}/o/${encodeURIComponent(file.name)}?alt=media&token=${downloadToken}`;
+  const filePathPrefix = `${CHECK_FORM_UPLOAD_FOLDER}/${safeFactory}/${safeCategory}/${safeTemplate}_${safeField}_${timestamp}_${sequence}`;
+  const { imageURL } = await saveBase64AssetToFirebase({ base64, filePathPrefix });
+  return imageURL;
 }
 
 app.get('/checkList', (req, res) => {
@@ -29609,6 +29715,99 @@ app.get('/checkList2.html', (req, res) => {
 
 app.get('/checkList2.js', (req, res) => {
   res.sendFile(path.join(__dirname, 'checkList2.js'));
+});
+
+app.get('/api/check-forms/reference-images', async (req, res) => {
+  const requestedFolderKey = normalizeCheckFormText(req.query.folderKey);
+
+  if (!requestedFolderKey) {
+    return res.status(400).json({ error: 'folderKey is required' });
+  }
+
+  const folderKey = sanitizeCheckFormFileSegment(requestedFolderKey, 'field');
+  const prefix = `equipmentEvents/checkform/${folderKey}/`;
+
+  try {
+    const bucket = admin.storage().bucket();
+    const [files] = await bucket.getFiles({ prefix });
+    const images = files
+      .filter((file) => file.name.startsWith(prefix) && file.name !== prefix && CHECK_FORM_REFERENCE_IMAGE_PATTERN.test(file.name))
+      .sort((left, right) => right.name.localeCompare(left.name, 'en'))
+      .map((file) => ({
+        name: path.basename(file.name),
+        storagePath: file.name,
+        imageURL: buildFirebaseDownloadUrl(file),
+      }));
+
+    return res.json({ folderKey, images });
+  } catch (error) {
+    console.error('Error loading check form reference images:', error);
+    return res.status(500).json({ error: 'Failed to load reference images' });
+  }
+});
+
+app.post('/api/check-forms/reference-images/source', async (req, res) => {
+  const imageURL = normalizeCheckFormText(req.body?.imageURL);
+
+  if (!imageURL) {
+    return res.status(400).json({ error: 'imageURL is required' });
+  }
+
+  const storagePath = extractCheckFormReferenceStoragePath(imageURL);
+  if (!storagePath) {
+    return res.status(400).json({ error: 'Invalid check form reference image URL' });
+  }
+
+  try {
+    const file = admin.storage().bucket().file(storagePath);
+    const [exists] = await file.exists();
+    if (!exists) {
+      return res.status(404).json({ error: 'Reference image not found' });
+    }
+
+    const [[buffer], [metadata]] = await Promise.all([
+      file.download(),
+      file.getMetadata(),
+    ]);
+    const contentType = normalizeCheckFormText(metadata?.contentType) || 'image/png';
+    const dataURL = `data:${contentType};base64,${buffer.toString('base64')}`;
+
+    return res.json({
+      storagePath,
+      fileName: path.basename(storagePath),
+      contentType,
+      dataURL,
+    });
+  } catch (error) {
+    console.error('Error loading check form reference image source:', error);
+    return res.status(500).json({ error: 'Failed to load reference image source' });
+  }
+});
+
+app.post('/api/check-forms/reference-images', async (req, res) => {
+  const { base64, folderKey: rawFolderKey, username } = req.body || {};
+  const requestedFolderKey = normalizeCheckFormText(rawFolderKey);
+
+  if (!base64) {
+    return res.status(400).json({ error: 'base64 image data is required' });
+  }
+
+  if (!requestedFolderKey) {
+    return res.status(400).json({ error: 'folderKey is required' });
+  }
+
+  const folderKey = sanitizeCheckFormFileSegment(requestedFolderKey, 'field');
+
+  try {
+    const filePathPrefix = `equipmentEvents/checkform/${folderKey}/${Date.now()}`;
+    const { filePath, imageURL } = await saveBase64AssetToFirebase({ base64, filePathPrefix });
+
+    console.log(`📎 Check form reference image uploaded by ${username || 'unknown'}: ${filePath}`);
+    return res.json({ folderKey, imageURL, storagePath: filePath, fileName: path.basename(filePath) });
+  } catch (error) {
+    console.error('Error uploading check form reference image:', error);
+    return res.status(500).json({ error: 'Error uploading reference image', details: error.message });
+  }
 });
 
 app.get('/api/check-forms/templates', async (req, res) => {
