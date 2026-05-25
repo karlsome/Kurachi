@@ -183,28 +183,35 @@
     .field-text-input:focus { border-color: rgba(245,158,11,0.4); }
 
     /* Photo capture */
-    .photo-capture { display: flex; flex-direction: column; gap: 0.5rem; padding-bottom: 0.375rem; }
+    .photo-capture { display: flex; align-items: center; gap: 0.625rem; padding-bottom: 0.375rem; }
     .photo-btn {
       display: flex; align-items: center; gap: 0.75rem;
       background: var(--secondary); border: 1px dashed rgba(255,255,255,0.15);
       color: var(--muted-fg); border-radius: 0.75rem; padding: 0.75rem 1rem;
       font-family: var(--font-sans); font-size: 0.9rem; cursor: pointer;
-      transition: border-color 0.15s, color 0.15s; width: 100%; text-align: left;
+      transition: border-color 0.15s, color 0.15s; text-align: left;
     }
+    /* Before photo: full-width call-to-action */
+    .photo-capture:not(.has-photo) .photo-btn { width: 100%; }
+    /* After photo: compact retake sits beside thumbnail */
+    .photo-capture.has-photo .photo-btn { flex-shrink: 0; }
     .photo-btn svg { width: 1.25rem; height: 1.25rem; flex-shrink: 0; }
     .photo-btn.has-photo { border-color: rgba(16,185,129,0.5); border-style: solid; color: var(--ok); }
     .photo-thumb {
-      width: 80px; height: 80px; object-fit: cover;
-      border-radius: 0.5rem; border: 1px solid var(--border);
+      width: 64px; height: 64px; object-fit: cover; flex-shrink: 0;
+      border-radius: 0.5rem; border: 2px solid rgba(16,185,129,0.4);
     }
 
     /* Select option buttons */
-    .field-select-grid { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; }
+    .field-select-grid { display: flex; gap: 0.5rem; }
     .field-select-btn {
-      padding: 0.625rem 1.125rem; border-radius: 0.625rem;
+      flex: 1;
+      display: flex; align-items: center; justify-content: center;
+      padding: 0.875rem 0.5rem; border-radius: 0.625rem;
       border: 1px solid var(--border); background: var(--card);
-      color: var(--muted-fg); font-family: var(--font-sans); font-size: 0.9rem;
+      color: var(--muted-fg); font-family: var(--font-sans); font-size: 1rem;
       cursor: pointer; transition: border-color 0.12s, background 0.12s, color 0.12s;
+      text-align: center; line-height: 1.2;
     }
     .field-select-btn.selected {
       border-color: rgba(245,158,11,0.5); background: rgba(245,158,11,0.12);
@@ -281,6 +288,8 @@
     /* When numpad is active: photo shrinks, step-content stops growing */
     #inspection-view.numpad-active #step-content { flex: none; }
     #inspection-view.numpad-active .photo-wrap   { height: 30dvh; }
+    /* When a step photo is taken: shrink the reference image to reclaim space */
+    #inspection-view.photo-taken .photo-wrap     { height: 35dvh; }
 
     #numpad {
       flex: 1;

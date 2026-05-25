@@ -29692,16 +29692,21 @@ app.get('/api/check-forms/names', async (req, res) => {
     const db = client.db(DB_NAME);
 
     const [workers, users] = await Promise.all([
-      db.collection('workerDB').find({}).project({ Name: 1 }).toArray(),
-      db.collection('users').find({}).project({ firstName: 1, lastName: 1 }).toArray(),
+      db.collection('workerDB').find({}).project({ Name: 1, name: 1 }).toArray(),
+      db.collection('users').find({}).project({ firstName: 1, lastName: 1, name: 1 }).toArray(),
     ]);
 
     const fromWorkers = workers
-      .map((w) => String(w.Name || '').trim())
+      .map((w) => String(w.Name || w.name || '').trim())
       .filter(Boolean);
 
     const fromUsers = users
-      .map((u) => [u.firstName, u.lastName].filter(Boolean).join(' ').trim())
+      .map((u) => {
+        if (u.firstName || u.lastName) {
+          return [u.firstName, u.lastName].filter(Boolean).join(' ').trim();
+        }
+        return String(u.name || '').trim();
+      })
       .filter(Boolean);
 
     const names = [...new Set([...fromWorkers, ...fromUsers])]

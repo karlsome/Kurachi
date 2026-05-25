@@ -9,6 +9,11 @@ const CHECKLIST_API = {
   translate:    `${API_BASE_URL}/api/check-forms/translate`,
 };
 
+const CHECKLIST_DB_NAME     = 'kurachi-checklist-assets';
+const CHECKLIST_DB_VERSION  = 1;
+const CHECKLIST_ASSET_STORE = 'assets';
+const CHECKLIST_DRAFT_KEY   = 'checkListDraft2';
+
 const STRINGS = {
   en: {
     eyebrow:         'PRE-USE INSPECTION',
@@ -92,12 +97,15 @@ const state = {
   results: [],        // { result: 'OK'|'NG', value: any }
   animating: false,
   pressedBtn: null,
-  inputValue: null,     // entered value for the current non-checkbox step
-  numpadBuffer: '',     // current digits typed on the custom numpad
-  photo: null,          // File object for the current step's required photo
+  inputValue: null,       // entered value for the current non-checkbox step
+  numpadBuffer: '',       // current digits typed on the custom numpad
+  photoAssetId: null,     // IndexedDB asset ID for the current step's photo
+  assetCache: new Map(),  // in-memory cache keyed by asset ID
+  memoryAssets: new Map(), // fallback when IndexedDB is unavailable
 };
 
 const dom = {};
+let indexedDbPromise = null;
 
 document.addEventListener('DOMContentLoaded', init);
 
@@ -354,6 +362,11 @@ async function loadTemplates() {
     dom.inspectionTitle.textContent = tx(state.pageTitle);
 
     transitionTo('name');
+    const savedDraft = loadDraft();
+    if (savedDraft && savedDraft.workerName) {
+      dom.workerNameInput.value = savedDraft.workerName;
+      dom.btnBegin.disabled = false;
+    }
 
   } catch (err) {
     applyLang(state.lang);
@@ -406,7 +419,8 @@ function renderNameDropdown(query) {
   if (matches.length === 0) { dom.nameDropdown.classList.add('hidden'); return; }
 
   dom.nameDropdown.innerHTML = '';
-  matches.slice(0, 20).forEach(name => {
+  const capped = q ? matches.slice(0, 50) : matches;
+  capped.forEach(name => {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'name-option';
@@ -432,9 +446,19 @@ function beginInspection() {
   closeNameDropdown();
   state.workerName = dom.workerNameInput.value.trim();
   if (!state.workerName) return;
-  state.step    = 0;
-  state.results = Array(state.steps.length).fill(null);
-  state.inputValue = null;
+
+  const draft = loadDraft();
+  if (draft && draft.workerName === state.workerName && Array.isArray(draft.results)) {
+    state.step    = Math.min(draft.step || 0, state.steps.length - 1);
+    state.results = draft.results.slice(0, state.steps.length);
+    while (state.results.length < state.steps.length) state.results.push(null);
+  } else {
+    state.step    = 0;
+    state.results = Array(state.steps.length).fill(null);
+  }
+
+  state.inputValue   = null;
+  state.photoAssetId = null;
   buildProgressBar();
   renderStep();
   transitionTo('inspection');
@@ -476,8 +500,9 @@ function renderStep() {
   dom.stepInstruction.textContent = tx(s.instruction);
   dom.inspectionTitle.textContent = tx(state.pageTitle);
 
-  state.inputValue = null;
-  state.photo      = null;
+  state.inputValue   = null;
+  state.photoAssetId = null;
+  dom.inspectionView.classList.remove('photo-taken');
   renderFieldInput(s);
   updateProgressBar();
   updateButtonLock();
@@ -554,22 +579,28 @@ function buildPhotoCapture() {
   thumb.className = 'photo-thumb hidden';
   thumb.alt       = '';
 
-  fileInput.addEventListener('change', () => {
+  fileInput.addEventListener('change', async () => {
     const file = fileInput.files[0];
     if (!file) return;
-    state.photo = file;
-    thumb.src = URL.createObjectURL(file);
+    if (state.photoAssetId) await deleteAsset(state.photoAssetId);
+    const compressed = await compressImageFile(file, 1600, 0.78);
+    const assetId = createAssetId('field');
+    await saveAsset(assetId, compressed);
+    state.photoAssetId = assetId;
+    thumb.src = compressed;
     thumb.classList.remove('hidden');
     btn.classList.add('has-photo');
     btn.querySelector('span').textContent = S().retakePhoto;
+    wrap.classList.add('has-photo');
+    dom.inspectionView.classList.add('photo-taken');
     updateButtonLock();
   });
 
   btn.addEventListener('click', () => fileInput.click());
 
   wrap.appendChild(fileInput);
-  wrap.appendChild(btn);
   wrap.appendChild(thumb);
+  wrap.appendChild(btn);
   return wrap;
 }
 
@@ -629,7 +660,7 @@ function updateButtonLock() {
   const needsValue = step.type !== 'checkbox';
   const hasValue   = state.inputValue !== null;
   const needsPhoto = step.photoRequired;
-  const hasPhoto   = state.photo !== null;
+  const hasPhoto   = state.photoAssetId !== null;
   const locked = state.animating
     || (needsValue && !hasValue)
     || (needsPhoto && !hasPhoto);
@@ -664,7 +695,8 @@ function handleResult(result) {
   showFlash(result);
 
   setTimeout(() => {
-    state.results[state.step] = { result, value: state.inputValue, photo: state.photo };
+    state.results[state.step] = { result, value: state.inputValue, photoAssetId: state.photoAssetId };
+    persistDraft();
     hideFlash();
     setTimeout(() => {
       if (state.step + 1 >= state.steps.length) {
@@ -748,12 +780,19 @@ function showSummary() {
 
 // ── Reset ────────────────────────────────────────────────────────
 
-function reset() {
-  state.step       = 0;
-  state.results    = Array(state.steps.length).fill(null);
-  state.animating  = false;
-  state.pressedBtn = null;
-  state.inputValue = null;
+async function reset() {
+  for (const r of state.results) {
+    if (r && r.photoAssetId) await deleteAsset(r.photoAssetId);
+  }
+  if (state.photoAssetId) await deleteAsset(state.photoAssetId);
+  removeDraft();
+
+  state.step         = 0;
+  state.results      = Array(state.steps.length).fill(null);
+  state.animating    = false;
+  state.pressedBtn   = null;
+  state.inputValue   = null;
+  state.photoAssetId = null;
   dom.workerNameInput.value = '';
   dom.btnBegin.disabled = true;
   dom.nameError.classList.add('hidden');
@@ -780,4 +819,146 @@ function escapeHtml(str) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+// ── Draft persistence ────────────────────────────────────────────
+
+function getDraftKey() {
+  return `${CHECKLIST_DRAFT_KEY}::${state.factory}::${state.machine}`;
+}
+
+function persistDraft() {
+  try {
+    const draft = {
+      version: 1,
+      factory: state.factory,
+      machine: state.machine,
+      workerName: state.workerName,
+      step: state.step,
+      results: state.results.map(r => r
+        ? { result: r.result, value: r.value, photoAssetId: r.photoAssetId || '' }
+        : null),
+      updatedAt: new Date().toISOString(),
+    };
+    window.localStorage.setItem(getDraftKey(), JSON.stringify(draft));
+  } catch (e) {
+    console.warn('Failed to persist checklist draft:', e);
+  }
+}
+
+function loadDraft() {
+  try {
+    const raw = window.localStorage.getItem(getDraftKey());
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function removeDraft() {
+  window.localStorage.removeItem(getDraftKey());
+}
+
+// ── Asset management (IndexedDB + memory fallback) ───────────────
+
+function createAssetId(prefix) {
+  if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+    return `${prefix}_${window.crypto.randomUUID()}`;
+  }
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+async function compressImageFile(file, maxWidth, quality) {
+  const dataUrl = await readFileAsDataUrl(file);
+  const image   = await loadImage(dataUrl);
+  const scale   = Math.min(1, maxWidth / image.width);
+  const canvas  = document.createElement('canvas');
+  canvas.width  = Math.max(1, Math.round(image.width  * scale));
+  canvas.height = Math.max(1, Math.round(image.height * scale));
+  canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL('image/jpeg', quality);
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload  = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('Failed to read image file.'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload  = () => resolve(img);
+    img.onerror = () => reject(new Error('Failed to load image for compression.'));
+    img.src = src;
+  });
+}
+
+async function openAssetDatabase() {
+  if (!('indexedDB' in window)) throw new Error('IndexedDB is not available.');
+  if (!indexedDbPromise) {
+    indexedDbPromise = new Promise((resolve, reject) => {
+      const request = window.indexedDB.open(CHECKLIST_DB_NAME, CHECKLIST_DB_VERSION);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains(CHECKLIST_ASSET_STORE)) {
+          db.createObjectStore(CHECKLIST_ASSET_STORE, { keyPath: 'id' });
+        }
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror   = () => reject(request.error || new Error('Failed to open IndexedDB.'));
+    });
+  }
+  return indexedDbPromise;
+}
+
+async function saveAsset(assetId, dataUrl) {
+  state.assetCache.set(assetId, dataUrl);
+  try {
+    const db = await openAssetDatabase();
+    await runAssetTransaction(db, 'readwrite', store => store.put({ id: assetId, dataUrl, updatedAt: Date.now() }));
+  } catch {
+    state.memoryAssets.set(assetId, dataUrl);
+  }
+}
+
+async function getAsset(assetId) {
+  if (!assetId) return '';
+  if (state.assetCache.has(assetId))   return state.assetCache.get(assetId);
+  if (state.memoryAssets.has(assetId)) return state.memoryAssets.get(assetId);
+  try {
+    const db     = await openAssetDatabase();
+    const record = await runAssetTransaction(db, 'readonly', store => store.get(assetId));
+    const dataUrl = record?.dataUrl || '';
+    if (dataUrl) state.assetCache.set(assetId, dataUrl);
+    return dataUrl;
+  } catch {
+    return '';
+  }
+}
+
+async function deleteAsset(assetId) {
+  if (!assetId) return;
+  state.assetCache.delete(assetId);
+  state.memoryAssets.delete(assetId);
+  try {
+    const db = await openAssetDatabase();
+    await runAssetTransaction(db, 'readwrite', store => store.delete(assetId));
+  } catch {
+    // ignore cleanup failures
+  }
+}
+
+function runAssetTransaction(db, mode, callback) {
+  return new Promise((resolve, reject) => {
+    const tx    = db.transaction(CHECKLIST_ASSET_STORE, mode);
+    const store = tx.objectStore(CHECKLIST_ASSET_STORE);
+    const req   = callback(store);
+    tx.oncomplete = () => resolve(req?.result);
+    tx.onerror    = () => reject(tx.error || new Error('IndexedDB transaction failed.'));
+    tx.onabort    = () => reject(tx.error || new Error('IndexedDB transaction aborted.'));
+  });
 }
