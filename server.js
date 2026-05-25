@@ -29500,6 +29500,19 @@ function extractCheckFormReferenceFolderKey(imageURL = '') {
   }
 }
 
+function extractCheckFormReferenceStoragePath(imageURL = '') {
+  const normalizedImageURL = normalizeCheckFormText(imageURL);
+  if (!normalizedImageURL) return '';
+
+  try {
+    const parsed = new URL(normalizedImageURL);
+    const objectPath = decodeCheckFormUrlComponentRepeatedly(parsed.pathname.split('/o/')[1] || '');
+    return objectPath.startsWith('equipmentEvents/checkform/') ? objectPath : '';
+  } catch (error) {
+    return '';
+  }
+}
+
 function buildCheckFormFieldImageFolderKey(field = {}) {
   const explicitKey = sanitizeCheckFormFileSegment(field.imageFolderKey, '');
   if (explicitKey) return explicitKey;
@@ -29689,6 +29702,44 @@ app.get('/api/check-forms/reference-images', async (req, res) => {
   }
 });
 
+app.post('/api/check-forms/reference-images/source', async (req, res) => {
+  const imageURL = normalizeCheckFormText(req.body?.imageURL);
+
+  if (!imageURL) {
+    return res.status(400).json({ error: 'imageURL is required' });
+  }
+
+  const storagePath = extractCheckFormReferenceStoragePath(imageURL);
+  if (!storagePath) {
+    return res.status(400).json({ error: 'Invalid check form reference image URL' });
+  }
+
+  try {
+    const file = admin.storage().bucket().file(storagePath);
+    const [exists] = await file.exists();
+    if (!exists) {
+      return res.status(404).json({ error: 'Reference image not found' });
+    }
+
+    const [[buffer], [metadata]] = await Promise.all([
+      file.download(),
+      file.getMetadata(),
+    ]);
+    const contentType = normalizeCheckFormText(metadata?.contentType) || 'image/png';
+    const dataURL = `data:${contentType};base64,${buffer.toString('base64')}`;
+
+    return res.json({
+      storagePath,
+      fileName: path.basename(storagePath),
+      contentType,
+      dataURL,
+    });
+  } catch (error) {
+    console.error('Error loading check form reference image source:', error);
+    return res.status(500).json({ error: 'Failed to load reference image source' });
+  }
+});
+
 app.post('/api/check-forms/reference-images', async (req, res) => {
   const { base64, folderKey: rawFolderKey, username } = req.body || {};
   const requestedFolderKey = normalizeCheckFormText(rawFolderKey);
@@ -29708,7 +29759,7 @@ app.post('/api/check-forms/reference-images', async (req, res) => {
     const { filePath, imageURL } = await saveBase64AssetToFirebase({ base64, filePathPrefix });
 
     console.log(`📎 Check form reference image uploaded by ${username || 'unknown'}: ${filePath}`);
-    return res.json({ folderKey, imageURL });
+    return res.json({ folderKey, imageURL, storagePath: filePath, fileName: path.basename(filePath) });
   } catch (error) {
     console.error('Error uploading check form reference image:', error);
     return res.status(500).json({ error: 'Error uploading reference image', details: error.message });
