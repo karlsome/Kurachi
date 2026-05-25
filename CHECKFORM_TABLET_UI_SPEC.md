@@ -227,6 +227,7 @@ A card is considered answered only when all required conditions for that field a
 
 - Ticket modal collects the reason for the abnormal answer
 - Ticket modal also supports image capture
+- A saved ticket must include at least 1 image
 - Ticket modal image rules:
   - up to 5 images
   - native image capture/input
@@ -294,16 +295,8 @@ The exact schema can evolve, but the submitted record should preserve at least t
   "templateName": "test1",
   "schedule": "weekly",
   "factory": "小瀬",
-  "machine": "OZNC02",
-  "machineId": "69fd4259534321eae70ab460",
-  "equipmentIds": [
-    "69fd4259534321eae70ab461",
-    "69fd4259534321eae70ab462"
-  ],
-  "equipmentNames": [
-    "OZNC02",
-    "OZNC03"
-  ],
+  "加工設備": "OZNC02",
+  "equipmentId": "69fd4259534321eae70ab460",
   "workerName": "青山",
   "submittedAt": "2026-05-20T12:34:56.000Z",
   "answers": [
@@ -362,19 +355,11 @@ Ticket records should preserve the abnormal event independently of the checklist
 {
   "source": "checkForm",
   "factory": "小瀬",
-  "machine": "OZNC02",
-  "machineId": "69fd4259534321eae70ab460",
+  "加工設備": "OZNC02",
+  "equipmentId": "69fd4259534321eae70ab460",
   "templateId": "6a0d39a371b0fa6df68c489e",
   "templateName": "test1",
   "checkFormRecordId": "<inserted record id>",
-  "equipmentIds": [
-    "69fd4259534321eae70ab461",
-    "69fd4259534321eae70ab462"
-  ],
-  "equipmentNames": [
-    "OZNC02",
-    "OZNC03"
-  ],
   "workerName": "青山",
   "fieldId": "93c5933d-5f5d-4b75-b660-775dcb436e40",
   "fieldLabel": "number t",
@@ -420,6 +405,7 @@ Ticket records should preserve the abnormal event independently of the checklist
 - Submit button stays enabled
 - First incomplete card is auto-scrolled and highlighted red on submit
 - Out-of-range and `NG` answers require tickets
+- Saved tickets must include at least 1 image
 - Ticket modal supports up to 5 images
 - Field photos are stored locally first and uploaded only on submit
 - Local draft photo storage uses `IndexedDB`

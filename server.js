@@ -5015,17 +5015,42 @@ app.post('/queries', async (req, res) => {
     // Log the initial request for debugging
     // console.log("Initial Request Body:", JSON.parse(JSON.stringify(req.body)));
 
-    // CENTRALIZED ObjectId CONVERSION for query._id
-    // This should happen before update or delete operations that rely on _id
-    if (query && query._id && typeof query._id === "string") {
-      console.log(`Attempting to convert query._id: ${query._id} to ObjectId`);
-      try {
-        query._id = new ObjectId(query._id); // Modify the query object directly
-        console.log(`Successfully converted query._id to:`, query._id);
-      } catch (err) {
-        console.error("Error converting query._id to ObjectId:", err.message);
-        // If _id is invalid, it's a bad request for operations targeting a specific document by _id
-        return res.status(400).json({ error: "Invalid _id format provided in query." });
+    function convertQueryObjectId(fieldName) {
+      if (!query || !query[fieldName]) return null;
+
+      if (typeof query[fieldName] === "string") {
+        console.log(`Attempting to convert query.${fieldName}: ${query[fieldName]} to ObjectId`);
+        try {
+          query[fieldName] = new ObjectId(query[fieldName]);
+          console.log(`Successfully converted query.${fieldName} to:`, query[fieldName]);
+        } catch (err) {
+          console.error(`Error converting query.${fieldName} to ObjectId:`, err.message);
+          return `Invalid ${fieldName} format provided in query.`;
+        }
+      }
+
+      if (query[fieldName] && Array.isArray(query[fieldName].$in)) {
+        try {
+          query[fieldName] = {
+            ...query[fieldName],
+            $in: query[fieldName].$in.map((value) => (
+              typeof value === "string" ? new ObjectId(value) : value
+            )),
+          };
+          console.log(`Successfully converted query.${fieldName}.$in to ObjectId array`);
+        } catch (err) {
+          console.error(`Error converting query.${fieldName}.$in to ObjectId array:`, err.message);
+          return `Invalid ${fieldName} list format provided in query.`;
+        }
+      }
+
+      return null;
+    }
+
+    for (const fieldName of ["_id", "checkFormRecordId"]) {
+      const conversionError = convertQueryObjectId(fieldName);
+      if (conversionError) {
+        return res.status(400).json({ error: conversionError });
       }
     }
 
@@ -29338,6 +29363,18 @@ function normalizeCheckFormMaybeNumber(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function resolveCheckFormAnswerTimestamp(value = '', fallbackIso = '') {
+  const normalized = normalizeCheckFormText(value);
+  if (!normalized) {
+    return fallbackIso || new Date().toISOString();
+  }
+
+  const parsed = new Date(normalized);
+  return Number.isNaN(parsed.getTime())
+    ? (fallbackIso || new Date().toISOString())
+    : parsed.toISOString();
+}
+
 function normalizeCheckFormStringArray(values = []) {
   if (!Array.isArray(values)) return [];
   return values
@@ -29816,10 +29853,15 @@ app.post('/api/check-forms/submit', async (req, res) => {
       const description = normalizeCheckFormText(templatePayload.description);
       const schedule = normalizeCheckFormSchedule(templatePayload.schedule);
       const startDate = normalizeCheckFormText(templatePayload.startDate);
-      const equipmentIds = normalizeCheckFormStringArray(templatePayload.equipmentIds);
-      const equipmentNames = normalizeCheckFormStringArray(templatePayload.equipmentNames);
+      const fallbackEquipmentIds = normalizeCheckFormStringArray(templatePayload.equipmentIds);
+      const fallbackEquipmentNames = normalizeCheckFormStringArray(templatePayload.equipmentNames);
+      const equipmentId = normalizeCheckFormText(
+        templatePayload.equipmentId || templatePayload.selectedMachineId || fallbackEquipmentIds[0]
+      );
+      const processingEquipment = normalizeCheckFormText(
+        templatePayload['加工設備'] || templatePayload.selectedMachine || machine || fallbackEquipmentNames[0]
+      );
       const selectedMachine = normalizeCheckFormText(templatePayload.selectedMachine || machine);
-      const selectedMachineId = normalizeCheckFormText(templatePayload.selectedMachineId);
       const workerName = normalizeCheckFormText(templatePayload.workerName);
 
       if (!templateId || !templateName) {
@@ -29832,6 +29874,10 @@ app.post('/api/check-forms/submit', async (req, res) => {
 
       if (!selectedMachine) {
         return res.status(400).json({ error: `selectedMachine is required for template ${templateName}` });
+      }
+
+      if (!processingEquipment) {
+        return res.status(400).json({ error: `加工設備 is required for template ${templateName}` });
       }
 
       if (answersPayload.length === 0) {
@@ -29908,13 +29954,11 @@ app.post('/api/check-forms/submit', async (req, res) => {
             _id: new ObjectId(),
             source: 'checkForm',
             factory,
-            machine: selectedMachine,
-            machineId: selectedMachineId || null,
+            加工設備: processingEquipment,
+            equipmentId: equipmentId || null,
             templateId,
             templateName,
             checkFormRecordId: recordId,
-            equipmentIds,
-            equipmentNames,
             workerName,
             fieldId: field.id,
             fieldLabel: field.label,
@@ -29962,7 +30006,7 @@ app.post('/api/check-forms/submit', async (req, res) => {
           ticketRequired,
           fieldPhotoURL,
           ticket: ticketSummary,
-          answeredAt: nowIso,
+          answeredAt: resolveCheckFormAnswerTimestamp(answerPayload.answeredAt, nowIso),
         });
       }
 
@@ -29975,10 +30019,8 @@ app.post('/api/check-forms/submit', async (req, res) => {
         schedule,
         startDate,
         factory,
-        machine: selectedMachine,
-        machineId: selectedMachineId || null,
-        equipmentIds,
-        equipmentNames,
+        加工設備: processingEquipment,
+        equipmentId: equipmentId || null,
         workerName,
         answers: normalizedAnswers,
         tickets: recordTicketSummaries,

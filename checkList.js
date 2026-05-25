@@ -1,6 +1,6 @@
-//const serverURL = "https://kurachi.onrender.com";
+const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
-const serverURL = "http://192.168.0.186:3000";
+//const serverURL = "http://192.168.24.60:3000";
 
 'use strict';
 
@@ -13,6 +13,8 @@ const CHECKLIST_API = {
 };
 
 const CHECKLIST_DRAFT_PREFIX = 'checkListDraft::';
+const CHECKLIST_RECENT_WORKERS_PREFIX = 'checkListRecentWorkers::';
+const MAX_RECENT_WORKERS = 4;
 const CHECKLIST_DB_NAME = 'kurachi-checklist-assets';
 const CHECKLIST_DB_VERSION = 1;
 const CHECKLIST_ASSET_STORE = 'assets';
@@ -28,6 +30,15 @@ const SCHEDULE_ORDER = {
   monthly: 2,
   unscheduled: 99,
 };
+const FIELD_TIME_FORMATTER = new Intl.DateTimeFormat('ja-JP', {
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: false,
+});
+const PHOTO_EDITOR_BRUSH_COLOR = '#d3312a';
+const PHOTO_EDITOR_BRUSH_SIZE = 18;
+const PHOTO_EDITOR_OUTPUT_QUALITY = 0.84;
 
 const appState = {
   factory: '',
@@ -35,6 +46,7 @@ const appState = {
   templates: [],
   workers: [],
   selectedWorkerName: '',
+  recentWorkers: [],
   loading: true,
   submitting: false,
   validationErrors: new Set(),
@@ -47,6 +59,7 @@ const appState = {
   },
   activeTicket: null,
   activeKeypad: null,
+  photoEditor: null,
   imagePreview: null,
 };
 
@@ -80,6 +93,8 @@ async function initializeCheckListApp() {
     return;
   }
 
+  restoreRecentWorkers();
+
   try {
     const [templateData, workerData] = await Promise.all([
       fetchJson(`${CHECKLIST_API.templates}?factory=${encodeURIComponent(appState.factory)}&machine=${encodeURIComponent(appState.machine)}`),
@@ -87,6 +102,8 @@ async function initializeCheckListApp() {
     ]);
 
     appState.workers = Array.isArray(workerData.workers) ? workerData.workers : [];
+  appState.recentWorkers = getVisibleRecentWorkers(appState.recentWorkers);
+  persistRecentWorkers();
     appState.templates = buildTemplateState(Array.isArray(templateData.templates) ? templateData.templates : []);
     await restoreDraftState();
     syncTemplateWorkersFromSelection(false);
@@ -97,7 +114,6 @@ async function initializeCheckListApp() {
       dom.statusValue.textContent = 'No templates';
     } else {
       hideEmptyState();
-      showBanner(`Loaded ${appState.templates.length} template${appState.templates.length === 1 ? '' : 's'} for ${appState.factory} / ${appState.machine}.`, 'info', 2200);
       dom.statusValue.textContent = 'Ready';
     }
   } catch (error) {
@@ -123,12 +139,12 @@ function cacheDom() {
   dom.emptyState = document.getElementById('emptyState');
   dom.templatesContainer = document.getElementById('templatesContainer');
   dom.actionFooter = document.getElementById('actionFooter');
-  dom.footerStatus = document.getElementById('footerStatus');
   dom.resetButton = document.getElementById('resetButton');
   dom.submitButton = document.getElementById('submitButton');
   dom.workerModal = document.getElementById('workerModal');
   dom.ticketModal = document.getElementById('ticketModal');
   dom.keypadModal = document.getElementById('keypadModal');
+  dom.photoEditorModal = document.getElementById('photoEditorModal');
   dom.imagePreviewModal = document.getElementById('imagePreviewModal');
   dom.submitOverlay = document.getElementById('submitOverlay');
 }
@@ -144,10 +160,22 @@ function bindStaticEvents() {
   dom.ticketModal.addEventListener('click', handleTicketModalClick);
   dom.ticketModal.addEventListener('input', handleTicketModalInput);
   dom.keypadModal.addEventListener('click', handleKeypadModalClick);
+  dom.photoEditorModal.addEventListener('click', handlePhotoEditorClick);
+  dom.photoEditorModal.addEventListener('pointerdown', handlePhotoEditorPointerDown);
+  dom.photoEditorModal.addEventListener('pointermove', handlePhotoEditorPointerMove);
+  dom.photoEditorModal.addEventListener('pointerup', finishPhotoEditorStroke);
+  dom.photoEditorModal.addEventListener('pointercancel', finishPhotoEditorStroke);
   dom.imagePreviewModal.addEventListener('click', handleImagePreviewClick);
+  window.addEventListener('scroll', syncHeaderCondensedState, { passive: true });
+  window.addEventListener('resize', syncPhotoEditorLayout, { passive: true });
+  syncHeaderCondensedState();
 
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') return;
+    if (appState.photoEditor) {
+      closePhotoEditor('');
+      return;
+    }
     if (appState.imagePreview) {
       closeImagePreview();
       return;
@@ -223,6 +251,7 @@ function createFieldState(templateId, field, index) {
     max: normalizeNumber(field.max),
     unit: normalizeText(field.unit),
     answerValue: '',
+    lastAnsweredAt: '',
     fieldPhotoAssetId: '',
     ticket: {
       ticketKey: createTicketKey(templateId, fieldId),
@@ -238,6 +267,14 @@ function createFieldState(templateId, field, index) {
 
 function normalizeText(value = '') {
   return String(value ?? '').trim();
+}
+
+function normalizeIsoTimestamp(value = '') {
+  const normalized = normalizeText(value);
+  if (!normalized) return '';
+
+  const parsed = new Date(normalized);
+  return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString();
 }
 
 function normalizeSchedule(value = '') {
@@ -279,6 +316,43 @@ function getDraftStorageKey() {
   return `${CHECKLIST_DRAFT_PREFIX}${appState.factory}::${machineKey}`;
 }
 
+function getRecentWorkersStorageKey() {
+  return `${CHECKLIST_RECENT_WORKERS_PREFIX}${appState.factory || 'unknown-factory'}`;
+}
+
+function restoreRecentWorkers() {
+  appState.recentWorkers = [];
+
+  try {
+    const raw = window.localStorage.getItem(getRecentWorkersStorageKey());
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return;
+
+    appState.recentWorkers = normalizeStringArray(parsed)
+      .filter((name, index, list) => list.indexOf(name) === index)
+      .slice(0, MAX_RECENT_WORKERS);
+  } catch (error) {
+    console.warn('Failed to restore recent workers:', error);
+  }
+}
+
+function persistRecentWorkers() {
+  try {
+    window.localStorage.setItem(getRecentWorkersStorageKey(), JSON.stringify(appState.recentWorkers.slice(0, MAX_RECENT_WORKERS)));
+  } catch (error) {
+    console.warn('Failed to persist recent workers:', error);
+  }
+}
+
+function getVisibleRecentWorkers(names) {
+  const normalizedNames = normalizeStringArray(names).slice(0, MAX_RECENT_WORKERS);
+  if (appState.workers.length === 0) return normalizedNames;
+
+  const availableNames = new Set(appState.workers.map((worker) => normalizeText(worker.name)));
+  return normalizedNames.filter((name) => availableNames.has(name));
+}
+
 async function restoreDraftState() {
   const raw = window.localStorage.getItem(getDraftStorageKey());
   if (!raw) return;
@@ -303,6 +377,7 @@ async function restoreDraftState() {
         field.answerValue = field.type === 'number'
           ? normalizeText(fieldDraft.answerValue)
           : String(fieldDraft.answerValue ?? '');
+        field.lastAnsweredAt = normalizeIsoTimestamp(fieldDraft.lastAnsweredAt);
         field.fieldPhotoAssetId = normalizeText(fieldDraft.fieldPhotoAssetId);
         field.ticket.saved = Boolean(fieldDraft.ticket?.saved);
         field.ticket.reason = normalizeText(fieldDraft.ticket?.reason);
@@ -330,6 +405,7 @@ function persistDraftState() {
         fields: template.fields.map((field) => ({
           fieldId: field.fieldId,
           answerValue: field.answerValue,
+          lastAnsweredAt: field.lastAnsweredAt,
           fieldPhotoAssetId: field.fieldPhotoAssetId,
           ticket: {
             saved: field.ticket.saved,
@@ -362,6 +438,7 @@ function renderApp() {
   renderWorkerModal();
   renderTicketModal();
   renderKeypadModal();
+  renderPhotoEditorModal();
   renderImagePreviewModal();
   renderSubmitOverlay();
 }
@@ -450,8 +527,13 @@ function renderTemplates() {
 
 function renderTemplatePanel(template, templateIndex) {
   const templateCounts = getTemplateCounts(template);
-  const equipmentMarkup = template.equipmentDetails.length > 0
-    ? template.equipmentDetails.map((equipment) => `
+  const visibleEquipment = appState.machine
+    ? template.equipmentDetails.filter((equipment) =>
+        (equipment.name || '').trim().toLowerCase() === appState.machine.trim().toLowerCase()
+      )
+    : template.equipmentDetails;
+  const equipmentMarkup = visibleEquipment.length > 0
+    ? visibleEquipment.map((equipment) => `
         <div class="equipment-card">
           ${equipment.imageURL ? `<img src="${escapeHtml(equipment.imageURL)}" alt="${escapeHtml(equipment.name)}">` : ''}
           <div class="equipment-card__label">${escapeHtml(equipment.name || 'Unknown equipment')}</div>
@@ -470,7 +552,7 @@ function renderTemplatePanel(template, templateIndex) {
           </div>
           <div class="chip-row">
             <span class="chip">Answered ${templateCounts.complete} / ${templateCounts.total}</span>
-            <span class="chip">Equipment ${template.equipmentNames.length}</span>
+            <span class="chip">Equipment ${visibleEquipment.length}</span>
             ${template.startDate ? `<span class="chip chip--muted">Start ${escapeHtml(template.startDate)}</span>` : ''}
           </div>
         </div>
@@ -489,6 +571,12 @@ function renderTemplatePanel(template, templateIndex) {
 function renderFieldCard(template, field, templateIndex, fieldIndex) {
   const fieldKey = getFieldKey(template.templateId, field.fieldId);
   const fieldStatus = getFieldStatus(field);
+  const showTicketButton = shouldShowTicketButton(field);
+  const showPhotoSection = field.photoRequired;
+  const showResetButton = fieldHasResettableState(field);
+  const answeredTimestampLabel = formatFieldAnswerTimestamp(field.lastAnsweredAt);
+  const showFieldActions = showTicketButton || showPhotoSection;
+  const showActionRow = showFieldActions || showResetButton;
   const classNames = [
     'field-card',
     fieldStatus.complete ? 'field-card--complete' : '',
@@ -516,10 +604,26 @@ function renderFieldCard(template, field, templateIndex, fieldIndex) {
         <div class="field-control">
           ${renderFieldControl(template, field)}
         </div>
+        ${showActionRow ? `
         <div class="field-actions">
+          ${showResetButton ? `
+          <div class="field-reset-meta">
+            <button
+              type="button"
+              class="utility-button utility-button--danger field-reset-button"
+              data-action="reset-field"
+              data-template-id="${escapeHtml(template.templateId)}"
+              data-field-id="${escapeHtml(field.fieldId)}"
+            >Reset</button>
+            ${answeredTimestampLabel ? `<span class="field-timestamp" title="${escapeHtml(field.lastAnsweredAt)}">${escapeHtml(answeredTimestampLabel)}</span>` : ''}
+          </div>
+          ` : ''}
+          ${showPhotoSection ? `
           <div class="field-thumb-grid">
             ${renderFieldPhotoSection(template, field)}
           </div>
+          ` : ''}
+          ${showTicketButton ? `
           <div class="field-option-grid">
             <button
               type="button"
@@ -529,7 +633,9 @@ function renderFieldCard(template, field, templateIndex, fieldIndex) {
               data-field-id="${escapeHtml(field.fieldId)}"
             >${escapeHtml(field.ticket.saved ? 'Ticket saved' : fieldStatus.ticketNeeded ? 'Ticket required' : 'Open ticket')}</button>
           </div>
+          ` : ''}
         </div>
+        ` : ''}
         ${renderTicketSummary(field)}
       </div>
     </article>
@@ -546,13 +652,44 @@ function renderReferenceThumb(field) {
       data-title="${escapeHtml(field.label)}"
     >
       <img src="${escapeHtml(field.imageURL)}" alt="${escapeHtml(field.label)} reference image">
-      <div>
-        <span class="reference-thumb__label">Reference image</span>
-        <strong>${escapeHtml(field.label)}</strong>
-        <div class="muted">Tap to view larger</div>
-      </div>
     </button>
   `;
+}
+
+function fieldHasResettableState(field) {
+  if (!field) return false;
+
+  return normalizeText(field.answerValue) !== ''
+    || Boolean(field.fieldPhotoAssetId)
+    || Boolean(field.ticket?.saved)
+    || normalizeText(field.ticket?.reason) !== ''
+    || (Array.isArray(field.ticket?.imageAssetIds) && field.ticket.imageAssetIds.length > 0)
+    || Boolean(field.ticket?.pendingTouched)
+    || normalizeText(field.ticket?.pendingReason) !== ''
+    || (Array.isArray(field.ticket?.pendingImageAssetIds) && field.ticket.pendingImageAssetIds.length > 0);
+}
+
+function createFieldAnswerTimestamp() {
+  return new Date().toISOString();
+}
+
+function touchFieldAnswerTimestamp(field) {
+  if (!field) return;
+  field.lastAnsweredAt = createFieldAnswerTimestamp();
+}
+
+function syncFieldAnswerTimestamp(field) {
+  if (!field) return;
+  field.lastAnsweredAt = normalizeText(field.answerValue) ? createFieldAnswerTimestamp() : '';
+}
+
+function formatFieldAnswerTimestamp(value = '') {
+  const normalized = normalizeIsoTimestamp(value);
+  if (!normalized) return '';
+
+  const parsed = new Date(normalized);
+  if (Number.isNaN(parsed.getTime())) return '';
+  return FIELD_TIME_FORMATTER.format(parsed);
 }
 
 function renderFieldControl(template, field) {
@@ -563,10 +700,10 @@ function renderFieldControl(template, field) {
   if (field.type === 'checkbox') {
     const current = normalizeText(field.answerValue).toUpperCase();
     return `
-      <div class="choice-grid">
+      <div class="choice-grid choice-grid--checkbox">
         <button
           type="button"
-          class="choice-button ${current === 'OK' ? 'is-active' : ''}"
+          class="choice-button choice-button--ok ${current === 'OK' ? 'is-active' : ''}"
           data-action="set-checkbox"
           data-template-id="${escapeHtml(template.templateId)}"
           data-field-id="${escapeHtml(field.fieldId)}"
@@ -689,7 +826,7 @@ function renderFieldPhotoSection(template, field) {
         data-action="remove-field-photo"
         data-template-id="${escapeHtml(template.templateId)}"
         data-field-id="${escapeHtml(field.fieldId)}"
-      >−</button>
+      >×</button>
       <img
         src=""
         alt="Captured photo for ${escapeHtml(field.label)}"
@@ -703,6 +840,10 @@ function renderFieldPhotoSection(template, field) {
 }
 
 function renderTicketSummary(field) {
+  if (!shouldShowTicketButton(field)) {
+    return '';
+  }
+
   if (!field.ticket.saved) {
     return fieldRequiresTicket(field)
       ? '<div class="ticket-summary"><strong>Ticket needed</strong>Answer is abnormal. Save a ticket before submit.</div>'
@@ -719,17 +860,10 @@ function renderTicketSummary(field) {
 }
 
 function renderFooter() {
-  const counts = getChecklistCounts();
   const templatesReady = appState.templates.length > 0 && !appState.loading;
   dom.actionFooter.classList.toggle('hidden', !templatesReady);
 
   if (!templatesReady) return;
-
-  if (counts.complete === counts.total && counts.total > 0) {
-    dom.footerStatus.textContent = 'All cards are complete. Ready to submit.';
-  } else {
-    dom.footerStatus.textContent = `${counts.complete} of ${counts.total} cards complete. ${counts.pendingTickets} ticket${counts.pendingTickets === 1 ? '' : 's'} pending.`;
-  }
 
   dom.submitButton.disabled = appState.submitting;
   dom.resetButton.disabled = appState.submitting;
@@ -742,6 +876,7 @@ function renderWorkerModal() {
     return;
   }
 
+  const recentWorkers = getVisibleRecentWorkers(appState.recentWorkers);
   const filteredWorkers = appState.workers.filter((worker) => {
     if (!appState.activeWorkerModal.search) return true;
     return worker.name.toLowerCase().includes(appState.activeWorkerModal.search.toLowerCase());
@@ -761,6 +896,19 @@ function renderWorkerModal() {
         <label class="modal-label" for="workerSearchInput">Search worker</label>
         <input id="workerSearchInput" class="worker-search" data-worker-search type="search" placeholder="Type a worker name" value="${escapeHtml(appState.activeWorkerModal.search)}">
       </div>
+      ${recentWorkers.length > 0 ? `
+      <div class="modal-section">
+        <div class="modal-label">Recent workers</div>
+        <div class="recent-workers-row">
+          ${recentWorkers.map((name, index) => `
+            <button type="button" class="recent-worker-chip" data-action="choose-worker" data-worker-name="${escapeHtml(name)}" title="Recently selected worker">
+              <span class="recent-worker-chip__name">${escapeHtml(name)}</span>
+              <span class="recent-worker-chip__meta">#${index + 1}</span>
+            </button>
+          `).join('')}
+        </div>
+      </div>
+      ` : ''}
       <div class="worker-list">
         ${filteredWorkers.length === 0 ? '<div class="chip chip--muted">No workers match this search.</div>' : filteredWorkers.map((worker) => `
           <button type="button" class="worker-option" data-action="choose-worker" data-worker-name="${escapeHtml(worker.name)}">
@@ -784,6 +932,8 @@ function renderTicketModal() {
   }
 
   const { template, field, draft } = getActiveTicketContext();
+  const reasonInvalid = Boolean(draft.reasonInvalid);
+  const imagesInvalid = Boolean(draft.imagesInvalid);
   dom.ticketModal.classList.remove('hidden');
   dom.ticketModal.innerHTML = `
     <div class="modal-panel" role="dialog" aria-modal="true" aria-label="Ticket modal">
@@ -801,28 +951,30 @@ function renderTicketModal() {
           <span class="chip chip--muted">Photos ${draft.imageAssetIds.length} / 5</span>
         </div>
       </div>
-      <div class="modal-section">
-        <label class="modal-label" for="ticketReasonInput">Reason</label>
-        <textarea id="ticketReasonInput" class="modal-textarea" data-ticket-reason placeholder="Why did this answer go out of range or need a ticket?">${escapeHtml(draft.reason)}</textarea>
+      <div class="modal-section ${reasonInvalid ? 'modal-section--invalid' : ''}">
+        <label class="modal-label ${reasonInvalid ? 'modal-label--danger' : ''}" for="ticketReasonInput">Reason</label>
+        <textarea id="ticketReasonInput" class="modal-textarea ${reasonInvalid ? 'modal-textarea--invalid' : ''}" data-ticket-reason placeholder="Why did this answer go out of range or need a ticket?">${escapeHtml(draft.reason)}</textarea>
+        ${reasonInvalid ? '<div class="modal-validation" data-ticket-validation="reason">Reason is required before saving the ticket.</div>' : ''}
       </div>
-      <div class="modal-section">
+      <div class="modal-section ${imagesInvalid ? 'modal-section--invalid' : ''}">
         <div class="field-actions">
           <div>
             <div class="modal-label">Ticket images</div>
             <div class="muted">Up to 5 photos. Tap a thumbnail to open it larger.</div>
           </div>
           <div class="field-option-grid">
-            <button type="button" class="utility-button utility-button--accent" data-action="add-ticket-images">Add photo</button>
+            <button type="button" class="utility-button ${imagesInvalid ? 'utility-button--danger' : 'utility-button--accent'}" data-action="add-ticket-images">Add photo</button>
           </div>
         </div>
         <div class="ticket-thumb-grid">
           ${draft.imageAssetIds.length === 0 ? '<span class="chip chip--muted">No ticket photos yet</span>' : draft.imageAssetIds.map((assetId, index) => `
             <div class="ticket-thumb">
-              <button type="button" class="thumb-delete" aria-label="Delete photo" data-action="remove-ticket-image" data-index="${index}">−</button>
+              <button type="button" class="thumb-delete" aria-label="Delete photo" data-action="remove-ticket-image" data-index="${index}">×</button>
               <img src="" alt="Ticket image ${index + 1}" data-thumb-asset-id="${escapeHtml(assetId)}" data-action="preview-asset" data-asset-id="${escapeHtml(assetId)}" data-title="${escapeHtml(field.label)} ticket image ${index + 1}">
             </div>
           `).join('')}
         </div>
+        ${imagesInvalid ? '<div class="modal-validation" data-ticket-validation="images">Add at least one ticket photo before saving.</div>' : ''}
       </div>
       <div class="field-option-grid">
         <button type="button" class="modal-button modal-button--ghost" data-action="close-ticket-modal">Close</button>
@@ -869,6 +1021,225 @@ function renderKeypadModal() {
       </div>
     </div>
   `;
+}
+
+function renderPhotoEditorModal() {
+  if (!appState.photoEditor) {
+    dom.photoEditorModal.classList.add('hidden');
+    dom.photoEditorModal.innerHTML = '';
+    return;
+  }
+
+  const editor = appState.photoEditor;
+  const hasScribble = editor.strokes.length > 0;
+  const hasRedoHistory = editor.redoStrokes.length > 0;
+  const scribbleActive = editor.activeTool === 'scribble';
+  const helperText = scribbleActive
+    ? 'Draw directly on the photo. The scribble is optional and will be flattened into the saved image.'
+    : hasScribble
+      ? 'Scribble added. Use photo to keep the flattened result, or switch back to Scribble to keep drawing.'
+      : 'Overlay tools are optional. Use photo to keep the original image as-is.';
+
+  dom.photoEditorModal.classList.remove('hidden');
+  dom.photoEditorModal.innerHTML = `
+    <div class="photo-editor" role="dialog" aria-modal="true" aria-label="Photo overlay editor">
+      <div class="modal-head">
+        <div>
+          <h2 class="modal-title">Photo overlay</h2>
+          <p class="modal-subtitle">${escapeHtml(editor.title || 'Captured photo')} · Pick an optional overlay tool below before saving the photo.</p>
+        </div>
+        <button type="button" class="modal-close" data-action="close-photo-editor" aria-label="Close">×</button>
+      </div>
+      <div class="photo-editor__stage">
+        <div class="photo-editor__canvas-stack">
+          <canvas class="photo-editor__canvas" data-photo-editor-canvas="base" width="${editor.sourceImage.width}" height="${editor.sourceImage.height}"></canvas>
+          <canvas class="photo-editor__canvas photo-editor__canvas--overlay ${scribbleActive ? 'photo-editor__canvas--active' : ''}" data-photo-editor-canvas="overlay" width="${editor.sourceImage.width}" height="${editor.sourceImage.height}"></canvas>
+        </div>
+      </div>
+      <div class="photo-editor__tools" aria-label="Photo overlay tools">
+        <button type="button" class="photo-tool ${!scribbleActive ? 'photo-tool--active' : ''}" data-action="select-photo-tool" data-tool="photo">
+          <span class="photo-tool__thumb">
+            <canvas data-photo-editor-preview="photo" width="84" height="84" aria-hidden="true"></canvas>
+          </span>
+          <span class="photo-tool__label">Photo</span>
+        </button>
+        <button type="button" class="photo-tool ${scribbleActive ? 'photo-tool--active' : ''}" data-action="select-photo-tool" data-tool="scribble">
+          <span class="photo-tool__thumb">
+            <canvas data-photo-editor-preview="scribble" width="84" height="84" aria-hidden="true"></canvas>
+          </span>
+          <span class="photo-tool__label">Scribble</span>
+        </button>
+      </div>
+      <div class="photo-editor__footer">
+        <div class="muted">${escapeHtml(helperText)}</div>
+        <div class="photo-editor__actions">
+          <button type="button" class="utility-button utility-button--ghost" data-action="undo-photo-scribble" ${hasScribble ? '' : 'disabled'}>Undo</button>
+          <button type="button" class="utility-button utility-button--ghost" data-action="redo-photo-scribble" ${hasRedoHistory ? '' : 'disabled'}>Redo</button>
+          <button type="button" class="utility-button utility-button--ghost" data-action="clear-photo-scribble" ${hasScribble ? '' : 'disabled'}>Clear scribble</button>
+          <button type="button" class="modal-button modal-button--ghost" data-action="close-photo-editor">Cancel</button>
+          <button type="button" class="modal-button modal-button--primary" data-action="apply-photo-editor">Use photo</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  syncPhotoEditorCanvases();
+  window.requestAnimationFrame(syncPhotoEditorLayout);
+}
+
+function syncPhotoEditorCanvases() {
+  if (!appState.photoEditor) return;
+
+  const baseCanvas = dom.photoEditorModal.querySelector('[data-photo-editor-canvas="base"]');
+  const overlayCanvas = dom.photoEditorModal.querySelector('[data-photo-editor-canvas="overlay"]');
+
+  if (baseCanvas) {
+    const context = baseCanvas.getContext('2d');
+    if (context) {
+      context.clearRect(0, 0, baseCanvas.width, baseCanvas.height);
+      context.drawImage(appState.photoEditor.sourceImage, 0, 0, baseCanvas.width, baseCanvas.height);
+    }
+  }
+
+  if (overlayCanvas) {
+    drawPhotoEditorOverlayCanvas(overlayCanvas);
+  }
+
+  syncPhotoEditorToolPreviews();
+}
+
+function syncPhotoEditorLayout() {
+  if (!appState.photoEditor) return;
+
+  const modal = dom.photoEditorModal.querySelector('.photo-editor');
+  const stage = dom.photoEditorModal.querySelector('.photo-editor__stage');
+  const canvasStack = dom.photoEditorModal.querySelector('.photo-editor__canvas-stack');
+  if (!modal || !stage || !canvasStack) return;
+
+  const overlayStyle = window.getComputedStyle(dom.photoEditorModal);
+  const modalStyle = window.getComputedStyle(modal);
+  const stageStyle = window.getComputedStyle(stage);
+
+  const overlayPadding = (parseFloat(overlayStyle.paddingTop) || 0) + (parseFloat(overlayStyle.paddingBottom) || 0);
+  const modalPadding = (parseFloat(modalStyle.paddingTop) || 0) + (parseFloat(modalStyle.paddingBottom) || 0);
+  const stagePaddingY = (parseFloat(stageStyle.paddingTop) || 0) + (parseFloat(stageStyle.paddingBottom) || 0);
+  const stagePaddingX = (parseFloat(stageStyle.paddingLeft) || 0) + (parseFloat(stageStyle.paddingRight) || 0);
+  const rowGap = parseFloat(modalStyle.rowGap || modalStyle.gap || '0') || 0;
+
+  const availableHeight = Math.max(220, window.innerHeight - overlayPadding);
+  const reservedHeight = modalPadding
+    + stagePaddingY
+    + rowGap * 3
+    + (modal.querySelector('.modal-head')?.offsetHeight || 0)
+    + (modal.querySelector('.photo-editor__tools')?.offsetHeight || 0)
+    + (modal.querySelector('.photo-editor__footer')?.offsetHeight || 0);
+  const stageMaxHeight = Math.max(180, Math.floor(availableHeight - reservedHeight));
+  const stageInnerWidth = Math.max(180, Math.floor(stage.clientWidth - stagePaddingX));
+  const imageRatio = appState.photoEditor.sourceImage.width / Math.max(appState.photoEditor.sourceImage.height, 1);
+
+  let displayWidth = stageInnerWidth;
+  let displayHeight = displayWidth / imageRatio;
+
+  if (displayHeight > stageMaxHeight) {
+    displayHeight = stageMaxHeight;
+    displayWidth = displayHeight * imageRatio;
+  }
+
+  modal.style.setProperty('--photo-editor-stage-max-height', `${stageMaxHeight}px`);
+  modal.style.setProperty('--photo-editor-display-width', `${Math.max(1, Math.floor(displayWidth))}px`);
+  modal.style.setProperty('--photo-editor-display-height', `${Math.max(1, Math.floor(displayHeight))}px`);
+  canvasStack.style.width = `var(--photo-editor-display-width)`;
+  canvasStack.style.height = `var(--photo-editor-display-height)`;
+}
+
+function syncPhotoEditorToolPreviews() {
+  if (!appState.photoEditor) return;
+
+  const previewCanvases = Array.from(dom.photoEditorModal.querySelectorAll('canvas[data-photo-editor-preview]'));
+  previewCanvases.forEach((canvas) => {
+    drawPhotoEditorPreviewCanvas(canvas, normalizeText(canvas.dataset.photoEditorPreview));
+  });
+}
+
+function drawPhotoEditorOverlayCanvas(canvas) {
+  if (!appState.photoEditor) return;
+  const context = canvas.getContext('2d');
+  if (!context) return;
+
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  drawPhotoEditorStrokes(context, appState.photoEditor.strokes);
+}
+
+function drawPhotoEditorPreviewCanvas(canvas, previewType) {
+  if (!appState.photoEditor) return;
+  const context = canvas.getContext('2d');
+  if (!context) return;
+
+  const box = drawImageContain(context, appState.photoEditor.sourceImage, canvas.width, canvas.height, 'rgba(15, 23, 42, 0.92)');
+  if (previewType === 'scribble') {
+    const strokes = appState.photoEditor.strokes.length > 0
+      ? appState.photoEditor.strokes
+      : [createPhotoEditorSampleStroke(appState.photoEditor.sourceImage.width, appState.photoEditor.sourceImage.height)];
+    drawPhotoEditorStrokes(context, strokes, box.scale, box.offsetX, box.offsetY);
+  }
+}
+
+function drawImageContain(context, image, width, height, background) {
+  context.clearRect(0, 0, width, height);
+  context.fillStyle = background;
+  context.fillRect(0, 0, width, height);
+
+  const scale = Math.min(width / image.width, height / image.height);
+  const drawWidth = image.width * scale;
+  const drawHeight = image.height * scale;
+  const offsetX = (width - drawWidth) / 2;
+  const offsetY = (height - drawHeight) / 2;
+
+  context.drawImage(image, offsetX, offsetY, drawWidth, drawHeight);
+  return { scale, offsetX, offsetY };
+}
+
+function drawPhotoEditorStrokes(context, strokes, scale = 1, offsetX = 0, offsetY = 0) {
+  strokes.forEach((stroke) => {
+    if (!stroke || !Array.isArray(stroke.points) || stroke.points.length === 0) return;
+
+    context.save();
+    context.strokeStyle = stroke.color || PHOTO_EDITOR_BRUSH_COLOR;
+    context.fillStyle = stroke.color || PHOTO_EDITOR_BRUSH_COLOR;
+    context.lineWidth = Math.max(2, (stroke.width || PHOTO_EDITOR_BRUSH_SIZE) * scale);
+    context.lineCap = 'round';
+    context.lineJoin = 'round';
+
+    if (stroke.points.length === 1) {
+      const point = stroke.points[0];
+      context.beginPath();
+      context.arc(offsetX + (point.x * scale), offsetY + (point.y * scale), context.lineWidth / 2, 0, Math.PI * 2);
+      context.fill();
+      context.restore();
+      return;
+    }
+
+    context.beginPath();
+    context.moveTo(offsetX + (stroke.points[0].x * scale), offsetY + (stroke.points[0].y * scale));
+    for (let index = 1; index < stroke.points.length; index += 1) {
+      context.lineTo(offsetX + (stroke.points[index].x * scale), offsetY + (stroke.points[index].y * scale));
+    }
+    context.stroke();
+    context.restore();
+  });
+}
+
+function createPhotoEditorSampleStroke(width, height) {
+  return {
+    color: PHOTO_EDITOR_BRUSH_COLOR,
+    width: PHOTO_EDITOR_BRUSH_SIZE,
+    points: [
+      { x: width * 0.18, y: height * 0.72 },
+      { x: width * 0.36, y: height * 0.48 },
+      { x: width * 0.56, y: height * 0.63 },
+      { x: width * 0.78, y: height * 0.3 },
+    ],
+  };
 }
 
 function renderImagePreviewModal() {
@@ -926,6 +1297,9 @@ function handleTemplateAreaClick(event) {
     case 'remove-field-photo':
       void removeFieldPhoto(templateId, fieldId);
       break;
+    case 'reset-field':
+      void resetFieldCard(templateId, fieldId);
+      break;
     case 'open-ticket':
       openTicketModal(templateId, fieldId, false);
       break;
@@ -950,6 +1324,7 @@ function handleTemplateAreaInput(event) {
   if (!field) return;
 
   field.answerValue = target.value;
+  syncFieldAnswerTimestamp(field);
   clearValidationError(templateId, fieldId);
   persistDraftState();
   renderSummarySection();
@@ -986,7 +1361,24 @@ function handleWorkerModalClick(event) {
 function handleWorkerModalInput(event) {
   if (!event.target.matches('[data-worker-search]')) return;
   appState.activeWorkerModal.search = event.target.value;
-  renderWorkerModal();
+  // Partial update: only replace the list, not the whole modal, so the input keeps focus
+  const workerList = dom.workerModal.querySelector('.worker-list');
+  if (!workerList) return;
+  const filteredWorkers = appState.workers.filter((worker) => {
+    if (!appState.activeWorkerModal.search) return true;
+    return worker.name.toLowerCase().includes(appState.activeWorkerModal.search.toLowerCase());
+  });
+  workerList.innerHTML = filteredWorkers.length === 0
+    ? '<div class="chip chip--muted">No workers match this search.</div>'
+    : filteredWorkers.map((worker) => `
+          <button type="button" class="worker-option" data-action="choose-worker" data-worker-name="${escapeHtml(worker.name)}">
+            <div>
+              <div class="worker-option__name">${escapeHtml(worker.name)}</div>
+              <div class="worker-option__dept">${escapeHtml(worker['部署'] || '')}</div>
+            </div>
+            <span>→</span>
+          </button>
+        `).join('');
 }
 
 function handleTicketModalClick(event) {
@@ -1023,6 +1415,15 @@ function handleTicketModalInput(event) {
   if (!appState.activeTicket) return;
   if (!event.target.matches('[data-ticket-reason]')) return;
   appState.activeTicket.reason = event.target.value;
+
+  if (normalizeText(appState.activeTicket.reason)) {
+    appState.activeTicket.reasonInvalid = false;
+    const section = event.target.closest('.modal-section');
+    section?.classList.remove('modal-section--invalid');
+    section?.querySelector('.modal-label')?.classList.remove('modal-label--danger');
+    event.target.classList.remove('modal-textarea--invalid');
+    section?.querySelector('[data-ticket-validation="reason"]')?.remove();
+  }
 }
 
 function handleKeypadModalClick(event) {
@@ -1061,6 +1462,175 @@ function handleImagePreviewClick(event) {
   }
 }
 
+function handlePhotoEditorClick(event) {
+  if (event.target === dom.photoEditorModal) {
+    closePhotoEditor('');
+    return;
+  }
+
+  const trigger = event.target.closest('[data-action]');
+  if (!trigger) return;
+
+  switch (trigger.dataset.action) {
+    case 'close-photo-editor':
+      closePhotoEditor('');
+      break;
+    case 'apply-photo-editor':
+      closePhotoEditor(buildPhotoEditorOutput());
+      break;
+    case 'select-photo-tool':
+      selectPhotoEditorTool(trigger.dataset.tool);
+      break;
+    case 'undo-photo-scribble':
+      undoPhotoEditorScribble();
+      break;
+    case 'redo-photo-scribble':
+      redoPhotoEditorScribble();
+      break;
+    case 'clear-photo-scribble':
+      clearPhotoEditorScribble();
+      break;
+    default:
+      break;
+  }
+}
+
+function handlePhotoEditorPointerDown(event) {
+  const canvas = event.target.closest('[data-photo-editor-canvas="overlay"]');
+  if (!canvas || !appState.photoEditor || appState.photoEditor.activeTool !== 'scribble') return;
+
+  event.preventDefault();
+  const point = getPhotoEditorCanvasPoint(canvas, event);
+  const stroke = {
+    color: PHOTO_EDITOR_BRUSH_COLOR,
+    width: PHOTO_EDITOR_BRUSH_SIZE,
+    points: [point],
+  };
+
+  appState.photoEditor.redoStrokes = [];
+  appState.photoEditor.strokes.push(stroke);
+  appState.photoEditor.currentStroke = stroke;
+  appState.photoEditor.drawing = true;
+  appState.photoEditor.pointerId = event.pointerId;
+  canvas.setPointerCapture?.(event.pointerId);
+  drawPhotoEditorOverlayCanvas(canvas);
+}
+
+function handlePhotoEditorPointerMove(event) {
+  if (!appState.photoEditor?.drawing) return;
+  if (appState.photoEditor.pointerId !== null && event.pointerId !== appState.photoEditor.pointerId) return;
+
+  const canvas = dom.photoEditorModal.querySelector('[data-photo-editor-canvas="overlay"]');
+  const currentStroke = appState.photoEditor.currentStroke;
+  if (!canvas || !currentStroke) return;
+
+  event.preventDefault();
+  const point = getPhotoEditorCanvasPoint(canvas, event);
+  const lastPoint = currentStroke.points[currentStroke.points.length - 1];
+  if (lastPoint && Math.hypot(lastPoint.x - point.x, lastPoint.y - point.y) < 1.5) return;
+
+  currentStroke.points.push(point);
+  drawPhotoEditorOverlayCanvas(canvas);
+}
+
+function finishPhotoEditorStroke(event) {
+  if (!appState.photoEditor?.drawing) return;
+  if (event.type !== 'pointercancel' && appState.photoEditor.pointerId !== null && event.pointerId !== appState.photoEditor.pointerId) return;
+
+  appState.photoEditor.drawing = false;
+  appState.photoEditor.pointerId = null;
+  appState.photoEditor.currentStroke = null;
+  syncPhotoEditorToolPreviews();
+}
+
+function getPhotoEditorCanvasPoint(canvas, event) {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / Math.max(rect.width, 1);
+  const scaleY = canvas.height / Math.max(rect.height, 1);
+
+  return {
+    x: clampNumber((event.clientX - rect.left) * scaleX, 0, canvas.width),
+    y: clampNumber((event.clientY - rect.top) * scaleY, 0, canvas.height),
+  };
+}
+
+function clampNumber(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function selectPhotoEditorTool(tool) {
+  if (!appState.photoEditor) return;
+  appState.photoEditor.activeTool = tool === 'scribble' ? 'scribble' : 'photo';
+  renderPhotoEditorModal();
+}
+
+function undoPhotoEditorScribble() {
+  if (!appState.photoEditor || appState.photoEditor.strokes.length === 0) return;
+
+  appState.photoEditor.drawing = false;
+  appState.photoEditor.pointerId = null;
+  appState.photoEditor.currentStroke = null;
+  const stroke = appState.photoEditor.strokes.pop();
+  if (stroke) {
+    appState.photoEditor.redoStrokes.push(stroke);
+  }
+  renderPhotoEditorModal();
+}
+
+function redoPhotoEditorScribble() {
+  if (!appState.photoEditor || appState.photoEditor.redoStrokes.length === 0) return;
+
+  appState.photoEditor.drawing = false;
+  appState.photoEditor.pointerId = null;
+  appState.photoEditor.currentStroke = null;
+  const stroke = appState.photoEditor.redoStrokes.pop();
+  if (stroke) {
+    appState.photoEditor.strokes.push(stroke);
+  }
+  renderPhotoEditorModal();
+}
+
+function clearPhotoEditorScribble() {
+  if (!appState.photoEditor) return;
+  appState.photoEditor.strokes = [];
+  appState.photoEditor.redoStrokes = [];
+  appState.photoEditor.currentStroke = null;
+  appState.photoEditor.drawing = false;
+  appState.photoEditor.pointerId = null;
+  renderPhotoEditorModal();
+}
+
+function buildPhotoEditorOutput() {
+  if (!appState.photoEditor) return '';
+  if (appState.photoEditor.strokes.length === 0) {
+    return appState.photoEditor.sourceDataUrl;
+  }
+
+  const canvas = document.createElement('canvas');
+  canvas.width = appState.photoEditor.sourceImage.width;
+  canvas.height = appState.photoEditor.sourceImage.height;
+  const context = canvas.getContext('2d');
+  if (!context) {
+    return appState.photoEditor.sourceDataUrl;
+  }
+
+  context.drawImage(appState.photoEditor.sourceImage, 0, 0, canvas.width, canvas.height);
+  drawPhotoEditorStrokes(context, appState.photoEditor.strokes);
+  return canvas.toDataURL('image/jpeg', PHOTO_EDITOR_OUTPUT_QUALITY);
+}
+
+function closePhotoEditor(result) {
+  if (!appState.photoEditor) return;
+
+  const resolveEditor = appState.photoEditor.resolve;
+  appState.photoEditor = null;
+  renderPhotoEditorModal();
+
+  if (typeof resolveEditor === 'function') {
+    resolveEditor(result || '');
+  }
+}
+
 function openWorkerModal() {
   appState.activeWorkerModal.open = true;
   appState.activeWorkerModal.search = '';
@@ -1077,13 +1647,25 @@ function chooseWorker(workerName) {
   const normalized = normalizeText(workerName);
   if (!normalized) return;
 
+  rememberRecentWorker(normalized);
   appState.selectedWorkerName = normalized;
-  syncTemplateWorkersFromSelection(true);
+  syncTemplateWorkersFromSelection(true, true);
   closeWorkerModal();
   showBanner(`Worker set to ${normalized}.`, 'info', 1800);
 }
 
-function syncTemplateWorkersFromSelection(shouldRender) {
+function rememberRecentWorker(workerName) {
+  const normalized = normalizeText(workerName);
+  if (!normalized) return;
+
+  appState.recentWorkers = [
+    normalized,
+    ...appState.recentWorkers.filter((name) => name !== normalized),
+  ].slice(0, MAX_RECENT_WORKERS);
+  persistRecentWorkers();
+}
+
+function syncTemplateWorkersFromSelection(shouldRender, shouldStampTimestamp = false) {
   if (!appState.selectedWorkerName) return;
 
   appState.templates.forEach((template) => {
@@ -1091,6 +1673,9 @@ function syncTemplateWorkersFromSelection(shouldRender) {
     template.fields.forEach((field) => {
       if (field.type !== 'name') return;
       field.answerValue = appState.selectedWorkerName;
+      if (shouldStampTimestamp) {
+        touchFieldAnswerTimestamp(field);
+      }
       clearValidationError(template.templateId, field.fieldId);
     });
   });
@@ -1107,6 +1692,7 @@ function setCheckboxValue(templateId, fieldId, value) {
   if (!field) return;
 
   field.answerValue = normalizeText(value).toUpperCase();
+  touchFieldAnswerTimestamp(field);
   clearValidationError(templateId, fieldId);
   persistDraftState();
   renderApp();
@@ -1121,6 +1707,7 @@ function setSelectValue(templateId, fieldId, value) {
   if (!field) return;
 
   field.answerValue = normalizeText(value);
+  touchFieldAnswerTimestamp(field);
   clearValidationError(templateId, fieldId);
   persistDraftState();
   renderApp();
@@ -1150,6 +1737,12 @@ function getActiveKeypadContext() {
   };
 }
 
+function updateKeypadDisplay() {
+  if (!appState.activeKeypad) return;
+  const displayEl = dom.keypadModal.querySelector('.keypad-display__value');
+  if (displayEl) displayEl.textContent = appState.activeKeypad.value || '0';
+}
+
 function appendKeypadValue(token) {
   if (!appState.activeKeypad) return;
 
@@ -1157,7 +1750,7 @@ function appendKeypadValue(token) {
   if (token === '-') {
     if (current.includes('-')) return;
     appState.activeKeypad.value = current ? current : '-';
-    renderKeypadModal();
+    updateKeypadDisplay();
     return;
   }
 
@@ -1168,24 +1761,24 @@ function appendKeypadValue(token) {
     } else {
       appState.activeKeypad.value = `${current}.`;
     }
-    renderKeypadModal();
+    updateKeypadDisplay();
     return;
   }
 
   appState.activeKeypad.value = `${current}${token}`;
-  renderKeypadModal();
+  updateKeypadDisplay();
 }
 
 function backspaceKeypadValue() {
   if (!appState.activeKeypad) return;
   appState.activeKeypad.value = appState.activeKeypad.value.slice(0, -1);
-  renderKeypadModal();
+  updateKeypadDisplay();
 }
 
 function clearKeypadValue() {
   if (!appState.activeKeypad) return;
   appState.activeKeypad.value = '';
-  renderKeypadModal();
+  updateKeypadDisplay();
 }
 
 function closeKeypadModal() {
@@ -1207,6 +1800,7 @@ function confirmKeypadValue() {
   }
 
   field.answerValue = normalized;
+  touchFieldAnswerTimestamp(field);
   clearValidationError(templateId, fieldId);
   closeKeypadModal();
   persistDraftState();
@@ -1242,6 +1836,8 @@ function openTicketModal(templateId, fieldId, autoOpened) {
     reason: draft.reason,
     imageAssetIds: [...draft.imageAssetIds],
     autoOpened: Boolean(autoOpened),
+    reasonInvalid: false,
+    imagesInvalid: false,
   };
   renderTicketModal();
 }
@@ -1270,6 +1866,19 @@ function getTicketDraft(field) {
   };
 }
 
+function focusTicketValidationTarget(reasonInvalid, imagesInvalid) {
+  window.requestAnimationFrame(() => {
+    if (reasonInvalid) {
+      dom.ticketModal.querySelector('#ticketReasonInput')?.focus();
+      return;
+    }
+
+    if (imagesInvalid) {
+      dom.ticketModal.querySelector('[data-action="add-ticket-images"]')?.focus();
+    }
+  });
+}
+
 function closeTicketModal(keepDraft) {
   if (appState.activeTicket && keepDraft) {
     const field = getFieldByIds(appState.activeTicket.templateId, appState.activeTicket.fieldId);
@@ -1294,8 +1903,14 @@ function saveTicketModal() {
   if (!field) return;
 
   const reason = normalizeText(appState.activeTicket.reason);
-  if (!reason) {
-    showBanner('Ticket reason is required.', 'danger', 2200);
+  const missingReason = !reason;
+  const missingImages = appState.activeTicket.imageAssetIds.length === 0;
+
+  if (missingReason || missingImages) {
+    appState.activeTicket.reasonInvalid = missingReason;
+    appState.activeTicket.imagesInvalid = missingImages;
+    renderTicketModal();
+    focusTicketValidationTarget(missingReason, missingImages);
     return;
   }
 
@@ -1320,22 +1935,41 @@ async function addTicketImages() {
     return;
   }
 
-  const files = await pickImagesFromDevice(false);
-  if (files.length === 0) return;
+  const field = getFieldByIds(appState.activeTicket.templateId, appState.activeTicket.fieldId);
+  const editedDataUrl = await capturePhotoWithOptionalOverlay(field ? `${field.label} ticket photo` : 'Ticket photo');
+  if (!editedDataUrl) return;
 
-  const file = files[0];
-  const compressedDataUrl = await compressImageFile(file, 1600, 0.78);
   const assetId = createAssetId('ticket');
-  await saveAsset(assetId, compressedDataUrl);
+  await saveAsset(assetId, editedDataUrl);
   appState.activeTicket.imageAssetIds.push(assetId);
+  appState.activeTicket.imagesInvalid = false;
   renderTicketModal();
 }
 
 async function removeTicketImage(index) {
   if (!appState.activeTicket) return;
   const assetId = appState.activeTicket.imageAssetIds[index];
+  if (!assetId) return;
+
   appState.activeTicket.imageAssetIds.splice(index, 1);
   await deleteAsset(assetId);
+
+  const field = getFieldByIds(appState.activeTicket.templateId, appState.activeTicket.fieldId);
+  if (field) {
+    field.ticket.pendingTouched = true;
+    field.ticket.pendingReason = appState.activeTicket.reason;
+    field.ticket.pendingImageAssetIds = [...appState.activeTicket.imageAssetIds];
+
+    if (field.ticket.saved && field.ticket.imageAssetIds.includes(assetId)) {
+      field.ticket.imageAssetIds = field.ticket.imageAssetIds.filter((savedAssetId) => savedAssetId !== assetId);
+      if (field.ticket.imageAssetIds.length === 0) {
+        field.ticket.saved = false;
+      }
+    }
+
+    persistDraftState();
+  }
+
   renderTicketModal();
 }
 
@@ -1343,17 +1977,15 @@ async function captureFieldPhoto(templateId, fieldId) {
   const field = getFieldByIds(templateId, fieldId);
   if (!field) return;
 
-  const files = await pickImagesFromDevice(false);
-  if (files.length === 0) return;
-
-  const compressedDataUrl = await compressImageFile(files[0], 1600, 0.78);
+  const editedDataUrl = await capturePhotoWithOptionalOverlay(`${field.label} photo`);
+  if (!editedDataUrl) return;
 
   if (field.fieldPhotoAssetId) {
     await deleteAsset(field.fieldPhotoAssetId);
   }
 
   const assetId = createAssetId('field');
-  await saveAsset(assetId, compressedDataUrl);
+  await saveAsset(assetId, editedDataUrl);
   field.fieldPhotoAssetId = assetId;
   clearValidationError(templateId, fieldId);
   persistDraftState();
@@ -1366,6 +1998,44 @@ async function removeFieldPhoto(templateId, fieldId) {
 
   await deleteAsset(field.fieldPhotoAssetId);
   field.fieldPhotoAssetId = '';
+  persistDraftState();
+  renderApp();
+}
+
+async function resetFieldCard(templateId, fieldId) {
+  const template = getTemplateById(templateId);
+  const field = getFieldByIds(templateId, fieldId);
+  if (!template || !field || !fieldHasResettableState(field)) return;
+
+  const assetIds = new Set();
+  if (field.fieldPhotoAssetId) {
+    assetIds.add(field.fieldPhotoAssetId);
+  }
+
+  (field.ticket.imageAssetIds || []).forEach((assetId) => {
+    if (assetId) assetIds.add(assetId);
+  });
+  (field.ticket.pendingImageAssetIds || []).forEach((assetId) => {
+    if (assetId) assetIds.add(assetId);
+  });
+
+  await Promise.all(Array.from(assetIds).map((assetId) => deleteAsset(assetId)));
+
+  field.answerValue = '';
+  field.fieldPhotoAssetId = '';
+  field.ticket.saved = false;
+  field.ticket.reason = '';
+  field.ticket.imageAssetIds = [];
+  field.ticket.pendingTouched = false;
+  field.ticket.pendingReason = '';
+  field.ticket.pendingImageAssetIds = [];
+  field.ticket.ticketKey = createTicketKey(templateId, fieldId);
+
+  if (field.type === 'name') {
+    template.workerName = '';
+  }
+
+  clearValidationError(templateId, fieldId);
   persistDraftState();
   renderApp();
 }
@@ -1425,6 +2095,7 @@ function getChecklistCounts() {
       total += 1;
       if (isFieldComplete(field)) complete += 1;
       if (fieldRequiresTicket(field) && !field.ticket.saved) pendingTickets += 1;
+      if (fieldRequiresTicket(field) && field.ticket.saved && !ticketHasRequiredImage(field)) pendingTickets += 1;
       if (field.photoRequired && !field.fieldPhotoAssetId) pendingPhotos += 1;
     });
   });
@@ -1467,7 +2138,8 @@ function fieldRequiresTicket(field) {
 function isFieldComplete(field) {
   const hasAnswer = isFieldAnswered(field);
   const hasPhoto = !field.photoRequired || Boolean(field.fieldPhotoAssetId);
-  const hasRequiredTicket = !fieldRequiresTicket(field) || (field.ticket.saved && normalizeText(field.ticket.reason).length > 0);
+  const hasRequiredTicket = !fieldRequiresTicket(field)
+    || (field.ticket.saved && normalizeText(field.ticket.reason).length > 0 && ticketHasRequiredImage(field));
   return hasAnswer && hasPhoto && hasRequiredTicket;
 }
 
@@ -1484,6 +2156,15 @@ function getFieldStatus(field) {
   if (fieldRequiresTicket(field) && !field.ticket.saved) {
     return {
       label: 'Ticket needed',
+      className: 'status-pill--ticket',
+      complete: false,
+      ticketNeeded: true,
+    };
+  }
+
+  if (fieldRequiresTicket(field) && field.ticket.saved && !ticketHasRequiredImage(field)) {
+    return {
+      label: 'Ticket photo needed',
       className: 'status-pill--ticket',
       complete: false,
       ticketNeeded: true,
@@ -1596,6 +2277,8 @@ function collectValidationErrors() {
 function scrollToField(templateId, fieldId) {
   const target = document.getElementById(getFieldDomId(templateId, fieldId));
   if (!target) return;
+  target.classList.add('field-card--attention-live');
+  window.setTimeout(() => target.classList.remove('field-card--attention-live'), 2200);
   target.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
@@ -1621,18 +2304,27 @@ async function buildSubmissionPayload() {
         unit: field.unit,
         value: field.type === 'number' ? normalizeNumber(field.answerValue) : normalizeText(field.answerValue),
         displayValue: field.type === 'number' ? getNumberFieldDisplayValue(field) : normalizeText(field.answerValue),
+        answeredAt: field.lastAnsweredAt || null,
       };
 
       if (field.fieldPhotoAssetId) {
-        answer.fieldPhotoData = await getAsset(field.fieldPhotoAssetId);
+        const fieldPhotoData = await getAsset(field.fieldPhotoAssetId);
+        if (!fieldPhotoData) {
+          throw new Error(`Could not load the saved field photo for ${field.label}. Capture it again before submit.`);
+        }
+        answer.fieldPhotoData = fieldPhotoData;
       }
 
       if (field.ticket.saved) {
+        const ticketImagesData = (await Promise.all(field.ticket.imageAssetIds.map((assetId) => getAsset(assetId)))).filter(Boolean);
+        if (ticketImagesData.length === 0) {
+          throw new Error(`Could not load the saved ticket photo for ${field.label}. Open the ticket and add the photo again.`);
+        }
         answer.ticket = {
           saved: true,
           ticketKey: field.ticket.ticketKey,
           reason: field.ticket.reason,
-          imagesData: await Promise.all(field.ticket.imageAssetIds.map((assetId) => getAsset(assetId))),
+          imagesData: ticketImagesData,
         };
       }
 
@@ -1645,8 +2337,8 @@ async function buildSubmissionPayload() {
       description: template.description,
       schedule: template.schedule,
       startDate: template.startDate,
-      equipmentIds: template.equipmentIds,
-      equipmentNames: template.equipmentNames,
+      equipmentId: resolveTemplateMachineId(template),
+      加工設備: appState.machine,
       selectedMachine: appState.machine,
       selectedMachineId: resolveTemplateMachineId(template),
       workerName: template.workerName || appState.selectedWorkerName,
@@ -1688,12 +2380,15 @@ async function resetDraftState(showResetBanner) {
   appState.validationErrors.clear();
   appState.activeTicket = null;
   appState.activeKeypad = null;
+  appState.photoEditor = null;
   appState.imagePreview = null;
 
   appState.templates.forEach((template) => {
     template.workerName = '';
     template.fields.forEach((field) => {
       field.answerValue = '';
+      field.lastAnsweredAt = '';
+      field.lastAnsweredAt = '';
       field.fieldPhotoAssetId = '';
       field.ticket.saved = false;
       field.ticket.reason = '';
@@ -1711,6 +2406,23 @@ async function resetDraftState(showResetBanner) {
   }
 
   renderApp();
+}
+
+function shouldShowTicketButton(field) {
+  return field.type !== 'name';
+}
+
+function ticketHasRequiredImage(field) {
+  return Array.isArray(field.ticket?.imageAssetIds) && field.ticket.imageAssetIds.length > 0;
+}
+
+function setFooterExpanded(expanded) {
+  appState.footerExpanded = Boolean(expanded);
+  renderFooter();
+}
+
+function syncHeaderCondensedState() {
+  document.body.classList.toggle('header-condensed', window.scrollY > 36);
 }
 
 function collectAllAssetIds() {
@@ -1782,6 +2494,14 @@ async function compressImageFile(file, maxWidth, quality) {
   return canvas.toDataURL('image/jpeg', quality);
 }
 
+async function capturePhotoWithOptionalOverlay(title) {
+  const files = await pickImagesFromDevice(false);
+  if (files.length === 0) return '';
+
+  const compressedDataUrl = await compressImageFile(files[0], 1600, 0.78);
+  return openPhotoEditor(compressedDataUrl, title);
+}
+
 function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -1798,6 +2518,33 @@ function loadImage(src) {
     image.onerror = () => reject(new Error('Failed to load image for compression.'));
     image.src = src;
   });
+}
+
+async function openPhotoEditor(sourceDataUrl, title) {
+  if (!sourceDataUrl) return '';
+
+  try {
+    const sourceImage = await loadImage(sourceDataUrl);
+    return await new Promise((resolve) => {
+      appState.photoEditor = {
+        title: normalizeText(title) || 'Captured photo',
+        sourceDataUrl,
+        sourceImage,
+        activeTool: 'photo',
+        strokes: [],
+        redoStrokes: [],
+        drawing: false,
+        pointerId: null,
+        currentStroke: null,
+        resolve,
+      };
+      renderPhotoEditorModal();
+    });
+  } catch (error) {
+    console.warn('Photo editor initialization failed:', error);
+    showBanner('Photo overlay tools are unavailable. The original photo will be used.', 'warning', 2200);
+    return sourceDataUrl;
+  }
 }
 
 async function openAssetDatabase() {
