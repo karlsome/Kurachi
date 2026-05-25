@@ -29705,6 +29705,18 @@ app.get('/checkList.js', (req, res) => {
   res.sendFile(path.join(__dirname, 'checkList.js'));
 });
 
+app.get('/checkList2', (req, res) => {
+  res.sendFile(path.join(__dirname, 'checkList2.html'));
+});
+
+app.get('/checkList2.html', (req, res) => {
+  res.sendFile(path.join(__dirname, 'checkList2.html'));
+});
+
+app.get('/checkList2.js', (req, res) => {
+  res.sendFile(path.join(__dirname, 'checkList2.js'));
+});
+
 app.get('/api/check-forms/reference-images', async (req, res) => {
   const requestedFolderKey = normalizeCheckFormText(req.query.folderKey);
 
@@ -29891,10 +29903,123 @@ app.get('/api/check-forms/workers', async (req, res) => {
   }
 });
 
+app.get('/api/check-forms/template/:id', async (req, res) => {
+  const { id } = req.params;
+  if (!id || id.length !== 24) {
+    return res.status(400).json({ error: 'Invalid template id' });
+  }
+  try {
+    await client.connect();
+    const db = client.db(DB_NAME);
+    const template = await db.collection('checkFormTemplatesDB').findOne(
+      { _id: new ObjectId(id) },
+    );
+    if (!template) return res.status(404).json({ error: 'Template not found' });
+    return res.json({ template });
+  } catch (error) {
+    console.error('Error loading check form template:', error);
+    return res.status(500).json({ error: 'Failed to load template' });
+  }
+});
+
+app.get('/api/check-forms/names', async (req, res) => {
+  try {
+    await client.connect();
+    const db = client.db(DB_NAME);
+
+    const [workers, users] = await Promise.all([
+      db.collection('workerDB').find({}).project({ Name: 1, name: 1 }).toArray(),
+      db.collection('users').find({}).project({ firstName: 1, lastName: 1, name: 1 }).toArray(),
+    ]);
+
+    const fromWorkers = workers
+      .map((w) => String(w.Name || w.name || '').trim())
+      .filter(Boolean);
+
+    const fromUsers = users
+      .map((u) => {
+        if (u.firstName || u.lastName) {
+          return [u.firstName, u.lastName].filter(Boolean).join(' ').trim();
+        }
+        return String(u.name || '').trim();
+      })
+      .filter(Boolean);
+
+    const names = [...new Set([...fromWorkers, ...fromUsers])]
+      .sort((a, b) => a.localeCompare(b, 'ja'));
+
+    return res.json({ names });
+  } catch (error) {
+    console.error('Error loading check form names:', error);
+    return res.status(500).json({ error: 'Failed to load names' });
+  }
+});
+
+function detectTextLang(text) {
+  // Japanese hiragana, katakana, CJK unified ideographs, half-width katakana
+  if (/[぀-ヿ㐀-䶿一-鿿ｦ-ﾟ]/.test(text)) return 'ja';
+  return 'en';
+}
+
+app.post('/api/check-forms/translate', async (req, res) => {
+  const { texts, targetLang } = req.body || {};
+  if (!Array.isArray(texts) || !['en', 'ja', 'tl'].includes(targetLang)) {
+    return res.status(400).json({ error: 'Invalid request' });
+  }
+
+  try {
+    await client.connect();
+    const db   = client.db(DB_NAME);
+    const coll = db.collection('translationCacheDB');
+
+    coll.createIndex({ text: 1, targetLang: 1 }, { unique: true }).catch(() => {});
+
+    const translations = {};
+
+    for (const text of texts) {
+      if (!text || !text.trim()) continue;
+
+      const cached = await coll.findOne({ text, targetLang });
+      if (cached) {
+        translations[text] = cached.translated;
+        continue;
+      }
+
+      const sourceLang = detectTextLang(text);
+
+      // Same source and target — no translation needed
+      if (sourceLang === targetLang) {
+        translations[text] = text;
+        await coll.insertOne({ text, targetLang, translated: text, createdAt: new Date() }).catch(() => {});
+        continue;
+      }
+
+      try {
+        const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${sourceLang}|${targetLang}`;
+        const apiRes   = await fetch(url);
+        const data     = await apiRes.json();
+        const translated = data?.responseData?.translatedText || text;
+        console.log(`[translate] ${sourceLang}→${targetLang}: "${text}" → "${translated}"`);
+        translations[text] = translated;
+        await coll.insertOne({ text, targetLang, translated, createdAt: new Date() }).catch(() => {});
+      } catch (apiErr) {
+        console.error(`[translate] API error for "${text}":`, apiErr.message);
+        translations[text] = text;
+      }
+    }
+
+    return res.json({ translations });
+  } catch (error) {
+    console.error('[translate] Endpoint error:', error);
+    return res.status(500).json({ error: 'Translation failed' });
+  }
+});
+
 app.post('/api/check-forms/submit', async (req, res) => {
   const payload = req.body || {};
   const factory = normalizeCheckFormText(payload.factory);
   const machine = normalizeCheckFormText(payload.machine);
+  const approvedBy = normalizeCheckFormText(payload.approvedBy);
   const submittedTemplates = Array.isArray(payload.templates) ? payload.templates : [];
 
   if (!factory) {
@@ -30046,6 +30171,7 @@ app.post('/api/check-forms/submit', async (req, res) => {
             imageURLs: ticketImageURLs,
             status: 'open',
             createdAt: now,
+            ...(approvedBy ? { approvedBy } : {}),
           };
 
           ngReportDocs.push(reportDoc);
@@ -30130,6 +30256,38 @@ app.post('/api/check-forms/submit', async (req, res) => {
   } catch (error) {
     console.error('Error submitting check forms:', error);
     return res.status(500).json({ error: 'Failed to submit check forms', details: error.message });
+  }
+});
+
+app.get('/api/check-forms/verify-qr', async (req, res) => {
+  const code = (req.query.code || '').trim();
+  if (!code) return res.status(400).json({ error: 'code is required' });
+
+  try {
+    await client.connect();
+    const db    = client.db(DB_NAME);
+    const users = db.collection('users');
+
+    let user = await users.findOne({ username: code });
+
+    if (!user) {
+      try {
+        const { ObjectId } = require('mongodb');
+        user = await users.findOne({ _id: new ObjectId(code) });
+      } catch { /* invalid ObjectId format — ignore */ }
+    }
+
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    return res.json({
+      username:  user.username  || '',
+      firstName: user.firstName || '',
+      lastName:  user.lastName  || '',
+      role:      user.role      || '',
+    });
+  } catch (err) {
+    console.error('verify-qr error:', err);
+    return res.status(500).json({ error: 'Server error' });
   }
 });
 
