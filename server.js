@@ -29820,6 +29820,7 @@ app.post('/api/check-forms/submit', async (req, res) => {
   const payload = req.body || {};
   const factory = normalizeCheckFormText(payload.factory);
   const machine = normalizeCheckFormText(payload.machine);
+  const approvedBy = normalizeCheckFormText(payload.approvedBy);
   const submittedTemplates = Array.isArray(payload.templates) ? payload.templates : [];
 
   if (!factory) {
@@ -29971,6 +29972,7 @@ app.post('/api/check-forms/submit', async (req, res) => {
             imageURLs: ticketImageURLs,
             status: 'open',
             createdAt: now,
+            ...(approvedBy ? { approvedBy } : {}),
           };
 
           ngReportDocs.push(reportDoc);
@@ -30055,6 +30057,38 @@ app.post('/api/check-forms/submit', async (req, res) => {
   } catch (error) {
     console.error('Error submitting check forms:', error);
     return res.status(500).json({ error: 'Failed to submit check forms', details: error.message });
+  }
+});
+
+app.get('/api/check-forms/verify-qr', async (req, res) => {
+  const code = (req.query.code || '').trim();
+  if (!code) return res.status(400).json({ error: 'code is required' });
+
+  try {
+    await client.connect();
+    const db    = client.db(DB_NAME);
+    const users = db.collection('users');
+
+    let user = await users.findOne({ username: code });
+
+    if (!user) {
+      try {
+        const { ObjectId } = require('mongodb');
+        user = await users.findOne({ _id: new ObjectId(code) });
+      } catch { /* invalid ObjectId format — ignore */ }
+    }
+
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    return res.json({
+      username:  user.username  || '',
+      firstName: user.firstName || '',
+      lastName:  user.lastName  || '',
+      role:      user.role      || '',
+    });
+  } catch (err) {
+    console.error('verify-qr error:', err);
+    return res.status(500).json({ error: 'Server error' });
   }
 });
 
