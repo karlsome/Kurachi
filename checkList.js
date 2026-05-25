@@ -697,14 +697,14 @@ function renderFieldControl(template, field) {
     return renderWorkerControl(template, field);
   }
 
-  if (field.type === 'checkbox') {
+  if (field.type === 'toggle') {
     const current = normalizeText(field.answerValue).toUpperCase();
     return `
-      <div class="choice-grid choice-grid--checkbox">
+      <div class="choice-grid choice-grid--toggle">
         <button
           type="button"
           class="choice-button choice-button--ok ${current === 'OK' ? 'is-active' : ''}"
-          data-action="set-checkbox"
+          data-action="set-toggle"
           data-template-id="${escapeHtml(template.templateId)}"
           data-field-id="${escapeHtml(field.fieldId)}"
           data-value="OK"
@@ -712,7 +712,7 @@ function renderFieldControl(template, field) {
         <button
           type="button"
           class="choice-button choice-button--danger ${current === 'NG' ? 'is-active' : ''}"
-          data-action="set-checkbox"
+          data-action="set-toggle"
           data-template-id="${escapeHtml(template.templateId)}"
           data-field-id="${escapeHtml(field.fieldId)}"
           data-value="NG"
@@ -1282,8 +1282,8 @@ function handleTemplateAreaClick(event) {
     case 'open-worker-modal':
       openWorkerModal();
       break;
-    case 'set-checkbox':
-      setCheckboxValue(templateId, fieldId, trigger.dataset.value);
+    case 'set-toggle':
+      setToggleValue(templateId, fieldId, trigger.dataset.value);
       break;
     case 'open-keypad':
       openKeypadModal(templateId, fieldId);
@@ -1687,7 +1687,7 @@ function syncTemplateWorkersFromSelection(shouldRender, shouldStampTimestamp = f
   }
 }
 
-function setCheckboxValue(templateId, fieldId, value) {
+function setToggleValue(templateId, fieldId, value) {
   const field = getFieldByIds(templateId, fieldId);
   if (!field) return;
 
@@ -2110,7 +2110,7 @@ function getTemplateCounts(template) {
 }
 
 function isFieldAnswered(field) {
-  if (field.type === 'checkbox') {
+  if (field.type === 'toggle') {
     const normalized = normalizeText(field.answerValue).toUpperCase();
     return normalized === 'OK' || normalized === 'NG';
   }
@@ -2121,7 +2121,7 @@ function isFieldAnswered(field) {
 }
 
 function fieldRequiresTicket(field) {
-  if (field.type === 'checkbox') {
+  if (field.type === 'toggle') {
     return normalizeText(field.answerValue).toUpperCase() === 'NG';
   }
 
@@ -2211,7 +2211,7 @@ function formatRange(min, max, unit = '') {
 }
 
 function describeFieldType(field) {
-  if (field.type === 'checkbox') return 'Choose OK or NG.';
+  if (field.type === 'toggle') return 'Choose OK or NG.';
   if (field.type === 'number') return 'Tap to open the numeric keypad.';
   if (field.type === 'select') return 'Choose one option.';
   if (field.type === 'name') return 'Select the worker assigned to this checklist.';
