@@ -11784,6 +11784,32 @@ function sanitizeMasterRecordUpdates(updates = {}) {
   }, {});
 }
 
+function normalizeCheckFormTemplateWritePayload(payload = {}) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return payload;
+  }
+
+  if (!Array.isArray(payload.fields)) {
+    return payload;
+  }
+
+  return {
+    ...payload,
+    fields: payload.fields.map((field) => {
+      if (!field || typeof field !== "object" || Array.isArray(field)) {
+        return field;
+      }
+
+      const fieldType = typeof field.type === "string" ? field.type.trim().toLowerCase() : field.type;
+
+      return {
+        ...field,
+        type: fieldType === "checkbox" ? "toggle" : fieldType,
+      };
+    }),
+  };
+}
+
 app.post("/updateMasterRecord", async (req, res) => {
   const { recordId, updates, username, collectionName } = req.body; // Add collectionName
 
@@ -11805,7 +11831,10 @@ app.post("/updateMasterRecord", async (req, res) => {
       return res.status(404).json({ error: "Record not found" });
     }
 
-    const sanitizedUpdates = sanitizeMasterRecordUpdates(updates);
+    const normalizedUpdates = collectionName === "checkFormTemplatesDB"
+      ? normalizeCheckFormTemplateWritePayload(updates)
+      : updates;
+    const sanitizedUpdates = sanitizeMasterRecordUpdates(normalizedUpdates);
 
     if (Object.keys(sanitizedUpdates).length === 0) {
       return res.json({ success: true, modifiedCount: 0 });
@@ -12185,9 +12214,12 @@ app.post("/submitToMasterDB", async (req, res) => {
     const db = client.db(dbName || "Sasaki_Coating_MasterDB");
     const collection = db.collection(collectionName);
     const logColl = db.collection(`${collectionName}_Log`);
+    const insertData = collectionName === "checkFormTemplatesDB"
+      ? normalizeCheckFormTemplateWritePayload(data)
+      : data;
 
     // Insert the data
-    const result = await collection.insertOne(data);
+    const result = await collection.insertOne(insertData);
 
     // Log the insert
     await logColl.insertOne({
@@ -12196,7 +12228,7 @@ app.post("/submitToMasterDB", async (req, res) => {
       action: "insert",
       username,
       timestamp: new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" })),
-      newData: data
+      newData: insertData
     });
 
     // Invalidate master data and filter caches – new record may add new field values
