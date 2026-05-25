@@ -16488,31 +16488,22 @@ app.post("/api/noda-requests", async (req, res) => {
               }
 
               const inventoryItem = inventoryResults[0];
-              const availableQuantity = inventoryItem.availableQuantity || inventoryItem.runningQuantity || 0;
-              const requestedQuantity = parseInt(item.quantity);
-              
-              // ✅ NEW: Calculate partial reservation amounts
-              const reservedQuantity = Math.min(availableQuantity, requestedQuantity);
-              const shortfallQuantity = Math.max(0, requestedQuantity - availableQuantity);
-              
-              // Determine line item inventory status
-              let inventoryStatus;
-              if (availableQuantity === 0) {
-                inventoryStatus = 'none'; // No inventory available
-              } else if (availableQuantity < requestedQuantity) {
-                inventoryStatus = 'insufficient'; // Partial inventory
-              } else {
-                inventoryStatus = 'sufficient'; // Full inventory available
-              }
+              const currentState = {
+                physicalQuantity: Number(inventoryItem.physicalQuantity ?? inventoryItem.runningQuantity ?? 0),
+                reservedQuantity: Number(inventoryItem.reservedQuantity ?? 0)
+              };
+              const availableQuantity = Number(inventoryItem.availableQuantity ?? inventoryItem.runningQuantity ?? 0);
+              const requestedQuantity = Math.max(0, parseInt(item.quantity, 10) || 0);
+              const reservationDetails = getNodaReservationDetails(currentState, requestedQuantity);
 
               // ✅ Item is always valid - we allow requests without inventory
               validItems.push({
                 ...item,
                 inventoryItem: inventoryItem,
                 availableQuantity: availableQuantity,
-                reservedQuantity: reservedQuantity,
-                shortfallQuantity: shortfallQuantity,
-                inventoryStatus: inventoryStatus
+                reservedQuantity: reservationDetails.reservedQuantity,
+                shortfallQuantity: reservationDetails.shortfallQuantity,
+                inventoryStatus: reservationDetails.inventoryStatus
               });
 
             } catch (error) {
@@ -16657,14 +16648,14 @@ app.post("/api/noda-requests", async (req, res) => {
 
           // Process inventory transactions for all valid items (including partial reservations)
           for (const item of validItems) {
-            const currentPhysical = item.inventoryItem ? (item.inventoryItem.physicalQuantity || item.inventoryItem.runningQuantity || 0) : 0;
-            const currentReserved = item.inventoryItem ? (item.inventoryItem.reservedQuantity || 0) : 0;
-            const currentAvailable = item.availableQuantity;
-            const requestedQuantity = parseInt(item.quantity);
+            const currentPhysical = Number(item.inventoryItem?.physicalQuantity ?? item.inventoryItem?.runningQuantity ?? 0);
+            const currentReserved = Number(item.inventoryItem?.reservedQuantity ?? 0);
+            const currentAvailable = Number(item.availableQuantity ?? (currentPhysical - currentReserved));
+            const requestedQuantity = Math.max(0, parseInt(item.quantity, 10) || 0);
 
             // ✅ FIXED: reservedQuantity in inventory should be the FULL requested amount, not just what's available
             const newReservedQuantity = currentReserved + requestedQuantity; // Reserve FULL amount (including shortfall)
-            const newAvailableQuantity = Math.max(0, currentAvailable - item.reservedQuantity); // Only deduct what's actually available
+            const newAvailableQuantity = currentPhysical - newReservedQuantity; // Available is always physical - reserved, even when negative
 
             const inventoryTransaction = {
               背番号: item.背番号,
@@ -16675,7 +16666,7 @@ app.post("/api/noda-requests", async (req, res) => {
               // Two-stage inventory fields
               physicalQuantity: currentPhysical, // Physical stock unchanged
               reservedQuantity: newReservedQuantity, // Reserve FULL requested amount (450)
-              availableQuantity: newAvailableQuantity, // Deduct only what's available (300 → 0)
+              availableQuantity: newAvailableQuantity, // Recalculate from physical - reserved (can go negative)
               
               // Legacy field for compatibility
               runningQuantity: newAvailableQuantity,
@@ -16797,31 +16788,22 @@ app.post("/api/noda-requests", async (req, res) => {
               }
 
               const inventoryItem = inventoryResults[0];
-              const availableQuantity = inventoryItem.availableQuantity || inventoryItem.runningQuantity || 0;
-              const requestedQuantity = parseInt(item.quantity);
-              
-              // ✅ NEW: Calculate partial reservation amounts (same as bulk creation)
-              const reservedQuantity = Math.min(availableQuantity, requestedQuantity);
-              const shortfallQuantity = Math.max(0, requestedQuantity - availableQuantity);
-              
-              // Determine line item inventory status
-              let inventoryStatus;
-              if (availableQuantity === 0) {
-                inventoryStatus = 'none';
-              } else if (availableQuantity < requestedQuantity) {
-                inventoryStatus = 'insufficient';
-              } else {
-                inventoryStatus = 'sufficient';
-              }
+              const currentState = {
+                physicalQuantity: Number(inventoryItem.physicalQuantity ?? inventoryItem.runningQuantity ?? 0),
+                reservedQuantity: Number(inventoryItem.reservedQuantity ?? 0)
+              };
+              const availableQuantity = Number(inventoryItem.availableQuantity ?? inventoryItem.runningQuantity ?? 0);
+              const requestedQuantity = Math.max(0, parseInt(item.quantity, 10) || 0);
+              const reservationDetails = getNodaReservationDetails(currentState, requestedQuantity);
 
               // ✅ Item is always valid - we allow requests without full inventory
               validItems.push({
                 ...item,
                 inventoryItem: inventoryItem,
                 availableQuantity: availableQuantity,
-                reservedQuantity: reservedQuantity,
-                shortfallQuantity: shortfallQuantity,
-                inventoryStatus: inventoryStatus
+                reservedQuantity: reservationDetails.reservedQuantity,
+                shortfallQuantity: reservationDetails.shortfallQuantity,
+                inventoryStatus: reservationDetails.inventoryStatus
               });
 
             } catch (error) {
@@ -16877,14 +16859,14 @@ app.post("/api/noda-requests", async (req, res) => {
 
           // Process inventory transactions for all valid items
           for (const item of validItems) {
-            const currentPhysical = item.inventoryItem.physicalQuantity || item.inventoryItem.runningQuantity || 0;
-            const currentReserved = item.inventoryItem.reservedQuantity || 0;
-            const currentAvailable = item.availableQuantity;
-            const requestedQuantity = parseInt(item.quantity);
+            const currentPhysical = Number(item.inventoryItem?.physicalQuantity ?? item.inventoryItem?.runningQuantity ?? 0);
+            const currentReserved = Number(item.inventoryItem?.reservedQuantity ?? 0);
+            const currentAvailable = Number(item.availableQuantity ?? (currentPhysical - currentReserved));
+            const requestedQuantity = Math.max(0, parseInt(item.quantity, 10) || 0);
 
             // ✅ FIXED: Reserve FULL requested amount in inventory
             const newReservedQuantity = currentReserved + requestedQuantity; // Reserve FULL amount (including shortfall)
-            const newAvailableQuantity = Math.max(0, currentAvailable - item.reservedQuantity); // Only deduct what's actually available
+            const newAvailableQuantity = currentPhysical - newReservedQuantity; // Available is always physical - reserved, even when negative
 
             const inventoryTransaction = {
               背番号: item.背番号,
@@ -16895,7 +16877,7 @@ app.post("/api/noda-requests", async (req, res) => {
               // Two-stage inventory fields
               physicalQuantity: currentPhysical, // Physical stock unchanged
               reservedQuantity: newReservedQuantity, // Reserve FULL requested amount
-              availableQuantity: newAvailableQuantity, // Decrease available by what's actually reserved
+              availableQuantity: newAvailableQuantity, // Recalculate from physical - reserved (can go negative)
               
               // Legacy field for compatibility
               runningQuantity: newAvailableQuantity,
