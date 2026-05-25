@@ -20,6 +20,7 @@ const path = require('path');
 const fs = require('fs');
 const { extractGENTokens } = require('./gen-token-extractor');
 const fetch = require('node-fetch');
+const heicConvert = require('heic-convert');
 const https = require('https');
 const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 
@@ -12005,7 +12006,7 @@ app.post("/uploadMasterImage", async (req, res) => {
     // Use a random token or constant token (example below)
     const downloadToken = "masterDBToken69";
 
-    await file.save(buffer, {
+    await file.save(uploadBuffer, {
       metadata: {
         contentType: "image/jpeg",
         metadata: {
@@ -12053,25 +12054,43 @@ app.post("/api/upload-equipment-event-image", async (req, res) => {
   try {
     const mimeMatch = base64.match(/^data:([^;]+);base64,/);
     const mimeType = mimeMatch?.[1] || "image/jpeg";
+    const HEIC_MIME_TYPES = new Set([
+      "image/heic",
+      "image/heif",
+      "image/heic-sequence",
+      "image/heif-sequence",
+    ]);
     const EXT_MAP = {
-      "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp",
-      "image/gif": "gif",  "video/mp4": "mp4", "video/quicktime": "mov",
+      "image/jpeg": "jpg", "image/jpg": "jpg",  "image/png": "png",
+      "image/webp": "webp", "image/gif": "gif", "image/heic": "heic",
+      "image/heif": "heif", "video/mp4": "mp4", "video/quicktime": "mov",
     };
-    const ext = EXT_MAP[mimeType] || "bin";
 
     const timestamp = Date.now();
     const factory  = (factoryName  || "unknown").replace(/[^a-zA-Z0-9　-鿿]/g, "_");
     const machine  = (equipmentName || "unknown").replace(/[^a-zA-Z0-9　-鿿]/g, "_");
-    const filePath = `equipmentEvents/${factory}/${machine}/${timestamp}.${ext}`;
 
     const rawBase64 = base64.includes(",") ? base64.split(",")[1] : base64;
-    const buffer = Buffer.from(rawBase64, "base64");
+    const originalBuffer = Buffer.from(rawBase64, "base64");
+    let uploadBuffer = originalBuffer;
+    let uploadMimeType = mimeType;
+
+    if (HEIC_MIME_TYPES.has(mimeType)) {
+      uploadBuffer = Buffer.from(await heicConvert({
+        buffer: originalBuffer,
+        format: "PNG",
+      }));
+      uploadMimeType = "image/png";
+    }
+
+    const ext = EXT_MAP[uploadMimeType] || uploadMimeType.split("/")[1]?.replace(/[^a-zA-Z0-9.+-]/g, "") || "bin";
+    const filePath = `equipmentEvents/${factory}/${machine}/${timestamp}.${ext}`;
     const file = admin.storage().bucket().file(filePath);
     const downloadToken = "masterDBToken69";
 
-    await file.save(buffer, {
+    await file.save(uploadBuffer, {
       metadata: {
-        contentType: mimeType,
+        contentType: uploadMimeType,
         metadata: { firebaseStorageDownloadTokens: downloadToken },
       },
     });
