@@ -507,6 +507,12 @@ function bindEvents() {
   dom.annotatorOverlay.addEventListener('pointerup',    handleAnnotatorPointerUp);
   dom.annotatorOverlay.addEventListener('pointercancel',handleAnnotatorPointerUp);
 
+  dom.stepImg.addEventListener('click', () => {
+    if (dom.photoWrap.classList.contains('hidden')) return;
+    if (!dom.stepImg.src) return;
+    openPhotoLightbox(dom.stepImg.src);
+  });
+
   document.addEventListener('click', (e) => {
     const thumb = e.target.closest('.photo-thumb') || e.target.closest('img[data-ticket-thumb]');
     if (thumb && thumb.src) { openPhotoLightbox(thumb.src); return; }
