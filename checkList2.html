@@ -272,7 +272,7 @@
 
     header { display: grid; grid-template-columns: 1fr auto 1fr; align-items: start; padding: 0.875rem 1.25rem 0.5rem; flex-shrink: 0; }
     .header-center { text-align: center; }
-    .header-right { text-align: right; padding-top: 0.25rem; }
+    .header-right { text-align: right; padding-top: 0.25rem; display: flex; flex-direction: column; align-items: flex-end; gap: 0.45rem; }
     .back-btn {
       display: flex; align-items: center; gap: 0.4rem;
       background: var(--primary); border: 1px solid var(--primary);
@@ -288,6 +288,24 @@
     h1.page-title { font-family: var(--font-display); font-size: 1.7rem; font-weight: 700; letter-spacing: 0.04em; line-height: 1; }
     #step-counter { font-family: var(--font-mono); font-size: 1.9rem; font-weight: 500; color: var(--primary); line-height: 1; }
     #step-counter .total { font-size: 1rem; font-weight: 400; color: var(--muted-fg); }
+    .ticket-mini-btn {
+      display: inline-flex; align-items: center; gap: 0.35rem;
+      padding: 0.24rem 0.52rem; border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.16);
+      background: rgba(255,255,255,0.05); color: var(--muted-fg);
+      font-family: var(--font-mono); font-size: 0.56rem; font-weight: 700;
+      letter-spacing: 0.1em; text-transform: uppercase;
+      cursor: pointer; transition: background 0.12s, border-color 0.12s, color 0.12s;
+    }
+    .ticket-mini-btn svg { width: 0.82rem; height: 0.82rem; fill: none; stroke: currentColor; stroke-width: 2; }
+    .ticket-mini-btn:hover:not(:disabled) { color: #fca5a5; border-color: rgba(239,68,68,0.45); background: rgba(239,68,68,0.12); }
+    .ticket-mini-btn.required { color: #fca5a5; border-color: rgba(239,68,68,0.45); background: rgba(239,68,68,0.12); animation: ticket-mini-pulse 1.4s ease-in-out infinite; }
+    .ticket-mini-btn.saved { color: #6ee7b7; border-color: rgba(16,185,129,0.45); background: rgba(16,185,129,0.12); }
+    .ticket-mini-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+    @keyframes ticket-mini-pulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.04); }
+    }
 
     #progress-bar { display: flex; gap: 6px; padding: 0 1.25rem 0.625rem; flex-shrink: 0; }
     .seg { height: 4px; border-radius: 999px; flex: 1; background: var(--muted); transition: background 0.4s; }
@@ -535,6 +553,20 @@
       background: var(--card); border-radius: 1.25rem 1.25rem 0 0;
       padding: 1.5rem 1.25rem calc(1.5rem + env(safe-area-inset-bottom, 0px));
       display: flex; flex-direction: column; gap: 1.25rem;
+      position: relative;
+    }
+    .ticket-modal-close {
+      position: absolute; top: 0.65rem; right: 0.65rem;
+      width: 2.1rem; height: 2.1rem; border-radius: 50%;
+      border: 1px solid var(--border); background: var(--secondary);
+      color: var(--muted-fg); font-size: 1.28rem; line-height: 1;
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      transition: background 0.12s, color 0.12s, border-color 0.12s;
+    }
+    .ticket-modal-close:hover {
+      background: rgba(239,68,68,0.14);
+      border-color: rgba(239,68,68,0.4);
+      color: #fca5a5;
     }
     .modal-title { font-family: var(--font-display); font-size: 1.8rem; font-weight: 700; color: var(--ng); line-height: 1; }
     .modal-subtitle { font-size: 0.8rem; color: var(--muted-fg); line-height: 1.45; margin-top: 0.25rem; }
@@ -686,6 +718,10 @@
       <div class="header-right">
         <p id="step-eyebrow" class="eyebrow">STEP</p>
         <p id="step-counter"><span class="num">01</span><span class="total">/01</span></p>
+        <button id="btn-ticket-mini" class="ticket-mini-btn" type="button" disabled>
+          <svg viewBox="0 0 24 24"><path d="M3 9a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v3a2 2 0 0 0 0 4v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-3a2 2 0 0 0 0-4z"/><path d="M9 7v14"/></svg>
+          <span id="ticket-mini-text">Ticket</span>
+        </button>
       </div>
     </header>
 

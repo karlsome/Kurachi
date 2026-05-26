@@ -54,6 +54,9 @@ const STRINGS = {
     ticketPhoto:     'Add photo',
     ticketSave:      'Save ticket',
     ticketCancel:    'Change answer',
+    ticketBtn:       'Ticket',
+    ticketReqBtn:    'Required',
+    ticketViewBtn:   'Review',
     ticketReasonReq: 'A reason is required before saving.',
     ticketPhotoReq:  'At least one photo is required.',
     skipped:         'SKIPPED',
@@ -105,6 +108,9 @@ const STRINGS = {
     ticketPhoto:     '写真を追加',
     ticketSave:      'チケットを保存',
     ticketCancel:    '回答を変更',
+    ticketBtn:       'チケット',
+    ticketReqBtn:    '必須',
+    ticketViewBtn:   '確認',
     ticketReasonReq: '保存する前に理由が必要です。',
     ticketPhotoReq:  '写真が少なくとも1枚必要です。',
     skipped:         'スキップ済',
@@ -156,6 +162,9 @@ const STRINGS = {
     ticketPhoto:     'Magdagdag ng larawan',
     ticketSave:      'I-save ang tiket',
     ticketCancel:    'Baguhin ang sagot',
+    ticketBtn:       'Ticket',
+    ticketReqBtn:    'Required',
+    ticketViewBtn:   'Review',
     ticketReasonReq: 'Kinakailangan ang dahilan bago i-save.',
     ticketPhotoReq:  'Kailangan ng hindi bababa sa isang larawan.',
     skipped:         'NILAKTAWAN',
@@ -211,6 +220,9 @@ let indexedDbPromise = null;
 
 const ticketModal = {
   open: false,
+  source: 'manual',
+  hasExistingTicket: false,
+  originalImageAssetIds: [],
   stepIndex: null,
   reason: '',
   imageAssetIds: [],
@@ -361,6 +373,8 @@ function cacheDom() {
   dom.numpadRange      = document.getElementById('numpad-range');
   dom.btnOK            = document.getElementById('btn-ok');
   dom.btnNG            = document.getElementById('btn-ng');
+  dom.btnTicketMini    = document.getElementById('btn-ticket-mini');
+  dom.ticketMiniText   = document.getElementById('ticket-mini-text');
 
   dom.summaryView      = document.getElementById('summary-view');
   dom.summaryWorker    = document.getElementById('summary-worker');
@@ -452,6 +466,11 @@ function bindEvents() {
   dom.btnStartOver.addEventListener('click', () => {
     if (!window.confirm('Discard all answers and start over?')) return;
     void reset();
+  });
+
+  dom.btnTicketMini.addEventListener('click', () => {
+    if (dom.btnTicketMini.disabled) return;
+    ensureTicketModalOpen(state.step, 'manual');
   });
 
   dom.numpad.addEventListener('pointerdown', (e) => {
@@ -797,7 +816,7 @@ function beginInspection() {
   if (stepResult && curStep) {
     const answerForTicket = curStep.type === 'checkbox' ? stepResult.result : stepResult.value;
     if (isTicketNeeded(curStep, answerForTicket, stepResult.result) && !stepResult.ticket) {
-      openTicketModal(state.step);
+        ensureTicketModalOpen(state.step, 'auto');
     }
   }
 }
@@ -1121,6 +1140,7 @@ function renderStep() {
 
   updateProgressBar();
   updateButtonLock();
+  updateTicketQuickButton();
 
   dom.stepContent.classList.remove('step-entering');
   void dom.stepContent.offsetWidth;
@@ -1372,6 +1392,45 @@ function updateButtonLock() {
     || (needsPhoto && !hasPhoto);
   dom.btnOK.disabled = locked;
   dom.btnNG.disabled = locked;
+  updateTicketQuickButton();
+}
+
+function getCurrentStepTicketState() {
+  const step = state.steps[state.step];
+  const result = state.results[state.step];
+  if (!step || !result) return { hasResult: false, required: false, saved: false };
+
+  const answer = step.type === 'checkbox' ? result.result : result.value;
+  const required = isTicketNeeded(step, answer, result.result);
+  const saved = Boolean(result.ticket);
+  return { hasResult: true, required, saved };
+}
+
+function updateTicketQuickButton() {
+  if (!dom.btnTicketMini || !dom.ticketMiniText) return;
+  if (state.phase !== 'inspection') {
+    dom.btnTicketMini.disabled = true;
+    dom.btnTicketMini.classList.remove('required', 'saved');
+    dom.ticketMiniText.textContent = S().ticketBtn;
+    return;
+  }
+
+  const status = getCurrentStepTicketState();
+  const canOpen = status.hasResult && (status.required || status.saved);
+  dom.btnTicketMini.disabled = !canOpen || ticketModal.open || state.animating;
+  dom.btnTicketMini.classList.toggle('required', status.required && !status.saved);
+  dom.btnTicketMini.classList.toggle('saved', status.saved);
+  dom.ticketMiniText.textContent = status.saved ? S().ticketViewBtn : status.required ? S().ticketReqBtn : S().ticketBtn;
+}
+
+function ensureTicketModalOpen(stepIndex, source = 'auto') {
+  openTicketModal(stepIndex, { source });
+  // Retry once on next frame to avoid rare missed-open race after flash transitions.
+  requestAnimationFrame(() => {
+    if (!ticketModal.open || ticketModal.stepIndex !== stepIndex || dom.ticketModal.classList.contains('hidden')) {
+      openTicketModal(stepIndex, { source });
+    }
+  });
 }
 
 // ── Button press interaction ─────────────────────────────────────
@@ -1410,8 +1469,8 @@ function handleResult(result) {
     setTimeout(() => {
       const answerForTicket = step.type === 'checkbox' ? result : state.inputValue;
       if (isTicketNeeded(step, answerForTicket, result)) {
-        openTicketModal(state.step);
         state.animating = false;
+        ensureTicketModalOpen(state.step, 'auto');
         updateButtonLock();
       } else {
         state.animating = false;
@@ -1706,14 +1765,20 @@ function isTicketNeeded(step, answerValue, buttonResult) {
 
 // ── Ticket modal ─────────────────────────────────────────────────
 
-function openTicketModal(stepIndex) {
+function openTicketModal(stepIndex, options = {}) {
+  const source = options.source === 'auto' ? 'auto' : 'manual';
+  const existing = state.results[stepIndex]?.ticket || null;
   ticketModal.open          = true;
+  ticketModal.source        = source;
+  ticketModal.hasExistingTicket = Boolean(existing);
   ticketModal.stepIndex     = stepIndex;
-  ticketModal.reason        = '';
-  ticketModal.imageAssetIds = [];
+  ticketModal.reason        = existing ? String(existing.reason || '') : '';
+  ticketModal.imageAssetIds = existing ? [...(existing.imageAssetIds || [])] : [];
+  ticketModal.originalImageAssetIds = existing ? [...(existing.imageAssetIds || [])] : [];
   ticketModal.reasonInvalid = false;
   ticketModal.imagesInvalid = false;
   renderTicketModal();
+  updateTicketQuickButton();
 }
 
 function renderTicketModal() {
@@ -1750,6 +1815,7 @@ function renderTicketModal() {
   dom.ticketModal.classList.remove('hidden');
   dom.ticketModal.innerHTML = `
     <div class="modal-panel" role="dialog" aria-modal="true">
+      <button type="button" class="ticket-modal-close" data-action="ticket-cancel" aria-label="Close">×</button>
       <h2 class="modal-title">${escapeHtml(s.ticketTitle)}</h2>
       <p class="modal-subtitle">Step ${num} · ${escapeHtml(tx(step.title))}${escapeHtml(context)}</p>
       <div class="modal-section">
@@ -1779,7 +1845,7 @@ function renderTicketModal() {
   });
 }
 
-function saveTicketModal() {
+async function saveTicketModal() {
   const reason    = ticketModal.reason.trim();
   const hasImages = ticketModal.imageAssetIds.length > 0;
 
@@ -1790,12 +1856,30 @@ function saveTicketModal() {
     return;
   }
 
-  state.results[ticketModal.stepIndex].ticket = {
+  const idx = ticketModal.stepIndex;
+  if (idx === null || !state.results[idx]) {
+    ticketModal.open = false;
+    renderTicketModal();
+    state.animating = false;
+    updateButtonLock();
+    return;
+  }
+
+  const removedOriginalIds = (ticketModal.originalImageAssetIds || [])
+    .filter(id => !ticketModal.imageAssetIds.includes(id));
+  for (const id of removedOriginalIds) await deleteAsset(id);
+
+  state.results[idx].ticket = {
     reason,
     imageAssetIds: [...ticketModal.imageAssetIds],
   };
 
+  const wasAuto = ticketModal.source === 'auto';
+
   ticketModal.open          = false;
+  ticketModal.source        = 'manual';
+  ticketModal.hasExistingTicket = false;
+  ticketModal.originalImageAssetIds = [];
   ticketModal.stepIndex     = null;
   ticketModal.reason        = '';
   ticketModal.imageAssetIds = [];
@@ -1804,19 +1888,27 @@ function saveTicketModal() {
 
   renderTicketModal();
   persistDraft();
-  advanceStep();
+  state.animating = false;
+  updateButtonLock();
+  if (wasAuto) advanceStep();
 }
 
 async function cancelTicketModal() {
-  for (const id of ticketModal.imageAssetIds) await deleteAsset(id);
+  const original = new Set(ticketModal.originalImageAssetIds || []);
+  for (const id of ticketModal.imageAssetIds) {
+    if (!original.has(id)) await deleteAsset(id);
+  }
 
   const idx = ticketModal.stepIndex;
-  if (idx !== null) {
+  if (idx !== null && ticketModal.source === 'auto' && !ticketModal.hasExistingTicket) {
     state.results[idx] = null;
     persistDraft();
   }
 
   ticketModal.open          = false;
+  ticketModal.source        = 'manual';
+  ticketModal.hasExistingTicket = false;
+  ticketModal.originalImageAssetIds = [];
   ticketModal.stepIndex     = null;
   ticketModal.reason        = '';
   ticketModal.imageAssetIds = [];
@@ -1846,7 +1938,8 @@ async function removeTicketImage(index) {
   const assetId = ticketModal.imageAssetIds[index];
   if (!assetId) return;
   ticketModal.imageAssetIds.splice(index, 1);
-  await deleteAsset(assetId);
+  const wasOriginal = (ticketModal.originalImageAssetIds || []).includes(assetId);
+  if (!wasOriginal) await deleteAsset(assetId);
   renderTicketModal();
 }
 
@@ -1867,10 +1960,15 @@ function pickImageFile() {
 }
 
 function handleTicketModalClick(e) {
+  if (e.target === dom.ticketModal) {
+    void cancelTicketModal();
+    return;
+  }
+
   const btn = e.target.closest('[data-action]');
   if (!btn) return;
   switch (btn.dataset.action) {
-    case 'ticket-save':         saveTicketModal();                            break;
+    case 'ticket-save':         void saveTicketModal();                       break;
     case 'ticket-add-photo':    void addTicketImage();                        break;
     case 'ticket-remove-photo': void removeTicketImage(Number(btn.dataset.index)); break;
     case 'ticket-cancel':       void cancelTicketModal();                     break;
@@ -1902,6 +2000,9 @@ async function reset() {
   if (state.photoAssetId) await deleteAsset(state.photoAssetId);
   for (const id of ticketModal.imageAssetIds) await deleteAsset(id);
   ticketModal.open = false;
+  ticketModal.source = 'manual';
+  ticketModal.hasExistingTicket = false;
+  ticketModal.originalImageAssetIds = [];
   ticketModal.stepIndex = null;
   ticketModal.reason = '';
   ticketModal.imageAssetIds = [];
