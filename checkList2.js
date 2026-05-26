@@ -2302,7 +2302,6 @@ function pickTicketImages() {
 
 function handleTicketModalClick(e) {
   if (e.target === dom.ticketModal) {
-    void cancelTicketModal();
     return;
   }
 
