@@ -1785,6 +1785,7 @@ function showSummary() {
     const r   = state.results[i];
     const res = r ? r.result : '—';
     const val = r ? r.value  : null;
+    const answerForTicket = r ? (s.type === 'checkbox' ? r.result : r.value) : null;
 
     const isSkippedRow = !!(r && r.skipReason);
     const rowClass = res === 'OK' ? 'ok' : isSkippedRow ? 'skipped' : 'ng';
@@ -1803,7 +1804,10 @@ function showSummary() {
       ? `<p class="result-value">${escapeHtml(String(val))}${s.unit ? ' ' + escapeHtml(s.unit) : ''}</p>`
       : '';
 
-    const ticketHtml = (r && r.ticket) ? `<p class="result-ticket">Ticket saved</p>` : '';
+    const ticketRequired = Boolean(r && r.ticket && isTicketNeeded(s, answerForTicket, r.result));
+    const ticketHtml = (r && r.ticket)
+      ? `<p class="result-ticket ${ticketRequired ? 'result-ticket--required' : 'result-ticket--optional'}">${ticketRequired ? 'Required ticket saved' : 'Optional ticket saved'}</p>`
+      : '';
 
     row.innerHTML = `
       <div class="result-icon">
@@ -1994,7 +1998,7 @@ async function buildSubmissionPayload() {
         reason:     result.skipReason,
         imagesData: [],
       };
-    } else if (!isSkipped && isTicketNeeded(step, answerValue, result.result) && result.ticket) {
+    } else if (!isSkipped && result.ticket) {
       const ticketImagesData = await Promise.all(
         result.ticket.imageAssetIds.map(id => getAsset(id))
       );

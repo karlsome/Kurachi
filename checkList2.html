@@ -747,7 +747,22 @@
       cursor: pointer; transition: color 0.15s; text-align: center;
     }
     .ticket-cancel-btn:hover { color: var(--fg); }
-    .result-ticket { font-family: var(--font-mono); font-size: 0.6rem; letter-spacing: 0.08em; color: rgba(248,113,113,0.7); margin-top: 2px; }
+    .result-ticket {
+      display: inline-flex; align-items: center; width: fit-content;
+      font-family: var(--font-mono); font-size: 0.6rem; letter-spacing: 0.08em;
+      text-transform: uppercase; border-radius: 999px; padding: 0.2rem 0.45rem;
+      margin-top: 0.25rem;
+    }
+    .result-ticket--required {
+      background: rgba(248,113,113,0.14);
+      border: 1px solid rgba(248,113,113,0.28);
+      color: #fca5a5;
+    }
+    .result-ticket--optional {
+      background: rgba(245,158,11,0.12);
+      border: 1px solid rgba(245,158,11,0.28);
+      color: #fbbf24;
+    }
 
     @keyframes photo-required-pulse {
       0%, 100% { transform: scale(1); }
