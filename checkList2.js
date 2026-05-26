@@ -1,6 +1,7 @@
 'use strict';
 
-const API_BASE_URL = window.location.origin;
+//const API_BASE_URL = window.location.origin;
+const API_BASE_URL = 'http://localhost:3000';
 
 const CHECKLIST_API = {
   templates:    `${API_BASE_URL}/api/check-forms/templates`,
@@ -16,6 +17,7 @@ const CHECKLIST_DB_VERSION  = 1;
 const CHECKLIST_ASSET_STORE = 'assets';
 const CHECKLIST_DRAFT_KEY          = 'checkListDraft2';
 const CHECKLIST_RECENT_NAMES_PREFIX = 'checkListRecentNames2::';
+const CHECKLIST_SELECTED_NAME_PREFIX = 'checkListSelectedName2::';
 const MAX_RECENT_NAMES              = 4;
 
 const ANNOTATOR_BRUSH_SIZE = 14;
@@ -25,8 +27,8 @@ const STRINGS = {
   en: {
     eyebrow:         'PRE-USE INSPECTION',
     stepLabel:       'STEP',
-    namePrompt:      'Enter your name to begin',
-    namePlaceholder: 'Your name…',
+    namePrompt:      'Select your name to begin',
+    namePlaceholder: 'Search or select your name…',
     beginBtn:        'BEGIN INSPECTION',
     ngSub:           'Not Good',
     okSub:           'Confirmed',
@@ -76,8 +78,8 @@ const STRINGS = {
   ja: {
     eyebrow:         '事前点検',
     stepLabel:       'ステップ',
-    namePrompt:      '名前を入力して開始してください',
-    namePlaceholder: '名前…',
+    namePrompt:      '名前を選択して開始してください',
+    namePlaceholder: '名前を検索または選択…',
     beginBtn:        '点検を開始',
     ngSub:           '不良',
     okSub:           '確認済',
@@ -127,8 +129,8 @@ const STRINGS = {
   tl: {
     eyebrow:         'INSPEKSYON BAGO GAMITIN',
     stepLabel:       'HAKBANG',
-    namePrompt:      'Ilagay ang iyong pangalan upang magsimula',
-    namePlaceholder: 'Iyong pangalan…',
+    namePrompt:      'Piliin ang iyong pangalan upang magsimula',
+    namePlaceholder: 'Hanapin o piliin ang iyong pangalan…',
     beginBtn:        'SIMULAN ANG INSPEKSYON',
     ngSub:           'Hindi Maganda',
     okSub:           'Nakumpirma',
@@ -183,6 +185,8 @@ const state = {
   translationCache: {},   // { 'ja': { 'original text': 'translated' }, ... }
   allNames: [],       // fetched from server for autocomplete
   workerName: '',
+  selectedName: '',   // chosen name shown when not actively searching
+  nameSearch: '',     // transient search text while dropdown is open
   factory: '',
   machine: '',
   pageTitle: 'Machine Check',
@@ -385,13 +389,25 @@ function cacheDom() {
 function bindEvents() {
   dom.workerNameInput.addEventListener('input', () => {
     const val = dom.workerNameInput.value.trim();
-    dom.btnBegin.disabled = val.length === 0;
-    dom.btnSkip.disabled  = val.length === 0;
+    state.nameSearch = val;
+    if (val.length > 0) state.selectedName = '';
+    const hasChosen = state.selectedName.length > 0;
+    dom.btnBegin.disabled = !hasChosen && val.length === 0;
+    dom.btnSkip.disabled  = !hasChosen && val.length === 0;
     renderNameDropdown(val);
   });
 
   dom.workerNameInput.addEventListener('focus', () => {
-    renderNameDropdown(dom.workerNameInput.value.trim());
+    // Always start search from blank so full list is visible.
+    state.nameSearch = '';
+    dom.workerNameInput.value = '';
+    renderNameDropdown('');
+  });
+
+  dom.workerNameInput.addEventListener('click', () => {
+    state.nameSearch = '';
+    dom.workerNameInput.value = '';
+    renderNameDropdown('');
   });
 
   document.getElementById('lang-switcher').addEventListener('click', (e) => {
@@ -400,6 +416,9 @@ function bindEvents() {
   });
 
   dom.workerNameInput.addEventListener('blur', () => {
+    if (!dom.workerNameInput.value.trim() && state.selectedName) {
+      dom.workerNameInput.value = state.selectedName;
+    }
     // Delay so click on option fires first
     setTimeout(() => dom.nameDropdown.classList.add('hidden'), 150);
   });
@@ -495,9 +514,7 @@ async function loadTemplates() {
       fetchJson(CHECKLIST_API.names),
     ]);
 
-    state.allNames = nameData.status === 'fulfilled' && Array.isArray(nameData.value.names)
-      ? nameData.value.names
-      : [];
+    state.allNames = resolveNameOptions(nameData);
 
     if (tplData.status === 'rejected') throw tplData.reason;
 
@@ -525,17 +542,24 @@ async function loadTemplates() {
     dom.inspectionTitle.textContent = tx(state.pageTitle);
 
     restoreRecentNames();
+    restoreSelectedName();
 
     const savedDraft = loadDraft();
     if (savedDraft && savedDraft.workerName &&
         Array.isArray(savedDraft.results) && savedDraft.results.some(r => r !== null)) {
       // In-progress draft — skip name screen and restore directly
+      state.selectedName = savedDraft.workerName;
       dom.workerNameInput.value = savedDraft.workerName;
       beginInspection();
     } else {
       transitionTo('name');
       if (savedDraft && savedDraft.workerName) {
+        state.selectedName = savedDraft.workerName;
         dom.workerNameInput.value = savedDraft.workerName;
+        dom.btnBegin.disabled = false;
+        dom.btnSkip.disabled  = false;
+      } else if (state.selectedName) {
+        dom.workerNameInput.value = state.selectedName;
         dom.btnBegin.disabled = false;
         dom.btnSkip.disabled  = false;
       }
@@ -546,6 +570,37 @@ async function loadTemplates() {
     showNameError(S().loadError(err.message));
     transitionTo('name');
   }
+}
+
+function resolveNameOptions(nameData) {
+  if (nameData.status !== 'fulfilled' || !nameData.value) return [];
+
+  const payload = nameData.value;
+  // New payload shape: { workerDBNames: [], userNames: [], names: [] }
+  // Keep compatibility with older payload shape: { names: [] }
+  if (Array.isArray(payload.workerDBNames) || Array.isArray(payload.userNames)) {
+    const workerNames = normalizeAndSortNames(payload.workerDBNames || []);
+    const userNames   = normalizeAndSortNames(payload.userNames || []);
+    const seen = new Set(workerNames.map(n => n.toLowerCase()));
+    const userOnly = userNames.filter(n => !seen.has(n.toLowerCase()));
+    return [...workerNames, ...userOnly];
+  }
+
+  return Array.isArray(payload.names) ? normalizeAndSortNames(payload.names) : [];
+}
+
+function normalizeAndSortNames(names) {
+  if (!Array.isArray(names)) return [];
+
+  const unique = new Map();
+  names.forEach((name) => {
+    const clean = String(name || '').trim();
+    if (!clean) return;
+    const key = clean.toLowerCase();
+    if (!unique.has(key)) unique.set(key, clean);
+  });
+
+  return [...unique.values()].sort((a, b) => a.localeCompare(b, 'ja'));
 }
 
 function buildSteps(templates) {
@@ -581,19 +636,42 @@ function showNameError(msg) {
 
 // ── Name autocomplete ────────────────────────────────────────────
 
-function appendNameOption(name, isRecent) {
+function selectNameOption(name) {
+  // Save immediately so the next open shows this at the top of recents.
+  rememberRecentName(name);
+  state.selectedName = name;
+  state.nameSearch = '';
+  persistSelectedName(name);
+  dom.workerNameInput.value = name;
+  dom.btnBegin.disabled = false;
+  dom.btnSkip.disabled  = false;
+  closeNameDropdown();
+}
+
+function appendNameOption(name) {
   const btn = document.createElement('button');
   btn.type = 'button';
-  btn.className = 'name-option' + (isRecent ? ' name-option-recent' : '');
+  btn.className = 'name-option';
   btn.textContent = name;
   btn.addEventListener('mousedown', (e) => {
     e.preventDefault();
-    dom.workerNameInput.value = name;
-    dom.btnBegin.disabled = false;
-    dom.btnSkip.disabled  = false;
-    closeNameDropdown();
+    selectNameOption(name);
   });
   dom.nameDropdown.appendChild(btn);
+}
+
+function appendRecentNameChip(name, index) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'name-recent-chip';
+  btn.innerHTML = `
+    <span class="name-recent-chip__name">${escapeHtml(name)}</span>
+    <span class="name-recent-chip__meta">#${index + 1}</span>`;
+  btn.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    selectNameOption(name);
+  });
+  return btn;
 }
 
 function appendDropdownLabel(text) {
@@ -610,35 +688,59 @@ function appendDropdownDivider() {
 }
 
 function getVisibleRecentNames() {
-  const allLower = new Set(state.allNames.map(n => n.toLowerCase()));
-  return state.recentNames.filter(n => allLower.has(n.toLowerCase()));
+  const available = new Set(state.allNames.map(n => String(n || '').trim().toLowerCase()));
+  const unique = new Set();
+  const out = [];
+  for (const name of state.recentNames) {
+    const clean = String(name || '').trim();
+    if (!clean) continue;
+    const key = clean.toLowerCase();
+    if (available.size > 0 && !available.has(key)) continue;
+    if (unique.has(key)) continue;
+    unique.add(key);
+    out.push(clean);
+  }
+  return out.slice(0, MAX_RECENT_NAMES);
 }
 
-function renderNameDropdown(query) {
+function renderNameDropdown(query = '') {
   if (!state.allNames.length && !state.recentNames.length) {
     dom.nameDropdown.classList.add('hidden');
     return;
   }
 
-  const q = query.toLowerCase();
+  const q = String(query || '').trim().toLowerCase();
   dom.nameDropdown.innerHTML = '';
 
-  if (q) {
-    const matches = state.allNames.filter(n => n.toLowerCase().includes(q)).slice(0, 50);
-    if (matches.length === 0) { dom.nameDropdown.classList.add('hidden'); return; }
-    matches.forEach(name => appendNameOption(name, false));
-  } else {
-    const recents = getVisibleRecentNames();
-    if (recents.length > 0) {
-      appendDropdownLabel('Recent');
-      recents.forEach(name => appendNameOption(name, true));
-      if (state.allNames.length > 0) appendDropdownDivider();
-    }
-    const recentSet = new Set(recents.map(n => n.toLowerCase()));
-    const rest = state.allNames.filter(n => !recentSet.has(n.toLowerCase()));
-    rest.forEach(name => appendNameOption(name, false));
-    if (dom.nameDropdown.childElementCount === 0) { dom.nameDropdown.classList.add('hidden'); return; }
+  const recents = getVisibleRecentNames();
+  if (recents.length > 0) {
+    appendDropdownLabel('Recent');
+    const recentWrap = document.createElement('div');
+    recentWrap.className = 'name-recent-grid';
+    recents.forEach((name, index) => {
+      recentWrap.appendChild(appendRecentNameChip(name, index));
+    });
+    dom.nameDropdown.appendChild(recentWrap);
+    if (state.allNames.length > 0) appendDropdownDivider();
   }
+
+  const recentSet = new Set(recents.map(n => n.toLowerCase()));
+  const rest = state.allNames.filter((name) => {
+    if (recentSet.has(name.toLowerCase())) return false;
+    if (!q) return true;
+    return name.toLowerCase().includes(q);
+  });
+
+  if (rest.length === 0 && q) {
+    const empty = document.createElement('div');
+    empty.className = 'name-dropdown-empty';
+    empty.textContent = 'No names match your search.';
+    dom.nameDropdown.appendChild(empty);
+  } else {
+    rest.forEach(name => appendNameOption(name));
+  }
+
+  if (dom.nameDropdown.childElementCount === 0) { dom.nameDropdown.classList.add('hidden'); return; }
 
   dom.nameDropdown.classList.remove('hidden');
 }
@@ -651,8 +753,12 @@ function closeNameDropdown() {
 
 function beginInspection() {
   closeNameDropdown();
-  state.workerName = dom.workerNameInput.value.trim();
+  const typed = dom.workerNameInput.value.trim();
+  state.workerName = state.selectedName || typed;
   if (!state.workerName) return;
+  state.selectedName = state.workerName;
+  persistSelectedName(state.workerName);
+  dom.workerNameInput.value = state.workerName;
   rememberRecentName(state.workerName);
 
   const draft = loadDraft();
@@ -928,7 +1034,7 @@ function stopQrScanner() {
 }
 
 function executeSkip(reason) {
-  const name = dom.workerNameInput.value.trim();
+  const name = (state.selectedName || dom.workerNameInput.value.trim()).trim();
   if (!name) return;
   const approvedUser = skipQr.user;
   state.skipApprovedBy = approvedUser
@@ -938,6 +1044,8 @@ function executeSkip(reason) {
   closeNameDropdown();
 
   state.workerName  = name;
+  state.selectedName = name;
+  persistSelectedName(name);
   rememberRecentName(name);
 
   const skipValue = `skipped by ${name}`;
@@ -1773,6 +1881,9 @@ async function reset() {
   state.pressedBtn   = null;
   state.inputValue   = null;
   state.photoAssetId = null;
+  state.selectedName = '';
+  state.nameSearch   = '';
+  clearSelectedName();
   dom.workerNameInput.value = '';
   dom.btnBegin.disabled = true;
   dom.btnSkip.disabled  = true;
@@ -2001,6 +2112,10 @@ function getRecentNamesKey() {
   return `${CHECKLIST_RECENT_NAMES_PREFIX}${state.factory}`;
 }
 
+function getSelectedNameKey() {
+  return `${CHECKLIST_SELECTED_NAME_PREFIX}${state.factory}::${state.machine}`;
+}
+
 function restoreRecentNames() {
   try {
     const raw = window.localStorage.getItem(getRecentNamesKey());
@@ -2020,9 +2135,45 @@ function persistRecentNames() {
 }
 
 function rememberRecentName(name) {
-  if (!name) return;
-  state.recentNames = [name, ...state.recentNames.filter(n => n !== name)].slice(0, MAX_RECENT_NAMES);
+  const cleanName = String(name || '').trim();
+  if (!cleanName) return;
+
+  const lower = cleanName.toLowerCase();
+  state.recentNames = [
+    cleanName,
+    ...state.recentNames.filter(n => String(n || '').trim().toLowerCase() !== lower),
+  ].slice(0, MAX_RECENT_NAMES);
   persistRecentNames();
+}
+
+function restoreSelectedName() {
+  try {
+    const raw = window.localStorage.getItem(getSelectedNameKey());
+    state.selectedName = String(raw || '').trim();
+  } catch (e) {
+    state.selectedName = '';
+  }
+}
+
+function persistSelectedName(name) {
+  const clean = String(name || '').trim();
+  try {
+    if (!clean) {
+      window.localStorage.removeItem(getSelectedNameKey());
+      return;
+    }
+    window.localStorage.setItem(getSelectedNameKey(), clean);
+  } catch (e) {
+    console.warn('Failed to persist selected name:', e);
+  }
+}
+
+function clearSelectedName() {
+  try {
+    window.localStorage.removeItem(getSelectedNameKey());
+  } catch (e) {
+    console.warn('Failed to clear selected name:', e);
+  }
 }
 
 // ── Draft persistence ────────────────────────────────────────────

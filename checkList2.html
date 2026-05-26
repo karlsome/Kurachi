@@ -178,13 +178,54 @@
     }
     .name-option:last-child { border-bottom: none; }
     .name-option:hover, .name-option.focused { background: rgba(245,158,11,0.1); color: var(--primary); }
-    .name-option-recent { border-left: 2px solid rgba(245,158,11,0.45); }
     .name-dropdown-label {
       display: block; padding: 0.45rem 1.25rem 0.2rem;
       font-family: var(--font-mono); font-size: 0.6rem; letter-spacing: 0.15em;
       color: var(--muted-fg); text-transform: uppercase; pointer-events: none;
     }
     .name-dropdown-divider { height: 1px; background: var(--border); margin: 0.25rem 1rem; }
+    .name-recent-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0.5rem;
+      padding: 0.4rem 0.8rem 0.6rem;
+    }
+    .name-recent-chip {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.15rem;
+      width: 100%;
+      padding: 0.55rem 0.7rem;
+      border-radius: 0.7rem;
+      border: 1px solid var(--border);
+      background: var(--secondary);
+      color: var(--fg);
+      cursor: pointer;
+      text-align: left;
+      transition: border-color 0.12s, background 0.12s;
+    }
+    .name-recent-chip:hover {
+      border-color: rgba(245,158,11,0.45);
+      background: rgba(245,158,11,0.12);
+    }
+    .name-recent-chip__name {
+      font-family: var(--font-display);
+      font-size: 1.02rem;
+      line-height: 1.15;
+      font-weight: 600;
+    }
+    .name-recent-chip__meta {
+      font-family: var(--font-mono);
+      font-size: 0.64rem;
+      letter-spacing: 0.08em;
+      color: var(--muted-fg);
+    }
+    .name-dropdown-empty {
+      padding: 0.75rem 1.25rem 0.95rem;
+      font-size: 0.82rem;
+      color: var(--muted-fg);
+    }
 
     .begin-btn {
       width: 100%; display: flex; align-items: center; justify-content: center;
@@ -586,7 +627,7 @@
       <p id="name-prompt" class="name-prompt">Enter your name to begin</p>
       <div class="name-autocomplete-wrap">
         <input id="worker-name-input" class="name-input" type="text"
-               placeholder="Your name…" autocomplete="off" spellcheck="false">
+               placeholder="Search or select your name…" autocomplete="off" spellcheck="false">
         <div id="name-dropdown" class="name-dropdown hidden"></div>
       </div>
       <button id="btn-begin" class="begin-btn" type="button" disabled>
