@@ -826,6 +826,8 @@ function beginInspection() {
     if (isTicketNeeded(curStep, answerForTicket, stepResult.result) && !stepResult.ticket) {
         ensureTicketModalOpen(state.step, 'auto');
     }
+  } else if (curStep && draft?.pending && Number(draft.pending.step) === state.step) {
+    void restorePendingStep(curStep, draft.pending);
   }
 }
 
@@ -1213,6 +1215,7 @@ function handleNumKey(key) {
   // Unlock buttons as soon as at least one digit is present
   state.inputValue = /\d/.test(buf) ? buf : null;
   updateButtonLock();
+  persistDraft();
 }
 
 function isNumberOutOfRange(step, rawValue) {
@@ -1288,6 +1291,7 @@ function buildPhotoCapture(isRequired) {
     wrap.classList.remove('required');
     dom.inspectionView.classList.add('photo-taken');
     updateButtonLock();
+    persistDraft();
   });
 
   btn.addEventListener('click', () => fileInput.click());
@@ -1331,6 +1335,7 @@ function renderFieldInput(step) {
     input.addEventListener('input', () => {
       state.inputValue = input.value.trim() || null;
       updateButtonLock();
+      persistDraft();
     });
     dom.fieldInputArea.appendChild(input);
     setTimeout(() => input.focus(), 50);
@@ -1355,6 +1360,7 @@ function renderFieldInput(step) {
         btn.classList.add('selected');
         state.inputValue = opt;
         updateButtonLock();
+        persistDraft();
       });
       grid.appendChild(btn);
     });
@@ -1396,6 +1402,51 @@ async function restoreStepAnswer(step, result) {
       if (thumb) { thumb.src = data; thumb.classList.remove('hidden'); }
       if (btn)   { btn.classList.add('has-photo'); const sp = btn.querySelector('span'); if (sp) sp.textContent = S().retakePhoto; }
       if (wrap)  wrap.classList.add('has-photo');
+      dom.inspectionView.classList.add('photo-taken');
+    }
+  }
+
+  updateButtonLock();
+}
+
+async function restorePendingStep(step, pending) {
+  const pendingValue = pending?.inputValue ?? null;
+  const pendingPhoto = pending?.photoAssetId || null;
+
+  state.inputValue = pendingValue !== '' ? pendingValue : null;
+  state.photoAssetId = pendingPhoto;
+
+  if (step.type === 'number' && pendingValue != null && pendingValue !== '') {
+    state.numpadBuffer = String(pendingValue);
+    dom.numpadValue.textContent = state.numpadBuffer;
+    dom.numpadValue.classList.remove('empty');
+    updateNumpadRangeState(step, state.numpadBuffer);
+  }
+
+  if (step.type === 'select' && pendingValue != null && pendingValue !== '') {
+    dom.fieldInputArea.querySelectorAll('.field-select-btn').forEach(btn => {
+      btn.classList.toggle('selected', btn.dataset.option === pendingValue);
+    });
+  }
+
+  if (step.type === 'text' && pendingValue != null && pendingValue !== '') {
+    const input = dom.fieldInputArea.querySelector('.field-text-input');
+    if (input) input.value = String(pendingValue);
+  }
+
+  if (pendingPhoto) {
+    const data = await getAsset(pendingPhoto);
+    if (data) {
+      const scope = dom.photoRequiredDock || dom.fieldInputArea;
+      const thumb = scope.querySelector('.photo-thumb');
+      const btn   = scope.querySelector('.photo-btn');
+      const wrap  = scope.querySelector('.photo-capture');
+      if (thumb) { thumb.src = data; thumb.classList.remove('hidden'); }
+      if (btn)   { btn.classList.add('has-photo'); const sp = btn.querySelector('span'); if (sp) sp.textContent = S().retakePhoto; }
+      if (wrap)  {
+        wrap.classList.add('has-photo');
+        wrap.classList.remove('required');
+      }
       dom.inspectionView.classList.add('photo-taken');
     }
   }
@@ -2412,6 +2463,12 @@ function getDraftKey() {
 
 function persistDraft() {
   try {
+    const hasPendingStep =
+      state.phase === 'inspection'
+      && state.step >= 0
+      && state.step < state.steps.length
+      && state.results[state.step] === null;
+
     const draft = {
       version: 1,
       factory: state.factory,
@@ -2426,6 +2483,13 @@ function persistDraft() {
             ticket:       r.ticket ? { reason: r.ticket.reason, imageAssetIds: [...r.ticket.imageAssetIds] } : null,
           }
         : null),
+      pending: hasPendingStep
+        ? {
+            step:        state.step,
+            inputValue:  state.inputValue ?? '',
+            photoAssetId: state.photoAssetId || '',
+          }
+        : null,
       updatedAt: new Date().toISOString(),
     };
     window.localStorage.setItem(getDraftKey(), JSON.stringify(draft));
