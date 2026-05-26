@@ -29932,23 +29932,36 @@ app.get('/api/check-forms/names', async (req, res) => {
       db.collection('users').find({}).project({ firstName: 1, lastName: 1, name: 1 }).toArray(),
     ]);
 
-    const fromWorkers = workers
-      .map((w) => String(w.Name || w.name || '').trim())
-      .filter(Boolean);
+    const dedupeCaseInsensitive = (list) => {
+      const unique = new Map();
+      list.forEach((name) => {
+        const clean = String(name || '').trim();
+        if (!clean) return;
+        const key = clean.toLowerCase();
+        if (!unique.has(key)) unique.set(key, clean);
+      });
+      return [...unique.values()];
+    };
 
-    const fromUsers = users
-      .map((u) => {
+    const workerDBNames = dedupeCaseInsensitive(
+      workers.map((w) => String(w.Name || w.name || '').trim()),
+    ).sort((a, b) => a.localeCompare(b, 'ja'));
+
+    const userNames = dedupeCaseInsensitive(
+      users.map((u) => {
         if (u.firstName || u.lastName) {
           return [u.firstName, u.lastName].filter(Boolean).join(' ').trim();
         }
         return String(u.name || '').trim();
-      })
-      .filter(Boolean);
-
-    const names = [...new Set([...fromWorkers, ...fromUsers])]
+      }),
+    )
+      .filter((name) => !workerDBNames.some((w) => w.toLowerCase() === name.toLowerCase()))
       .sort((a, b) => a.localeCompare(b, 'ja'));
 
-    return res.json({ names });
+    // Keep backward compatibility: `names` remains available.
+    const names = [...workerDBNames, ...userNames];
+
+    return res.json({ names, workerDBNames, userNames });
   } catch (error) {
     console.error('Error loading check form names:', error);
     return res.status(500).json({ error: 'Failed to load names' });
