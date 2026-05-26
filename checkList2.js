@@ -1143,8 +1143,10 @@ function showNumpad(step) {
     else if (hasMin)        dom.numpadRange.textContent = `min ${step.min}${u}`;
     else                    dom.numpadRange.textContent = `max ${step.max}${u}`;
     dom.numpadRange.classList.remove('hidden');
+    updateNumpadRangeState(step, '');
   } else {
     dom.numpadRange.classList.add('hidden');
+    dom.numpadRange.classList.remove('numpad-range--alert', 'numpad-range--shake');
   }
 
   dom.numpad.classList.remove('hidden');
@@ -1155,6 +1157,7 @@ function hideNumpad() {
   dom.numpad.classList.add('hidden');
   dom.inspectionView.classList.remove('numpad-active');
   state.numpadBuffer = '';
+  dom.numpadRange.classList.remove('numpad-range--alert', 'numpad-range--shake');
 }
 
 function handleNumKey(key) {
@@ -1177,10 +1180,41 @@ function handleNumKey(key) {
   const display = buf || '—';
   dom.numpadValue.textContent = display;
   dom.numpadValue.classList.toggle('empty', !buf);
+  updateNumpadRangeState(state.steps[state.step], buf);
 
   // Unlock buttons as soon as at least one digit is present
   state.inputValue = /\d/.test(buf) ? buf : null;
   updateButtonLock();
+}
+
+function isNumberOutOfRange(step, rawValue) {
+  if (!step || step.type !== 'number') return false;
+  if (step.min === null && step.max === null) return false;
+  const text = String(rawValue || '').trim();
+  if (!text) return false;
+
+  const num = parseFloat(text);
+  if (Number.isNaN(num)) return false;
+  if (step.min !== null && num < step.min) return true;
+  if (step.max !== null && num > step.max) return true;
+  return false;
+}
+
+function updateNumpadRangeState(step, rawValue) {
+  if (!step || step.type !== 'number') return;
+  if (!dom.numpadRange || dom.numpadRange.classList.contains('hidden')) return;
+
+  const outOfRange = isNumberOutOfRange(step, rawValue);
+  dom.numpadRange.classList.toggle('numpad-range--alert', outOfRange);
+
+  if (outOfRange) {
+    // Retrigger shake each time value changes while out of range.
+    dom.numpadRange.classList.remove('numpad-range--shake');
+    void dom.numpadRange.offsetWidth;
+    dom.numpadRange.classList.add('numpad-range--shake');
+  } else {
+    dom.numpadRange.classList.remove('numpad-range--shake');
+  }
 }
 
 // ── Field input rendering ────────────────────────────────────────
@@ -1293,6 +1327,7 @@ async function restoreStepAnswer(step, result) {
     state.numpadBuffer = String(result.value);
     dom.numpadValue.textContent = state.numpadBuffer;
     dom.numpadValue.classList.remove('empty');
+    updateNumpadRangeState(step, state.numpadBuffer);
   }
 
   if (step.type === 'select' && result.value != null) {
