@@ -2094,6 +2094,8 @@ function renderTicketModal() {
       <img src="" alt="Ticket photo ${i + 1}" data-ticket-thumb="${escapeHtml(id)}">
     </div>
   `).join('');
+  const photoCount = ticketModal.imageAssetIds.length;
+  const photoLimitReached = photoCount >= 5;
 
   dom.ticketModal.classList.remove('hidden');
   dom.ticketModal.innerHTML = `
@@ -2111,12 +2113,13 @@ function renderTicketModal() {
         <div class="modal-label${ticketModal.imagesInvalid ? ' modal-label--danger' : ''}">${escapeHtml(s.ticketPhotoLabel)}${requiredTicket ? ' *' : ''}</div>
         <div class="ticket-thumb-grid">${thumbsHtml}</div>
         ${ticketModal.imagesInvalid ? `<div class="modal-validation">${escapeHtml(s.ticketPhotoReq)}</div>` : ''}
-        <button type="button" class="ticket-add-photo-btn" data-action="ticket-add-photo">
+        <div class="ticket-photo-counter${photoLimitReached ? ' ticket-photo-counter--full' : ''}">Photos ${photoCount} / 5</div>
+        <button type="button" class="ticket-add-photo-btn" data-action="ticket-add-photo" ${photoLimitReached ? 'disabled' : ''}>
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
             <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
             <circle cx="12" cy="13" r="4"/>
           </svg>
-          <span>${escapeHtml(s.ticketPhoto)}</span>
+          <span>${escapeHtml(s.ticketPhoto)}${photoLimitReached ? ' (Max)' : ''}</span>
         </button>
       </div>
       <button type="button" class="ticket-save-btn" data-action="ticket-save">${escapeHtml(s.ticketSave)}</button>
@@ -2229,14 +2232,21 @@ async function cancelTicketModal() {
 }
 
 async function addTicketImage() {
-  const file = await pickImageFile();
-  if (!file) return;
-  const compressed = await compressImageFile(file, 1600, 0.78);
-  const annotated  = await openAnnotator(compressed);
-  if (!annotated) return;
-  const assetId    = createAssetId('ticket');
-  await saveAsset(assetId, annotated);
-  ticketModal.imageAssetIds.push(assetId);
+  const files = await pickTicketImages();
+  if (!files.length) return;
+
+  const remaining = Math.max(0, 5 - ticketModal.imageAssetIds.length);
+  if (remaining === 0) return;
+
+  for (const file of files.slice(0, remaining)) {
+    const compressed = await compressImageFile(file, 1600, 0.78);
+    const annotated  = await openAnnotator(compressed);
+    if (!annotated) continue;
+    const assetId    = createAssetId('ticket');
+    await saveAsset(assetId, annotated);
+    ticketModal.imageAssetIds.push(assetId);
+  }
+
   ticketModal.imagesInvalid = false;
   ticketModal.contentInvalid = false;
   renderTicketModal();
@@ -2251,17 +2261,18 @@ async function removeTicketImage(index) {
   renderTicketModal();
 }
 
-function pickImageFile() {
+function pickTicketImages() {
   return new Promise(resolve => {
     const input = document.createElement('input');
     input.type  = 'file';
     input.accept = 'image/*';
     input.setAttribute('capture', 'environment');
+    input.multiple = true;
     input.style.display = 'none';
     document.body.appendChild(input);
     input.addEventListener('change', () => {
       document.body.removeChild(input);
-      resolve(input.files[0] || null);
+      resolve(Array.from(input.files || []));
     }, { once: true });
     input.click();
   });

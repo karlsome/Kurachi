@@ -714,6 +714,26 @@
       transition: border-color 0.15s, color 0.15s;
     }
     .ticket-add-photo-btn:hover { border-color: rgba(245,158,11,0.4); color: var(--primary); }
+    .ticket-add-photo-btn:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+      color: var(--muted-fg);
+      border-color: rgba(255,255,255,0.1);
+    }
+    .ticket-add-photo-btn:disabled:hover { border-color: rgba(255,255,255,0.1); color: var(--muted-fg); }
+    .ticket-photo-counter {
+      display: inline-flex; align-items: center; justify-content: center;
+      margin-top: 0.55rem; padding: 0.35rem 0.65rem;
+      border-radius: 999px; background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.08);
+      font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.12em;
+      text-transform: uppercase; color: var(--muted-fg);
+    }
+    .ticket-photo-counter--full {
+      background: rgba(239,68,68,0.14);
+      border-color: rgba(239,68,68,0.32);
+      color: #f87171;
+    }
     .ticket-save-btn {
       width: 100%; padding: 1rem; border-radius: 0.75rem; border: none;
       background: var(--ng); color: #fff;
