@@ -474,10 +474,7 @@ function bindEvents() {
   dom.ticketModal.addEventListener('input', handleTicketModalInput);
   dom.btnBack.addEventListener('click', () => { void goBack(); });
   dom.btnResetAll.addEventListener('click', () => { void handleResetAllRequest(); });
-  dom.btnStartOver.addEventListener('click', () => {
-    if (!window.confirm('Discard all answers and start over?')) return;
-    void reset();
-  });
+  dom.btnStartOver.addEventListener('click', () => { void handleResetAllRequest(); });
 
   dom.btnTicketMini.addEventListener('click', () => {
     if (dom.btnTicketMini.disabled) return;
