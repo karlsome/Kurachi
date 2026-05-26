@@ -500,6 +500,14 @@ function bindEvents() {
     if (thumb && thumb.src) { openPhotoLightbox(thumb.src); return; }
     if (e.target === dom.photoLightbox) closePhotoLightbox();
   });
+
+  // Keep text input visible above on-screen keyboards on tablets/phones.
+  const onViewportChange = () => updateKeyboardAwareLayout(false);
+  window.addEventListener('resize', onViewportChange, { passive: true });
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', onViewportChange, { passive: true });
+    window.visualViewport.addEventListener('scroll', onViewportChange, { passive: true });
+  }
 }
 
 // ── Screen transitions ───────────────────────────────────────────
@@ -510,6 +518,38 @@ function transitionTo(phase) {
   dom.nameScreen.classList.toggle('hidden',    phase !== 'name');
   dom.inspectionView.classList.toggle('hidden', phase !== 'inspection');
   dom.summaryView.classList.toggle('hidden',   phase !== 'summary');
+  if (phase !== 'inspection') {
+    dom.inspectionView.classList.remove('text-keyboard-open');
+    document.documentElement.style.setProperty('--keyboard-inset', '0px');
+  }
+}
+
+function getKeyboardInset() {
+  const vv = window.visualViewport;
+  if (!vv) return 0;
+  const inset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+  return Number.isFinite(inset) ? Math.round(inset) : 0;
+}
+
+function isTextFieldFocused() {
+  return document.activeElement?.classList?.contains('field-text-input') || false;
+}
+
+function ensureTextInputVisible(smooth) {
+  const input = dom.fieldInputArea.querySelector('.field-text-input');
+  if (!input) return;
+  input.scrollIntoView({ block: 'center', behavior: smooth ? 'smooth' : 'auto' });
+}
+
+function updateKeyboardAwareLayout(shouldScrollInput) {
+  if (state.phase !== 'inspection') return;
+  const inset = getKeyboardInset();
+  document.documentElement.style.setProperty('--keyboard-inset', `${inset}px`);
+  const keyboardOpen = isTextFieldFocused() && inset > 0;
+  dom.inspectionView.classList.toggle('text-keyboard-open', keyboardOpen);
+  if (shouldScrollInput && isTextFieldFocused()) {
+    ensureTextInputVisible(keyboardOpen);
+  }
 }
 
 // ── Template loading ─────────────────────────────────────────────
@@ -1343,8 +1383,18 @@ function renderFieldInput(step) {
       updateButtonLock();
       persistDraft();
     });
+    input.addEventListener('focus', () => {
+      updateKeyboardAwareLayout(false);
+      setTimeout(() => updateKeyboardAwareLayout(true), 40);
+    });
+    input.addEventListener('blur', () => {
+      setTimeout(() => updateKeyboardAwareLayout(false), 80);
+    });
     dom.fieldInputArea.appendChild(input);
-    setTimeout(() => input.focus(), 50);
+    setTimeout(() => {
+      input.focus();
+      updateKeyboardAwareLayout(true);
+    }, 50);
   }
 
   if (step.type === 'number') {
