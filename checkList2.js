@@ -629,11 +629,14 @@ function buildSteps(templates) {
     const fields = Array.isArray(tpl.fields) ? tpl.fields : [];
     for (const field of fields) {
       if (field.type === 'name') continue;
+      const normalizedType = String(field.type || 'checkbox').toLowerCase() === 'toggle'
+        ? 'checkbox'
+        : String(field.type || 'checkbox');
       steps.push({
         templateId:   String(tpl._id || ''),
         templateName: String(tpl.name || ''),
         fieldId:      String(field.id || ''),
-        type:         String(field.type || 'checkbox'),
+        type:         normalizedType,
         title:        String(field.label || ''),
         instruction:  String(field.description || ''),
         imageUrl:     String(field.imageURL || ''),
