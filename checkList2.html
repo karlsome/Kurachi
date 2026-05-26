@@ -614,6 +614,54 @@
       background: rgba(0,0,0,0.75); backdrop-filter: blur(4px);
       display: flex; align-items: flex-end; justify-content: center;
     }
+    .success-modal-overlay {
+      position: fixed; inset: 0; z-index: 210;
+      background: rgba(0,0,0,0.72); backdrop-filter: blur(2px);
+      display: flex; align-items: center; justify-content: center;
+      padding: 1.25rem;
+    }
+    .success-modal-overlay.hidden { display: none; }
+    .success-modal-card {
+      width: 100%; max-width: 24rem;
+      background: linear-gradient(160deg, #102318 0%, #162a1f 50%, #172017 100%);
+      border: 1px solid rgba(52,211,153,0.4);
+      border-radius: 1rem;
+      padding: 1.4rem 1.2rem;
+      text-align: center;
+      box-shadow: 0 16px 40px rgba(0,0,0,0.45);
+      animation: success-modal-enter 0.22s ease-out;
+    }
+    .success-modal-icon {
+      width: 3rem; height: 3rem;
+      margin: 0 auto 0.7rem;
+      border-radius: 50%;
+      background: rgba(16,185,129,0.15);
+      color: #34d399;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .success-modal-icon svg {
+      width: 1.7rem; height: 1.7rem;
+      fill: none; stroke: currentColor; stroke-width: 2.5;
+      stroke-linecap: round; stroke-linejoin: round;
+    }
+    .success-modal-title {
+      font-family: var(--font-display);
+      font-size: 1.65rem;
+      letter-spacing: 0.03em;
+      color: #d1fae5;
+      line-height: 1.05;
+    }
+    .success-modal-sub {
+      margin-top: 0.45rem;
+      font-family: var(--font-sans);
+      font-size: 0.9rem;
+      color: rgba(220,252,231,0.82);
+      line-height: 1.45;
+    }
+    @keyframes success-modal-enter {
+      from { opacity: 0; transform: translateY(10px) scale(0.96); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
     .modal-panel {
       width: 100%; max-width: 28rem; max-height: 88dvh; overflow-y: auto;
       background: var(--card); border-radius: 1.25rem 1.25rem 0 0;
@@ -915,6 +963,17 @@
 
   <!-- Ticket modal (content injected by JS) -->
   <div id="ticket-modal" class="modal-overlay hidden"></div>
+
+  <!-- Submit success modal -->
+  <div id="submit-success-modal" class="success-modal-overlay hidden" aria-live="polite" aria-hidden="true">
+    <div class="success-modal-card" role="status">
+      <div class="success-modal-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><path d="M8 12l3 3 5-5"></path></svg>
+      </div>
+      <p id="submit-success-title" class="success-modal-title">Submitted Successfully</p>
+      <p id="submit-success-sub" class="success-modal-sub">Resetting in a moment…</p>
+    </div>
+  </div>
 
   <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
   <script src="checkList2.js"></script>

@@ -40,6 +40,8 @@ const STRINGS = {
     allClear:        'All checks cleared. Machine is ready to operate.',
     someNg:          (n, t) => `${n} of ${t} check${n > 1 ? 's' : ''} failed — do not operate.`,
     submitBtn:       'SUBMIT RESULTS',
+    submitSuccessTitle: 'Submitted Successfully',
+    submitSuccessSub: 'Resetting in a moment…',
     takePhoto:       'Take photo',
     retakePhoto:     'Retake photo',
     photoRequiredHint:'Photo is required to continue',
@@ -61,6 +63,7 @@ const STRINGS = {
     ticketViewBtn:   'Review',
     ticketReasonReq: 'A reason is required before saving.',
     ticketPhotoReq:  'At least one photo is required.',
+    ticketContentReq:'Enter a comment or add a photo before saving.',
     skipped:         'SKIPPED',
     skipSub:         'Inspection skipped — results recorded for reference only.',
     skipBtn:         'SKIP CHECK',
@@ -96,6 +99,8 @@ const STRINGS = {
     allClear:        '全項目確認。機械は稼働可能です。',
     someNg:          (n, t) => `${t}項目中${n}項目が不良 — 操作しないでください。`,
     submitBtn:       '結果を送信',
+    submitSuccessTitle: '送信が完了しました',
+    submitSuccessSub: 'まもなくリセットします…',
     takePhoto:       '写真を撮る',
     retakePhoto:     '撮り直す',
     photoRequiredHint:'続行するには写真が必要です',
@@ -117,6 +122,7 @@ const STRINGS = {
     ticketViewBtn:   '確認',
     ticketReasonReq: '保存する前に理由が必要です。',
     ticketPhotoReq:  '写真が少なくとも1枚必要です。',
+    ticketContentReq:'保存するにはコメントまたは写真が必要です。',
     skipped:         'スキップ済',
     skipSub:         '点検はスキップされました — 記録のみ保存されます。',
     skipBtn:         'スキップ',
@@ -152,6 +158,8 @@ const STRINGS = {
     allClear:        'Lahat ng pagsusuri ay maayos. Handa na ang makina.',
     someNg:          (n, t) => `${n} sa ${t} pagsusuri ay nabigo — huwag ipaandar.`,
     submitBtn:       'ISUMITE ANG MGA RESULTA',
+    submitSuccessTitle: 'Matagumpay na naisumite',
+    submitSuccessSub: 'Magre-reset sa loob ng ilang sandali…',
     takePhoto:       'Kumuha ng larawan',
     retakePhoto:     'Kumuha muli',
     photoRequiredHint:'Kailangan ang larawan para magpatuloy',
@@ -173,6 +181,7 @@ const STRINGS = {
     ticketViewBtn:   'Review',
     ticketReasonReq: 'Kinakailangan ang dahilan bago i-save.',
     ticketPhotoReq:  'Kailangan ng hindi bababa sa isang larawan.',
+    ticketContentReq:'Maglagay ng komento o magdagdag ng larawan bago i-save.',
     skipped:         'NILAKTAWAN',
     skipSub:         'Nilaktawan ang inspeksyon — mga resulta ay naitala para sa sanggunian.',
     skipBtn:         'LAKTAWAN',
@@ -219,6 +228,7 @@ const state = {
   memoryAssets: new Map(), // fallback when IndexedDB is unavailable
   recentNames: [],
   skipApprovedBy: null,   // QR-verified supervisor name for skipped submissions
+  pendingTicketsByStep: {}, // optional tickets saved before a step result is committed
 };
 
 const dom = {};
@@ -234,6 +244,7 @@ const ticketModal = {
   imageAssetIds: [],
   reasonInvalid: false,
   imagesInvalid: false,
+  contentInvalid: false,
 };
 
 const annotator = {
@@ -288,6 +299,8 @@ function applyLang(lang) {
   set('ok-sub',             s.okSub);
   set('summary-eyebrow',    s.complete);
   set('submit-btn-text',    s.submitBtn);
+  set('submit-success-title', s.submitSuccessTitle);
+  set('submit-success-sub', s.submitSuccessSub);
   set('back-btn-text',      s.backBtn);
   set('reset-all-btn-text', s.resetAllBtn);
   set('start-over-btn-text', s.startOver);
@@ -395,6 +408,7 @@ function cacheDom() {
   dom.btnReset         = document.getElementById('btn-reset');
   dom.submitBtnText    = document.getElementById('submit-btn-text');
   dom.summaryError     = document.getElementById('summary-error');
+  dom.submitSuccessModal = document.getElementById('submit-success-modal');
   dom.ticketModal      = document.getElementById('ticket-modal');
   dom.btnBack          = document.getElementById('btn-back');
   dom.btnResetAll      = document.getElementById('btn-reset-all');
@@ -833,6 +847,7 @@ function beginInspection() {
 
   const draft = loadDraft();
   if (draft && draft.workerName === state.workerName && Array.isArray(draft.results)) {
+    state.pendingTicketsByStep = normalizePendingTickets(draft.pendingTicketsByStep);
     state.results = draft.results.slice(0, state.steps.length);
     while (state.results.length < state.steps.length) state.results.push(null);
 
@@ -841,7 +856,8 @@ function beginInspection() {
       if (r === null) return true;
       const s = state.steps[i];
       const answerForTicket = s.type === 'checkbox' ? r.result : r.value;
-      return isTicketNeeded(s, answerForTicket, r.result) && !r.ticket;
+      const requiredTicket = isTicketNeeded(s, answerForTicket, r.result);
+      return requiredTicket && !doesTicketSatisfyRequirement(r.ticket, true);
     });
 
     if (firstIncomplete === -1) {
@@ -854,6 +870,7 @@ function beginInspection() {
   } else {
     state.step    = 0;
     state.results = Array(state.steps.length).fill(null);
+    state.pendingTicketsByStep = {};
   }
 
   state.inputValue   = null;
@@ -866,7 +883,8 @@ function beginInspection() {
   const curStep    = state.steps[state.step];
   if (stepResult && curStep) {
     const answerForTicket = curStep.type === 'checkbox' ? stepResult.result : stepResult.value;
-    if (isTicketNeeded(curStep, answerForTicket, stepResult.result) && !stepResult.ticket) {
+    const requiredTicket = isTicketNeeded(curStep, answerForTicket, stepResult.result);
+    if (requiredTicket && !doesTicketSatisfyRequirement(stepResult.ticket, true)) {
         ensureTicketModalOpen(state.step, 'auto');
     }
   } else if (curStep && draft?.pending && Number(draft.pending.step) === state.step) {
@@ -1568,11 +1586,18 @@ function updateActionButtons() {
 function getCurrentStepTicketState() {
   const step = state.steps[state.step];
   const result = state.results[state.step];
-  if (!step || !result) return { hasResult: false, required: false, saved: false };
+  if (!step) return { hasResult: false, required: false, saved: false };
+
+  const pendingTicket = getPendingStepTicket(state.step);
+  if (!result) {
+    const answer = step.type === 'checkbox' ? '' : state.inputValue;
+    const required = isTicketNeeded(step, answer, '');
+    return { hasResult: false, required, saved: Boolean(pendingTicket) };
+  }
 
   const answer = step.type === 'checkbox' ? result.result : result.value;
   const required = isTicketNeeded(step, answer, result.result);
-  const saved = Boolean(result.ticket);
+  const saved = Boolean(result.ticket || pendingTicket);
   return { hasResult: true, required, saved };
 }
 
@@ -1586,8 +1611,7 @@ function updateTicketQuickButton() {
   }
 
   const status = getCurrentStepTicketState();
-  const canOpen = status.hasResult && (status.required || status.saved);
-  dom.btnTicketMini.disabled = !canOpen || ticketModal.open || state.animating;
+  dom.btnTicketMini.disabled = ticketModal.open || state.animating;
   dom.btnTicketMini.classList.toggle('required', status.required && !status.saved);
   dom.btnTicketMini.classList.toggle('saved', status.saved);
   dom.ticketMiniText.textContent = status.saved ? S().ticketViewBtn : status.required ? S().ticketReqBtn : S().ticketBtn;
@@ -1657,12 +1681,15 @@ function handleResult(result) {
   showFlash(isTicketNeeded(step, answerForTicket, result) ? 'NG' : result);
 
   setTimeout(() => {
-    state.results[state.step] = { result, value: state.inputValue, photoAssetId: state.photoAssetId, ticket: null };
+    const pendingTicket = consumePendingStepTicket(state.step);
+    state.results[state.step] = { result, value: state.inputValue, photoAssetId: state.photoAssetId, ticket: pendingTicket };
     persistDraft();
     hideFlash();
     setTimeout(() => {
       const answerForTicket = step.type === 'checkbox' ? result : state.inputValue;
-      if (isTicketNeeded(step, answerForTicket, result)) {
+      const currentTicket = state.results[state.step]?.ticket || null;
+      const requiredTicket = isTicketNeeded(step, answerForTicket, result);
+      if (requiredTicket && !doesTicketSatisfyRequirement(currentTicket, true)) {
         state.animating = false;
         ensureTicketModalOpen(state.step, 'auto');
         updateButtonLock();
@@ -1809,7 +1836,8 @@ async function handleSubmitRequest() {
     const result = state.results[i];
     if (!result || result.skipReason) continue;
     const answerForTicket = step.type === 'checkbox' ? result.result : result.value;
-    if (isTicketNeeded(step, answerForTicket, result.result) && !result.ticket) {
+    const requiredTicket = isTicketNeeded(step, answerForTicket, result.result);
+    if (requiredTicket && !doesTicketSatisfyRequirement(result.ticket, true)) {
       dom.summaryError.textContent = `"${tx(step.title)}" is NG/out-of-range but has no ticket. Reset and re-run the inspection.`;
       dom.summaryError.classList.remove('hidden');
       return;
@@ -1823,13 +1851,25 @@ async function handleSubmitRequest() {
 
   try {
     const payload = await buildSubmissionPayload();
-    await fetchJson(CHECKLIST_API.submit, {
+    const response = await fetchJson(CHECKLIST_API.submit, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify(payload),
     });
+
+    const verification = verifySubmitResponse(response, payload);
+    if (!verification.ok) {
+      throw new Error(verification.reason || 'Submission acknowledgment could not be verified. Data was kept locally; please retry.');
+    }
+
+    // Success is verified from server acknowledgment, so clear all and restart.
+    showSubmitSuccessModal();
+    await waitMs(2000);
+    hideSubmitSuccessModal();
+    await clearAllStoredAssets();
     await reset();
   } catch (err) {
+    hideSubmitSuccessModal();
     dom.summaryError.textContent = err.message || 'Submission failed. Please try again.';
     dom.summaryError.classList.remove('hidden');
     dom.submitBtnText.textContent = S().submitBtn;
@@ -1837,6 +1877,53 @@ async function handleSubmitRequest() {
   } finally {
     state.submitting = false;
   }
+}
+
+function verifySubmitResponse(response, payload) {
+  if (!response || response.success !== true) {
+    return { ok: false, reason: 'Server did not confirm successful submission.' };
+  }
+
+  const templates = Array.isArray(payload?.templates) ? payload.templates : [];
+  const expectedRecordCount = templates.length;
+  const expectedTicketCount = templates.reduce((acc, tpl) => {
+    const answers = Array.isArray(tpl?.answers) ? tpl.answers : [];
+    return acc + answers.filter(a => a && a.ticket && a.ticket.saved === true).length;
+  }, 0);
+
+  const insertedRecordCount = Number(response.insertedRecordCount ?? -1);
+  const insertedTicketCount = Number(response.insertedTicketCount ?? -1);
+  const recordIds = Array.isArray(response.recordIds) ? response.recordIds : [];
+
+  if (insertedRecordCount !== expectedRecordCount) {
+    return { ok: false, reason: `Submission count mismatch (${insertedRecordCount}/${expectedRecordCount}).` };
+  }
+
+  if (recordIds.length !== expectedRecordCount) {
+    return { ok: false, reason: 'Server response missing record identifiers for submitted templates.' };
+  }
+
+  if (insertedTicketCount !== expectedTicketCount) {
+    return { ok: false, reason: `Ticket insertion mismatch (${insertedTicketCount}/${expectedTicketCount}).` };
+  }
+
+  return { ok: true };
+}
+
+function showSubmitSuccessModal() {
+  if (!dom.submitSuccessModal) return;
+  dom.submitSuccessModal.classList.remove('hidden');
+  dom.submitSuccessModal.setAttribute('aria-hidden', 'false');
+}
+
+function hideSubmitSuccessModal() {
+  if (!dom.submitSuccessModal) return;
+  dom.submitSuccessModal.classList.add('hidden');
+  dom.submitSuccessModal.setAttribute('aria-hidden', 'true');
+}
+
+function waitMs(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 async function buildSubmissionPayload() {
@@ -1961,7 +2048,7 @@ function isTicketNeeded(step, answerValue, buttonResult) {
 
 function openTicketModal(stepIndex, options = {}) {
   const source = options.source === 'auto' ? 'auto' : 'manual';
-  const existing = state.results[stepIndex]?.ticket || null;
+  const existing = state.results[stepIndex]?.ticket || getPendingStepTicket(stepIndex) || null;
   ticketModal.open          = true;
   ticketModal.source        = source;
   ticketModal.hasExistingTicket = Boolean(existing);
@@ -1971,6 +2058,7 @@ function openTicketModal(stepIndex, options = {}) {
   ticketModal.originalImageAssetIds = existing ? [...(existing.imageAssetIds || [])] : [];
   ticketModal.reasonInvalid = false;
   ticketModal.imagesInvalid = false;
+  ticketModal.contentInvalid = false;
   renderTicketModal();
   updateTicketQuickButton();
 }
@@ -1986,6 +2074,7 @@ function renderTicketModal() {
   const step = state.steps[ticketModal.stepIndex];
   const num  = ticketModal.stepIndex + 1;
   const r    = state.results[ticketModal.stepIndex];
+  const requiredTicket = getTicketRequirementForStep(ticketModal.stepIndex);
 
   let context = '';
   if (step.type === 'checkbox') {
@@ -2016,9 +2105,10 @@ function renderTicketModal() {
         <label class="modal-label${ticketModal.reasonInvalid ? ' modal-label--danger' : ''}" for="ticket-reason-input">${escapeHtml(s.ticketReasonLabel)}</label>
         <textarea id="ticket-reason-input" class="modal-textarea${ticketModal.reasonInvalid ? ' modal-textarea--invalid' : ''}" placeholder="${escapeHtml(s.ticketReasonHint)}" rows="4">${escapeHtml(ticketModal.reason)}</textarea>
         ${ticketModal.reasonInvalid ? `<div class="modal-validation">${escapeHtml(s.ticketReasonReq)}</div>` : ''}
+        ${ticketModal.contentInvalid ? `<div class="modal-validation">${escapeHtml(s.ticketContentReq)}</div>` : ''}
       </div>
       <div class="modal-section">
-        <div class="modal-label${ticketModal.imagesInvalid ? ' modal-label--danger' : ''}">${escapeHtml(s.ticketPhotoLabel)}</div>
+        <div class="modal-label${ticketModal.imagesInvalid ? ' modal-label--danger' : ''}">${escapeHtml(s.ticketPhotoLabel)}${requiredTicket ? ' *' : ''}</div>
         <div class="ticket-thumb-grid">${thumbsHtml}</div>
         ${ticketModal.imagesInvalid ? `<div class="modal-validation">${escapeHtml(s.ticketPhotoReq)}</div>` : ''}
         <button type="button" class="ticket-add-photo-btn" data-action="ticket-add-photo">
@@ -2042,16 +2132,29 @@ function renderTicketModal() {
 async function saveTicketModal() {
   const reason    = ticketModal.reason.trim();
   const hasImages = ticketModal.imageAssetIds.length > 0;
+  const requiredTicket = getTicketRequirementForStep(ticketModal.stepIndex);
 
-  if (!reason || !hasImages) {
-    ticketModal.reasonInvalid = !reason;
-    ticketModal.imagesInvalid = !hasImages;
+  ticketModal.reasonInvalid = false;
+  ticketModal.imagesInvalid = false;
+  ticketModal.contentInvalid = false;
+
+  if (requiredTicket && !reason) {
+    ticketModal.reasonInvalid = true;
+  }
+  if (requiredTicket && !hasImages) {
+    ticketModal.imagesInvalid = true;
+  }
+  if (!requiredTicket && !reason && !hasImages) {
+    ticketModal.contentInvalid = true;
+  }
+
+  if (ticketModal.reasonInvalid || ticketModal.imagesInvalid || ticketModal.contentInvalid) {
     renderTicketModal();
     return;
   }
 
   const idx = ticketModal.stepIndex;
-  if (idx === null || !state.results[idx]) {
+  if (idx === null) {
     ticketModal.open = false;
     renderTicketModal();
     state.animating = false;
@@ -2063,10 +2166,16 @@ async function saveTicketModal() {
     .filter(id => !ticketModal.imageAssetIds.includes(id));
   for (const id of removedOriginalIds) await deleteAsset(id);
 
-  state.results[idx].ticket = {
+  const savedTicket = {
     reason,
     imageAssetIds: [...ticketModal.imageAssetIds],
   };
+
+  if (state.results[idx]) {
+    state.results[idx].ticket = savedTicket;
+  } else {
+    setPendingStepTicket(idx, savedTicket);
+  }
 
   const wasAuto = ticketModal.source === 'auto';
 
@@ -2079,6 +2188,7 @@ async function saveTicketModal() {
   ticketModal.imageAssetIds = [];
   ticketModal.reasonInvalid = false;
   ticketModal.imagesInvalid = false;
+  ticketModal.contentInvalid = false;
 
   renderTicketModal();
   persistDraft();
@@ -2110,6 +2220,7 @@ async function cancelTicketModal() {
   ticketModal.imageAssetIds = [];
   ticketModal.reasonInvalid = false;
   ticketModal.imagesInvalid = false;
+  ticketModal.contentInvalid = false;
 
   renderTicketModal();
   state.animating = false;
@@ -2127,6 +2238,7 @@ async function addTicketImage() {
   await saveAsset(assetId, annotated);
   ticketModal.imageAssetIds.push(assetId);
   ticketModal.imagesInvalid = false;
+  ticketModal.contentInvalid = false;
   renderTicketModal();
 }
 
@@ -2174,6 +2286,11 @@ function handleTicketModalClick(e) {
 function handleTicketModalInput(e) {
   if (e.target.id !== 'ticket-reason-input') return;
   ticketModal.reason = e.target.value;
+  if (ticketModal.reason.trim() && ticketModal.contentInvalid) {
+    ticketModal.contentInvalid = false;
+    renderTicketModal();
+    return;
+  }
   if (ticketModal.reason.trim() && ticketModal.reasonInvalid) {
     ticketModal.reasonInvalid = false;
     e.target.classList.remove('modal-textarea--invalid');
@@ -2184,6 +2301,64 @@ function handleTicketModalInput(e) {
   }
 }
 
+function getTicketRequirementForStep(stepIndex) {
+  const step = state.steps[stepIndex];
+  if (!step) return false;
+
+  const result = state.results[stepIndex];
+  if (result) {
+    const answer = step.type === 'checkbox' ? result.result : result.value;
+    return isTicketNeeded(step, answer, result.result);
+  }
+
+  if (stepIndex === state.step) {
+    const answer = step.type === 'checkbox' ? '' : state.inputValue;
+    return isTicketNeeded(step, answer, '');
+  }
+
+  return false;
+}
+
+function doesTicketSatisfyRequirement(ticket, requiredTicket) {
+  if (!ticket) return false;
+  const reason = String(ticket.reason || '').trim();
+  const imageCount = Array.isArray(ticket.imageAssetIds) ? ticket.imageAssetIds.length : 0;
+  if (requiredTicket) return Boolean(reason) && imageCount > 0;
+  return Boolean(reason) || imageCount > 0;
+}
+
+function getPendingStepTicket(stepIndex) {
+  return state.pendingTicketsByStep[String(stepIndex)] || null;
+}
+
+function setPendingStepTicket(stepIndex, ticket) {
+  state.pendingTicketsByStep[String(stepIndex)] = {
+    reason: String(ticket?.reason || ''),
+    imageAssetIds: Array.isArray(ticket?.imageAssetIds) ? [...ticket.imageAssetIds] : [],
+  };
+}
+
+function consumePendingStepTicket(stepIndex) {
+  const key = String(stepIndex);
+  const ticket = state.pendingTicketsByStep[key] || null;
+  if (ticket) delete state.pendingTicketsByStep[key];
+  return ticket;
+}
+
+function normalizePendingTickets(raw) {
+  if (!raw || typeof raw !== 'object') return {};
+  const normalized = {};
+  Object.keys(raw).forEach((key) => {
+    const item = raw[key];
+    if (!item || typeof item !== 'object') return;
+    const reason = String(item.reason || '');
+    const imageAssetIds = Array.isArray(item.imageAssetIds) ? item.imageAssetIds.filter(Boolean).map(String) : [];
+    if (!reason.trim() && imageAssetIds.length === 0) return;
+    normalized[String(key)] = { reason, imageAssetIds };
+  });
+  return normalized;
+}
+
 // ── Reset ────────────────────────────────────────────────────────
 
 async function reset() {
@@ -2192,6 +2367,9 @@ async function reset() {
     if (r && r.ticket) {
       for (const id of (r.ticket.imageAssetIds || [])) await deleteAsset(id);
     }
+  }
+  for (const pending of Object.values(state.pendingTicketsByStep || {})) {
+    for (const id of (pending.imageAssetIds || [])) await deleteAsset(id);
   }
   if (state.photoAssetId) await deleteAsset(state.photoAssetId);
   for (const id of ticketModal.imageAssetIds) await deleteAsset(id);
@@ -2204,6 +2382,7 @@ async function reset() {
   ticketModal.imageAssetIds = [];
   ticketModal.reasonInvalid = false;
   ticketModal.imagesInvalid = false;
+  ticketModal.contentInvalid = false;
   renderTicketModal();
   removeDraft();
 
@@ -2213,6 +2392,7 @@ async function reset() {
   state.pressedBtn   = null;
   state.inputValue   = null;
   state.photoAssetId = null;
+  state.pendingTicketsByStep = {};
   state.selectedName = '';
   state.nameSearch   = '';
   clearSelectedName();
@@ -2554,6 +2734,15 @@ function persistDraft() {
             photoAssetId: state.photoAssetId || '',
           }
         : null,
+      pendingTicketsByStep: Object.fromEntries(
+        Object.entries(state.pendingTicketsByStep || {}).map(([key, ticket]) => [
+          key,
+          {
+            reason: String(ticket?.reason || ''),
+            imageAssetIds: Array.isArray(ticket?.imageAssetIds) ? [...ticket.imageAssetIds] : [],
+          },
+        ])
+      ),
       updatedAt: new Date().toISOString(),
     };
     window.localStorage.setItem(getDraftKey(), JSON.stringify(draft));
