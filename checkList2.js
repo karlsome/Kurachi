@@ -47,6 +47,7 @@ const STRINGS = {
     loadError:       (e) => `Could not load template: ${e}`,
     translating:     'Translating…',
     backBtn:         'Back',
+    resetAllBtn:     'Reset All',
     startOver:       'Start Over',
     ticketTitle:     'NG Report',
     ticketReasonLabel: 'Reason for failure',
@@ -102,6 +103,7 @@ const STRINGS = {
     loadError:       (e) => `テンプレートを読み込めません: ${e}`,
     translating:     '翻訳中…',
     backBtn:         '戻る',
+    resetAllBtn:     '全リセット',
     startOver:       'やり直す',
     ticketTitle:     '不合格報告',
     ticketReasonLabel: '不合格の理由',
@@ -157,6 +159,7 @@ const STRINGS = {
     loadError:       (e) => `Hindi ma-load ang template: ${e}`,
     translating:     'Nagsasalin…',
     backBtn:         'Bumalik',
+    resetAllBtn:     'Reset All',
     startOver:       'Magsimula Muli',
     ticketTitle:     'Ulat ng NG',
     ticketReasonLabel: 'Dahilan ng Pagkabigo',
@@ -286,6 +289,7 @@ function applyLang(lang) {
   set('summary-eyebrow',    s.complete);
   set('submit-btn-text',    s.submitBtn);
   set('back-btn-text',      s.backBtn);
+  set('reset-all-btn-text', s.resetAllBtn);
   set('start-over-btn-text', s.startOver);
   if (dom.btnSkip) dom.btnSkip.textContent = s.skipBtn;
   const nameInput = document.getElementById('worker-name-input');
@@ -393,6 +397,7 @@ function cacheDom() {
   dom.summaryError     = document.getElementById('summary-error');
   dom.ticketModal      = document.getElementById('ticket-modal');
   dom.btnBack          = document.getElementById('btn-back');
+  dom.btnResetAll      = document.getElementById('btn-reset-all');
   dom.btnStartOver     = document.getElementById('btn-start-over');
   dom.annotatorOverlay  = document.getElementById('annotator-overlay');
   dom.photoLightbox     = document.getElementById('photo-lightbox');
@@ -468,6 +473,7 @@ function bindEvents() {
   dom.ticketModal.addEventListener('click', handleTicketModalClick);
   dom.ticketModal.addEventListener('input', handleTicketModalInput);
   dom.btnBack.addEventListener('click', () => { void goBack(); });
+  dom.btnResetAll.addEventListener('click', () => { void handleResetAllRequest(); });
   dom.btnStartOver.addEventListener('click', () => {
     if (!window.confirm('Discard all answers and start over?')) return;
     void reset();
@@ -2171,6 +2177,17 @@ async function reset() {
   transitionTo('name');
 }
 
+async function handleResetAllRequest() {
+  const confirmed = window.confirm('Reset everything and start over? This clears draft data and captured photos, but keeps recent names.');
+  if (!confirmed) return;
+
+  // Clear stored assets completely so large blobs do not survive hard reset.
+  await clearAllStoredAssets();
+
+  // Existing reset clears draft + selected name while preserving recent names.
+  await reset();
+}
+
 // ── Utilities ────────────────────────────────────────────────────
 
 async function fetchJson(url, options = {}) {
@@ -2601,6 +2618,18 @@ async function deleteAsset(assetId) {
     await runAssetTransaction(db, 'readwrite', store => store.delete(assetId));
   } catch {
     // ignore cleanup failures
+  }
+}
+
+async function clearAllStoredAssets() {
+  state.assetCache.clear();
+  state.memoryAssets.clear();
+
+  try {
+    const db = await openAssetDatabase();
+    await runAssetTransaction(db, 'readwrite', store => store.clear());
+  } catch {
+    // If IndexedDB is unavailable, in-memory caches are already cleared.
   }
 }
 
