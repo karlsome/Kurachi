@@ -373,6 +373,7 @@ function cacheDom() {
   dom.numpadRange      = document.getElementById('numpad-range');
   dom.btnOK            = document.getElementById('btn-ok');
   dom.btnNG            = document.getElementById('btn-ng');
+  dom.actionRow        = document.getElementById('action-row');
   dom.btnTicketMini    = document.getElementById('btn-ticket-mini');
   dom.ticketMiniText   = document.getElementById('ticket-mini-text');
 
@@ -1392,7 +1393,47 @@ function updateButtonLock() {
     || (needsPhoto && !hasPhoto);
   dom.btnOK.disabled = locked;
   dom.btnNG.disabled = locked;
+  updateActionButtons();
   updateTicketQuickButton();
+}
+
+function updateActionButtons() {
+  const step = state.steps[state.step];
+  if (!step || !dom.btnOK || !dom.btnNG) return;
+
+  // Checklist-type (checkbox) keeps explicit OK/NG choices.
+  if (step.type === 'checkbox') {
+    dom.btnOK.classList.remove('hidden');
+    dom.btnNG.classList.remove('hidden');
+    if (dom.actionRow) dom.actionRow.classList.remove('single-btn');
+    return;
+  }
+
+  const currentResult = state.results[state.step];
+  const hasTicket = Boolean(currentResult && currentResult.ticket);
+  const currentValue = state.inputValue;
+  const needsTicket = isTicketNeeded(step, currentValue, '');
+
+  // Non-checklist flow:
+  // - In-range / normal value: OK only
+  // - Ticket required and missing: NG only (forces ticket flow)
+  // - Ticket required and saved: OK only (confirm and proceed)
+  if (!needsTicket) {
+    dom.btnOK.classList.remove('hidden');
+    dom.btnNG.classList.add('hidden');
+    if (dom.actionRow) dom.actionRow.classList.add('single-btn');
+    return;
+  }
+
+  if (hasTicket) {
+    dom.btnOK.classList.remove('hidden');
+    dom.btnNG.classList.add('hidden');
+    if (dom.actionRow) dom.actionRow.classList.add('single-btn');
+  } else {
+    dom.btnOK.classList.add('hidden');
+    dom.btnNG.classList.remove('hidden');
+    if (dom.actionRow) dom.actionRow.classList.add('single-btn');
+  }
 }
 
 function getCurrentStepTicketState() {
@@ -1455,10 +1496,34 @@ function endPress(result, commit) {
 }
 
 function handleResult(result) {
+  const step = state.steps[state.step];
+  const existing = state.results[state.step];
+
+  // Non-checklist recovery path: when NG ticket is already saved,
+  // user confirms with OK to proceed to next step.
+  if (
+    result === 'OK'
+    && step
+    && step.type !== 'checkbox'
+    && existing
+    && existing.result === 'NG'
+    && existing.ticket
+  ) {
+    state.animating = true;
+    updateButtonLock();
+    showFlash('OK');
+    setTimeout(() => {
+      hideFlash();
+      state.animating = false;
+      updateButtonLock();
+      advanceStep();
+    }, 450);
+    return;
+  }
+
   state.animating = true;
   updateButtonLock();
 
-  const step = state.steps[state.step];
   const answerForTicket = step.type === 'checkbox' ? result : state.inputValue;
   showFlash(isTicketNeeded(step, answerForTicket, result) ? 'NG' : result);
 
@@ -1890,7 +1955,9 @@ async function saveTicketModal() {
   persistDraft();
   state.animating = false;
   updateButtonLock();
-  if (wasAuto) advanceStep();
+  // For auto-required ticket flow, keep user on current step and
+  // show OK-only confirmation button before proceeding.
+  if (!wasAuto) return;
 }
 
 async function cancelTicketModal() {
