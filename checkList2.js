@@ -42,6 +42,7 @@ const STRINGS = {
     submitBtn:       'SUBMIT RESULTS',
     takePhoto:       'Take photo',
     retakePhoto:     'Retake photo',
+    photoRequiredHint:'Photo is required to continue',
     noTemplates:     'No active inspection templates found.',
     loadError:       (e) => `Could not load template: ${e}`,
     translating:     'Translating…',
@@ -96,6 +97,7 @@ const STRINGS = {
     submitBtn:       '結果を送信',
     takePhoto:       '写真を撮る',
     retakePhoto:     '撮り直す',
+    photoRequiredHint:'続行するには写真が必要です',
     noTemplates:     '有効な点検テンプレートが見つかりません。',
     loadError:       (e) => `テンプレートを読み込めません: ${e}`,
     translating:     '翻訳中…',
@@ -150,6 +152,7 @@ const STRINGS = {
     submitBtn:       'ISUMITE ANG MGA RESULTA',
     takePhoto:       'Kumuha ng larawan',
     retakePhoto:     'Kumuha muli',
+    photoRequiredHint:'Kailangan ang larawan para magpatuloy',
     noTemplates:     'Walang aktibong template ng inspeksyon na natagpuan.',
     loadError:       (e) => `Hindi ma-load ang template: ${e}`,
     translating:     'Nagsasalin…',
@@ -374,6 +377,7 @@ function cacheDom() {
   dom.btnOK            = document.getElementById('btn-ok');
   dom.btnNG            = document.getElementById('btn-ng');
   dom.actionRow        = document.getElementById('action-row');
+  dom.photoRequiredDock = document.getElementById('photo-required-dock');
   dom.btnTicketMini    = document.getElementById('btn-ticket-mini');
   dom.ticketMiniText   = document.getElementById('ticket-mini-text');
 
@@ -1243,9 +1247,10 @@ function updateNumpadRangeState(step, rawValue) {
 
 // ── Field input rendering ────────────────────────────────────────
 
-function buildPhotoCapture() {
+function buildPhotoCapture(isRequired) {
   const wrap = document.createElement('div');
   wrap.className = 'photo-capture';
+  if (isRequired) wrap.classList.add('required');
 
   const fileInput = document.createElement('input');
   fileInput.type   = 'file';
@@ -1280,6 +1285,7 @@ function buildPhotoCapture() {
     btn.classList.add('has-photo');
     btn.querySelector('span').textContent = S().retakePhoto;
     wrap.classList.add('has-photo');
+    wrap.classList.remove('required');
     dom.inspectionView.classList.add('photo-taken');
     updateButtonLock();
   });
@@ -1295,9 +1301,24 @@ function buildPhotoCapture() {
 function renderFieldInput(step) {
   hideNumpad();
   dom.fieldInputArea.innerHTML = '';
+  if (dom.photoRequiredDock) {
+    dom.photoRequiredDock.innerHTML = '';
+    dom.photoRequiredDock.classList.add('hidden');
+  }
 
   if (step.photoRequired) {
-    dom.fieldInputArea.appendChild(buildPhotoCapture());
+    const note = document.createElement('div');
+    note.className = 'photo-required-note';
+    note.innerHTML = `<span class="photo-required-dot" aria-hidden="true"></span>${escapeHtml(S().photoRequiredHint)}`;
+    const capture = buildPhotoCapture(true);
+    if (dom.photoRequiredDock) {
+      dom.photoRequiredDock.appendChild(note);
+      dom.photoRequiredDock.appendChild(capture);
+      dom.photoRequiredDock.classList.remove('hidden');
+    } else {
+      dom.fieldInputArea.appendChild(note);
+      dom.fieldInputArea.appendChild(capture);
+    }
   }
 
   if (step.type === 'checkbox') return;
@@ -1368,9 +1389,10 @@ async function restoreStepAnswer(step, result) {
   if (result.photoAssetId) {
     const data = await getAsset(result.photoAssetId);
     if (data) {
-      const thumb = dom.fieldInputArea.querySelector('.photo-thumb');
-      const btn   = dom.fieldInputArea.querySelector('.photo-btn');
-      const wrap  = dom.fieldInputArea.querySelector('.photo-capture');
+      const scope = dom.photoRequiredDock || dom.fieldInputArea;
+      const thumb = scope.querySelector('.photo-thumb');
+      const btn   = scope.querySelector('.photo-btn');
+      const wrap  = scope.querySelector('.photo-capture');
       if (thumb) { thumb.src = data; thumb.classList.remove('hidden'); }
       if (btn)   { btn.classList.add('has-photo'); const sp = btn.querySelector('span'); if (sp) sp.textContent = S().retakePhoto; }
       if (wrap)  wrap.classList.add('has-photo');
