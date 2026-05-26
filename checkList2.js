@@ -2002,10 +2002,12 @@ async function buildSubmissionPayload() {
       const ticketImagesData = await Promise.all(
         result.ticket.imageAssetIds.map(id => getAsset(id))
       );
+      const isRequiredTicket = isTicketNeeded(step, answerValue, result.result);
+      const ticketReason = normalizeTicketSubmissionReason(result.ticket.reason, isRequiredTicket);
       answer.ticket = {
         saved:      true,
         ticketKey:  `ticket_${step.templateId}_${step.fieldId}`,
-        reason:     result.ticket.reason,
+        reason:     ticketReason,
         imagesData: ticketImagesData.filter(Boolean),
       };
     }
@@ -2021,6 +2023,15 @@ async function buildSubmissionPayload() {
   };
   if (state.skipApprovedBy) payload.approvedBy = state.skipApprovedBy;
   return payload;
+}
+
+function normalizeTicketSubmissionReason(reason, isRequiredTicket) {
+  const cleanReason = String(reason || '').trim();
+  if (!cleanReason) return cleanReason;
+  if (isRequiredTicket) return cleanReason;
+  return cleanReason.startsWith('Optional Ticket:')
+    ? cleanReason
+    : `Optional Ticket: ${cleanReason}`;
 }
 
 function resolveEquipmentId(tpl) {
