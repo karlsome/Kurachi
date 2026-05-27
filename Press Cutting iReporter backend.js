@@ -4706,6 +4706,8 @@ async function printLabel() {
     const amPattern = /^AM(0[1-9]|[12][0-9]|3[0-6])$/; // Matches AM01 to AM36
     if (amPattern.test(currentSebanggo)) {
       return "2TN5.lbx";
+    } else if (currentSebanggo === "RA01" || currentSebanggo === "RA02") {
+      return "311BPlr3.lbx";
     } else if (currentSRS === "有り") {
       return "SRS3.lbx";
     } else if (currentSebanggo === "NC2") {
