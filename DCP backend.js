@@ -384,6 +384,12 @@ document.addEventListener('DOMContentLoaded', () => {
   console.log("🔵 selectedFactory:", selectedFactory);
   console.log("🔵 selectedMachine:", selectedMachine);
   console.log("🔵 groupedMachines at this point:", groupedMachines);
+  const processInput = document.getElementById('process');
+
+  if (processInput && !processInput.dataset.sendToMachineVisibilityBound) {
+    processInput.addEventListener('change', updateSendToMachineVisibility);
+    processInput.dataset.sendToMachineVisibilityBound = 'true';
+  }
   
   if (selectedFactory) {
     const factoryInput = document.getElementById('selected工場');
@@ -394,7 +400,6 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   
   if (selectedMachine) {
-    const processInput = document.getElementById('process');
     if (processInput) {
       processInput.value = selectedMachine;
       console.log("✅ machine set to: " + selectedMachine);
@@ -411,6 +416,8 @@ document.addEventListener('DOMContentLoaded', () => {
   } else {
     console.log("❌ selectedMachine is null/undefined");
   }
+
+  updateSendToMachineVisibility();
 }, { once: true }); // Use once option to ensure this runs first
 
 // Add CSS styles for time input fields and edit buttons
@@ -702,6 +709,7 @@ document.addEventListener('DOMContentLoaded', () => {
     addMaintenanceBtn.addEventListener('click', () => showMaintenanceModal());
   }
 
+  updateSendToMachineVisibility();
   toggleInputs(); //enable or disable the kensa page
 });
 
@@ -742,6 +750,7 @@ async function fetchSetsubiList() {
     });
 
     console.log("Process dropdown populated with options.");
+    updateSendToMachineVisibility();
 
     // Automatically call fetchSebanggo to populate the sub-dropdown
     fetchSebanggo();
@@ -3935,12 +3944,255 @@ function resetForm() {
   window.location.reload();
 }
 
+function showPrintStatusMessage(message) {
+  const scanAlertModal = document.getElementById('scanAlertModal');
+  const scanAlertText = document.getElementById('scanAlertText');
+  const closeScanModalButton = document.getElementById('closeScanModalButton');
+
+  if (scanAlertText && scanAlertModal) {
+    scanAlertText.innerText = message;
+    scanAlertModal.style.display = 'block';
+
+    if (closeScanModalButton) {
+      closeScanModalButton.onclick = function() {
+        scanAlertModal.style.display = 'none';
+      };
+    }
+    return;
+  }
+
+  window.alert(message);
+}
+
+function promptLaptopAutoPrintCopies(defaultCopies = 3) {
+  return new Promise(resolve => {
+    const existingOverlay = document.getElementById('laptopAutoPrintCopiesOverlay');
+    if (existingOverlay) {
+      existingOverlay.remove();
+    }
+
+    const overlay = document.createElement('div');
+    overlay.id = 'laptopAutoPrintCopiesOverlay';
+    overlay.style.cssText = `
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10002;
+      padding: 20px;
+    `;
+
+    const modal = document.createElement('div');
+    modal.style.cssText = `
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+      width: min(360px, 100%);
+      padding: 24px;
+      text-align: center;
+    `;
+
+    const title = document.createElement('h3');
+    title.textContent = 'Print copies / 印刷枚数';
+    title.style.cssText = 'margin: 0 0 12px; font-size: 22px;';
+
+    const description = document.createElement('p');
+    description.textContent = 'How many labels do you want to print? / 何枚印刷しますか？';
+    description.style.cssText = 'margin: 0 0 18px; color: #555;';
+
+    const controls = document.createElement('div');
+    controls.style.cssText = 'display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 18px;';
+
+    const decrementButton = document.createElement('button');
+    decrementButton.type = 'button';
+    decrementButton.textContent = '-';
+    decrementButton.style.cssText = 'width: 52px; height: 52px; font-size: 28px; border: none; border-radius: 8px; background: #e9ecef; cursor: pointer;';
+
+    const copiesInput = document.createElement('input');
+    copiesInput.type = 'number';
+    copiesInput.min = '1';
+    copiesInput.step = '1';
+    copiesInput.value = String(defaultCopies);
+    copiesInput.style.cssText = 'width: 96px; padding: 12px; font-size: 24px; text-align: center; border: 1px solid #ced4da; border-radius: 8px;';
+
+    const incrementButton = document.createElement('button');
+    incrementButton.type = 'button';
+    incrementButton.textContent = '+';
+    incrementButton.style.cssText = 'width: 52px; height: 52px; font-size: 28px; border: none; border-radius: 8px; background: #e9ecef; cursor: pointer;';
+
+    controls.appendChild(decrementButton);
+    controls.appendChild(copiesInput);
+    controls.appendChild(incrementButton);
+
+    const buttonRow = document.createElement('div');
+    buttonRow.style.cssText = 'display: flex; justify-content: center; gap: 12px;';
+
+    const cancelButton = document.createElement('button');
+    cancelButton.type = 'button';
+    cancelButton.textContent = 'Cancel';
+    cancelButton.style.cssText = 'padding: 12px 20px; border: none; border-radius: 8px; background: #adb5bd; color: white; cursor: pointer;';
+
+    const confirmButton = document.createElement('button');
+    confirmButton.type = 'button';
+    confirmButton.textContent = 'Print';
+    confirmButton.style.cssText = 'padding: 12px 20px; border: none; border-radius: 8px; background: #28a745; color: white; cursor: pointer;';
+
+    buttonRow.appendChild(cancelButton);
+    buttonRow.appendChild(confirmButton);
+
+    modal.appendChild(title);
+    modal.appendChild(description);
+    modal.appendChild(controls);
+    modal.appendChild(buttonRow);
+    overlay.appendChild(modal);
+
+    const closeModal = value => {
+      if (document.body.contains(overlay)) {
+        document.body.removeChild(overlay);
+      }
+      resolve(value);
+    };
+
+    const getSafeCopiesValue = () => {
+      const parsedValue = parseInt(copiesInput.value, 10);
+      return Number.isInteger(parsedValue) && parsedValue > 0 ? parsedValue : 1;
+    };
+
+    decrementButton.onclick = () => {
+      copiesInput.value = String(Math.max(1, getSafeCopiesValue() - 1));
+    };
+
+    incrementButton.onclick = () => {
+      copiesInput.value = String(getSafeCopiesValue() + 1);
+    };
+
+    copiesInput.addEventListener('input', () => {
+      if (copiesInput.value === '') {
+        return;
+      }
+      copiesInput.value = String(getSafeCopiesValue());
+    });
+
+    copiesInput.addEventListener('keydown', event => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        confirmButton.click();
+      }
+
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeModal(null);
+      }
+    });
+
+    cancelButton.onclick = () => closeModal(null);
+    confirmButton.onclick = () => closeModal(getSafeCopiesValue());
+    overlay.addEventListener('click', event => {
+      if (event.target === overlay) {
+        closeModal(null);
+      }
+    });
+
+    document.body.appendChild(overlay);
+    copiesInput.focus();
+    copiesInput.select();
+  });
+}
+
+async function resolveEquipmentPrinterIP(machineName) {
+  const machineNames = String(machineName || '')
+    .split(',')
+    .map(name => name.trim())
+    .filter(Boolean);
+  const primaryMachineName = machineNames[0];
+
+  if (!primaryMachineName) {
+    throw new Error('設備名がありません / Equipment name is missing.');
+  }
+
+  if (groupedMachineIPs[primaryMachineName]) {
+    return groupedMachineIPs[primaryMachineName];
+  }
+
+  const ipInput = document.getElementById('ipInfo');
+  const cachedIPs = String(ipInput?.value || '')
+    .split(',')
+    .map(ip => ip.replace(/"/g, '').trim())
+    .filter(Boolean);
+
+  if (cachedIPs.length > 0) {
+    return cachedIPs[0];
+  }
+
+  const response = await fetch(`${ipURL}?filter=${encodeURIComponent(primaryMachineName)}`);
+  if (!response.ok) {
+    throw new Error(`設備IPの取得に失敗しました / Failed to fetch IP for ${primaryMachineName}`);
+  }
+
+  const ipAddress = (await response.text()).replace(/"/g, '').trim();
+  if (!ipAddress) {
+    throw new Error(`設備IPが未設定です / No IP configured for ${primaryMachineName}`);
+  }
+
+  if (ipInput) {
+    ipInput.value = ipAddress;
+  }
+
+  return ipAddress;
+}
+
+async function request047JAutoPrint(machineName, sebanggo, copies) {
+  const printerIP = await resolveEquipmentPrinterIP(machineName);
+  const requestURL = `http://${printerIP}:5001/request?${new URLSearchParams({
+    filename: sebanggo,
+    qty: String(copies)
+  }).toString()}`;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+  try {
+    const response = await fetch(requestURL, {
+      method: 'GET',
+      signal: controller.signal
+    });
+    const responseText = await response.text();
+
+    let payload = {};
+    if (responseText) {
+      try {
+        payload = JSON.parse(responseText);
+      } catch (error) {
+        payload = { success: response.ok, error: responseText };
+      }
+    }
+
+    if (!response.ok || payload.success === false) {
+      const errorMessage = payload.error || `Printer server returned HTTP ${response.status}`;
+      throw new Error(`HTTP ${response.status}: ${errorMessage}`);
+    }
+
+    return { printerIP, payload };
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error('Label print request timed out / ラベル印刷リクエストがタイムアウトしました');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 // Print label using "Smooth Print" app for mobile devices
-function printLabel() {
+async function printLabel() {
   const alertSound = document.getElementById('alert-sound');
   const scanAlertModal = document.getElementById('scanAlertModal');
   const scanAlertText = document.getElementById('scanAlertText');
   const 背番号 = document.getElementById("sub-dropdown").value;
+  const モデル = document.getElementById("model")?.value?.trim() || "";
+  const selectedEquipmentName = document.getElementById("process")?.value?.trim() || "";
 
   // Preload the alert sound without playing it
   if (alertSound) {
@@ -3978,21 +4230,38 @@ function printLabel() {
     return; // Stop the submission process
   }
 
-  // OZMANAS-only rule: label printing must be done from dedicated laptop
-  if (isOZMANASMachine()) {
-    scanAlertText.innerText = 'Please use the dedicated laptop to print this label. / このラベルは専用ノートPCで印刷してください。';
-    scanAlertModal.style.display = 'block';
+  if (モデル === '047J') {
+    const copies = await promptLaptopAutoPrintCopies();
+    if (copies === null) {
+      return;
+    }
 
-    const closeScanModalButton = document.getElementById('closeScanModalButton');
-    closeScanModalButton.onclick = function() {
-      scanAlertModal.style.display = 'none';
-    };
+    try {
+      const { printerIP, payload } = await request047JAutoPrint(selectedEquipmentName, 背番号, copies);
 
-    logTabletAction('Print blocked on OZMANAS tablet', 'in-progress', {
-      reason: 'Dedicated laptop printing only',
-      machine: getMachineName(),
-      背番号
-    });
+      showPrintStatusMessage(
+        `Label print sent successfully / ラベル印刷を送信しました\n背番号: ${payload.banumber || 背番号}\nCopies: ${payload.copies || copies}`
+      );
+
+      logTabletAction('047J laptop auto-print success', 'Completed', {
+        machine: selectedEquipmentName,
+        背番号,
+        copies,
+        printerIP,
+        productNumber: payload.productNumber || '',
+        lotNumber: payload.lotNumber || ''
+      });
+    } catch (error) {
+      console.error('047J laptop auto-print failed:', error);
+      showPrintStatusMessage(`Label printing failed / ラベル印刷に失敗しました\n${error.message}`);
+      logTabletAction('047J laptop auto-print failed', 'in-progress', {
+        machine: selectedEquipmentName,
+        背番号,
+        copies,
+        error: error.message
+      });
+    }
+
     return;
   }
 
@@ -8968,6 +9237,17 @@ function isOZMANASMachine() {
   const machineFromQuery = String(selectedMachine || '').trim().toUpperCase();
   const machineFromProcess = String(document.getElementById('process')?.value || '').trim().toUpperCase();
   return machineFromQuery === 'OZMANAS' || machineFromProcess === 'OZMANAS';
+}
+
+function updateSendToMachineVisibility() {
+  const sendToMachineButton = document.getElementById('sendtoNC');
+  if (!sendToMachineButton) {
+    return;
+  }
+
+  const shouldHide = isOZMANASMachine();
+  sendToMachineButton.hidden = shouldHide;
+  sendToMachineButton.style.display = shouldHide ? 'none' : '';
 }
 
 // Helper function to parse and validate material codes (case-sensitive)
