@@ -4014,6 +4014,7 @@ function promptLaptopAutoPrintCopies(defaultCopies = 3) {
     copiesInput.type = 'number';
     copiesInput.min = '1';
     copiesInput.step = '1';
+    copiesInput.readOnly = true;
     copiesInput.value = String(defaultCopies);
     copiesInput.style.cssText = 'width: 96px; padding: 12px; font-size: 24px; text-align: center; border: 1px solid #ced4da; border-radius: 8px;';
 
@@ -4096,8 +4097,7 @@ function promptLaptopAutoPrintCopies(defaultCopies = 3) {
     });
 
     document.body.appendChild(overlay);
-    copiesInput.focus();
-    copiesInput.select();
+    confirmButton.focus();
   });
 }
 
