@@ -218,6 +218,7 @@ const state = {
   steps: [],          // built from template fields
   step: 0,
   results: [],        // { result: 'OK'|'NG', value: any, photoAssetId: string }
+  pendingStepResult: null, // 'OK' when waiting for a required field photo before commit
   templates: [],      // raw template objects from API (for metadata at submit time)
   animating: false,
   submitting: false,
@@ -1210,6 +1211,7 @@ function renderStep() {
 
   state.inputValue   = null;
   state.photoAssetId = null;
+  state.pendingStepResult = null;
   dom.inspectionView.classList.remove('photo-taken');
   renderFieldInput(s);
 
@@ -1358,6 +1360,12 @@ function buildPhotoCapture(isRequired) {
     wrap.classList.add('has-photo');
     wrap.classList.remove('required');
     dom.inspectionView.classList.add('photo-taken');
+    if (state.pendingStepResult === 'OK') {
+      commitCurrentStepResult('OK');
+      updateButtonLock();
+      advanceStep();
+      return;
+    }
     updateButtonLock();
     persistDraft();
   });
@@ -1368,6 +1376,47 @@ function buildPhotoCapture(isRequired) {
   wrap.appendChild(thumb);
   wrap.appendChild(btn);
   return wrap;
+}
+
+function shouldShowPhotoRequirement(step, result = state.results[state.step]) {
+  if (!step || !step.photoRequired) return false;
+  return state.pendingStepResult === 'OK' || state.photoAssetId !== null || Boolean(result?.photoAssetId);
+}
+
+function updatePhotoRequirementVisibility(step = state.steps[state.step], result = state.results[state.step]) {
+  const visible = shouldShowPhotoRequirement(step, result);
+  if (dom.photoRequiredDock) {
+    dom.photoRequiredDock.classList.toggle('hidden', !visible);
+    return;
+  }
+
+  dom.fieldInputArea
+    .querySelectorAll('.photo-required-note, .photo-capture')
+    .forEach((el) => el.classList.toggle('hidden', !visible));
+}
+
+function revealRequiredPhotoCapture() {
+  state.pendingStepResult = 'OK';
+  updatePhotoRequirementVisibility();
+  const scope = dom.photoRequiredDock || dom.fieldInputArea;
+  const photoBtn = scope?.querySelector('.photo-btn');
+  if (photoBtn) {
+    requestAnimationFrame(() => {
+      photoBtn.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    });
+  }
+}
+
+function commitCurrentStepResult(result) {
+  const pendingTicket = consumePendingStepTicket(state.step);
+  state.results[state.step] = {
+    result,
+    value: state.inputValue,
+    photoAssetId: state.photoAssetId,
+    ticket: pendingTicket,
+  };
+  state.pendingStepResult = null;
+  persistDraft();
 }
 
 function renderFieldInput(step) {
@@ -1391,6 +1440,7 @@ function renderFieldInput(step) {
       dom.fieldInputArea.appendChild(note);
       dom.fieldInputArea.appendChild(capture);
     }
+    updatePhotoRequirementVisibility(step);
   }
 
   if (step.type === 'checkbox') return;
@@ -1493,6 +1543,8 @@ async function restorePendingStep(step, pending) {
 
   state.inputValue = pendingValue !== '' ? pendingValue : null;
   state.photoAssetId = pendingPhoto;
+  state.pendingStepResult = pending?.result === 'OK' ? 'OK' : null;
+  updatePhotoRequirementVisibility(step);
 
   if (step.type === 'number' && pendingValue != null && pendingValue !== '') {
     state.numpadBuffer = String(pendingValue);
@@ -1539,7 +1591,7 @@ function updateButtonLock() {
   if (!step) return;
   const needsValue = step.type !== 'checkbox';
   const hasValue   = state.inputValue !== null;
-  const needsPhoto = step.photoRequired;
+  const needsPhoto = step.photoRequired && state.pendingStepResult === 'OK';
   const hasPhoto   = state.photoAssetId !== null;
   const locked = state.animating
     || ticketModal.open
@@ -1659,6 +1711,18 @@ function handleResult(result) {
   const step = state.steps[state.step];
   const existing = state.results[state.step];
 
+  if (
+    result === 'OK'
+    && step
+    && step.photoRequired
+    && !state.photoAssetId
+  ) {
+    revealRequiredPhotoCapture();
+    updateButtonLock();
+    persistDraft();
+    return;
+  }
+
   // Non-checklist recovery path: when NG ticket is already saved,
   // user confirms with OK to proceed to next step.
   if (
@@ -1688,9 +1752,7 @@ function handleResult(result) {
   showFlash(isTicketNeeded(step, answerForTicket, result) ? 'NG' : result);
 
   setTimeout(() => {
-    const pendingTicket = consumePendingStepTicket(state.step);
-    state.results[state.step] = { result, value: state.inputValue, photoAssetId: state.photoAssetId, ticket: pendingTicket };
-    persistDraft();
+    commitCurrentStepResult(result);
     hideFlash();
     setTimeout(() => {
       const answerForTicket = step.type === 'checkbox' ? result : state.inputValue;
@@ -2219,9 +2281,8 @@ async function saveTicketModal() {
   persistDraft();
   state.animating = false;
   updateButtonLock();
-  // For auto-required ticket flow, keep user on current step and
-  // show OK-only confirmation button before proceeding.
   if (!wasAuto) return;
+  advanceStep();
 }
 
 async function cancelTicketModal() {
@@ -2424,6 +2485,7 @@ async function reset() {
   state.pressedBtn   = null;
   state.inputValue   = null;
   state.photoAssetId = null;
+  state.pendingStepResult = null;
   state.pendingTicketsByStep = {};
   state.selectedName = '';
   state.nameSearch   = '';
@@ -2764,6 +2826,7 @@ function persistDraft() {
             step:        state.step,
             inputValue:  state.inputValue ?? '',
             photoAssetId: state.photoAssetId || '',
+            result:      state.pendingStepResult || '',
           }
         : null,
       pendingTicketsByStep: Object.fromEntries(
