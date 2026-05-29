@@ -1,0 +1,1519 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PU + Leather Roll Diameter Wrinkle Analysis</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root {
+      --bg: #f7f5f2;
+      --card: rgba(255,255,255,0.8);
+      --text: #1f2937;
+      --muted: #6b7280;
+      --line: #d1d5db;
+      --accent: #7c5c3b;
+      --accent-soft: #d9c4aa;
+      --danger: #c2410c;
+      --warn: #b45309;
+      --safe: #166534;
+    }
+
+    body {
+      background: radial-gradient(circle at top left, #fffaf5, #f4f0ea 40%, #ece7df 100%);
+      color: var(--text);
+      font-family: "Hiragino Sans", "Yu Gothic", "Yu Gothic UI", "Meiryo", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .lang-tabs {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      padding: 0.25rem;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.82);
+      border: 1px solid rgba(209,213,219,0.85);
+      box-shadow: 0 12px 24px rgba(15, 23, 42, 0.08);
+    }
+
+    .lang-tab {
+      border: 0;
+      background: transparent;
+      color: #57534e;
+      font-size: 0.85rem;
+      font-weight: 800;
+      border-radius: 999px;
+      padding: 0.6rem 1rem;
+      transition: background-color 200ms ease, color 200ms ease, box-shadow 200ms ease;
+    }
+
+    .lang-tab.is-active {
+      background: #1f2937;
+      color: white;
+      box-shadow: 0 8px 18px rgba(31, 41, 55, 0.18);
+    }
+
+    .glass {
+      background: var(--card);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,0.65);
+      box-shadow: 0 18px 50px rgba(31, 41, 55, 0.08);
+    }
+
+    .fade-up {
+      animation: fadeUp 0.7s ease both;
+    }
+
+    @keyframes fadeUp {
+      from {
+        opacity: 0;
+        transform: translateY(18px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .roll-wrap {
+      position: relative;
+      width: min(92vw, 560px);
+      height: min(92vw, 560px);
+      margin: 0 auto;
+      display: grid;
+      place-items: center;
+    }
+
+    .roll {
+      position: relative;
+      border-radius: 999px;
+      transition: width 700ms ease, height 700ms ease;
+      background: conic-gradient(from 0deg, #d9c4aa 0deg, #b9926b 80deg, #ead6c3 160deg, #9b7a58 260deg, #d9c4aa 360deg);
+      box-shadow: inset 0 0 0 6px rgba(255,255,255,0.45), 0 20px 50px rgba(0,0,0,0.15);
+      overflow: hidden;
+    }
+
+    .roll::before {
+      content: "";
+      position: absolute;
+      inset: 7%;
+      border-radius: inherit;
+      border: 2px dashed rgba(255,255,255,0.6);
+      opacity: 0.65;
+    }
+
+    .core {
+      position: absolute;
+      inset: 50%;
+      transform: translate(-50%, -50%);
+      border-radius: 999px;
+      background: radial-gradient(circle at 35% 35%, #cdd5df, #94a3b8 55%, #64748b 100%);
+      box-shadow: inset 0 0 0 8px rgba(255,255,255,0.25);
+      transition: width 700ms ease, height 700ms ease;
+    }
+
+    .compression-zone,
+    .tension-zone {
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      pointer-events: none;
+    }
+
+    .compression-zone::before {
+      content: attr(data-label);
+      position: absolute;
+      inset: 14% 14% auto 14%;
+      height: 26%;
+      border-radius: 999px 999px 0 0;
+      background: linear-gradient(180deg, rgba(194,65,12,0.34), rgba(194,65,12,0));
+      color: white;
+      font-size: 12px;
+      display: flex;
+      align-items: start;
+      justify-content: center;
+      padding-top: 14px;
+      font-weight: 700;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+    }
+
+    .tension-zone::before {
+      content: attr(data-label);
+      position: absolute;
+      inset: auto 14% 14% 14%;
+      height: 26%;
+      border-radius: 0 0 999px 999px;
+      background: linear-gradient(0deg, rgba(21,128,61,0.35), rgba(21,128,61,0));
+      color: white;
+      font-size: 12px;
+      display: flex;
+      align-items: end;
+      justify-content: center;
+      padding-bottom: 14px;
+      font-weight: 700;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+    }
+
+    .flatten-stage {
+      position: relative;
+      width: 100%;
+      min-height: 220px;
+      border-radius: 24px;
+      border: 1px dashed rgba(124,92,59,0.35);
+      background: linear-gradient(180deg, rgba(255,255,255,0.55), rgba(255,255,255,0.2));
+      overflow: hidden;
+    }
+
+    .sheet {
+      position: absolute;
+      left: 5%;
+      right: 5%;
+      top: 34%;
+      height: 72px;
+      border-radius: 18px;
+      transition: transform 700ms ease, filter 700ms ease;
+      box-shadow: 0 12px 28px rgba(0,0,0,0.1);
+      background: linear-gradient(180deg, #efe5d9 0%, #dcc8b1 24%, #c1a282 50%, #eadbc9 76%, #f8f4ee 100%);
+    }
+
+    .sheet::before, .sheet::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      height: 16px;
+    }
+
+    .sheet::before {
+      top: 0;
+      background: rgba(124,92,59,0.12);
+    }
+
+    .sheet::after {
+      bottom: 0;
+      background: rgba(255,255,255,0.35);
+    }
+
+    .wrinkled {
+      background:
+        radial-gradient(circle at 12% 50%, rgba(255,255,255,0.22), transparent 10%),
+        radial-gradient(circle at 28% 58%, rgba(255,255,255,0.2), transparent 10%),
+        radial-gradient(circle at 46% 48%, rgba(255,255,255,0.2), transparent 11%),
+        radial-gradient(circle at 68% 57%, rgba(255,255,255,0.18), transparent 10%),
+        radial-gradient(circle at 86% 47%, rgba(255,255,255,0.2), transparent 10%),
+        linear-gradient(180deg, #efe5d9 0%, #dcc8b1 24%, #c1a282 50%, #eadbc9 76%, #f8f4ee 100%);
+      transform: skewX(-3deg) scaleY(1.05);
+      filter: saturate(0.95);
+    }
+
+    .smooth {
+      transform: translateY(0) scaleY(1);
+      filter: saturate(1.02);
+    }
+
+    .pill {
+      border-radius: 999px;
+      padding: 0.3rem 0.7rem;
+      font-weight: 700;
+      font-size: 0.78rem;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+
+    .grid-bg {
+      background-image: linear-gradient(rgba(0,0,0,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(0,0,0,0.03) 1px, transparent 1px);
+      background-size: 26px 26px;
+    }
+
+    .unroll-stage {
+      --sheet-height: 62px;
+      --damage-width: 36%;
+      --damage-alpha: 0.38;
+      --damage-soft-alpha: 0.26;
+      --ring-alpha: 0.36;
+      position: relative;
+      overflow: hidden;
+      border-radius: 28px;
+      min-height: 360px;
+      padding: 24px;
+      background:
+        radial-gradient(circle at 14% 18%, rgba(245, 158, 11, 0.14), transparent 22%),
+        radial-gradient(circle at 82% 16%, rgba(239, 68, 68, 0.15), transparent 22%),
+        linear-gradient(180deg, #17110d 0%, #261c15 100%);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 18px 38px rgba(15,23,42,0.18);
+    }
+
+    .unroll-stage::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background-image: linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px);
+      background-size: 34px 34px;
+      mask-image: linear-gradient(180deg, rgba(0,0,0,0.7), transparent);
+      pointer-events: none;
+    }
+
+    .unroll-layout {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: minmax(140px, 190px) minmax(0, 1fr);
+      gap: 24px;
+      align-items: center;
+      min-height: 220px;
+    }
+
+    .unroll-roll-shell {
+      display: flex;
+      justify-content: center;
+    }
+
+    .unroll-roll {
+      position: relative;
+      width: 156px;
+      height: 156px;
+      border-radius: 999px;
+      background: conic-gradient(from 0deg, #d9c4aa 0deg, #b9926b 80deg, #ead6c3 160deg, #9b7a58 260deg, #d9c4aa 360deg);
+      box-shadow: inset 0 0 0 4px rgba(255,255,255,0.18), 0 18px 36px rgba(0,0,0,0.35);
+      transition: transform 700ms ease;
+    }
+
+    .unroll-roll::before {
+      content: "";
+      position: absolute;
+      inset: 14%;
+      border-radius: inherit;
+      border: 2px solid rgba(255,255,255,0.08);
+    }
+
+    .unroll-risk-ring {
+      position: absolute;
+      inset: 18%;
+      border-radius: inherit;
+      border: 10px solid rgba(239,68,68,var(--ring-alpha));
+      box-shadow: 0 0 18px rgba(239,68,68,var(--ring-alpha));
+      opacity: 0.95;
+      transition: border-color 400ms ease, box-shadow 400ms ease;
+    }
+
+    .unroll-core {
+      position: absolute;
+      inset: 50%;
+      transform: translate(-50%, -50%);
+      width: 72px;
+      height: 72px;
+      border-radius: 999px;
+      background: radial-gradient(circle at 35% 35%, #cdd5df, #94a3b8 55%, #64748b 100%);
+      box-shadow: inset 0 0 0 6px rgba(255,255,255,0.22);
+      transition: width 700ms ease, height 700ms ease;
+    }
+
+    .unroll-track {
+      position: relative;
+      min-height: 220px;
+      display: flex;
+      align-items: center;
+    }
+
+    .unroll-track::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 6%;
+      top: 50%;
+      height: 2px;
+      background: linear-gradient(90deg, rgba(255,255,255,0.24), rgba(255,255,255,0.04));
+      transform: translateY(-50%);
+    }
+
+    .unroll-sheet {
+      position: absolute;
+      left: -12px;
+      right: 0;
+      top: 50%;
+      height: var(--sheet-height);
+      transform: translateY(-50%) scaleX(0.06);
+      transform-origin: left center;
+      border-radius: 0 18px 18px 0;
+      box-shadow: 0 18px 28px rgba(0,0,0,0.26);
+      overflow: hidden;
+      background: linear-gradient(180deg, #efe5d9 0%, #dcc8b1 24%, #c1a282 50%, #eadbc9 76%, #f8f4ee 100%);
+    }
+
+    .unroll-sheet::before,
+    .unroll-sheet::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      height: 14px;
+    }
+
+    .unroll-sheet::before {
+      top: 0;
+      background: rgba(124,92,59,0.14);
+    }
+
+    .unroll-sheet::after {
+      bottom: 0;
+      background: rgba(255,255,255,0.32);
+    }
+
+    .unroll-damage {
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: var(--damage-width);
+      background: linear-gradient(90deg, rgba(185,28,28,var(--damage-alpha)) 0%, rgba(249,115,22,var(--damage-soft-alpha)) 56%, rgba(255,255,255,0) 100%);
+      opacity: 0.94;
+      transition: width 600ms ease, background 600ms ease, opacity 600ms ease;
+    }
+
+    .unroll-damage::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        repeating-linear-gradient(96deg, rgba(127,29,29,0.18) 0 10px, rgba(127,29,29,0) 10px 24px),
+        radial-gradient(circle at 12% 50%, rgba(255,255,255,0.18), transparent 12%),
+        radial-gradient(circle at 28% 58%, rgba(255,255,255,0.15), transparent 11%),
+        radial-gradient(circle at 46% 48%, rgba(255,255,255,0.15), transparent 12%),
+        radial-gradient(circle at 66% 56%, rgba(255,255,255,0.14), transparent 11%);
+      opacity: 0.95;
+      animation: wrinkleDrift 2.6s linear infinite;
+    }
+
+    .unroll-pulse {
+      position: absolute;
+      left: 36%;
+      top: 50%;
+      width: 120px;
+      height: 120px;
+      border-radius: 999px;
+      transform: translate(-50%, -50%);
+      background: radial-gradient(circle, rgba(239,68,68,0.42), rgba(239,68,68,0.18) 38%, rgba(239,68,68,0) 70%);
+      filter: blur(6px);
+      opacity: 0.52;
+      pointer-events: none;
+      transition: left 600ms ease, opacity 600ms ease;
+    }
+
+    .unroll-stage.is-playing .unroll-sheet {
+      animation: unrollSheet 1.35s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+    }
+
+    .unroll-stage.is-playing .unroll-damage {
+      animation: revealDamage 1.2s 0.24s both;
+    }
+
+    .unroll-stage.is-playing .unroll-pulse {
+      animation: pulseHotspot 1.2s 0.68s ease-in-out 2;
+    }
+
+    .unroll-stage.is-playing .unroll-risk-ring {
+      animation: ringPulse 1.05s ease-in-out 2;
+    }
+
+    @keyframes unrollSheet {
+      0% {
+        transform: translateY(-50%) scaleX(0.06);
+      }
+      72% {
+        transform: translateY(-50%) scaleX(1.02);
+      }
+      100% {
+        transform: translateY(-50%) scaleX(1);
+      }
+    }
+
+    @keyframes revealDamage {
+      0%,
+      26% {
+        opacity: 0;
+      }
+      100% {
+        opacity: 0.94;
+      }
+    }
+
+    @keyframes ringPulse {
+      0%,
+      100% {
+        transform: scale(1);
+      }
+      50% {
+        transform: scale(1.05);
+      }
+    }
+
+    @keyframes pulseHotspot {
+      0%,
+      100% {
+        transform: translate(-50%, -50%) scale(0.88);
+      }
+      50% {
+        transform: translate(-50%, -50%) scale(1.08);
+      }
+    }
+
+    @keyframes wrinkleDrift {
+      from {
+        background-position: 0 0;
+      }
+      to {
+        background-position: 72px 0;
+      }
+    }
+
+    @media (max-width: 768px) {
+      .unroll-stage {
+        min-height: 420px;
+        padding: 20px;
+      }
+
+      .unroll-layout {
+        grid-template-columns: 1fr;
+        gap: 18px;
+      }
+
+      .unroll-roll-shell {
+        justify-content: flex-start;
+      }
+
+      .unroll-track {
+        min-height: 170px;
+      }
+
+      .unroll-sheet {
+        left: 0;
+      }
+    }
+
+    .eq {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+
+    canvas {
+      width: 100% !important;
+      height: 280px !important;
+    }
+  </style>
+</head>
+<body>
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
+    <section class="fade-up mb-8 sm:mb-10">
+      <div class="glass rounded-[32px] p-6 sm:p-10 overflow-hidden relative">
+        <div class="absolute inset-0 opacity-20 pointer-events-none" style="background: radial-gradient(circle at top right, #d6b79b, transparent 30%), radial-gradient(circle at bottom left, #b9c8d9, transparent 25%);"></div>
+        <div class="relative">
+          <div class="flex items-start justify-between gap-4 flex-wrap mb-5">
+            <div class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/80 text-sm font-semibold text-stone-700">
+              <span data-i18n="heroBadge">Animated management explanation</span>
+            </div>
+            <div class="lang-tabs" role="tablist" aria-label="Language switcher">
+              <button id="langJa" class="lang-tab is-active" type="button" role="tab" aria-selected="true">日本語</button>
+              <button id="langEn" class="lang-tab" type="button" role="tab" aria-selected="false">English</button>
+            </div>
+          </div>
+          <h1 class="text-3xl sm:text-5xl font-black tracking-tight text-stone-900 max-w-5xl leading-tight" data-i18n="heroTitle" data-i18n-html>
+            Why tight rolling can create wrinkles in <span class="text-[var(--accent)]">PU + leather + adhesive + release paper</span>
+          </h1>
+          <p class="mt-4 max-w-4xl text-base sm:text-lg text-stone-600 leading-8" data-i18n="heroIntro">
+            This page explains the material behavior, shows the strain calculation, and visualizes why the innermost roll diameter matters most. It is designed so you can present the concept directly to management.
+          </p>
+          <div class="mt-6 flex flex-wrap gap-3">
+            <span class="pill bg-orange-100 text-orange-800" data-i18n="heroPillCompression">Compression on inner layers</span>
+            <span class="pill bg-emerald-100 text-emerald-800" data-i18n="heroPillTension">Tension on outer layers</span>
+            <span class="pill bg-stone-100 text-stone-700" data-i18n="heroPillEquation">Core idea: ε = t / 2R</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="grid lg:grid-cols-2 gap-6 mb-8 sm:mb-10">
+      <div class="glass rounded-[28px] p-6 sm:p-8 fade-up">
+        <div class="flex items-center justify-between gap-4 flex-wrap mb-5">
+          <div>
+            <h2 class="text-2xl font-bold text-stone-900" data-i18n="interactiveTitle">Interactive roll model</h2>
+            <p class="text-stone-600 mt-1" data-i18n="interactiveSubtitle">Adjust the inside diameter and see how bending strain changes.</p>
+          </div>
+          <span id="riskBadge" class="pill bg-orange-100 text-orange-800">Borderline</span>
+        </div>
+
+        <div class="roll-wrap">
+          <div id="roll" class="roll" style="width: 420px; height: 420px;">
+            <div class="compression-zone" data-label="Compression on inner layers"></div>
+            <div class="tension-zone" data-label="Tension on outer layers"></div>
+            <div id="core" class="core" style="width: 180px; height: 180px;"></div>
+          </div>
+        </div>
+
+        <div class="mt-6 space-y-4">
+          <div>
+            <div class="flex justify-between text-sm font-semibold text-stone-700 mb-2">
+              <label for="diameterSlider" data-i18n="diameterLabel">Inside roll diameter</label>
+              <span><span id="diameterValue">300</span> mm</span>
+            </div>
+            <input id="diameterSlider" type="range" min="100" max="800" step="10" value="300" class="w-full" />
+          </div>
+
+          <div>
+            <div class="flex justify-between text-sm font-semibold text-stone-700 mb-2">
+              <label for="thicknessSlider" data-i18n="thicknessLabel">Total laminate thickness</label>
+              <span><span id="thicknessValue">3.0</span> mm</span>
+            </div>
+            <input id="thicknessSlider" type="range" min="0.5" max="5" step="0.1" value="3.0" class="w-full" />
+          </div>
+
+          <div class="grid sm:grid-cols-3 gap-3 pt-2">
+            <div class="rounded-2xl bg-stone-50 p-4 border border-stone-200">
+              <div class="text-sm text-stone-500" data-i18n="radiusLabel">Radius</div>
+              <div class="text-2xl font-black text-stone-900"><span id="radiusValue">150</span> mm</div>
+            </div>
+            <div class="rounded-2xl bg-stone-50 p-4 border border-stone-200">
+              <div class="text-sm text-stone-500" data-i18n="strainLabel">Strain</div>
+              <div class="text-2xl font-black text-stone-900"><span id="strainValue">1.00</span>%</div>
+            </div>
+            <div class="rounded-2xl bg-stone-50 p-4 border border-stone-200">
+              <div class="text-sm text-stone-500" data-i18n="estimatedRiskLabel">Estimated risk</div>
+              <div class="text-2xl font-black text-stone-900" id="riskText">Borderline</div>
+            </div>
+          </div>
+
+          <div class="rounded-2xl bg-stone-900 text-stone-50 p-4 sm:p-5">
+            <div class="text-stone-300 text-sm" data-i18n="equationTitle">Working equation</div>
+            <div class="eq text-lg sm:text-xl mt-1">ε = t / (2R)</div>
+            <p class="text-sm text-stone-300 mt-3 leading-7" data-i18n="equationBody" data-i18n-html>
+              Where <strong>ε</strong> is surface bending strain, <strong>t</strong> is total laminate thickness, and <strong>R</strong> is the inside bending radius. Smaller inside diameter means higher strain at the innermost wrap.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="glass rounded-[28px] p-6 sm:p-8 fade-up">
+        <h2 class="text-2xl font-bold text-stone-900" data-i18n="managementTitle">What management needs to understand</h2>
+        <div class="mt-5 space-y-4">
+          <div class="rounded-2xl border border-stone-200 bg-white p-5">
+            <h3 class="font-bold text-lg text-stone-900" data-i18n="mgmtCard1Title">1) Synthetic leather / leather behavior</h3>
+            <p class="text-stone-600 mt-2 leading-7" data-i18n="mgmtCard1Body">
+              Leather-like materials are not perfectly elastic. They are fibrous or composite-like, and they do not recover uniformly after bending. This means they can keep a deformation memory after being wound for long periods, especially under compression on the inner wraps.
+            </p>
+          </div>
+          <div class="rounded-2xl border border-stone-200 bg-white p-5">
+            <h3 class="font-bold text-lg text-stone-900" data-i18n="mgmtCard2Title">2) Urethane layer behavior</h3>
+            <p class="text-stone-600 mt-2 leading-7" data-i18n="mgmtCard2Body">
+              Urethane is flexible, but it is also viscoelastic. That means it can slowly deform under load, store strain, and recover imperfectly. In a roll, the inner side is compressed while the outer side is stretched. Over time, the inner compressed region can buckle or keep shape memory.
+            </p>
+          </div>
+          <div class="rounded-2xl border border-stone-200 bg-white p-5">
+            <h3 class="font-bold text-lg text-stone-900" data-i18n="mgmtCard3Title">3) Release paper + adhesive behavior</h3>
+            <p class="text-stone-600 mt-2 leading-7" data-i18n="mgmtCard3Body">
+              Release paper is typically stiffer than the soft urethane surface, while adhesive behaves like a shear layer. This makes the laminate asymmetric. Because the layers do not all bend the same way, internal stress becomes unbalanced, which increases curl, set, and wrinkle risk.
+            </p>
+          </div>
+          <div class="rounded-2xl border border-stone-200 bg-white p-5">
+            <h3 class="font-bold text-lg text-stone-900" data-i18n="mgmtCard4Title">4) When all layers are combined</h3>
+            <p class="text-stone-600 mt-2 leading-7" data-i18n="mgmtCard4Body">
+              The stack behaves like a multilayer composite. Each layer has different stiffness and recovery behavior. When rolled tightly, the innermost wraps see the highest compressive strain. After unrolling, the layers try to recover differently, and that mismatch can appear as wrinkles or waviness.
+            </p>
+          </div>
+          <div class="rounded-2xl border border-orange-200 bg-orange-50 p-5">
+            <h3 class="font-bold text-lg text-stone-900" data-i18n="mgmtCard5Title">5) PSA cold-flow under sustained pressure</h3>
+            <p class="text-stone-600 mt-2 leading-7" data-i18n="mgmtCard5Body">
+              Pressure-sensitive adhesive (PSA) is specifically designed to conform and bond under light pressure — and that same property works against the roll. When wound tightly, the PSA layer is held under sustained compressive and shear force for hours or days. Even at room temperature and without any heat, PSA will cold-flow: it slowly migrates laterally and permanently deforms. Once displaced, the surrounding layers lose their original register. The adhesive cannot fully recover after unrolling, leaving a zone of uneven bonding and layer misalignment that appears as permanent waviness or localized adhesion failure. This is a PSA-specific mechanism on top of, and separate from, the bending-strain problem described above.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="glass rounded-[28px] p-6 sm:p-8 mb-8 sm:mb-10 fade-up">
+      <div class="flex items-center justify-between gap-4 flex-wrap">
+        <div>
+          <h2 class="text-2xl font-bold text-stone-900" data-i18n="unrollTitle">Unroll risk animation</h2>
+          <p class="text-stone-600 mt-1" data-i18n="unrollSubtitle">This card turns the engineering calculation into a simple story: a smaller core and thicker laminate create a larger red wrinkle-prone zone when the material opens.</p>
+        </div>
+        <button id="playUnroll" class="px-5 py-3 rounded-2xl bg-[var(--accent)] text-white font-semibold shadow-lg hover:opacity-90 transition" data-i18n="playUnroll">Replay unroll</button>
+      </div>
+
+      <div class="mt-8 grid xl:grid-cols-[minmax(0,1.3fr)_minmax(320px,0.7fr)] gap-6 items-start">
+        <div id="unrollStage" class="unroll-stage is-playing">
+          <div class="relative z-[1] flex items-center justify-between gap-4 flex-wrap">
+            <div class="inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-xs font-bold uppercase tracking-[0.24em] text-white/85" data-i18n="unrollBadge" data-i18n-html>
+              <span class="w-2.5 h-2.5 rounded-full bg-red-400"></span>
+              Inner wraps unroll first
+            </div>
+            <div class="text-sm text-white/70" data-i18n="unrollLegend">Red area = higher wrinkle probability after flattening</div>
+          </div>
+
+          <div class="unroll-layout mt-6">
+            <div class="unroll-roll-shell">
+              <div class="w-full">
+                <div class="text-xs font-bold uppercase tracking-[0.24em] text-white/50 mb-3" data-i18n="unrollBefore">Before opening</div>
+                <div id="unrollRollVisual" class="unroll-roll">
+                  <div id="unrollRiskRing" class="unroll-risk-ring"></div>
+                  <div id="unrollCore" class="unroll-core"></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="unroll-track">
+              <div class="absolute left-0 top-6 text-xs font-bold uppercase tracking-[0.24em] text-white/50" data-i18n="unrollAfter">After opening</div>
+              <div class="absolute right-0 bottom-6 max-w-[280px] text-right text-sm text-white/60" data-i18n="unrollAfterNote">The first sheet leaving the core carries the most damage memory.</div>
+              <div id="unrollPulse" class="unroll-pulse"></div>
+              <div id="unrollSheet" class="unroll-sheet">
+                <div id="unrollDamage" class="unroll-damage"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="relative z-[1] grid sm:grid-cols-3 gap-3 mt-4">
+            <div class="rounded-2xl bg-white/8 border border-white/10 p-4">
+              <div class="text-xs uppercase tracking-[0.18em] text-white/55" data-i18n="unrollInsideDiameter">Inside diameter</div>
+              <div class="text-2xl font-black mt-1 text-white"><span id="unrollDiameter">300</span> mm</div>
+            </div>
+            <div class="rounded-2xl bg-white/8 border border-white/10 p-4">
+              <div class="text-xs uppercase tracking-[0.18em] text-white/55" data-i18n="unrollLaminateThickness">Laminate thickness</div>
+              <div class="text-2xl font-black mt-1 text-white"><span id="unrollThickness">3.0</span> mm</div>
+            </div>
+            <div class="rounded-2xl bg-white/8 border border-white/10 p-4">
+              <div class="text-xs uppercase tracking-[0.18em] text-white/55" data-i18n="unrollOpeningResult">Opening result</div>
+              <div id="unrollOutcome" class="text-lg font-black mt-1 text-white">Moderate red zone</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="space-y-4">
+          <div class="rounded-[24px] border border-stone-200 bg-white p-5">
+            <div class="text-sm font-semibold text-stone-500" data-i18n="probabilityTitle">Estimated wrinkle probability</div>
+            <div class="mt-3 flex items-end justify-between gap-3 flex-wrap">
+              <div id="probabilityValue" class="text-5xl font-black text-stone-900">50%</div>
+              <span id="probabilityLabel" class="pill bg-orange-100 text-orange-800">Mixed recovery</span>
+            </div>
+            <div class="mt-4 h-3 rounded-full bg-stone-100 overflow-hidden">
+              <div id="probabilityBar" class="h-full rounded-full transition-all duration-700" style="width: 50%; background: linear-gradient(90deg, #f59e0b, #f97316);"></div>
+            </div>
+            <p id="probabilityNarrative" class="mt-3 text-stone-600 leading-7">
+              A medium red zone means the laminate may unroll but still keep some deformation memory near the first wraps that leave the core.
+            </p>
+          </div>
+
+          <div class="rounded-[24px] border border-stone-200 bg-stone-50 p-5">
+            <h3 class="font-bold text-lg text-stone-900" data-i18n="howReadTitle">How to read this card</h3>
+            <div class="mt-4 space-y-4 text-sm text-stone-600">
+              <div class="flex gap-3">
+                <span class="mt-1 w-2.5 h-2.5 rounded-full bg-stone-900 flex-shrink-0"></span>
+                <p data-i18n="howRead1">The roll on the left uses your selected inside diameter. Smaller inside diameter means a tighter bend at the core.</p>
+              </div>
+              <div class="flex gap-3">
+                <span class="mt-1 w-2.5 h-2.5 rounded-full bg-orange-500 flex-shrink-0"></span>
+                <p data-i18n="howRead2">The sheet thickness also follows your setting. Thicker laminate creates higher strain for the same core diameter.</p>
+              </div>
+              <div class="flex gap-3">
+                <span class="mt-1 w-2.5 h-2.5 rounded-full bg-red-500 flex-shrink-0"></span>
+                <p data-i18n="howRead3">The red animated zone marks where visible wrinkle memory is most likely after unrolling. More red means higher risk for management attention.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="glass rounded-[28px] p-6 sm:p-8 mb-8 sm:mb-10 fade-up">
+      <div class="flex items-center justify-between flex-wrap gap-4">
+        <div>
+          <h2 class="text-2xl font-bold text-stone-900" data-i18n="layerTitle">Layer-by-layer structure</h2>
+          <p class="text-stone-600 mt-1" data-i18n="layerSubtitle">A simple presentation-friendly view of the laminate stack.</p>
+        </div>
+        <button id="playLayers" class="px-5 py-3 rounded-2xl bg-stone-900 text-white font-semibold shadow-lg hover:opacity-90 transition" data-i18n="playLayers">Play layer animation</button>
+      </div>
+
+      <div class="mt-8 grid md:grid-cols-4 gap-4" id="layerCards">
+        <div class="layer-card rounded-[24px] p-5 bg-gradient-to-b from-amber-100 to-amber-50 border border-amber-200 transition-all duration-500">
+          <div class="text-sm font-semibold text-amber-800" data-i18n="layer1Label">Top surface</div>
+          <h3 class="text-xl font-black mt-1 text-stone-900" data-i18n="layer1Title">PU / urethane</h3>
+          <p class="text-stone-600 mt-3 leading-7" data-i18n="layer1Body">Flexible and soft-feeling, but viscoelastic. Can keep a shape memory after being bent and stored.</p>
+        </div>
+        <div class="layer-card rounded-[24px] p-5 bg-gradient-to-b from-stone-200 to-stone-50 border border-stone-300 transition-all duration-500">
+          <div class="text-sm font-semibold text-stone-700" data-i18n="layer2Label">Main body</div>
+          <h3 class="text-xl font-black mt-1 text-stone-900" data-i18n="layer2Title">Leather / substrate</h3>
+          <p class="text-stone-600 mt-3 leading-7" data-i18n="layer2Body">Provides bulk and structure. Does not necessarily recover perfectly after repeated bending or compression.</p>
+        </div>
+        <div class="layer-card rounded-[24px] p-5 bg-gradient-to-b from-orange-100 to-orange-50 border border-orange-200 transition-all duration-500">
+          <div class="text-sm font-semibold text-orange-800" data-i18n="layer3Label">Bonding layer</div>
+          <h3 class="text-xl font-black mt-1 text-stone-900" data-i18n="layer3Title">Adhesive</h3>
+          <p class="text-stone-600 mt-3 leading-7" data-i18n="layer3Body">Acts like a shear-transfer layer. Lets layers move a little differently, which can amplify mismatch and set.</p>
+        </div>
+        <div class="layer-card rounded-[24px] p-5 bg-gradient-to-b from-sky-100 to-sky-50 border border-sky-200 transition-all duration-500">
+          <div class="text-sm font-semibold text-sky-800" data-i18n="layer4Label">Bottom side</div>
+          <h3 class="text-xl font-black mt-1 text-stone-900" data-i18n="layer4Title">Release paper</h3>
+          <p class="text-stone-600 mt-3 leading-7" data-i18n="layer4Body">Usually stiffer and less stretchable than the soft top surface, so it resists bending differently.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="glass rounded-[28px] p-6 sm:p-8 mb-8 sm:mb-10 fade-up">
+      <h2 class="text-2xl font-bold text-stone-900" data-i18n="factorsTitle">Three factors that make tight rolling worse</h2>
+      <p class="text-stone-600 mt-1" data-i18n="factorsSubtitle">These factors are additive. Any one alone raises the risk — all three together can cause irreversible damage even at a core diameter that would otherwise be acceptable.</p>
+      <div class="mt-6 grid md:grid-cols-3 gap-5">
+        <div class="rounded-2xl bg-sky-50 border border-sky-200 p-6">
+          <div class="w-10 h-10 rounded-2xl bg-sky-100 flex items-center justify-center mb-4">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-sky-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          </div>
+          <h3 class="text-xl font-black text-stone-900" data-i18n="factor1Title">Storage time</h3>
+          <p class="text-stone-600 mt-3 leading-7" data-i18n="factor1Body">Viscoelastic materials creep: they slowly deform permanently under sustained load. A roll stored for 3 months is far worse than one stored for 1 hour. Once creep sets in the deformation is irreversible. Rolls waiting between production steps in a warehouse are especially at risk because no one checks progress of the damage.</p>
+        </div>
+        <div class="rounded-2xl bg-amber-50 border border-amber-200 p-6">
+          <div class="w-10 h-10 rounded-2xl bg-amber-100 flex items-center justify-center mb-4">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-amber-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/></svg>
+          </div>
+          <h3 class="text-xl font-black text-stone-900" data-i18n="factor2Title">Winding tension</h3>
+          <p class="text-stone-600 mt-3 leading-7" data-i18n="factor2Body">Every outer wrap acts like a clamp on the layers below it. High winding tension adds radial compressive pressure on top of the bending strain from the curved core. This radial pressure peaks at the innermost wraps and grows with each additional layer wound above. A material that could survive the core diameter at low tension may fail when winding tension is high.</p>
+        </div>
+        <div class="rounded-2xl bg-rose-50 border border-rose-200 p-6">
+          <div class="w-10 h-10 rounded-2xl bg-rose-100 flex items-center justify-center mb-4">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-rose-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/></svg>
+          </div>
+          <h3 class="text-xl font-black text-stone-900" data-i18n="factor3Title">Temperature</h3>
+          <p class="text-stone-600 mt-3 leading-7" data-i18n="factor3Body">Warm storage significantly accelerates PSA cold-flow and polymer creep. A roll stored in a summer warehouse without air conditioning can degrade as quickly as one kept at room temperature for twice as long. Cold creates a different risk: the urethane and leather layers become stiffer and more brittle, making surface cracking more likely instead of soft wrinkles.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="grid lg:grid-cols-2 gap-6 mb-8 sm:mb-10">
+      <div class="glass rounded-[28px] p-6 sm:p-8 fade-up">
+        <h2 class="text-2xl font-bold text-stone-900" data-i18n="flattenTitle">What happens after unrolling</h2>
+        <p class="text-stone-600 mt-1" data-i18n="flattenSubtitle">The bigger the stored strain mismatch, the more likely wrinkles become visible when flattened.</p>
+        <div class="mt-6 flatten-stage grid-bg">
+          <div id="sheet" class="sheet wrinkled"></div>
+        </div>
+        <div class="mt-4 flex items-center gap-3 flex-wrap">
+          <button id="toggleFlatten" class="px-5 py-3 rounded-2xl bg-[var(--accent)] text-white font-semibold shadow-lg hover:opacity-90 transition" data-i18n="toggleFlatten">Toggle wrinkle demo</button>
+          <span class="text-sm text-stone-600" data-i18n="flattenArrow">Tighter roll ⟶ higher strain ⟶ more stored mismatch after flattening</span>
+        </div>
+      </div>
+
+      <div class="glass rounded-[28px] p-6 sm:p-8 fade-up">
+        <h2 class="text-2xl font-bold text-stone-900" data-i18n="chartTitle">Risk versus inside diameter</h2>
+        <p class="text-stone-600 mt-1" data-i18n="chartSubtitle">This chart uses the equation above for the selected thickness.</p>
+        <div class="mt-4">
+          <canvas id="strainChart"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <section class="glass rounded-[28px] p-6 sm:p-8 mb-8 sm:mb-10 fade-up">
+      <h2 class="text-2xl font-bold text-stone-900" data-i18n="defectsTitle">What the damage looks like — four defect modes</h2>
+      <p class="text-stone-600 mt-1" data-i18n="defectsSubtitle">Different failure modes appear depending on which factor dominates. All are most severe at the innermost wraps near the core. Identifying the mode helps pinpoint the root cause.</p>
+      <div class="mt-6 grid md:grid-cols-2 gap-4">
+        <div class="rounded-2xl border border-stone-200 bg-white p-5">
+          <div class="inline-flex items-center gap-2 mb-3">
+            <div class="w-2.5 h-2.5 rounded-full bg-orange-400 flex-shrink-0"></div>
+            <span class="text-xs font-bold text-orange-700 uppercase tracking-widest" data-i18n="mode1Label">Mode 1</span>
+          </div>
+          <h3 class="font-bold text-lg text-stone-900" data-i18n="mode1Title">Transverse curl ("banana set")</h3>
+          <p class="text-stone-600 mt-2 leading-7" data-i18n="mode1Body">The unrolled sheet refuses to lie flat and springs back into the shape of the roll. The inner face was compressed and the outer face was stretched throughout storage. After weeks the material stores this curvature permanently. This is the most common complaint from downstream cutting and bonding steps, and is directly caused by the bending-strain mismatch.</p>
+        </div>
+        <div class="rounded-2xl border border-stone-200 bg-white p-5">
+          <div class="inline-flex items-center gap-2 mb-3">
+            <div class="w-2.5 h-2.5 rounded-full bg-red-400 flex-shrink-0"></div>
+            <span class="text-xs font-bold text-red-700 uppercase tracking-widest" data-i18n="mode2Label">Mode 2</span>
+          </div>
+          <h3 class="font-bold text-lg text-stone-900" data-i18n="mode2Title">Tunnel wrinkle (length-direction waves)</h3>
+          <p class="text-stone-600 mt-2 leading-7" data-i18n="mode2Body">Wavelike ridges run along the length of the material — the machine direction. This is caused by lateral buckling under excessive compressive strain. The waves are often visible only once the material is stretched flat under tension and then released, making them easy to overlook during initial unrolling. Tunnel wrinkles are especially common near the edges of narrow rolls.</p>
+        </div>
+        <div class="rounded-2xl border border-stone-200 bg-white p-5">
+          <div class="inline-flex items-center gap-2 mb-3">
+            <div class="w-2.5 h-2.5 rounded-full bg-amber-400 flex-shrink-0"></div>
+            <span class="text-xs font-bold text-amber-700 uppercase tracking-widest" data-i18n="mode3Label">Mode 3</span>
+          </div>
+          <h3 class="font-bold text-lg text-stone-900" data-i18n="mode3Title">PSA edge creep / squeeze-out</h3>
+          <p class="text-stone-600 mt-2 leading-7" data-i18n="mode3Body">Under sustained radial compression the PSA layer migrates toward the side edges over time. After unrolling the edges feel tacky or show visible adhesive build-up. Even if the PSA does not fully squeeze out, the migration creates uneven adhesive thickness. This leads to inconsistent bonding strength or liner delamination at the edges of finished product.</p>
+        </div>
+        <div class="rounded-2xl border border-stone-200 bg-white p-5">
+          <div class="inline-flex items-center gap-2 mb-3">
+            <div class="w-2.5 h-2.5 rounded-full bg-stone-500 flex-shrink-0"></div>
+            <span class="text-xs font-bold text-stone-600 uppercase tracking-widest" data-i18n="mode4Label">Mode 4</span>
+          </div>
+          <h3 class="font-bold text-lg text-stone-900" data-i18n="mode4Title">Inner-wrap surface crush</h3>
+          <p class="text-stone-600 mt-2 leading-7" data-i18n="mode4Body">The decorative grain or texture of the urethane face can be permanently flattened at the innermost wraps, where compressive pressure is highest. The result is a dull, glossy, or compressed-looking patch compared to the undamaged remainder of the roll. This is typically confined to the first few wraps near the core and is not recoverable by any subsequent process.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="glass rounded-[28px] p-6 sm:p-8 mb-8 sm:mb-10 fade-up">
+      <div class="flex items-center justify-between gap-4 flex-wrap">
+        <div>
+          <h2 class="text-2xl font-bold text-stone-900" data-i18n="presentationTitle">Presentation-ready explanation</h2>
+          <p class="text-stone-600 mt-1" data-i18n="presentationSubtitle">You can copy these points into your slides almost as-is.</p>
+        </div>
+      </div>
+
+      <div class="mt-6 grid md:grid-cols-2 gap-4">
+        <div class="rounded-2xl border border-stone-200 bg-white p-5">
+          <h3 class="font-bold text-lg" data-i18n="technicalTitle">Technical message</h3>
+          <p class="text-stone-600 mt-3 leading-7" data-i18n="technicalBody">
+            Wrinkles are not caused by diameter alone. They occur because the laminate is a multilayer system with unequal stiffness and recovery. Tight rolling increases surface strain at the innermost wraps. When the material is later flattened, the layers recover unevenly and visible wrinkles can remain.
+          </p>
+        </div>
+        <div class="rounded-2xl border border-stone-200 bg-white p-5">
+          <h3 class="font-bold text-lg" data-i18n="managementMessageTitle">Management message</h3>
+          <p class="text-stone-600 mt-3 leading-7" data-i18n="managementMessageBody">
+            If the roll core is too small, product quality risk increases. A larger inside diameter reduces bending strain, lowers deformation memory, and helps protect flatness after unrolling. This is why minimum inside diameter should be controlled as a process condition, not treated as arbitrary packing preference.
+          </p>
+        </div>
+      </div>
+
+      <div class="mt-5 rounded-2xl border border-stone-200 overflow-hidden">
+        <div class="bg-stone-50 px-5 py-3 border-b border-stone-200">
+          <h3 class="font-bold text-base text-stone-900" data-i18n="practicalGuideTitle">Practical minimum inside diameter guide</h3>
+          <p class="text-xs text-stone-500 mt-0.5" data-i18n="practicalGuideBody">Based on ε = t / (2R). Use these as starting estimates — validate by trial roll on your actual material and measure with your specific layer stack.</p>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="bg-stone-100 text-stone-700">
+                <th class="text-left px-5 py-3 font-bold" data-i18n="tableRiskLevel">Risk level</th>
+                <th class="text-left px-5 py-3 font-bold" data-i18n="tableSurfaceStrain">Surface strain</th>
+                <th class="text-left px-5 py-3 font-bold" data-i18n="tableDiameterRule">Minimum diameter rule</th>
+                <th class="text-left px-5 py-3 font-bold" data-i18n="tableExample">Example (3 mm laminate)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="border-t border-stone-200">
+                <td class="px-5 py-3 font-semibold text-emerald-700" data-i18n="tableSafe">Safe</td>
+                <td class="px-5 py-3 text-stone-600">ε &lt; 0.5%</td>
+                <td class="px-5 py-3 text-stone-600">D &gt; 200 × t</td>
+                <td class="px-5 py-3 text-stone-600">D &gt; 600 mm</td>
+              </tr>
+              <tr class="border-t border-stone-200 bg-stone-50">
+                <td class="px-5 py-3 font-semibold text-amber-700" data-i18n="tableBorderline">Borderline</td>
+                <td class="px-5 py-3 text-stone-600">0.5% – 1.5%</td>
+                <td class="px-5 py-3 text-stone-600">D = 100–200 × t</td>
+                <td class="px-5 py-3 text-stone-600">D = 300–600 mm</td>
+              </tr>
+              <tr class="border-t border-stone-200">
+                <td class="px-5 py-3 font-semibold text-red-700" data-i18n="tableHighRisk">High risk</td>
+                <td class="px-5 py-3 text-stone-600">ε &gt; 1.5%</td>
+                <td class="px-5 py-3 text-stone-600">D &lt; 100 × t</td>
+                <td class="px-5 py-3 text-stone-600">D &lt; 300 mm</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="mt-5 rounded-[24px] bg-stone-900 p-5 sm:p-6 text-stone-50">
+        <h3 class="font-bold text-xl" data-i18n="currentExampleTitle">For your current example</h3>
+        <p id="summaryParagraph" class="mt-3 text-stone-300 leading-8">
+          With total thickness set to 3.0 mm, an inside diameter of 300 mm gives a strain of 1.00%. Based on this simplified mechanics model, the current setup is in the borderline zone. Increasing inside diameter lowers bending strain and improves the chance of smooth flattening.
+        </p>
+      </div>
+    </section>
+
+    <section class="glass rounded-[28px] p-6 sm:p-8 fade-up">
+      <h2 class="text-2xl font-bold text-stone-900" data-i18n="notesTitle">Notes and assumptions</h2>
+      <div class="mt-5 grid md:grid-cols-2 gap-4 text-stone-600">
+        <div class="rounded-2xl bg-stone-50 border border-stone-200 p-5">
+          <p class="leading-7" data-i18n="notesBody1" data-i18n-html>
+            This page uses the standard surface bending-strain relation <span class="eq">ε = t / (2R)</span> as a simplified engineering model. It is useful for explaining trend and risk, but the real wrinkle threshold also depends on winding tension, storage time, temperature, moisture, layer stiffness, and coating hardness.
+          </p>
+        </div>
+        <div class="rounded-2xl bg-stone-50 border border-stone-200 p-5">
+          <p class="leading-7" data-i18n="notesBody2">
+            So the calculation should be presented as a practical decision tool: smaller inside diameter means higher strain and higher wrinkle risk. Exact acceptable limits should still be validated by trial rolls and flattening tests on the real production material.
+          </p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    const diameterSlider = document.getElementById('diameterSlider');
+    const thicknessSlider = document.getElementById('thicknessSlider');
+    const diameterValue = document.getElementById('diameterValue');
+    const thicknessValue = document.getElementById('thicknessValue');
+    const radiusValue = document.getElementById('radiusValue');
+    const strainValue = document.getElementById('strainValue');
+    const riskText = document.getElementById('riskText');
+    const riskBadge = document.getElementById('riskBadge');
+    const compressionZone = document.querySelector('.compression-zone');
+    const tensionZone = document.querySelector('.tension-zone');
+    const roll = document.getElementById('roll');
+    const core = document.getElementById('core');
+    const summaryParagraph = document.getElementById('summaryParagraph');
+    const sheet = document.getElementById('sheet');
+    const unrollStage = document.getElementById('unrollStage');
+    const unrollRollVisual = document.getElementById('unrollRollVisual');
+    const unrollCore = document.getElementById('unrollCore');
+    const unrollRiskRing = document.getElementById('unrollRiskRing');
+    const unrollPulse = document.getElementById('unrollPulse');
+    const playUnroll = document.getElementById('playUnroll');
+    const unrollDiameter = document.getElementById('unrollDiameter');
+    const unrollThickness = document.getElementById('unrollThickness');
+    const unrollOutcome = document.getElementById('unrollOutcome');
+    const probabilityValue = document.getElementById('probabilityValue');
+    const probabilityLabel = document.getElementById('probabilityLabel');
+    const probabilityBar = document.getElementById('probabilityBar');
+    const probabilityNarrative = document.getElementById('probabilityNarrative');
+    const langJa = document.getElementById('langJa');
+    const langEn = document.getElementById('langEn');
+
+    const ctx = document.getElementById('strainChart').getContext('2d');
+    let strainChart;
+    let unrollReplayTimer;
+    let currentLocale = 'ja';
+
+    const translations = {
+      ja: {
+        static: {
+          pageTitle: 'PU + レザー巻径シワ解析',
+          heroBadge: '管理向けアニメーション説明',
+          heroTitle: 'なぜ小径コアで巻くと <span class="text-[var(--accent)]">PU + レザー + PSA + 剥離紙</span> にシワが出るのか',
+          heroIntro: 'このページでは、材料の挙動、ひずみ計算、そして最内周の巻径がなぜ重要かを視覚的に説明します。管理層へそのまま提示できる構成にしています。',
+          heroPillCompression: '内層は圧縮',
+          heroPillTension: '外層は引張',
+          heroPillEquation: '基本式: ε = t / 2R',
+          interactiveTitle: '巻回モデル',
+          interactiveSubtitle: '巻き内径を変えると、曲げひずみがどう変化するかをすぐに確認できます。',
+          diameterLabel: '巻き内径',
+          thicknessLabel: 'ラミネート総厚み',
+          radiusLabel: '半径',
+          strainLabel: 'ひずみ',
+          estimatedRiskLabel: '推定リスク',
+          equationTitle: '計算式',
+          equationBody: 'ここで <strong>ε</strong> は表面曲げひずみ、<strong>t</strong> はラミネート総厚み、<strong>R</strong> は内側の曲げ半径です。内径が小さいほど、最内周のひずみは大きくなります。',
+          compressionZoneLabel: '内層は圧縮',
+          tensionZoneLabel: '外層は引張',
+          managementTitle: '管理層が理解すべきポイント',
+          mgmtCard1Title: '1) 合成皮革 / レザーの挙動',
+          mgmtCard1Body: 'レザー系材料は完全弾性体ではありません。繊維質あるいは複合材に近い挙動を示し、曲げ後に均一には戻りません。そのため長時間巻かれると変形の記憶を持ちやすく、特に最内周の圧縮側でその影響が強く出ます。',
+          mgmtCard2Title: '2) ウレタン層の挙動',
+          mgmtCard2Body: 'ウレタンは柔らかい一方で粘弾性体でもあります。つまり荷重下でゆっくり変形し、ひずみを保持し、回復も完全ではありません。ロールでは内側が圧縮、外側が引張になります。時間が経つと内側の圧縮領域が座屈したり、形状記憶のような残留変形を持ちます。',
+          mgmtCard3Title: '3) 剥離紙と接着層の挙動',
+          mgmtCard3Body: '剥離紙は一般に柔らかいウレタン面より剛性が高く、接着層はせん断を受け持つ中間層として働きます。このためラミネートは非対称になります。各層が同じようには曲がらないため内部応力が偏り、カール、セット、シワのリスクが上がります。',
+          mgmtCard4Title: '4) 全層を積層すると',
+          mgmtCard4Body: 'この積層体は多層複合材として振る舞います。各層で剛性も回復挙動も異なるため、きつく巻いたとき最内周が最も大きい圧縮ひずみを受けます。開反後に各層が別々の速度で戻ろうとすると、その差がシワやうねりとして表面に現れます。',
+          mgmtCard5Title: '5) 持続圧力による PSA のコールドフロー',
+          mgmtCard5Body: 'PSA は軽い圧力で追従し接着するよう設計されていますが、その性質がロール内では逆に働きます。きつく巻くと PSA 層は何時間も何日も圧縮とせん断を受け続けます。熱がなくても PSA はコールドフローを起こし、横方向へゆっくり移動して永久変形します。いったんずれると周辺層との位置関係が崩れ、開反後に均一な接着状態へ戻れず、永久的なうねりや局所的な接着不良の原因になります。これは曲げひずみとは別に重なる PSA 特有の不良メカニズムです。',
+          unrollTitle: '開反時のリスクアニメーション',
+          unrollSubtitle: 'このカードは工学計算を直感的な見え方に変えます。コアが小さいほど、またラミネートが厚いほど、開いた後の赤いシワ危険帯が大きくなります。',
+          playUnroll: 'もう一度アニメーション',
+          unrollBadge: '<span class="w-2.5 h-2.5 rounded-full bg-red-400"></span>最内周が先に開く',
+          unrollLegend: '赤い部分 = 平坦化後のシワ発生確率が高い領域',
+          unrollBefore: '開く前',
+          unrollAfter: '開いた後',
+          unrollAfterNote: 'コアから最初に出るシートほど、ダメージの記憶を強く持ちます。',
+          unrollInsideDiameter: '巻き内径',
+          unrollLaminateThickness: 'ラミネート厚み',
+          unrollOpeningResult: '開反結果',
+          probabilityTitle: '推定シワ確率',
+          howReadTitle: 'このカードの見方',
+          howRead1: '左側のロールは、いま選択している巻き内径をそのまま表しています。内径が小さいほど、コアでの曲げはきつくなります。',
+          howRead2: 'シートの厚みも現在の設定に連動しています。同じコア径でも、ラミネートが厚いほどひずみは大きくなります。',
+          howRead3: '赤いアニメーション帯は、開反後に見えるシワ記憶が最も出やすい領域です。赤が大きいほど、管理上の品質リスクが高いと考えてください。',
+          layerTitle: '層構成の見え方',
+          layerSubtitle: 'ラミネートの積層を、説明用にシンプルに表した図です。',
+          playLayers: '層アニメーション再生',
+          layer1Label: '表面層',
+          layer1Title: 'PU / ウレタン',
+          layer1Body: '柔軟で手触りは良いですが、粘弾性を持つため、曲げた状態で保管されると形状を記憶しやすい層です。',
+          layer2Label: '主構造',
+          layer2Title: 'レザー / 基材',
+          layer2Body: '全体の厚みと構造を担います。繰り返しの曲げや圧縮を受けると、必ずしも完全には元に戻りません。',
+          layer3Label: '接合層',
+          layer3Title: '接着剤',
+          layer3Body: 'せん断を伝える層として働きます。各層の戻り方の差を吸収しきれず、ミスマッチやセットを増幅することがあります。',
+          layer4Label: '裏面',
+          layer4Title: '剥離紙',
+          layer4Body: '通常は柔らかい表面層よりも伸びにくく、曲がり方の違いがラミネート全体の非対称性を強めます。',
+          factorsTitle: '小径巻きで悪化する 3 つの要因',
+          factorsSubtitle: 'これらは足し算で効いてきます。1 つでもリスクを押し上げ、3 つ重なると本来許容できるコア径でも不可逆なダメージにつながります。',
+          factor1Title: '保管時間',
+          factor1Body: '粘弾性材料はクリープするため、荷重を受け続けるとゆっくり永久変形します。1 時間だけ巻いたロールより、3 か月保管したロールの方がはるかに危険です。工程待ちで倉庫に置かれるロールは、気づかないうちに不良が進行しやすい状態です。',
+          factor2Title: '巻きテンション',
+          factor2Body: '外側の各巻は、内側の層を締め付けるクランプのように働きます。高い巻きテンションは、コア曲率による曲げひずみに加えて半径方向の圧縮圧力を与えます。この圧力は最内周で最大になり、上に重なる巻数が増えるほど強くなります。低テンションなら耐えられる条件でも、高テンションでは不良化する可能性があります。',
+          factor3Title: '温度',
+          factor3Body: '高温保管は PSA のコールドフローとポリマーのクリープを大きく加速します。夏場の空調のない倉庫では、室温保管の倍近いスピードで劣化が進むことがあります。逆に低温ではウレタンやレザーが硬く脆くなり、柔らかいシワではなく表面クラックのリスクが高まります。',
+          flattenTitle: '開反後に何が起きるか',
+          flattenSubtitle: '保持されたひずみのミスマッチが大きいほど、平らにしたときシワが見えやすくなります。',
+          toggleFlatten: 'シワ表示を切替',
+          flattenArrow: '巻きがきつい → ひずみが大きい → 平坦化後の残留ミスマッチが増える',
+          chartTitle: '内径とリスクの関係',
+          chartSubtitle: 'このグラフは、選択した厚みに対して上の式を使って計算しています。',
+          defectsTitle: '実際に見える不良 4 パターン',
+          defectsSubtitle: '支配要因によって現れ方は変わりますが、どのモードも最内周付近で最も強く出ます。不良の見え方を分けて考えると、原因の切り分けがしやすくなります。',
+          mode1Label: '不良 1',
+          mode1Title: '横方向カール（バナナセット）',
+          mode1Body: '開いたシートが平らにならず、ロール形状に戻ろうとします。保管中ずっと内面は圧縮、外面は引張を受けていたため、数週間でこの曲率を永久記憶します。後工程の裁断や貼り合わせで最も多く問題になる代表的な不良です。',
+          mode2Label: '不良 2',
+          mode2Title: 'トンネルシワ（長手方向の波）',
+          mode2Body: '材料の長手方向に波状の盛り上がりが出るモードです。過大な圧縮ひずみによる横座屈が原因で、引っ張って一見平らに見えてもテンションを抜くと再び現れることがあります。細幅ロールの端部で出やすい不良です。',
+          mode3Label: '不良 3',
+          mode3Title: 'PSA の端部流れ / はみ出し',
+          mode3Body: '持続的な半径方向圧縮により、PSA 層が時間とともに側端へ移動します。開反後に端部がベタついたり、接着剤の盛り上がりが見える場合があります。完全にはみ出さなくても厚みが不均一になるため、最終製品で接着強度ばらつきやライナー剥離不良につながります。',
+          mode4Label: '不良 4',
+          mode4Title: '最内周の表面つぶれ',
+          mode4Body: '最内周では圧縮圧力が最も高いため、ウレタン表面のシボや意匠が永久的につぶれることがあります。周囲より光沢が強い、艶が抜ける、押しつぶされたように見えるなどの差が出ます。通常はコア近くの数巻に限られ、後工程で回復させることはできません。',
+          presentationTitle: 'そのまま使える説明文',
+          presentationSubtitle: '下の文章は、資料や会議でほぼそのまま使える内容です。',
+          technicalTitle: '技術的な説明',
+          technicalBody: 'シワは単に径が小さいから起きるのではありません。剛性と回復挙動が異なる多層ラミネートであることが本質です。きつく巻くと最内周の表面ひずみが増え、開反後に各層の戻り方がそろわず、結果として目に見えるシワが残ります。',
+          managementMessageTitle: '管理向けの説明',
+          managementMessageBody: 'ロールコアが小さすぎると、製品品質リスクは上がります。内径を大きくすれば曲げひずみが下がり、変形記憶が減り、開反後の平坦性を守りやすくなります。つまり最小内径は、任意の梱包条件ではなく工程条件として管理すべき項目です。',
+          practicalGuideTitle: '実務用 最小内径ガイド',
+          practicalGuideBody: 'ε = t / (2R) を基準にした初期目安です。実際には試験巻きと開反確認を行い、実材料・実構成で妥当性を確認してください。',
+          tableRiskLevel: 'リスク水準',
+          tableSurfaceStrain: '表面ひずみ',
+          tableDiameterRule: '内径の目安',
+          tableExample: '例（3 mm ラミネート）',
+          tableSafe: '安全側',
+          tableBorderline: '境界',
+          tableHighRisk: '高リスク',
+          currentExampleTitle: '現在の設定で見ると',
+          notesTitle: '注記と前提条件',
+          notesBody1: 'このページでは、標準的な表面曲げひずみ式 <span class="eq">ε = t / (2R)</span> を簡易工学モデルとして使っています。傾向とリスクを説明するには有効ですが、実際のシワ限界は巻きテンション、保管時間、温度、水分、各層の剛性、コーティング硬度にも左右されます。',
+          notesBody2: 'したがってこの計算は、内径が小さいほどひずみが大きくなり、シワリスクが上がるという意思決定用の道具として提示してください。正確な許容限界は、実生産材での試験巻きと開反試験で確認する必要があります。',
+          chartDatasetStrain: '曲げひずみ %',
+          chartCurrentSelection: '現在の設定',
+          chartXAxis: '内径 (mm)',
+          chartYAxis: '表面ひずみ (%)'
+        },
+        risk: {
+          high: { label: '高リスク', summaryPhrase: '高リスク領域です' },
+          borderline: { label: '境界', summaryPhrase: '境界領域です' },
+          safe: { label: '比較的安全', summaryPhrase: '比較的安全領域です' }
+        },
+        probability: {
+          high: {
+            label: '赤ゾーン大',
+            narrative: 'コアから最初に出る材料に強い変形記憶が残っています。非技術者向けには、開反後に目視できるカールやシワが出やすい状態と理解してください。',
+            outcome: '大きな赤ゾーン'
+          },
+          medium: {
+            label: '回復が混在',
+            narrative: '一見は開いても、最内周近くには十分なミスマッチが残っており、平坦化後に断続的なうねりやシワ線が出る可能性があります。',
+            outcome: '中程度の赤ゾーン'
+          },
+          low: {
+            label: '比較的スムーズ',
+            narrative: '赤い領域が短く、保管時間や巻きテンションも適切なら、コアから出た後に比較的きれいに回復しやすい状態です。',
+            outcome: '小さな赤ゾーン'
+          }
+        }
+      },
+      en: {
+        static: {
+          pageTitle: 'PU + Leather Roll Diameter Wrinkle Analysis',
+          heroBadge: 'Animated management explanation',
+          heroTitle: 'Why tight rolling can create wrinkles in <span class="text-[var(--accent)]">PU + leather + PSA + release paper</span>',
+          heroIntro: 'This page explains the material behavior, shows the strain calculation, and visualizes why the innermost roll diameter matters most. It is designed so you can present the concept directly to management.',
+          heroPillCompression: 'Compression on inner layers',
+          heroPillTension: 'Tension on outer layers',
+          heroPillEquation: 'Core idea: ε = t / 2R',
+          interactiveTitle: 'Interactive roll model',
+          interactiveSubtitle: 'Adjust the inside diameter and see how bending strain changes.',
+          diameterLabel: 'Inside roll diameter',
+          thicknessLabel: 'Total laminate thickness',
+          radiusLabel: 'Radius',
+          strainLabel: 'Strain',
+          estimatedRiskLabel: 'Estimated risk',
+          equationTitle: 'Working equation',
+          equationBody: 'Where <strong>ε</strong> is surface bending strain, <strong>t</strong> is total laminate thickness, and <strong>R</strong> is the inside bending radius. Smaller inside diameter means higher strain at the innermost wrap.',
+          compressionZoneLabel: 'Compression on inner layers',
+          tensionZoneLabel: 'Tension on outer layers',
+          managementTitle: 'What management needs to understand',
+          mgmtCard1Title: '1) Synthetic leather / leather behavior',
+          mgmtCard1Body: 'Leather-like materials are not perfectly elastic. They are fibrous or composite-like, and they do not recover uniformly after bending. This means they can keep a deformation memory after being wound for long periods, especially under compression on the inner wraps.',
+          mgmtCard2Title: '2) Urethane layer behavior',
+          mgmtCard2Body: 'Urethane is flexible, but it is also viscoelastic. That means it can slowly deform under load, store strain, and recover imperfectly. In a roll, the inner side is compressed while the outer side is stretched. Over time, the inner compressed region can buckle or keep shape memory.',
+          mgmtCard3Title: '3) Release paper + adhesive behavior',
+          mgmtCard3Body: 'Release paper is typically stiffer than the soft urethane surface, while adhesive behaves like a shear layer. This makes the laminate asymmetric. Because the layers do not all bend the same way, internal stress becomes unbalanced, which increases curl, set, and wrinkle risk.',
+          mgmtCard4Title: '4) When all layers are combined',
+          mgmtCard4Body: 'The stack behaves like a multilayer composite. Each layer has different stiffness and recovery behavior. When rolled tightly, the innermost wraps see the highest compressive strain. After unrolling, the layers try to recover differently, and that mismatch can appear as wrinkles or waviness.',
+          mgmtCard5Title: '5) PSA cold-flow under sustained pressure',
+          mgmtCard5Body: 'Pressure-sensitive adhesive (PSA) is specifically designed to conform and bond under light pressure, and that same property works against the roll. When wound tightly, the PSA layer is held under sustained compressive and shear force for hours or days. Even at room temperature and without heat, PSA will cold-flow: it slowly migrates laterally and permanently deforms. Once displaced, the surrounding layers lose their original register. The adhesive cannot fully recover after unrolling, leaving a zone of uneven bonding and layer misalignment that appears as permanent waviness or localized adhesion failure. This is a PSA-specific mechanism on top of, and separate from, the bending-strain problem described above.',
+          unrollTitle: 'Unroll risk animation',
+          unrollSubtitle: 'This card turns the engineering calculation into a simple story: a smaller core and thicker laminate create a larger red wrinkle-prone zone when the material opens.',
+          playUnroll: 'Replay unroll',
+          unrollBadge: '<span class="w-2.5 h-2.5 rounded-full bg-red-400"></span>Inner wraps unroll first',
+          unrollLegend: 'Red area = higher wrinkle probability after flattening',
+          unrollBefore: 'Before opening',
+          unrollAfter: 'After opening',
+          unrollAfterNote: 'The first sheet leaving the core carries the most damage memory.',
+          unrollInsideDiameter: 'Inside diameter',
+          unrollLaminateThickness: 'Laminate thickness',
+          unrollOpeningResult: 'Opening result',
+          probabilityTitle: 'Estimated wrinkle probability',
+          howReadTitle: 'How to read this card',
+          howRead1: 'The roll on the left uses your selected inside diameter. Smaller inside diameter means a tighter bend at the core.',
+          howRead2: 'The sheet thickness also follows your setting. Thicker laminate creates higher strain for the same core diameter.',
+          howRead3: 'The red animated zone marks where visible wrinkle memory is most likely after unrolling. More red means higher risk for management attention.',
+          layerTitle: 'Layer-by-layer structure',
+          layerSubtitle: 'A simple presentation-friendly view of the laminate stack.',
+          playLayers: 'Play layer animation',
+          layer1Label: 'Top surface',
+          layer1Title: 'PU / urethane',
+          layer1Body: 'Flexible and soft-feeling, but viscoelastic. Can keep a shape memory after being bent and stored.',
+          layer2Label: 'Main body',
+          layer2Title: 'Leather / substrate',
+          layer2Body: 'Provides bulk and structure. Does not necessarily recover perfectly after repeated bending or compression.',
+          layer3Label: 'Bonding layer',
+          layer3Title: 'Adhesive',
+          layer3Body: 'Acts like a shear-transfer layer. Lets layers move a little differently, which can amplify mismatch and set.',
+          layer4Label: 'Bottom side',
+          layer4Title: 'Release paper',
+          layer4Body: 'Usually stiffer and less stretchable than the soft top surface, so it resists bending differently.',
+          factorsTitle: 'Three factors that make tight rolling worse',
+          factorsSubtitle: 'These factors are additive. Any one alone raises the risk, and all three together can cause irreversible damage even at a core diameter that would otherwise be acceptable.',
+          factor1Title: 'Storage time',
+          factor1Body: 'Viscoelastic materials creep: they slowly deform permanently under sustained load. A roll stored for 3 months is far worse than one stored for 1 hour. Once creep sets in, the deformation is irreversible. Rolls waiting between production steps in a warehouse are especially at risk because no one checks how the damage is progressing.',
+          factor2Title: 'Winding tension',
+          factor2Body: 'Every outer wrap acts like a clamp on the layers below it. High winding tension adds radial compressive pressure on top of the bending strain from the curved core. This radial pressure peaks at the innermost wraps and grows with each additional layer wound above. A material that could survive the core diameter at low tension may fail when winding tension is high.',
+          factor3Title: 'Temperature',
+          factor3Body: 'Warm storage significantly accelerates PSA cold-flow and polymer creep. A roll stored in a summer warehouse without air conditioning can degrade as quickly as one kept at room temperature for twice as long. Cold creates a different risk: the urethane and leather layers become stiffer and more brittle, making surface cracking more likely instead of soft wrinkles.',
+          flattenTitle: 'What happens after unrolling',
+          flattenSubtitle: 'The bigger the stored strain mismatch, the more likely wrinkles become visible when flattened.',
+          toggleFlatten: 'Toggle wrinkle demo',
+          flattenArrow: 'Tighter roll → higher strain → more stored mismatch after flattening',
+          chartTitle: 'Risk versus inside diameter',
+          chartSubtitle: 'This chart uses the equation above for the selected thickness.',
+          defectsTitle: 'What the damage looks like - four defect modes',
+          defectsSubtitle: 'Different failure modes appear depending on which factor dominates. All are most severe at the innermost wraps near the core. Identifying the mode helps pinpoint the root cause.',
+          mode1Label: 'Mode 1',
+          mode1Title: 'Transverse curl ("banana set")',
+          mode1Body: 'The unrolled sheet refuses to lie flat and springs back into the shape of the roll. The inner face was compressed and the outer face was stretched throughout storage. After weeks the material stores this curvature permanently. This is the most common complaint from downstream cutting and bonding steps, and is directly caused by the bending-strain mismatch.',
+          mode2Label: 'Mode 2',
+          mode2Title: 'Tunnel wrinkle (length-direction waves)',
+          mode2Body: 'Wavelike ridges run along the length of the material, in the machine direction. This is caused by lateral buckling under excessive compressive strain. The waves are often visible only once the material is stretched flat under tension and then released, making them easy to overlook during initial unrolling. Tunnel wrinkles are especially common near the edges of narrow rolls.',
+          mode3Label: 'Mode 3',
+          mode3Title: 'PSA edge creep / squeeze-out',
+          mode3Body: 'Under sustained radial compression the PSA layer migrates toward the side edges over time. After unrolling the edges feel tacky or show visible adhesive build-up. Even if the PSA does not fully squeeze out, the migration creates uneven adhesive thickness. This leads to inconsistent bonding strength or liner delamination at the edges of finished product.',
+          mode4Label: 'Mode 4',
+          mode4Title: 'Inner-wrap surface crush',
+          mode4Body: 'The decorative grain or texture of the urethane face can be permanently flattened at the innermost wraps, where compressive pressure is highest. The result is a dull, glossy, or compressed-looking patch compared to the undamaged remainder of the roll. This is typically confined to the first few wraps near the core and is not recoverable by any subsequent process.',
+          presentationTitle: 'Presentation-ready explanation',
+          presentationSubtitle: 'You can copy these points into your slides almost as-is.',
+          technicalTitle: 'Technical message',
+          technicalBody: 'Wrinkles are not caused by diameter alone. They occur because the laminate is a multilayer system with unequal stiffness and recovery. Tight rolling increases surface strain at the innermost wraps. When the material is later flattened, the layers recover unevenly and visible wrinkles can remain.',
+          managementMessageTitle: 'Management message',
+          managementMessageBody: 'If the roll core is too small, product quality risk increases. A larger inside diameter reduces bending strain, lowers deformation memory, and helps protect flatness after unrolling. This is why minimum inside diameter should be controlled as a process condition, not treated as an arbitrary packing preference.',
+          practicalGuideTitle: 'Practical minimum inside diameter guide',
+          practicalGuideBody: 'Based on ε = t / (2R). Use these as starting estimates, then validate them by trial rolls on your actual material and layer stack.',
+          tableRiskLevel: 'Risk level',
+          tableSurfaceStrain: 'Surface strain',
+          tableDiameterRule: 'Minimum diameter rule',
+          tableExample: 'Example (3 mm laminate)',
+          tableSafe: 'Safe',
+          tableBorderline: 'Borderline',
+          tableHighRisk: 'High risk',
+          currentExampleTitle: 'For your current example',
+          notesTitle: 'Notes and assumptions',
+          notesBody1: 'This page uses the standard surface bending-strain relation <span class="eq">ε = t / (2R)</span> as a simplified engineering model. It is useful for explaining trend and risk, but the real wrinkle threshold also depends on winding tension, storage time, temperature, moisture, layer stiffness, and coating hardness.',
+          notesBody2: 'So the calculation should be presented as a practical decision tool: smaller inside diameter means higher strain and higher wrinkle risk. Exact acceptable limits should still be validated by trial rolls and flattening tests on the real production material.',
+          chartDatasetStrain: 'Bending strain %',
+          chartCurrentSelection: 'Current selection',
+          chartXAxis: 'Inside diameter (mm)',
+          chartYAxis: 'Surface strain (%)'
+        },
+        risk: {
+          high: { label: 'High', summaryPhrase: 'the current setup is in the high-risk zone' },
+          borderline: { label: 'Borderline', summaryPhrase: 'the current setup is in the borderline zone' },
+          safe: { label: 'Safer', summaryPhrase: 'the current setup is in the safer zone' }
+        },
+        probability: {
+          high: {
+            label: 'Red zone dominant',
+            narrative: 'The first material leaving the core is carrying strong deformation memory. Non-engineers should read this as: visible curl or wrinkle marks are likely after unrolling.',
+            outcome: 'Large red zone'
+          },
+          medium: {
+            label: 'Mixed recovery',
+            narrative: 'The laminate may open acceptably at first, but some inner wraps are storing enough mismatch to create intermittent waviness, curl, or wrinkle lines after flattening.',
+            outcome: 'Moderate red zone'
+          },
+          low: {
+            label: 'Mostly smooth',
+            narrative: 'The red zone stays short, meaning the laminate is more likely to recover cleanly when it leaves the core, assuming storage time and winding tension are also controlled.',
+            outcome: 'Small red zone'
+          }
+        }
+      }
+    };
+
+    function getStaticText(key) {
+      return translations[currentLocale].static[key];
+    }
+
+    function applyStaticTranslations() {
+      document.title = getStaticText('pageTitle');
+      document.documentElement.lang = currentLocale;
+
+      document.querySelectorAll('[data-i18n]').forEach((element) => {
+        const key = element.dataset.i18n;
+        const value = getStaticText(key);
+        if (typeof value !== 'string') return;
+
+        if (element.hasAttribute('data-i18n-html')) {
+          element.innerHTML = value;
+        } else {
+          element.textContent = value;
+        }
+      });
+
+      compressionZone.dataset.label = getStaticText('compressionZoneLabel');
+      tensionZone.dataset.label = getStaticText('tensionZoneLabel');
+
+      langJa.classList.toggle('is-active', currentLocale === 'ja');
+      langJa.setAttribute('aria-selected', String(currentLocale === 'ja'));
+      langEn.classList.toggle('is-active', currentLocale === 'en');
+      langEn.setAttribute('aria-selected', String(currentLocale === 'en'));
+    }
+
+    function calcStrainPercent(t, d) {
+      const R = d / 2;
+      return (t / (2 * R)) * 100;
+    }
+
+    function getRisk(strain) {
+      if (strain > 1.5) return { level: 'high', badge: 'bg-red-100 text-red-800' };
+      if (strain > 0.75) return { level: 'borderline', badge: 'bg-orange-100 text-orange-800' };
+      return { level: 'safe', badge: 'bg-emerald-100 text-emerald-800' };
+    }
+
+    function clamp(value, min, max) {
+      return Math.min(max, Math.max(min, value));
+    }
+
+    function calcWrinkleProbability(strain) {
+      return Math.round(clamp(100 / (1 + Math.exp(-4.4 * (strain - 1))), 4, 98));
+    }
+
+    function getProbabilityPresentation(probability) {
+      if (probability >= 75) {
+        return {
+          level: 'high',
+          pill: 'bg-red-100 text-red-800',
+          bar: 'linear-gradient(90deg, #f97316, #ef4444)'
+        };
+      }
+
+      if (probability >= 40) {
+        return {
+          level: 'medium',
+          pill: 'bg-orange-100 text-orange-800',
+          bar: 'linear-gradient(90deg, #f59e0b, #f97316)'
+        };
+      }
+
+      return {
+        level: 'low',
+        pill: 'bg-emerald-100 text-emerald-800',
+        bar: 'linear-gradient(90deg, #34d399, #10b981)'
+      };
+    }
+
+    function updateSummary(d, t, strain, riskLevel) {
+      const riskPhrase = translations[currentLocale].risk[riskLevel].summaryPhrase;
+
+      if (currentLocale === 'ja') {
+        summaryParagraph.innerHTML = '総厚み ' + t.toFixed(1) + ' mm、巻き内径 ' + d.toFixed(0) + ' mm の場合、ひずみは ' + strain.toFixed(2) + '% です。この簡易モデルでは <span class="font-semibold text-stone-50">' + riskPhrase + '</span>。内径を大きくすると曲げひずみが下がり、開反後に平滑性を保ちやすくなります。';
+        return;
+      }
+
+      summaryParagraph.innerHTML = 'With total thickness set to ' + t.toFixed(1) + ' mm and inside diameter at ' + d.toFixed(0) + ' mm, the strain is ' + strain.toFixed(2) + '%. Based on this simplified mechanics model, <span class="font-semibold text-stone-50">' + riskPhrase + '</span>. Increasing inside diameter lowers bending strain and improves the chance of smooth flattening.';
+    }
+
+    function setLocale(locale) {
+      currentLocale = locale;
+      applyStaticTranslations();
+      updateVisualization();
+    }
+
+    function playUnrollAnimation() {
+      unrollStage.classList.remove('is-playing');
+      void unrollStage.offsetWidth;
+      unrollStage.classList.add('is-playing');
+    }
+
+    function scheduleUnrollAnimation() {
+      clearTimeout(unrollReplayTimer);
+      unrollReplayTimer = window.setTimeout(playUnrollAnimation, 140);
+    }
+
+    function updateUnrollCard(d, t, strain) {
+      const probability = calcWrinkleProbability(strain);
+      const presentation = getProbabilityPresentation(probability);
+      const probabilityLocale = translations[currentLocale].probability[presentation.level];
+      const sheetHeight = 34 + ((t - 0.5) / 4.5) * 48;
+      const corePx = 46 + ((d - 100) / 700) * 56;
+      const damageWidth = clamp(12 + probability * 0.58, 12, 72);
+      const damageAlpha = clamp(0.16 + probability / 140, 0.16, 0.86);
+      const softAlpha = clamp(damageAlpha - 0.14, 0.12, 0.72);
+      const ringAlpha = clamp(0.22 + probability / 170, 0.22, 0.78);
+      const pulseLeft = clamp(damageWidth - 8, 12, 76);
+
+      unrollDiameter.textContent = d.toFixed(0);
+      unrollThickness.textContent = t.toFixed(1);
+  unrollOutcome.textContent = probabilityLocale.outcome;
+
+      unrollCore.style.width = corePx + 'px';
+      unrollCore.style.height = corePx + 'px';
+      unrollStage.style.setProperty('--sheet-height', sheetHeight + 'px');
+      unrollStage.style.setProperty('--damage-width', damageWidth + '%');
+      unrollStage.style.setProperty('--damage-alpha', damageAlpha.toFixed(2));
+      unrollStage.style.setProperty('--damage-soft-alpha', softAlpha.toFixed(2));
+      unrollStage.style.setProperty('--ring-alpha', ringAlpha.toFixed(2));
+
+      unrollPulse.style.left = pulseLeft + '%';
+      unrollPulse.style.opacity = clamp(probability / 120, 0.12, 0.88).toFixed(2);
+      unrollRiskRing.style.boxShadow = '0 0 ' + (16 + probability / 4).toFixed(0) + 'px rgba(239,68,68,' + clamp(ringAlpha + 0.06, 0.2, 0.45).toFixed(2) + ')';
+      unrollRollVisual.style.transform = 'scale(' + (1 + clamp((t - 2.5) / 35, -0.02, 0.08)).toFixed(3) + ')';
+
+      probabilityValue.textContent = probability + '%';
+      probabilityLabel.textContent = probabilityLocale.label;
+      probabilityLabel.className = 'pill ' + presentation.pill;
+      probabilityBar.style.width = probability + '%';
+      probabilityBar.style.background = presentation.bar;
+      probabilityNarrative.textContent = probabilityLocale.narrative;
+    }
+
+    function updateVisualization() {
+      const d = parseFloat(diameterSlider.value);
+      const t = parseFloat(thicknessSlider.value);
+      const R = d / 2;
+      const strain = calcStrainPercent(t, d);
+      const risk = getRisk(strain);
+      const riskLocale = translations[currentLocale].risk[risk.level];
+
+      diameterValue.textContent = d.toFixed(0);
+      thicknessValue.textContent = t.toFixed(1);
+      radiusValue.textContent = R.toFixed(0);
+      strainValue.textContent = strain.toFixed(2);
+      riskText.textContent = riskLocale.label;
+      riskBadge.textContent = riskLocale.label;
+      riskBadge.className = 'pill ' + risk.badge;
+
+      updateSummary(d, t, strain, risk.level);
+
+      const corePx = 80 + ((d - 100) / 700) * 200;
+      core.style.width = corePx + 'px';
+      core.style.height = corePx + 'px';
+
+      if (strain > 0.75) {
+        sheet.classList.add('wrinkled');
+        sheet.classList.remove('smooth');
+      } else {
+        sheet.classList.add('smooth');
+        sheet.classList.remove('wrinkled');
+      }
+
+      updateUnrollCard(d, t, strain);
+      scheduleUnrollAnimation();
+      updateChart(t, d);
+    }
+
+    function buildDataset(thickness) {
+      const diameters = [100, 150, 200, 250, 300, 400, 500, 600, 700, 800];
+      return {
+        labels: diameters,
+        data: diameters.map(d => calcStrainPercent(thickness, d))
+      };
+    }
+
+    function updateChart(thickness, currentDiameter) {
+      const dataset = buildDataset(thickness);
+      const staticText = translations[currentLocale].static;
+
+      if (!strainChart) {
+        strainChart = new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: dataset.labels,
+            datasets: [
+              {
+                label: staticText.chartDatasetStrain,
+                data: dataset.data,
+                borderWidth: 3,
+                tension: 0.25,
+                pointRadius: 4,
+                fill: false
+              },
+              {
+                label: staticText.chartCurrentSelection,
+                data: dataset.labels.map(d => d === Math.round(currentDiameter) ? calcStrainPercent(thickness, currentDiameter) : null),
+                type: 'scatter',
+                pointRadius: 7
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: {
+                labels: { usePointStyle: true }
+              },
+              tooltip: {
+                callbacks: {
+                  label: function(context) {
+                    return context.dataset.label + ': ' + Number(context.raw).toFixed(2) + '%';
+                  }
+                }
+              }
+            },
+            scales: {
+              x: {
+                title: { display: true, text: staticText.chartXAxis }
+              },
+              y: {
+                title: { display: true, text: staticText.chartYAxis },
+                suggestedMin: 0,
+                suggestedMax: 3.5
+              }
+            }
+          }
+        });
+      } else {
+        strainChart.data.labels = dataset.labels;
+        strainChart.data.datasets[0].label = staticText.chartDatasetStrain;
+        strainChart.data.datasets[0].data = dataset.data;
+        strainChart.data.datasets[1].label = staticText.chartCurrentSelection;
+        strainChart.data.datasets[1].data = dataset.labels.map(d => d === Math.round(currentDiameter) ? calcStrainPercent(thickness, currentDiameter) : null);
+        strainChart.options.scales.x.title.text = staticText.chartXAxis;
+        strainChart.options.scales.y.title.text = staticText.chartYAxis;
+        strainChart.update();
+      }
+    }
+
+    diameterSlider.addEventListener('input', updateVisualization);
+    thicknessSlider.addEventListener('input', updateVisualization);
+
+    document.getElementById('toggleFlatten').addEventListener('click', () => {
+      sheet.classList.toggle('wrinkled');
+      sheet.classList.toggle('smooth');
+    });
+
+    playUnroll.addEventListener('click', playUnrollAnimation);
+    langJa.addEventListener('click', () => setLocale('ja'));
+    langEn.addEventListener('click', () => setLocale('en'));
+
+    document.getElementById('playLayers').addEventListener('click', () => {
+      const cards = [...document.querySelectorAll('.layer-card')];
+      cards.forEach((card, i) => {
+        setTimeout(() => {
+          card.style.transform = 'translateY(-10px) scale(1.02)';
+          card.style.boxShadow = '0 16px 32px rgba(0,0,0,0.08)';
+          setTimeout(() => {
+            card.style.transform = 'translateY(0px) scale(1)';
+            card.style.boxShadow = 'none';
+          }, 500);
+        }, i * 220);
+      });
+    });
+
+    setLocale('ja');
+  </script>
+</body>
+</html>

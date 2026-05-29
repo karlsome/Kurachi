@@ -20,15 +20,17 @@ const path = require('path');
 const fs = require('fs');
 const { extractGENTokens } = require('./gen-token-extractor');
 const fetch = require('node-fetch');
+const heicConvert = require('heic-convert');
 const https = require('https');
 const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 
 const app = express();
 const port = 3000;
+const REQUEST_BODY_LIMIT = '100mb';
 
 app.use(cors());
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+app.use(express.json({ limit: REQUEST_BODY_LIMIT }));
+app.use(express.urlencoded({ limit: REQUEST_BODY_LIMIT, extended: true }));
 
 // ============================================
 // SSE (Server-Sent Events) Setup
@@ -528,6 +530,7 @@ app.post("/api/broadcast-scan", async (req, res) => {
       // Extract 工場 and sessionID from additionalData
       const 工場 = additionalData?.工場 || additionalData?.factory || '';
       const sessionID = additionalData?.sessionID || '';
+      const Worker_Name = additionalData?.Worker_Name || additionalData?.workerName || additionalData?.worker || '';
       const cleanedAdditionalData = { ...additionalData };
       delete cleanedAdditionalData.工場;
       delete cleanedAdditionalData.factory;
@@ -542,6 +545,7 @@ app.post("/api/broadcast-scan", async (req, res) => {
           工場: 工場,
           設備: normalizedMachineId,
           設備_原形式: machineId.toUpperCase(), // Keep original format (e.g., "OZNC04,OZNC06")
+          Worker_Name,
           Action: 'Scanned kanban (Step 1)',
           Status: 'in-progress',
           Timestamp: currentDate.toISOString(), // ISO string format
@@ -683,87 +687,269 @@ app.get("/api/creatomate/renders/:id", async (req, res) => {
 });
 
 // API endpoint to insert tablet action logs
+function isTabletLogSetupAction(action = '') {
+  const setupActions = ['Kensa mode checkbox toggled', 'Break time', 'Reset'];
+  return setupActions.some(setupAction => String(action || '').includes(setupAction));
+}
+
+function resolveTabletLogEventTimestamp(clientTimestamp) {
+  if (!clientTimestamp) {
+    return new Date();
+  }
+
+  const parsedTimestamp = new Date(clientTimestamp);
+  if (Number.isNaN(parsedTimestamp.getTime())) {
+    return new Date();
+  }
+
+  return parsedTimestamp;
+}
+
+async function prepareTabletLogEntry(tabletLogDB, payload = {}, sessionOperatorMap = null) {
+  const {
+    背番号,
+    品番,
+    工場,
+    設備,
+    Action,
+    Status,
+    sessionID,
+    AdditionalData,
+    Worker_Name: requestWorkerName,
+    ClientTimestamp,
+    ClientLogID,
+  } = payload;
+
+  let Worker_Name = requestWorkerName
+    || AdditionalData?.Worker_Name
+    || AdditionalData?.workerName
+    || AdditionalData?.worker
+    || AdditionalData?.inspectorName
+    || '';
+
+  if (!設備 || !Action) {
+    return {
+      success: false,
+      retriable: false,
+      error: '設備 and Action are required',
+      action: Action,
+      設備,
+    };
+  }
+
+  if (!背番号 && !isTabletLogSetupAction(Action)) {
+    return {
+      success: false,
+      retriable: false,
+      error: '背番号 is required for this action',
+      action: Action,
+      設備,
+    };
+  }
+
+  if (!sessionID) {
+    return {
+      success: false,
+      retriable: false,
+      error: 'sessionID is required. Frontend must generate and provide sessionID.',
+      action: Action,
+      設備,
+    };
+  }
+
+  const normalizedSessionID = normalizeFactoryStatusText(sessionID);
+
+  if (!Worker_Name && normalizedSessionID) {
+    if (sessionOperatorMap?.has(normalizedSessionID)) {
+      Worker_Name = sessionOperatorMap.get(normalizedSessionID) || '';
+    } else {
+      const { operatorMap } = await collectFactoryStatusSessionOperators(tabletLogDB, [normalizedSessionID]);
+      Worker_Name = operatorMap.get(normalizedSessionID) || '';
+    }
+  }
+
+  Worker_Name = normalizeFactoryStatusText(Worker_Name);
+
+  const eventTimestamp = resolveTabletLogEventTimestamp(ClientTimestamp);
+  const jstDate = new Date(eventTimestamp.getTime() + (9 * 60 * 60 * 1000));
+
+  const logEntry = {
+    sessionID: normalizedSessionID,
+    背番号: 背番号 || '',
+    品番: 品番 || '',
+    工場: 工場 || '',
+    設備: 設備 || '',
+    Worker_Name,
+    Action,
+    Status: Status || 'in-progress',
+    Timestamp: eventTimestamp.toISOString(),
+    Date: jstDate.toISOString().split('T')[0],
+    Time: jstDate.toISOString().split('T')[1].split('.')[0],
+    AdditionalData: AdditionalData || {},
+    ...(ClientLogID ? { ClientLogID } : {}),
+  };
+
+  return {
+    success: true,
+    logEntry,
+    broadcastPayload: {
+      type: 'in_progress_update',
+      collection: 'tabletLogDB',
+      equipment: 設備,
+      sebanggo: 背番号 || '',
+      hinban: 品番 || '',
+      workerName: Worker_Name,
+      action: Action,
+      status: Status || 'in-progress',
+      sessionID: normalizedSessionID,
+      timestamp: eventTimestamp.toISOString(),
+    },
+  };
+}
+
+async function insertPreparedTabletLog(tabletLogDB, preparedLog) {
+  const clientLogID = preparedLog.logEntry?.ClientLogID || '';
+
+  if (clientLogID) {
+    const existingLog = await tabletLogDB.findOne(
+      { ClientLogID: clientLogID },
+      { projection: { _id: 1 } }
+    );
+
+    if (existingLog) {
+      return {
+        insertedId: existingLog._id,
+        duplicate: true,
+      };
+    }
+  }
+
+  const result = await tabletLogDB.insertOne(preparedLog.logEntry);
+  return {
+    insertedId: result.insertedId,
+    duplicate: false,
+  };
+}
+
 app.post("/api/tablet-log", async (req, res) => {
   try {
-    const { 背番号, 品番, 工場, 設備, Action, Status, sessionID, AdditionalData } = req.body;
-    
-    // Validate required fields - 設備 and Action are always required
-    if (!設備 || !Action) {
-      return res.status(400).json({ error: "設備 and Action are required" });
-    }
-    
-    // 背番号 is required for most actions, but not for setup actions
-    const setupActions = ['Kensa mode checkbox toggled', 'Break time', 'Reset'];
-    const isSetupAction = setupActions.some(setupAction => Action.includes(setupAction));
-    
-    if (!背番号 && !isSetupAction) {
-      return res.status(400).json({ error: "背番号 is required for this action" });
-    }
-    
-    // ✅ STRICT REQUIREMENT: sessionID must be provided by frontend
-    if (!sessionID) {
-      console.error(`❌ REJECTED: No sessionID provided for action: ${Action}`);
-      return res.status(400).json({ 
-        error: "sessionID is required. Frontend must generate and provide sessionID.",
-        action: Action,
-        設備: 設備
-      });
-    }
-    
     await client.connect();
     const database = client.db("submittedDB");
     const tabletLogDB = database.collection("tabletLogDB");
-    
-    const currentDate = new Date();
-    
-    // Convert to JST (UTC+9) for Date and Time fields
-    const jstDate = new Date(currentDate.getTime() + (9 * 60 * 60 * 1000));
-    const dateYYYYMMDD = jstDate.toISOString().split('T')[0]; // yyyy-mm-dd in JST
-    const timeHHMMSS = jstDate.toISOString().split('T')[1].split('.')[0]; // HH:mm:ss in JST
-    
-    const logEntry = {
-      sessionID: sessionID,
-      背番号: 背番号 || '',
-      品番: 品番 || '',
-      工場: 工場 || '',
-      設備: 設備 || '',
-      Action: Action,
-      Status: Status || 'in-progress',
-      Timestamp: currentDate.toISOString(), // ISO string format in UTC (for consistency)
-      Date: dateYYYYMMDD, // yyyy-mm-dd in JST
-      Time: timeHHMMSS, // HH:mm:ss in JST
-      AdditionalData: AdditionalData || {}
-    };
-    
-    const result = await tabletLogDB.insertOne(logEntry);
-    
-    console.log(`📝 Tablet log inserted: ${背番号} - ${Action} (Session: ${sessionID})`);
-    
-    // Broadcast to factory TV via SSE for in-progress updates
-    if (工場) {
-      broadcastToFactory(工場, {
-        type: 'in_progress_update',
-        collection: 'tabletLogDB',
-        equipment: 設備,
-        sebanggo: 背番号,
-        hinban: 品番,
-        action: Action,
-        status: Status,
-        sessionID: sessionID,
-        timestamp: currentDate.toISOString()
+
+    const preparedLog = await prepareTabletLogEntry(tabletLogDB, req.body);
+
+    if (!preparedLog.success) {
+      if (!req.body?.sessionID) {
+        console.error(`❌ REJECTED: No sessionID provided for action: ${preparedLog.action || req.body?.Action || ''}`);
+      }
+
+      return res.status(400).json({
+        error: preparedLog.error,
+        action: preparedLog.action || req.body?.Action || '',
+        設備: preparedLog.設備 || req.body?.設備 || '',
       });
     }
-    
+
+    const insertResult = await insertPreparedTabletLog(tabletLogDB, preparedLog);
+    const { logEntry, broadcastPayload } = preparedLog;
+
+    console.log(`📝 Tablet log ${insertResult.duplicate ? 'deduplicated' : 'inserted'}: ${logEntry.背番号} - ${logEntry.Action} (Session: ${logEntry.sessionID})`);
+
+    if (!insertResult.duplicate && logEntry.工場) {
+      broadcastToFactory(logEntry.工場, broadcastPayload);
+    }
+
     res.json({
       success: true,
-      message: "Tablet log inserted successfully",
-      insertedId: result.insertedId
+      message: insertResult.duplicate ? "Tablet log already recorded" : "Tablet log inserted successfully",
+      insertedId: insertResult.insertedId,
+      duplicate: insertResult.duplicate,
     });
   } catch (error) {
     console.error("❌ Error inserting tablet log:", error);
     res.status(500).json({ 
       error: "Error inserting tablet log", 
       details: error.message 
+    });
+  }
+});
+
+app.post("/api/tablet-log/batch", async (req, res) => {
+  try {
+    const logs = Array.isArray(req.body?.logs) ? req.body.logs : [];
+
+    if (logs.length === 0) {
+      return res.status(400).json({ error: 'logs array is required' });
+    }
+
+    await client.connect();
+    const database = client.db("submittedDB");
+    const tabletLogDB = database.collection("tabletLogDB");
+
+    const sessionIDs = [...new Set(
+      logs
+        .map(log => normalizeFactoryStatusText(log?.sessionID))
+        .filter(Boolean)
+    )];
+
+    const { operatorMap } = sessionIDs.length > 0
+      ? await collectFactoryStatusSessionOperators(tabletLogDB, sessionIDs)
+      : { operatorMap: new Map() };
+
+    const results = [];
+    let insertedCount = 0;
+    let duplicateCount = 0;
+
+    for (let index = 0; index < logs.length; index += 1) {
+      const preparedLog = await prepareTabletLogEntry(tabletLogDB, logs[index], operatorMap);
+
+      if (!preparedLog.success) {
+        results.push({
+          index,
+          success: false,
+          retriable: false,
+          error: preparedLog.error,
+        });
+        continue;
+      }
+
+      const insertResult = await insertPreparedTabletLog(tabletLogDB, preparedLog);
+      const { logEntry, broadcastPayload } = preparedLog;
+
+      if (insertResult.duplicate) {
+        duplicateCount += 1;
+      } else {
+        insertedCount += 1;
+        if (logEntry.工場) {
+          broadcastToFactory(logEntry.工場, broadcastPayload);
+        }
+      }
+
+      console.log(`📝 Tablet log ${insertResult.duplicate ? 'deduplicated' : 'inserted'}: ${logEntry.背番号} - ${logEntry.Action} (Session: ${logEntry.sessionID})`);
+
+      results.push({
+        index,
+        success: true,
+        duplicate: insertResult.duplicate,
+        insertedId: insertResult.insertedId,
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Tablet log batch processed',
+      totalReceived: logs.length,
+      insertedCount,
+      duplicateCount,
+      failedCount: results.filter(result => !result.success).length,
+      results,
+    });
+  } catch (error) {
+    console.error("❌ Error inserting tablet log batch:", error);
+    res.status(500).json({
+      error: "Error inserting tablet log batch",
+      details: error.message,
     });
   }
 });
@@ -3214,8 +3400,12 @@ app.get("/getSCNAWorkOrders", async (req, res) => {
     const database = client.db("submittedDB");
     const collection = database.collection("SCNAWorkOrderDB");
 
-    // Fetch all work orders, sorted by date (newest first)
-    const result = await collection.find({}).sort({ "Date and time": -1 }).toArray();
+    // Fetch latest 100 work orders only, sorted by date (newest first)
+    const result = await collection
+      .find({})
+      .sort({ "Date and time": -1 })
+      .limit(100)
+      .toArray();
 
     res.json(result);
   } catch (error) {
@@ -4827,17 +5017,42 @@ app.post('/queries', async (req, res) => {
     // Log the initial request for debugging
     // console.log("Initial Request Body:", JSON.parse(JSON.stringify(req.body)));
 
-    // CENTRALIZED ObjectId CONVERSION for query._id
-    // This should happen before update or delete operations that rely on _id
-    if (query && query._id && typeof query._id === "string") {
-      console.log(`Attempting to convert query._id: ${query._id} to ObjectId`);
-      try {
-        query._id = new ObjectId(query._id); // Modify the query object directly
-        console.log(`Successfully converted query._id to:`, query._id);
-      } catch (err) {
-        console.error("Error converting query._id to ObjectId:", err.message);
-        // If _id is invalid, it's a bad request for operations targeting a specific document by _id
-        return res.status(400).json({ error: "Invalid _id format provided in query." });
+    function convertQueryObjectId(fieldName) {
+      if (!query || !query[fieldName]) return null;
+
+      if (typeof query[fieldName] === "string") {
+        console.log(`Attempting to convert query.${fieldName}: ${query[fieldName]} to ObjectId`);
+        try {
+          query[fieldName] = new ObjectId(query[fieldName]);
+          console.log(`Successfully converted query.${fieldName} to:`, query[fieldName]);
+        } catch (err) {
+          console.error(`Error converting query.${fieldName} to ObjectId:`, err.message);
+          return `Invalid ${fieldName} format provided in query.`;
+        }
+      }
+
+      if (query[fieldName] && Array.isArray(query[fieldName].$in)) {
+        try {
+          query[fieldName] = {
+            ...query[fieldName],
+            $in: query[fieldName].$in.map((value) => (
+              typeof value === "string" ? new ObjectId(value) : value
+            )),
+          };
+          console.log(`Successfully converted query.${fieldName}.$in to ObjectId array`);
+        } catch (err) {
+          console.error(`Error converting query.${fieldName}.$in to ObjectId array:`, err.message);
+          return `Invalid ${fieldName} list format provided in query.`;
+        }
+      }
+
+      return null;
+    }
+
+    for (const fieldName of ["_id", "checkFormRecordId"]) {
+      const conversionError = convertQueryObjectId(fieldName);
+      if (conversionError) {
+        return res.status(400).json({ error: conversionError });
       }
     }
 
@@ -5943,6 +6158,321 @@ app.post('/api/sensor-history/export-csv', async (req, res) => {
   }
 });
 
+function normalizeIotDeviceNameValue(value = '') {
+  return String(value ?? '').trim();
+}
+
+function sanitizeIotDeviceImagePathSegment(value = '') {
+  const normalizedValue = normalizeIotDeviceNameValue(value);
+  return normalizedValue
+    .replace(/[\\/?%*:|"<>]/g, '_')
+    .replace(/\s+/g, '_')
+    .slice(0, 80) || 'unknown';
+}
+
+function extractIotDeviceImagePayload(imageValue = '', fallbackMimeType = 'image/jpeg') {
+  const normalizedImageValue = normalizeIotDeviceNameValue(imageValue);
+  const normalizedFallbackMimeType = normalizeIotDeviceNameValue(fallbackMimeType).toLowerCase() || 'image/jpeg';
+
+  if (!normalizedImageValue) {
+    return null;
+  }
+
+  const dataUrlMatch = normalizedImageValue.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,([\s\S]+)$/);
+  const mimeType = (dataUrlMatch?.[1] || normalizedFallbackMimeType).toLowerCase();
+  const base64Content = (dataUrlMatch?.[2] || normalizedImageValue).replace(/\s/g, '');
+  const buffer = Buffer.from(base64Content, 'base64');
+
+  if (!buffer.length) {
+    return null;
+  }
+
+  const extensionByMimeType = {
+    'image/jpeg': 'jpg',
+    'image/jpg': 'jpg',
+    'image/png': 'png',
+    'image/webp': 'webp',
+    'image/gif': 'gif',
+    'image/heic': 'heic',
+    'image/heif': 'heif'
+  };
+
+  const extension = extensionByMimeType[mimeType] || mimeType.split('/')[1]?.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() || 'jpg';
+
+  return {
+    buffer,
+    mimeType,
+    extension,
+  };
+}
+
+function getIotDeviceNamesCollection() {
+  return client.db(DB_NAME).collection('ioTNames');
+}
+
+function formatIotDeviceNameRecord(record = null) {
+  if (!record) {
+    return null;
+  }
+
+  return {
+    id: record._id?.toString() || '',
+    _id: record._id?.toString() || '',
+    deviceId: normalizeIotDeviceNameValue(record.deviceId),
+    factoryName: normalizeIotDeviceNameValue(record.factoryName),
+    name: normalizeIotDeviceNameValue(record.name),
+    imageURLs: Array.isArray(record.imageURLs) ? record.imageURLs.filter(Boolean) : [],
+    username: normalizeIotDeviceNameValue(record.username),
+    createdAt: record.createdAt || null,
+    updatedAt: record.updatedAt || null,
+  };
+}
+
+/**
+ * Save or update a custom display name for an IoT sensor device.
+ * POST /api/iot-device-names/save
+ */
+app.post('/api/iot-device-names/save', async (req, res) => {
+  console.log('🟢 Received POST request to /api/iot-device-names/save');
+
+  const normalizedDeviceId = normalizeIotDeviceNameValue(req.body?.deviceId);
+  const normalizedFactoryName = normalizeIotDeviceNameValue(req.body?.factoryName);
+  const hasName = Object.prototype.hasOwnProperty.call(req.body || {}, 'name');
+  const hasImageURLs = Object.prototype.hasOwnProperty.call(req.body || {}, 'imageURLs');
+  const hasUsername = Object.prototype.hasOwnProperty.call(req.body || {}, 'username');
+
+  if (!normalizedDeviceId || !normalizedFactoryName) {
+    return res.status(400).json({
+      error: 'deviceId and factoryName are required',
+      success: false,
+    });
+  }
+
+  if (hasImageURLs && !Array.isArray(req.body.imageURLs)) {
+    return res.status(400).json({
+      error: 'imageURLs must be an array when provided',
+      success: false,
+    });
+  }
+
+  try {
+    const now = new Date();
+    const collection = getIotDeviceNamesCollection();
+    const updateDoc = {
+      $set: {
+        deviceId: normalizedDeviceId,
+        factoryName: normalizedFactoryName,
+        updatedAt: now,
+      },
+      $setOnInsert: {
+        createdAt: now,
+      },
+    };
+
+    if (hasName) {
+      updateDoc.$set.name = normalizeIotDeviceNameValue(req.body.name);
+    } else {
+      updateDoc.$setOnInsert.name = '';
+    }
+
+    if (hasUsername) {
+      updateDoc.$set.username = normalizeIotDeviceNameValue(req.body.username);
+    }
+
+    if (hasImageURLs) {
+      updateDoc.$set.imageURLs = [...new Set(
+        req.body.imageURLs
+          .map((imageURL) => normalizeIotDeviceNameValue(imageURL))
+          .filter(Boolean)
+      )];
+    } else {
+      updateDoc.$setOnInsert.imageURLs = [];
+    }
+
+    await collection.updateOne(
+      { deviceId: normalizedDeviceId, factoryName: normalizedFactoryName },
+      updateDoc,
+      { upsert: true }
+    );
+
+    const savedRecord = await collection.findOne({
+      deviceId: normalizedDeviceId,
+      factoryName: normalizedFactoryName,
+    });
+
+    res.json({
+      success: true,
+      data: formatIotDeviceNameRecord(savedRecord),
+    });
+  } catch (error) {
+    console.error('❌ Error saving IoT device name:', error);
+    res.status(500).json({
+      error: 'Error saving IoT device name',
+      details: error.message,
+      success: false,
+    });
+  }
+});
+
+/**
+ * Upload an IoT device reference image and attach it to the device record.
+ * POST /api/upload-iot-device-image
+ */
+app.post('/api/upload-iot-device-image', async (req, res) => {
+  console.log('🟢 Received POST request to /api/upload-iot-device-image');
+
+  const normalizedDeviceId = normalizeIotDeviceNameValue(req.body?.deviceId);
+  const normalizedFactoryName = normalizeIotDeviceNameValue(req.body?.factoryName);
+  const normalizedUsername = normalizeIotDeviceNameValue(req.body?.username);
+  const rawImageValue =
+    req.body?.imageBase64 ||
+    req.body?.base64Image ||
+    req.body?.base64 ||
+    req.body?.imageData ||
+    req.body?.image ||
+    '';
+
+  if (!normalizedDeviceId || !normalizedFactoryName || !normalizeIotDeviceNameValue(rawImageValue)) {
+    return res.status(400).json({
+      error: 'deviceId, factoryName, and a base64 image are required',
+      success: false,
+    });
+  }
+
+  try {
+    const imagePayload = extractIotDeviceImagePayload(rawImageValue, req.body?.mimeType);
+
+    if (!imagePayload) {
+      return res.status(400).json({
+        error: 'Invalid base64 image payload',
+        success: false,
+      });
+    }
+
+    const bucket = storage.bucket();
+    const timestamp = Date.now();
+    const safeFactoryName = sanitizeIotDeviceImagePathSegment(normalizedFactoryName);
+    const safeDeviceId = sanitizeIotDeviceImagePathSegment(normalizedDeviceId);
+    const safeUsername = sanitizeIotDeviceImagePathSegment(normalizedUsername || 'anonymous');
+    const fileName = `iotDeviceNames/${safeFactoryName}/${safeDeviceId}/${timestamp}_${safeUsername}.${imagePayload.extension}`;
+    const file = bucket.file(fileName);
+    const downloadToken = `iotDeviceName_${timestamp}_${Math.random().toString(36).slice(2, 12)}`;
+
+    await file.save(imagePayload.buffer, {
+      metadata: {
+        contentType: imagePayload.mimeType,
+        metadata: {
+          firebaseStorageDownloadTokens: downloadToken,
+        },
+      },
+    });
+
+    const imageURL = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(fileName)}?alt=media&token=${downloadToken}`;
+    const now = new Date();
+
+    await getIotDeviceNamesCollection().updateOne(
+      { deviceId: normalizedDeviceId, factoryName: normalizedFactoryName },
+      {
+        $set: {
+          deviceId: normalizedDeviceId,
+          factoryName: normalizedFactoryName,
+          updatedAt: now,
+          ...(normalizedUsername ? { username: normalizedUsername } : {}),
+        },
+        $setOnInsert: {
+          createdAt: now,
+          name: '',
+        },
+        $addToSet: {
+          imageURLs: imageURL,
+        },
+      },
+      { upsert: true }
+    );
+
+    res.status(201).json({
+      success: true,
+      imageURL,
+    });
+  } catch (error) {
+    console.error('❌ Error uploading IoT device image:', error);
+    res.status(500).json({
+      error: 'Error uploading IoT device image',
+      details: error.message,
+      success: false,
+    });
+  }
+});
+
+/**
+ * Remove an image URL from an IoT device name record.
+ * POST /api/iot-device-names/delete-image
+ */
+app.post('/api/iot-device-names/delete-image', async (req, res) => {
+  console.log('🟢 Received POST request to /api/iot-device-names/delete-image');
+
+  const normalizedDeviceId = normalizeIotDeviceNameValue(req.body?.deviceId);
+  const normalizedFactoryName = normalizeIotDeviceNameValue(req.body?.factoryName);
+  const normalizedImageURL = normalizeIotDeviceNameValue(req.body?.imageUrl || req.body?.imageURL);
+  const normalizedUsername = normalizeIotDeviceNameValue(req.body?.username);
+
+  if (!normalizedDeviceId || !normalizedFactoryName || !normalizedImageURL) {
+    return res.status(400).json({
+      error: 'deviceId, factoryName, and imageUrl are required',
+      success: false,
+    });
+  }
+
+  try {
+    const collection = getIotDeviceNamesCollection();
+    const existingRecord = await collection.findOne(
+      { deviceId: normalizedDeviceId, factoryName: normalizedFactoryName },
+      { projection: { imageURLs: 1 } }
+    );
+
+    if (!existingRecord) {
+      return res.status(404).json({
+        error: 'IoT device name record not found',
+        success: false,
+      });
+    }
+
+    const existingImageURLs = Array.isArray(existingRecord.imageURLs) ? existingRecord.imageURLs : [];
+    if (!existingImageURLs.includes(normalizedImageURL)) {
+      return res.status(404).json({
+        error: 'Image URL not found on this device record',
+        success: false,
+      });
+    }
+
+    const now = new Date();
+    await collection.updateOne(
+      { deviceId: normalizedDeviceId, factoryName: normalizedFactoryName },
+      {
+        $pull: {
+          imageURLs: normalizedImageURL,
+        },
+        $set: {
+          updatedAt: now,
+          ...(normalizedUsername ? { username: normalizedUsername } : {}),
+        },
+      }
+    );
+
+    res.json({
+      success: true,
+      imageURL: normalizedImageURL,
+    });
+  } catch (error) {
+    console.error('❌ Error deleting IoT device image URL:', error);
+    res.status(500).json({
+      error: 'Error deleting IoT device image URL',
+      details: error.message,
+      success: false,
+    });
+  }
+});
+
 /**
  * Specialized approval data pagination
  * POST /api/approval-paginate
@@ -6005,6 +6535,11 @@ app.post('/api/approval-paginate', async (req, res) => {
       matchStage.工場 = { $in: factoryAccess };
     }
 
+    const timezoneOffset = filters.timezoneOffset || -540;
+    const offsetHours = -timezoneOffset / 60;
+    const offsetSign = offsetHours >= 0 ? '+' : '';
+    const offsetString = `${offsetSign}${String(Math.floor(Math.abs(offsetHours))).padStart(2, '0')}:${String(Math.round((Math.abs(offsetHours) % 1) * 60)).padStart(2, '0')}`;
+
     // Add non-date filters
     Object.keys(filters).forEach(key => {
       if (key !== 'Date' && key !== 'timezoneOffset') {
@@ -6017,12 +6552,6 @@ app.post('/api/approval-paginate', async (req, res) => {
     let dateMatchStage = {};
     if (filters.Date) {
       const targetDate = filters.Date; // Format: "YYYY-MM-DD"
-      const timezoneOffset = filters.timezoneOffset || -540; // Default to JST (-540 min = UTC+9)
-      
-      // Convert timezone offset to hours (e.g., -480 min = -8 hours = PST)
-      const offsetHours = -timezoneOffset / 60;
-      const offsetSign = offsetHours >= 0 ? '+' : '';
-      const offsetString = `${offsetSign}${String(Math.floor(Math.abs(offsetHours))).padStart(2, '0')}:${String(Math.abs(offsetHours) % 1 * 60).padStart(2, '0')}`;
       
       // Create date range in user's timezone
       const startOfDayLocal = new Date(targetDate + 'T00:00:00' + offsetString);
@@ -6052,13 +6581,14 @@ app.post('/api/approval-paginate', async (req, res) => {
           _objectIdDate: {
             $dateToString: {
               format: "%Y-%m-%d",
-              date: { $toDate: "$_id" }
+              date: { $toDate: "$_id" },
+              timezone: offsetString,
             }
           },
           // Flag if user-entered Date doesn't match ObjectId date
           _hasDateMismatch: {
             $cond: {
-              if: { $ne: ["$Date", { $dateToString: { format: "%Y-%m-%d", date: { $toDate: "$_id" } } }] },
+              if: { $ne: ["$Date", { $dateToString: { format: "%Y-%m-%d", date: { $toDate: "$_id" }, timezone: offsetString } }] },
               then: 1,
               else: 0
             }
@@ -6067,7 +6597,8 @@ app.post('/api/approval-paginate', async (req, res) => {
           _objectIdTime: {
             $dateToString: {
               format: "%H:%M",
-              date: { $toDate: "$_id" }
+              date: { $toDate: "$_id" },
+              timezone: offsetString,
             }
           },
           // Flag if Time_end is off by more than 30 minutes
@@ -6096,8 +6627,29 @@ app.post('/api/approval-paginate', async (req, res) => {
                             // Convert ObjectId time to minutes
                             {
                               $add: [
-                                { $multiply: [{ $hour: { $toDate: "$_id" } }, 60] },
-                                { $minute: { $toDate: "$_id" } }
+                                {
+                                  $multiply: [
+                                    {
+                                      $toInt: {
+                                        $dateToString: {
+                                          format: "%H",
+                                          date: { $toDate: "$_id" },
+                                          timezone: offsetString,
+                                        }
+                                      }
+                                    },
+                                    60
+                                  ]
+                                },
+                                {
+                                  $toInt: {
+                                    $dateToString: {
+                                      format: "%M",
+                                      date: { $toDate: "$_id" },
+                                      timezone: offsetString,
+                                    }
+                                  }
+                                }
                               ]
                             }
                           ]
@@ -8980,7 +9532,24 @@ app.post("/login", async (req, res) => {
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
-    res.json({ username: user.username, role: user.role });
+    const assignedFactories = Array.isArray(user.工場 || user.factory)
+      ? (user.工場 || user.factory).filter(Boolean)
+      : user.工場 || user.factory
+        ? [user.工場 || user.factory]
+        : [];
+
+    res.json({
+      _id: user._id,
+      username: user.username,
+      role: user.role,
+      firstName: user.firstName || "",
+      lastName: user.lastName || "",
+      email: user.email || "",
+      factory: assignedFactories,
+      工場: assignedFactories,
+      department: user.department || user.部署 || "",
+      部署: user.部署 || user.department || "",
+    });
   } catch (err) {
     console.error("Login error:", err);
     res.status(500).json({ error: "Server error" });
@@ -9729,79 +10298,1124 @@ app.get('/api/production-goals/summary', async (req, res) => {
     }
 });
 
+const FACTORY_STATUS_DEFAULT_PAGE_SIZE = 10;
+const FACTORY_STATUS_MAX_PAGE_SIZE = 50;
+const FACTORY_STATUS_STALE_MINUTES = 20;
+const FACTORY_STATUS_TERMINAL_STATUSES = new Set(["completed", "reset"]);
 
+function normalizeFactoryStatusText(value) {
+  if (value == null) return "";
+  return String(value).trim();
+}
 
+function normalizeFactoryStatusTextLower(value) {
+  return normalizeFactoryStatusText(value).toLowerCase();
+}
 
-
-
-
-//FREYA ACESS BACKEND
-// Token validation endpoint
-app.post("/validateToken", async (req, res) => {
-  const token = req.headers.authorization?.replace('Bearer ', '');
-  
-  if (!token) {
-    return res.status(401).json({ error: 'No token provided' });
+function sanitizeFactoryStatusDate(value) {
+  const text = normalizeFactoryStatusText(value);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    return text;
   }
-  
-  try {
-    // If you're using JWT
-    const jwt = require('jsonwebtoken');
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
-    
-    // Fetch user from database
-    await client.connect();
-    const database = client.db("Sasaki_Coating_MasterDB");
-    const masterUsers = database.collection("masterUsers");
-    
-    const user = await masterUsers.findOne({ 
-      username: decoded.username 
-    }, {
-      projection: { password: 0 } // Exclude password
-    });
-    
-    if (!user) {
-      return res.status(401).json({ error: 'User not found' });
+  return new Date().toISOString().split("T")[0];
+}
+
+function sanitizeFactoryStatusList(value) {
+  const values = Array.isArray(value) ? value : [value];
+  return [...new Set(values.map(normalizeFactoryStatusText).filter(Boolean))];
+}
+
+function buildFactoryStatusMapKey(factory, equipment) {
+  return `${factory}::${equipment}`;
+}
+
+function toFactoryStatusIsoTimestamp({ timestamp = "", date = "", time = "" } = {}) {
+  const directTimestamp = normalizeFactoryStatusText(timestamp);
+  if (directTimestamp) {
+    const parsed = new Date(directTimestamp);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toISOString();
     }
-    
-    res.json(user);
-    
+  }
+
+  const dateText = normalizeFactoryStatusText(date);
+  const timeText = normalizeFactoryStatusText(time);
+  if (dateText && timeText) {
+    const parsed = new Date(`${dateText}T${timeText}`);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toISOString();
+    }
+  }
+
+  return "";
+}
+
+function getFactoryStatusMinutesSince(isoTimestamp) {
+  const timestamp = normalizeFactoryStatusText(isoTimestamp);
+  if (!timestamp) return null;
+
+  const parsed = new Date(timestamp);
+  if (Number.isNaN(parsed.getTime())) return null;
+
+  return Math.max(0, Math.round((Date.now() - parsed.getTime()) / 60000));
+}
+
+function getFactoryStatusElapsedMinutes(startTimestamp, endTimestamp = new Date().toISOString()) {
+  const start = new Date(startTimestamp);
+  const end = new Date(endTimestamp);
+
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    return null;
+  }
+
+  return Math.max(0, Math.round((end.getTime() - start.getTime()) / 60000));
+}
+
+function getFactoryStatusCounterValue(additionalData = {}) {
+  const candidate = additionalData?.newValue
+    ?? additionalData?.counterValue
+    ?? additionalData?.currentValue
+    ?? additionalData?.count
+    ?? null;
+
+  const numericCandidate = Number(candidate);
+  return Number.isFinite(numericCandidate) ? numericCandidate : null;
+}
+
+function getFactoryStatusNumericValue(value) {
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) ? numericValue : null;
+}
+
+function matchesFactoryStatusSingleFilter(row = {}, filter = {}) {
+  const field = normalizeFactoryStatusText(filter?.field);
+  const operator = normalizeFactoryStatusText(filter?.operator);
+  const type = normalizeFactoryStatusText(filter?.type);
+
+  if (!field || !operator) return true;
+
+  const rawValue = row?.[field];
+
+  if (type === "number") {
+    const rowValue = getFactoryStatusNumericValue(rawValue);
+    const filterValue = getFactoryStatusNumericValue(filter?.value);
+    const fromValue = getFactoryStatusNumericValue(filter?.valueFrom);
+    const toValue = getFactoryStatusNumericValue(filter?.valueTo);
+
+    if (rowValue == null) return false;
+    if (operator === "equals") return rowValue === filterValue;
+    if (operator === "greater") return filterValue != null && rowValue > filterValue;
+    if (operator === "less") return filterValue != null && rowValue < filterValue;
+    if (operator === "range") return fromValue != null && toValue != null && rowValue >= fromValue && rowValue <= toValue;
+    return true;
+  }
+
+  const rowText = normalizeFactoryStatusTextLower(rawValue);
+
+  if (operator === "in") {
+    const values = Array.isArray(filter?.value)
+      ? filter.value
+      : String(filter?.value || "")
+          .split(",")
+          .map((value) => value.trim())
+          .filter(Boolean);
+
+    return values.some((value) => rowText === normalizeFactoryStatusTextLower(value));
+  }
+
+  const filterText = normalizeFactoryStatusTextLower(filter?.value);
+  if (operator === "equals") return rowText === filterText;
+  if (operator === "contains") return rowText.includes(filterText);
+  return true;
+}
+
+function matchesFactoryStatusAdvancedFilters(row = {}, filters = []) {
+  if (!Array.isArray(filters) || filters.length === 0) return true;
+
+  const groupedFilters = new Map();
+  filters.forEach((filter) => {
+    const field = normalizeFactoryStatusText(filter?.field);
+    if (!field) return;
+
+    if (!groupedFilters.has(field)) {
+      groupedFilters.set(field, []);
+    }
+
+    groupedFilters.get(field).push(filter);
+  });
+
+  return Array.from(groupedFilters.values()).every((fieldFilters) => fieldFilters.some((filter) => matchesFactoryStatusSingleFilter(row, filter)));
+}
+
+function compareFactoryStatusTextValues(left, right) {
+  const leftText = normalizeFactoryStatusText(left);
+  const rightText = normalizeFactoryStatusText(right);
+
+  if (leftText && rightText) return leftText.localeCompare(rightText, 'ja');
+  if (leftText) return -1;
+  if (rightText) return 1;
+  return 0;
+}
+
+function compareFactoryStatusNumericValues(left, right) {
+  const leftNumber = getFactoryStatusNumericValue(left);
+  const rightNumber = getFactoryStatusNumericValue(right);
+
+  if (leftNumber != null && rightNumber != null && leftNumber !== rightNumber) {
+    return leftNumber - rightNumber;
+  }
+  if (leftNumber != null && rightNumber == null) return -1;
+  if (leftNumber == null && rightNumber != null) return 1;
+  return 0;
+}
+
+function compareFactoryStatusTimestampValues(left, right) {
+  const leftTime = normalizeFactoryStatusText(left) ? new Date(left).getTime() : NaN;
+  const rightTime = normalizeFactoryStatusText(right) ? new Date(right).getTime() : NaN;
+  const hasLeftTime = Number.isFinite(leftTime);
+  const hasRightTime = Number.isFinite(rightTime);
+
+  if (hasLeftTime && hasRightTime && leftTime !== rightTime) return leftTime - rightTime;
+  if (hasLeftTime && !hasRightTime) return -1;
+  if (!hasLeftTime && hasRightTime) return 1;
+  return 0;
+}
+
+function compareFactoryStatusStatusValues(left, right) {
+  const statusRank = { running: 0, stale: 1, idle: 2 };
+  const leftRank = statusRank[normalizeFactoryStatusTextLower(left)] ?? 99;
+  const rightRank = statusRank[normalizeFactoryStatusTextLower(right)] ?? 99;
+
+  if (leftRank !== rightRank) return leftRank - rightRank;
+  return 0;
+}
+
+function sortFactoryStatusRowsDefault(left, right) {
+  const statusComparison = compareFactoryStatusStatusValues(left?.statusKey, right?.statusKey);
+  if (statusComparison !== 0) return statusComparison;
+
+  const minutesComparison = compareFactoryStatusNumericValues(left?.lastUpdatedMinutes, right?.lastUpdatedMinutes);
+  if (minutesComparison !== 0) return minutesComparison;
+
+  return compareFactoryStatusTextValues(left?.equipment, right?.equipment);
+}
+
+function sortFactoryStatusRows(left, right, sort = {}) {
+  const sortColumn = normalizeFactoryStatusText(sort?.column);
+  const sortDirection = Number(sort?.direction) === -1 ? -1 : 1;
+  let comparison = 0;
+
+  switch (sortColumn) {
+    case 'equipment':
+      comparison = compareFactoryStatusTextValues(left?.equipment, right?.equipment);
+      break;
+    case 'statusKey':
+      comparison = compareFactoryStatusStatusValues(left?.statusKey, right?.statusKey);
+      break;
+    case 'workerName':
+      comparison = compareFactoryStatusTextValues(left?.workerName, right?.workerName);
+      break;
+    case 'latestAction':
+      comparison = compareFactoryStatusTextValues(left?.latestAction, right?.latestAction);
+      break;
+    case 'partNumber':
+      comparison = compareFactoryStatusTextValues(left?.partNumber, right?.partNumber);
+      break;
+    case 'backNumber':
+      comparison = compareFactoryStatusTextValues(left?.backNumber, right?.backNumber);
+      break;
+    case 'elapsedMinutes':
+      comparison = compareFactoryStatusNumericValues(left?.elapsedMinutes, right?.elapsedMinutes);
+      break;
+    case 'lastUpdatedAt':
+      comparison = compareFactoryStatusTimestampValues(left?.lastUpdatedAt, right?.lastUpdatedAt);
+      break;
+    case 'todayActualQuantity':
+      comparison = compareFactoryStatusNumericValues(left?.todayActualQuantity, right?.todayActualQuantity);
+      break;
+    default:
+      break;
+  }
+
+  if (comparison !== 0) return comparison * sortDirection;
+  return sortFactoryStatusRowsDefault(left, right);
+}
+
+function escapeFactoryStatusRegex(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function buildFactoryStatusLogSortSpec(sort = {}) {
+  const direction = Number(sort?.direction) === 1 ? 1 : -1;
+
+  switch (normalizeFactoryStatusText(sort?.column)) {
+    case 'factory':
+      return { 工場: direction, Timestamp: -1, _id: -1 };
+    case 'equipment':
+      return { 設備: direction, Timestamp: -1, _id: -1 };
+    case 'status':
+      return { Status: direction, Timestamp: -1, _id: -1 };
+    case 'action':
+      return { Action: direction, Timestamp: -1, _id: -1 };
+    case 'workerName':
+      return { Worker_Name: direction, Timestamp: -1, _id: -1 };
+    case 'partNumber':
+      return { 品番: direction, Timestamp: -1, _id: -1 };
+    case 'backNumber':
+      return { 背番号: direction, Timestamp: -1, _id: -1 };
+    case 'sessionID':
+      return { sessionID: direction, Timestamp: -1, _id: -1 };
+    case 'timestamp':
+    default:
+      return { Timestamp: direction, _id: direction };
+  }
+}
+
+async function collectFactoryStatusDistinctValues(collection, field, match = {}) {
+  const results = await collection.aggregate([
+    { $match: match },
+    { $group: { _id: `$${field}` } },
+    { $sort: { _id: 1 } },
+  ]).toArray();
+
+  return results
+    .map((item) => normalizeFactoryStatusText(item?._id))
+    .filter(Boolean);
+}
+
+async function collectFactoryStatusSessionWorkers(collection, sessionIds = []) {
+  const normalizedSessionIds = [...new Set(
+    (Array.isArray(sessionIds) ? sessionIds : [sessionIds])
+      .map((value) => normalizeFactoryStatusText(value))
+      .filter(Boolean)
+  )];
+
+  if (!normalizedSessionIds.length) {
+    return new Map();
+  }
+
+  const results = await collection.aggregate([
+    {
+      $match: {
+        sessionID: { $in: normalizedSessionIds },
+        Worker_Name: { $nin: ["", null] },
+      },
+    },
+    { $sort: { Timestamp: -1 } },
+    {
+      $group: {
+        _id: "$sessionID",
+        workerName: { $first: "$Worker_Name" },
+      },
+    },
+  ]).toArray();
+
+  return new Map(
+    results
+      .map((item) => [
+        normalizeFactoryStatusText(item?._id),
+        normalizeFactoryStatusText(item?.workerName),
+      ])
+      .filter(([sessionID, workerName]) => sessionID && workerName)
+  );
+}
+
+async function collectFactoryStatusSessionInspectors(collection, sessionIds = []) {
+  const normalizedSessionIds = [...new Set(
+    (Array.isArray(sessionIds) ? sessionIds : [sessionIds])
+      .map((value) => normalizeFactoryStatusText(value))
+      .filter(Boolean)
+  )];
+
+  if (!normalizedSessionIds.length) {
+    return new Map();
+  }
+
+  const results = await collection.aggregate([
+    {
+      $match: {
+        sessionID: { $in: normalizedSessionIds },
+        'AdditionalData.inspectorName': { $nin: ["", null] },
+      },
+    },
+    { $sort: { Timestamp: -1 } },
+    {
+      $group: {
+        _id: '$sessionID',
+        inspectorName: { $first: '$AdditionalData.inspectorName' },
+      },
+    },
+  ]).toArray();
+
+  return new Map(
+    results
+      .map((item) => [
+        normalizeFactoryStatusText(item?._id),
+        normalizeFactoryStatusText(item?.inspectorName),
+      ])
+      .filter(([sessionID, inspectorName]) => sessionID && inspectorName)
+  );
+}
+
+async function collectFactoryStatusSessionOperators(collection, sessionIds = []) {
+  const normalizedSessionIds = [...new Set(
+    (Array.isArray(sessionIds) ? sessionIds : [sessionIds])
+      .map((value) => normalizeFactoryStatusText(value))
+      .filter(Boolean)
+  )];
+
+  if (!normalizedSessionIds.length) {
+    return {
+      workerMap: new Map(),
+      inspectorMap: new Map(),
+      operatorMap: new Map(),
+    };
+  }
+
+  const [workerMap, inspectorMap] = await Promise.all([
+    collectFactoryStatusSessionWorkers(collection, normalizedSessionIds),
+    collectFactoryStatusSessionInspectors(collection, normalizedSessionIds),
+  ]);
+
+  const operatorMap = new Map();
+  normalizedSessionIds.forEach((sessionID) => {
+    const operatorName = workerMap.get(sessionID) || inspectorMap.get(sessionID) || '';
+    if (operatorName) {
+      operatorMap.set(sessionID, operatorName);
+    }
+  });
+
+  return {
+    workerMap,
+    inspectorMap,
+    operatorMap,
+  };
+}
+
+async function collectFactoryStatusDistinctOperatorValues(collection, match = {}) {
+  const [workers, inspectors] = await Promise.all([
+    collectFactoryStatusDistinctValues(collection, 'Worker_Name', match),
+    collectFactoryStatusDistinctValues(collection, 'AdditionalData.inspectorName', match),
+  ]);
+
+  return [...new Set(
+    [...workers, ...inspectors]
+      .map((value) => normalizeFactoryStatusText(value))
+      .filter(Boolean)
+  )];
+}
+
+async function collectFactoryStatusMatchingSessionIdsByOperator(collection, match = {}, operatorName = '') {
+  const normalizedOperatorName = normalizeFactoryStatusText(operatorName);
+  if (!normalizedOperatorName) {
+    return [];
+  }
+
+  const regex = new RegExp(escapeFactoryStatusRegex(normalizedOperatorName), 'i');
+  const results = await collection.aggregate([
+    {
+      $match: {
+        $and: [
+          match,
+          { sessionID: { $nin: ['', null] } },
+          {
+            $or: [
+              { Worker_Name: regex },
+              { 'AdditionalData.inspectorName': regex },
+            ],
+          },
+        ],
+      },
+    },
+    {
+      $group: {
+        _id: '$sessionID',
+      },
+    },
+    { $sort: { _id: 1 } },
+  ]).toArray();
+
+  return results
+    .map((item) => normalizeFactoryStatusText(item?._id))
+    .filter(Boolean);
+}
+
+app.post('/api/factory-status/snapshot', async (req, res) => {
+  try {
+    await client.connect();
+
+    const submittedDb = client.db('submittedDB');
+    const pressCollection = submittedDb.collection('pressDB');
+    const tabletLogCollection = submittedDb.collection('tabletLogDB');
+    const goalsCollection = submittedDb.collection('productionGoalsDB');
+
+    const selectedDate = sanitizeFactoryStatusDate(req.body?.date);
+    const selectedFactories = sanitizeFactoryStatusList(req.body?.factories);
+    const advancedFilters = Array.isArray(req.body?.advancedFilters) ? req.body.advancedFilters : [];
+    const pagesByFactory = req.body?.pagesByFactory && typeof req.body.pagesByFactory === 'object'
+      ? req.body.pagesByFactory
+      : {};
+    const sort = req.body?.sort && typeof req.body.sort === 'object'
+      ? req.body.sort
+      : {};
+    const pageSize = Math.min(
+      FACTORY_STATUS_MAX_PAGE_SIZE,
+      Math.max(1, Number.parseInt(req.body?.limit, 10) || FACTORY_STATUS_DEFAULT_PAGE_SIZE)
+    );
+
+    const emptySummary = {
+      totalGoalQuantity: 0,
+      totalActualQuantity: 0,
+      totalGoodQuantity: 0,
+      totalNgQuantity: 0,
+      achievementRate: 0,
+      activeMachines: 0,
+      staleMachines: 0,
+      idleMachines: 0,
+      activeSessions: 0,
+      selectedFactoryCount: selectedFactories.length,
+    };
+
+    if (!selectedFactories.length) {
+      return res.json({
+        success: true,
+        date: selectedDate,
+        generatedAt: new Date().toISOString(),
+        pageSize,
+        summary: emptySummary,
+        groups: [],
+        filterOptions: {
+          equipments: [],
+          workers: [],
+          actions: [],
+        },
+      });
+    }
+
+    const factoryMatch = { $in: selectedFactories };
+
+    const [goalRows, actualRows, equipmentRows, sessionRows] = await Promise.all([
+      goalsCollection.aggregate([
+        { $match: { factory: factoryMatch, date: selectedDate } },
+        {
+          $group: {
+            _id: '$factory',
+            totalTargetQuantity: { $sum: '$targetQuantity' },
+            totalScheduledQuantity: { $sum: '$scheduledQuantity' },
+            totalRemainingQuantity: { $sum: '$remainingQuantity' },
+            goalCount: { $sum: 1 },
+          },
+        },
+        {
+          $project: {
+            _id: 0,
+            factory: '$_id',
+            totalTargetQuantity: 1,
+            totalScheduledQuantity: 1,
+            totalRemainingQuantity: 1,
+            goalCount: 1,
+          },
+        },
+      ]).toArray(),
+      pressCollection.aggregate([
+        {
+          $match: {
+            工場: factoryMatch,
+            Date: selectedDate,
+            設備: { $nin: ['', null] },
+          },
+        },
+        {
+          $group: {
+            _id: { factory: '$工場', equipment: '$設備' },
+            actualQuantity: {
+              $sum: {
+                $convert: { input: '$Process_Quantity', to: 'double', onError: 0, onNull: 0 },
+              },
+            },
+            goodQuantity: {
+              $sum: {
+                $convert: { input: '$Total', to: 'double', onError: 0, onNull: 0 },
+              },
+            },
+            ngQuantity: {
+              $sum: {
+                $convert: { input: '$Total_NG', to: 'double', onError: 0, onNull: 0 },
+              },
+            },
+            recordCount: { $sum: 1 },
+            latestTime: { $max: '$Time_end' },
+          },
+        },
+        {
+          $project: {
+            _id: 0,
+            factory: '$_id.factory',
+            equipment: '$_id.equipment',
+            actualQuantity: 1,
+            goodQuantity: 1,
+            ngQuantity: 1,
+            recordCount: 1,
+            latestTime: 1,
+          },
+        },
+      ]).toArray(),
+      pressCollection.aggregate([
+        {
+          $match: {
+            工場: factoryMatch,
+            設備: { $nin: ['', null] },
+          },
+        },
+        {
+          $group: {
+            _id: { factory: '$工場', equipment: '$設備' },
+          },
+        },
+        {
+          $project: {
+            _id: 0,
+            factory: '$_id.factory',
+            equipment: '$_id.equipment',
+          },
+        },
+      ]).toArray(),
+      tabletLogCollection.aggregate([
+        {
+          $match: {
+            工場: factoryMatch,
+            Date: selectedDate,
+            設備: { $nin: ['', null] },
+            sessionID: { $nin: ['', null] },
+          },
+        },
+        { $sort: { Timestamp: -1 } },
+        {
+          $group: {
+            _id: { factory: '$工場', equipment: '$設備', sessionID: '$sessionID' },
+            latestTimestamp: { $first: '$Timestamp' },
+            latestStatus: { $first: '$Status' },
+            latestAction: { $first: '$Action' },
+            latestWorkerName: { $first: '$Worker_Name' },
+            latestPartNumber: { $first: '$品番' },
+            latestBackNumber: { $first: '$背番号' },
+            latestAdditionalData: { $first: '$AdditionalData' },
+            firstTimestamp: { $last: '$Timestamp' },
+          },
+        },
+        {
+          $project: {
+            _id: 0,
+            factory: '$_id.factory',
+            equipment: '$_id.equipment',
+            sessionID: '$_id.sessionID',
+            latestTimestamp: 1,
+            latestStatus: 1,
+            latestAction: 1,
+            latestWorkerName: 1,
+            latestPartNumber: 1,
+            latestBackNumber: 1,
+            latestAdditionalData: 1,
+            firstTimestamp: 1,
+          },
+        },
+      ]).toArray(),
+    ]);
+
+    const {
+      operatorMap: sessionOperatorMap,
+      inspectorMap: sessionInspectorMap,
+    } = await collectFactoryStatusSessionOperators(
+      tabletLogCollection,
+      sessionRows.map((row) => row.sessionID)
+    );
+
+    const goalsByFactory = new Map(selectedFactories.map((factory) => [factory, {
+      totalTargetQuantity: 0,
+      totalScheduledQuantity: 0,
+      totalRemainingQuantity: 0,
+      goalCount: 0,
+    }]));
+
+    goalRows.forEach((row) => {
+      goalsByFactory.set(normalizeFactoryStatusText(row.factory), {
+        totalTargetQuantity: Number(row.totalTargetQuantity) || 0,
+        totalScheduledQuantity: Number(row.totalScheduledQuantity) || 0,
+        totalRemainingQuantity: Number(row.totalRemainingQuantity) || 0,
+        goalCount: Number(row.goalCount) || 0,
+      });
+    });
+
+    const actualByFactory = new Map(selectedFactories.map((factory) => [factory, {
+      actualQuantity: 0,
+      goodQuantity: 0,
+      ngQuantity: 0,
+      recordCount: 0,
+    }]));
+    const actualByEquipment = new Map();
+
+    actualRows.forEach((row) => {
+      const factory = normalizeFactoryStatusText(row.factory);
+      const equipment = normalizeFactoryStatusText(row.equipment);
+      if (!factory || !equipment) return;
+
+      const nextActual = {
+        factory,
+        equipment,
+        actualQuantity: Number(row.actualQuantity) || 0,
+        goodQuantity: Number(row.goodQuantity) || 0,
+        ngQuantity: Number(row.ngQuantity) || 0,
+        recordCount: Number(row.recordCount) || 0,
+        latestTime: normalizeFactoryStatusText(row.latestTime),
+      };
+
+      actualByEquipment.set(buildFactoryStatusMapKey(factory, equipment), nextActual);
+
+      const bucket = actualByFactory.get(factory) || { actualQuantity: 0, goodQuantity: 0, ngQuantity: 0, recordCount: 0 };
+      bucket.actualQuantity += nextActual.actualQuantity;
+      bucket.goodQuantity += nextActual.goodQuantity;
+      bucket.ngQuantity += nextActual.ngQuantity;
+      bucket.recordCount += nextActual.recordCount;
+      actualByFactory.set(factory, bucket);
+    });
+
+    const equipmentByFactory = new Map(selectedFactories.map((factory) => [factory, new Set()]));
+    equipmentRows.forEach((row) => {
+      const factory = normalizeFactoryStatusText(row.factory);
+      const equipment = normalizeFactoryStatusText(row.equipment);
+      if (!factory || !equipment) return;
+      if (!equipmentByFactory.has(factory)) {
+        equipmentByFactory.set(factory, new Set());
+      }
+      equipmentByFactory.get(factory).add(equipment);
+    });
+
+    const sessionsByEquipment = new Map();
+    sessionRows.forEach((row) => {
+      const factory = normalizeFactoryStatusText(row.factory);
+      const equipment = normalizeFactoryStatusText(row.equipment);
+      const sessionID = normalizeFactoryStatusText(row.sessionID);
+      if (!factory || !equipment || !sessionID) return;
+
+      if (!equipmentByFactory.has(factory)) {
+        equipmentByFactory.set(factory, new Set());
+      }
+      equipmentByFactory.get(factory).add(equipment);
+
+      const normalizedSession = {
+        factory,
+        equipment,
+        sessionID,
+        latestTimestamp: toFactoryStatusIsoTimestamp({ timestamp: row.latestTimestamp }),
+        latestStatus: normalizeFactoryStatusText(row.latestStatus),
+        latestStatusLower: normalizeFactoryStatusTextLower(row.latestStatus),
+        latestAction: normalizeFactoryStatusText(row.latestAction),
+        workerName: normalizeFactoryStatusText(row.latestWorkerName) || sessionOperatorMap.get(sessionID) || '',
+        inspectorName: normalizeFactoryStatusText(row?.latestAdditionalData?.inspectorName) || sessionInspectorMap.get(sessionID) || '',
+        partNumber: normalizeFactoryStatusText(row.latestPartNumber),
+        backNumber: normalizeFactoryStatusText(row.latestBackNumber),
+        firstTimestamp: toFactoryStatusIsoTimestamp({ timestamp: row.firstTimestamp }),
+        additionalData: row.latestAdditionalData || {},
+      };
+
+      const key = buildFactoryStatusMapKey(factory, equipment);
+      const bucket = sessionsByEquipment.get(key) || {
+        latestSession: null,
+        activeSession: null,
+        activeSessionCount: 0,
+      };
+
+      if (!bucket.latestSession || new Date(normalizedSession.latestTimestamp) > new Date(bucket.latestSession.latestTimestamp)) {
+        bucket.latestSession = normalizedSession;
+      }
+
+      if (!FACTORY_STATUS_TERMINAL_STATUSES.has(normalizedSession.latestStatusLower)) {
+        bucket.activeSessionCount += 1;
+        if (!bucket.activeSession || new Date(normalizedSession.latestTimestamp) > new Date(bucket.activeSession.latestTimestamp)) {
+          bucket.activeSession = normalizedSession;
+        }
+      }
+
+      sessionsByEquipment.set(key, bucket);
+    });
+
+    actualRows.forEach((row) => {
+      const factory = normalizeFactoryStatusText(row.factory);
+      const equipment = normalizeFactoryStatusText(row.equipment);
+      if (!factory || !equipment) return;
+      if (!equipmentByFactory.has(factory)) {
+        equipmentByFactory.set(factory, new Set());
+      }
+      equipmentByFactory.get(factory).add(equipment);
+    });
+
+    const allRowsByFactory = new Map();
+    const allRows = [];
+
+    selectedFactories.forEach((factory) => {
+      const equipmentList = Array.from(equipmentByFactory.get(factory) || []).sort((left, right) => left.localeCompare(right, 'ja'));
+
+      const rows = equipmentList.map((equipment) => {
+        const key = buildFactoryStatusMapKey(factory, equipment);
+        const actual = actualByEquipment.get(key) || {
+          actualQuantity: 0,
+          goodQuantity: 0,
+          ngQuantity: 0,
+          recordCount: 0,
+          latestTime: '',
+        };
+        const sessionBucket = sessionsByEquipment.get(key) || {
+          latestSession: null,
+          activeSession: null,
+          activeSessionCount: 0,
+        };
+
+        const activeSession = sessionBucket.activeSession;
+        const latestSession = sessionBucket.latestSession;
+        const lastUpdatedAt = activeSession?.latestTimestamp
+          || latestSession?.latestTimestamp
+          || toFactoryStatusIsoTimestamp({ date: selectedDate, time: actual.latestTime });
+        const lastUpdatedMinutes = getFactoryStatusMinutesSince(lastUpdatedAt);
+
+        let statusKey = 'idle';
+        let statusLabel = 'Idle';
+        if (activeSession) {
+          if (lastUpdatedMinutes != null && lastUpdatedMinutes > FACTORY_STATUS_STALE_MINUTES) {
+            statusKey = 'stale';
+            statusLabel = 'Stale';
+          } else {
+            statusKey = 'running';
+            statusLabel = 'Running';
+          }
+        }
+
+        const row = {
+          factory,
+          equipment,
+          statusKey,
+          statusLabel,
+          workerName: activeSession?.workerName || activeSession?.inspectorName || '',
+          inspectorName: activeSession?.inspectorName || '',
+          latestAction: activeSession?.latestAction || latestSession?.latestAction || '',
+          partNumber: activeSession?.partNumber || '',
+          backNumber: activeSession?.backNumber || '',
+          sessionID: activeSession?.sessionID || '',
+          sessionStartedAt: activeSession?.firstTimestamp || '',
+          elapsedMinutes: activeSession ? getFactoryStatusElapsedMinutes(activeSession.firstTimestamp) : null,
+          lastUpdatedAt,
+          lastUpdatedMinutes,
+          todayActualQuantity: actual.actualQuantity,
+          todayGoodQuantity: actual.goodQuantity,
+          todayNgQuantity: actual.ngQuantity,
+          todayRecordCount: actual.recordCount,
+          latestCounterValue: activeSession ? getFactoryStatusCounterValue(activeSession.additionalData) : null,
+          activeSessionCount: sessionBucket.activeSessionCount,
+        };
+
+        allRows.push(row);
+        return row;
+      }).sort((left, right) => sortFactoryStatusRows(left, right, sort));
+
+      allRowsByFactory.set(factory, rows);
+    });
+
+    const filterOptions = {
+      equipments: [...new Set(allRows.map((row) => row.equipment).filter(Boolean))].sort((left, right) => left.localeCompare(right, 'ja')),
+      workers: [...new Set(allRows.map((row) => row.workerName).filter(Boolean))].sort((left, right) => left.localeCompare(right, 'ja')),
+      actions: [...new Set(allRows.map((row) => row.latestAction).filter(Boolean))].sort((left, right) => left.localeCompare(right, 'ja')),
+    };
+
+    const groups = selectedFactories.map((factory) => {
+      const rows = allRowsByFactory.get(factory) || [];
+      const filteredRows = rows.filter((row) => matchesFactoryStatusAdvancedFilters(row, advancedFilters));
+      const goal = goalsByFactory.get(factory) || {
+        totalTargetQuantity: 0,
+        totalScheduledQuantity: 0,
+        totalRemainingQuantity: 0,
+        goalCount: 0,
+      };
+      const actual = actualByFactory.get(factory) || {
+        actualQuantity: 0,
+        goodQuantity: 0,
+        ngQuantity: 0,
+        recordCount: 0,
+      };
+
+      const runningCount = rows.filter((row) => row.statusKey === 'running').length;
+      const staleCount = rows.filter((row) => row.statusKey === 'stale').length;
+      const idleCount = rows.filter((row) => row.statusKey === 'idle').length;
+      const activeSessions = rows.reduce((sum, row) => sum + (row.activeSessionCount || 0), 0);
+
+      const totalItems = filteredRows.length;
+      const totalPages = totalItems > 0 ? Math.ceil(totalItems / pageSize) : 0;
+      const requestedPage = Math.max(1, Number.parseInt(pagesByFactory[factory], 10) || 1);
+      const currentPage = totalPages > 0 ? Math.min(requestedPage, totalPages) : 1;
+      const startIndex = totalPages > 0 ? (currentPage - 1) * pageSize : 0;
+      const pagedRows = filteredRows.slice(startIndex, startIndex + pageSize);
+
+      return {
+        factory,
+        goal,
+        overview: {
+          machineCount: rows.length,
+          filteredMachineCount: filteredRows.length,
+          activeMachines: runningCount,
+          staleMachines: staleCount,
+          idleMachines: idleCount,
+          activeSessions,
+          actualQuantity: actual.actualQuantity,
+          goodQuantity: actual.goodQuantity,
+          ngQuantity: actual.ngQuantity,
+          recordCount: actual.recordCount,
+          achievementRate: goal.totalTargetQuantity > 0
+            ? Math.round((actual.actualQuantity / goal.totalTargetQuantity) * 1000) / 10
+            : 0,
+        },
+        pagination: {
+          currentPage,
+          totalPages,
+          totalItems,
+          itemsPerPage: pageSize,
+        },
+        rows: pagedRows,
+      };
+    });
+
+    const summary = groups.reduce((accumulator, group) => {
+      accumulator.totalGoalQuantity += group.goal.totalTargetQuantity || 0;
+      accumulator.totalActualQuantity += group.overview.actualQuantity || 0;
+      accumulator.totalGoodQuantity += group.overview.goodQuantity || 0;
+      accumulator.totalNgQuantity += group.overview.ngQuantity || 0;
+      accumulator.activeMachines += group.overview.activeMachines || 0;
+      accumulator.staleMachines += group.overview.staleMachines || 0;
+      accumulator.idleMachines += group.overview.idleMachines || 0;
+      accumulator.activeSessions += group.overview.activeSessions || 0;
+      return accumulator;
+    }, {
+      ...emptySummary,
+      selectedFactoryCount: selectedFactories.length,
+    });
+
+    summary.achievementRate = summary.totalGoalQuantity > 0
+      ? Math.round((summary.totalActualQuantity / summary.totalGoalQuantity) * 1000) / 10
+      : 0;
+
+    res.json({
+      success: true,
+      date: selectedDate,
+      generatedAt: new Date().toISOString(),
+      pageSize,
+      summary,
+      groups,
+      filterOptions,
+    });
   } catch (error) {
-    console.error('Token validation error:', error);
-    res.status(401).json({ error: 'Invalid token' });
+    console.error('Error building factory status snapshot:', error);
+    res.status(500).json({ success: false, error: error.message || 'Failed to build factory status snapshot.' });
   }
 });
 
+app.post('/api/factory-status/logs', async (req, res) => {
+  try {
+    await client.connect();
 
-// app.post("/loginCustomer", async (req, res) => {
-//   const { username, password } = req.body;
+    const submittedDb = client.db('submittedDB');
+    const tabletLogCollection = submittedDb.collection('tabletLogDB');
 
-//   try {
-//     await client.connect();
+    const selectedDate = sanitizeFactoryStatusDate(req.body?.date);
+    const selectedFactories = sanitizeFactoryStatusList(req.body?.factories);
+    const equipment = normalizeFactoryStatusText(req.body?.equipment);
+    const workerName = normalizeFactoryStatusText(req.body?.workerName);
+    const status = normalizeFactoryStatusText(req.body?.status);
+    const sessionID = normalizeFactoryStatusText(req.body?.sessionID);
+    const search = normalizeFactoryStatusText(req.body?.search);
+    const requestedPage = Math.max(1, Number.parseInt(req.body?.page, 10) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number.parseInt(req.body?.limit, 10) || 25));
+    const sortSpec = buildFactoryStatusLogSortSpec(req.body?.sort);
 
-//     const globalDB = client.db("Sasaki_Coating_MasterDB");
-//     const masterUser = await globalDB.collection("masterUsers").findOne({ username });
+    const emptyResponse = {
+      success: true,
+      date: selectedDate,
+      generatedAt: new Date().toISOString(),
+      summary: {
+        totalLogs: 0,
+        equipmentCount: 0,
+        workerCount: 0,
+        sessionCount: 0,
+      },
+      pagination: {
+        currentPage: 1,
+        totalPages: 0,
+        totalItems: 0,
+        itemsPerPage: pageSize,
+      },
+      rows: [],
+      filterOptions: {
+        equipments: [],
+        workers: [],
+        statuses: [],
+      },
+    };
 
-//     // 1️⃣ MasterUser login
-//     if (masterUser) {
-//       const passwordMatch = await bcrypt.compare(password, masterUser.password);
-//       if (!passwordMatch) return res.status(401).json({ error: "Invalid password" });
+    if (!selectedFactories.length) {
+      return res.json(emptyResponse);
+    }
 
-//       const today = new Date();
-//       const validUntil = new Date(masterUser.validUntil);
-//       if (today > validUntil) return res.status(403).json({ error: "Account expired. Contact support." });
+    const factoryMatch = { $in: selectedFactories };
+    const scopeMatch = {
+      工場: factoryMatch,
+      Date: selectedDate,
+    };
 
-//       return res.status(200).json({
-//         username: masterUser.username,
-//         role: masterUser.role,
-//         dbName: masterUser.dbName
-//       });
-//     }
+    const baseMatch = { ...scopeMatch };
 
-//     // 2️⃣ Sub-user login (loop all master users)
-//     const allMasterUsers = await globalDB.collection("masterUsers").find({}).toArray();
+    if (equipment) {
+      baseMatch.設備 = { $regex: escapeFactoryStatusRegex(equipment), $options: 'i' };
+    }
 
-//     for (const mu of allMasterUsers) {
+    if (status) {
+      baseMatch.Status = status;
+    }
+
+    if (sessionID) {
+      baseMatch.sessionID = { $regex: escapeFactoryStatusRegex(sessionID), $options: 'i' };
+    }
+
+    const match = { ...baseMatch };
+    const andClauses = [];
+
+    if (workerName) {
+      const workerNameRegex = { $regex: escapeFactoryStatusRegex(workerName), $options: 'i' };
+      const matchingOperatorSessionIds = await collectFactoryStatusMatchingSessionIdsByOperator(
+        tabletLogCollection,
+        baseMatch,
+        workerName
+      );
+      const operatorClauses = [
+        { Worker_Name: workerNameRegex },
+        { 'AdditionalData.inspectorName': workerNameRegex },
+      ];
+
+      if (matchingOperatorSessionIds.length) {
+        operatorClauses.push({ sessionID: { $in: matchingOperatorSessionIds } });
+      }
+
+      andClauses.push({ $or: operatorClauses });
+    }
+
+    if (search) {
+      const regex = new RegExp(escapeFactoryStatusRegex(search), 'i');
+      andClauses.push({ $or: [
+        { 設備: regex },
+        { Action: regex },
+        { Worker_Name: regex },
+        { 'AdditionalData.inspectorName': regex },
+        { 品番: regex },
+        { 背番号: regex },
+        { sessionID: regex },
+        { Status: regex },
+      ] });
+    }
+
+    if (andClauses.length) {
+      match.$and = andClauses;
+    }
+
+    const [
+      totalItems,
+      scopedEquipments,
+      scopedWorkers,
+      scopedStatuses,
+      matchedEquipments,
+      matchedWorkers,
+      matchedSessions,
+    ] = await Promise.all([
+      tabletLogCollection.countDocuments(match),
+      collectFactoryStatusDistinctValues(tabletLogCollection, '設備', scopeMatch),
+      collectFactoryStatusDistinctOperatorValues(tabletLogCollection, scopeMatch),
+      collectFactoryStatusDistinctValues(tabletLogCollection, 'Status', scopeMatch),
+      collectFactoryStatusDistinctValues(tabletLogCollection, '設備', match),
+      collectFactoryStatusDistinctOperatorValues(tabletLogCollection, match),
+      collectFactoryStatusDistinctValues(tabletLogCollection, 'sessionID', match),
+    ]);
+
+    const totalPages = totalItems > 0 ? Math.ceil(totalItems / pageSize) : 0;
+    const currentPage = totalPages > 0 ? Math.min(requestedPage, totalPages) : 1;
+    const skip = totalPages > 0 ? (currentPage - 1) * pageSize : 0;
+
+    const documents = await tabletLogCollection.find(match, {
+      projection: {
+        Timestamp: 1,
+        Date: 1,
+        Time: 1,
+        工場: 1,
+        設備: 1,
+        Worker_Name: 1,
+        AdditionalData: 1,
+        Action: 1,
+        Status: 1,
+        品番: 1,
+        背番号: 1,
+        sessionID: 1,
+      },
+    }).sort(sortSpec).skip(skip).limit(pageSize).toArray();
+
+    const {
+      operatorMap: sessionOperatorMap,
+      inspectorMap: sessionInspectorMap,
+    } = await collectFactoryStatusSessionOperators(
+      tabletLogCollection,
+      documents.map((document) => document.sessionID)
+    );
+
+    res.json({
+      success: true,
+      date: selectedDate,
+      generatedAt: new Date().toISOString(),
+      summary: {
+        totalLogs: totalItems,
+        equipmentCount: matchedEquipments.filter(Boolean).length,
+        workerCount: matchedWorkers.filter(Boolean).length,
+        sessionCount: matchedSessions.filter(Boolean).length,
+      },
+      pagination: {
+        currentPage,
+        totalPages,
+        totalItems,
+        itemsPerPage: pageSize,
+      },
+      rows: documents.map((document) => ({
+        id: String(document._id),
+        timestamp: document.Timestamp || '',
+        date: document.Date || '',
+        time: document.Time || '',
+        factory: document.工場 || '',
+        equipment: document.設備 || '',
+        workerName: normalizeFactoryStatusText(document.Worker_Name)
+          || sessionOperatorMap.get(normalizeFactoryStatusText(document.sessionID))
+          || normalizeFactoryStatusText(document?.AdditionalData?.inspectorName)
+          || sessionInspectorMap.get(normalizeFactoryStatusText(document.sessionID))
+          || '',
+        inspectorName: normalizeFactoryStatusText(document?.AdditionalData?.inspectorName)
+          || sessionInspectorMap.get(normalizeFactoryStatusText(document.sessionID))
+          || '',
+        action: document.Action || '',
+        status: document.Status || '',
+        partNumber: document.品番 || '',
+        backNumber: document.背番号 || '',
+        sessionID: document.sessionID || '',
+      })),
+      filterOptions: {
+        equipments: scopedEquipments.filter(Boolean).sort((left, right) => String(left).localeCompare(String(right), 'ja')),
+        workers: scopedWorkers.filter(Boolean).sort((left, right) => String(left).localeCompare(String(right), 'ja')),
+        statuses: scopedStatuses.filter(Boolean).sort((left, right) => String(left).localeCompare(String(right), 'ja')),
+      },
+    });
+  } catch (error) {
+    console.error('Error building factory status logs:', error);
+    res.status(500).json({ success: false, error: error.message || 'Failed to load factory status logs.' });
+  }
+});
 //       const customerDB = client.db(mu.dbName);
 //       const subUser = await customerDB.collection("users").findOne({ username });
 
@@ -10469,6 +12083,49 @@ app.post('/saveImageURL', async (req, res) => {
 
 
 //updates masterDB
+function sanitizeMasterRecordUpdates(updates = {}) {
+  if (!updates || typeof updates !== "object" || Array.isArray(updates)) {
+    return {};
+  }
+
+  return Object.entries(updates).reduce((sanitized, [key, value]) => {
+    const rawKey = typeof key === "string" ? key : String(key ?? "");
+
+    if (!rawKey.trim() || rawKey === "_id") {
+      return sanitized;
+    }
+
+    sanitized[rawKey] = value;
+    return sanitized;
+  }, {});
+}
+
+function normalizeCheckFormTemplateWritePayload(payload = {}) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return payload;
+  }
+
+  if (!Array.isArray(payload.fields)) {
+    return payload;
+  }
+
+  return {
+    ...payload,
+    fields: payload.fields.map((field) => {
+      if (!field || typeof field !== "object" || Array.isArray(field)) {
+        return field;
+      }
+
+      const fieldType = typeof field.type === "string" ? field.type.trim().toLowerCase() : field.type;
+
+      return {
+        ...field,
+        type: fieldType === "checkbox" ? "toggle" : fieldType,
+      };
+    }),
+  };
+}
+
 app.post("/updateMasterRecord", async (req, res) => {
   const { recordId, updates, username, collectionName } = req.body; // Add collectionName
 
@@ -10490,10 +12147,19 @@ app.post("/updateMasterRecord", async (req, res) => {
       return res.status(404).json({ error: "Record not found" });
     }
 
+    const normalizedUpdates = collectionName === "checkFormTemplatesDB"
+      ? normalizeCheckFormTemplateWritePayload(updates)
+      : updates;
+    const sanitizedUpdates = sanitizeMasterRecordUpdates(normalizedUpdates);
+
+    if (Object.keys(sanitizedUpdates).length === 0) {
+      return res.json({ success: true, modifiedCount: 0 });
+    }
+
     // Perform update
     const updateResult = await masterColl.updateOne(
       { _id: objectId },
-      { $set: updates }
+      { $set: sanitizedUpdates }
     );
 
     if (updateResult.modifiedCount === 0) {
@@ -10507,7 +12173,7 @@ app.post("/updateMasterRecord", async (req, res) => {
       username,
       timestamp: new Date(Date.now() + 9 * 60 * 60 * 1000), // JST = UTC + 9 hours
       oldData: oldRecord,
-      newData: updates
+      newData: sanitizedUpdates
     });
 
     // Invalidate master data cache for this collection – record was updated
@@ -10545,10 +12211,16 @@ app.post("/batchUpdateMasterRecords", async (req, res) => {
       return res.status(404).json({ error: "No records found" });
     }
 
+    const sanitizedUpdates = sanitizeMasterRecordUpdates(updates);
+
+    if (Object.keys(sanitizedUpdates).length === 0) {
+      return res.json({ success: true, modifiedCount: 0, matchedCount: oldRecords.length });
+    }
+
     // Perform batch update
     const updateResult = await masterColl.updateMany(
       { _id: { $in: objectIds } },
-      { $set: updates }
+      { $set: sanitizedUpdates }
     );
 
     if (updateResult.modifiedCount === 0) {
@@ -10562,7 +12234,7 @@ app.post("/batchUpdateMasterRecords", async (req, res) => {
       username,
       timestamp: new Date(Date.now() + 9 * 60 * 60 * 1000), // JST = UTC + 9 hours
       oldData: oldRecord,
-      newData: updates,
+      newData: sanitizedUpdates,
       batchUpdate: true // Flag to indicate this was part of a batch update
     }));
 
@@ -10679,7 +12351,7 @@ app.post("/uploadMasterImage", async (req, res) => {
     // Use a random token or constant token (example below)
     const downloadToken = "masterDBToken69";
 
-    await file.save(buffer, {
+    await file.save(uploadBuffer, {
       metadata: {
         contentType: "image/jpeg",
         metadata: {
@@ -10714,6 +12386,99 @@ app.post("/uploadMasterImage", async (req, res) => {
 });
 
 
+
+const FIREBASE_DOWNLOAD_TOKEN = 'masterDBToken69';
+const FIREBASE_HEIC_MIME_TYPES = new Set([
+  'image/heic',
+  'image/heif',
+  'image/heic-sequence',
+  'image/heif-sequence',
+]);
+const FIREBASE_EXTENSION_MAP = {
+  'image/jpeg': 'jpg',
+  'image/jpg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+  'image/avif': 'avif',
+  'image/heic': 'heic',
+  'image/heif': 'heif',
+  'video/mp4': 'mp4',
+  'video/quicktime': 'mov',
+};
+
+function buildFirebaseDownloadUrl(file, downloadToken = FIREBASE_DOWNLOAD_TOKEN) {
+  return `https://firebasestorage.googleapis.com/v0/b/${file.bucket.name}/o/${encodeURIComponent(file.name)}?alt=media&token=${downloadToken}`;
+}
+
+async function saveBase64AssetToFirebase({
+  base64,
+  filePathPrefix,
+  downloadToken = FIREBASE_DOWNLOAD_TOKEN,
+}) {
+  if (!base64) {
+    throw new Error('base64 image data is required');
+  }
+
+  const mimeMatch = String(base64).match(/^data:([^;]+);base64,/);
+  const mimeType = mimeMatch?.[1] || 'image/jpeg';
+  const rawBase64 = String(base64).includes(',') ? String(base64).split(',')[1] : String(base64);
+  const originalBuffer = Buffer.from(rawBase64, 'base64');
+  let uploadBuffer = originalBuffer;
+  let uploadMimeType = mimeType;
+
+  if (FIREBASE_HEIC_MIME_TYPES.has(mimeType)) {
+    uploadBuffer = Buffer.from(await heicConvert({
+      buffer: originalBuffer,
+      format: 'PNG',
+    }));
+    uploadMimeType = 'image/png';
+  }
+
+  const extension = FIREBASE_EXTENSION_MAP[uploadMimeType]
+    || uploadMimeType.split('/')[1]?.replace(/[^a-zA-Z0-9.+-]/g, '')
+    || 'bin';
+  const filePath = `${String(filePathPrefix || '').replace(/\/+$/, '')}.${extension}`;
+  const file = admin.storage().bucket().file(filePath);
+
+  await file.save(uploadBuffer, {
+    metadata: {
+      contentType: uploadMimeType,
+      metadata: { firebaseStorageDownloadTokens: downloadToken },
+    },
+  });
+
+  return {
+    file,
+    filePath,
+    imageURL: buildFirebaseDownloadUrl(file, downloadToken),
+    contentType: uploadMimeType,
+  };
+}
+
+// Upload an image attached to an equipment event (事案) to Firebase Storage.
+// Does NOT update MongoDB — the returned URL is stored by the caller when saving the event record.
+app.post("/api/upload-equipment-event-image", async (req, res) => {
+  const { base64, factoryName, equipmentName, username } = req.body;
+
+  if (!base64) {
+    return res.status(400).json({ error: "base64 image data is required" });
+  }
+
+  try {
+    const timestamp = Date.now();
+    const factory  = (factoryName  || "unknown").replace(/[^a-zA-Z0-9　-鿿]/g, "_");
+    const machine  = (equipmentName || "unknown").replace(/[^a-zA-Z0-9　-鿿]/g, "_");
+    const filePathPrefix = `equipmentEvents/${factory}/${machine}/${timestamp}`;
+    const { filePath, imageURL } = await saveBase64AssetToFirebase({ base64, filePathPrefix });
+
+    console.log(`📎 Equipment event file uploaded by ${username || "unknown"}: ${filePath}`);
+    res.json({ imageURL });
+  } catch (error) {
+    console.error("Error uploading equipment event image:", error);
+    res.status(500).json({ error: "Error uploading image", details: error.message });
+  }
+});
 
 // //inserts data to masterDB
 // app.post("/submitToMasterDB", async (req, res) => {
@@ -10754,20 +12519,23 @@ app.post("/uploadMasterImage", async (req, res) => {
 
 //inserts data to masterDB
 app.post("/submitToMasterDB", async (req, res) => {
-  const { data, username, collectionName } = req.body; // Add collectionName
+  const { data, username, collectionName, dbName } = req.body;
 
-  if (!data || !username || !collectionName) { // Add collectionName to validation
+  if (!data || !username || !collectionName) {
     return res.status(400).json({ error: "Missing data, username, or collectionName" });
   }
 
   try {
     await client.connect();
-    const db = client.db("Sasaki_Coating_MasterDB");
-    const collection = db.collection(collectionName); // Use dynamic collection name
-    const logColl = db.collection(`${collectionName}_Log`); // Use dynamic log collection
+    const db = client.db(dbName || "Sasaki_Coating_MasterDB");
+    const collection = db.collection(collectionName);
+    const logColl = db.collection(`${collectionName}_Log`);
+    const insertData = collectionName === "checkFormTemplatesDB"
+      ? normalizeCheckFormTemplateWritePayload(data)
+      : data;
 
     // Insert the data
-    const result = await collection.insertOne(data);
+    const result = await collection.insertOne(insertData);
 
     // Log the insert
     await logColl.insertOne({
@@ -10776,7 +12544,7 @@ app.post("/submitToMasterDB", async (req, res) => {
       action: "insert",
       username,
       timestamp: new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" })),
-      newData: data
+      newData: insertData
     });
 
     // Invalidate master data and filter caches – new record may add new field values
@@ -11650,6 +13418,1838 @@ app.get('/api/masterdb/products', async (req, res) => {
     }
 });
 
+  // ==================== PRODUCTION CAPABILITY MANAGEMENT ====================
+
+  let productionCapabilityIndexesEnsured = false;
+
+  async function ensureProductionCapabilityIndexes() {
+    if (productionCapabilityIndexesEnsured) {
+      return;
+    }
+
+    const db = client.db('submittedDB');
+    const capabilityCollection = db.collection('productionCapabilityDB');
+
+    await capabilityCollection.createIndex(
+      { 工場: 1, 背番号: 1, 品番: 1 },
+      { unique: true, name: 'factory_sebanggo_hinban_unique' }
+    );
+    await capabilityCollection.createIndex(
+      { 工場: 1, enabled: 1 },
+      { name: 'factory_enabled_idx' }
+    );
+    await capabilityCollection.createIndex(
+      { モデル: 1 },
+      { name: 'model_idx' }
+    );
+
+    productionCapabilityIndexesEnsured = true;
+  }
+
+  function escapeProductionCapabilityRegex(value = '') {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  function buildProductionCapabilityKey(factory = '', sebanggo = '', hinban = '') {
+    return `${factory}::${sebanggo}::${hinban}`;
+  }
+
+  function normalizeProductionCapabilityMachine(machine = {}, index = 0) {
+    const equipment = String(machine?.設備 || machine?.equipment || '').trim();
+    if (!equipment) {
+      return null;
+    }
+
+    const toNullableNumber = (value) => {
+      if (value === '' || value === null || value === undefined) {
+        return null;
+      }
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+
+    return {
+      設備: equipment,
+      priority: index + 1,
+      enabled: machine?.enabled !== false,
+      preferred: machine?.preferred === true,
+      cycleTimeSeconds: toNullableNumber(machine?.cycleTimeSeconds),
+      pcPerCycle: toNullableNumber(machine?.pcPerCycle),
+      boxQuantityOverride: toNullableNumber(machine?.boxQuantityOverride),
+    };
+  }
+
+  function getProductionCapabilityEquipmentNames(equipment = '') {
+    return String(equipment || '')
+      .split(',')
+      .map((name) => name.trim())
+      .filter(Boolean);
+  }
+
+  function getProductionCapabilityMasterNumber(value) {
+    if (value === '' || value === null || value === undefined) {
+      return null;
+    }
+
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  function resolveProductionCapabilityMasterPcPerCycle(masterProduct = {}, equipment = '') {
+    const rootPcPerCycle = getProductionCapabilityMasterNumber(masterProduct?.pcPerCycle);
+    const machineConfig = masterProduct?.machineConfig && typeof masterProduct.machineConfig === 'object'
+      ? masterProduct.machineConfig
+      : null;
+    const equipmentNames = getProductionCapabilityEquipmentNames(equipment);
+
+    if (!machineConfig || equipmentNames.length === 0) {
+      return rootPcPerCycle;
+    }
+
+    if (equipmentNames.length === 1) {
+      const config = machineConfig[equipmentNames[0]];
+      return getProductionCapabilityMasterNumber(config?.pcPerCycle) ?? rootPcPerCycle;
+    }
+
+    const configValues = equipmentNames
+      .map((name) => getProductionCapabilityMasterNumber(machineConfig[name]?.pcPerCycle))
+      .filter((value) => value !== null);
+
+    if (
+      configValues.length === equipmentNames.length
+      && configValues.length > 0
+      && configValues.every((value) => value === configValues[0])
+    ) {
+      return configValues[0];
+    }
+
+    return rootPcPerCycle;
+  }
+
+  function simplifyProductionCapabilityMachineOverrides(machine = {}, masterProduct = {}) {
+    const simplifiedMachine = { ...machine };
+    const masterCycleTimeSeconds = getProductionCapabilityMasterNumber(masterProduct?.['秒数(1pcs何秒)']);
+    const masterPcPerCycle = resolveProductionCapabilityMasterPcPerCycle(masterProduct, simplifiedMachine['設備']);
+    const masterBoxQuantity = getProductionCapabilityMasterNumber(masterProduct?.['収容数']);
+
+    if (
+      simplifiedMachine.cycleTimeSeconds !== null
+      && masterCycleTimeSeconds !== null
+      && Number(simplifiedMachine.cycleTimeSeconds) === masterCycleTimeSeconds
+    ) {
+      simplifiedMachine.cycleTimeSeconds = null;
+    }
+
+    if (
+      simplifiedMachine.pcPerCycle !== null
+      && masterPcPerCycle !== null
+      && Number(simplifiedMachine.pcPerCycle) === masterPcPerCycle
+    ) {
+      simplifiedMachine.pcPerCycle = null;
+    }
+
+    if (
+      simplifiedMachine.boxQuantityOverride !== null
+      && masterBoxQuantity !== null
+      && Number(simplifiedMachine.boxQuantityOverride) === masterBoxQuantity
+    ) {
+      simplifiedMachine.boxQuantityOverride = null;
+    }
+
+    return simplifiedMachine;
+  }
+
+  app.post('/api/production-capability/products', async (req, res) => {
+    try {
+      await client.connect();
+
+      const {
+        page = 1,
+        limit = 25,
+        factory = '',
+        model = '',
+        search = ''
+      } = req.body || {};
+
+      const safePage = Math.max(parseInt(page, 10) || 1, 1);
+      const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 25, 1), 100);
+      const skip = (safePage - 1) * safeLimit;
+
+      const masterDb = client.db('Sasaki_Coating_MasterDB');
+      const productCollection = masterDb.collection('masterDB');
+      const capabilityCollection = client.db('submittedDB').collection('productionCapabilityDB');
+
+      const query = {};
+      if (factory) {
+        query['工場'] = factory;
+      }
+      if (model) {
+        query['モデル'] = model;
+      }
+      if (search && search.trim()) {
+        const regex = new RegExp(escapeProductionCapabilityRegex(search.trim()), 'i');
+        query.$or = [
+          { '背番号': regex },
+          { '品番': regex },
+          { '品名': regex },
+          { 'モデル': regex },
+          { '工場': regex }
+        ];
+      }
+
+      const projection = {
+        背番号: 1,
+        品番: 1,
+        品名: 1,
+        モデル: 1,
+        工場: 1,
+        収容数: 1,
+        材料: 1,
+        材料背番号: 1,
+        imageURL: 1,
+      };
+
+      const [totalCount, products] = await Promise.all([
+        productCollection.countDocuments(query),
+        productCollection
+          .find(query, { projection })
+          .sort({ 工場: 1, モデル: 1, 背番号: 1, 品番: 1 })
+          .skip(skip)
+          .limit(safeLimit)
+          .toArray()
+      ]);
+
+      const capabilityQueries = products.map((product) => ({
+        工場: product['工場'] || '',
+        背番号: product['背番号'] || '',
+        品番: product['品番'] || '',
+      })).filter((item) => item['背番号'] && item['品番']);
+
+      const capabilityDocs = capabilityQueries.length > 0
+        ? await capabilityCollection.find({ $or: capabilityQueries }).toArray()
+        : [];
+
+      const capabilityMap = new Map(
+        capabilityDocs.map((doc) => [
+          buildProductionCapabilityKey(doc['工場'], doc['背番号'], doc['品番']),
+          doc
+        ])
+      );
+
+      const data = products.map((product) => {
+        const key = buildProductionCapabilityKey(product['工場'], product['背番号'], product['品番']);
+        const capability = capabilityMap.get(key);
+        const enabledMachines = (capability?.machines || []).filter((machine) => machine?.enabled !== false);
+        const preferredMachine = enabledMachines.find((machine) => machine?.preferred) || enabledMachines[0] || null;
+
+        return {
+          ...product,
+          capabilityId: capability?._id?.toString() || null,
+          capabilityEnabled: capability?.enabled === true,
+          machineCount: enabledMachines.length,
+          preferredMachine: preferredMachine?.設備 || null,
+          mappingStatus: !capability
+            ? 'unmapped'
+            : capability.enabled === false
+              ? 'disabled'
+              : enabledMachines.length > 0
+                ? 'mapped'
+                : 'empty'
+        };
+      });
+
+      res.json({
+        success: true,
+        data,
+        pagination: {
+          page: safePage,
+          limit: safeLimit,
+          totalCount,
+          totalPages: Math.max(Math.ceil(totalCount / safeLimit), 1),
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error fetching production capability products:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch production capability products',
+        message: error.message,
+      });
+    }
+  });
+
+  app.get('/api/production-capability/detail', async (req, res) => {
+    try {
+      await client.connect();
+
+      const sebanggo = String(req.query.sebanggo || '').trim();
+      const hinban = String(req.query.hinban || '').trim();
+      const factory = String(req.query.factory || '').trim();
+
+      if (!sebanggo || !hinban) {
+        return res.status(400).json({
+          success: false,
+          error: 'sebanggo and hinban are required'
+        });
+      }
+
+      const masterDb = client.db('Sasaki_Coating_MasterDB');
+      const productCollection = masterDb.collection('masterDB');
+      const capabilityCollection = client.db('submittedDB').collection('productionCapabilityDB');
+
+      const productQuery = {
+        背番号: sebanggo,
+        品番: hinban,
+      };
+      if (factory) {
+        productQuery['工場'] = factory;
+      }
+
+      const product = await productCollection.findOne(productQuery, {
+        projection: {
+          背番号: 1,
+          品番: 1,
+          品名: 1,
+          モデル: 1,
+          工場: 1,
+          収容数: 1,
+          '秒数(1pcs何秒)': 1,
+          pcPerCycle: 1,
+          machineConfig: 1,
+          加工設備: 1,
+          送りピッチ: 1,
+          材料: 1,
+          材料背番号: 1,
+          imageURL: 1,
+        }
+      });
+
+      if (!product) {
+        return res.status(404).json({
+          success: false,
+          error: 'Product not found in masterDB'
+        });
+      }
+
+      const capability = await capabilityCollection.findOne({
+        工場: product['工場'] || '',
+        背番号: sebanggo,
+        品番: hinban,
+      });
+
+      res.json({
+        success: true,
+        product,
+        capability: capability
+          ? {
+            ...capability,
+            _id: capability._id.toString(),
+          }
+          : null,
+      });
+    } catch (error) {
+      console.error('❌ Error fetching production capability detail:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch production capability detail',
+        message: error.message,
+      });
+    }
+  });
+
+  app.get('/api/production-capability/equipment', async (req, res) => {
+    try {
+      await client.connect();
+
+      const factory = String(req.query.factory || '').trim();
+      const pressCollection = client.db('submittedDB').collection('pressDB');
+
+      const match = {
+        設備: { $exists: true, $nin: [null, ''] }
+      };
+      if (factory) {
+        match['工場'] = factory;
+      }
+
+      const equipment = await pressCollection.aggregate([
+        { $match: match },
+        { $group: { _id: '$設備' } },
+        { $sort: { _id: 1 } },
+        { $project: { _id: 0, value: '$_id' } }
+      ]).toArray();
+
+      res.json({
+        success: true,
+        data: equipment.map((item) => item.value),
+        count: equipment.length,
+      });
+    } catch (error) {
+      console.error('❌ Error fetching production capability equipment:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch equipment list',
+        message: error.message,
+      });
+    }
+  });
+
+  app.post('/api/production-capability/save', async (req, res) => {
+    try {
+      await client.connect();
+      await ensureProductionCapabilityIndexes();
+
+      const {
+        product = {},
+        enabled = true,
+        machines = [],
+        username = 'system'
+      } = req.body || {};
+
+      const sebanggo = String(product['背番号'] || '').trim();
+      const hinban = String(product['品番'] || '').trim();
+      let factory = String(product['工場'] || '').trim();
+
+      if (!sebanggo || !hinban) {
+        return res.status(400).json({
+          success: false,
+          error: 'Product 背番号 and 品番 are required'
+        });
+      }
+
+      const masterDb = client.db('Sasaki_Coating_MasterDB');
+      const productCollection = masterDb.collection('masterDB');
+      const capabilityDb = client.db('submittedDB');
+      const capabilityCollection = capabilityDb.collection('productionCapabilityDB');
+      const logCollection = capabilityDb.collection('productionCapabilityLogDB');
+
+      const masterQuery = { 背番号: sebanggo, 品番: hinban };
+      if (factory) {
+        masterQuery['工場'] = factory;
+      }
+
+      const masterProduct = await productCollection.findOne(masterQuery, {
+        projection: {
+          背番号: 1,
+          品番: 1,
+          品名: 1,
+          モデル: 1,
+          工場: 1,
+          収容数: 1,
+          材料: 1,
+          材料背番号: 1,
+        }
+      });
+
+      if (!masterProduct) {
+        return res.status(404).json({
+          success: false,
+          error: 'Product not found in masterDB'
+        });
+      }
+
+      factory = String(masterProduct['工場'] || factory || '').trim();
+
+      const seenEquipment = new Set();
+      const sanitizedMachines = machines
+        .map((machine, index) => normalizeProductionCapabilityMachine(machine, index))
+        .filter((machine) => {
+          if (!machine || seenEquipment.has(machine['設備'])) {
+            return false;
+          }
+          seenEquipment.add(machine['設備']);
+          return true;
+        })
+        .map((machine, index) => ({
+          ...simplifyProductionCapabilityMachineOverrides(machine, masterProduct),
+          priority: index + 1,
+        }));
+
+      if (sanitizedMachines.length > 0) {
+        const preferredIndex = sanitizedMachines.findIndex((machine) => machine.preferred === true);
+        sanitizedMachines.forEach((machine, index) => {
+          machine.preferred = preferredIndex === -1 ? index === 0 : index === preferredIndex;
+        });
+      }
+
+      const filter = {
+        工場: factory,
+        背番号: sebanggo,
+        品番: hinban,
+      };
+
+      const existingCapability = await capabilityCollection.findOne(filter);
+      const now = new Date();
+      const nextDocument = {
+        背番号: sebanggo,
+        品番: hinban,
+        品名: masterProduct['品名'] || String(product['品名'] || '').trim(),
+        モデル: masterProduct['モデル'] || String(product['モデル'] || '').trim(),
+        工場: factory,
+        enabled: enabled !== false,
+        machines: sanitizedMachines,
+        updatedAt: now,
+        updatedBy: username,
+      };
+
+      let savedDocument;
+      if (existingCapability) {
+        await capabilityCollection.updateOne(filter, {
+          $set: nextDocument,
+        });
+        savedDocument = await capabilityCollection.findOne(filter);
+      } else {
+        const insertResult = await capabilityCollection.insertOne({
+          ...nextDocument,
+          createdAt: now,
+          createdBy: username,
+        });
+        savedDocument = await capabilityCollection.findOne({ _id: insertResult.insertedId });
+      }
+
+      await logCollection.insertOne({
+        背番号: sebanggo,
+        品番: hinban,
+        工場: factory,
+        username,
+        action: existingCapability ? 'update' : 'create',
+        timestamp: now,
+        previousData: existingCapability || null,
+        newData: nextDocument,
+      });
+
+      res.json({
+        success: true,
+        data: {
+          ...savedDocument,
+          _id: savedDocument._id.toString(),
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error saving production capability:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to save production capability',
+        message: error.message,
+      });
+    }
+  });
+
+  app.post('/api/production-capability/resolve', async (req, res) => {
+    try {
+      await client.connect();
+
+      const defaultFactory = String(req.body?.factory || '').trim();
+      const rawItems = Array.isArray(req.body?.items) ? req.body.items : [];
+
+      const normalizedItems = [];
+      const seenKeys = new Set();
+
+      rawItems.forEach((item = {}) => {
+        const factory = String(item?.工場 || item?.factory || defaultFactory || '').trim();
+        const sebanggo = String(item?.背番号 || '').trim();
+        const hinban = String(item?.品番 || '').trim();
+
+        if (!factory || (!sebanggo && !hinban)) {
+          return;
+        }
+
+        const key = buildProductionCapabilityKey(factory, sebanggo, hinban);
+        if (seenKeys.has(key)) {
+          return;
+        }
+
+        seenKeys.add(key);
+        normalizedItems.push({ factory, sebanggo, hinban });
+      });
+
+      if (normalizedItems.length === 0) {
+        return res.json({
+          success: true,
+          capabilities: {},
+          count: 0,
+          missing: [],
+        });
+      }
+
+      const capabilityCollection = client.db('submittedDB').collection('productionCapabilityDB');
+
+      const exactQueries = normalizedItems
+        .filter((item) => item.sebanggo && item.hinban)
+        .map((item) => ({
+          工場: item.factory,
+          背番号: item.sebanggo,
+          品番: item.hinban,
+        }));
+
+      const capabilityDocs = exactQueries.length > 0
+        ? await capabilityCollection.find({ $or: exactQueries }).toArray()
+        : [];
+
+      const capabilityDocMap = new Map(
+        capabilityDocs.map((doc) => [
+          buildProductionCapabilityKey(doc['工場'], doc['背番号'], doc['品番']),
+          doc,
+        ])
+      );
+
+      const capabilities = {};
+      const missing = [];
+
+      normalizedItems.forEach((item) => {
+        const key = buildProductionCapabilityKey(item.factory, item.sebanggo, item.hinban);
+
+        let capability = capabilityDocMap.get(key) || null;
+        if (!capability && (!item.sebanggo || !item.hinban)) {
+          capability = capabilityDocs.find((doc) => (
+            doc['工場'] === item.factory
+            && (!item.sebanggo || doc['背番号'] === item.sebanggo)
+            && (!item.hinban || doc['品番'] === item.hinban)
+          )) || null;
+        }
+
+        const eligibleMachines = capability?.enabled === false
+          ? []
+          : (capability?.machines || [])
+              .filter((machine) => String(machine?.設備 || '').trim() && machine?.enabled !== false)
+              .sort((left, right) => {
+                const leftPriority = Number.isFinite(Number(left?.priority)) ? Number(left.priority) : 999;
+                const rightPriority = Number.isFinite(Number(right?.priority)) ? Number(right.priority) : 999;
+
+                if (leftPriority !== rightPriority) {
+                  return leftPriority - rightPriority;
+                }
+
+                if ((left?.preferred === true) !== (right?.preferred === true)) {
+                  return left?.preferred === true ? -1 : 1;
+                }
+
+                return String(left?.設備 || '').localeCompare(String(right?.設備 || ''));
+              })
+              .map((machine, index) => {
+                const equipment = String(machine?.設備 || '').trim();
+                return {
+                  equipment,
+                  設備: equipment,
+                  priority: Number.isFinite(Number(machine?.priority)) ? Number(machine.priority) : index + 1,
+                  preferred: machine?.preferred === true,
+                  enabled: machine?.enabled !== false,
+                  cycleTimeSeconds: machine?.cycleTimeSeconds ?? null,
+                  pcPerCycle: machine?.pcPerCycle ?? null,
+                  boxQuantityOverride: machine?.boxQuantityOverride ?? null,
+                };
+              });
+
+        const reason = !capability
+          ? 'unmapped'
+          : capability.enabled === false
+            ? 'disabled'
+            : eligibleMachines.length === 0
+              ? 'empty'
+              : null;
+
+        capabilities[key] = {
+          factory: item.factory,
+          背番号: item.sebanggo,
+          品番: item.hinban,
+          hasMapping: !!capability,
+          capabilityEnabled: capability?.enabled === true,
+          eligibleMachines,
+          preferredMachine: eligibleMachines.find((machine) => machine.preferred)?.equipment || eligibleMachines[0]?.equipment || null,
+          updatedAt: capability?.updatedAt || null,
+          updatedBy: capability?.updatedBy || null,
+          reason,
+        };
+
+        if (reason) {
+          missing.push({
+            factory: item.factory,
+            背番号: item.sebanggo,
+            品番: item.hinban,
+            reason,
+          });
+        }
+      });
+
+      res.json({
+        success: true,
+        capabilities,
+        count: Object.keys(capabilities).length,
+        missing,
+      });
+    } catch (error) {
+      console.error('❌ Error resolving production capabilities:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to resolve production capabilities',
+        message: error.message,
+      });
+    }
+  });
+
+  function normalizeProductionPreviewDate(value = '') {
+    const text = String(value || '').trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+      return text;
+    }
+
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  function addProductionPreviewDays(dateText, dayOffset = 0) {
+    const [year, month, day] = normalizeProductionPreviewDate(dateText).split('-').map(Number);
+    const date = new Date(Date.UTC(year, month - 1, day));
+    date.setUTCDate(date.getUTCDate() + dayOffset);
+    return date.toISOString().split('T')[0];
+  }
+
+  function getProductionPreviewNumericValue(value, fallback = 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
+  function buildProductionPreviewItemKey(sebanggo = '', hinban = '') {
+    return `${String(sebanggo || '').trim()}::${String(hinban || '').trim()}`;
+  }
+
+  function normalizeProductionPreviewStatus(value = '') {
+    return String(value || '').trim().toLowerCase();
+  }
+
+  function isProductionPreviewCompletedStatus(value = '') {
+    const raw = String(value || '').trim();
+    const normalized = normalizeProductionPreviewStatus(value);
+    return raw === '完了' || normalized === 'completed' || normalized === 'complete' || normalized === 'done';
+  }
+
+  function isProductionPreviewCancelledStatus(value = '') {
+    const raw = String(value || '').trim();
+    const normalized = normalizeProductionPreviewStatus(value);
+    return raw === 'キャンセル' || normalized === 'cancelled' || normalized === 'canceled';
+  }
+
+  function getProductionPreviewRequestTimestamp(requestDoc = {}) {
+    const createdAt = requestDoc?.createdAt ? new Date(requestDoc.createdAt) : null;
+    if (createdAt && !Number.isNaN(createdAt.getTime())) {
+      return createdAt.getTime();
+    }
+
+    const objectIdTimestamp = requestDoc?._id?.getTimestamp?.();
+    if (objectIdTimestamp instanceof Date && !Number.isNaN(objectIdTimestamp.getTime())) {
+      return objectIdTimestamp.getTime();
+    }
+
+    return 0;
+  }
+
+  function getProductionPreviewDateSortValue(dateText = '') {
+    const normalizedDate = normalizeProductionPreviewDate(dateText);
+    const [year, month, day] = normalizedDate.split('-').map(Number);
+    return Date.UTC(year, month - 1, day);
+  }
+
+  function getProductionPreviewInternalDeadline(dateText = '') {
+    const normalizedDate = normalizeProductionPreviewDate(dateText);
+    const [year, month, day] = normalizedDate.split('-').map(Number);
+    const deadline = new Date(Date.UTC(year, month - 1, day));
+    deadline.setUTCDate(deadline.getUTCDate() - 1);
+
+    while (deadline.getUTCDay() === 0 || deadline.getUTCDay() === 6) {
+      deadline.setUTCDate(deadline.getUTCDate() - 1);
+    }
+
+    return deadline.toISOString().split('T')[0];
+  }
+
+  function getProductionPreviewDeliveryOrderValue(value = null) {
+    const text = String(value ?? '').trim();
+    if (!text) {
+      return Number.MAX_SAFE_INTEGER;
+    }
+
+    const numericValue = Number(text);
+    if (Number.isFinite(numericValue)) {
+      return numericValue;
+    }
+
+    const numericMatch = text.match(/\d+/);
+    return numericMatch ? Number(numericMatch[0]) : Number.MAX_SAFE_INTEGER;
+  }
+
+  function compareProductionPreviewRequestNumbers(leftValue = '', rightValue = '') {
+    const leftText = String(leftValue || '').trim();
+    const rightText = String(rightValue || '').trim();
+
+    if (!leftText && !rightText) {
+      return 0;
+    }
+    if (!leftText) {
+      return 1;
+    }
+    if (!rightText) {
+      return -1;
+    }
+
+    return leftText.localeCompare(rightText, undefined, { numeric: true, sensitivity: 'base' });
+  }
+
+  function compareProductionPreviewLineItems(left = {}, right = {}) {
+    const leftDeadlineSortValue = getProductionPreviewDateSortValue(left.internalDeadline || left.dueDate || '');
+    const rightDeadlineSortValue = getProductionPreviewDateSortValue(right.internalDeadline || right.dueDate || '');
+    if (leftDeadlineSortValue !== rightDeadlineSortValue) {
+      return leftDeadlineSortValue - rightDeadlineSortValue;
+    }
+
+    const leftDeliveryOrder = getProductionPreviewDeliveryOrderValue(left.deliveryOrder);
+    const rightDeliveryOrder = getProductionPreviewDeliveryOrderValue(right.deliveryOrder);
+    if (leftDeliveryOrder !== rightDeliveryOrder) {
+      return leftDeliveryOrder - rightDeliveryOrder;
+    }
+
+    const requestNumberCompare = compareProductionPreviewRequestNumbers(left.requestNumber, right.requestNumber);
+    if (requestNumberCompare !== 0) {
+      return requestNumberCompare;
+    }
+
+    const leftTimestamp = Number(left.requestTimestamp || 0);
+    const rightTimestamp = Number(right.requestTimestamp || 0);
+    if (leftTimestamp !== rightTimestamp) {
+      return leftTimestamp - rightTimestamp;
+    }
+
+    return Number(left.lineNumber || 0) - Number(right.lineNumber || 0);
+  }
+
+  function buildProductionPreviewDraftBasisKey(row = {}) {
+    const rowId = String(row?.id || '').trim();
+    if (rowId) {
+      return rowId;
+    }
+
+    const requestNumber = String(row?.requestNumber || '').trim();
+    const lineNumber = Number.isFinite(Number(row?.lineNumber)) ? Number(row.lineNumber) : '';
+    const sebanggo = String(row?.['背番号'] || row?.背番号 || '').trim();
+    const hinban = String(row?.['品番'] || row?.品番 || '').trim();
+    return [requestNumber, lineNumber, sebanggo, hinban].join('::');
+  }
+
+  function normalizeProductionPreviewDraftBasisRows(rows = []) {
+    return (Array.isArray(rows) ? rows : [])
+      .map((row = {}) => {
+        const rowId = String(row?.id || row?.sourceRowId || '').trim();
+        const requestId = String(row?.requestId || '').trim();
+        const requestNumber = String(row?.requestNumber || '').trim();
+        const lineNumber = Number.isFinite(Number(row?.lineNumber)) ? Number(row.lineNumber) : null;
+        const sebanggo = String(row?.['背番号'] || row?.背番号 || '').trim();
+        const hinban = String(row?.['品番'] || row?.品番 || '').trim();
+        const shortfallQuantity = getProductionPreviewNumericValue(row?.shortfallQuantity ?? row?.quantity, 0);
+        const key = buildProductionPreviewDraftBasisKey({
+          id: rowId,
+          requestNumber,
+          lineNumber,
+          背番号: sebanggo,
+          品番: hinban,
+        });
+
+        if (!key || (!requestNumber && !requestId && !sebanggo && !hinban)) {
+          return null;
+        }
+
+        return {
+          key,
+          id: rowId || key,
+          requestId: requestId || null,
+          requestNumber,
+          lineNumber,
+          背番号: sebanggo,
+          品番: hinban,
+          shortfallQuantity,
+        };
+      })
+      .filter(Boolean)
+      .sort((left, right) => {
+        const requestNumberCompare = compareProductionPreviewRequestNumbers(left.requestNumber, right.requestNumber);
+        if (requestNumberCompare !== 0) {
+          return requestNumberCompare;
+        }
+
+        const leftLineNumber = Number.isFinite(Number(left.lineNumber)) ? Number(left.lineNumber) : Number.MAX_SAFE_INTEGER;
+        const rightLineNumber = Number.isFinite(Number(right.lineNumber)) ? Number(right.lineNumber) : Number.MAX_SAFE_INTEGER;
+        if (leftLineNumber !== rightLineNumber) {
+          return leftLineNumber - rightLineNumber;
+        }
+
+        return String(left.key || '').localeCompare(String(right.key || ''));
+      });
+  }
+
+  function compareProductionPreviewDraftBasis(savedBasisRows = [], currentPriorityRows = []) {
+    const normalizedSavedBasisRows = normalizeProductionPreviewDraftBasisRows(savedBasisRows);
+    if (normalizedSavedBasisRows.length === 0) {
+      return {
+        tracked: false,
+        status: 'untracked',
+        isStale: null,
+        savedRowCount: 0,
+        currentRowCount: Array.isArray(currentPriorityRows) ? currentPriorityRows.length : 0,
+        missingCount: 0,
+        newCount: 0,
+        changedQuantityCount: 0,
+        sampleMissingRows: [],
+        sampleNewRows: [],
+        sampleChangedRows: [],
+      };
+    }
+
+    const normalizedCurrentRows = normalizeProductionPreviewDraftBasisRows(currentPriorityRows);
+    const savedMap = new Map(normalizedSavedBasisRows.map((row) => [row.key, row]));
+    const currentMap = new Map(normalizedCurrentRows.map((row) => [row.key, row]));
+
+    const missingRows = normalizedSavedBasisRows.filter((row) => !currentMap.has(row.key));
+    const newRows = normalizedCurrentRows.filter((row) => !savedMap.has(row.key));
+    const changedRows = normalizedCurrentRows.reduce((rows, row) => {
+      const savedRow = savedMap.get(row.key);
+      if (!savedRow) {
+        return rows;
+      }
+
+      if (savedRow.shortfallQuantity !== row.shortfallQuantity) {
+        rows.push({
+          key: row.key,
+          requestNumber: row.requestNumber,
+          lineNumber: row.lineNumber,
+          背番号: row['背番号'],
+          品番: row['品番'],
+          savedShortfallQuantity: savedRow.shortfallQuantity,
+          currentShortfallQuantity: row.shortfallQuantity,
+        });
+      }
+
+      return rows;
+    }, []);
+
+    const isStale = missingRows.length > 0 || newRows.length > 0 || changedRows.length > 0;
+
+    return {
+      tracked: true,
+      status: isStale ? 'stale' : 'current',
+      isStale,
+      savedRowCount: normalizedSavedBasisRows.length,
+      currentRowCount: normalizedCurrentRows.length,
+      missingCount: missingRows.length,
+      newCount: newRows.length,
+      changedQuantityCount: changedRows.length,
+      sampleMissingRows: missingRows.slice(0, 5),
+      sampleNewRows: newRows.slice(0, 5),
+      sampleChangedRows: changedRows.slice(0, 5),
+    };
+  }
+
+  function sanitizeProductionPreviewAssignments(assignments = []) {
+    const sanitizeNumber = (value, fallback = null) => {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : fallback;
+    };
+
+    return (Array.isArray(assignments) ? assignments : []).map((assignment = {}, index) => {
+      const equipment = String(assignment?.equipment || '').trim();
+      const startTime = String(assignment?.startTime || '').trim();
+      const previewEndTime = String(assignment?.previewEndTime || '').trim();
+
+      if (!equipment || !startTime || !previewEndTime) {
+        return null;
+      }
+
+      const estimatedTime = assignment?.estimatedTime && typeof assignment.estimatedTime === 'object'
+        ? {
+            totalSeconds: sanitizeNumber(assignment.estimatedTime.totalSeconds, 0),
+            totalMinutes: sanitizeNumber(assignment.estimatedTime.totalMinutes, 0),
+            cycleTimeSeconds: sanitizeNumber(assignment.estimatedTime.cycleTimeSeconds, null),
+            secondsPerPiece: sanitizeNumber(assignment.estimatedTime.secondsPerPiece, null),
+            pcPerCycle: sanitizeNumber(assignment.estimatedTime.pcPerCycle, null),
+            hours: sanitizeNumber(assignment.estimatedTime.hours, 0),
+            minutes: sanitizeNumber(assignment.estimatedTime.minutes, 0),
+            cyclesNeeded: sanitizeNumber(assignment.estimatedTime.cyclesNeeded, 0),
+            formattedTime: String(assignment.estimatedTime.formattedTime || '').trim(),
+          }
+        : null;
+
+      return {
+        draftId: String(assignment?.draftId || `${equipment}::${startTime}::${index}`).trim(),
+        goalId: assignment?.goalId || null,
+        背番号: String(assignment?.背番号 || '').trim(),
+        品番: String(assignment?.品番 || '').trim(),
+        品名: String(assignment?.品名 || '').trim(),
+        モデル: String(assignment?.モデル || '').trim(),
+        quantity: sanitizeNumber(assignment?.quantity, 0),
+        equipment,
+        startTime,
+        previewEndTime,
+        boxes: sanitizeNumber(assignment?.boxes, null),
+        estimatedTime,
+        color: String(assignment?.color || '').trim(),
+        previewSource: String(assignment?.previewSource || 'priority').trim(),
+        requestNumber: String(assignment?.requestNumber || '').trim(),
+        requestNumberLabel: String(assignment?.requestNumberLabel || '').trim(),
+        lineNumber: sanitizeNumber(assignment?.lineNumber, null),
+        requestStatus: String(assignment?.requestStatus || '').trim(),
+        sourceRowId: String(assignment?.sourceRowId || '').trim(),
+        sourceRowIds: Array.isArray(assignment?.sourceRowIds) ? assignment.sourceRowIds.map((value) => String(value || '').trim()).filter(Boolean) : [],
+        groupedRequestNumbers: Array.isArray(assignment?.groupedRequestNumbers) ? assignment.groupedRequestNumbers.map((value) => String(value || '').trim()).filter(Boolean) : [],
+        usedPreferredMachine: assignment?.usedPreferredMachine === true,
+      };
+    }).filter(Boolean);
+  }
+
+  function formatProductionPublishedScheduleDoc(doc = {}, currentPriorityRows = []) {
+    const basisRows = normalizeProductionPreviewDraftBasisRows(doc?.basisRows || []);
+    const assignments = sanitizeProductionPreviewAssignments(doc?.assignments || []);
+
+    return {
+      id: doc?._id?.toString?.() || String(doc?._id || ''),
+      factory: String(doc?.factory || '').trim(),
+      date: normalizeProductionPreviewDate(doc?.date || ''),
+      version: Number.isFinite(Number(doc?.version)) ? Number(doc.version) : 1,
+      isActive: doc?.isActive !== false,
+      sourceMode: String(doc?.sourceMode || 'auto').trim() || 'auto',
+      sourceType: String(doc?.sourceType || 'manual').trim() || 'manual',
+      sourceLabel: String(doc?.sourceLabel || '').trim(),
+      scheduleUntilTime: String(doc?.scheduleUntilTime || '').trim() || null,
+      assignmentCount: Number.isFinite(Number(doc?.assignmentCount)) ? Number(doc.assignmentCount) : assignments.length,
+      assignments,
+      basisRows,
+      basisRowCount: Number.isFinite(Number(doc?.basisRowCount)) ? Number(doc.basisRowCount) : basisRows.length,
+      basisComparison: compareProductionPreviewDraftBasis(basisRows, currentPriorityRows),
+      publishedBy: String(doc?.publishedBy || doc?.updatedBy || doc?.createdBy || 'system').trim() || 'system',
+      publishedAt: doc?.publishedAt || doc?.updatedAt || doc?.createdAt || null,
+      createdBy: String(doc?.createdBy || doc?.publishedBy || 'system').trim() || 'system',
+      createdAt: doc?.createdAt || doc?.publishedAt || null,
+      note: String(doc?.note || '').trim(),
+    };
+  }
+
+  const PRODUCTION_PUBLISHED_MANAGE_ROLES = new Set(['admin', '課長', '部長', '係長']);
+
+  function canManageProductionPublishedSchedules(role = 'viewer') {
+    return PRODUCTION_PUBLISHED_MANAGE_ROLES.has(String(role || 'viewer').trim());
+  }
+
+  app.get('/api/production-planner/preview', async (req, res) => {
+    try {
+      await client.connect();
+
+      const factory = String(req.query.factory || '').trim();
+      const targetDate = normalizeProductionPreviewDate(req.query.date || '');
+
+      if (!factory) {
+        return res.status(400).json({
+          success: false,
+          error: 'factory is required'
+        });
+      }
+
+      const db = client.db('submittedDB');
+      const requestsCollection = db.collection('nodaRequestDB');
+      const inventoryCollection = db.collection('nodaInventoryDB');
+      const capabilityCollection = db.collection('productionCapabilityDB');
+      const previewDraftCollection = db.collection('productionPreviewDraftsDB');
+      const masterCollection = client.db('Sasaki_Coating_MasterDB').collection('masterDB');
+
+      const rawRequests = await requestsCollection
+        .find({
+          status: { $nin: ['completed', 'Completed', 'cancelled', 'Cancelled', '完了', 'キャンセル'] }
+        })
+        .sort({ createdAt: 1, requestNumber: 1, _id: 1 })
+        .toArray();
+
+      const activeRequests = rawRequests
+        .filter((requestDoc) => !isProductionPreviewCompletedStatus(requestDoc?.status) && !isProductionPreviewCancelledStatus(requestDoc?.status))
+        .sort((left, right) => {
+          const leftDeadline = getProductionPreviewInternalDeadline(left?.['納入指示日'] || targetDate);
+          const rightDeadline = getProductionPreviewInternalDeadline(right?.['納入指示日'] || targetDate);
+          const leftDeadlineSortValue = getProductionPreviewDateSortValue(leftDeadline);
+          const rightDeadlineSortValue = getProductionPreviewDateSortValue(rightDeadline);
+          if (leftDeadlineSortValue !== rightDeadlineSortValue) {
+            return leftDeadlineSortValue - rightDeadlineSortValue;
+          }
+
+          const leftDeliveryOrder = getProductionPreviewDeliveryOrderValue(left?.deliveryOrder ?? left?.['便']);
+          const rightDeliveryOrder = getProductionPreviewDeliveryOrderValue(right?.deliveryOrder ?? right?.['便']);
+          if (leftDeliveryOrder !== rightDeliveryOrder) {
+            return leftDeliveryOrder - rightDeliveryOrder;
+          }
+
+          const requestNumberCompare = compareProductionPreviewRequestNumbers(left?.requestNumber, right?.requestNumber);
+          if (requestNumberCompare !== 0) {
+            return requestNumberCompare;
+          }
+
+          const leftTimestamp = getProductionPreviewRequestTimestamp(left);
+          const rightTimestamp = getProductionPreviewRequestTimestamp(right);
+          if (leftTimestamp !== rightTimestamp) {
+            return leftTimestamp - rightTimestamp;
+          }
+
+          return String(left?._id || '').localeCompare(String(right?._id || ''));
+        });
+
+      const rawLineItems = [];
+      activeRequests.forEach((requestDoc) => {
+        const baseRequestNumber = String(requestDoc?.requestNumber || '').trim();
+        const baseDueDate = normalizeProductionPreviewDate(requestDoc?.['納入指示日'] || targetDate);
+        const internalDeadline = getProductionPreviewInternalDeadline(baseDueDate);
+        const baseRequestStatus = String(requestDoc?.status || '').trim();
+        const requestTimestamp = getProductionPreviewRequestTimestamp(requestDoc);
+        const baseLineItems = Array.isArray(requestDoc?.lineItems) && requestDoc.lineItems.length > 0
+          ? requestDoc.lineItems
+          : [{
+              背番号: requestDoc?.背番号 || '',
+              品番: requestDoc?.品番 || '',
+              品名: requestDoc?.品名 || '',
+              quantity: requestDoc?.quantity || 0,
+              status: requestDoc?.status || 'pending'
+            }];
+
+        baseLineItems.forEach((lineItem = {}, lineIndex) => {
+          const lineStatus = String(lineItem?.status || '').trim();
+          if (isProductionPreviewCompletedStatus(lineStatus) || isProductionPreviewCancelledStatus(lineStatus)) {
+            return;
+          }
+
+          const sebanggo = String(lineItem?.背番号 || requestDoc?.背番号 || '').trim();
+          const hinban = String(lineItem?.品番 || requestDoc?.品番 || '').trim();
+          const quantity = getProductionPreviewNumericValue(lineItem?.quantity ?? requestDoc?.quantity, 0);
+
+          if (!sebanggo && !hinban) {
+            return;
+          }
+
+          rawLineItems.push({
+            key: buildProductionPreviewItemKey(sebanggo, hinban),
+            背番号: sebanggo,
+            品番: hinban,
+            品名: String(lineItem?.品名 || requestDoc?.品名 || '').trim(),
+            quantity,
+            dueDate: baseDueDate,
+            internalDeadline,
+            requestNumber: baseRequestNumber,
+            lineNumber: lineItem?.lineNumber || lineIndex + 1,
+            lineStatus,
+            requestStatus: baseRequestStatus,
+            requestId: requestDoc?._id?.toString?.() || String(requestDoc?._id || ''),
+            requestCreatedAt: requestDoc?.createdAt || null,
+            requestTimestamp,
+            deliveryOrder: lineItem?.deliveryOrder ?? lineItem?.['便'] ?? requestDoc?.deliveryOrder ?? requestDoc?.['便'] ?? null,
+            deliveryNote: String(requestDoc?.deliveryNote || '').trim(),
+            type: String(requestDoc?.type || '').trim(),
+          });
+        });
+      });
+
+      rawLineItems.sort(compareProductionPreviewLineItems);
+
+      const itemKeys = new Set();
+      const backNumbers = new Set();
+      const partNumbers = new Set();
+
+      rawLineItems.forEach((line) => {
+        itemKeys.add(line.key);
+        if (line['背番号']) backNumbers.add(line['背番号']);
+        if (line['品番']) partNumbers.add(line['品番']);
+      });
+
+      const masterQuery = {
+        工場: factory,
+      };
+      const orClauses = [];
+      if (backNumbers.size > 0) {
+        orClauses.push({ 背番号: { $in: Array.from(backNumbers) } });
+      }
+      if (partNumbers.size > 0) {
+        orClauses.push({ 品番: { $in: Array.from(partNumbers) } });
+      }
+      if (orClauses.length > 0) {
+        masterQuery.$or = orClauses;
+      }
+
+      const masterProducts = orClauses.length > 0
+        ? await masterCollection.find(masterQuery, {
+            projection: {
+              背番号: 1,
+              品番: 1,
+              品名: 1,
+              モデル: 1,
+              工場: 1,
+              収容数: 1,
+              '秒数(1pcs何秒)': 1,
+              pcPerCycle: 1,
+              machineConfig: 1,
+            }
+          }).toArray()
+        : [];
+
+      const masterProductMap = new Map(
+        masterProducts.map((product) => [
+          buildProductionPreviewItemKey(product?.['背番号'], product?.['品番']),
+          product
+        ])
+      );
+
+      const filteredLineItems = rawLineItems.filter((line) => masterProductMap.has(line.key));
+
+      const filteredBackNumbers = Array.from(new Set(filteredLineItems.map((line) => line['背番号']).filter(Boolean)));
+      const filteredItemKeys = Array.from(new Set(filteredLineItems.map((line) => line.key).filter(Boolean)));
+
+      const inventoryResults = filteredBackNumbers.length > 0
+        ? await inventoryCollection.aggregate([
+            { $match: { 背番号: { $in: filteredBackNumbers } } },
+            {
+              $addFields: {
+                productionPreviewTimestamp: {
+                  $switch: {
+                    branches: [
+                      {
+                        case: { $eq: [{ $type: '$timeStamp' }, 'date'] },
+                        then: '$timeStamp'
+                      },
+                      {
+                        case: { $eq: [{ $type: '$timeStamp' }, 'string'] },
+                        then: { $dateFromString: { dateString: '$timeStamp', onError: new Date(0), onNull: new Date(0) } }
+                      },
+                      {
+                        case: { $eq: [{ $type: '$updatedAt' }, 'date'] },
+                        then: '$updatedAt'
+                      },
+                      {
+                        case: { $eq: [{ $type: '$createdAt' }, 'date'] },
+                        then: '$createdAt'
+                      }
+                    ],
+                    default: new Date(0)
+                  }
+                }
+              }
+            },
+            { $sort: { productionPreviewTimestamp: -1, _id: -1 } },
+            {
+              $group: {
+                _id: '$背番号',
+                latestRecord: { $first: '$$ROOT' }
+              }
+            }
+          ]).toArray()
+        : [];
+
+      const inventoryMap = new Map(
+        inventoryResults.map((row) => {
+          const record = row?.latestRecord || {};
+          const lastUpdated = record?.productionPreviewTimestamp instanceof Date
+            ? record.productionPreviewTimestamp.toISOString()
+            : record?.timeStamp || record?.updatedAt || record?.createdAt || null;
+
+          return [
+            row._id,
+            {
+              physicalQuantity: getProductionPreviewNumericValue(record?.physicalQuantity ?? record?.runningQuantity, 0),
+              reservedQuantity: getProductionPreviewNumericValue(record?.reservedQuantity, 0),
+              availableQuantity: getProductionPreviewNumericValue(record?.availableQuantity ?? record?.runningQuantity, 0),
+              lastUpdated,
+            }
+          ];
+        })
+      );
+
+      const capabilityQueries = filteredItemKeys
+        .map((key) => {
+          const [sebanggo, hinban] = key.split('::');
+          return {
+            工場: factory,
+            背番号: sebanggo,
+            品番: hinban,
+          };
+        })
+        .filter((item) => item.背番号 || item.品番);
+
+      const capabilityDocs = capabilityQueries.length > 0
+        ? await capabilityCollection.find({ $or: capabilityQueries }).toArray()
+        : [];
+
+      const capabilityMap = new Map(
+        capabilityDocs.map((doc) => [
+          buildProductionCapabilityKey(doc?.['工場'], doc?.['背番号'], doc?.['品番']),
+          doc
+        ])
+      );
+
+      const remainingPhysicalByBackNumber = new Map();
+      filteredBackNumbers.forEach((backNumber) => {
+        remainingPhysicalByBackNumber.set(backNumber, getProductionPreviewNumericValue(inventoryMap.get(backNumber)?.physicalQuantity, 0));
+      });
+
+      const priorityRows = [];
+      const priorityShortfallByKey = new Map();
+
+      filteredLineItems.forEach((lineItem, index) => {
+        const masterProduct = masterProductMap.get(lineItem.key) || null;
+        const inventory = inventoryMap.get(lineItem['背番号']) || {
+          physicalQuantity: 0,
+          reservedQuantity: 0,
+          availableQuantity: 0,
+          lastUpdated: null,
+        };
+        const capability = capabilityMap.get(buildProductionCapabilityKey(factory, lineItem['背番号'], lineItem['品番'])) || null;
+        const currentRemaining = getProductionPreviewNumericValue(remainingPhysicalByBackNumber.get(lineItem['背番号']), 0);
+        const requestedQuantity = getProductionPreviewNumericValue(lineItem.quantity, 0);
+        const reservedQuantity = Math.min(currentRemaining, requestedQuantity);
+        const shortfallQuantity = Math.max(0, requestedQuantity - currentRemaining);
+
+        remainingPhysicalByBackNumber.set(lineItem['背番号'], Math.max(0, currentRemaining - reservedQuantity));
+
+        if (shortfallQuantity <= 0) {
+          return;
+        }
+
+        const boxQuantity = getProductionPreviewNumericValue(masterProduct?.['収容数'], 0);
+        const eligibleMachines = capability?.enabled === false
+          ? []
+          : (capability?.machines || [])
+              .filter((machine) => String(machine?.設備 || '').trim() && machine?.enabled !== false)
+              .sort((left, right) => {
+                const leftPriority = Number.isFinite(Number(left?.priority)) ? Number(left.priority) : 999;
+                const rightPriority = Number.isFinite(Number(right?.priority)) ? Number(right.priority) : 999;
+                if (leftPriority !== rightPriority) {
+                  return leftPriority - rightPriority;
+                }
+                if ((left?.preferred === true) !== (right?.preferred === true)) {
+                  return left?.preferred === true ? -1 : 1;
+                }
+                return String(left?.設備 || '').localeCompare(String(right?.設備 || ''));
+              })
+              .map((machine) => ({
+                equipment: String(machine?.設備 || '').trim(),
+                priority: Number.isFinite(Number(machine?.priority)) ? Number(machine.priority) : null,
+                preferred: machine?.preferred === true,
+                cycleTimeSeconds: Number.isFinite(Number(machine?.cycleTimeSeconds)) ? Number(machine.cycleTimeSeconds) : null,
+                pcPerCycle: Number.isFinite(Number(machine?.pcPerCycle)) ? Number(machine.pcPerCycle) : null,
+                boxQuantityOverride: Number.isFinite(Number(machine?.boxQuantityOverride)) ? Number(machine.boxQuantityOverride) : null,
+              }));
+
+        const capabilityStatus = !capability
+          ? 'unmapped'
+          : capability.enabled === false
+            ? 'disabled'
+            : eligibleMachines.length === 0
+              ? 'empty'
+              : 'mapped';
+
+        const priorityRow = {
+          id: `${lineItem.requestId || lineItem.requestNumber || 'request'}:${lineItem.lineNumber}`,
+          priorityRank: priorityRows.length + 1,
+          queueOrder: index + 1,
+          factory,
+          requestId: lineItem.requestId,
+          requestNumber: lineItem.requestNumber,
+          requestStatus: lineItem.requestStatus,
+          requestCreatedAt: lineItem.requestCreatedAt,
+          requestTimestamp: lineItem.requestTimestamp,
+          deliveryDate: lineItem.dueDate,
+          internalDeadline: lineItem.internalDeadline,
+          deliveryOrder: lineItem.deliveryOrder,
+          deliveryNote: lineItem.deliveryNote,
+          type: lineItem.type,
+          lineNumber: lineItem.lineNumber,
+          lineStatus: lineItem.lineStatus,
+          背番号: lineItem['背番号'],
+          品番: lineItem['品番'],
+          品名: String(masterProduct?.['品名'] || lineItem['品名'] || '').trim(),
+          モデル: String(masterProduct?.['モデル'] || '').trim(),
+          収容数: masterProduct?.['収容数'] ?? null,
+          '秒数(1pcs何秒)': masterProduct?.['秒数(1pcs何秒)'] ?? null,
+          pcPerCycle: masterProduct?.pcPerCycle ?? null,
+          machineConfig: masterProduct?.machineConfig || null,
+          requestedQuantity,
+          reservedQuantity,
+          shortfallQuantity,
+          shortageBoxes: boxQuantity > 0 ? Math.ceil(shortfallQuantity / boxQuantity) : null,
+          physicalQuantity: getProductionPreviewNumericValue(inventory.physicalQuantity, 0),
+          inventoryStatus: reservedQuantity > 0 ? 'insufficient' : 'none',
+          boxQuantity: boxQuantity > 0 ? boxQuantity : null,
+          inventoryLastUpdated: inventory.lastUpdated || null,
+          eligibleMachines,
+          preferredMachine: eligibleMachines.find((machine) => machine.preferred)?.equipment || eligibleMachines[0]?.equipment || null,
+          capabilityStatus,
+          hasCapabilityMapping: !!capability,
+        };
+
+        priorityRows.push(priorityRow);
+        priorityShortfallByKey.set(lineItem.key, (priorityShortfallByKey.get(lineItem.key) || 0) + shortfallQuantity);
+      });
+
+      const activeLineSummaryByKey = new Map();
+      filteredLineItems.forEach((lineItem) => {
+        if (!activeLineSummaryByKey.has(lineItem.key)) {
+          activeLineSummaryByKey.set(lineItem.key, {
+            requestNumbers: new Set(),
+            activeRequestedQuantity: 0,
+            activeLineCount: 0,
+          });
+        }
+
+        const summary = activeLineSummaryByKey.get(lineItem.key);
+        summary.activeRequestedQuantity += getProductionPreviewNumericValue(lineItem.quantity, 0);
+        summary.activeLineCount += 1;
+        if (lineItem.requestNumber) {
+          summary.requestNumbers.add(lineItem.requestNumber);
+        }
+      });
+
+      const inventoryRows = filteredItemKeys
+        .map((key) => {
+          const [sebanggo, hinban] = key.split('::');
+          const masterProduct = masterProductMap.get(key) || null;
+          const inventory = inventoryMap.get(sebanggo) || {
+            physicalQuantity: 0,
+            reservedQuantity: 0,
+            availableQuantity: 0,
+            lastUpdated: null,
+          };
+          const summary = activeLineSummaryByKey.get(key) || {
+            requestNumbers: new Set(),
+            activeRequestedQuantity: 0,
+            activeLineCount: 0,
+          };
+          const pendingShortfallQuantity = priorityShortfallByKey.get(key) || 0;
+
+          return {
+            key,
+            factory,
+            背番号: sebanggo,
+            品番: hinban,
+            品名: String(masterProduct?.['品名'] || '').trim(),
+            モデル: String(masterProduct?.['モデル'] || '').trim(),
+            physicalQuantity: getProductionPreviewNumericValue(inventory.physicalQuantity, 0),
+            reservedQuantity: getProductionPreviewNumericValue(inventory.reservedQuantity, 0),
+            availableQuantity: getProductionPreviewNumericValue(inventory.availableQuantity, 0),
+            lastUpdated: inventory.lastUpdated || null,
+            activeRequestedQuantity: summary.activeRequestedQuantity,
+            activeLineCount: summary.activeLineCount,
+            requestCount: summary.requestNumbers.size,
+            requestNumbers: Array.from(summary.requestNumbers),
+            pendingShortfallQuantity,
+          };
+        })
+        .sort((left, right) => {
+          if (right.pendingShortfallQuantity !== left.pendingShortfallQuantity) {
+            return right.pendingShortfallQuantity - left.pendingShortfallQuantity;
+          }
+          if (right.activeRequestedQuantity !== left.activeRequestedQuantity) {
+            return right.activeRequestedQuantity - left.activeRequestedQuantity;
+          }
+          return String(left['背番号'] || left['品番']).localeCompare(String(right['背番号'] || right['品番']));
+        });
+
+      const totalShortfallQuantity = priorityRows.reduce((sum, row) => sum + row.shortfallQuantity, 0);
+      const unmappedPriorityCount = priorityRows.filter((row) => row.capabilityStatus !== 'mapped').length;
+      const savedDraftDoc = targetDate
+        ? await previewDraftCollection.findOne({ factory, date: targetDate })
+        : null;
+      const savedDraftBasisRows = normalizeProductionPreviewDraftBasisRows(savedDraftDoc?.basisRows || []);
+      const savedDraftBasisComparison = savedDraftDoc
+        ? compareProductionPreviewDraftBasis(savedDraftBasisRows, priorityRows)
+        : null;
+
+      res.json({
+        success: true,
+        preview: {
+          factory,
+          targetDate,
+          generatedAt: new Date().toISOString(),
+          summary: {
+            priorityRowCount: priorityRows.length,
+            inventoryRowCount: inventoryRows.length,
+            activeLineCount: filteredLineItems.length,
+            totalShortfallQuantity,
+            unmappedPriorityCount,
+            requestCount: activeRequests.length,
+          },
+          priorityRows,
+          inventoryRows,
+          savedDraft: savedDraftDoc ? {
+            id: savedDraftDoc?._id?.toString?.() || String(savedDraftDoc?._id || ''),
+            factory: savedDraftDoc.factory,
+            date: savedDraftDoc.date,
+            scheduleUntilTime: savedDraftDoc.scheduleUntilTime || null,
+            assignmentCount: Number.isFinite(Number(savedDraftDoc.assignmentCount)) ? Number(savedDraftDoc.assignmentCount) : ((savedDraftDoc.assignments || []).length || 0),
+            assignments: Array.isArray(savedDraftDoc.assignments) ? savedDraftDoc.assignments : [],
+            basisRows: savedDraftBasisRows,
+            basisRowCount: Number.isFinite(Number(savedDraftDoc.basisRowCount)) ? Number(savedDraftDoc.basisRowCount) : savedDraftBasisRows.length,
+            basisComparison: savedDraftBasisComparison,
+            createdBy: savedDraftDoc.createdBy || 'system',
+            createdAt: savedDraftDoc.createdAt || null,
+            updatedBy: savedDraftDoc.updatedBy || savedDraftDoc.createdBy || 'system',
+            updatedAt: savedDraftDoc.updatedAt || savedDraftDoc.createdAt || null,
+          } : null,
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error building production planner preview:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to build production planner preview',
+        message: error.message,
+      });
+    }
+  });
+
+  app.get('/api/production-planner/published', async (req, res) => {
+    try {
+      await client.connect();
+
+      const factory = String(req.query.factory || '').trim();
+      const targetDate = normalizeProductionPreviewDate(req.query.date || '');
+
+      if (!factory || !targetDate) {
+        return res.status(400).json({
+          success: false,
+          error: 'factory and date are required'
+        });
+      }
+
+      const db = client.db('submittedDB');
+      const collection = db.collection('productionPublishedSchedulesDB');
+      const publishedDocs = await collection
+        .find({ factory, date: targetDate })
+        .sort({ version: -1, publishedAt: -1, createdAt: -1, _id: -1 })
+        .toArray();
+
+      const formattedVersions = publishedDocs.map((doc) => formatProductionPublishedScheduleDoc(doc, []));
+      const activeVersion = formattedVersions.find((doc) => doc.isActive) || formattedVersions[0] || null;
+
+      res.json({
+        success: true,
+        data: {
+          factory,
+          date: targetDate,
+          activeVersion,
+          versions: formattedVersions,
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error loading production planner published schedule:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to load production planner published schedule',
+        message: error.message,
+      });
+    }
+  });
+
+  app.post('/api/production-planner/published/publish', async (req, res) => {
+    try {
+      await client.connect();
+      const { username, role } = vmGetRequester(req);
+
+      if (!canManageProductionPublishedSchedules(role)) {
+        return res.status(403).json({
+          success: false,
+          error: 'Insufficient role to publish schedules'
+        });
+      }
+
+      const factory = String(req.body?.factory || '').trim();
+      const targetDate = normalizeProductionPreviewDate(req.body?.date || '');
+      const scheduleUntilTime = String(req.body?.scheduleUntilTime || '').trim();
+      const sourceMode = String(req.body?.sourceMode || 'auto').trim() || 'auto';
+      const sourceType = String(req.body?.sourceType || 'manual').trim() || 'manual';
+      const sourceLabel = String(req.body?.sourceLabel || '').trim();
+      const note = String(req.body?.note || '').trim();
+      const publishedBy = String(req.body?.publishedBy || username || 'system').trim() || 'system';
+      const assignments = sanitizeProductionPreviewAssignments(req.body?.assignments || []);
+      const basisRows = normalizeProductionPreviewDraftBasisRows(req.body?.basisRows || []);
+
+      if (!factory || !targetDate) {
+        return res.status(400).json({
+          success: false,
+          error: 'factory and date are required'
+        });
+      }
+
+      if (assignments.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'at least one assignment is required to publish a schedule'
+        });
+      }
+
+      const db = client.db('submittedDB');
+      const collection = db.collection('productionPublishedSchedulesDB');
+      const now = new Date();
+      const latestVersionDoc = await collection.find({ factory, date: targetDate })
+        .sort({ version: -1, _id: -1 })
+        .limit(1)
+        .next();
+      const nextVersion = Number.isFinite(Number(latestVersionDoc?.version))
+        ? Number(latestVersionDoc.version) + 1
+        : 1;
+
+      await collection.updateMany(
+        { factory, date: targetDate, isActive: true },
+        {
+          $set: {
+            isActive: false,
+            supersededAt: now,
+            supersededBy: publishedBy,
+          }
+        }
+      );
+
+      const publishDoc = {
+        factory,
+        date: targetDate,
+        version: nextVersion,
+        isActive: true,
+        sourceMode: sourceMode === 'draft' ? 'draft' : 'auto',
+        sourceType,
+        sourceLabel,
+        scheduleUntilTime,
+        assignments,
+        assignmentCount: assignments.length,
+        basisRows,
+        basisRowCount: basisRows.length,
+        publishedBy,
+        publishedAt: now,
+        createdBy: publishedBy,
+        createdAt: now,
+        note,
+      };
+
+      const insertResult = await collection.insertOne(publishDoc);
+      const savedDoc = await collection.findOne({ _id: insertResult.insertedId });
+
+      res.json({
+        success: true,
+        data: formatProductionPublishedScheduleDoc(savedDoc, basisRows),
+      });
+    } catch (error) {
+      console.error('❌ Error publishing production planner schedule:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to publish production planner schedule',
+        message: error.message,
+      });
+    }
+  });
+
+  app.post('/api/production-planner/published/restore', async (req, res) => {
+    try {
+      await client.connect();
+      const { username, role } = vmGetRequester(req);
+
+      if (!canManageProductionPublishedSchedules(role)) {
+        return res.status(403).json({
+          success: false,
+          error: 'Insufficient role to restore schedules'
+        });
+      }
+
+      const factory = String(req.body?.factory || '').trim();
+      const targetDate = normalizeProductionPreviewDate(req.body?.date || '');
+      const sourceVersion = Number(req.body?.sourceVersion || 0);
+      const publishedBy = String(req.body?.publishedBy || username || 'system').trim() || 'system';
+      const note = String(req.body?.note || '').trim();
+
+      if (!factory || !targetDate || !Number.isFinite(sourceVersion) || sourceVersion <= 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'factory, date, and sourceVersion are required'
+        });
+      }
+
+      const db = client.db('submittedDB');
+      const collection = db.collection('productionPublishedSchedulesDB');
+      const sourceDoc = await collection.findOne({ factory, date: targetDate, version: sourceVersion });
+
+      if (!sourceDoc) {
+        return res.status(404).json({
+          success: false,
+          error: 'Published schedule version not found'
+        });
+      }
+
+      const now = new Date();
+      const latestVersionDoc = await collection.find({ factory, date: targetDate })
+        .sort({ version: -1, _id: -1 })
+        .limit(1)
+        .next();
+      const nextVersion = Number.isFinite(Number(latestVersionDoc?.version))
+        ? Number(latestVersionDoc.version) + 1
+        : 1;
+
+      await collection.updateMany(
+        { factory, date: targetDate, isActive: true },
+        {
+          $set: {
+            isActive: false,
+            supersededAt: now,
+            supersededBy: publishedBy,
+          }
+        }
+      );
+
+      const restoredAssignments = sanitizeProductionPreviewAssignments(sourceDoc.assignments || []);
+      const restoredBasisRows = normalizeProductionPreviewDraftBasisRows(sourceDoc.basisRows || []);
+      const restoreDoc = {
+        factory,
+        date: targetDate,
+        version: nextVersion,
+        isActive: true,
+        sourceMode: String(sourceDoc.sourceMode || 'auto').trim() === 'draft' ? 'draft' : 'auto',
+        sourceType: 'restore',
+        sourceLabel: `Restored from Version ${sourceVersion}`,
+        scheduleUntilTime: String(sourceDoc.scheduleUntilTime || '').trim(),
+        assignments: restoredAssignments,
+        assignmentCount: restoredAssignments.length,
+        basisRows: restoredBasisRows,
+        basisRowCount: restoredBasisRows.length,
+        publishedBy,
+        publishedAt: now,
+        createdBy: publishedBy,
+        createdAt: now,
+        note,
+        restoredFromVersion: sourceVersion,
+      };
+
+      const insertResult = await collection.insertOne(restoreDoc);
+      const savedDoc = await collection.findOne({ _id: insertResult.insertedId });
+
+      res.json({
+        success: true,
+        data: formatProductionPublishedScheduleDoc(savedDoc, restoredBasisRows),
+      });
+    } catch (error) {
+      console.error('❌ Error restoring production planner schedule:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to restore production planner schedule',
+        message: error.message,
+      });
+    }
+  });
+
+  app.post('/api/production-planner/preview-draft/save', async (req, res) => {
+    try {
+      await client.connect();
+
+      const factory = String(req.body?.factory || '').trim();
+      const targetDate = normalizeProductionPreviewDate(req.body?.date || '');
+      const scheduleUntilTime = String(req.body?.scheduleUntilTime || '').trim();
+      const updatedBy = String(req.body?.updatedBy || 'system').trim() || 'system';
+      const assignments = Array.isArray(req.body?.assignments) ? req.body.assignments : [];
+      const basisRows = normalizeProductionPreviewDraftBasisRows(req.body?.basisRows || []);
+
+      if (!factory || !targetDate) {
+        return res.status(400).json({
+          success: false,
+          error: 'factory and date are required'
+        });
+      }
+      const sanitizedAssignments = sanitizeProductionPreviewAssignments(assignments);
+
+      const db = client.db('submittedDB');
+      const collection = db.collection('productionPreviewDraftsDB');
+      const now = new Date();
+
+      await collection.updateOne(
+        { factory, date: targetDate },
+        {
+          $set: {
+            factory,
+            date: targetDate,
+            scheduleUntilTime,
+            assignments: sanitizedAssignments,
+            assignmentCount: sanitizedAssignments.length,
+            basisRows,
+            basisRowCount: basisRows.length,
+            updatedBy,
+            updatedAt: now,
+          },
+          $setOnInsert: {
+            createdBy: updatedBy,
+            createdAt: now,
+          }
+        },
+        { upsert: true }
+      );
+
+      const savedDraftDoc = await collection.findOne({ factory, date: targetDate });
+
+      res.json({
+        success: true,
+        data: {
+          id: savedDraftDoc?._id?.toString?.() || String(savedDraftDoc?._id || ''),
+          factory: savedDraftDoc.factory,
+          date: savedDraftDoc.date,
+          scheduleUntilTime: savedDraftDoc.scheduleUntilTime || null,
+          assignmentCount: Number.isFinite(Number(savedDraftDoc.assignmentCount)) ? Number(savedDraftDoc.assignmentCount) : sanitizedAssignments.length,
+          assignments: Array.isArray(savedDraftDoc.assignments) ? savedDraftDoc.assignments : [],
+          basisRows: normalizeProductionPreviewDraftBasisRows(savedDraftDoc.basisRows || []),
+          basisRowCount: Number.isFinite(Number(savedDraftDoc.basisRowCount)) ? Number(savedDraftDoc.basisRowCount) : basisRows.length,
+          basisComparison: compareProductionPreviewDraftBasis(savedDraftDoc.basisRows || [], savedDraftDoc.basisRows || []),
+          createdBy: savedDraftDoc.createdBy || updatedBy,
+          createdAt: savedDraftDoc.createdAt || now,
+          updatedBy: savedDraftDoc.updatedBy || updatedBy,
+          updatedAt: savedDraftDoc.updatedAt || now,
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error saving production preview draft:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to save production preview draft',
+        message: error.message,
+      });
+    }
+  });
+
+  app.delete('/api/production-planner/preview-draft', async (req, res) => {
+    try {
+      await client.connect();
+
+      const factory = String(req.query.factory || '').trim();
+      const targetDate = normalizeProductionPreviewDate(req.query.date || '');
+
+      if (!factory || !targetDate) {
+        return res.status(400).json({
+          success: false,
+          error: 'factory and date are required'
+        });
+      }
+
+      const db = client.db('submittedDB');
+      const collection = db.collection('productionPreviewDraftsDB');
+      const result = await collection.deleteOne({ factory, date: targetDate });
+
+      if (result.deletedCount === 0) {
+        return res.status(404).json({
+          success: false,
+          error: 'Saved preview draft not found'
+        });
+      }
+
+      res.json({ success: true, deletedCount: result.deletedCount });
+    } catch (error) {
+      console.error('❌ Error deleting production preview draft:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to delete production preview draft',
+        message: error.message,
+      });
+    }
+  });
+
 // Route to get unique shape values from Master DB
 app.get('/api/masterdb/shapes', async (req, res) => {
     const _ck = 'masterdb:shapes';
@@ -11925,6 +15525,350 @@ console.log("🖨️ Planner print API route loaded successfully");
 // ==================== NODA WAREHOUSE MANAGEMENT API ROUTES ====================
 // Copy this entire section to your server.js file
 
+function parseNodaPositiveNumber(value) {
+  const numericValue = Number(typeof value === 'string' ? value.replace(/,/g, '').trim() : value);
+  return Number.isFinite(numericValue) && numericValue > 0 ? numericValue : null;
+}
+
+function buildNodaMasterLineItemKey(partNumber = '', backNumber = '') {
+  return `${String(partNumber || '').trim()}::${String(backNumber || '').trim()}`;
+}
+
+async function attachNodaBoxCounts(masterCollection, lineItems = []) {
+  if (!Array.isArray(lineItems) || lineItems.length === 0) {
+    return lineItems;
+  }
+
+  const pairQueries = new Map();
+  const backNumbers = new Set();
+
+  for (const lineItem of lineItems) {
+    const partNumber = String(lineItem.品番 || '').trim();
+    const backNumber = String(lineItem.背番号 || '').trim();
+
+    if (!backNumber) {
+      continue;
+    }
+
+    backNumbers.add(backNumber);
+
+    if (partNumber) {
+      pairQueries.set(buildNodaMasterLineItemKey(partNumber, backNumber), {
+        品番: partNumber,
+        背番号: backNumber
+      });
+    }
+  }
+
+  if (pairQueries.size === 0 && backNumbers.size === 0) {
+    return lineItems.map((lineItem) => ({
+      ...lineItem,
+      箱数: null,
+      '箱数足りない': null
+    }));
+  }
+
+  const masterRows = await masterCollection.find(
+    {
+      $or: [
+        ...pairQueries.values(),
+        ...(backNumbers.size > 0 ? [{ 背番号: { $in: Array.from(backNumbers) } }] : [])
+      ]
+    },
+    {
+      projection: {
+        品番: 1,
+        背番号: 1,
+        収容数: 1,
+        _id: 0
+      }
+    }
+  ).toArray();
+
+  const capacityByPair = new Map();
+  const capacityByBackNumber = new Map();
+
+  for (const masterRow of masterRows) {
+    const partNumber = String(masterRow.品番 || '').trim();
+    const backNumber = String(masterRow.背番号 || '').trim();
+    const capacity = parseNodaPositiveNumber(masterRow.収容数);
+
+    if (!backNumber || !capacity) {
+      continue;
+    }
+
+    if (partNumber) {
+      const pairKey = buildNodaMasterLineItemKey(partNumber, backNumber);
+      if (!capacityByPair.has(pairKey)) {
+        capacityByPair.set(pairKey, capacity);
+      }
+    }
+
+    if (!capacityByBackNumber.has(backNumber)) {
+      capacityByBackNumber.set(backNumber, capacity);
+    }
+  }
+
+  return lineItems.map((lineItem) => {
+    const partNumber = String(lineItem.品番 || '').trim();
+    const backNumber = String(lineItem.背番号 || '').trim();
+    const capacity =
+      capacityByPair.get(buildNodaMasterLineItemKey(partNumber, backNumber)) ??
+      capacityByBackNumber.get(backNumber) ??
+      null;
+    const quantity = parseNodaPositiveNumber(lineItem.quantity);
+    const rawShortfallQuantity = Number(
+      typeof lineItem.shortfallQuantity === 'string'
+        ? lineItem.shortfallQuantity.replace(/,/g, '').trim()
+        : lineItem.shortfallQuantity
+    );
+    const shortfallQuantity = Number.isFinite(rawShortfallQuantity) && rawShortfallQuantity >= 0
+      ? rawShortfallQuantity
+      : null;
+
+    if (!capacity || !quantity) {
+      return {
+        ...lineItem,
+        箱数: null,
+        '箱数足りない': shortfallQuantity === 0 ? 0 : null
+      };
+    }
+
+    const calculatedBoxes = quantity / capacity;
+    const calculatedShortfallBoxes = shortfallQuantity === null ? null : shortfallQuantity / capacity;
+
+    return {
+      ...lineItem,
+      箱数: Number.isInteger(calculatedBoxes)
+        ? calculatedBoxes
+        : Number(calculatedBoxes.toFixed(2)),
+      '箱数足りない': calculatedShortfallBoxes === null
+        ? null
+        : Number.isInteger(calculatedShortfallBoxes)
+          ? calculatedShortfallBoxes
+          : Number(calculatedShortfallBoxes.toFixed(2))
+    };
+  });
+}
+
+function isNodaRequestCompletedStatus(value = '') {
+  const normalizedValue = String(value || '').toLowerCase();
+  return normalizedValue === 'completed' || normalizedValue === 'complete';
+}
+
+function isNodaRequestCancelledStatus(value = '') {
+  const normalizedValue = String(value || '').toLowerCase();
+  return normalizedValue === 'cancelled' || normalizedValue === 'canceled';
+}
+
+function getNodaTrashExpiryDate(baseDate = new Date()) {
+  const expiryDate = new Date(baseDate);
+  expiryDate.setMonth(expiryDate.getMonth() + 6);
+  return expiryDate;
+}
+
+function getNodaTrashAdjustableItems(request = {}) {
+  if (request?.requestType === 'bulk' && Array.isArray(request.lineItems)) {
+    return request.lineItems
+      .filter((lineItem) => !isNodaRequestCompletedStatus(lineItem?.status) && !isNodaRequestCancelledStatus(lineItem?.status))
+      .map((lineItem) => ({
+        背番号: lineItem.背番号,
+        品番: lineItem.品番,
+        quantity: Number(lineItem.quantity || 0),
+        lineNumber: lineItem.lineNumber ?? null
+      }))
+      .filter((lineItem) => lineItem.背番号 && lineItem.quantity > 0);
+  }
+
+  if (!request?.背番号 || !Number(request?.quantity) || isNodaRequestCompletedStatus(request?.status) || isNodaRequestCancelledStatus(request?.status)) {
+    return [];
+  }
+
+  return [{
+    背番号: request.背番号,
+    品番: request.品番,
+    quantity: Number(request.quantity || 0),
+    lineNumber: null
+  }];
+}
+
+async function getLatestNodaInventorySnapshot(inventoryCollection, backNumber) {
+  const inventoryResults = await inventoryCollection.aggregate([
+    { $match: { 背番号: backNumber } },
+    {
+      $addFields: {
+        timeStampDate: {
+          $cond: {
+            if: { $type: "$timeStamp" },
+            then: {
+              $cond: {
+                if: { $eq: [{ $type: "$timeStamp" }, "string"] },
+                then: { $dateFromString: { dateString: "$timeStamp" } },
+                else: "$timeStamp"
+              }
+            },
+            else: new Date()
+          }
+        }
+      }
+    },
+    { $sort: { timeStampDate: -1 } },
+    { $limit: 1 }
+  ]).toArray();
+
+  const latestInventory = inventoryResults[0];
+
+  return {
+    found: Boolean(latestInventory),
+    physicalQuantity: Number(latestInventory?.physicalQuantity ?? latestInventory?.runningQuantity ?? 0),
+    reservedQuantity: Number(latestInventory?.reservedQuantity ?? 0),
+    availableQuantity: Number(latestInventory?.availableQuantity ?? latestInventory?.runningQuantity ?? 0)
+  };
+}
+
+function getNodaReservationDetails(currentState = {}, quantity = 0) {
+  const requestedQuantity = Math.max(0, Number(quantity || 0));
+  const currentPhysical = Number(currentState?.physicalQuantity || 0);
+  const currentReserved = Number(currentState?.reservedQuantity || 0);
+  const reservableQuantity = Math.max(0, currentPhysical - currentReserved);
+  const reservedQuantity = Math.min(reservableQuantity, requestedQuantity);
+  const shortfallQuantity = Math.max(0, requestedQuantity - reservedQuantity);
+
+  let inventoryStatus = 'sufficient';
+  if (reservedQuantity <= 0) {
+    inventoryStatus = 'none';
+  } else if (reservedQuantity < requestedQuantity) {
+    inventoryStatus = 'insufficient';
+  }
+
+  return {
+    reservedQuantity,
+    shortfallQuantity,
+    inventoryStatus
+  };
+}
+
+function getNodaBulkRequestStatusFromLineItems(lineItems = []) {
+  const activeLineItems = Array.isArray(lineItems)
+    ? lineItems.filter((lineItem) => !isNodaRequestCompletedStatus(lineItem?.status) && !isNodaRequestCancelledStatus(lineItem?.status))
+    : [];
+
+  if (!activeLineItems.length) {
+    return {
+      overallInventoryStatus: 'sufficient',
+      requestStatus: 'pending'
+    };
+  }
+
+  const anyInProgress = activeLineItems.some((lineItem) => String(lineItem?.status || '').toLowerCase() === 'in-progress');
+  const anyPaused = activeLineItems.some((lineItem) => String(lineItem?.status || '').toLowerCase() === 'paused');
+  const hasNoInventory = activeLineItems.every((lineItem) => String(lineItem?.inventoryStatus || '').toLowerCase() === 'none');
+  const hasPartialInventory = activeLineItems.some((lineItem) => {
+    const inventoryStatus = String(lineItem?.inventoryStatus || '').toLowerCase();
+    return inventoryStatus === 'insufficient' || inventoryStatus === 'none';
+  });
+
+  let overallInventoryStatus;
+  let requestStatus;
+
+  if (hasNoInventory) {
+    overallInventoryStatus = 'waiting-for-inventory';
+    requestStatus = 'waiting-for-inventory';
+  } else if (hasPartialInventory) {
+    overallInventoryStatus = 'partial-inventory';
+    requestStatus = 'partial-inventory';
+  } else {
+    overallInventoryStatus = 'sufficient';
+    requestStatus = 'pending';
+  }
+
+  if (anyInProgress) {
+    requestStatus = 'in-progress';
+  } else if (anyPaused) {
+    requestStatus = 'paused';
+  }
+
+  return {
+    overallInventoryStatus,
+    requestStatus
+  };
+}
+
+async function applyNodaTrashReservationAdjustment({
+  inventoryCollection,
+  request,
+  requestId,
+  userName,
+  mode = 'trash',
+  eventTime = new Date()
+}) {
+  const adjustableItems = getNodaTrashAdjustableItems(request);
+  const inventoryStateByBackNumber = new Map();
+  const eventDate = eventTime.toISOString().split('T')[0];
+  let adjustedLineItems = 0;
+  let adjustedQuantity = 0;
+
+  for (const item of adjustableItems) {
+    let currentState = inventoryStateByBackNumber.get(item.背番号);
+    if (!currentState) {
+      currentState = await getLatestNodaInventorySnapshot(inventoryCollection, item.背番号);
+    }
+
+    const currentPhysical = Number(currentState.physicalQuantity || 0);
+    const currentReserved = Number(currentState.reservedQuantity || 0);
+    const currentAvailable = Number(currentState.availableQuantity || 0);
+    const quantity = Number(item.quantity || 0);
+
+    const newReservedQuantity = mode === 'restore'
+      ? currentReserved + quantity
+      : Math.max(0, currentReserved - quantity);
+    const newAvailableQuantity = currentPhysical - newReservedQuantity;
+
+    const inventoryTransaction = {
+      背番号: item.背番号,
+      品番: item.品番,
+      timeStamp: eventTime,
+      Date: eventDate,
+      physicalQuantity: currentPhysical,
+      reservedQuantity: newReservedQuantity,
+      availableQuantity: newAvailableQuantity,
+      runningQuantity: newAvailableQuantity,
+      lastQuantity: currentAvailable,
+      action: mode === 'restore'
+        ? `Trash Restore (+${quantity} reserved)`
+        : `Moved to Trash (-${quantity} reserved)`,
+      source: `Freya Admin - ${userName}`,
+      requestId: String(requestId),
+      note: mode === 'restore'
+        ? `Recovered request ${request.requestNumber}${item.lineNumber ? ` line ${item.lineNumber}` : ''} from trash. Reserved: ${currentReserved} → ${newReservedQuantity}. Available recalculated from physical ${currentPhysical}: ${currentAvailable} → ${newAvailableQuantity}.`
+        : `Moved request ${request.requestNumber}${item.lineNumber ? ` line ${item.lineNumber}` : ''} to trash. Reserved: ${currentReserved} → ${newReservedQuantity}. Available recalculated from physical ${currentPhysical}: ${currentAvailable} → ${newAvailableQuantity}.`
+    };
+
+    if (request?.requestType === 'bulk') {
+      inventoryTransaction.bulkRequestNumber = request.requestNumber;
+      if (item.lineNumber !== null) {
+        inventoryTransaction.lineNumber = item.lineNumber;
+      }
+    }
+
+    await inventoryCollection.insertOne(inventoryTransaction);
+
+    inventoryStateByBackNumber.set(item.背番号, {
+      physicalQuantity: currentPhysical,
+      reservedQuantity: newReservedQuantity,
+      availableQuantity: newAvailableQuantity
+    });
+
+    adjustedLineItems += 1;
+    adjustedQuantity += quantity;
+  }
+
+  return {
+    adjustedLineItems,
+    adjustedQuantity
+  };
+}
+
 // NODA Requests API Route
 app.post("/api/noda-requests", async (req, res) => {
   const { action, filters = {}, page = 1, limit = 10, sort = {}, requestId, data } = req.body;
@@ -11934,15 +15878,29 @@ app.post("/api/noda-requests", async (req, res) => {
     const db = client.db("submittedDB");
     const requestsCollection = db.collection("nodaRequestDB");
     const inventoryCollection = db.collection("nodaInventoryDB");
+    const masterCollection = client.db("Sasaki_Coating_MasterDB").collection("masterDB");
+    const withActiveRequestFilter = (query = {}) => ({
+      ...query,
+      isDeleted: { $ne: true }
+    });
+    const withTrashedRequestFilter = (query = {}) => ({
+      ...query,
+      isDeleted: true
+    });
 
     switch (action) {
       case 'getNodaRequests':
         try {
           // Build MongoDB query from filters
-          let query = {};
+          let query = withActiveRequestFilter();
+          const today = new Date();
+          const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
           // Status filter
-          if (filters.status) {
+          if (filters.pastDeadline) {
+            query.status = { $nin: ['completed', 'cancelled'] };
+            query['納入指示日'] = { ...(query['納入指示日'] || {}), $lt: todayStr };
+          } else if (filters.status) {
             query.status = filters.status;
           }
 
@@ -11958,7 +15916,7 @@ app.post("/api/noda-requests", async (req, res) => {
 
           // Date range filter (using 納入指示日 deadline field)
           if (filters.dateRange) {
-            query['納入指示日'] = {};
+            query['納入指示日'] = query['納入指示日'] || {};
             if (filters.dateRange.from) {
               query['納入指示日'].$gte = filters.dateRange.from;
             }
@@ -12004,18 +15962,16 @@ app.post("/api/noda-requests", async (req, res) => {
           // Calculate which requests can actually be picked based on PHYSICAL inventory
           // Priority: deadline date (納入指示日) - earliest deadline first
           // IMPORTANT: Only consider requests with deadline >= today (ignore past deadlines)
-          
+
           // Get today's date in YYYY-MM-DD format (matching the 納入指示日 format)
-          const today = new Date();
-          const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
           
           // Step 1: Get ALL active requests with deadline >= today, sorted by deadline (for FIFO calculation)
           const allActiveRequests = await requestsCollection
-            .find({ 
+            .find(withActiveRequestFilter({ 
               status: { $nin: ['completed', 'cancelled'] },
               // Only include requests where deadline is today or in the future
               納入指示日: { $gte: todayStr }
-            })
+            }))
             .sort({ '納入指示日': 1, createdAt: 1 }) // Sort by deadline first, then createdAt for same deadline
             .toArray();
           
@@ -12220,8 +16176,36 @@ app.post("/api/noda-requests", async (req, res) => {
 
           // Calculate statistics - use base query WITHOUT status filter
           // so card counts always show totals, not filtered counts
-          const statsQuery = { ...query };
-          delete statsQuery.status; // Remove status filter for statistics
+          const statsQuery = withActiveRequestFilter();
+
+          if (filters['品番']) {
+            statsQuery['品番'] = filters['品番'];
+          }
+
+          if (filters['背番号']) {
+            statsQuery['背番号'] = filters['背番号'];
+          }
+
+          if (filters.dateRange) {
+            statsQuery['納入指示日'] = {};
+            if (filters.dateRange.from) {
+              statsQuery['納入指示日'].$gte = filters.dateRange.from;
+            }
+            if (filters.dateRange.to) {
+              statsQuery['納入指示日'].$lte = filters.dateRange.to;
+            }
+          }
+
+          if (filters.search) {
+            const searchRegex = new RegExp(filters.search, 'i');
+            statsQuery.$or = [
+              { 'requestNumber': searchRegex },
+              { '品番': searchRegex },
+              { '背番号': searchRegex },
+              { 'status': searchRegex }
+            ];
+          }
+
           const statistics = await calculateNodaStatistics(requestsCollection, statsQuery);
 
           res.json({
@@ -12248,7 +16232,7 @@ app.post("/api/noda-requests", async (req, res) => {
             return res.status(400).json({ error: "Request ID is required" });
           }
 
-          const request = await requestsCollection.findOne({ _id: new ObjectId(requestId) });
+          const request = await requestsCollection.findOne(withActiveRequestFilter({ _id: new ObjectId(requestId) }));
           
           if (!request) {
             return res.status(404).json({ error: "Request not found" });
@@ -12263,10 +16247,10 @@ app.post("/api/noda-requests", async (req, res) => {
           
           // Get all active requests with deadline >= today, sorted by deadline
           const activeRequestsForFifo = await requestsCollection
-            .find({ 
+            .find(withActiveRequestFilter({ 
               status: { $nin: ['completed', 'cancelled'] },
               納入指示日: { $gte: detailTodayStr }
-            })
+            }))
             .sort({ '納入指示日': 1, createdAt: 1 })
             .toArray();
           
@@ -12429,9 +16413,14 @@ app.post("/api/noda-requests", async (req, res) => {
           }
           
           // Return enriched request
+          const lineItemsWithBoxCounts = await attachNodaBoxCounts(
+            masterCollection,
+            enrichedLineItems || request.lineItems
+          );
+
           const enrichedRequest = {
             ...request,
-            lineItems: enrichedLineItems || request.lineItems
+            lineItems: lineItemsWithBoxCounts || request.lineItems
           };
 
           res.json({
@@ -12442,6 +16431,150 @@ app.post("/api/noda-requests", async (req, res) => {
         } catch (error) {
           console.error("Error in getRequestById:", error);
           res.status(500).json({ error: "Failed to fetch request", details: error.message });
+        }
+        break;
+
+      case 'getTrashRequests':
+        try {
+          const userRole = data?.userRole || req.body.userRole || '';
+          if (userRole !== 'admin') {
+            return res.status(403).json({ error: "Only admin can access the NODA trash bin" });
+          }
+
+          const query = withTrashedRequestFilter();
+
+          if (filters.search) {
+            const searchRegex = new RegExp(filters.search, 'i');
+            query.$or = [
+              { requestNumber: searchRegex },
+              { 品番: searchRegex },
+              { 背番号: searchRegex },
+              { status: searchRegex },
+              { deletedBy: searchRegex },
+              { deletedByUsername: searchRegex },
+              { 納品書番号: searchRegex },
+              { 便: searchRegex }
+            ];
+          }
+
+          const totalCount = await requestsCollection.countDocuments(query);
+          const skip = (page - 1) * limit;
+          const sortObj = sort.column
+            ? { [sort.column]: sort.direction || 1 }
+            : { deletedAt: -1 };
+
+          const requests = await requestsCollection
+            .find(query)
+            .sort(sortObj)
+            .skip(skip)
+            .limit(parseInt(limit))
+            .toArray();
+
+          res.json({
+            success: true,
+            data: requests,
+            pagination: {
+              currentPage: page,
+              totalPages: Math.ceil(totalCount / limit),
+              totalItems: totalCount,
+              itemsPerPage: limit
+            }
+          });
+        } catch (error) {
+          console.error("Error in getTrashRequests:", error);
+          res.status(500).json({ error: "Failed to fetch trashed requests", details: error.message });
+        }
+        break;
+
+      case 'restoreDeletedRequest':
+        try {
+          const restoredBy = data?.restoredBy || req.body.restoredBy || 'Unknown User';
+          const restoredByUsername = data?.restoredByUsername || req.body.restoredByUsername || null;
+          const restoredByRole = data?.userRole || req.body.userRole || '';
+
+          if (restoredByRole !== 'admin') {
+            return res.status(403).json({ error: "Only admin can restore NODA trash requests" });
+          }
+
+          if (!requestId) {
+            return res.status(400).json({ error: "Request ID is required" });
+          }
+
+          const request = await requestsCollection.findOne(withTrashedRequestFilter({ _id: new ObjectId(requestId) }));
+          if (!request) {
+            return res.status(404).json({ error: "Deleted request not found" });
+          }
+
+          const restoredAt = new Date();
+          const adjustmentSummary = await applyNodaTrashReservationAdjustment({
+            inventoryCollection,
+            request,
+            requestId,
+            userName: restoredBy,
+            mode: 'restore',
+            eventTime: restoredAt
+          });
+
+          const result = await requestsCollection.updateOne(
+            withTrashedRequestFilter({ _id: new ObjectId(requestId) }),
+            {
+              $set: {
+                isDeleted: false,
+                updatedAt: restoredAt,
+                updatedBy: restoredBy,
+                restoredAt: restoredAt.toISOString(),
+                restoredBy: restoredBy,
+                restoredByUsername: restoredByUsername
+              },
+              $unset: {
+                deletedAt: '',
+                deletedBy: '',
+                deletedByRole: '',
+                deletedByUsername: '',
+                trashExpiresAt: ''
+              }
+            }
+          );
+
+          if (result.matchedCount === 0) {
+            return res.status(404).json({ error: "Deleted request not found" });
+          }
+
+          res.json({
+            success: true,
+            message: `Request ${request.requestNumber} restored successfully`,
+            restoredLineItems: adjustmentSummary.adjustedLineItems,
+            restoredQuantity: adjustmentSummary.adjustedQuantity
+          });
+        } catch (error) {
+          console.error("Error in restoreDeletedRequest:", error);
+          res.status(500).json({ error: "Failed to restore request", details: error.message });
+        }
+        break;
+
+      case 'permanentlyDeleteTrashedRequest':
+        try {
+          const userRole = data?.userRole || req.body.userRole || '';
+          if (userRole !== 'admin') {
+            return res.status(403).json({ error: "Only admin can permanently delete NODA trash requests" });
+          }
+
+          if (!requestId) {
+            return res.status(400).json({ error: "Request ID is required" });
+          }
+
+          const result = await requestsCollection.deleteOne(withTrashedRequestFilter({ _id: new ObjectId(requestId) }));
+          if (result.deletedCount === 0) {
+            return res.status(404).json({ error: "Deleted request not found" });
+          }
+
+          res.json({
+            success: true,
+            message: "Request permanently deleted"
+          });
+        } catch (error) {
+          console.error("Error in permanentlyDeleteTrashedRequest:", error);
+          res.status(500).json({ error: "Failed to permanently delete request", details: error.message });
         }
         break;
 
@@ -12555,11 +16688,11 @@ app.post("/api/noda-requests", async (req, res) => {
           }
 
           // Search for existing request with same 納品書番号, 便, and 納入指示日
-          const existingRequest = await requestsCollection.findOne({
+          const existingRequest = await requestsCollection.findOne(withActiveRequestFilter({
             納品書番号: deliveryNote,
             便: deliveryOrder,
             納入指示日: deadlineDate
-          });
+          }));
 
           if (existingRequest) {
             res.json({
@@ -12612,7 +16745,7 @@ app.post("/api/noda-requests", async (req, res) => {
           // CRITICAL: Handle overwrite mode FIRST - unreserve inventory before validation
           if (mode === 'overwrite' && existingRequestId) {
             try {
-              const existingRequest = await requestsCollection.findOne({ _id: new ObjectId(existingRequestId) });
+              const existingRequest = await requestsCollection.findOne(withActiveRequestFilter({ _id: new ObjectId(existingRequestId) }));
               if (existingRequest) {
                 // Store the old request number to reuse it
                 oldRequestNumber = existingRequest.requestNumber;
@@ -12752,31 +16885,22 @@ app.post("/api/noda-requests", async (req, res) => {
               }
 
               const inventoryItem = inventoryResults[0];
-              const availableQuantity = inventoryItem.availableQuantity || inventoryItem.runningQuantity || 0;
-              const requestedQuantity = parseInt(item.quantity);
-              
-              // ✅ NEW: Calculate partial reservation amounts
-              const reservedQuantity = Math.min(availableQuantity, requestedQuantity);
-              const shortfallQuantity = Math.max(0, requestedQuantity - availableQuantity);
-              
-              // Determine line item inventory status
-              let inventoryStatus;
-              if (availableQuantity === 0) {
-                inventoryStatus = 'none'; // No inventory available
-              } else if (availableQuantity < requestedQuantity) {
-                inventoryStatus = 'insufficient'; // Partial inventory
-              } else {
-                inventoryStatus = 'sufficient'; // Full inventory available
-              }
+              const currentState = {
+                physicalQuantity: Number(inventoryItem.physicalQuantity ?? inventoryItem.runningQuantity ?? 0),
+                reservedQuantity: Number(inventoryItem.reservedQuantity ?? 0)
+              };
+              const availableQuantity = Number(inventoryItem.availableQuantity ?? inventoryItem.runningQuantity ?? 0);
+              const requestedQuantity = Math.max(0, parseInt(item.quantity, 10) || 0);
+              const reservationDetails = getNodaReservationDetails(currentState, requestedQuantity);
 
               // ✅ Item is always valid - we allow requests without inventory
               validItems.push({
                 ...item,
                 inventoryItem: inventoryItem,
                 availableQuantity: availableQuantity,
-                reservedQuantity: reservedQuantity,
-                shortfallQuantity: shortfallQuantity,
-                inventoryStatus: inventoryStatus
+                reservedQuantity: reservationDetails.reservedQuantity,
+                shortfallQuantity: reservationDetails.shortfallQuantity,
+                inventoryStatus: reservationDetails.inventoryStatus
               });
 
             } catch (error) {
@@ -12921,14 +17045,14 @@ app.post("/api/noda-requests", async (req, res) => {
 
           // Process inventory transactions for all valid items (including partial reservations)
           for (const item of validItems) {
-            const currentPhysical = item.inventoryItem ? (item.inventoryItem.physicalQuantity || item.inventoryItem.runningQuantity || 0) : 0;
-            const currentReserved = item.inventoryItem ? (item.inventoryItem.reservedQuantity || 0) : 0;
-            const currentAvailable = item.availableQuantity;
-            const requestedQuantity = parseInt(item.quantity);
+            const currentPhysical = Number(item.inventoryItem?.physicalQuantity ?? item.inventoryItem?.runningQuantity ?? 0);
+            const currentReserved = Number(item.inventoryItem?.reservedQuantity ?? 0);
+            const currentAvailable = Number(item.availableQuantity ?? (currentPhysical - currentReserved));
+            const requestedQuantity = Math.max(0, parseInt(item.quantity, 10) || 0);
 
             // ✅ FIXED: reservedQuantity in inventory should be the FULL requested amount, not just what's available
             const newReservedQuantity = currentReserved + requestedQuantity; // Reserve FULL amount (including shortfall)
-            const newAvailableQuantity = Math.max(0, currentAvailable - item.reservedQuantity); // Only deduct what's actually available
+            const newAvailableQuantity = currentPhysical - newReservedQuantity; // Available is always physical - reserved, even when negative
 
             const inventoryTransaction = {
               背番号: item.背番号,
@@ -12939,7 +17063,7 @@ app.post("/api/noda-requests", async (req, res) => {
               // Two-stage inventory fields
               physicalQuantity: currentPhysical, // Physical stock unchanged
               reservedQuantity: newReservedQuantity, // Reserve FULL requested amount (450)
-              availableQuantity: newAvailableQuantity, // Deduct only what's available (300 → 0)
+              availableQuantity: newAvailableQuantity, // Recalculate from physical - reserved (can go negative)
               
               // Legacy field for compatibility
               runningQuantity: newAvailableQuantity,
@@ -12983,7 +17107,7 @@ app.post("/api/noda-requests", async (req, res) => {
           }
 
           // Get existing request
-          const existingRequest = await requestsCollection.findOne({ _id: new ObjectId(requestId) });
+          const existingRequest = await requestsCollection.findOne(withActiveRequestFilter({ _id: new ObjectId(requestId) }));
           if (!existingRequest) {
             return res.status(404).json({ error: "Request not found" });
           }
@@ -13061,31 +17185,22 @@ app.post("/api/noda-requests", async (req, res) => {
               }
 
               const inventoryItem = inventoryResults[0];
-              const availableQuantity = inventoryItem.availableQuantity || inventoryItem.runningQuantity || 0;
-              const requestedQuantity = parseInt(item.quantity);
-              
-              // ✅ NEW: Calculate partial reservation amounts (same as bulk creation)
-              const reservedQuantity = Math.min(availableQuantity, requestedQuantity);
-              const shortfallQuantity = Math.max(0, requestedQuantity - availableQuantity);
-              
-              // Determine line item inventory status
-              let inventoryStatus;
-              if (availableQuantity === 0) {
-                inventoryStatus = 'none';
-              } else if (availableQuantity < requestedQuantity) {
-                inventoryStatus = 'insufficient';
-              } else {
-                inventoryStatus = 'sufficient';
-              }
+              const currentState = {
+                physicalQuantity: Number(inventoryItem.physicalQuantity ?? inventoryItem.runningQuantity ?? 0),
+                reservedQuantity: Number(inventoryItem.reservedQuantity ?? 0)
+              };
+              const availableQuantity = Number(inventoryItem.availableQuantity ?? inventoryItem.runningQuantity ?? 0);
+              const requestedQuantity = Math.max(0, parseInt(item.quantity, 10) || 0);
+              const reservationDetails = getNodaReservationDetails(currentState, requestedQuantity);
 
               // ✅ Item is always valid - we allow requests without full inventory
               validItems.push({
                 ...item,
                 inventoryItem: inventoryItem,
                 availableQuantity: availableQuantity,
-                reservedQuantity: reservedQuantity,
-                shortfallQuantity: shortfallQuantity,
-                inventoryStatus: inventoryStatus
+                reservedQuantity: reservationDetails.reservedQuantity,
+                shortfallQuantity: reservationDetails.shortfallQuantity,
+                inventoryStatus: reservationDetails.inventoryStatus
               });
 
             } catch (error) {
@@ -13124,7 +17239,7 @@ app.post("/api/noda-requests", async (req, res) => {
 
           // Update the bulk request with new line items
           const updateResult = await requestsCollection.updateOne(
-            { _id: new ObjectId(requestId) },
+            withActiveRequestFilter({ _id: new ObjectId(requestId) }),
             { 
               $push: { lineItems: { $each: newLineItems } },
               $set: { 
@@ -13141,14 +17256,14 @@ app.post("/api/noda-requests", async (req, res) => {
 
           // Process inventory transactions for all valid items
           for (const item of validItems) {
-            const currentPhysical = item.inventoryItem.physicalQuantity || item.inventoryItem.runningQuantity || 0;
-            const currentReserved = item.inventoryItem.reservedQuantity || 0;
-            const currentAvailable = item.availableQuantity;
-            const requestedQuantity = parseInt(item.quantity);
+            const currentPhysical = Number(item.inventoryItem?.physicalQuantity ?? item.inventoryItem?.runningQuantity ?? 0);
+            const currentReserved = Number(item.inventoryItem?.reservedQuantity ?? 0);
+            const currentAvailable = Number(item.availableQuantity ?? (currentPhysical - currentReserved));
+            const requestedQuantity = Math.max(0, parseInt(item.quantity, 10) || 0);
 
             // ✅ FIXED: Reserve FULL requested amount in inventory
             const newReservedQuantity = currentReserved + requestedQuantity; // Reserve FULL amount (including shortfall)
-            const newAvailableQuantity = Math.max(0, currentAvailable - item.reservedQuantity); // Only deduct what's actually available
+            const newAvailableQuantity = currentPhysical - newReservedQuantity; // Available is always physical - reserved, even when negative
 
             const inventoryTransaction = {
               背番号: item.背番号,
@@ -13159,7 +17274,7 @@ app.post("/api/noda-requests", async (req, res) => {
               // Two-stage inventory fields
               physicalQuantity: currentPhysical, // Physical stock unchanged
               reservedQuantity: newReservedQuantity, // Reserve FULL requested amount
-              availableQuantity: newAvailableQuantity, // Decrease available by what's actually reserved
+              availableQuantity: newAvailableQuantity, // Recalculate from physical - reserved (can go negative)
               
               // Legacy field for compatibility
               runningQuantity: newAvailableQuantity,
@@ -13219,7 +17334,7 @@ app.post("/api/noda-requests", async (req, res) => {
 
           // If quantity or back number changed, check inventory
           if (data.quantity || data.背番号) {
-            const existingRequest = await requestsCollection.findOne({ _id: new ObjectId(requestId) });
+            const existingRequest = await requestsCollection.findOne(withActiveRequestFilter({ _id: new ObjectId(requestId) }));
             const backNumber = data.背番号 || existingRequest.背番号;
             const quantity = data.quantity || existingRequest.quantity;
 
@@ -13246,7 +17361,7 @@ app.post("/api/noda-requests", async (req, res) => {
           };
 
           const result = await requestsCollection.updateOne(
-            { _id: new ObjectId(requestId) },
+            withActiveRequestFilter({ _id: new ObjectId(requestId) }),
             { $set: updateData }
           );
 
@@ -13268,7 +17383,7 @@ app.post("/api/noda-requests", async (req, res) => {
             return res.status(400).json({ error: "Request ID and status are required" });
           }
 
-          const request = await requestsCollection.findOne({ _id: new ObjectId(requestId) });
+          const request = await requestsCollection.findOne(withActiveRequestFilter({ _id: new ObjectId(requestId) }));
           if (!request) {
             return res.status(404).json({ error: "Request not found" });
           }
@@ -13276,6 +17391,394 @@ app.post("/api/noda-requests", async (req, res) => {
           const userName = data.userName || 'Unknown User';
           const oldStatus = request.status;
           const newStatus = data.status;
+          const normalizedOldStatus = String(oldStatus || '').toLowerCase();
+          const normalizedNewStatus = String(newStatus || '').toLowerCase();
+          const isCompletedStatus = (value = '') => {
+            const normalizedValue = String(value || '').toLowerCase();
+            return normalizedValue === 'completed' || normalizedValue === 'complete';
+          };
+          const isCancelledStatus = (value = '') => {
+            const normalizedValue = String(value || '').toLowerCase();
+            return normalizedValue === 'cancelled' || normalizedValue === 'canceled';
+          };
+
+          if (normalizedOldStatus === normalizedNewStatus) {
+            return res.json({
+              success: true,
+              message: `Request status already ${newStatus}`
+            });
+          }
+
+          if (isCancelledStatus(oldStatus) && normalizedNewStatus === 'pending' && data.restoreCancelled) {
+            const restoredAt = new Date();
+            const restoredDate = restoredAt.toISOString().split('T')[0];
+
+            const createUncancelTransaction = async ({ backNumber, partNumber, quantity, lineNumber = null, requestNumber, currentState }) => {
+              const uncancelQuantity = Number(quantity || 0);
+              const reservationDetails = getNodaReservationDetails(currentState, uncancelQuantity);
+
+              if (uncancelQuantity <= 0) {
+                return {
+                  nextState: currentState,
+                  reservationDetails
+                };
+              }
+
+              const currentPhysical = Number(currentState.physicalQuantity || 0);
+              const currentReserved = Number(currentState.reservedQuantity || 0);
+              const currentAvailable = Number(currentState.availableQuantity || 0);
+              const newReservedQuantity = currentReserved + uncancelQuantity;
+              const newAvailableQuantity = currentPhysical - newReservedQuantity;
+
+              const uncancelTransaction = {
+                背番号: backNumber,
+                品番: partNumber,
+                timeStamp: restoredAt,
+                Date: restoredDate,
+                physicalQuantity: currentPhysical,
+                reservedQuantity: newReservedQuantity,
+                availableQuantity: newAvailableQuantity,
+                runningQuantity: newAvailableQuantity,
+                lastQuantity: currentAvailable,
+                action: `Request Uncancel (+${uncancelQuantity} reserved)`,
+                source: `Freya Admin - ${userName}`,
+                requestId: requestId,
+                note: lineNumber !== null
+                  ? `Uncancelled request ${requestNumber} line ${lineNumber}. Reserved: ${currentReserved} → ${newReservedQuantity}. Available recalculated from physical ${currentPhysical}: ${currentAvailable} → ${newAvailableQuantity}.`
+                  : `Uncancelled request ${requestNumber}. Reserved: ${currentReserved} → ${newReservedQuantity}. Available recalculated from physical ${currentPhysical}: ${currentAvailable} → ${newAvailableQuantity}.`
+              };
+
+              if (request.requestType === 'bulk') {
+                uncancelTransaction.bulkRequestNumber = request.requestNumber;
+                if (lineNumber !== null) {
+                  uncancelTransaction.lineNumber = lineNumber;
+                }
+              }
+
+              await inventoryCollection.insertOne(uncancelTransaction);
+
+              return {
+                nextState: {
+                  physicalQuantity: currentPhysical,
+                  reservedQuantity: newReservedQuantity,
+                  availableQuantity: newAvailableQuantity
+                },
+                reservationDetails
+              };
+            };
+
+            if (request.requestType === 'bulk' && Array.isArray(request.lineItems)) {
+              const cancelledLineItems = request.lineItems.filter((lineItem) => isCancelledStatus(lineItem?.status));
+              if (!cancelledLineItems.length) {
+                return res.status(400).json({ error: "No cancelled line items found to restore" });
+              }
+
+              const inventoryStateByBackNumber = new Map();
+              for (const lineItem of cancelledLineItems) {
+                if (!inventoryStateByBackNumber.has(lineItem.背番号)) {
+                  const currentState = await getLatestNodaInventorySnapshot(inventoryCollection, lineItem.背番号);
+                  if (!currentState.found) {
+                    return res.status(404).json({ error: `Inventory not found for back number ${lineItem.背番号}` });
+                  }
+
+                  inventoryStateByBackNumber.set(lineItem.背番号, currentState);
+                }
+              }
+
+              let restoredLineCount = 0;
+              const updatedLineItems = [];
+
+              for (const lineItem of request.lineItems) {
+                if (!isCancelledStatus(lineItem?.status)) {
+                  updatedLineItems.push(lineItem);
+                  continue;
+                }
+
+                const currentState = inventoryStateByBackNumber.get(lineItem.背番号);
+                const { nextState, reservationDetails } = await createUncancelTransaction({
+                  backNumber: lineItem.背番号,
+                  partNumber: lineItem.品番,
+                  quantity: lineItem.quantity,
+                  lineNumber: lineItem.lineNumber,
+                  requestNumber: request.requestNumber,
+                  currentState
+                });
+
+                inventoryStateByBackNumber.set(lineItem.背番号, nextState);
+
+                const {
+                  cancelledAt,
+                  cancelledBy,
+                  ...restoredLineItem
+                } = lineItem;
+
+                restoredLineCount += 1;
+                updatedLineItems.push({
+                  ...restoredLineItem,
+                  status: 'pending',
+                  reservedQuantity: reservationDetails.reservedQuantity,
+                  shortfallQuantity: reservationDetails.shortfallQuantity,
+                  inventoryStatus: reservationDetails.inventoryStatus,
+                  updatedAt: restoredAt
+                });
+              }
+
+              const { overallInventoryStatus, requestStatus } = getNodaBulkRequestStatusFromLineItems(updatedLineItems);
+
+              await requestsCollection.updateOne(
+                withActiveRequestFilter({ _id: new ObjectId(requestId) }),
+                {
+                  $set: {
+                    status: requestStatus,
+                    overallInventoryStatus,
+                    lineItems: updatedLineItems,
+                    updatedAt: restoredAt,
+                    updatedBy: userName
+                  },
+                  $unset: {
+                    cancelledAt: "",
+                    cancelledBy: ""
+                  }
+                }
+              );
+
+              return res.json({
+                success: true,
+                message: `Request uncancelled. ${restoredLineCount} cancelled line items were restored.`,
+                restoredLineItems: restoredLineCount
+              });
+            }
+
+            const currentState = await getLatestNodaInventorySnapshot(inventoryCollection, request.背番号);
+            if (!currentState.found) {
+              return res.status(404).json({ error: `Inventory not found for back number ${request.背番号}` });
+            }
+
+            const { reservationDetails } = await createUncancelTransaction({
+              backNumber: request.背番号,
+              partNumber: request.品番,
+              quantity: request.quantity,
+              requestNumber: request.requestNumber,
+              currentState
+            });
+
+            const { overallInventoryStatus, requestStatus } = getNodaBulkRequestStatusFromLineItems([
+              {
+                status: 'pending',
+                inventoryStatus: reservationDetails.inventoryStatus
+              }
+            ]);
+
+            await requestsCollection.updateOne(
+              withActiveRequestFilter({ _id: new ObjectId(requestId) }),
+              {
+                $set: {
+                  status: requestStatus,
+                  overallInventoryStatus,
+                  reservedQuantity: reservationDetails.reservedQuantity,
+                  shortfallQuantity: reservationDetails.shortfallQuantity,
+                  inventoryStatus: reservationDetails.inventoryStatus,
+                  updatedAt: restoredAt,
+                  updatedBy: userName
+                },
+                $unset: {
+                  cancelledAt: "",
+                  cancelledBy: ""
+                }
+              }
+            );
+
+            return res.json({
+              success: true,
+              message: `Request ${request.requestNumber} uncancelled successfully`
+            });
+          }
+
+          if (normalizedNewStatus === 'cancelled') {
+            if (isCompletedStatus(oldStatus)) {
+              return res.status(400).json({ error: "Completed requests cannot be cancelled" });
+            }
+
+            const cancelledAt = new Date();
+            const cancelledDate = cancelledAt.toISOString().split('T')[0];
+
+            const getLatestInventoryRecord = async (backNumber) => {
+              const inventoryResults = await inventoryCollection.aggregate([
+                { $match: { 背番号: backNumber } },
+                {
+                  $addFields: {
+                    timeStampDate: {
+                      $cond: {
+                        if: { $type: "$timeStamp" },
+                        then: {
+                          $cond: {
+                            if: { $eq: [{ $type: "$timeStamp" }, "string"] },
+                            then: { $dateFromString: { dateString: "$timeStamp" } },
+                            else: "$timeStamp"
+                          }
+                        },
+                        else: new Date()
+                      }
+                    }
+                  }
+                },
+                { $sort: { timeStampDate: -1 } },
+                { $limit: 1 }
+              ]).toArray();
+
+              return inventoryResults[0] || null;
+            };
+
+            const buildInventoryState = (inventoryItem) => ({
+              physicalQuantity: Number(inventoryItem?.physicalQuantity ?? inventoryItem?.runningQuantity ?? 0),
+              reservedQuantity: Number(inventoryItem?.reservedQuantity ?? 0),
+              availableQuantity: Number(inventoryItem?.availableQuantity ?? inventoryItem?.runningQuantity ?? 0)
+            });
+
+            const createCancellationTransaction = async ({ backNumber, partNumber, quantity, lineNumber = null, requestNumber, currentState }) => {
+              const cancelQuantity = Number(quantity || 0);
+              if (cancelQuantity <= 0) {
+                return currentState;
+              }
+
+              const currentPhysical = Number(currentState.physicalQuantity || 0);
+              const currentReserved = Number(currentState.reservedQuantity || 0);
+              const currentAvailable = Number(currentState.availableQuantity || 0);
+              const newReservedQuantity = Math.max(0, currentReserved - cancelQuantity);
+              const newAvailableQuantity = currentPhysical - newReservedQuantity;
+
+              const cancellationTransaction = {
+                背番号: backNumber,
+                品番: partNumber,
+                timeStamp: cancelledAt,
+                Date: cancelledDate,
+                physicalQuantity: currentPhysical,
+                reservedQuantity: newReservedQuantity,
+                availableQuantity: newAvailableQuantity,
+                runningQuantity: newAvailableQuantity,
+                lastQuantity: currentAvailable,
+                action: `Request Cancellation (-${cancelQuantity} reserved)`,
+                source: `Freya Admin - ${userName}`,
+                requestId: requestId,
+                note: lineNumber !== null
+                  ? `Cancelled request ${requestNumber} line ${lineNumber}. Reserved: ${currentReserved} → ${newReservedQuantity}. Available recalculated from physical ${currentPhysical}: ${currentAvailable} → ${newAvailableQuantity}.`
+                  : `Cancelled request ${requestNumber}. Reserved: ${currentReserved} → ${newReservedQuantity}. Available recalculated from physical ${currentPhysical}: ${currentAvailable} → ${newAvailableQuantity}.`
+              };
+
+              if (request.requestType === 'bulk') {
+                cancellationTransaction.bulkRequestNumber = request.requestNumber;
+                if (lineNumber !== null) {
+                  cancellationTransaction.lineNumber = lineNumber;
+                }
+              }
+
+              await inventoryCollection.insertOne(cancellationTransaction);
+
+              return {
+                physicalQuantity: currentPhysical,
+                reservedQuantity: newReservedQuantity,
+                availableQuantity: newAvailableQuantity
+              };
+            };
+
+            if (request.requestType === 'bulk' && Array.isArray(request.lineItems)) {
+              const openLineItems = request.lineItems.filter((lineItem) => !isCompletedStatus(lineItem?.status) && !isCancelledStatus(lineItem?.status));
+              const inventoryStateByBackNumber = new Map();
+
+              for (const lineItem of openLineItems) {
+                if (!inventoryStateByBackNumber.has(lineItem.背番号)) {
+                  const latestInventory = await getLatestInventoryRecord(lineItem.背番号);
+                  if (!latestInventory) {
+                    return res.status(404).json({ error: `Inventory not found for back number ${lineItem.背番号}` });
+                  }
+
+                  inventoryStateByBackNumber.set(lineItem.背番号, buildInventoryState(latestInventory));
+                }
+              }
+
+              let cancelledLineCount = 0;
+              const updatedLineItems = [];
+
+              for (const lineItem of request.lineItems) {
+                const lineStatus = String(lineItem?.status || 'pending').toLowerCase();
+                if (isCompletedStatus(lineStatus) || isCancelledStatus(lineStatus)) {
+                  updatedLineItems.push(lineItem);
+                  continue;
+                }
+
+                const currentState = inventoryStateByBackNumber.get(lineItem.背番号);
+                const nextState = await createCancellationTransaction({
+                  backNumber: lineItem.背番号,
+                  partNumber: lineItem.品番,
+                  quantity: lineItem.quantity,
+                  lineNumber: lineItem.lineNumber,
+                  requestNumber: request.requestNumber,
+                  currentState
+                });
+
+                inventoryStateByBackNumber.set(lineItem.背番号, nextState);
+                cancelledLineCount += 1;
+                updatedLineItems.push({
+                  ...lineItem,
+                  status: 'cancelled',
+                  updatedAt: cancelledAt,
+                  cancelledAt: cancelledAt,
+                  cancelledBy: userName
+                });
+              }
+
+              await requestsCollection.updateOne(
+                withActiveRequestFilter({ _id: new ObjectId(requestId) }),
+                {
+                  $set: {
+                    status: 'cancelled',
+                    lineItems: updatedLineItems,
+                    updatedAt: cancelledAt,
+                    updatedBy: userName,
+                    cancelledAt: cancelledAt,
+                    cancelledBy: userName
+                  }
+                }
+              );
+
+              return res.json({
+                success: true,
+                message: `Request cancelled. ${cancelledLineCount} open line items were cancelled.`,
+                cancelledLineItems: cancelledLineCount
+              });
+            }
+
+            const latestInventory = await getLatestInventoryRecord(request.背番号);
+            if (!latestInventory) {
+              return res.status(404).json({ error: `Inventory not found for back number ${request.背番号}` });
+            }
+
+            await createCancellationTransaction({
+              backNumber: request.背番号,
+              partNumber: request.品番,
+              quantity: request.quantity,
+              requestNumber: request.requestNumber,
+              currentState: buildInventoryState(latestInventory)
+            });
+
+            await requestsCollection.updateOne(
+              withActiveRequestFilter({ _id: new ObjectId(requestId) }),
+              {
+                $set: {
+                  status: 'cancelled',
+                  updatedAt: cancelledAt,
+                  updatedBy: userName,
+                  cancelledAt: cancelledAt,
+                  cancelledBy: userName
+                }
+              }
+            );
+
+            return res.json({
+              success: true,
+              message: `Request ${request.requestNumber} cancelled successfully`
+            });
+          }
 
           // Handle inventory changes based on status transition
           if (oldStatus !== newStatus) {
@@ -13390,7 +17893,7 @@ app.post("/api/noda-requests", async (req, res) => {
           }
 
           // Find the bulk request
-          const bulkRequest = await requestsCollection.findOne({ _id: new ObjectId(requestId) });
+          const bulkRequest = await requestsCollection.findOne(withActiveRequestFilter({ _id: new ObjectId(requestId) }));
           if (!bulkRequest) {
             return res.status(404).json({ error: "Bulk request not found" });
           }
@@ -13416,7 +17919,7 @@ app.post("/api/noda-requests", async (req, res) => {
           }
 
           // Handle inventory transactions when changing from completed to pending/in-progress
-          if (currentStatus === 'completed' && (newStatus === 'pending' || newStatus === 'in-progress')) {
+          if (currentStatus === 'completed' && (newStatus === 'pending' || newStatus === 'paused' || newStatus === 'in-progress')) {
             console.log(`🔄 Reversing inventory transaction for line item ${data.lineNumber}: ${currentStatus} → ${newStatus}`);
             
             // Get current inventory state
@@ -13507,10 +18010,10 @@ app.post("/api/noda-requests", async (req, res) => {
           }
 
           const result = await requestsCollection.updateOne(
-            { 
+            withActiveRequestFilter({ 
               _id: new ObjectId(requestId),
               "lineItems.lineNumber": data.lineNumber
-            },
+            }),
             { $set: updateFields }
           );
 
@@ -13519,9 +18022,10 @@ app.post("/api/noda-requests", async (req, res) => {
           }
 
           // Check if all line items are completed to update bulk request status
-          const updatedRequest = await requestsCollection.findOne({ _id: new ObjectId(requestId) });
+          const updatedRequest = await requestsCollection.findOne(withActiveRequestFilter({ _id: new ObjectId(requestId) }));
           const allCompleted = updatedRequest.lineItems.every(item => item.status === 'completed');
           const anyInProgress = updatedRequest.lineItems.some(item => item.status === 'in-progress');
+          const anyPaused = updatedRequest.lineItems.some(item => item.status === 'paused');
 
           let newBulkStatus = updatedRequest.status;
           let bulkUpdateFields = { updatedAt: new Date() };
@@ -13537,6 +18041,14 @@ app.post("/api/noda-requests", async (req, res) => {
             if (updatedRequest.status !== 'in-progress') {
               bulkUpdateFields.status = 'in-progress';
               // Clear completion timestamp if moving away from completed
+              if (updatedRequest.status === 'completed') {
+                bulkUpdateFields.completedAt = null;
+              }
+            }
+          } else if (anyPaused) {
+            newBulkStatus = 'paused';
+            if (updatedRequest.status !== 'paused') {
+              bulkUpdateFields.status = 'paused';
               if (updatedRequest.status === 'completed') {
                 bulkUpdateFields.completedAt = null;
               }
@@ -13572,7 +18084,7 @@ app.post("/api/noda-requests", async (req, res) => {
             }
             
             await requestsCollection.updateOne(
-              { _id: new ObjectId(requestId) },
+              withActiveRequestFilter({ _id: new ObjectId(requestId) }),
               updateOperation
             );
           }
@@ -13583,7 +18095,7 @@ app.post("/api/noda-requests", async (req, res) => {
             previousStatus: currentStatus,
             newStatus: data.status,
             bulkStatus: newBulkStatus,
-            inventoryReversed: currentStatus === 'completed' && (newStatus === 'pending' || newStatus === 'in-progress')
+            inventoryReversed: currentStatus === 'completed' && (newStatus === 'pending' || newStatus === 'paused' || newStatus === 'in-progress')
           });
 
         } catch (error) {
@@ -13607,7 +18119,7 @@ app.post("/api/noda-requests", async (req, res) => {
           }
 
           // Get the bulk request
-          const bulkRequest = await requestsCollection.findOne({ _id: new ObjectId(requestId) });
+          const bulkRequest = await requestsCollection.findOne(withActiveRequestFilter({ _id: new ObjectId(requestId) }));
           if (!bulkRequest) {
             return res.status(404).json({ error: "Request not found" });
           }
@@ -13708,10 +18220,10 @@ app.post("/api/noda-requests", async (req, res) => {
 
           // Update the line item quantity in the request
           const updateResult = await requestsCollection.updateOne(
-            { 
+            withActiveRequestFilter({ 
               _id: new ObjectId(requestId),
               'lineItems.lineNumber': data.lineNumber
-            },
+            }),
             {
               $set: {
                 'lineItems.$.quantity': newQuantity,
@@ -13747,7 +18259,7 @@ app.post("/api/noda-requests", async (req, res) => {
           }
 
           // Get the bulk request
-          const bulkRequest = await requestsCollection.findOne({ _id: new ObjectId(requestId) });
+          const bulkRequest = await requestsCollection.findOne(withActiveRequestFilter({ _id: new ObjectId(requestId) }));
           if (!bulkRequest) {
             return res.status(404).json({ error: "Request not found" });
           }
@@ -13830,7 +18342,7 @@ app.post("/api/noda-requests", async (req, res) => {
 
           // Remove the line item from the request
           const updateResult = await requestsCollection.updateOne(
-            { _id: new ObjectId(requestId) },
+            withActiveRequestFilter({ _id: new ObjectId(requestId) }),
             {
               $pull: { lineItems: { lineNumber: data.lineNumber } },
               $set: { 
@@ -13864,205 +18376,64 @@ app.post("/api/noda-requests", async (req, res) => {
             return res.status(400).json({ error: "Request ID is required" });
           }
 
-          // Get the request details first
-          const request = await requestsCollection.findOne({ _id: new ObjectId(requestId) });
+          const request = await requestsCollection.findOne(withActiveRequestFilter({ _id: new ObjectId(requestId) }));
           if (!request) {
             return res.status(404).json({ error: "Request not found" });
           }
 
-          // Get user information for transaction
           const userName = req.body.userName || 'Unknown User';
-          let restoredItems = 0;
-          let totalQuantityRestored = 0;
+          const deletedByUsername = req.body.deletedByUsername || null;
+          const deletedByRole = req.body.deletedByRole || null;
+          const deletedAt = new Date();
+          const trashExpiresAt = getNodaTrashExpiryDate(deletedAt).toISOString();
 
-          const isBulkRequest = request.requestType === 'bulk';
-          
-          if (isBulkRequest && request.lineItems) {
-            // ============ BULK REQUEST DELETION WITH LINE-ITEM-LEVEL RESTORATION ============
-            console.log(`🗑️ Deleting bulk request ${request.requestNumber} with ${request.lineItems.length} line items`);
-            
-            // Loop through each line item and restore inventory ONLY for items that were NOT completed
-            for (const lineItem of request.lineItems) {
-              try {
-                // ✅ KEY FIX: Check individual LINE ITEM status, not bulk request status
-                if (lineItem.status === 'completed') {
-                  console.log(`⏭️ Skipping line ${lineItem.lineNumber} (${lineItem.背番号}): Already completed (physically picked)`);
-                  continue; // Skip completed items - they were already picked physically
-                }
-                
-                // Only restore inventory for pending/in-progress/active line items
-                console.log(`🔄 Restoring line ${lineItem.lineNumber} (${lineItem.背番号}): Status = ${lineItem.status}`);
-                
-                // Get current inventory state using aggregation pipeline
-                const inventoryResults = await inventoryCollection.aggregate([
-                  { $match: { 背番号: lineItem.背番号 } },
-                  {
-                    $addFields: {
-                      timeStampDate: {
-                        $cond: {
-                          if: { $type: "$timeStamp" },
-                          then: {
-                            $cond: {
-                              if: { $eq: [{ $type: "$timeStamp" }, "string"] },
-                              then: { $dateFromString: { dateString: "$timeStamp" } },
-                              else: "$timeStamp"
-                            }
-                          },
-                          else: new Date()
-                        }
-                      }
-                    }
-                  },
-                  { $sort: { timeStampDate: -1 } },
-                  { $limit: 1 }
-                ]).toArray();
+          const adjustmentSummary = await applyNodaTrashReservationAdjustment({
+            inventoryCollection,
+            request,
+            requestId,
+            userName,
+            mode: 'trash',
+            eventTime: deletedAt
+          });
 
-                if (inventoryResults.length > 0) {
-                  const inventoryItem = inventoryResults[0];
-                  
-                  // Create inventory restoration transaction for this line item
-                  const currentPhysical = inventoryItem.physicalQuantity || inventoryItem.runningQuantity || 0;
-                  const currentReserved = inventoryItem.reservedQuantity || 0;
-                  const currentAvailable = inventoryItem.availableQuantity || inventoryItem.runningQuantity || 0;
-
-                  // Restore inventory: Decrease reserved, Increase available
-                  const newReservedQuantity = Math.max(0, currentReserved - lineItem.quantity);
-                  const newAvailableQuantity = currentAvailable + lineItem.quantity;
-
-                  const restorationTransaction = {
-                    背番号: lineItem.背番号,
-                    品番: lineItem.品番,
-                    timeStamp: new Date(),
-                    Date: new Date().toISOString().split('T')[0],
-                    
-                    // Two-stage inventory fields
-                    physicalQuantity: currentPhysical, // Physical stock unchanged (item was never picked)
-                    reservedQuantity: newReservedQuantity, // Decrease reserved
-                    availableQuantity: newAvailableQuantity, // Increase available
-                    
-                    // Legacy field for compatibility
-                    runningQuantity: newAvailableQuantity,
-                    lastQuantity: currentAvailable,
-                    
-                    action: `Delete Restoration (-${lineItem.quantity} reserved, +${lineItem.quantity} available)`,
-                    source: `Freya Admin - ${userName}`,
-                    requestId: requestId,
-                    bulkRequestNumber: request.requestNumber,
-                    lineNumber: lineItem.lineNumber,
-                    note: `Restored ${lineItem.quantity} units from DELETED request ${request.requestNumber} line ${lineItem.lineNumber} (status: ${lineItem.status}). Reserved: ${currentReserved} → ${newReservedQuantity}, Available: ${currentAvailable} → ${newAvailableQuantity}`
-                  };
-
-                  await inventoryCollection.insertOne(restorationTransaction);
-                  restoredItems++;
-                  totalQuantityRestored += lineItem.quantity;
-                  
-                  console.log(`✅ Restored ${lineItem.quantity} units for ${lineItem.背番号} (line ${lineItem.lineNumber})`);
-                } else {
-                  console.warn(`⚠️ No inventory found for ${lineItem.背番号} (line ${lineItem.lineNumber})`);
-                }
-              } catch (error) {
-                console.error(`❌ Error restoring inventory for line item ${lineItem.lineNumber} (${lineItem.背番号}):`, error);
+          const result = await requestsCollection.updateOne(
+            withActiveRequestFilter({ _id: new ObjectId(requestId) }),
+            {
+              $set: {
+                isDeleted: true,
+                deletedAt: deletedAt.toISOString(),
+                deletedBy: userName,
+                deletedByUsername,
+                deletedByRole,
+                trashExpiresAt,
+                updatedAt: deletedAt,
+                updatedBy: userName
               }
             }
-            
-          } else if (!isBulkRequest) {
-            // ============ SINGLE REQUEST DELETION (ORIGINAL LOGIC) ============
-            console.log(`🗑️ Deleting single request ${request.requestNumber}`);
-            
-            // Only restore inventory if request is still pending/active (not completed)
-            if (request.status === 'pending' || request.status === 'active' || request.status === 'in-progress') {
-              
-              // Get current inventory state using aggregation pipeline
-              const inventoryResults = await inventoryCollection.aggregate([
-                { $match: { 背番号: request.背番号 } },
-                {
-                  $addFields: {
-                    timeStampDate: {
-                      $cond: {
-                        if: { $type: "$timeStamp" },
-                        then: {
-                          $cond: {
-                            if: { $eq: [{ $type: "$timeStamp" }, "string"] },
-                            then: { $dateFromString: { dateString: "$timeStamp" } },
-                            else: "$timeStamp"
-                          }
-                        },
-                        else: new Date()
-                      }
-                    }
-                  }
-                },
-                { $sort: { timeStampDate: -1 } },
-                { $limit: 1 }
-              ]).toArray();
+          );
 
-              if (inventoryResults.length > 0) {
-                const inventoryItem = inventoryResults[0];
-                
-                // Create inventory restoration transaction
-                const currentPhysical = inventoryItem.physicalQuantity || inventoryItem.runningQuantity || 0;
-                const currentReserved = inventoryItem.reservedQuantity || 0;
-                const currentAvailable = inventoryItem.availableQuantity || inventoryItem.runningQuantity || 0;
-
-                const newReservedQuantity = Math.max(0, currentReserved - request.quantity);
-                const newAvailableQuantity = currentAvailable + request.quantity;
-
-                const restorationTransaction = {
-                  背番号: request.背番号,
-                  品番: request.品番,
-                  timeStamp: new Date(),
-                  Date: new Date().toISOString().split('T')[0],
-                  
-                  // Two-stage inventory fields
-                  physicalQuantity: currentPhysical, // Physical stock unchanged
-                  reservedQuantity: newReservedQuantity, // Decrease reserved
-                  availableQuantity: newAvailableQuantity, // Increase available
-                  
-                  // Legacy field for compatibility
-                  runningQuantity: newAvailableQuantity,
-                  lastQuantity: currentAvailable,
-                  
-                  action: `Reservation Cancelled (-${request.quantity})`,
-                  source: `Freya Admin - ${userName}`,
-                  requestId: requestId,
-                  note: `Restored ${request.quantity} units from cancelled request ${request.requestNumber}`
-                };
-
-                await inventoryCollection.insertOne(restorationTransaction);
-                restoredItems = 1;
-                totalQuantityRestored = request.quantity;
-                
-                console.log(`✅ Restored ${request.quantity} units for ${request.背番号}`);
-              }
-            } else {
-              console.log(`⏭️ Skipping restoration: Single request status is '${request.status}' (completed requests are not restored)`);
-            }
+          if (result.matchedCount === 0) {
+            return res.status(404).json({ error: "Request not found" });
           }
 
-          // Delete the request from database
-          const result = await requestsCollection.deleteOne({ _id: new ObjectId(requestId) });
-
-          // Build response message
-          let message = '';
-          if (isBulkRequest) {
-            if (restoredItems > 0) {
-              message = `✅ Bulk request deleted. Restored ${restoredItems} unpicked line items (${totalQuantityRestored} total units). Completed items were not restored.`;
-            } else {
-              message = `✅ Bulk request deleted. All line items were already completed - no inventory restoration needed.`;
-            }
+          let message;
+          if (request.requestType === 'bulk') {
+            message = adjustmentSummary.adjustedLineItems > 0
+              ? `✅ Bulk request moved to trash. Released ${adjustmentSummary.adjustedLineItems} open line items (${adjustmentSummary.adjustedQuantity} total units).`
+              : '✅ Bulk request moved to trash. No open line items required inventory changes.';
           } else {
-            if (restoredItems > 0) {
-              message = `✅ Request deleted and ${totalQuantityRestored} units restored to inventory.`;
-            } else {
-              message = `✅ Request deleted (no inventory restoration - request was already completed).`;
-            }
+            message = adjustmentSummary.adjustedQuantity > 0
+              ? `✅ Request moved to trash and ${adjustmentSummary.adjustedQuantity} units were released from reservation.`
+              : '✅ Request moved to trash. No inventory changes were needed.';
           }
 
-          res.json({ 
+          res.json({
             success: true,
-            message: message,
-            restoredItems: restoredItems,
-            totalQuantityRestored: totalQuantityRestored
+            movedToTrash: true,
+            message,
+            restoredItems: adjustmentSummary.adjustedLineItems,
+            totalQuantityRestored: adjustmentSummary.adjustedQuantity,
+            trashExpiresAt
           });
 
         } catch (error) {
@@ -14080,13 +18451,13 @@ app.post("/api/noda-requests", async (req, res) => {
           
           // Find all requests waiting for inventory or with partial inventory
           // Sort by createdAt for first-come-first-served priority
-          const requestsNeedingInventory = await requestsCollection.find({
+          const requestsNeedingInventory = await requestsCollection.find(withActiveRequestFilter({
             $or: [
               { overallInventoryStatus: 'waiting-for-inventory' },
               { overallInventoryStatus: 'partial-inventory' }
             ],
             status: { $nin: ['completed', 'cancelled'] } // Only active requests
-          }).sort({ createdAt: 1 }).toArray(); // First-come-first-served
+          })).sort({ createdAt: 1 }).toArray(); // First-come-first-served
           
           console.log(`📋 Found ${requestsNeedingInventory.length} requests needing inventory check`);
           
@@ -14181,10 +18552,10 @@ app.post("/api/noda-requests", async (req, res) => {
                     
                     // Update the line item
                     await requestsCollection.updateOne(
-                      { 
+                      withActiveRequestFilter({ 
                         _id: request._id,
                         'lineItems.lineNumber': lineItem.lineNumber
-                      },
+                      }),
                       {
                         $set: {
                           'lineItems.$.reservedQuantity': newReservedQty,
@@ -14206,7 +18577,7 @@ app.post("/api/noda-requests", async (req, res) => {
             // If request was updated, recalculate overall inventory status
             if (requestUpdated) {
               // Get updated request
-              const updatedRequest = await requestsCollection.findOne({ _id: request._id });
+              const updatedRequest = await requestsCollection.findOne(withActiveRequestFilter({ _id: request._id }));
               
               // Calculate new overall status
               const hasNoInventory = updatedRequest.lineItems.every(item => item.inventoryStatus === 'none');
@@ -14229,7 +18600,7 @@ app.post("/api/noda-requests", async (req, res) => {
               
               // Update overall status
               await requestsCollection.updateOne(
-                { _id: request._id },
+                withActiveRequestFilter({ _id: request._id }),
                 {
                   $set: {
                     overallInventoryStatus: newOverallStatus,
@@ -14269,12 +18640,14 @@ app.post("/api/noda-requests", async (req, res) => {
         try {
           // Use aggregation instead of distinct for API Version 1 compatibility
           const partNumbersResult = await requestsCollection.aggregate([
+            { $match: { isDeleted: { $ne: true } } },
             { $group: { _id: "$品番" } },
             { $match: { _id: { $ne: null, $ne: "" } } },
             { $sort: { _id: 1 } }
           ]).toArray();
 
           const backNumbersResult = await requestsCollection.aggregate([
+            { $match: { isDeleted: { $ne: true } } },
             { $group: { _id: "$背番号" } },
             { $match: { _id: { $ne: null, $ne: "" } } },
             { $sort: { _id: 1 } }
@@ -14334,12 +18707,31 @@ app.post("/api/noda-requests", async (req, res) => {
           }
 
           const inventoryItem = inventoryResults[0];
+          let capacityPerBox = null;
+
+          if (inventoryItem.品番 && inventoryItem.背番号) {
+            const masterRecords = await masterCollection.find(
+              {
+                品番: inventoryItem.品番,
+                背番号: inventoryItem.背番号
+              },
+              {
+                projection: { 品番: 1, 背番号: 1, 工場: 1, 収容数: 1 }
+              }
+            ).toArray();
+
+            const masterCapacityMap = buildInventoryMasterCapacityMap(masterRecords);
+            capacityPerBox = getInventoryCapacityPerBox(masterCapacityMap, inventoryItem) || null;
+          }
+
+          const physicalQuantity = inventoryItem.physicalQuantity || inventoryItem.runningQuantity || 0;
 
           // Return two-stage inventory information
           const inventoryInfo = {
             背番号: inventoryItem.背番号,
             品番: inventoryItem.品番,
-            physicalQuantity: inventoryItem.physicalQuantity || inventoryItem.runningQuantity || 0,
+            physicalQuantity,
+            stockBoxCount: capacityPerBox ? physicalQuantity / capacityPerBox : null,
             reservedQuantity: inventoryItem.reservedQuantity || 0,
             availableQuantity: inventoryItem.availableQuantity || inventoryItem.runningQuantity || 0,
             lastUpdated: inventoryItem.timeStamp,
@@ -14412,8 +18804,13 @@ app.post("/api/noda-requests", async (req, res) => {
         try {
           // Build query from filters (same as getNodaRequests)
           let query = {};
+          const today = new Date();
+          const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
-          if (filters.status) {
+          if (filters.pastDeadline) {
+            query.status = { $nin: ['completed', 'cancelled'] };
+            query['納入指示日'] = { ...(query['納入指示日'] || {}), $lt: todayStr };
+          } else if (filters.status) {
             query.status = filters.status;
           }
 
@@ -14427,7 +18824,7 @@ app.post("/api/noda-requests", async (req, res) => {
 
           // Date range filter (using 納入指示日 deadline field)
           if (filters.dateRange) {
-            query['納入指示日'] = {};
+            query['納入指示日'] = query['納入指示日'] || {};
             if (filters.dateRange.from) {
               query['納入指示日'].$gte = filters.dateRange.from;
             }
@@ -14478,11 +18875,29 @@ app.post("/api/noda-requests", async (req, res) => {
  */
 async function calculateNodaStatistics(collection, baseQuery = {}) {
   try {
+    const today = new Date();
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     const stats = await collection.aggregate([
-      { $match: baseQuery },
+      { $match: { ...baseQuery, isDeleted: { $ne: true } } },
+      {
+        $addFields: {
+          computedStatStatus: {
+            $cond: [
+              {
+                $and: [
+                  { $lt: ['$納入指示日', todayStr] },
+                  { $not: [{ $in: ['$status', ['completed', 'cancelled']] }] }
+                ]
+              },
+              'past-deadline',
+              '$status'
+            ]
+          }
+        }
+      },
       {
         $group: {
-          _id: "$status",
+          _id: "$computedStatStatus",
           count: { $sum: 1 }
         }
       }
@@ -14493,6 +18908,7 @@ async function calculateNodaStatistics(collection, baseQuery = {}) {
       pending: 0,
       'in-progress': 0,
       completed: 0,
+      'past-deadline': 0,
       'partial-inventory': 0,
       cancelled: 0
     };
@@ -14508,9 +18924,30 @@ async function calculateNodaStatistics(collection, baseQuery = {}) {
     return statistics;
   } catch (error) {
     console.error("Error calculating NODA statistics:", error);
-    return { all: 0, pending: 0, 'in-progress': 0, completed: 0, 'partial-inventory': 0, cancelled: 0 };
+    return { all: 0, pending: 0, 'in-progress': 0, completed: 0, 'past-deadline': 0, 'partial-inventory': 0, cancelled: 0 };
   }
 }
+
+async function cleanupOldNodaTrash() {
+  try {
+    await client.connect();
+    const requestsCollection = client.db('submittedDB').collection('nodaRequestDB');
+    const nowIso = new Date().toISOString();
+    const result = await requestsCollection.deleteMany({
+      isDeleted: true,
+      trashExpiresAt: { $lt: nowIso }
+    });
+
+    if (result.deletedCount > 0) {
+      console.log(`🧹 Cleaned up ${result.deletedCount} expired NODA trash request(s)`);
+    }
+  } catch (error) {
+    console.error('Error cleaning up NODA trash:', error.message);
+  }
+}
+
+setInterval(cleanupOldNodaTrash, 24 * 60 * 60 * 1000);
+cleanupOldNodaTrash();
 
 // ==================== END OF NODA API ROUTES ====================
 
@@ -14526,93 +18963,130 @@ async function calculateNodaStatistics(collection, baseQuery = {}) {
 
 // Inventory Management API Route
 app.post("/api/inventory-management", async (req, res) => {
-  const { action, filters = {}, page = 1, limit = 10, sort = {}, 背番号 } = req.body;
+  const { action, filters = {}, page = 1, limit, sort = {}, 背番号 } = req.body;
 
   try {
     await client.connect();
     const db = client.db("submittedDB");
+    const requestsCollection = db.collection("nodaRequestDB");
     const inventoryCollection = db.collection("nodaInventoryDB");
+    const thresholdCollection = db.collection("inventoryThresholdSettings");
+    const masterCollection = client.db("Sasaki_Coating_MasterDB").collection("masterDB");
 
     switch (action) {
       case 'getInventoryData':
         try {
-          // Get latest inventory state for each unique 背番号
-          const pipeline = [
-            // First convert timeStamp to Date for proper sorting
-            {
-              $addFields: {
-                timeStampDate: {
-                  $cond: {
-                    if: { $type: "$timeStamp" },
-                    then: { $toDate: "$timeStamp" },
-                    else: new Date()
-                  }
-                }
-              }
-            },
-            // Sort by 背番号 and timestamp (newest first)
-            {
-              $sort: { 背番号: 1, timeStampDate: -1 }
-            },
-            // Group by 背番号 and get the latest record
-            {
-              $group: {
-                _id: "$背番号",
-                latestRecord: { $first: "$$ROOT" }
-              }
-            },
-            // Replace root with the latest record
-            {
-              $replaceRoot: { newRoot: "$latestRecord" }
-            }
-          ];
+          const normalizedPage = normalizeInventoryPositiveInteger(page, 1);
+          const normalizedLimit = normalizeInventoryPageSize(limit, 50);
+          const snapshotAt = parseInventorySnapshotAt(filters.snapshotAt);
 
-          // Apply filters if provided
-          const matchStage = {};
-          if (filters['品番']) {
-            matchStage['品番'] = filters['品番'];
-          }
-          // sebanggoArray: model-based tag filter (array of 背番号 from model selection)
-          if (filters.sebanggoArray && Array.isArray(filters.sebanggoArray) && filters.sebanggoArray.length > 0) {
-            matchStage['背番号'] = { $in: filters.sebanggoArray };
-          } else if (filters['背番号']) {
-            matchStage['背番号'] = filters['背番号'];
-          }
-          if (filters.search) {
-            const searchRegex = new RegExp(filters.search, 'i');
-            matchStage.$or = [
-              { '品番': searchRegex },
-              { '背番号': searchRegex }
-            ];
+          if (hasInventorySnapshotValue(filters.snapshotAt) && !snapshotAt) {
+            return res.status(400).json({ error: 'Invalid snapshot timestamp' });
           }
 
-          // Add match stage if filters exist
-          if (Object.keys(matchStage).length > 0) {
-            pipeline.unshift({ $match: matchStage });
-          }
+          const pipeline = buildInventoryLatestStatePipeline(filters, { snapshotAt });
 
           // Get filtered results
           const inventoryItems = await inventoryCollection.aggregate(pipeline).toArray();
+
+          const advancedFilters = Array.isArray(filters.advancedFilters) ? filters.advancedFilters : [];
+          const filteredInventoryItems = advancedFilters.length
+            ? inventoryItems.filter((item) => matchesInventoryAdvancedFilters(item, advancedFilters))
+            : inventoryItems;
+
+          const thresholdConfig = await getInventoryThresholdConfig(thresholdCollection);
+          const thresholdRuleMap = new Map(thresholdConfig.models.map((rule) => [rule.model, rule]));
+
+          const masterLookupPairs = Array.from(
+            new Map(
+              filteredInventoryItems
+                .filter((item) => item?.品番 && item?.背番号)
+                .map((item) => {
+                  const key = buildInventoryMasterLookupKey(item.品番, item.背番号);
+                  return [key, { 品番: item.品番, 背番号: item.背番号 }];
+                })
+            ).values()
+          );
+
+          let masterCapacityMap = new Map();
+          let masterModelMap = new Map();
+          if (masterLookupPairs.length > 0) {
+            const masterRecords = await masterCollection.find(
+              {
+                $or: masterLookupPairs.map(({ 品番, 背番号 }) => ({ 品番, 背番号 }))
+              },
+              {
+                projection: { 品番: 1, 背番号: 1, 工場: 1, 収容数: 1, モデル: 1 }
+              }
+            ).toArray();
+
+            masterCapacityMap = buildInventoryMasterCapacityMap(masterRecords);
+            masterModelMap = buildInventoryModelMap(masterRecords);
+          }
+
+          const inventoryItemsWithThresholds = filteredInventoryItems.map((item) => {
+            const physicalQuantity = getInventoryPhysicalQuantityValue(item);
+            const reservedQuantity = Number(item.reservedQuantity || 0);
+            const availableQuantity = getInventoryAvailableQuantityValue(item);
+            const capacityPerBox = getInventoryCapacityPerBox(masterCapacityMap, item);
+            const stockBoxCount = capacityPerBox > 0 ? physicalQuantity / capacityPerBox : null;
+            const model = getInventoryModel(masterModelMap, item);
+            const thresholdState = resolveInventoryThreshold(
+              {
+                ...item,
+                モデル: model,
+                stockBoxCount
+              },
+              thresholdConfig,
+              thresholdRuleMap
+            );
+
+            return {
+              ...item,
+              モデル: model,
+              physicalQuantity,
+              reservedQuantity,
+              availableQuantity,
+              capacityPerBox: capacityPerBox || null,
+              stockBoxCount,
+              thresholdStatus: thresholdState.status,
+              thresholdWarning: thresholdState.warning,
+              thresholdCritical: thresholdState.critical,
+              thresholdSource: thresholdState.source
+            };
+          });
+
+          const thresholdSummary = calculateInventoryThresholdSummary(inventoryItemsWithThresholds);
+          const thresholdStatusFilter = String(filters.thresholdStatus || '').trim().toLowerCase();
+          const visibleInventoryItems = thresholdStatusFilter && thresholdStatusFilter !== 'all'
+            ? inventoryItemsWithThresholds.filter((item) => item.thresholdStatus === thresholdStatusFilter)
+            : inventoryItemsWithThresholds;
           
           // Debug logging
-          console.log(`📊 Found ${inventoryItems.length} inventory items`);
-          if (inventoryItems.length > 0) {
-            console.log('📝 Sample inventory item:', JSON.stringify(inventoryItems[0], null, 2));
+          console.log(`📊 Found ${visibleInventoryItems.length} visible inventory items`);
+          if (visibleInventoryItems.length > 0) {
+            console.log('📝 Sample inventory item:', JSON.stringify(visibleInventoryItems[0], null, 2));
           }
 
           // Calculate summary statistics
-          const summary = calculateInventorySummary(inventoryItems);
+          const summary = calculateInventorySummary(visibleInventoryItems);
 
           // Apply sorting
           if (sort.column) {
-            inventoryItems.sort((a, b) => {
+            visibleInventoryItems.sort((a, b) => {
               let aVal = a[sort.column];
               let bVal = b[sort.column];
               
               // Handle numeric fields
-              if (['physicalQuantity', 'reservedQuantity', 'availableQuantity', 'runningQuantity'].includes(sort.column)) {
+              if (['physicalQuantity', 'reservedQuantity', 'availableQuantity', 'runningQuantity', 'stockBoxCount', 'thresholdWarning', 'thresholdCritical'].includes(sort.column)) {
                 aVal = Number(aVal) || 0;
                 bVal = Number(bVal) || 0;
+              }
+
+              if (sort.column === 'thresholdStatus') {
+                const severity = { critical: 0, warning: 1, healthy: 2 };
+                aVal = severity[a.thresholdStatus] ?? 99;
+                bVal = severity[b.thresholdStatus] ?? 99;
               }
               
               // Handle date fields - use the already-parsed timeStampDate for proper sorting
@@ -14629,20 +19103,26 @@ app.post("/api/inventory-management", async (req, res) => {
           }
 
           // Apply pagination
-          const totalItems = inventoryItems.length;
-          const totalPages = Math.ceil(totalItems / limit);
-          const startIndex = (page - 1) * limit;
-          const endIndex = startIndex + limit;
-          const paginatedItems = inventoryItems.slice(startIndex, endIndex);
+          const totalItems = visibleInventoryItems.length;
+          const totalPages = totalItems > 0 ? Math.ceil(totalItems / normalizedLimit) : 0;
+          const startIndex = (normalizedPage - 1) * normalizedLimit;
+          const endIndex = startIndex + normalizedLimit;
+          const paginatedItems = visibleInventoryItems.slice(startIndex, endIndex);
 
           // Format data for frontend
           const formattedItems = paginatedItems.map(item => ({
             品番: item.品番,
             背番号: item.背番号,
             工場: item.工場,
-            physicalQuantity: item.physicalQuantity || item.runningQuantity || 0,
+            model: item.モデル || '',
+            physicalQuantity: getInventoryPhysicalQuantityValue(item),
+            stockBoxCount: item.stockBoxCount,
             reservedQuantity: item.reservedQuantity || 0,
-            availableQuantity: item.availableQuantity || item.runningQuantity || 0,
+            availableQuantity: getInventoryAvailableQuantityValue(item),
+            thresholdStatus: item.thresholdStatus,
+            thresholdWarning: item.thresholdWarning,
+            thresholdCritical: item.thresholdCritical,
+            thresholdSource: item.thresholdSource,
             lastUpdated: item.timeStamp,
             timeStampDate: item.timeStampDate // Add parsed date for sorting
           }));
@@ -14651,11 +19131,13 @@ app.post("/api/inventory-management", async (req, res) => {
             success: true,
             data: formattedItems,
             summary: summary,
+            thresholdSummary,
+            snapshotAt: snapshotAt ? snapshotAt.toISOString() : null,
             pagination: {
-              currentPage: page,
+              currentPage: normalizedPage,
               totalPages: totalPages,
               totalItems: totalItems,
-              itemsPerPage: limit
+              itemsPerPage: normalizedLimit
             }
           });
 
@@ -14665,29 +19147,462 @@ app.post("/api/inventory-management", async (req, res) => {
         }
         break;
 
+      case 'getSnapshotRequestOptions':
+        try {
+          const requestDocuments = await requestsCollection.find(
+            {
+              requestNumber: { $exists: true, $nin: [null, ''] },
+              $or: [
+                { 'lineItems.status': 'completed' },
+                { 'lineItems.completedAt': { $exists: true } },
+                { completedAt: { $exists: true } },
+                { status: 'completed' }
+              ]
+            },
+            {
+              projection: {
+                requestNumber: 1,
+                status: 1,
+                totalItems: 1,
+                createdAt: 1,
+                updatedAt: 1,
+                pickupDate: 1,
+                納入指示日: 1,
+                lineItems: 1
+              }
+            }
+          )
+            .sort({ updatedAt: -1, createdAt: -1, _id: -1 })
+            .limit(250)
+            .toArray();
+
+          const requestOptions = requestDocuments
+            .map((requestDoc) => {
+              const lineItems = Array.isArray(requestDoc?.lineItems) ? requestDoc.lineItems : [];
+              const completedLineItems = lineItems.filter((lineItem) => {
+                if (lineItem?.status === 'completed') {
+                  return true;
+                }
+
+                const completedAt = lineItem?.completedAt ? new Date(lineItem.completedAt) : null;
+                return completedAt instanceof Date && !Number.isNaN(completedAt.getTime());
+              });
+
+              const completionDates = completedLineItems
+                .map((lineItem) => new Date(lineItem.completedAt || 0))
+                .filter((dateValue) => dateValue instanceof Date && !Number.isNaN(dateValue.getTime()))
+                .sort((left, right) => right.getTime() - left.getTime());
+
+              const updatedAt = requestDoc?.updatedAt ? new Date(requestDoc.updatedAt) : null;
+              const createdAt = requestDoc?.createdAt ? new Date(requestDoc.createdAt) : null;
+
+              return {
+                requestNumber: String(requestDoc?.requestNumber || '').trim(),
+                status: String(requestDoc?.status || '').trim(),
+                totalItems: Number(requestDoc?.totalItems) || lineItems.length,
+                completedCount: completedLineItems.length,
+                pickupDate: requestDoc?.pickupDate || '',
+                deliveryDate: requestDoc?.['納入指示日'] || '',
+                updatedAt: updatedAt instanceof Date && !Number.isNaN(updatedAt.getTime())
+                  ? updatedAt.toISOString()
+                  : null,
+                createdAt: createdAt instanceof Date && !Number.isNaN(createdAt.getTime())
+                  ? createdAt.toISOString()
+                  : null,
+                lastCompletedAt: completionDates[0] ? completionDates[0].toISOString() : null
+              };
+            })
+            .filter((requestOption) => requestOption.requestNumber && requestOption.completedCount > 0)
+            .sort((left, right) => {
+              const rightTimestamp = new Date(
+                right.lastCompletedAt || right.updatedAt || right.createdAt || 0
+              ).getTime();
+              const leftTimestamp = new Date(
+                left.lastCompletedAt || left.updatedAt || left.createdAt || 0
+              ).getTime();
+
+              return rightTimestamp - leftTimestamp;
+            });
+
+          res.json({
+            success: true,
+            data: requestOptions
+          });
+        } catch (error) {
+          console.error('Error in getSnapshotRequestOptions:', error);
+          res.status(500).json({ error: 'Failed to fetch snapshot request options', details: error.message });
+        }
+        break;
+
+      case 'resolveSnapshotForRequest':
+        try {
+          const requestReference = String(req.body.requestReference || req.body.requestNumber || '').trim();
+
+          if (!requestReference) {
+            return res.status(400).json({ error: 'Request number is required' });
+          }
+
+          const resolvedSnapshot = await resolveInventorySnapshotForRequestReference(
+            inventoryCollection,
+            requestsCollection,
+            requestReference
+          );
+
+          if (!resolvedSnapshot?.snapshotAt || !resolvedSnapshot?.pickedAt) {
+            return res.status(404).json({
+              error: `No picking transaction found for request ${requestReference}`
+            });
+          }
+
+          res.json({
+            success: true,
+            data: {
+              requestReference,
+              requestId: resolvedSnapshot.requestId,
+              requestNumber: resolvedSnapshot.requestNumber,
+              snapshotAt: resolvedSnapshot.snapshotAt.toISOString(),
+              pickedAt: resolvedSnapshot.pickedAt.toISOString(),
+              lineNumber: resolvedSnapshot.lineNumber,
+              matchedTransactionId: resolvedSnapshot.matchedTransactionId
+            }
+          });
+        } catch (error) {
+          console.error('Error in resolveSnapshotForRequest:', error);
+          res.status(500).json({ error: 'Failed to resolve request snapshot', details: error.message });
+        }
+        break;
+
+      case 'getInventoryAddHistoryGroups':
+        try {
+          const normalizedPage = normalizeInventoryPositiveInteger(page, 1);
+          const requestedLimit = normalizeInventoryPageSize(limit, 50);
+          const normalizedLimit = [10, 50, 100].includes(requestedLimit) ? requestedLimit : 50;
+          const skip = (normalizedPage - 1) * normalizedLimit;
+          const inventoryAddHistoryMatch = {
+            timeStampDate: { $gt: new Date(0) },
+            inputQuantity: { $gt: 0 },
+            $or: [
+              { action: { $regex: /^(Warehouse Input|Manual Inventory Add)\s*\(\+/i } },
+              { source: { $regex: /^tablet\s*入庫/i } }
+            ]
+          };
+
+          const groups = await inventoryCollection.aggregate([
+            {
+              $addFields: {
+                timeStampDate: buildInventoryTimeStampDateExpression(),
+                physicalQuantityNumber: {
+                  $convert: {
+                    input: { $ifNull: ['$physicalQuantity', '$runningQuantity'] },
+                    to: 'double',
+                    onError: 0,
+                    onNull: 0
+                  }
+                },
+                lastQuantityNumber: {
+                  $convert: {
+                    input: { $ifNull: ['$lastQuantity', 0] },
+                    to: 'double',
+                    onError: 0,
+                    onNull: 0
+                  }
+                }
+              }
+            },
+            {
+              $addFields: {
+                inputQuantity: {
+                  $subtract: ['$physicalQuantityNumber', '$lastQuantityNumber']
+                }
+              }
+            },
+            {
+              $match: inventoryAddHistoryMatch
+            },
+            {
+              $group: {
+                _id: '$timeStampDate',
+                itemCount: { $sum: 1 },
+                totalInsertedQuantity: { $sum: '$inputQuantity' }
+              }
+            },
+            {
+              $sort: { _id: -1 }
+            },
+            {
+              $facet: {
+                data: [
+                  { $skip: skip },
+                  { $limit: normalizedLimit }
+                ],
+                metadata: [
+                  { $count: 'totalItems' }
+                ]
+              }
+            }
+          ]).toArray();
+
+          const paginationResult = groups[0] || {};
+          const paginatedGroups = Array.isArray(paginationResult.data) ? paginationResult.data : [];
+          const totalItems = Number(paginationResult?.metadata?.[0]?.totalItems) || 0;
+          const totalPages = totalItems > 0 ? Math.ceil(totalItems / normalizedLimit) : 0;
+
+          res.json({
+            success: true,
+            data: paginatedGroups.map((group) => ({
+              timeStamp: group._id instanceof Date && !Number.isNaN(group._id.getTime())
+                ? group._id.toISOString()
+                : null,
+              itemCount: Number(group.itemCount) || 0,
+              totalInsertedQuantity: Number(group.totalInsertedQuantity) || 0
+            })).filter((group) => group.timeStamp),
+            pagination: {
+              currentPage: totalPages > 0 ? Math.min(normalizedPage, totalPages) : 1,
+              totalPages,
+              totalItems,
+              itemsPerPage: normalizedLimit
+            }
+          });
+        } catch (error) {
+          console.error('Error in getInventoryAddHistoryGroups:', error);
+          res.status(500).json({ error: 'Failed to fetch inventory add history groups', details: error.message });
+        }
+        break;
+
+      case 'getInventoryAddHistoryItems':
+        try {
+          const selectedTimeStamp = parseInventorySnapshotAt(req.body.timeStamp || req.body.snapshotAt);
+
+          if (!selectedTimeStamp) {
+            return res.status(400).json({ error: 'A valid history timestamp is required' });
+          }
+
+          const inventoryAddHistoryMatch = {
+            timeStampDate: selectedTimeStamp,
+            inputQuantity: { $gt: 0 },
+            $or: [
+              { action: { $regex: /^(Warehouse Input|Manual Inventory Add)\s*\(\+/i } },
+              { source: { $regex: /^tablet\s*入庫/i } }
+            ]
+          };
+
+          const inventoryAddHistoryItems = await inventoryCollection.aggregate([
+            {
+              $addFields: {
+                timeStampDate: buildInventoryTimeStampDateExpression(),
+                physicalQuantityNumber: {
+                  $convert: {
+                    input: { $ifNull: ['$physicalQuantity', '$runningQuantity'] },
+                    to: 'double',
+                    onError: 0,
+                    onNull: 0
+                  }
+                },
+                lastQuantityNumber: {
+                  $convert: {
+                    input: { $ifNull: ['$lastQuantity', 0] },
+                    to: 'double',
+                    onError: 0,
+                    onNull: 0
+                  }
+                }
+              }
+            },
+            {
+              $addFields: {
+                inputQuantity: {
+                  $subtract: ['$physicalQuantityNumber', '$lastQuantityNumber']
+                }
+              }
+            },
+            {
+              $match: inventoryAddHistoryMatch
+            },
+            {
+              $sort: { 背番号: 1, 品番: 1, _id: 1 }
+            },
+            {
+              $project: {
+                _id: 0,
+                品番: 1,
+                背番号: 1,
+                工場: 1,
+                source: 1,
+                action: 1,
+                inputQuantity: 1,
+                timeStampDate: 1
+              }
+            }
+          ]).toArray();
+
+          const masterLookupPairs = Array.from(
+            new Map(
+              inventoryAddHistoryItems
+                .filter((item) => item?.品番 && item?.背番号)
+                .map((item) => {
+                  const key = buildInventoryMasterLookupKey(item.品番, item.背番号);
+                  return [key, { 品番: item.品番, 背番号: item.背番号 }];
+                })
+            ).values()
+          );
+
+          let masterCapacityMap = new Map();
+          if (masterLookupPairs.length > 0) {
+            const masterRecords = await masterCollection.find(
+              {
+                $or: masterLookupPairs.map(({ 品番, 背番号 }) => ({ 品番, 背番号 }))
+              },
+              {
+                projection: { 品番: 1, 背番号: 1, 工場: 1, 収容数: 1 }
+              }
+            ).toArray();
+
+            masterCapacityMap = buildInventoryMasterCapacityMap(masterRecords);
+          }
+
+          const formattedItems = inventoryAddHistoryItems.map((item) => {
+            const insertedQuantity = Number(item.inputQuantity) || 0;
+            const capacityPerBox = getInventoryCapacityPerBox(masterCapacityMap, item);
+            const insertedBy = extractInventorySourceActor(item.source);
+
+            return {
+              品番: item.品番,
+              背番号: item.背番号,
+              工場: item.工場 || '',
+              insertedQuantity,
+              insertedBy,
+              boxQuantity: capacityPerBox > 0 ? insertedQuantity / capacityPerBox : null,
+              capacityPerBox: capacityPerBox || null,
+              source: item.source || '',
+              action: item.action || '',
+              timeStamp: item.timeStampDate instanceof Date && !Number.isNaN(item.timeStampDate.getTime())
+                ? item.timeStampDate.toISOString()
+                : selectedTimeStamp.toISOString()
+            };
+          });
+
+          res.json({
+            success: true,
+            data: formattedItems,
+            meta: {
+              timeStamp: selectedTimeStamp.toISOString(),
+              itemCount: formattedItems.length
+            }
+          });
+        } catch (error) {
+          console.error('Error in getInventoryAddHistoryItems:', error);
+          res.status(500).json({ error: 'Failed to fetch inventory add history items', details: error.message });
+        }
+        break;
+
       case 'getItemTransactions':
         try {
           if (!背番号) {
             return res.status(400).json({ error: "背番号 is required" });
           }
 
-          // Get all transactions for the specific item, sorted by timestamp (newest first)
-          const transactions = await inventoryCollection
-            .find({ 背番号: 背番号 })
-            .sort({ timeStamp: -1 })
-            .toArray();
+          const normalizedPage = normalizeInventoryPositiveInteger(page, 1);
+          const requestedLimit = normalizeInventoryPageSize(limit, 10);
+          const normalizedLimit = [10, 50, 100].includes(requestedLimit) ? requestedLimit : 10;
+          const transactionFilter = { 背番号 };
+          const transactionProjection = {
+            品番: 1,
+            背番号: 1,
+            工場: 1,
+            timeStamp: 1,
+            action: 1,
+            physicalQuantity: 1,
+            runningQuantity: 1,
+            reservedQuantity: 1,
+            availableQuantity: 1,
+            source: 1,
+            note: 1,
+            migrationNote: 1
+          };
+          const totalItems = await inventoryCollection.countDocuments(transactionFilter);
 
-          if (transactions.length === 0) {
+          if (totalItems === 0) {
             return res.json({
               success: true,
               data: [],
+              currentItem: null,
+              pagination: {
+                currentPage: 1,
+                totalPages: 0,
+                totalItems: 0,
+                itemsPerPage: normalizedLimit
+              },
               message: `No transactions found for ${背番号}`
             });
           }
 
+          const totalPages = Math.ceil(totalItems / normalizedLimit);
+          const currentPage = Math.min(normalizedPage, totalPages);
+          const skip = (currentPage - 1) * normalizedLimit;
+
+          const transactionResults = await inventoryCollection.aggregate([
+            { $match: transactionFilter },
+            {
+              $addFields: {
+                timeStampDate: buildInventoryTimeStampDateExpression()
+              }
+            },
+            { $sort: { timeStampDate: -1, _id: -1 } },
+            {
+              $facet: {
+                latest: [
+                  { $limit: 1 },
+                  { $project: transactionProjection }
+                ],
+                transactions: [
+                  { $skip: skip },
+                  { $limit: normalizedLimit },
+                  { $project: transactionProjection }
+                ]
+              }
+            }
+          ]).toArray();
+
+          const latestTransaction = transactionResults[0]?.latest?.[0] || null;
+          const transactions = transactionResults[0]?.transactions || [];
+
+          let capacityPerBox = null;
+
+          if (latestTransaction.品番 && latestTransaction.背番号) {
+            const masterRecords = await masterCollection.find(
+              {
+                品番: latestTransaction.品番,
+                背番号: latestTransaction.背番号
+              },
+              {
+                projection: { 品番: 1, 背番号: 1, 工場: 1, 収容数: 1 }
+              }
+            ).toArray();
+
+            const masterCapacityMap = buildInventoryMasterCapacityMap(masterRecords);
+            capacityPerBox = getInventoryCapacityPerBox(masterCapacityMap, latestTransaction) || null;
+          }
+
+          const enrichTransaction = (transaction) => ({
+            ...transaction,
+            capacityPerBox,
+            stockBoxCount: capacityPerBox
+              ? getInventoryPhysicalQuantityValue(transaction) / capacityPerBox
+              : null
+          });
+
+          const formattedTransactions = transactions.map(enrichTransaction);
+
           res.json({
             success: true,
-            data: transactions
+            data: formattedTransactions,
+            currentItem: latestTransaction ? enrichTransaction(latestTransaction) : null,
+            pagination: {
+              currentPage,
+              totalPages,
+              totalItems,
+              itemsPerPage: normalizedLimit
+            }
           });
 
         } catch (error) {
@@ -14718,18 +19633,72 @@ app.post("/api/inventory-management", async (req, res) => {
 
           const partNumbers = [...new Set(latestInventory.map(item => item.品番).filter(Boolean))].sort();
           const backNumbers = [...new Set(latestInventory.map(item => item.背番号).filter(Boolean))].sort();
+          const factories = [...new Set(latestInventory.map(item => item.工場).filter(Boolean))].sort();
 
           res.json({
             success: true,
             data: {
               partNumbers: partNumbers,
-              backNumbers: backNumbers
+              backNumbers: backNumbers,
+              factories: factories
             }
           });
 
         } catch (error) {
           console.error("Error in getFilterOptions:", error);
           res.status(500).json({ error: "Failed to fetch filter options", details: error.message });
+        }
+        break;
+
+      case 'getThresholdConfig':
+        try {
+          const thresholdConfig = await getInventoryThresholdConfig(thresholdCollection);
+
+          res.json({
+            success: true,
+            data: thresholdConfig
+          });
+        } catch (error) {
+          console.error('Error in getThresholdConfig:', error);
+          res.status(500).json({ error: 'Failed to fetch threshold config', details: error.message });
+        }
+        break;
+
+      case 'saveThresholdConfig':
+        try {
+          const { role, submittedBy, fullName, config } = req.body;
+
+          if (role !== 'admin') {
+            return res.status(403).json({ error: 'Only admin can update threshold rules' });
+          }
+
+          const validationError = validateInventoryThresholdConfigInput(config);
+          if (validationError) {
+            return res.status(400).json({ error: validationError });
+          }
+
+          const normalizedConfig = normalizeInventoryThresholdConfig(config);
+          const savedConfig = {
+            _id: INVENTORY_THRESHOLD_CONFIG_ID,
+            global: normalizedConfig.global,
+            models: normalizedConfig.models,
+            updatedAt: new Date().toISOString(),
+            updatedBy: fullName || submittedBy || 'admin'
+          };
+
+          await thresholdCollection.replaceOne(
+            { _id: INVENTORY_THRESHOLD_CONFIG_ID },
+            savedConfig,
+            { upsert: true }
+          );
+
+          res.json({
+            success: true,
+            data: savedConfig
+          });
+        } catch (error) {
+          console.error('Error in saveThresholdConfig:', error);
+          res.status(500).json({ error: 'Failed to save threshold config', details: error.message });
         }
         break;
 
@@ -14819,6 +19788,112 @@ app.post("/api/inventory-management", async (req, res) => {
         } catch (error) {
           console.error("Error in resetInventory:", error);
           res.status(500).json({ error: "Failed to reset inventory", details: error.message });
+        }
+        break;
+
+      case 'adjustInventory':
+        try {
+          const {
+            backNumber,
+            partNumber,
+            factory,
+            newPhysicalQuantity,
+            submittedBy,
+            fullName,
+            role
+          } = req.body;
+
+          if (role !== 'admin') {
+            return res.status(403).json({ error: 'Only admin can adjust inventory' });
+          }
+
+          if (!backNumber || !partNumber) {
+            return res.status(400).json({ error: '背番号 and 品番 are required' });
+          }
+
+          const normalizedNewPhysicalQuantity = Math.floor(Number(newPhysicalQuantity));
+          if (!Number.isFinite(normalizedNewPhysicalQuantity) || normalizedNewPhysicalQuantity < 0) {
+            return res.status(400).json({ error: 'A valid new physical quantity is required' });
+          }
+
+          const latestRecordResults = await inventoryCollection.aggregate([
+            { $match: { 背番号: backNumber } },
+            {
+              $addFields: {
+                timeStampDate: {
+                  $cond: {
+                    if: { $eq: [{ $type: '$timeStamp' }, 'string'] },
+                    then: { $dateFromString: { dateString: '$timeStamp' } },
+                    else: { $toDate: '$timeStamp' }
+                  }
+                }
+              }
+            },
+            { $sort: { timeStampDate: -1 } },
+            { $limit: 1 }
+          ]).toArray();
+
+          const latestRecord = latestRecordResults[0] || null;
+          const currentPhysicalQuantity = latestRecord?.physicalQuantity ?? latestRecord?.runningQuantity ?? 0;
+          const currentReservedQuantity = latestRecord?.reservedQuantity ?? 0;
+          const currentRunningQuantity = latestRecord?.runningQuantity ?? currentPhysicalQuantity;
+          const currentFactory = latestRecord?.工場 || factory || '野田倉庫';
+          const difference = normalizedNewPhysicalQuantity - currentPhysicalQuantity;
+          const newAvailableQuantity = normalizedNewPhysicalQuantity - currentReservedQuantity;
+          const newRunningQuantity = latestRecord ? currentRunningQuantity + difference : normalizedNewPhysicalQuantity;
+
+          let action;
+          let note;
+          if (!latestRecord) {
+            action = `棚卸し (+${normalizedNewPhysicalQuantity})`;
+            note = `added ${normalizedNewPhysicalQuantity} because missing from inventory`;
+          } else if (difference > 0) {
+            action = `棚卸し (+${difference})`;
+            note = `added ${difference} pieces because lacking`;
+          } else if (difference < 0) {
+            action = `棚卸し (${difference})`;
+            note = `deducted ${Math.abs(difference)} pieces because excess`;
+          } else {
+            action = '棚卸し (±0)';
+            note = 'count matches inventory';
+          }
+
+          const now = new Date();
+          const timeStamp = now.toISOString();
+          const dateField = timeStamp.split('T')[0];
+
+          const transactionDoc = {
+            背番号: backNumber,
+            品番: latestRecord?.品番 || partNumber,
+            工場: currentFactory,
+            physicalQuantity: normalizedNewPhysicalQuantity,
+            reservedQuantity: currentReservedQuantity,
+            availableQuantity: newAvailableQuantity,
+            runningQuantity: newRunningQuantity,
+            lastQuantity: currentPhysicalQuantity,
+            action: action,
+            timeStamp: timeStamp,
+            Date: dateField,
+            submittedBy: submittedBy,
+            source: `Freya Admin 棚卸し - ${fullName || submittedBy}`,
+            note: note
+          };
+
+          const result = await inventoryCollection.insertOne(transactionDoc);
+
+          console.log(`✅ Admin inventory adjustment: ${backNumber} ${currentPhysicalQuantity} -> ${normalizedNewPhysicalQuantity} by ${submittedBy}`);
+
+          res.json({
+            success: true,
+            message: 'Inventory adjusted successfully',
+            transaction: {
+              ...transactionDoc,
+              _id: result.insertedId
+            }
+          });
+        } catch (error) {
+          console.error('Error in adjustInventory:', error);
+          res.status(500).json({ error: 'Failed to adjust inventory', details: error.message });
         }
         break;
 
@@ -15009,53 +20084,213 @@ app.post("/api/inventory-management", async (req, res) => {
         }
         break;
 
+      case 'previewRepairReservedAvailable':
+        try {
+          const { role, backNumbers = [] } = req.body;
+
+          if (role !== 'admin') {
+            return res.status(403).json({ error: 'Only admin can preview inventory repair' });
+          }
+
+          const repairPreview = await buildInventoryRepairPreviewData({
+            requestsCollection,
+            inventoryCollection,
+            backNumbers
+          });
+
+          res.json({
+            success: true,
+            data: repairPreview.mismatches,
+            summary: repairPreview.summary,
+            scopeBackNumbers: repairPreview.scopeBackNumbers
+          });
+        } catch (error) {
+          console.error('Error in previewRepairReservedAvailable:', error);
+          res.status(500).json({ error: 'Failed to preview inventory repair', details: error.message });
+        }
+        break;
+
+      case 'repairReservedAvailable':
+        try {
+          const { role, selectedBackNumbers = [], submittedBy, fullName } = req.body;
+
+          if (role !== 'admin') {
+            return res.status(403).json({ error: 'Only admin can apply inventory repair' });
+          }
+
+          const normalizedSelectedBackNumbers = normalizeInventoryRepairBackNumbers(selectedBackNumbers);
+          if (normalizedSelectedBackNumbers.length === 0) {
+            return res.status(400).json({ error: 'No items selected for repair' });
+          }
+
+          const repairPreview = await buildInventoryRepairPreviewData({
+            requestsCollection,
+            inventoryCollection,
+            backNumbers: normalizedSelectedBackNumbers
+          });
+
+          const itemsToRepair = repairPreview.mismatches;
+          if (itemsToRepair.length === 0) {
+            return res.json({
+              success: true,
+              message: 'No inventory mismatches found for the selected items.',
+              successCount: 0,
+              selectedCount: normalizedSelectedBackNumbers.length,
+              repairedCount: 0,
+              results: []
+            });
+          }
+
+          const now = new Date();
+          const timeStamp = now.toISOString();
+          const dateField = timeStamp.split('T')[0];
+          const source = `Freya Admin Repair - ${fullName || submittedBy || 'admin'}`;
+          const results = [];
+
+          for (const item of itemsToRepair) {
+            const transactionDoc = {
+              背番号: item.背番号,
+              品番: item.品番,
+              工場: item.工場 || '',
+              physicalQuantity: item.currentPhysicalQuantity,
+              reservedQuantity: item.repairedReservedQuantity,
+              availableQuantity: item.repairedAvailableQuantity,
+              runningQuantity: item.repairedAvailableQuantity,
+              lastQuantity: item.currentAvailableQuantity,
+              action: 'Repair Reserved and Available',
+              timeStamp,
+              Date: dateField,
+              submittedBy,
+              source,
+              note: buildInventoryRepairNote(item)
+            };
+
+            const insertResult = await inventoryCollection.insertOne(transactionDoc);
+
+            results.push({
+              背番号: item.背番号,
+              品番: item.品番,
+              repairedReservedQuantity: item.repairedReservedQuantity,
+              repairedAvailableQuantity: item.repairedAvailableQuantity,
+              transactionId: String(insertResult.insertedId)
+            });
+          }
+
+          res.json({
+            success: true,
+            message: 'Inventory repair completed.',
+            successCount: results.length,
+            selectedCount: normalizedSelectedBackNumbers.length,
+            repairedCount: results.length,
+            results
+          });
+        } catch (error) {
+          console.error('Error in repairReservedAvailable:', error);
+          res.status(500).json({ error: 'Failed to repair reserved and available quantities', details: error.message });
+        }
+        break;
+
       case 'exportInventoryData':
         try {
-          // Get latest inventory state for all items (no pagination for export)
-          const pipeline = [
-            {
-              $sort: { 背番号: 1, timeStamp: -1 }
-            },
-            {
-              $group: {
-                _id: "$背番号",
-                latestRecord: { $first: "$$ROOT" }
-              }
-            },
-            {
-              $replaceRoot: { newRoot: "$latestRecord" }
-            }
-          ];
+          const snapshotAt = parseInventorySnapshotAt(filters.snapshotAt);
 
-          // Apply filters if provided
-          const matchStage = {};
-          if (filters['品番']) {
-            matchStage['品番'] = filters['品番'];
-          }
-          if (filters['背番号']) {
-            matchStage['背番号'] = filters['背番号'];
-          }
-          if (filters.search) {
-            const searchRegex = new RegExp(filters.search, 'i');
-            matchStage.$or = [
-              { '品番': searchRegex },
-              { '背番号': searchRegex }
-            ];
+          if (hasInventorySnapshotValue(filters.snapshotAt) && !snapshotAt) {
+            return res.status(400).json({ error: 'Invalid snapshot timestamp' });
           }
 
-          if (Object.keys(matchStage).length > 0) {
-            pipeline.unshift({ $match: matchStage });
-          }
+          const pipeline = buildInventoryLatestStatePipeline(filters, { snapshotAt });
 
           const inventoryItems = await inventoryCollection.aggregate(pipeline).toArray();
+          const advancedFilters = Array.isArray(filters.advancedFilters) ? filters.advancedFilters : [];
+          const filteredInventoryItems = advancedFilters.length
+            ? inventoryItems.filter((item) => matchesInventoryAdvancedFilters(item, advancedFilters))
+            : inventoryItems;
+
+          const thresholdConfig = await getInventoryThresholdConfig(thresholdCollection);
+          const thresholdRuleMap = new Map(thresholdConfig.models.map((rule) => [rule.model, rule]));
+
+          const masterLookupPairs = Array.from(
+            new Map(
+              filteredInventoryItems
+                .filter((item) => item?.品番 && item?.背番号)
+                .map((item) => {
+                  const key = buildInventoryMasterLookupKey(item.品番, item.背番号);
+                  return [key, { 品番: item.品番, 背番号: item.背番号 }];
+                })
+            ).values()
+          );
+
+          let masterCapacityMap = new Map();
+          let masterModelMap = new Map();
+          if (masterLookupPairs.length > 0) {
+            const masterRecords = await masterCollection.find(
+              {
+                $or: masterLookupPairs.map(({ 品番, 背番号 }) => ({ 品番, 背番号 }))
+              },
+              {
+                projection: { 品番: 1, 背番号: 1, 工場: 1, 収容数: 1, モデル: 1 }
+              }
+            ).toArray();
+
+            masterCapacityMap = buildInventoryMasterCapacityMap(masterRecords);
+            masterModelMap = buildInventoryModelMap(masterRecords);
+          }
+
+          const thresholdStatusFilter = String(filters.thresholdStatus || '').trim().toLowerCase();
+          const exportItems = filteredInventoryItems
+            .map((item) => {
+              const model = getInventoryModel(masterModelMap, item);
+              const physicalQuantity = getInventoryPhysicalQuantityValue(item);
+              const reservedQuantity = Number(item.reservedQuantity || 0);
+              const availableQuantity = getInventoryAvailableQuantityValue(item);
+              const stockBoxCount = (() => {
+                const capacityPerBox = getInventoryCapacityPerBox(masterCapacityMap, item);
+                return capacityPerBox > 0 ? physicalQuantity / capacityPerBox : null;
+              })();
+              const thresholdState = resolveInventoryThreshold(
+                {
+                  ...item,
+                  モデル: model,
+                  stockBoxCount
+                },
+                thresholdConfig,
+                thresholdRuleMap
+              );
+
+              return {
+                ...item,
+                model,
+                physicalQuantity,
+                reservedQuantity,
+                availableQuantity,
+                stockBoxCount,
+                thresholdStatus: thresholdState.status,
+                thresholdWarning: thresholdState.warning,
+                thresholdCritical: thresholdState.critical,
+                thresholdSource: thresholdState.source
+              };
+            })
+            .filter((item) => {
+              if (!thresholdStatusFilter || thresholdStatusFilter === 'all') {
+                return true;
+              }
+
+              return item.thresholdStatus === thresholdStatusFilter;
+            });
 
           // Format data for export
-          const exportData = inventoryItems.map(item => ({
+          const exportData = exportItems.map(item => ({
             品番: item.品番,
             背番号: item.背番号,
-            physicalQuantity: item.physicalQuantity || item.runningQuantity || 0,
+            model: item.model || '',
+            physicalQuantity: getInventoryPhysicalQuantityValue(item),
+            stockBoxCount: item.stockBoxCount,
             reservedQuantity: item.reservedQuantity || 0,
-            availableQuantity: item.availableQuantity || item.runningQuantity || 0,
+            availableQuantity: getInventoryAvailableQuantityValue(item),
+            thresholdStatus: item.thresholdStatus,
+            thresholdWarning: item.thresholdWarning,
+            thresholdCritical: item.thresholdCritical,
+            thresholdSource: item.thresholdSource,
             lastUpdated: item.timeStamp
           }));
 
@@ -15080,9 +20315,265 @@ app.post("/api/inventory-management", async (req, res) => {
   }
 });
 
+const INVENTORY_THRESHOLD_CONFIG_ID = 'inventory-thresholds';
+const DEFAULT_INVENTORY_THRESHOLD_CONFIG = Object.freeze({
+  global: {
+    warning: 10,
+    critical: 3
+  },
+  models: []
+});
+
+function parseInventoryThresholdNumber(value) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue) || numericValue < 0) {
+    return null;
+  }
+
+  return Math.round(numericValue * 100) / 100;
+}
+
+function validateInventoryThresholdConfigInput(config = {}) {
+  if (!config || typeof config !== 'object') {
+    return 'Threshold config is required.';
+  }
+
+  const globalWarning = parseInventoryThresholdNumber(config?.global?.warning);
+  const globalCritical = parseInventoryThresholdNumber(config?.global?.critical);
+
+  if (globalWarning === null) {
+    return 'Global warning threshold must be 0 or higher.';
+  }
+
+  if (globalCritical === null) {
+    return 'Global critical threshold must be 0 or higher.';
+  }
+
+  if (globalCritical > globalWarning) {
+    return 'Global critical threshold cannot exceed the warning threshold.';
+  }
+
+  const seenModels = new Set();
+  const modelRules = Array.isArray(config?.models) ? config.models : [];
+
+  for (const rule of modelRules) {
+    const model = String(rule?.model || '').trim();
+    if (!model) {
+      return 'Each model override must include a model.';
+    }
+
+    if (seenModels.has(model)) {
+      return `Duplicate threshold rule for model: ${model}`;
+    }
+
+    seenModels.add(model);
+
+    const warning = parseInventoryThresholdNumber(rule?.warning);
+    const critical = parseInventoryThresholdNumber(rule?.critical);
+
+    if (warning === null) {
+      return `Warning threshold must be 0 or higher for ${model}.`;
+    }
+
+    if (critical === null) {
+      return `Critical threshold must be 0 or higher for ${model}.`;
+    }
+
+    if (critical > warning) {
+      return `Critical threshold cannot exceed warning threshold for ${model}.`;
+    }
+  }
+
+  return null;
+}
+
+function normalizeInventoryThresholdNumber(value, fallback = 0) {
+  const parsedValue = parseInventoryThresholdNumber(value);
+  return parsedValue === null ? fallback : parsedValue;
+}
+
+function normalizeInventoryThresholdConfig(config = {}) {
+  const fallbackGlobal = DEFAULT_INVENTORY_THRESHOLD_CONFIG.global;
+  const globalWarning = normalizeInventoryThresholdNumber(config?.global?.warning, fallbackGlobal.warning);
+  const globalCritical = normalizeInventoryThresholdNumber(
+    config?.global?.critical,
+    Math.min(fallbackGlobal.critical, globalWarning)
+  );
+
+  const modelRules = new Map();
+  (Array.isArray(config?.models) ? config.models : []).forEach((rule) => {
+    const model = String(rule?.model || '').trim();
+    if (!model) return;
+
+    const warning = normalizeInventoryThresholdNumber(rule?.warning, globalWarning);
+    const critical = normalizeInventoryThresholdNumber(rule?.critical, Math.min(globalCritical, warning));
+
+    modelRules.set(model, {
+      model,
+      warning,
+      critical: Math.min(critical, warning)
+    });
+  });
+
+  return {
+    global: {
+      warning: globalWarning,
+      critical: Math.min(globalCritical, globalWarning)
+    },
+    models: Array.from(modelRules.values()).sort((left, right) => left.model.localeCompare(right.model)),
+    updatedAt: config?.updatedAt || null,
+    updatedBy: config?.updatedBy || ''
+  };
+}
+
+async function getInventoryThresholdConfig(thresholdCollection) {
+  const savedConfig = await thresholdCollection.findOne({ _id: INVENTORY_THRESHOLD_CONFIG_ID });
+  if (!savedConfig) {
+    return normalizeInventoryThresholdConfig(DEFAULT_INVENTORY_THRESHOLD_CONFIG);
+  }
+
+  return normalizeInventoryThresholdConfig(savedConfig);
+}
+
+/**
+ * Build a masterDB lookup key for inventory box-count calculations
+ */
+function buildInventoryMasterLookupKey(partNumber = '', backNumber = '', factory = '') {
+  return [partNumber || '', backNumber || '', factory || ''].join('::');
+}
+
+function parseInventoryCapacityValue(value) {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) && value > 0 ? value : 0;
+  }
+
+  if (typeof value === 'string') {
+    const normalized = value.replace(/,/g, '').trim();
+    if (!normalized) return 0;
+
+    const parsedValue = Number(normalized);
+    return Number.isFinite(parsedValue) && parsedValue > 0 ? parsedValue : 0;
+  }
+
+  return 0;
+}
+
+function buildInventoryMasterCapacityMap(masterRecords = []) {
+  const capacityMap = new Map();
+
+  masterRecords.forEach((record) => {
+    const capacityPerBox = parseInventoryCapacityValue(record?.収容数);
+    if (!capacityPerBox) return;
+
+    const baseKey = buildInventoryMasterLookupKey(record?.品番, record?.背番号);
+    const factoryKey = buildInventoryMasterLookupKey(record?.品番, record?.背番号, record?.工場);
+
+    if (record?.工場) {
+      capacityMap.set(factoryKey, capacityPerBox);
+    }
+
+    if (!capacityMap.has(baseKey)) {
+      capacityMap.set(baseKey, capacityPerBox);
+    }
+  });
+
+  return capacityMap;
+}
+
+function getInventoryCapacityPerBox(capacityMap, item = {}) {
+  if (!(capacityMap instanceof Map)) return 0;
+
+  const factoryKey = buildInventoryMasterLookupKey(item?.品番, item?.背番号, item?.工場);
+  if (item?.工場 && capacityMap.has(factoryKey)) {
+    return capacityMap.get(factoryKey) || 0;
+  }
+
+  const baseKey = buildInventoryMasterLookupKey(item?.品番, item?.背番号);
+  return capacityMap.get(baseKey) || 0;
+}
+
+function buildInventoryModelMap(masterRecords = []) {
+  const modelMap = new Map();
+
+  masterRecords.forEach((record) => {
+    const model = String(record?.モデル || '').trim();
+    if (!model) return;
+
+    const baseKey = buildInventoryMasterLookupKey(record?.品番, record?.背番号);
+    const factoryKey = buildInventoryMasterLookupKey(record?.品番, record?.背番号, record?.工場);
+
+    if (record?.工場) {
+      modelMap.set(factoryKey, model);
+    }
+
+    if (!modelMap.has(baseKey)) {
+      modelMap.set(baseKey, model);
+    }
+  });
+
+  return modelMap;
+}
+
+function getInventoryModel(modelMap, item = {}) {
+  if (!(modelMap instanceof Map)) return '';
+
+  const factoryKey = buildInventoryMasterLookupKey(item?.品番, item?.背番号, item?.工場);
+  if (item?.工場 && modelMap.has(factoryKey)) {
+    return modelMap.get(factoryKey) || '';
+  }
+
+  const baseKey = buildInventoryMasterLookupKey(item?.品番, item?.背番号);
+  return modelMap.get(baseKey) || '';
+}
+
+function resolveInventoryThreshold(item = {}, config = DEFAULT_INVENTORY_THRESHOLD_CONFIG, ruleMap = null) {
+  const normalizedConfig = normalizeInventoryThresholdConfig(config);
+  const normalizedRuleMap = ruleMap instanceof Map
+    ? ruleMap
+    : new Map(normalizedConfig.models.map((rule) => [rule.model, rule]));
+  const model = String(item?.モデル || item?.model || '').trim();
+  const matchingRule = model ? normalizedRuleMap.get(model) : null;
+  const appliedRule = matchingRule || normalizedConfig.global;
+  const stockBoxCount = item?.stockBoxCount;
+
+  let status = 'healthy';
+  if (Number.isFinite(stockBoxCount) && stockBoxCount <= appliedRule.critical) {
+    status = 'critical';
+  } else if (Number.isFinite(stockBoxCount) && stockBoxCount <= appliedRule.warning) {
+    status = 'warning';
+  }
+
+  return {
+    status,
+    warning: appliedRule.warning,
+    critical: appliedRule.critical,
+    source: matchingRule ? 'model' : 'global'
+  };
+}
+
 /**
  * Calculate inventory summary statistics
  */
+function getInventoryPhysicalQuantityValue(item = {}) {
+  const physicalQuantity = Number(item?.physicalQuantity);
+  if (Number.isFinite(physicalQuantity)) {
+    return physicalQuantity;
+  }
+
+  const runningQuantity = Number(item?.runningQuantity);
+  return Number.isFinite(runningQuantity) ? runningQuantity : 0;
+}
+
+function getInventoryAvailableQuantityValue(item = {}) {
+  const availableQuantity = Number(item?.availableQuantity);
+  if (Number.isFinite(availableQuantity)) {
+    return availableQuantity;
+  }
+
+  const runningQuantity = Number(item?.runningQuantity);
+  return Number.isFinite(runningQuantity) ? runningQuantity : 0;
+}
+
 function calculateInventorySummary(inventoryItems) {
   const summary = {
     totalItems: inventoryItems.length,
@@ -15092,12 +20583,555 @@ function calculateInventorySummary(inventoryItems) {
   };
 
   inventoryItems.forEach(item => {
-    summary.totalPhysicalStock += item.physicalQuantity || item.runningQuantity || 0;
+    summary.totalPhysicalStock += getInventoryPhysicalQuantityValue(item);
     summary.totalReservedStock += item.reservedQuantity || 0;
-    summary.totalAvailableStock += item.availableQuantity || item.runningQuantity || 0;
+    summary.totalAvailableStock += getInventoryAvailableQuantityValue(item);
   });
 
   return summary;
+}
+
+function calculateInventoryThresholdSummary(inventoryItems = []) {
+  const summary = {
+    totalItems: inventoryItems.length,
+    healthyCount: 0,
+    warningCount: 0,
+    criticalCount: 0
+  };
+
+  inventoryItems.forEach((item) => {
+    if (item?.thresholdStatus === 'critical') {
+      summary.criticalCount += 1;
+      return;
+    }
+
+    if (item?.thresholdStatus === 'warning') {
+      summary.warningCount += 1;
+      return;
+    }
+
+    summary.healthyCount += 1;
+  });
+
+  return summary;
+}
+
+function toInventoryDate(value) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function normalizeInventoryDateValue(value) {
+  const date = toInventoryDate(value);
+  if (!date) return "";
+  return date.toISOString().split('T')[0];
+}
+
+function normalizeInventoryPositiveInteger(value, fallback = 1) {
+  const parsedValue = Number.parseInt(value, 10);
+  return Number.isFinite(parsedValue) && parsedValue > 0 ? parsedValue : fallback;
+}
+
+function normalizeInventoryPageSize(value, fallback = 50) {
+  const parsedValue = normalizeInventoryPositiveInteger(value, fallback);
+  return Math.min(parsedValue, 100);
+}
+
+function hasInventorySnapshotValue(value) {
+  return value !== null && value !== undefined && String(value).trim() !== '';
+}
+
+function parseInventorySnapshotAt(value) {
+  if (!hasInventorySnapshotValue(value)) {
+    return null;
+  }
+
+  return toInventoryDate(value);
+}
+
+async function resolveInventorySnapshotForRequestReference(inventoryCollection, requestsCollection, requestReference) {
+  const normalizedRequestReference = String(requestReference || '').trim();
+  if (!normalizedRequestReference) {
+    return null;
+  }
+
+  const requestDoc = await requestsCollection.findOne(
+    { requestNumber: normalizedRequestReference },
+    { projection: { _id: 1, requestNumber: 1 } }
+  );
+
+  const candidateReferences = Array.from(new Set([
+    normalizedRequestReference,
+    requestDoc?.requestNumber ? String(requestDoc.requestNumber).trim() : '',
+    requestDoc?._id ? String(requestDoc._id) : ''
+  ].filter(Boolean)));
+
+  if (candidateReferences.length === 0) {
+    return null;
+  }
+
+  const [firstPickingTransaction] = await inventoryCollection.aggregate([
+    {
+      $addFields: {
+        timeStampDate: buildInventoryTimeStampDateExpression()
+      }
+    },
+    {
+      $match: {
+        action: { $regex: /^Picking(?: Completed)? \(-/i },
+        $or: [
+          { requestId: { $in: candidateReferences } },
+          { bulkRequestNumber: { $in: candidateReferences } },
+          { requestNumber: { $in: candidateReferences } }
+        ]
+      }
+    },
+    {
+      $sort: { timeStampDate: 1, _id: 1 }
+    },
+    {
+      $limit: 1
+    },
+    {
+      $project: {
+        _id: 1,
+        timeStampDate: 1,
+        requestId: 1,
+        bulkRequestNumber: 1,
+        requestNumber: 1,
+        lineNumber: 1,
+        action: 1
+      }
+    }
+  ]).toArray();
+
+  if (!firstPickingTransaction?.timeStampDate) {
+    return null;
+  }
+
+  const pickedAt = new Date(firstPickingTransaction.timeStampDate);
+  if (Number.isNaN(pickedAt.getTime())) {
+    return null;
+  }
+
+  const snapshotAt = new Date(Math.max(0, pickedAt.getTime() - 1));
+
+  return {
+    requestId: requestDoc?._id ? String(requestDoc._id) : null,
+    requestNumber: String(
+      requestDoc?.requestNumber
+      || firstPickingTransaction.bulkRequestNumber
+      || firstPickingTransaction.requestNumber
+      || firstPickingTransaction.requestId
+      || normalizedRequestReference
+    ).trim(),
+    snapshotAt,
+    pickedAt,
+    lineNumber: Number.isFinite(Number(firstPickingTransaction.lineNumber))
+      ? Number(firstPickingTransaction.lineNumber)
+      : null,
+    matchedTransactionId: firstPickingTransaction._id ? String(firstPickingTransaction._id) : null
+  };
+}
+
+function buildInventoryTimeStampDateExpression() {
+  return {
+    $convert: {
+      input: '$timeStamp',
+      to: 'date',
+      onError: new Date(0),
+      onNull: new Date(0)
+    }
+  };
+}
+
+function extractInventorySourceActor(source = '') {
+  const normalizedSource = String(source || '').trim();
+  if (!normalizedSource) {
+    return '';
+  }
+
+  const separator = ' - ';
+  if (normalizedSource.includes(separator)) {
+    return normalizedSource.split(separator).pop().trim();
+  }
+
+  return normalizedSource;
+}
+
+function buildInventoryBaseMatchStage(filters = {}) {
+  const matchStage = {};
+
+  if (filters['品番']) {
+    matchStage['品番'] = filters['品番'];
+  }
+
+  if (filters.sebanggoArray && Array.isArray(filters.sebanggoArray) && filters.sebanggoArray.length > 0) {
+    matchStage['背番号'] = { $in: filters.sebanggoArray };
+  } else if (filters['背番号']) {
+    matchStage['背番号'] = filters['背番号'];
+  }
+
+  if (filters.search) {
+    const searchRegex = new RegExp(filters.search, 'i');
+    matchStage.$or = [
+      { '品番': searchRegex },
+      { '背番号': searchRegex }
+    ];
+  }
+
+  return matchStage;
+}
+
+function buildInventoryLatestStatePipeline(filters = {}, { snapshotAt = null } = {}) {
+  const pipeline = [];
+  const matchStage = buildInventoryBaseMatchStage(filters);
+
+  if (Object.keys(matchStage).length > 0) {
+    pipeline.push({ $match: matchStage });
+  }
+
+  pipeline.push({
+    $addFields: {
+      timeStampDate: buildInventoryTimeStampDateExpression()
+    }
+  });
+
+  if (snapshotAt) {
+    pipeline.push({
+      $match: {
+        timeStampDate: { $lte: snapshotAt }
+      }
+    });
+  }
+
+  pipeline.push(
+    {
+      $sort: { 背番号: 1, timeStampDate: -1 }
+    },
+    {
+      $group: {
+        _id: '$背番号',
+        latestRecord: { $first: '$$ROOT' }
+      }
+    },
+    {
+      $replaceRoot: { newRoot: '$latestRecord' }
+    }
+  );
+
+  return pipeline;
+}
+
+const INVENTORY_REPAIR_ACTIVE_LINE_STATUSES = Object.freeze(['pending', 'in-progress', 'paused']);
+const INVENTORY_REPAIR_ACTIVE_REQUEST_STATUSES = Object.freeze([
+  ...INVENTORY_REPAIR_ACTIVE_LINE_STATUSES,
+  'partial-inventory',
+  'waiting-for-inventory'
+]);
+
+function normalizeInventoryRepairBackNumbers(values = []) {
+  const inputValues = Array.isArray(values) ? values : [values];
+  return Array.from(new Set(inputValues.map((value) => String(value || '').trim()).filter(Boolean)));
+}
+
+function normalizeInventoryRepairStatus(value = '') {
+  return String(value || '').trim().toLowerCase();
+}
+
+function isInventoryRepairActiveLineStatus(value = '') {
+  return INVENTORY_REPAIR_ACTIVE_LINE_STATUSES.includes(normalizeInventoryRepairStatus(value));
+}
+
+function isInventoryRepairActiveRequestStatus(value = '') {
+  return INVENTORY_REPAIR_ACTIVE_REQUEST_STATUSES.includes(normalizeInventoryRepairStatus(value));
+}
+
+function getInventoryRepairNumericValue(value, fallback = 0) {
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) ? numericValue : fallback;
+}
+
+function getInventoryRepairOpenLineItems(requestDoc = {}) {
+  const requestNumber = String(requestDoc?.requestNumber || requestDoc?._id || '').trim();
+  const requestStatus = normalizeInventoryRepairStatus(requestDoc?.status || '');
+
+  if (Array.isArray(requestDoc?.lineItems) && requestDoc.lineItems.length > 0) {
+    return requestDoc.lineItems
+      .map((lineItem = {}, index) => ({
+        requestNumber,
+        lineNumber: Number.isFinite(Number(lineItem?.lineNumber)) ? Number(lineItem.lineNumber) : index + 1,
+        背番号: String(lineItem?.背番号 || requestDoc?.背番号 || '').trim(),
+        品番: String(lineItem?.品番 || requestDoc?.品番 || '').trim(),
+        quantity: getInventoryRepairNumericValue(lineItem?.quantity ?? requestDoc?.quantity, 0),
+        status: normalizeInventoryRepairStatus(lineItem?.status || requestStatus || 'pending'),
+        usesRequestStatusFallback: false
+      }))
+      .filter((lineItem) => lineItem.背番号 && lineItem.quantity > 0);
+  }
+
+  const backNumber = String(requestDoc?.背番号 || '').trim();
+  const quantity = getInventoryRepairNumericValue(requestDoc?.quantity, 0);
+  if (!backNumber || quantity <= 0) {
+    return [];
+  }
+
+  return [{
+    requestNumber,
+    lineNumber: 1,
+    背番号: backNumber,
+    品番: String(requestDoc?.品番 || '').trim(),
+    quantity,
+    status: requestStatus || 'pending',
+    usesRequestStatusFallback: true
+  }];
+}
+
+function formatInventoryRepairRequestSummary(requestNumbers = []) {
+  const normalizedRequestNumbers = Array.from(new Set(
+    (Array.isArray(requestNumbers) ? requestNumbers : [])
+      .map((value) => String(value || '').trim())
+      .filter(Boolean)
+  )).sort(compareProductionPreviewRequestNumbers);
+
+  if (normalizedRequestNumbers.length === 0) {
+    return '';
+  }
+
+  if (normalizedRequestNumbers.length <= 6) {
+    return normalizedRequestNumbers.join(', ');
+  }
+
+  return `${normalizedRequestNumbers.slice(0, 6).join(', ')} +${normalizedRequestNumbers.length - 6} more`;
+}
+
+function buildInventoryRepairNote(item = {}) {
+  const requestSummary = formatInventoryRepairRequestSummary(item.requestNumbers);
+  return `Repaired reserved/available from open NODA requests: ${requestSummary || 'n/a'}. Reserved: ${item.currentReservedQuantity} -> ${item.repairedReservedQuantity}. Available: ${item.currentAvailableQuantity} -> ${item.repairedAvailableQuantity}.`;
+}
+
+async function buildInventoryRepairPreviewData({ requestsCollection, inventoryCollection, backNumbers = [] } = {}) {
+  const scopeBackNumbers = normalizeInventoryRepairBackNumbers(backNumbers);
+  const requestFilters = [
+    {
+      $or: [
+        { status: { $in: INVENTORY_REPAIR_ACTIVE_REQUEST_STATUSES } },
+        { 'lineItems.status': { $in: INVENTORY_REPAIR_ACTIVE_LINE_STATUSES } }
+      ]
+    }
+  ];
+
+  if (scopeBackNumbers.length > 0) {
+    requestFilters.push({
+      $or: [
+        { 背番号: { $in: scopeBackNumbers } },
+        { 'lineItems.背番号': { $in: scopeBackNumbers } }
+      ]
+    });
+  }
+
+  const requestQuery = requestFilters.length === 1 ? requestFilters[0] : { $and: requestFilters };
+  const requestDocs = await requestsCollection.find(
+    requestQuery,
+    {
+      projection: {
+        _id: 1,
+        requestNumber: 1,
+        status: 1,
+        lineItems: 1,
+        背番号: 1,
+        品番: 1,
+        quantity: 1
+      }
+    }
+  ).toArray();
+
+  const groupedItems = new Map();
+
+  requestDocs.forEach((requestDoc) => {
+    getInventoryRepairOpenLineItems(requestDoc).forEach((lineItem) => {
+      const isActiveLine = lineItem.usesRequestStatusFallback
+        ? isInventoryRepairActiveRequestStatus(lineItem.status)
+        : isInventoryRepairActiveLineStatus(lineItem.status);
+
+      if (!isActiveLine) {
+        return;
+      }
+
+      if (scopeBackNumbers.length > 0 && !scopeBackNumbers.includes(lineItem.背番号)) {
+        return;
+      }
+
+      if (!groupedItems.has(lineItem.背番号)) {
+        groupedItems.set(lineItem.背番号, {
+          背番号: lineItem.背番号,
+          品番: lineItem.品番,
+          repairedReservedQuantity: 0,
+          openLineCount: 0,
+          requestNumbers: new Set()
+        });
+      }
+
+      const groupedItem = groupedItems.get(lineItem.背番号);
+      groupedItem.品番 = groupedItem.品番 || lineItem.品番;
+      groupedItem.repairedReservedQuantity += lineItem.quantity;
+      groupedItem.openLineCount += 1;
+      if (lineItem.requestNumber) {
+        groupedItem.requestNumbers.add(lineItem.requestNumber);
+      }
+    });
+  });
+
+  const groupedValues = Array.from(groupedItems.values());
+  if (groupedValues.length === 0) {
+    return {
+      items: [],
+      mismatches: [],
+      scopeBackNumbers,
+      summary: {
+        totalTrackedItems: 0,
+        mismatchCount: 0,
+        totalOpenLineCount: 0
+      }
+    };
+  }
+
+  const latestInventoryRecords = await inventoryCollection.aggregate(
+    buildInventoryLatestStatePipeline({ sebanggoArray: groupedValues.map((item) => item.背番号) })
+  ).toArray();
+  const latestInventoryByBackNumber = new Map(
+    latestInventoryRecords.map((record) => [String(record?.背番号 || '').trim(), record])
+  );
+
+  const items = groupedValues.map((groupedItem) => {
+    const latestRecord = latestInventoryByBackNumber.get(groupedItem.背番号);
+    const currentPhysicalQuantity = getInventoryRepairNumericValue(
+      latestRecord?.physicalQuantity ?? latestRecord?.runningQuantity,
+      0
+    );
+    const currentReservedQuantity = getInventoryRepairNumericValue(latestRecord?.reservedQuantity, 0);
+    const currentAvailableQuantity = getInventoryRepairNumericValue(
+      latestRecord?.availableQuantity ?? latestRecord?.runningQuantity,
+      0
+    );
+    const repairedReservedQuantity = Math.max(0, groupedItem.repairedReservedQuantity);
+    const repairedAvailableQuantity = currentPhysicalQuantity - repairedReservedQuantity;
+    const requestNumbers = Array.from(groupedItem.requestNumbers).sort(compareProductionPreviewRequestNumbers);
+    const hasMismatch = currentReservedQuantity !== repairedReservedQuantity
+      || currentAvailableQuantity !== repairedAvailableQuantity;
+
+    return {
+      背番号: groupedItem.背番号,
+      品番: groupedItem.品番 || String(latestRecord?.品番 || '').trim(),
+      工場: String(latestRecord?.工場 || '').trim(),
+      currentPhysicalQuantity,
+      currentReservedQuantity,
+      currentAvailableQuantity,
+      repairedReservedQuantity,
+      repairedAvailableQuantity,
+      deltaReservedQuantity: repairedReservedQuantity - currentReservedQuantity,
+      deltaAvailableQuantity: repairedAvailableQuantity - currentAvailableQuantity,
+      openLineCount: groupedItem.openLineCount,
+      requestNumbers,
+      requestCount: requestNumbers.length,
+      hasMismatch
+    };
+  }).sort((left, right) => {
+    if (left.hasMismatch !== right.hasMismatch) {
+      return left.hasMismatch ? -1 : 1;
+    }
+
+    return String(left.背番号 || '').localeCompare(String(right.背番号 || ''), undefined, {
+      numeric: true,
+      sensitivity: 'base'
+    });
+  });
+
+  const mismatches = items.filter((item) => item.hasMismatch);
+
+  return {
+    items,
+    mismatches,
+    scopeBackNumbers,
+    summary: {
+      totalTrackedItems: items.length,
+      mismatchCount: mismatches.length,
+      totalOpenLineCount: items.reduce((total, item) => total + item.openLineCount, 0)
+    }
+  };
+}
+
+function matchesInventoryAdvancedFilters(item = {}, filters = []) {
+  if (!filters || filters.length === 0) return true;
+
+  // Group filters by field - same field filters use OR, different fields use AND
+  const groupedFilters = new Map();
+  filters.forEach((filter) => {
+    const field = filter?.field;
+    if (!field) return;
+    if (!groupedFilters.has(field)) {
+      groupedFilters.set(field, []);
+    }
+    groupedFilters.get(field).push(filter);
+  });
+
+  // Check that every field group has at least one matching filter (AND across fields)
+  return Array.from(groupedFilters.values()).every((fieldFilters) => {
+    // Within a field group, check if any filter matches (OR within field)
+    return fieldFilters.some((filter) => {
+      const field = filter?.field;
+      const operator = filter?.operator;
+      const type = filter?.type;
+      const rawValue = item?.[field];
+
+      if (!field || !operator) return true;
+
+      if (type === 'number') {
+        const itemValue = Number(rawValue) || 0;
+        const nextValue = Number(filter?.value);
+        const nextFrom = Number(filter?.valueFrom);
+        const nextTo = Number(filter?.valueTo);
+
+        if (operator === 'equals') return itemValue === nextValue;
+        if (operator === 'greater') return itemValue > nextValue;
+        if (operator === 'less') return itemValue < nextValue;
+        if (operator === 'range') return itemValue >= nextFrom && itemValue <= nextTo;
+        return true;
+      }
+
+      if (type === 'date') {
+        const itemDate = normalizeInventoryDateValue(rawValue);
+        if (!itemDate) return false;
+
+        if (operator === 'equals') return itemDate === filter?.value;
+        if (operator === 'greater') return itemDate > filter?.value;
+        if (operator === 'less') return itemDate < filter?.value;
+        if (operator === 'range') {
+          return itemDate >= filter?.valueFrom && itemDate <= filter?.valueTo;
+        }
+        return true;
+      }
+
+      const itemValue = String(rawValue ?? '').trim().toLowerCase();
+
+      if (operator === 'in') {
+        const candidateValues = Array.isArray(filter?.value)
+          ? filter.value
+          : String(filter?.value || '')
+              .split(',')
+              .map((value) => value.trim())
+              .filter(Boolean);
+
+        return candidateValues.some((value) => itemValue === String(value).trim().toLowerCase());
+      }
+
+      const compareValue = String(filter?.value || '').trim().toLowerCase();
+      if (operator === 'equals') return itemValue === compareValue;
+      if (operator === 'contains') return itemValue.includes(compareValue);
+      return true;
+    });
+  });
 }
 
 // Add Inventory API Route
@@ -24727,6 +30761,916 @@ setTimeout(() => {
     console.warn('[VM Deployments] Initial retention cleanup failed:', err.message);
   });
 }, 15000);
+
+
+// ==================== CHECK FORM TABLET UI ====================
+
+const CHECK_FORM_TEMPLATES_COLLECTION = 'checkFormTemplatesDB';
+const CHECK_FORM_RECORDS_COLLECTION = 'checkFormRecordsDB';
+const CHECK_FORM_NG_REPORTS_COLLECTION = 'ngReportsDB';
+const CHECK_FORM_EQUIPMENT_COLLECTION = 'setsubiDB';
+const CHECK_FORM_WORKERS_COLLECTION = 'workerDB';
+const CHECK_FORM_UPLOAD_FOLDER = 'maintenanceForm';
+const CHECK_FORM_REFERENCE_IMAGE_PATTERN = /\.(?:avif|gif|jpe?g|png|webp)$/i;
+const CHECK_FORM_SCHEDULE_ORDER = Object.freeze({
+  daily: 0,
+  weekly: 1,
+  monthly: 2,
+});
+
+function normalizeCheckFormText(value = '') {
+  return String(value ?? '').trim();
+}
+
+function normalizeCheckFormSchedule(value = '') {
+  const schedule = normalizeCheckFormText(value).toLowerCase();
+  return CHECK_FORM_SCHEDULE_ORDER[schedule] !== undefined ? schedule : 'unscheduled';
+}
+
+function normalizeCheckFormMaybeNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function resolveCheckFormAnswerTimestamp(value = '', fallbackIso = '') {
+  const normalized = normalizeCheckFormText(value);
+  if (!normalized) {
+    return fallbackIso || new Date().toISOString();
+  }
+
+  const parsed = new Date(normalized);
+  return Number.isNaN(parsed.getTime())
+    ? (fallbackIso || new Date().toISOString())
+    : parsed.toISOString();
+}
+
+function normalizeCheckFormStringArray(values = []) {
+  if (!Array.isArray(values)) return [];
+  return values
+    .map((value) => normalizeCheckFormText(value))
+    .filter(Boolean);
+}
+
+function escapeCheckFormRegex(value = '') {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function toCheckFormIdString(value) {
+  if (!value) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value?.toHexString === 'function') return value.toHexString();
+  return String(value);
+}
+
+function toCheckFormObjectId(value) {
+  const normalized = normalizeCheckFormText(value);
+  if (!normalized) return null;
+
+  try {
+    return new ObjectId(normalized);
+  } catch (error) {
+    return null;
+  }
+}
+
+function parseCheckFormFactoryMembership(value = '') {
+  return String(value ?? '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function doesWorkerBelongToFactory(departmentValue = '', factory = '') {
+  const normalizedFactory = normalizeCheckFormText(factory);
+  if (!normalizedFactory) return false;
+
+  return parseCheckFormFactoryMembership(departmentValue).includes(normalizedFactory);
+}
+
+function normalizeCheckFormMachineName(value = '') {
+  return normalizeCheckFormText(value).toUpperCase();
+}
+
+function checkFormMachineNamesMatch(left = '', right = '') {
+  const normalizedLeft = normalizeCheckFormMachineName(left);
+  const normalizedRight = normalizeCheckFormMachineName(right);
+  return Boolean(normalizedLeft) && Boolean(normalizedRight) && normalizedLeft === normalizedRight;
+}
+
+function sanitizeCheckFormFileSegment(value = '', fallback = 'item') {
+  const sanitized = normalizeCheckFormText(value).replace(/[^a-zA-Z0-9　-鿿_-]+/g, '_');
+  return sanitized || fallback;
+}
+
+function decodeCheckFormUrlComponentRepeatedly(value = '', attempts = 3) {
+  let nextValue = normalizeCheckFormText(value);
+
+  for (let index = 0; index < attempts; index += 1) {
+    try {
+      const decoded = decodeURIComponent(nextValue);
+      if (decoded === nextValue) break;
+      nextValue = decoded;
+    } catch (error) {
+      break;
+    }
+  }
+
+  return nextValue;
+}
+
+function extractCheckFormReferenceFolderKey(imageURL = '') {
+  const normalizedImageURL = normalizeCheckFormText(imageURL);
+  if (!normalizedImageURL) return '';
+
+  try {
+    const parsed = new URL(normalizedImageURL);
+    const objectPath = decodeCheckFormUrlComponentRepeatedly(parsed.pathname.split('/o/')[1] || '');
+    const segments = objectPath.split('/').filter(Boolean);
+
+    if (segments[0] !== 'equipmentEvents' || segments[1] !== 'checkform' || !segments[2]) {
+      return '';
+    }
+
+    return sanitizeCheckFormFileSegment(segments[2], '');
+  } catch (error) {
+    return '';
+  }
+}
+
+function extractCheckFormReferenceStoragePath(imageURL = '') {
+  const normalizedImageURL = normalizeCheckFormText(imageURL);
+  if (!normalizedImageURL) return '';
+
+  try {
+    const parsed = new URL(normalizedImageURL);
+    const objectPath = decodeCheckFormUrlComponentRepeatedly(parsed.pathname.split('/o/')[1] || '');
+    return objectPath.startsWith('equipmentEvents/checkform/') ? objectPath : '';
+  } catch (error) {
+    return '';
+  }
+}
+
+function buildCheckFormFieldImageFolderKey(field = {}) {
+  const explicitKey = sanitizeCheckFormFileSegment(field.imageFolderKey, '');
+  if (explicitKey) return explicitKey;
+
+  const imageKey = extractCheckFormReferenceFolderKey(field.imageURL);
+  if (imageKey) return imageKey;
+
+  const safeLabel = sanitizeCheckFormFileSegment(field.label, 'field');
+  const safeId = sanitizeCheckFormFileSegment(field.id, 'id');
+  const suffix = safeId.slice(-8) || safeId || String(Date.now());
+  return safeLabel === 'field' ? `field_${suffix}` : `${safeLabel}_${suffix}`;
+}
+
+function sanitizeCheckFormField(field = {}) {
+  const imageURL = normalizeCheckFormText(field.imageURL);
+
+  return {
+    id: normalizeCheckFormText(field.id),
+    label: normalizeCheckFormText(field.label),
+    description: normalizeCheckFormText(field.description),
+    imageURL,
+    imageFolderKey: buildCheckFormFieldImageFolderKey({ ...field, imageURL }),
+    type: normalizeCheckFormText(field.type).toLowerCase(),
+    required: !!field.required,
+    locked: !!field.locked,
+    photoRequired: !!field.photoRequired,
+    options: normalizeCheckFormStringArray(field.options),
+    min: normalizeCheckFormMaybeNumber(field.min),
+    max: normalizeCheckFormMaybeNumber(field.max),
+    unit: normalizeCheckFormText(field.unit),
+  };
+}
+
+function sanitizeCheckFormEquipment(equipment = {}) {
+  return {
+    _id: toCheckFormIdString(equipment._id),
+    name: normalizeCheckFormText(equipment.name),
+    工場: normalizeCheckFormText(equipment['工場']),
+    imageURL: normalizeCheckFormText(equipment.imageURL),
+  };
+}
+
+function sanitizeCheckFormTemplate(template = {}, equipmentMap = new Map()) {
+  const equipmentIds = normalizeCheckFormStringArray(template.equipmentIds);
+  const equipmentDetails = equipmentIds
+    .map((equipmentId) => equipmentMap.get(equipmentId))
+    .filter(Boolean);
+
+  return {
+    _id: toCheckFormIdString(template._id),
+    name: normalizeCheckFormText(template.name),
+    description: normalizeCheckFormText(template.description),
+    工場: normalizeCheckFormText(template['工場']),
+    schedule: normalizeCheckFormSchedule(template.schedule),
+    startDate: normalizeCheckFormText(template.startDate),
+    status: normalizeCheckFormText(template.status || 'active'),
+    equipmentIds,
+    equipmentNames: equipmentDetails.map((equipment) => equipment.name).filter(Boolean),
+    equipmentDetails,
+    fields: Array.isArray(template.fields)
+      ? template.fields.map((field) => sanitizeCheckFormField(field))
+      : [],
+  };
+}
+
+function getCheckFormScheduleSortOrder(schedule = '') {
+  const normalized = normalizeCheckFormSchedule(schedule);
+  return CHECK_FORM_SCHEDULE_ORDER[normalized] ?? 99;
+}
+
+function normalizeCheckFormAnswerValue(fieldType = '', value = null) {
+  if (fieldType === 'number') {
+    const parsed = normalizeCheckFormMaybeNumber(value);
+    return parsed === null ? '' : parsed;
+  }
+
+  return typeof value === 'string' ? value.trim() : value;
+}
+
+function isCheckFormAnswered(fieldType = '', value = null) {
+  if (fieldType === 'checkbox') {
+    const normalized = normalizeCheckFormText(value).toUpperCase();
+    return normalized === 'OK' || normalized === 'NG';
+  }
+
+  if (fieldType === 'number') {
+    return normalizeCheckFormMaybeNumber(value) !== null;
+  }
+
+  if (fieldType === 'name' || fieldType === 'text' || fieldType === 'select') {
+    return normalizeCheckFormText(value).length > 0;
+  }
+
+  return value !== null && value !== undefined && normalizeCheckFormText(value).length > 0;
+}
+
+function doesCheckFormAnswerRequireTicket(field = {}, value = null) {
+  const fieldType = normalizeCheckFormText(field.type).toLowerCase();
+
+  if (fieldType === 'checkbox') {
+    return normalizeCheckFormText(value).toUpperCase() === 'NG';
+  }
+
+  if (fieldType === 'number' || fieldType === 'select') {
+    const numericValue = normalizeCheckFormMaybeNumber(value);
+    if (numericValue === null) return false;
+    if (field.min !== null && numericValue < field.min) return true;
+    if (field.max !== null && numericValue > field.max) return true;
+  }
+
+  return false;
+}
+
+function buildCheckFormAnswerStatus(field = {}, value = null, ticketRequired = false) {
+  const fieldType = normalizeCheckFormText(field.type).toLowerCase();
+
+  if (fieldType === 'checkbox') {
+    return normalizeCheckFormText(value).toUpperCase() === 'NG' ? 'ng' : 'ok';
+  }
+
+  if ((fieldType === 'number' || fieldType === 'select') && ticketRequired) {
+    return 'out-of-range';
+  }
+
+  return 'ok';
+}
+
+async function uploadCheckFormImageToFirebase({
+  base64,
+  factory = '',
+  templateName = '',
+  fieldLabel = '',
+  category = 'fields',
+  sequence = 0,
+}) {
+  if (!base64) {
+    throw new Error('base64 image data is required');
+  }
+  const timestamp = Date.now();
+  const safeFactory = sanitizeCheckFormFileSegment(factory, 'unknown_factory');
+  const safeTemplate = sanitizeCheckFormFileSegment(templateName, 'template');
+  const safeField = sanitizeCheckFormFileSegment(fieldLabel, 'field');
+  const safeCategory = sanitizeCheckFormFileSegment(category, 'fields');
+  const filePathPrefix = `${CHECK_FORM_UPLOAD_FOLDER}/${safeFactory}/${safeCategory}/${safeTemplate}_${safeField}_${timestamp}_${sequence}`;
+  const { imageURL } = await saveBase64AssetToFirebase({ base64, filePathPrefix });
+  return imageURL;
+}
+
+app.get('/checkList', (req, res) => {
+  res.sendFile(path.join(__dirname, 'checkList.html'));
+});
+
+app.get('/checkList.html', (req, res) => {
+  res.sendFile(path.join(__dirname, 'checkList.html'));
+});
+
+app.get('/checkList.js', (req, res) => {
+  res.sendFile(path.join(__dirname, 'checkList.js'));
+});
+
+app.get('/checkList2', (req, res) => {
+  res.sendFile(path.join(__dirname, 'checkList2.html'));
+});
+
+app.get('/checkList2.html', (req, res) => {
+  res.sendFile(path.join(__dirname, 'checkList2.html'));
+});
+
+app.get('/checkList2.js', (req, res) => {
+  res.sendFile(path.join(__dirname, 'checkList2.js'));
+});
+
+app.get('/api/check-forms/reference-images', async (req, res) => {
+  const requestedFolderKey = normalizeCheckFormText(req.query.folderKey);
+
+  if (!requestedFolderKey) {
+    return res.status(400).json({ error: 'folderKey is required' });
+  }
+
+  const folderKey = sanitizeCheckFormFileSegment(requestedFolderKey, 'field');
+  const prefix = `equipmentEvents/checkform/${folderKey}/`;
+
+  try {
+    const bucket = admin.storage().bucket();
+    const [files] = await bucket.getFiles({ prefix });
+    const images = files
+      .filter((file) => file.name.startsWith(prefix) && file.name !== prefix && CHECK_FORM_REFERENCE_IMAGE_PATTERN.test(file.name))
+      .sort((left, right) => right.name.localeCompare(left.name, 'en'))
+      .map((file) => ({
+        name: path.basename(file.name),
+        storagePath: file.name,
+        imageURL: buildFirebaseDownloadUrl(file),
+      }));
+
+    return res.json({ folderKey, images });
+  } catch (error) {
+    console.error('Error loading check form reference images:', error);
+    return res.status(500).json({ error: 'Failed to load reference images' });
+  }
+});
+
+app.post('/api/check-forms/reference-images/source', async (req, res) => {
+  const imageURL = normalizeCheckFormText(req.body?.imageURL);
+
+  if (!imageURL) {
+    return res.status(400).json({ error: 'imageURL is required' });
+  }
+
+  const storagePath = extractCheckFormReferenceStoragePath(imageURL);
+  if (!storagePath) {
+    return res.status(400).json({ error: 'Invalid check form reference image URL' });
+  }
+
+  try {
+    const file = admin.storage().bucket().file(storagePath);
+    const [exists] = await file.exists();
+    if (!exists) {
+      return res.status(404).json({ error: 'Reference image not found' });
+    }
+
+    const [[buffer], [metadata]] = await Promise.all([
+      file.download(),
+      file.getMetadata(),
+    ]);
+    const contentType = normalizeCheckFormText(metadata?.contentType) || 'image/png';
+    const dataURL = `data:${contentType};base64,${buffer.toString('base64')}`;
+
+    return res.json({
+      storagePath,
+      fileName: path.basename(storagePath),
+      contentType,
+      dataURL,
+    });
+  } catch (error) {
+    console.error('Error loading check form reference image source:', error);
+    return res.status(500).json({ error: 'Failed to load reference image source' });
+  }
+});
+
+app.post('/api/check-forms/reference-images', async (req, res) => {
+  const { base64, folderKey: rawFolderKey, username } = req.body || {};
+  const requestedFolderKey = normalizeCheckFormText(rawFolderKey);
+
+  if (!base64) {
+    return res.status(400).json({ error: 'base64 image data is required' });
+  }
+
+  if (!requestedFolderKey) {
+    return res.status(400).json({ error: 'folderKey is required' });
+  }
+
+  const folderKey = sanitizeCheckFormFileSegment(requestedFolderKey, 'field');
+
+  try {
+    const filePathPrefix = `equipmentEvents/checkform/${folderKey}/${Date.now()}`;
+    const { filePath, imageURL } = await saveBase64AssetToFirebase({ base64, filePathPrefix });
+
+    console.log(`📎 Check form reference image uploaded by ${username || 'unknown'}: ${filePath}`);
+    return res.json({ folderKey, imageURL, storagePath: filePath, fileName: path.basename(filePath) });
+  } catch (error) {
+    console.error('Error uploading check form reference image:', error);
+    return res.status(500).json({ error: 'Error uploading reference image', details: error.message });
+  }
+});
+
+app.get('/api/check-forms/templates', async (req, res) => {
+  const factory = normalizeCheckFormText(req.query.factory || req.query.selected);
+  const machine = normalizeCheckFormText(req.query.machine);
+
+  if (!factory) {
+    return res.status(400).json({ error: 'factory is required' });
+  }
+
+  try {
+    await client.connect();
+    const db = client.db(DB_NAME);
+    const templatesCollection = db.collection(CHECK_FORM_TEMPLATES_COLLECTION);
+    const equipmentCollection = db.collection(CHECK_FORM_EQUIPMENT_COLLECTION);
+
+    const rawTemplates = await templatesCollection
+      .find({ 工場: factory, status: 'active' })
+      .toArray();
+
+    const equipmentIds = [];
+    const seenEquipmentIds = new Set();
+
+    rawTemplates.forEach((template) => {
+      normalizeCheckFormStringArray(template.equipmentIds).forEach((equipmentId) => {
+        const objectId = toCheckFormObjectId(equipmentId);
+        if (!objectId) return;
+        const idKey = objectId.toHexString();
+        if (seenEquipmentIds.has(idKey)) return;
+        seenEquipmentIds.add(idKey);
+        equipmentIds.push(objectId);
+      });
+    });
+
+    const equipmentDocs = equipmentIds.length > 0
+      ? await equipmentCollection.find({ _id: { $in: equipmentIds } }).toArray()
+      : [];
+
+    const equipmentMap = new Map(
+      equipmentDocs.map((equipment) => {
+        const sanitized = sanitizeCheckFormEquipment(equipment);
+        return [sanitized._id, sanitized];
+      })
+    );
+
+    const templates = rawTemplates
+      .map((template) => sanitizeCheckFormTemplate(template, equipmentMap))
+      .filter((template) => (
+        !machine || template.equipmentDetails.some((equipment) => checkFormMachineNamesMatch(equipment.name, machine))
+      ))
+      .sort((left, right) => {
+        const scheduleDiff = getCheckFormScheduleSortOrder(left.schedule) - getCheckFormScheduleSortOrder(right.schedule);
+        if (scheduleDiff !== 0) return scheduleDiff;
+        return left.name.localeCompare(right.name, 'ja');
+      });
+
+    return res.json({ factory, machine, templates });
+  } catch (error) {
+    console.error('Error loading check form templates:', error);
+    return res.status(500).json({ error: 'Failed to load check form templates' });
+  }
+});
+
+app.get('/api/check-forms/workers', async (req, res) => {
+  const factory = normalizeCheckFormText(req.query.factory || req.query.selected);
+
+  if (!factory) {
+    return res.status(400).json({ error: 'factory is required' });
+  }
+
+  try {
+    await client.connect();
+    const db = client.db(DB_NAME);
+    const workersCollection = db.collection(CHECK_FORM_WORKERS_COLLECTION);
+    const workers = await workersCollection
+      .find({ 部署: { $regex: new RegExp(escapeCheckFormRegex(factory), 'i') } })
+      .project({ Name: 1, 部署: 1 })
+      .toArray();
+
+    const filteredWorkers = workers
+      .filter((worker) => doesWorkerBelongToFactory(worker['部署'], factory))
+      .map((worker) => ({
+        name: normalizeCheckFormText(worker.Name),
+        部署: normalizeCheckFormText(worker['部署']),
+      }))
+      .filter((worker) => worker.name)
+      .sort((left, right) => left.name.localeCompare(right.name, 'ja'));
+
+    return res.json({ factory, workers: filteredWorkers });
+  } catch (error) {
+    console.error('Error loading check form workers:', error);
+    return res.status(500).json({ error: 'Failed to load workers' });
+  }
+});
+
+app.get('/api/check-forms/template/:id', async (req, res) => {
+  const { id } = req.params;
+  if (!id || id.length !== 24) {
+    return res.status(400).json({ error: 'Invalid template id' });
+  }
+  try {
+    await client.connect();
+    const db = client.db(DB_NAME);
+    const template = await db.collection('checkFormTemplatesDB').findOne(
+      { _id: new ObjectId(id) },
+    );
+    if (!template) return res.status(404).json({ error: 'Template not found' });
+    return res.json({ template });
+  } catch (error) {
+    console.error('Error loading check form template:', error);
+    return res.status(500).json({ error: 'Failed to load template' });
+  }
+});
+
+app.get('/api/check-forms/names', async (req, res) => {
+  try {
+    await client.connect();
+    const db = client.db(DB_NAME);
+
+    const [workers, users] = await Promise.all([
+      db.collection('workerDB').find({}).project({ Name: 1, name: 1 }).toArray(),
+      db.collection('users').find({}).project({ firstName: 1, lastName: 1, name: 1 }).toArray(),
+    ]);
+
+    const dedupeCaseInsensitive = (list) => {
+      const unique = new Map();
+      list.forEach((name) => {
+        const clean = String(name || '').trim();
+        if (!clean) return;
+        const key = clean.toLowerCase();
+        if (!unique.has(key)) unique.set(key, clean);
+      });
+      return [...unique.values()];
+    };
+
+    const workerDBNames = dedupeCaseInsensitive(
+      workers.map((w) => String(w.Name || w.name || '').trim()),
+    ).sort((a, b) => a.localeCompare(b, 'ja'));
+
+    const userNames = dedupeCaseInsensitive(
+      users.map((u) => {
+        if (u.firstName || u.lastName) {
+          return [u.firstName, u.lastName].filter(Boolean).join(' ').trim();
+        }
+        return String(u.name || '').trim();
+      }),
+    )
+      .filter((name) => !workerDBNames.some((w) => w.toLowerCase() === name.toLowerCase()))
+      .sort((a, b) => a.localeCompare(b, 'ja'));
+
+    // Keep backward compatibility: `names` remains available.
+    const names = [...workerDBNames, ...userNames];
+
+    return res.json({ names, workerDBNames, userNames });
+  } catch (error) {
+    console.error('Error loading check form names:', error);
+    return res.status(500).json({ error: 'Failed to load names' });
+  }
+});
+
+function detectTextLang(text) {
+  // Japanese hiragana, katakana, CJK unified ideographs, half-width katakana
+  if (/[぀-ヿ㐀-䶿一-鿿ｦ-ﾟ]/.test(text)) return 'ja';
+  return 'en';
+}
+
+app.post('/api/check-forms/translate', async (req, res) => {
+  const { texts, targetLang } = req.body || {};
+  if (!Array.isArray(texts) || !['en', 'ja', 'tl'].includes(targetLang)) {
+    return res.status(400).json({ error: 'Invalid request' });
+  }
+
+  try {
+    await client.connect();
+    const db   = client.db(DB_NAME);
+    const coll = db.collection('translationCacheDB');
+
+    coll.createIndex({ text: 1, targetLang: 1 }, { unique: true }).catch(() => {});
+
+    const translations = {};
+
+    for (const text of texts) {
+      if (!text || !text.trim()) continue;
+
+      const cached = await coll.findOne({ text, targetLang });
+      if (cached) {
+        translations[text] = cached.translated;
+        continue;
+      }
+
+      const sourceLang = detectTextLang(text);
+
+      // Same source and target — no translation needed
+      if (sourceLang === targetLang) {
+        translations[text] = text;
+        await coll.insertOne({ text, targetLang, translated: text, createdAt: new Date() }).catch(() => {});
+        continue;
+      }
+
+      try {
+        const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${sourceLang}|${targetLang}`;
+        const apiRes   = await fetch(url);
+        const data     = await apiRes.json();
+        const translated = data?.responseData?.translatedText || text;
+        console.log(`[translate] ${sourceLang}→${targetLang}: "${text}" → "${translated}"`);
+        translations[text] = translated;
+        await coll.insertOne({ text, targetLang, translated, createdAt: new Date() }).catch(() => {});
+      } catch (apiErr) {
+        console.error(`[translate] API error for "${text}":`, apiErr.message);
+        translations[text] = text;
+      }
+    }
+
+    return res.json({ translations });
+  } catch (error) {
+    console.error('[translate] Endpoint error:', error);
+    return res.status(500).json({ error: 'Translation failed' });
+  }
+});
+
+app.post('/api/check-forms/submit', async (req, res) => {
+  const payload = req.body || {};
+  const factory = normalizeCheckFormText(payload.factory);
+  const machine = normalizeCheckFormText(payload.machine);
+  const approvedBy = normalizeCheckFormText(payload.approvedBy);
+  const submittedTemplates = Array.isArray(payload.templates) ? payload.templates : [];
+
+  if (!factory) {
+    return res.status(400).json({ error: 'factory is required' });
+  }
+
+  if (!machine) {
+    return res.status(400).json({ error: 'machine is required' });
+  }
+
+  if (submittedTemplates.length === 0) {
+    return res.status(400).json({ error: 'at least one template submission is required' });
+  }
+
+  try {
+    await client.connect();
+    const db = client.db(DB_NAME);
+    const submittedDb = client.db('submittedDB');
+    const recordsCollection = submittedDb.collection(CHECK_FORM_RECORDS_COLLECTION);
+    const ngReportsCollection = submittedDb.collection(CHECK_FORM_NG_REPORTS_COLLECTION);
+    const now = new Date();
+    const nowIso = now.toISOString();
+    const recordDocs = [];
+    const ngReportDocs = [];
+
+    for (let templateIndex = 0; templateIndex < submittedTemplates.length; templateIndex += 1) {
+      const templatePayload = submittedTemplates[templateIndex] || {};
+      const answersPayload = Array.isArray(templatePayload.answers) ? templatePayload.answers : [];
+      const templateId = normalizeCheckFormText(templatePayload.templateId);
+      const templateName = normalizeCheckFormText(templatePayload.templateName);
+      const description = normalizeCheckFormText(templatePayload.description);
+      const schedule = normalizeCheckFormSchedule(templatePayload.schedule);
+      const startDate = normalizeCheckFormText(templatePayload.startDate);
+      const fallbackEquipmentIds = normalizeCheckFormStringArray(templatePayload.equipmentIds);
+      const fallbackEquipmentNames = normalizeCheckFormStringArray(templatePayload.equipmentNames);
+      const equipmentId = normalizeCheckFormText(
+        templatePayload.equipmentId || templatePayload.selectedMachineId || fallbackEquipmentIds[0]
+      );
+      const processingEquipment = normalizeCheckFormText(
+        templatePayload['加工設備'] || templatePayload.selectedMachine || machine || fallbackEquipmentNames[0]
+      );
+      const selectedMachine = normalizeCheckFormText(templatePayload.selectedMachine || machine);
+      const workerName = normalizeCheckFormText(templatePayload.workerName);
+
+      if (!templateId || !templateName) {
+        return res.status(400).json({ error: `templateId and templateName are required for template index ${templateIndex}` });
+      }
+
+      if (!workerName) {
+        return res.status(400).json({ error: `workerName is required for template ${templateName}` });
+      }
+
+      if (!selectedMachine) {
+        return res.status(400).json({ error: `selectedMachine is required for template ${templateName}` });
+      }
+
+      if (!processingEquipment) {
+        return res.status(400).json({ error: `加工設備 is required for template ${templateName}` });
+      }
+
+      if (answersPayload.length === 0) {
+        return res.status(400).json({ error: `answers are required for template ${templateName}` });
+      }
+
+      const recordId = new ObjectId();
+      const normalizedAnswers = [];
+      const recordTicketSummaries = [];
+
+      for (let answerIndex = 0; answerIndex < answersPayload.length; answerIndex += 1) {
+        const answerPayload = answersPayload[answerIndex] || {};
+        const field = sanitizeCheckFormField(answerPayload);
+        const rawValue = answerPayload.value;
+        const normalizedValue = normalizeCheckFormAnswerValue(field.type, rawValue);
+        const isAnswered = isCheckFormAnswered(field.type, normalizedValue);
+
+        if (!field.id || !field.label || !field.type) {
+          return res.status(400).json({ error: `field metadata is incomplete for template ${templateName}` });
+        }
+
+        if (!isAnswered) {
+          return res.status(400).json({ error: `field ${field.label} is missing an answer in template ${templateName}` });
+        }
+
+        const fieldPhotoData = normalizeCheckFormText(answerPayload.fieldPhotoData);
+        if (field.photoRequired && !fieldPhotoData) {
+          return res.status(400).json({ error: `field ${field.label} requires a photo in template ${templateName}` });
+        }
+
+        let fieldPhotoURL = '';
+        if (fieldPhotoData) {
+          fieldPhotoURL = await uploadCheckFormImageToFirebase({
+            base64: fieldPhotoData,
+            factory,
+            templateName,
+            fieldLabel: field.label || field.id,
+            category: 'fields',
+            sequence: answerIndex,
+          });
+        }
+
+        const ticketPayload = answerPayload.ticket && typeof answerPayload.ticket === 'object'
+          ? answerPayload.ticket
+          : null;
+        const ticketReason = normalizeCheckFormText(ticketPayload?.reason);
+        const ticketImagesData = Array.isArray(ticketPayload?.imagesData)
+          ? ticketPayload.imagesData.filter(Boolean).slice(0, 5)
+          : [];
+        const ticketRequired = doesCheckFormAnswerRequireTicket(field, normalizedValue);
+        const shouldCreateTicket = ticketRequired || !!ticketPayload?.saved;
+        let ticketSummary = null;
+
+        if (shouldCreateTicket) {
+          if (!ticketReason) {
+            return res.status(400).json({ error: `ticket reason is required for field ${field.label} in template ${templateName}` });
+          }
+
+          const ticketImageURLs = [];
+          for (let imageIndex = 0; imageIndex < ticketImagesData.length; imageIndex += 1) {
+            const imageURL = await uploadCheckFormImageToFirebase({
+              base64: ticketImagesData[imageIndex],
+              factory,
+              templateName,
+              fieldLabel: `${field.label || field.id}_ticket`,
+              category: 'tickets',
+              sequence: imageIndex,
+            });
+            ticketImageURLs.push(imageURL);
+          }
+
+          const ticketKey = normalizeCheckFormText(ticketPayload?.ticketKey) || `ticket_${recordId.toHexString()}_${field.id}`;
+          const reportDoc = {
+            _id: new ObjectId(),
+            source: 'checkForm',
+            factory,
+            加工設備: processingEquipment,
+            equipmentId: equipmentId || null,
+            templateId,
+            templateName,
+            checkFormRecordId: recordId,
+            workerName,
+            fieldId: field.id,
+            fieldLabel: field.label,
+            fieldType: field.type,
+            answerValue: normalizedValue,
+            min: field.min,
+            max: field.max,
+            unit: field.unit,
+            reason: ticketReason,
+            imageURLs: ticketImageURLs,
+            status: 'open',
+            createdAt: now,
+            ...(approvedBy ? { approvedBy } : {}),
+          };
+
+          ngReportDocs.push(reportDoc);
+          ticketSummary = {
+            ticketKey,
+            required: ticketRequired,
+            reason: ticketReason,
+            imageURLs: ticketImageURLs,
+          };
+          recordTicketSummaries.push({
+            fieldId: field.id,
+            fieldLabel: field.label,
+            ...ticketSummary,
+          });
+        }
+
+        normalizedAnswers.push({
+          fieldId: field.id,
+          label: field.label,
+          description: field.description,
+          type: field.type,
+          required: field.required,
+          locked: field.locked,
+          photoRequired: field.photoRequired,
+          options: field.options,
+          min: field.min,
+          max: field.max,
+          unit: field.unit,
+          templateImageURL: field.imageURL,
+          value: normalizedValue,
+          displayValue: normalizeCheckFormText(answerPayload.displayValue) || String(normalizedValue ?? ''),
+          status: buildCheckFormAnswerStatus(field, normalizedValue, ticketRequired),
+          ticketRequired,
+          fieldPhotoURL,
+          ticket: ticketSummary,
+          answeredAt: resolveCheckFormAnswerTimestamp(answerPayload.answeredAt, nowIso),
+        });
+      }
+
+      recordDocs.push({
+        _id: recordId,
+        source: 'checkForm',
+        templateId,
+        templateName,
+        description,
+        schedule,
+        startDate,
+        factory,
+        加工設備: processingEquipment,
+        equipmentId: equipmentId || null,
+        workerName,
+        answers: normalizedAnswers,
+        tickets: recordTicketSummaries,
+        submittedAtClient: normalizeCheckFormText(payload.submittedAtClient),
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    const session = client.startSession();
+
+    try {
+      await session.withTransaction(async () => {
+        if (recordDocs.length > 0) {
+          await recordsCollection.insertMany(recordDocs, { session });
+        }
+
+        if (ngReportDocs.length > 0) {
+          await ngReportsCollection.insertMany(ngReportDocs, { session });
+        }
+      });
+    } finally {
+      await session.endSession();
+    }
+
+    return res.status(201).json({
+      success: true,
+      insertedRecordCount: recordDocs.length,
+      insertedTicketCount: ngReportDocs.length,
+      recordIds: recordDocs.map((record) => record._id.toHexString()),
+    });
+  } catch (error) {
+    console.error('Error submitting check forms:', error);
+    return res.status(500).json({ error: 'Failed to submit check forms', details: error.message });
+  }
+});
+
+app.get('/api/check-forms/verify-qr', async (req, res) => {
+  const code = (req.query.code || '').trim();
+  if (!code) return res.status(400).json({ error: 'code is required' });
+
+  try {
+    await client.connect();
+    const db    = client.db(DB_NAME);
+    const users = db.collection('users');
+
+    let user = await users.findOne({ username: code });
+
+    if (!user) {
+      try {
+        const { ObjectId } = require('mongodb');
+        user = await users.findOne({ _id: new ObjectId(code) });
+      } catch { /* invalid ObjectId format — ignore */ }
+    }
+
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    return res.json({
+      username:  user.username  || '',
+      firstName: user.firstName || '',
+      lastName:  user.lastName  || '',
+      role:      user.role      || '',
+    });
+  } catch (err) {
+    console.error('verify-qr error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+console.log('📋 Check form tablet routes loaded');
 
 
 app.listen(port, () => {
