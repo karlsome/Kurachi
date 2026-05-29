@@ -1452,7 +1452,77 @@ const MAX_MAINTENANCE_PHOTOS = 5; // Maximum photos per maintenance record
 
 // Material Label Photo System
 let materialLabelPhotos = []; // Array to store multiple material label photos
-const MAX_MATERIAL_PHOTOS = 10; // Maximum number of photos allowed
+const MAX_MATERIAL_PHOTOS = 25; // Maximum number of photos allowed
+
+// IndexedDB helper for material label photos (keyed by uniquePrefix to avoid cross-form collisions)
+const materialLabelDB = (() => {
+  let _db = null;
+  const DB_VERSION = 1;
+  const STORE = 'photos';
+
+  function open() {
+    if (_db) return Promise.resolve(_db);
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(`${uniquePrefix}materialLabelDB`, DB_VERSION);
+      req.onupgradeneeded = e => e.target.result.createObjectStore(STORE, { keyPath: 'id' });
+      req.onsuccess = e => { _db = e.target.result; resolve(_db); };
+      req.onerror = e => reject(e.target.error);
+    });
+  }
+
+  return {
+    put(record) {
+      return open().then(db => new Promise((res, rej) => {
+        const tx = db.transaction(STORE, 'readwrite');
+        tx.objectStore(STORE).put(record).onsuccess = () => res();
+        tx.onerror = e => rej(e.target.error);
+      }));
+    },
+    getAll() {
+      return open().then(db => new Promise((res, rej) => {
+        const req = db.transaction(STORE, 'readonly').objectStore(STORE).getAll();
+        req.onsuccess = e => res(e.target.result);
+        req.onerror = e => rej(e.target.error);
+      }));
+    },
+    delete(id) {
+      return open().then(db => new Promise((res, rej) => {
+        const tx = db.transaction(STORE, 'readwrite');
+        tx.objectStore(STORE).delete(id).onsuccess = () => res();
+        tx.onerror = e => rej(e.target.error);
+      }));
+    },
+    clear() {
+      return open().then(db => new Promise((res, rej) => {
+        const tx = db.transaction(STORE, 'readwrite');
+        tx.objectStore(STORE).clear().onsuccess = () => res();
+        tx.onerror = e => rej(e.target.error);
+      }));
+    }
+  };
+})();
+
+// Compress a dataURL to a Blob at the highest quality that fits within maxBytes.
+// Tries quality steps from high to low; falls back to halved dimensions as last resort.
+async function compressBlobToLimit(dataURL, maxBytes = 1024 * 1024) {
+  const img = await new Promise((res, rej) => {
+    const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = dataURL;
+  });
+  const canvas = document.createElement('canvas');
+  let w = img.width, h = img.height;
+  if (w > 2048) { h = Math.round(h * 2048 / w); w = 2048; }
+  canvas.width = w; canvas.height = h;
+  canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+
+  for (const q of [0.95, 0.85, 0.75, 0.65, 0.55, 0.45, 0.35]) {
+    const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', q));
+    if (blob && blob.size <= maxBytes) return blob;
+  }
+  // Last resort: halve dimensions
+  canvas.width = Math.round(w / 2); canvas.height = Math.round(h / 2);
+  canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+  return new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.7));
+}
 
 // Load maintenance records from localStorage
 function loadMaintenanceRecords() {
@@ -1896,6 +1966,7 @@ function setupMaintenanceModalEvents(modal, existingRecord) {
 
 // === Material Label Photo Functions ===
 function clearMaterialLabelPhotos() {
+  materialLabelPhotos.forEach(p => URL.revokeObjectURL(p.blobUrl));
   materialLabelPhotos = [];
   renderMaterialPhotoThumbnails();
   updateMaterialPhotoCount();
@@ -1906,78 +1977,43 @@ async function addMaterialLabelPhoto(photoDataURL) {
     alert(`最大${MAX_MATERIAL_PHOTOS}枚まで撮影できます / Maximum ${MAX_MATERIAL_PHOTOS} photos allowed`);
     return false;
   }
-  
-  console.log('Adding material label photo:', typeof photoDataURL, photoDataURL ? photoDataURL.substring(0, 50) + '...' : 'undefined');
-  
-  // Handle both base64 string and data URL formats
-  let base64Data = photoDataURL;
-  let displayURL;
-  
-  if (typeof photoDataURL === 'string') {
-    if (photoDataURL.startsWith('data:image')) {
-      // This is a full data URL
-      displayURL = photoDataURL;
-      base64Data = photoDataURL.split(',')[1];
-      console.log('Extracted base64 data from data URL');
-    } else {
-      // Assume this is already base64 data
-      displayURL = `data:image/jpeg;base64,${photoDataURL}`;
-      console.log('Created display URL from base64 data');
-    }
-  } else {
+
+  if (typeof photoDataURL !== 'string' || !photoDataURL) {
     console.error('Invalid photo data provided to addMaterialLabelPhoto');
     return false;
   }
 
-  // Compress image for localStorage to avoid quota issues
-  // Original size
-  const originalSize = (base64Data.length * 3 / 4 / 1024).toFixed(2);
-  console.log(`Original material photo size: ${originalSize} KB`);
-  
-  // Compress to 60% quality, max 800px for localStorage storage
-  const compressedDataURL = await compressBase64Image(displayURL, 800, 0.6);
-  const compressedBase64 = compressedDataURL.split(',')[1] || compressedDataURL;
-  const compressedSize = (compressedBase64.length * 3 / 4 / 1024).toFixed(2);
-  console.log(`Compressed for localStorage: ${compressedSize} KB (${((1 - compressedBase64.length / base64Data.length) * 100).toFixed(1)}% reduction)`);
+  // Normalise to full data URL for canvas processing
+  const displayURL = photoDataURL.startsWith('data:') ? photoDataURL : `data:image/jpeg;base64,${photoDataURL}`;
 
-  const photoData = {
-    base64: compressedBase64,  // Store compressed version
-    timestamp: new Date().toISOString(),
-    displayURL: compressedDataURL  // Also use compressed for display
-  };
+  const originalBytes = Math.round(displayURL.length * 3 / 4);
+  console.log(`Material label photo original size: ~${(originalBytes / 1024).toFixed(1)} KB`);
 
-  materialLabelPhotos.push(photoData);
+  // Compress to a raw Blob under 1 MB — highest quality that fits
+  const blob = await compressBlobToLimit(displayURL, 1024 * 1024);
+  console.log(`Compressed to: ${(blob.size / 1024).toFixed(1)} KB`);
+
+  const id = `material-label-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  const timestamp = new Date().toISOString();
+
+  // Persist raw blob in IndexedDB (no base64 at rest)
+  await materialLabelDB.put({ id, blob, timestamp });
+
+  // Object URL is used only for display in this session
+  const blobUrl = URL.createObjectURL(blob);
+  materialLabelPhotos.push({ id, timestamp, blobUrl });
+
   console.log(`Added material label photo #${materialLabelPhotos.length}`);
-  
-  // Log material label photo capture
+
   logTabletAction('Material label photo captured', 'in-progress', {
     photoNumber: materialLabelPhotos.length,
     totalPhotos: materialLabelPhotos.length,
-    timestamp: photoData.timestamp
+    timestamp
   });
-  
+
   renderMaterialPhotoThumbnails();
   updateMaterialPhotoCount();
   updateMaterialLabelElement();
-  
-  // Save to localStorage (now with compressed images)
-  const key = `${uniquePrefix}materialLabelPhotos`;
-  try {
-    localStorage.setItem(key, JSON.stringify(materialLabelPhotos));
-    console.log(`Saved ${materialLabelPhotos.length} compressed material photos to localStorage`);
-  } catch (error) {
-    if (error.name === 'QuotaExceededError') {
-      console.error('localStorage quota exceeded! Cannot save material photos.');
-      showAlert('ストレージ容量不足です。古い写真を削除してください / Storage full! Please delete old photos.');
-      // Remove the photo we just added since we can't save it
-      materialLabelPhotos.pop();
-      renderMaterialPhotoThumbnails();
-      updateMaterialPhotoCount();
-      return false;
-    }
-    throw error;
-  }
-  
   return true;
 }
 
@@ -1985,19 +2021,19 @@ function removeMaterialLabelPhoto(index) {
   if (index >= 0 && index < materialLabelPhotos.length) {
     const removedPhoto = materialLabelPhotos[index];
     materialLabelPhotos.splice(index, 1);
-    
-    // Log material label photo removal
+
+    URL.revokeObjectURL(removedPhoto.blobUrl);
+    materialLabelDB.delete(removedPhoto.id);
+
     logTabletAction('Material label photo removed', 'in-progress', {
       photoIndex: index + 1,
       remainingPhotos: materialLabelPhotos.length,
       timestamp: removedPhoto.timestamp
     });
-    
-    // Save updated array to localStorage
-    const key = `${uniquePrefix}materialLabelPhotos`;
-    localStorage.setItem(key, JSON.stringify(materialLabelPhotos));
+
     renderMaterialPhotoThumbnails();
     updateMaterialPhotoCount();
+    updateMaterialLabelElement();
   }
 }
 
@@ -2066,17 +2102,8 @@ function renderMaterialPhotoThumbnails() {
       
       const img = document.createElement('img');
       
-      // Determine image source
-      let imageSrc;
-      if (photo.displayURL) {
-        imageSrc = photo.displayURL;
-      } else if (photo.firebaseURL) {
-        imageSrc = photo.firebaseURL;
-      } else if (photo.base64) {
-        imageSrc = `data:image/jpeg;base64,${photo.base64}`;
-      } else {
-        imageSrc = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODAiIGhlaWdodD0iODAiIHZpZXdCb3g9IjAgMCA4MCA4MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjgwIiBoZWlnaHQ9IjgwIiBmaWxsPSIjZjBmMGYwIi8+Cjx0ZXh0IHg9IjQwIiB5PSI0NSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEyIiBmaWxsPSIjOTk5Ij5JbWFnZTwvdGV4dD4KPHR0ZXh0IHg9IjQwIiB5PSI1NSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOTk5Ij5FcnJvcjwvdGV4dD4KPC9zdmc+';
-      }
+      // Determine image source — blobUrl is created from IndexedDB on load
+      const imageSrc = photo.blobUrl || '';
       
       img.src = imageSrc;
       img.style.cssText = `
@@ -2141,7 +2168,7 @@ function showMaterialPhotoPreview(imageDataURL) {
     align-items: center;
     z-index: 10001;
   `;
-  
+
   const img = document.createElement('img');
   img.src = imageDataURL;
   img.style.cssText = `
@@ -2149,8 +2176,9 @@ function showMaterialPhotoPreview(imageDataURL) {
     max-height: 90%;
     border-radius: 10px;
     box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+    cursor: pointer;
   `;
-  
+
   const closeBtn = document.createElement('button');
   closeBtn.innerHTML = '×';
   closeBtn.style.cssText = `
@@ -2166,12 +2194,13 @@ function showMaterialPhotoPreview(imageDataURL) {
     font-size: 20px;
     cursor: pointer;
   `;
-  
+
   closeBtn.onclick = () => document.body.removeChild(previewModal);
+  img.onclick = () => document.body.removeChild(previewModal);
   previewModal.onclick = (e) => {
     if (e.target === previewModal) document.body.removeChild(previewModal);
   };
-  
+
   previewModal.appendChild(img);
   previewModal.appendChild(closeBtn);
   document.body.appendChild(previewModal);
@@ -2202,44 +2231,24 @@ function updateMaterialPhotoCount() {
   updateMaterialLabelElement();
 }
 
-// Function to load material label photos from localStorage
-function loadMaterialLabelPhotos() {
-  console.log('Loading material label photos from localStorage');
-  const key = `${uniquePrefix}materialLabelPhotos`;
-  const saved = localStorage.getItem(key);
-  
-  if (saved) {
-    try {
-      materialLabelPhotos = JSON.parse(saved);
-      console.log(`Loaded ${materialLabelPhotos.length} material label photos from localStorage`);
-      
-      // Ensure photos have proper displayURL format if missing
-      materialLabelPhotos = materialLabelPhotos.map(photo => {
-        // Fix missing displayURL if needed
-        if (!photo.displayURL && photo.base64) {
-          photo.displayURL = `data:image/jpeg;base64,${photo.base64}`;
-        }
-        return photo;
-      });
-      
-      // Update UI with the loaded photos
-      renderMaterialPhotoThumbnails();
-      updateMaterialPhotoCount();
-      updateMaterialLabelElement();
-      
-      // Force an additional render after a short delay to ensure UI is updated
-      setTimeout(() => {
-        renderMaterialPhotoThumbnails();
-        updateMaterialLabelElement();
-        console.log('Completed delayed rendering of material label photos');
-      }, 1000);
-      
-    } catch (error) {
-      console.error('Error loading material label photos from localStorage:', error);
-      materialLabelPhotos = [];
-    }
-  } else {
-    console.log('No material label photos found in localStorage');
+// Function to load material label photos from IndexedDB
+async function loadMaterialLabelPhotos() {
+  console.log('Loading material label photos from IndexedDB');
+  // Clean up any legacy localStorage entry left from the old system
+  localStorage.removeItem(`${uniquePrefix}materialLabelPhotos`);
+  try {
+    const records = await materialLabelDB.getAll();
+    materialLabelPhotos = records.map(r => ({
+      id: r.id,
+      timestamp: r.timestamp,
+      blobUrl: URL.createObjectURL(r.blob)
+    }));
+    console.log(`Loaded ${materialLabelPhotos.length} material label photos from IndexedDB`);
+    renderMaterialPhotoThumbnails();
+    updateMaterialPhotoCount();
+    updateMaterialLabelElement();
+  } catch (error) {
+    console.error('Error loading material label photos from IndexedDB:', error);
     materialLabelPhotos = [];
   }
 }
@@ -2289,43 +2298,21 @@ function updateMaterialLabelElement() {
   });
   
   if (materialLabelPhotos.length > 0) {
-    // Use the first photo to set the legacy element
-    const photo = materialLabelPhotos[0];
-    let src;
-    
-    if (photo.displayURL) {
-      src = photo.displayURL;
-      console.log('Using displayURL for material label');
-    } else if (photo.firebaseURL) {
-      src = photo.firebaseURL;
-      console.log('Using firebaseURL for material label');
-    } else if (photo.base64) {
-      src = `data:image/jpeg;base64,${photo.base64}`;
-      console.log('Using base64 data for material label');
-    } else {
-      console.warn('No valid image source found in photo object');
-      return;
-    }
-    
+    // Use the blobUrl of the first photo for the legacy single-image element
+    const src = materialLabelPhotos[0].blobUrl;
     try {
-      // Set the image source and make it visible
       makerPic.src = src;
       makerPic.style.display = 'block';
-      
-      // Save to localStorage for persistence across refreshes
-      localStorage.setItem(`${uniquePrefix}材料ラベル.src`, src);
-      
-      // Update all possible label status elements
+      // Don't write blobUrl to localStorage — it's session-only; IndexedDB is the durable store
+      localStorage.removeItem(`${uniquePrefix}材料ラベル.src`);
       if (materialLabelJP) {
         materialLabelJP.textContent = 'TRUE';
         localStorage.setItem(`${uniquePrefix}材料ラベル_L.textContent`, 'TRUE');
       }
-      
       if (materialLabelEN) {
         materialLabelEN.textContent = 'TRUE';
         localStorage.setItem(`${uniquePrefix}makerLabel.textContent`, 'TRUE');
       }
-      
       console.log('Successfully updated 材料ラベル element with first material photo');
     } catch (error) {
       console.error('Error setting material label image:', error);
@@ -2335,21 +2322,15 @@ function updateMaterialLabelElement() {
     try {
       makerPic.src = '';
       makerPic.style.display = 'none';
-      
-      // Update localStorage
       localStorage.removeItem(`${uniquePrefix}材料ラベル.src`);
-      
-      // Update all possible label status elements
       if (materialLabelJP) {
         materialLabelJP.textContent = 'FALSE';
         localStorage.setItem(`${uniquePrefix}材料ラベル_L.textContent`, 'FALSE');
       }
-      
       if (materialLabelEN) {
         materialLabelEN.textContent = 'FALSE';
         localStorage.setItem(`${uniquePrefix}makerLabel.textContent`, 'FALSE');
       }
-      
       console.log('Cleared 材料ラベル element (no photos)');
     } catch (error) {
       console.error('Error clearing material label image:', error);
@@ -3604,9 +3585,9 @@ function renderMaterialLotTags() {
 
 // Add scanned lot
 function addScannedLot(lotNumber) {
-  // Check for maximum limit (10 lots)
-  if (materialLots.length >= 10) {
-    showAlert(`最大10個のロット番号のみ追加可能です\n\nMaximum 10 lot numbers allowed\n\nCurrent: ${materialLots.length} lots`);
+  // Check for maximum limit (25 lots)
+  if (materialLots.length >= 25) {
+    showAlert(`最大25個のロット番号のみ追加可能です\n\nMaximum 25 lot numbers allowed\n\nCurrent: ${materialLots.length} lots`);
     return false; // At maximum
   }
   // Check for duplicates
@@ -3623,10 +3604,10 @@ function addScannedLot(lotNumber) {
 function addManualLot(lotNumber) {
   if (!lotNumber || !lotNumber.trim()) return false;
   lotNumber = lotNumber.trim();
-  
-  // Check for maximum limit (10 lots)
-  if (materialLots.length >= 10) {
-    showAlert(`最大10個のロット番号のみ追加可能です\n\nMaximum 10 lot numbers allowed\n\nCurrent: ${materialLots.length} lots`);
+
+  // Check for maximum limit (25 lots)
+  if (materialLots.length >= 25) {
+    showAlert(`最大25個のロット番号のみ追加可能です\n\nMaximum 25 lot numbers allowed\n\nCurrent: ${materialLots.length} lots`);
     return false; // At maximum
   }
   // Check for duplicates
@@ -3901,11 +3882,17 @@ function resetForm() {
   localStorage.removeItem(`${uniquePrefix}maintenanceRecords`);
   maintenanceRecords = [];
   
-  // Clear material label photos
-  localStorage.removeItem(`${uniquePrefix}materialLabelPhotos`);
+  // Clear material label photos from IndexedDB and revoke object URLs
+  materialLabelPhotos.forEach(p => URL.revokeObjectURL(p.blobUrl));
   materialLabelPhotos = [];
+  materialLabelDB.clear(); // async fire-and-forget; page reloads immediately after
   renderMaterialPhotoThumbnails();
   updateMaterialPhotoCount();
+
+  // Clear material lots
+  localStorage.removeItem(`${uniquePrefix}材料ロット-data`);
+  materialLots = [];
+  renderMaterialLotTags();
 
 
   // Reset all textContent elements
@@ -4624,16 +4611,6 @@ async function captureFromWebcam() {
     
     if (added) {
       console.log('✅ Successfully added material label photo from webcam');
-      
-      updateMaterialLabelElement();
-      
-      setTimeout(() => {
-        renderMaterialPhotoThumbnails();
-        updateMaterialPhotoCount();
-        localStorage.setItem(`${uniquePrefix}materialLabelPhotos`, JSON.stringify(materialLabelPhotos));
-        updateMaterialLabelElement();
-      }, 100);
-      
       logTabletAction('Photo captured: 材料ラベル (webcam)', 'in-progress', {
         photoType: '材料ラベル',
         photoCount: materialLabelPhotos.length
@@ -4910,23 +4887,6 @@ if (makerLabelButton) {
         
         if (added) {
           console.log('✅ Successfully added material label photo');
-          
-          // Update all material label elements
-          updateMaterialLabelElement();
-          
-          // Render thumbnails and update counts
-          setTimeout(() => {
-            renderMaterialPhotoThumbnails();
-            updateMaterialPhotoCount();
-            
-            // Save to localStorage
-            localStorage.setItem(`${uniquePrefix}materialLabelPhotos`, JSON.stringify(materialLabelPhotos));
-            
-            // Update legacy element for compatibility
-            updateMaterialLabelElement();
-          }, 100);
-          
-          // Log photo capture
           logTabletAction('Photo captured: 材料ラベル', 'in-progress', {
             photoType: '材料ラベル',
             photoCount: materialLabelPhotos.length
@@ -5088,22 +5048,6 @@ window.addEventListener('message', async function(event) {
           
           if (added) {
             console.log('Successfully added material label photo');
-            
-            // Update all possible material label elements to ensure compatibility
-            // Update the legacy single image element
-            updateMaterialLabelElement();
-            
-            // Force render thumbnails to make sure they appear
-            setTimeout(() => {
-              renderMaterialPhotoThumbnails();
-              updateMaterialPhotoCount(); // Make sure counts are updated
-              
-              // Re-save all material label data to ensure it persists
-              localStorage.setItem(`${uniquePrefix}materialLabelPhotos`, JSON.stringify(materialLabelPhotos));
-              
-              // Double check elements are properly updated
-              updateMaterialLabelElement();
-            }, 500);
           }
           
           // Reset the current button ID after processing
@@ -5740,7 +5684,16 @@ function showDateChoiceModal(enteredDate, currentDate) {
   });
 }
 
-// Locate your document.getElementById('submit').addEventListener('click', async (event) => { ... }
+function updateUploadProgress(percent, text) {
+    const bar = document.getElementById('uploadProgressBar');
+    const textEl = document.getElementById('uploadProgressText');
+    const percentEl = document.getElementById('uploadProgressPercent');
+    const clamped = Math.round(Math.min(100, Math.max(0, percent)));
+    if (bar) bar.style.width = `${clamped}%`;
+    if (textEl) textEl.textContent = text || '';
+    if (percentEl) percentEl.textContent = `${clamped}%`;
+}
+
 document.getElementById('submit').addEventListener('click', async (event) => {
     event.preventDefault();
     updateCycleTime();
@@ -5764,6 +5717,7 @@ document.getElementById('submit').addEventListener('click', async (event) => {
     }
 
     uploadingModal.style.display = 'flex';
+    updateUploadProgress(0, '');
 
     // Use the new material label photo system for validation
     if (materialLabelPhotos.length === 0) {
@@ -5967,6 +5921,13 @@ document.getElementById('submit').addEventListener('click', async (event) => {
         console.log('✅ All required fields validated successfully');
         // ==================== END VALIDATION SECTION ====================
 
+        const maintenancePhotoTotal = maintenanceRecords.reduce((sum, r) => sum + (r.photos?.length || 0), 0);
+        const materialPhotoTotal = materialLabelPhotos.length;
+        const totalPhotos = maintenancePhotoTotal + materialPhotoTotal;
+        let processedPhotos = 0;
+
+        updateUploadProgress(5, 'Preparing data...');
+
         const breakTimeData = {
             break1: { start: document.getElementById('break1-start')?.value || '', end: document.getElementById('break1-end')?.value || '' },
             break2: { start: document.getElementById('break2-start')?.value || '', end: document.getElementById('break2-end')?.value || '' },
@@ -6010,6 +5971,8 @@ document.getElementById('submit').addEventListener('click', async (event) => {
                                 timestamp: photo.timestamp,
                                 maintenanceRecordId: record.id
                             });
+                            processedPhotos++;
+                            updateUploadProgress(5 + (processedPhotos / Math.max(1, totalPhotos)) * 65, `Processing photo ${processedPhotos}/${totalPhotos}...`);
                         }
                     }
                 }
@@ -6074,32 +6037,43 @@ document.getElementById('submit').addEventListener('click', async (event) => {
         const materialLabelImages = [];
         
         console.log(`📸 Processing ${materialLabelPhotos.length} material label photos for submission`);
-        console.log('Material photos array:', materialLabelPhotos.map((p, i) => ({ index: i, hasBase64: !!p.base64, timestamp: p.timestamp })));
+        console.log('Material photos array:', materialLabelPhotos.map((p, i) => ({ index: i, id: p.id, timestamp: p.timestamp })));
         
-        // Convert all material label photos to the format expected by server (with compression)
+        // Read blobs from IndexedDB and convert to base64 for server upload
+        // Build a lookup map so we only call getAll() once
+        let idbRecordMap = {};
+        try {
+            const idbRecords = await materialLabelDB.getAll();
+            idbRecords.forEach(r => { idbRecordMap[r.id] = r; });
+        } catch (idbErr) {
+            console.error('⚠️ Could not read IndexedDB records for material label upload:', idbErr);
+        }
+
         for (let i = 0; i < materialLabelPhotos.length; i++) {
             const photo = materialLabelPhotos[i];
-            if (!photo.base64) {
-                console.warn(`⚠️ Skipping material label photo ${i} - no base64 data`);
+            const record = idbRecordMap[photo.id];
+            if (!record || !record.blob) {
+                console.warn(`⚠️ Skipping material label photo ${i} - no blob in IndexedDB`);
                 continue;
             }
-            
-            // Use already-compressed base64 directly (no second compression)
-            // Image was already compressed at 60% quality / 800px on capture
-            const base64Only = photo.base64.startsWith('data:')
-                ? photo.base64.split(',')[1]
-                : photo.base64;
-            
-            console.log(`✅ Material label ${i+1}/${materialLabelPhotos.length}: ${(base64Only.length / 1024).toFixed(2)} KB (no re-compression)`);
-            
+
+            const base64Only = await new Promise((res, rej) => {
+                const reader = new FileReader();
+                reader.onloadend = () => res(reader.result.split(',')[1]);
+                reader.onerror = rej;
+                reader.readAsDataURL(record.blob);
+            });
+
+            console.log(`✅ Material label ${i+1}/${materialLabelPhotos.length}: ${(base64Only.length / 1024).toFixed(1)} KB`);
+
             materialLabelImages.push({
-                base64: base64Only, // Server expects base64 without prefix
-                id: `material-label-${i}-${photo.timestamp || new Date().getTime()}`,
-                timestamp: photo.timestamp || new Date().getTime(),
+                base64: base64Only,
+                id: photo.id,
+                timestamp: photo.timestamp,
                 description: `材料ラベル ${i+1}/${materialLabelPhotos.length}`
             });
-            
-            console.log(`   📦 Added to upload queue: ${(base64Only.length / 1024).toFixed(2)} KB`);
+            processedPhotos++;
+            updateUploadProgress(5 + (processedPhotos / Math.max(1, totalPhotos)) * 65, `Processing photo ${processedPhotos}/${totalPhotos}...`);
         }
         
         console.log(`📊 Total material label images prepared for upload: ${materialLabelImages.length}`);
@@ -6179,6 +6153,8 @@ document.getElementById('submit').addEventListener('click', async (event) => {
             description: img.description 
         })));
 
+        updateUploadProgress(75, 'Submitting...');
+
         // Submit to the new combined route
         const dcpResponse = await fetch(`${serverURL}/submitToDCP`, {
             method: 'POST',
@@ -6193,6 +6169,7 @@ document.getElementById('submit').addEventListener('click', async (event) => {
 
         const dcpResult = await dcpResponse.json();
         console.log("✅ DCP submission successful:", dcpResult);
+        updateUploadProgress(100, '');
 
         // Log submit button action ONLY after successful submission
         logTabletAction('Submit button pressed', 'Completed', { 
