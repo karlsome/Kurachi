@@ -6158,6 +6158,321 @@ app.post('/api/sensor-history/export-csv', async (req, res) => {
   }
 });
 
+function normalizeIotDeviceNameValue(value = '') {
+  return String(value ?? '').trim();
+}
+
+function sanitizeIotDeviceImagePathSegment(value = '') {
+  const normalizedValue = normalizeIotDeviceNameValue(value);
+  return normalizedValue
+    .replace(/[\\/?%*:|"<>]/g, '_')
+    .replace(/\s+/g, '_')
+    .slice(0, 80) || 'unknown';
+}
+
+function extractIotDeviceImagePayload(imageValue = '', fallbackMimeType = 'image/jpeg') {
+  const normalizedImageValue = normalizeIotDeviceNameValue(imageValue);
+  const normalizedFallbackMimeType = normalizeIotDeviceNameValue(fallbackMimeType).toLowerCase() || 'image/jpeg';
+
+  if (!normalizedImageValue) {
+    return null;
+  }
+
+  const dataUrlMatch = normalizedImageValue.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,([\s\S]+)$/);
+  const mimeType = (dataUrlMatch?.[1] || normalizedFallbackMimeType).toLowerCase();
+  const base64Content = (dataUrlMatch?.[2] || normalizedImageValue).replace(/\s/g, '');
+  const buffer = Buffer.from(base64Content, 'base64');
+
+  if (!buffer.length) {
+    return null;
+  }
+
+  const extensionByMimeType = {
+    'image/jpeg': 'jpg',
+    'image/jpg': 'jpg',
+    'image/png': 'png',
+    'image/webp': 'webp',
+    'image/gif': 'gif',
+    'image/heic': 'heic',
+    'image/heif': 'heif'
+  };
+
+  const extension = extensionByMimeType[mimeType] || mimeType.split('/')[1]?.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() || 'jpg';
+
+  return {
+    buffer,
+    mimeType,
+    extension,
+  };
+}
+
+function getIotDeviceNamesCollection() {
+  return client.db(DB_NAME).collection('ioTNames');
+}
+
+function formatIotDeviceNameRecord(record = null) {
+  if (!record) {
+    return null;
+  }
+
+  return {
+    id: record._id?.toString() || '',
+    _id: record._id?.toString() || '',
+    deviceId: normalizeIotDeviceNameValue(record.deviceId),
+    factoryName: normalizeIotDeviceNameValue(record.factoryName),
+    name: normalizeIotDeviceNameValue(record.name),
+    imageURLs: Array.isArray(record.imageURLs) ? record.imageURLs.filter(Boolean) : [],
+    username: normalizeIotDeviceNameValue(record.username),
+    createdAt: record.createdAt || null,
+    updatedAt: record.updatedAt || null,
+  };
+}
+
+/**
+ * Save or update a custom display name for an IoT sensor device.
+ * POST /api/iot-device-names/save
+ */
+app.post('/api/iot-device-names/save', async (req, res) => {
+  console.log('🟢 Received POST request to /api/iot-device-names/save');
+
+  const normalizedDeviceId = normalizeIotDeviceNameValue(req.body?.deviceId);
+  const normalizedFactoryName = normalizeIotDeviceNameValue(req.body?.factoryName);
+  const hasName = Object.prototype.hasOwnProperty.call(req.body || {}, 'name');
+  const hasImageURLs = Object.prototype.hasOwnProperty.call(req.body || {}, 'imageURLs');
+  const hasUsername = Object.prototype.hasOwnProperty.call(req.body || {}, 'username');
+
+  if (!normalizedDeviceId || !normalizedFactoryName) {
+    return res.status(400).json({
+      error: 'deviceId and factoryName are required',
+      success: false,
+    });
+  }
+
+  if (hasImageURLs && !Array.isArray(req.body.imageURLs)) {
+    return res.status(400).json({
+      error: 'imageURLs must be an array when provided',
+      success: false,
+    });
+  }
+
+  try {
+    const now = new Date();
+    const collection = getIotDeviceNamesCollection();
+    const updateDoc = {
+      $set: {
+        deviceId: normalizedDeviceId,
+        factoryName: normalizedFactoryName,
+        updatedAt: now,
+      },
+      $setOnInsert: {
+        createdAt: now,
+      },
+    };
+
+    if (hasName) {
+      updateDoc.$set.name = normalizeIotDeviceNameValue(req.body.name);
+    } else {
+      updateDoc.$setOnInsert.name = '';
+    }
+
+    if (hasUsername) {
+      updateDoc.$set.username = normalizeIotDeviceNameValue(req.body.username);
+    }
+
+    if (hasImageURLs) {
+      updateDoc.$set.imageURLs = [...new Set(
+        req.body.imageURLs
+          .map((imageURL) => normalizeIotDeviceNameValue(imageURL))
+          .filter(Boolean)
+      )];
+    } else {
+      updateDoc.$setOnInsert.imageURLs = [];
+    }
+
+    await collection.updateOne(
+      { deviceId: normalizedDeviceId, factoryName: normalizedFactoryName },
+      updateDoc,
+      { upsert: true }
+    );
+
+    const savedRecord = await collection.findOne({
+      deviceId: normalizedDeviceId,
+      factoryName: normalizedFactoryName,
+    });
+
+    res.json({
+      success: true,
+      data: formatIotDeviceNameRecord(savedRecord),
+    });
+  } catch (error) {
+    console.error('❌ Error saving IoT device name:', error);
+    res.status(500).json({
+      error: 'Error saving IoT device name',
+      details: error.message,
+      success: false,
+    });
+  }
+});
+
+/**
+ * Upload an IoT device reference image and attach it to the device record.
+ * POST /api/upload-iot-device-image
+ */
+app.post('/api/upload-iot-device-image', async (req, res) => {
+  console.log('🟢 Received POST request to /api/upload-iot-device-image');
+
+  const normalizedDeviceId = normalizeIotDeviceNameValue(req.body?.deviceId);
+  const normalizedFactoryName = normalizeIotDeviceNameValue(req.body?.factoryName);
+  const normalizedUsername = normalizeIotDeviceNameValue(req.body?.username);
+  const rawImageValue =
+    req.body?.imageBase64 ||
+    req.body?.base64Image ||
+    req.body?.base64 ||
+    req.body?.imageData ||
+    req.body?.image ||
+    '';
+
+  if (!normalizedDeviceId || !normalizedFactoryName || !normalizeIotDeviceNameValue(rawImageValue)) {
+    return res.status(400).json({
+      error: 'deviceId, factoryName, and a base64 image are required',
+      success: false,
+    });
+  }
+
+  try {
+    const imagePayload = extractIotDeviceImagePayload(rawImageValue, req.body?.mimeType);
+
+    if (!imagePayload) {
+      return res.status(400).json({
+        error: 'Invalid base64 image payload',
+        success: false,
+      });
+    }
+
+    const bucket = storage.bucket();
+    const timestamp = Date.now();
+    const safeFactoryName = sanitizeIotDeviceImagePathSegment(normalizedFactoryName);
+    const safeDeviceId = sanitizeIotDeviceImagePathSegment(normalizedDeviceId);
+    const safeUsername = sanitizeIotDeviceImagePathSegment(normalizedUsername || 'anonymous');
+    const fileName = `iotDeviceNames/${safeFactoryName}/${safeDeviceId}/${timestamp}_${safeUsername}.${imagePayload.extension}`;
+    const file = bucket.file(fileName);
+    const downloadToken = `iotDeviceName_${timestamp}_${Math.random().toString(36).slice(2, 12)}`;
+
+    await file.save(imagePayload.buffer, {
+      metadata: {
+        contentType: imagePayload.mimeType,
+        metadata: {
+          firebaseStorageDownloadTokens: downloadToken,
+        },
+      },
+    });
+
+    const imageURL = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(fileName)}?alt=media&token=${downloadToken}`;
+    const now = new Date();
+
+    await getIotDeviceNamesCollection().updateOne(
+      { deviceId: normalizedDeviceId, factoryName: normalizedFactoryName },
+      {
+        $set: {
+          deviceId: normalizedDeviceId,
+          factoryName: normalizedFactoryName,
+          updatedAt: now,
+          ...(normalizedUsername ? { username: normalizedUsername } : {}),
+        },
+        $setOnInsert: {
+          createdAt: now,
+          name: '',
+        },
+        $addToSet: {
+          imageURLs: imageURL,
+        },
+      },
+      { upsert: true }
+    );
+
+    res.status(201).json({
+      success: true,
+      imageURL,
+    });
+  } catch (error) {
+    console.error('❌ Error uploading IoT device image:', error);
+    res.status(500).json({
+      error: 'Error uploading IoT device image',
+      details: error.message,
+      success: false,
+    });
+  }
+});
+
+/**
+ * Remove an image URL from an IoT device name record.
+ * POST /api/iot-device-names/delete-image
+ */
+app.post('/api/iot-device-names/delete-image', async (req, res) => {
+  console.log('🟢 Received POST request to /api/iot-device-names/delete-image');
+
+  const normalizedDeviceId = normalizeIotDeviceNameValue(req.body?.deviceId);
+  const normalizedFactoryName = normalizeIotDeviceNameValue(req.body?.factoryName);
+  const normalizedImageURL = normalizeIotDeviceNameValue(req.body?.imageUrl || req.body?.imageURL);
+  const normalizedUsername = normalizeIotDeviceNameValue(req.body?.username);
+
+  if (!normalizedDeviceId || !normalizedFactoryName || !normalizedImageURL) {
+    return res.status(400).json({
+      error: 'deviceId, factoryName, and imageUrl are required',
+      success: false,
+    });
+  }
+
+  try {
+    const collection = getIotDeviceNamesCollection();
+    const existingRecord = await collection.findOne(
+      { deviceId: normalizedDeviceId, factoryName: normalizedFactoryName },
+      { projection: { imageURLs: 1 } }
+    );
+
+    if (!existingRecord) {
+      return res.status(404).json({
+        error: 'IoT device name record not found',
+        success: false,
+      });
+    }
+
+    const existingImageURLs = Array.isArray(existingRecord.imageURLs) ? existingRecord.imageURLs : [];
+    if (!existingImageURLs.includes(normalizedImageURL)) {
+      return res.status(404).json({
+        error: 'Image URL not found on this device record',
+        success: false,
+      });
+    }
+
+    const now = new Date();
+    await collection.updateOne(
+      { deviceId: normalizedDeviceId, factoryName: normalizedFactoryName },
+      {
+        $pull: {
+          imageURLs: normalizedImageURL,
+        },
+        $set: {
+          updatedAt: now,
+          ...(normalizedUsername ? { username: normalizedUsername } : {}),
+        },
+      }
+    );
+
+    res.json({
+      success: true,
+      imageURL: normalizedImageURL,
+    });
+  } catch (error) {
+    console.error('❌ Error deleting IoT device image URL:', error);
+    res.status(500).json({
+      error: 'Error deleting IoT device image URL',
+      details: error.message,
+      success: false,
+    });
+  }
+});
+
 /**
  * Specialized approval data pagination
  * POST /api/approval-paginate
