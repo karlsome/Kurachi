@@ -30607,6 +30607,73 @@ app.get('/api/check-forms/verify-qr', async (req, res) => {
 
 console.log('📋 Check form tablet routes loaded');
 
+// ── Camera stream proxy ───────────────────────────────────────────────────────
+
+const requireAuth = (req, res, next) => {
+  const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  if (!token) return res.status(401).json({ error: 'Authentication required' });
+  try {
+    jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key-change-in-production');
+    next();
+  } catch {
+    return res.status(401).json({ error: 'Invalid or expired token' });
+  }
+};
+
+app.get('/api/cam', requireAuth, (req, res) => {
+  const streamUrl = process.env.GO2RTC_STREAM_URL;
+  if (!streamUrl) return res.status(404).json({ error: 'GO2RTC_STREAM_URL not configured' });
+
+  https.get(streamUrl, {
+    headers: { 'X-Stream-Token': process.env.GO2RTC_SECRET }
+  }, (streamRes) => {
+    let body = '';
+    streamRes.on('data', chunk => { body += chunk; });
+    streamRes.on('end', () => {
+      // Rewrite absolute segment/playlist URLs so they route back through the authenticated proxy
+      const rewritten = body.replace(/(https?:\/\/\S+)/g, match =>
+        `/api/cam-seg?u=${encodeURIComponent(match)}`
+      );
+      res.setHeader('Content-Type', 'application/x-mpegURL');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.send(rewritten);
+    });
+  }).on('error', (err) => {
+    console.error('Camera stream error:', err);
+    res.status(502).send('Stream unavailable');
+  });
+});
+
+// Proxies individual HLS segments (and any sub-playlists) — also rewrites URLs if the
+// response is itself an m3u8, so Caddy's token requirement is never exposed to the client.
+app.get('/api/cam-seg', requireAuth, (req, res) => {
+  const targetUrl = req.query.u ? decodeURIComponent(req.query.u) : null;
+  if (!targetUrl) return res.status(400).send('Missing segment URL');
+
+  https.get(targetUrl, {
+    headers: { 'X-Stream-Token': process.env.GO2RTC_SECRET }
+  }, (segRes) => {
+    const ct = segRes.headers['content-type'] || 'video/MP2T';
+    res.setHeader('Content-Type', ct);
+    res.setHeader('Cache-Control', segRes.headers['cache-control'] || 'no-cache');
+
+    if (ct.includes('mpegURL') || ct.includes('x-mpegurl') || targetUrl.includes('.m3u8')) {
+      let body = '';
+      segRes.on('data', chunk => { body += chunk; });
+      segRes.on('end', () => {
+        const rewritten = body.replace(/(https?:\/\/\S+)/g, match =>
+          `/api/cam-seg?u=${encodeURIComponent(match)}`
+        );
+        res.send(rewritten);
+      });
+    } else {
+      segRes.pipe(res);
+    }
+  }).on('error', (err) => {
+    console.error('Camera segment error:', err);
+    res.status(502).send('Segment unavailable');
+  });
+});
 
 app.listen(port, () => {
   console.log(`✅ Combined server is running at http://localhost:${port}`);
