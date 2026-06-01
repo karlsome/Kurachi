@@ -12341,27 +12341,12 @@ app.post("/uploadMasterImage", async (req, res) => {
     }
 
     const 品番 = oldRecord["品番"] || oldRecord["材料品番"] || "unknownPart"; // Support both 品番 and 材料品番
-    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const fileName = `${品番}.jpg`;
-    const filePath = `masterImage/${fileName}`;
-    const file = admin.storage().bucket().file(filePath);
-
-    const buffer = Buffer.from(base64, "base64");
-
-    // Use a random token or constant token (example below)
-    const downloadToken = "masterDBToken69";
-
-    await file.save(uploadBuffer, {
-      metadata: {
-        contentType: "image/jpeg",
-        metadata: {
-          firebaseStorageDownloadTokens: downloadToken
-        }
-      }
+    const fileNameBase = `${collectionName}_${recordId}_${品番}_${label || "main"}`.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const filePathPrefix = `masterImage/${fileNameBase}`;
+    const { imageURL: firebaseUrl } = await saveBase64AssetToFirebase({
+      base64,
+      filePathPrefix,
     });
-
-    // ✅ Firebase-style URL (supports preview/download with token)
-    const firebaseUrl = `https://firebasestorage.googleapis.com/v0/b/${file.bucket.name}/o/${encodeURIComponent(file.name)}?alt=media&token=${downloadToken}`;
 
     // Update document in the specified collection
     await collection.updateOne({ _id: objectId }, { $set: { imageURL: firebaseUrl } });
