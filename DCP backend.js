@@ -6373,6 +6373,133 @@ function updateSheetStatus(selectedValue, machineName) {
     });
 }
 
+const SEND_TO_MACHINE_COOLDOWN_MS = 17000;
+let sendToMachineCooldownEndTime = 0;
+let sendToMachineCooldownTimer = null;
+let sendToMachineProgressHideTimer = null;
+let sendToMachineProgressMessage = 'Send to machine in progress';
+
+function getSendToMachineCooldownSeconds() {
+  return Math.max(0, Math.ceil((sendToMachineCooldownEndTime - Date.now()) / 1000));
+}
+
+function isSendToMachineCooldownActive() {
+  return getSendToMachineCooldownSeconds() > 0;
+}
+
+function setButtonCooldownState(button, disabled, secondsRemaining) {
+  if (!button) return;
+
+  if (!button.dataset.sendToMachineOriginalText) {
+    button.dataset.sendToMachineOriginalText = button.textContent.trim() || 'Send to Machine';
+  }
+
+  if (disabled) {
+    button.disabled = true;
+    button.setAttribute('aria-disabled', 'true');
+    button.title = `Send to machine in progress. Please wait ${secondsRemaining} seconds.`;
+    button.style.opacity = '0.6';
+    button.style.cursor = 'not-allowed';
+    button.style.filter = 'grayscale(20%)';
+    button.textContent = `送信中... ${secondsRemaining}s`;
+    return;
+  }
+
+  button.disabled = false;
+  button.removeAttribute('aria-disabled');
+  button.removeAttribute('title');
+  button.style.opacity = '';
+  button.style.cursor = '';
+  button.style.filter = '';
+  if (button.dataset.sendToMachineOriginalText) {
+    button.textContent = button.dataset.sendToMachineOriginalText;
+    delete button.dataset.sendToMachineOriginalText;
+  }
+}
+
+function getSendingProgressTextElement() {
+  const progressBar = document.getElementById('sendingProgressBar');
+  if (!progressBar) return null;
+  return progressBar.querySelector('.progress-text span') || progressBar.querySelector('.progress-text');
+}
+
+function showSendToMachineProgress(secondsRemaining) {
+  const progressBar = document.getElementById('sendingProgressBar');
+  if (!progressBar) return;
+
+  clearTimeout(sendToMachineProgressHideTimer);
+  progressBar.style.display = 'block';
+  progressBar.classList.remove('hide');
+  progressBar.classList.add('show');
+
+  const progressText = getSendingProgressTextElement();
+  if (progressText) {
+    if (!progressText.dataset.defaultText) {
+      progressText.dataset.defaultText = progressText.textContent.trim();
+    }
+    progressText.textContent = `${sendToMachineProgressMessage}... ${secondsRemaining}s remaining / 送信中... 残り${secondsRemaining}秒`;
+  }
+}
+
+function hideSendToMachineProgress() {
+  const progressBar = document.getElementById('sendingProgressBar');
+  if (!progressBar) return;
+
+  progressBar.classList.remove('show');
+  progressBar.classList.add('hide');
+  sendToMachineProgressHideTimer = setTimeout(() => {
+    progressBar.classList.remove('hide');
+    progressBar.style.display = 'none';
+
+    const progressText = getSendingProgressTextElement();
+    if (progressText?.dataset.defaultText) {
+      progressText.textContent = progressText.dataset.defaultText;
+      delete progressText.dataset.defaultText;
+    }
+  }, 300);
+}
+
+function updateSendToMachineCooldownUI() {
+  const secondsRemaining = getSendToMachineCooldownSeconds();
+  const isActive = secondsRemaining > 0;
+  const mainButton = document.getElementById('sendtoNC');
+  const step3Button = document.getElementById('startStep3Send');
+
+  setButtonCooldownState(mainButton, isActive, secondsRemaining);
+  if (!isOZMANASMachine()) {
+    setButtonCooldownState(step3Button, isActive, secondsRemaining);
+  }
+
+  if (isActive) {
+    showSendToMachineProgress(secondsRemaining);
+    return;
+  }
+
+  hideSendToMachineProgress();
+}
+
+function beginSendToMachineCooldown(message = 'Send to machine in progress') {
+  sendToMachineProgressMessage = message;
+  sendToMachineCooldownEndTime = Date.now() + SEND_TO_MACHINE_COOLDOWN_MS;
+
+  clearInterval(sendToMachineCooldownTimer);
+  updateSendToMachineCooldownUI();
+  sendToMachineCooldownTimer = setInterval(() => {
+    updateSendToMachineCooldownUI();
+    if (!isSendToMachineCooldownActive()) {
+      clearInterval(sendToMachineCooldownTimer);
+      sendToMachineCooldownTimer = null;
+    }
+  }, 250);
+}
+
+function updateSendToMachineProgressMessage(message) {
+  sendToMachineProgressMessage = message;
+  if (isSendToMachineCooldownActive()) {
+    updateSendToMachineCooldownUI();
+  }
+}
+
 //this function sends request to nc cutter's pC (supports single or multiple machines)
 async function sendtoNC(selectedValue) {
 
@@ -6400,31 +6527,32 @@ async function sendtoNC(selectedValue) {
   //   }
   // }
   
-  sendtoNCButtonisPressed = true;
-
-  // Save to localStorage with a unique key format
-  const key = `${uniquePrefix}sendtoNCButtonisPressed`;
-  localStorage.setItem(key, 'true'); // Save the value with the unique key
-  
   const ipAddress = document.getElementById('ipInfo').value;
   console.log(ipAddress);
   const currentSebanggo = document.getElementById('sub-dropdown').value;
-  
-  // Also store the current sebanggo as the "previous" sebanggo to track changes
-  localStorage.setItem(`${uniquePrefix}previous-sebanggo`, currentSebanggo);
-  console.log(`Send to Machine button pressed. Set state to true for ${currentSebanggo}`);
+
   //window.alert(machineName + currentSebanggo);
   if (!currentSebanggo) {
     window.alert("Please select product first / 背番号選んでください");
     return;
   }
 
-  // Show progress bar at top of page
-  const progressBar = document.getElementById('sendingProgressBar');
-  if (progressBar) {
-    progressBar.classList.remove('hide');
-    progressBar.classList.add('show');
+  if (isSendToMachineCooldownActive()) {
+    updateSendToMachineCooldownUI();
+    return;
   }
+
+  sendtoNCButtonisPressed = true;
+
+  // Save to localStorage with a unique key format
+  const key = `${uniquePrefix}sendtoNCButtonisPressed`;
+  localStorage.setItem(key, 'true'); // Save the value with the unique key
+
+  // Also store the current sebanggo as the "previous" sebanggo to track changes
+  localStorage.setItem(`${uniquePrefix}previous-sebanggo`, currentSebanggo);
+  console.log(`Send to Machine button pressed. Set state to true for ${currentSebanggo}`);
+
+  beginSendToMachineCooldown('Send to machine in progress');
 
   // Check if this is grouped machines (by page detection OR comma-separated IPs)
   const hasMultipleIPs = ipAddress && ipAddress.includes(',');
@@ -6456,11 +6584,7 @@ async function sendtoNC(selectedValue) {
     window.currentMachineGroup = Object.entries(machineIPMap).map(([name, ip]) => ({ name, ip }));
     console.log("💾 Stored currentMachineGroup:", window.currentMachineGroup);
     
-    // Update progress bar text for multiple machines
-    const progressText = progressBar?.querySelector('span');
-    if (progressText) {
-      progressText.textContent = `Sending to ${Object.keys(machineIPMap).length} machines...`;
-    }
+    updateSendToMachineProgressMessage(`Sending to ${Object.keys(machineIPMap).length} machines`);
     
     // Send command to each machine
     const sendPromises = Object.entries(machineIPMap).map(async ([machine, ip]) => {
@@ -6516,18 +6640,6 @@ async function sendtoNC(selectedValue) {
       console.error('Error sending to multiple machines:', error);
     }
     
-    // Hide progress bar after 7 seconds
-    setTimeout(() => {
-      if (progressBar) {
-        progressBar.classList.remove('show');
-        progressBar.classList.add('hide');
-        setTimeout(() => {
-          progressBar.classList.remove('hide');
-          progressBar.style.display = 'none';
-        }, 300);
-      }
-    }, 7000);
-    
   } else {
     // Single machine - original logic
     const url = `http://${ipAddress}:5000/request?filename=${currentSebanggo}.pce`;
@@ -6542,30 +6654,8 @@ async function sendtoNC(selectedValue) {
       
       console.log('Command sent successfully to mini PC');
       
-      // Hide progress bar after 4 seconds
-      setTimeout(() => {
-        if (progressBar) {
-          progressBar.classList.remove('show');
-          progressBar.classList.add('hide');
-          setTimeout(() => {
-            progressBar.classList.remove('hide');
-            progressBar.style.display = 'none';
-          }, 300);
-        }
-      }, 4000);
-      
     } catch (error) {
       console.error('Failed to send command to mini PC:', error);
-      
-      // Hide progress bar on error
-      if (progressBar) {
-        progressBar.classList.remove('show');
-        progressBar.classList.add('hide');
-        setTimeout(() => {
-          progressBar.classList.remove('hide');
-          progressBar.style.display = 'none';
-        }, 300);
-      }
       
       // Fallback: Try opening in new tab if fetch fails
       console.log('Fetch failed, trying fallback method...');
@@ -6579,6 +6669,11 @@ async function sendtoNC(selectedValue) {
 
 // Send to NC button - triggers 3-step modal workflow OR individual send modal
 document.getElementById('sendtoNC').addEventListener('click', async function() {
+  if (isSendToMachineCooldownActive()) {
+    updateSendToMachineCooldownUI();
+    return;
+  }
+
   // Check if this is a single machine (DCP iReporter) or grouped machines (DCP Grouping)
   const machineName = document.getElementById('process').value;
   const isSingleMachine = !isGroupedMachinePage && !machineName.includes(',');
@@ -6593,10 +6688,10 @@ document.getElementById('sendtoNC').addEventListener('click', async function() {
     }
     
     // Log send to machine action (main button)
-    await logTabletAction('Send to machine pressed (Main button)', 'in-progress', {
+    logTabletAction('Send to machine pressed (Main button)', 'in-progress', {
       sebanggo: currentSebanggo,
       source: 'Main Send to Machine button'
-    });
+    }).catch(error => console.error('Failed to log main send to machine action:', error));
     
     // Send directly to machine
     await sendtoNC(currentSebanggo);
@@ -10147,14 +10242,19 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
     }
 
     // Default behavior for non-OZMANAS machines
+    if (isSendToMachineCooldownActive()) {
+      updateSendToMachineCooldownUI();
+      return;
+    }
+
     // Close Step 3 modal immediately (sending in background)
     document.getElementById('step3Modal').style.display = 'none';
     
     // Log send to machine action (Step 3)
-    await logTabletAction('Send to machine pressed (Step 3)', 'in-progress', {
+    logTabletAction('Send to machine pressed (Step 3)', 'in-progress', {
       背番号: currentSebanggo,
       source: 'Step 3 Modal'
-    });
+    }).catch(error => console.error('Failed to log Step 3 send to machine action:', error));
     
     // Clear cached product details from localStorage
     localStorage.removeItem(`${uniquePrefix}cached-sebanggo`);
