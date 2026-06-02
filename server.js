@@ -30718,6 +30718,10 @@ app.get(['/api/video-manual-media', '/api/video-manual-media/:assetName'], async
       return res.status(400).json({ error: 'url query parameter is required' });
     }
 
+    const wantsDownload = String(req.query.download || '').toLowerCase() === '1'
+      || String(req.query.download || '').toLowerCase() === 'true';
+    const requestedFileName = String(req.query.fileName || req.params.assetName || '').trim();
+
     const assetUrl = new URL(rawUrl);
     const isAllowedHost = assetUrl.hostname === 'firebasestorage.googleapis.com'
       || assetUrl.hostname === 'storage.googleapis.com'
@@ -30757,6 +30761,11 @@ app.get(['/api/video-manual-media', '/api/video-manual-media/:assetName'], async
       const value = upstream.headers.get(headerName);
       if (value) res.setHeader(headerName, value);
     });
+
+    if (wantsDownload) {
+      const downloadFileName = vmNormalizeFileName(requestedFileName || 'video-manual.mp4');
+      res.setHeader('Content-Disposition', `attachment; filename="${downloadFileName}"`);
+    }
 
     if (!upstream.body) {
       return res.end();
