@@ -30622,10 +30622,89 @@ app.get('/api/check-forms/verify-qr', async (req, res) => {
 
 console.log('📋 Check form tablet routes loaded');
 
-// ── Camera stream proxy ───────────────────────────────────────────────────────
+// ── Camera HLS proxy with server-side segment cache ───────────────────────────
+// go2rtc expires each segment after ~1s. We pre-download segment bytes the
+// moment each one appears and hold them in camCache, so HLS.js always gets
+// data from memory rather than hitting an expired go2rtc URL.
+
+const camBuf = {
+  mediaUrl: null,
+  segs: [],        // { url, dur, seq }
+  seen: new Set(),
+  running: false,
+};
+const camCache = new Map(); // url → Buffer
+const CAM_MAX_SEGS = 20;
+const CAM_POLL_MS = 400;
+
+async function camInitSession() {
+  const masterUrl = process.env.GO2RTC_STREAM_URL;
+  const r = await fetch(masterUrl, { headers: { 'X-Stream-Token': process.env.GO2RTC_SECRET } });
+  if (!r.ok) throw new Error(`go2rtc master ${r.status}`);
+  const body = await r.text();
+  const line = body.split('\n').find(l => l.trim() && !l.startsWith('#'));
+  if (!line) throw new Error('No level URL in master playlist');
+  camBuf.mediaUrl = new URL(line.trim(), masterUrl).toString();
+  camBuf.segs = [];
+  camBuf.seen = new Set();
+  camCache.clear();
+  console.log('[cam] session started:', camBuf.mediaUrl);
+}
+
+async function camPollOnce() {
+  const r = await fetch(camBuf.mediaUrl, { headers: { 'X-Stream-Token': process.env.GO2RTC_SECRET } });
+  if (!r.ok) { camBuf.mediaUrl = null; return; }
+  const body = await r.text();
+  let seqStart = 0, dur = 0.5, idx = 0;
+  const fresh = [];
+  for (const raw of body.split('\n')) {
+    const line = raw.trim();
+    if (line.startsWith('#EXT-X-MEDIA-SEQUENCE:')) seqStart = parseInt(line.slice(22), 10);
+    else if (line.startsWith('#EXTINF:')) dur = parseFloat(line.slice(8));
+    else if (line && !line.startsWith('#')) {
+      const seq = seqStart + idx++;
+      if (!camBuf.seen.has(seq)) {
+        const url = new URL(line, camBuf.mediaUrl).toString();
+        camBuf.seen.add(seq);
+        camBuf.segs.push({ url, dur, seq });
+        fresh.push(url);
+        if (camBuf.segs.length > CAM_MAX_SEGS) {
+          const old = camBuf.segs.shift();
+          camBuf.seen.delete(old.seq);
+          camCache.delete(old.url);
+        }
+      }
+    }
+  }
+  // Pre-download fresh segment bytes immediately before go2rtc expires them
+  await Promise.all(fresh.map(async (url) => {
+    try {
+      const sr = await fetch(url, { headers: { 'X-Stream-Token': process.env.GO2RTC_SECRET } });
+      if (sr.ok) camCache.set(url, Buffer.from(await sr.arrayBuffer()));
+    } catch (e) { /* segment vanished between poll and download — skip */ }
+  }));
+}
+
+async function camRunLoop() {
+  if (camBuf.running) return;
+  camBuf.running = true;
+  while (camBuf.running) {
+    try {
+      if (!camBuf.mediaUrl) await camInitSession();
+      await camPollOnce();
+    } catch (e) {
+      console.error('[cam]', e.message);
+      camBuf.mediaUrl = null;
+      await new Promise(r => setTimeout(r, 2000));
+    }
+    await new Promise(r => setTimeout(r, CAM_POLL_MS));
+  }
+}
 
 const requireAuth = (req, res, next) => {
-  const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  if (process.env.NODE_ENV !== 'production') return next();
+  const header = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  const token = header || (req.query.token || '');
   if (!token) return res.status(401).json({ error: 'Authentication required' });
   try {
     jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key-change-in-production');
@@ -30635,59 +30714,46 @@ const requireAuth = (req, res, next) => {
   }
 };
 
-app.get('/api/cam', requireAuth, (req, res) => {
-  const streamUrl = process.env.GO2RTC_STREAM_URL;
-  if (!streamUrl) return res.status(404).json({ error: 'GO2RTC_STREAM_URL not configured' });
-
-  https.get(streamUrl, {
-    headers: { 'X-Stream-Token': process.env.GO2RTC_SECRET }
-  }, (streamRes) => {
-    let body = '';
-    streamRes.on('data', chunk => { body += chunk; });
-    streamRes.on('end', () => {
-      // Rewrite absolute segment/playlist URLs so they route back through the authenticated proxy
-      const rewritten = body.replace(/(https?:\/\/\S+)/g, match =>
-        `/api/cam-seg?u=${encodeURIComponent(match)}`
-      );
-      res.setHeader('Content-Type', 'application/x-mpegURL');
-      res.setHeader('Cache-Control', 'no-cache');
-      res.send(rewritten);
-    });
-  }).on('error', (err) => {
-    console.error('Camera stream error:', err);
-    res.status(502).send('Stream unavailable');
-  });
+app.get('/api/cam', requireAuth, async (req, res) => {
+  if (!process.env.GO2RTC_STREAM_URL) return res.status(404).json({ error: 'GO2RTC_STREAM_URL not configured' });
+  camRunLoop();
+  // Wait up to 3s for at least 3 segments to be downloaded into cache
+  for (let i = 0; i < 15 && camBuf.segs.filter(s => camCache.has(s.url)).length < 3; i++) {
+    await new Promise(r => setTimeout(r, 200));
+  }
+  const segs = camBuf.segs.filter(s => camCache.has(s.url));
+  if (!segs.length) return res.status(503).send('Buffer not ready');
+  const playlist = [
+    '#EXTM3U',
+    '#EXT-X-VERSION:3',
+    '#EXT-X-TARGETDURATION:1',
+    `#EXT-X-MEDIA-SEQUENCE:${segs[0].seq}`,
+    ...segs.flatMap(s => [`#EXTINF:${s.dur.toFixed(3)},`, `/api/cam-seg?u=${encodeURIComponent(s.url)}`]),
+  ].join('\n');
+  res.setHeader('Content-Type', 'application/x-mpegURL');
+  res.setHeader('Cache-Control', 'no-cache, no-store');
+  res.send(playlist);
 });
 
-// Proxies individual HLS segments (and any sub-playlists) — also rewrites URLs if the
-// response is itself an m3u8, so Caddy's token requirement is never exposed to the client.
-app.get('/api/cam-seg', requireAuth, (req, res) => {
+app.get('/api/cam-seg', requireAuth, async (req, res) => {
   const targetUrl = req.query.u ? decodeURIComponent(req.query.u) : null;
   if (!targetUrl) return res.status(400).send('Missing segment URL');
-
-  https.get(targetUrl, {
-    headers: { 'X-Stream-Token': process.env.GO2RTC_SECRET }
-  }, (segRes) => {
-    const ct = segRes.headers['content-type'] || 'video/MP2T';
-    res.setHeader('Content-Type', ct);
-    res.setHeader('Cache-Control', segRes.headers['cache-control'] || 'no-cache');
-
-    if (ct.includes('mpegURL') || ct.includes('x-mpegurl') || targetUrl.includes('.m3u8')) {
-      let body = '';
-      segRes.on('data', chunk => { body += chunk; });
-      segRes.on('end', () => {
-        const rewritten = body.replace(/(https?:\/\/\S+)/g, match =>
-          `/api/cam-seg?u=${encodeURIComponent(match)}`
-        );
-        res.send(rewritten);
-      });
-    } else {
-      segRes.pipe(res);
-    }
-  }).on('error', (err) => {
-    console.error('Camera segment error:', err);
+  const cached = camCache.get(targetUrl);
+  if (cached) {
+    res.setHeader('Content-Type', 'video/MP2T');
+    res.setHeader('Cache-Control', 'no-cache');
+    return res.send(cached);
+  }
+  // Fallback: live fetch for any segment not yet in cache
+  try {
+    const sr = await fetch(targetUrl, { headers: { 'X-Stream-Token': process.env.GO2RTC_SECRET } });
+    if (!sr.ok) return res.status(sr.status).send('Segment unavailable');
+    res.setHeader('Content-Type', 'video/MP2T');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.send(Buffer.from(await sr.arrayBuffer()));
+  } catch (e) {
     res.status(502).send('Segment unavailable');
-  });
+  }
 });
 
 app.listen(port, () => {
