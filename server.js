@@ -28300,9 +28300,71 @@ app.post('/api/video-manuals-studio/projects/:id/deploy-render', async (req, res
     });
   } catch (err) {
     console.error('❌ video-manuals-studio deploy-render error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(Number(err?.status) || 500).json({ error: err?.message || 'Failed to deploy rendered revision' });
   }
 });
+
+app.post('/api/video-manuals-studio/projects/:id/deploy-upload',
+  express.raw({ type: '*/*', limit: '500mb' }),
+  async (req, res) => {
+    try {
+      const { username, role } = vmGetRequester(req);
+      if (!VM_DEPLOY_ROLES.has(role)) {
+        return res.status(403).json({ error: 'Insufficient role to deploy projects' });
+      }
+
+      const db = client.db(VM_DB);
+      const projectId = new ObjectId(req.params.id);
+      const project = await db.collection(VMSS_PROJECTS_COLLECTION).findOne({ _id: projectId, deleted: { $ne: true } });
+      if (!project) return res.status(404).json({ error: 'Project not found' });
+
+      const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: project.playlistId });
+      if (!playlist || !vmCanEdit(playlist, username, role)) {
+        return res.status(403).json({ error: 'No edit access to this project' });
+      }
+
+      const rawRevisionId = String(req.headers['x-revision-id'] || '').trim();
+      if (!rawRevisionId) return res.status(400).json({ error: 'x-revision-id is required' });
+
+      let revisionId;
+      try {
+        revisionId = new ObjectId(rawRevisionId);
+      } catch (_) {
+        return res.status(400).json({ error: 'Invalid revisionId' });
+      }
+
+      const revision = await db.collection(VMSS_REVISIONS_COLLECTION).findOne({ _id: revisionId, projectId });
+      if (!revision?.snapshot?.edit) {
+        return res.status(404).json({ error: 'Revision not found for this project' });
+      }
+
+      const buffer = req.body;
+      if (!Buffer.isBuffer(buffer) || !buffer.length) {
+        return res.status(400).json({ error: 'No video data received' });
+      }
+
+      const requestedFileName = String(req.headers['x-file-name'] || '').trim();
+      const mimeType = String(req.headers['content-type'] || '').trim() || 'video/mp4';
+      const safeTitle = requestedFileName
+        || vmNormalizeFileName(`${project?.title || 'video-manual'}-rev-${revision?.revisionNumber || 'deploy'}.mp4`);
+      const upload = await vmUploadVideoBuffer(buffer, {
+        fileName: safeTitle,
+        mimeType,
+        uploadFolder: 'videoManualDeployed',
+      });
+
+      const result = await vmssApplyDeployedRevision(db, projectId, revision, username, upload);
+      res.json({
+        ...result,
+        provider: 'browser-export',
+        uploadedAt: upload.uploadedAt,
+      });
+    } catch (err) {
+      console.error('❌ video-manuals-studio deploy-upload error:', err);
+      res.status(Number(err?.status) || 500).json({ error: err?.message || 'Failed to deploy uploaded revision' });
+    }
+  }
+);
 
 app.get('/api/video-manuals-studio/playlists/:id/assets', async (req, res) => {
   try {
@@ -28413,6 +28475,17 @@ function vmCanManageDeployedFiles(role) {
 
 function vmShotstackEnabled() {
   return !!String(process.env.SHOTSTACK_API_KEY || '').trim();
+}
+
+function vmShotstackExtractErrorMessages(payload = {}) {
+  const rawErrors = [
+    ...(Array.isArray(payload?.errors) ? payload.errors : []),
+    ...(Array.isArray(payload?.response?.errors) ? payload.response.errors : []),
+  ];
+
+  return rawErrors
+    .map((entry) => String(entry?.detail || entry?.message || entry?.title || entry?.error || '').trim())
+    .filter(Boolean);
 }
 
 function vmClampNumber(value, fallback = 0, { min = -Infinity, max = Infinity } = {}) {
@@ -28771,17 +28844,38 @@ async function vmShotstackRequest(method, path, body = null) {
     body: body ? JSON.stringify(body) : undefined,
   });
 
+  const providerRequestId = String(response.headers.get('x-amzn-requestid') || '').trim();
+  const providerTraceId = String(response.headers.get('x-amzn-trace-id') || '').trim();
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const validationDetails = Array.isArray(payload?.errors)
-      ? payload.errors
-          .map((entry) => String(entry?.detail || entry?.title || '').trim())
-          .filter(Boolean)
-      : [];
+    const validationDetails = vmShotstackExtractErrorMessages(payload);
     const message = validationDetails.length
       ? validationDetails.join('; ')
-      : payload?.response?.message || payload?.message || payload?.error || `Shotstack request failed (${response.status})`;
-    throw new Error(message);
+      : payload?.response?.error
+        || payload?.response?.message
+        || payload?.message
+        || payload?.error
+        || response.statusText
+        || `Shotstack request failed (${response.status})`;
+    const error = new Error(message);
+    error.status = response.status;
+    error.provider = 'shotstack';
+    if (providerRequestId) {
+      error.providerRequestId = providerRequestId;
+    }
+    if (providerTraceId) {
+      error.providerTraceId = providerTraceId;
+    }
+    const providerCode = typeof payload?.code === 'string' && payload.code.trim()
+      ? payload.code.trim()
+      : typeof payload?.response?.errors?.[0]?.code === 'string' && payload.response.errors[0].code.trim()
+        ? payload.response.errors[0].code.trim()
+        : '';
+    if (providerCode) {
+      error.code = providerCode;
+    }
+    error.shotstackPayload = payload;
+    throw error;
   }
   return payload;
 }
@@ -28895,7 +28989,13 @@ app.post('/api/video-manuals/render', async (req, res) => {
     });
   } catch (err) {
     console.error('❌ video-manuals render queue error:', err);
-    res.status(500).json({ error: err.message });
+    const responsePayload = { error: err?.message || 'Failed to queue render' };
+    if (err?.code) responsePayload.code = err.code;
+    if (err?.provider === 'shotstack') responsePayload.provider = 'shotstack';
+    if (err?.providerRequestId) responsePayload.providerRequestId = err.providerRequestId;
+    if (err?.providerTraceId) responsePayload.providerTraceId = err.providerTraceId;
+    if (err?.shotstackPayload) responsePayload.shotstackPayload = err.shotstackPayload;
+    res.status(Number(err?.status) || 500).json(responsePayload);
   }
 });
 
@@ -28927,7 +29027,7 @@ app.get('/api/video-manuals/render-status/:id', async (req, res) => {
     });
   } catch (err) {
     console.error('❌ video-manuals render status error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(Number(err?.status) || 500).json({ error: err?.message || 'Failed to fetch render status' });
   }
 });
 
@@ -28960,7 +29060,7 @@ app.get('/api/video-manuals/download/:id', async (req, res) => {
     res.redirect(result.url);
   } catch (err) {
     console.error('❌ video-manuals download redirect error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(Number(err?.status) || 500).json({ error: err?.message || 'Failed to fetch render download' });
   }
 });
 // GET /api/video-playlists
