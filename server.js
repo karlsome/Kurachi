@@ -28156,6 +28156,7 @@ app.post('/api/video-manuals-studio/projects/:id/deploy', async (req, res) => {
     }
 
     const requestedReuse = req.body?.reuseExistingDeployment === true;
+    const allowMissingReusableDeployment = req.body?.allowMissingReusableDeployment === true;
     let deployedVideoMetadata = null;
 
     if (req.body?.deployedVideo && typeof req.body.deployedVideo === 'object') {
@@ -28165,6 +28166,14 @@ app.post('/api/video-manuals-studio/projects/:id/deploy', async (req, res) => {
     if (!deployedVideoMetadata && requestedReuse) {
       deployedVideoMetadata = await vmssResolveReusableDeployedVideo(revision);
       if (!deployedVideoMetadata) {
+        if (allowMissingReusableDeployment) {
+          return res.json({
+            reusableDeploymentAvailable: false,
+            needsRender: true,
+            revisionId: String(revision._id || ''),
+            projectId: String(projectId),
+          });
+        }
         return res.status(409).json({
           error: 'Reusable deployed video not available',
           code: 'DEPLOYED_VIDEO_REUSE_MISSING',
