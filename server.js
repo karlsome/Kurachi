@@ -27524,7 +27524,10 @@ const VMSS_PLAYLISTS_COLLECTION = 'videoManualShotstackPlaylists';
 const VMSS_PROJECTS_COLLECTION = 'videoManualShotstackProjects';
 const VMSS_REVISIONS_COLLECTION = 'videoManualShotstackRevisions';
 const VMSS_ASSETS_COLLECTION = 'videoManualShotstackAssets';
-const VM_UPLOAD_FOLDERS       = new Set(['videoManuals', 'videoManuals/shotstackAssets', 'videoManualDeployed']);
+const VMSS_ASSET_UPLOAD_FOLDER = 'videoManuals/shotstackAssets';
+const VMSS_ASSET_PREVIEW_FOLDER = `${VMSS_ASSET_UPLOAD_FOLDER}/previews`;
+const VMSS_ASSET_THUMBNAIL_FOLDER = `${VMSS_ASSET_UPLOAD_FOLDER}/thumbnails`;
+const VM_UPLOAD_FOLDERS       = new Set(['videoManuals', VMSS_ASSET_UPLOAD_FOLDER, VMSS_ASSET_PREVIEW_FOLDER, VMSS_ASSET_THUMBNAIL_FOLDER, 'videoManualDeployed']);
 const VM_DEPLOYED_RETENTION_DAYS = 60;
 const VM_DEPLOYED_RETENTION_MS = VM_DEPLOYED_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 const VM_DEPLOYED_CLEANUP_INTERVAL_MS = 12 * 60 * 60 * 1000;
@@ -27532,9 +27535,17 @@ const VM_SHOTSTACK_API_BASE = 'https://api.shotstack.io/edit';
 const VM_SHOTSTACK_STAGE = String(process.env.SHOTSTACK_STAGE || 'stage').trim() === 'v1' ? 'v1' : 'stage';
 const VM_SHOTSTACK_POLL_INTERVAL_MS = 5000;
 const VM_SHOTSTACK_TIMEOUT_MS = 10 * 60 * 1000;
+const VMSS_ASSET_PREVIEW_DURATION_SECONDS = 4;
+const VMSS_ASSET_THUMBNAIL_CAPTURE_SECONDS = 0.8;
 
 let vmDeployedCleanupPromise = null;
 let vmDeployedCleanupLastRunAt = 0;
+
+function vmIsSupportedUploadFolder(uploadFolder = '') {
+  const normalized = String(uploadFolder || '').trim().replace(/\/+$/, '');
+  return VM_UPLOAD_FOLDERS.has(normalized)
+    || normalized.startsWith(`${VMSS_ASSET_UPLOAD_FOLDER}/`);
+}
 
 // Roles that can manage (create/edit/delete) playlists and assign access
 const VM_MANAGE_ROLES = new Set(['admin', '課長', '部長', '係長']);
@@ -28420,52 +28431,77 @@ app.post('/api/video-manuals-studio/upload-asset',
         return res.status(403).json({ error: 'No edit access to this playlist' });
       }
 
-      const fileName = vmNormalizeFileName(req.headers['x-file-name'] || `asset_${Date.now()}`);
+      const rawFileName = req.headers['x-file-name'] || `asset_${Date.now()}`;
       const mimeType = req.headers['content-type'] || 'application/octet-stream';
-      const uploadFolder = 'videoManuals/shotstackAssets';
+      let fileName = vmNormalizeFileName(rawFileName);
+      
+      if (!fileName.includes('.')) {
+        if (mimeType.includes('mp4')) fileName += '.mp4';
+        else if (mimeType.includes('webm')) fileName += '.webm';
+        else if (mimeType.includes('quicktime') || mimeType.includes('mov')) fileName += '.mov';
+        else fileName += '.mp4';
+      }
+
       const buffer = req.body;
       if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
         return res.status(400).json({ error: 'No file data received' });
       }
 
-      const assetId = new ObjectId().toString();
-      const uploadedAt = new Date();
-      const storagePath = `${uploadFolder}/${Date.now()}_${assetId}_${fileName}`;
-      const bucket = admin.storage().bucket();
-      const fileRef = bucket.file(storagePath);
-      const downloadToken = `vmss_${Date.now()}`;
-
-      await fileRef.save(buffer, {
-        metadata: {
-          contentType: mimeType,
-          metadata: { firebaseStorageDownloadTokens: downloadToken },
-        },
+      const upload = await vmUploadBuffer(buffer, {
+        fileName,
+        mimeType,
+        uploadFolder: VMSS_ASSET_UPLOAD_FOLDER,
+        tokenPrefix: 'vmss',
       });
-
-      const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(storagePath)}?alt=media&token=${downloadToken}`;
+      const db = client.db(VM_DB);
+      const uploadedAt = new Date(upload.uploadedAt);
+      const assetType = vmInferAssetTypeFromMimeType(mimeType);
+      const shouldProcessVideo = assetType === 'video' && vmShotstackEnabled();
       const assetDoc = {
         playlistId,
-        assetId,
-        name: fileName,
-        type: vmInferAssetTypeFromMimeType(mimeType),
+        assetId: upload.assetId,
+        name: upload.fileName,
+        type: assetType,
         mimeType,
-        storagePath,
-        downloadUrl: publicUrl,
+        storagePath: upload.storagePath,
+        downloadUrl: upload.url,
         size: buffer.length,
         uploadedBy: username,
         uploadedAt,
+        previewUrl: null,
+        previewStoragePath: null,
+        previewMimeType: null,
+        previewDurationSeconds: null,
+        thumbnailUrl: null,
+        thumbnailStoragePath: null,
+        thumbnailMimeType: null,
+        processingStatus: shouldProcessVideo ? 'processing' : 'ready',
+        processingError: null,
+        processingStartedAt: shouldProcessVideo ? uploadedAt : null,
+        processingCompletedAt: shouldProcessVideo ? null : uploadedAt,
+        shotstackRenderId: null,
       };
 
-      await client.db(VM_DB).collection(VMSS_ASSETS_COLLECTION).insertOne(assetDoc);
+      const insertResult = await db.collection(VMSS_ASSETS_COLLECTION).insertOne(assetDoc);
       res.json({
-        assetId,
-        fileName,
-        mimeType,
-        storagePath,
-        uploadedAt: uploadedAt.toISOString(),
-        type: assetDoc.type,
-        url: publicUrl,
+        assetId: upload.assetId,
+        fileName: upload.fileName,
+        mimeType: upload.mimeType,
+        storagePath: upload.storagePath,
+        uploadedAt: upload.uploadedAt,
+        type: assetType,
+        url: upload.url,
+        previewUrl: null,
+        thumbnailUrl: null,
+        processingStatus: assetDoc.processingStatus,
+        processingError: null,
+        processingStartedAt: assetDoc.processingStartedAt ? assetDoc.processingStartedAt.toISOString() : null,
+        processingCompletedAt: assetDoc.processingCompletedAt ? assetDoc.processingCompletedAt.toISOString() : null,
       });
+
+      if (shouldProcessVideo) {
+        vmssQueueAssetDerivativeProcessing({ ...assetDoc, _id: insertResult.insertedId });
+      }
     } catch (err) {
       console.error('❌ video-manuals-studio upload error:', err);
       res.status(500).json({ error: err.message });
@@ -28495,6 +28531,58 @@ function vmShotstackExtractErrorMessages(payload = {}) {
   return rawErrors
     .map((entry) => String(entry?.detail || entry?.message || entry?.title || entry?.error || '').trim())
     .filter(Boolean);
+}
+
+function vmShotstackSerializeValue(value, fallback = '') {
+  if (typeof value === 'string') {
+    const normalized = value.trim();
+    return normalized || fallback;
+  }
+
+  if (value == null) {
+    return fallback;
+  }
+
+  try {
+    const serialized = JSON.stringify(value);
+    if (!serialized || serialized === '{}' || serialized === '[]') {
+      return fallback;
+    }
+    return serialized;
+  } catch {
+    const normalized = String(value).trim();
+    if (!normalized || normalized === '[object Object]') {
+      return fallback;
+    }
+    return normalized;
+  }
+}
+
+function vmShotstackBuildRenderFailure(response = {}, renderId = '') {
+  const renderStatus = String(response?.status || '').trim().toLowerCase();
+  const details = [
+    ...vmShotstackExtractErrorMessages(response),
+    vmShotstackSerializeValue(response?.error),
+    vmShotstackSerializeValue(response?.message),
+  ].filter(Boolean);
+
+  const context = [
+    renderId ? `renderId=${renderId}` : '',
+    renderStatus ? `status=${renderStatus}` : '',
+  ].filter(Boolean).join(', ');
+
+  const message = details.length
+    ? details.join('; ')
+    : 'No failure details returned by Shotstack';
+
+  const error = new Error(
+    context ? `Shotstack render failed (${context}): ${message}` : `Shotstack render failed: ${message}`,
+  );
+  error.provider = 'shotstack';
+  error.renderId = renderId || undefined;
+  error.renderStatus = renderStatus || undefined;
+  error.shotstackPayload = response;
+  return error;
 }
 
 function vmClampNumber(value, fallback = 0, { min = -Infinity, max = Infinity } = {}) {
@@ -28903,34 +28991,236 @@ async function vmShotstackGetRender(renderId) {
 
 async function vmShotstackWaitForRender(renderId) {
   const startedAt = Date.now();
+  let lastStatus = '';
   while (Date.now() - startedAt < VM_SHOTSTACK_TIMEOUT_MS) {
     const response = await vmShotstackGetRender(renderId);
     const status = String(response?.status || '').toLowerCase();
+    if (status && status !== lastStatus) {
+      console.log(`🎬 Shotstack render ${renderId} status: ${status}`);
+      lastStatus = status;
+    }
     if (status === 'done' && response?.url) return response;
     if (status === 'failed') {
-      throw new Error(response?.error || 'Shotstack render failed');
+      throw vmShotstackBuildRenderFailure(response, renderId);
     }
     await new Promise((resolve) => setTimeout(resolve, VM_SHOTSTACK_POLL_INTERVAL_MS));
   }
   throw new Error('Timed out waiting for Shotstack render');
 }
 
-async function vmUploadVideoBuffer(buffer, { fileName, mimeType = 'video/mp4', uploadFolder = 'videoManualDeployed' } = {}) {
-  if (!Buffer.isBuffer(buffer) || !buffer.length) {
-    throw new Error('No video buffer provided');
+function vmBuildDerivativeFileStem(fileName = '') {
+  return vmNormalizeFileName(fileName || 'asset').replace(/\.[a-z0-9]{1,8}$/i, '') || `asset_${Date.now()}`;
+}
+
+function vmInferExtensionFromMimeType(mimeType = '', fallback = 'bin') {
+  const normalized = String(mimeType || '').toLowerCase();
+  if (normalized.includes('jpeg')) return 'jpg';
+  if (normalized.includes('png')) return 'png';
+  if (normalized.includes('gif')) return 'gif';
+  if (normalized.includes('webp')) return 'webp';
+  if (normalized.includes('mp4')) return 'mp4';
+  if (normalized.includes('quicktime')) return 'mov';
+  if (normalized.includes('webm')) return 'webm';
+  if (normalized.includes('mpeg')) return 'mp3';
+  return fallback;
+}
+
+function vmssBuildAssetDerivativeEdit(assetDoc) {
+  const sourceUrl = String(assetDoc?.downloadUrl || assetDoc?.url || '').trim();
+  if (!sourceUrl) throw new Error('Asset has no downloadable source URL');
+
+  const edit = {
+    timeline: {
+      background: '#000000',
+      tracks: [{
+        clips: [{
+          asset: {
+            type: 'video',
+            src: sourceUrl,
+            trim: 0,
+            volume: 0,
+            transcode: true,
+          },
+          start: 0,
+          length: VMSS_ASSET_PREVIEW_DURATION_SECONDS,
+          fit: 'crop',
+          position: 'center',
+        }],
+      }],
+      cache: true,
+    },
+    output: {
+      format: 'mp4',
+      resolution: 'preview',
+      fps: 15,
+      quality: 'low',
+      mute: true,
+      poster: {
+        capture: VMSS_ASSET_THUMBNAIL_CAPTURE_SECONDS,
+      },
+      thumbnail: {
+        capture: VMSS_ASSET_THUMBNAIL_CAPTURE_SECONDS,
+        scale: 1,
+      },
+    },
+    disk: 'local',
+    merge: [],
+  };
+
+  const callbackUrl = String(process.env.SHOTSTACK_CALLBACK_URL || '').trim();
+  if (callbackUrl) {
+    edit.callback = callbackUrl;
   }
 
-  if (!VM_UPLOAD_FOLDERS.has(uploadFolder)) {
+  return edit;
+}
+
+async function vmDownloadBuffer(url) {
+  const response = await fetch(url, { method: 'GET' });
+  if (!response.ok) {
+    throw new Error(`Failed to download remote media (${response.status})`);
+  }
+
+  return {
+    buffer: Buffer.from(await response.arrayBuffer()),
+    mimeType: String(response.headers.get('content-type') || '').trim() || 'application/octet-stream',
+  };
+}
+
+function vmssBuildAssetFilter(assetDoc) {
+  if (assetDoc?._id) return { _id: assetDoc._id };
+  return { assetId: String(assetDoc?.assetId || '') };
+}
+
+function vmssQueueAssetDerivativeProcessing(assetDoc) {
+  if (!assetDoc || assetDoc.type !== 'video' || !vmShotstackEnabled()) return;
+
+  setImmediate(() => {
+    vmssProcessUploadedVideoAsset(assetDoc).catch((error) => {
+      console.error('❌ video-manuals-studio derivative processing error:', {
+        assetId: assetDoc?.assetId || null,
+        renderId: error?.renderId || null,
+        message: error?.message || String(error),
+        shotstackPayload: error?.shotstackPayload || null,
+      });
+      if (error?.stack) {
+        console.error(error.stack);
+      }
+    });
+  });
+}
+
+async function vmssProcessUploadedVideoAsset(assetDoc) {
+  const db = client.db(VM_DB);
+  const assetsCollection = db.collection(VMSS_ASSETS_COLLECTION);
+  const assetFilter = vmssBuildAssetFilter(assetDoc);
+  const derivativeEdit = vmssBuildAssetDerivativeEdit(assetDoc);
+  const assetLabel = assetDoc?.assetId || assetDoc?._id || assetDoc?.name || 'unknown-asset';
+  console.log('Sending Derivative Edit to Shotstack:', JSON.stringify(derivativeEdit, null, 2));
+  let renderId = null;
+
+  try {
+    renderId = await vmShotstackQueueRender(derivativeEdit);
+    console.log(`🎬 Shotstack derivative queued for ${assetLabel}: renderId=${renderId}`);
+    await assetsCollection.updateOne(assetFilter, {
+      $set: {
+        shotstackRenderId: renderId,
+        processingStatus: 'processing',
+        processingStartedAt: new Date(),
+        processingError: null,
+      },
+    });
+
+    const render = await vmShotstackWaitForRender(renderId);
+  console.log(`🎬 Shotstack derivative completed for ${assetLabel}: renderId=${renderId}`);
+    const previewSourceUrl = String(render?.url || '').trim();
+    const thumbnailSourceUrl = String(render?.thumbnail || render?.poster || '').trim();
+    if (!previewSourceUrl) {
+      throw new Error('Shotstack did not return a preview video URL');
+    }
+
+    const [previewDownload, thumbnailDownload] = await Promise.all([
+      vmDownloadBuffer(previewSourceUrl),
+      thumbnailSourceUrl ? vmDownloadBuffer(thumbnailSourceUrl) : Promise.resolve(null),
+    ]);
+
+    const fileStem = vmBuildDerivativeFileStem(assetDoc?.name || assetDoc?.fileName || assetDoc?.assetId || 'asset');
+    const previewExtension = vmInferExtensionFromMimeType(previewDownload?.mimeType, 'mp4');
+    const thumbnailExtension = vmInferExtensionFromMimeType(thumbnailDownload?.mimeType, 'jpg');
+
+    const [previewUpload, thumbnailUpload] = await Promise.all([
+      vmUploadBuffer(previewDownload.buffer, {
+        fileName: `${fileStem}_preview.${previewExtension}`,
+        mimeType: previewDownload.mimeType || 'video/mp4',
+        uploadFolder: VMSS_ASSET_PREVIEW_FOLDER,
+        tokenPrefix: 'vmss',
+      }),
+      thumbnailDownload
+        ? vmUploadBuffer(thumbnailDownload.buffer, {
+          fileName: `${fileStem}_thumbnail.${thumbnailExtension}`,
+          mimeType: thumbnailDownload.mimeType || 'image/jpeg',
+          uploadFolder: VMSS_ASSET_THUMBNAIL_FOLDER,
+          tokenPrefix: 'vmss',
+        })
+        : Promise.resolve(null),
+    ]);
+
+    await assetsCollection.updateOne(assetFilter, {
+      $set: {
+        previewUrl: previewUpload.url,
+        previewStoragePath: previewUpload.storagePath,
+        previewMimeType: previewUpload.mimeType,
+        previewDurationSeconds: Number.isFinite(Number(render?.duration)) ? Number(render.duration) : VMSS_ASSET_PREVIEW_DURATION_SECONDS,
+        thumbnailUrl: thumbnailUpload?.url || null,
+        thumbnailStoragePath: thumbnailUpload?.storagePath || null,
+        thumbnailMimeType: thumbnailUpload?.mimeType || null,
+        processingStatus: 'ready',
+        processingError: null,
+        processingCompletedAt: new Date(),
+        shotstackRenderId: renderId,
+      },
+    });
+    console.log(`✅ Video manual asset derivative ready for ${assetLabel}:`, {
+      previewUrl: previewUpload.url,
+      thumbnailUrl: thumbnailUpload?.url || null,
+    });
+  } catch (error) {
+    console.error(`❌ Shotstack derivative failed for ${assetLabel}:`, {
+      renderId,
+      message: error?.message || String(error),
+      shotstackPayload: error?.shotstackPayload || null,
+    });
+    await assetsCollection.updateOne(assetFilter, {
+      $set: {
+        processingStatus: 'failed',
+        processingError: error?.message || 'Failed to generate preview assets',
+        processingCompletedAt: new Date(),
+        ...(renderId ? { shotstackRenderId: renderId } : {}),
+      },
+    }).catch((updateError) => {
+      console.error('❌ video-manuals-studio derivative failure state update error:', updateError);
+    });
+    throw error;
+  }
+}
+
+async function vmUploadBuffer(buffer, { fileName, mimeType = 'application/octet-stream', uploadFolder = 'videoManuals', tokenPrefix = 'vm' } = {}) {
+  if (!Buffer.isBuffer(buffer) || !buffer.length) {
+    throw new Error('No buffer provided');
+  }
+
+  if (!vmIsSupportedUploadFolder(uploadFolder)) {
     throw new Error('Unsupported upload folder');
   }
 
-  const normalizedFileName = vmNormalizeFileName(fileName || `video_${Date.now()}.mp4`);
+  const normalizedFileName = vmNormalizeFileName(fileName || `asset_${Date.now()}`);
   const assetId = new ObjectId().toString();
   const uploadedAt = new Date();
   const storagePath = `${uploadFolder}/${Date.now()}_${assetId}_${normalizedFileName}`;
   const bucket = admin.storage().bucket();
   const fileRef = bucket.file(storagePath);
-  const downloadToken = `vm_${Date.now()}`;
+  const safeTokenPrefix = String(tokenPrefix || 'vm').trim().replace(/[^a-zA-Z0-9_-]+/g, '') || 'vm';
+  const downloadToken = `${safeTokenPrefix}_${Date.now()}`;
 
   await fileRef.save(buffer, {
     metadata: {
@@ -28947,6 +29237,10 @@ async function vmUploadVideoBuffer(buffer, { fileName, mimeType = 'video/mp4', u
     uploadedAt: uploadedAt.toISOString(),
     url: `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(storagePath)}?alt=media&token=${downloadToken}`,
   };
+}
+
+async function vmUploadVideoBuffer(buffer, { fileName, mimeType = 'video/mp4', uploadFolder = 'videoManualDeployed' } = {}) {
+  return vmUploadBuffer(buffer, { fileName, mimeType, uploadFolder, tokenPrefix: 'vm' });
 }
 
 async function vmShotstackRenderToFirebase(project, revision) {
@@ -30798,7 +31092,7 @@ app.post('/api/upload-video-manual',
         return res.status(400).json({ error: 'No file data received' });
       }
 
-      if (!VM_UPLOAD_FOLDERS.has(uploadFolder)) {
+      if (!vmIsSupportedUploadFolder(uploadFolder)) {
         return res.status(400).json({ error: 'Unsupported upload folder' });
       }
 
