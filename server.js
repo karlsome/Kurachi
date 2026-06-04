@@ -27537,6 +27537,9 @@ const VM_SHOTSTACK_POLL_INTERVAL_MS = 5000;
 const VM_SHOTSTACK_TIMEOUT_MS = 10 * 60 * 1000;
 const VMSS_ASSET_PREVIEW_DURATION_SECONDS = 4;
 const VMSS_ASSET_THUMBNAIL_CAPTURE_SECONDS = 0.8;
+const VMSS_DERIVATIVE_MAX_ATTEMPTS = 3;
+const VMSS_DERIVATIVE_RETRY_DELAY_MS = 4000;
+const VMSS_SOURCE_SIGNED_URL_TTL_MS = 15 * 60 * 1000;
 
 let vmDeployedCleanupPromise = null;
 let vmDeployedCleanupLastRunAt = 0;
@@ -29025,8 +29028,8 @@ function vmInferExtensionFromMimeType(mimeType = '', fallback = 'bin') {
   return fallback;
 }
 
-function vmssBuildAssetDerivativeEdit(assetDoc) {
-  const sourceUrl = String(assetDoc?.downloadUrl || assetDoc?.url || '').trim();
+function vmssBuildAssetDerivativeEdit(assetDoc, sourceUrlOverride = '') {
+  const sourceUrl = String(sourceUrlOverride || assetDoc?.downloadUrl || assetDoc?.url || '').trim();
   if (!sourceUrl) throw new Error('Asset has no downloadable source URL');
 
   const edit = {
@@ -29075,6 +29078,40 @@ function vmssBuildAssetDerivativeEdit(assetDoc) {
   return edit;
 }
 
+async function vmssResolveShotstackSourceUrl(assetDoc) {
+  const fallbackUrl = String(assetDoc?.downloadUrl || assetDoc?.url || '').trim();
+  const storagePath = String(assetDoc?.storagePath || '').trim();
+  if (!storagePath) return fallbackUrl;
+
+  try {
+    const bucket = admin.storage().bucket();
+    const fileRef = bucket.file(storagePath);
+    const expiresAt = Date.now() + VMSS_SOURCE_SIGNED_URL_TTL_MS;
+    const [signedUrl] = await fileRef.getSignedUrl({
+      version: 'v4',
+      action: 'read',
+      expires: expiresAt,
+    });
+    return String(signedUrl || '').trim() || fallbackUrl;
+  } catch (error) {
+    console.warn('⚠️ Failed to generate signed URL for Shotstack source, using fallback URL:', {
+      assetId: assetDoc?.assetId || null,
+      storagePath,
+      message: error?.message || String(error),
+    });
+    return fallbackUrl;
+  }
+}
+
+function vmssIsRetryableDerivativeError(error) {
+  const message = String(error?.message || '').toLowerCase();
+  if (!message) return false;
+  return message.includes('not a valid media file')
+    || message.includes('unsupported format')
+    || message.includes('failed to download remote media')
+    || message.includes('timed out waiting for shotstack render');
+}
+
 async function vmDownloadBuffer(url) {
   const response = await fetch(url, { method: 'GET' });
   if (!response.ok) {
@@ -29114,25 +29151,55 @@ async function vmssProcessUploadedVideoAsset(assetDoc) {
   const db = client.db(VM_DB);
   const assetsCollection = db.collection(VMSS_ASSETS_COLLECTION);
   const assetFilter = vmssBuildAssetFilter(assetDoc);
-  const derivativeEdit = vmssBuildAssetDerivativeEdit(assetDoc);
   const assetLabel = assetDoc?.assetId || assetDoc?._id || assetDoc?.name || 'unknown-asset';
-  console.log('Sending Derivative Edit to Shotstack:', JSON.stringify(derivativeEdit, null, 2));
   let renderId = null;
+  let render = null;
 
   try {
-    renderId = await vmShotstackQueueRender(derivativeEdit);
-    console.log(`🎬 Shotstack derivative queued for ${assetLabel}: renderId=${renderId}`);
-    await assetsCollection.updateOne(assetFilter, {
-      $set: {
-        shotstackRenderId: renderId,
-        processingStatus: 'processing',
-        processingStartedAt: new Date(),
-        processingError: null,
-      },
-    });
+    let lastAttemptError = null;
 
-    const render = await vmShotstackWaitForRender(renderId);
-  console.log(`🎬 Shotstack derivative completed for ${assetLabel}: renderId=${renderId}`);
+    for (let attempt = 1; attempt <= VMSS_DERIVATIVE_MAX_ATTEMPTS; attempt += 1) {
+      const sourceUrl = await vmssResolveShotstackSourceUrl(assetDoc);
+      const derivativeEdit = vmssBuildAssetDerivativeEdit(assetDoc, sourceUrl);
+      console.log(`Sending Derivative Edit to Shotstack (attempt ${attempt}/${VMSS_DERIVATIVE_MAX_ATTEMPTS}):`, JSON.stringify(derivativeEdit, null, 2));
+
+      try {
+        renderId = await vmShotstackQueueRender(derivativeEdit);
+        console.log(`🎬 Shotstack derivative queued for ${assetLabel}: renderId=${renderId} (attempt ${attempt})`);
+        await assetsCollection.updateOne(assetFilter, {
+          $set: {
+            shotstackRenderId: renderId,
+            processingStatus: 'processing',
+            processingStartedAt: new Date(),
+            processingError: null,
+          },
+        });
+
+        render = await vmShotstackWaitForRender(renderId);
+        console.log(`🎬 Shotstack derivative completed for ${assetLabel}: renderId=${renderId}`);
+        break;
+      } catch (attemptError) {
+        lastAttemptError = attemptError;
+        const retryable = vmssIsRetryableDerivativeError(attemptError);
+        const hasMoreAttempts = attempt < VMSS_DERIVATIVE_MAX_ATTEMPTS;
+        if (!retryable || !hasMoreAttempts) {
+          throw attemptError;
+        }
+
+        const delayMs = VMSS_DERIVATIVE_RETRY_DELAY_MS * attempt;
+        console.warn(`⚠️ Retrying Shotstack derivative for ${assetLabel} after attempt ${attempt} failed:`, {
+          renderId,
+          delayMs,
+          message: attemptError?.message || String(attemptError),
+        });
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+
+    if (!render) {
+      throw lastAttemptError || new Error('Shotstack derivative render did not complete');
+    }
+
     const previewSourceUrl = String(render?.url || '').trim();
     const thumbnailSourceUrl = String(render?.thumbnail || render?.poster || '').trim();
     if (!previewSourceUrl) {
