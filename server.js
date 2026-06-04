@@ -30609,20 +30609,18 @@ console.log('📋 Check form tablet routes loaded');
 
 // ── Camera HLS proxy (MediaMTX) ───────────────────────────────────────────────
 // MediaMTX serves HLS with correct continuous timestamps. This proxy enforces
-// JWT auth so only logged-in users can access the feed. MediaMTX credentials
-// stay server-side and never reach the browser.
-
-const requireAuth = (req, res, next) => {
-  if (process.env.NODE_ENV !== 'production') return next();
-  const header = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
-  const token = header || (req.query.token || '');
-  if (!token) return res.status(401).json({ error: 'Authentication required' });
-  try {
-    jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key-change-in-production');
-    next();
-  } catch {
-    return res.status(401).json({ error: 'Invalid or expired token' });
+const requireCamAuth = (req, res, next) => {
+  const user = process.env.CAM_USER;
+  const pass = process.env.CAM_PASS;
+  if (!user || !pass) return next();
+  const match = (req.headers.authorization || '').match(/^Basic\s+(.+)$/i);
+  if (!match) return res.status(401).set('WWW-Authenticate', 'Basic realm="camera"').json({ error: 'Authentication required' });
+  const decoded = Buffer.from(match[1], 'base64').toString();
+  const colonIdx = decoded.indexOf(':');
+  if (decoded.slice(0, colonIdx) !== user || decoded.slice(colonIdx + 1) !== pass) {
+    return res.status(401).json({ error: 'Invalid credentials' });
   }
+  next();
 };
 
 function camHeaders() {
@@ -30650,7 +30648,7 @@ async function camFetchMediaPlaylist(masterUrl) {
 
 const CAM_STREAMS = new Set(['tapo_cam', 'tapo_cam2', 'tapo_cam3']);
 
-app.get('/api/cam', requireAuth, async (req, res) => {
+app.get('/api/cam', requireCamAuth, async (req, res) => {
   const base = process.env.CAM_HLS_URL;
   if (!base) return res.status(404).json({ error: 'CAM_HLS_URL not configured' });
   const stream = req.query.stream || 'tapo_cam';
@@ -30676,7 +30674,7 @@ app.get('/api/cam', requireAuth, async (req, res) => {
   }
 });
 
-app.get('/api/cam-seg', requireAuth, async (req, res) => {
+app.get('/api/cam-seg', requireCamAuth, async (req, res) => {
   const targetUrl = req.query.u ? decodeURIComponent(req.query.u) : null;
   if (!targetUrl) return res.status(400).send('Missing segment URL');
   try {
