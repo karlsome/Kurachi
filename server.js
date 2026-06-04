@@ -30688,6 +30688,89 @@ app.get('/api/cam-seg', requireCamAuth, async (req, res) => {
   }
 });
 
+// ── PCE File Upload (Google Drive) ───────────────────────────────────────────
+const { google } = require('googleapis');
+const { Readable } = require('stream');
+
+function _buildDriveClient() {
+  const clientEmail = process.env.GOOGLE_CLIENT_EMAIL;
+  const privateKey = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n');
+  if (!clientEmail || !privateKey) throw new Error('Google Drive credentials not configured');
+  const auth = new google.auth.GoogleAuth({
+    credentials: { client_email: clientEmail, private_key: privateKey },
+    scopes: ['https://www.googleapis.com/auth/drive'],
+  });
+  return google.drive({ version: 'v3', auth });
+}
+
+app.get('/api/masterdb/pce-data', async (req, res) => {
+  try {
+    await client.connect();
+    const records = await client
+      .db('Sasaki_Coating_MasterDB')
+      .collection('masterDB')
+      .find({}, { projection: { 背番号: 1, 品番: 1, 品名: 1, _id: 0 } })
+      .toArray();
+    res.json(records);
+  } catch (error) {
+    console.error('❌ Error fetching PCE master data:', error);
+    res.status(500).json({ error: 'Failed to fetch master data', details: error.message });
+  }
+});
+
+app.post('/api/pce/upload', async (req, res) => {
+  try {
+    const { fileBase64, sebanggoList, machineSuffix } = req.body;
+    if (!fileBase64 || !Array.isArray(sebanggoList) || !sebanggoList.length || !machineSuffix) {
+      return res.status(400).json({ error: 'fileBase64, sebanggoList, and machineSuffix are required' });
+    }
+    const folderId = process.env.GOOGLE_DRIVE_PCE_FOLDER_ID;
+    if (!folderId) {
+      return res.status(500).json({ error: 'GOOGLE_DRIVE_PCE_FOLDER_ID is not set in .env' });
+    }
+    const drive = _buildDriveClient();
+    const fileNames = sebanggoList.map((s) => `${s}_${machineSuffix}.pce`);
+
+    // Check for existing files in one query
+    const nameConditions = fileNames.map((n) => `name = '${n}'`).join(' or ');
+    const searchRes = await drive.files.list({
+      q: `(${nameConditions}) and '${folderId}' in parents and trashed = false`,
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+      fields: 'files(name)',
+    });
+    const conflicts = (searchRes.data.files || []).map((f) => f.name);
+    if (conflicts.length > 0) {
+      return res.status(409).json({ error: 'File already exists', conflicts });
+    }
+
+    const fileBuffer = Buffer.from(fileBase64, 'base64');
+    const uploaded = [];
+    for (const sebanggo of sebanggoList) {
+      const fileName = `${sebanggo}_${machineSuffix}.pce`;
+      const stream = new Readable();
+      stream.push(fileBuffer);
+      stream.push(null);
+      const response = await drive.files.create({
+        requestBody: { name: fileName, parents: [folderId] },
+        media: { mimeType: 'application/octet-stream', body: stream },
+        supportsAllDrives: true,
+        fields: 'id,name',
+      });
+      uploaded.push({ sebanggo, name: response.data.name, id: response.data.id });
+    }
+    res.json({ success: true, files: uploaded });
+  } catch (error) {
+    const googleDetails = error.response?.data || error.errors || null;
+    console.error('❌ Error uploading PCE file:', error.message, googleDetails || '');
+    res.status(500).json({
+      error: 'Failed to upload PCE file',
+      details: error.message,
+      google: googleDetails,
+    });
+  }
+});
+
 app.listen(port, () => {
   console.log(`✅ Combined server is running at http://localhost:${port}`);
   console.log(`🌐 GEN CSV Download available at: http://localhost:${port}/gen-automated`);
