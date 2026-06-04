@@ -1,5 +1,8 @@
 # Environment variables
 .env
+
+# MediaMTX config (contains RTSP credentials — keep off git)
+mediamtx.yml
 .env.local
 .env.development.local
 .env.test.local

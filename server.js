@@ -30607,6 +30607,88 @@ app.get('/api/check-forms/verify-qr', async (req, res) => {
 
 console.log('📋 Check form tablet routes loaded');
 
+// ── Camera HLS proxy (MediaMTX) ───────────────────────────────────────────────
+// MediaMTX serves HLS with correct continuous timestamps. This proxy enforces
+// JWT auth so only logged-in users can access the feed. MediaMTX credentials
+// stay server-side and never reach the browser.
+
+const requireAuth = (req, res, next) => {
+  if (process.env.NODE_ENV !== 'production') return next();
+  const header = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  const token = header || (req.query.token || '');
+  if (!token) return res.status(401).json({ error: 'Authentication required' });
+  try {
+    jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key-change-in-production');
+    next();
+  } catch {
+    return res.status(401).json({ error: 'Invalid or expired token' });
+  }
+};
+
+function camHeaders() {
+  const user = process.env.CAM_USER;
+  const pass = process.env.CAM_PASS;
+  if (!user || !pass) return {};
+  return { 'Authorization': 'Basic ' + Buffer.from(`${user}:${pass}`).toString('base64') };
+}
+
+async function camFetchMediaPlaylist(masterUrl) {
+  const r = await fetch(masterUrl, { headers: camHeaders() });
+  if (!r.ok) throw new Error(`MediaMTX playlist ${r.status}`);
+  const body = await r.text();
+  if (body.includes('#EXTINF') || body.includes('#EXT-X-TARGETDURATION')) {
+    return { url: masterUrl, body };
+  }
+  // Master playlist — follow the first variant
+  const variantLine = body.split('\n').find(l => l.trim() && !l.startsWith('#'));
+  if (!variantLine) throw new Error('No variant in master playlist');
+  const variantUrl = new URL(variantLine.trim(), masterUrl).toString();
+  const r2 = await fetch(variantUrl, { headers: camHeaders() });
+  if (!r2.ok) throw new Error(`MediaMTX variant ${r2.status}`);
+  return { url: variantUrl, body: await r2.text() };
+}
+
+const CAM_STREAMS = new Set(['tapo_cam', 'tapo_cam2', 'tapo_cam3']);
+
+app.get('/api/cam', requireAuth, async (req, res) => {
+  const base = process.env.CAM_HLS_URL;
+  if (!base) return res.status(404).json({ error: 'CAM_HLS_URL not configured' });
+  const stream = req.query.stream || 'tapo_cam';
+  if (!CAM_STREAMS.has(stream)) return res.status(400).json({ error: 'Unknown stream' });
+  // Swap the stream name in the base URL (e.g. tapo_cam → tapo_cam2)
+  const masterUrl = base.replace('tapo_cam', stream);
+  try {
+    const { url: mediaUrl, body } = await camFetchMediaPlaylist(masterUrl);
+    const playlist = body.split('\n').map(line => {
+      const trimmed = line.trim();
+      if (trimmed && !trimmed.startsWith('#')) {
+        const segUrl = new URL(trimmed, mediaUrl).toString();
+        return `/api/cam-seg?u=${encodeURIComponent(segUrl)}`;
+      }
+      return line;
+    }).join('\n');
+    res.setHeader('Content-Type', 'application/x-mpegURL');
+    res.setHeader('Cache-Control', 'no-cache, no-store');
+    res.send(playlist);
+  } catch (e) {
+    console.error('[cam]', e.message);
+    res.status(502).send('Camera unavailable');
+  }
+});
+
+app.get('/api/cam-seg', requireAuth, async (req, res) => {
+  const targetUrl = req.query.u ? decodeURIComponent(req.query.u) : null;
+  if (!targetUrl) return res.status(400).send('Missing segment URL');
+  try {
+    const sr = await fetch(targetUrl, { headers: camHeaders() });
+    if (!sr.ok) return res.status(sr.status).send('Segment unavailable');
+    res.setHeader('Content-Type', 'video/MP2T');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.send(Buffer.from(await sr.arrayBuffer()));
+  } catch (e) {
+    res.status(502).send('Segment unavailable');
+  }
+});
 
 app.listen(port, () => {
   console.log(`✅ Combined server is running at http://localhost:${port}`);
