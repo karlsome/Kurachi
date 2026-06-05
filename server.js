@@ -27540,9 +27540,12 @@ const VMSS_ASSET_THUMBNAIL_CAPTURE_SECONDS = 0.8;
 const VMSS_DERIVATIVE_MAX_ATTEMPTS = 3;
 const VMSS_DERIVATIVE_RETRY_DELAY_MS = 4000;
 const VMSS_SOURCE_SIGNED_URL_TTL_MS = 15 * 60 * 1000;
+const VMSS_ASSET_RECYCLE_RETENTION_DAYS = 60;
+const VMSS_ASSET_RECYCLE_RETENTION_MS = VMSS_ASSET_RECYCLE_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 
 let vmDeployedCleanupPromise = null;
 let vmDeployedCleanupLastRunAt = 0;
+let vmssAssetCleanupPromise = null;
 
 function vmIsSupportedUploadFolder(uploadFolder = '') {
   const normalized = String(uploadFolder || '').trim().replace(/\/+$/, '');
@@ -27619,23 +27622,145 @@ function vmssAssetUsageMatches(project, asset) {
   return false;
 }
 
-async function vmssBuildAssetUsageMap(db, playlistId) {
+function vmssBuildAssetUsagePayload(asset, usageDetail = null) {
+  const usageCount = Math.max(0, Number(usageDetail?.usageCount) || 0);
+  const usageProjects = Array.isArray(usageDetail?.projects) ? usageDetail.projects : [];
+  return {
+    ...asset,
+    usageCount,
+    usageProjects,
+    isUnused: usageCount === 0,
+    canDelete: usageCount === 0,
+  };
+}
+
+async function vmssBuildAssetUsageDetailsMap(db, playlistId, { assetDocs = null } = {}) {
   const projects = await db.collection(VMSS_PROJECTS_COLLECTION)
-    .find({ playlistId, deleted: { $ne: true } }, { projection: { edit: 1, assetSourceMap: 1 } })
+    .find(
+      { playlistId, deleted: { $ne: true } },
+      { projection: { _id: 1, title: 1, edit: 1, assetSourceMap: 1 } }
+    )
     .toArray();
-  const assets = await db.collection(VMSS_ASSETS_COLLECTION)
-    .find({ playlistId }, { projection: { _id: 1, assetId: 1, storagePath: 1, downloadUrl: 1, url: 1 } })
-    .toArray();
+
+  const assets = Array.isArray(assetDocs)
+    ? assetDocs
+    : await db.collection(VMSS_ASSETS_COLLECTION)
+      .find(
+        { playlistId, deleted: { $ne: true } },
+        { projection: { _id: 1, assetId: 1, storagePath: 1, downloadUrl: 1, url: 1 } }
+      )
+      .toArray();
 
   const usageMap = new Map();
   assets.forEach((asset) => {
-    const usageCount = projects.reduce((count, project) => (
-      count + (vmssAssetUsageMatches(project, asset) ? 1 : 0)
-    ), 0);
-    usageMap.set(String(asset._id), usageCount);
+    const usedByProjects = [];
+    projects.forEach((project) => {
+      if (!vmssAssetUsageMatches(project, asset)) return;
+      usedByProjects.push({
+        projectId: String(project?._id || ''),
+        title: String(project?.title || 'Untitled Project'),
+      });
+    });
+
+    usageMap.set(String(asset._id), {
+      usageCount: usedByProjects.length,
+      projects: usedByProjects,
+    });
   });
 
   return usageMap;
+}
+
+async function vmssBuildAssetUsageMap(db, playlistId) {
+  const usageDetails = await vmssBuildAssetUsageDetailsMap(db, playlistId);
+  const usageMap = new Map();
+  usageDetails.forEach((detail, key) => {
+    usageMap.set(key, Number(detail?.usageCount) || 0);
+  });
+  return usageMap;
+}
+
+function vmssBuildDeletedAssetMetadata(username = 'unknown') {
+  const deletedAt = new Date();
+  return {
+    deleted: true,
+    deletedAt,
+    deletedBy: String(username || 'unknown'),
+    recycleExpiresAt: new Date(deletedAt.getTime() + VMSS_ASSET_RECYCLE_RETENTION_MS),
+  };
+}
+
+function vmCanPermanentlyDeleteStudioAssets(role = '') {
+  return String(role || '').trim().toLowerCase() === 'admin';
+}
+
+async function vmDeleteFirebaseStoragePathIfExists(storagePath) {
+  const normalizedPath = String(storagePath || '').trim();
+  if (!normalizedPath) return false;
+
+  try {
+    await admin.storage().bucket().file(normalizedPath).delete();
+    return true;
+  } catch (error) {
+    const missingFile = Number(error?.code) === 404 || /no such object/i.test(String(error?.message || ''));
+    if (missingFile) return false;
+    throw error;
+  }
+}
+
+async function vmssPermanentlyDeleteAssetDocument(db, asset, { deletedBy = 'admin' } = {}) {
+  const storagePaths = [
+    asset?.storagePath,
+    asset?.previewStoragePath,
+    asset?.thumbnailStoragePath,
+  ].map((path) => String(path || '').trim()).filter(Boolean);
+
+  for (const storagePath of storagePaths) {
+    await vmDeleteFirebaseStoragePathIfExists(storagePath);
+  }
+
+  await db.collection(VMSS_ASSETS_COLLECTION).deleteOne({ _id: asset._id });
+  return {
+    assetId: String(asset?.assetId || asset?._id || ''),
+    name: String(asset?.name || ''),
+    deletedBy,
+  };
+}
+
+async function vmssCleanupExpiredRecycledAssets() {
+  if (vmssAssetCleanupPromise) return vmssAssetCleanupPromise;
+
+  vmssAssetCleanupPromise = (async () => {
+    const db = client.db(VM_DB);
+    const now = new Date();
+    const expiredAssets = await db.collection(VMSS_ASSETS_COLLECTION)
+      .find({ deleted: true, recycleExpiresAt: { $lte: now } })
+      .toArray();
+
+    let deletedCount = 0;
+    for (const asset of expiredAssets) {
+      try {
+        await vmssPermanentlyDeleteAssetDocument(db, asset, { deletedBy: 'retention' });
+        deletedCount += 1;
+      } catch (error) {
+        console.warn('⚠️ vmss asset retention delete failed:', {
+          assetId: String(asset?.assetId || asset?._id || ''),
+          message: error?.message || String(error),
+        });
+      }
+    }
+
+    return {
+      scanned: expiredAssets.length,
+      deleted: deletedCount,
+    };
+  })();
+
+  try {
+    return await vmssAssetCleanupPromise;
+  } finally {
+    vmssAssetCleanupPromise = null;
+  }
 }
 
 function vmssBuildDeployedVideoMetadata(input = {}) {
@@ -28400,19 +28525,251 @@ app.get('/api/video-manuals-studio/playlists/:id/assets', async (req, res) => {
       return res.status(403).json({ error: 'No view access to this playlist' });
     }
 
-    const usageMap = await vmssBuildAssetUsageMap(db, playlistId);
-    const assets = await db.collection(VMSS_ASSETS_COLLECTION).find({ playlistId }).sort({ uploadedAt: -1 }).toArray();
+    const assets = await db.collection(VMSS_ASSETS_COLLECTION)
+      .find({ playlistId, deleted: { $ne: true } })
+      .sort({ uploadedAt: -1 })
+      .toArray();
+    const usageMap = await vmssBuildAssetUsageDetailsMap(db, playlistId, { assetDocs: assets });
+
+    res.json(assets.map((asset) => vmssBuildAssetUsagePayload(asset, usageMap.get(String(asset._id)))));
+  } catch (err) {
+    console.error('❌ video-manuals-studio assets list error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/video-manuals-studio/playlists/:id/assets/delete-preview', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const db = client.db(VM_DB);
+    const playlistId = new ObjectId(req.params.id);
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: playlistId });
+    if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
+    if (!vmCanEdit(playlist, username, role)) {
+      return res.status(403).json({ error: 'No edit access to this playlist' });
+    }
+
+    const rawAssetIds = Array.isArray(req.body?.assetIds) ? req.body.assetIds : [];
+    const normalizedAssetIds = Array.from(new Set(rawAssetIds.map((id) => String(id || '').trim()).filter(Boolean)));
+    if (!normalizedAssetIds.length) {
+      return res.status(400).json({ error: 'assetIds is required' });
+    }
+
+    const assets = await db.collection(VMSS_ASSETS_COLLECTION)
+      .find({
+        playlistId,
+        deleted: { $ne: true },
+        $or: [
+          { assetId: { $in: normalizedAssetIds } },
+          { _id: { $in: normalizedAssetIds.filter((id) => ObjectId.isValid(id)).map((id) => new ObjectId(id)) } },
+        ],
+      })
+      .toArray();
+
+    const foundAssetIdSet = new Set();
+    assets.forEach((asset) => {
+      foundAssetIdSet.add(String(asset.assetId || ''));
+      foundAssetIdSet.add(String(asset._id || ''));
+    });
+
+    const usageMap = await vmssBuildAssetUsageDetailsMap(db, playlistId, { assetDocs: assets });
+    const previewAssets = assets.map((asset) => vmssBuildAssetUsagePayload(asset, usageMap.get(String(asset._id))));
+
+    res.json({
+      assets: previewAssets,
+      notFoundAssetIds: normalizedAssetIds.filter((assetId) => !foundAssetIdSet.has(assetId)),
+    });
+  } catch (err) {
+    console.error('❌ video-manuals-studio assets delete-preview error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/video-manuals-studio/playlists/:id/assets/soft-delete', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const db = client.db(VM_DB);
+    const playlistId = new ObjectId(req.params.id);
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: playlistId });
+    if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
+    if (!vmCanEdit(playlist, username, role)) {
+      return res.status(403).json({ error: 'No edit access to this playlist' });
+    }
+
+    const rawAssetIds = Array.isArray(req.body?.assetIds) ? req.body.assetIds : [];
+    const normalizedAssetIds = Array.from(new Set(rawAssetIds.map((id) => String(id || '').trim()).filter(Boolean)));
+    if (!normalizedAssetIds.length) {
+      return res.status(400).json({ error: 'assetIds is required' });
+    }
+
+    const assets = await db.collection(VMSS_ASSETS_COLLECTION)
+      .find({
+        playlistId,
+        deleted: { $ne: true },
+        $or: [
+          { assetId: { $in: normalizedAssetIds } },
+          { _id: { $in: normalizedAssetIds.filter((id) => ObjectId.isValid(id)).map((id) => new ObjectId(id)) } },
+        ],
+      })
+      .toArray();
+
+    if (!assets.length) {
+      return res.status(404).json({ error: 'No matching assets found for this playlist' });
+    }
+
+    const usageMap = await vmssBuildAssetUsageDetailsMap(db, playlistId, { assetDocs: assets });
+    const deletedMetadata = vmssBuildDeletedAssetMetadata(username);
+
+    await db.collection(VMSS_ASSETS_COLLECTION).updateMany(
+      { _id: { $in: assets.map((asset) => asset._id) } },
+      {
+        $set: {
+          ...deletedMetadata,
+          updatedAt: new Date(),
+        },
+      }
+    );
+
+    res.json({
+      deleted: true,
+      deletedCount: assets.length,
+      assets: assets.map((asset) => ({
+        ...vmssBuildAssetUsagePayload(asset, usageMap.get(String(asset._id))),
+        ...deletedMetadata,
+      })),
+    });
+  } catch (err) {
+    console.error('❌ video-manuals-studio assets soft-delete error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/video-manuals-studio/playlists/:id/assets/recycle-bin', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const db = client.db(VM_DB);
+    const playlistId = new ObjectId(req.params.id);
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: playlistId });
+    if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
+    if (!vmCanView(playlist, username, role)) {
+      return res.status(403).json({ error: 'No view access to this playlist' });
+    }
+
+    await vmssCleanupExpiredRecycledAssets();
+
+    const assets = await db.collection(VMSS_ASSETS_COLLECTION)
+      .find({ playlistId, deleted: true })
+      .sort({ deletedAt: -1 })
+      .toArray();
+    const usageMap = await vmssBuildAssetUsageDetailsMap(db, playlistId, { assetDocs: assets });
+    const now = Date.now();
+
     res.json(assets.map((asset) => {
-      const usageCount = usageMap.get(String(asset._id)) || 0;
+      const expiresAt = asset?.recycleExpiresAt ? new Date(asset.recycleExpiresAt).getTime() : 0;
+      const daysRemaining = expiresAt > 0 ? Math.max(0, Math.ceil((expiresAt - now) / 86400000)) : 0;
       return {
-        ...asset,
-        usageCount,
-        isUnused: usageCount === 0,
-        canDelete: usageCount === 0,
+        ...vmssBuildAssetUsagePayload(asset, usageMap.get(String(asset._id))),
+        daysRemaining,
       };
     }));
   } catch (err) {
-    console.error('❌ video-manuals-studio assets list error:', err);
+    console.error('❌ video-manuals-studio assets recycle-bin error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/video-manuals-studio/playlists/:id/assets/restore', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const db = client.db(VM_DB);
+    const playlistId = new ObjectId(req.params.id);
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: playlistId });
+    if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
+    if (!vmCanEdit(playlist, username, role)) {
+      return res.status(403).json({ error: 'No edit access to this playlist' });
+    }
+
+    const rawAssetIds = Array.isArray(req.body?.assetIds) ? req.body.assetIds : [];
+    const normalizedAssetIds = Array.from(new Set(rawAssetIds.map((id) => String(id || '').trim()).filter(Boolean)));
+    if (!normalizedAssetIds.length) {
+      return res.status(400).json({ error: 'assetIds is required' });
+    }
+
+    const result = await db.collection(VMSS_ASSETS_COLLECTION).updateMany(
+      {
+        playlistId,
+        deleted: true,
+        $or: [
+          { assetId: { $in: normalizedAssetIds } },
+          { _id: { $in: normalizedAssetIds.filter((id) => ObjectId.isValid(id)).map((id) => new ObjectId(id)) } },
+        ],
+      },
+      {
+        $set: { updatedAt: new Date(), restoredAt: new Date(), restoredBy: String(username || 'unknown') },
+        $unset: {
+          deleted: '',
+          deletedAt: '',
+          deletedBy: '',
+          recycleExpiresAt: '',
+        },
+      }
+    );
+
+    res.json({ restored: true, restoredCount: result.modifiedCount || 0 });
+  } catch (err) {
+    console.error('❌ video-manuals-studio assets restore error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/video-manuals-studio/playlists/:id/assets/permanent', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    if (!vmCanPermanentlyDeleteStudioAssets(role)) {
+      return res.status(403).json({ error: 'Only admin can permanently delete playlist assets.' });
+    }
+
+    const db = client.db(VM_DB);
+    const playlistId = new ObjectId(req.params.id);
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: playlistId });
+    if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
+    if (!vmCanView(playlist, username, role)) {
+      return res.status(403).json({ error: 'No access to this playlist' });
+    }
+
+    const rawAssetIds = Array.isArray(req.body?.assetIds) ? req.body.assetIds : [];
+    const normalizedAssetIds = Array.from(new Set(rawAssetIds.map((id) => String(id || '').trim()).filter(Boolean)));
+    if (!normalizedAssetIds.length) {
+      return res.status(400).json({ error: 'assetIds is required' });
+    }
+
+    const assets = await db.collection(VMSS_ASSETS_COLLECTION)
+      .find({
+        playlistId,
+        deleted: true,
+        $or: [
+          { assetId: { $in: normalizedAssetIds } },
+          { _id: { $in: normalizedAssetIds.filter((id) => ObjectId.isValid(id)).map((id) => new ObjectId(id)) } },
+        ],
+      })
+      .toArray();
+
+    if (!assets.length) {
+      return res.status(404).json({ error: 'No deleted assets found for this playlist' });
+    }
+
+    const deletedAssets = [];
+    for (const asset of assets) {
+      deletedAssets.push(await vmssPermanentlyDeleteAssetDocument(db, asset, { deletedBy: username || 'admin' }));
+    }
+
+    res.json({
+      deleted: true,
+      deletedCount: deletedAssets.length,
+      assets: deletedAssets,
+    });
+  } catch (err) {
+    console.error('❌ video-manuals-studio assets permanent-delete error:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -31240,6 +31597,18 @@ setTimeout(() => {
     console.warn('[VM Deployments] Initial retention cleanup failed:', err.message);
   });
 }, 15000);
+
+setInterval(() => {
+  void vmssCleanupExpiredRecycledAssets().catch((err) => {
+    console.warn('[VMSS Assets] Scheduled recycle-bin cleanup failed:', err.message);
+  });
+}, 24 * 60 * 60 * 1000);
+
+setTimeout(() => {
+  void vmssCleanupExpiredRecycledAssets().catch((err) => {
+    console.warn('[VMSS Assets] Initial recycle-bin cleanup failed:', err.message);
+  });
+}, 20000);
 
 
 // ==================== CHECK FORM TABLET UI ====================
