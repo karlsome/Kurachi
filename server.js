@@ -27554,6 +27554,8 @@ const VMSS_PROJECT_PREVIEW_DURATION_SECONDS = 5;
 const VMSS_PROJECT_THUMBNAIL_CAPTURE_SECONDS = 1;
 const VMSS_ASSET_RECYCLE_RETENTION_DAYS = 60;
 const VMSS_ASSET_RECYCLE_RETENTION_MS = VMSS_ASSET_RECYCLE_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+const VMSS_PROJECT_TRASH_TTL_DAYS = 60;
+const VMSS_PROJECT_TRASH_TTL_MS = VMSS_PROJECT_TRASH_TTL_DAYS * 24 * 60 * 60 * 1000;
 
 let vmDeployedCleanupPromise = null;
 let vmDeployedCleanupLastRunAt = 0;
@@ -27854,6 +27856,28 @@ async function vmssApplyDeployedRevision(db, projectId, revision, username, depl
   };
 }
 
+async function vmssPurgeProject(db, project) {
+  if (!project?._id) return;
+  const projectId = project._id;
+  await db.collection(VMSS_REVISIONS_COLLECTION).deleteMany({ projectId });
+  await db.collection(VMSS_PROJECTS_COLLECTION).deleteOne({ _id: projectId });
+}
+
+async function vmssAutoPurgeExpiredProjects(db) {
+  const cutoff = new Date(Date.now() - VMSS_PROJECT_TRASH_TTL_MS);
+  const expired = await db.collection(VMSS_PROJECTS_COLLECTION)
+    .find({ deleted: true, deletedAt: { $lte: cutoff } })
+    .toArray();
+
+  for (const project of expired) {
+    try {
+      await vmssPurgeProject(db, project);
+    } catch (error) {
+      console.error('❌ vmss auto purge project error:', error);
+    }
+  }
+}
+
 // ── Playlists ────────────────────────────────────────────────────────────────
 
 // ==================== VIDEO MANUAL SHOTSTACK API ====================
@@ -27922,6 +27946,78 @@ app.post('/api/video-manuals-studio/playlists', async (req, res) => {
     res.json({ insertedId: result.insertedId, ...doc });
   } catch (err) {
     console.error('❌ video-manuals-studio playlists create error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.patch('/api/video-manuals-studio/playlists/:id', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const db = client.db(VM_DB);
+    const playlistId = new ObjectId(req.params.id);
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: playlistId });
+    if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
+    if (!vmCanEdit(playlist, username, role)) {
+      return res.status(403).json({ error: 'No edit access to this playlist' });
+    }
+
+    const updates = {};
+    if (req.body?.name !== undefined) {
+      const name = String(req.body.name || '').trim();
+      if (!name) return res.status(400).json({ error: 'name is required' });
+      updates.name = name;
+    }
+    if (req.body?.description !== undefined) {
+      updates.description = String(req.body.description || '').trim();
+    }
+    if (req.body?.model !== undefined) {
+      const model = String(req.body.model || '').trim();
+      updates.model = model || null;
+    }
+    if (req.body?.privacy !== undefined && VM_MANAGE_ROLES.has(role)) {
+      const nextPrivacy = String(req.body.privacy || '').trim() || 'internal';
+      if (!['internal', 'private', 'public'].includes(nextPrivacy)) {
+        return res.status(400).json({ error: 'privacy must be internal, private, or public' });
+      }
+      updates.privacy = nextPrivacy;
+    }
+
+    updates.updatedAt = new Date();
+    await db.collection(VMSS_PLAYLISTS_COLLECTION).updateOne({ _id: playlistId }, { $set: updates });
+    res.json({ updated: true });
+  } catch (err) {
+    console.error('❌ video-manuals-studio playlist patch error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/video-manuals-studio/playlists/:id', async (req, res) => {
+  try {
+    const { role } = vmGetRequester(req);
+    if (role !== 'admin') {
+      return res.status(403).json({ error: 'Only admin can delete playlists.' });
+    }
+
+    const db = client.db(VM_DB);
+    const playlistId = new ObjectId(req.params.id);
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: playlistId });
+    if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
+
+    const projects = await db.collection(VMSS_PROJECTS_COLLECTION)
+      .find({ playlistId })
+      .project({ _id: 1 })
+      .toArray();
+    const projectIds = projects.map((project) => project._id).filter(Boolean);
+
+    if (projectIds.length) {
+      await db.collection(VMSS_REVISIONS_COLLECTION).deleteMany({ projectId: { $in: projectIds } });
+      await db.collection(VMSS_PROJECTS_COLLECTION).deleteMany({ _id: { $in: projectIds } });
+    }
+
+    await db.collection(VMSS_PLAYLISTS_COLLECTION).deleteOne({ _id: playlistId });
+    res.json({ deleted: true, playlistDeleted: true, projectsDeleted: projectIds.length });
+  } catch (err) {
+    console.error('❌ video-manuals-studio playlist delete error:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -28108,6 +28204,10 @@ app.patch('/api/video-manuals-studio/projects/:id', async (req, res) => {
 app.delete('/api/video-manuals-studio/projects/:id', async (req, res) => {
   try {
     const { username, role } = vmGetRequester(req);
+    if (role !== 'admin') {
+      return res.status(403).json({ error: 'Only admin can delete projects.' });
+    }
+
     const db = client.db(VM_DB);
     const projectId = new ObjectId(req.params.id);
     const project = await db.collection(VMSS_PROJECTS_COLLECTION).findOne({ _id: projectId });
@@ -28156,9 +28256,8 @@ app.post('/api/video-manuals-studio/projects/:id/restore', async (req, res) => {
 app.delete('/api/video-manuals-studio/projects/:id/permanent', async (req, res) => {
   try {
     const { username, role } = vmGetRequester(req);
-    const allowedRoles = new Set(['admin', '課長', '係長', '部長']);
-    if (!allowedRoles.has(role)) {
-      return res.status(403).json({ error: 'Only admin, 課長, 係長, or 部長 can permanently delete projects.' });
+    if (role !== 'admin') {
+      return res.status(403).json({ error: 'Only admin can permanently delete projects.' });
     }
 
     const db = client.db(VM_DB);
@@ -28171,8 +28270,7 @@ app.delete('/api/video-manuals-studio/projects/:id/permanent', async (req, res) 
       return res.status(403).json({ error: 'No edit access to this project' });
     }
 
-    await db.collection(VMSS_REVISIONS_COLLECTION).deleteMany({ projectId });
-    await db.collection(VMSS_PROJECTS_COLLECTION).deleteOne({ _id: projectId });
+    await vmssPurgeProject(db, project);
     res.json({ deleted: true, permanent: true });
   } catch (err) {
     console.error('❌ video-manuals-studio project permanent-delete error:', err);
@@ -28191,12 +28289,25 @@ app.get('/api/video-manuals-studio/playlists/:id/trash', async (req, res) => {
       return res.status(403).json({ error: 'No view access to this playlist' });
     }
 
+    await vmssAutoPurgeExpiredProjects(db);
+
     const docs = await db.collection(VMSS_PROJECTS_COLLECTION).find(
       { playlistId, deleted: true },
-      { projection: { title: 1, deletedAt: 1, deletedBy: 1, currentRevisionNumber: 1 } }
+      { projection: { title: 1, deletedAt: 1, deletedBy: 1, currentRevisionNumber: 1, edit: 1 } }
     ).sort({ deletedAt: -1 }).toArray();
 
-    res.json(docs);
+    const now = Date.now();
+    res.json(docs.map((doc) => {
+      const deletedAtMs = doc.deletedAt ? new Date(doc.deletedAt).getTime() : 0;
+      const daysRemaining = deletedAtMs > 0
+        ? Math.max(0, Math.ceil((deletedAtMs + VMSS_PROJECT_TRASH_TTL_MS - now) / 86400000))
+        : 0;
+      return {
+        ...doc,
+        tracksCount: vmssCountTracks(doc),
+        daysRemaining,
+      };
+    }));
   } catch (err) {
     console.error('❌ video-manuals-studio trash error:', err);
     res.status(500).json({ error: err.message });
