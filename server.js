@@ -27527,7 +27527,17 @@ const VMSS_ASSETS_COLLECTION = 'videoManualShotstackAssets';
 const VMSS_ASSET_UPLOAD_FOLDER = 'videoManuals/shotstackAssets';
 const VMSS_ASSET_PREVIEW_FOLDER = `${VMSS_ASSET_UPLOAD_FOLDER}/previews`;
 const VMSS_ASSET_THUMBNAIL_FOLDER = `${VMSS_ASSET_UPLOAD_FOLDER}/thumbnails`;
-const VM_UPLOAD_FOLDERS       = new Set(['videoManuals', VMSS_ASSET_UPLOAD_FOLDER, VMSS_ASSET_PREVIEW_FOLDER, VMSS_ASSET_THUMBNAIL_FOLDER, 'videoManualDeployed']);
+const VMSS_PROJECT_PREVIEW_FOLDER = `${VMSS_ASSET_UPLOAD_FOLDER}/project-previews`;
+const VMSS_PROJECT_THUMBNAIL_FOLDER = `${VMSS_ASSET_UPLOAD_FOLDER}/project-thumbnails`;
+const VM_UPLOAD_FOLDERS       = new Set([
+  'videoManuals',
+  VMSS_ASSET_UPLOAD_FOLDER,
+  VMSS_ASSET_PREVIEW_FOLDER,
+  VMSS_ASSET_THUMBNAIL_FOLDER,
+  VMSS_PROJECT_PREVIEW_FOLDER,
+  VMSS_PROJECT_THUMBNAIL_FOLDER,
+  'videoManualDeployed',
+]);
 const VM_DEPLOYED_RETENTION_DAYS = 60;
 const VM_DEPLOYED_RETENTION_MS = VM_DEPLOYED_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 const VM_DEPLOYED_CLEANUP_INTERVAL_MS = 12 * 60 * 60 * 1000;
@@ -27540,6 +27550,8 @@ const VMSS_ASSET_THUMBNAIL_CAPTURE_SECONDS = 0.8;
 const VMSS_DERIVATIVE_MAX_ATTEMPTS = 3;
 const VMSS_DERIVATIVE_RETRY_DELAY_MS = 4000;
 const VMSS_SOURCE_SIGNED_URL_TTL_MS = 15 * 60 * 1000;
+const VMSS_PROJECT_PREVIEW_DURATION_SECONDS = 5;
+const VMSS_PROJECT_THUMBNAIL_CAPTURE_SECONDS = 1;
 const VMSS_ASSET_RECYCLE_RETENTION_DAYS = 60;
 const VMSS_ASSET_RECYCLE_RETENTION_MS = VMSS_ASSET_RECYCLE_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 
@@ -27936,6 +27948,17 @@ app.get('/api/video-manuals-studio/playlists/:id/projects', async (req, res) => 
           deployedRevisionId: 1, deployedRevisionNumber: 1, deployedRevisionName: 1,
           deployedAt: 1, deployedBy: 1,
           deployedVideoUrl: 1, deployedVideoStoragePath: 1, deployedVideoMimeType: 1, deployedVideoFileName: 1,
+          previewRevisionId: 1,
+          previewUrl: 1,
+          previewStoragePath: 1,
+          previewMimeType: 1,
+          previewThumbnailUrl: 1,
+          previewThumbnailStoragePath: 1,
+          previewThumbnailMimeType: 1,
+          previewDurationSeconds: 1,
+          previewStatus: 1,
+          previewError: 1,
+          previewUpdatedAt: 1,
         }
       }
     ).sort({ order: 1, createdAt: 1 }).toArray();
@@ -27994,6 +28017,17 @@ app.post('/api/video-manuals-studio/playlists/:id/projects', async (req, res) =>
       deployedVideoStoragePath: null,
       deployedVideoMimeType: null,
       deployedVideoFileName: null,
+      previewRevisionId: null,
+      previewUrl: null,
+      previewStoragePath: null,
+      previewMimeType: null,
+      previewThumbnailUrl: null,
+      previewThumbnailStoragePath: null,
+      previewThumbnailMimeType: null,
+      previewDurationSeconds: VMSS_PROJECT_PREVIEW_DURATION_SECONDS,
+      previewStatus: 'idle',
+      previewError: null,
+      previewUpdatedAt: null,
       createdBy: username,
       createdAt: now,
       updatedAt: now,
@@ -28190,6 +28224,7 @@ app.post('/api/video-manuals-studio/projects/:id/revisions', async (req, res) =>
     const now = new Date();
     const revisionNumber = (project.currentRevisionNumber || 0) + 1;
     const revisionName = String(req.body?.revisionName || '').trim() || `Revision ${String(revisionNumber).padStart(2, '0')}`;
+    const shouldGeneratePreview = vmShotstackEnabled();
     const revisionDoc = {
       projectId,
       playlistId: project.playlistId,
@@ -28198,15 +28233,51 @@ app.post('/api/video-manuals-studio/projects/:id/revisions', async (req, res) =>
       snapshot,
       createdAt: now,
       createdBy: username,
+      previewUrl: null,
+      previewStoragePath: null,
+      previewMimeType: null,
+      previewThumbnailUrl: null,
+      previewThumbnailStoragePath: null,
+      previewThumbnailMimeType: null,
+      previewDurationSeconds: VMSS_PROJECT_PREVIEW_DURATION_SECONDS,
+      previewStatus: shouldGeneratePreview ? 'processing' : 'unavailable',
+      previewError: shouldGeneratePreview ? null : 'Shotstack is not configured on the server',
+      previewUpdatedAt: now,
+      previewRenderId: null,
     };
 
     const insertResult = await db.collection(VMSS_REVISIONS_COLLECTION).insertOne(revisionDoc);
+    const revisionId = insertResult.insertedId;
     await db.collection(VMSS_PROJECTS_COLLECTION).updateOne(
       { _id: projectId },
-      { $set: { currentRevisionNumber: revisionNumber, lastRevisionId: insertResult.insertedId, updatedAt: now } }
+      {
+        $set: {
+          currentRevisionNumber: revisionNumber,
+          lastRevisionId: revisionId,
+          updatedAt: now,
+          previewRevisionId: revisionId,
+          previewUrl: null,
+          previewStoragePath: null,
+          previewMimeType: null,
+          previewThumbnailUrl: null,
+          previewThumbnailStoragePath: null,
+          previewThumbnailMimeType: null,
+          previewDurationSeconds: VMSS_PROJECT_PREVIEW_DURATION_SECONDS,
+          previewStatus: shouldGeneratePreview ? 'processing' : 'unavailable',
+          previewError: shouldGeneratePreview ? null : 'Shotstack is not configured on the server',
+          previewUpdatedAt: now,
+        }
+      }
     );
 
-    res.json({ revisionId: insertResult.insertedId, revisionNumber, revisionName });
+    if (shouldGeneratePreview) {
+      vmssQueueProjectRevisionPreviewProcessing({
+        projectId,
+        revisionId,
+      });
+    }
+
+    res.json({ revisionId, revisionNumber, revisionName });
   } catch (err) {
     console.error('❌ video-manuals-studio revision save error:', err);
     res.status(500).json({ error: err.message });
@@ -28228,7 +28299,22 @@ app.get('/api/video-manuals-studio/projects/:id/revisions', async (req, res) => 
 
     const docs = await db.collection(VMSS_REVISIONS_COLLECTION).find(
       { projectId },
-      { projection: { projectId: 1, playlistId: 1, revisionName: 1, revisionNumber: 1, createdAt: 1, createdBy: 1 } }
+      {
+        projection: {
+          projectId: 1,
+          playlistId: 1,
+          revisionName: 1,
+          revisionNumber: 1,
+          createdAt: 1,
+          createdBy: 1,
+          previewUrl: 1,
+          previewThumbnailUrl: 1,
+          previewDurationSeconds: 1,
+          previewStatus: 1,
+          previewError: 1,
+          previewUpdatedAt: 1,
+        }
+      }
     ).sort({ revisionNumber: -1 }).toArray();
 
     res.json(docs.map((doc) => ({
@@ -29502,6 +29588,312 @@ function vmssQueueAssetDerivativeProcessing(assetDoc) {
       }
     });
   });
+}
+
+function vmssDecodeNestedUrl(value, maxDepth = 3) {
+  let nextValue = String(value || '').trim();
+  for (let depth = 0; depth < maxDepth; depth += 1) {
+    try {
+      const decoded = decodeURIComponent(nextValue);
+      if (!decoded || decoded === nextValue) break;
+      nextValue = decoded;
+    } catch {
+      break;
+    }
+  }
+  return nextValue;
+}
+
+function vmssResolveProjectPreviewAssetUrl(sourceUrl, assetSourceMap = {}) {
+  const rawSource = String(sourceUrl || '').trim();
+  if (!rawSource) return '';
+
+  const mappedSource = String(assetSourceMap?.[rawSource] || '').trim();
+  if (mappedSource) return mappedSource;
+
+  let parsed = null;
+  try {
+    parsed = new URL(rawSource);
+  } catch {
+    return rawSource;
+  }
+
+  const upstreamFromProxy = parsed.searchParams.get('url');
+  if (upstreamFromProxy) {
+    const decodedUpstream = vmssDecodeNestedUrl(upstreamFromProxy);
+    const mappedUpstream = String(assetSourceMap?.[decodedUpstream] || '').trim();
+    if (mappedUpstream) return mappedUpstream;
+    return decodedUpstream;
+  }
+
+  const mappedParsedUrl = String(assetSourceMap?.[parsed.toString()] || '').trim();
+  if (mappedParsedUrl) return mappedParsedUrl;
+
+  return parsed.toString();
+}
+
+function vmssBuildProjectRevisionPreviewEdit(revision, project = null) {
+  const sourceEdit = revision?.snapshot?.edit;
+  if (!sourceEdit || typeof sourceEdit !== 'object') {
+    throw new Error('Revision snapshot is missing edit data');
+  }
+
+  const snapshotAssetSourceMap = revision?.snapshot?.assetSourceMap;
+  const projectAssetSourceMap = project?.assetSourceMap;
+  const mergedAssetSourceMap = {
+    ...(projectAssetSourceMap && typeof projectAssetSourceMap === 'object' ? projectAssetSourceMap : {}),
+    ...(snapshotAssetSourceMap && typeof snapshotAssetSourceMap === 'object' ? snapshotAssetSourceMap : {}),
+  };
+
+  const clonedEdit = JSON.parse(JSON.stringify(sourceEdit));
+  const tracks = Array.isArray(clonedEdit?.timeline?.tracks) ? clonedEdit.timeline.tracks : [];
+  const unresolvedRestrictedSources = [];
+
+  const trimmedTracks = tracks
+    .map((track) => {
+      const clips = Array.isArray(track?.clips) ? track.clips : [];
+      const trimmedClips = clips
+        .map((clip) => {
+          const nextClip = { ...clip };
+          if (nextClip?.asset?.src && typeof nextClip.asset.src === 'string') {
+            const resolvedSrc = vmssResolveProjectPreviewAssetUrl(nextClip.asset.src, mergedAssetSourceMap);
+            nextClip.asset = {
+              ...nextClip.asset,
+              src: resolvedSrc,
+            };
+
+            try {
+              const srcUrl = new URL(String(resolvedSrc || '').trim());
+              const isLocalhost = srcUrl.hostname === 'localhost'
+                || srcUrl.hostname === '127.0.0.1'
+                || srcUrl.hostname.endsWith('.local');
+              if (isLocalhost) {
+                unresolvedRestrictedSources.push({
+                  source: nextClip.asset.src,
+                  original: clip.asset.src,
+                });
+              }
+            } catch {
+              // Ignore malformed URLs here; Shotstack will validate if required.
+            }
+          }
+
+          const clipStart = vmClampNumber(clip?.start, 0, { min: 0 });
+          const rawLength = Number(clip?.length);
+          const clipLength = Number.isFinite(rawLength) && rawLength > 0
+            ? rawLength
+            : Math.max(0.1, VMSS_PROJECT_PREVIEW_DURATION_SECONDS - clipStart);
+          const clipEnd = clipStart + clipLength;
+          const effectiveEnd = Math.min(clipEnd, VMSS_PROJECT_PREVIEW_DURATION_SECONDS);
+          const effectiveLength = effectiveEnd - clipStart;
+          if (effectiveLength < 0.05) return null;
+
+          return {
+            ...nextClip,
+            start: Number(clipStart.toFixed(3)),
+            length: Number(effectiveLength.toFixed(3)),
+          };
+        })
+        .filter(Boolean);
+
+      if (!trimmedClips.length) return null;
+      return { ...track, clips: trimmedClips };
+    })
+    .filter(Boolean);
+
+  if (!trimmedTracks.length) {
+    throw new Error('Revision has no renderable clips within the first 5 seconds');
+  }
+
+  if (unresolvedRestrictedSources.length) {
+    throw new Error(
+      `Revision contains localhost/proxy asset URLs that Shotstack cannot fetch. First unresolved source: ${unresolvedRestrictedSources[0]?.original || unresolvedRestrictedSources[0]?.source || 'unknown'}`,
+    );
+  }
+
+  const output = {
+    ...(clonedEdit.output || {}),
+    format: 'mp4',
+    resolution: 'preview',
+    fps: 15,
+    quality: 'low',
+    mute: true,
+    poster: {
+      capture: VMSS_PROJECT_THUMBNAIL_CAPTURE_SECONDS,
+    },
+  };
+
+  return {
+    ...clonedEdit,
+    timeline: {
+      ...(clonedEdit.timeline || {}),
+      tracks: trimmedTracks,
+      cache: true,
+    },
+    output,
+    disk: 'local',
+    merge: Array.isArray(clonedEdit.merge) ? clonedEdit.merge : [],
+  };
+}
+
+function vmssQueueProjectRevisionPreviewProcessing({ projectId, revisionId }) {
+  if (!projectId || !revisionId || !vmShotstackEnabled()) return;
+
+  setImmediate(() => {
+    vmssProcessProjectRevisionPreview({ projectId, revisionId }).catch((error) => {
+      console.error('❌ video-manuals-studio project revision preview processing error:', {
+        projectId: String(projectId || ''),
+        revisionId: String(revisionId || ''),
+        renderId: error?.renderId || null,
+        message: error?.message || String(error),
+        shotstackPayload: error?.shotstackPayload || null,
+      });
+      if (error?.stack) {
+        console.error(error.stack);
+      }
+    });
+  });
+}
+
+async function vmssProcessProjectRevisionPreview({ projectId, revisionId }) {
+  const db = client.db(VM_DB);
+  const projectsCollection = db.collection(VMSS_PROJECTS_COLLECTION);
+  const revisionsCollection = db.collection(VMSS_REVISIONS_COLLECTION);
+  const revisionObjectId = new ObjectId(revisionId);
+  const projectObjectId = new ObjectId(projectId);
+
+  const revision = await revisionsCollection.findOne({ _id: revisionObjectId, projectId: projectObjectId });
+  if (!revision) {
+    throw new Error('Revision not found while generating preview');
+  }
+
+  const project = await projectsCollection.findOne({ _id: projectObjectId });
+  if (!project) {
+    throw new Error('Project not found while generating preview');
+  }
+
+  let renderId = null;
+  try {
+    const previewEdit = vmssBuildProjectRevisionPreviewEdit(revision, project);
+    renderId = await vmShotstackQueueRender(previewEdit);
+    await revisionsCollection.updateOne(
+      { _id: revisionObjectId },
+      {
+        $set: {
+          previewStatus: 'processing',
+          previewError: null,
+          previewRenderId: renderId,
+          previewUpdatedAt: new Date(),
+        },
+      },
+    );
+
+    const render = await vmShotstackWaitForRender(renderId);
+    const previewSourceUrl = String(render?.url || '').trim();
+    const thumbnailSourceUrl = String(render?.thumbnail || render?.poster || '').trim();
+    if (!previewSourceUrl) {
+      throw new Error('Shotstack did not return a revision preview URL');
+    }
+
+    const [previewDownload, thumbnailDownload] = await Promise.all([
+      vmDownloadBuffer(previewSourceUrl),
+      thumbnailSourceUrl ? vmDownloadBuffer(thumbnailSourceUrl) : Promise.resolve(null),
+    ]);
+
+    const fileStem = vmBuildDerivativeFileStem(`${project?.title || 'project'}-rev-${revision?.revisionNumber || 'preview'}`);
+    const previewExtension = vmInferExtensionFromMimeType(previewDownload?.mimeType, 'mp4');
+    const thumbnailExtension = vmInferExtensionFromMimeType(thumbnailDownload?.mimeType, 'jpg');
+
+    const [previewUpload, thumbnailUpload] = await Promise.all([
+      vmUploadBuffer(previewDownload.buffer, {
+        fileName: `${fileStem}_preview.${previewExtension}`,
+        mimeType: previewDownload.mimeType || 'video/mp4',
+        uploadFolder: VMSS_PROJECT_PREVIEW_FOLDER,
+        tokenPrefix: 'vmss',
+      }),
+      thumbnailDownload
+        ? vmUploadBuffer(thumbnailDownload.buffer, {
+          fileName: `${fileStem}_thumbnail.${thumbnailExtension}`,
+          mimeType: thumbnailDownload.mimeType || 'image/jpeg',
+          uploadFolder: VMSS_PROJECT_THUMBNAIL_FOLDER,
+          tokenPrefix: 'vmss',
+        })
+        : Promise.resolve(null),
+    ]);
+
+    const previewDurationSeconds = Number.isFinite(Number(render?.duration))
+      ? Number(render.duration)
+      : VMSS_PROJECT_PREVIEW_DURATION_SECONDS;
+    const previewUpdatedAt = new Date();
+
+    await revisionsCollection.updateOne(
+      { _id: revisionObjectId },
+      {
+        $set: {
+          previewUrl: previewUpload.url,
+          previewStoragePath: previewUpload.storagePath,
+          previewMimeType: previewUpload.mimeType,
+          previewThumbnailUrl: thumbnailUpload?.url || null,
+          previewThumbnailStoragePath: thumbnailUpload?.storagePath || null,
+          previewThumbnailMimeType: thumbnailUpload?.mimeType || null,
+          previewDurationSeconds,
+          previewStatus: 'ready',
+          previewError: null,
+          previewUpdatedAt,
+          previewRenderId: renderId,
+        },
+      },
+    );
+
+    await projectsCollection.updateOne(
+      { _id: projectObjectId, lastRevisionId: revisionObjectId },
+      {
+        $set: {
+          previewRevisionId: revisionObjectId,
+          previewUrl: previewUpload.url,
+          previewStoragePath: previewUpload.storagePath,
+          previewMimeType: previewUpload.mimeType,
+          previewThumbnailUrl: thumbnailUpload?.url || null,
+          previewThumbnailStoragePath: thumbnailUpload?.storagePath || null,
+          previewThumbnailMimeType: thumbnailUpload?.mimeType || null,
+          previewDurationSeconds,
+          previewStatus: 'ready',
+          previewError: null,
+          previewUpdatedAt,
+        },
+      },
+    );
+  } catch (error) {
+    const previewUpdatedAt = new Date();
+    await revisionsCollection.updateOne(
+      { _id: revisionObjectId },
+      {
+        $set: {
+          previewStatus: 'failed',
+          previewError: error?.message || 'Failed to generate project preview',
+          previewUpdatedAt,
+          ...(renderId ? { previewRenderId: renderId } : {}),
+        },
+      },
+    ).catch((updateError) => {
+      console.error('❌ video-manuals-studio revision preview failure state update error:', updateError);
+    });
+
+    await projectsCollection.updateOne(
+      { _id: projectObjectId, lastRevisionId: revisionObjectId },
+      {
+        $set: {
+          previewStatus: 'failed',
+          previewError: error?.message || 'Failed to generate project preview',
+          previewUpdatedAt,
+        },
+      },
+    ).catch((updateError) => {
+      console.error('❌ video-manuals-studio project preview failure state update error:', updateError);
+    });
+
+    throw error;
+  }
 }
 
 async function vmssProcessUploadedVideoAsset(assetDoc) {
