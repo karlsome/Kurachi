@@ -30709,7 +30709,7 @@ app.get('/api/masterdb/pce-data', async (req, res) => {
     const records = await client
       .db('Sasaki_Coating_MasterDB')
       .collection('masterDB')
-      .find({}, { projection: { 背番号: 1, 品番: 1, 品名: 1, _id: 0 } })
+      .find({}, { projection: { 背番号: 1, 品番: 1, 品名: 1, imageURL: 1, _id: 0 } })
       .toArray();
     res.json(records);
   } catch (error) {
