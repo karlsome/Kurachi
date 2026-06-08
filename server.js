@@ -13017,7 +13017,11 @@ app.post('/api/masterdb/paginate', async (req, res) => {
     };
     for (const [key, field] of Object.entries(filterFieldMap)) {
       const val = simpleFilters[key];
-      if (val && val !== 'all') conditions.push({ [field]: val });
+      if (Array.isArray(val)) {
+        if (val.length) conditions.push({ [field]: { $in: val } });
+      } else if (val && val !== 'all') {
+        conditions.push({ [field]: val });
+      }
     }
 
     // Advanced filter object
