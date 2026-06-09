@@ -172,3 +172,6 @@ wheels/
 server.log
 *.pid
 *.pem
+
+# Graphify files
+graphify-out/
