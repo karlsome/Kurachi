@@ -3146,7 +3146,7 @@ function updateCycleTime() {
 }
 
 //scan BUtton javascript
-document.getElementById('scan-button').addEventListener('click', function() {
+document.getElementById('scan-button')?.addEventListener('click', function() {
   const qrScannerModal = document.getElementById('qrScannerModal');
   const scanAlertModal = document.getElementById('scanAlertModal');
   const scanAlertText = document.getElementById('scanAlertText');
@@ -6668,7 +6668,8 @@ async function sendtoNC(selectedValue) {
 }
 
 // Send to NC button - triggers 3-step modal workflow OR individual send modal
-document.getElementById('sendtoNC').addEventListener('click', async function() {
+// (Legacy trigger; redesigned scan tab uses the always-visible Step 1/2/3 cards.)
+document.getElementById('sendtoNC')?.addEventListener('click', async function() {
   if (isSendToMachineCooldownActive()) {
     updateSendToMachineCooldownUI();
     return;
@@ -9890,8 +9891,13 @@ document.getElementById('startStep2Scan').addEventListener('click', function(eve
         });
         
         document.getElementById('step2Modal').style.display = 'none';
-        showStep3Modal();
-        
+        // Mandatory material-label photo for NEW lots before advancing (Phase 1 gate)
+        if (typeof window.materialPhotoGate === 'function') {
+          window.materialPhotoGate(() => showStep3Modal());
+        } else {
+          showStep3Modal();
+        }
+
       } catch (error) {
         console.error("Error processing lot QR code:", error);
         
@@ -10026,9 +10032,13 @@ document.getElementById('overrideStep2').addEventListener('click', function(even
                       console.log("Manual lot added via Step 2 override:", lotNumber);
                     }
                     
-                    // Automatically proceed to Step 3
+                    // Automatically proceed to Step 3 (after mandatory material-label photo)
                     setTimeout(() => {
-                      showStep3Modal();
+                      if (typeof window.materialPhotoGate === 'function') {
+                        window.materialPhotoGate(() => showStep3Modal());
+                      } else {
+                        showStep3Modal();
+                      }
                     }, 500);
                   } else {
                     // No lot entered, return to Step 2

@@ -1266,34 +1266,54 @@
                         </div>
                     </div>
 
+                    <!-- Production Actions: checks, material scan, label print -->
+                    <div class="glass-card">
+                        <h3>生産アクション / Production Actions</h3>
+                        <div class="prod-action-grid">
+                            <button type="button" id="prodScanMaterialButton" class="prod-action-btn">
+                                <svg viewBox="0 0 24 24"><path d="M4 7V5a1 1 0 0 1 1-1h2M4 17v2a1 1 0 0 0 1 1h2M20 7V5a1 1 0 0 0-1-1h-2M20 17v2a1 1 0 0 1-1 1h-2"/><line x1="4" y1="12" x2="20" y2="12"/></svg>
+                                <span>材料スキャン<small>Scan Material + Photo</small></span>
+                            </button>
+                            <button type="button" id="prodPrintLabelButton" class="prod-action-btn">
+                                <svg viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+                                <span>ラベル印刷<small>Print Label</small></span>
+                            </button>
+                        </div>
+                        <div class="prod-check-grid">
+                            <button type="button" id="hatsumonoButton" class="prod-check-btn" data-check="hatsumono">
+                                <span class="check-ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9 12l2 2 4-4"/></svg></span>
+                                <span class="check-txt" data-i18n="first_cycle_check">初物チェック<small>First Cycle</small></span>
+                            </button>
+                            <button type="button" id="atomonoButton" class="prod-check-btn" data-check="atomono">
+                                <span class="check-ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9 12l2 2 4-4"/></svg></span>
+                                <span class="check-txt" data-i18n="last_cycle_check">終物チェック<small>Last Cycle</small></span>
+                            </button>
+                        </div>
+                    </div>
+
                     <div class="glass-card">
                         <h3>加工不良カウンター / Defect Counters</h3>
-                        <div class="counter-container">
-                            <div id="counter-box-18" class="counter-box">
-                                <label for="counter-18" data-i18n="defect_pull">疵引不良</label>
-                                <div class="counter-controls">
-                                    <button class="minus-btn" type="button" onclick="decrementCounter(18)">-</button>
-                                    <input readonly id="counter-18" value="0" type="number" name="疵引不良">
-                                    <button class="plus-btn" type="button" onclick="incrementCounter(18)">+</button>
-                                </div>
+                        <div class="tap-counter-grid">
+                            <div class="tap-counter" id="counter-box-18" onclick="prodCounterTap(event, 18)">
+                                <button type="button" class="tap-minus" onclick="prodCounterMinus(event, 18)" aria-label="minus">&minus;</button>
+                                <div class="tap-count" id="counter-18-display">0</div>
+                                <div class="tap-label" data-i18n="defect_pull">疵引不良</div>
+                                <input readonly id="counter-18" value="0" type="number" name="疵引不良" style="display:none;">
                             </div>
-                            <div id="counter-box-19" class="counter-box">
-                                <label for="counter-19" data-i18n="processing_defect">加工不良</label>
-                                <div class="counter-controls">
-                                    <button class="minus-btn" type="button" onclick="decrementCounter(19)">-</button>
-                                    <input readonly id="counter-19" value="0" type="number" name="加工不良">
-                                    <button class="plus-btn" type="button" onclick="incrementCounter(19)">+</button>
-                                </div>
+                            <div class="tap-counter" id="counter-box-19" onclick="prodCounterTap(event, 19)">
+                                <button type="button" class="tap-minus" onclick="prodCounterMinus(event, 19)" aria-label="minus">&minus;</button>
+                                <div class="tap-count" id="counter-19-display">0</div>
+                                <div class="tap-label" data-i18n="processing_defect">加工不良</div>
+                                <input readonly id="counter-19" value="0" type="number" name="加工不良" style="display:none;">
                             </div>
-                            <div id="counter-box-20" class="counter-box">
-                                <label for="counter-20" data-i18n="other">その他:</label>
-                                <div class="counter-controls">
-                                    <button class="minus-btn" type="button" onclick="decrementCounter(20)">-</button>
-                                    <input readonly id="counter-20" value="0" type="number" name="その他">
-                                    <button class="plus-btn" type="button" onclick="incrementCounter(20)">+</button>
-                                </div>
+                            <div class="tap-counter" id="counter-box-20" onclick="prodCounterTap(event, 20)">
+                                <button type="button" class="tap-minus" onclick="prodCounterMinus(event, 20)" aria-label="minus">&minus;</button>
+                                <div class="tap-count" id="counter-20-display">0</div>
+                                <div class="tap-label" data-i18n="other">その他</div>
+                                <input readonly id="counter-20" value="0" type="number" name="その他" style="display:none;">
                             </div>
                         </div>
+                        <p class="tap-hint">カードをタップで +1 ・ 左上の − で訂正 / Tap card to add, minus to correct</p>
                     </div>
 
                     <div class="glass-card">
@@ -1302,7 +1322,7 @@
                     </div>
 
                     <!-- Toggleable Inspection Checklist -->
-                    <div class="glass-card">
+                    <div class="glass-card" id="kensaCard">
                         <h3 style="border: none; margin-bottom: 0; padding-bottom: 0;">
                             <label style="display: flex; align-items: center; gap: 10px; font-size: 1.05rem; color: var(--text-main); font-weight: 700; cursor: pointer;">
                                 <input type="checkbox" id="enable-inputs" onclick="toggleInputs()" style="width: 20px; height: 20px; accent-color: var(--accent-green);">
@@ -1370,101 +1390,61 @@
                             </div>
                         </div>
                     </div>
+
+                    <!-- Break time (timer-based) + total at the bottom of production -->
+                    <div class="glass-card">
+                        <h3 data-i18n="break_time_title">休憩時間 / Break Time</h3>
+                        <button type="button" id="breakStartButton" class="btn btn-secondary btn-full" style="height: 56px; font-size: 1.05rem;">
+                            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>
+                            休憩を開始 / Start Break
+                        </button>
+                        <div class="break-summary">
+                            <span data-i18n="total_break_time">合計休憩時間:</span>
+                            <span id="total-break-display">0分</span>
+                            <span id="break-count-display" class="break-count"></span>
+                        </div>
+                        <!-- Hidden inputs consumed by backend (calculateTotalBreakTime / breakTimeData) -->
+                        <div style="display:none;" aria-hidden="true">
+                            <input type="time" id="break1-start" name="break1-start"><input type="time" id="break1-end" name="break1-end">
+                            <input type="time" id="break2-start" name="break2-start"><input type="time" id="break2-end" name="break2-end">
+                            <input type="time" id="break3-start" name="break3-start"><input type="time" id="break3-end" name="break3-end">
+                            <input type="time" id="break4-start" name="break4-start"><input type="time" id="break4-end" name="break4-end">
+                        </div>
+                    </div>
                 </div>
 
-                <!-- TAB 4: IMAGES -->
+                <!-- TAB 4: IMAGES (gallery view) -->
                 <div class="tab-panel" id="panel-3">
                     <div class="glass-card">
-                        <h3>検査・ラベル画像撮影 / Photos Check</h3>
-                        <div class="photo-card-grid">
-                            <!-- First Cycle Check -->
-                            <div class="photo-capture-card">
-                                <label data-i18n="first_cycle_check" style="font-size: 0.95rem; font-weight: bold;">初物チェック:</label>
-                                <div class="photo-status-indicator" id="hatsumonoStatusIndicator">FALSE</div>
-                                <span id="hatsumonoLabel" style="display:none;">FALSE</span>
-                                <button type="button" id="hatsumonoButton" class="btn btn-secondary btn-full" style="margin-top: 10px;">Check 1st Cycle</button>
-                                <img id="hatsumonoPic" src="" alt="hatsumonoPic" style="display:none; max-width: 100%; height: auto; border-radius: var(--btn-radius); border: 1px solid var(--border-color); margin-top: 10px;">
-                            </div>
-
-                            <!-- Last Cycle Check -->
-                            <div class="photo-capture-card">
-                                <label data-i18n="last_cycle_check" style="font-size: 0.95rem; font-weight: bold;">終物チェック:</label>
-                                <div class="photo-status-indicator" id="atomonoStatusIndicator">FALSE</div>
-                                <span id="atomonoLabel" style="display:none;">FALSE</span>
-                                <button type="button" id="atomonoButton" class="btn btn-secondary btn-full" style="margin-top: 10px;">Check Last Cycle</button>
-                                <img id="atomonoPic" src="" alt="atomonoPic" style="display:none; max-width: 100%; height: auto; border-radius: var(--btn-radius); border: 1px solid var(--border-color); margin-top: 10px;">
-                            </div>
-
-                            <!-- Material Label -->
-                            <div class="photo-capture-card" style="grid-column: span 2;">
-                                <label data-i18n="material_label" style="font-size: 0.95rem; font-weight: bold;">材料ラベル:</label>
-                                <div class="photo-status-indicator" id="materialLabelStatusIndicator">FALSE</div>
-                                <span id="材料ラベル_L" style="display:none;">FALSE</span>
-                                <span id="makerLabel" style="display:none;">FALSE</span>
-                                
-                                <button type="button" id="makerLabelButton" class="btn btn-secondary btn-full" style="margin-top: 10px; max-width: 280px;">写真撮影 / Take Photo</button>
-                                <img id="材料ラベル" src="" alt="材料ラベル" style="display:none; max-width: 100%; height: auto; border-radius: var(--btn-radius); border: 1px solid var(--border-color); margin-top: 10px;">
-                                
-                                <div id="material-photo-count" style="margin-top: 10px; font-weight: bold; color: var(--accent-blue);"></div>
-                                <div id="material-photo-thumbnails" style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; justify-content: center; width: 100%;"></div>
-                            </div>
+                        <h3>撮影画像 / Captured Photos</h3>
+                        <p class="gallery-sub">初物・終物・材料ラベルの写真はここに集約されます。サムネイルをタップで拡大 / All captures collect here. Tap a thumbnail to preview.</p>
+                        <div id="imageGallery" class="image-gallery"></div>
+                        <div id="imageGalleryEmpty" class="gallery-empty">
+                            <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.6"/><polyline points="4 17 9 12 13 16 16.5 12.5 20 16"/></svg>
+                            <p>まだ写真がありません / No photos captured yet</p>
                         </div>
+                        <div id="material-photo-count" style="margin-top: 12px; font-weight: 700; color: var(--blue); text-align:center;"></div>
+                    </div>
+
+                    <!-- Hidden backend-owned photo elements (display/state hooks; gallery mirrors these) -->
+                    <div style="display:none;" aria-hidden="true">
+                        <div class="photo-status-indicator" id="hatsumonoStatusIndicator">FALSE</div>
+                        <span id="hatsumonoLabel">FALSE</span>
+                        <img id="hatsumonoPic" src="" alt="初物チェック">
+                        <div class="photo-status-indicator" id="atomonoStatusIndicator">FALSE</div>
+                        <span id="atomonoLabel">FALSE</span>
+                        <img id="atomonoPic" src="" alt="終物チェック">
+                        <div class="photo-status-indicator" id="materialLabelStatusIndicator">FALSE</div>
+                        <span id="材料ラベル_L">FALSE</span>
+                        <span id="makerLabel">FALSE</span>
+                        <button type="button" id="makerLabelButton">写真撮影 / Take Photo</button>
+                        <img id="材料ラベル" src="" alt="材料ラベル">
+                        <div id="material-photo-thumbnails"></div>
                     </div>
                 </div>
 
                 <!-- TAB 5: MAINTENANCE -->
                 <div class="tab-panel" id="panel-4">
-                    <!-- Break Times -->
-                    <div class="glass-card">
-                        <h3 data-i18n="break_time_title">休憩時間</h3>
-                        <div class="form-grid" style="grid-template-columns: 1fr;">
-                            <div class="break-time-entry" style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: var(--btn-radius); padding: 12px; margin-bottom: 10px;">
-                                <label style="margin-bottom: 8px;">休憩1:</label>
-                                <div style="display: flex; gap: 10px; align-items: center;">
-                                    <input type="time" id="break1-start" name="break1-start" onfocus="setDefaultTime(this)">
-                                    <span style="color: var(--text-muted);">~</span>
-                                    <input type="time" id="break1-end" name="break1-end" onfocus="setDefaultTime(this)">
-                                    <button type="button" class="btn btn-alert" onclick="resetBreakTime(1)" style="padding: 10px 14px; font-size: 0.85rem;">Reset</button>
-                                </div>
-                            </div>
-
-                            <div class="break-time-entry" style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: var(--btn-radius); padding: 12px; margin-bottom: 10px;">
-                                <label style="margin-bottom: 8px;">休憩2:</label>
-                                <div style="display: flex; gap: 10px; align-items: center;">
-                                    <input type="time" id="break2-start" name="break2-start" onfocus="setDefaultTime(this)">
-                                    <span style="color: var(--text-muted);">~</span>
-                                    <input type="time" id="break2-end" name="break2-end" onfocus="setDefaultTime(this)">
-                                    <button type="button" class="btn btn-alert" onclick="resetBreakTime(2)" style="padding: 10px 14px; font-size: 0.85rem;">Reset</button>
-                                </div>
-                            </div>
-
-                            <div class="break-time-entry" style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: var(--btn-radius); padding: 12px; margin-bottom: 10px;">
-                                <label style="margin-bottom: 8px;">休憩3:</label>
-                                <div style="display: flex; gap: 10px; align-items: center;">
-                                    <input type="time" id="break3-start" name="break3-start" onfocus="setDefaultTime(this)">
-                                    <span style="color: var(--text-muted);">~</span>
-                                    <input type="time" id="break3-end" name="break3-end" onfocus="setDefaultTime(this)">
-                                    <button type="button" class="btn btn-alert" onclick="resetBreakTime(3)" style="padding: 10px 14px; font-size: 0.85rem;">Reset</button>
-                                </div>
-                            </div>
-
-                            <div class="break-time-entry" style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: var(--btn-radius); padding: 12px; margin-bottom: 15px;">
-                                <label style="margin-bottom: 8px;">休憩4:</label>
-                                <div style="display: flex; gap: 10px; align-items: center;">
-                                    <input type="time" id="break4-start" name="break4-start" onfocus="setDefaultTime(this)">
-                                    <span style="color: var(--text-muted);">~</span>
-                                    <input type="time" id="break4-end" name="break4-end" onfocus="setDefaultTime(this)">
-                                    <button type="button" class="btn btn-alert" onclick="resetBreakTime(4)" style="padding: 10px 14px; font-size: 0.85rem;">Reset</button>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div style="background: rgba(0, 210, 255, 0.05); border: 1px solid rgba(0, 210, 255, 0.2); padding: 15px; border-radius: var(--btn-radius); text-align: center; font-weight: bold;">
-                            <span data-i18n="total_break_time">合計休憩時間:</span>
-                            <span id="total-break-display" style="color: var(--accent-blue); font-size: 1.1rem; margin-left: 5px;">0分</span>
-                        </div>
-                    </div>
-
                     <!-- Machine Maintenance -->
                     <div class="glass-card">
                         <h3 data-i18n="machine_trouble_title">機械故障時間 / Machine Maintenance Time</h3>
@@ -2016,6 +1996,212 @@
         };
     </script>
 
+    <!-- ===== Phase 1 component styles ===== -->
+    <style>
+        /* Production action buttons */
+        .prod-action-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+            margin-bottom: 14px;
+        }
+        .prod-action-btn {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-strong);
+            border-radius: var(--btn-radius);
+            cursor: pointer;
+            font-family: inherit;
+            color: var(--text-main);
+            transition: var(--transition-smooth);
+            text-align: left;
+            min-height: 64px;
+        }
+        .prod-action-btn:hover { border-color: var(--blue); background: var(--bg-subtle); }
+        .prod-action-btn:active { transform: translateY(1px); }
+        .prod-action-btn svg {
+            width: 26px; height: 26px; flex-shrink: 0;
+            stroke: var(--blue); stroke-width: 1.7; fill: none;
+            stroke-linecap: round; stroke-linejoin: round;
+        }
+        .prod-action-btn span { display: flex; flex-direction: column; font-weight: 700; font-size: 0.95rem; line-height: 1.25; }
+        .prod-action-btn small { font-weight: 600; font-size: 0.72rem; color: var(--text-soft); }
+
+        /* Check buttons (初物 / 終物) */
+        .prod-check-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+        .prod-check-btn {
+            display: flex; align-items: center; gap: 12px;
+            padding: 16px; min-height: 64px;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-strong);
+            border-radius: var(--btn-radius);
+            cursor: pointer; font-family: inherit; color: var(--text-main);
+            transition: var(--transition-smooth); text-align: left;
+        }
+        .prod-check-btn:hover { border-color: var(--brand); background: var(--bg-subtle); }
+        .prod-check-btn:active { transform: translateY(1px); }
+        .prod-check-btn .check-ico {
+            display: flex; align-items: center; justify-content: center;
+            width: 36px; height: 36px; flex-shrink: 0; border-radius: 50%;
+            background: var(--bg-inset); color: var(--text-soft);
+        }
+        .prod-check-btn .check-ico svg { width: 22px; height: 22px; stroke: currentColor; stroke-width: 1.7; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+        .prod-check-btn .check-txt { display: flex; flex-direction: column; font-weight: 700; font-size: 0.95rem; line-height: 1.25; }
+        .prod-check-btn .check-txt small { font-weight: 600; font-size: 0.72rem; color: var(--text-soft); }
+        .prod-check-btn.done {
+            background: var(--brand-soft); border-color: var(--brand);
+        }
+        .prod-check-btn.done .check-ico { background: var(--brand); color: #fff; }
+        .prod-check-btn.done .check-txt { color: var(--brand); }
+
+        /* Tap-to-count defect cards */
+        .tap-counter-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+        @media (max-width: 600px) { .tap-counter-grid { grid-template-columns: repeat(1, 1fr); } }
+        .tap-counter {
+            position: relative;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-strong);
+            border-radius: var(--card-radius);
+            padding: 22px 14px 16px;
+            text-align: center;
+            cursor: pointer;
+            transition: var(--transition-smooth);
+            user-select: none;
+            min-height: 130px;
+            display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+        }
+        .tap-counter:hover { border-color: var(--brand); }
+        .tap-counter:active { transform: scale(0.98); background: var(--bg-subtle); }
+        .tap-counter.bump { animation: tapBump 0.18s ease; }
+        @keyframes tapBump { 50% { transform: scale(1.04); } }
+        .tap-counter.has-count { border-color: var(--red); background: var(--red-soft); }
+        .tap-counter .tap-count { font-size: 2.6rem; font-weight: 800; line-height: 1; color: var(--text-main); }
+        .tap-counter.has-count .tap-count { color: var(--red); }
+        .tap-counter .tap-label { font-size: 0.95rem; font-weight: 700; color: var(--text-muted); }
+        .tap-counter .tap-minus {
+            position: absolute; top: 8px; left: 8px;
+            width: 34px; height: 34px; border-radius: 50%;
+            border: 1px solid var(--border-strong); background: var(--bg-surface);
+            color: var(--text-main); font-size: 1.2rem; font-weight: 700; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            transition: var(--transition-smooth);
+        }
+        .tap-counter .tap-minus:hover { border-color: var(--red); color: var(--red); }
+        .tap-counter .tap-minus:active { transform: scale(0.9); }
+        .tap-hint { text-align: center; color: var(--text-soft); font-size: 0.8rem; font-weight: 600; margin-top: 14px; }
+
+        /* Break summary + count */
+        .break-summary {
+            margin-top: 14px; padding: 14px; text-align: center; font-weight: 700;
+            background: var(--blue-soft); border: 1px solid #CFE0FB; border-radius: var(--btn-radius);
+            color: var(--text-main);
+        }
+        .break-summary #total-break-display { color: var(--blue); font-size: 1.15rem; margin-left: 6px; }
+        .break-summary .break-count { display: block; margin-top: 4px; font-size: 0.78rem; font-weight: 600; color: var(--text-muted); }
+
+        /* Image gallery */
+        .gallery-sub { color: var(--text-muted); font-size: 0.85rem; line-height: 1.5; margin-bottom: 16px; }
+        .image-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; }
+        .gallery-thumb {
+            position: relative; aspect-ratio: 1; border-radius: var(--btn-radius);
+            overflow: hidden; border: 1px solid var(--border); cursor: pointer; background: var(--bg-inset);
+            transition: var(--transition-smooth);
+        }
+        .gallery-thumb:hover { border-color: var(--blue); }
+        .gallery-thumb:active { transform: scale(0.98); }
+        .gallery-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .gallery-thumb .thumb-tag {
+            position: absolute; left: 0; bottom: 0; right: 0;
+            background: rgba(16,24,40,0.62); color: #fff; font-size: 0.7rem; font-weight: 700;
+            padding: 4px 6px; text-align: center;
+        }
+        .gallery-empty {
+            text-align: center; color: var(--text-soft); padding: 32px 16px;
+        }
+        .gallery-empty svg { width: 40px; height: 40px; stroke: currentColor; stroke-width: 1.5; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+        .gallery-empty p { margin-top: 10px; font-size: 0.9rem; font-weight: 600; }
+
+        /* Break full-screen overlay */
+        .break-overlay {
+            position: fixed; inset: 0; z-index: 100002;
+            background: linear-gradient(160deg, #15324A, #0E2438);
+            display: none; flex-direction: column; align-items: center; justify-content: center;
+            color: #fff; padding: 24px; text-align: center;
+        }
+        .break-overlay.open { display: flex; }
+        .break-overlay .break-pulse {
+            width: 120px; height: 120px; border-radius: 50%;
+            background: rgba(46,111,242,0.18); border: 2px solid #2E6FF2;
+            display: flex; align-items: center; justify-content: center; margin-bottom: 28px;
+            animation: breakPulse 1.6s ease-in-out infinite;
+        }
+        .break-overlay .break-pulse svg { width: 56px; height: 56px; stroke: #7FB0FF; stroke-width: 1.6; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+        @keyframes breakPulse {
+            0%,100% { box-shadow: 0 0 0 0 rgba(46,111,242,0.45); }
+            50% { box-shadow: 0 0 0 22px rgba(46,111,242,0); }
+        }
+        .break-overlay h2 { font-size: 1.6rem; font-weight: 800; letter-spacing: 0.02em; }
+        .break-overlay .break-sub { color: #9FB8D4; margin-top: 8px; font-weight: 600; }
+        .break-overlay .break-timer { font-size: 4rem; font-weight: 800; font-variant-numeric: tabular-nums; margin: 24px 0 32px; }
+        .break-overlay .btn-finish-break {
+            background: #fff; color: #15324A; min-height: 56px; padding: 0 40px;
+            border: none; border-radius: var(--btn-radius); font-family: inherit;
+            font-size: 1.05rem; font-weight: 800; cursor: pointer;
+        }
+        .break-overlay .btn-finish-break:active { transform: translateY(1px); }
+
+        /* Image preview modal */
+        .img-preview-modal {
+            position: fixed; inset: 0; z-index: 100003; display: none;
+            align-items: center; justify-content: center;
+            background: rgba(16,24,40,0.82); padding: 20px;
+        }
+        .img-preview-modal.open { display: flex; }
+        .img-preview-modal img { max-width: 96vw; max-height: 82vh; border-radius: var(--card-radius); box-shadow: var(--shadow-pop); }
+        .img-preview-modal .img-preview-close {
+            position: absolute; top: 18px; right: 20px; width: 44px; height: 44px;
+            border-radius: 50%; border: none; background: rgba(255,255,255,0.16); color: #fff;
+            font-size: 1.6rem; cursor: pointer; line-height: 1;
+        }
+    </style>
+
+    <!-- Break full-screen overlay -->
+    <div id="breakOverlay" class="break-overlay">
+        <div class="break-pulse">
+            <svg viewBox="0 0 24 24"><path d="M18 8h1a3 3 0 0 1 0 6h-1"/><path d="M3 8h15v5a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4z"/><line x1="7" y1="2" x2="7" y2="5"/><line x1="11" y1="2" x2="11" y2="5"/><line x1="15" y1="2" x2="15" y2="5"/></svg>
+        </div>
+        <h2 data-i18n="break_in_progress">休憩中 / Break in Progress</h2>
+        <p class="break-sub">作業を一時停止しています / Production is paused</p>
+        <div class="break-timer" id="breakTimerDisplay">00:00</div>
+        <button type="button" class="btn-finish-break" id="finishBreakButton" data-i18n="finish_break">休憩を終了 / Finish Break</button>
+    </div>
+
+    <!-- Image preview modal -->
+    <div id="imgPreviewModal" class="img-preview-modal">
+        <button type="button" class="img-preview-close" id="imgPreviewClose">&times;</button>
+        <img id="imgPreviewTarget" src="" alt="preview">
+    </div>
+
+    <!-- Mandatory material-label photo gate (Step 2 / production scan) -->
+    <div id="materialPhotoGateModal" class="img-preview-modal" style="background: rgba(16,24,40,0.9);">
+        <div style="background: var(--bg-card, #fff); color: var(--text-main, #101828); border-radius: var(--card-radius, 16px); padding: 28px 24px; max-width: 420px; width: 92%; text-align: center; box-shadow: var(--shadow-pop, 0 20px 50px rgba(0,0,0,0.3));">
+            <div style="width:64px;height:64px;border-radius:50%;background:var(--blue-soft,#E8F0FE);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;">
+                <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="var(--blue,#2E6FF2)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+            </div>
+            <h2 style="font-size:1.2rem;font-weight:800;margin-bottom:8px;">材料ラベルを撮影 / Material Label Photo</h2>
+            <p style="color:var(--text-muted,#475467);font-size:0.9rem;line-height:1.5;margin-bottom:22px;">この材料ロットのラベル写真が必要です。撮影すると次へ進みます。<br>A label photo of this material lot is required to continue.</p>
+            <button type="button" id="materialPhotoGateCapture" class="btn btn-secondary btn-full" style="height:54px;font-size:1rem;">
+                📷 写真を撮影 / Take Photo
+            </button>
+        </div>
+    </div>
+
+    <!-- Lightweight toast -->
+    <div id="appToast" style="position:fixed;left:50%;bottom:32px;transform:translateX(-50%) translateY(20px);z-index:100004;background:rgba(16,24,40,0.92);color:#fff;padding:12px 20px;border-radius:999px;font-weight:700;font-size:0.9rem;opacity:0;pointer-events:none;transition:opacity .25s,transform .25s;"></div>
+
     <!-- Fallback/Legacy inputs hidden for backend logic (avoid reference errors) -->
     <div style="display:none;">
         <input id="process" name="process" value="OZNC01" readonly>
@@ -2027,5 +2213,320 @@
     <script src="html5-qrcode.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jsqr/dist/jsQR.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
+
+    <!-- ===== Phase 1 interactive behaviors (runs after backend) ===== -->
+    <script>
+    (function () {
+      "use strict";
+
+      // ---------- Toast ----------
+      let toastTimer = null;
+      function showToast(msg) {
+        const t = document.getElementById('appToast');
+        if (!t) return;
+        t.textContent = msg;
+        t.style.opacity = '1';
+        t.style.transform = 'translateX(-50%) translateY(0)';
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => {
+          t.style.opacity = '0';
+          t.style.transform = 'translateX(-50%) translateY(20px)';
+        }, 2600);
+      }
+      window.showAppToast = showToast;
+
+      const breakPrefix = (typeof uniquePrefix !== 'undefined' && uniquePrefix) ? uniquePrefix : 'kurachi_';
+
+      // ---------- Defect tap counters (18/19/20) ----------
+      function syncDefectDisplays() {
+        [18, 19, 20].forEach(n => {
+          const inp = document.getElementById('counter-' + n);
+          const disp = document.getElementById('counter-' + n + '-display');
+          const card = document.getElementById('counter-box-' + n);
+          if (!inp || !disp || !card) return;
+          const v = parseInt(inp.value, 10) || 0;
+          disp.textContent = v;
+          card.classList.toggle('has-count', v > 0);
+        });
+      }
+      window.prodCounterTap = function (e, n) {
+        if (e && e.target && e.target.closest('.tap-minus')) return;
+        if (typeof incrementCounter === 'function') incrementCounter(n);
+        syncDefectDisplays();
+        const card = document.getElementById('counter-box-' + n);
+        if (card) { card.classList.remove('bump'); void card.offsetWidth; card.classList.add('bump'); }
+      };
+      window.prodCounterMinus = function (e, n) {
+        if (e) e.stopPropagation();
+        if (typeof decrementCounter === 'function') decrementCounter(n);
+        syncDefectDisplays();
+      };
+
+      // ---------- Image preview ----------
+      function openPreview(src) {
+        if (!src) return;
+        const m = document.getElementById('imgPreviewModal');
+        const img = document.getElementById('imgPreviewTarget');
+        if (!m || !img) return;
+        img.src = src;
+        m.classList.add('open');
+      }
+      (function bindPreviewClose() {
+        const m = document.getElementById('imgPreviewModal');
+        const close = document.getElementById('imgPreviewClose');
+        if (close) close.addEventListener('click', () => m.classList.remove('open'));
+        if (m) m.addEventListener('click', (e) => { if (e.target === m) m.classList.remove('open'); });
+      })();
+
+      // ---------- Image gallery (Images tab) ----------
+      function statusCardHTML(tag, src, has) {
+        if (has && src) {
+          return '<div class="gallery-thumb" data-src="' + src + '">' +
+                 '<span style="position:absolute;top:6px;right:6px;width:12px;height:12px;border-radius:50%;background:#12B76A;border:2px solid #fff;z-index:2;"></span>' +
+                 '<img src="' + src + '" alt="' + tag + '">' +
+                 '<span class="thumb-tag">' + tag + '</span></div>';
+        }
+        return '<div class="gallery-thumb empty" style="display:flex;flex-direction:column;align-items:center;justify-content:center;border:1px dashed #F04438;background:rgba(240,68,56,0.06);">' +
+               '<span style="position:absolute;top:6px;right:6px;width:12px;height:12px;border-radius:50%;background:#F04438;border:2px solid #fff;"></span>' +
+               '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#F04438" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>' +
+               '<span class="thumb-tag" style="position:static;background:none;color:#F04438;margin-top:6px;">' + tag + ' 未撮影</span></div>';
+      }
+      function isTrue(elId) {
+        const el = document.getElementById(elId);
+        return !!el && (el.textContent || '').trim().toUpperCase() === 'TRUE';
+      }
+      function renderImageGallery() {
+        const g = document.getElementById('imageGallery');
+        const empty = document.getElementById('imageGalleryEmpty');
+        if (!g) return;
+        let html = '';
+        const hPic = document.getElementById('hatsumonoPic');
+        const aPic = document.getElementById('atomonoPic');
+        html += statusCardHTML('初物チェック', hPic ? hPic.getAttribute('src') : '', isTrue('hatsumonoLabel'));
+        html += statusCardHTML('終物チェック', aPic ? aPic.getAttribute('src') : '', isTrue('atomonoLabel'));
+        const matImgs = document.querySelectorAll('#material-photo-thumbnails img');
+        matImgs.forEach((img, i) => { html += statusCardHTML('材料ラベル ' + (i + 1), img.src, true); });
+        g.innerHTML = html;
+        if (empty) empty.style.display = 'none';
+        g.querySelectorAll('.gallery-thumb[data-src]').forEach(el => {
+          el.addEventListener('click', () => openPreview(el.getAttribute('data-src')));
+        });
+      }
+      window.renderImageGallery = renderImageGallery;
+
+      // ---------- 初物 / 終物 buttons: hide in production once captured ----------
+      function syncCheckButtons() {
+        const hBtn = document.getElementById('hatsumonoButton');
+        const aBtn = document.getElementById('atomonoButton');
+        if (hBtn) hBtn.style.display = isTrue('hatsumonoLabel') ? 'none' : '';
+        if (aBtn) aBtn.style.display = isTrue('atomonoLabel') ? 'none' : '';
+      }
+      function observeLabel(id, cb) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        new MutationObserver(cb).observe(el, { childList: true, characterData: true, subtree: true });
+      }
+      function observeAttr(id, attr, cb) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        new MutationObserver(cb).observe(el, { attributes: true, attributeFilter: [attr] });
+      }
+
+      // ---------- Break timer ----------
+      let breakInterval = null;
+      function fmtClock(d) {
+        return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+      }
+      function fmtElapsed(ms) {
+        const s = Math.floor(ms / 1000);
+        const hh = Math.floor(s / 3600), mm = Math.floor((s % 3600) / 60), ss = s % 60;
+        const p = (x) => String(x).padStart(2, '0');
+        return hh > 0 ? (p(hh) + ':' + p(mm) + ':' + p(ss)) : (p(mm) + ':' + p(ss));
+      }
+      function tickBreak(startEpoch) {
+        const disp = document.getElementById('breakTimerDisplay');
+        if (disp) disp.textContent = fmtElapsed(Date.now() - startEpoch);
+      }
+      function openBreakOverlay(startEpoch) {
+        const ov = document.getElementById('breakOverlay');
+        if (ov) ov.classList.add('open');
+        tickBreak(startEpoch);
+        clearInterval(breakInterval);
+        breakInterval = setInterval(() => tickBreak(startEpoch), 1000);
+      }
+      function startBreak() {
+        const startEpoch = Date.now();
+        localStorage.setItem(breakPrefix + 'activeBreakStart', String(startEpoch));
+        openBreakOverlay(startEpoch);
+      }
+      function finishBreak() {
+        const raw = localStorage.getItem(breakPrefix + 'activeBreakStart');
+        clearInterval(breakInterval);
+        const ov = document.getElementById('breakOverlay');
+        if (ov) ov.classList.remove('open');
+        localStorage.removeItem(breakPrefix + 'activeBreakStart');
+        if (!raw) return;
+        const start = new Date(parseInt(raw, 10));
+        const end = new Date();
+        // find first empty break slot (1..4)
+        let slot = 0;
+        for (let i = 1; i <= 4; i++) {
+          const si = document.getElementById('break' + i + '-start');
+          if (si && !si.value) { slot = i; break; }
+        }
+        if (!slot) { showToast('休憩は最大4回までです / Max 4 breaks recorded'); return; }
+        const si = document.getElementById('break' + slot + '-start');
+        const ei = document.getElementById('break' + slot + '-end');
+        if (si) si.value = fmtClock(start);
+        if (ei) ei.value = fmtClock(end);
+        if (typeof calculateTotalBreakTime === 'function') calculateTotalBreakTime();
+        updateBreakCount();
+        showToast('休憩を記録しました / Break recorded');
+      }
+      function updateBreakCount() {
+        let n = 0;
+        for (let i = 1; i <= 4; i++) {
+          const si = document.getElementById('break' + i + '-start');
+          const ei = document.getElementById('break' + i + '-end');
+          if (si && ei && si.value && ei.value) n++;
+        }
+        const c = document.getElementById('break-count-display');
+        if (c) c.textContent = n > 0 ? ('休憩 ' + n + ' 回 / ' + n + ' break' + (n > 1 ? 's' : '')) : '';
+      }
+      function resumeBreakIfActive() {
+        const raw = localStorage.getItem(breakPrefix + 'activeBreakStart');
+        if (raw) openBreakOverlay(parseInt(raw, 10));
+      }
+
+      // ---------- Material photo gate (Step 2 / production scan) ----------
+      let matWaiters = [];
+      if (typeof window.addMaterialLabelPhoto === 'function') {
+        const origAdd = window.addMaterialLabelPhoto;
+        window.addMaterialLabelPhoto = async function () {
+          const r = await origAdd.apply(this, arguments);
+          if (r) {
+            const ws = matWaiters.slice(); matWaiters.length = 0;
+            ws.forEach(f => { try { f(); } catch (_) {} });
+            renderImageGallery();
+          }
+          return r;
+        };
+      }
+      window.materialPhotoGate = function (proceed) {
+        const modal = document.getElementById('materialPhotoGateModal');
+        matWaiters.push(() => { if (modal) modal.classList.remove('open'); if (typeof proceed === 'function') proceed(); });
+        if (modal) modal.classList.add('open');
+      };
+      (function bindGateCapture() {
+        const btn = document.getElementById('materialPhotoGateCapture');
+        if (btn) btn.addEventListener('click', () => {
+          const b = document.getElementById('makerLabelButton');
+          if (b) b.click();
+        });
+      })();
+
+      // Production "Scan Material" closes instead of advancing to Step 3 (no send)
+      if (typeof window.showStep3Modal === 'function') {
+        const origStep3 = window.showStep3Modal;
+        window.showStep3Modal = function () {
+          if (window.__materialScanMode === 'production') {
+            window.__materialScanMode = null;
+            const m = document.getElementById('step2Modal');
+            if (m) m.style.display = 'none';
+            if (typeof closeAllStepModals === 'function') closeAllStepModals();
+            renderImageGallery();
+            showToast('材料を追加しました / Material added');
+            return;
+          }
+          return origStep3.apply(this, arguments);
+        };
+      }
+      // Clear stale production-scan mode if the flow is abandoned or a fresh scan starts
+      if (typeof window.closeAllStepModals === 'function') {
+        const origClose = window.closeAllStepModals;
+        window.closeAllStepModals = function () { window.__materialScanMode = null; return origClose.apply(this, arguments); };
+      }
+      if (typeof window.showStep1Modal === 'function') {
+        const origStep1 = window.showStep1Modal;
+        window.showStep1Modal = function () { window.__materialScanMode = null; return origStep1.apply(this, arguments); };
+      }
+
+      // ---------- Kensa visibility ----------
+      function applyKensaVisibility() {
+        const grouped = (typeof isGroupedMachinePage !== 'undefined' && isGroupedMachinePage);
+        const card = document.getElementById('kensaCard');
+        const fields = document.getElementById('kensa-fields-container');
+        const cb = document.getElementById('enable-inputs');
+        if (grouped) { if (card) card.style.display = 'none'; return; }
+        if (fields) fields.style.display = (cb && cb.checked) ? 'flex' : 'none';
+      }
+      window.applyKensaVisibility = applyKensaVisibility;
+
+      // ---------- Wiring ----------
+      function init() {
+        // Defect counters
+        syncDefectDisplays();
+
+        // Check buttons + gallery observers
+        syncCheckButtons();
+        renderImageGallery();
+        observeLabel('hatsumonoLabel', () => { syncCheckButtons(); renderImageGallery(); });
+        observeLabel('atomonoLabel', () => { syncCheckButtons(); renderImageGallery(); });
+        observeAttr('hatsumonoPic', 'src', renderImageGallery);
+        observeAttr('atomonoPic', 'src', renderImageGallery);
+        const matThumbs = document.getElementById('material-photo-thumbnails');
+        if (matThumbs) new MutationObserver(renderImageGallery).observe(matThumbs, { childList: true, subtree: true });
+
+        // Break timer
+        const startBtn = document.getElementById('breakStartButton');
+        const finishBtn = document.getElementById('finishBreakButton');
+        if (startBtn) startBtn.addEventListener('click', startBreak);
+        if (finishBtn) finishBtn.addEventListener('click', finishBreak);
+        updateBreakCount();
+        resumeBreakIfActive();
+
+        // Print label
+        const pl = document.getElementById('prodPrintLabelButton');
+        if (pl) pl.addEventListener('click', () => {
+          if (typeof printLabel === 'function') printLabel();
+          else showToast('印刷機能が利用できません / Print unavailable');
+        });
+
+        // Scan material (production, no send)
+        const sm = document.getElementById('prodScanMaterialButton');
+        if (sm) sm.addEventListener('click', () => {
+          if (typeof currentProductDetails === 'undefined' || !currentProductDetails || !currentProductDetails.materialCode) {
+            showToast('先に製品をスキャンしてください / Scan the product first');
+            return;
+          }
+          window.__materialScanMode = 'production';
+          if (typeof showStep2Modal === 'function') showStep2Modal();
+        });
+
+        // Kensa
+        const cb = document.getElementById('enable-inputs');
+        if (cb) cb.addEventListener('change', applyKensaVisibility);
+        applyKensaVisibility();
+
+        // Re-apply after backend restore settles
+        setTimeout(() => { syncDefectDisplays(); syncCheckButtons(); renderImageGallery(); applyKensaVisibility(); updateBreakCount(); }, 800);
+
+        // Render gallery whenever Images tab is opened
+        if (typeof window.goToTab === 'function') {
+          const origGoToTab = window.goToTab;
+          window.goToTab = function (i) {
+            origGoToTab(i);
+            if (i === 3) renderImageGallery();
+          };
+        }
+      }
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+      } else {
+        init();
+      }
+    })();
+    </script>
 </body>
 </html>
