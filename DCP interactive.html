@@ -1448,10 +1448,14 @@
                     <!-- Machine Maintenance -->
                     <div class="glass-card">
                         <h3 data-i18n="machine_trouble_title">機械故障時間 / Machine Maintenance Time</h3>
-                        <button type="button" id="add-maintenance-btn" class="btn btn-secondary btn-full" style="margin-bottom: 20px;">
-                            機械故障時間を追加 / Add Maintenance Time
+                        <button type="button" id="maintenanceStartButton" class="btn btn-primary btn-full" style="height: 56px; font-size: 1.05rem; margin-bottom: 12px;">
+                            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.3L3 18l3 3 6.4-6.3a4 4 0 0 0 5.3-5.4l-2.7 2.7-2-2 2.7-2.7z"/></svg>
+                            故障タイマー開始 / Start Maintenance Timer
                         </button>
-                        
+                        <button type="button" id="add-maintenance-btn" class="btn btn-secondary btn-full" style="margin-bottom: 20px;">
+                            手動で追加 / Add Manually
+                        </button>
+
                         <div id="maintenance-records-container" style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
                             <!-- populated dynamically by backend -->
                         </div>
@@ -1964,30 +1968,63 @@
                 html += '</div>';
             }
             
+            // Edit button helper: jumps to the field's tab and highlights it
+            const edit = (tab, fieldId) => `<button type="button" class="row-edit-btn" onclick="goToTabAndFocus(${tab}, '${fieldId}')">✎ 編集</button>`;
+            const row = (label, valHtml, editBtn) =>
+                '  <div class="summary-row"><span class="lbl">' + label + '</span> <span class="val">' + valHtml + (editBtn || '') + '</span></div>';
+
             html += '<div class="summary-details-grid">';
             html += '  <h3>入力データ概要 / Data Summary</h3>';
-            html += '  <div class="summary-row"><span class="lbl">背番号 (Code):</span> <span class="val">' + (values.sebanggo || '---') + '</span></div>';
-            html += '  <div class="summary-row"><span class="lbl">品番 (Product Number):</span> <span class="val">' + (values.hinban || '---') + '</span></div>';
-            html += '  <div class="summary-row"><span class="lbl">作業者 (Worker):</span> <span class="val">' + (values.workerName || '---') + '</span></div>';
-            html += '  <div class="summary-row"><span class="lbl">加工日 (Date):</span> <span class="val">' + (values.date || '---') + '</span></div>';
-            html += '  <div class="summary-row"><span class="lbl">時間 (Time):</span> <span class="val">' + (values.startTime || '--:--') + ' ~ ' + (values.endTime || '--:--') + '</span></div>';
-            html += '  <div class="summary-row"><span class="lbl">加工数 (Qty):</span> <span class="val">' + values.processQty + '</span></div>';
-            html += '  <div class="summary-row"><span class="lbl">ショット数 (Shots):</span> <span class="val">' + values.shotCount + '</span></div>';
-            html += '  <div class="summary-row"><span class="lbl">材料ロット (Material Lot):</span> <span class="val">' + (values.materialLot || '---') + '</span></div>';
-            html += '  <div class="summary-row"><span class="lbl">不良 (Defects):</span> <span class="val">疵引: ' + values.defectsPull + ' | 加工: ' + values.defectsProcess + ' | その他: ' + values.defectsOther + ' (NG: ' + values.totalNG + ')</span></div>';
-            html += '  <div class="summary-row"><span class="lbl">良品合計 (Good Total):</span> <span class="val" style="font-weight: bold; color: var(--accent-green);">' + values.totalGood + '</span></div>';
-            html += '  <div class="summary-row"><span class="lbl">初物/終物チェック:</span> <span class="val">初物: ' + values.photosHatsumono + ' | 終物: ' + values.photosAtomono + '</span></div>';
-            html += '  <div class="summary-row"><span class="lbl">材料ラベル画像数 (Label Photos):</span> <span class="val">' + values.photosMaterial + '枚</span></div>';
+            html += row('背番号 (Code):', (values.sebanggo || '---'), edit(0, 'startStep1Scan'));
+            html += row('品番 (Product Number):', (values.hinban || '---'));
+            html += row('作業者 (Worker):', (values.workerName || '---'), edit(2, 'Machine Operator'));
+            html += row('加工日 (Date):', (values.date || '---'), edit(2, 'Lot No.'));
+            html += row('時間 (Time):', (values.startTime || '--:--') + ' ~ ' + (values.endTime || '--:--'), edit(2, 'Start Time'));
+            html += row('加工数 (Qty):', values.processQty, edit(2, 'ProcessQuantity'));
+            html += row('ショット数 (Shots):', values.shotCount, edit(2, 'shot'));
+            html += row('材料ロット (Material Lot):', (values.materialLot || '---'), edit(2, '材料ロット'));
+            html += row('不良 (Defects):', '疵引: ' + values.defectsPull + ' | 加工: ' + values.defectsProcess + ' | その他: ' + values.defectsOther + ' (NG: ' + values.totalNG + ')', edit(2, 'counter-box-18'));
+            html += row('良品合計 (Good Total):', '<span style="font-weight: bold; color: var(--accent-green);">' + values.totalGood + '</span>');
+            html += row('初物/終物チェック:', '初物: ' + values.photosHatsumono + ' | 終物: ' + values.photosAtomono, edit(3, 'imageGallery'));
+            html += row('材料ラベル画像数 (Label Photos):', values.photosMaterial + '枚', edit(3, 'imageGallery'));
             html += '</div>';
-            
+
+            // ----- Calculated values (recalculated live so edits stay consistent) -----
+            if (typeof updateCycleTime === 'function') { try { updateCycleTime(); } catch (e) {} }
+            const minOf = (txt) => { const m = String(txt || '').match(/-?\d+/); return m ? parseInt(m[0], 10) : 0; };
+            const breakMins = minOf(document.getElementById('total-break-display')?.textContent);
+            const maintMins = minOf(document.getElementById('total-trouble-display')?.textContent);
+            const cycleTimeVal = document.getElementById('cycleTime')?.value || '0';
+            let grossMins = 0;
+            if (values.startTime && values.endTime) {
+                const s = new Date('1970-01-01T' + values.startTime + ':00Z');
+                const e = new Date('1970-01-01T' + values.endTime + ':00Z');
+                grossMins = Math.max(0, Math.round((e - s) / 60000));
+            }
+            const netMins = Math.max(0, grossMins - breakMins - maintMins);
+            const fmtHM = (m) => Math.floor(m / 60).toString().padStart(2, '0') + 'h ' + (m % 60).toString().padStart(2, '0') + 'm';
+            html += '<div class="summary-details-grid summary-calc-grid" style="margin-top: 16px;">';
+            html += '  <h3>計算値 / Calculated Values</h3>';
+            html += row('サイクルタイム (Cycle Time):', cycleTimeVal + ' 秒/個');
+            html += row('総時間 (Gross Time):', fmtHM(grossMins));
+            html += row('休憩合計 (Break):', breakMins + '分');
+            html += row('故障合計 (Maintenance):', maintMins + '分');
+            html += row('実働時間 (Work Time):', '<span style="font-weight: bold; color: var(--blue, #2E6FF2);">' + fmtHM(netMins) + '</span>');
+            html += '</div>';
+
             summaryList.innerHTML = html;
         }
 
         window.goToTabAndFocus = function(tabIndex, fieldId) {
             goToTab(tabIndex);
             setTimeout(() => {
+                // Start/End processing times are locked after first entry — unlock for editing
+                if ((fieldId === 'Start Time' || fieldId === 'End Time') && typeof unlockProcessingTime === 'function') {
+                    try { unlockProcessingTime(fieldId === 'Start Time' ? 'start' : 'end'); } catch (e) {}
+                }
                 const field = document.getElementById(fieldId);
                 if (field) {
+                    field.scrollIntoView({ behavior: 'smooth', block: 'center' });
                     field.focus();
                     field.classList.add('flash-highlight');
                     setTimeout(() => field.classList.remove('flash-highlight'), 1800);
@@ -2177,6 +2214,35 @@
         <p class="break-sub">作業を一時停止しています / Production is paused</p>
         <div class="break-timer" id="breakTimerDisplay">00:00</div>
         <button type="button" class="btn-finish-break" id="finishBreakButton" data-i18n="finish_break">休憩を終了 / Finish Break</button>
+    </div>
+
+    <style>
+        .maintenance-overlay { background: linear-gradient(160deg, #4A3415, #38260E); }
+        .maintenance-overlay .maintenance-pulse { background: rgba(245,158,11,0.18); border-color: #F59E0B; animation: maintPulse 1.6s ease-in-out infinite; }
+        .maintenance-overlay .maintenance-pulse svg { stroke: #FCD980; }
+        @keyframes maintPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(245,158,11,0.45); } 50% { box-shadow: 0 0 0 22px rgba(245,158,11,0); } }
+        .maintenance-overlay .break-sub { color: #D8B78A; }
+        .maintenance-overlay .btn-finish-break { background: #FCD980; color: #4A3415; }
+        /* Summary row edit button + calculated section */
+        .summary-row { position: relative; }
+        .summary-row .row-edit-btn {
+            margin-left: 10px; border: 1px solid var(--border-strong, #D0D5DD); background: var(--bg-surface, #fff);
+            color: var(--blue, #2E6FF2); border-radius: 8px; padding: 3px 10px; font-size: 0.78rem; font-weight: 700;
+            cursor: pointer; font-family: inherit; white-space: nowrap;
+        }
+        .summary-row .row-edit-btn:active { transform: translateY(1px); }
+        .summary-calc-grid .summary-row .val { font-variant-numeric: tabular-nums; }
+    </style>
+
+    <!-- Maintenance full-screen overlay (machine trouble timer) -->
+    <div id="maintenanceOverlay" class="break-overlay maintenance-overlay">
+        <div class="break-pulse maintenance-pulse">
+            <svg viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.3L3 18l3 3 6.4-6.3a4 4 0 0 0 5.3-5.4l-2.7 2.7-2-2 2.7-2.7z"/></svg>
+        </div>
+        <h2 data-i18n="maintenance_in_progress">機械故障中 / Machine Maintenance</h2>
+        <p class="break-sub">機械を修理中です / Machine is being serviced</p>
+        <div class="break-timer" id="maintenanceTimerDisplay">00:00</div>
+        <button type="button" class="btn-finish-break" id="finishMaintenanceButton" data-i18n="finish_maintenance">故障対応を終了 / End Maintenance</button>
     </div>
 
     <!-- Image preview modal -->
@@ -2398,6 +2464,52 @@
         if (raw) openBreakOverlay(parseInt(raw, 10));
       }
 
+      // ---------- Maintenance timer (machine trouble) ----------
+      let maintInterval = null;
+      function tickMaint(startEpoch) {
+        const disp = document.getElementById('maintenanceTimerDisplay');
+        if (disp) disp.textContent = fmtElapsed(Date.now() - startEpoch);
+      }
+      function openMaintOverlay(startEpoch) {
+        const ov = document.getElementById('maintenanceOverlay');
+        if (ov) ov.classList.add('open');
+        tickMaint(startEpoch);
+        clearInterval(maintInterval);
+        maintInterval = setInterval(() => tickMaint(startEpoch), 1000);
+      }
+      function startMaintenance() {
+        const startEpoch = Date.now();
+        localStorage.setItem(breakPrefix + 'activeMaintStart', String(startEpoch));
+        openMaintOverlay(startEpoch);
+      }
+      function finishMaintenance() {
+        const raw = localStorage.getItem(breakPrefix + 'activeMaintStart');
+        clearInterval(maintInterval);
+        const ov = document.getElementById('maintenanceOverlay');
+        if (ov) ov.classList.remove('open');
+        localStorage.removeItem(breakPrefix + 'activeMaintStart');
+        if (!raw) return;
+        const start = new Date(parseInt(raw, 10));
+        const end = new Date();
+        // Open the existing maintenance record modal pre-filled (reason + photo required there)
+        if (typeof showMaintenanceModal === 'function') {
+          showMaintenanceModal(-1);
+          setTimeout(() => {
+            const s = document.getElementById('maintenance-start');
+            const e = document.getElementById('maintenance-end');
+            if (s) s.value = fmtClock(start);
+            if (e) e.value = fmtClock(end);
+            const reason = document.getElementById('maintenance-comment');
+            if (reason) reason.focus();
+            showToast('理由を入力し写真を撮影してください / Enter reason and take a photo');
+          }, 120);
+        }
+      }
+      function resumeMaintIfActive() {
+        const raw = localStorage.getItem(breakPrefix + 'activeMaintStart');
+        if (raw) openMaintOverlay(parseInt(raw, 10));
+      }
+
       // ---------- Material photo gate (Step 2 / production scan) ----------
       let matWaiters = [];
       if (typeof window.addMaterialLabelPhoto === 'function') {
@@ -2484,6 +2596,13 @@
         if (finishBtn) finishBtn.addEventListener('click', finishBreak);
         updateBreakCount();
         resumeBreakIfActive();
+
+        // Maintenance timer
+        const maintStartBtn = document.getElementById('maintenanceStartButton');
+        const maintFinishBtn = document.getElementById('finishMaintenanceButton');
+        if (maintStartBtn) maintStartBtn.addEventListener('click', startMaintenance);
+        if (maintFinishBtn) maintFinishBtn.addEventListener('click', finishMaintenance);
+        resumeMaintIfActive();
 
         // Print label
         const pl = document.getElementById('prodPrintLabelButton');

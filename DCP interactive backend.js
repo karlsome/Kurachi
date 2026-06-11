@@ -6631,8 +6631,12 @@ async function sendtoNC(selectedValue) {
         console.warn('⚠️ Failed machines:', failed.map(f => f.machine).join(', '));
       }
       
-      // Always show manual send modal for grouped machines (for user verification)
-      if (typeof showManualSendModal === 'function') {
+      // Always show the individual (per-machine) send modal for grouped machines,
+      // so the worker can verify / resend to each machine. (showManualSendModal's
+      // #manualSendModal markup was removed in the redesign; this themed modal exists.)
+      if (typeof showIndividualSendModal === 'function') {
+        setTimeout(() => showIndividualSendModal(), 1000);
+      } else if (typeof showManualSendModal === 'function') {
         setTimeout(() => showManualSendModal(currentSebanggo), 1000);
       }
       
@@ -6921,23 +6925,23 @@ function createGroupedShotInputs() {
     
     // Add title
     const title = document.createElement('label');
-    title.style.cssText = 'display: block; font-weight: bold; margin-bottom: 15px; color: white;';
-    title.innerHTML = 'ショット数 (Shot Count) <span style="color: #ffeb3b;">- Per Machine</span>';
+    title.style.cssText = 'display: block; font-weight: 700; margin-bottom: 15px; color: var(--text-main, #101828);';
+    title.innerHTML = 'ショット数 (Shot Count) <span style="color: var(--blue, #2E6FF2); font-weight: 700;">- Per Machine</span>';
     shotSection.appendChild(title);
-    
+
     // Create container for machine inputs
     const container = document.createElement('div');
     container.style.cssText = 'display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px;';
-    
+
     // Create input for each machine
     groupedMachines.forEach((machine, index) => {
       const machineDiv = document.createElement('div');
-      machineDiv.style.cssText = 'display: flex; align-items: center; gap: 10px; background: rgba(255, 255, 255, 0.1); padding: 10px; border-radius: 5px;';
-      
+      machineDiv.style.cssText = 'display: flex; align-items: center; gap: 10px; background: var(--bg-inset, #F9FAFB); border: 1px solid var(--border, #E4E7EC); padding: 12px; border-radius: 10px;';
+
       const label = document.createElement('label');
-      label.style.cssText = 'min-width: 120px; color: white; font-weight: 600;';
+      label.style.cssText = 'min-width: 120px; color: var(--text-main, #101828); font-weight: 700;';
       label.textContent = `${machine}:`;
-      
+
       const input = document.createElement('input');
       input.type = 'number';
       input.id = `shot-${machine}`;
@@ -6946,7 +6950,7 @@ function createGroupedShotInputs() {
       input.min = '0';
       input.value = ''; // Start with blank value
       input.readOnly = true; // Make readonly so keypad is used
-      input.style.cssText = 'flex: 1; padding: 8px; border: 2px solid #007bff; border-radius: 3px; cursor: pointer; background-color: #f0f8ff;';
+      input.style.cssText = 'flex: 1; padding: 12px; border: 1px solid var(--border-strong, #D0D5DD); border-radius: 8px; cursor: pointer; background-color: var(--bg-surface, #fff); color: var(--text-main, #101828); font-weight: 700;';
       
       // Restore value from localStorage
       const savedValue = localStorage.getItem(`${uniquePrefix}shot-${machine}`);
@@ -6983,19 +6987,19 @@ function createGroupedShotInputs() {
     
     // Add total display
     const totalDiv = document.createElement('div');
-    totalDiv.style.cssText = 'display: flex; align-items: center; gap: 10px; background: rgba(76, 175, 80, 0.2); padding: 12px; border-radius: 5px; border: 2px solid #4CAF50; margin-top: 10px;';
-    
+    totalDiv.style.cssText = 'display: flex; align-items: center; gap: 10px; background: var(--brand-soft, #E7F7EF); padding: 12px; border-radius: 10px; border: 1px solid var(--brand, #12B76A); margin-top: 10px;';
+
     const totalLabel = document.createElement('label');
-    totalLabel.style.cssText = 'min-width: 120px; color: #4CAF50; font-weight: bold; font-size: 16px;';
+    totalLabel.style.cssText = 'min-width: 120px; color: var(--brand, #0E9F6E); font-weight: 800; font-size: 1rem;';
     totalLabel.textContent = '合計 (Total):';
-    
+
     const totalInput = document.createElement('input');
     totalInput.type = 'number';
     totalInput.id = 'shot';
     totalInput.name = 'shot';
     totalInput.readOnly = true;
     totalInput.value = '0';
-    totalInput.style.cssText = 'flex: 1; padding: 10px; border: 2px solid #4CAF50; border-radius: 3px; background: white; font-weight: bold; font-size: 16px;';
+    totalInput.style.cssText = 'flex: 1; padding: 12px; border: 1px solid var(--brand, #12B76A); border-radius: 8px; background: var(--bg-surface, #fff); font-weight: 800; font-size: 1rem; color: var(--text-main, #101828);';
     
     totalDiv.appendChild(totalLabel);
     totalDiv.appendChild(totalInput);
@@ -10304,8 +10308,9 @@ document.getElementById('resetStep3').addEventListener('click', function(event) 
 
 function showIndividualSendModal() {
   const modal = document.getElementById('individualSendModal');
-  const machineList = document.getElementById('individualMachineList');
-  
+  const machineList = document.getElementById('individualSendContainer')
+                   || document.getElementById('individualMachineList');
+
   if (!modal || !machineList) return;
   
   // Clear previous content
@@ -10326,22 +10331,22 @@ function showIndividualSendModal() {
   // Create a card for each machine
   machines.forEach((machine, index) => {
     const card = document.createElement('div');
-    card.style.cssText = 'border: 2px solid #ddd; border-radius: 10px; padding: 20px; background: #f8f9fa;';
-    
+    card.style.cssText = 'border: 1px solid var(--border, #E4E7EC); border-radius: 12px; padding: 16px; background: var(--bg-inset, #F9FAFB);';
+
     const machineName = document.createElement('div');
-    machineName.style.cssText = 'font-size: 20px; font-weight: 600; color: #333; margin-bottom: 10px;';
+    machineName.style.cssText = 'font-size: 1.05rem; font-weight: 700; color: var(--text-main, #101828); margin-bottom: 12px;';
     machineName.textContent = `${machine.name} (${machine.ip})`;
-    
+
     const statusIndicator = document.createElement('div');
     statusIndicator.id = `sendStatus-${index}`;
-    statusIndicator.style.cssText = 'display: none; margin-bottom: 10px; padding: 8px; background: #d4edda; border: 1px solid #c3e6cb; border-radius: 5px; color: #155724; font-weight: 600; text-align: center;';
+    statusIndicator.style.cssText = 'display: none; margin-bottom: 10px; padding: 10px; background: var(--brand-soft, #E7F7EF); border: 1px solid var(--brand, #12B76A); border-radius: 8px; color: var(--brand, #0E9F6E); font-weight: 700; text-align: center;';
     statusIndicator.innerHTML = '✓ Sent / 送信完了';
-    
+
     const sendButton = document.createElement('button');
     sendButton.type = 'button';
     sendButton.id = `sendBtn-${index}`;
-    sendButton.style.cssText = 'background: #2196F3; color: white; border: none; padding: 15px 30px; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: 600; width: 100%; transition: all 0.3s;';
-    sendButton.innerHTML = `Send to ${machine.name}<br><span style="font-size: 14px;">送信</span>`;
+    sendButton.style.cssText = 'background: var(--blue, #2E6FF2); color: #fff; border: none; padding: 14px 24px; border-radius: 10px; cursor: pointer; font-size: 1rem; font-weight: 700; width: 100%; font-family: inherit;';
+    sendButton.innerHTML = `Send to ${machine.name}<br><span style="font-size: 0.82rem; opacity: 0.9;">送信</span>`;
     
     sendButton.addEventListener('click', async function() {
       await sendToIndividualMachine(machine, ncFilename, index);
