@@ -1,0 +1,2031 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <link rel="icon" type="image/png" href="src/favicon2.png">
+    <title data-i18n="daily_report">自動日報(倉知) - インタラクティブ</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Nunito+Sans:ital,opsz,wght@0,6..12,400;0,6..12,600;0,6..12,700;0,6..12,800;0,6..12,900&display=swap" rel="stylesheet">
+    <style>
+        /* ============================================================
+           DESIGN SYSTEM  ·  Flat / Dashboard-UI-Kit inspired
+           Nunito Sans · light-gray canvas · flat white surfaces
+           No gradients · no glass · 1px borders · consistent scale
+           Optimized for 10" tablets (portrait + landscape)
+           ============================================================ */
+        :root {
+            /* Surfaces */
+            --bg-app: #F4F6FA;       /* page canvas */
+            --bg-surface: #FFFFFF;   /* cards / panels */
+            --bg-subtle: #F7F8FB;    /* light insets */
+            --bg-inset: #EEF1F6;     /* pressed / disabled fills */
+
+            /* Borders */
+            --border: #E6E8EF;
+            --border-strong: #D6DAE3;
+
+            /* Text */
+            --text-main: #1F2733;
+            --text-muted: #6B7280;
+            --text-soft: #9AA1AC;
+
+            /* Brand + semantic (flat solids) */
+            --brand: #1F9D6B;
+            --brand-hover: #178A5C;
+            --brand-soft: #E7F5EF;
+            --blue: #2E6FF2;
+            --blue-hover: #1F5DD8;
+            --blue-soft: #E8F0FE;
+            --red: #E5484D;
+            --red-hover: #CE3B40;
+            --red-soft: #FCEBEC;
+            --amber: #E0900E;
+            --amber-soft: #FBF0DC;
+
+            /* Back-compat aliases (inline styles still reference these) */
+            --bg-primary: var(--bg-app);
+            --bg-secondary: var(--bg-surface);
+            --bg-card: var(--bg-surface);
+            --border-color: var(--border);
+            --accent-gray: #6B7280;
+            --accent-light-gray: #374151;
+            --accent-red: var(--red);
+            --accent-green: var(--brand);
+            --accent-blue: var(--blue);
+
+            /* Radii */
+            --card-radius: 12px;
+            --btn-radius: 8px;
+            --r-pill: 6px;
+
+            /* Elevation — intentionally minimal (flat) */
+            --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04);
+            --shadow-pop: 0 12px 32px rgba(16, 24, 40, 0.14);
+
+            --transition-smooth: 0.18s ease;
+            --header-height: 64px;
+            --tab-bar-height: 66px;
+        }
+
+        /* Base Resets */
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            font-family: 'Nunito Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-app);
+            color: var(--text-main);
+            height: 100vh;
+            width: 100vw;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-font-smoothing: antialiased;
+            text-rendering: optimizeLegibility;
+        }
+
+        /* ---------------- Header ---------------- */
+        header {
+            height: var(--header-height);
+            background: var(--bg-surface);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 20px;
+            z-index: 1000;
+            flex-shrink: 0;
+        }
+
+        .header-title-section {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .header-title-section h1 {
+            font-size: 1.125rem;
+            font-weight: 800;
+            letter-spacing: -0.02em;
+            color: var(--text-main);
+        }
+
+        .header-title-section .status-tag {
+            background: var(--bg-inset);
+            border: 1px solid var(--border);
+            padding: 5px 10px;
+            border-radius: var(--r-pill);
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            font-weight: 700;
+            white-space: nowrap;
+        }
+
+        .header-action-section {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        /* Language Selector */
+        .language-selector {
+            background: transparent;
+            border: none;
+            box-shadow: none;
+            position: static;
+            padding: 0;
+            z-index: auto;
+        }
+
+        .language-selector select {
+            min-height: 40px;
+            padding: 8px 12px;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-strong);
+            border-radius: var(--btn-radius);
+            color: var(--text-main);
+            font-family: inherit;
+            font-size: 0.875rem;
+            font-weight: 600;
+            outline: none;
+            cursor: pointer;
+            transition: border-color var(--transition-smooth);
+        }
+
+        .language-selector select:hover {
+            border-color: var(--blue);
+        }
+
+        .btn-sidebar-toggle {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-strong);
+            color: var(--text-muted);
+            width: 40px;
+            height: 40px;
+            border-radius: var(--btn-radius);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1rem;
+            font-weight: 800;
+            font-style: italic;
+            cursor: pointer;
+            transition: var(--transition-smooth);
+            flex-shrink: 0;
+        }
+
+        .btn-sidebar-toggle:hover {
+            border-color: var(--blue);
+            color: var(--blue);
+        }
+
+        /* ---------------- Tab Navigation ---------------- */
+        .tab-bar {
+            height: var(--tab-bar-height);
+            background: var(--bg-surface);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            position: relative;
+            z-index: 999;
+            flex-shrink: 0;
+        }
+
+        .tab-btn {
+            flex: 1;
+            background: transparent;
+            border: none;
+            color: var(--text-soft);
+            font-family: inherit;
+            font-size: 0.8125rem;
+            font-weight: 700;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 5px;
+            transition: color var(--transition-smooth);
+            position: relative;
+        }
+
+        .tab-btn:hover {
+            color: var(--text-main);
+        }
+
+        .tab-btn.active {
+            color: var(--brand);
+        }
+
+        .tab-btn .tab-icon {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 24px;
+        }
+
+        .tab-btn .tab-icon svg {
+            width: 22px;
+            height: 22px;
+            stroke: currentColor;
+            stroke-width: 1.8;
+            fill: none;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        .tab-indicator {
+            position: absolute;
+            bottom: 0;
+            height: 3px;
+            background-color: var(--brand);
+            border-radius: 3px 3px 0 0;
+            transition: var(--transition-smooth);
+        }
+
+        /* ---------------- Viewport & Panels ---------------- */
+        .tab-content-viewport {
+            flex: 1;
+            width: 100%;
+            overflow: hidden;
+            position: relative;
+            background: var(--bg-app);
+        }
+
+        .tab-panels-container {
+            display: flex;
+            width: 600%; /* 6 tabs */
+            height: 100%;
+            transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+            will-change: transform;
+        }
+
+        .tab-panel {
+            width: 16.666%;
+            height: 100%;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+            padding: 20px;
+        }
+
+        .tab-panel::-webkit-scrollbar { width: 6px; }
+        .tab-panel::-webkit-scrollbar-track { background: transparent; }
+        .tab-panel::-webkit-scrollbar-thumb {
+            background: var(--border-strong);
+            border-radius: 3px;
+        }
+
+        /* ---------------- Info Sidebar ---------------- */
+        .sidebar-backdrop {
+            position: fixed;
+            inset: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(16, 24, 40, 0.45);
+            z-index: 10004;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity var(--transition-smooth);
+        }
+        .sidebar-backdrop.open {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .info-sidebar {
+            position: fixed;
+            top: 0;
+            right: -380px;
+            width: 360px;
+            max-width: 90vw;
+            height: 100vh;
+            background: var(--bg-surface);
+            border-left: 1px solid var(--border);
+            z-index: 10005;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            box-shadow: var(--shadow-pop);
+            transition: right var(--transition-smooth);
+            overflow-y: auto;
+        }
+        .info-sidebar.open { right: 0; }
+
+        .sidebar-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 16px;
+        }
+
+        .sidebar-header h2 {
+            font-size: 1.0625rem;
+            font-weight: 800;
+            color: var(--text-main);
+        }
+
+        .sidebar-close {
+            background: transparent;
+            border: none;
+            color: var(--text-soft);
+            font-size: 1.5rem;
+            line-height: 1;
+            cursor: pointer;
+            transition: color var(--transition-smooth);
+        }
+        .sidebar-close:hover { color: var(--text-main); }
+
+        /* ---------------- Cards ---------------- */
+        .glass-card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: var(--card-radius);
+            padding: 20px;
+            margin-bottom: 16px;
+            box-shadow: var(--shadow-card);
+        }
+
+        .glass-card h3 {
+            font-size: 0.9375rem;
+            font-weight: 800;
+            letter-spacing: -0.01em;
+            margin-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 12px;
+            color: var(--text-main);
+        }
+
+        /* ---------------- Forms ---------------- */
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 16px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .form-group.full-width {
+            grid-column: span 2;
+        }
+
+        label {
+            font-size: 0.8125rem;
+            font-weight: 700;
+            color: var(--text-muted);
+            display: block;
+            letter-spacing: 0.01em;
+        }
+
+        input[type="text"],
+        input[type="number"],
+        input[type="date"],
+        input[type="time"],
+        select,
+        textarea {
+            width: 100%;
+            min-height: 44px;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-strong);
+            border-radius: var(--btn-radius);
+            padding: 10px 12px;
+            color: var(--text-main);
+            font-family: inherit;
+            font-size: 0.9375rem;
+            font-weight: 600;
+            outline: none;
+            transition: border-color var(--transition-smooth), box-shadow var(--transition-smooth);
+        }
+
+        textarea {
+            min-height: auto;
+            resize: vertical;
+            line-height: 1.5;
+        }
+
+        input[type="text"]:focus,
+        input[type="number"]:focus,
+        input[type="date"]:focus,
+        input[type="time"]:focus,
+        select:focus,
+        textarea:focus {
+            border-color: var(--blue);
+            box-shadow: 0 0 0 3px var(--blue-soft);
+            background: var(--bg-surface);
+        }
+
+        input[readonly],
+        input:disabled,
+        textarea:disabled {
+            background: var(--bg-inset);
+            border-color: var(--border);
+            color: var(--text-muted);
+        }
+
+        /* ---------------- Defect Counters ---------------- */
+        .counter-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+            gap: 12px;
+            margin-top: 10px;
+        }
+
+        .counter-box {
+            background: var(--bg-subtle);
+            border: 1px solid var(--border);
+            border-radius: var(--btn-radius);
+            padding: 12px 10px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+            text-align: center;
+        }
+
+        .counter-box label {
+            font-size: 0.8125rem;
+            font-weight: 700;
+            color: var(--text-main);
+            min-height: 2.2em;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .counter-controls {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            gap: 8px;
+        }
+
+        .counter-box button {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-strong);
+            color: var(--text-main);
+            width: 38px;
+            height: 38px;
+            border-radius: var(--btn-radius);
+            font-size: 1.15rem;
+            font-weight: 700;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: var(--transition-smooth);
+            flex-shrink: 0;
+        }
+
+        .counter-box button:hover:not(:disabled) {
+            border-color: var(--blue);
+            color: var(--blue);
+        }
+
+        .counter-box button:active:not(:disabled) {
+            background: var(--bg-inset);
+        }
+
+        .counter-box button:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .counter-box input {
+            width: 48px;
+            min-height: auto;
+            text-align: center;
+            font-size: 1.0625rem;
+            font-weight: 800;
+            padding: 4px;
+            border: none;
+            background: transparent;
+            color: var(--text-main);
+            outline: none;
+        }
+        .counter-box input:focus {
+            box-shadow: none;
+        }
+
+        /* ---------------- Buttons ---------------- */
+        .btn {
+            min-height: 44px;
+            padding: 0 18px;
+            font-family: inherit;
+            font-size: 0.9375rem;
+            font-weight: 700;
+            letter-spacing: -0.01em;
+            line-height: 1.25;
+            border-radius: var(--btn-radius);
+            border: 1px solid transparent;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            text-align: center;
+            transition: background var(--transition-smooth), border-color var(--transition-smooth), color var(--transition-smooth);
+        }
+
+        .btn:active { transform: translateY(1px); }
+
+        .btn-primary {
+            background: var(--brand);
+            color: #FFFFFF;
+        }
+        .btn-primary:hover { background: var(--brand-hover); }
+
+        .btn-secondary {
+            background: var(--bg-surface);
+            border-color: var(--border-strong);
+            color: var(--text-main);
+        }
+        .btn-secondary:hover {
+            background: var(--bg-subtle);
+            border-color: var(--text-soft);
+        }
+
+        .btn-alert {
+            background: var(--red);
+            color: #FFFFFF;
+        }
+        .btn-alert:hover { background: var(--red-hover); }
+
+        .btn-full { width: 100%; }
+
+        /* ---------------- Photo Capture ---------------- */
+        .photo-card-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 16px;
+        }
+
+        .photo-capture-card {
+            background: var(--bg-subtle);
+            border: 1px solid var(--border);
+            border-radius: var(--card-radius);
+            padding: 18px 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            align-items: center;
+            text-align: center;
+        }
+
+        .photo-status-indicator {
+            font-size: 0.75rem;
+            font-weight: 800;
+            letter-spacing: 0.04em;
+            padding: 4px 12px;
+            border-radius: var(--r-pill);
+            background: var(--red-soft);
+            color: var(--red);
+            border: 1px solid transparent;
+        }
+
+        .photo-status-indicator.success {
+            background: var(--brand-soft);
+            color: var(--brand);
+        }
+
+        /* ---------------- Step cards (Scan tab) ---------------- */
+        #step1Modal, #step2Modal, #step3Modal {
+            position: static !important;
+            background: transparent !important;
+            width: 100% !important;
+            height: auto !important;
+            display: none;
+            z-index: 1 !important;
+            transform: none !important;
+            padding: 0 !important;
+            box-shadow: none !important;
+        }
+
+        #step1Modal > div,
+        #step2Modal > div,
+        #step3Modal > div,
+        .scan-completed-card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: var(--card-radius);
+            padding: 22px;
+            width: 100%;
+            max-width: 520px;
+            margin: 16px auto;
+            box-shadow: var(--shadow-card);
+            box-sizing: border-box;
+            position: static !important;
+            transform: none !important;
+            left: auto !important;
+            top: auto !important;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .step-modal-info-box {
+            background: var(--bg-subtle);
+            border: 1px solid var(--border);
+            padding: 14px;
+            border-radius: var(--btn-radius);
+            text-align: center;
+        }
+
+        .step-modal-info-box p {
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            line-height: 1.6;
+        }
+
+        /* Completed scan card */
+        .scan-completed-card {
+            text-align: center;
+            align-items: center;
+        }
+
+        .success-icon-badge {
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            background: var(--brand-soft);
+            border: none;
+            color: var(--brand);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.6rem;
+            font-weight: 800;
+        }
+
+        .active-prod-details {
+            background: var(--bg-subtle);
+            border: 1px solid var(--border);
+            border-radius: var(--btn-radius);
+            padding: 16px;
+            width: 100%;
+            text-align: left;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .active-prod-details div {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.9rem;
+            gap: 12px;
+        }
+
+        .active-prod-details .lbl {
+            color: var(--text-muted);
+            font-weight: 600;
+        }
+
+        /* ---------------- Sidebar info grid ---------------- */
+        .info-sidebar-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .info-sidebar-grid label {
+            font-size: 0.6875rem;
+            color: var(--text-soft);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-weight: 700;
+        }
+
+        .info-sidebar-grid p,
+        .info-sidebar-grid input {
+            font-size: 0.9375rem;
+            font-weight: 700;
+            color: var(--text-main);
+            margin-top: 3px;
+        }
+
+        .info-sidebar-image-container {
+            width: 100%;
+            border-radius: var(--btn-radius);
+            border: 1px solid var(--border);
+            overflow: hidden;
+            background: var(--bg-subtle);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 150px;
+        }
+        .info-sidebar-image-container img {
+            width: 100%;
+            height: auto;
+            max-height: 180px;
+            object-fit: contain;
+        }
+
+        /* ---------------- Validation summary ---------------- */
+        .validation-errors-card {
+            background: var(--red-soft);
+            border: 1px solid #F4C9CB;
+            border-radius: var(--card-radius);
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+
+        .validation-success-card {
+            background: var(--brand-soft);
+            border: 1px solid #C4E7D8;
+            border-radius: var(--card-radius);
+            padding: 16px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .success-checkmark {
+            color: var(--brand);
+            font-size: 1.4rem;
+            font-weight: 800;
+        }
+
+        .validation-list {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .validation-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            padding: 14px;
+            border-radius: var(--btn-radius);
+            font-size: 0.875rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: var(--transition-smooth);
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+        }
+
+        .validation-item:hover {
+            border-color: var(--blue);
+        }
+
+        .validation-item.error {
+            border-left: 3px solid var(--red);
+        }
+
+        .validation-item .fix-btn {
+            font-size: 0.75rem;
+            font-weight: 800;
+            color: var(--blue);
+            background: var(--blue-soft);
+            padding: 5px 10px;
+            border-radius: var(--r-pill);
+            white-space: nowrap;
+        }
+
+        .summary-details-grid {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: var(--card-radius);
+            padding: 20px;
+            box-shadow: var(--shadow-card);
+        }
+
+        .summary-details-grid h3 {
+            font-size: 0.9375rem;
+            font-weight: 800;
+            margin-bottom: 12px;
+            color: var(--text-main);
+        }
+
+        .summary-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 11px 0;
+            border-bottom: 1px solid var(--border);
+            font-size: 0.875rem;
+        }
+
+        .summary-row:last-child { border-bottom: none; }
+
+        .summary-row .lbl {
+            color: var(--text-muted);
+            font-weight: 600;
+        }
+
+        .summary-row .val {
+            font-weight: 700;
+            text-align: right;
+        }
+
+        /* ---------------- Modals ---------------- */
+        .modal {
+            position: fixed !important;
+            inset: 0 !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            background: rgba(16, 24, 40, 0.45) !important;
+            z-index: 100000 !important;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .modal-content,
+        #workerNameModal > div {
+            background: var(--bg-surface) !important;
+            border: 1px solid var(--border) !important;
+            border-radius: var(--card-radius) !important;
+            padding: 24px !important;
+            color: var(--text-main) !important;
+            box-shadow: var(--shadow-pop) !important;
+            box-sizing: border-box;
+        }
+
+        #workerNameModal .worker-section-header {
+            background: var(--blue) !important;
+            color: #FFFFFF !important;
+        }
+
+        #workerNameModal .worker-name-btn {
+            background: var(--bg-surface) !important;
+            border: 1px solid var(--border-strong) !important;
+            color: var(--text-main) !important;
+            border-radius: var(--btn-radius) !important;
+            transition: var(--transition-smooth) !important;
+        }
+
+        #workerNameModal .worker-name-btn:hover {
+            background: var(--bg-subtle) !important;
+            border-color: var(--blue) !important;
+        }
+
+        #workerNameModal .recent-section .worker-name-btn {
+            background: var(--amber-soft) !important;
+            border-color: #EAD2A0 !important;
+            color: #8A5A00 !important;
+        }
+
+        #workerNameModal .recent-section .worker-section-header {
+            background: var(--amber) !important;
+        }
+
+        /* Numeric keypad */
+        #keypadModal .modal-content {
+            background: var(--bg-surface) !important;
+            border: 1px solid var(--border) !important;
+            border-radius: var(--card-radius) !important;
+            color: var(--text-main) !important;
+        }
+
+        #numericKeypadModalDirect {
+            background-color: rgba(16, 24, 40, 0.45) !important;
+        }
+        #numericKeypadModalDirect > div {
+            background-color: var(--bg-surface) !important;
+            border: 1px solid var(--border) !important;
+            color: var(--text-main) !important;
+            border-radius: var(--card-radius) !important;
+            box-shadow: var(--shadow-pop) !important;
+        }
+        #numericKeypadModalDirect h2 {
+            color: var(--text-main) !important;
+        }
+        #numericKeypadModalDirect button {
+            background-color: var(--bg-subtle) !important;
+            color: var(--text-main) !important;
+            border-radius: var(--btn-radius) !important;
+            border: 1px solid var(--border) !important;
+            font-weight: 700 !important;
+            transition: var(--transition-smooth) !important;
+        }
+        #numericKeypadModalDirect button:hover {
+            background-color: var(--bg-inset) !important;
+        }
+        #numericKeypadModalDirect button[onclick*="confirmDirectNumericInput"] {
+            background: var(--brand) !important;
+            border-color: var(--brand) !important;
+            color: #FFFFFF !important;
+        }
+
+        /* ---------------- Error flash ---------------- */
+        .flash-highlight {
+            animation: highlightFlash 1.5s ease-out;
+        }
+
+        @keyframes highlightFlash {
+            0% {
+                box-shadow: 0 0 0 3px var(--red);
+                border-color: var(--red);
+            }
+            100% {
+                box-shadow: 0 0 0 0 transparent;
+            }
+        }
+
+        /* ---------------- Placeholder ---------------- */
+        .placeholder-card {
+            text-align: center;
+            padding: 48px 24px;
+            background: var(--bg-surface);
+            border-radius: var(--card-radius);
+            border: 1px solid var(--border);
+            box-shadow: var(--shadow-card);
+            max-width: 520px;
+            margin: 32px auto;
+        }
+
+        .placeholder-card .icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 56px;
+            height: 56px;
+            margin-bottom: 16px;
+            border-radius: 50%;
+            background: var(--bg-inset);
+            color: var(--text-soft);
+        }
+        .placeholder-card .icon svg {
+            width: 26px;
+            height: 26px;
+            stroke: currentColor;
+            stroke-width: 1.8;
+            fill: none;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        .placeholder-card h3 {
+            font-size: 1.0625rem;
+            font-weight: 800;
+            color: var(--text-main);
+            margin-bottom: 10px;
+        }
+
+        .placeholder-card p {
+            color: var(--text-muted);
+            margin: 10px 0;
+            font-size: 0.9rem;
+            line-height: 1.6;
+        }
+
+        /* ---------------- Landscape tuning for tablets ---------------- */
+        @media (orientation: landscape) {
+            .form-grid { gap: 16px; }
+            .tab-panel { padding: 20px 28px; }
+        }
+    </style>
+</head>
+<body>
+    <audio id="alert-sound" src="src/alert.mp3" preload="auto"></audio>
+    <iframe id="hiddenIframe" style="display:none;"></iframe>
+
+    <!-- Progress Notification -->
+    <div id="sendingProgressBar" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 6px; background: var(--accent-blue); z-index: 100001; transition: width 0.3s ease;"></div>
+
+    <!-- Header -->
+    <header>
+        <div class="header-title-section">
+            <h1 id="nippoTitle" data-i18n="daily_report">日報</h1>
+            <span class="status-tag" id="headerMachineTag">設備: Loading...</span>
+        </div>
+        <div class="header-action-section">
+            <!-- Language Selector -->
+            <div class="language-selector">
+                <select id="languageSelector">
+                    <option value="ja">日本語</option>
+                    <option value="en">English</option>
+                    <option value="pt">Português</option>
+                </select>
+            </div>
+            <!-- Info button -->
+            <button type="button" class="btn-sidebar-toggle" onclick="toggleSidebar()">i</button>
+        </div>
+    </header>
+
+    <!-- Tab Bar -->
+    <div class="tab-bar">
+        <button type="button" class="tab-btn active" data-tab="0">
+            <span class="tab-icon"><svg viewBox="0 0 24 24"><path d="M4 7V5a1 1 0 0 1 1-1h2M4 17v2a1 1 0 0 0 1 1h2M20 7V5a1 1 0 0 0-1-1h-2M20 17v2a1 1 0 0 1-1 1h-2"/><line x1="4" y1="12" x2="20" y2="12"/></svg></span>
+            <span class="tab-label" data-i18n="scan">Scan</span>
+        </button>
+        <button type="button" class="tab-btn" data-tab="1">
+            <span class="tab-icon"><svg viewBox="0 0 24 24"><line x1="4" y1="8" x2="20" y2="8"/><circle cx="9" cy="8" r="2.4"/><line x1="4" y1="16" x2="20" y2="16"/><circle cx="15" cy="16" r="2.4"/></svg></span>
+            <span class="tab-label">Params</span>
+        </button>
+        <button type="button" class="tab-btn" data-tab="2">
+            <span class="tab-icon"><svg viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.3 7 12 12 20.7 7"/><line x1="12" y1="12" x2="12" y2="21.5"/></svg></span>
+            <span class="tab-label">Production</span>
+        </button>
+        <button type="button" class="tab-btn" data-tab="3">
+            <span class="tab-icon"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.6"/><polyline points="4 17 9 12 13 16 16.5 12.5 20 16"/></svg></span>
+            <span class="tab-label">Images</span>
+        </button>
+        <button type="button" class="tab-btn" data-tab="4">
+            <span class="tab-icon"><svg viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0 5 5l-7.6 7.6a2.1 2.1 0 0 1-3-3L16.7 8.3"/><path d="M14.7 6.3 18 3l3 3-3.3 3.3"/></svg></span>
+            <span class="tab-label">Maintenance</span>
+        </button>
+        <button type="button" class="tab-btn" data-tab="5">
+            <span class="tab-icon"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 9 12 4 17 9"/><line x1="12" y1="4" x2="12" y2="16"/></svg></span>
+            <span class="tab-label" data-i18n="submit">Submit</span>
+        </button>
+        <div class="tab-indicator"></div>
+    </div>
+
+    <!-- main form wrapping all inputs for submission -->
+    <form method="post" action="" name="contact-form" id="contact-form" style="display:contents;">
+        <!-- Hidden Inputs for DCP backend -->
+        <input type="hidden" name="設備" id="hidden設備">
+        <input type="hidden" name="工場2" id="hidden工場">
+        <input type="hidden" name="工場" id="selected工場" value="小瀬">
+        <input type="hidden" name="printerCode" id="printerCode">
+        <input type="hidden" name="検査STATUS" id="検査STATUS" value="false">
+        <input type="hidden" name="ipInfo" id="ipInfo">
+        <input type="hidden" name="rikeshi" id="rikeshi">
+        <input type="hidden" name="printerHostname" id="printerHostname">
+        <input type="hidden" name="boxqty" id="boxqty">
+        <input type="hidden" name="scannedKanban" id="scannedKanban">
+        <input type="hidden" name="tracking QR" id="tracking-QR">
+        <input type="hidden" name="Last Process" id="Last Process" value="A">
+        <input type="hidden" name="Remaining_Quantity" id="Remaining_Quantity">
+        <input type="hidden" name="Process_Status" id="Process_Status">
+        <input type="hidden" name="収容数" id="収容数" value="">
+        <input type="hidden" name="firstScanValue" id="firstScanValue" value="">
+        <input type="hidden" name="secondScanValue" id="secondScanValue" value="">
+        <input type="hidden" name="SRS" id="SRS" value="">
+        
+        <input type="hidden" name="CONFIRM SHAPE" id="confirm-shape" value="false">
+        <input type="hidden" name="CONFIRM MATERIAL" id="confirm-material" value="false">
+        <input type="hidden" name="CONFIRM COLOR" id="confirm-color" value="false">
+        <input type="hidden" name="CONFIRM PIN HOLE" id="confirm-pin-hole" value="false">
+        <input type="hidden" name="CONFIRM CUTTING CONDITION" id="confirm-cutting-condition" value="false">
+        <input type="hidden" name="CONFIRM PRODUCT NUMBER" id="confirm-product-number" value="false">
+        <input type="hidden" name="CONFIRM FILE NAME" id="confirm-file-name" value="false">
+        <input type="hidden" name="CONFIRM SEWING LINE" id="confirm-sewing-line" value="false">
+        
+        <input type="hidden" id="confirm-type" name="CONFIRM TYPE" value="false">
+        <input type="hidden" id="confirm-appearance" name="CONFIRM APPEARANCE" value="false">
+        <input type="hidden" id="confirm-text-misalignment" name="CONFIRM TEXT MISALIGNMENT" value="false">
+        <input type="hidden" id="confirm-position-misalignment" name="CONFIRM POSITION MISALIGNMENT" value="false">
+        
+        <input type="hidden" id="initialBTotal" value="0">
+        <input type="hidden" id="initialCTotal" value="0">
+
+        <!-- Hidden but required select element for products -->
+        <select id="sub-dropdown" name="背番号" style="display:none;"></select>
+
+        <!-- Viewport content container -->
+        <div class="tab-content-viewport">
+            <div class="tab-panels-container">
+                
+                <!-- TAB 1: SCAN -->
+                <div class="tab-panel" id="panel-0">
+                    <!-- Step 1 Card: Scan Kanban -->
+                    <div id="step1Modal">
+                        <div>
+                            <h2 style="font-size: 1.15rem; font-weight: 700; text-align: center;">
+                                Step <span style="color: var(--accent-green);">1</span>: SCAN <strong>Kanban</strong> / スキャン看板
+                            </h2>
+                            <div id="step1Content" style="display: flex; flex-direction: column; align-items: center; gap: 15px;">
+                                <div id="step1ErrorMsg" style="display: none; background: rgba(255, 77, 77, 0.1); border: 1px solid var(--accent-red); border-radius: var(--btn-radius); padding: 12px; width: 100%;">
+                                    <p style="color: var(--accent-red); font-size: 0.9rem; margin: 0; line-height: 1.4;"></p>
+                                </div>
+                                <p style="font-size: 0.9rem; color: var(--text-muted);" data-i18n="press_button">Press this button / このボタンを押して</p>
+                                <div style="color: var(--text-soft); margin: 6px 0;"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="6 13 12 19 18 13"/></svg></div>
+                                <button type="button" id="startStep1Scan" class="btn btn-primary btn-full">
+                                    Scan Kanban<br>スキャン看板
+                                </button>
+                            </div>
+                            <div id="step1Scanner" style="display: none; width: 100%; border-radius: var(--btn-radius); overflow: hidden; background: #000;">
+                                <div id="step1QrReader" style="width: 100%; aspect-ratio: 1.0;"></div>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 15px;">
+                                <p style="font-size: 0.85rem; font-weight: 600; color: var(--text-muted);"><span id="step1MachineName"></span></p>
+                                <button type="button" id="resetStep1" class="btn btn-secondary" style="padding: 6px 12px; font-size: 0.8rem;">Reset / リセット</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Step 2 Card: Scan Material -->
+                    <div id="step2Modal">
+                        <div>
+                            <h2 style="font-size: 1.15rem; font-weight: 700; text-align: center;">
+                                Step <span style="color: var(--accent-blue);">2</span>: SCAN <strong>Material</strong> / スキャン材料
+                            </h2>
+                            <div class="step-modal-info-box">
+                                <p style="font-size: 0.85rem;">
+                                    背番号: <strong id="step2Sebanggo" style="color: var(--accent-green);"></strong><br>
+                                    品番: <strong id="step2Hinban" style="color: var(--accent-blue);"></strong><br>
+                                    材料: <strong id="step2Material" style="color: var(--accent-red);"></strong>
+                                </p>
+                            </div>
+                            <div id="step2Content" style="display: flex; flex-direction: column; align-items: center; gap: 15px;">
+                                <div id="step2ErrorMsg" style="display: none; background: rgba(255, 77, 77, 0.1); border: 1px solid var(--accent-red); border-radius: var(--btn-radius); padding: 12px; width: 100%;">
+                                    <p style="color: var(--accent-red); font-size: 0.9rem; margin: 0; line-height: 1.4;"></p>
+                                </div>
+                                <p style="font-size: 0.9rem; color: var(--text-muted);" data-i18n="press_button">Press this button / このボタンを押して</p>
+                                <div style="color: var(--text-soft); margin: 6px 0;"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="6 13 12 19 18 13"/></svg></div>
+                                <button type="button" id="startStep2Scan" class="btn btn-primary btn-full">
+                                    Scan Lot. No. / スキャンロット
+                                </button>
+                            </div>
+                            <div id="step2Scanner" style="display: none; width: 100%; border-radius: var(--btn-radius); overflow: hidden; background: #000;">
+                                <div id="step2QrReader" style="width: 100%; aspect-ratio: 1.0;"></div>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 15px; gap: 10px;">
+                                <p style="font-size: 0.85rem; font-weight: 600; color: var(--text-muted); flex: 1;"><span id="step2MachineName"></span></p>
+                                <button type="button" id="overrideStep2" class="btn btn-secondary" style="padding: 6px 12px; font-size: 0.8rem; background: rgba(255, 235, 59, 0.1); border-color: #fbc02d; color: #fbc02d;">Override / 手動</button>
+                                <button type="button" id="resetStep2" class="btn btn-secondary" style="padding: 6px 12px; font-size: 0.8rem;">Reset / リセット</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Step 3 Card: Send to Machine -->
+                    <div id="step3Modal">
+                        <div>
+                            <h2 id="step3Title" style="font-size: 1.15rem; font-weight: 700; text-align: center;">
+                                Step <span style="color: #f39c12;">3</span>: send to <strong>Machine</strong> / データ送信
+                            </h2>
+                            <div class="step-modal-info-box">
+                                <p style="font-size: 0.85rem;">
+                                    背番号: <strong id="step3Sebanggo" style="color: var(--accent-green);"></strong><br>
+                                    品番: <strong id="step3Hinban" style="color: var(--accent-blue);"></strong><br>
+                                    材料: <strong id="step3Material" style="color: #f39c12;"></strong>
+                                </p>
+                            </div>
+                            <div id="step3Content" style="display: flex; flex-direction: column; align-items: center; gap: 15px;">
+                                <p style="font-size: 0.9rem; color: var(--text-muted);" data-i18n="press_button">Press this button / このボタンを押して</p>
+                                <div style="color: var(--text-soft); margin: 6px 0;"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="6 13 12 19 18 13"/></svg></div>
+                                <button type="button" id="startStep3Send" class="btn btn-primary btn-full">
+                                    Send to machine
+                                </button>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 15px;">
+                                <p style="font-size: 0.85rem; font-weight: 600; color: var(--text-muted);"><span id="step3MachineName"></span></p>
+                                <button type="button" id="resetStep3" class="btn btn-secondary" style="padding: 6px 12px; font-size: 0.8rem;">Reset / リセット</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Completed Card -->
+                    <div id="scanCompletedCard" class="scan-completed-card" style="display: none;">
+                        <div class="success-icon-badge">✓</div>
+                        <h2 style="font-size: 1.25rem; font-weight: 700;">スキャン完了 / Scan Completed</h2>
+                        <p style="color: var(--text-muted); font-size: 0.9rem;">現在アクティブな生産データ / Active Production Info:</p>
+                        <div class="active-prod-details">
+                            <div><span class="lbl">背番号 (Code):</span> <strong id="activeSebanggoDisplay"></strong></div>
+                            <div><span class="lbl">品番 (Product Number):</span> <strong id="activeHinbanDisplay"></strong></div>
+                        </div>
+                        <button type="button" class="btn btn-secondary btn-full" onclick="resetAllSteps()" style="margin-top: 10px;">
+                            新規スキャン / New Scan
+                        </button>
+                    </div>
+                </div>
+
+                <!-- TAB 2: PARAMS -->
+                <div class="tab-panel" id="panel-1">
+                    <div class="placeholder-card">
+                        <div class="icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></div>
+                        <h3>設備パラメーター / Machine Parameters</h3>
+                        <p>このセクションは現在準備中です。将来のアップデートで詳細な設備パラメータ設定が追加されます。</p>
+                        <p style="font-size: 0.85rem;">This section is currently under development. Detailed machine parameters will be configured here in a future update.</p>
+                    </div>
+                </div>
+
+                <!-- TAB 3: PRODUCTION -->
+                <div class="tab-panel" id="panel-2">
+                    <div class="glass-card">
+                        <h3>生産情報 / Production Information</h3>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label for="Machine Operator" data-i18n="worker_name">作業者:</label>
+                                <input list="machine-operator-suggestions" placeholder="Worker's Name" id="Machine Operator" name="Machine Operator" data-i18n="worker_name_placeholder" required readonly style="cursor: pointer; background: rgba(255,255,255,0.05);">
+                                <datalist id="machine-operator-suggestions"></datalist>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="Lot No." data-i18n="processing_date">加工日:</label>
+                                <input type="date" name="Lot No." id="Lot No." placeholder="Date" onfocus="setDefaultDate(this)" required>
+                                <input type="hidden" name="Labelextension" id="Labelextension">
+                            </div>
+
+                            <div class="form-group">
+                                <label for="Start Time" data-i18n="start_time">加工開始時間:</label>
+                                <input type="time" name="Start Time" id="Start Time" placeholder="Time Start" data-i18n="time_start_placeholder" onfocus="setDefaultTime(this)" required>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="End Time" data-i18n="end_time">加工終了時間:</label>
+                                <input type="time" name="End Time" id="End Time" placeholder="Time End" data-i18n="time_end_placeholder" onfocus="setDefaultTime(this)" required>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="Process Quantity" data-i18n="process_quantity">加工数（良品）+ NG:</label>
+                                <input type="text" name="Process Quantity" id="ProcessQuantity" placeholder="Process Quantity" data-i18n="process_quantity_placeholder" required readonly style="cursor: pointer;">
+                            </div>
+
+                            <div class="form-group" style="justify-content: flex-end;">
+                                <button type="button" id="sendtoQty" class="btn btn-secondary btn-full" style="height: 48px;" data-i18n="one_box_completed">
+                                    1 box completed
+                                </button>
+                            </div>
+
+                            <div class="form-group full-width" id="shotCountSection">
+                                <label for="shot" data-i18n="shot_count">ショット数</label>
+                                <input type="number" name="shot" id="shot" placeholder="ショット数" data-i18n="shot_count_placeholder" readonly style="cursor: pointer;">
+                            </div>
+
+                            <div class="form-group full-width">
+                                <label for="材料ロット" data-i18n="material_lot">材料ロット:</label>
+                                <input type="text" name="材料ロット" id="材料ロット" placeholder="Material Lot" data-i18n="material_lot_placeholder" required readonly style="cursor: pointer;">
+                                <div id="材料ロット-tags" style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px;"></div>
+                                <input type="hidden" id="材料ロット-data" value="">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="glass-card">
+                        <h3>加工不良カウンター / Defect Counters</h3>
+                        <div class="counter-container">
+                            <div id="counter-box-18" class="counter-box">
+                                <label for="counter-18" data-i18n="defect_pull">疵引不良</label>
+                                <div class="counter-controls">
+                                    <button class="minus-btn" type="button" onclick="decrementCounter(18)">-</button>
+                                    <input readonly id="counter-18" value="0" type="number" name="疵引不良">
+                                    <button class="plus-btn" type="button" onclick="incrementCounter(18)">+</button>
+                                </div>
+                            </div>
+                            <div id="counter-box-19" class="counter-box">
+                                <label for="counter-19" data-i18n="processing_defect">加工不良</label>
+                                <div class="counter-controls">
+                                    <button class="minus-btn" type="button" onclick="decrementCounter(19)">-</button>
+                                    <input readonly id="counter-19" value="0" type="number" name="加工不良">
+                                    <button class="plus-btn" type="button" onclick="incrementCounter(19)">+</button>
+                                </div>
+                            </div>
+                            <div id="counter-box-20" class="counter-box">
+                                <label for="counter-20" data-i18n="other">その他:</label>
+                                <div class="counter-controls">
+                                    <button class="minus-btn" type="button" onclick="decrementCounter(20)">-</button>
+                                    <input readonly id="counter-20" value="0" type="number" name="その他">
+                                    <button class="plus-btn" type="button" onclick="incrementCounter(20)">+</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="glass-card">
+                        <h3>コメント / Comments</h3>
+                        <textarea name="Comments1" rows="3" placeholder="Enter Comments"></textarea>
+                    </div>
+
+                    <!-- Toggleable Inspection Checklist -->
+                    <div class="glass-card">
+                        <h3 style="border: none; margin-bottom: 0; padding-bottom: 0;">
+                            <label style="display: flex; align-items: center; gap: 10px; font-size: 1.05rem; color: var(--text-main); font-weight: 700; cursor: pointer;">
+                                <input type="checkbox" id="enable-inputs" onclick="toggleInputs()" style="width: 20px; height: 20px; accent-color: var(--accent-green);">
+                                <span id="checkboxLabel" data-i18n="kensa_checkbox">倉知検査</span>
+                            </label>
+                        </h3>
+                        
+                        <div id="kensa-fields-container" style="margin-top: 20px; display: flex; flex-direction: column; gap: 15px;">
+                            <div class="form-grid">
+                                <div class="form-group">
+                                    <label for="Kensa Name" data-i18n="inspector_name">検査者:</label>
+                                    <input list="kensa-name-suggestions" placeholder="Kensa Name" data-i18n="inspector_placeholder" id="Kensa Name" name="Kensa Name" type="text" disabled readonly style="cursor: pointer; background: rgba(255,255,255,0.05);">
+                                    <datalist id="kensa-name-suggestions"></datalist>
+                                </div>
+                                <div class="form-group">
+                                    <label for="KDate" data-i18n="inspection_date">検査日付:</label>
+                                    <input type="date" name="KDate" id="KDate" placeholder="KDate" onfocus="setDefaultDate(this)" disabled>
+                                </div>
+                                <div class="form-group">
+                                    <label for="KStart Time" data-i18n="inspection_start_time">検査開始時間:</label>
+                                    <input type="time" name="KStart Time" id="KStart Time" placeholder="KTime Start" onfocus="setDefaultTime(this)" disabled>
+                                </div>
+                                <div class="form-group">
+                                    <label for="KEnd Time" data-i18n="inspection_end_time">検査終了時間:</label>
+                                    <input type="time" name="KEnd Time" id="KEnd Time" placeholder="KTime End" onfocus="setDefaultTime(this)" disabled>
+                                </div>
+                            </div>
+
+                            <div style="margin-top: 10px;">
+                                <label style="margin-bottom: 10px;">検査不良カウンター / Inspection Defect Counters</label>
+                                <div class="counter-container">
+                                    <div id="counter-box-1" class="counter-box"><label for="counter-1">1</label><div class="counter-controls"><button class="minus-btn" type="button" onclick="decrementCounter(1)" disabled>-</button><input readonly id="counter-1" value="0" type="number" name="1"><button class="plus-btn" type="button" onclick="incrementCounter(1)" disabled>+</button></div></div>
+                                    <div id="counter-box-2" class="counter-box"><label for="counter-2">2</label><div class="counter-controls"><button class="minus-btn" type="button" onclick="decrementCounter(2)" disabled>-</button><input readonly id="counter-2" value="0" type="number" name="2"><button class="plus-btn" type="button" onclick="incrementCounter(2)" disabled>+</button></div></div>
+                                    <div id="counter-box-3" class="counter-box"><label for="counter-3">3</label><div class="counter-controls"><button class="minus-btn" type="button" onclick="decrementCounter(3)" disabled>-</button><input readonly id="counter-3" value="0" type="number" name="3"><button class="plus-btn" type="button" onclick="incrementCounter(3)" disabled>+</button></div></div>
+                                    <div id="counter-box-4" class="counter-box"><label for="counter-4">4</label><div class="counter-controls"><button class="minus-btn" type="button" onclick="decrementCounter(4)" disabled>-</button><input readonly id="counter-4" value="0" type="number" name="4"><button class="plus-btn" type="button" onclick="incrementCounter(4)" disabled>+</button></div></div>
+                                    <div id="counter-box-5" class="counter-box"><label for="counter-5">5</label><div class="counter-controls"><button class="minus-btn" type="button" onclick="decrementCounter(5)" disabled>-</button><input readonly id="counter-5" value="0" type="number" name="5"><button class="plus-btn" type="button" onclick="incrementCounter(5)" disabled>+</button></div></div>
+                                    <div id="counter-box-6" class="counter-box"><label for="counter-6">6</label><div class="counter-controls"><button class="minus-btn" type="button" onclick="decrementCounter(6)" disabled>-</button><input readonly id="counter-6" value="0" type="number" name="6"><button class="plus-btn" type="button" onclick="incrementCounter(6)" disabled>+</button></div></div>
+                                    <div id="counter-box-7" class="counter-box"><label for="counter-7">7</label><div class="counter-controls"><button class="minus-btn" type="button" onclick="decrementCounter(7)" disabled>-</button><input readonly id="counter-7" value="0" type="number" name="7"><button class="plus-btn" type="button" onclick="incrementCounter(7)" disabled>+</button></div></div>
+                                    <div id="counter-box-8" class="counter-box"><label for="counter-8">8</label><div class="counter-controls"><button class="minus-btn" type="button" onclick="decrementCounter(8)" disabled>-</button><input readonly id="counter-8" value="0" type="number" name="8"><button class="plus-btn" type="button" onclick="incrementCounter(8)" disabled>+</button></div></div>
+                                    <div id="counter-box-9" class="counter-box"><label for="counter-9">9</label><div class="counter-controls"><button class="minus-btn" type="button" onclick="decrementCounter(9)" disabled>-</button><input readonly id="counter-9" value="0" type="number" name="9"><button class="plus-btn" type="button" onclick="incrementCounter(9)" disabled>+</button></div></div>
+                                    <div id="counter-box-10" class="counter-box"><label for="counter-10">10</label><div class="counter-controls"><button class="minus-btn" type="button" onclick="decrementCounter(10)" disabled>-</button><input readonly id="counter-10" value="0" type="number" name="10"><button class="plus-btn" type="button" onclick="incrementCounter(10)" disabled>+</button></div></div>
+                                    <div id="counter-box-11" class="counter-box"><label for="counter-11">11</label><div class="counter-controls"><button class="minus-btn" type="button" onclick="decrementCounter(11)" disabled>-</button><input readonly id="counter-11" value="0" type="number" name="11"><button class="plus-btn" type="button" onclick="incrementCounter(11)" disabled>+</button></div></div>
+                                    <div id="counter-box-12" class="counter-box"><label for="counter-12">その他</label><div class="counter-controls"><button class="minus-btn" type="button" onclick="decrementCounter(12)" disabled>-</button><input readonly id="counter-12" value="0" type="number" name="その他"><button class="plus-btn" type="button" onclick="incrementCounter(12)" disabled>+</button></div></div>
+                                </div>
+                            </div>
+
+                            <div class="form-grid" style="margin-top: 10px;">
+                                <div class="form-group">
+                                    <label for="Total_NG" data-i18n="ng_quantity" style="color: var(--accent-red); font-weight: bold;">NG Quantity:</label>
+                                    <input readonly id="Total_NG" value="0" type="number" name="Total_NG" style="font-weight: bold; color: var(--accent-red); font-size: 1.15rem; background: rgba(255, 77, 77, 0.05); border-color: rgba(255, 77, 77, 0.2);">
+                                </div>
+                                <div class="form-group">
+                                    <label for="total" data-i18n="total_good" style="color: var(--accent-green); font-weight: bold;">良品合計(TOTAL):</label>
+                                    <input readonly id="total" value="0" type="number" name="Final Quantity" style="font-weight: bold; color: var(--accent-green); font-size: 1.15rem; background: rgba(77, 255, 188, 0.05); border-color: rgba(77, 255, 188, 0.2);">
+                                </div>
+                                <div class="form-group">
+                                    <label for="在庫" data-i18n="spare">スペア:</label>
+                                    <input type="text" name="在庫" id="在庫" placeholder="Spare" data-i18n="spare_placeholder" disabled readonly style="cursor: pointer;">
+                                </div>
+                            </div>
+
+                            <div class="form-group" style="margin-top: 10px;">
+                                <label data-i18n="comments">Comments (Inspection)</label>
+                                <textarea name="Comments2" rows="3" placeholder="Enter Comments" disabled></textarea>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB 4: IMAGES -->
+                <div class="tab-panel" id="panel-3">
+                    <div class="glass-card">
+                        <h3>検査・ラベル画像撮影 / Photos Check</h3>
+                        <div class="photo-card-grid">
+                            <!-- First Cycle Check -->
+                            <div class="photo-capture-card">
+                                <label data-i18n="first_cycle_check" style="font-size: 0.95rem; font-weight: bold;">初物チェック:</label>
+                                <div class="photo-status-indicator" id="hatsumonoStatusIndicator">FALSE</div>
+                                <span id="hatsumonoLabel" style="display:none;">FALSE</span>
+                                <button type="button" id="hatsumonoButton" class="btn btn-secondary btn-full" style="margin-top: 10px;">Check 1st Cycle</button>
+                                <img id="hatsumonoPic" src="" alt="hatsumonoPic" style="display:none; max-width: 100%; height: auto; border-radius: var(--btn-radius); border: 1px solid var(--border-color); margin-top: 10px;">
+                            </div>
+
+                            <!-- Last Cycle Check -->
+                            <div class="photo-capture-card">
+                                <label data-i18n="last_cycle_check" style="font-size: 0.95rem; font-weight: bold;">終物チェック:</label>
+                                <div class="photo-status-indicator" id="atomonoStatusIndicator">FALSE</div>
+                                <span id="atomonoLabel" style="display:none;">FALSE</span>
+                                <button type="button" id="atomonoButton" class="btn btn-secondary btn-full" style="margin-top: 10px;">Check Last Cycle</button>
+                                <img id="atomonoPic" src="" alt="atomonoPic" style="display:none; max-width: 100%; height: auto; border-radius: var(--btn-radius); border: 1px solid var(--border-color); margin-top: 10px;">
+                            </div>
+
+                            <!-- Material Label -->
+                            <div class="photo-capture-card" style="grid-column: span 2;">
+                                <label data-i18n="material_label" style="font-size: 0.95rem; font-weight: bold;">材料ラベル:</label>
+                                <div class="photo-status-indicator" id="materialLabelStatusIndicator">FALSE</div>
+                                <span id="材料ラベル_L" style="display:none;">FALSE</span>
+                                <span id="makerLabel" style="display:none;">FALSE</span>
+                                
+                                <button type="button" id="makerLabelButton" class="btn btn-secondary btn-full" style="margin-top: 10px; max-width: 280px;">写真撮影 / Take Photo</button>
+                                <img id="材料ラベル" src="" alt="材料ラベル" style="display:none; max-width: 100%; height: auto; border-radius: var(--btn-radius); border: 1px solid var(--border-color); margin-top: 10px;">
+                                
+                                <div id="material-photo-count" style="margin-top: 10px; font-weight: bold; color: var(--accent-blue);"></div>
+                                <div id="material-photo-thumbnails" style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; justify-content: center; width: 100%;"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB 5: MAINTENANCE -->
+                <div class="tab-panel" id="panel-4">
+                    <!-- Break Times -->
+                    <div class="glass-card">
+                        <h3 data-i18n="break_time_title">休憩時間</h3>
+                        <div class="form-grid" style="grid-template-columns: 1fr;">
+                            <div class="break-time-entry" style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: var(--btn-radius); padding: 12px; margin-bottom: 10px;">
+                                <label style="margin-bottom: 8px;">休憩1:</label>
+                                <div style="display: flex; gap: 10px; align-items: center;">
+                                    <input type="time" id="break1-start" name="break1-start" onfocus="setDefaultTime(this)">
+                                    <span style="color: var(--text-muted);">~</span>
+                                    <input type="time" id="break1-end" name="break1-end" onfocus="setDefaultTime(this)">
+                                    <button type="button" class="btn btn-alert" onclick="resetBreakTime(1)" style="padding: 10px 14px; font-size: 0.85rem;">Reset</button>
+                                </div>
+                            </div>
+
+                            <div class="break-time-entry" style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: var(--btn-radius); padding: 12px; margin-bottom: 10px;">
+                                <label style="margin-bottom: 8px;">休憩2:</label>
+                                <div style="display: flex; gap: 10px; align-items: center;">
+                                    <input type="time" id="break2-start" name="break2-start" onfocus="setDefaultTime(this)">
+                                    <span style="color: var(--text-muted);">~</span>
+                                    <input type="time" id="break2-end" name="break2-end" onfocus="setDefaultTime(this)">
+                                    <button type="button" class="btn btn-alert" onclick="resetBreakTime(2)" style="padding: 10px 14px; font-size: 0.85rem;">Reset</button>
+                                </div>
+                            </div>
+
+                            <div class="break-time-entry" style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: var(--btn-radius); padding: 12px; margin-bottom: 10px;">
+                                <label style="margin-bottom: 8px;">休憩3:</label>
+                                <div style="display: flex; gap: 10px; align-items: center;">
+                                    <input type="time" id="break3-start" name="break3-start" onfocus="setDefaultTime(this)">
+                                    <span style="color: var(--text-muted);">~</span>
+                                    <input type="time" id="break3-end" name="break3-end" onfocus="setDefaultTime(this)">
+                                    <button type="button" class="btn btn-alert" onclick="resetBreakTime(3)" style="padding: 10px 14px; font-size: 0.85rem;">Reset</button>
+                                </div>
+                            </div>
+
+                            <div class="break-time-entry" style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: var(--btn-radius); padding: 12px; margin-bottom: 15px;">
+                                <label style="margin-bottom: 8px;">休憩4:</label>
+                                <div style="display: flex; gap: 10px; align-items: center;">
+                                    <input type="time" id="break4-start" name="break4-start" onfocus="setDefaultTime(this)">
+                                    <span style="color: var(--text-muted);">~</span>
+                                    <input type="time" id="break4-end" name="break4-end" onfocus="setDefaultTime(this)">
+                                    <button type="button" class="btn btn-alert" onclick="resetBreakTime(4)" style="padding: 10px 14px; font-size: 0.85rem;">Reset</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div style="background: rgba(0, 210, 255, 0.05); border: 1px solid rgba(0, 210, 255, 0.2); padding: 15px; border-radius: var(--btn-radius); text-align: center; font-weight: bold;">
+                            <span data-i18n="total_break_time">合計休憩時間:</span>
+                            <span id="total-break-display" style="color: var(--accent-blue); font-size: 1.1rem; margin-left: 5px;">0分</span>
+                        </div>
+                    </div>
+
+                    <!-- Machine Maintenance -->
+                    <div class="glass-card">
+                        <h3 data-i18n="machine_trouble_title">機械故障時間 / Machine Maintenance Time</h3>
+                        <button type="button" id="add-maintenance-btn" class="btn btn-secondary btn-full" style="margin-bottom: 20px;">
+                            機械故障時間を追加 / Add Maintenance Time
+                        </button>
+                        
+                        <div id="maintenance-records-container" style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
+                            <!-- populated dynamically by backend -->
+                        </div>
+
+                        <div style="background: rgba(255, 77, 77, 0.05); border: 1px solid rgba(255, 77, 77, 0.2); padding: 15px; border-radius: var(--btn-radius); text-align: center; font-weight: bold;">
+                            <span data-i18n="total_trouble_time">合計故障時間:</span>
+                            <span id="total-trouble-display" style="color: var(--accent-red); font-size: 1.1rem; margin-left: 5px;">0分</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB 6: SUBMIT / SUMMARY -->
+                <div class="tab-panel" id="panel-5">
+                    <!-- Summary Card & clickable redirect list -->
+                    <div id="submit-summary-list" style="margin-bottom: 20px;">
+                        <!-- Updated dynamically by JS -->
+                    </div>
+
+                    <!-- Action buttons -->
+                    <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 25px;">
+                        <input type="submit" value="Submit" id="submit" class="btn btn-primary btn-full" style="height: 52px; font-size: 1.1rem;">
+                        <button type="button" onclick="resetForm()" class="btn btn-secondary btn-full" style="height: 48px;" data-i18n="reset">Reset</button>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </form>
+
+    <!-- Slide-out Sidebar for Product Info -->
+    <div class="sidebar-backdrop" onclick="toggleSidebar(false)"></div>
+    <div class="info-sidebar">
+        <div class="sidebar-header">
+            <h2 data-i18n="product_name">製品情報 / Product Info</h2>
+            <button type="button" class="sidebar-close" onclick="toggleSidebar(false)">&times;</button>
+        </div>
+        
+        <div class="info-sidebar-grid">
+            <div class="info-sidebar-image-container">
+                <img id="dynamicImage" src="" alt="Product Image">
+            </div>
+
+            <div>
+                <label>品番 / Product Number</label>
+                <input readonly id="product-number" value="" name="品番" style="background: transparent; border: none; padding: 0; font-size: 1rem; font-weight: bold;">
+            </div>
+
+            <div>
+                <label>モデル / Model</label>
+                <p id="model">---</p>
+            </div>
+
+            <div>
+                <label>形状 / Shape</label>
+                <p id="shape">---</p>
+            </div>
+
+            <div>
+                <label>R/L</label>
+                <p id="R-L">---</p>
+            </div>
+
+            <div>
+                <label>材料 / Material</label>
+                <p id="material">---</p>
+            </div>
+
+            <div>
+                <label>材料コード / Material Code</label>
+                <p id="material-code">---</p>
+            </div>
+
+            <div>
+                <label>材料色 / Material Color</label>
+                <p id="material-color">---</p>
+            </div>
+
+            <div>
+                <label>型番 / Kataban</label>
+                <p id="kataban">---</p>
+            </div>
+
+            <div style="border-top: 1px solid var(--border-color); padding-top: 15px;">
+                <label>送りピッチ / Feeding Pitch</label>
+                <p id="送りピッチ">---</p>
+            </div>
+
+            <div>
+                <label>離型紙 / Release Paper</label>
+                <p id="rikeshitext">---</p>
+            </div>
+
+            <div style="border-top: 1px solid var(--border-color); padding-top: 15px;">
+                <label>加工合計時間 (Total Time)</label>
+                <input readonly id="totalTime" value="0" name="Total Time" style="background: transparent; border: none; padding: 0; font-weight: 600;">
+            </div>
+
+            <div>
+                <label>Cycle Time DCP</label>
+                <input readonly id="cycleTime" value="0" name="Cycle Time" style="background: transparent; border: none; padding: 0; font-weight: 600;">
+            </div>
+
+            <div>
+                <label>Cycle Time Kensa</label>
+                <input readonly id="cycleTimeK" value="0" name="Cycle TimeK" style="background: transparent; border: none; padding: 0; font-weight: 600;">
+            </div>
+
+            <div>
+                <label>休憩 (Break Time Mins)</label>
+                <input readonly id="breaktime-mins" value="0" name="Breaktime" style="background: transparent; border: none; padding: 0; font-weight: 600;">
+            </div>
+
+            <div>
+                <label>故障時間 (Trouble Time)</label>
+                <input type="text" id="trouble-time-display" name="trouble-time-display" placeholder="00h 00m" readonly style="background: transparent; border: none; padding: 0; font-weight: 600; color: var(--text-main);">
+            </div>
+        </div>
+    </div>
+
+    <!-- Modals at page root level -->
+    
+    <!-- Worker Select Modal -->
+    <div id="workerNameModal" class="modal">
+        <div>
+            <h2 data-i18n="worker_name" style="text-align: center; margin-bottom: 20px;">Select Worker</h2>
+            <div class="worker-names-container" id="workerNamesContainer" style="max-height: 50vh; overflow-y: auto;">
+                <!-- dynamic -->
+            </div>
+            <button type="button" class="btn btn-secondary btn-full manual-entry-btn" id="manualEntryBtn" style="margin-top: 15px;">
+                手動入力 / Manual Entry
+            </button>
+            <button type="button" class="btn btn-alert btn-full close-modal-btn" id="closeWorkerModal" style="margin-top: 10px;">
+                閉じる / Close
+            </button>
+        </div>
+    </div>
+
+    <!-- Grouped Machines Manual Send Modal -->
+    <div id="individualSendModal" class="modal">
+        <div class="modal-content" style="max-width: 450px !important;">
+            <h3 style="text-align: center; margin-bottom: 15px;">DCP Data Transmission Status</h3>
+            <div id="individualSendContainer" style="display: flex; flex-direction: column; gap: 12px; max-height: 250px; overflow-y: auto; margin-bottom: 20px;">
+                <!-- Filled dynamically by backend -->
+            </div>
+            <button type="button" class="btn btn-alert btn-full" id="closeIndividualSendModal">Close</button>
+        </div>
+    </div>
+
+    <!-- Scanning Overlays -->
+    
+    <!-- QR Scanner Modal -->
+    <div id="qrScannerModal" class="modal">
+        <div class="modal-content">
+            <h3 style="text-align: center; margin-bottom: 15px;">
+                <span data-i18n="scan_qr_sebango">背番号をスキャンしてください</span><br>
+                <span data-i18n="scan_qr_sebango_en" style="font-size: 0.85rem; color: var(--text-muted);">Please scan product QR code</span>
+            </h3>
+            <div id="qrReader" style="width: 100%; aspect-ratio: 1.0; border-radius: var(--btn-radius); overflow: hidden; background: #000;"></div>
+            <p id="scanQRStatus" style="text-align: center; margin: 15px 0; font-size: 0.9rem; color: var(--text-muted); min-height: 20px;"></p>
+            <button type="button" class="btn btn-alert btn-full" id="closeQRScannerModal" data-i18n="cancel">Cancel</button>
+        </div>
+    </div>
+
+    <!-- Scan Lot Modal -->
+    <div id="scanLotModal" class="modal">
+        <div class="modal-content">
+            <h3 style="text-align: center; margin-bottom: 15px;">
+                <span data-i18n="scan_material_lot">材料ロットをスキャンしてください</span><br>
+                <span data-i18n="scan_material_lot_en" style="font-size: 0.85rem; color: var(--text-muted);">Please scan material lot QR code</span>
+            </h3>
+            <div id="lotQrReader" style="width: 100%; aspect-ratio: 1.0; border-radius: var(--btn-radius); overflow: hidden; background: #000;"></div>
+            <p id="scanLotStatus" style="text-align: center; margin: 15px 0; font-size: 0.9rem; color: var(--text-muted); min-height: 20px;"></p>
+            <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 15px;">
+                <button type="button" class="btn btn-primary btn-full" id="overrideLotButton" data-i18n="override_manual">Override / 手動入力</button>
+                <button type="button" class="btn btn-alert btn-full" id="closeScanLotModal" data-i18n="cancel">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Leader Verification Modal -->
+    <div id="leaderVerificationModal" class="modal">
+        <div class="modal-content">
+            <div style="margin: 0 auto 14px auto; width:52px; height:52px; border-radius:50%; background: var(--amber-soft); color: var(--amber); display:flex; align-items:center; justify-content:center;"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></div>
+            <h3 style="text-align: center; margin-bottom: 15px;" data-i18n="warning">Warning!</h3>
+            <p style="text-align: center; font-size: 0.9rem; color: var(--text-muted); line-height: 1.4; margin-bottom: 15px;">
+                <span data-i18n="leader_verification_warning">価値観を変えることができるのはリーダーだけ</span><br>
+                <span data-i18n="leader_verification_only" style="font-size: 0.8rem;">Only leaders can change value</span>
+            </p>
+            <div id="leaderQrReader" style="width: 100%; aspect-ratio: 1.0; border-radius: var(--btn-radius); overflow: hidden; background: #000; max-width: 280px; margin: 0 auto;"></div>
+            <p id="leaderVerificationStatus" style="text-align: center; margin: 15px 0; font-size: 0.9rem; color: var(--text-muted); min-height: 20px;"></p>
+            <button type="button" class="btn btn-alert btn-full" id="closeLeaderVerificationModal" data-i18n="cancel">Cancel</button>
+        </div>
+    </div>
+
+    <!-- Uploading Modal -->
+    <div id="uploadingModal" class="modal" style="display: none; background: rgba(0, 0, 0, 0.4); z-index: 100000;">
+        <div style="background: var(--bg-card); border: 1px solid var(--border-color); padding: 30px; border-radius: var(--card-radius); text-align: center; width: 90%; max-width: 340px; color: var(--text-main);">
+            <div class="loader" style="margin: 0 auto 20px auto; border: 4px solid rgba(0,0,0,0.08); border-top: 4px solid var(--accent-blue); border-radius: 50%; width: 45px; height: 45px; animation: spin 1s linear infinite;"></div>
+            <p style="font-size: 1.05rem; font-weight: bold; margin-bottom: 10px;" data-i18n="uploading">Uploading, please wait...</p>
+            <p id="uploadProgressText" style="font-size: 0.85rem; color: var(--text-muted); min-height: 20px;"></p>
+            <div style="background: rgba(0,0,0,0.05); border-radius: 10px; margin: 12px 0 6px 0; height: 6px; overflow: hidden; border: 1px solid var(--border-color);">
+                <div id="uploadProgressBar" style="height: 100%; width: 0%; background: var(--accent-blue); transition: width 0.3s ease;"></div>
+            </div>
+            <p id="uploadProgressPercent" style="font-size: 0.85rem; color: var(--text-muted); font-weight: bold;">0%</p>
+        </div>
+    </div>
+
+    <!-- Alert Modal Custom -->
+    <div id="customAlertModal" class="modal">
+        <div class="modal-content" style="max-width: 400px !important; text-align: center;">
+            <div style="margin: 0 auto 14px auto; width:52px; height:52px; border-radius:50%; background: var(--amber-soft); color: var(--amber); display:flex; align-items:center; justify-content:center;"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></div>
+            <p id="customAlertText" style="font-size: 1rem; line-height: 1.5; margin-bottom: 20px;" data-i18n="wrong_kanban">Wrong Kanban / 看板間違い</p>
+            <button type="button" class="btn btn-alert btn-full" id="closeModalButton" data-i18n="close">Close</button>
+        </div>
+    </div>
+
+    <!-- Scan Alert Modal Custom -->
+    <div id="scanAlertModal" class="modal">
+        <div class="modal-content" style="max-width: 400px !important; text-align: center;">
+            <div style="margin: 0 auto 14px auto; width:52px; height:52px; border-radius:50%; background: var(--blue-soft); color: var(--blue); display:flex; align-items:center; justify-content:center;"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></div>
+            <p id="scanAlertText" style="font-size: 1rem; line-height: 1.5; margin-bottom: 20px;" data-i18n="different_product">Different product detected!</p>
+            <button type="button" class="btn btn-primary btn-full" id="closeScanModalButton" data-i18n="close">Close</button>
+        </div>
+    </div>
+
+    <style>
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+
+    <!-- Core App Scripts -->
+    <script>
+        // Collapsible Info Sidebar
+        window.toggleSidebar = function(show) {
+            const sidebar = document.querySelector('.info-sidebar');
+            const backdrop = document.querySelector('.sidebar-backdrop');
+            if (show === undefined) {
+                show = !sidebar.classList.contains('open');
+            }
+            if (show) {
+                sidebar.classList.add('open');
+                backdrop.classList.add('open');
+            } else {
+                sidebar.classList.remove('open');
+                backdrop.classList.remove('open');
+            }
+        };
+
+        // Tab Navigation Logic
+        const panelsContainer = document.querySelector('.tab-panels-container');
+        const tabs = document.querySelectorAll('.tab-btn');
+        let currentTabIndex = 0;
+
+        window.goToTab = function(index) {
+            if (index < 0 || index >= tabs.length) return;
+            currentTabIndex = index;
+            
+            // Slide tabs viewport
+            panelsContainer.style.transform = `translateX(-${index * 16.666}%)`;
+            
+            // Highlight active button
+            tabs.forEach((tab, idx) => {
+                if (idx === index) {
+                    tab.classList.add('active');
+                } else {
+                    tab.classList.remove('active');
+                }
+            });
+            
+            updateTabIndicator(index);
+            
+            // If on Submit tab (index 5), compile summary
+            if (index === 5) {
+                updateSubmitSummary();
+            }
+        };
+
+        function updateTabIndicator(index) {
+            const activeTab = tabs[index];
+            const indicator = document.querySelector('.tab-indicator');
+            if (activeTab && indicator) {
+                indicator.style.width = `${activeTab.offsetWidth}px`;
+                indicator.style.left = `${activeTab.offsetLeft}px`;
+            }
+        }
+
+        // Bind clicks on Tab navigation bar
+        tabs.forEach((tab, index) => {
+            tab.addEventListener('click', () => {
+                goToTab(index);
+            });
+        });
+
+        // Initialize active highlight tab underline indicator position
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                updateTabIndicator(currentTabIndex);
+            }, 500);
+        });
+
+        // Swipe Gestures Logic
+        let touchStartX = 0;
+        let touchStartY = 0;
+        
+        document.addEventListener('touchstart', (e) => {
+            // Do not capture events on sliders, scanners, and scrolling input fields
+            if (e.target.closest('input') || 
+                e.target.closest('textarea') || 
+                e.target.closest('select') || 
+                e.target.closest('#qrReader') || 
+                e.target.closest('#lotQrReader') || 
+                e.target.closest('#leaderQrReader') || 
+                e.target.closest('.counter-controls') || 
+                e.target.closest('.info-sidebar') || 
+                e.target.closest('#maintenance-records-container')) {
+                return;
+            }
+            touchStartX = e.changedTouches[0].screenX;
+            touchStartY = e.changedTouches[0].screenY;
+        }, { passive: true });
+
+        document.addEventListener('touchend', (e) => {
+            if (e.target.closest('input') || 
+                e.target.closest('textarea') || 
+                e.target.closest('select') || 
+                e.target.closest('#qrReader') || 
+                e.target.closest('#lotQrReader') || 
+                e.target.closest('#leaderQrReader') || 
+                e.target.closest('.counter-controls') || 
+                e.target.closest('.info-sidebar') || 
+                e.target.closest('#maintenance-records-container')) {
+                return;
+            }
+            
+            const touchEndX = e.changedTouches[0].screenX;
+            const touchEndY = e.changedTouches[0].screenY;
+            
+            const diffX = touchEndX - touchStartX;
+            const diffY = touchEndY - touchStartY;
+            
+            // Swipe horizontal checks
+            if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 80) {
+                if (diffX > 0) {
+                    // Swipe right -> previous tab
+                    if (currentTabIndex > 0) {
+                        goToTab(currentTabIndex - 1);
+                    }
+                } else {
+                    // Swipe left -> next tab
+                    if (currentTabIndex < tabs.length - 1) {
+                        goToTab(currentTabIndex + 1);
+                    }
+                }
+            }
+        }, { passive: true });
+
+        // MutationObserver to bridge step display overlays with Scan tab cards
+        function syncScanTabState() {
+            const step1 = document.getElementById('step1Modal');
+            const step2 = document.getElementById('step2Modal');
+            const step3 = document.getElementById('step3Modal');
+            const completedCard = document.getElementById('scanCompletedCard');
+            const subDropdown = document.getElementById('sub-dropdown');
+            
+            const isStep1Visible = step1 && step1.style.display !== 'none';
+            const isStep2Visible = step2 && step2.style.display !== 'none';
+            const isStep3Visible = step3 && step3.style.display !== 'none';
+            
+            if (!isStep1Visible && !isStep2Visible && !isStep3Visible) {
+                if (subDropdown && subDropdown.value && subDropdown.value !== "") {
+                    completedCard.style.display = 'flex';
+                    document.getElementById('activeSebanggoDisplay').textContent = subDropdown.value;
+                    document.getElementById('activeHinbanDisplay').textContent = document.getElementById('product-number')?.value || '---';
+                } else {
+                    completedCard.style.display = 'none';
+                }
+            } else {
+                completedCard.style.display = 'none';
+            }
+        }
+
+        // Set up observers for step overlays visibility styles
+        window.addEventListener('DOMContentLoaded', () => {
+            const stepObserver = new MutationObserver(() => {
+                syncScanTabState();
+            });
+            const config = { attributes: true, attributeFilter: ['style'] };
+            
+            const s1 = document.getElementById('step1Modal');
+            const s2 = document.getElementById('step2Modal');
+            const s3 = document.getElementById('step3Modal');
+            
+            if (s1) stepObserver.observe(s1, config);
+            if (s2) stepObserver.observe(s2, config);
+            if (s3) stepObserver.observe(s3, config);
+            
+            // Double check setup machine header tag
+            setTimeout(() => {
+                const processInput = document.getElementById('process');
+                const headerTag = document.getElementById('headerMachineTag');
+                if (processInput && headerTag) {
+                    headerTag.textContent = "設備: " + (processInput.value || "Not Set");
+                }
+            }, 1000);
+        });
+
+        // Image capture label styling states synchronizer
+        function syncImageStatusIndicators() {
+            const checkLabel = (lblId, indicatorId) => {
+                const lbl = document.getElementById(lblId);
+                const ind = document.getElementById(indicatorId);
+                if (lbl && ind) {
+                    const hasValue = lbl.textContent.trim().toUpperCase() === 'TRUE';
+                    ind.textContent = hasValue ? 'TRUE' : 'FALSE';
+                    if (hasValue) {
+                        ind.classList.add('success');
+                    } else {
+                        ind.classList.remove('success');
+                    }
+                }
+            };
+            checkLabel('hatsumonoLabel', 'hatsumonoStatusIndicator');
+            checkLabel('atomonoLabel', 'atomonoStatusIndicator');
+            checkLabel('材料ラベル_L', 'materialLabelStatusIndicator');
+        }
+
+        // Run images checklist update loop periodically
+        setInterval(syncImageStatusIndicators, 1000);
+
+        // Submit tab compilation logic
+        function updateSubmitSummary() {
+            const summaryList = document.getElementById('submit-summary-list');
+            if (!summaryList) return;
+            
+            const values = {
+                sebanggo: document.getElementById('sub-dropdown')?.value || '',
+                hinban: document.getElementById('product-number')?.value || '',
+                workerName: document.getElementById('Machine Operator')?.value || '',
+                date: document.getElementById('Lot No.')?.value || '',
+                startTime: document.getElementById('Start Time')?.value || '',
+                endTime: document.getElementById('End Time')?.value || '',
+                processQty: parseInt(document.getElementById('ProcessQuantity')?.value) || 0,
+                shotCount: parseInt(document.getElementById('shot')?.value) || 0,
+                materialLot: document.getElementById('材料ロット')?.value || '',
+                defectsPull: parseInt(document.getElementById('counter-18')?.value) || 0,
+                defectsProcess: parseInt(document.getElementById('counter-19')?.value) || 0,
+                defectsOther: parseInt(document.getElementById('counter-20')?.value) || 0,
+                photosHatsumono: document.getElementById('hatsumonoLabel')?.textContent || 'FALSE',
+                photosAtomono: document.getElementById('atomonoLabel')?.textContent || 'FALSE',
+                photosMaterial: typeof materialLabelPhotos !== 'undefined' ? materialLabelPhotos.length : 0,
+                totalNG: parseInt(document.getElementById('Total_NG')?.value) || 0,
+                totalGood: parseInt(document.getElementById('total')?.value) || 0
+            };
+            
+            const issues = [];
+            
+            if (!values.sebanggo) {
+                issues.push({ text: '背番号がスキャンされていません / Product Code is required', tab: 0, fieldId: 'startStep1Scan' });
+            }
+            if (!values.workerName) {
+                issues.push({ text: '作業者名が入力されていません / Worker Name is required', tab: 2, fieldId: 'Machine Operator' });
+            }
+            if (!values.date) {
+                issues.push({ text: '加工日が入力されていません / Date is required', tab: 2, fieldId: 'Lot No.' });
+            }
+            if (!values.startTime) {
+                issues.push({ text: '加工開始時間が入力されていません / Start Time is required', tab: 2, fieldId: 'Start Time' });
+            }
+            if (!values.endTime) {
+                issues.push({ text: '加工終了時間が入力されていません / End Time is required', tab: 2, fieldId: 'End Time' });
+            }
+            if (values.startTime && values.endTime && values.startTime === values.endTime) {
+                issues.push({ text: '加工開始時間と終了時間が同じです / Start and End Time cannot be same', tab: 2, fieldId: 'End Time' });
+            }
+            if (values.processQty <= 0) {
+                issues.push({ text: '加工数が0または空です / Process Quantity must be greater than 0', tab: 2, fieldId: 'ProcessQuantity' });
+            }
+            if (values.shotCount < 1) {
+                issues.push({ text: 'ショット数が入力されていません / Shot Count must be at least 1', tab: 2, fieldId: 'shot' });
+            }
+            if (!values.materialLot) {
+                issues.push({ text: '材料ロットが入力されていません / Material Lot is required', tab: 2, fieldId: '材料ロット' });
+            }
+            
+            const lotCount = values.materialLot.split(',').map(l => l.trim()).filter(l => l).length;
+            if (values.photosMaterial < lotCount) {
+                issues.push({ text: `材料ラベル写真が不足しています (必要: ${lotCount}枚, 撮影: ${values.photosMaterial}枚) / Insufficient material label photos`, tab: 3, fieldId: 'makerLabelButton' });
+            }
+            
+            let html = '';
+            
+            if (issues.length > 0) {
+                html += '<div class="validation-errors-card">';
+                html += '  <h4 style="color: var(--accent-red); margin-top: 0; margin-bottom: 12px; font-size: 0.95rem;">修正が必要な項目 / Required Fields to Fix:</h4>';
+                html += '  <ul class="validation-list">';
+                issues.forEach(issue => {
+                    html += `    <li class="validation-item error" onclick="goToTabAndFocus(${issue.tab}, '${issue.fieldId}')">`;
+                    html += `       <span>${issue.text}</span>`;
+                    html += `       <span class="fix-btn">修正 / Go Fix →</span>`;
+                    html += `    </li>`;
+                });
+                html += '  </ul>';
+                html += '</div>';
+            } else {
+                html += '<div class="validation-success-card">';
+                html += '  <span class="success-checkmark">✓</span>';
+                html += '  <p style="margin: 0; font-weight: bold; color: var(--accent-green);">すべての入力内容が正しいです / All inputs validated successfully</p>';
+                html += '</div>';
+            }
+            
+            html += '<div class="summary-details-grid">';
+            html += '  <h3>入力データ概要 / Data Summary</h3>';
+            html += '  <div class="summary-row"><span class="lbl">背番号 (Code):</span> <span class="val">' + (values.sebanggo || '---') + '</span></div>';
+            html += '  <div class="summary-row"><span class="lbl">品番 (Product Number):</span> <span class="val">' + (values.hinban || '---') + '</span></div>';
+            html += '  <div class="summary-row"><span class="lbl">作業者 (Worker):</span> <span class="val">' + (values.workerName || '---') + '</span></div>';
+            html += '  <div class="summary-row"><span class="lbl">加工日 (Date):</span> <span class="val">' + (values.date || '---') + '</span></div>';
+            html += '  <div class="summary-row"><span class="lbl">時間 (Time):</span> <span class="val">' + (values.startTime || '--:--') + ' ~ ' + (values.endTime || '--:--') + '</span></div>';
+            html += '  <div class="summary-row"><span class="lbl">加工数 (Qty):</span> <span class="val">' + values.processQty + '</span></div>';
+            html += '  <div class="summary-row"><span class="lbl">ショット数 (Shots):</span> <span class="val">' + values.shotCount + '</span></div>';
+            html += '  <div class="summary-row"><span class="lbl">材料ロット (Material Lot):</span> <span class="val">' + (values.materialLot || '---') + '</span></div>';
+            html += '  <div class="summary-row"><span class="lbl">不良 (Defects):</span> <span class="val">疵引: ' + values.defectsPull + ' | 加工: ' + values.defectsProcess + ' | その他: ' + values.defectsOther + ' (NG: ' + values.totalNG + ')</span></div>';
+            html += '  <div class="summary-row"><span class="lbl">良品合計 (Good Total):</span> <span class="val" style="font-weight: bold; color: var(--accent-green);">' + values.totalGood + '</span></div>';
+            html += '  <div class="summary-row"><span class="lbl">初物/終物チェック:</span> <span class="val">初物: ' + values.photosHatsumono + ' | 終物: ' + values.photosAtomono + '</span></div>';
+            html += '  <div class="summary-row"><span class="lbl">材料ラベル画像数 (Label Photos):</span> <span class="val">' + values.photosMaterial + '枚</span></div>';
+            html += '</div>';
+            
+            summaryList.innerHTML = html;
+        }
+
+        window.goToTabAndFocus = function(tabIndex, fieldId) {
+            goToTab(tabIndex);
+            setTimeout(() => {
+                const field = document.getElementById(fieldId);
+                if (field) {
+                    field.focus();
+                    field.classList.add('flash-highlight');
+                    setTimeout(() => field.classList.remove('flash-highlight'), 1800);
+                }
+            }, 400);
+        };
+    </script>
+
+    <!-- Fallback/Legacy inputs hidden for backend logic (avoid reference errors) -->
+    <div style="display:none;">
+        <input id="process" name="process" value="OZNC01" readonly>
+    </div>
+
+    <!-- Core application dependencies -->
+    <script src="i18n.js"></script>
+    <script src="DCP interactive backend.js"></script>
+    <script src="html5-qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr/dist/jsQR.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
+</body>
+</html>
