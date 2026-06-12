@@ -2415,14 +2415,14 @@
       function statusCardHTML(tag, src, has) {
         if (has && src) {
           return '<div class="gallery-thumb" data-src="' + src + '">' +
-                 '<span style="position:absolute;top:6px;right:6px;width:12px;height:12px;border-radius:50%;background:#12B76A;border:2px solid #fff;z-index:2;"></span>' +
+                 '<span style="position:absolute;top:6px;right:6px;width:12px;height:12px;border-radius:50%;background:var(--brand);border:2px solid #fff;z-index:2;"></span>' +
                  '<img src="' + src + '" alt="' + tag + '">' +
                  '<span class="thumb-tag">' + tag + '</span></div>';
         }
-        return '<div class="gallery-thumb empty" style="display:flex;flex-direction:column;align-items:center;justify-content:center;border:1px dashed #F04438;background:rgba(240,68,56,0.06);">' +
-               '<span style="position:absolute;top:6px;right:6px;width:12px;height:12px;border-radius:50%;background:#F04438;border:2px solid #fff;"></span>' +
-               '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#F04438" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>' +
-               '<span class="thumb-tag" style="position:static;background:none;color:#F04438;margin-top:6px;">' + tag + ' 未撮影</span></div>';
+        return '<div class="gallery-thumb empty" style="display:flex;flex-direction:column;align-items:center;justify-content:center;border:1px dashed var(--red);background:var(--red-soft);">' +
+               '<span style="position:absolute;top:6px;right:6px;width:12px;height:12px;border-radius:50%;background:var(--red);border:2px solid #fff;"></span>' +
+               '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" style="stroke:var(--red);" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>' +
+               '<span class="thumb-tag" style="position:static;background:none;color:var(--red);margin-top:6px;">' + tag + ' 未撮影</span></div>';
       }
       function isTrue(elId) {
         const el = document.getElementById(elId);
