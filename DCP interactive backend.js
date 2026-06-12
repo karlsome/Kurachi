@@ -2931,7 +2931,7 @@ function selectWorkerName(name) {
 function openWorkerModal() {
   currentModalInputField = 'worker'; // Track which field opened the modal
   const modal = document.getElementById('workerNameModal');
-  modal.style.display = 'block';
+  modal.style.display = 'flex'; // flex so the .modal centering applies
   renderWorkerNames();
 }
 
@@ -3139,7 +3139,7 @@ function selectKensaName(name) {
 function openKensaModal() {
   currentModalInputField = 'kensa'; // Track which field opened the modal
   const modal = document.getElementById('workerNameModal');
-  modal.style.display = 'block';
+  modal.style.display = 'flex'; // flex so the .modal centering applies
   renderKensaNames();
 }
 
@@ -8106,22 +8106,9 @@ window.addEventListener('load', function() {
       };
     }
     
-    // Style the input
-    shotInput.style.cssText = `
-      cursor: pointer;
-      background-color: #f0f8ff;
-      border: 2px solid #007bff;
-      border-radius: 5px;
-      padding: 8px 10px;
-      font-size: 16px;
-      width: 100%;
-      background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="%23007bff"><path d="M4 2h16a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm1 4h4v4H5V6zm0 6h4v4H5v-4zm6-6h4v4h-4V6zm6 0h2v4h-2V6zm-6 6h4v4h-4v-4zm6 0h2v4h-2v-4z"/></svg>');
-      background-repeat: no-repeat;
-      background-position: right 8px center;
-      background-size: 16px 16px;
-      padding-right: 30px;
-    `;
-    
+    // Styling handled by the .tap-field CSS class (uniform tap-to-open look)
+    shotInput.classList.add('tap-field');
+
     console.log('Shot input configured with direct keypad');
   }
   
@@ -8142,22 +8129,9 @@ window.addEventListener('load', function() {
       };
     }
     
-    // Style the input
-    processQuantityInput.style.cssText = `
-      cursor: pointer;
-      background-color: #f0f8ff;
-      border: 2px solid #007bff;
-      border-radius: 5px;
-      padding: 8px 10px;
-      font-size: 16px;
-      width: 100%;
-      background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="%23007bff"><path d="M4 2h16a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm1 4h4v4H5V6zm0 6h4v4H5v-4zm6-6h4v4h-4V6zm6 0h2v4h-2V6zm-6 6h4v4h-4v-4zm6 0h2v4h-2v-4z"/></svg>');
-      background-repeat: no-repeat;
-      background-position: right 8px center;
-      background-size: 16px 16px;
-      padding-right: 30px;
-    `;
-    
+    // Styling handled by the .tap-field CSS class (uniform tap-to-open look)
+    processQuantityInput.classList.add('tap-field');
+
     console.log('ProcessQuantity input configured with direct keypad');
   }
   
@@ -8178,22 +8152,9 @@ window.addEventListener('load', function() {
       };
     }
     
-    // Style the input
-    spareInput.style.cssText = `
-      cursor: pointer;
-      background-color: #f0f8ff;
-      border: 2px solid #007bff;
-      border-radius: 5px;
-      padding: 8px 10px;
-      font-size: 16px;
-      width: 100%;
-      background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="%23007bff"><path d="M4 2h16a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm1 4h4v4H5V6zm0 6h4v4H5v-4zm6-6h4v4h-4V6zm6 0h2v4h-2V6zm-6 6h4v4h-4v-4zm6 0h2v4h-2v-4z"/></svg>');
-      background-repeat: no-repeat;
-      background-position: right 8px center;
-      background-size: 16px 16px;
-      padding-right: 30px;
-    `;
-    
+    // Styling handled by the .tap-field CSS class (uniform tap-to-open look)
+    spareInput.classList.add('tap-field');
+
     console.log('Spare (在庫) input configured with direct keypad');
     
     // Add logging when spare value changes

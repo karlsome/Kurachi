@@ -434,6 +434,34 @@
             color: var(--text-muted);
         }
 
+        /* Tap-to-open fields (open a keypad / picker / worker modal). One uniform,
+           touch-first look with a chevron affordance. Overrides the muted readonly
+           look while still falling back to the disabled style when actually disabled. */
+        input.tap-field:not(:disabled) {
+            cursor: pointer;
+            background-color: var(--bg-surface);
+            border: 1.5px solid var(--border-strong);
+            color: var(--text-main);
+            min-height: 52px;
+            font-weight: 700;
+            padding-right: 44px;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='22' height='22' fill='none' stroke='%232E6FF2' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 14px center;
+            background-size: 20px;
+            -webkit-appearance: none;
+            appearance: none;
+        }
+        input.tap-field:not(:disabled):hover { border-color: var(--blue); }
+        input.tap-field:not(:disabled):active {
+            background-color: var(--blue-soft);
+            border-color: var(--blue);
+            transform: scale(0.997);
+        }
+        input.tap-field::placeholder { color: var(--text-soft); font-weight: 600; }
+        input.tap-field::-webkit-outer-spin-button,
+        input.tap-field::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
         /* ---------------- Defect Counters ---------------- */
         .counter-container {
             display: grid;
@@ -891,6 +919,36 @@
             background: var(--amber) !important;
         }
 
+        /* Worker / Kensa select modal — card + touch-first name grid */
+        #workerNameModal > div {
+            width: 100%; max-width: 580px; max-height: 86vh; overflow-y: auto;
+            display: flex; flex-direction: column;
+        }
+        #workerNameModal h2 { font-size: 1.25rem; font-weight: 800; }
+        #workerNameModal .worker-section { margin-bottom: 18px; }
+        #workerNameModal .worker-section-header {
+            font-size: 0.78rem; font-weight: 800; letter-spacing: 0.03em;
+            padding: 6px 14px; border-radius: 999px; display: inline-block; margin-bottom: 12px;
+        }
+        #workerNameModal .worker-names-grid {
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px;
+        }
+        #workerNameModal .worker-name-btn {
+            width: 100%; min-height: 58px; padding: 12px 14px;
+            font-size: 1rem; font-weight: 700; cursor: pointer;
+            display: flex; align-items: center; justify-content: center; text-align: center;
+        }
+        #workerNameModal .worker-name-btn:active { transform: scale(0.97); }
+        #workerNameModal .recent-section [style*="position: relative"],
+        #workerNameModal .recent-section .worker-name-btn { position: relative; }
+        #workerNameModal .delete-recent-btn {
+            position: absolute; top: -7px; right: -7px; width: 26px; height: 26px;
+            border-radius: 50%; background: var(--red); color: #fff;
+            border: 2px solid var(--bg-surface); font-size: 0.9rem; font-weight: 700;
+            cursor: pointer; line-height: 1; display: flex; align-items: center; justify-content: center;
+            z-index: 2; padding: 0;
+        }
+
         /* Numeric keypad */
         #keypadModal .modal-content {
             background: var(--bg-surface) !important;
@@ -1221,7 +1279,7 @@
                         <div class="form-grid">
                             <div class="form-group">
                                 <label for="Machine Operator" data-i18n="worker_name">作業者:</label>
-                                <input list="machine-operator-suggestions" placeholder="Worker's Name" id="Machine Operator" name="Machine Operator" data-i18n="worker_name_placeholder" required readonly style="cursor: pointer; background: rgba(255,255,255,0.05);">
+                                <input list="machine-operator-suggestions" class="tap-field" placeholder="タップして選択 / Tap to select" id="Machine Operator" name="Machine Operator" data-i18n="worker_name_placeholder" required readonly>
                                 <datalist id="machine-operator-suggestions"></datalist>
                             </div>
                             
@@ -1243,7 +1301,7 @@
 
                             <div class="form-group">
                                 <label for="Process Quantity" data-i18n="process_quantity">加工数（良品）+ NG:</label>
-                                <input type="text" name="Process Quantity" id="ProcessQuantity" placeholder="Process Quantity" data-i18n="process_quantity_placeholder" required readonly style="cursor: pointer;">
+                                <input type="text" name="Process Quantity" id="ProcessQuantity" class="tap-field" placeholder="Process Quantity" data-i18n="process_quantity_placeholder" required readonly>
                             </div>
 
                             <div class="form-group" style="justify-content: flex-end;">
@@ -1254,12 +1312,12 @@
 
                             <div class="form-group full-width" id="shotCountSection">
                                 <label for="shot" data-i18n="shot_count">ショット数</label>
-                                <input type="number" name="shot" id="shot" placeholder="ショット数" data-i18n="shot_count_placeholder" readonly style="cursor: pointer;">
+                                <input type="number" name="shot" id="shot" class="tap-field" placeholder="ショット数" data-i18n="shot_count_placeholder" readonly>
                             </div>
 
                             <div class="form-group full-width">
                                 <label for="材料ロット" data-i18n="material_lot">材料ロット:</label>
-                                <input type="text" name="材料ロット" id="材料ロット" placeholder="Material Lot" data-i18n="material_lot_placeholder" required readonly style="cursor: pointer;">
+                                <input type="text" name="材料ロット" id="材料ロット" class="tap-field" placeholder="Material Lot" data-i18n="material_lot_placeholder" required readonly>
                                 <div id="材料ロット-tags" style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px;"></div>
                                 <input type="hidden" id="材料ロット-data" value="">
                             </div>
@@ -1334,7 +1392,7 @@
                             <div class="form-grid">
                                 <div class="form-group">
                                     <label for="Kensa Name" data-i18n="inspector_name">検査者:</label>
-                                    <input list="kensa-name-suggestions" placeholder="Kensa Name" data-i18n="inspector_placeholder" id="Kensa Name" name="Kensa Name" type="text" disabled readonly style="cursor: pointer; background: rgba(255,255,255,0.05);">
+                                    <input list="kensa-name-suggestions" class="tap-field" placeholder="タップして選択 / Tap to select" data-i18n="inspector_placeholder" id="Kensa Name" name="Kensa Name" type="text" disabled readonly>
                                     <datalist id="kensa-name-suggestions"></datalist>
                                 </div>
                                 <div class="form-group">
@@ -1380,7 +1438,7 @@
                                 </div>
                                 <div class="form-group">
                                     <label for="在庫" data-i18n="spare">スペア:</label>
-                                    <input type="text" name="在庫" id="在庫" placeholder="Spare" data-i18n="spare_placeholder" disabled readonly style="cursor: pointer;">
+                                    <input type="text" name="在庫" id="在庫" class="tap-field" placeholder="Spare" data-i18n="spare_placeholder" disabled readonly>
                                 </div>
                             </div>
 
