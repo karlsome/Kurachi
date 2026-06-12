@@ -474,7 +474,7 @@ inputs.forEach(input => {
   input.addEventListener('input', () => {
     const key = `${uniquePrefix}${input.id || input.name}`; // Prefix key with pageName and selected工場
     if (key) {
-      localStorage.setItem(key, input.value);
+      safeSetItem(key, input.value);
     }
   });
 
@@ -482,7 +482,7 @@ inputs.forEach(input => {
     input.addEventListener('change', () => {
       const key = `${uniquePrefix}${input.id || input.name}`;
       if (key) {
-        localStorage.setItem(key, input.checked); // Save checkbox/radio state
+        safeSetItem(key, input.checked); // Save checkbox/radio state
       }
     });
   }
@@ -1524,6 +1524,95 @@ async function compressBlobToLimit(dataURL, maxBytes = 1024 * 1024) {
   return new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.7));
 }
 
+// IndexedDB for maintenance photos — keeps base64 out of localStorage (avoids the ~5MB
+// quota). Stores full photos keyed by id, plus an unsaved-photo "draft" for refresh recovery.
+const maintenanceDB = (() => {
+  let _db = null;
+  const DB_VERSION = 1;
+  const PHOTOS = 'photos';
+  const DRAFT = 'draft';
+
+  function open() {
+    if (_db) return Promise.resolve(_db);
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(`${uniquePrefix}maintenanceDB`, DB_VERSION);
+      req.onupgradeneeded = e => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains(PHOTOS)) db.createObjectStore(PHOTOS, { keyPath: 'id' });
+        if (!db.objectStoreNames.contains(DRAFT)) db.createObjectStore(DRAFT, { keyPath: 'key' });
+      };
+      req.onsuccess = e => { _db = e.target.result; resolve(_db); };
+      req.onerror = e => reject(e.target.error);
+    });
+  }
+  const tx = (store, mode, fn) => open().then(db => new Promise((res, rej) => {
+    const t = db.transaction(store, mode);
+    const r = fn(t.objectStore(store));
+    if (r) r.onsuccess = e => res(e.target.result);
+    t.oncomplete = () => res(r ? r.result : undefined);
+    t.onerror = e => rej(e.target.error);
+  }));
+
+  return {
+    putPhoto(rec)   { return tx(PHOTOS, 'readwrite', s => s.put(rec)); },
+    getPhoto(id)    { return tx(PHOTOS, 'readonly',  s => s.get(id)); },
+    deletePhoto(id) { return tx(PHOTOS, 'readwrite', s => s.delete(id)); },
+    saveDraft(photos) { return tx(DRAFT, 'readwrite', s => s.put({ key: 'current', photos })); },
+    getDraft()      { return tx(DRAFT, 'readonly',  s => s.get('current')).then(r => r ? r.photos : null); },
+    clearDraft()    { return tx(DRAFT, 'readwrite', s => s.delete('current')); }
+  };
+})();
+
+// Returns the base64 for a maintenance photo — from the object itself (legacy records /
+// in-memory) or hydrated from IndexedDB by id (new reference-only records).
+async function getMaintenancePhotoBase64(photo) {
+  if (!photo) return null;
+  if (photo.base64) return photo.base64;
+  try { const rec = await maintenanceDB.getPhoto(photo.id); return rec ? rec.base64 : null; }
+  catch (e) { console.warn('Maintenance photo hydrate failed:', e); return null; }
+}
+
+// Fill base64 for an array of photo references (used when editing a saved record).
+async function hydrateMaintenancePhotos(photos) {
+  const out = [];
+  for (const p of (photos || [])) {
+    const base64 = await getMaintenancePhotoBase64(p);
+    out.push({ id: p.id, timestamp: p.timestamp, uploaded: p.uploaded || false, base64: base64 || undefined });
+  }
+  return out;
+}
+
+// Persist the current unsaved maintenance photos as a draft (add mode only) so a refresh
+// mid-capture doesn't lose freshly-taken photos.
+function persistMaintenanceDraft() {
+  if (currentEditingIndex >= 0) return; // editing a saved record: not an unsaved draft
+  try { maintenanceDB.saveDraft(maintenancePhotos.map(p => ({ id: p.id, timestamp: p.timestamp, base64: p.base64, uploaded: p.uploaded }))); }
+  catch (e) { console.warn('Maintenance draft save failed:', e); }
+}
+
+// localStorage.setItem with QuotaExceededError handling + a throttled user warning, so a
+// full store fails loudly instead of silently dropping the write.
+let _storageWarnShown = 0;
+function safeSetItem(key, value) {
+  try { localStorage.setItem(key, value); return true; }
+  catch (e) {
+    const quota = e && (e.name === 'QuotaExceededError' || e.code === 22 || e.code === 1014 || e.name === 'NS_ERROR_DOM_QUOTA_REACHED');
+    if (quota) {
+      const now = Date.now();
+      if (now - _storageWarnShown > 10000) {
+        _storageWarnShown = now;
+        const msg = 'ストレージ容量が不足しています。データを送信して空き容量を確保してください / Storage is full — please submit to free space.';
+        if (typeof window.showAppToast === 'function') window.showAppToast(msg);
+        else if (typeof showAlert === 'function') showAlert(msg, false);
+      }
+      console.error('QuotaExceededError while saving', key, e);
+    } else {
+      console.error('localStorage.setItem failed for', key, e);
+    }
+    return false;
+  }
+}
+
 // Load maintenance records from localStorage
 function loadMaintenanceRecords() {
   const saved = localStorage.getItem(`${uniquePrefix}maintenanceRecords`);
@@ -1534,15 +1623,16 @@ function loadMaintenanceRecords() {
   }
 }
 
-// Save maintenance records to localStorage
+// Save maintenance records to localStorage (photo bytes live in IndexedDB, not here)
 function saveMaintenanceRecords() {
-  localStorage.setItem(`${uniquePrefix}maintenanceRecords`, JSON.stringify(maintenanceRecords));
+  safeSetItem(`${uniquePrefix}maintenanceRecords`, JSON.stringify(maintenanceRecords));
 }
 
 // Clear maintenance photos
 function clearMaintenancePhotos() {
   maintenancePhotos = [];
   renderMaintenancePhotoThumbnails();
+  persistMaintenanceDraft();
 }
 
 // Add photo to maintenance photos
@@ -1572,8 +1662,9 @@ function addMaintenancePhoto(base64Data) {
   maintenancePhotos.push(photoData);
   
   console.log(`📷 Photo added: ID=${photoData.id}, base64Length=${base64Data.length}, timestamp=${photoData.timestamp}`);
-  
+
   renderMaintenancePhotoThumbnails();
+  persistMaintenanceDraft();
   return true;
 }
 
@@ -1582,6 +1673,7 @@ function removeMaintenancePhoto(index) {
   if (index >= 0 && index < maintenancePhotos.length) {
     maintenancePhotos.splice(index, 1);
     renderMaintenancePhotoThumbnails();
+    persistMaintenanceDraft();
   }
 }
 
@@ -1728,13 +1820,10 @@ function showMaintenancePhotoPreview(imageDataURL) {
 function showMaintenanceModal(editIndex = -1) {
   currentEditingIndex = editIndex;
   const isEditing = editIndex >= 0;
-  
-  // Clear or load existing photos
-  if (isEditing && maintenanceRecords[editIndex] && maintenanceRecords[editIndex].photos) {
-    maintenancePhotos = [...maintenanceRecords[editIndex].photos];
-  } else {
-    maintenancePhotos = [];
-  }
+
+  // Photos are hydrated asynchronously below (after the modal DOM exists): from IndexedDB
+  // for a saved record (edit), or from the unsaved draft (add). Start empty.
+  maintenancePhotos = [];
   
   // Create modal
   const modal = document.createElement('div');
@@ -1833,8 +1922,29 @@ function showMaintenanceModal(editIndex = -1) {
   modal.appendChild(modalContent);
   document.body.appendChild(modal);
 
-  // Render existing photos
+  // Render existing photos (empty initially; filled by the async hydration below)
   renderMaintenancePhotoThumbnails();
+
+  // Hydrate photos: edit -> from the saved record's IndexedDB blobs; add -> from an
+  // unsaved draft recovered after a refresh mid-capture.
+  (async () => {
+    try {
+      if (isEditing && existingRecord.photos && existingRecord.photos.length) {
+        maintenancePhotos = await hydrateMaintenancePhotos(existingRecord.photos);
+      } else if (!isEditing) {
+        const draft = await maintenanceDB.getDraft();
+        if (draft && draft.length) {
+          maintenancePhotos = draft;
+          if (typeof window.showAppToast === 'function') {
+            window.showAppToast('未保存の故障写真を復元しました / Restored unsaved maintenance photos');
+          }
+        }
+      }
+      renderMaintenancePhotoThumbnails();
+    } catch (e) {
+      console.warn('Maintenance photo hydration failed:', e);
+    }
+  })();
 
   // Add event listeners
   setupMaintenanceModalEvents(modal, existingRecord);
@@ -1868,7 +1978,7 @@ function setupMaintenanceModalEvents(modal, existingRecord) {
   });
 
   // Save functionality
-  saveBtn.addEventListener('click', () => {
+  saveBtn.addEventListener('click', async () => {
     const startTime = modal.querySelector('#maintenance-start').value;
     const endTime = modal.querySelector('#maintenance-end').value;
     const comment = modal.querySelector('#maintenance-comment').value;
@@ -1883,16 +1993,36 @@ function setupMaintenanceModalEvents(modal, existingRecord) {
       return;
     }
 
+    const wasEditing = currentEditingIndex >= 0;
+    const recordId = wasEditing ? maintenanceRecords[currentEditingIndex].id : Date.now();
+
+    // Persist photo bytes to IndexedDB; the localStorage record keeps references only.
+    const photoRefs = [];
+    for (const p of maintenancePhotos) {
+      try {
+        if (p.base64) await maintenanceDB.putPhoto({ id: p.id, base64: p.base64, timestamp: p.timestamp, recordId });
+      } catch (e) { console.warn('Failed to persist maintenance photo to IndexedDB:', e); }
+      photoRefs.push({ id: p.id, timestamp: p.timestamp, uploaded: p.uploaded || false });
+    }
+
+    // Clean up blobs for photos removed while editing this record.
+    if (wasEditing) {
+      const keepIds = new Set(photoRefs.map(r => r.id));
+      for (const op of (maintenanceRecords[currentEditingIndex].photos || [])) {
+        if (op.id && !keepIds.has(op.id)) { try { await maintenanceDB.deletePhoto(op.id); } catch (e) {} }
+      }
+    }
+
     const record = {
-      id: currentEditingIndex >= 0 ? maintenanceRecords[currentEditingIndex].id : Date.now(),
+      id: recordId,
       startTime,
       endTime,
       comment: comment.trim(),
-      photos: [...maintenancePhotos], // Store multiple photos
-      timestamp: currentEditingIndex >= 0 ? maintenanceRecords[currentEditingIndex].timestamp : new Date().toISOString()
+      photos: photoRefs, // references only — base64 lives in IndexedDB
+      timestamp: wasEditing ? maintenanceRecords[currentEditingIndex].timestamp : new Date().toISOString()
     };
 
-    if (currentEditingIndex >= 0) {
+    if (wasEditing) {
       maintenanceRecords[currentEditingIndex] = record;
       // Log maintenance record edit
       logTabletAction('Maintenance record edited', 'Completed', {
@@ -1915,23 +2045,25 @@ function setupMaintenanceModalEvents(modal, existingRecord) {
     saveMaintenanceRecords();
     renderMaintenanceRecords();
     calculateTotalMachineTroubleTime();
-    
-    // Clear the working photos array
+
+    // Consume the unsaved-photo draft (add flow) and clear the working array
+    if (!wasEditing) { try { await maintenanceDB.clearDraft(); } catch (e) {} }
     maintenancePhotos = [];
-    
+
     document.body.removeChild(modal);
   });
 
   // Cancel functionality
-  cancelBtn.addEventListener('click', () => {
-    // Clear the working photos array
+  cancelBtn.addEventListener('click', async () => {
+    // Discard the unsaved-photo draft (add flow) and clear the working array
+    if (currentEditingIndex < 0) { try { await maintenanceDB.clearDraft(); } catch (e) {} }
     maintenancePhotos = [];
     document.body.removeChild(modal);
   });
 
   // Delete functionality
   if (deleteBtn) {
-    deleteBtn.addEventListener('click', () => {
+    deleteBtn.addEventListener('click', async () => {
       if (confirm('この機械故障記録を削除しますか？ / Delete this maintenance record?')) {
         const deletedRecord = maintenanceRecords[currentEditingIndex];
         // Log maintenance record delete
@@ -1940,24 +2072,30 @@ function setupMaintenanceModalEvents(modal, existingRecord) {
           endTime: deletedRecord.endTime,
           comment: deletedRecord.comment
         });
-        
+
+        // Remove this record's photo blobs from IndexedDB
+        for (const p of (deletedRecord.photos || [])) {
+          if (p.id) { try { await maintenanceDB.deletePhoto(p.id); } catch (e) {} }
+        }
+
         maintenanceRecords.splice(currentEditingIndex, 1);
         saveMaintenanceRecords();
         renderMaintenanceRecords();
         calculateTotalMachineTroubleTime();
-        
+
         // Clear the working photos array
         maintenancePhotos = [];
-        
+
         document.body.removeChild(modal);
       }
     });
   }
 
   // Close on background click
-  modal.addEventListener('click', (e) => {
+  modal.addEventListener('click', async (e) => {
     if (e.target === modal) {
-      // Clear the working photos array
+      // Discard the unsaved-photo draft (add flow) and clear the working array
+      if (currentEditingIndex < 0) { try { await maintenanceDB.clearDraft(); } catch (err) {} }
       maintenancePhotos = [];
       document.body.removeChild(modal);
     }
@@ -5950,14 +6088,17 @@ document.getElementById('submit').addEventListener('click', async (event) => {
             for (const record of maintenanceRecords) {
                 if (record.photos && record.photos.length > 0) {
                     for (const photo of record.photos) {
-                        if (photo.base64 && photo.id && photo.timestamp) {
+                        // Hydrate base64 from IndexedDB (new reference-only records) or use
+                        // the embedded base64 (legacy records).
+                        const photoBase64 = await getMaintenancePhotoBase64(photo);
+                        if (photoBase64 && photo.id && photo.timestamp) {
                             // Ensure base64 data has proper data URL prefix
-                            const photoDataURL = photo.base64.startsWith('data:') 
-                                ? photo.base64 
-                                : `data:image/jpeg;base64,${photo.base64}`;
-                            
+                            const photoDataURL = photoBase64.startsWith('data:')
+                                ? photoBase64
+                                : `data:image/jpeg;base64,${photoBase64}`;
+
                             // Compress maintenance photo for upload (80% quality, max 1024px)
-                            const originalSize = (photo.base64.length / 1024).toFixed(2);
+                            const originalSize = (photoBase64.length / 1024).toFixed(2);
                             const compressedDataURL = await compressBase64Image(photoDataURL, 1024, 0.8);
                             const compressedSize = (compressedDataURL.length / 1024).toFixed(2);
                             console.log(`Maintenance photo ${photo.id}: ${originalSize} KB → ${compressedSize} KB`);
