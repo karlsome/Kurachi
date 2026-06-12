@@ -1418,7 +1418,7 @@
                     <div class="glass-card">
                         <h3>撮影画像 / Captured Photos</h3>
                         <p class="gallery-sub">初物・終物・材料ラベルの写真はここに集約されます。サムネイルをタップで拡大 / All captures collect here. Tap a thumbnail to preview.</p>
-                        <div id="imageGallery" class="image-gallery"></div>
+                        <div id="imageGallery" class="gallery-sections"></div>
                         <div id="imageGalleryEmpty" class="gallery-empty">
                             <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.6"/><polyline points="4 17 9 12 13 16 16.5 12.5 20 16"/></svg>
                             <p>まだ写真がありません / No photos captured yet</p>
@@ -2141,6 +2141,15 @@
 
         /* Image gallery */
         .gallery-sub { color: var(--text-muted); font-size: 0.85rem; line-height: 1.5; margin-bottom: 16px; }
+        .gallery-sections { display: flex; flex-direction: column; gap: 18px; }
+        .gallery-section-head {
+            font-weight: 800; font-size: 0.85rem; color: var(--text-main);
+            margin-bottom: 8px; display: flex; align-items: center; gap: 8px;
+        }
+        .gallery-section-head .gallery-count {
+            font-size: 0.72rem; font-weight: 700; color: var(--blue);
+            background: rgba(46,111,242,0.10); border-radius: 999px; padding: 2px 9px;
+        }
         .image-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; }
         .gallery-thumb {
             position: relative; aspect-ratio: 1; border-radius: var(--btn-radius);
@@ -2365,13 +2374,33 @@
         const g = document.getElementById('imageGallery');
         const empty = document.getElementById('imageGalleryEmpty');
         if (!g) return;
-        let html = '';
         const hPic = document.getElementById('hatsumonoPic');
         const aPic = document.getElementById('atomonoPic');
-        html += statusCardHTML('初物チェック', hPic ? hPic.getAttribute('src') : '', isTrue('hatsumonoLabel'));
-        html += statusCardHTML('終物チェック', aPic ? aPic.getAttribute('src') : '', isTrue('atomonoLabel'));
+        const hCard = statusCardHTML('初物チェック', hPic ? hPic.getAttribute('src') : '', isTrue('hatsumonoLabel'));
+        const aCard = statusCardHTML('終物チェック', aPic ? aPic.getAttribute('src') : '', isTrue('atomonoLabel'));
+
+        // Material label photos (up to 25) get their own row; placeholder when none yet.
         const matImgs = document.querySelectorAll('#material-photo-thumbnails img');
-        matImgs.forEach((img, i) => { html += statusCardHTML('材料ラベル ' + (i + 1), img.src, true); });
+        let matCards = '';
+        if (matImgs.length === 0) {
+          matCards = statusCardHTML('材料ラベル', '', false);
+        } else {
+          matImgs.forEach((img, i) => { matCards += statusCardHTML('材料ラベル ' + (i + 1), img.src, true); });
+        }
+
+        // Each capture type on its own row/section.
+        const section = (title, cards, count) =>
+          '<div class="gallery-section">' +
+            '<div class="gallery-section-head">' + title +
+              (count != null ? '<span class="gallery-count">' + count + '枚</span>' : '') +
+            '</div>' +
+            '<div class="image-gallery">' + cards + '</div>' +
+          '</div>';
+
+        let html = '';
+        html += section('初物チェック / First Cycle', hCard, null);
+        html += section('終物チェック / Last Cycle', aCard, null);
+        html += section('材料ラベル / Material Label', matCards, matImgs.length);
         g.innerHTML = html;
         if (empty) empty.style.display = 'none';
         g.querySelectorAll('.gallery-thumb[data-src]').forEach(el => {
