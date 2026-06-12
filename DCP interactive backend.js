@@ -3687,35 +3687,21 @@ function renderMaterialLotTags() {
     lotText.textContent = lot.lotNumber;
     tag.appendChild(lotText);
 
-    // Add delete button (only for manual lots)
-    if (lot.source === 'manual') {
-      const deleteBtn = document.createElement('span');
-      deleteBtn.textContent = '×';
-      deleteBtn.style.cssText = `
-        cursor: pointer;
-        font-size: 18px;
-        font-weight: bold;
-        margin-left: 4px;
-      `;
-      deleteBtn.onclick = () => {
-        materialLots.splice(index, 1);
-        saveMaterialLots();
-        renderMaterialLotTags();
-      };
-      tag.appendChild(deleteBtn);
-    } else {
-      // Show × but disabled for scanned lots
-      const disabledX = document.createElement('span');
-      disabledX.textContent = '×';
-      disabledX.style.cssText = `
-        font-size: 18px;
-        font-weight: bold;
-        margin-left: 4px;
-        opacity: 0.3;
-        cursor: not-allowed;
-      `;
-      tag.appendChild(disabledX);
-    }
+    // Delete button — works for both scanned and manual lots
+    const deleteBtn = document.createElement('span');
+    deleteBtn.textContent = '×';
+    deleteBtn.style.cssText = `
+      cursor: pointer;
+      font-size: 18px;
+      font-weight: bold;
+      margin-left: 4px;
+    `;
+    deleteBtn.onclick = () => {
+      materialLots.splice(index, 1);
+      saveMaterialLots();
+      renderMaterialLotTags();
+    };
+    tag.appendChild(deleteBtn);
 
     tagsContainer.appendChild(tag);
   });
@@ -3780,10 +3766,18 @@ if (materialLotInput) {
       return;
     }
     
-    // Block keypad and open QR scanner
+    // Block keypad and open the material QR scanner (same flow as the
+    // "Scan Material" button). The legacy #scan-lot button no longer exists
+    // in the redesigned HTML, so route through triggerMaterialScan().
     e.preventDefault();
     materialLotInput.blur();
-    document.getElementById('scan-lot').click();
+    if (typeof window.triggerMaterialScan === 'function') {
+      window.triggerMaterialScan();
+    } else if (typeof showStep2Modal === 'function') {
+      window.__materialScanMode = 'production';
+      showStep2Modal();
+      setTimeout(() => document.getElementById('startStep2Scan')?.click(), 250);
+    }
   });
   
   // Store reference to allow keypad function

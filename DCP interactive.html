@@ -201,6 +201,7 @@
 
         .tab-btn {
             flex: 1;
+            min-width: 0;
             background: transparent;
             border: none;
             color: var(--text-soft);
@@ -396,6 +397,7 @@
         select,
         textarea {
             width: 100%;
+            min-width: 0;
             min-height: 44px;
             background: var(--bg-surface);
             border: 1px solid var(--border-strong);
@@ -1054,6 +1056,32 @@
             .form-grid { gap: 16px; }
             .tab-panel { padding: 20px 28px; }
         }
+
+        /* ---------------- Small screens (phones) ---------------- */
+        @media (max-width: 600px) {
+            /* Single-column forms so native date/time inputs never overflow */
+            .form-grid { grid-template-columns: 1fr; }
+            .form-group.full-width { grid-column: span 1; }
+            .tab-panel { padding: 16px 14px; }
+            .glass-card { padding: 16px; }
+
+            /* Header fits without wrapping */
+            header { padding: 0 12px; }
+            .header-title-section { gap: 8px; }
+            .header-title-section h1 { font-size: 1rem; white-space: nowrap; }
+            .header-title-section .status-tag { font-size: 0.65rem; padding: 4px 7px; }
+            .header-action-section { gap: 8px; }
+            .language-selector select { min-height: 36px; padding: 6px 8px; font-size: 0.8rem; }
+
+            /* Tab bar: 6 tabs fit on a narrow screen */
+            .tab-btn { font-size: 0.6rem; gap: 3px; padding: 0 2px; letter-spacing: -0.02em; }
+            .tab-btn .tab-icon { height: 20px; }
+            .tab-btn .tab-icon svg { width: 19px; height: 19px; }
+        }
+
+        @media (max-width: 380px) {
+            .tab-btn { font-size: 0.55rem; }
+        }
     </style>
 </head>
 <body>
@@ -1563,37 +1591,37 @@
 
             <div>
                 <label>モデル / Model</label>
-                <p id="model">---</p>
+                <input readonly id="model" value="" style="background: transparent; border: none; padding: 0; font-weight: 600;">
             </div>
 
             <div>
                 <label>形状 / Shape</label>
-                <p id="shape">---</p>
+                <input readonly id="shape" value="" style="background: transparent; border: none; padding: 0; font-weight: 600;">
             </div>
 
             <div>
                 <label>R/L</label>
-                <p id="R-L">---</p>
+                <input readonly id="R-L" value="" style="background: transparent; border: none; padding: 0; font-weight: 600;">
             </div>
 
             <div>
                 <label>材料 / Material</label>
-                <p id="material">---</p>
+                <input readonly id="material" value="" style="background: transparent; border: none; padding: 0; font-weight: 600;">
             </div>
 
             <div>
                 <label>材料コード / Material Code</label>
-                <p id="material-code">---</p>
+                <input readonly id="material-code" value="" style="background: transparent; border: none; padding: 0; font-weight: 600;">
             </div>
 
             <div>
                 <label>材料色 / Material Color</label>
-                <p id="material-color">---</p>
+                <input readonly id="material-color" value="" style="background: transparent; border: none; padding: 0; font-weight: 600;">
             </div>
 
             <div>
                 <label>型番 / Kataban</label>
-                <p id="kataban">---</p>
+                <input readonly id="kataban" value="" style="background: transparent; border: none; padding: 0; font-weight: 600;">
             </div>
 
             <div style="border-top: 1px solid var(--border-color); padding-top: 15px;">
@@ -2222,6 +2250,14 @@
             background: rgba(16,24,40,0.62); color: #fff; font-size: 0.7rem; font-weight: 700;
             padding: 4px 6px; text-align: center;
         }
+        .gallery-thumb .thumb-edit-btn {
+            position: absolute; top: 6px; left: 6px; z-index: 3;
+            background: rgba(16,24,40,0.66); color: #fff; border: none;
+            border-radius: 7px; padding: 5px 9px; font-size: 0.7rem; font-weight: 800;
+            cursor: pointer; font-family: inherit;
+        }
+        .gallery-thumb .thumb-edit-btn:active { transform: scale(0.95); }
+        .gallery-thumb.empty:active { transform: scale(0.98); }
         .gallery-empty {
             text-align: center; color: var(--text-soft); padding: 32px 16px;
         }
@@ -2412,17 +2448,26 @@
       })();
 
       // ---------- Image gallery (Images tab) ----------
-      function statusCardHTML(tag, src, has) {
+      // `capture` = which capture to trigger ('hatsumono'|'atomono'|'material').
+      // Empty cards are tappable to capture; captured cards get an Edit button.
+      function statusCardHTML(tag, src, has, capture) {
+        const capAttr = capture ? ' data-capture="' + capture + '"' : '';
         if (has && src) {
           return '<div class="gallery-thumb" data-src="' + src + '">' +
                  '<span style="position:absolute;top:6px;right:6px;width:12px;height:12px;border-radius:50%;background:var(--brand);border:2px solid #fff;z-index:2;"></span>' +
+                 (capture ? '<button type="button" class="thumb-edit-btn"' + capAttr + '>✎ 編集</button>' : '') +
                  '<img src="' + src + '" alt="' + tag + '">' +
                  '<span class="thumb-tag">' + tag + '</span></div>';
         }
-        return '<div class="gallery-thumb empty" style="display:flex;flex-direction:column;align-items:center;justify-content:center;border:1px dashed var(--red);background:var(--red-soft);">' +
+        return '<div class="gallery-thumb empty"' + capAttr + ' style="display:flex;flex-direction:column;align-items:center;justify-content:center;border:1px dashed var(--red);background:var(--red-soft);cursor:pointer;">' +
                '<span style="position:absolute;top:6px;right:6px;width:12px;height:12px;border-radius:50%;background:var(--red);border:2px solid #fff;"></span>' +
                '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" style="stroke:var(--red);" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>' +
-               '<span class="thumb-tag" style="position:static;background:none;color:var(--red);margin-top:6px;">' + tag + ' 未撮影</span></div>';
+               '<span class="thumb-tag" style="position:static;background:none;color:var(--red);margin-top:6px;text-align:center;">' + tag + ' 未撮影<br><small style="font-weight:700;">タップして撮影 / Tap to capture</small></span></div>';
+      }
+      function triggerCapture(which) {
+        if (which === 'hatsumono') document.getElementById('hatsumonoButton')?.click();
+        else if (which === 'atomono') document.getElementById('atomonoButton')?.click();
+        else if (which === 'material') document.getElementById('makerLabelButton')?.click();
       }
       function isTrue(elId) {
         const el = document.getElementById(elId);
@@ -2434,16 +2479,16 @@
         if (!g) return;
         const hPic = document.getElementById('hatsumonoPic');
         const aPic = document.getElementById('atomonoPic');
-        const hCard = statusCardHTML('初物チェック', hPic ? hPic.getAttribute('src') : '', isTrue('hatsumonoLabel'));
-        const aCard = statusCardHTML('終物チェック', aPic ? aPic.getAttribute('src') : '', isTrue('atomonoLabel'));
+        const hCard = statusCardHTML('初物チェック', hPic ? hPic.getAttribute('src') : '', isTrue('hatsumonoLabel'), 'hatsumono');
+        const aCard = statusCardHTML('終物チェック', aPic ? aPic.getAttribute('src') : '', isTrue('atomonoLabel'), 'atomono');
 
         // Material label photos (up to 25) get their own row; placeholder when none yet.
         const matImgs = document.querySelectorAll('#material-photo-thumbnails img');
         let matCards = '';
         if (matImgs.length === 0) {
-          matCards = statusCardHTML('材料ラベル', '', false);
+          matCards = statusCardHTML('材料ラベル', '', false, 'material');
         } else {
-          matImgs.forEach((img, i) => { matCards += statusCardHTML('材料ラベル ' + (i + 1), img.src, true); });
+          matImgs.forEach((img, i) => { matCards += statusCardHTML('材料ラベル ' + (i + 1), img.src, true, 'material'); });
         }
 
         // Each capture type on its own row/section.
@@ -2463,6 +2508,13 @@
         if (empty) empty.style.display = 'none';
         g.querySelectorAll('.gallery-thumb[data-src]').forEach(el => {
           el.addEventListener('click', () => openPreview(el.getAttribute('data-src')));
+        });
+        // Capture / edit: empty cards capture, the ✎ edit button retakes.
+        g.querySelectorAll('[data-capture]').forEach(el => {
+          el.addEventListener('click', (e) => {
+            e.stopPropagation(); // don't also open the preview
+            triggerCapture(el.getAttribute('data-capture'));
+          });
         });
       }
       window.renderImageGallery = renderImageGallery;
@@ -2698,16 +2750,23 @@
           else showToast('印刷機能が利用できません / Print unavailable');
         });
 
-        // Scan material (production, no send)
-        const sm = document.getElementById('prodScanMaterialButton');
-        if (sm) sm.addEventListener('click', () => {
+        // Scan material directly (production mode, no product re-scan, no send).
+        // Opens the material QR scanner immediately; after a valid scan the
+        // material-label photo gate fires, then the lot is added.
+        window.triggerMaterialScan = function () {
           if (typeof currentProductDetails === 'undefined' || !currentProductDetails || !currentProductDetails.materialCode) {
             showToast('先に製品をスキャンしてください / Scan the product first');
             return;
           }
           window.__materialScanMode = 'production';
-          if (typeof showStep2Modal === 'function') showStep2Modal();
-        });
+          if (typeof showStep2Modal === 'function') {
+            showStep2Modal();
+            // Auto-start the camera so one tap opens the scanner
+            setTimeout(() => { document.getElementById('startStep2Scan')?.click(); }, 250);
+          }
+        };
+        const sm = document.getElementById('prodScanMaterialButton');
+        if (sm) sm.addEventListener('click', () => window.triggerMaterialScan());
 
         // Kensa
         const cb = document.getElementById('enable-inputs');
