@@ -665,6 +665,31 @@
             gap: 16px;
         }
 
+        /* When the material scanner is launched from the Production tab, the
+           Step-2 card floats as a centered overlay instead of an inline scan-tab
+           card (otherwise the camera starts but the UI is on a hidden tab). */
+        #step2Modal.as-overlay {
+            position: fixed !important;
+            inset: 0 !important;
+            background: rgba(16, 24, 40, 0.55) !important;
+            z-index: 100000 !important;
+            padding: 16px !important;
+            overflow-y: auto !important;
+        }
+        #step2Modal.as-overlay > div {
+            position: relative !important;
+            margin: auto !important;
+            max-height: 92vh;
+            overflow-y: auto;
+        }
+        .step-overlay-close {
+            position: absolute; top: 10px; right: 12px;
+            width: 34px; height: 34px; border-radius: 50%;
+            border: none; background: var(--bg-inset); color: var(--text-main);
+            font-size: 1.2rem; font-weight: 700; cursor: pointer; z-index: 5;
+            line-height: 1; display: flex; align-items: center; justify-content: center;
+        }
+
         .step-modal-info-box {
             background: var(--bg-subtle);
             border: 1px solid var(--border);
@@ -1844,61 +1869,9 @@
             }, 500);
         });
 
-        // Swipe Gestures Logic
-        let touchStartX = 0;
-        let touchStartY = 0;
-        
-        document.addEventListener('touchstart', (e) => {
-            // Do not capture events on sliders, scanners, and scrolling input fields
-            if (e.target.closest('input') || 
-                e.target.closest('textarea') || 
-                e.target.closest('select') || 
-                e.target.closest('#qrReader') || 
-                e.target.closest('#lotQrReader') || 
-                e.target.closest('#leaderQrReader') || 
-                e.target.closest('.counter-controls') || 
-                e.target.closest('.info-sidebar') || 
-                e.target.closest('#maintenance-records-container')) {
-                return;
-            }
-            touchStartX = e.changedTouches[0].screenX;
-            touchStartY = e.changedTouches[0].screenY;
-        }, { passive: true });
+        // Swipe-to-change-tab was removed: users accidentally changed tabs while
+        // scrolling. Tab navigation is via the tab bar buttons only.
 
-        document.addEventListener('touchend', (e) => {
-            if (e.target.closest('input') || 
-                e.target.closest('textarea') || 
-                e.target.closest('select') || 
-                e.target.closest('#qrReader') || 
-                e.target.closest('#lotQrReader') || 
-                e.target.closest('#leaderQrReader') || 
-                e.target.closest('.counter-controls') || 
-                e.target.closest('.info-sidebar') || 
-                e.target.closest('#maintenance-records-container')) {
-                return;
-            }
-            
-            const touchEndX = e.changedTouches[0].screenX;
-            const touchEndY = e.changedTouches[0].screenY;
-            
-            const diffX = touchEndX - touchStartX;
-            const diffY = touchEndY - touchStartY;
-            
-            // Swipe horizontal checks
-            if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 80) {
-                if (diffX > 0) {
-                    // Swipe right -> previous tab
-                    if (currentTabIndex > 0) {
-                        goToTab(currentTabIndex - 1);
-                    }
-                } else {
-                    // Swipe left -> next tab
-                    if (currentTabIndex < tabs.length - 1) {
-                        goToTab(currentTabIndex + 1);
-                    }
-                }
-            }
-        }, { passive: true });
 
         // MutationObserver to bridge step display overlays with Scan tab cards
         function syncScanTabState() {
@@ -1908,9 +1881,13 @@
             const completedCard = document.getElementById('scanCompletedCard');
             const subDropdown = document.getElementById('sub-dropdown');
             
-            const isStep1Visible = step1 && step1.style.display !== 'none';
-            const isStep2Visible = step2 && step2.style.display !== 'none';
-            const isStep3Visible = step3 && step3.style.display !== 'none';
+            // Use computed style: on a fresh reload the inline style.display is ''
+            // (display:none comes from the stylesheet), so checking style.display
+            // alone would wrongly treat a step as visible and hide the completed card.
+            const vis = el => el && getComputedStyle(el).display !== 'none';
+            const isStep1Visible = vis(step1);
+            const isStep2Visible = vis(step2);
+            const isStep3Visible = vis(step3);
             
             if (!isStep1Visible && !isStep2Visible && !isStep3Visible) {
                 if (subDropdown && subDropdown.value && subDropdown.value !== "") {
@@ -1939,7 +1916,12 @@
             if (s1) stepObserver.observe(s1, config);
             if (s2) stepObserver.observe(s2, config);
             if (s3) stepObserver.observe(s3, config);
-            
+
+            // On a completed workflow no step modal toggles, so the observer never
+            // fires — render the completed-scan card explicitly after restore settles.
+            window.syncScanTabState = syncScanTabState;
+            [2600, 3500, 5000].forEach(t => setTimeout(syncScanTabState, t));
+
             // Double check setup machine header tag
             setTimeout(() => {
                 const processInput = document.getElementById('process');
@@ -2692,10 +2674,61 @@
           return origStep3.apply(this, arguments);
         };
       }
+      // Production material scan: float Step 2 as a centered overlay (with a close
+      // button) so the scanner is visible over the Production tab. In the normal
+      // scan-tab flow it stays an inline card.
+      if (typeof window.showStep2Modal === 'function') {
+        const origStep2 = window.showStep2Modal;
+        window.showStep2Modal = function () {
+          const r = origStep2.apply(this, arguments);
+          const el = document.getElementById('step2Modal');
+          if (el) {
+            const overlay = window.__materialScanMode === 'production';
+            el.classList.toggle('as-overlay', overlay);
+            // position:fixed is relative to the transformed .tab-panels-container,
+            // not the viewport — move the modal to <body> so the overlay isn't
+            // offset/clipped. Restored to its scan-tab slot on close.
+            if (overlay && el.parentElement !== document.body) {
+              el.__origParent = el.parentElement;
+              el.__origNext = el.nextElementSibling;
+              document.body.appendChild(el);
+            }
+            const card = el.querySelector(':scope > div');
+            const existing = card && card.querySelector('.step-overlay-close');
+            if (overlay && card && !existing) {
+              const x = document.createElement('button');
+              x.type = 'button'; x.className = 'step-overlay-close'; x.innerHTML = '✕';
+              x.setAttribute('aria-label', 'close');
+              x.onclick = () => { if (typeof closeAllStepModals === 'function') closeAllStepModals(); };
+              card.appendChild(x);
+            } else if (!overlay && existing) {
+              existing.remove();
+            }
+          }
+          return r;
+        };
+      }
+
       // Clear stale production-scan mode if the flow is abandoned or a fresh scan starts
       if (typeof window.closeAllStepModals === 'function') {
         const origClose = window.closeAllStepModals;
-        window.closeAllStepModals = function () { window.__materialScanMode = null; return origClose.apply(this, arguments); };
+        window.closeAllStepModals = function () {
+          window.__materialScanMode = null;
+          const el = document.getElementById('step2Modal');
+          if (el) {
+            el.classList.remove('as-overlay');
+            // Restore the modal to its original scan-tab position
+            if (el.__origParent) {
+              if (el.__origNext && el.__origNext.parentElement === el.__origParent) {
+                el.__origParent.insertBefore(el, el.__origNext);
+              } else {
+                el.__origParent.appendChild(el);
+              }
+              el.__origParent = null; el.__origNext = null;
+            }
+          }
+          return origClose.apply(this, arguments);
+        };
       }
       if (typeof window.showStep1Modal === 'function') {
         const origStep1 = window.showStep1Modal;

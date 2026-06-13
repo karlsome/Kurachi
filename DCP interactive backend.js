@@ -10532,6 +10532,33 @@ window.addEventListener('load', function() {
   setTimeout(() => {
     const subDropdown = document.getElementById('sub-dropdown');
     const savedStep = getCurrentStepFromStorage();
+
+    // The sub-dropdown value is restored once (500ms) only if its <option> list
+    // has loaded by then. If the server option list arrives later, that restore
+    // misses and the value stays empty — which used to wipe a completed scan on
+    // refresh. Re-attempt here from the saved/cached value, injecting the option
+    // if the list still isn't populated, so the workflow state survives a reload.
+    const savedSub = localStorage.getItem(`${uniquePrefix}sub-dropdown`)
+                  || localStorage.getItem(`${uniquePrefix}cached-sebanggo`);
+    if (subDropdown && savedSub && (!subDropdown.value || subDropdown.selectedIndex === 0)) {
+      if (![...subDropdown.options].some(o => o.value === savedSub)) {
+        // Keep a placeholder at index 0 so the injected value never lands at
+        // selectedIndex 0 (which the workflow guard treats as "nothing scanned").
+        if (subDropdown.options.length === 0) {
+          const ph = document.createElement('option');
+          ph.value = '';
+          ph.textContent = '---';
+          subDropdown.appendChild(ph);
+        }
+        const opt = document.createElement('option');
+        opt.value = savedSub;
+        opt.textContent = savedSub;
+        subDropdown.appendChild(opt);
+      }
+      subDropdown.value = savedSub;
+      console.log('Re-restored sub-dropdown from cache on load:', savedSub);
+      if (typeof fetchProductDetails === 'function') fetchProductDetails();
+    }
     
     console.log('=== 3-Step Modal Auto-Load Debug ===');
     console.log('Dropdown value:', subDropdown?.value);
