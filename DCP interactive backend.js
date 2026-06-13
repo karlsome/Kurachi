@@ -10329,10 +10329,26 @@ document.getElementById('overrideStep2').addEventListener('click', function(even
   };
 });
 
+// Auto-fill the production 加工開始時間 (Start Time) with the current time when the
+// scan workflow finishes (Step 3 / send to machine). Only fills if still empty so a
+// manually-entered start time is never overwritten.
+function autoFillProductionStartTime() {
+  const el = document.getElementById('Start Time');
+  if (!el || el.value) return;
+  const now = new Date();
+  el.value = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+  if (typeof updateProcessingTimeLockStatus === 'function') {
+    try { updateProcessingTimeLockStatus('start'); } catch (e) {}
+  }
+  console.log('Auto-filled production Start Time:', el.value);
+}
+
 // Step 3: Send to Machine Button
 document.getElementById('startStep3Send').addEventListener('click', async function(event) {
   event.preventDefault(); // Prevent form submission
-  
+
   try {
     // Get the current 背番号
     const currentSebanggo = document.getElementById('sub-dropdown').value;
@@ -10460,6 +10476,7 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
 
           // Mark workflow as complete
           saveCurrentStep(0);
+          autoFillProductionStartTime();
 
           // Close Step 3 modal (OZMANAS does not send command to machine at this step)
           document.getElementById('step3Modal').style.display = 'none';
@@ -10498,7 +10515,8 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
     
     // Mark workflow as complete
     saveCurrentStep(0);
-    
+    autoFillProductionStartTime();
+
     // Call the sendtoNC function (sends in background with progress bar)
     await sendtoNC(currentSebanggo);
     
