@@ -1370,13 +1370,19 @@
                         <p class="tap-hint">カードをタップで +1 ・ 左上の − で訂正 / Tap card to add, minus to correct</p>
                     </div>
 
-                    <!-- 2. Material — scan + lots (frequent during the run) -->
+                    <!-- 2. Material & print — frequent actions during the run -->
                     <div class="glass-card">
-                        <h3>材料 / Material</h3>
-                        <button type="button" id="prodScanMaterialButton" class="prod-action-btn" style="width:100%; margin-bottom:14px;">
-                            <svg viewBox="0 0 24 24"><path d="M4 7V5a1 1 0 0 1 1-1h2M4 17v2a1 1 0 0 0 1 1h2M20 7V5a1 1 0 0 0-1-1h-2M20 17v2a1 1 0 0 1-1 1h-2"/><line x1="4" y1="12" x2="20" y2="12"/></svg>
-                            <span>材料スキャン<small>Scan Material + Photo</small></span>
-                        </button>
+                        <h3>材料・印刷 / Material &amp; Print</h3>
+                        <div class="prod-action-grid" style="margin-bottom:14px;">
+                            <button type="button" id="prodScanMaterialButton" class="prod-action-btn">
+                                <svg viewBox="0 0 24 24"><path d="M4 7V5a1 1 0 0 1 1-1h2M4 17v2a1 1 0 0 0 1 1h2M20 7V5a1 1 0 0 0-1-1h-2M20 17v2a1 1 0 0 1-1 1h-2"/><line x1="4" y1="12" x2="20" y2="12"/></svg>
+                                <span>材料スキャン<small>Scan Material + Photo</small></span>
+                            </button>
+                            <button type="button" id="prodPrintLabelButton" class="prod-action-btn">
+                                <svg viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+                                <span>ラベル印刷<small>Print Label</small></span>
+                            </button>
+                        </div>
                         <div class="form-group full-width">
                             <label for="材料ロット" data-i18n="material_lot">材料ロット:</label>
                             <input type="text" name="材料ロット" id="材料ロット" class="tap-field" placeholder="Material Lot" data-i18n="material_lot_placeholder" required readonly>
@@ -1447,10 +1453,6 @@
                                     <input type="time" name="Start Time" id="Start Time" placeholder="Time Start" data-i18n="time_start_placeholder" onfocus="setDefaultTime(this)" required>
                                 </div>
                             </div>
-                            <button type="button" id="prodPrintLabelButton" class="prod-action-btn" style="width:100%; margin-top:14px;">
-                                <svg viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
-                                <span>ラベル印刷<small>Print Label</small></span>
-                            </button>
                         </div>
                     </div>
 
