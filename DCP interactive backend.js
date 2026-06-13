@@ -10604,27 +10604,28 @@ window.addEventListener('load', function() {
       return;
     }
     
-    // If workflow was incomplete (step 1, 2, or 3), restart from Step 1
-    if (savedStep === 1 || savedStep === 2 || savedStep === 3) {
-      // Restore product details from DOM
-      currentProductDetails = {
-        sebanggo: subDropdown.value,
-        hinban: document.getElementById('product-number')?.value || '',
-        materialCode: document.getElementById('material-code')?.value || '',
-        model: document.getElementById('model')?.value || localStorage.getItem(`${uniquePrefix}cached-model`) || ''
-      };
-      
-      console.log('Incomplete workflow detected (step ' + savedStep + ') - Restarting from Step 1');
-      console.log('Product details:', currentProductDetails);
-      
-      // Always restart from Step 1 for incomplete workflows
-      showStep1Modal();
-    } else if (savedStep === 0) {
-      // Workflow was completed (or never started) - don't show modal
-      console.log('Workflow complete (step 0) - No modal shown');
-    } else {
-      console.log('Unknown savedStep:', savedStep);
+    // A 背番号 is present (something was scanned). Restore the product details
+    // and show the "Scan Completed" card. Do NOT restart the workflow on
+    // refresh — users expect their scan to persist (the new production-tab
+    // material scan never advances Step 3, so the step would read "incomplete"
+    // and wrongly bounce them back to Step 1).
+    currentProductDetails = {
+      sebanggo: subDropdown.value,
+      hinban: document.getElementById('product-number')?.value || '',
+      materialCode: document.getElementById('material-code')?.value || '',
+      model: document.getElementById('model')?.value || localStorage.getItem(`${uniquePrefix}cached-model`) || '',
+      kataban: document.getElementById('kataban')?.value || ''
+    };
+    if (savedStep !== 0) {
+      console.log('Restoring completed scan state for', subDropdown.value, '(was step ' + savedStep + ')');
+      saveCurrentStep(0);
     }
+    // Make sure no step card is showing, then render the completed card
+    ['step1Modal', 'step2Modal', 'step3Modal'].forEach(id => {
+      const m = document.getElementById(id);
+      if (m) m.style.display = 'none';
+    });
+    if (typeof window.syncScanTabState === 'function') window.syncScanTabState();
 
     currentProductDetails.model = currentProductDetails.model || document.getElementById('model')?.value || localStorage.getItem(`${uniquePrefix}cached-model`) || '';
     syncVideoManualLauncherState();
