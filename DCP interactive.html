@@ -1344,81 +1344,7 @@
 
                 <!-- TAB 3: PRODUCTION -->
                 <div class="tab-panel" id="panel-2">
-                    <div class="glass-card">
-                        <h3>生産情報 / Production Information</h3>
-                        <div class="form-grid">
-                            <div class="form-group">
-                                <label for="Machine Operator" data-i18n="worker_name">作業者:</label>
-                                <input list="machine-operator-suggestions" class="tap-field" placeholder="タップして選択 / Tap to select" id="Machine Operator" name="Machine Operator" data-i18n="worker_name_placeholder" required readonly>
-                                <datalist id="machine-operator-suggestions"></datalist>
-                            </div>
-                            
-                            <div class="form-group">
-                                <label for="Lot No." data-i18n="processing_date">加工日:</label>
-                                <input type="date" name="Lot No." id="Lot No." placeholder="Date" onfocus="setDefaultDate(this)" required>
-                                <input type="hidden" name="Labelextension" id="Labelextension">
-                            </div>
-
-                            <div class="form-group">
-                                <label for="Start Time" data-i18n="start_time">加工開始時間:</label>
-                                <input type="time" name="Start Time" id="Start Time" placeholder="Time Start" data-i18n="time_start_placeholder" onfocus="setDefaultTime(this)" required>
-                            </div>
-
-                            <div class="form-group">
-                                <label for="End Time" data-i18n="end_time">加工終了時間:</label>
-                                <input type="time" name="End Time" id="End Time" placeholder="Time End" data-i18n="time_end_placeholder" onfocus="setDefaultTime(this)" required>
-                            </div>
-
-                            <div class="form-group">
-                                <label for="Process Quantity" data-i18n="process_quantity">加工数（良品）+ NG:</label>
-                                <input type="text" name="Process Quantity" id="ProcessQuantity" class="tap-field" placeholder="Process Quantity" data-i18n="process_quantity_placeholder" required readonly>
-                            </div>
-
-                            <div class="form-group" style="justify-content: flex-end;">
-                                <button type="button" id="sendtoQty" class="btn btn-secondary btn-full" style="height: 48px;" data-i18n="one_box_completed">
-                                    1 box completed
-                                </button>
-                            </div>
-
-                            <div class="form-group full-width" id="shotCountSection">
-                                <label for="shot" data-i18n="shot_count">ショット数</label>
-                                <input type="number" name="shot" id="shot" class="tap-field" placeholder="ショット数" data-i18n="shot_count_placeholder" readonly>
-                            </div>
-
-                            <div class="form-group full-width">
-                                <label for="材料ロット" data-i18n="material_lot">材料ロット:</label>
-                                <input type="text" name="材料ロット" id="材料ロット" class="tap-field" placeholder="Material Lot" data-i18n="material_lot_placeholder" required readonly>
-                                <div id="材料ロット-tags" style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px;"></div>
-                                <input type="hidden" id="材料ロット-data" value="">
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Production Actions: checks, material scan, label print -->
-                    <div class="glass-card">
-                        <h3>生産アクション / Production Actions</h3>
-                        <div class="prod-action-grid">
-                            <button type="button" id="prodScanMaterialButton" class="prod-action-btn">
-                                <svg viewBox="0 0 24 24"><path d="M4 7V5a1 1 0 0 1 1-1h2M4 17v2a1 1 0 0 0 1 1h2M20 7V5a1 1 0 0 0-1-1h-2M20 17v2a1 1 0 0 1-1 1h-2"/><line x1="4" y1="12" x2="20" y2="12"/></svg>
-                                <span>材料スキャン<small>Scan Material + Photo</small></span>
-                            </button>
-                            <button type="button" id="prodPrintLabelButton" class="prod-action-btn">
-                                <svg viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
-                                <span>ラベル印刷<small>Print Label</small></span>
-                            </button>
-                        </div>
-                        <div class="prod-check-grid">
-                            <button type="button" id="hatsumonoButton" class="prod-check-btn" data-check="hatsumono">
-                                <span class="check-ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9 12l2 2 4-4"/></svg></span>
-                                <span class="check-txt" data-i18n="first_cycle_check">初物チェック<small>First Cycle</small></span>
-                            </button>
-                            <button type="button" id="atomonoButton" class="prod-check-btn" data-check="atomono">
-                                <span class="check-ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9 12l2 2 4-4"/></svg></span>
-                                <span class="check-txt" data-i18n="last_cycle_check">終物チェック<small>Last Cycle</small></span>
-                            </button>
-                        </div>
-                    </div>
-
+                    <!-- 1. Defect counters — most used during the run -->
                     <div class="glass-card">
                         <h3>加工不良カウンター / Defect Counters</h3>
                         <div class="tap-counter-grid">
@@ -1444,6 +1370,91 @@
                         <p class="tap-hint">カードをタップで +1 ・ 左上の − で訂正 / Tap card to add, minus to correct</p>
                     </div>
 
+                    <!-- 2. Material — scan + lots (frequent during the run) -->
+                    <div class="glass-card">
+                        <h3>材料 / Material</h3>
+                        <button type="button" id="prodScanMaterialButton" class="prod-action-btn" style="width:100%; margin-bottom:14px;">
+                            <svg viewBox="0 0 24 24"><path d="M4 7V5a1 1 0 0 1 1-1h2M4 17v2a1 1 0 0 0 1 1h2M20 7V5a1 1 0 0 0-1-1h-2M20 17v2a1 1 0 0 1-1 1h-2"/><line x1="4" y1="12" x2="20" y2="12"/></svg>
+                            <span>材料スキャン<small>Scan Material + Photo</small></span>
+                        </button>
+                        <div class="form-group full-width">
+                            <label for="材料ロット" data-i18n="material_lot">材料ロット:</label>
+                            <input type="text" name="材料ロット" id="材料ロット" class="tap-field" placeholder="Material Lot" data-i18n="material_lot_placeholder" required readonly>
+                            <div id="材料ロット-tags" style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px;"></div>
+                            <input type="hidden" id="材料ロット-data" value="">
+                        </div>
+                    </div>
+
+                    <!-- 3. Quantities -->
+                    <div class="glass-card">
+                        <h3>生産数量 / Production Quantity</h3>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label for="Process Quantity" data-i18n="process_quantity">加工数（良品）+ NG:</label>
+                                <input type="text" name="Process Quantity" id="ProcessQuantity" class="tap-field" placeholder="Process Quantity" data-i18n="process_quantity_placeholder" required readonly>
+                            </div>
+                            <div class="form-group" style="justify-content: flex-end;">
+                                <button type="button" id="sendtoQty" class="btn btn-secondary btn-full" style="height: 48px;" data-i18n="one_box_completed">
+                                    1 box completed
+                                </button>
+                            </div>
+                            <div class="form-group full-width" id="shotCountSection">
+                                <label for="shot" data-i18n="shot_count">ショット数</label>
+                                <input type="number" name="shot" id="shot" class="tap-field" placeholder="ショット数" data-i18n="shot_count_placeholder" readonly>
+                            </div>
+                            <div class="form-group">
+                                <label for="End Time" data-i18n="end_time">加工終了時間:</label>
+                                <input type="time" name="End Time" id="End Time" placeholder="Time End" data-i18n="time_end_placeholder" onfocus="setDefaultTime(this)" required>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 4. First / last piece checks -->
+                    <div class="glass-card">
+                        <h3>初物・終物チェック / Cycle Checks</h3>
+                        <div class="prod-check-grid">
+                            <button type="button" id="hatsumonoButton" class="prod-check-btn" data-check="hatsumono">
+                                <span class="check-ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9 12l2 2 4-4"/></svg></span>
+                                <span class="check-txt" data-i18n="first_cycle_check">初物チェック<small>First Cycle</small></span>
+                            </button>
+                            <button type="button" id="atomonoButton" class="prod-check-btn" data-check="atomono">
+                                <span class="check-ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9 12l2 2 4-4"/></svg></span>
+                                <span class="check-txt" data-i18n="last_cycle_check">終物チェック<small>Last Cycle</small></span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 5. Setup — set once at the start; collapsible -->
+                    <div class="glass-card collapsible-card collapsed" id="setupCard">
+                        <h3 class="collapsible-head" onclick="toggleSetupCard()">
+                            <span>生産設定 / Setup</span>
+                            <span class="collapse-chevron">▾</span>
+                        </h3>
+                        <div class="collapsible-body">
+                            <div class="form-grid">
+                                <div class="form-group">
+                                    <label for="Machine Operator" data-i18n="worker_name">作業者:</label>
+                                    <input list="machine-operator-suggestions" class="tap-field" placeholder="タップして選択 / Tap to select" id="Machine Operator" name="Machine Operator" data-i18n="worker_name_placeholder" required readonly>
+                                    <datalist id="machine-operator-suggestions"></datalist>
+                                </div>
+                                <div class="form-group">
+                                    <label for="Lot No." data-i18n="processing_date">加工日:</label>
+                                    <input type="date" name="Lot No." id="Lot No." placeholder="Date" onfocus="setDefaultDate(this)" required>
+                                    <input type="hidden" name="Labelextension" id="Labelextension">
+                                </div>
+                                <div class="form-group">
+                                    <label for="Start Time" data-i18n="start_time">加工開始時間:</label>
+                                    <input type="time" name="Start Time" id="Start Time" placeholder="Time Start" data-i18n="time_start_placeholder" onfocus="setDefaultTime(this)" required>
+                                </div>
+                            </div>
+                            <button type="button" id="prodPrintLabelButton" class="prod-action-btn" style="width:100%; margin-top:14px;">
+                                <svg viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+                                <span>ラベル印刷<small>Print Label</small></span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 6. Comments -->
                     <div class="glass-card">
                         <h3>コメント / Comments</h3>
                         <textarea name="Comments1" rows="3" placeholder="Enter Comments"></textarea>
@@ -2177,6 +2188,15 @@
 
         /* Check buttons (初物 / 終物) */
         .prod-check-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+
+        /* Collapsible card (production setup) */
+        .collapsible-card .collapsible-head {
+            display: flex; align-items: center; justify-content: space-between; cursor: pointer;
+        }
+        .collapsible-card .collapse-chevron { color: var(--text-muted); transition: transform var(--transition-smooth); font-size: 0.9rem; }
+        .collapsible-card.collapsed .collapse-chevron { transform: rotate(-90deg); }
+        .collapsible-card.collapsed .collapsible-head { margin-bottom: 0; border-bottom: none; padding-bottom: 0; }
+        .collapsible-card.collapsed .collapsible-body { display: none; }
         .prod-check-btn {
             display: flex; align-items: center; gap: 12px;
             padding: 16px; min-height: 64px;
@@ -2843,6 +2863,19 @@
         if (maintStartBtn) maintStartBtn.addEventListener('click', startMaintenance);
         if (maintFinishBtn) maintFinishBtn.addEventListener('click', finishMaintenance);
         resumeMaintIfActive();
+
+        // Collapsible Setup card: collapse once a worker is set (set-once fields)
+        window.toggleSetupCard = function () {
+          document.getElementById('setupCard')?.classList.toggle('collapsed');
+        };
+        const opInput = document.getElementById('Machine Operator');
+        const setupCard = document.getElementById('setupCard');
+        function refreshSetupCollapse() {
+          if (setupCard && opInput) setupCard.classList.toggle('collapsed', !!opInput.value);
+        }
+        if (opInput) opInput.addEventListener('change', refreshSetupCollapse);
+        refreshSetupCollapse();
+        setTimeout(refreshSetupCollapse, 1200);
 
         // Print label
         const pl = document.getElementById('prodPrintLabelButton');
