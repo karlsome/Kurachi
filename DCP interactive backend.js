@@ -3760,7 +3760,7 @@ function renderMaterialLotTags() {
       position: relative;
       display: inline-flex;
       align-items: center;
-      background: ${lot.source === 'scanned' ? '#f44336' : '#4CAF50'};
+      background: #4CAF50;
       color: white;
       padding: 6px 12px;
       border-radius: 20px;
