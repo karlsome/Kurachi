@@ -2133,13 +2133,28 @@ async function addMaterialLabelPhoto(photoDataURL) {
 
   const id = `material-label-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
   const timestamp = new Date().toISOString();
+  // Link this photo to the lot it was captured for (set before opening the camera)
+  const lotNumber = window.__captureLotTarget || null;
+
+  // Retaking a photo for a lot that already has one: replace it (keep the link)
+  if (lotNumber && typeof materialLabelPhotos !== 'undefined') {
+    const existingIdx = materialLabelPhotos.findIndex(p => p.lotNumber === lotNumber);
+    if (existingIdx >= 0) {
+      const old = materialLabelPhotos[existingIdx];
+      try { URL.revokeObjectURL(old.blobUrl); } catch (e) {}
+      try { await materialLabelDB.delete(old.id); } catch (e) {}
+      materialLabelPhotos.splice(existingIdx, 1);
+    }
+  }
 
   // Persist raw blob in IndexedDB (no base64 at rest)
-  await materialLabelDB.put({ id, blob, timestamp });
+  await materialLabelDB.put({ id, blob, timestamp, lotNumber });
 
   // Object URL is used only for display in this session
   const blobUrl = URL.createObjectURL(blob);
-  materialLabelPhotos.push({ id, timestamp, blobUrl });
+  materialLabelPhotos.push({ id, timestamp, blobUrl, lotNumber });
+
+  window.__captureLotTarget = null; // consume the link target
 
   console.log(`Added material label photo #${materialLabelPhotos.length}`);
 
@@ -2152,6 +2167,7 @@ async function addMaterialLabelPhoto(photoDataURL) {
   renderMaterialPhotoThumbnails();
   updateMaterialPhotoCount();
   updateMaterialLabelElement();
+  if (typeof renderMaterialLotTags === 'function') renderMaterialLotTags();
   return true;
 }
 
@@ -2379,12 +2395,14 @@ async function loadMaterialLabelPhotos() {
     materialLabelPhotos = records.map(r => ({
       id: r.id,
       timestamp: r.timestamp,
-      blobUrl: URL.createObjectURL(r.blob)
+      blobUrl: URL.createObjectURL(r.blob),
+      lotNumber: r.lotNumber || null
     }));
     console.log(`Loaded ${materialLabelPhotos.length} material label photos from IndexedDB`);
     renderMaterialPhotoThumbnails();
     updateMaterialPhotoCount();
     updateMaterialLabelElement();
+    if (typeof renderMaterialLotTags === 'function') renderMaterialLotTags();
   } catch (error) {
     console.error('Error loading material label photos from IndexedDB:', error);
     materialLabelPhotos = [];
@@ -3670,9 +3688,19 @@ function renderMaterialLotTags() {
 
   tagsContainer.innerHTML = '';
 
+  const anyMissing = materialLots.some(lot =>
+    !(typeof materialLabelPhotos !== 'undefined' && materialLabelPhotos.some(p => p.lotNumber === lot.lotNumber)));
+  // Leave headroom above the first row so the "no photo" callouts don't overlap the input
+  tagsContainer.style.marginTop = anyMissing ? '30px' : '8px';
+
   materialLots.forEach((lot, index) => {
+    const hasPhoto = (typeof materialLabelPhotos !== 'undefined') &&
+                     materialLabelPhotos.some(p => p.lotNumber === lot.lotNumber);
+
     const tag = document.createElement('div');
+    tag.className = 'lot-pill' + (hasPhoto ? '' : ' lot-pill-nophoto');
     tag.style.cssText = `
+      position: relative;
       display: inline-flex;
       align-items: center;
       background: ${lot.source === 'scanned' ? '#f44336' : '#4CAF50'};
@@ -3680,28 +3708,59 @@ function renderMaterialLotTags() {
       padding: 6px 12px;
       border-radius: 20px;
       font-size: 14px;
-      gap: 8px;
+      gap: 6px;
+      cursor: pointer;
     `;
+    tag.title = hasPhoto ? '写真を変更 / Tap to change photo' : '写真がありません / Tap to add photo';
+
+    const icon = document.createElement('span');
+    icon.textContent = hasPhoto ? '📷' : '⚠️';
+    icon.style.fontSize = '13px';
+    tag.appendChild(icon);
 
     const lotText = document.createElement('span');
     lotText.textContent = lot.lotNumber;
     tag.appendChild(lotText);
 
-    // Delete button — works for both scanned and manual lots
+    // Delete button — also deletes the lot's linked photo
     const deleteBtn = document.createElement('span');
     deleteBtn.textContent = '×';
-    deleteBtn.style.cssText = `
-      cursor: pointer;
-      font-size: 18px;
-      font-weight: bold;
-      margin-left: 4px;
-    `;
-    deleteBtn.onclick = () => {
+    deleteBtn.style.cssText = `cursor: pointer; font-size: 18px; font-weight: bold; margin-left: 2px;`;
+    deleteBtn.onclick = async (e) => {
+      e.stopPropagation();
+      const lotNum = lot.lotNumber;
+      if (typeof materialLabelPhotos !== 'undefined') {
+        const linked = materialLabelPhotos.filter(p => p.lotNumber === lotNum);
+        for (const ph of linked) {
+          try { URL.revokeObjectURL(ph.blobUrl); } catch (err) {}
+          try { await materialLabelDB.delete(ph.id); } catch (err) {}
+        }
+        materialLabelPhotos = materialLabelPhotos.filter(p => p.lotNumber !== lotNum);
+      }
       materialLots.splice(index, 1);
       saveMaterialLots();
       renderMaterialLotTags();
+      if (typeof renderMaterialPhotoThumbnails === 'function') renderMaterialPhotoThumbnails();
+      if (typeof updateMaterialPhotoCount === 'function') updateMaterialPhotoCount();
+      if (typeof updateMaterialLabelElement === 'function') updateMaterialLabelElement();
+      if (typeof window.renderImageGallery === 'function') window.renderImageGallery();
     };
     tag.appendChild(deleteBtn);
+
+    // "No photo" speech-bubble callout
+    if (!hasPhoto) {
+      const callout = document.createElement('span');
+      callout.className = 'lot-callout';
+      callout.textContent = '写真なし・タップで撮影 / Tap to add photo';
+      tag.appendChild(callout);
+    }
+
+    // Tapping the pill captures / re-takes the photo for THIS lot
+    tag.onclick = () => {
+      window.__captureLotTarget = lot.lotNumber;
+      const b = document.getElementById('makerLabelButton');
+      if (b) b.click();
+    };
 
     tagsContainer.appendChild(tag);
   });
@@ -3719,6 +3778,8 @@ function addScannedLot(lotNumber) {
     return false; // Duplicate
   }
   materialLots.push({ lotNumber, source: 'scanned' });
+  // The next captured material-label photo links to this lot
+  window.__captureLotTarget = lotNumber;
   saveMaterialLots();
   renderMaterialLotTags();
   return true; // Success
@@ -3739,6 +3800,8 @@ function addManualLot(lotNumber) {
     return false; // Duplicate
   }
   materialLots.push({ lotNumber, source: 'manual' });
+  // The next captured material-label photo links to this lot
+  window.__captureLotTarget = lotNumber;
   saveMaterialLots();
   renderMaterialLotTags();
   return true; // Success

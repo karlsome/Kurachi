@@ -2240,6 +2240,24 @@
         }
         .gallery-thumb .thumb-edit-btn:active { transform: scale(0.95); }
         .gallery-thumb.empty:active { transform: scale(0.98); }
+
+        /* Material lot pills: pulse + callout when a lot has no linked photo */
+        @keyframes lotPulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(229, 72, 77, 0.55); }
+            50% { box-shadow: 0 0 0 8px rgba(229, 72, 77, 0); }
+        }
+        .lot-pill-nophoto { animation: lotPulse 1.4s ease-in-out infinite; }
+        .lot-pill:active { transform: scale(0.96); }
+        .lot-pill .lot-callout {
+            position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+            background: var(--text-main); color: #fff; font-size: 0.66rem; font-weight: 700;
+            white-space: nowrap; padding: 4px 9px; border-radius: 8px; pointer-events: none;
+            z-index: 6; box-shadow: var(--shadow-card);
+        }
+        .lot-pill .lot-callout::after {
+            content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+            border: 5px solid transparent; border-top-color: var(--text-main);
+        }
         .gallery-empty {
             text-align: center; color: var(--text-soft); padding: 32px 16px;
         }
@@ -2449,7 +2467,11 @@
       function triggerCapture(which) {
         if (which === 'hatsumono') document.getElementById('hatsumonoButton')?.click();
         else if (which === 'atomono') document.getElementById('atomonoButton')?.click();
-        else if (which === 'material') document.getElementById('makerLabelButton')?.click();
+        else if (which === 'material') {
+          // General material capture from the gallery — not tied to a specific lot
+          window.__captureLotTarget = null;
+          document.getElementById('makerLabelButton')?.click();
+        }
       }
       function isTrue(elId) {
         const el = document.getElementById(elId);
