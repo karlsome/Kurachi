@@ -3681,6 +3681,63 @@ function updateMaterialLotInput() {
   }
 }
 
+// Popup (speech bubble) showing a lot's linked photo + a Replace action
+function closeLotPhotoPopup() {
+  const pop = document.getElementById('lotPhotoPopup');
+  if (pop) pop.remove();
+  document.removeEventListener('click', lotPopupOutsideHandler, true);
+}
+function lotPopupOutsideHandler(e) {
+  const pop = document.getElementById('lotPhotoPopup');
+  if (pop && !pop.contains(e.target)) closeLotPhotoPopup();
+}
+function showLotPhotoPopup(lotNumber, anchorEl) {
+  closeLotPhotoPopup();
+  const photo = (typeof materialLabelPhotos !== 'undefined')
+    ? materialLabelPhotos.find(p => p.lotNumber === lotNumber) : null;
+
+  const pop = document.createElement('div');
+  pop.id = 'lotPhotoPopup';
+  pop.style.cssText = `
+    position: fixed; z-index: 100050; width: 210px;
+    background: #fff; border: 1px solid var(--border); border-radius: 12px;
+    box-shadow: 0 12px 32px rgba(16,24,40,0.18); padding: 10px;
+    display: flex; flex-direction: column; gap: 8px;`;
+  pop.innerHTML = `
+    <div style="font-size:0.74rem;font-weight:800;color:var(--text-main);display:flex;justify-content:space-between;align-items:center;">
+      <span>📷 ${lotNumber}</span>
+      <span id="lotPopupClose" style="cursor:pointer;color:var(--text-muted);font-size:1rem;">✕</span>
+    </div>
+    <img src="${photo ? photo.blobUrl : ''}" alt="lot photo"
+         style="width:100%;height:160px;object-fit:contain;border-radius:8px;background:var(--bg-inset);">
+    <button type="button" id="lotReplaceBtn"
+            style="background:var(--blue);color:#fff;border:none;border-radius:8px;padding:11px;font-weight:800;cursor:pointer;font-family:inherit;font-size:0.85rem;">
+      🔁 置き換え / Replace
+    </button>`;
+  document.body.appendChild(pop);
+
+  // Position above the pill (or below if no room)
+  const r = anchorEl.getBoundingClientRect();
+  let top = r.top - pop.offsetHeight - 10;
+  if (top < 10) top = r.bottom + 10;
+  let left = r.left + r.width / 2 - pop.offsetWidth / 2;
+  left = Math.max(10, Math.min(left, window.innerWidth - pop.offsetWidth - 10));
+  pop.style.top = top + 'px';
+  pop.style.left = left + 'px';
+
+  pop.querySelector('#lotPopupClose').onclick = closeLotPhotoPopup;
+  pop.querySelector('#lotReplaceBtn').onclick = () => {
+    closeLotPhotoPopup();
+    // Redirect to the Images tab and re-take (edit) the photo for this lot
+    window.__captureLotTarget = lotNumber;
+    if (typeof window.goToTab === 'function') window.goToTab(3);
+    setTimeout(() => { document.getElementById('makerLabelButton')?.click(); }, 350);
+  };
+
+  // Close when tapping outside (deferred so this opening click doesn't close it)
+  setTimeout(() => document.addEventListener('click', lotPopupOutsideHandler, true), 0);
+}
+
 // Render lot tags
 function renderMaterialLotTags() {
   const tagsContainer = document.getElementById('材料ロット-tags');
@@ -3755,11 +3812,15 @@ function renderMaterialLotTags() {
       tag.appendChild(callout);
     }
 
-    // Tapping the pill captures / re-takes the photo for THIS lot
+    // Tap a pill: with a photo -> popup (thumbnail + Replace); without -> capture
     tag.onclick = () => {
-      window.__captureLotTarget = lot.lotNumber;
-      const b = document.getElementById('makerLabelButton');
-      if (b) b.click();
+      if (hasPhoto) {
+        showLotPhotoPopup(lot.lotNumber, tag);
+      } else {
+        window.__captureLotTarget = lot.lotNumber;
+        const b = document.getElementById('makerLabelButton');
+        if (b) b.click();
+      }
     };
 
     tagsContainer.appendChild(tag);
