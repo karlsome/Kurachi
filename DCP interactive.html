@@ -226,6 +226,12 @@
             color: var(--brand);
         }
 
+        /* Locked: until the 3-step scan is done, only the Scan tab is usable */
+        .tab-bar.locked .tab-btn:not(:first-child) { opacity: 0.4; }
+        .tab-bar.locked .tab-btn:not(:first-child) .tab-icon::after {
+            content: '🔒'; font-size: 9px; position: absolute; top: 2px; right: 50%; transform: translateX(14px);
+        }
+
         .tab-btn .tab-icon {
             display: flex;
             align-items: center;
@@ -1329,6 +1335,11 @@
                             <div><span class="lbl">背番号 (Code):</span> <strong id="activeSebanggoDisplay"></strong></div>
                             <div><span class="lbl">品番 (Product Number):</span> <strong id="activeHinbanDisplay"></strong></div>
                         </div>
+                        <button type="button" id="completedSendToMachine" class="btn btn-primary btn-full" style="margin-top: 12px;">
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:6px;"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                            送信 / Send to Machine
+                        </button>
+                        <p style="color: var(--text-soft); font-size: 0.75rem; margin-top: 8px;">ステップ3が失敗した場合に再送信できます / Re-send if Step 3 failed</p>
                     </div>
                 </div>
 
@@ -1852,8 +1863,33 @@
         const tabs = document.querySelectorAll('.tab-btn');
         let currentTabIndex = 0;
 
+        // Scan must be completed (3-step done) before leaving the Scan tab
+        function isScanComplete() {
+            const sd = document.getElementById('sub-dropdown');
+            if (!sd || !sd.value) return false;
+            const stepOpen = ['step1Modal', 'step2Modal', 'step3Modal'].some(id => {
+                const el = document.getElementById(id);
+                return el && getComputedStyle(el).display !== 'none';
+            });
+            return !stepOpen;
+        }
+        function updateTabLock() {
+            const bar = document.querySelector('.tab-bar');
+            if (bar) bar.classList.toggle('locked', !isScanComplete());
+        }
+        window.isScanComplete = isScanComplete;
+        window.updateTabLock = updateTabLock;
+
         window.goToTab = function(index) {
             if (index < 0 || index >= tabs.length) return;
+            // Lock: cannot leave the Scan tab until the 3-step scan is complete
+            if (index !== 0 && !isScanComplete()) {
+                if (typeof window.showAppToast === 'function') {
+                    window.showAppToast('先に3ステップのスキャンを完了してください / Complete the 3-step scan first');
+                }
+                updateTabLock();
+                return;
+            }
             currentTabIndex = index;
             
             // Slide tabs viewport
@@ -1943,6 +1979,7 @@
                 completedCard.style.display = 'none';
             }
             updateFloatingNewScan(completed);
+            if (typeof updateTabLock === 'function') updateTabLock();
         }
 
         // The floating "New Scan" button only shows on the Scan tab when a scan is active
@@ -2878,6 +2915,20 @@
         if (opInput) opInput.addEventListener('change', refreshSetupCollapse);
         refreshSetupCollapse();
         setTimeout(refreshSetupCollapse, 1200);
+
+        // Completed-card "Send to Machine" (re-send if Step 3 failed)
+        const csm = document.getElementById('completedSendToMachine');
+        if (csm) csm.addEventListener('click', () => {
+          const seb = document.getElementById('sub-dropdown')?.value;
+          if (!seb) { if (window.showAppToast) window.showAppToast('背番号がありません / No product scanned'); return; }
+          if (typeof sendtoNC === 'function') sendtoNC(seb);
+        });
+
+        // Apply the tab lock as soon as possible (and again after restore settles)
+        if (typeof updateTabLock === 'function') {
+          updateTabLock();
+          [1200, 2600, 5200].forEach(t => setTimeout(updateTabLock, t));
+        }
 
         // Print label
         const pl = document.getElementById('prodPrintLabelButton');
