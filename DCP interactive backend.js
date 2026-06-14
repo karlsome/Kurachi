@@ -1,3 +1,32 @@
+// ===== Required URL parameters guard =====
+// The page must be opened with BOTH ?filter=<工場> and ?machine=<設備>. Without
+// them (e.g. opened directly) the app is blocked — no default machine is allowed.
+(function enforceRequiredParams() {
+  const params = new URLSearchParams(window.location.search);
+  const f = (params.get('filter') || '').trim();
+  const m = (params.get('machine') || '').trim();
+  if (f && m) return; // valid — continue loading the app
+
+  window.__dcpBlocked = true;
+  const showError = () => {
+    if (document.getElementById('paramErrorOverlay')) return;
+    const ov = document.createElement('div');
+    ov.id = 'paramErrorOverlay';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:#F4F6FA;display:flex;align-items:center;justify-content:center;padding:24px;font-family:\'Nunito Sans\',-apple-system,BlinkMacSystemFont,sans-serif;';
+    ov.innerHTML = '<div style="max-width:440px;width:100%;text-align:center;background:#fff;border:1px solid #E6E8EF;border-radius:12px;padding:32px 24px;box-shadow:0 12px 32px rgba(16,24,40,0.14);">'
+      + '<div style="font-size:44px;line-height:1;">⚠️</div>'
+      + '<h1 style="font-size:1.25rem;font-weight:800;margin:14px 0 10px;color:#1F2733;">アクセスできません / Access Denied</h1>'
+      + '<p style="color:#6B7280;font-size:0.95rem;line-height:1.6;margin:0;">工場 (filter) と 設備 (machine) のパラメータが必要です。<br>Missing required parameters: <strong>filter</strong> and <strong>machine</strong>.<br><br>正しいQRコードまたはリンクからアクセスしてください。<br>Please open this page from the correct QR code / link.</p>'
+      + '<p style="color:#9AA1AC;font-size:0.72rem;margin-top:18px;word-break:break-all;">例 / Example:<br>?filter=小瀬&amp;machine=OZNC02</p>'
+      + '</div>';
+    (document.body || document.documentElement).appendChild(ov);
+  };
+  if (document.body) showError();
+  else document.addEventListener('DOMContentLoaded', showError);
+  // Halt the rest of backend.js (uncaught throw stops further top-level execution)
+  throw new Error('DCP: missing required URL parameters (filter, machine) — app blocked.');
+})();
+
 //link for ip address database
 const ipURL = 'https://script.google.com/macros/s/AKfycbyC6-KiT3xwGiahhzhB-L-OOL8ufG0WqnT5mjEelGBKGnbiqVAS6qjT78FlzBUHqTn3Gg/exec';
 

@@ -2476,7 +2476,7 @@
 
     <!-- Fallback/Legacy inputs hidden for backend logic (avoid reference errors) -->
     <div style="display:none;">
-        <input id="process" name="process" value="OZNC01" readonly>
+        <input id="process" name="process" value="" readonly>
     </div>
 
     <!-- Core application dependencies -->
@@ -2507,7 +2507,10 @@
       }
       window.showAppToast = showToast;
 
-      const breakPrefix = (typeof uniquePrefix !== 'undefined' && uniquePrefix) ? uniquePrefix : 'kurachi_';
+      let breakPrefix = 'kurachi_';
+      // uniquePrefix may be in the temporal dead zone if backend.js halted early
+      // (missing filter/machine guard), so guard the access with try/catch.
+      try { if (uniquePrefix) breakPrefix = uniquePrefix; } catch (e) {}
 
       // ---------- Defect tap counters (18/19/20) ----------
       function syncDefectDisplays() {
@@ -2873,6 +2876,7 @@
 
       // ---------- Wiring ----------
       function init() {
+        if (window.__dcpBlocked) return; // missing filter/machine — app blocked
         // Defect counters
         syncDefectDisplays();
 
