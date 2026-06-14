@@ -3711,10 +3711,27 @@ function updateMaterialLotInput() {
 }
 
 // Popup (speech bubble) showing a lot's linked photo + a Replace action
+let _lotPopupAnchor = null;
+function positionLotPopup() {
+  const pop = document.getElementById('lotPhotoPopup');
+  if (!pop || !_lotPopupAnchor) return;
+  const r = _lotPopupAnchor.getBoundingClientRect();
+  // Pill scrolled out of view -> close the popup
+  if (r.bottom < 56 || r.top > window.innerHeight - 16) { closeLotPhotoPopup(); return; }
+  let top = r.top - pop.offsetHeight - 10;
+  if (top < 56) top = r.bottom + 10; // not enough room above -> show below
+  let left = r.left + r.width / 2 - pop.offsetWidth / 2;
+  left = Math.max(10, Math.min(left, window.innerWidth - pop.offsetWidth - 10));
+  pop.style.top = top + 'px';
+  pop.style.left = left + 'px';
+}
 function closeLotPhotoPopup() {
   const pop = document.getElementById('lotPhotoPopup');
   if (pop) pop.remove();
   document.removeEventListener('click', lotPopupOutsideHandler, true);
+  document.removeEventListener('scroll', positionLotPopup, true);
+  window.removeEventListener('resize', positionLotPopup);
+  _lotPopupAnchor = null;
 }
 function lotPopupOutsideHandler(e) {
   const pop = document.getElementById('lotPhotoPopup');
@@ -3722,6 +3739,7 @@ function lotPopupOutsideHandler(e) {
 }
 function showLotPhotoPopup(lotNumber, anchorEl) {
   closeLotPhotoPopup();
+  _lotPopupAnchor = anchorEl;
   const photo = (typeof materialLabelPhotos !== 'undefined')
     ? materialLabelPhotos.find(p => p.lotNumber === lotNumber) : null;
 
@@ -3737,23 +3755,26 @@ function showLotPhotoPopup(lotNumber, anchorEl) {
       <span>📷 ${lotNumber}</span>
       <span id="lotPopupClose" style="cursor:pointer;color:var(--text-muted);font-size:1rem;">✕</span>
     </div>
-    <img src="${photo ? photo.blobUrl : ''}" alt="lot photo"
-         style="width:100%;height:160px;object-fit:contain;border-radius:8px;background:var(--bg-inset);">
+    <img id="lotPopupThumb" src="${photo ? photo.blobUrl : ''}" alt="lot photo"
+         style="width:100%;height:160px;object-fit:contain;border-radius:8px;background:var(--bg-inset);cursor:zoom-in;">
     <button type="button" id="lotReplaceBtn"
             style="background:var(--blue);color:#fff;border:none;border-radius:8px;padding:11px;font-weight:800;cursor:pointer;font-family:inherit;font-size:0.85rem;">
       🔁 置き換え / Replace
     </button>`;
   document.body.appendChild(pop);
 
-  // Position above the pill (or below if no room)
-  const r = anchorEl.getBoundingClientRect();
-  let top = r.top - pop.offsetHeight - 10;
-  if (top < 10) top = r.bottom + 10;
-  let left = r.left + r.width / 2 - pop.offsetWidth / 2;
-  left = Math.max(10, Math.min(left, window.innerWidth - pop.offsetWidth - 10));
-  pop.style.top = top + 'px';
-  pop.style.left = left + 'px';
+  positionLotPopup();
 
+  // Tap the thumbnail to preview it full-size (close the popup first to avoid z-index overlap)
+  const thumb = pop.querySelector('#lotPopupThumb');
+  if (thumb && photo) {
+    thumb.onclick = (e) => {
+      e.stopPropagation();
+      const src = photo.blobUrl;
+      closeLotPhotoPopup();
+      if (typeof window.openPreview === 'function') window.openPreview(src);
+    };
+  }
   pop.querySelector('#lotPopupClose').onclick = closeLotPhotoPopup;
   pop.querySelector('#lotReplaceBtn').onclick = () => {
     closeLotPhotoPopup();
@@ -3763,8 +3784,13 @@ function showLotPhotoPopup(lotNumber, anchorEl) {
     setTimeout(() => { document.getElementById('makerLabelButton')?.click(); }, 350);
   };
 
-  // Close when tapping outside (deferred so this opening click doesn't close it)
-  setTimeout(() => document.addEventListener('click', lotPopupOutsideHandler, true), 0);
+  // Close on outside tap; follow the pill on scroll/resize (deferred so the
+  // opening click doesn't immediately close it)
+  setTimeout(() => {
+    document.addEventListener('click', lotPopupOutsideHandler, true);
+    document.addEventListener('scroll', positionLotPopup, true);
+    window.addEventListener('resize', positionLotPopup);
+  }, 0);
 }
 
 // Render lot tags

@@ -2553,6 +2553,7 @@
         img.src = src;
         m.classList.add('open');
       }
+      window.openPreview = openPreview; // used by the lot-photo popup (backend)
       (function bindPreviewClose() {
         const m = document.getElementById('imgPreviewModal');
         const close = document.getElementById('imgPreviewClose');
@@ -2932,6 +2933,24 @@
           if (!seb) { if (window.showAppToast) window.showAppToast('背番号がありません / No product scanned'); return; }
           if (typeof sendtoNC === 'function') sendtoNC(seb);
         });
+
+        // Tap to preview: completed-card thumbnail and the info-sidebar product image
+        const prodThumb = document.getElementById('activeProductThumb');
+        if (prodThumb) {
+          prodThumb.style.cursor = 'zoom-in';
+          prodThumb.addEventListener('click', () => {
+            const s = prodThumb.getAttribute('src');
+            if (s) openPreview(s);
+          });
+        }
+        const infoImg = document.getElementById('dynamicImage');
+        if (infoImg) {
+          infoImg.style.cursor = 'zoom-in';
+          infoImg.addEventListener('click', () => {
+            const s = infoImg.getAttribute('src');
+            if (s) openPreview(s);
+          });
+        }
 
         // Apply the tab lock as soon as possible (and again after restore settles)
         if (typeof updateTabLock === 'function') {
