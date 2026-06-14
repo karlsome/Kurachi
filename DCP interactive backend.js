@@ -9601,8 +9601,21 @@ function getCurrentStepFromStorage() {
   return saved ? parseInt(saved) : 0;
 }
 
+// The scan workflow is "complete" ONLY after Step 3 (send to machine, or for
+// OZMANAS/400D the トムソンボード scan). Refreshing during Step 1/2 must restart.
+function markScanWorkflowComplete() {
+  try { localStorage.setItem(`${uniquePrefix}scanComplete`, 'true'); } catch (e) {}
+}
+function clearScanWorkflowComplete() {
+  try { localStorage.removeItem(`${uniquePrefix}scanComplete`); } catch (e) {}
+}
+window.isScanWorkflowComplete = function () {
+  return localStorage.getItem(`${uniquePrefix}scanComplete`) === 'true';
+};
+
 // Function to show Step 1 Modal
 function showStep1Modal() {
+  clearScanWorkflowComplete(); // (re)starting the workflow -> not complete
   const modal = document.getElementById('step1Modal');
   const machineName = document.getElementById('step1MachineName');
   const content = document.getElementById('step1Content');
@@ -9768,7 +9781,9 @@ function resetAllSteps() {
   
   // Reset step to 0 and clear from localStorage
   saveCurrentStep(0);
-  
+  clearScanWorkflowComplete();
+  localStorage.removeItem(`${uniquePrefix}sub-dropdown`);
+
   // Call resetForm() to clear all form data
   resetForm();
   syncVideoManualLauncherState();
@@ -10474,8 +10489,9 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
           localStorage.removeItem(`${uniquePrefix}cached-materialCode`);
           localStorage.removeItem(`${uniquePrefix}cached-kataban`);
 
-          // Mark workflow as complete
+          // Mark workflow as complete (OZMANAS: トムソンボード scan == Step 3 done)
           saveCurrentStep(0);
+          markScanWorkflowComplete();
           autoFillProductionStartTime();
 
           // Close Step 3 modal (OZMANAS does not send command to machine at this step)
@@ -10513,8 +10529,9 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
     localStorage.removeItem(`${uniquePrefix}cached-materialCode`);
     localStorage.removeItem(`${uniquePrefix}cached-kataban`);
     
-    // Mark workflow as complete
+    // Mark workflow as complete (Step 3 send to machine pressed)
     saveCurrentStep(0);
+    markScanWorkflowComplete();
     autoFillProductionStartTime();
 
     // Call the sendtoNC function (sends in background with progress bar)
@@ -10746,28 +10763,30 @@ window.addEventListener('load', function() {
       return;
     }
     
-    // A 背番号 is present (something was scanned). Restore the product details
-    // and show the "Scan Completed" card. Do NOT restart the workflow on
-    // refresh — users expect their scan to persist (the new production-tab
-    // material scan never advances Step 3, so the step would read "incomplete"
-    // and wrongly bounce them back to Step 1).
-    currentProductDetails = {
-      sebanggo: subDropdown.value,
-      hinban: document.getElementById('product-number')?.value || '',
-      materialCode: document.getElementById('material-code')?.value || '',
-      model: document.getElementById('model')?.value || localStorage.getItem(`${uniquePrefix}cached-model`) || '',
-      kataban: document.getElementById('kataban')?.value || ''
-    };
-    if (savedStep !== 0) {
-      console.log('Restoring completed scan state for', subDropdown.value, '(was step ' + savedStep + ')');
+    // A 背番号 is present. Only treat it as "complete" if Step 3 actually ran
+    // (send to machine, or OZMANAS トムソンボード scan) — tracked by the
+    // scanComplete flag. Otherwise the workflow was abandoned mid-way (refresh
+    // during Step 1/2) and must restart from the beginning.
+    if (window.isScanWorkflowComplete && window.isScanWorkflowComplete()) {
+      currentProductDetails = {
+        sebanggo: subDropdown.value,
+        hinban: document.getElementById('product-number')?.value || '',
+        materialCode: document.getElementById('material-code')?.value || '',
+        model: document.getElementById('model')?.value || localStorage.getItem(`${uniquePrefix}cached-model`) || '',
+        kataban: document.getElementById('kataban')?.value || ''
+      };
       saveCurrentStep(0);
+      // Make sure no step card is showing, then render the completed card
+      ['step1Modal', 'step2Modal', 'step3Modal'].forEach(id => {
+        const m = document.getElementById(id);
+        if (m) m.style.display = 'none';
+      });
+      if (typeof window.syncScanTabState === 'function') window.syncScanTabState();
+    } else {
+      // Scanned but Step 3 not done — restart from Step 1
+      console.log('Incomplete workflow on load (step ' + savedStep + ') - restarting from Step 1');
+      showStep1Modal();
     }
-    // Make sure no step card is showing, then render the completed card
-    ['step1Modal', 'step2Modal', 'step3Modal'].forEach(id => {
-      const m = document.getElementById(id);
-      if (m) m.style.display = 'none';
-    });
-    if (typeof window.syncScanTabState === 'function') window.syncScanTabState();
 
     currentProductDetails.model = currentProductDetails.model || document.getElementById('model')?.value || localStorage.getItem(`${uniquePrefix}cached-model`) || '';
     syncVideoManualLauncherState();

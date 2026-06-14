@@ -1867,11 +1867,8 @@
         function isScanComplete() {
             const sd = document.getElementById('sub-dropdown');
             if (!sd || !sd.value) return false;
-            const stepOpen = ['step1Modal', 'step2Modal', 'step3Modal'].some(id => {
-                const el = document.getElementById(id);
-                return el && getComputedStyle(el).display !== 'none';
-            });
-            return !stepOpen;
+            // Complete only after Step 3 (send to machine / OZMANAS board scan)
+            return !!(window.isScanWorkflowComplete && window.isScanWorkflowComplete());
         }
         function updateTabLock() {
             const bar = document.querySelector('.tab-bar');
@@ -1959,8 +1956,9 @@
             const isStep3Visible = vis(step3);
             
             let completed = false;
+            const workflowDone = !!(window.isScanWorkflowComplete && window.isScanWorkflowComplete());
             if (!isStep1Visible && !isStep2Visible && !isStep3Visible) {
-                if (subDropdown && subDropdown.value && subDropdown.value !== "") {
+                if (subDropdown && subDropdown.value && subDropdown.value !== "" && workflowDone) {
                     completed = true;
                     completedCard.style.display = 'flex';
                     document.getElementById('activeSebanggoDisplay').textContent = subDropdown.value;
