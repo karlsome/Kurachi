@@ -236,11 +236,25 @@
         }
 
         /* Locked: until the 3-step scan is done, only the Scan tab is usable */
-        .tab-bar.locked .tab-btn:not(:first-child) {
+        .tab-bar.locked-scan .tab-btn:not(:first-child) {
             opacity: 0.4;
         }
 
-        .tab-bar.locked .tab-btn:not(:first-child) .tab-icon::after {
+        .tab-bar.locked-scan .tab-btn:not(:first-child) .tab-icon::after {
+            content: '🔒';
+            font-size: 9px;
+            position: absolute;
+            top: 2px;
+            right: 50%;
+            transform: translateX(14px);
+        }
+
+        /* Locked: during params verification, Scan and Params tabs are usable, others are locked */
+        .tab-bar.locked-params .tab-btn:not(:first-child):not(:nth-child(2)) {
+            opacity: 0.4;
+        }
+
+        .tab-bar.locked-params .tab-btn:not(:first-child):not(:nth-child(2)) .tab-icon::after {
             content: '🔒';
             font-size: 9px;
             position: absolute;
@@ -2560,12 +2574,41 @@
             // Complete only after Step 3 (send to machine / OZMANAS board scan)
             return !!(window.isScanWorkflowComplete && window.isScanWorkflowComplete());
         }
+        function getParamsConfirmedKey() {
+            const prefix = typeof uniquePrefix !== 'undefined' ? uniquePrefix : '';
+            return prefix ? `${prefix}paramsConfirmed` : 'DCP_paramsConfirmed';
+        }
+
+        function checkParamsLockState() {
+            if (!isScanComplete()) {
+                window.paramsLocked = false;
+                window.paramsVisited = false;
+                return;
+            }
+            const confirmedKey = getParamsConfirmedKey();
+            const confirmed = localStorage.getItem(confirmedKey) === 'true';
+            if (confirmed) {
+                window.paramsLocked = false;
+                window.paramsVisited = true;
+            } else {
+                window.paramsLocked = true;
+            }
+        }
+
         function updateTabLock() {
             const bar = document.querySelector('.tab-bar');
-            if (bar) bar.classList.toggle('locked', !isScanComplete() || (window.paramsLocked === true));
+            if (bar) {
+                checkParamsLockState();
+                const scanIncomplete = !isScanComplete();
+                const paramsLocked = window.paramsLocked === true;
+                bar.classList.toggle('locked-scan', scanIncomplete);
+                bar.classList.toggle('locked-params', !scanIncomplete && paramsLocked);
+            }
         }
         window.isScanComplete = isScanComplete;
         window.updateTabLock = updateTabLock;
+        window.getParamsConfirmedKey = getParamsConfirmedKey;
+        window.checkParamsLockState = checkParamsLockState;
 
         window.paramsLocked = false;
         window.paramsVisited = false;
@@ -2580,8 +2623,9 @@
                 updateTabLock();
                 return;
             }
-            // Lock: cannot leave Params tab until "Values changed" is pressed
-            if (currentTabIndex === 1 && index !== 1 && window.paramsLocked) {
+            checkParamsLockState();
+            // Lock: cannot visit pages beyond Scan (0) and Params (1) until "Values changed" is pressed
+            if (index > 1 && window.paramsLocked) {
                 if (typeof window.showAppToast === 'function') {
                     window.showAppToast('「Values changed」を押してください / Please press "Values changed"');
                 }
@@ -2640,6 +2684,25 @@
                 }
             }
 
+            const confirmedKey = getParamsConfirmedKey();
+            const isConfirmed = localStorage.getItem(confirmedKey) === 'true';
+
+            if (isConfirmed) {
+                window.paramsLocked = false;
+                window.paramsVisited = true;
+                const btn = document.getElementById('valuesChangedBtn');
+                if (btn) {
+                    btn.disabled = false;
+                    btn.classList.remove('btn-secondary');
+                    btn.classList.add('btn-primary');
+                    btn.onclick = function () {
+                        if (typeof window.showAppToast === 'function') {
+                            window.showAppToast('設定が確認されました / Settings confirmed');
+                        }
+                    };
+                }
+            }
+
             // 5-second lock logic (only trigger once per scan sequence)
             if (!window.paramsVisited) {
                 window.paramsVisited = true;
@@ -2663,6 +2726,8 @@
                     // Re-add event listener to prevent duplicate binding just in case
                     btn.onclick = function () {
                         window.paramsLocked = false;
+                        const confirmedKey = getParamsConfirmedKey();
+                        localStorage.setItem(confirmedKey, 'true');
                         updateTabLock();
                         if (typeof window.showAppToast === 'function') {
                             window.showAppToast('設定が確認されました / Settings confirmed');

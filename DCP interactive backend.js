@@ -9898,6 +9898,7 @@ function resetAllSteps() {
   if (typeof window.paramsVisited !== 'undefined') {
     window.paramsVisited = false;
     window.paramsLocked = false;
+    localStorage.removeItem(`${uniquePrefix}paramsConfirmed`);
   }
 }
 
