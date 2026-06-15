@@ -4033,7 +4033,7 @@
             // ---------- Image gallery (Images tab) ----------
             // `capture` = which capture to trigger ('hatsumono'|'atomono'|'material').
             // Empty cards are tappable to capture; captured cards get an Edit button.
-            function statusCardHTML(tag, src, has, capture) {
+            function statusCardHTML(tag, src, has, capture, simpleBlank) {
                 const capAttr = capture ? ' data-capture="' + capture + '"' : '';
                 if (has && src) {
                     return '<div class="gallery-thumb" data-src="' + src + '">' +
@@ -4042,10 +4042,15 @@
                         '<img src="' + src + '" alt="' + tag + '">' +
                         '<span class="thumb-tag">' + tag + '</span></div>';
                 }
+                
+                const labelHTML = simpleBlank 
+                    ? '<span class="thumb-tag" style="position:static;background:none;color:var(--red);margin-top:6px;text-align:center;font-weight:800;word-break:break-all;">' + tag + '</span>'
+                    : '<span class="thumb-tag" style="position:static;background:none;color:var(--red);margin-top:6px;text-align:center;">' + tag + ' 未撮影<br><small style="font-weight:700;">タップして撮影 / Tap to capture</small></span>';
+
                 return '<div class="gallery-thumb empty"' + capAttr + ' style="display:flex;flex-direction:column;align-items:center;justify-content:center;border:1px dashed var(--red);background:var(--red-soft);cursor:pointer;">' +
                     '<span style="position:absolute;top:6px;right:6px;width:12px;height:12px;border-radius:50%;background:var(--red);border:2px solid #fff;"></span>' +
                     '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" style="stroke:var(--red);" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>' +
-                    '<span class="thumb-tag" style="position:static;background:none;color:var(--red);margin-top:6px;text-align:center;">' + tag + ' 未撮影<br><small style="font-weight:700;">タップして撮影 / Tap to capture</small></span></div>';
+                    labelHTML + '</div>';
             }
             function triggerCapture(which) {
                 if (which === 'hatsumono') document.getElementById('hatsumonoButton')?.click();
@@ -4071,11 +4076,23 @@
 
                 // Material label photos (up to 25) get their own row; placeholder when none yet.
                 const matImgs = document.querySelectorAll('#material-photo-thumbnails img');
+                const materialLotInput = document.getElementById('材料ロット');
+                const materialLots = materialLotInput ? materialLotInput.value.split(',').map(l => l.trim()).filter(l => l) : [];
+                
                 let matCards = '';
-                if (matImgs.length === 0) {
+                
+                // Show actual captured images first
+                matImgs.forEach((img, i) => { 
+                    matCards += statusCardHTML('材料ラベル ' + (i + 1), img.src, true, 'material'); 
+                });
+
+                // Generate red blank thumbnails for unfulfilled lots
+                if (materialLots.length > matImgs.length) {
+                    for (let i = matImgs.length; i < materialLots.length; i++) {
+                        matCards += statusCardHTML(materialLots[i], '', false, 'material', true);
+                    }
+                } else if (materialLots.length === 0 && matImgs.length === 0) {
                     matCards = statusCardHTML('材料ラベル', '', false, 'material');
-                } else {
-                    matImgs.forEach((img, i) => { matCards += statusCardHTML('材料ラベル ' + (i + 1), img.src, true, 'material'); });
                 }
 
                 // Each capture type on its own row/section.
