@@ -2534,45 +2534,62 @@ function renderMaintenanceRecords() {
   container.innerHTML = '';
 
   maintenanceRecords.forEach((record, index) => {
-    const recordElement = document.createElement('div');
-    recordElement.className = 'maintenance-record-item';
-    recordElement.style.cssText = `
-      background: #f8f9fa;
-      border: 1px solid #dee2e6;
-      border-radius: 5px;
-      padding: 10px;
-      margin-bottom: 10px;
-      cursor: pointer;
-      transition: background-color 0.2s;
-    `;
-
     const duration = calculateDuration(record.startTime, record.endTime);
     const photoCount = record.photos ? record.photos.length : 0;
-    const photoIndicator = photoCount > 0 ? `📷 ${photoCount}` : '';
-    
-    recordElement.innerHTML = `
-      <div style="display: flex; justify-content: space-between; align-items: center;">
-        <div style="flex: 1;">
-          <strong>${record.startTime} - ${record.endTime}</strong> (${duration}分)
-          <br>
-          <small style="color: #666;">${record.comment}</small>
-        </div>
-        <div style="color: #007cba; font-size: 14px;">
-          ${photoIndicator}
-        </div>
-      </div>
-    `;
 
-    recordElement.addEventListener('click', () => showMaintenanceModal(index));
-    recordElement.addEventListener('mouseenter', () => {
-      recordElement.style.backgroundColor = '#e9ecef';
-    });
-    recordElement.addEventListener('mouseleave', () => {
-      recordElement.style.backgroundColor = '#f8f9fa';
-    });
+    const row = document.createElement('div');
+    row.className = 'record-row';
 
-    container.appendChild(recordElement);
+    // Order number (1, 2, 3 ...)
+    const num = document.createElement('span');
+    num.className = 'record-num';
+    num.textContent = index + 1;
+    row.appendChild(num);
+
+    // Main (tap to edit)
+    const main = document.createElement('div');
+    main.className = 'record-main';
+    main.style.cursor = 'pointer';
+    const title = document.createElement('div');
+    title.className = 'record-title';
+    title.innerHTML = `${record.startTime} ~ ${record.endTime} <span class="record-dur">(${duration}分)</span>` +
+                      (photoCount > 0 ? ` <span class="record-dur">· 📷 ${photoCount}</span>` : '');
+    const sub = document.createElement('div');
+    sub.className = 'record-sub';
+    sub.textContent = record.comment || '';
+    main.appendChild(title);
+    main.appendChild(sub);
+    main.addEventListener('click', () => showMaintenanceModal(index));
+    row.appendChild(main);
+
+    // Quick delete
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'record-del';
+    del.setAttribute('aria-label', 'delete maintenance');
+    del.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
+    del.addEventListener('click', (e) => { e.stopPropagation(); deleteMaintenanceRecord(index); });
+    row.appendChild(del);
+
+    container.appendChild(row);
   });
+}
+
+// Delete a maintenance record (also removes its linked photos from IndexedDB)
+async function deleteMaintenanceRecord(index) {
+  const rec = maintenanceRecords[index];
+  if (!rec) return;
+  if (!confirm('この機械故障記録を削除しますか？ / Delete this maintenance record?')) return;
+  for (const ph of (rec.photos || [])) {
+    if (ph && ph.id) { try { await maintenanceDB.deletePhoto(ph.id); } catch (e) {} }
+  }
+  if (typeof logTabletAction === 'function') {
+    logTabletAction('Maintenance record deleted', 'Reset', { startTime: rec.startTime, endTime: rec.endTime, comment: rec.comment });
+  }
+  maintenanceRecords.splice(index, 1);
+  saveMaintenanceRecords();
+  renderMaintenanceRecords();
+  calculateTotalMachineTroubleTime();
 }
 
 // Calculate duration between start and end time

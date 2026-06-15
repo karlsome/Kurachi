@@ -2239,6 +2239,8 @@
                             <span id="total-break-display">0分</span>
                             <span id="break-count-display" class="break-count"></span>
                         </div>
+                        <!-- Recorded break times list -->
+                        <div id="break-list"></div>
                         <!-- Hidden inputs consumed by backend (calculateTotalBreakTime / breakTimeData) -->
                         <div style="display:none;" aria-hidden="true">
                             <input type="time" id="break1-start" name="break1-start"><input type="time" id="break1-end"
@@ -3496,6 +3498,28 @@
             color: var(--text-main);
         }
 
+        /* Recorded-item list rows (break times + maintenance) */
+        .record-row {
+            display: flex; align-items: center; gap: 10px;
+            background: var(--bg-subtle); border: 1px solid var(--border);
+            border-radius: var(--btn-radius); padding: 10px 12px; margin-top: 8px;
+        }
+        .record-row .record-num {
+            flex-shrink: 0; width: 26px; height: 26px; border-radius: 50%;
+            background: var(--blue); color: #fff; font-weight: 800; font-size: 0.8rem;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .record-row .record-main { flex: 1; min-width: 0; }
+        .record-row .record-title { font-weight: 700; font-size: 0.9rem; color: var(--text-main); }
+        .record-row .record-dur { color: var(--text-muted); font-weight: 600; }
+        .record-row .record-sub { font-size: 0.8rem; color: var(--text-muted); margin-top: 2px; word-break: break-word; }
+        .record-row .record-del {
+            flex-shrink: 0; width: 34px; height: 34px; border-radius: 8px;
+            border: 1px solid var(--red-soft); background: var(--red-soft); color: var(--red);
+            cursor: pointer; display: flex; align-items: center; justify-content: center;
+        }
+        .record-row .record-del:active { transform: scale(0.92); }
+
         .break-summary #total-break-display {
             color: var(--blue);
             font-size: 1.15rem;
@@ -4196,6 +4220,7 @@
                 }
                 if (typeof calculateTotalBreakTime === 'function') calculateTotalBreakTime();
                 updateBreakCount();
+                renderBreakList();
                 showToast('休憩を記録しました / Break recorded');
             }
             function updateBreakCount() {
@@ -4207,6 +4232,56 @@
                 }
                 const c = document.getElementById('break-count-display');
                 if (c) c.textContent = n > 0 ? ('休憩 ' + n + ' 回 / ' + n + ' break' + (n > 1 ? 's' : '')) : '';
+            }
+            function breakMinsOf(s, e) {
+                const a = new Date('2000-01-01T' + s + ':00'), b = new Date('2000-01-01T' + e + ':00');
+                return b > a ? Math.floor((b - a) / 60000) : 0;
+            }
+            function renderBreakList() {
+                const c = document.getElementById('break-list');
+                if (!c) return;
+                c.innerHTML = '';
+                let n = 0;
+                for (let i = 1; i <= 4; i++) {
+                    const s = document.getElementById('break' + i + '-start')?.value;
+                    const e = document.getElementById('break' + i + '-end')?.value;
+                    if (!s || !e) continue;
+                    n++;
+                    const slot = i;
+                    const row = document.createElement('div'); row.className = 'record-row';
+                    const num = document.createElement('span'); num.className = 'record-num'; num.textContent = n; row.appendChild(num);
+                    const main = document.createElement('div'); main.className = 'record-main';
+                    const title = document.createElement('div'); title.className = 'record-title';
+                    title.innerHTML = n + '回目の休憩 / Break ' + n + ' <span class="record-dur">(' + breakMinsOf(s, e) + '分)</span>';
+                    const sub = document.createElement('div'); sub.className = 'record-sub'; sub.textContent = s + ' ~ ' + e;
+                    main.appendChild(title); main.appendChild(sub); row.appendChild(main);
+                    const del = document.createElement('button'); del.type = 'button'; del.className = 'record-del';
+                    del.setAttribute('aria-label', 'delete break');
+                    del.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
+                    del.onclick = () => deleteBreak(slot);
+                    row.appendChild(del);
+                    c.appendChild(row);
+                }
+            }
+            function deleteBreak(slot) {
+                // Collect remaining breaks (excluding the deleted slot) and compact into 1..N
+                const remaining = [];
+                for (let i = 1; i <= 4; i++) {
+                    if (i === slot) continue;
+                    const s = document.getElementById('break' + i + '-start'), e = document.getElementById('break' + i + '-end');
+                    if (s && e && s.value && e.value) remaining.push({ s: s.value, e: e.value });
+                }
+                for (let i = 1; i <= 4; i++) {
+                    const s = document.getElementById('break' + i + '-start'), e = document.getElementById('break' + i + '-end');
+                    const r = remaining[i - 1];
+                    s.value = r ? r.s : ''; e.value = r ? r.e : '';
+                    s.dispatchEvent(new Event('change', { bubbles: true }));
+                    e.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                if (typeof calculateTotalBreakTime === 'function') calculateTotalBreakTime();
+                updateBreakCount();
+                renderBreakList();
+                showToast('休憩を削除しました / Break removed');
             }
             function resumeBreakIfActive() {
                 const raw = localStorage.getItem(breakPrefix + 'activeBreakStart');
@@ -4400,6 +4475,7 @@
                 if (startBtn) startBtn.addEventListener('click', startBreak);
                 if (finishBtn) finishBtn.addEventListener('click', finishBreak);
                 updateBreakCount();
+                renderBreakList();
                 resumeBreakIfActive();
 
                 // Maintenance timer
@@ -4485,7 +4561,7 @@
                 applyKensaVisibility();
 
                 // Re-apply after backend restore settles
-                setTimeout(() => { syncDefectDisplays(); syncCheckButtons(); renderImageGallery(); applyKensaVisibility(); updateBreakCount(); }, 800);
+                setTimeout(() => { syncDefectDisplays(); syncCheckButtons(); renderImageGallery(); applyKensaVisibility(); updateBreakCount(); renderBreakList(); }, 800);
 
                 // Render gallery whenever Images tab is opened
                 if (typeof window.goToTab === 'function') {
