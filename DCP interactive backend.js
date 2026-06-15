@@ -4537,9 +4537,7 @@ async function printLabel() {
     try {
       const { printerIP, payload } = await request047JAutoPrint(selectedEquipmentName, 背番号, copies);
 
-      showPrintStatusMessage(
-        `Label print sent successfully / ラベル印刷を送信しました\n背番号: ${payload.banumber || 背番号}\nCopies: ${payload.copies || copies}`
-      );
+      setPrintBtnState('success');
 
       logTabletAction('047J laptop auto-print success', 'Completed', {
         machine: selectedEquipmentName,
@@ -4551,7 +4549,7 @@ async function printLabel() {
       });
     } catch (error) {
       console.error('047J laptop auto-print failed:', error);
-      showPrintStatusMessage(`Label printing failed / ラベル印刷に失敗しました\n${error.message}`);
+      setPrintBtnState('error', error.message);
       logTabletAction('047J laptop auto-print failed', 'in-progress', {
         machine: selectedEquipmentName,
         背番号,
@@ -4740,52 +4738,95 @@ async function printLabel() {
 // Send a label print to the Brother QL-820. iOS uses the brotherwebprint:// URL
 // scheme (fire-and-forget); Android posts to the local SmoothPrint service on
 // :8088 and checks the response. Mirrors firstKojoLabelPrinter.js.
-function showPrintingIndicator() {
-  let el = document.getElementById('printingIndicator');
-  if (!el) {
-    el = document.createElement('div');
-    el.id = 'printingIndicator';
-    el.style.cssText = 'position:fixed;top:max(14px,env(safe-area-inset-top,0px));left:50%;transform:translateX(-50%);' +
-      'z-index:2147483646;background:#2E6FF2;color:#fff;padding:10px 18px;border-radius:999px;font-family:inherit;' +
-      'font-weight:800;font-size:0.85rem;box-shadow:0 6px 20px rgba(16,24,40,0.28);display:flex;align-items:center;gap:10px;';
-    el.innerHTML = '<span style="width:16px;height:16px;border:2.5px solid rgba(255,255,255,0.4);border-top-color:#fff;border-radius:50%;display:inline-block;animation:spin 0.8s linear infinite;"></span>' +
-      '<span>印刷中... / Printing...</span>';
-    document.body.appendChild(el);
+
+// ---------- Print button state helpers ----------
+function _getPrintBtn() {
+  return document.getElementById('prodPrintLabelButton');
+}
+function _isJapanese() {
+  return (localStorage.getItem('appLanguage') || 'ja') === 'ja';
+}
+function _defaultPrintLabel() {
+  return _isJapanese()
+    ? 'ラベル印刷<small>Print Label</small>'
+    : 'Print Label<small>ラベル印刷</small>';
+}
+
+/**
+ * Set the print button to one of: 'printing', 'success', 'error', 'idle'
+ * For 'error' pass an optional message string.
+ */
+function setPrintBtnState(state, errorMsg) {
+  const btn = _getPrintBtn();
+  if (!btn) return;
+  const label = btn.querySelector('.print-btn-label');
+  if (!label) return;
+
+  // Clear previous state classes
+  btn.classList.remove('printing', 'print-success', 'print-error');
+
+  const ja = _isJapanese();
+
+  switch (state) {
+    case 'printing':
+      btn.classList.add('printing');
+      label.innerHTML = ja ? '印刷中...' : 'Printing...';
+      break;
+    case 'success':
+      btn.classList.add('print-success');
+      label.innerHTML = ja
+        ? '✓ 印刷成功!<small>Print Success!</small>'
+        : '✓ Print Success!<small>印刷成功!</small>';
+      // Reset back to default after 3s
+      setTimeout(() => setPrintBtnState('idle'), 3000);
+      break;
+    case 'error':
+      btn.classList.add('print-error');
+      label.innerHTML = ja
+        ? '✕ 印刷エラー<small>' + (errorMsg || 'Print Error') + '</small>'
+        : '✕ Print Error<small>' + (errorMsg || '印刷エラー') + '</small>';
+      // Reset back to default after 4s
+      setTimeout(() => setPrintBtnState('idle'), 4000);
+      break;
+    case 'idle':
+    default:
+      label.innerHTML = _defaultPrintLabel();
+      break;
   }
-  el.style.display = 'flex';
 }
-function hidePrintingIndicator() {
-  const el = document.getElementById('printingIndicator');
-  if (el) el.remove();
-}
+window.setPrintBtnState = setPrintBtnState;
+
+// Legacy aliases — keep them functional for any external callers
+function showPrintingIndicator() { setPrintBtnState('printing'); }
+function hidePrintingIndicator() { /* handled by setPrintBtnState */ }
 
 function sendBrotherPrint(query) {
   const isIOS = /iphone|ipad|ipod/.test(navigator.userAgent.toLowerCase());
-  showPrintingIndicator();
+  setPrintBtnState('printing');
   if (isIOS) {
-    // Fire-and-forget URL scheme — keep the indicator up briefly then clear it
+    // Fire-and-forget URL scheme — iOS has no return status, assume success
     window.location.href = `brotherwebprint://print?${query}`;
-    setTimeout(hidePrintingIndicator, 3500);
+    setTimeout(() => setPrintBtnState('success'), 2500);
     return;
   }
   // Android (and desktop): Brother SmoothPrint listens on localhost:8088
   fetch(`http://localhost:8088/print?${query}`)
     .then(res => res.text())
     .then(res => {
-      if (!res.includes('<result>SUCCESS</result>')) {
+      if (res.includes('<result>SUCCESS</result>')) {
+        setPrintBtnState('success');
+      } else {
         console.error('Android label print response:', res);
-        if (typeof showAlert === 'function') {
-          showAlert(/coveropen/i.test(res)
-            ? 'プリンターのカバーが開いています / Printer cover open'
-            : 'ラベル印刷エラー / Label print error');
-        }
+        const errMsg = /coveropen/i.test(res)
+          ? 'カバーが開いています / Cover open'
+          : 'ラベル印刷エラー / Label print error';
+        setPrintBtnState('error', errMsg);
       }
     })
     .catch(err => {
       console.error('Android label print failed:', err);
-      if (typeof showAlert === 'function') showAlert('ラベル印刷に失敗しました / Label print failed');
-    })
-    .finally(hidePrintingIndicator);
+      setPrintBtnState('error', 'ラベル印刷に失敗しました / Print failed');
+    });
 }
 
 // Helper function to convert File to base64 string

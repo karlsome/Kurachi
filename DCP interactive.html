@@ -1965,7 +1965,7 @@
                                         d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
                                     <rect x="6" y="14" width="12" height="8" />
                                 </svg>
-                                <span>ラベル印刷<small>Print Label</small></span>
+                                <span class="print-btn-label">ラベル印刷<small>Print Label</small></span>
                             </button>
                         </div>
                         <div class="form-group full-width">
@@ -3188,6 +3188,37 @@
 
         .prod-action-btn.print-btn small {
             color: rgba(255, 255, 255, 0.85);
+        }
+
+        /* Print button animated states */
+        .prod-action-btn.print-btn.printing {
+            background: var(--blue);
+            border-color: var(--blue);
+            pointer-events: none;
+            opacity: 0.9;
+        }
+
+        .prod-action-btn.print-btn.printing .print-btn-label::after {
+            content: '';
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2.5px solid rgba(255,255,255,0.4);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            vertical-align: middle;
+            margin-left: 6px;
+        }
+
+        .prod-action-btn.print-btn.print-success {
+            background: var(--green, #22c55e);
+            border-color: var(--green, #22c55e);
+        }
+
+        .prod-action-btn.print-btn.print-error {
+            background: var(--red, #ef4444);
+            border-color: var(--red, #ef4444);
         }
 
         /* Check buttons (初物 / 終物) */
