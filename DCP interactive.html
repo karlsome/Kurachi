@@ -2840,6 +2840,10 @@
             } else if (!overlay && existing) {
               existing.remove();
             }
+            // In production mode, hide the Reset button (full reset belongs only on
+            // the Scan tab) — keep Override (manual entry). Restore it otherwise.
+            const resetBtn = document.getElementById('resetStep2');
+            if (resetBtn) resetBtn.style.display = overlay ? 'none' : '';
           }
           return r;
         };
