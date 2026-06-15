@@ -814,6 +814,64 @@
             padding: 6px;
         }
 
+        /* Production tab: product info summary card */
+        .prod-info-card {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 14px 16px;
+        }
+
+        .prod-info-thumb {
+            width: 64px;
+            height: 64px;
+            min-width: 64px;
+            object-fit: contain;
+            border-radius: var(--btn-radius);
+            border: 1px solid var(--border);
+            background: var(--bg-subtle);
+            padding: 4px;
+            cursor: zoom-in;
+        }
+
+        .prod-info-text {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            min-width: 0;
+            cursor: pointer;
+            flex: 1;
+            padding: 6px 8px;
+            border-radius: var(--btn-radius);
+            transition: background 0.15s;
+        }
+
+        .prod-info-text:active {
+            background: var(--bg-subtle);
+        }
+
+        .prod-info-text .prod-info-row {
+            display: flex;
+            align-items: baseline;
+            gap: 6px;
+            font-size: 0.875rem;
+        }
+
+        .prod-info-text .prod-info-label {
+            color: var(--text-muted);
+            font-weight: 600;
+            white-space: nowrap;
+            font-size: 0.75rem;
+        }
+
+        .prod-info-text .prod-info-value {
+            font-weight: 800;
+            color: var(--text-main);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
         /* Floating New Scan / reset button */
         #floatingNewScan {
             position: fixed;
@@ -1840,6 +1898,22 @@
 
                 <!-- TAB 3: PRODUCTION -->
                 <div class="tab-panel" id="panel-2">
+                    <!-- 0. Active product info card -->
+                    <div class="glass-card prod-info-card" id="prodInfoCard" style="display:none;">
+                        <img id="prodInfoThumb" class="prod-info-thumb" src="" alt="Product"
+                            onclick="if(this.src && typeof window.openPreview==='function') window.openPreview(this.src);">
+                        <div class="prod-info-text" onclick="if(typeof window.toggleSidebar==='function') window.toggleSidebar(true);">
+                            <div class="prod-info-row">
+                                <span class="prod-info-label">背番号</span>
+                                <span class="prod-info-value" id="prodInfoSebanggo">—</span>
+                            </div>
+                            <div class="prod-info-row">
+                                <span class="prod-info-label">品番</span>
+                                <span class="prod-info-value" id="prodInfoHinban">—</span>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- 1. Defect counters — most used during the run -->
                     <div class="glass-card">
                         <h3>加工不良カウンター / Defect Counters</h3>
@@ -2804,7 +2878,27 @@
             }
             updateFloatingNewScan(completed);
             if (typeof updateTabLock === 'function') updateTabLock();
+            syncProdInfoCard(completed);
         }
+
+        // Sync the Production tab's quick-glance product info card
+        function syncProdInfoCard(completed) {
+            const card = document.getElementById('prodInfoCard');
+            if (!card) return;
+            if (!completed) { card.style.display = 'none'; return; }
+            card.style.display = 'flex';
+            const sebanggo = document.getElementById('sub-dropdown')?.value || '—';
+            const hinban = document.getElementById('product-number')?.value || '—';
+            const imgSrc = document.getElementById('dynamicImage')?.getAttribute('src') || '';
+            document.getElementById('prodInfoSebanggo').textContent = sebanggo;
+            document.getElementById('prodInfoHinban').textContent = hinban;
+            const thumb = document.getElementById('prodInfoThumb');
+            if (thumb) {
+                if (imgSrc) { thumb.src = imgSrc; thumb.style.display = ''; }
+                else { thumb.style.display = 'none'; }
+            }
+        }
+        window.syncProdInfoCard = syncProdInfoCard;
 
         // The floating "New Scan" button only shows on the Scan tab when a scan is active
         function updateFloatingNewScan(completedMaybe) {
