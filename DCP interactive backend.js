@@ -9893,6 +9893,12 @@ function resetAllSteps() {
   // Call resetForm() to clear all form data
   resetForm();
   syncVideoManualLauncherState();
+
+  // Reset params lock state
+  if (typeof window.paramsVisited !== 'undefined') {
+    window.paramsVisited = false;
+    window.paramsLocked = false;
+  }
 }
 
 // Step 1: Start Scan Button
