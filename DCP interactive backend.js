@@ -4665,8 +4665,8 @@ async function printLabel() {
       }
       const size = "RollW62";
       const copies = 1;
-      const url =
-        `brotherwebprint://print?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent(size)}&copies=${encodeURIComponent(copies)}` +
+      const query =
+        `filename=${encodeURIComponent(filename)}&size=${encodeURIComponent(size)}&copies=${encodeURIComponent(copies)}` +
         `&text_品番=${encodeURIComponent(品番)}` +
         `&text_車型=${encodeURIComponent(車型)}` +
         `&text_収容数=${encodeURIComponent(value)}` +
@@ -4679,7 +4679,7 @@ async function printLabel() {
         `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
 
       console.log(WorkDate);
-      window.location.href = url; // Redirect to Smooth Print
+      sendBrotherPrint(query); // iOS: brotherwebprint:// · Android: localhost:8088
     }
 
     return; // Stop the submission process until user chooses 収容数
@@ -4719,8 +4719,8 @@ async function printLabel() {
 
   const size = "RollW62";
   const copies = 1;
-  const url =
-    `brotherwebprint://print?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent(size)}&copies=${encodeURIComponent(copies)}` +
+  const query =
+    `filename=${encodeURIComponent(filename)}&size=${encodeURIComponent(size)}&copies=${encodeURIComponent(copies)}` +
     `&text_品番=${encodeURIComponent(品番)}` +
     `&text_車型=${encodeURIComponent(車型)}` +
     `&text_収容数=${encodeURIComponent(収容数)}` +
@@ -4733,10 +4733,38 @@ async function printLabel() {
     `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
 
   console.log(WorkDate);
-  window.location.href = url;
+  sendBrotherPrint(query);
 }
 
 // Take photo hatsumono and atomono and label
+// Send a label print to the Brother QL-820. iOS uses the brotherwebprint:// URL
+// scheme (fire-and-forget); Android posts to the local SmoothPrint service on
+// :8088 and checks the response. Mirrors firstKojoLabelPrinter.js.
+function sendBrotherPrint(query) {
+  const isIOS = /iphone|ipad|ipod/.test(navigator.userAgent.toLowerCase());
+  if (isIOS) {
+    window.location.href = `brotherwebprint://print?${query}`;
+    return;
+  }
+  // Android (and desktop): Brother SmoothPrint listens on localhost:8088
+  fetch(`http://localhost:8088/print?${query}`)
+    .then(res => res.text())
+    .then(res => {
+      if (!res.includes('<result>SUCCESS</result>')) {
+        console.error('Android label print response:', res);
+        if (typeof showAlert === 'function') {
+          showAlert(/coveropen/i.test(res)
+            ? 'プリンターのカバーが開いています / Printer cover open'
+            : 'ラベル印刷エラー / Label print error');
+        }
+      }
+    })
+    .catch(err => {
+      console.error('Android label print failed:', err);
+      if (typeof showAlert === 'function') showAlert('ラベル印刷に失敗しました / Label print failed');
+    });
+}
+
 // Helper function to convert File to base64 string
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
