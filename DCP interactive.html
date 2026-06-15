@@ -3018,9 +3018,17 @@
                 issues.push({ text: '材料ロットが入力されていません / Material Lot is required', tab: 2, fieldId: '材料ロット' });
             }
 
-            const lotCount = values.materialLot.split(',').map(l => l.trim()).filter(l => l).length;
-            if (values.photosMaterial < lotCount) {
-                issues.push({ text: `材料ラベル写真が不足しています (必要: ${lotCount}枚, 撮影: ${values.photosMaterial}枚) / Insufficient material label photos`, tab: 3, fieldId: 'makerLabelButton' });
+            if (values.photosHatsumono !== 'TRUE') {
+                issues.push({ text: '初物チェックの写真がありません / Hatsumono Photo is missing', tab: 3, fieldId: 'hatsumonoButton' });
+            }
+
+            if (values.photosAtomono !== 'TRUE') {
+                issues.push({ text: '終物チェックの写真がありません / Atomono Photo is missing', tab: 3, fieldId: 'atomonoButton' });
+            }
+
+            const lotCount = values.materialLot ? values.materialLot.split(',').map(l => l.trim()).filter(l => l).length : 0;
+            if (lotCount > 0 && values.photosMaterial < lotCount) {
+                issues.push({ text: `材料ラベル写真が不足しています (必要: ${lotCount}枚以上, 撮影: ${values.photosMaterial}枚) / Insufficient material label photos`, tab: 2, fieldId: '材料ロット' });
             }
 
             let html = '';
@@ -3100,8 +3108,16 @@
                 }
                 const field = document.getElementById(fieldId);
                 if (field) {
+                    if (fieldId !== '材料ロット') {
+                        field.focus();
+                    }
                     field.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    field.focus();
+                    // On mobile/tablets, focusing an input brings up the soft keyboard which resizes the viewport.
+                    // Doing a second delayed scroll ensures the field stays in the center and doesn't get pushed to the bottom.
+                    setTimeout(() => {
+                        field.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }, 400);
+                    
                     field.classList.add('flash-highlight');
                     setTimeout(() => field.classList.remove('flash-highlight'), 1800);
                 }
