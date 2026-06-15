@@ -4186,8 +4186,14 @@
                 if (!slot) { showToast('休憩は最大4回までです / Max 4 breaks recorded'); return; }
                 const si = document.getElementById('break' + slot + '-start');
                 const ei = document.getElementById('break' + slot + '-end');
-                if (si) si.value = fmtClock(start);
-                if (ei) ei.value = fmtClock(end);
+                if (si) {
+                    si.value = fmtClock(start);
+                    si.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                if (ei) {
+                    ei.value = fmtClock(end);
+                    ei.dispatchEvent(new Event('change', { bubbles: true }));
+                }
                 if (typeof calculateTotalBreakTime === 'function') calculateTotalBreakTime();
                 updateBreakCount();
                 showToast('休憩を記録しました / Break recorded');

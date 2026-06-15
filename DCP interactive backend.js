@@ -6598,14 +6598,14 @@ document.getElementById('submit').addEventListener('click', async (event) => {
             // Auto-close after 5 seconds to prevent duplicate submissions
             const autoCloseTimer = setTimeout(() => {
                 scanAlertModal.style.display = 'none'; document.body.classList.remove('flash-green');
-                window.location.reload(); resetForm();
+                resetAllSteps(); window.location.reload();
             }, 5000);
             
             // Allow manual close by clicking the × button
             document.getElementById('closeScanModalButton').onclick = function() {
                 clearTimeout(autoCloseTimer); // Cancel auto-close if user clicks manually
                 scanAlertModal.style.display = 'none'; document.body.classList.remove('flash-green');
-                window.location.reload(); resetForm();
+                resetAllSteps(); window.location.reload();
             };
         }, 3000);
 
@@ -9935,11 +9935,20 @@ function resetAllSteps() {
   resetForm();
   syncVideoManualLauncherState();
 
-  // Reset params lock state
-  if (typeof window.paramsVisited !== 'undefined') {
-    window.paramsVisited = false;
-    window.paramsLocked = false;
-    localStorage.removeItem(`${uniquePrefix}paramsConfirmed`);
+  // Reset params lock state unconditionally
+  window.paramsVisited = false;
+  window.paramsLocked = false;
+  
+  const prefix = typeof uniquePrefix !== 'undefined' ? uniquePrefix : '';
+  const confirmedKey = prefix ? `${prefix}paramsConfirmed` : 'DCP_paramsConfirmed';
+  localStorage.removeItem(confirmedKey);
+  
+  // Explicitly reset Values Changed button to prevent it from staying green
+  const btn = document.getElementById('valuesChangedBtn');
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.remove('btn-primary');
+    btn.classList.add('btn-secondary');
   }
 }
 
