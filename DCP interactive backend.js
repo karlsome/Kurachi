@@ -4740,10 +4740,32 @@ async function printLabel() {
 // Send a label print to the Brother QL-820. iOS uses the brotherwebprint:// URL
 // scheme (fire-and-forget); Android posts to the local SmoothPrint service on
 // :8088 and checks the response. Mirrors firstKojoLabelPrinter.js.
+function showPrintingIndicator() {
+  let el = document.getElementById('printingIndicator');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'printingIndicator';
+    el.style.cssText = 'position:fixed;top:max(14px,env(safe-area-inset-top,0px));left:50%;transform:translateX(-50%);' +
+      'z-index:2147483646;background:#2E6FF2;color:#fff;padding:10px 18px;border-radius:999px;font-family:inherit;' +
+      'font-weight:800;font-size:0.85rem;box-shadow:0 6px 20px rgba(16,24,40,0.28);display:flex;align-items:center;gap:10px;';
+    el.innerHTML = '<span style="width:16px;height:16px;border:2.5px solid rgba(255,255,255,0.4);border-top-color:#fff;border-radius:50%;display:inline-block;animation:spin 0.8s linear infinite;"></span>' +
+      '<span>印刷中... / Printing...</span>';
+    document.body.appendChild(el);
+  }
+  el.style.display = 'flex';
+}
+function hidePrintingIndicator() {
+  const el = document.getElementById('printingIndicator');
+  if (el) el.remove();
+}
+
 function sendBrotherPrint(query) {
   const isIOS = /iphone|ipad|ipod/.test(navigator.userAgent.toLowerCase());
+  showPrintingIndicator();
   if (isIOS) {
+    // Fire-and-forget URL scheme — keep the indicator up briefly then clear it
     window.location.href = `brotherwebprint://print?${query}`;
+    setTimeout(hidePrintingIndicator, 3500);
     return;
   }
   // Android (and desktop): Brother SmoothPrint listens on localhost:8088
@@ -4762,7 +4784,8 @@ function sendBrotherPrint(query) {
     .catch(err => {
       console.error('Android label print failed:', err);
       if (typeof showAlert === 'function') showAlert('ラベル印刷に失敗しました / Label print failed');
-    });
+    })
+    .finally(hidePrintingIndicator);
 }
 
 // Helper function to convert File to base64 string

@@ -83,6 +83,7 @@
             background-color: var(--bg-app);
             color: var(--text-main);
             height: 100vh;
+            height: 100dvh; /* fit the visible area (excludes Android nav bar / browser UI) */
             width: 100vw;
             overflow: hidden;
             display: flex;
@@ -280,7 +281,9 @@
             height: 100%;
             overflow-y: auto;
             -webkit-overflow-scrolling: touch;
-            padding: 20px;
+            /* extra bottom clearance so the last card isn't hidden behind the
+               Android nav bar / iOS home indicator */
+            padding: 20px 20px calc(64px + env(safe-area-inset-bottom, 0px));
         }
 
         .tab-panel::-webkit-scrollbar { width: 6px; }
@@ -1104,7 +1107,7 @@
         /* ---------------- Landscape tuning for tablets ---------------- */
         @media (orientation: landscape) {
             .form-grid { gap: 16px; }
-            .tab-panel { padding: 20px 28px; }
+            .tab-panel { padding: 20px 28px calc(64px + env(safe-area-inset-bottom, 0px)); }
         }
 
         /* ---------------- Small screens (phones) ---------------- */
@@ -1112,7 +1115,7 @@
             /* Single-column forms so native date/time inputs never overflow */
             .form-grid { grid-template-columns: 1fr; }
             .form-group.full-width { grid-column: span 1; }
-            .tab-panel { padding: 16px 14px; }
+            .tab-panel { padding: 16px 14px calc(64px + env(safe-area-inset-bottom, 0px)); }
             .glass-card { padding: 16px; }
 
             /* Header fits without wrapping */
@@ -1389,7 +1392,7 @@
                                 <svg viewBox="0 0 24 24"><path d="M4 7V5a1 1 0 0 1 1-1h2M4 17v2a1 1 0 0 0 1 1h2M20 7V5a1 1 0 0 0-1-1h-2M20 17v2a1 1 0 0 1-1 1h-2"/><line x1="4" y1="12" x2="20" y2="12"/></svg>
                                 <span>材料スキャン<small>Scan Material + Photo</small></span>
                             </button>
-                            <button type="button" id="prodPrintLabelButton" class="prod-action-btn">
+                            <button type="button" id="prodPrintLabelButton" class="prod-action-btn print-btn">
                                 <svg viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
                                 <span>ラベル印刷<small>Print Label</small></span>
                             </button>
@@ -2201,6 +2204,7 @@
         .prod-action-btn {
             display: flex;
             align-items: center;
+            justify-content: center;
             gap: 12px;
             padding: 16px;
             background: var(--bg-surface);
@@ -2211,17 +2215,25 @@
             color: var(--text-main);
             transition: var(--transition-smooth);
             text-align: left;
-            min-height: 64px;
+            min-height: 130px;
         }
         .prod-action-btn:hover { border-color: var(--blue); background: var(--bg-subtle); }
         .prod-action-btn:active { transform: translateY(1px); }
         .prod-action-btn svg {
-            width: 26px; height: 26px; flex-shrink: 0;
+            width: 28px; height: 28px; flex-shrink: 0;
             stroke: var(--blue); stroke-width: 1.7; fill: none;
             stroke-linecap: round; stroke-linejoin: round;
         }
         .prod-action-btn span { display: flex; flex-direction: column; font-weight: 700; font-size: 0.95rem; line-height: 1.25; }
         .prod-action-btn small { font-weight: 600; font-size: 0.72rem; color: var(--text-soft); }
+
+        /* Print button — blue so it's clearly distinct from Scan Material */
+        .prod-action-btn.print-btn {
+            background: var(--blue); border-color: var(--blue); color: #fff;
+        }
+        .prod-action-btn.print-btn:hover { background: var(--blue-hover); border-color: var(--blue-hover); }
+        .prod-action-btn.print-btn svg { stroke: #fff; }
+        .prod-action-btn.print-btn small { color: rgba(255,255,255,0.85); }
 
         /* Check buttons (初物 / 終物) */
         .prod-check-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
