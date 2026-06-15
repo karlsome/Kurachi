@@ -30831,21 +30831,24 @@ app.get('/api/shisaku/list', async (req, res) => {
 
 app.post('/api/shisaku/register', async (req, res) => {
   try {
-    const { shisakuNo, deadline, eventName, modelName, customerName, dxfFile, pdfFile, pceFile } = req.body;
+    const { shisakuNo, deadline, eventName, modelName, customerName, registeredBy, dxfFile, pdfFile, pceFiles } = req.body;
 
-    if (!shisakuNo || !deadline || !eventName || !modelName || !customerName) {
-      return res.status(400).json({ error: 'shisakuNo, deadline, eventName, modelName, and customerName are required' });
+    if (!shisakuNo || !deadline || !eventName || !modelName || !customerName || !registeredBy) {
+      return res.status(400).json({ error: 'shisakuNo, deadline, eventName, modelName, customerName, and registeredBy are required' });
     }
-    if (!dxfFile?.base64 || !dxfFile?.name || !pdfFile?.base64 || !pdfFile?.name || !pceFile?.base64 || !pceFile?.name) {
-      return res.status(400).json({ error: 'dxfFile, pdfFile, and pceFile (each with name and base64) are required' });
+    if (!dxfFile?.base64 || !dxfFile?.name || !pdfFile?.base64 || !pdfFile?.name) {
+      return res.status(400).json({ error: 'dxfFile and pdfFile (each with name and base64) are required' });
+    }
+    if (!Array.isArray(pceFiles) || pceFiles.length === 0 || !pceFiles.every((f) => f?.base64 && f?.name)) {
+      return res.status(400).json({ error: 'pceFiles must be a non-empty array of files, each with name and base64' });
     }
 
     const drive = _buildDriveClient();
 
-    const [dxfResult, pdfResult, pceResult] = await Promise.all([
+    const [dxfResult, pdfResult, ...pceResults] = await Promise.all([
       _uploadShisakuFile(drive, 'dxf', dxfFile.name, dxfFile.base64, 'application/octet-stream'),
       _uploadShisakuFile(drive, 'pdf', pdfFile.name, pdfFile.base64, 'application/pdf'),
-      _uploadShisakuFile(drive, 'pce', pceFile.name, pceFile.base64, 'application/octet-stream'),
+      ...pceFiles.map((f) => _uploadShisakuFile(drive, 'pce', f.name, f.base64, 'application/octet-stream')),
     ]);
 
     const document = {
@@ -30853,10 +30856,11 @@ app.post('/api/shisaku/register', async (req, res) => {
       deadline,
       dxflink: dxfResult.link,
       pdflink: pdfResult.link,
-      pcelink: pceResult.link,
+      pcelinks: pceResults.map((r) => ({ name: r.name, link: r.link })),
       eventName: String(eventName).trim(),
       modelName: String(modelName).trim(),
       customerName: String(customerName).trim(),
+      registeredBy: String(registeredBy).trim(),
       createdAt: new Date(),
     };
 
