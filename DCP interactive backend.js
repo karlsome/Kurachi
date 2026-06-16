@@ -10714,9 +10714,11 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
     markScanWorkflowComplete();
     autoFillProductionStartTime();
 
-    // Call the sendtoNC function (sends in background with progress bar)
-    await sendtoNC(currentSebanggo);
+    // Navigate to params page immediately, send in background
     if (typeof window.goToTab === 'function') window.goToTab(1);
+
+    // Call the sendtoNC function (sends in background with progress bar)
+    sendtoNC(currentSebanggo);
     
   } catch (error) {
     console.error("Error sending to machine:", error);
