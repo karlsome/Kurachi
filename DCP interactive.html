@@ -3041,6 +3041,22 @@
                 issues.push({ text: `材料ラベル写真が不足しています (必要: ${lotCount}枚以上, 撮影: ${values.photosMaterial}枚) / Insufficient material label photos`, tab: 2, fieldId: '材料ロット' });
             }
 
+            // Kensa (inspection) fields are required only when the kensa toggle is ON
+            if (document.getElementById('enable-inputs')?.checked) {
+                if (!document.getElementById('Kensa Name')?.value) {
+                    issues.push({ text: '検査者が入力されていません / Inspector name is required', tab: 2, fieldId: 'Kensa Name' });
+                }
+                if (!document.getElementById('KDate')?.value) {
+                    issues.push({ text: '検査日付が入力されていません / Inspection date is required', tab: 2, fieldId: 'KDate' });
+                }
+                if (!document.getElementById('KStart Time')?.value) {
+                    issues.push({ text: '検査開始時間が入力されていません / Inspection start time is required', tab: 2, fieldId: 'KStart Time' });
+                }
+                if (!document.getElementById('KEnd Time')?.value) {
+                    issues.push({ text: '検査終了時間が入力されていません / Inspection end time is required', tab: 2, fieldId: 'KEnd Time' });
+                }
+            }
+
             let html = '';
 
             if (issues.length > 0) {

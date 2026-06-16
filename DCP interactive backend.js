@@ -6558,7 +6558,7 @@ document.getElementById('submit').addEventListener('click', async (event) => {
             isToggleChecked: isToggleChecked
         };
 
-        // Add counter data if toggle is checked
+        // Add counter + inspection data if toggle is checked (for kensaDB)
         if (isToggleChecked) {
             const counters = Array.from({ length: 12 }, (_, i) => {
                 const counter = document.getElementById(`counter-${i + 1}`);
@@ -6568,6 +6568,13 @@ document.getElementById('submit').addEventListener('click', async (event) => {
                 acc[`counter-${i + 1}`] = val;
                 return acc;
             }, {});
+
+            // Inspection-specific fields so kensaDB records the inspector/date/times
+            // (the server falls back to the production values if these are blank)
+            dcpSubmissionData.Inspection_Name = document.getElementById('Kensa Name')?.value || '';
+            dcpSubmissionData.Inspection_Date = document.getElementById('KDate')?.value || '';
+            dcpSubmissionData.Inspection_Time_start = document.getElementById('KStart Time')?.value || '';
+            dcpSubmissionData.Inspection_Time_end = document.getElementById('KEnd Time')?.value || '';
         }
 
         console.log("🚀 Submitting to new DCP route:", {
@@ -6778,6 +6785,26 @@ function toggleInputs() {
 
   // Set hidden input value based on checkbox status
   document.getElementById('検査STATUS').value = isChecked ? "TRUE" : "false";
+
+  // When kensa is enabled, default the inspection fields from the production
+  // values (only if still empty, so the user's own edits are preserved).
+  if (isChecked) {
+    const kensaDefaults = [
+      ['Kensa Name', 'Machine Operator'],
+      ['KDate', 'Lot No.'],
+      ['KStart Time', 'Start Time'],
+      ['KEnd Time', 'End Time']
+    ];
+    kensaDefaults.forEach(([kid, pid]) => {
+      const k = document.getElementById(kid);
+      const pv = document.getElementById(pid)?.value || '';
+      if (k && !k.value && pv) {
+        k.value = pv;
+        k.dispatchEvent(new Event('input', { bubbles: true }));
+        k.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+  }
 }
 
 //LIVE STATUS function
