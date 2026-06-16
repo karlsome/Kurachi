@@ -3048,6 +3048,23 @@ setTimeout(function() {
         openWorkerModal();
       }
     });
+
+    // When the production worker name changes, mirror it into the Kensa
+    // inspector name — but only if kensa is toggled on and the inspector
+    // name is still empty (never overwrite an existing inspector value).
+    const mirrorWorkerToKensa = function() {
+      const kensaToggle = document.getElementById('enable-inputs');
+      if (!kensaToggle || !kensaToggle.checked) return;
+      const kensaInput = document.getElementById('Kensa Name');
+      if (!kensaInput || kensaInput.value) return;
+      const workerValue = workerInput.value || '';
+      if (!workerValue) return;
+      kensaInput.value = workerValue;
+      kensaInput.dispatchEvent(new Event('input', { bubbles: true }));
+      kensaInput.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    workerInput.addEventListener('change', mirrorWorkerToKensa);
+    workerInput.addEventListener('input', mirrorWorkerToKensa);
   }
   
   // Close modal button
