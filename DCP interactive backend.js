@@ -9960,6 +9960,9 @@ function resetAllSteps() {
   const confirmedKey = prefix ? `${prefix}paramsConfirmed` : 'DCP_paramsConfirmed';
   localStorage.removeItem(confirmedKey);
   
+  // Also clear the saved tab index so it doesn't remember the locked tab after a reset
+  localStorage.removeItem(`${prefix}activeTabIndex`);
+  
   // Explicitly reset Values Changed button to prevent it from staying green
   const btn = document.getElementById('valuesChangedBtn');
   if (btn) {
