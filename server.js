@@ -180,6 +180,20 @@ function broadcastToFactory(factoryId, data) {
   console.log(`📡 Broadcasted to ${clients.length} factory TV client(s) on ${factoryId}:`, data);
 }
 
+// ============================================
+// Stop-call (call-leader) state per factory — drives the factory TV blinking.
+// factoryStopCalls: factory -> Map(machine -> { since })
+// ============================================
+const factoryStopCalls = new Map();
+
+function buildStopCallPayload(factoryId) {
+  const machines = factoryStopCalls.get(factoryId) || new Map();
+  const active = Array.from(machines.entries())
+    .map(([machine, info]) => ({ machine, since: info.since }))
+    .sort((a, b) => a.since - b.since); // earliest call first → #1
+  return { type: 'stopcall', factory: factoryId, active };
+}
+
 const uri = process.env.MONGODB_URI;
 const client = new MongoClient(uri, {
   serverApi: {
@@ -452,7 +466,10 @@ app.get("/sse/factory/:factoryId", (req, res) => {
   
   // Send initial connection message
   res.write(`data: ${JSON.stringify({ type: 'connected', factoryId, timestamp: new Date().toISOString() })}\n\n`);
-  
+
+  // Send the current stop-call state so a freshly-loaded TV blinks the right machines
+  res.write(`data: ${JSON.stringify(buildStopCallPayload(factoryId))}\n\n`);
+
   // Handle client disconnect
   req.on('close', () => {
     const clients = factoryConnections.get(factoryId) || [];
@@ -462,6 +479,39 @@ app.get("/sse/factory/:factoryId", (req, res) => {
     }
     console.log(`❌ Factory TV disconnected from ${factoryId}. Remaining: ${clients.length}`);
   });
+});
+
+// Tablet → server: a machine started or cleared a call-leader (stop) request.
+// Broadcasts the full active set to the factory TV(s) so they can rank/blink.
+app.post("/api/stop-call", (req, res) => {
+  const factory = String(req.body?.factory || '').trim();
+  const machine = String(req.body?.machine || '').trim().toUpperCase();
+  const action = String(req.body?.action || '').trim();
+
+  if (!factory || !machine) {
+    return res.status(400).json({ error: "factory and machine are required" });
+  }
+  if (action !== 'activate' && action !== 'clear') {
+    return res.status(400).json({ error: "action must be 'activate' or 'clear'" });
+  }
+
+  if (!factoryStopCalls.has(factory)) factoryStopCalls.set(factory, new Map());
+  const machines = factoryStopCalls.get(factory);
+
+  // A tablet machine id may be grouped, e.g. "OZNC04,OZNC06" — apply to each.
+  const ids = machine.split(',').map(m => m.trim()).filter(Boolean);
+  ids.forEach(id => {
+    if (action === 'activate') {
+      if (!machines.has(id)) machines.set(id, { since: Date.now() });
+    } else {
+      machines.delete(id);
+    }
+  });
+
+  const payload = buildStopCallPayload(factory);
+  broadcastToFactory(factory, payload);
+  console.log(`🟥 stop-call ${action} for ${factory}/${ids.join(',')} → ${payload.active.length} active`);
+  res.json({ ok: true, active: payload.active });
 });
 
 // API endpoint to broadcast scan data to specific machine(s)

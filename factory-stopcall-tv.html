@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>呼び出しモニター / Call Monitor</title>
+    <style>
+        :root {
+            --bg: #0A0F1A;
+            --bg-2: #111A2B;
+            --tile: #16223A;
+            --tile-border: #243450;
+            --text: #E7EEF9;
+            --muted: #8499B8;
+            --red: #E11D2A;
+            --red-2: #FF3B47;
+            --green: #29C36A;
+            --amber: #F5A524;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        html,
+        body {
+            height: 100%;
+            background: var(--bg);
+            color: var(--text);
+            font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", system-ui, -apple-system, sans-serif;
+            overflow: hidden;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .app {
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            padding: 2vh 2.2vw;
+            gap: 1.6vh;
+        }
+
+        /* ---------- Header ---------- */
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 24px;
+        }
+
+        .brand {
+            display: flex;
+            align-items: baseline;
+            gap: 18px;
+        }
+
+        .brand h1 {
+            font-size: clamp(28px, 3.4vw, 64px);
+            font-weight: 900;
+            letter-spacing: 0.01em;
+        }
+
+        .brand .sub {
+            font-size: clamp(14px, 1.3vw, 24px);
+            color: var(--muted);
+            font-weight: 700;
+        }
+
+        .head-right {
+            display: flex;
+            align-items: center;
+            gap: 26px;
+        }
+
+        .clock {
+            font-size: clamp(24px, 2.8vw, 52px);
+            font-weight: 800;
+            font-variant-numeric: tabular-nums;
+            letter-spacing: 0.02em;
+        }
+
+        .conn {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: clamp(12px, 1.1vw, 20px);
+            font-weight: 700;
+            color: var(--muted);
+        }
+
+        .conn .dot {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: var(--muted);
+        }
+
+        .conn.online .dot {
+            background: var(--green);
+            box-shadow: 0 0 12px var(--green);
+        }
+
+        .conn.offline .dot {
+            background: var(--amber);
+            box-shadow: 0 0 12px var(--amber);
+        }
+
+        /* ---------- Status banner ---------- */
+        .banner {
+            border-radius: 16px;
+            padding: 1.2vh 1.4vw;
+            font-weight: 900;
+            font-size: clamp(18px, 2vw, 40px);
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            background: var(--bg-2);
+            color: var(--muted);
+            border: 2px solid var(--tile-border);
+        }
+
+        .banner.alert {
+            background: linear-gradient(90deg, rgba(225, 29, 42, 0.25), rgba(225, 29, 42, 0.08));
+            color: #FFD7DA;
+            border-color: var(--red);
+            animation: bannerBlink 1s steps(1) infinite;
+        }
+
+        @keyframes bannerBlink {
+
+            0%,
+            100% {
+                border-color: var(--red);
+            }
+
+            50% {
+                border-color: rgba(225, 29, 42, 0.3);
+            }
+        }
+
+        .banner .pill {
+            background: var(--red);
+            color: #fff;
+            border-radius: 999px;
+            padding: 0.2em 0.7em;
+            font-size: 0.9em;
+        }
+
+        /* ---------- Grid ---------- */
+        .grid {
+            flex: 1;
+            display: grid;
+            gap: 1.4vh 1.2vw;
+            grid-auto-rows: 1fr;
+            min-height: 0;
+        }
+
+        .tile {
+            position: relative;
+            background: var(--tile);
+            border: 3px solid var(--tile-border);
+            border-radius: 18px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 0.6vh;
+            overflow: hidden;
+            transition: background 0.2s, border-color 0.2s;
+        }
+
+        .tile .name {
+            font-size: clamp(22px, 2.6vw, 56px);
+            font-weight: 900;
+            letter-spacing: 0.02em;
+        }
+
+        .tile .state {
+            font-size: clamp(12px, 1.1vw, 22px);
+            font-weight: 800;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+
+        /* calling */
+        .tile.calling {
+            background: var(--red);
+            border-color: #fff;
+            animation: tileBlink 0.9s steps(1) infinite;
+        }
+
+        .tile.calling .name {
+            color: #fff;
+        }
+
+        .tile.calling .state {
+            color: #FFE3E5;
+        }
+
+        @keyframes tileBlink {
+
+            0%,
+            100% {
+                background: var(--red);
+                box-shadow: 0 0 0 0 rgba(255, 59, 71, 0.0), 0 0 40px rgba(225, 29, 42, 0.6);
+            }
+
+            50% {
+                background: #7d0f17;
+                box-shadow: 0 0 0 0 rgba(255, 59, 71, 0.0), 0 0 10px rgba(225, 29, 42, 0.2);
+            }
+        }
+
+        .rank-badge {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            min-width: clamp(34px, 3vw, 64px);
+            height: clamp(34px, 3vw, 64px);
+            padding: 0 0.3em;
+            border-radius: 999px;
+            background: #fff;
+            color: var(--red);
+            font-weight: 900;
+            font-size: clamp(18px, 1.8vw, 38px);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            font-variant-numeric: tabular-nums;
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+        }
+
+        .tile.calling .rank-badge {
+            display: flex;
+        }
+
+        .wait {
+            position: absolute;
+            bottom: 8px;
+            right: 12px;
+            font-size: clamp(12px, 1.2vw, 24px);
+            font-weight: 800;
+            color: #FFE3E5;
+            font-variant-numeric: tabular-nums;
+            display: none;
+        }
+
+        .tile.calling .wait {
+            display: block;
+        }
+
+        /* ---------- Full-screen takeover ---------- */
+        .takeover {
+            position: fixed;
+            inset: 0;
+            z-index: 50;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 2vh;
+            background: radial-gradient(circle at 50% 40%, #C2151F, #5A0A0E 80%);
+            animation: takeoverBlink 0.7s steps(1) infinite;
+        }
+
+        .takeover.show {
+            display: flex;
+        }
+
+        @keyframes takeoverBlink {
+
+            0%,
+            100% {
+                background: radial-gradient(circle at 50% 40%, #E11D2A, #5A0A0E 80%);
+            }
+
+            50% {
+                background: radial-gradient(circle at 50% 40%, #8d1118, #380a0c 80%);
+            }
+        }
+
+        .takeover .to-label {
+            font-size: clamp(28px, 4vw, 80px);
+            font-weight: 900;
+            color: #FFD7DA;
+            letter-spacing: 0.1em;
+        }
+
+        .takeover .to-machine {
+            font-size: clamp(80px, 18vw, 360px);
+            font-weight: 900;
+            color: #fff;
+            line-height: 0.95;
+            text-shadow: 0 8px 40px rgba(0, 0, 0, 0.4);
+        }
+
+        .takeover .to-rank {
+            font-size: clamp(20px, 2.4vw, 48px);
+            font-weight: 900;
+            color: #fff;
+            background: rgba(0, 0, 0, 0.25);
+            border: 3px solid #fff;
+            border-radius: 999px;
+            padding: 0.2em 1em;
+        }
+
+        .sound-enable {
+            position: fixed;
+            bottom: 16px;
+            left: 16px;
+            z-index: 60;
+            background: var(--bg-2);
+            color: var(--muted);
+            border: 2px solid var(--tile-border);
+            border-radius: 999px;
+            padding: 8px 16px;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .sound-enable.on {
+            color: var(--green);
+            border-color: var(--green);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="app">
+        <header>
+            <div class="brand">
+                <h1 id="factoryName">—</h1>
+                <span class="sub">呼び出しモニター / Call Monitor</span>
+            </div>
+            <div class="head-right">
+                <div class="clock" id="clock">--:--</div>
+                <div class="conn" id="conn">
+                    <span class="dot"></span><span id="connText">接続中… / Connecting…</span>
+                </div>
+            </div>
+        </header>
+
+        <div class="banner" id="banner">
+            <span id="bannerText">すべて正常 / All clear</span>
+        </div>
+
+        <div class="grid" id="grid"></div>
+    </div>
+
+    <!-- Full-screen new-call takeover -->
+    <div class="takeover" id="takeover">
+        <div class="to-label">呼び出し / CALLING LEADER</div>
+        <div class="to-machine" id="toMachine">—</div>
+        <div class="to-rank" id="toRank">#1</div>
+    </div>
+
+    <button type="button" class="sound-enable" id="soundEnable">🔇 音を有効化 / Enable sound</button>
+
+    <script>
+        const serverURL = "https://kurachi.onrender.com";
+        // const serverURL = "http://localhost:3000";
+
+        const params = new URLSearchParams(location.search);
+        const FACTORY = params.get('filter') || params.get('factory') || '';
+        const SERVER = params.get('server') || serverURL; // ?server= override for local testing
+
+        // Per-factory machine roster (mirrors chooseMachine.html). Office/entrance ignored.
+        const FACTORY_MACHINES = {
+            '小瀬': [
+                'OZNC01', 'OZNC02', 'OZNC03', 'OZNC04', 'OZNC05', 'OZNC06',
+                'OZNC07', 'OZNC08', 'OZNC09', 'OZNC10', 'OZNC11', 'OZNC12',
+                'OZNC13', 'OZNC14', 'OZNC15', 'OZNC16', 'OZNC17', 'OZNC18',
+                'OZMANAS'
+            ]
+        };
+
+        document.getElementById('factoryName').textContent = FACTORY || '工場未指定';
+
+        // ----- Build the grid -----
+        const grid = document.getElementById('grid');
+        const tileByMachine = new Map();
+        let roster = (FACTORY_MACHINES[FACTORY] || []).slice();
+
+        function chooseColumns(n) {
+            if (n <= 4) return n || 1;
+            if (n <= 6) return 3;
+            if (n <= 12) return 4;
+            if (n <= 20) return 5;
+            return 6;
+        }
+
+        function renderRoster() {
+            grid.innerHTML = '';
+            tileByMachine.clear();
+            const cols = chooseColumns(roster.length);
+            grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+            roster.forEach(m => {
+                const tile = document.createElement('div');
+                tile.className = 'tile';
+                tile.dataset.machine = m;
+                tile.innerHTML =
+                    '<div class="rank-badge"></div>' +
+                    '<div class="name">' + m + '</div>' +
+                    '<div class="state">稼働 / RUNNING</div>' +
+                    '<div class="wait"></div>';
+                grid.appendChild(tile);
+                tileByMachine.set(m, tile);
+            });
+        }
+        renderRoster();
+
+        // ----- Clock -----
+        function tickClock() {
+            const d = new Date();
+            const p = n => String(n).padStart(2, '0');
+            document.getElementById('clock').textContent = p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+        }
+        tickClock();
+        setInterval(tickClock, 1000);
+
+        // ----- Sound (best-effort; TVs often block autoplay) -----
+        let audioCtx = null;
+        let soundOn = false;
+        document.getElementById('soundEnable').addEventListener('click', function () {
+            try {
+                audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+                soundOn = true;
+                this.classList.add('on');
+                this.textContent = '🔊 音 ON / Sound on';
+                beep();
+            } catch (e) { }
+        });
+        function beep() {
+            if (!soundOn || !audioCtx) return;
+            try {
+                const o = audioCtx.createOscillator();
+                const g = audioCtx.createGain();
+                o.type = 'square';
+                o.frequency.value = 880;
+                g.gain.value = 0.08;
+                o.connect(g); g.connect(audioCtx.destination);
+                o.start();
+                o.stop(audioCtx.currentTime + 0.25);
+            } catch (e) { }
+        }
+
+        // ----- State + rendering of active calls -----
+        let activeList = [];                  // [{machine, since}] sorted earliest-first
+        let activeSince = new Map();          // machine -> since (for wait timers + new detection)
+
+        function fmtWait(ms) {
+            const s = Math.max(0, Math.floor(ms / 1000));
+            const m = Math.floor(s / 60), ss = s % 60;
+            const p = n => String(n).padStart(2, '0');
+            return p(m) + ':' + p(ss);
+        }
+
+        function refreshWaitTimers() {
+            const now = Date.now();
+            activeSince.forEach((since, machine) => {
+                const tile = tileByMachine.get(machine);
+                if (tile) {
+                    const w = tile.querySelector('.wait');
+                    if (w) w.textContent = fmtWait(now - since);
+                }
+            });
+        }
+        setInterval(refreshWaitTimers, 1000);
+
+        function applyActive(list) {
+            // Ensure roster contains any unexpected machine ids from events
+            let rosterChanged = false;
+            list.forEach(item => {
+                if (!tileByMachine.has(item.machine)) {
+                    roster.push(item.machine);
+                    rosterChanged = true;
+                }
+            });
+            if (rosterChanged) {
+                renderRoster();
+            }
+
+            const prev = new Set(activeSince.keys());
+            activeList = list.slice().sort((a, b) => a.since - b.since);
+            const newSince = new Map();
+            activeList.forEach(it => newSince.set(it.machine, it.since));
+
+            // Detect newly-added machines (for the takeover announcement)
+            const newlyAdded = activeList.filter(it => !prev.has(it.machine));
+
+            // Paint tiles
+            tileByMachine.forEach((tile, machine) => {
+                const idx = activeList.findIndex(it => it.machine === machine);
+                if (idx >= 0) {
+                    tile.classList.add('calling');
+                    tile.querySelector('.rank-badge').textContent = '#' + (idx + 1);
+                    tile.querySelector('.state').textContent = '呼び出し中 / CALLING';
+                } else {
+                    tile.classList.remove('calling');
+                    tile.querySelector('.state').textContent = '稼働 / RUNNING';
+                    const w = tile.querySelector('.wait'); if (w) w.textContent = '';
+                }
+            });
+
+            activeSince = newSince;
+            updateBanner();
+            refreshWaitTimers();
+
+            // Announce each newly-added machine (queued, 3s each)
+            if (newlyAdded.length) {
+                beep();
+                newlyAdded
+                    .sort((a, b) => a.since - b.since)
+                    .forEach(it => queueTakeover(it.machine));
+            }
+        }
+
+        function updateBanner() {
+            const banner = document.getElementById('banner');
+            const text = document.getElementById('bannerText');
+            const n = activeList.length;
+            if (n > 0) {
+                banner.classList.add('alert');
+                const names = activeList.map((it, i) => '#' + (i + 1) + ' ' + it.machine).join('　');
+                text.innerHTML = '<span class="pill">' + n + '</span> 台 呼び出し中 / Calling — ' + names;
+            } else {
+                banner.classList.remove('alert');
+                text.textContent = 'すべて正常 / All clear';
+            }
+        }
+
+        // ----- Takeover queue -----
+        const takeoverQueue = [];
+        let takeoverRunning = false;
+        function queueTakeover(machine) {
+            takeoverQueue.push(machine);
+            if (!takeoverRunning) runTakeover();
+        }
+        function runTakeover() {
+            if (!takeoverQueue.length) { takeoverRunning = false; return; }
+            takeoverRunning = true;
+            const machine = takeoverQueue.shift();
+            // Only announce if still active
+            const idx = activeList.findIndex(it => it.machine === machine);
+            if (idx < 0) { runTakeover(); return; }
+            const el = document.getElementById('takeover');
+            document.getElementById('toMachine').textContent = machine;
+            document.getElementById('toRank').textContent = '#' + (idx + 1) + ' に呼ばれました / called';
+            el.classList.add('show');
+            setTimeout(() => {
+                el.classList.remove('show');
+                setTimeout(runTakeover, 350); // brief gap before next
+            }, 3000);
+        }
+
+        // Expose for offline/unit testing without a live SSE server
+        window.__applyStopCallPayload = function (payload) {
+            if (payload && payload.type === 'stopcall' && Array.isArray(payload.active)) {
+                applyActive(payload.active);
+            }
+        };
+
+        // ----- SSE connection -----
+        function setConn(state, label) {
+            const c = document.getElementById('conn');
+            c.classList.remove('online', 'offline');
+            if (state) c.classList.add(state);
+            document.getElementById('connText').textContent = label;
+        }
+
+        let es = null;
+        function connect() {
+            if (!FACTORY) { setConn('offline', '工場が指定されていません / No factory'); return; }
+            try {
+                es = new EventSource(`${SERVER}/sse/factory/${encodeURIComponent(FACTORY)}`);
+            } catch (e) {
+                setConn('offline', '接続エラー / Connection error');
+                return;
+            }
+            es.onopen = () => setConn('online', '接続済み / Connected');
+            es.onmessage = (ev) => {
+                let data;
+                try { data = JSON.parse(ev.data); } catch (e) { return; }
+                if (data.type === 'connected') {
+                    setConn('online', '接続済み / Connected');
+                } else if (data.type === 'stopcall') {
+                    applyActive(Array.isArray(data.active) ? data.active : []);
+                }
+            };
+            es.onerror = () => {
+                setConn('offline', '再接続中… / Reconnecting…');
+                // EventSource auto-reconnects; nothing else needed.
+            };
+        }
+        connect();
+    </script>
+</body>
+
+</html>

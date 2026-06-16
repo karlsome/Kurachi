@@ -4710,7 +4710,7 @@
             }
 
             // ---------- Stop / Call leader (production halt) ----------
-            const STOP_CANCEL_WINDOW_MS = 15000; // cancel button available for 15s
+            const STOP_CANCEL_WINDOW_MS = 5000; // cancel button available for 5s (3s hold already guards mis-clicks)
             let stopCallInterval = null;
             let stopCallCancelTimer = null;
             let stopCallScanner = null;
@@ -4739,6 +4739,21 @@
                 localStorage.removeItem(breakPrefix + 'stopCallData');
                 localStorage.removeItem(breakPrefix + 'activeStopCallStart');
             };
+
+            // Notify the server so the factory TV can blink this machine in real time (SSE).
+            function notifyStopCall(action) {
+                try {
+                    const factory = document.getElementById('selected工場')?.value || '';
+                    const machine = new URLSearchParams(location.search).get('machine') || '';
+                    if (!factory || !machine) return;
+                    const base = (typeof serverURL !== 'undefined' && serverURL) ? serverURL : '';
+                    fetch(`${base}/api/stop-call`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ factory, machine, action })
+                    }).catch(() => { });
+                } catch (e) { }
+            }
 
             function tickStopCall(startEpoch) {
                 const disp = document.getElementById('stopCallTimerDisplay');
@@ -4794,6 +4809,7 @@
                 const startEpoch = Date.now();
                 localStorage.setItem(breakPrefix + 'activeStopCallStart', String(startEpoch));
                 openStopCallOverlay(startEpoch);
+                notifyStopCall('activate');
             }
             function cancelStopCall() {
                 const raw = localStorage.getItem(breakPrefix + 'activeStopCallStart');
@@ -4801,6 +4817,7 @@
                 if (raw && (Date.now() - parseInt(raw, 10)) > STOP_CANCEL_WINDOW_MS) return;
                 localStorage.removeItem(breakPrefix + 'activeStopCallStart');
                 closeStopCallOverlay();
+                notifyStopCall('clear');
                 showToast('呼び出しをキャンセルしました / Call canceled');
             }
             function beginStopCallUnlock() {
@@ -4874,11 +4891,15 @@
                 saveStopCallData(data);
                 localStorage.removeItem(breakPrefix + 'activeStopCallStart');
                 closeStopCallOverlay();
+                notifyStopCall('clear');
                 showToast('リーダー対応を記録しました / Leader arrival recorded');
             }
             function resumeStopCallIfActive() {
                 const raw = localStorage.getItem(breakPrefix + 'activeStopCallStart');
-                if (raw) openStopCallOverlay(parseInt(raw, 10));
+                if (raw) {
+                    openStopCallOverlay(parseInt(raw, 10));
+                    notifyStopCall('activate'); // re-assert to the TV after a reload/server restart
+                }
             }
             window.startStopCall = startStopCall;
 
