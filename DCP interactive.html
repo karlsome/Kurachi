@@ -1980,35 +1980,6 @@
                         </div>
                     </div>
 
-                    <!-- 3. Quantities -->
-                    <div class="glass-card">
-                        <h3>生産数量 / Production Quantity</h3>
-                        <div class="form-grid">
-                            <div class="form-group">
-                                <label for="Process Quantity" data-i18n="process_quantity">加工数（良品）+ NG:</label>
-                                <input type="text" name="Process Quantity" id="ProcessQuantity" class="tap-field"
-                                    placeholder="Process Quantity" data-i18n="process_quantity_placeholder" required
-                                    readonly>
-                            </div>
-                            <div class="form-group" style="justify-content: flex-end;">
-                                <button type="button" id="sendtoQty" class="btn btn-secondary btn-full"
-                                    style="height: 48px;" data-i18n="one_box_completed">
-                                    1 box completed
-                                </button>
-                            </div>
-                            <div class="form-group full-width" id="shotCountSection">
-                                <label for="shot" data-i18n="shot_count">ショット数</label>
-                                <input type="number" name="shot" id="shot" class="tap-field" placeholder="ショット数"
-                                    data-i18n="shot_count_placeholder" readonly>
-                            </div>
-                            <div class="form-group">
-                                <label for="End Time" data-i18n="end_time">加工終了時間:</label>
-                                <input type="time" name="End Time" id="End Time" placeholder="Time End"
-                                    data-i18n="time_end_placeholder" onfocus="setDefaultTime(this)" required>
-                            </div>
-                        </div>
-                    </div>
-
                     <!-- 4. First / last piece checks -->
                     <div class="glass-card">
                         <h3>初物・終物チェック / Cycle Checks</h3>
@@ -2058,6 +2029,35 @@
                                     <input type="time" name="Start Time" id="Start Time" placeholder="Time Start"
                                         data-i18n="time_start_placeholder" onfocus="setDefaultTime(this)" required>
                                 </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 3. Quantities -->
+                    <div class="glass-card">
+                        <h3>生産数量 / Production Quantity</h3>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label for="Process Quantity" data-i18n="process_quantity">加工数（良品）+ NG:</label>
+                                <input type="text" name="Process Quantity" id="ProcessQuantity" class="tap-field"
+                                    placeholder="Process Quantity" data-i18n="process_quantity_placeholder" required
+                                    readonly>
+                            </div>
+                            <div class="form-group" style="justify-content: flex-end;">
+                                <button type="button" id="sendtoQty" class="btn btn-secondary btn-full"
+                                    style="height: 48px;" data-i18n="one_box_completed">
+                                    1 box completed
+                                </button>
+                            </div>
+                            <div class="form-group full-width" id="shotCountSection">
+                                <label for="shot" data-i18n="shot_count">ショット数</label>
+                                <input type="number" name="shot" id="shot" class="tap-field" placeholder="ショット数"
+                                    data-i18n="shot_count_placeholder" readonly>
+                            </div>
+                            <div class="form-group">
+                                <label for="End Time" data-i18n="end_time">加工終了時間:</label>
+                                <input type="time" name="End Time" id="End Time" placeholder="Time End"
+                                    data-i18n="time_end_placeholder" onfocus="setDefaultTime(this)" required>
                             </div>
                         </div>
                     </div>
