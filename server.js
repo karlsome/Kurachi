@@ -2852,7 +2852,7 @@ app.post('/submitToDCP', async (req, res) => {
                 工場: formData.工場,
                 Total: Total_KensaDB,
                 Worker_Name: formData.Inspector_Name || formData.Worker_Name, // Use Inspector_Name if available, fallback to Worker_Name
-                Process_Quantity: formData.Process_Quantity,
+                Process_Quantity: formData.Total, // kensaDB Process_Quantity = production Total (already minus production defects)
                 Remaining_Quantity: formData.Inspection_Good_Total || formData.Total,
                 Date: formData.Inspection_Date || formData.Date, // Use Inspection_Date if available
                 Time_start: formData.Inspection_Time_start || formData.Time_start, // Use Inspection times
