@@ -2775,6 +2775,7 @@
                         if (typeof window.showAppToast === 'function') {
                             window.showAppToast('設定が確認されました / Settings confirmed');
                         }
+                        if (typeof window.goToTab === 'function') window.goToTab(2);
                     };
                 }
             }
@@ -2808,6 +2809,7 @@
                         if (typeof window.showAppToast === 'function') {
                             window.showAppToast('設定が確認されました / Settings confirmed');
                         }
+                        if (typeof window.goToTab === 'function') window.goToTab(2);
                     };
                 }
             }
@@ -4503,7 +4505,10 @@
                 if (csm) csm.addEventListener('click', () => {
                     const seb = document.getElementById('sub-dropdown')?.value;
                     if (!seb) { if (window.showAppToast) window.showAppToast('背番号がありません / No product scanned'); return; }
-                    if (typeof sendtoNC === 'function') sendtoNC(seb);
+                    if (typeof sendtoNC === 'function') {
+                        sendtoNC(seb);
+                        if (typeof window.goToTab === 'function') window.goToTab(1);
+                    }
                 });
 
                 // Tap to preview: completed-card thumbnail and the info-sidebar product image

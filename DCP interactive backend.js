@@ -6887,8 +6887,10 @@ function updateSendToMachineCooldownUI() {
   const isActive = secondsRemaining > 0;
   const mainButton = document.getElementById('sendtoNC');
   const step3Button = document.getElementById('startStep3Send');
+  const completedButton = document.getElementById('completedSendToMachine');
 
   setButtonCooldownState(mainButton, isActive, secondsRemaining);
+  setButtonCooldownState(completedButton, isActive, secondsRemaining);
   if (!isOZMANASMachine()) {
     setButtonCooldownState(step3Button, isActive, secondsRemaining);
   }
@@ -10716,6 +10718,7 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
 
     // Call the sendtoNC function (sends in background with progress bar)
     await sendtoNC(currentSebanggo);
+    if (typeof window.goToTab === 'function') window.goToTab(1);
     
   } catch (error) {
     console.error("Error sending to machine:", error);
