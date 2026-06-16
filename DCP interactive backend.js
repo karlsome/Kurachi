@@ -10965,6 +10965,16 @@ window.addEventListener('load', function() {
         if (m) m.style.display = 'none';
       });
       if (typeof window.syncScanTabState === 'function') window.syncScanTabState();
+      
+      // Restore active tab if we have a valid workflow state
+      const savedTabIndexStr = localStorage.getItem(`${uniquePrefix}activeTabIndex`);
+      if (savedTabIndexStr !== null) {
+        const savedTabIndex = parseInt(savedTabIndexStr, 10);
+        if (!isNaN(savedTabIndex) && typeof window.goToTab === 'function') {
+          // Add a small delay so goToTab runs after all UI state settles
+          setTimeout(() => window.goToTab(savedTabIndex), 50);
+        }
+      }
     } else {
       // Scanned but Step 3 not done — restart from Step 1
       console.log('Incomplete workflow on load (step ' + savedStep + ') - restarting from Step 1');

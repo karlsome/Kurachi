@@ -1781,7 +1781,7 @@
                         </p>
                         <img id="activeProductThumb" class="active-prod-thumb" src="" alt="Product"
                             style="display:none;">
-                        <div class="active-prod-details">
+                        <div class="active-prod-details" onclick="if(typeof window.toggleSidebar==='function') window.toggleSidebar(true);" style="cursor: pointer;" title="製品情報を表示 / Show product info">
                             <div><span class="lbl">背番号 (Code):</span> <strong id="activeSebanggoDisplay"></strong></div>
                             <div><span class="lbl">品番 (Product Number):</span> <strong
                                     id="activeHinbanDisplay"></strong></div>
@@ -2711,6 +2711,10 @@
             }
 
             currentTabIndex = index;
+            
+            // Save active tab index so it persists after refresh
+            const prefix = typeof uniquePrefix !== 'undefined' ? uniquePrefix : '';
+            localStorage.setItem(`${prefix}activeTabIndex`, index);
 
             // Slide tabs viewport
             panelsContainer.style.transform = `translateX(-${index * 16.666}%)`;
