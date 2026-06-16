@@ -875,6 +875,10 @@ function blankInfo() {
   document.getElementById("material-code").value = "";
   document.getElementById("material-color").value = "";
   document.getElementById("送りピッチ").textContent = ""; // Corrected to textContent for label
+
+  if (typeof window.updateParamsGuide === 'function') {
+    window.updateParamsGuide();
+  }
 }
 
 async function fetchProductDetails() {
@@ -997,6 +1001,11 @@ async function fetchProductDetails() {
       dynamicImage.src = "";
       dynamicImage.alt = "No Image Available";
       dynamicImage.style.display = "none";
+    }
+
+    // Update Params guide dynamically if it was already on screen before this fetch finished
+    if (typeof window.updateParamsGuide === 'function') {
+      window.updateParamsGuide();
     }
 
   } catch (error) {
