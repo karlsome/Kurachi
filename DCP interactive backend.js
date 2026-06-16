@@ -4251,6 +4251,10 @@ function resetForm() {
   materialLots = [];
   renderMaterialLotTags();
 
+  // Clear any stop/call-leader events for this session
+  localStorage.removeItem(`${uniquePrefix}stopCallData`);
+  localStorage.removeItem(`${uniquePrefix}activeStopCallStart`);
+
 
   // Reset all textContent elements
   const textContentElements = document.querySelectorAll('[id]'); // Select all elements with an ID
@@ -6568,7 +6572,13 @@ document.getElementById('submit').addEventListener('click', async (event) => {
             Maintenance_Data: maintenanceDataForSubmission,
             Total_Trouble_Minutes: totalTroubleMinutes, Total_Trouble_Hours: parseFloat(totalTroubleHours.toFixed(2)),
             Total_Work_Hours: parseFloat(totalWorkHours.toFixed(2)),
-            
+
+            // Stop / call-leader events (pressDB only). Tracks each time the leader was
+            // called during processing: who arrived, when, and how long the wait was.
+            StopCall: (typeof window.getStopCallData === 'function'
+                ? window.getStopCallData()
+                : { count: 0, totalWaitSeconds: 0, totalWaitMinutes: 0, records: [] }),
+
             // Include image data
             images: uploadedImages, // Cycle check images (existing logic)
             maintenanceImages: maintenanceImages, // Maintenance images
@@ -6643,6 +6653,9 @@ document.getElementById('submit').addEventListener('click', async (event) => {
         
         // Clear session ONLY after successful submission
         clearSessionID();
+
+        // Clear stop-call events so they are not re-submitted after the reload
+        if (typeof window.clearStopCallData === 'function') window.clearStopCallData();
 
         setTimeout(() => {
             uploadingModal.style.display = 'none'; scanAlertText.innerText = 'Form submitted successfully / 保存しました';

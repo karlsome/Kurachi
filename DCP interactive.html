@@ -4019,6 +4019,135 @@
             color: #4A3415;
         }
 
+        /* ---------- Stop / Call-leader (floating button + overlay) ---------- */
+        .stopcall-fab {
+            position: fixed;
+            left: 16px;
+            top: 50%;
+            transform: translateY(-50%);
+            z-index: 99990;
+            width: 86px;
+            height: 86px;
+            background: #E11D2A;
+            color: #fff;
+            border: 3px solid #fff;
+            box-shadow: 0 6px 18px rgba(225, 29, 42, 0.5);
+            clip-path: polygon(30% 0, 70% 0, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0 70%, 0 30%);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 3px;
+            cursor: pointer;
+            font-family: inherit;
+            font-weight: 800;
+            animation: stopFabPulse 2s ease-in-out infinite;
+        }
+
+        .stopcall-fab svg {
+            width: 26px;
+            height: 26px;
+            stroke: #fff;
+            fill: none;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        .stopcall-fab span {
+            font-size: 0.62rem;
+            line-height: 1.05;
+            letter-spacing: 0.02em;
+        }
+
+        .stopcall-fab:active {
+            transform: translateY(-50%) scale(0.95);
+        }
+
+        @keyframes stopFabPulse {
+
+            0%,
+            100% {
+                box-shadow: 0 0 0 0 rgba(225, 29, 42, 0.55);
+            }
+
+            50% {
+                box-shadow: 0 0 0 14px rgba(225, 29, 42, 0);
+            }
+        }
+
+        .stopcall-overlay {
+            background: linear-gradient(160deg, #5A1014, #380A0C);
+        }
+
+        .stopcall-overlay .stopcall-pulse {
+            background: rgba(225, 29, 42, 0.18);
+            border-color: #E11D2A;
+            animation: stopPulse 1.4s ease-in-out infinite;
+        }
+
+        .stopcall-overlay .stopcall-pulse svg {
+            stroke: #FFB3B8;
+        }
+
+        @keyframes stopPulse {
+
+            0%,
+            100% {
+                box-shadow: 0 0 0 0 rgba(225, 29, 42, 0.5);
+            }
+
+            50% {
+                box-shadow: 0 0 0 22px rgba(225, 29, 42, 0);
+            }
+        }
+
+        .stopcall-overlay .break-sub {
+            color: #E8A9AD;
+        }
+
+        .stopcall-overlay .btn-finish-break {
+            background: #fff;
+            color: #5A1014;
+        }
+
+        .stopcall-cancel-btn {
+            margin-top: 14px;
+            background: transparent;
+            color: #E8A9AD;
+            border: 1px solid rgba(255, 255, 255, 0.35);
+            border-radius: var(--btn-radius);
+            min-height: 48px;
+            padding: 0 28px;
+            font-family: inherit;
+            font-weight: 700;
+            font-size: 0.95rem;
+            cursor: pointer;
+        }
+
+        .stopcall-cancel-btn:active {
+            transform: translateY(1px);
+        }
+
+        .stopcall-qr-wrap {
+            width: 100%;
+            max-width: 300px;
+            margin-top: 18px;
+            display: none;
+        }
+
+        .stopcall-qr-wrap.show {
+            display: block;
+        }
+
+        #stopCallQrReader {
+            width: 100%;
+            aspect-ratio: 1;
+            border-radius: var(--btn-radius);
+            overflow: hidden;
+            background: #000;
+        }
+
         /* Summary row edit button + calculated section */
         .summary-row {
             position: relative;
@@ -4059,6 +4188,44 @@
         <div class="break-timer" id="maintenanceTimerDisplay">00:00</div>
         <button type="button" class="btn-finish-break" id="finishMaintenanceButton"
             data-i18n="finish_maintenance">故障対応を終了 / End Maintenance</button>
+    </div>
+
+    <!-- Floating "Stop / Call leader" button (always visible, left side) -->
+    <button type="button" id="stopCallButton" class="stopcall-fab"
+        aria-label="リーダー呼び出し / Call leader"
+        onclick="if(window.startStopCall) window.startStopCall()">
+        <svg viewBox="0 0 24 24">
+            <path d="M18.5 12a6.5 6.5 0 0 0-13 0" />
+            <path d="M5 12v3a2 2 0 0 0 2 2h1v-5H6a1 1 0 0 0-1 0z" />
+            <path d="M19 12v3a2 2 0 0 1-2 2h-1v-5h2a1 1 0 0 1 1 0z" />
+            <path d="M8 19a4 4 0 0 0 4 2" />
+        </svg>
+        <span>呼出<br>Call</span>
+    </button>
+
+    <!-- Stop / Call-leader full-screen overlay (production halted) -->
+    <div id="stopCallOverlay" class="break-overlay stopcall-overlay">
+        <div class="break-pulse stopcall-pulse">
+            <svg viewBox="0 0 24 24">
+                <path d="M18.5 10a6.5 6.5 0 0 0-13 0" />
+                <path d="M5 10v4a2 2 0 0 0 2 2h1v-6H6a1 1 0 0 0-1 0z" />
+                <path d="M19 10v4a2 2 0 0 1-2 2h-1v-6h2a1 1 0 0 1 1 0z" />
+                <path d="M8 18a4 4 0 0 0 4 2" />
+            </svg>
+        </div>
+        <h2 data-i18n="stopcall_wait">リーダーをお待ちください / Please wait for the leader</h2>
+        <p class="break-sub" data-i18n="stopcall_inprogress">呼び出し中… / Calling in progress…</p>
+        <div class="break-timer" id="stopCallTimerDisplay">00:00</div>
+        <button type="button" class="btn-finish-break" id="stopCallUnlockButton"
+            data-i18n="stopcall_unlock">リーダーQRで解除 / Unlock with leader QR</button>
+        <button type="button" class="stopcall-cancel-btn" id="stopCallCancelButton"
+            data-i18n="stopcall_cancel">間違えました / Cancel (mis-press)</button>
+        <div class="stopcall-qr-wrap" id="stopCallQrWrap">
+            <div id="stopCallQrReader"></div>
+            <p id="stopCallStatus"
+                style="text-align:center; margin-top:12px; font-size:0.92rem; font-weight:700; color:#E8A9AD; min-height:20px;">
+            </p>
+        </div>
     </div>
 
     <!-- Floating "New Scan" / reset (shown on the Scan tab when a scan is active) -->
@@ -4464,6 +4631,179 @@
                 if (raw) openMaintOverlay(parseInt(raw, 10));
             }
 
+            // ---------- Stop / Call leader (production halt) ----------
+            const STOP_CANCEL_WINDOW_MS = 15000; // cancel button available for 15s
+            let stopCallInterval = null;
+            let stopCallCancelTimer = null;
+            let stopCallScanner = null;
+
+            function getStopCallData() {
+                try {
+                    const raw = localStorage.getItem(breakPrefix + 'stopCallData');
+                    if (raw) {
+                        const d = JSON.parse(raw);
+                        if (d && typeof d === 'object') {
+                            d.count = d.count || 0;
+                            d.totalWaitSeconds = d.totalWaitSeconds || 0;
+                            d.totalWaitMinutes = d.totalWaitMinutes || 0;
+                            d.records = Array.isArray(d.records) ? d.records : [];
+                            return d;
+                        }
+                    }
+                } catch (e) { }
+                return { count: 0, totalWaitSeconds: 0, totalWaitMinutes: 0, records: [] };
+            }
+            function saveStopCallData(d) {
+                try { localStorage.setItem(breakPrefix + 'stopCallData', JSON.stringify(d)); } catch (e) { }
+            }
+            window.getStopCallData = getStopCallData;
+            window.clearStopCallData = function () {
+                localStorage.removeItem(breakPrefix + 'stopCallData');
+                localStorage.removeItem(breakPrefix + 'activeStopCallStart');
+            };
+
+            function tickStopCall(startEpoch) {
+                const disp = document.getElementById('stopCallTimerDisplay');
+                if (disp) disp.textContent = fmtElapsed(Date.now() - startEpoch);
+            }
+            function setStopCancelVisible(startEpoch) {
+                const cancelBtn = document.getElementById('stopCallCancelButton');
+                if (!cancelBtn) return;
+                clearTimeout(stopCallCancelTimer);
+                const remaining = STOP_CANCEL_WINDOW_MS - (Date.now() - startEpoch);
+                if (remaining > 0) {
+                    cancelBtn.style.display = '';
+                    stopCallCancelTimer = setTimeout(() => { cancelBtn.style.display = 'none'; }, remaining);
+                } else {
+                    cancelBtn.style.display = 'none';
+                }
+            }
+            function stopStopCallScanner() {
+                const qrWrap = document.getElementById('stopCallQrWrap');
+                if (qrWrap) qrWrap.classList.remove('show');
+                if (stopCallScanner) {
+                    const sc = stopCallScanner;
+                    stopCallScanner = null;
+                    try { sc.stop().then(() => { try { sc.clear(); } catch (e) { } }).catch(() => { }); }
+                    catch (e) { }
+                }
+            }
+            function openStopCallOverlay(startEpoch) {
+                const ov = document.getElementById('stopCallOverlay');
+                if (ov) ov.classList.add('open');
+                const fab = document.getElementById('stopCallButton');
+                if (fab) fab.style.display = 'none';
+                const unlockBtn = document.getElementById('stopCallUnlockButton');
+                if (unlockBtn) unlockBtn.style.display = '';
+                const qrWrap = document.getElementById('stopCallQrWrap');
+                if (qrWrap) qrWrap.classList.remove('show');
+                tickStopCall(startEpoch);
+                clearInterval(stopCallInterval);
+                stopCallInterval = setInterval(() => tickStopCall(startEpoch), 1000);
+                setStopCancelVisible(startEpoch);
+            }
+            function closeStopCallOverlay() {
+                clearInterval(stopCallInterval);
+                clearTimeout(stopCallCancelTimer);
+                stopStopCallScanner();
+                const ov = document.getElementById('stopCallOverlay');
+                if (ov) ov.classList.remove('open');
+                const fab = document.getElementById('stopCallButton');
+                if (fab) fab.style.display = '';
+            }
+            function startStopCall() {
+                if (localStorage.getItem(breakPrefix + 'activeStopCallStart')) return; // already calling
+                const startEpoch = Date.now();
+                localStorage.setItem(breakPrefix + 'activeStopCallStart', String(startEpoch));
+                openStopCallOverlay(startEpoch);
+            }
+            function cancelStopCall() {
+                const raw = localStorage.getItem(breakPrefix + 'activeStopCallStart');
+                // Only allowed within the 15s window; ignore otherwise.
+                if (raw && (Date.now() - parseInt(raw, 10)) > STOP_CANCEL_WINDOW_MS) return;
+                localStorage.removeItem(breakPrefix + 'activeStopCallStart');
+                closeStopCallOverlay();
+                showToast('呼び出しをキャンセルしました / Call canceled');
+            }
+            function beginStopCallUnlock() {
+                const qrWrap = document.getElementById('stopCallQrWrap');
+                const statusEl = document.getElementById('stopCallStatus');
+                const unlockBtn = document.getElementById('stopCallUnlockButton');
+                if (!qrWrap || qrWrap.classList.contains('show')) return;
+                qrWrap.classList.add('show');
+                if (unlockBtn) unlockBtn.style.display = 'none';
+                if (statusEl) { statusEl.textContent = 'リーダーのQRコードをスキャン / Scan leader QR code'; statusEl.style.color = '#E8A9AD'; }
+                try {
+                    stopCallScanner = new Html5Qrcode('stopCallQrReader');
+                    const sc = stopCallScanner;
+                    sc.start(
+                        { facingMode: 'environment' },
+                        { fps: 30, qrbox: { width: 800, height: 800 }, aspectRatio: 1.0, disableFlip: false },
+                        async (decodedText) => {
+                            if (sc.__busy) return;
+                            sc.__busy = true;
+                            try {
+                                const resp = await fetch(`${serverURL}/verifyLeader`, {
+                                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ username: decodedText })
+                                });
+                                const result = await resp.json();
+                                if (result.authorized) {
+                                    if (statusEl) { statusEl.textContent = `✅ ${(result.lastName || '')} ${(result.firstName || '')} (${result.role || ''})`; statusEl.style.color = '#9DEAB0'; }
+                                    completeStopCall({
+                                        username: result.username || decodedText,
+                                        firstName: result.firstName || '',
+                                        lastName: result.lastName || '',
+                                        role: result.role || ''
+                                    });
+                                } else {
+                                    if (statusEl) { statusEl.textContent = '❌ リーダー権限がありません / Not a leader'; statusEl.style.color = '#FFB3B8'; }
+                                    sc.__busy = false;
+                                }
+                            } catch (e) {
+                                if (statusEl) { statusEl.textContent = '❌ 認証エラー / Verification error'; statusEl.style.color = '#FFB3B8'; }
+                                sc.__busy = false;
+                            }
+                        },
+                        () => { }
+                    ).catch(() => {
+                        if (statusEl) { statusEl.textContent = '❌ カメラを起動できません / Cannot start camera'; statusEl.style.color = '#FFB3B8'; }
+                    });
+                } catch (e) {
+                    if (statusEl) { statusEl.textContent = '❌ スキャナーエラー / Scanner error'; statusEl.style.color = '#FFB3B8'; }
+                }
+            }
+            function completeStopCall(leader) {
+                const raw = localStorage.getItem(breakPrefix + 'activeStopCallStart');
+                const startEpoch = raw ? parseInt(raw, 10) : Date.now();
+                const start = new Date(startEpoch);
+                const end = new Date();
+                const waitSeconds = Math.max(0, Math.round((end - start) / 1000));
+                const waitMinutes = Math.round(waitSeconds / 60);
+                const data = getStopCallData();
+                data.records.push({
+                    calledAt: fmtClock(start),
+                    arrivedAt: fmtClock(end),
+                    waitSeconds: waitSeconds,
+                    waitMinutes: waitMinutes,
+                    leaderName: ((leader.lastName || '') + ' ' + (leader.firstName || '')).trim(),
+                    leaderUsername: leader.username || '',
+                    leaderRole: leader.role || ''
+                });
+                data.count = data.records.length;
+                data.totalWaitSeconds = data.records.reduce((s, r) => s + (r.waitSeconds || 0), 0);
+                data.totalWaitMinutes = Math.round(data.totalWaitSeconds / 60);
+                saveStopCallData(data);
+                localStorage.removeItem(breakPrefix + 'activeStopCallStart');
+                closeStopCallOverlay();
+                showToast('リーダー対応を記録しました / Leader arrival recorded');
+            }
+            function resumeStopCallIfActive() {
+                const raw = localStorage.getItem(breakPrefix + 'activeStopCallStart');
+                if (raw) openStopCallOverlay(parseInt(raw, 10));
+            }
+            window.startStopCall = startStopCall;
+
             // ---------- Material photo gate (Step 2 / production scan) ----------
             let matWaiters = [];
             if (typeof window.addMaterialLabelPhoto === 'function') {
@@ -4648,6 +4988,13 @@
                 if (maintStartBtn) maintStartBtn.addEventListener('click', startMaintenance);
                 if (maintFinishBtn) maintFinishBtn.addEventListener('click', finishMaintenance);
                 resumeMaintIfActive();
+
+                // Stop / Call leader
+                const stopUnlockBtn = document.getElementById('stopCallUnlockButton');
+                const stopCancelBtn = document.getElementById('stopCallCancelButton');
+                if (stopUnlockBtn) stopUnlockBtn.addEventListener('click', beginStopCallUnlock);
+                if (stopCancelBtn) stopCancelBtn.addEventListener('click', cancelStopCall);
+                resumeStopCallIfActive();
 
                 // Collapsible Setup card: collapse once a worker is set (set-once fields)
                 window.toggleSetupCard = function () {
