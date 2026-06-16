@@ -4042,6 +4042,77 @@
             font-family: inherit;
             font-weight: 800;
             animation: stopFabPulse 2s ease-in-out infinite;
+            touch-action: none;
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+
+        .stopcall-fab.holding {
+            transform: translateY(-50%) scale(1.08);
+            animation: none;
+            box-shadow: 0 0 0 10px rgba(225, 29, 42, 0.25);
+        }
+
+        /* Press-and-hold 3-2-1 countdown */
+        .stop-hold-countdown {
+            position: fixed;
+            inset: 0;
+            z-index: 100001;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            background: rgba(56, 10, 12, 0.82);
+        }
+
+        .stop-hold-countdown.show {
+            display: flex;
+        }
+
+        .stop-hold-ring {
+            width: 230px;
+            height: 230px;
+            border-radius: 50%;
+            border: 6px solid rgba(255, 255, 255, 0.22);
+            box-shadow: inset 0 0 0 6px rgba(225, 29, 42, 0.45);
+            background: rgba(225, 29, 42, 0.18);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            animation: stopHoldPop 0.3s ease;
+        }
+
+        .stop-hold-num {
+            font-size: 7rem;
+            font-weight: 900;
+            line-height: 1;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .stop-hold-num.bump {
+            animation: stopHoldBump 0.3s ease;
+        }
+
+        .stop-hold-label {
+            margin-top: 6px;
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: #FFD7DA;
+            text-align: center;
+            line-height: 1.3;
+        }
+
+        @keyframes stopHoldPop {
+            from { transform: scale(0.8); opacity: 0; }
+            to { transform: scale(1); opacity: 1; }
+        }
+
+        @keyframes stopHoldBump {
+            0% { transform: scale(0.7); }
+            60% { transform: scale(1.12); }
+            100% { transform: scale(1); }
         }
 
         .stopcall-fab svg {
@@ -4190,10 +4261,9 @@
             data-i18n="finish_maintenance">故障対応を終了 / End Maintenance</button>
     </div>
 
-    <!-- Floating "Stop / Call leader" button (always visible, left side) -->
+    <!-- Floating "Stop / Call leader" button (hold 3s to activate; left side) -->
     <button type="button" id="stopCallButton" class="stopcall-fab"
-        aria-label="リーダー呼び出し / Call leader"
-        onclick="if(window.startStopCall) window.startStopCall()">
+        aria-label="リーダー呼び出し（3秒長押し） / Call leader (hold 3s)">
         <svg viewBox="0 0 24 24">
             <path d="M18.5 12a6.5 6.5 0 0 0-13 0" />
             <path d="M5 12v3a2 2 0 0 0 2 2h1v-5H6a1 1 0 0 0-1 0z" />
@@ -4202,6 +4272,14 @@
         </svg>
         <span>呼出<br>Call</span>
     </button>
+
+    <!-- Hold-to-activate 3-2-1 countdown -->
+    <div id="stopHoldCountdown" class="stop-hold-countdown">
+        <div class="stop-hold-ring">
+            <div class="stop-hold-num" id="stopHoldNum">3</div>
+            <div class="stop-hold-label" data-i18n="stopcall_keephold">押し続けてください<br>Keep holding…</div>
+        </div>
+    </div>
 
     <!-- Stop / Call-leader full-screen overlay (production halted) -->
     <div id="stopCallOverlay" class="break-overlay stopcall-overlay">
@@ -4804,6 +4882,51 @@
             }
             window.startStopCall = startStopCall;
 
+            // Press-and-hold (3s) to arm the call, to avoid accidental taps.
+            const STOP_HOLD_MS = 3000;
+            let stopHoldRAF = null;
+            let stopHoldStart = 0;
+            function showHoldCountdown() { document.getElementById('stopHoldCountdown')?.classList.add('show'); }
+            function hideHoldCountdown() { document.getElementById('stopHoldCountdown')?.classList.remove('show'); }
+            function setHoldNum(n) {
+                const el = document.getElementById('stopHoldNum');
+                if (!el) return;
+                el.textContent = n;
+                el.classList.remove('bump'); void el.offsetWidth; el.classList.add('bump');
+            }
+            function beginStopHold(e) {
+                if (e && e.cancelable) e.preventDefault();
+                if (localStorage.getItem(breakPrefix + 'activeStopCallStart')) return; // already calling
+                if (stopHoldRAF) return;
+                const fab = document.getElementById('stopCallButton');
+                if (fab) fab.classList.add('holding');
+                stopHoldStart = Date.now();
+                showHoldCountdown();
+                let lastShown = 3;
+                setHoldNum(3);
+                const tick = () => {
+                    const remaining = STOP_HOLD_MS - (Date.now() - stopHoldStart);
+                    if (remaining <= 0) {
+                        endStopHold();
+                        startStopCall(); // hides countdown + FAB via openStopCallOverlay
+                        return;
+                    }
+                    const shown = Math.ceil(remaining / 1000);
+                    if (shown !== lastShown) { lastShown = shown; setHoldNum(shown); }
+                    stopHoldRAF = requestAnimationFrame(tick);
+                };
+                stopHoldRAF = requestAnimationFrame(tick);
+            }
+            function endStopHold() {
+                if (stopHoldRAF) { cancelAnimationFrame(stopHoldRAF); stopHoldRAF = null; }
+                hideHoldCountdown();
+                document.getElementById('stopCallButton')?.classList.remove('holding');
+            }
+            function cancelStopHold() {
+                if (!stopHoldRAF) return; // not holding (or already completed)
+                endStopHold();
+            }
+
             // ---------- Material photo gate (Step 2 / production scan) ----------
             let matWaiters = [];
             if (typeof window.addMaterialLabelPhoto === 'function') {
@@ -4994,6 +5117,18 @@
                 const stopCancelBtn = document.getElementById('stopCallCancelButton');
                 if (stopUnlockBtn) stopUnlockBtn.addEventListener('click', beginStopCallUnlock);
                 if (stopCancelBtn) stopCancelBtn.addEventListener('click', cancelStopCall);
+
+                // Press-and-hold (3s) on the floating button to arm the call
+                const stopFab = document.getElementById('stopCallButton');
+                if (stopFab) {
+                    stopFab.addEventListener('pointerdown', (e) => {
+                        try { stopFab.setPointerCapture(e.pointerId); } catch (_) { }
+                        beginStopHold(e);
+                    });
+                    stopFab.addEventListener('pointerup', cancelStopHold);
+                    stopFab.addEventListener('pointercancel', cancelStopHold);
+                    stopFab.addEventListener('contextmenu', (e) => e.preventDefault());
+                }
                 resumeStopCallIfActive();
 
                 // Collapsible Setup card: collapse once a worker is set (set-once fields)
