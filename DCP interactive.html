@@ -1775,17 +1775,8 @@
                             <div><span class="lbl">品番 (Product Number):</span> <strong
                                     id="activeHinbanDisplay"></strong></div>
                         </div>
-                        <button type="button" id="completedSendToMachine" class="btn btn-primary btn-full"
-                            style="margin-top: 12px;">
-                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
-                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-                                style="vertical-align:-3px;margin-right:6px;">
-                                <rect x="2" y="3" width="20" height="14" rx="2" />
-                                <line x1="8" y1="21" x2="16" y2="21" />
-                                <line x1="12" y1="17" x2="12" y2="21" />
-                            </svg>
-                            送信 / Send to Machine
-                        </button>
+                        <!-- Send to Machine panel (dynamically built by JS) -->
+                        <div id="completedSendPanel" style="margin-top: 12px;"></div>
                         <p style="color: var(--text-soft); font-size: 0.75rem; margin-top: 8px;">ステップ3が失敗した場合に再送信できます /
                             Re-send if Step 3 failed</p>
                     </div>
@@ -3522,6 +3513,56 @@
         }
         .record-row .record-del:active { transform: scale(0.92); }
 
+        /* Grouped Machine Send Panel */
+        .machine-send-panel { display: flex; flex-direction: column; gap: 8px; }
+        .machine-send-all {
+            display: flex; align-items: center; justify-content: center; gap: 8px;
+            background: var(--blue); color: #fff; border: none; padding: 14px 20px;
+            border-radius: var(--btn-radius); cursor: pointer; font-size: 0.95rem;
+            font-weight: 700; font-family: inherit; width: 100%;
+            transition: opacity 0.2s, transform 0.1s;
+        }
+        .machine-send-all:active { transform: scale(0.97); }
+        .machine-send-all:disabled { opacity: 0.55; cursor: not-allowed; }
+        .machine-send-all svg { flex-shrink: 0; }
+
+        .machine-chip-row { display: flex; gap: 6px; flex-wrap: wrap; }
+        .machine-chip {
+            flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px;
+            background: var(--bg-inset); border: 1px solid var(--border);
+            border-radius: var(--btn-radius); padding: 10px 12px;
+            transition: border-color 0.25s, background 0.25s;
+        }
+        .machine-chip .chip-dot {
+            width: 10px; height: 10px; border-radius: 50%;
+            background: var(--text-soft); flex-shrink: 0;
+            transition: background 0.3s;
+        }
+        .machine-chip .chip-name {
+            font-weight: 700; font-size: 0.85rem; color: var(--text-main);
+            flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .machine-chip .chip-status {
+            font-size: 0.75rem; font-weight: 600; color: var(--text-muted);
+            flex-shrink: 0;
+        }
+        .machine-chip .chip-retry {
+            flex-shrink: 0; background: var(--blue); color: #fff; border: none;
+            padding: 5px 10px; border-radius: 6px; cursor: pointer;
+            font-size: 0.75rem; font-weight: 700; font-family: inherit;
+            transition: opacity 0.2s;
+        }
+        .machine-chip .chip-retry:active { transform: scale(0.94); }
+        .machine-chip .chip-retry:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .machine-chip.sent { border-color: var(--brand); background: color-mix(in srgb, var(--brand) 8%, transparent); }
+        .machine-chip.sent .chip-dot { background: var(--brand); }
+        .machine-chip.sent .chip-status { color: var(--brand); }
+
+        .machine-chip.failed { border-color: var(--red); background: color-mix(in srgb, var(--red) 8%, transparent); }
+        .machine-chip.failed .chip-dot { background: var(--red); }
+        .machine-chip.failed .chip-status { color: var(--red); }
+
         .break-summary #total-break-display {
             color: var(--blue);
             font-size: 1.15rem;
@@ -4500,16 +4541,78 @@
                 refreshSetupCollapse();
                 setTimeout(refreshSetupCollapse, 1200);
 
-                // Completed-card "Send to Machine" (re-send if Step 3 failed)
-                const csm = document.getElementById('completedSendToMachine');
-                if (csm) csm.addEventListener('click', () => {
-                    const seb = document.getElementById('sub-dropdown')?.value;
-                    if (!seb) { if (window.showAppToast) window.showAppToast('背番号がありません / No product scanned'); return; }
-                    if (typeof sendtoNC === 'function') {
-                        sendtoNC(seb);
-                        if (typeof window.goToTab === 'function') window.goToTab(1);
+                // Completed-card "Send to Machine" panel (dynamic: single or grouped)
+                function buildCompletedSendPanel() {
+                    const panel = document.getElementById('completedSendPanel');
+                    if (!panel) return;
+                    panel.innerHTML = '';
+
+                    const machines = (typeof groupedMachines !== 'undefined' && groupedMachines.length > 1) ? groupedMachines : null;
+
+                    // Helper: send to a single machine IP with fallback
+                    async function fireSendToMachine(ip, seb) {
+                        const url = 'http://' + ip + ':5000/request?filename=' + seb + '.pce';
+                        try {
+                            await fetch(url, { method: 'GET', mode: 'no-cors' });
+                        } catch (_) {
+                            try {
+                                const tab = window.open(url, '_blank', 'width=100,height=100,left=-1000,top=-1000');
+                                if (tab) setTimeout(() => { try { tab.close(); } catch (__) {} }, 4000);
+                            } catch (__) {}
+                        }
                     }
-                });
+
+                    if (!machines) {
+                        // ── Single machine — simple button ──
+                        const btn = document.createElement('button');
+                        btn.type = 'button';
+                        btn.id = 'completedSendToMachine';
+                        btn.className = 'btn btn-primary btn-full';
+                        btn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:6px;"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>送信 / Send to Machine';
+                        btn.addEventListener('click', () => {
+                            const seb = document.getElementById('sub-dropdown')?.value;
+                            if (!seb) { if (window.showAppToast) window.showAppToast('背番号がありません / No product scanned'); return; }
+                            if (typeof sendtoNC === 'function') {
+                                sendtoNC(seb);
+                                if (typeof window.goToTab === 'function') window.goToTab(1);
+                            }
+                        });
+                        panel.appendChild(btn);
+                        return;
+                    }
+
+                    // ── Grouped machines — individual buttons for each machine ──
+                    const wrap = document.createElement('div');
+                    wrap.className = 'machine-send-panel';
+
+                    machines.forEach(name => {
+                        const btn = document.createElement('button');
+                        btn.type = 'button';
+                        btn.className = 'machine-send-all';
+                        btn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>' + name + ' に送信 / Send to ' + name;
+
+                        btn.addEventListener('click', async () => {
+                            const seb = document.getElementById('sub-dropdown')?.value;
+                            if (!seb) { if (window.showAppToast) window.showAppToast('背番号がありません / No product scanned'); return; }
+                            const ips = (typeof groupedMachineIPs !== 'undefined') ? groupedMachineIPs : {};
+                            const ip = ips[name];
+                            if (!ip) { if (window.showAppToast) window.showAppToast(name + ' の IP が不明です'); return; }
+
+                            // Send to this machine
+                            await fireSendToMachine(ip, seb);
+
+                            // 17 second cooldown lock on ALL send buttons
+                            if (typeof beginSendToMachineCooldown === 'function') beginSendToMachineCooldown(name + ' に送信中');
+
+                            if (window.showAppToast) window.showAppToast(name + ' に送信しました / Sent to ' + name);
+                        });
+
+                        wrap.appendChild(btn);
+                    });
+
+                    panel.appendChild(wrap);
+                }
+                buildCompletedSendPanel();
 
                 // Tap to preview: completed-card thumbnail and the info-sidebar product image
                 const prodThumb = document.getElementById('activeProductThumb');

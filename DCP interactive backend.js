@@ -6895,6 +6895,10 @@ function updateSendToMachineCooldownUI() {
     setButtonCooldownState(step3Button, isActive, secondsRemaining);
   }
 
+  // Also lock/unlock grouped machine buttons in the completed send panel
+  const groupedBtns = document.querySelectorAll('#completedSendPanel .machine-send-all');
+  groupedBtns.forEach(btn => setButtonCooldownState(btn, isActive, secondsRemaining));
+
   if (isActive) {
     showSendToMachineProgress(secondsRemaining);
     return;
@@ -7056,14 +7060,8 @@ async function sendtoNC(selectedValue) {
         console.warn('⚠️ Failed machines:', failed.map(f => f.machine).join(', '));
       }
       
-      // Always show the individual (per-machine) send modal for grouped machines,
-      // so the worker can verify / resend to each machine. (showManualSendModal's
-      // #manualSendModal markup was removed in the redesign; this themed modal exists.)
-      if (typeof showIndividualSendModal === 'function') {
-        setTimeout(() => showIndividualSendModal(), 1000);
-      } else if (typeof showManualSendModal === 'function') {
-        setTimeout(() => showManualSendModal(currentSebanggo), 1000);
-      }
+      // Per-machine status is now handled inline in the completedSendPanel chips.
+      // No separate modal needed.
       
     } catch (error) {
       console.error('Error sending to multiple machines:', error);
