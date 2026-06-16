@@ -3821,17 +3821,19 @@ function showLotPhotoPopup(lotNumber, anchorEl) {
 
 // Render lot tags
 function renderMaterialLotTags() {
-  const tagsContainer = document.getElementById('材料ロット-tags');
-  if (!tagsContainer) return;
-
-  tagsContainer.innerHTML = '';
+  // Render the lot pills into every lot container (Production card + Kensa tab)
+  const containers = document.querySelectorAll('.lot-tags');
+  if (!containers.length) return;
 
   const anyMissing = materialLots.some(lot =>
     !(typeof materialLabelPhotos !== 'undefined' && materialLabelPhotos.some(p => p.lotNumber === lot.lotNumber)));
-  // Leave headroom above the first row so the "no photo" callouts don't overlap the input
-  tagsContainer.style.marginTop = anyMissing ? '30px' : '8px';
 
-  materialLots.forEach((lot, index) => {
+  containers.forEach(tagsContainer => {
+    tagsContainer.innerHTML = '';
+    // Leave headroom above the first row so the "no photo" callouts don't overlap the input
+    tagsContainer.style.marginTop = anyMissing ? '30px' : '8px';
+
+    materialLots.forEach((lot, index) => {
     const hasPhoto = (typeof materialLabelPhotos !== 'undefined') &&
                      materialLabelPhotos.some(p => p.lotNumber === lot.lotNumber);
 
@@ -3904,7 +3906,8 @@ function renderMaterialLotTags() {
       }
     };
 
-    tagsContainer.appendChild(tag);
+      tagsContainer.appendChild(tag);
+    });
   });
 }
 
@@ -6804,6 +6807,11 @@ function toggleInputs() {
         k.dispatchEvent(new Event('change', { bubbles: true }));
       }
     });
+  }
+
+  // Move kensa into its dedicated tab (or back to Production) + navigate
+  if (typeof window.onKensaToggleClicked === 'function') {
+    window.onKensaToggleClicked(isChecked);
   }
 }
 

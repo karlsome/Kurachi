@@ -300,15 +300,15 @@
 
         .tab-panels-container {
             display: flex;
-            width: 600%;
-            /* 6 tabs */
+            width: 700%;
+            /* 7 tabs (Scan, Params, Production, Kensa, Images, Maintenance, Submit) */
             height: 100%;
             transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
             will-change: transform;
         }
 
         .tab-panel {
-            width: 16.666%;
+            width: 14.2857%;
             height: 100%;
             overflow-y: auto;
             -webkit-overflow-scrolling: touch;
@@ -1584,7 +1584,14 @@
                 </svg></span>
             <span class="tab-label">Production</span>
         </button>
-        <button type="button" class="tab-btn" data-tab="3">
+        <button type="button" class="tab-btn" id="kensaTabBtn" data-tab="3" style="display:none;">
+            <span class="tab-icon"><svg viewBox="0 0 24 24">
+                    <path d="M9 3h6v4l4 9a3 3 0 0 1-2.7 4.3H7.7A3 3 0 0 1 5 16l4-9z" />
+                    <line x1="9" y1="3" x2="15" y2="3" />
+                </svg></span>
+            <span class="tab-label">検査 Kensa</span>
+        </button>
+        <button type="button" class="tab-btn" data-tab="4">
             <span class="tab-icon"><svg viewBox="0 0 24 24">
                     <rect x="3" y="4" width="18" height="16" rx="2" />
                     <circle cx="8.5" cy="9.5" r="1.6" />
@@ -1592,14 +1599,14 @@
                 </svg></span>
             <span class="tab-label">Images</span>
         </button>
-        <button type="button" class="tab-btn" data-tab="4">
+        <button type="button" class="tab-btn" data-tab="5">
             <span class="tab-icon"><svg viewBox="0 0 24 24">
                     <path d="M14.7 6.3a4 4 0 0 0 5 5l-7.6 7.6a2.1 2.1 0 0 1-3-3L16.7 8.3" />
                     <path d="M14.7 6.3 18 3l3 3-3.3 3.3" />
                 </svg></span>
             <span class="tab-label">Maintenance</span>
         </button>
-        <button type="button" class="tab-btn" data-tab="5">
+        <button type="button" class="tab-btn" data-tab="6">
             <span class="tab-icon"><svg viewBox="0 0 24 24">
                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                     <polyline points="7 9 12 4 17 9" />
@@ -1988,7 +1995,7 @@
                             <label for="材料ロット" data-i18n="material_lot">材料ロット:</label>
                             <input type="text" name="材料ロット" id="材料ロット" class="tap-field" placeholder="Material Lot"
                                 data-i18n="material_lot_placeholder" required readonly>
-                            <div id="材料ロット-tags" style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px;">
+                            <div id="材料ロット-tags" class="lot-tags" style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px;">
                             </div>
                             <input type="hidden" id="材料ロット-data" value="">
                         </div>
@@ -2236,6 +2243,8 @@
                             </div>
                         </div>
                     </div>
+                    <!-- Home anchor: the kensa card returns here when the toggle is off -->
+                    <div id="kensaCardHome"></div>
 
                     <!-- Break time (timer-based) + total at the bottom of production -->
                     <div class="glass-card">
@@ -2267,6 +2276,35 @@
                                 name="break3-end">
                             <input type="time" id="break4-start" name="break4-start"><input type="time" id="break4-end"
                                 name="break4-end">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB (dynamic): KENSA — revealed when the 検査 toggle is on -->
+                <div class="tab-panel" id="panel-kensa">
+                    <!-- The kensa card (toggle + inspection fields) is moved here by JS when checked -->
+                    <div class="glass-card">
+                        <h3>材料・印刷 / Material &amp; Print</h3>
+                        <div class="prod-action-grid" style="margin-bottom:14px;">
+                            <button type="button" id="kensaScanMaterialButton" class="prod-action-btn">
+                                <svg viewBox="0 0 24 24">
+                                    <path d="M4 7V5a1 1 0 0 1 1-1h2M4 17v2a1 1 0 0 0 1 1h2M20 7V5a1 1 0 0 0-1-1h-2M20 17v2a1 1 0 0 1-1 1h-2" />
+                                    <line x1="4" y1="12" x2="20" y2="12" />
+                                </svg>
+                                <span>材料スキャン<small>Scan Material + Photo</small></span>
+                            </button>
+                            <button type="button" id="kensaPrintLabelButton" class="prod-action-btn print-btn">
+                                <svg viewBox="0 0 24 24">
+                                    <polyline points="6 9 6 2 18 2 18 9" />
+                                    <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
+                                    <rect x="6" y="14" width="12" height="8" />
+                                </svg>
+                                <span class="print-btn-label">ラベル印刷<small>Print Label</small></span>
+                            </button>
+                        </div>
+                        <div class="form-group full-width">
+                            <label data-i18n="material_lot">材料ロット:</label>
+                            <div class="lot-tags" style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px;"></div>
                         </div>
                     </div>
                 </div>
@@ -2707,6 +2745,10 @@
 
         window.goToTab = function (index) {
             if (index < 0 || index >= tabs.length) return;
+            // Kensa (index 3) only exists when its tab is revealed; otherwise go to Production
+            if (index === 3 && document.getElementById('kensaTabBtn')?.style.display === 'none') {
+                index = 2;
+            }
             // Lock: cannot leave the Scan tab until the 3-step scan is complete
             if (index !== 0 && !isScanComplete()) {
                 if (typeof window.showAppToast === 'function') {
@@ -2730,8 +2772,8 @@
             const prefix = typeof uniquePrefix !== 'undefined' ? uniquePrefix : '';
             localStorage.setItem(`${prefix}activeTabIndex`, index);
 
-            // Slide tabs viewport
-            panelsContainer.style.transform = `translateX(-${index * 16.666}%)`;
+            // Slide tabs viewport (count-aware so the 7th Kensa tab works)
+            panelsContainer.style.transform = `translateX(-${index * (100 / tabs.length)}%)`;
 
             // Highlight active button
             tabs.forEach((tab, idx) => {
@@ -2744,8 +2786,8 @@
 
             updateTabIndicator(index);
 
-            // If on Submit tab (index 5), compile summary
-            if (index === 5) {
+            // If on Submit tab (now index 6), compile summary
+            if (index === 6) {
                 updateSubmitSummary();
             }
             // Params guide (index 1): show the live 送りピッチ as the rolldist value
@@ -4541,6 +4583,40 @@
             }
             window.applyKensaVisibility = applyKensaVisibility;
 
+            // Move the kensa card between Production and the dedicated Kensa tab based
+            // on the toggle, and show/hide the Kensa tab button. Does NOT navigate.
+            function syncKensaTab() {
+                applyKensaVisibility();
+                const grouped = (typeof isGroupedMachinePage !== 'undefined' && isGroupedMachinePage);
+                const card = document.getElementById('kensaCard');
+                const tabBtn = document.getElementById('kensaTabBtn');
+                const kensaPanel = document.getElementById('panel-kensa');
+                const prodPanel = document.getElementById('panel-2');
+                const home = document.getElementById('kensaCardHome');
+                const cb = document.getElementById('enable-inputs');
+                if (!card || !tabBtn || !kensaPanel || !prodPanel) return;
+                if (grouped) { tabBtn.style.display = 'none'; return; }
+                if (cb && cb.checked) {
+                    if (card.parentElement !== kensaPanel) kensaPanel.insertBefore(card, kensaPanel.firstChild);
+                    tabBtn.style.display = '';
+                } else {
+                    if (home && card.parentElement !== prodPanel) prodPanel.insertBefore(card, home);
+                    tabBtn.style.display = 'none';
+                }
+                if (typeof updateTabIndicator === 'function') updateTabIndicator(currentTabIndex);
+            }
+            window.syncKensaTab = syncKensaTab;
+
+            // Called from toggleInputs (backend) on the actual checkbox click — also navigates.
+            window.onKensaToggleClicked = function (checked) {
+                syncKensaTab();
+                if (checked) {
+                    goToTab(3);                       // jump to the new Kensa tab
+                } else if (currentTabIndex === 3) {
+                    goToTab(2);                       // back to Production
+                }
+            };
+
             // ---------- Wiring ----------
             function init() {
                 if (window.__dcpBlocked) return; // missing filter/machine — app blocked
@@ -4708,20 +4784,26 @@
                 const sm = document.getElementById('prodScanMaterialButton');
                 if (sm) sm.addEventListener('click', () => window.triggerMaterialScan());
 
-                // Kensa
+                // Kensa: keep card placement / tab visibility in sync with the toggle
                 const cb = document.getElementById('enable-inputs');
-                if (cb) cb.addEventListener('change', applyKensaVisibility);
-                applyKensaVisibility();
+                if (cb) cb.addEventListener('change', syncKensaTab);
+                syncKensaTab();
+
+                // Duplicate Scan Material + Print Label inside the Kensa tab
+                const kScan = document.getElementById('kensaScanMaterialButton');
+                if (kScan) kScan.addEventListener('click', () => { if (typeof window.triggerMaterialScan === 'function') window.triggerMaterialScan(); });
+                const kPrint = document.getElementById('kensaPrintLabelButton');
+                if (kPrint) kPrint.addEventListener('click', () => { if (typeof printLabel === 'function') printLabel(); });
 
                 // Re-apply after backend restore settles
-                setTimeout(() => { syncDefectDisplays(); syncCheckButtons(); renderImageGallery(); applyKensaVisibility(); updateBreakCount(); renderBreakList(); }, 800);
+                setTimeout(() => { syncDefectDisplays(); syncCheckButtons(); renderImageGallery(); syncKensaTab(); updateBreakCount(); renderBreakList(); }, 800);
 
                 // Render gallery whenever Images tab is opened
                 if (typeof window.goToTab === 'function') {
                     const origGoToTab = window.goToTab;
                     window.goToTab = function (i) {
                         origGoToTab(i);
-                        if (i === 3) renderImageGallery();
+                        if (i === 4) renderImageGallery();
                     };
                 }
             }
