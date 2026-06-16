@@ -1510,6 +1510,20 @@
                 font-size: 0.55rem;
             }
         }
+
+        /* Subtle red hint for required but empty inputs */
+        input:required:invalid:not(:disabled):not(:focus),
+        input:required:placeholder-shown:not(:disabled):not(:focus),
+        input.tap-field:required:placeholder-shown:not(:disabled):not(:focus),
+        select:required:invalid:not(:disabled):not(:focus) {
+            border-color: rgba(229, 72, 77, 0.8);
+            background-color: rgba(229, 72, 77, 0.12);
+        }
+
+        .prod-check-btn:not(.done) {
+            border-color: rgba(229, 72, 77, 0.8);
+            background-color: rgba(229, 72, 77, 0.12);
+        }
     </style>
 </head>
 
@@ -2052,7 +2066,7 @@
                             <div class="form-group full-width" id="shotCountSection">
                                 <label for="shot" data-i18n="shot_count">ショット数</label>
                                 <input type="number" name="shot" id="shot" class="tap-field" placeholder="ショット数"
-                                    data-i18n="shot_count_placeholder" readonly>
+                                    data-i18n="shot_count_placeholder" readonly required>
                             </div>
                             <div class="form-group">
                                 <label for="End Time" data-i18n="end_time">加工終了時間:</label>
