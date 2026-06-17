@@ -240,7 +240,7 @@ function applyTabletLogToMachineState(logEntry) {
     const st = map.get(id) || {
       sebanggo: '', hinban: '', worker: '',
       breakActive: false, maintActive: false,
-      runSince: 0, modeSince: 0, prodAccumMs: 0, updatedAt: 0
+      runSince: 0, modeSince: 0, prodAccumMs: 0, updatedAt: 0, lastSeen: 0
     };
 
     const isRunning = () => !!st.sebanggo && !st.breakActive && !st.maintActive;
@@ -283,6 +283,7 @@ function applyTabletLogToMachineState(logEntry) {
 
     if (worker) st.worker = worker;
     st.updatedAt = ts;
+    st.lastSeen = Date.now(); // server-receipt time, for the idle sweep
     map.set(id, st);
   });
   return ids;
@@ -635,6 +636,84 @@ app.post("/api/stop-call", (req, res) => {
   console.log(`🟥 stop-call ${action} for ${factory}/${ids.join(',')} → ${payload.active.length} active`);
   res.json({ ok: true, active: payload.active });
 });
+
+// Tablet → server: periodic state re-assert. Keeps the live machine state
+// alive (idle sweep below) and, after a server restart when memory is empty,
+// re-establishes a machine's state without any DB read. Does NOT clobber state
+// the live tablet-log stream is already maintaining — it just refreshes
+// liveness in that case.
+app.post("/api/machine-assert", (req, res) => {
+  const factory = String(req.body?.工場 || req.body?.factory || '').trim();
+  const equipmentRaw = String(req.body?.設備 || req.body?.machine || '').trim();
+  if (!factory || !equipmentRaw) {
+    return res.status(400).json({ error: "工場 and 設備 are required" });
+  }
+  const ids = equipmentRaw.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+  const seb = String(req.body?.背番号 || '');
+  const hinban = String(req.body?.品番 || '');
+  const mode = String(req.body?.mode || 'idle');
+  const modeStartedAt = Number(req.body?.modeStartedAt) || 0;
+  const runStartedAt = Number(req.body?.runStartedAt) || 0;
+  const now = Date.now();
+  const map = getMachineStateMap(factory);
+  const updated = [];
+
+  ids.forEach(id => {
+    let st = map.get(id);
+    if (!st) {
+      // Recovery: server has no record (e.g., after a restart) → adopt the
+      // tablet's snapshot as the source of truth.
+      st = {
+        sebanggo: '', hinban: '', worker: '',
+        breakActive: false, maintActive: false,
+        runSince: 0, modeSince: 0, prodAccumMs: 0, updatedAt: now, lastSeen: now
+      };
+      if (mode !== 'idle' && seb) {
+        st.sebanggo = seb; st.hinban = hinban;
+        if (mode === 'break') { st.breakActive = true; st.modeSince = modeStartedAt || now; }
+        else if (mode === 'maintenance') { st.maintActive = true; st.modeSince = modeStartedAt || now; }
+        else { st.runSince = runStartedAt || now; } // running
+      }
+      map.set(id, st);
+      updated.push(id);
+    }
+    // Always refresh liveness (prevents the idle sweep from idling an active machine)
+    st.lastSeen = now;
+  });
+
+  if (updated.length) {
+    broadcastToFactory(factory, {
+      type: 'machine_state', factory,
+      machines: updated.map(id => machineStateView(id, map.get(id)))
+    });
+  }
+  res.json({ ok: true });
+});
+
+// Idle sweep: if a machine hasn't been seen (no tablet log AND no re-assert)
+// for a while, its tablet is off/closed — show it as idle rather than stale.
+setInterval(() => {
+  const now = Date.now();
+  const STALE_MS = 150000; // ~2.5 min (tablets re-assert every 30s)
+  factoryMachineState.forEach((map, factory) => {
+    const idled = [];
+    map.forEach((st, id) => {
+      const mode = st.maintActive ? 'maintenance' : st.breakActive ? 'break' : (st.sebanggo ? 'running' : 'idle');
+      if (mode !== 'idle' && (now - (st.lastSeen || st.updatedAt || 0)) > STALE_MS) {
+        st.sebanggo = ''; st.hinban = '';
+        st.breakActive = false; st.maintActive = false;
+        st.runSince = 0; st.modeSince = 0; st.prodAccumMs = 0;
+        idled.push(id);
+      }
+    });
+    if (idled.length) {
+      broadcastToFactory(factory, {
+        type: 'machine_state', factory,
+        machines: idled.map(id => machineStateView(id, map.get(id)))
+      });
+    }
+  });
+}, 60000);
 
 // API endpoint to broadcast scan data to specific machine(s)
 // Supports both single machines (OZNC09) and grouped machines (OZNC04,OZNC06)

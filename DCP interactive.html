@@ -4913,6 +4913,49 @@
             }
             window.startStopCall = startStopCall;
 
+            // ---------- Machine-state re-assert (keeps the factory TV correct) ----------
+            // Periodically tell the server this machine's current state. This keeps
+            // the live display alive (so it isn't swept to idle) and rebuilds the
+            // server's in-memory state after a restart — with no database read.
+            function assertMachineState() {
+                try {
+                    const 工場 = document.getElementById('selected工場')?.value || '';
+                    const 設備 = document.getElementById('process')?.value
+                        || new URLSearchParams(location.search).get('machine') || '';
+                    if (!工場 || !設備) return;
+                    const 背番号 = document.getElementById('sub-dropdown')?.value || '';
+                    const 品番 = document.getElementById('product-number')?.value || '';
+                    const breakStart = parseInt(localStorage.getItem(breakPrefix + 'activeBreakStart') || '0', 10);
+                    const maintStart = parseInt(localStorage.getItem(breakPrefix + 'activeMaintStart') || '0', 10);
+
+                    let mode = 'idle', modeStartedAt = 0;
+                    if (maintStart) { mode = 'maintenance'; modeStartedAt = maintStart; }
+                    else if (breakStart) { mode = 'break'; modeStartedAt = breakStart; }
+                    else if (背番号) { mode = 'running'; }
+
+                    // Persist when production started so a recovered run shows a sane elapsed
+                    let prodStart = parseInt(localStorage.getItem(breakPrefix + 'prodStartEpoch') || '0', 10);
+                    if (mode === 'idle' || !背番号) {
+                        localStorage.removeItem(breakPrefix + 'prodStartEpoch');
+                        prodStart = 0;
+                    } else if (!prodStart) {
+                        prodStart = Date.now();
+                        localStorage.setItem(breakPrefix + 'prodStartEpoch', String(prodStart));
+                    }
+
+                    const base = (typeof serverURL !== 'undefined' && serverURL) ? serverURL : '';
+                    fetch(`${base}/api/machine-assert`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 工場, 設備, 背番号, 品番, mode, modeStartedAt, runStartedAt: prodStart })
+                    }).catch(() => { });
+                } catch (e) { }
+            }
+            setTimeout(assertMachineState, 3000);          // shortly after load
+            setInterval(assertMachineState, 30000);        // every 30s
+            window.addEventListener('online', assertMachineState);
+            document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') assertMachineState(); });
+
             // Press-and-hold (3s) to arm the call, to avoid accidental taps.
             const STOP_HOLD_MS = 3000;
             let stopHoldRAF = null;
