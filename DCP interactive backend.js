@@ -10234,6 +10234,13 @@ document.getElementById('startStep1Scan').addEventListener('click', function(eve
       
       if (newSessionID) {
         setSessionID(newSessionID);
+        // Fresh production entry: clear any per-lot tracking left over from a
+        // previous (possibly abandoned) session so no phantom "previous lot"
+        // shots prompt appears on the first scan.
+        if (typeof window.lotProductionReset === 'function') window.lotProductionReset();
+        window.__lotScanMachine = null;
+        window.__pendingPrevLot = null;
+        window.__lotCycleMachinesDone = [];
         console.log('✅ New session started:', newSessionID);
       } else {
         console.warn('⚠️ Failed to generate sessionID');
@@ -10332,7 +10339,12 @@ document.getElementById('startStep2Scan').addEventListener('click', function(eve
   
   content.style.display = 'none';
   scanner.style.display = 'block';
-  
+
+  // Fresh scan: allow processing one successful QR (guards against the scanner
+  // firing its callback multiple times for the same code before stop() finishes,
+  // which previously double-recorded a lot and made a phantom "previous lot").
+  window.__step2Processing = false;
+
   step2Scanner = new Html5Qrcode("step2QrReader");
   
   step2Scanner.start(
@@ -10348,8 +10360,11 @@ document.getElementById('startStep2Scan').addEventListener('click', function(eve
       }]
     },
     async (qrCodeMessage) => {
+      // Ignore duplicate fires of the same scan while we're already handling one.
+      if (window.__step2Processing) return;
+      window.__step2Processing = true;
       console.log("Step 2 QR Scanned:", qrCodeMessage);
-      
+
       try {
         // Parse QR code: "Z1Z9,250805-5,500"
         const parts = qrCodeMessage.split(',');
