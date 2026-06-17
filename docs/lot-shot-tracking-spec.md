@@ -42,12 +42,16 @@ Each machine has its **own independent lot timeline**.
 
 1. Tap scan → **choose which machine** (one button per machine in the group —
    **no "Both" option**).
-2. Scan lot → photo → if that machine has an open lot, prompt its ショット数 →
-   **Send to that machine only** (resets only that machine).
-3. On **Time End** → popup lists each machine that still has an open lot and asks
+2. Scan lot → photo → if that machine has an open lot, prompt its ショット数.
+3. **The chooser re-opens automatically**, with the just-handled machine **greyed
+   out (✓ 済)**, so the operator doesn't forget the other machine(s). They pick the
+   next machine (repeat from step 2) or tap **「完了して送信へ / Done → Send」**.
+4. Step 3 **Send** goes to **all machines assigned in this cycle**.
+5. On **Time End** → popup lists each machine that still has an open lot and asks
    for each one's ショット数.
 
-The same lot number may appear under two different machines (de-dup is per machine).
+The same lot number may be scanned for two machines (the 材料ロット list keeps it
+once; it is recorded once per machine in `Lot_Details`). De-dup is per machine.
 
 ## 送りピッチ / pcPerCycle resolver
 

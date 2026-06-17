@@ -7125,11 +7125,18 @@ async function sendtoNC(selectedValue) {
       });
     }
     
-    // If a specific machine was chosen for this lot scan, send ONLY to it
-    // (each grouped machine has its own lot timeline).
-    if (window.__lotScanMachine && machineIPMap[window.__lotScanMachine]) {
-      machineIPMap = { [window.__lotScanMachine]: machineIPMap[window.__lotScanMachine] };
-      console.log("🎯 Restricting send to chosen machine:", window.__lotScanMachine);
+    // Send only to the machine(s) assigned in this lot-change cycle (each grouped
+    // machine has its own lot timeline). Falls back to the single chosen machine.
+    const _chosen = (window.__lotCycleMachinesDone && window.__lotCycleMachinesDone.length)
+      ? window.__lotCycleMachinesDone
+      : (window.__lotScanMachine ? [window.__lotScanMachine] : null);
+    if (_chosen) {
+      const filtered = {};
+      _chosen.forEach(m => { if (machineIPMap[m]) filtered[m] = machineIPMap[m]; });
+      if (Object.keys(filtered).length) {
+        machineIPMap = filtered;
+        console.log("🎯 Restricting send to assigned machine(s):", Object.keys(filtered).join(', '));
+      }
     }
 
     console.log("🔵 Sending to multiple machines:", machineIPMap);
@@ -10056,6 +10063,7 @@ function resetAllSteps() {
   if (typeof window.lotProductionReset === 'function') window.lotProductionReset();
   window.__lotScanMachine = null;
   window.__pendingPrevLot = null;
+  window.__lotCycleMachinesDone = [];
 
   // Clear product details cache
   currentProductDetails = {
@@ -10413,46 +10421,68 @@ document.getElementById('startStep2Scan').addEventListener('click', function(eve
         // This could be used later if needed for tracking which specific code was used
         const actualScannedCode = validation.matchedCode;
         
-        // Add scanned lot to the material lot input
+        // Which machine is this lot for (chosen in the grouped chooser, else the
+        // single machine).
+        const _scanMachine = window.__lotScanMachine
+          || (typeof groupedMachines !== 'undefined' && groupedMachines[0])
+          || (document.getElementById('process') ? document.getElementById('process').value : '');
+        const _isGrouped = (typeof groupedMachines !== 'undefined' && groupedMachines.length > 1);
+        const _machineDone = (window.__lotCycleMachinesDone || []).indexOf(_scanMachine) >= 0;
+
+        // Record the lot on the chosen machine's timeline, then photo + previous-lot
+        // ショット数 + (grouped) re-prompt for the other machine before Step 3.
+        const _recordAndAdvance = () => {
+          if (typeof window.recordLotScan === 'function') {
+            window.__pendingPrevLot = window.recordLotScan(lotNumber, _scanMachine, 'scanned');
+          }
+          document.getElementById('step2Modal').style.display = 'none';
+          const _afterPhoto = () => {
+            const _next = () => {
+              if (typeof window.proceedAfterMachineDone === 'function') window.proceedAfterMachineDone();
+              else showStep3Modal();
+            };
+            if (typeof window.afterLotPhotoProceed === 'function') window.afterLotPhotoProceed(_next);
+            else _next();
+          };
+          if (typeof window.materialPhotoGate === 'function') window.materialPhotoGate(_afterPhoto);
+          else _afterPhoto();
+        };
+
+        // Add scanned lot to the material lot input (de-dups the 材料ロット list)
         const success = addScannedLot(lotNumber);
-        
+
         if (!success) {
-          // Lot already exists - show info message but don't treat as error
+          // Already in the 材料ロット list. For a grouped machine the SAME lot can
+          // run on another machine, so still record it on that machine's timeline
+          // and continue; otherwise it's a genuine duplicate → just go to Step 3.
+          await step2Scanner.stop();
+          step2Scanner = null;
+
+          if (_isGrouped && !_machineDone) {
+            console.log("Lot already listed; recording it for another machine:", _scanMachine);
+            _recordAndAdvance();
+            return;
+          }
+
           console.log("Lot already added, but material code is correct. Proceeding to Step 3.");
-          
-          // Show info in modal (yellow box with informational message)
           const errorMsg = document.getElementById('step2ErrorMsg');
           const errorText = errorMsg.querySelector('p');
           errorText.innerHTML = `⚠️ <strong>このロット番号は既に追加されています / Lot number already added</strong><br><br>Lot: <code style="background: #f8f9fa; padding: 2px 8px; border-radius: 4px;">${lotNumber}</code><br><br>Material code is correct. Proceeding to next step...`;
           errorMsg.style.display = 'block';
-          
-          // Stop scanner and move to Step 3 after a short delay
-          await step2Scanner.stop();
-          step2Scanner = null;
-          
+
           setTimeout(() => {
             document.getElementById('step2Modal').style.display = 'none';
             showStep3Modal();
           }, 2000); // 2 second delay to show the message
-          
+
           return;
         }
-        
-        // Success - stop scanner and move to Step 3
+
+        // Success - stop scanner and advance
         await step2Scanner.stop();
         step2Scanner = null;
 
         console.log("Lot added successfully:", lotNumber);
-
-        // Record this lot on the chosen machine's timeline. recordLotScan returns
-        // the machine's previously-open lot (if any), whose ショット数 we collect
-        // after the label photo (the machine counter that just finished = prev lot).
-        const _scanMachine = window.__lotScanMachine
-          || (typeof groupedMachines !== 'undefined' && groupedMachines[0])
-          || (document.getElementById('process') ? document.getElementById('process').value : '');
-        if (typeof window.recordLotScan === 'function') {
-          window.__pendingPrevLot = window.recordLotScan(lotNumber, _scanMachine, 'scanned');
-        }
 
         // Log material lot scan action
         await logTabletAction('Scanned material lot (Step 2)', 'in-progress', {
@@ -10460,22 +10490,8 @@ document.getElementById('startStep2Scan').addEventListener('click', function(eve
           materialCode: actualScannedCode,
           allMaterialLots: materialLots.map(l => l.lotNumber).join(', ')
         });
-        
-        document.getElementById('step2Modal').style.display = 'none';
-        // Mandatory material-label photo for NEW lots before advancing (Phase 1 gate).
-        // After the photo, collect the PREVIOUS lot's ショット数 (if any) before Step 3.
-        const _afterPhoto = () => {
-          if (typeof window.afterLotPhotoProceed === 'function') {
-            window.afterLotPhotoProceed(() => showStep3Modal());
-          } else {
-            showStep3Modal();
-          }
-        };
-        if (typeof window.materialPhotoGate === 'function') {
-          window.materialPhotoGate(_afterPhoto);
-        } else {
-          _afterPhoto();
-        }
+
+        _recordAndAdvance();
 
       } catch (error) {
         console.error("Error processing lot QR code:", error);
@@ -10880,8 +10896,10 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
     // Call the sendtoNC function (sends in background with progress bar)
     sendtoNC(currentSebanggo);
 
-    // Lot cycle done: clear the chosen machine so the next scan re-prompts (grouped).
+    // Lot cycle done: clear the chosen machine + cycle set so the next lot change
+    // re-prompts from scratch (grouped).
     window.__lotScanMachine = null;
+    window.__lotCycleMachinesDone = [];
 
   } catch (error) {
     console.error("Error sending to machine:", error);
@@ -11374,6 +11392,10 @@ if (manualSendModal) {
       meters: null, pieces: null, source: source || 'scanned', open: true, ts: Date.now()
     });
     save();
+    // Mark this machine as handled in the current grouped lot-change cycle so the
+    // chooser can grey it out and we send to every assigned machine.
+    if (!window.__lotCycleMachinesDone) window.__lotCycleMachinesDone = [];
+    if (window.__lotCycleMachinesDone.indexOf(machine) < 0) window.__lotCycleMachinesDone.push(machine);
     return prevOpen;
   }
 
@@ -11437,16 +11459,27 @@ if (manualSendModal) {
     card.querySelector('#lpOk').onclick = () => { const v = parseInt(disp.value, 10) || 0; closeLP(); if (onSubmit) onSubmit(v); };
   }
 
-  function chooseMachine(machines, onPick) {
+  function chooseMachine(machines, onPick, opts) {
+    opts = opts || {};
+    const done = opts.done || [];
     closeLP();
     const card = shell();
-    const btns = (machines || []).map(m =>
-      '<button data-m="' + m + '" style="width:100%;background:#16223A;color:#fff;border:none;border-radius:10px;padding:16px;font-size:1.1rem;font-weight:800;cursor:pointer;margin-bottom:10px;">' + m + '</button>'
-    ).join('');
+    const btns = (machines || []).map(m => {
+      const isDone = done.indexOf(m) >= 0;
+      const style = isDone
+        ? 'width:100%;background:#E4E7EC;color:#98A2B3;border:none;border-radius:10px;padding:16px;font-size:1.1rem;font-weight:800;margin-bottom:10px;cursor:not-allowed;'
+        : 'width:100%;background:#16223A;color:#fff;border:none;border-radius:10px;padding:16px;font-size:1.1rem;font-weight:800;margin-bottom:10px;cursor:pointer;';
+      return '<button data-m="' + m + '" ' + (isDone ? 'disabled' : '') + ' style="' + style + '">' + m + (isDone ? ' ✓ 済' : '') + '</button>';
+    }).join('');
+    const doneBtn = opts.allowDone
+      ? '<button id="lpDone" style="width:100%;background:#29C36A;color:#fff;border:none;border-radius:10px;padding:14px;font-size:1rem;font-weight:800;cursor:pointer;margin-top:6px;">完了して送信へ / Done → Send</button>'
+      : '';
     card.innerHTML =
       '<div style="font-size:1.05rem;font-weight:800;color:#101828;margin-bottom:4px;">機械を選択 / Select machine</div>' +
-      '<div style="font-size:.85rem;font-weight:600;color:#475467;margin-bottom:14px;">このロットを処理する機械 / Machine for this lot</div>' + btns;
-    card.querySelectorAll('[data-m]').forEach(b => b.onclick = () => { const m = b.getAttribute('data-m'); closeLP(); if (onPick) onPick(m); });
+      '<div style="font-size:.85rem;font-weight:600;color:#475467;margin-bottom:14px;">このロットを処理する機械 / Machine for this lot</div>' + btns + doneBtn;
+    card.querySelectorAll('[data-m]:not([disabled])').forEach(b => b.onclick = () => { const m = b.getAttribute('data-m'); closeLP(); if (onPick) onPick(m); });
+    const db = card.querySelector('#lpDone');
+    if (db) db.onclick = () => { closeLP(); if (opts.onDone) opts.onDone(); };
   }
 
   // Collect ショット数 for each still-open lot (triggered when End Time is set).
@@ -11468,8 +11501,32 @@ if (manualSendModal) {
   window.buildLotProductionPayload = buildPayload;
   window.lotProductionReset = function () { lotsByMachine = {}; save(); updateShotTotalField(); };
   window.chooseScanMachine = function (onPicked) {
+    const done = window.__lotCycleMachinesDone || [];
     chooseMachine((typeof groupedMachines !== 'undefined') ? groupedMachines : [],
-      m => { window.__lotScanMachine = m; if (onPicked) onPicked(); });
+      m => { window.__lotScanMachine = m; if (onPicked) onPicked(); },
+      {
+        done: done,
+        allowDone: done.length > 0,
+        // "Done → Send": stop adding machines and go to Step 3 (send).
+        onDone: function () { if (typeof showStep3Modal === 'function') showStep3Modal(); }
+      });
+  };
+
+  // After a machine's lot+photo+shots: if grouped machines remain unhandled this
+  // cycle, re-open the chooser (handled machines greyed) so the operator does the
+  // other machine; otherwise continue to Step 3 (send).
+  window.proceedAfterMachineDone = function () {
+    const grouped = (typeof groupedMachines !== 'undefined' && groupedMachines.length > 1);
+    if (grouped) {
+      const done = window.__lotCycleMachinesDone || [];
+      const remaining = groupedMachines.filter(m => done.indexOf(m) < 0);
+      if (remaining.length > 0) {
+        window.__lotScanMachine = null; // force a fresh choice
+        window.chooseScanMachine(() => document.getElementById('startStep2Scan').click());
+        return;
+      }
+    }
+    if (typeof showStep3Modal === 'function') showStep3Modal();
   };
   window.afterLotPhotoProceed = function (onDone) {
     const prev = window.__pendingPrevLot;
