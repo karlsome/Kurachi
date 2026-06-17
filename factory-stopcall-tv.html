@@ -158,23 +158,45 @@
 
         .tile.idle { opacity: 0.5; }
 
-        .tile.brk { background: #10263F; border-color: var(--blue); animation: modeBlinkBlue 1.1s steps(1) infinite; }
-        .tile.brk .seb { display: block; }
-        .tile.brk .status { color: #9FC2FF; }
+        /* Break / maintenance: calm "chill" breathing glow (not a hard blink).
+           The big mode word stays up; a small 背番号 sits bottom-left. */
+        .tile.brk {
+            background: #10263F;
+            border-color: var(--blue);
+            animation: chillPulseBlue 3.4s ease-in-out infinite;
+        }
+        .tile.brk .status { display: none; }
 
-        .tile.maint { background: #3A2A10; border-color: var(--amber); animation: modeBlinkAmber 1.1s steps(1) infinite; }
-        .tile.maint .seb { display: block; }
-        .tile.maint .status { color: #FCD980; }
+        .tile.maint {
+            background: #2F2410;
+            border-color: var(--amber);
+            animation: chillPulseAmber 3.4s ease-in-out infinite;
+        }
+        .tile.maint .status { display: none; }
 
-        @keyframes modeBlinkBlue {
-            0%, 100% { border-color: var(--blue); }
-            50% { border-color: rgba(46, 111, 242, 0.25); }
+        @keyframes chillPulseBlue {
+            0%, 100% { box-shadow: inset 0 0 0 rgba(46, 111, 242, 0); }
+            50% { box-shadow: inset 0 0 70px rgba(46, 111, 242, 0.32), 0 0 26px rgba(46, 111, 242, 0.14); }
         }
 
-        @keyframes modeBlinkAmber {
-            0%, 100% { border-color: var(--amber); }
-            50% { border-color: rgba(245, 165, 36, 0.25); }
+        @keyframes chillPulseAmber {
+            0%, 100% { box-shadow: inset 0 0 0 rgba(245, 165, 36, 0); }
+            50% { box-shadow: inset 0 0 70px rgba(245, 165, 36, 0.30), 0 0 26px rgba(245, 165, 36, 0.14); }
         }
+
+        /* small 背番号 (bottom-left, aligned with the elapsed timer) */
+        .seb-mini {
+            position: absolute;
+            bottom: 8px;
+            left: 12px;
+            font-size: clamp(12px, 1.2vw, 24px);
+            font-weight: 800;
+            letter-spacing: 0.02em;
+            font-variant-numeric: tabular-nums;
+            display: none;
+        }
+        .tile.brk .seb-mini { display: block; color: #9FC2FF; }
+        .tile.maint .seb-mini { display: block; color: #FCD980; }
 
         /* calling */
         .tile.calling {
@@ -242,8 +264,8 @@
             display: block;
         }
 
-        /* Big full-card mode word (BREAK / MAINTENANCE) shown during the flip,
-           alternating with the 背番号 on break/maintenance tiles. */
+        /* Big full-card mode word (休憩中 / 整備中) — always shown on break/
+           maintenance tiles (the 背番号 sits small at the bottom-left). */
         .big-mode {
             display: none;
             font-weight: 900;
@@ -254,20 +276,8 @@
             padding: 0 6px;
         }
 
-        .tile.brk .big-mode { color: #BFD8FF; }
-        .tile.maint .big-mode { color: #FFD980; }
-
-        .grid.flip .tile.brk .seb,
-        .grid.flip .tile.brk .status,
-        .grid.flip .tile.maint .seb,
-        .grid.flip .tile.maint .status {
-            display: none;
-        }
-
-        .grid.flip .tile.brk .big-mode,
-        .grid.flip .tile.maint .big-mode {
-            display: block;
-        }
+        .tile.brk .big-mode { display: block; color: #BFD8FF; }
+        .tile.maint .big-mode { display: block; color: #FFD980; }
 
         /* ---------- Full-screen takeover ---------- */
         .takeover {
@@ -467,6 +477,7 @@
                     '<div class="seb"></div>' +
                     '<div class="big-mode"></div>' +
                     '<div class="status">停止 / IDLE</div>' +
+                    '<div class="seb-mini"></div>' +
                     '<div class="elapsed"></div>';
                 grid.appendChild(tile);
                 tileByMachine.set(m, tile);
@@ -577,35 +588,40 @@
             return h > 0 ? (p(h) + ':' + p(m) + ':' + p(ss)) : (p(m) + ':' + p(ss));
         }
 
-        // Single elapsed-timer loop: calling tiles show wait-since-call,
-        // running/break/maintenance tiles show elapsed-in-mode, idle shows blank.
+        // Single elapsed-timer loop. By mode:
+        //  - calling     → time since the call started
+        //  - running     → PRODUCTION time (accumulated, paused during break/maint)
+        //  - break/maint → time since that mode started
+        //  - idle        → blank
         function refreshElapsed() {
             const now = Date.now();
             tileByMachine.forEach((tile, machine) => {
                 const el = tile.querySelector('.elapsed');
                 if (!el) return;
-                let since = 0;
-                if (activeSince.has(machine)) since = activeSince.get(machine);
-                else {
+                let text = '';
+                if (activeSince.has(machine)) {
+                    text = fmtWait(now - activeSince.get(machine));
+                } else {
                     const ms = machineState.get(machine);
-                    if (ms && ms.mode !== 'idle' && ms.since) since = ms.since;
+                    if (ms) {
+                        if (ms.mode === 'running') {
+                            const prod = (ms.prodAccumMs || 0) + (ms.runSince ? (now - ms.runSince) : 0);
+                            text = fmtWait(prod);
+                        } else if (ms.mode === 'break' || ms.mode === 'maintenance') {
+                            text = ms.modeSince ? fmtWait(now - ms.modeSince) : '';
+                        }
+                    }
                 }
-                el.textContent = since ? fmtWait(now - since) : '';
+                el.textContent = text;
             });
         }
         setInterval(refreshElapsed, 1000);
 
-        // Once per second, flip calling tiles (name <-> rank) AND break/
-        // maintenance tiles (背番号 <-> big mode word), so both read from afar.
-        function hasFlippers() {
-            if (activeList.length > 0) return true;
-            for (const ms of machineState.values()) {
-                if (ms && (ms.mode === 'break' || ms.mode === 'maintenance')) return true;
-            }
-            return false;
-        }
+        // Once per second, flip calling tiles (name <-> rank) so the order
+        // reads from afar. Break/maintenance tiles no longer flip — they keep
+        // the big mode word with a small 背番号 in the corner.
         setInterval(() => {
-            if (hasFlippers()) grid.classList.toggle('flip');
+            if (activeList.length > 0) grid.classList.toggle('flip');
             else if (grid.classList.contains('flip')) grid.classList.remove('flip');
         }, 1000);
 
@@ -640,22 +656,23 @@
                 const ms = machineState.get(machine) || { mode: 'idle', sebanggo: '' };
                 const mode = ms.mode || 'idle';
                 tile.classList.add(mode === 'break' ? 'brk' : mode === 'maintenance' ? 'maint' : mode === 'running' ? 'running' : 'idle');
+                // Running shows the 背番号 big & centered; idle shows nothing big.
                 const sebEl = tile.querySelector('.seb');
-                sebEl.textContent = (mode === 'idle') ? '' : (ms.sebanggo || '');
-                if (mode !== 'idle' && ms.sebanggo) fitSeb(tile, ms.sebanggo);
+                sebEl.textContent = (mode === 'running') ? (ms.sebanggo || '') : '';
+                if (mode === 'running' && ms.sebanggo) fitSeb(tile, ms.sebanggo);
                 tile.querySelector('.status').textContent =
-                    mode === 'running' ? '稼働 / RUNNING'
-                        : mode === 'break' ? '休憩中 / BREAK'
-                            : mode === 'maintenance' ? '整備中 / MAINTENANCE'
-                                : '停止 / IDLE';
-                // Big full-card word that alternates with the 背番号 (break/maint)
+                    mode === 'running' ? '稼働 / RUNNING' : '停止 / IDLE';
+                // Break/maintenance: big mode word in the center, small 背番号 bottom-left
                 const bigMode = tile.querySelector('.big-mode');
+                const sebMini = tile.querySelector('.seb-mini');
                 if (mode === 'break' || mode === 'maintenance') {
                     const word = mode === 'break' ? '休憩中' : '整備中';
                     bigMode.textContent = word;
-                    fitText(bigMode, word, tile.clientWidth || 300, 110);
+                    fitText(bigMode, word, tile.clientWidth || 300, 96);
+                    sebMini.textContent = ms.sebanggo || '';
                 } else {
                     bigMode.textContent = '';
+                    sebMini.textContent = '';
                 }
             }
         }
@@ -671,7 +688,9 @@
                     sebanggo: m.sebanggo || '',
                     hinban: m.hinban || '',
                     mode: m.mode || 'idle',
-                    since: m.since || 0
+                    prodAccumMs: m.prodAccumMs || 0,
+                    runSince: m.runSince || 0,
+                    modeSince: m.modeSince || 0
                 });
             });
             if (rosterChanged) renderRoster(); // renderRoster re-applies all tiles

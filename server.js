@@ -240,7 +240,19 @@ function applyTabletLogToMachineState(logEntry) {
     const st = map.get(id) || {
       sebanggo: '', hinban: '', worker: '',
       breakActive: false, maintActive: false,
-      runSince: 0, modeSince: 0, updatedAt: 0
+      runSince: 0, modeSince: 0, prodAccumMs: 0, updatedAt: 0
+    };
+
+    const isRunning = () => !!st.sebanggo && !st.breakActive && !st.maintActive;
+    // Accumulate the current running segment, then pause production time
+    const pauseProd = () => { if (st.runSince > 0) { st.prodAccumMs += Math.max(0, ts - st.runSince); st.runSince = 0; } };
+    // Resume production time if the machine is running again
+    const resumeProd = () => { if (isRunning() && st.runSince === 0) st.runSince = ts; };
+    // A brand-new 背番号 → fresh production session
+    const startNewRun = (s) => {
+      st.sebanggo = s; st.hinban = hinban;
+      st.prodAccumMs = 0; st.runSince = ts;
+      st.breakActive = false; st.maintActive = false; st.modeSince = 0;
     };
 
     if (action.includes('Reset button pressed') ||
@@ -248,21 +260,25 @@ function applyTabletLogToMachineState(logEntry) {
       // Session finished/cleared → machine goes idle
       st.sebanggo = ''; st.hinban = '';
       st.breakActive = false; st.maintActive = false;
-      st.runSince = 0; st.modeSince = 0;
+      st.runSince = 0; st.modeSince = 0; st.prodAccumMs = 0;
     } else if (action.includes('Break started')) {
+      if (seb && seb !== st.sebanggo) startNewRun(seb);
+      pauseProd();                                  // production clock pauses during break
       st.breakActive = true; st.modeSince = ts;
-      if (seb) { if (seb !== st.sebanggo) { st.sebanggo = seb; st.runSince = ts; } st.hinban = hinban; }
     } else if (action.includes('Break ended')) {
       st.breakActive = false; st.modeSince = 0;
+      resumeProd();                                 // production clock continues
     } else if (action.includes('Maintenance started')) {
+      if (seb && seb !== st.sebanggo) startNewRun(seb);
+      pauseProd();                                  // production clock pauses during maintenance
       st.maintActive = true; st.modeSince = ts;
-      if (seb) { if (seb !== st.sebanggo) { st.sebanggo = seb; st.runSince = ts; } st.hinban = hinban; }
     } else if (action.includes('Maintenance ended')) {
       st.maintActive = false; st.modeSince = 0;
+      resumeProd();
     } else if (seb) {
       // Any normal action carrying a 背番号 means this machine is running it
-      if (seb !== st.sebanggo) { st.sebanggo = seb; st.runSince = ts; }
-      st.hinban = hinban;
+      if (seb !== st.sebanggo) startNewRun(seb);
+      else { st.hinban = hinban; resumeProd(); }
     }
 
     if (worker) st.worker = worker;
@@ -273,13 +289,22 @@ function applyTabletLogToMachineState(logEntry) {
 }
 
 function machineStateView(id, st) {
-  if (!st) return { equipment: id, sebanggo: '', hinban: '', worker: '', mode: 'idle', since: 0 };
+  if (!st) return { equipment: id, sebanggo: '', hinban: '', worker: '', mode: 'idle', prodAccumMs: 0, runSince: 0, modeSince: 0 };
   const mode = st.maintActive ? 'maintenance'
     : st.breakActive ? 'break'
       : (st.sebanggo ? 'running' : 'idle');
-  const since = (mode === 'maintenance' || mode === 'break') ? (st.modeSince || st.updatedAt)
-    : (mode === 'running' ? (st.runSince || st.updatedAt) : 0);
-  return { equipment: id, sebanggo: st.sebanggo || '', hinban: st.hinban || '', worker: st.worker || '', mode, since };
+  return {
+    equipment: id,
+    sebanggo: st.sebanggo || '',
+    hinban: st.hinban || '',
+    worker: st.worker || '',
+    mode,
+    // Production elapsed = prodAccumMs + (now - runSince) while running.
+    prodAccumMs: st.prodAccumMs || 0,
+    runSince: (mode === 'running') ? (st.runSince || 0) : 0,
+    // Break/maintenance elapsed = now - modeSince.
+    modeSince: (mode === 'break' || mode === 'maintenance') ? (st.modeSince || 0) : 0
+  };
 }
 
 function buildMachineStatePayload(factory) {
