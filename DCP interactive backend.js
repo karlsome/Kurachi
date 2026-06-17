@@ -980,6 +980,17 @@ async function fetchProductDetails() {
       throw new Error("Retrieved data is null or undefined");
     }
 
+    // Stash the full master record so the per-lot tracker can resolve
+    // 送りピッチ / pcPerCycle per machine (machineConfig or the encoded string).
+    window.currentMasterRecord = data;
+    try {
+      localStorage.setItem(`${uniquePrefix}feedConfig`, JSON.stringify({
+        送りピッチ: data.送りピッチ != null ? data.送りピッチ : '',
+        pcPerCycle: data.pcPerCycle != null ? data.pcPerCycle : '',
+        machineConfig: data.machineConfig || null
+      }));
+    } catch (e) { /* non-fatal */ }
+
     // Populate fields
     document.getElementById("product-number").value = data.品番 || "";
     document.getElementById("model").value = data.モデル || "";
@@ -3976,6 +3987,14 @@ function addManualLot(lotNumber) {
   materialLots.push({ lotNumber, source: 'manual' });
   // The next captured material-label photo links to this lot
   window.__captureLotTarget = lotNumber;
+  // Track on the machine timeline too (manual lots are closed by the End-Time
+  // popup; no per-scan prompt, so the previous-lot return value is ignored).
+  if (typeof window.recordLotScan === 'function') {
+    const _m = window.__lotScanMachine
+      || (typeof groupedMachines !== 'undefined' && groupedMachines[0])
+      || (document.getElementById('process') ? document.getElementById('process').value : '');
+    window.recordLotScan(lotNumber, _m, 'manual');
+  }
   saveMaterialLots();
   renderMaterialLotTags();
   return true; // Success
@@ -6600,6 +6619,19 @@ document.getElementById('submit').addEventListener('click', async (event) => {
             isToggleChecked: isToggleChecked
         };
 
+        // Per-lot production tracking (pressDB only, additive): shots / meters /
+        // pieces per material lot. ショット数 is overwritten with the auto-summed
+        // total of all lots. The server spreads formData into pressDB only.
+        try {
+            const _lp = (typeof window.buildLotProductionPayload === 'function') ? window.buildLotProductionPayload() : null;
+            if (_lp) {
+                dcpSubmissionData.Lot_Details = _lp.Lot_Details;
+                dcpSubmissionData.Total_Meters = _lp.Total_Meters;
+                dcpSubmissionData.Total_Pieces = _lp.Total_Pieces;
+                if (_lp.totalShots > 0) dcpSubmissionData.ショット数 = _lp.totalShots;
+            }
+        } catch (e) { console.warn('Lot production payload build failed:', e); }
+
         // Add counter + inspection data if toggle is checked (for kensaDB)
         if (isToggleChecked) {
             const counters = Array.from({ length: 12 }, (_, i) => {
@@ -7093,8 +7125,15 @@ async function sendtoNC(selectedValue) {
       });
     }
     
+    // If a specific machine was chosen for this lot scan, send ONLY to it
+    // (each grouped machine has its own lot timeline).
+    if (window.__lotScanMachine && machineIPMap[window.__lotScanMachine]) {
+      machineIPMap = { [window.__lotScanMachine]: machineIPMap[window.__lotScanMachine] };
+      console.log("🎯 Restricting send to chosen machine:", window.__lotScanMachine);
+    }
+
     console.log("🔵 Sending to multiple machines:", machineIPMap);
-    
+
     // Store machine group globally for individual send modal
     window.currentMachineGroup = Object.entries(machineIPMap).map(([name, ip]) => ({ name, ip }));
     console.log("💾 Stored currentMachineGroup:", window.currentMachineGroup);
@@ -10012,7 +10051,12 @@ function resetAllSteps() {
   materialLots = [];
   saveMaterialLots();
   renderMaterialLotTags();
-  
+
+  // Clear per-lot production tracking (shots / meters / pieces) and chosen machine
+  if (typeof window.lotProductionReset === 'function') window.lotProductionReset();
+  window.__lotScanMachine = null;
+  window.__pendingPrevLot = null;
+
   // Clear product details cache
   currentProductDetails = {
     sebanggo: '',
@@ -10245,7 +10289,16 @@ document.getElementById('startStep1Scan').addEventListener('click', function(eve
 // Step 2: Start Scan Button
 document.getElementById('startStep2Scan').addEventListener('click', function(event) {
   event.preventDefault(); // Prevent form submission
-  
+
+  // Grouped machine: pick which machine this lot is for BEFORE scanning, then
+  // re-enter this handler with the choice made. Single machine skips this.
+  if (typeof groupedMachines !== 'undefined' && groupedMachines.length > 1 && !window.__lotScanMachine) {
+    if (typeof window.chooseScanMachine === 'function') {
+      window.chooseScanMachine(() => document.getElementById('startStep2Scan').click());
+      return;
+    }
+  }
+
   const content = document.getElementById('step2Content');
   const scanner = document.getElementById('step2Scanner');
   
@@ -10388,9 +10441,19 @@ document.getElementById('startStep2Scan').addEventListener('click', function(eve
         // Success - stop scanner and move to Step 3
         await step2Scanner.stop();
         step2Scanner = null;
-        
+
         console.log("Lot added successfully:", lotNumber);
-        
+
+        // Record this lot on the chosen machine's timeline. recordLotScan returns
+        // the machine's previously-open lot (if any), whose ショット数 we collect
+        // after the label photo (the machine counter that just finished = prev lot).
+        const _scanMachine = window.__lotScanMachine
+          || (typeof groupedMachines !== 'undefined' && groupedMachines[0])
+          || (document.getElementById('process') ? document.getElementById('process').value : '');
+        if (typeof window.recordLotScan === 'function') {
+          window.__pendingPrevLot = window.recordLotScan(lotNumber, _scanMachine, 'scanned');
+        }
+
         // Log material lot scan action
         await logTabletAction('Scanned material lot (Step 2)', 'in-progress', {
           lotNumber: lotNumber,
@@ -10399,11 +10462,19 @@ document.getElementById('startStep2Scan').addEventListener('click', function(eve
         });
         
         document.getElementById('step2Modal').style.display = 'none';
-        // Mandatory material-label photo for NEW lots before advancing (Phase 1 gate)
+        // Mandatory material-label photo for NEW lots before advancing (Phase 1 gate).
+        // After the photo, collect the PREVIOUS lot's ショット数 (if any) before Step 3.
+        const _afterPhoto = () => {
+          if (typeof window.afterLotPhotoProceed === 'function') {
+            window.afterLotPhotoProceed(() => showStep3Modal());
+          } else {
+            showStep3Modal();
+          }
+        };
         if (typeof window.materialPhotoGate === 'function') {
-          window.materialPhotoGate(() => showStep3Modal());
+          window.materialPhotoGate(_afterPhoto);
         } else {
-          showStep3Modal();
+          _afterPhoto();
         }
 
       } catch (error) {
@@ -10808,7 +10879,10 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
 
     // Call the sendtoNC function (sends in background with progress bar)
     sendtoNC(currentSebanggo);
-    
+
+    // Lot cycle done: clear the chosen machine so the next scan re-prompts (grouped).
+    window.__lotScanMachine = null;
+
   } catch (error) {
     console.error("Error sending to machine:", error);
     showAlert('送信エラー / Send error');
@@ -11217,3 +11291,199 @@ if (manualSendModal) {
     }
   });
 }
+
+/* ============================================================================
+   PER-LOT PRODUCTION TRACKING  (ショット数 / 使用メートル / 生産数 per lot)
+   See docs/lot-shot-tracking-spec.md. Self-contained, client-only, additive.
+   - Each material lot records the shots run on a specific machine.
+   - meters = shots × 送りピッチ ÷ 1000 (mm) ; pieces = shots × pcPerCycle.
+   - Shots attach to the PREVIOUS lot (machine counter resets when a new program
+     is sent); the final/open lot is captured when End Time is entered.
+   - Grouped machines: each machine keeps its own independent lot timeline.
+   ============================================================================ */
+(function () {
+  const PFX = (typeof uniquePrefix !== 'undefined' && uniquePrefix) ? uniquePrefix : 'dcp-';
+  const LOTS_KEY = PFX + 'lotsByMachine';
+
+  let lotsByMachine = {};
+  try { lotsByMachine = JSON.parse(localStorage.getItem(LOTS_KEY) || '{}') || {}; } catch (e) { lotsByMachine = {}; }
+  function save() { try { localStorage.setItem(LOTS_KEY, JSON.stringify(lotsByMachine)); } catch (e) { } }
+
+  const round1 = n => Math.round(n * 10) / 10;
+  function num(v) { if (v === '' || v == null) return null; const n = parseFloat(v); return isFinite(n) ? n : null; }
+
+  function getMaster() {
+    if (window.currentMasterRecord) return window.currentMasterRecord;
+    try { return JSON.parse(localStorage.getItem(PFX + 'feedConfig') || 'null'); } catch (e) { return null; }
+  }
+
+  // Parse "OZNC(04,06,08,10):820 OZNC(03,05,07,09):1590" -> pitch for a machine.
+  function parsePitchString(str, machine) {
+    const mNum = ((String(machine).match(/(\d+)/) || [])[1] || '').padStart(2, '0');
+    const re = /([A-Za-z]+)\(([^)]+)\):(\d+)/g;
+    let m, fallback = null;
+    while ((m = re.exec(str))) {
+      const prefix = m[1];
+      const nums = m[2].split(',').map(s => s.trim().padStart(2, '0'));
+      const pitch = parseInt(m[3], 10);
+      if (mNum && String(machine).indexOf(prefix) === 0 && nums.indexOf(mNum) >= 0) return pitch;
+      fallback = pitch;
+    }
+    return fallback;
+  }
+
+  // Resolve { feedPitch (mm), pcPerCycle } for a machine: machineConfig -> string -> plain.
+  function resolveFeed(machine) {
+    const rec = getMaster() || {};
+    let feedPitch = null, pcPerCycle = null;
+    if (rec.machineConfig && rec.machineConfig[machine]) {
+      feedPitch = num(rec.machineConfig[machine].送りピッチ);
+      pcPerCycle = num(rec.machineConfig[machine].pcPerCycle);
+    }
+    if (feedPitch == null && typeof rec.送りピッチ === 'string' && /[A-Za-z]/.test(rec.送りピッチ)) {
+      feedPitch = parsePitchString(rec.送りピッチ, machine);
+    }
+    if (feedPitch == null && rec.送りピッチ != null) feedPitch = num(rec.送りピッチ);
+    if (pcPerCycle == null) pcPerCycle = num(rec.pcPerCycle);
+    return { feedPitch: feedPitch, pcPerCycle: (pcPerCycle && pcPerCycle > 0) ? pcPerCycle : null };
+  }
+
+  function openRecordFor(machine) {
+    const list = lotsByMachine[machine] || [];
+    for (let i = list.length - 1; i >= 0; i--) if (list[i].open) return list[i];
+    return null;
+  }
+  function allRecords() { return Object.keys(lotsByMachine).reduce((a, k) => a.concat(lotsByMachine[k]), []); }
+  function totalShots() { return allRecords().reduce((s, r) => s + (parseInt(r.shots, 10) || 0), 0); }
+
+  function updateShotTotalField() {
+    const el = document.getElementById('shot');
+    if (el) { el.value = String(totalShots()); try { el.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) { } }
+  }
+
+  // Add a newly scanned lot to a machine's timeline; return the previously-open
+  // record (whose shots should be collected now), or null for the first lot.
+  function recordLotScan(lotNumber, machine, source) {
+    machine = machine || 'UNKNOWN';
+    const list = lotsByMachine[machine] || (lotsByMachine[machine] = []);
+    const prevOpen = openRecordFor(machine);
+    const feed = resolveFeed(machine);
+    list.push({
+      lotNumber: lotNumber, machine: machine, shots: null,
+      feedPitch: feed.feedPitch, pcPerCycle: feed.pcPerCycle,
+      meters: null, pieces: null, source: source || 'scanned', open: true, ts: Date.now()
+    });
+    save();
+    return prevOpen;
+  }
+
+  function closeRecord(rec, shots) {
+    if (!rec) return;
+    shots = parseInt(shots, 10) || 0;
+    rec.shots = shots;
+    rec.meters = (rec.feedPitch != null) ? round1(shots * rec.feedPitch / 1000) : null;
+    rec.pieces = (rec.pcPerCycle != null) ? shots * rec.pcPerCycle : null;
+    rec.open = false;
+    save();
+    updateShotTotalField();
+  }
+
+  function buildPayload() {
+    const recs = allRecords().filter(r => r.shots != null);
+    const Lot_Details = recs.map(r => {
+      const o = {
+        lotNumber: r.lotNumber, machine: r.machine, shots: r.shots,
+        feedPitch: r.feedPitch, pcPerCycle: r.pcPerCycle, meters: r.meters
+      };
+      if (r.pieces != null) o.pieces = r.pieces;
+      return o;
+    });
+    const Total_Meters = round1(recs.reduce((s, r) => s + (r.meters || 0), 0));
+    const Total_Pieces = recs.filter(r => r.pieces != null).reduce((s, r) => s + r.pieces, 0);
+    return { Lot_Details: Lot_Details, Total_Meters: Total_Meters, Total_Pieces: Total_Pieces, totalShots: totalShots() };
+  }
+
+  /* ---------- Modals (self-contained, injected) ---------- */
+  function closeLP() { const e = document.getElementById('lpModal'); if (e) e.remove(); }
+  function shell() {
+    const ov = document.createElement('div');
+    ov.id = 'lpModal';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:100100;background:rgba(10,15,26,.6);display:flex;align-items:center;justify-content:center;padding:20px;';
+    const card = document.createElement('div');
+    card.style.cssText = 'background:#fff;border-radius:16px;max-width:360px;width:100%;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.3);font-family:inherit;';
+    ov.appendChild(card);
+    document.body.appendChild(ov);
+    return card;
+  }
+
+  function promptShots(title, subtitle, onSubmit) {
+    closeLP();
+    const card = shell();
+    card.innerHTML =
+      '<div style="font-size:1.05rem;font-weight:800;color:#101828;">' + title + '</div>' +
+      '<div style="font-size:.85rem;font-weight:600;color:#475467;margin:6px 0 12px;">' + subtitle + '</div>' +
+      '<input id="lpDisplay" type="text" readonly value="" inputmode="none" style="width:100%;font-size:2rem;font-weight:800;text-align:center;padding:12px;border:2px solid #D0D5DD;border-radius:10px;color:#101828;margin-bottom:12px;">' +
+      '<div id="lpKeys" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;"></div>' +
+      '<button id="lpOk" style="margin-top:12px;width:100%;background:#2E6FF2;color:#fff;border:none;border-radius:10px;padding:14px;font-size:1rem;font-weight:800;cursor:pointer;">OK</button>';
+    const disp = card.querySelector('#lpDisplay');
+    const keys = card.querySelector('#lpKeys');
+    ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', 'C'].forEach(k => {
+      const b = document.createElement('button');
+      b.textContent = k;
+      b.style.cssText = 'padding:16px;font-size:1.3rem;font-weight:800;border:1px solid #D0D5DD;border-radius:10px;background:#F9FAFB;color:#101828;cursor:pointer;';
+      b.onclick = () => { if (k === '⌫') disp.value = disp.value.slice(0, -1); else if (k === 'C') disp.value = ''; else disp.value += k; };
+      keys.appendChild(b);
+    });
+    card.querySelector('#lpOk').onclick = () => { const v = parseInt(disp.value, 10) || 0; closeLP(); if (onSubmit) onSubmit(v); };
+  }
+
+  function chooseMachine(machines, onPick) {
+    closeLP();
+    const card = shell();
+    const btns = (machines || []).map(m =>
+      '<button data-m="' + m + '" style="width:100%;background:#16223A;color:#fff;border:none;border-radius:10px;padding:16px;font-size:1.1rem;font-weight:800;cursor:pointer;margin-bottom:10px;">' + m + '</button>'
+    ).join('');
+    card.innerHTML =
+      '<div style="font-size:1.05rem;font-weight:800;color:#101828;margin-bottom:4px;">機械を選択 / Select machine</div>' +
+      '<div style="font-size:.85rem;font-weight:600;color:#475467;margin-bottom:14px;">このロットを処理する機械 / Machine for this lot</div>' + btns;
+    card.querySelectorAll('[data-m]').forEach(b => b.onclick = () => { const m = b.getAttribute('data-m'); closeLP(); if (onPick) onPick(m); });
+  }
+
+  // Collect ショット数 for each still-open lot (triggered when End Time is set).
+  function promptFinalLots() {
+    const open = allRecords().filter(r => r.open);
+    if (!open.length) return;
+    let i = 0;
+    const next = () => {
+      if (i >= open.length) return;
+      const r = open[i++];
+      promptShots('最終ロットのショット数 / Final lot shots', r.machine + ' — ロット ' + r.lotNumber,
+        v => { closeRecord(r, v); next(); });
+    };
+    next();
+  }
+
+  /* ---------- Public hooks ---------- */
+  window.recordLotScan = recordLotScan;
+  window.buildLotProductionPayload = buildPayload;
+  window.lotProductionReset = function () { lotsByMachine = {}; save(); updateShotTotalField(); };
+  window.chooseScanMachine = function (onPicked) {
+    chooseMachine((typeof groupedMachines !== 'undefined') ? groupedMachines : [],
+      m => { window.__lotScanMachine = m; if (onPicked) onPicked(); });
+  };
+  window.afterLotPhotoProceed = function (onDone) {
+    const prev = window.__pendingPrevLot;
+    window.__pendingPrevLot = null;
+    if (prev && prev.open) {
+      promptShots('前ロットのショット数 / Previous lot shots', prev.machine + ' — ロット ' + prev.lotNumber,
+        v => { closeRecord(prev, v); if (onDone) onDone(); });
+    } else if (onDone) { onDone(); }
+  };
+
+  // Final/open lot capture when End Time is entered.
+  const endTimeEl = document.getElementById('End Time');
+  if (endTimeEl) endTimeEl.addEventListener('change', function () { if (endTimeEl.value) promptFinalLots(); });
+
+  // Reflect any persisted lots into the (hidden) #shot total on load.
+  updateShotTotalField();
+})();
