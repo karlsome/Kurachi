@@ -1177,13 +1177,26 @@
             };
 
             try {
-                exAudio.currentTime = 0;
-                exAudio.volume = 1;
-                exAudio.muted = false;
                 exAudio.onended = endExercise;
-                const p = exAudio.play();
-                if (p && p.then) p.then(begin).catch(() => { begin(); }); // animate even if audio is blocked
-                else begin();
+                const tryPlay = () => {
+                    try {
+                        exAudio.currentTime = 0;
+                        exAudio.volume = 1;
+                        exAudio.muted = false;
+                        const p = exAudio.play();
+                        if (p && p.then) p.then(begin).catch(onPlayFail);
+                        else begin();
+                    } catch (e) { onPlayFail(); }
+                };
+                // If the file isn't buffered yet (e.g. a manual test fired before
+                // the 30s preload finished), wait until it can play through, then
+                // start — instead of freezing on the first frame. If it's already
+                // playable but autoplay was blocked, still animate the ring.
+                const onPlayFail = () => {
+                    if (exAudio.readyState >= 3) { begin(); return; }
+                    exAudio.addEventListener('canplaythrough', tryPlay, { once: true });
+                };
+                tryPlay();
             } catch (e) { begin(); }
         }
 
@@ -1298,6 +1311,11 @@
         }
         setInterval(schedulerTick, 1000);
         schedulerTick();
+
+        // Pre-fetch the exercise audio into memory at page load so the first
+        // play (manual test or the 08:45 trigger) starts instantly. The
+        // scheduler also re-checks this ~30s before 08:45 as a safety net.
+        preloadExerciseAudio();
 
         // ----- TEMPORARY test buttons (fire each event immediately) -----
         const testPanel = document.getElementById('testPanel');
