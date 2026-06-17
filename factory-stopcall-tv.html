@@ -242,6 +242,33 @@
             display: block;
         }
 
+        /* Big full-card mode word (BREAK / MAINTENANCE) shown during the flip,
+           alternating with the 背番号 on break/maintenance tiles. */
+        .big-mode {
+            display: none;
+            font-weight: 900;
+            line-height: 0.95;
+            text-align: center;
+            white-space: nowrap;
+            max-width: 100%;
+            padding: 0 6px;
+        }
+
+        .tile.brk .big-mode { color: #BFD8FF; }
+        .tile.maint .big-mode { color: #FFD980; }
+
+        .grid.flip .tile.brk .seb,
+        .grid.flip .tile.brk .status,
+        .grid.flip .tile.maint .seb,
+        .grid.flip .tile.maint .status {
+            display: none;
+        }
+
+        .grid.flip .tile.brk .big-mode,
+        .grid.flip .tile.maint .big-mode {
+            display: block;
+        }
+
         /* ---------- Full-screen takeover ---------- */
         .takeover {
             position: fixed;
@@ -438,6 +465,7 @@
                     '<div class="name">' + m + '</div>' +
                     '<div class="big-rank"></div>' +
                     '<div class="seb"></div>' +
+                    '<div class="big-mode"></div>' +
                     '<div class="status">停止 / IDLE</div>' +
                     '<div class="elapsed"></div>';
                 grid.appendChild(tile);
@@ -567,10 +595,17 @@
         }
         setInterval(refreshElapsed, 1000);
 
-        // Alternate every calling tile between its machine name and a big rank
-        // number once per second, so the order is readable from far away.
+        // Once per second, flip calling tiles (name <-> rank) AND break/
+        // maintenance tiles (背番号 <-> big mode word), so both read from afar.
+        function hasFlippers() {
+            if (activeList.length > 0) return true;
+            for (const ms of machineState.values()) {
+                if (ms && (ms.mode === 'break' || ms.mode === 'maintenance')) return true;
+            }
+            return false;
+        }
         setInterval(() => {
-            if (activeList.length > 0) grid.classList.toggle('flip');
+            if (hasFlippers()) grid.classList.toggle('flip');
             else if (grid.classList.contains('flip')) grid.classList.remove('flip');
         }, 1000);
 
@@ -613,6 +648,15 @@
                         : mode === 'break' ? '休憩中 / BREAK'
                             : mode === 'maintenance' ? '整備中 / MAINTENANCE'
                                 : '停止 / IDLE';
+                // Big full-card word that alternates with the 背番号 (break/maint)
+                const bigMode = tile.querySelector('.big-mode');
+                if (mode === 'break' || mode === 'maintenance') {
+                    const word = mode === 'break' ? '休憩中' : '整備中';
+                    bigMode.textContent = word;
+                    fitText(bigMode, word, tile.clientWidth || 300, 110);
+                } else {
+                    bigMode.textContent = '';
+                }
             }
         }
 
