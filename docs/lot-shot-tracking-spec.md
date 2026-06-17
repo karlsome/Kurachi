@@ -53,6 +53,10 @@ Each machine has its **own independent lot timeline**.
 The same lot number may be scanned for two machines (the 材料ロット list keeps it
 once; it is recorded once per machine in `Lot_Details`). De-dup is per machine.
 
+**Photo once per lot:** the material-label photo gate only appears for a lot that
+has no photo yet. Assigning the SAME lot to a second machine skips the photo
+(the label was already captured) and goes straight to the chooser.
+
 ## 送りピッチ / pcPerCycle resolver
 
 For a given machine, resolve from the cached masterDB product record, in order:

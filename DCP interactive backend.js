@@ -10444,8 +10444,17 @@ document.getElementById('startStep2Scan').addEventListener('click', function(eve
             if (typeof window.afterLotPhotoProceed === 'function') window.afterLotPhotoProceed(_next);
             else _next();
           };
-          if (typeof window.materialPhotoGate === 'function') window.materialPhotoGate(_afterPhoto);
-          else _afterPhoto();
+          // Only require a material-label photo if this lot has none yet. When the
+          // SAME lot is assigned to a second grouped machine, the label was already
+          // photographed, so skip the photo gate and go straight to the chooser.
+          const _hasPhoto = (typeof materialLabelPhotos !== 'undefined')
+            && Array.isArray(materialLabelPhotos)
+            && materialLabelPhotos.some(p => p && p.lotNumber === lotNumber);
+          if (!_hasPhoto && typeof window.materialPhotoGate === 'function') {
+            window.materialPhotoGate(_afterPhoto);
+          } else {
+            _afterPhoto();
+          }
         };
 
         // Add scanned lot to the material lot input (de-dups the 材料ロット list)
