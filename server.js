@@ -31005,7 +31005,7 @@ app.get('/api/shisaku-request/list', async (req, res) => {
 
 app.post('/api/shisaku-request/register', async (req, res) => {
   try {
-    const { name, pce, okuriPitch, color, material, boxType, quantity, pdfLink } = req.body;
+    const { name, pce, okuriPitch, color, material, boxType, quantity, pdfLink, shisakudb_id } = req.body;
 
     if (!name || !pce || !okuriPitch || !color || !material || !boxType || !quantity || !pdfLink) {
       return res.status(400).json({ error: 'name, pce, okuriPitch, color, material, boxType, quantity, and pdfLink are required' });
@@ -31020,6 +31020,7 @@ app.post('/api/shisaku-request/register', async (req, res) => {
       boxType: String(boxType).trim(),
       quantity: Number(quantity),
       pdfLink: String(pdfLink).trim(),
+      ...(shisakudb_id && ObjectId.isValid(shisakudb_id) && { shisakudb_id: new ObjectId(shisakudb_id) }),
       createdAt: new Date(),
     };
 
