@@ -10302,7 +10302,7 @@ document.getElementById('startStep1Scan').addEventListener('click', function(eve
 });
 
 // Step 2: Start Scan Button
-document.getElementById('startStep2Scan').addEventListener('click', function(event) {
+document.getElementById('startStep2Scan').addEventListener('click', async function(event) {
   event.preventDefault(); // Prevent form submission
 
   // Grouped machine: pick which machine this lot is for BEFORE scanning, then
@@ -10344,6 +10344,20 @@ document.getElementById('startStep2Scan').addEventListener('click', function(eve
   // firing its callback multiple times for the same code before stop() finishes,
   // which previously double-recorded a lot and made a phantom "previous lot").
   window.__step2Processing = false;
+
+  // Fully release any previous scanner and rebuild the reader DOM before starting
+  // a new one. Without this, re-scanning (e.g. the 2nd grouped machine) reuses a
+  // stale #step2QrReader and the camera stays locked / never activates.
+  if (step2Scanner) {
+    try { await step2Scanner.stop(); } catch (e) { /* already stopped */ }
+    try { step2Scanner.clear(); } catch (e) { }
+    step2Scanner = null;
+  }
+  const step2ReaderHost = document.getElementById('step2QrReader');
+  if (step2ReaderHost) step2ReaderHost.innerHTML = '';
+
+  // Let the DOM apply the cleared reader before the camera stream attaches.
+  await new Promise(resolve => setTimeout(resolve, 50));
 
   step2Scanner = new Html5Qrcode("step2QrReader");
   
