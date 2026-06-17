@@ -389,6 +389,139 @@
             font-weight: 700;
             color: var(--muted);
         }
+
+        /* ---------- Scheduled events (ラジオ体操 / 時報) ---------- */
+        /* Shared full-screen layer for the lead-in countdown, the radio-taiso
+           exercise, and the hourly time chimes. Sits above the call takeover
+           but below the one-time audio-unlock gate. */
+        .sched {
+            position: fixed;
+            inset: 0;
+            z-index: 80;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 3vh;
+            text-align: center;
+            padding: 24px;
+        }
+
+        .sched.show {
+            display: flex;
+        }
+
+        /* Countdown (10 → 1) */
+        #countdownOverlay {
+            background: radial-gradient(circle at 50% 40%, #0E1830, #05080F 85%);
+        }
+
+        #countdownOverlay .cd-label {
+            font-size: clamp(22px, 3vw, 60px);
+            font-weight: 800;
+            color: var(--muted);
+            letter-spacing: 0.08em;
+        }
+
+        #countdownOverlay .cd-num {
+            font-size: clamp(140px, 34vw, 620px);
+            font-weight: 900;
+            color: #fff;
+            line-height: 0.9;
+            font-variant-numeric: tabular-nums;
+            text-shadow: 0 10px 60px rgba(0, 0, 0, 0.5);
+            animation: cdPulse 1s ease-in-out infinite;
+        }
+
+        @keyframes cdPulse {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.08); opacity: 0.82; }
+        }
+
+        /* Exercise: title + progress ring + remaining-time */
+        #exOverlay {
+            background: radial-gradient(circle at 50% 35%, #123A2E, #06140F 85%);
+        }
+
+        #exOverlay .ex-title {
+            font-size: clamp(34px, 6vw, 140px);
+            font-weight: 900;
+            color: #EAFBF2;
+            letter-spacing: 0.04em;
+        }
+
+        .ex-ring {
+            position: relative;
+            width: min(46vh, 46vw);
+            height: min(46vh, 46vw);
+        }
+
+        .ex-ring svg {
+            width: 100%;
+            height: 100%;
+            transform: rotate(-90deg);
+        }
+
+        .ex-ring .track {
+            fill: none;
+            stroke: rgba(255, 255, 255, 0.12);
+            stroke-width: 9;
+        }
+
+        .ex-ring .prog {
+            fill: none;
+            stroke: var(--green);
+            stroke-width: 9;
+            stroke-linecap: round;
+            transition: stroke-dashoffset 0.25s linear;
+            filter: drop-shadow(0 0 10px rgba(41, 195, 106, 0.6));
+        }
+
+        .ex-ring .ex-timer {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: clamp(40px, 7vw, 150px);
+            font-weight: 900;
+            color: #fff;
+            font-variant-numeric: tabular-nums;
+        }
+
+        #exOverlay .ex-sub {
+            font-size: clamp(18px, 2vw, 42px);
+            font-weight: 800;
+            color: #9FE9C2;
+            letter-spacing: 0.06em;
+        }
+
+        /* Time chime (12:00 / 15:00 / 17:30) */
+        #chimeOverlay {
+            background: radial-gradient(circle at 50% 40%, #1A2740, #070C16 85%);
+            animation: chimeFade 1.2s ease-out;
+        }
+
+        @keyframes chimeFade {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        #chimeOverlay .ch-label {
+            font-size: clamp(22px, 3vw, 64px);
+            font-weight: 800;
+            color: #9DB4E0;
+            letter-spacing: 0.1em;
+        }
+
+        #chimeOverlay .ch-time {
+            font-size: clamp(120px, 26vw, 520px);
+            font-weight: 900;
+            color: #fff;
+            line-height: 0.9;
+            font-variant-numeric: tabular-nums;
+            text-shadow: 0 10px 60px rgba(0, 0, 0, 0.5);
+        }
     </style>
 </head>
 
@@ -411,6 +544,38 @@
         <div class="to-label">呼び出し / CALLING LEADER</div>
         <div class="to-machine" id="toMachine">—</div>
         <div class="to-rank" id="toRank">#1</div>
+    </div>
+
+    <!-- Scheduled-event overlays: lead-in countdown, ラジオ体操 exercise, 時報 chime -->
+    <div class="sched" id="countdownOverlay">
+        <div class="cd-label" id="cdLabel">まもなく</div>
+        <div class="cd-num" id="cdNum">10</div>
+    </div>
+
+    <div class="sched" id="exOverlay">
+        <div class="ex-title">ラジオ体操第一</div>
+        <div class="ex-ring">
+            <svg viewBox="0 0 200 200">
+                <circle class="track" cx="100" cy="100" r="90"></circle>
+                <circle class="prog" id="exProg" cx="100" cy="100" r="90"></circle>
+            </svg>
+            <div class="ex-timer" id="exTimer">3:11</div>
+        </div>
+        <div class="ex-sub" id="exSub">残り時間 / remaining</div>
+    </div>
+
+    <div class="sched" id="chimeOverlay">
+        <div class="ch-label">時報 / TIME</div>
+        <div class="ch-time" id="chTime">12:00</div>
+    </div>
+
+    <!-- TEMPORARY: manual test panel for scheduled events. Remove after testing
+         (or add ?test=0 to hide). -->
+    <div id="testPanel" style="position:fixed;bottom:16px;right:16px;z-index:90;display:flex;flex-wrap:wrap;gap:8px;max-width:60vw;justify-content:flex-end;">
+        <button type="button" data-test="taiso"   style="background:#123A2E;color:#EAFBF2;border:2px solid #29C36A;border-radius:999px;padding:8px 14px;font-size:14px;font-weight:800;cursor:pointer;">▶ 8:45 体操</button>
+        <button type="button" data-test="noon"    style="background:#1A2740;color:#EAF0FB;border:2px solid #2E6FF2;border-radius:999px;padding:8px 14px;font-size:14px;font-weight:800;cursor:pointer;">▶ 12:00</button>
+        <button type="button" data-test="three"   style="background:#1A2740;color:#EAF0FB;border:2px solid #2E6FF2;border-radius:999px;padding:8px 14px;font-size:14px;font-weight:800;cursor:pointer;">▶ 15:00</button>
+        <button type="button" data-test="evening" style="background:#1A2740;color:#EAF0FB;border:2px solid #2E6FF2;border-radius:999px;padding:8px 14px;font-size:14px;font-weight:800;cursor:pointer;">▶ 17:30</button>
     </div>
 
     <button type="button" class="sound-enable" id="soundEnable">🔇 音を有効化 / Enable sound</button>
@@ -720,11 +885,23 @@
 
             // Announce each newly-added machine (full-screen takeover, 3s each).
             // The chime plays once per new call — only during that announcement.
+            //
+            // Scheduled-event gating:
+            //  - During ラジオ体操 the exercise stays on top: do NOT interrupt or
+            //    chime. The call is still recorded and its tile keeps blinking on
+            //    the board, becoming visible the moment the exercise ends.
+            //  - During a 時報 chime a real stop-call outranks the time signal, so
+            //    we dismiss the chime and announce the call normally.
             if (newlyAdded.length) {
-                playAlert();
-                newlyAdded
-                    .sort((a, b) => a.since - b.since)
-                    .forEach(it => queueTakeover(it.machine));
+                if (scheduledMode === 'exercise') {
+                    // suppressed on purpose — see above
+                } else {
+                    if (scheduledMode === 'chime') endChime();
+                    playAlert();
+                    newlyAdded
+                        .sort((a, b) => a.since - b.since)
+                        .forEach(it => queueTakeover(it.machine));
+                }
             }
         }
 
@@ -870,6 +1047,274 @@
         });
         // Reconnect immediately if the network comes back.
         window.addEventListener('online', () => { closeES(); connect(); });
+
+        /* ============================================================
+           Scheduled events — ラジオ体操第一 (08:45) + 時報 chimes
+           (12:00 / 15:00 / 17:30). Weekdays (Mon–Fri) only. All times are
+           evaluated in Asia/Tokyo, so the schedule is correct regardless of
+           the TV's own clock/timezone. Runs entirely client-side — no server
+           involvement, on every factory display independently.
+           ============================================================ */
+        const AUDIO_URL = params.get('audio') || 'src/rajio.mp3';
+        const EX_FALLBACK_SECONDS = 192; // used until real audio metadata loads
+
+        const PRELOAD_LEAD = 30;   // begin loading the audio this many seconds ahead
+        const COUNTDOWN_LEAD = 10; // lead-in countdown length (seconds)
+        const FIRE_GRACE = 3;      // tolerate a few seconds of timer drift/throttling
+        const CHIME_HOLD_MS = 15000;
+
+        const SCHEDULE = [
+            { id: 'taiso',   at: '08:45', kind: 'exercise' },
+            { id: 'noon',    at: '12:00', kind: 'chime' },
+            { id: 'three',   at: '15:00', kind: 'chime' },
+            { id: 'evening', at: '17:30', kind: 'chime' },
+        ].map(e => {
+            const [h, m] = e.at.split(':').map(Number);
+            return Object.assign({}, e, { sec: h * 3600 + m * 60 });
+        });
+
+        let scheduledMode = null; // null | 'exercise' | 'chime' — gates stop-call takeover
+        const firedToday = { dateKey: '', done: new Set() };
+
+        // Scheduled-event overlay elements
+        const countdownOverlay = document.getElementById('countdownOverlay');
+        const cdNumEl = document.getElementById('cdNum');
+        const cdLabelEl = document.getElementById('cdLabel');
+        const exOverlay = document.getElementById('exOverlay');
+        const exProgEl = document.getElementById('exProg');
+        const exTimerEl = document.getElementById('exTimer');
+        const chimeOverlay = document.getElementById('chimeOverlay');
+        const chTimeEl = document.getElementById('chTime');
+
+        const RING_C = 2 * Math.PI * 90; // progress-ring circumference (r=90)
+        exProgEl.style.strokeDasharray = RING_C;
+        exProgEl.style.strokeDashoffset = RING_C;
+
+        // Current Asia/Tokyo time, broken into the parts the scheduler needs.
+        function jstNow() {
+            const parts = new Intl.DateTimeFormat('en-CA', {
+                timeZone: 'Asia/Tokyo', hour12: false,
+                year: 'numeric', month: '2-digit', day: '2-digit',
+                hour: '2-digit', minute: '2-digit', second: '2-digit', weekday: 'short'
+            }).formatToParts(new Date());
+            const g = t => (parts.find(p => p.type === t) || {}).value;
+            let h = +g('hour'); if (h === 24) h = 0; // some engines emit 24 at midnight
+            return {
+                dateKey: g('year') + '-' + g('month') + '-' + g('day'),
+                weekday: g('weekday'),                 // 'Mon'..'Sun'
+                secOfDay: h * 3600 + (+g('minute')) * 60 + (+g('second'))
+            };
+        }
+        const isWeekday = wd => ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].indexOf(wd) >= 0;
+
+        function rollDay(dateKey) {
+            if (firedToday.dateKey !== dateKey) { firedToday.dateKey = dateKey; firedToday.done.clear(); }
+        }
+        function onceToday(key) {
+            if (firedToday.done.has(key)) return false;
+            firedToday.done.add(key);
+            return true;
+        }
+
+        function fmtClock(totalSec) {
+            const s = Math.max(0, Math.round(totalSec));
+            return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+        }
+
+        // ----- Exercise audio: fully pre-fetched into memory so it can't stutter -----
+        let exAudio = null;
+        let exDuration = EX_FALLBACK_SECONDS;
+        function preloadExerciseAudio() {
+            if (exAudio) return; // already cached for this session
+            const audio = new Audio();
+            audio.preload = 'auto';
+            exAudio = audio;
+            audio.addEventListener('loadedmetadata', () => {
+                if (isFinite(audio.duration) && audio.duration > 0) {
+                    exDuration = audio.duration;
+                    exTimerEl.textContent = fmtClock(exDuration);
+                }
+            });
+            // Pull the whole file into memory; fall back to streaming if blocked.
+            fetch(AUDIO_URL).then(r => r.blob()).then(b => {
+                audio.src = URL.createObjectURL(b);
+                audio.load();
+            }).catch(() => {
+                audio.src = AUDIO_URL;
+                audio.load();
+            });
+        }
+
+        // ----- Exercise run -----
+        let exRAF = 0;
+        function startExercise() {
+            scheduledMode = 'exercise';
+            hideCountdown();
+            // The exercise outranks any in-flight call announcement.
+            takeoverQueue.length = 0;
+            document.getElementById('takeover').classList.remove('show');
+
+            if (!exAudio) preloadExerciseAudio();
+            exProgEl.style.strokeDashoffset = RING_C;
+            exTimerEl.textContent = fmtClock(exDuration);
+            exOverlay.classList.add('show');
+
+            const begin = () => {
+                const total = (exAudio && isFinite(exAudio.duration) && exAudio.duration > 0)
+                    ? exAudio.duration : exDuration;
+                const tick = () => {
+                    const cur = exAudio ? exAudio.currentTime : 0;
+                    const frac = total ? Math.min(1, cur / total) : 0;
+                    exProgEl.style.strokeDashoffset = RING_C * (1 - frac);
+                    exTimerEl.textContent = fmtClock(Math.max(0, total - cur));
+                    exRAF = requestAnimationFrame(tick);
+                };
+                cancelAnimationFrame(exRAF);
+                tick();
+                // Safety net: end even if 'ended' never fires (bad encode etc.).
+                clearTimeout(window.__exGuard);
+                window.__exGuard = setTimeout(endExercise, (total + 8) * 1000);
+            };
+
+            try {
+                exAudio.currentTime = 0;
+                exAudio.volume = 1;
+                exAudio.muted = false;
+                exAudio.onended = endExercise;
+                const p = exAudio.play();
+                if (p && p.then) p.then(begin).catch(() => { begin(); }); // animate even if audio is blocked
+                else begin();
+            } catch (e) { begin(); }
+        }
+
+        function endExercise() {
+            cancelAnimationFrame(exRAF); exRAF = 0;
+            clearTimeout(window.__exGuard);
+            try { if (exAudio) { exAudio.pause(); exAudio.onended = null; } } catch (e) { }
+            exOverlay.classList.remove('show');
+            scheduledMode = null;
+            // Re-sync the board: surface any calls that arrived during the exercise.
+            tileByMachine.forEach((t, m) => refreshTile(m));
+            refreshElapsed();
+        }
+
+        // ----- Time chime -----
+        let chimeTimer = 0;
+        function startChime(hhmm) {
+            scheduledMode = 'chime';
+            hideCountdown();
+            chTimeEl.textContent = hhmm;
+            chimeOverlay.classList.add('show');
+            playSingingBowl();
+            clearTimeout(chimeTimer);
+            chimeTimer = setTimeout(endChime, CHIME_HOLD_MS);
+        }
+        function endChime() {
+            clearTimeout(chimeTimer);
+            chimeOverlay.classList.remove('show');
+            scheduledMode = null;
+            tileByMachine.forEach((t, m) => refreshTile(m));
+        }
+
+        // Relaxing "singing bowl" strike: a warm fundamental plus a few
+        // inharmonic partials, soft mallet attack and a long, gently shimmering
+        // decay. Two strikes, the second softer.
+        function playSingingBowl() {
+            if (!ensureAudio()) return;
+            const ctx = audioCtx;
+            const strike = (t0, base, gain) => {
+                const partials = [[1, 1], [2.0, 0.5], [2.76, 0.28], [5.40, 0.12]];
+                const master = ctx.createGain();
+                master.connect(ctx.destination);
+                master.gain.setValueAtTime(0.0001, t0);
+                master.gain.exponentialRampToValueAtTime(gain, t0 + 0.06); // soft attack
+                master.gain.exponentialRampToValueAtTime(0.0001, t0 + 6.0); // long decay
+                partials.forEach(([ratio, amp]) => {
+                    const o = ctx.createOscillator();
+                    const g = ctx.createGain();
+                    o.type = 'sine';
+                    o.frequency.setValueAtTime(base * ratio, t0);
+                    // subtle shimmer (slow detune)
+                    const lfo = ctx.createOscillator(), lg = ctx.createGain();
+                    lfo.frequency.value = 4 + ratio;
+                    lg.gain.value = base * ratio * 0.003;
+                    lfo.connect(lg); lg.connect(o.frequency);
+                    g.gain.value = amp;
+                    o.connect(g); g.connect(master);
+                    o.start(t0); lfo.start(t0);
+                    o.stop(t0 + 6.3); lfo.stop(t0 + 6.3);
+                });
+            };
+            const now = ctx.currentTime + 0.05;
+            strike(now, 320, 0.5);
+            strike(now + 1.4, 320, 0.32);
+        }
+
+        // ----- Countdown overlay -----
+        function showCountdown(label, num) {
+            cdLabelEl.textContent = label;
+            cdNumEl.textContent = String(num);
+            countdownOverlay.classList.add('show');
+        }
+        function hideCountdown() { countdownOverlay.classList.remove('show'); }
+
+        // ----- Manual fire (used by both the test buttons and the scheduler) -----
+        function fireEvent(ev) {
+            if (ev.kind === 'exercise') startExercise();
+            else startChime(ev.at);
+        }
+
+        // ----- 1 Hz scheduler -----
+        function schedulerTick() {
+            const t = jstNow();
+            rollDay(t.dateKey);
+            if (!isWeekday(t.weekday)) { if (!scheduledMode) hideCountdown(); return; }
+            const sec = t.secOfDay;
+
+            SCHEDULE.forEach(ev => {
+                // Pre-fetch the exercise audio ~30s ahead (once/day).
+                if (ev.kind === 'exercise' && sec >= ev.sec - PRELOAD_LEAD && sec < ev.sec) {
+                    if (onceToday(ev.id + ':preload')) preloadExerciseAudio();
+                }
+                // Fire at the scheduled second within a small grace window (once/day).
+                if (sec >= ev.sec && sec <= ev.sec + FIRE_GRACE) {
+                    if (onceToday(ev.id + ':fire')) fireEvent(ev);
+                }
+            });
+
+            // Lead-in countdown for the next not-yet-fired event.
+            let showing = false;
+            for (let i = 0; i < SCHEDULE.length; i++) {
+                const ev = SCHEDULE[i];
+                const remaining = ev.sec - sec;
+                if (remaining >= 1 && remaining <= COUNTDOWN_LEAD && !firedToday.done.has(ev.id + ':fire')) {
+                    if (ev.kind === 'exercise') scheduledMode = 'exercise'; // hold calls during the lead-in
+                    showCountdown(ev.kind === 'exercise' ? 'まもなく ラジオ体操' : '時報まで', remaining);
+                    showing = true;
+                    break;
+                }
+            }
+            if (!showing && !scheduledMode && countdownOverlay.classList.contains('show')) hideCountdown();
+        }
+        setInterval(schedulerTick, 1000);
+        schedulerTick();
+
+        // ----- TEMPORARY test buttons (fire each event immediately) -----
+        const testPanel = document.getElementById('testPanel');
+        if (testPanel) {
+            if (params.get('test') === '0') {
+                testPanel.style.display = 'none';
+            } else {
+                testPanel.addEventListener('click', (e) => {
+                    const btn = e.target.closest('[data-test]');
+                    if (!btn) return;
+                    e.stopPropagation();
+                    ensureAudio(); // make sure the WebAudio context is unlocked for the bell
+                    const ev = SCHEDULE.find(s => s.id === btn.dataset.test);
+                    if (ev) fireEvent(ev);
+                });
+            }
+        }
 
         connect();
     </script>
