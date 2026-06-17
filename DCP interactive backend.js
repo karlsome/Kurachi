@@ -10823,19 +10823,18 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
 function confirmReset(msg) {
   return confirm(msg || 'リセットしてもよろしいですか？\nスキャンしたデータはすべて消去されます。\n\nReset? All scanned data will be cleared. This cannot be undone.');
 }
+// The 3-step Reset buttons fire before any data is committed, so they don't
+// need a confirmation.
 document.getElementById('resetStep1').addEventListener('click', function(event) {
   event.preventDefault(); // Prevent form submission
-  if (!confirmReset()) return;
   resetAllSteps();
 });
 document.getElementById('resetStep2').addEventListener('click', function(event) {
   event.preventDefault(); // Prevent form submission
-  if (!confirmReset()) return;
   resetAllSteps();
 });
 document.getElementById('resetStep3').addEventListener('click', function(event) {
   event.preventDefault(); // Prevent form submission
-  if (!confirmReset()) return;
   resetAllSteps();
 });
 
