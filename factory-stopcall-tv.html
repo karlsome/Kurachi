@@ -369,12 +369,20 @@
         let audioCtx = null;
         let soundOn = true;
         function ensureAudio() {
-            if (!soundOn) return false;
+            if (!soundOn) { console.log('[sound] ensureAudio: soundOn=false (muted)'); return false; }
             try {
-                if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                if (audioCtx.state === 'suspended') audioCtx.resume();
+                if (!audioCtx) {
+                    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                    console.log('[sound] AudioContext created, state=', audioCtx.state);
+                }
+                if (audioCtx.state === 'suspended') {
+                    console.log('[sound] context suspended → calling resume()');
+                    audioCtx.resume().then(() => console.log('[sound] resume() resolved, state=', audioCtx.state))
+                        .catch(e => console.log('[sound] resume() failed:', e && e.message));
+                }
+                console.log('[sound] ensureAudio returning, state=', audioCtx.state);
                 return audioCtx.state === 'running';
-            } catch (e) { return false; }
+            } catch (e) { console.log('[sound] ensureAudio error:', e && e.message); return false; }
         }
         function updateSoundButton() {
             const btn = document.getElementById('soundEnable');
@@ -395,7 +403,9 @@
         // Unlock on the very first user interaction if the browser blocked autoplay
         ['pointerdown', 'touchstart', 'keydown', 'mousemove', 'click'].forEach(ev => {
             window.addEventListener(ev, function unlock() {
+                console.log('[sound] interaction (' + ev + ') → attempting unlock');
                 if (ensureAudio()) {
+                    console.log('[sound] unlocked by interaction; audio running');
                     updateSoundButton();
                     ['pointerdown', 'touchstart', 'keydown', 'mousemove', 'click']
                         .forEach(e2 => window.removeEventListener(e2, unlock));
@@ -413,8 +423,10 @@
         // style): three rising bell-like notes that grab attention without being
         // harsh, and carry across the floor.
         function playAlert() {
-            if (!ensureAudio()) return;
+            console.log('[sound] playAlert() called; soundOn=', soundOn, 'ctx=', audioCtx && audioCtx.state);
+            if (!ensureAudio()) { console.log('[sound] playAlert ABORTED — audio not running (state=', audioCtx && audioCtx.state, ')'); return; }
             const ctx = audioCtx;
+            console.log('[sound] playAlert PLAYING chime, ctx.state=', ctx.state, 'currentTime=', ctx.currentTime.toFixed(2));
             const t0 = ctx.currentTime + 0.02;
             const notes = [587.33, 783.99, 1046.50]; // D5 → G5 → C6 (rising)
             const step = 0.34;   // time between chime onsets
@@ -544,6 +556,7 @@
             refreshWaitTimers();
 
             // Announce each newly-added machine (queued, 3s each) + sound alert
+            console.log('[sound] applyActive: active=', activeList.length, 'newlyAdded=', newlyAdded.map(x => x.machine).join(',') || '(none)');
             if (newlyAdded.length) {
                 playAlert();
                 newlyAdded
@@ -619,10 +632,12 @@
                 setConn('offline', '接続エラー / Connection error');
                 return;
             }
-            es.onopen = () => setConn('online', '接続済み / Connected');
+            console.log('[sse] connecting to', `${SERVER}/sse/factory/${encodeURIComponent(FACTORY)}`);
+            es.onopen = () => { console.log('[sse] open'); setConn('online', '接続済み / Connected'); };
             es.onmessage = (ev) => {
+                console.log('[sse] message:', ev.data);
                 let data;
-                try { data = JSON.parse(ev.data); } catch (e) { return; }
+                try { data = JSON.parse(ev.data); } catch (e) { console.log('[sse] parse error'); return; }
                 if (data.type === 'connected') {
                     setConn('online', '接続済み / Connected');
                 } else if (data.type === 'stopcall') {
@@ -630,6 +645,7 @@
                 }
             };
             es.onerror = () => {
+                console.log('[sse] error / reconnecting');
                 setConn('offline', '再接続中… / Reconnecting…');
                 // EventSource auto-reconnects; nothing else needed.
             };
