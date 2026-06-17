@@ -4023,8 +4023,7 @@
         .stopcall-fab {
             position: fixed;
             left: 16px;
-            top: 50%;
-            transform: translateY(-50%);
+            bottom: 32px;
             z-index: 99990;
             width: 86px;
             height: 86px;
@@ -4049,7 +4048,7 @@
         }
 
         .stopcall-fab.holding {
-            transform: translateY(-50%) scale(1.08);
+            transform: scale(1.08);
             animation: none;
             box-shadow: 0 0 0 10px rgba(225, 29, 42, 0.25);
         }
@@ -4132,7 +4131,7 @@
         }
 
         .stopcall-fab:active {
-            transform: translateY(-50%) scale(0.95);
+            transform: scale(0.95);
         }
 
         @keyframes stopFabPulse {

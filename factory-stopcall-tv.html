@@ -362,8 +362,9 @@
     <button type="button" class="sound-enable" id="soundEnable">🔇 音を有効化 / Enable sound</button>
 
     <script>
-        const serverURL = "https://kurachi.onrender.com";
-        // const serverURL = "http://localhost:3000";
+        //const serverURL = "https://kurachi.onrender.com";
+        //const serverURL = "http://localhost:3000";
+        const serverURL = "http://192.168.3.9:3000";
 
         const params = new URLSearchParams(location.search);
         const FACTORY = params.get('filter') || params.get('factory') || '';
