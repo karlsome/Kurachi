@@ -460,6 +460,7 @@
             width: 100%;
             height: 100%;
             transform: rotate(-90deg);
+            overflow: visible; /* let the arc's glow extend past the viewBox */
         }
 
         .ex-ring .track {
@@ -474,6 +475,7 @@
             stroke-width: 9;
             stroke-linecap: round;
             transition: stroke-dashoffset 0.25s linear;
+            filter: url(#ringGlow); /* soft glow with a large region (no square clip) */
         }
 
         .ex-ring .ex-timer {
@@ -555,6 +557,11 @@
         <div class="ex-title">ラジオ体操第一</div>
         <div class="ex-ring">
             <svg viewBox="0 0 200 200">
+                <defs>
+                    <filter id="ringGlow" x="-75%" y="-75%" width="250%" height="250%">
+                        <feDropShadow dx="0" dy="0" stdDeviation="3.5" flood-color="#29C36A" flood-opacity="0.75" />
+                    </filter>
+                </defs>
                 <circle class="track" cx="100" cy="100" r="90"></circle>
                 <circle class="prog" id="exProg" cx="100" cy="100" r="90"></circle>
             </svg>
