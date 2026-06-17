@@ -47,26 +47,8 @@
         header {
             display: flex;
             align-items: center;
-            justify-content: space-between;
+            justify-content: flex-end;
             gap: 24px;
-        }
-
-        .brand {
-            display: flex;
-            align-items: baseline;
-            gap: 18px;
-        }
-
-        .brand h1 {
-            font-size: clamp(28px, 3.4vw, 64px);
-            font-weight: 900;
-            letter-spacing: 0.01em;
-        }
-
-        .brand .sub {
-            font-size: clamp(14px, 1.3vw, 24px);
-            color: var(--muted);
-            font-weight: 700;
         }
 
         .head-right {
@@ -106,47 +88,6 @@
         .conn.offline .dot {
             background: var(--amber);
             box-shadow: 0 0 12px var(--amber);
-        }
-
-        /* ---------- Status banner ---------- */
-        .banner {
-            border-radius: 16px;
-            padding: 1.2vh 1.4vw;
-            font-weight: 900;
-            font-size: clamp(18px, 2vw, 40px);
-            display: flex;
-            align-items: center;
-            gap: 16px;
-            background: var(--bg-2);
-            color: var(--muted);
-            border: 2px solid var(--tile-border);
-        }
-
-        .banner.alert {
-            background: linear-gradient(90deg, rgba(225, 29, 42, 0.25), rgba(225, 29, 42, 0.08));
-            color: #FFD7DA;
-            border-color: var(--red);
-            animation: bannerBlink 1s steps(1) infinite;
-        }
-
-        @keyframes bannerBlink {
-
-            0%,
-            100% {
-                border-color: var(--red);
-            }
-
-            50% {
-                border-color: rgba(225, 29, 42, 0.3);
-            }
-        }
-
-        .banner .pill {
-            background: var(--red);
-            color: #fff;
-            border-radius: 999px;
-            padding: 0.2em 0.7em;
-            font-size: 0.9em;
         }
 
         /* ---------- Grid ---------- */
@@ -333,10 +274,6 @@
 <body>
     <div class="app">
         <header>
-            <div class="brand">
-                <h1 id="factoryName">—</h1>
-                <span class="sub">呼び出しモニター / Call Monitor</span>
-            </div>
             <div class="head-right">
                 <div class="clock" id="clock">--:--</div>
                 <div class="conn" id="conn">
@@ -344,10 +281,6 @@
                 </div>
             </div>
         </header>
-
-        <div class="banner" id="banner">
-            <span id="bannerText">すべて正常 / All clear</span>
-        </div>
 
         <div class="grid" id="grid"></div>
     </div>
@@ -380,7 +313,7 @@
             ]
         };
 
-        document.getElementById('factoryName').textContent = FACTORY || '工場未指定';
+        document.title = (FACTORY || '工場') + ' 呼び出しモニター / Call Monitor';
 
         // ----- Build the grid -----
         const grid = document.getElementById('grid');
@@ -524,6 +457,7 @@
 
         function updateBanner() {
             const banner = document.getElementById('banner');
+            if (!banner) return; // banner removed from layout
             const text = document.getElementById('bannerText');
             const n = activeList.length;
             if (n > 0) {
