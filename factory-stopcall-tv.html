@@ -156,27 +156,26 @@
             }
         }
 
-        .rank-badge {
-            position: absolute;
-            top: 8px;
-            left: 8px;
-            min-width: clamp(34px, 3vw, 64px);
-            height: clamp(34px, 3vw, 64px);
-            padding: 0 0.3em;
-            border-radius: 999px;
-            background: #fff;
-            color: var(--red);
-            font-weight: 900;
-            font-size: clamp(18px, 1.8vw, 38px);
+        /* Big full-tile rank shown while flipping (see .grid.flip below) */
+        .big-rank {
             display: none;
-            align-items: center;
-            justify-content: center;
+            font-size: clamp(56px, 8vw, 200px);
+            font-weight: 900;
+            color: #fff;
+            line-height: 0.9;
             font-variant-numeric: tabular-nums;
-            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+            text-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
         }
 
-        .tile.calling .rank-badge {
-            display: flex;
+        /* Each calling tile alternates: machine name <-> big rank number, in
+           sync across all tiles, driven by toggling .flip on the grid. */
+        .grid.flip .tile.calling .name,
+        .grid.flip .tile.calling .state {
+            display: none;
+        }
+
+        .grid.flip .tile.calling .big-rank {
+            display: block;
         }
 
         .wait {
@@ -338,8 +337,8 @@
                 tile.className = 'tile';
                 tile.dataset.machine = m;
                 tile.innerHTML =
-                    '<div class="rank-badge"></div>' +
                     '<div class="name">' + m + '</div>' +
+                    '<div class="big-rank"></div>' +
                     '<div class="state">稼働 / RUNNING</div>' +
                     '<div class="wait"></div>';
                 grid.appendChild(tile);
@@ -407,6 +406,16 @@
         }
         setInterval(refreshWaitTimers, 1000);
 
+        // Alternate every calling tile between its machine name and a big rank
+        // number once per second, so the order is readable from far away.
+        setInterval(() => {
+            if (activeList.length > 0) {
+                grid.classList.toggle('flip');
+            } else if (grid.classList.contains('flip')) {
+                grid.classList.remove('flip');
+            }
+        }, 1000);
+
         function applyActive(list) {
             // Ensure roster contains any unexpected machine ids from events
             let rosterChanged = false;
@@ -433,7 +442,7 @@
                 const idx = activeList.findIndex(it => it.machine === machine);
                 if (idx >= 0) {
                     tile.classList.add('calling');
-                    tile.querySelector('.rank-badge').textContent = '#' + (idx + 1);
+                    tile.querySelector('.big-rank').textContent = '#' + (idx + 1);
                     tile.querySelector('.state').textContent = '呼び出し中 / CALLING';
                 } else {
                     tile.classList.remove('calling');
