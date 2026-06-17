@@ -136,10 +136,16 @@
 
         .tile.calling .name {
             color: #fff;
+            white-space: nowrap;
+            max-width: 100%;
+            padding: 0 8px;
+            /* font-size is set by JS (fitCallingName) to be as large as fits */
         }
 
+        /* On a calling tile the name alone fills the card (no "CALLING" subtitle),
+           alternating with the big rank — so the machine reads big from far away. */
         .tile.calling .state {
-            color: #FFE3E5;
+            display: none;
         }
 
         @keyframes tileBlink {
@@ -416,6 +422,23 @@
             }
         }, 1000);
 
+        // Size a calling tile's machine name as large as fits on one line
+        // (shorter names render bigger). Empirical width factor for the bold font.
+        function fitCallingName(tile, machine) {
+            const nameEl = tile.querySelector('.name');
+            if (!nameEl) return;
+            const w = tile.clientWidth || 300;
+            const chars = Math.max(1, String(machine).length);
+            const size = Math.max(28, Math.min(110, Math.floor((w - 28) / (chars * 0.82))));
+            nameEl.style.fontSize = size + 'px';
+        }
+        // Recompute on resize so the wall display stays correct at any size.
+        window.addEventListener('resize', () => {
+            tileByMachine.forEach((tile, machine) => {
+                if (tile.classList.contains('calling')) fitCallingName(tile, machine);
+            });
+        });
+
         function applyActive(list) {
             // Ensure roster contains any unexpected machine ids from events
             let rosterChanged = false;
@@ -443,9 +466,10 @@
                 if (idx >= 0) {
                     tile.classList.add('calling');
                     tile.querySelector('.big-rank').textContent = '#' + (idx + 1);
-                    tile.querySelector('.state').textContent = '呼び出し中 / CALLING';
+                    fitCallingName(tile, machine);
                 } else {
                     tile.classList.remove('calling');
+                    tile.querySelector('.name').style.fontSize = ''; // back to running size
                     tile.querySelector('.state').textContent = '稼働 / RUNNING';
                     const w = tile.querySelector('.wait'); if (w) w.textContent = '';
                 }
