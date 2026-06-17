@@ -194,6 +194,19 @@ function buildStopCallPayload(factoryId) {
   return { type: 'stopcall', factory: factoryId, active };
 }
 
+// Heartbeat: keep factory TV SSE connections alive through proxies/idle
+// timeouts and let 24/7 displays detect a dead link. Prunes any client whose
+// write fails. Runs for the lifetime of the server.
+setInterval(() => {
+  const ping = `data: ${JSON.stringify({ type: 'ping', t: Date.now() })}\n\n`;
+  factoryConnections.forEach((clients) => {
+    for (let i = clients.length - 1; i >= 0; i--) {
+      try { clients[i].write(ping); }
+      catch (e) { clients.splice(i, 1); }
+    }
+  });
+}, 25000);
+
 const uri = process.env.MONGODB_URI;
 const client = new MongoClient(uri, {
   serverApi: {

@@ -646,29 +646,87 @@
         }
 
         let es = null;
+        let lastMessageAt = Date.now();   // updated on ANY server message (incl. heartbeat)
+        let reconnectTimer = null;
+
+        function closeES() {
+            if (es) {
+                try { es.onopen = es.onmessage = es.onerror = null; es.close(); } catch (e) { }
+                es = null;
+            }
+        }
+
         function connect() {
             if (!FACTORY) { setConn('offline', '工場が指定されていません / No factory'); return; }
+            closeES(); // never stack connections
             try {
                 es = new EventSource(`${SERVER}/sse/factory/${encodeURIComponent(FACTORY)}`);
             } catch (e) {
                 setConn('offline', '接続エラー / Connection error');
+                scheduleReconnect();
                 return;
             }
-            es.onopen = () => setConn('online', '接続済み / Connected');
+            lastMessageAt = Date.now();
+            es.onopen = () => { lastMessageAt = Date.now(); setConn('online', '接続済み / Connected'); };
             es.onmessage = (ev) => {
+                lastMessageAt = Date.now();
                 let data;
                 try { data = JSON.parse(ev.data); } catch (e) { return; }
-                if (data.type === 'connected') {
+                if (data.type === 'ping') {
+                    setConn('online', '接続済み / Connected'); // heartbeat keeps us green
+                } else if (data.type === 'connected') {
                     setConn('online', '接続済み / Connected');
                 } else if (data.type === 'stopcall') {
+                    // Full state is replayed by the server on (re)connect, so this
+                    // also resynchronizes the board after any outage.
                     applyActive(Array.isArray(data.active) ? data.active : []);
                 }
             };
             es.onerror = () => {
                 setConn('offline', '再接続中… / Reconnecting…');
-                // EventSource auto-reconnects; nothing else needed.
+                // EventSource tries to auto-reconnect, but if it is stuck CLOSED
+                // we recreate it ourselves.
+                if (!es || es.readyState === 2 /* CLOSED */) scheduleReconnect();
             };
         }
+
+        function scheduleReconnect(delay) {
+            if (reconnectTimer) return;
+            reconnectTimer = setTimeout(() => {
+                reconnectTimer = null;
+                connect();
+            }, delay || 3000);
+        }
+
+        // ----- Watchdog: the ultimate fail-safe for a 24/7 display -----
+        // The server sends a heartbeat every ~25s. If we hear NOTHING (no data,
+        // no heartbeat) for 70s, the link is dead even if the browser hasn't
+        // noticed — so we tear it down and reconnect. On reconnect the server
+        // resends the current call state, so the board self-heals.
+        const STALE_MS = 70000;
+        setInterval(() => {
+            const silentFor = Date.now() - lastMessageAt;
+            if (silentFor > STALE_MS) {
+                setConn('offline', '再接続中… / Reconnecting…');
+                closeES();
+                connect();
+                lastMessageAt = Date.now(); // give the fresh connection time
+            }
+        }, 15000);
+
+        // If the OS/browser ever throttled or suspended the tab (power saving,
+        // screensaver wake, etc.), force an immediate liveness check on return.
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+                if (!es || es.readyState === 2 || (Date.now() - lastMessageAt) > STALE_MS) {
+                    closeES();
+                    connect();
+                }
+            }
+        });
+        // Reconnect immediately if the network comes back.
+        window.addEventListener('online', () => { closeES(); connect(); });
+
         connect();
     </script>
 </body>
