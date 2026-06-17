@@ -2390,7 +2390,7 @@
                     <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 25px;">
                         <input type="submit" value="Submit" id="submit" class="btn btn-primary btn-full"
                             style="height: 52px; font-size: 1.1rem;">
-                        <button type="button" onclick="resetForm()" class="btn btn-alert btn-full" style="height: 48px;"
+                        <button type="button" onclick="if (confirmReset()) resetForm()" class="btn btn-alert btn-full" style="height: 48px;"
                             data-i18n="reset">Reset</button>
                     </div>
                 </div>
@@ -4306,7 +4306,7 @@
     </div>
 
     <!-- Floating "New Scan" / reset (shown on the Scan tab when a scan is active) -->
-    <button type="button" id="floatingNewScan" onclick="resetAllSteps()">
+    <button type="button" id="floatingNewScan" onclick="if (confirmReset('新規スキャンを開始しますか？\n現在のデータはすべて消去されます。\n\nStart a new scan? All current data will be cleared.')) resetAllSteps()">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"
             stroke-linecap="round" stroke-linejoin="round">
             <polyline points="23 4 23 10 17 10" />

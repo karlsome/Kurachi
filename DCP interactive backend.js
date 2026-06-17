@@ -10816,16 +10816,26 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
 });
 
 // Reset buttons
+// Shared confirmation for destructive reset / new-scan actions: these clear
+// ALL scanned data on the current form, so guard against accidental taps.
+// (Called only from user-initiated buttons — programmatic resets after a
+//  successful submit skip this on purpose.)
+function confirmReset(msg) {
+  return confirm(msg || 'リセットしてもよろしいですか？\nスキャンしたデータはすべて消去されます。\n\nReset? All scanned data will be cleared. This cannot be undone.');
+}
 document.getElementById('resetStep1').addEventListener('click', function(event) {
   event.preventDefault(); // Prevent form submission
+  if (!confirmReset()) return;
   resetAllSteps();
 });
 document.getElementById('resetStep2').addEventListener('click', function(event) {
   event.preventDefault(); // Prevent form submission
+  if (!confirmReset()) return;
   resetAllSteps();
 });
 document.getElementById('resetStep3').addEventListener('click', function(event) {
   event.preventDefault(); // Prevent form submission
+  if (!confirmReset()) return;
   resetAllSteps();
 });
 
