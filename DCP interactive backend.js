@@ -110,8 +110,9 @@ async function generateSessionID(背番号, 設備, 工場, date) {
 
 // Persistent queue for failed log entries
 let logQueue = [];
-const MAX_RETRY_ATTEMPTS = 5;
-const INITIAL_RETRY_DELAY = 2000; // 2 seconds
+const MAX_RETRY_ATTEMPTS = 100;      // keep retrying for a long time — don't drop tablet logs
+const INITIAL_RETRY_DELAY = 2000;    // 2 seconds
+const MAX_RETRY_DELAY = 60000;       // cap backoff so retries keep flowing on a 24/7 tablet
 let isProcessingQueue = false;
 
 /**
@@ -241,8 +242,8 @@ async function processLogQueue() {
         logQueue = logQueue.filter(e => e.id !== entry.id);
         saveLogQueue();
       } else {
-        // Calculate exponential backoff: 2s, 4s, 8s, 16s, 32s
-        const delay = INITIAL_RETRY_DELAY * Math.pow(2, entry.attempts - 1);
+        // Exponential backoff (2s, 4s, 8s, …) capped so retries keep flowing
+        const delay = Math.min(MAX_RETRY_DELAY, INITIAL_RETRY_DELAY * Math.pow(2, entry.attempts - 1));
         entry.nextRetryTime = now + delay;
         saveLogQueue();
         console.warn(`⏳ Will retry in ${delay/1000}s: ${entry.logData.Action}`);
@@ -372,6 +373,16 @@ document.addEventListener('DOMContentLoaded', () => {
     setTimeout(processLogQueue, 2000); // Start processing after 2 seconds
   }
 });
+
+// Failsafe: flush any pending logs when the network returns, when the tab
+// becomes visible again, and on a steady interval — so a 24/7 tablet never
+// silently strands queued logs.
+function flushLogQueue() {
+  try { if (logQueue.length > 0 && !isProcessingQueue) processLogQueue(); } catch (e) { }
+}
+window.addEventListener('online', flushLogQueue);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') flushLogQueue(); });
+setInterval(flushLogQueue, 30000);
 
 //this code listens to incoming parameters passed
 function getQueryParam(param) {

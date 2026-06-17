@@ -4565,6 +4565,7 @@
                 const startEpoch = Date.now();
                 localStorage.setItem(breakPrefix + 'activeBreakStart', String(startEpoch));
                 openBreakOverlay(startEpoch);
+                if (typeof logTabletAction === 'function') logTabletAction('Break started', 'in-progress', {});
             }
             function finishBreak() {
                 const raw = localStorage.getItem(breakPrefix + 'activeBreakStart');
@@ -4572,6 +4573,7 @@
                 const ov = document.getElementById('breakOverlay');
                 if (ov) ov.classList.remove('open');
                 localStorage.removeItem(breakPrefix + 'activeBreakStart');
+                if (typeof logTabletAction === 'function') logTabletAction('Break ended', 'Completed', {});
                 if (!raw) return;
                 const start = new Date(parseInt(raw, 10));
                 const end = new Date();
@@ -4659,7 +4661,11 @@
             }
             function resumeBreakIfActive() {
                 const raw = localStorage.getItem(breakPrefix + 'activeBreakStart');
-                if (raw) openBreakOverlay(parseInt(raw, 10));
+                if (raw) {
+                    openBreakOverlay(parseInt(raw, 10));
+                    // Re-assert to the factory TV after a reload/server restart
+                    if (typeof logTabletAction === 'function') logTabletAction('Break started', 'in-progress', {});
+                }
             }
 
             // ---------- Maintenance timer (machine trouble) ----------
@@ -4679,6 +4685,7 @@
                 const startEpoch = Date.now();
                 localStorage.setItem(breakPrefix + 'activeMaintStart', String(startEpoch));
                 openMaintOverlay(startEpoch);
+                if (typeof logTabletAction === 'function') logTabletAction('Maintenance started', 'in-progress', {});
             }
             function finishMaintenance() {
                 const raw = localStorage.getItem(breakPrefix + 'activeMaintStart');
@@ -4686,6 +4693,7 @@
                 const ov = document.getElementById('maintenanceOverlay');
                 if (ov) ov.classList.remove('open');
                 localStorage.removeItem(breakPrefix + 'activeMaintStart');
+                if (typeof logTabletAction === 'function') logTabletAction('Maintenance ended', 'Completed', {});
                 if (!raw) return;
                 const start = new Date(parseInt(raw, 10));
                 const end = new Date();
@@ -4705,7 +4713,10 @@
             }
             function resumeMaintIfActive() {
                 const raw = localStorage.getItem(breakPrefix + 'activeMaintStart');
-                if (raw) openMaintOverlay(parseInt(raw, 10));
+                if (raw) {
+                    openMaintOverlay(parseInt(raw, 10));
+                    if (typeof logTabletAction === 'function') logTabletAction('Maintenance started', 'in-progress', {});
+                }
             }
 
             // ---------- Stop / Call leader (production halt) ----------
