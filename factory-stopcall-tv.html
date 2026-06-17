@@ -409,26 +409,33 @@
             updateSoundButton();
         });
 
-        // Attention-grabbing "call the leader" klaxon: an urgent hi-lo two-tone
-        // pattern (like a factory/emergency call), louder and more distinct than
-        // a single beep so it carries across the floor.
+        // Ascending 3-chime "attention" call (PA / airport pre-announcement
+        // style): three rising bell-like notes that grab attention without being
+        // harsh, and carry across the floor.
         function playAlert() {
             if (!ensureAudio()) return;
             const ctx = audioCtx;
-            const t0 = ctx.currentTime;
-            const seq = [784, 1175, 784, 1175, 784, 1175]; // G5 / D6 alternating
-            const dur = 0.22, gap = 0.05;
-            seq.forEach((freq, i) => {
-                const t = t0 + i * (dur + gap);
-                const o = ctx.createOscillator();
+            const t0 = ctx.currentTime + 0.02;
+            const notes = [587.33, 783.99, 1046.50]; // D5 → G5 → C6 (rising)
+            const step = 0.34;   // time between chime onsets
+            const dur = 0.9;     // each chime rings out (bell-like decay)
+            notes.forEach((freq, i) => {
+                const t = t0 + i * step;
                 const g = ctx.createGain();
-                o.type = 'sawtooth';
-                o.frequency.setValueAtTime(freq, t);
+                g.connect(ctx.destination);
                 g.gain.setValueAtTime(0.0001, t);
-                g.gain.exponentialRampToValueAtTime(0.22, t + 0.02);
-                g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-                o.connect(g); g.connect(ctx.destination);
-                o.start(t); o.stop(t + dur + 0.03);
+                g.gain.exponentialRampToValueAtTime(0.32, t + 0.015); // soft attack
+                g.gain.exponentialRampToValueAtTime(0.0001, t + dur); // bell decay
+                // Fundamental + soft octave overtone for a chime/bell timbre
+                [[freq, 1], [freq * 2, 0.25]].forEach(([f, amp]) => {
+                    const o = ctx.createOscillator();
+                    const og = ctx.createGain();
+                    o.type = 'sine';
+                    o.frequency.setValueAtTime(f, t);
+                    og.gain.value = amp;
+                    o.connect(og); og.connect(g);
+                    o.start(t); o.stop(t + dur + 0.05);
+                });
             });
         }
 
