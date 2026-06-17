@@ -362,31 +362,88 @@
         tickClock();
         setInterval(tickClock, 1000);
 
-        // ----- Sound (best-effort; TVs often block autoplay) -----
+        // ----- Sound: ON by default. Browser autoplay rules keep the audio
+        // context "suspended" until a user gesture, so we create it up front,
+        // try to resume immediately, and also unlock on the first interaction
+        // (kiosk/TV browsers launched with autoplay allowed start instantly).
         let audioCtx = null;
-        let soundOn = false;
-        document.getElementById('soundEnable').addEventListener('click', function () {
+        let soundOn = true;
+        function ensureAudio() {
+            if (!soundOn) return false;
             try {
-                audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+                if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
                 if (audioCtx.state === 'suspended') audioCtx.resume();
-                soundOn = true;
-                this.classList.add('on');
-                this.textContent = '🔊 音 ON / Sound on';
-                beep();
-            } catch (e) { }
+                return audioCtx.state === 'running';
+            } catch (e) { return false; }
+        }
+        function updateSoundButton() {
+            const btn = document.getElementById('soundEnable');
+            if (!btn) return;
+            if (soundOn) {
+                btn.classList.add('on');
+                btn.textContent = (audioCtx && audioCtx.state === 'running')
+                    ? '🔊 音 ON / Sound on'
+                    : '🔊 タップで音 / Tap for sound';
+            } else {
+                btn.classList.remove('on');
+                btn.textContent = '🔇 音 OFF / Muted';
+            }
+        }
+        // Try to start audio right away (works on kiosk/autoplay-allowed displays)
+        ensureAudio();
+        updateSoundButton();
+        // Unlock on the very first user interaction if the browser blocked autoplay
+        ['pointerdown', 'touchstart', 'keydown', 'mousemove', 'click'].forEach(ev => {
+            window.addEventListener(ev, function unlock() {
+                if (ensureAudio()) {
+                    updateSoundButton();
+                    ['pointerdown', 'touchstart', 'keydown', 'mousemove', 'click']
+                        .forEach(e2 => window.removeEventListener(e2, unlock));
+                }
+            }, { passive: true });
         });
-        function beep() {
-            if (!soundOn || !audioCtx) return;
-            try {
-                const o = audioCtx.createOscillator();
-                const g = audioCtx.createGain();
-                o.type = 'square';
-                o.frequency.value = 880;
-                g.gain.value = 0.08;
-                o.connect(g); g.connect(audioCtx.destination);
-                o.start();
-                o.stop(audioCtx.currentTime + 0.25);
-            } catch (e) { }
+        // Button now toggles mute on/off
+        document.getElementById('soundEnable').addEventListener('click', function () {
+            soundOn = !soundOn;
+            if (soundOn) { ensureAudio(); playAlert(); }
+            updateSoundButton();
+        });
+
+        // Attention-grabbing "call the leader" klaxon: an urgent hi-lo two-tone
+        // pattern (like a factory/emergency call), louder and more distinct than
+        // a single beep so it carries across the floor.
+        function playAlert() {
+            if (!ensureAudio()) return;
+            const ctx = audioCtx;
+            const t0 = ctx.currentTime;
+            const seq = [784, 1175, 784, 1175, 784, 1175]; // G5 / D6 alternating
+            const dur = 0.22, gap = 0.05;
+            seq.forEach((freq, i) => {
+                const t = t0 + i * (dur + gap);
+                const o = ctx.createOscillator();
+                const g = ctx.createGain();
+                o.type = 'sawtooth';
+                o.frequency.setValueAtTime(freq, t);
+                g.gain.setValueAtTime(0.0001, t);
+                g.gain.exponentialRampToValueAtTime(0.22, t + 0.02);
+                g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+                o.connect(g); g.connect(ctx.destination);
+                o.start(t); o.stop(t + dur + 0.03);
+            });
+        }
+
+        // Keep nagging until the call is cleared: repeat the alert every 10s
+        // while any machine is still calling.
+        let alertTimer = null;
+        function startAlertLoop() {
+            if (alertTimer) return;
+            alertTimer = setInterval(() => {
+                if (activeList.length > 0) playAlert();
+                else stopAlertLoop();
+            }, 10000);
+        }
+        function stopAlertLoop() {
+            if (alertTimer) { clearInterval(alertTimer); alertTimer = null; }
         }
 
         // ----- State + rendering of active calls -----
@@ -479,13 +536,17 @@
             updateBanner();
             refreshWaitTimers();
 
-            // Announce each newly-added machine (queued, 3s each)
+            // Announce each newly-added machine (queued, 3s each) + sound alert
             if (newlyAdded.length) {
-                beep();
+                playAlert();
                 newlyAdded
                     .sort((a, b) => a.since - b.since)
                     .forEach(it => queueTakeover(it.machine));
             }
+
+            // Keep the audible alert nagging while any call is unresolved
+            if (activeList.length > 0) startAlertLoop();
+            else stopAlertLoop();
         }
 
         function updateBanner() {
