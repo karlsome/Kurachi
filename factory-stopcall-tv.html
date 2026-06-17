@@ -273,42 +273,6 @@
             color: var(--green);
             border-color: var(--green);
         }
-
-        /* One-time audio-unlock start gate */
-        .audio-gate {
-            position: fixed;
-            inset: 0;
-            z-index: 100;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            gap: 2.4vh;
-            background: rgba(10, 15, 26, 0.97);
-            cursor: pointer;
-            text-align: center;
-            padding: 24px;
-        }
-
-        .audio-gate.hidden {
-            display: none;
-        }
-
-        .audio-gate .ag-icon {
-            font-size: clamp(60px, 9vw, 160px);
-        }
-
-        .audio-gate .ag-title {
-            font-size: clamp(30px, 4.5vw, 96px);
-            font-weight: 900;
-            color: var(--text);
-        }
-
-        .audio-gate .ag-sub {
-            font-size: clamp(16px, 1.8vw, 34px);
-            font-weight: 700;
-            color: var(--muted);
-        }
     </style>
 </head>
 
@@ -334,14 +298,6 @@
     </div>
 
     <button type="button" class="sound-enable" id="soundEnable">🔇 音を有効化 / Enable sound</button>
-
-    <!-- One-time start gate: a single tap per page load unlocks audio output
-         (browsers keep sound muted until a real user gesture). -->
-    <div class="audio-gate" id="audioGate">
-        <div class="ag-icon">🔊</div>
-        <div class="ag-title">タップして開始</div>
-        <div class="ag-sub">Tap anywhere to start the monitor &amp; enable sound</div>
-    </div>
 
     <script>
         //const serverURL = "https://kurachi.onrender.com";
@@ -413,48 +369,51 @@
         let audioCtx = null;
         let soundOn = true;
         function ensureAudio() {
-            if (!soundOn) return false;
+            if (!soundOn) { console.log('[sound] ensureAudio: soundOn=false (muted)'); return false; }
             try {
-                if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                if (audioCtx.state === 'suspended') audioCtx.resume();
+                if (!audioCtx) {
+                    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                    console.log('[sound] AudioContext created, state=', audioCtx.state);
+                }
+                if (audioCtx.state === 'suspended') {
+                    console.log('[sound] context suspended → calling resume()');
+                    audioCtx.resume().then(() => console.log('[sound] resume() resolved, state=', audioCtx.state))
+                        .catch(e => console.log('[sound] resume() failed:', e && e.message));
+                }
+                console.log('[sound] ensureAudio returning, state=', audioCtx.state);
                 return audioCtx.state === 'running';
-            } catch (e) { return false; }
+            } catch (e) { console.log('[sound] ensureAudio error:', e && e.message); return false; }
         }
         function updateSoundButton() {
             const btn = document.getElementById('soundEnable');
             if (!btn) return;
             if (soundOn) {
                 btn.classList.add('on');
-                btn.textContent = '🔊 音 ON / Sound on';
+                btn.textContent = (audioCtx && audioCtx.state === 'running')
+                    ? '🔊 音 ON / Sound on'
+                    : '🔊 タップで音 / Tap for sound';
             } else {
                 btn.classList.remove('on');
                 btn.textContent = '🔇 音 OFF / Muted';
             }
         }
+        // Try to start audio right away (works on kiosk/autoplay-allowed displays)
+        ensureAudio();
         updateSoundButton();
-
-        // One-time start gate: a single user gesture is required by the browser
-        // before any audio actually plays (even when the context reports
-        // "running"). The first tap/click/key anywhere resumes audio, plays a
-        // confirmation chime, and hides the gate for the rest of the session.
-        let audioUnlocked = false;
-        function unlockAudioAndStart() {
-            if (audioUnlocked) return;
-            audioUnlocked = true;
-            ensureAudio();
-            const gate = document.getElementById('audioGate');
-            if (gate) gate.classList.add('hidden');
-            updateSoundButton();
-            playAlert(); // confirmation chime so the operator hears it works
-            ['pointerdown', 'touchstart', 'keydown', 'click'].forEach(e2 => window.removeEventListener(e2, unlockAudioAndStart));
-        }
-        ['pointerdown', 'touchstart', 'keydown', 'click'].forEach(ev => {
-            window.addEventListener(ev, unlockAudioAndStart, { passive: true });
+        // Unlock on the very first user interaction if the browser blocked autoplay
+        ['pointerdown', 'touchstart', 'keydown', 'mousemove', 'click'].forEach(ev => {
+            window.addEventListener(ev, function unlock() {
+                console.log('[sound] interaction (' + ev + ') → attempting unlock');
+                if (ensureAudio()) {
+                    console.log('[sound] unlocked by interaction; audio running');
+                    updateSoundButton();
+                    ['pointerdown', 'touchstart', 'keydown', 'mousemove', 'click']
+                        .forEach(e2 => window.removeEventListener(e2, unlock));
+                }
+            }, { passive: true });
         });
-
-        // Button toggles mute on/off (after the gate is dismissed)
-        document.getElementById('soundEnable').addEventListener('click', function (e) {
-            e.stopPropagation();
+        // Button now toggles mute on/off
+        document.getElementById('soundEnable').addEventListener('click', function () {
             soundOn = !soundOn;
             if (soundOn) { ensureAudio(); playAlert(); }
             updateSoundButton();
@@ -464,8 +423,10 @@
         // style): three rising bell-like notes that grab attention without being
         // harsh, and carry across the floor.
         function playAlert() {
-            if (!ensureAudio()) return;
+            console.log('[sound] playAlert() called; soundOn=', soundOn, 'ctx=', audioCtx && audioCtx.state);
+            if (!ensureAudio()) { console.log('[sound] playAlert ABORTED — audio not running (state=', audioCtx && audioCtx.state, ')'); return; }
             const ctx = audioCtx;
+            console.log('[sound] playAlert PLAYING chime, ctx.state=', ctx.state, 'currentTime=', ctx.currentTime.toFixed(2));
             const t0 = ctx.currentTime + 0.02;
             const notes = [587.33, 783.99, 1046.50]; // D5 → G5 → C6 (rising)
             const step = 0.34;   // time between chime onsets
@@ -595,6 +556,7 @@
             refreshWaitTimers();
 
             // Announce each newly-added machine (queued, 3s each) + sound alert
+            console.log('[sound] applyActive: active=', activeList.length, 'newlyAdded=', newlyAdded.map(x => x.machine).join(',') || '(none)');
             if (newlyAdded.length) {
                 playAlert();
                 newlyAdded
@@ -670,10 +632,12 @@
                 setConn('offline', '接続エラー / Connection error');
                 return;
             }
-            es.onopen = () => setConn('online', '接続済み / Connected');
+            console.log('[sse] connecting to', `${SERVER}/sse/factory/${encodeURIComponent(FACTORY)}`);
+            es.onopen = () => { console.log('[sse] open'); setConn('online', '接続済み / Connected'); };
             es.onmessage = (ev) => {
+                console.log('[sse] message:', ev.data);
                 let data;
-                try { data = JSON.parse(ev.data); } catch (e) { return; }
+                try { data = JSON.parse(ev.data); } catch (e) { console.log('[sse] parse error'); return; }
                 if (data.type === 'connected') {
                     setConn('online', '接続済み / Connected');
                 } else if (data.type === 'stopcall') {
@@ -681,6 +645,7 @@
                 }
             };
             es.onerror = () => {
+                console.log('[sse] error / reconnecting');
                 setConn('offline', '再接続中… / Reconnecting…');
                 // EventSource auto-reconnects; nothing else needed.
             };
