@@ -490,20 +490,6 @@
             });
         }
 
-        // Keep nagging until the call is cleared: repeat the alert every 10s
-        // while any machine is still calling.
-        let alertTimer = null;
-        function startAlertLoop() {
-            if (alertTimer) return;
-            alertTimer = setInterval(() => {
-                if (activeList.length > 0) playAlert();
-                else stopAlertLoop();
-            }, 10000);
-        }
-        function stopAlertLoop() {
-            if (alertTimer) { clearInterval(alertTimer); alertTimer = null; }
-        }
-
         // ----- State + rendering of active calls -----
         let activeList = [];                  // [{machine, since}] sorted earliest-first
         let activeSince = new Map();          // machine -> since (for wait timers + new detection)
@@ -594,17 +580,15 @@
             updateBanner();
             refreshWaitTimers();
 
-            // Announce each newly-added machine (queued, 3s each) + sound alert
+            // Announce each newly-added machine (full-screen takeover, 3s each).
+            // The chime plays once per new call — only during that announcement,
+            // never on a repeating loop (avoids constant pressure on leaders).
             if (newlyAdded.length) {
                 playAlert();
                 newlyAdded
                     .sort((a, b) => a.since - b.since)
                     .forEach(it => queueTakeover(it.machine));
             }
-
-            // Keep the audible alert nagging while any call is unresolved
-            if (activeList.length > 0) startAlertLoop();
-            else stopAlertLoop();
         }
 
         function updateBanner() {
