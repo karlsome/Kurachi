@@ -5044,15 +5044,8 @@
             if (typeof window.showStep3Modal === 'function') {
                 const origStep3 = window.showStep3Modal;
                 window.showStep3Modal = function () {
-                    if (window.__materialScanMode === 'production') {
-                        window.__materialScanMode = null;
-                        const m = document.getElementById('step2Modal');
-                        if (m) m.style.display = 'none';
-                        if (typeof closeAllStepModals === 'function') closeAllStepModals();
-                        renderImageGallery();
-                        showToast('材料を追加しました / Material added');
-                        return;
-                    }
+                    // We removed the early return so that the user CAN proceed to Step 3
+                    // (Send to machine) in production mode, as requested.
                     return origStep3.apply(this, arguments);
                 };
             }
@@ -5343,10 +5336,23 @@
                         return;
                     }
                     window.__materialScanMode = 'production';
-                    if (typeof showStep2Modal === 'function') {
-                        showStep2Modal();
-                        // Auto-start the camera so one tap opens the scanner
-                        setTimeout(() => { document.getElementById('startStep2Scan')?.click(); }, 250);
+                    // Clear the current cycle so we can pick any machine
+                    if (window.__lotCycleMachinesDone) {
+                        window.__lotCycleMachinesDone = [];
+                    }
+                    
+                    if (typeof groupedMachines !== 'undefined' && groupedMachines.length > 1) {
+                        window.chooseScanMachine(() => {
+                            if (typeof showStep2Modal === 'function') {
+                                showStep2Modal();
+                                setTimeout(() => { document.getElementById('startStep2Scan')?.click(); }, 250);
+                            }
+                        });
+                    } else {
+                        if (typeof showStep2Modal === 'function') {
+                            showStep2Modal();
+                            setTimeout(() => { document.getElementById('startStep2Scan')?.click(); }, 250);
+                        }
                     }
                 };
                 const sm = document.getElementById('prodScanMaterialButton');

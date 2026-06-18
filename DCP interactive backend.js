@@ -1338,6 +1338,7 @@ function setDefaultTime(input) {
     // Update lock status for end time
     setTimeout(() => {
       updateProcessingTimeLockStatus('end');
+      input.dispatchEvent(new Event('change', { bubbles: true }));
     }, 100);
   }
 }
@@ -11614,7 +11615,7 @@ if (manualSendModal) {
     console.log('🟣 [proceedAfterMachineDone] called');
     const grouped = (typeof groupedMachines !== 'undefined' && groupedMachines.length > 1);
     console.log('🟣 [proceedAfterMachineDone] grouped:', grouped);
-    if (grouped) {
+    if (grouped && window.__materialScanMode !== 'production') {
       const done = window.__lotCycleMachinesDone || [];
       const remaining = groupedMachines.filter(m => done.indexOf(m) < 0);
       console.log('🟣 [proceedAfterMachineDone] done:', done, 'remaining:', remaining);
