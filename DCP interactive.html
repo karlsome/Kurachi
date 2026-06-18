@@ -3930,7 +3930,7 @@
         .img-preview-modal {
             position: fixed;
             inset: 0;
-            z-index: 100003;
+            z-index: 100150;
             display: none;
             align-items: center;
             justify-content: center;
@@ -4412,12 +4412,28 @@
             };
 
             // ---------- Image preview ----------
-            function openPreview(src) {
+            function openPreview(src, titleText = '') {
                 if (!src) return;
                 const m = document.getElementById('imgPreviewModal');
                 const img = document.getElementById('imgPreviewTarget');
                 if (!m || !img) return;
                 img.src = src;
+                
+                let titleEl = document.getElementById('imgPreviewTitle');
+                if (!titleEl) {
+                    titleEl = document.createElement('div');
+                    titleEl.id = 'imgPreviewTitle';
+                    titleEl.style.cssText = 'position:absolute; top:15%; left:50%; transform:translateX(-50%); color:#fff; font-size:3rem; font-weight:900; text-shadow: 2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 0 4px 12px rgba(0,0,0,0.9); background: rgba(0,0,0,0.5); padding: 12px 32px; border-radius: 16px; pointer-events:none; z-index: 100010; white-space:nowrap; letter-spacing:3px; border: 3px solid rgba(255,255,255,0.3);';
+                    m.appendChild(titleEl);
+                }
+                
+                if (titleText) {
+                    titleEl.textContent = titleText;
+                    titleEl.style.display = 'block';
+                } else {
+                    titleEl.style.display = 'none';
+                }
+
                 m.classList.add('open');
             }
             window.openPreview = openPreview; // used by the lot-photo popup (backend)
@@ -5044,8 +5060,24 @@
             if (typeof window.showStep3Modal === 'function') {
                 const origStep3 = window.showStep3Modal;
                 window.showStep3Modal = function () {
-                    // We removed the early return so that the user CAN proceed to Step 3
-                    // (Send to machine) in production mode, as requested.
+                    if (window.__materialScanMode === 'production') {
+                        const seb = document.getElementById('scannedKanban')?.value || document.getElementById('sub-dropdown')?.value;
+                        if (seb && typeof window.sendtoNC === 'function') {
+                            if (window.showToast) window.showToast('機械へ送信中... / Sending to machine...', 2000);
+                            window.sendtoNC(seb).then(() => {
+                                if (window.showToast) window.showToast('送信完了 / Send complete', 3000);
+                                const m = document.getElementById('step2Modal');
+                                if (m) m.style.display = 'none';
+                                if (typeof window.closeAllStepModals === 'function') window.closeAllStepModals();
+                                if (typeof window.renderImageGallery === 'function') window.renderImageGallery();
+                            }).catch(err => {
+                                if (window.showToast) window.showToast('送信失敗 / Send failed', 4000);
+                            });
+                        } else {
+                            if (window.showToast) window.showToast('エラー：背番号がありません / Error: No product selected');
+                        }
+                        return;
+                    }
                     return origStep3.apply(this, arguments);
                 };
             }

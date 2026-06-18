@@ -11534,15 +11534,17 @@ if (manualSendModal) {
     return card;
   }
 
-  function promptShots(title, subtitle, onSubmit) {
+  function promptShots(machine, lot, onSubmit) {
     closeLP();
     const card = shell();
     card.innerHTML =
-      '<div style="font-size:1.05rem;font-weight:800;color:#101828;">' + title + '</div>' +
-      '<div style="font-size:.85rem;font-weight:600;color:#475467;margin:6px 0 12px;">' + subtitle + '</div>' +
-      '<input id="lpDisplay" type="text" readonly value="" inputmode="none" style="width:100%;font-size:2rem;font-weight:800;text-align:center;padding:12px;border:2px solid #D0D5DD;border-radius:10px;color:#101828;margin-bottom:12px;">' +
+      '<div style="font-size:1.6rem;font-weight:900;color:#101828;text-align:center;margin-bottom:4px;">' + machine + '</div>' +
+      '<div style="font-size:1.1rem;font-weight:700;color:#f39c12;text-align:center;margin-bottom:12px;">Lot: ' + lot + '</div>' +
+      '<div style="font-size:1.1rem;font-weight:800;color:#2E6FF2;text-align:center;margin-bottom:8px;">ショット数を入力<br><span style="font-size:0.85rem;color:#475467;font-weight:600;">Enter cur times value</span></div>' +
+      '<div style="text-align:center; margin-bottom:12px;"><img src="src/curTimes.jpeg" alt="cur times" style="max-height:100px; width:auto; max-width:100%; border-radius:6px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); cursor:pointer;" onclick="if(window.openPreview) window.openPreview(this.src, \'' + machine + '\');"></div>' +
+      '<input id="lpDisplay" type="text" readonly value="" inputmode="none" style="width:100%;font-size:2.5rem;font-weight:900;text-align:center;padding:12px;border:3px solid #2E6FF2;border-radius:10px;color:#101828;margin-bottom:12px;">' +
       '<div id="lpKeys" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;"></div>' +
-      '<button id="lpOk" style="margin-top:12px;width:100%;background:#2E6FF2;color:#fff;border:none;border-radius:10px;padding:14px;font-size:1rem;font-weight:800;cursor:pointer;">OK</button>';
+      '<button id="lpOk" style="margin-top:12px;width:100%;background:#2E6FF2;color:#fff;border:none;border-radius:10px;padding:14px;font-size:1.2rem;font-weight:800;cursor:pointer;">OK</button>';
     const disp = card.querySelector('#lpDisplay');
     const keys = card.querySelector('#lpKeys');
     ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', 'C'].forEach(k => {
@@ -11586,11 +11588,48 @@ if (manualSendModal) {
     const next = () => {
       if (i >= open.length) return;
       const r = open[i++];
-      promptShots('最終ロットのショット数 / Final lot shots', r.machine + ' — ロット ' + r.lotNumber,
+      promptShots(r.machine, r.lotNumber,
         v => { closeRecord(r, v); next(); });
     };
     next();
   }
+
+  // Failsafe: if the user refreshes the page before entering shots for a previous lot,
+  // we detect open lots that are NOT the current (last) lot, and prompt for their shots.
+  window.checkMissingShots = function() {
+    const missing = [];
+    Object.keys(lotsByMachine).forEach(machine => {
+      const list = lotsByMachine[machine];
+      if (!list || list.length <= 1) return;
+      // All items except the last one should NOT be open.
+      for (let i = 0; i < list.length - 1; i++) {
+        if (list[i].open) {
+          missing.push(list[i]);
+        }
+      }
+    });
+
+    if (missing.length === 0) return;
+
+    let idx = 0;
+    const promptNext = () => {
+      if (idx >= missing.length) return;
+      const rec = missing[idx++];
+      promptShots(rec.machine, rec.lotNumber, v => {
+        closeRecord(rec, v);
+        promptNext();
+      });
+    };
+    promptNext();
+  };
+
+  window.addEventListener('DOMContentLoaded', () => {
+    setTimeout(() => {
+      if (typeof window.checkMissingShots === 'function') {
+        window.checkMissingShots();
+      }
+    }, 1500);
+  });
 
   /* ---------- Public hooks ---------- */
   window.recordLotScan = recordLotScan;
@@ -11641,7 +11680,7 @@ if (manualSendModal) {
     console.log('🟣 [afterLotPhotoProceed] called, prev:', prev ? (prev.machine + ' lot ' + prev.lotNumber + ' open=' + prev.open) : 'null');
     if (prev && prev.open) {
       console.log('🟣 [afterLotPhotoProceed] Prompting shots for previous lot...');
-      promptShots('前ロットのショット数 / Previous lot shots', prev.machine + ' — ロット ' + prev.lotNumber,
+      promptShots(prev.machine, prev.lotNumber,
         v => { closeRecord(prev, v); console.log('🟣 [afterLotPhotoProceed] Shots entered, calling onDone...'); if (onDone) onDone(); });
     } else {
       console.log('🟣 [afterLotPhotoProceed] No previous open lot, calling onDone directly');
