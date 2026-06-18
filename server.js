@@ -30775,6 +30775,287 @@ app.post('/api/pce/upload', async (req, res) => {
   }
 });
 
+// ── Prototype (試作) Registration (Google Drive + MongoDB) ───────────────────
+const _shisakuSubfolderCache = new Map();
+
+async function _getShisakuSubfolderId(drive, subfolderName) {
+  if (_shisakuSubfolderCache.has(subfolderName)) return _shisakuSubfolderCache.get(subfolderName);
+
+  const parentFolderId = process.env.GOOGLE_DRIVE_PROTOTYPE_FOLDER_ID;
+  if (!parentFolderId) throw new Error('GOOGLE_DRIVE_PROTOTYPE_FOLDER_ID is not set in .env');
+
+  const searchRes = await drive.files.list({
+    q: `'${parentFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and name = '${subfolderName}' and trashed = false`,
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+    fields: 'files(id, name)',
+  });
+
+  const folder = (searchRes.data.files || [])[0];
+  if (!folder) throw new Error(`Drive subfolder "${subfolderName}" not found in prototype folder`);
+
+  _shisakuSubfolderCache.set(subfolderName, folder.id);
+  return folder.id;
+}
+
+async function _uploadShisakuFile(drive, subfolderName, fileName, base64, mimeType) {
+  const folderId = await _getShisakuSubfolderId(drive, subfolderName);
+  const fileBuffer = Buffer.from(base64, 'base64');
+  const stream = new Readable();
+  stream.push(fileBuffer);
+  stream.push(null);
+  const response = await drive.files.create({
+    requestBody: { name: fileName, parents: [folderId] },
+    media: { mimeType, body: stream },
+    supportsAllDrives: true,
+    fields: 'id, name, webViewLink',
+  });
+  return { id: response.data.id, name: response.data.name, link: response.data.webViewLink };
+}
+
+const _shisakuNestedFolderCache = new Map();
+
+async function _getOrCreateShisakuSubfolder(drive, parentFolderId, subfolderName) {
+  const cacheKey = `${parentFolderId}/${subfolderName}`;
+  if (_shisakuNestedFolderCache.has(cacheKey)) return _shisakuNestedFolderCache.get(cacheKey);
+
+  const searchRes = await drive.files.list({
+    q: `'${parentFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and name = '${subfolderName}' and trashed = false`,
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+    fields: 'files(id, name)',
+  });
+
+  let folder = (searchRes.data.files || [])[0];
+
+  if (!folder) {
+    const createRes = await drive.files.create({
+      requestBody: {
+        name: subfolderName,
+        mimeType: 'application/vnd.google-apps.folder',
+        parents: [parentFolderId],
+      },
+      supportsAllDrives: true,
+      fields: 'id, name',
+    });
+    folder = createRes.data;
+  }
+
+  _shisakuNestedFolderCache.set(cacheKey, folder.id);
+  return folder.id;
+}
+
+async function _uploadShisakuPdfPreviewImage(drive, fileName, base64, baseUrl) {
+  const pdfFolderId = await _getShisakuSubfolderId(drive, 'pdf');
+  const jpgFolderId = await _getOrCreateShisakuSubfolder(drive, pdfFolderId, 'jpg');
+
+  const fileBuffer = Buffer.from(base64, 'base64');
+  const stream = new Readable();
+  stream.push(fileBuffer);
+  stream.push(null);
+  const response = await drive.files.create({
+    requestBody: { name: fileName, parents: [jpgFolderId] },
+    media: { mimeType: 'image/jpeg', body: stream },
+    supportsAllDrives: true,
+    fields: 'id, name, webViewLink',
+  });
+  return { id: response.data.id, name: response.data.name, link: `${baseUrl}/api/shisaku/image/${response.data.id}` };
+}
+
+// Streams a Drive-hosted image (e.g. the PDF JPG preview) so it can be used directly as an <img> src.
+app.get('/api/shisaku/image/:fileId', async (req, res) => {
+  try {
+    const { fileId } = req.params;
+    if (!fileId) return res.status(400).json({ error: 'fileId is required' });
+
+    const drive = _buildDriveClient();
+    const meta = await drive.files.get({ fileId, fields: 'mimeType, name', supportsAllDrives: true });
+    const fileRes = await drive.files.get(
+      { fileId, alt: 'media', supportsAllDrives: true },
+      { responseType: 'stream' }
+    );
+
+    res.setHeader('Content-Type', meta.data.mimeType || 'image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    fileRes.data.pipe(res);
+  } catch (error) {
+    console.error('❌ Error streaming shisaku image:', error.message);
+    res.status(500).json({ error: 'Failed to load image', details: error.message });
+  }
+});
+
+// Older records stored Drive's webViewLink ("/file/d/<id>/view...") for pdfjpglink, which isn't a
+// renderable image URL. Rewrite those to the streaming proxy so previews work for existing records too.
+function _normalizeShisakuJpgLink(link, baseUrl) {
+  if (!link) return link;
+  const match = String(link).match(/\/file\/d\/([^/]+)/);
+  return match ? `${baseUrl}/api/shisaku/image/${match[1]}` : link;
+}
+
+app.get('/api/shisaku/list', async (req, res) => {
+  try {
+    await client.connect();
+    const records = await client
+      .db('Sasaki_Coating_MasterDB')
+      .collection('shisakuDB')
+      .find({})
+      .sort({ createdAt: -1 })
+      .toArray();
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    res.json(records.map((r) => ({ ...r, pdfjpglink: _normalizeShisakuJpgLink(r.pdfjpglink, baseUrl) })));
+  } catch (error) {
+    console.error('❌ Error fetching shisakuDB records:', error);
+    res.status(500).json({ error: 'Failed to fetch prototype records', details: error.message });
+  }
+});
+
+app.post('/api/shisaku/register', async (req, res) => {
+  try {
+    const { shisakuNo, deadline, eventName, modelName, customerName, registeredBy, dxfFile, pdfFile, pdfImageFile, pceFiles } = req.body;
+
+    if (!shisakuNo || !deadline || !eventName || !modelName || !customerName || !registeredBy) {
+      return res.status(400).json({ error: 'shisakuNo, deadline, eventName, modelName, customerName, and registeredBy are required' });
+    }
+    if (!dxfFile?.base64 || !dxfFile?.name || !pdfFile?.base64 || !pdfFile?.name) {
+      return res.status(400).json({ error: 'dxfFile and pdfFile (each with name and base64) are required' });
+    }
+    if (!pdfImageFile?.base64 || !pdfImageFile?.name) {
+      return res.status(400).json({ error: 'pdfImageFile (the converted JPG preview of pdfFile, with name and base64) is required' });
+    }
+    if (!Array.isArray(pceFiles) || pceFiles.length === 0 || !pceFiles.every((f) => f?.base64 && f?.name)) {
+      return res.status(400).json({ error: 'pceFiles must be a non-empty array of files, each with name and base64' });
+    }
+
+    const drive = _buildDriveClient();
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+
+    const [dxfResult, pdfResult, pdfImageResult, ...pceResults] = await Promise.all([
+      _uploadShisakuFile(drive, 'dxf', dxfFile.name, dxfFile.base64, 'application/octet-stream'),
+      _uploadShisakuFile(drive, 'pdf', pdfFile.name, pdfFile.base64, 'application/pdf'),
+      _uploadShisakuPdfPreviewImage(drive, pdfImageFile.name, pdfImageFile.base64, baseUrl),
+      ...pceFiles.map((f) => _uploadShisakuFile(drive, 'pce', f.name, f.base64, 'application/octet-stream')),
+    ]);
+
+    const document = {
+      shisakuNo: String(shisakuNo).trim(),
+      deadline,
+      dxflink: dxfResult.link,
+      pdflink: pdfResult.link,
+      pdfjpglink: pdfImageResult.link,
+      pcelinks: pceResults.map((r) => ({ name: r.name, link: r.link })),
+      eventName: String(eventName).trim(),
+      modelName: String(modelName).trim(),
+      customerName: String(customerName).trim(),
+      registeredBy: String(registeredBy).trim(),
+      createdAt: new Date(),
+    };
+
+    await client.connect();
+    const result = await client.db('Sasaki_Coating_MasterDB').collection('shisakuDB').insertOne(document);
+
+    res.status(201).json({ success: true, insertedId: result.insertedId, document });
+  } catch (error) {
+    const googleDetails = error.response?.data || error.errors || null;
+    console.error('❌ Error registering prototype (試作):', error.message, googleDetails || '');
+    res.status(500).json({
+      error: 'Failed to register prototype',
+      details: error.message,
+      google: googleDetails,
+    });
+  }
+});
+
+app.delete('/api/shisaku/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ error: 'Invalid prototype id' });
+    }
+
+    await client.connect();
+    const result = await client.db('Sasaki_Coating_MasterDB').collection('shisakuDB').deleteOne({ _id: new ObjectId(id) });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ error: 'Prototype record not found' });
+    }
+
+    res.json({ success: true, deletedId: id });
+  } catch (error) {
+    console.error('❌ Error deleting prototype (試作):', error.message);
+    res.status(500).json({ error: 'Failed to delete prototype', details: error.message });
+  }
+});
+
+app.get('/api/shisaku-request/list', async (req, res) => {
+  try {
+    await client.connect();
+    const records = await client
+      .db('Sasaki_Coating_MasterDB')
+      .collection('shisakuRequestDB')
+      .find({})
+      .sort({ createdAt: -1 })
+      .toArray();
+    res.json(records);
+  } catch (error) {
+    console.error('❌ Error fetching shisakuRequestDB records:', error);
+    res.status(500).json({ error: 'Failed to fetch prototype request records', details: error.message });
+  }
+});
+
+app.post('/api/shisaku-request/register', async (req, res) => {
+  try {
+    const { name, pce, okuriPitch, color, material, boxType, quantity, pdfLink, shisakudb_id } = req.body;
+
+    if (!name || !pce || !okuriPitch || !color || !material || !boxType || !quantity || !pdfLink) {
+      return res.status(400).json({ error: 'name, pce, okuriPitch, color, material, boxType, quantity, and pdfLink are required' });
+    }
+
+    const document = {
+      name: String(name).trim(),
+      pce: String(pce).trim(),
+      okuriPitch: Number(okuriPitch),
+      color: String(color).trim(),
+      material: String(material).trim(),
+      boxType: String(boxType).trim(),
+      quantity: Number(quantity),
+      pdfLink: String(pdfLink).trim(),
+      ...(shisakudb_id && ObjectId.isValid(shisakudb_id) && { shisakudb_id: new ObjectId(shisakudb_id) }),
+      createdAt: new Date(),
+    };
+
+    await client.connect();
+    const result = await client.db('Sasaki_Coating_MasterDB').collection('shisakuRequestDB').insertOne(document);
+
+    res.status(201).json({ success: true, insertedId: result.insertedId, document });
+  } catch (error) {
+    console.error('❌ Error registering prototype request:', error.message);
+    res.status(500).json({ error: 'Failed to register prototype request', details: error.message });
+  }
+});
+
+app.delete('/api/shisaku-request/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ error: 'Invalid prototype request id' });
+    }
+
+    await client.connect();
+    const result = await client.db('Sasaki_Coating_MasterDB').collection('shisakuRequestDB').deleteOne({ _id: new ObjectId(id) });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ error: 'Prototype request record not found' });
+    }
+
+    res.json({ success: true, deletedId: id });
+  } catch (error) {
+    console.error('❌ Error deleting prototype request:', error.message);
+    res.status(500).json({ error: 'Failed to delete prototype request', details: error.message });
+  }
+});
+
 app.listen(port, () => {
   console.log(`✅ Combined server is running at http://localhost:${port}`);
   console.log(`🌐 GEN CSV Download available at: http://localhost:${port}/gen-automated`);
