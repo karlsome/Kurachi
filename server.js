@@ -1980,10 +1980,14 @@ const fdb = admin.firestore();
 const storage = admin.storage();
 
 // Helper to upload files to Firebase Storage with retry logic to handle intermittent "Premature close" network errors
-const uploadToFirebaseWithRetry = async (file, buffer, options, maxRetries = 3) => {
+const uploadToFirebaseWithRetry = async (file, buffer, options = {}, maxRetries = 3) => {
+  // Force resumable: false. Resumable uploads in @google-cloud/storage have a known 
+  // gaxios network bug (ERR_STREAM_PREMATURE_CLOSE) in Node 18+ when fetching tokens.
+  const safeOptions = { ...options, resumable: false };
+  
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      await file.save(buffer, options);
+      await file.save(buffer, safeOptions);
       return; // Success
     } catch (error) {
       if (attempt === maxRetries) {
