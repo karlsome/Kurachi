@@ -6588,7 +6588,7 @@ async function sendtoNC(selectedValue) {
     
     // Send command to each machine
     const sendPromises = Object.entries(machineIPMap).map(async ([machine, ip]) => {
-      const url = `http://${ip}:5000/request?filename=${currentSebanggo}.pce`;
+      const url = `http://${ip}:5000/request?filename=${currentSebanggo}.pce&mode=mass`;
       
       try {
         console.log(`📤 Sending to ${machine} (${ip}): ${url}`);
@@ -6642,7 +6642,7 @@ async function sendtoNC(selectedValue) {
     
   } else {
     // Single machine - original logic
-    const url = `http://${ipAddress}:5000/request?filename=${currentSebanggo}.pce`;
+    const url = `http://${ipAddress}:5000/request?filename=${currentSebanggo}.pce&mode=mass`;
     
     try {
       console.log(`Sending command to mini PC: ${url}`);
@@ -10360,7 +10360,7 @@ async function sendToIndividualMachine(machine, ncFilename, index) {
   sendButton.innerHTML = 'Sending... / 送信中...';
   
   // Use the same URL format as Step 3 modal (port 5000 with /request?filename=)
-  const ncProgramUrl = `http://${machine.ip}:5000/request?filename=${ncFilename}`;
+  const ncProgramUrl = `http://${machine.ip}:5000/request?filename=${ncFilename}&mode=mass`;
   
   try {
     // Try background fetch first
@@ -10577,7 +10577,7 @@ function showManualSendModal(sebanggo) {
       button.style.boxShadow = '0 2px 8px rgba(33, 150, 243, 0.3)';
     };
     button.onclick = () => {
-      const url = `http://${ip}:5000/request?filename=${sebanggo}.pce`;
+      const url = `http://${ip}:5000/request?filename=${sebanggo}.pce&mode=mass`;
       console.log(`📤 Manual send to ${machine}: ${url}`);
       const newTab = window.open(url, '_blank');
       setTimeout(() => {
