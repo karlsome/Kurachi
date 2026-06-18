@@ -41,7 +41,7 @@ const dbURL = 'https://script.google.com/macros/s/AKfycbx0qBw0_wF5X-hA2t1yY-d5h5
 
 //const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
-const serverURL = "http://192.168.3.9:3000";
+const serverURL = "http://192.168.1.104:3000";
 
 // Global variable to track if sendtoNC button has been pressed
 let sendtoNCButtonisPressed = false;
@@ -90,7 +90,7 @@ async function generateSessionID(背番号, 設備, 工場, date) {
   try {
     const response = await fetch(`${serverURL}/api/generate-session-id?背番号=${encodeURIComponent(背番号)}&設備=${encodeURIComponent(設備)}&工場=${encodeURIComponent(工場)}&Date=${encodeURIComponent(date)}`);
     const data = await response.json();
-    
+
     if (data.success) {
       console.log(`✅ Generated new sessionID: ${data.sessionID} (Order #${data.orderNumber})`);
       return data.sessionID;
@@ -164,11 +164,11 @@ function addToLogQueue(logData) {
     timestamp: new Date().toISOString(),
     nextRetryTime: Date.now()
   };
-  
+
   logQueue.push(queueEntry);
   saveLogQueue();
   console.log(`📥 Added to queue: ${logData.Action} (Queue size: ${logQueue.length})`);
-  
+
   // Start processing queue if not already running
   if (!isProcessingQueue) {
     processLogQueue();
@@ -181,7 +181,7 @@ function addToLogQueue(logData) {
 async function sendLogToServer(logData, timeoutMs = 10000) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-  
+
   try {
     const response = await fetch(`${serverURL}/api/tablet-log`, {
       method: 'POST',
@@ -191,9 +191,9 @@ async function sendLogToServer(logData, timeoutMs = 10000) {
       body: JSON.stringify(logData),
       signal: controller.signal
     });
-    
+
     clearTimeout(timeoutId);
-    
+
     if (response.ok) {
       return { success: true };
     } else {
@@ -216,20 +216,20 @@ async function processLogQueue() {
   if (isProcessingQueue || logQueue.length === 0) {
     return;
   }
-  
+
   isProcessingQueue = true;
   console.log(`🔄 Processing log queue (${logQueue.length} entries)...`);
-  
+
   const now = Date.now();
   const entriesToProcess = logQueue.filter(entry => entry.nextRetryTime <= now);
-  
+
   for (const entry of entriesToProcess) {
     entry.attempts++;
-    
+
     console.log(`🔁 Retry attempt ${entry.attempts}/${MAX_RETRY_ATTEMPTS} for: ${entry.logData.Action}`);
-    
+
     const result = await sendLogToServer(entry.logData);
-    
+
     if (result.success) {
       // Success - remove from queue
       console.log(`✅ Successfully logged (retry): ${entry.logData.Action}`);
@@ -246,22 +246,22 @@ async function processLogQueue() {
         const delay = Math.min(MAX_RETRY_DELAY, INITIAL_RETRY_DELAY * Math.pow(2, entry.attempts - 1));
         entry.nextRetryTime = now + delay;
         saveLogQueue();
-        console.warn(`⏳ Will retry in ${delay/1000}s: ${entry.logData.Action}`);
+        console.warn(`⏳ Will retry in ${delay / 1000}s: ${entry.logData.Action}`);
       }
     }
-    
+
     // Small delay between processing entries
     await new Promise(resolve => setTimeout(resolve, 500));
   }
-  
+
   isProcessingQueue = false;
-  
+
   // Schedule next queue check if there are still entries
   if (logQueue.length > 0) {
     const nextRetry = Math.min(...logQueue.map(e => e.nextRetryTime));
     const delayUntilNext = Math.max(1000, nextRetry - Date.now());
     setTimeout(processLogQueue, delayUntilNext);
-    console.log(`⏰ Next queue check in ${(delayUntilNext/1000).toFixed(1)}s`);
+    console.log(`⏰ Next queue check in ${(delayUntilNext / 1000).toFixed(1)}s`);
   }
 }
 
@@ -279,33 +279,33 @@ async function logTabletAction(action, status = 'in-progress', additionalData = 
     const 設備 = document.getElementById('process')?.value || '';
     const Worker_Name = document.getElementById('Machine Operator')?.value || '';
     const lotNumber = document.getElementById('Lot No.')?.value || '';
-    
+
     // Don't log if machine info is missing - tablet not initialized yet
     if (!設備) {
       console.log('⚠️ Skipping log: Machine (設備) not selected yet');
       return;
     }
-    
+
     // For most actions, 背番号 is required (except setup actions like checkbox toggle)
     const setupActions = ['Kensa mode checkbox toggled', 'Break time', 'Reset'];
     const isSetupAction = setupActions.some(setupAction => action.includes(setupAction));
-    
+
     if (!背番号 && !isSetupAction) {
       console.log('⚠️ Skipping log: Kanban (背番号) not scanned yet');
       return;
     }
-    
+
     // Get sessionID from localStorage
     let sessionID = getSessionID();
-    
+
     // ✅ CRITICAL: sessionID is REQUIRED - Auto-generate if missing
     if (!sessionID) {
       console.warn(`⚠️ No sessionID found! Auto-generating for action: ${action}`);
-      
+
       // Generate sessionID immediately
       const todayDate = new Date().toISOString().split('T')[0];
       sessionID = await generateSessionID(背番号 || 'setup', 設備, 工場, todayDate);
-      
+
       if (sessionID) {
         setSessionID(sessionID);
         console.log(`✅ Emergency sessionID created: ${sessionID}`);
@@ -315,7 +315,7 @@ async function logTabletAction(action, status = 'in-progress', additionalData = 
         return; // Block logging if sessionID cannot be generated
       }
     }
-    
+
     const logData = {
       背番号,
       品番,
@@ -327,10 +327,10 @@ async function logTabletAction(action, status = 'in-progress', additionalData = 
       sessionID: sessionID,
       AdditionalData: additionalData
     };
-    
+
     // Try to send immediately
     const result = await sendLogToServer(logData, 8000); // 8 second timeout
-    
+
     if (result.success) {
       console.log(`📝 Tablet action logged: ${action}`);
     } else {
@@ -349,7 +349,7 @@ async function logTabletAction(action, status = 'in-progress', additionalData = 
       const 設備 = document.getElementById('process')?.value || '';
       const Worker_Name = document.getElementById('Machine Operator')?.value || '';
       const sessionID = getSessionID();
-      
+
       if (設備 && sessionID) {
         addToLogQueue({
           背番号, 品番, 工場, 設備, Worker_Name,
@@ -431,7 +431,7 @@ document.addEventListener('DOMContentLoaded', () => {
     processInput.addEventListener('change', updateSendToMachineVisibility);
     processInput.dataset.sendToMachineVisibilityBound = 'true';
   }
-  
+
   if (selectedFactory) {
     const factoryInput = document.getElementById('selected工場');
     const nippoTitle = document.getElementById('nippoTitle');
@@ -439,12 +439,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (nippoTitle) nippoTitle.textContent = selectedFactory + "日報";
     console.log("✅ kojo changed to: " + selectedFactory);
   }
-  
+
   if (selectedMachine) {
     if (processInput) {
       processInput.value = selectedMachine;
       console.log("✅ machine set to: " + selectedMachine);
-      
+
       // Create dynamic shot inputs after machine value is set
       setTimeout(() => {
         console.log("🔵 ⏰ setTimeout fired - About to call createGroupedShotInputs");
@@ -545,22 +545,22 @@ document.addEventListener('DOMContentLoaded', () => {
     console.error("Selected 工場 is not set or found.");
     return;
   }
-  
+
   // Explicitly restore sub-dropdown value first
   if (subDropdown) {
     const subDropdownKey = `${uniquePrefix}sub-dropdown`;
     const savedSubDropdownValue = localStorage.getItem(subDropdownKey);
-    
+
     if (savedSubDropdownValue) {
       console.log(`Found saved sub-dropdown value: ${savedSubDropdownValue}`);
-      
+
       // Wait for options to be populated before setting value
       setTimeout(() => {
         if ([...subDropdown.options].some(option => option.value === savedSubDropdownValue)) {
           subDropdown.value = savedSubDropdownValue;
           previousSubDropdownValue = savedSubDropdownValue; // Initialize previous value
           console.log(`Restored sub-dropdown to: ${savedSubDropdownValue}`);
-          
+
           // Fetch product details after setting dropdown value
           fetchProductDetails();
         } else {
@@ -632,16 +632,16 @@ document.addEventListener('DOMContentLoaded', () => {
   // Calculate break time and trouble time after restoring values
   calculateTotalBreakTime();
   calculateTotalMachineTroubleTime();
-  
+
   // Restore the sendtoNCButtonisPressed state
   const sendToNCKey = `${uniquePrefix}sendtoNCButtonisPressed`;
   const savedSendToNCState = localStorage.getItem(sendToNCKey);
   const currentSebanggo = document.getElementById('sub-dropdown')?.value;
-  
+
   // Set up processing time inputs with edit buttons
   const startTimeInput = document.getElementById('Start Time');
   const endTimeInput = document.getElementById('End Time');
-  
+
   if (startTimeInput) {
     // Wrap start time input in a container if not already wrapped
     if (!startTimeInput.closest('.time-input-wrapper')) {
@@ -649,7 +649,7 @@ document.addEventListener('DOMContentLoaded', () => {
       wrapper.className = 'time-input-wrapper';
       startTimeInput.parentNode.insertBefore(wrapper, startTimeInput);
       wrapper.appendChild(startTimeInput);
-      
+
       // Add edit button
       const editBtn = document.createElement('button');
       editBtn.type = 'button';
@@ -657,17 +657,17 @@ document.addEventListener('DOMContentLoaded', () => {
       editBtn.id = 'edit-start-time';
       editBtn.textContent = 'Edit';
       editBtn.style.display = 'none';
-      editBtn.onclick = function() { unlockProcessingTime('start'); };
+      editBtn.onclick = function () { unlockProcessingTime('start'); };
       wrapper.appendChild(editBtn);
-      
+
       // Update focus handler to use our custom handler
-      startTimeInput.onfocus = function() { handleProcessingTimeFocus(this); };
-      
+      startTimeInput.onfocus = function () { handleProcessingTimeFocus(this); };
+
       // Update lock status based on current value
       updateProcessingTimeLockStatus('start');
     }
   }
-  
+
   if (endTimeInput) {
     // Wrap end time input in a container if not already wrapped
     if (!endTimeInput.closest('.time-input-wrapper')) {
@@ -675,7 +675,7 @@ document.addEventListener('DOMContentLoaded', () => {
       wrapper.className = 'time-input-wrapper';
       endTimeInput.parentNode.insertBefore(wrapper, endTimeInput);
       wrapper.appendChild(endTimeInput);
-      
+
       // Add edit button
       const editBtn = document.createElement('button');
       editBtn.type = 'button';
@@ -683,23 +683,23 @@ document.addEventListener('DOMContentLoaded', () => {
       editBtn.id = 'edit-end-time';
       editBtn.textContent = 'Edit';
       editBtn.style.display = 'none';
-      editBtn.onclick = function() { unlockProcessingTime('end'); };
+      editBtn.onclick = function () { unlockProcessingTime('end'); };
       wrapper.appendChild(editBtn);
-      
+
       // Update focus handler to use our custom handler
-      endTimeInput.onfocus = function() { handleProcessingTimeFocus(this); };
-      
+      endTimeInput.onfocus = function () { handleProcessingTimeFocus(this); };
+
       // Update lock status based on current value
       updateProcessingTimeLockStatus('end');
     }
   }
-  
+
   // Initialize previous sebanggo if it doesn't exist
   if (!localStorage.getItem(`${uniquePrefix}previous-sebanggo`) && currentSebanggo) {
     localStorage.setItem(`${uniquePrefix}previous-sebanggo`, currentSebanggo);
     console.log(`Initialized previous-sebanggo to current value: ${currentSebanggo}`);
   }
-  
+
   if (savedSendToNCState === 'true') {
     sendtoNCButtonisPressed = true;
     console.log("Restored sendtoNCButtonisPressed to true on page load");
@@ -715,14 +715,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const endInput = document.getElementById(`break${i}-end`);
 
     if (startInput && endInput) {
-      startInput.addEventListener('change', function() {
+      startInput.addEventListener('change', function () {
         calculateTotalBreakTime();
         // Save to localStorage
         const key = `${uniquePrefix}${this.id}`;
         localStorage.setItem(key, this.value);
       });
 
-      endInput.addEventListener('change', function() {
+      endInput.addEventListener('change', function () {
         calculateTotalBreakTime();
         // Save to localStorage
         const key = `${uniquePrefix}${this.id}`;
@@ -733,14 +733,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Initialize maintenance system
   loadMaintenanceRecords();
-  
+
   // ============================================
   // STEP PERSISTENCE LOGIC - REMOVED
   // ============================================
   // Step persistence is now handled in window.addEventListener('load') 
   // to ensure dropdown is fully restored before checking
   // See bottom of file for step restoration logic
-  
+
   // Initialize material label photo system
   loadMaterialLabelPhotos();
 
@@ -907,7 +907,7 @@ async function fetchProductDetails() {
 
   try {
     console.log(`Fetching product details for ${serialNumber}`);
-    
+
     // Step 1: Try query by 背番号
     let response = await fetch(`${serverURL}/queries`, {
       method: "POST",
@@ -933,7 +933,7 @@ async function fetchProductDetails() {
     // Step 2: If not found, try query by 品番
     if (!result || result.length === 0) {
       console.log(`No results found for 背番号: ${serialNumber}, trying 品番 instead`);
-      
+
       const altRes = await fetch(`${serverURL}/queries`, {
         method: "POST",
         headers: {
@@ -1002,7 +1002,7 @@ async function fetchProductDetails() {
     document.getElementById("kataban").value = data.型番 || "";
     document.getElementById("収容数").value = data.収容数 || "";
     document.getElementById("送りピッチ").textContent = "送りピッチ: " + (data.送りピッチ || "");
-    
+
     // Set 離型紙 value with Japanese/English labels
     const rikeshiValue = data.離型紙上下 || data["離型紙上/下"] || "";
     if (rikeshiValue === "上") {
@@ -1012,7 +1012,7 @@ async function fetchProductDetails() {
     } else {
       document.getElementById("rikeshitext").textContent = rikeshiValue;
     }
-    
+
     document.getElementById("SRS").value = data.SRS || "";
 
     // Set image
@@ -1034,18 +1034,18 @@ async function fetchProductDetails() {
   } catch (error) {
     console.error("Error fetching product details:", error);
     blankInfo(); // Make sure we blank fields on error
-    
+
     // Display user-friendly error
     const scanAlertModal = document.getElementById('scanAlertModal');
     const scanAlertText = document.getElementById('scanAlertText');
-    
+
     if (scanAlertModal && scanAlertText) {
       scanAlertText.innerText = `製品情報の取得中にエラーが発生しました / Error fetching product details: ${error.message}`;
       scanAlertModal.style.display = 'block';
-      
+
       const closeScanModalButton = document.getElementById('closeScanModalButton');
       if (closeScanModalButton) {
-        closeScanModalButton.onclick = function() {
+        closeScanModalButton.onclick = function () {
           scanAlertModal.style.display = 'none';
         };
       }
@@ -1059,18 +1059,18 @@ async function fetchProductDetails() {
 let previousSubDropdownValue = document.getElementById("sub-dropdown").value;
 
 // Trigger when 背番号 is selected - with leader verification
-document.getElementById("sub-dropdown").addEventListener("change", function(event) {
+document.getElementById("sub-dropdown").addEventListener("change", function (event) {
   const currentValue = document.getElementById("sub-dropdown").value;
   const subDropdown = document.getElementById('sub-dropdown');
-  
+
   // Check if value actually changed
   if (currentValue === previousSubDropdownValue) {
     return; // No change, exit early
   }
-  
+
   // Immediately revert the dropdown to previous value
   subDropdown.value = previousSubDropdownValue;
-  
+
   // User is trying to change the dropdown - trigger leader verification with the attempted value
   showLeaderVerification(currentValue);
 });
@@ -1083,15 +1083,15 @@ function showLeaderVerification(attemptedValue) {
   const modal = document.getElementById('leaderVerificationModal');
   const statusText = document.getElementById('leaderVerificationStatus');
   const subDropdown = document.getElementById('sub-dropdown');
-  
+
   // Reset status text
   statusText.textContent = 'リーダーのQRコードをスキャンしてください / Please scan leader QR code';
   statusText.style.color = '#2d5f4f';
-  
+
   // Reset the warning text to original (for sub-dropdown flow)
   const modalContent = modal.querySelector('.modal-content');
   const warningTextElement = modalContent.querySelector('p[style*="font-size"]');
-  
+
   if (warningTextElement) {
     // Restore original warning text
     warningTextElement.innerHTML = `価値観を変えることができるのはリーダーだけ<br>
@@ -1101,17 +1101,17 @@ function showLeaderVerification(attemptedValue) {
     warningTextElement.style.color = '#666';
     warningTextElement.style.lineHeight = '1.5';
   }
-  
+
   // Show modal
   modal.style.display = 'block';
-  
+
   // Initialize QR scanner for leader verification
   leaderVerificationScanner = new Html5Qrcode("leaderQrReader");
   const html5QrCode = leaderVerificationScanner;
-  
+
   html5QrCode.start(
     { facingMode: "environment" },
-    { 
+    {
       fps: 30,
       qrbox: { width: 800, height: 800 },
       aspectRatio: 1.0,
@@ -1123,7 +1123,7 @@ function showLeaderVerification(attemptedValue) {
     },
     async (decodedText) => {
       console.log("Leader QR Code scanned:", decodedText);
-      
+
       // Verify leader with backend
       try {
         const response = await fetch(`${serverURL}/verifyLeader`, {
@@ -1131,31 +1131,31 @@ function showLeaderVerification(attemptedValue) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ username: decodedText })
         });
-        
+
         const result = await response.json();
-        
+
         if (result.authorized) {
           // Leader verified successfully
           statusText.textContent = `✅ 認証成功！ / Verified: ${result.firstName} ${result.lastName} (${result.role})`;
           statusText.style.color = '#006400';
-          
+
           // Stop scanner
           html5QrCode.stop().then(() => {
             // Close modal after short delay
             setTimeout(() => {
               modal.style.display = 'none';
-              
+
               // Allow the change to happen
               previousSubDropdownValue = attemptedValue;
               subDropdown.value = attemptedValue;
-              
+
               // Save the sub-dropdown value to localStorage
               localStorage.setItem(`${uniquePrefix}sub-dropdown`, attemptedValue);
               console.log(`Leader authorized change to: ${attemptedValue}`);
-              
+
               // Apply the proper sendtoNCButtonisPressed logic
               NCPresstoFalse();
-              
+
               // Fetch product details
               fetchProductDetails();
             }, 1500);
@@ -1164,7 +1164,7 @@ function showLeaderVerification(attemptedValue) {
           // Not authorized
           statusText.textContent = `❌ 権限がありません / Not authorized: ${result.error}`;
           statusText.style.color = '#cc0000';
-          
+
           // Revert dropdown to previous value
           subDropdown.value = previousSubDropdownValue;
         }
@@ -1172,7 +1172,7 @@ function showLeaderVerification(attemptedValue) {
         console.error("Error verifying leader:", error);
         statusText.textContent = '❌ エラーが発生しました / Error occurred during verification';
         statusText.style.color = '#cc0000';
-        
+
         // Revert dropdown to previous value
         subDropdown.value = previousSubDropdownValue;
       }
@@ -1185,9 +1185,9 @@ function showLeaderVerification(attemptedValue) {
     statusText.textContent = '❌ カメラを起動できませんでした / Could not start camera';
     statusText.style.color = '#cc0000';
   });
-  
+
   // Close button handler
-  document.getElementById('closeLeaderVerificationModal').onclick = function() {
+  document.getElementById('closeLeaderVerificationModal').onclick = function () {
     // Stop the leader verification scanner and close modal
     if (leaderVerificationScanner) {
       leaderVerificationScanner.stop().then(() => {
@@ -1251,9 +1251,9 @@ function NCPresstoFalse() {
   const key = `${uniquePrefix}sendtoNCButtonisPressed`;
   const currentSebanggo = document.getElementById('sub-dropdown').value;
   const previousSebanggo = localStorage.getItem(`${uniquePrefix}previous-sebanggo`);
-  
+
   console.log(`Dropdown changed: Previous=${previousSebanggo}, Current=${currentSebanggo}`);
-  
+
   // Check if the selection has changed to a different value
   if (currentSebanggo !== previousSebanggo && currentSebanggo !== "Select 背番号") {
     // Different sebanggo selected, reset the state to false
@@ -1262,7 +1262,7 @@ function NCPresstoFalse() {
     localStorage.setItem(key, 'false');
     localStorage.setItem(`${uniquePrefix}previous-sebanggo`, currentSebanggo);
     console.log(`Reset sendtoNCButtonisPressed to false - sebanggo changed from ${previousSebanggo} to ${currentSebanggo}`);
-  } 
+  }
   else if (currentSebanggo === "Select 背番号") {
     // "Select 背番号" was chosen, always reset to false
     sendtoNCButtonisPressed = false;
@@ -1350,7 +1350,7 @@ function handleProcessingTimeFocus(input) {
     input.blur(); // Remove focus to prevent interaction
     return;
   }
-  
+
   // If not locked, proceed with normal setDefaultTime behavior
   setDefaultTime(input);
 }
@@ -1369,7 +1369,7 @@ function resetBreakTime(breakNumber) {
         previousEnd: endInput.value
       });
     }
-    
+
     // Clear the values
     startInput.value = '';
     endInput.value = '';
@@ -1404,12 +1404,12 @@ function lockProcessingTime(timeType) {
     timeInput.classList.add('locked');
     timeInput.readOnly = true;
     timeInput.style.pointerEvents = 'none';
-    
+
     // Show edit button
     if (editBtn) {
       editBtn.style.display = 'inline-block';
     }
-    
+
     console.log(`🔒 Processing ${timeType} time locked to prevent accidental changes`);
   }
 }
@@ -1424,12 +1424,12 @@ function unlockProcessingTime(timeType) {
     timeInput.classList.remove('locked');
     timeInput.readOnly = false;
     timeInput.style.pointerEvents = 'auto';
-    
+
     // Hide edit button
     if (editBtn) {
       editBtn.style.display = 'none';
     }
-    
+
     console.log(`🔓 Processing ${timeType} time unlocked for editing`);
   }
 }
@@ -1437,10 +1437,10 @@ function unlockProcessingTime(timeType) {
 // Function to check and update lock status for processing times
 function updateProcessingTimeLockStatus(timeType) {
   const timeInput = document.getElementById(timeType === 'start' ? 'Start Time' : 'End Time');
-  
+
   if (timeInput) {
     const timeValue = timeInput.value;
-    
+
     // Lock only if time has a value
     if (timeValue && timeValue.trim() !== '') {
       lockProcessingTime(timeType);
@@ -1615,12 +1615,12 @@ const maintenanceDB = (() => {
   }));
 
   return {
-    putPhoto(rec)   { return tx(PHOTOS, 'readwrite', s => s.put(rec)); },
-    getPhoto(id)    { return tx(PHOTOS, 'readonly',  s => s.get(id)); },
+    putPhoto(rec) { return tx(PHOTOS, 'readwrite', s => s.put(rec)); },
+    getPhoto(id) { return tx(PHOTOS, 'readonly', s => s.get(id)); },
     deletePhoto(id) { return tx(PHOTOS, 'readwrite', s => s.delete(id)); },
     saveDraft(photos) { return tx(DRAFT, 'readwrite', s => s.put({ key: 'current', photos })); },
-    getDraft()      { return tx(DRAFT, 'readonly',  s => s.get('current')).then(r => r ? r.photos : null); },
-    clearDraft()    { return tx(DRAFT, 'readwrite', s => s.delete('current')); }
+    getDraft() { return tx(DRAFT, 'readonly', s => s.get('current')).then(r => r ? r.photos : null); },
+    clearDraft() { return tx(DRAFT, 'readwrite', s => s.delete('current')); }
   };
 })();
 
@@ -1702,26 +1702,26 @@ function addMaintenancePhoto(base64Data) {
     showAlert(`最大${MAX_MAINTENANCE_PHOTOS}枚まで撮影できます / Maximum ${MAX_MAINTENANCE_PHOTOS} photos allowed`);
     return false;
   }
-  
+
   // SIMPLIFIED validation like test HTML - just check if it's not empty
   if (!base64Data || base64Data.length === 0) {
     console.error('❌ addMaintenancePhoto ERROR: Empty base64 data');
     showAlert('無効な画像データです。再試行してください。', false);
     return false;
   }
-  
+
   console.log(`🔍 addMaintenancePhoto: Received ${base64Data.length} bytes of base64 data`);
   console.log(`🔍 addMaintenancePhoto: First 50 chars: ${base64Data.substring(0, 50)}`);
-  
+
   const photoData = {
     base64: base64Data, // Clean base64 without data URL prefix  
     timestamp: Date.now(),
     id: `maintenance_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
     uploaded: false // Track upload status
   };
-  
+
   maintenancePhotos.push(photoData);
-  
+
   console.log(`📷 Photo added: ID=${photoData.id}, base64Length=${base64Data.length}, timestamp=${photoData.timestamp}`);
 
   renderMaintenancePhotoThumbnails();
@@ -1742,9 +1742,9 @@ function removeMaintenancePhoto(index) {
 function renderMaintenancePhotoThumbnails() {
   const container = document.getElementById('maintenance-photo-thumbnails');
   if (!container) return;
-  
+
   container.innerHTML = '';
-  
+
   if (maintenancePhotos.length === 0) {
     container.innerHTML = '<p style="text-align: center; color: #666; margin: 20px 0;">写真がありません / No photos</p>';
   } else {
@@ -1759,7 +1759,7 @@ function renderMaintenancePhotoThumbnails() {
         overflow: hidden;
         background: #f9f9f9;
       `;
-      
+
       const img = document.createElement('img');
       // Use firebaseUrl if uploaded, otherwise use base64 data
       let imageSrc;
@@ -1782,13 +1782,13 @@ function renderMaintenancePhotoThumbnails() {
         display: block;
       `;
       img.onclick = () => showMaintenancePhotoPreview(imageSrc);
-      
+
       // Add error handling for failed image loads
       img.onerror = () => {
         console.error('Failed to load maintenance photo:', imageSrc);
         img.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODAiIGhlaWdodD0iODAiIHZpZXdCb3g9IjAgMCA4MCA4MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjgwIiBoZWlnaHQ9IjgwIiBmaWxsPSIjZjBmMGYwIi8+Cjx0ZXh0IHg9IjQwIiB5PSI0NSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEyIiBmaWxsPSIjOTk5Ij5GYWlsZWQ8L3RleHQ+CjwvdGV4dD4KPC9zdmc+'; // Error placeholder
       };
-      
+
       const removeBtn = document.createElement('button');
       removeBtn.innerHTML = '×';
       removeBtn.style.cssText = `
@@ -1812,13 +1812,13 @@ function renderMaintenancePhotoThumbnails() {
         e.stopPropagation();
         removeMaintenancePhoto(index);
       };
-      
+
       thumbItem.appendChild(img);
       thumbItem.appendChild(removeBtn);
       container.appendChild(thumbItem);
     });
   }
-  
+
   // Update photo count display
   const photoCount = document.getElementById('maintenance-photo-count');
   if (photoCount) {
@@ -1842,7 +1842,7 @@ function showMaintenancePhotoPreview(imageDataURL) {
     align-items: center;
     z-index: 10001;
   `;
-  
+
   const img = document.createElement('img');
   img.src = imageDataURL;
   img.style.cssText = `
@@ -1850,7 +1850,7 @@ function showMaintenancePhotoPreview(imageDataURL) {
     max-height: 90%;
     object-fit: contain;
   `;
-  
+
   const closeBtn = document.createElement('button');
   closeBtn.innerHTML = '×';
   closeBtn.style.cssText = `
@@ -1866,12 +1866,12 @@ function showMaintenancePhotoPreview(imageDataURL) {
     font-size: 20px;
     cursor: pointer;
   `;
-  
+
   closeBtn.onclick = () => document.body.removeChild(previewModal);
   previewModal.onclick = (e) => {
     if (e.target === previewModal) document.body.removeChild(previewModal);
   };
-  
+
   previewModal.appendChild(img);
   previewModal.appendChild(closeBtn);
   document.body.appendChild(previewModal);
@@ -1885,7 +1885,7 @@ function showMaintenanceModal(editIndex = -1) {
   // Photos are hydrated asynchronously below (after the modal DOM exists): from IndexedDB
   // for a saved record (edit), or from the unsaved draft (add). Start empty.
   maintenancePhotos = [];
-  
+
   // Create modal
   const modal = document.createElement('div');
   modal.id = 'maintenanceModal';
@@ -2025,7 +2025,7 @@ function setupMaintenanceModalEvents(modal, existingRecord) {
       showAlert(`最大${MAX_MAINTENANCE_PHOTOS}枚まで撮影できます / Maximum ${MAX_MAINTENANCE_PHOTOS} photos allowed`);
       return;
     }
-    
+
     await openMaintenanceCamera();
   });
 
@@ -2070,7 +2070,7 @@ function setupMaintenanceModalEvents(modal, existingRecord) {
     if (wasEditing) {
       const keepIds = new Set(photoRefs.map(r => r.id));
       for (const op of (maintenanceRecords[currentEditingIndex].photos || [])) {
-        if (op.id && !keepIds.has(op.id)) { try { await maintenanceDB.deletePhoto(op.id); } catch (e) {} }
+        if (op.id && !keepIds.has(op.id)) { try { await maintenanceDB.deletePhoto(op.id); } catch (e) { } }
       }
     }
 
@@ -2108,7 +2108,7 @@ function setupMaintenanceModalEvents(modal, existingRecord) {
     calculateTotalMachineTroubleTime();
 
     // Consume the unsaved-photo draft (add flow) and clear the working array
-    if (!wasEditing) { try { await maintenanceDB.clearDraft(); } catch (e) {} }
+    if (!wasEditing) { try { await maintenanceDB.clearDraft(); } catch (e) { } }
     maintenancePhotos = [];
 
     document.body.removeChild(modal);
@@ -2117,7 +2117,7 @@ function setupMaintenanceModalEvents(modal, existingRecord) {
   // Cancel functionality
   cancelBtn.addEventListener('click', async () => {
     // Discard the unsaved-photo draft (add flow) and clear the working array
-    if (currentEditingIndex < 0) { try { await maintenanceDB.clearDraft(); } catch (e) {} }
+    if (currentEditingIndex < 0) { try { await maintenanceDB.clearDraft(); } catch (e) { } }
     maintenancePhotos = [];
     document.body.removeChild(modal);
   });
@@ -2136,7 +2136,7 @@ function setupMaintenanceModalEvents(modal, existingRecord) {
 
         // Remove this record's photo blobs from IndexedDB
         for (const p of (deletedRecord.photos || [])) {
-          if (p.id) { try { await maintenanceDB.deletePhoto(p.id); } catch (e) {} }
+          if (p.id) { try { await maintenanceDB.deletePhoto(p.id); } catch (e) { } }
         }
 
         maintenanceRecords.splice(currentEditingIndex, 1);
@@ -2156,7 +2156,7 @@ function setupMaintenanceModalEvents(modal, existingRecord) {
   modal.addEventListener('click', async (e) => {
     if (e.target === modal) {
       // Discard the unsaved-photo draft (add flow) and clear the working array
-      if (currentEditingIndex < 0) { try { await maintenanceDB.clearDraft(); } catch (err) {} }
+      if (currentEditingIndex < 0) { try { await maintenanceDB.clearDraft(); } catch (err) { } }
       maintenancePhotos = [];
       document.body.removeChild(modal);
     }
@@ -2202,8 +2202,8 @@ async function addMaterialLabelPhoto(photoDataURL) {
     const existingIdx = materialLabelPhotos.findIndex(p => p.lotNumber === lotNumber);
     if (existingIdx >= 0) {
       const old = materialLabelPhotos[existingIdx];
-      try { URL.revokeObjectURL(old.blobUrl); } catch (e) {}
-      try { await materialLabelDB.delete(old.id); } catch (e) {}
+      try { URL.revokeObjectURL(old.blobUrl); } catch (e) { }
+      try { await materialLabelDB.delete(old.id); } catch (e) { }
       materialLabelPhotos.splice(existingIdx, 1);
     }
   }
@@ -2254,26 +2254,26 @@ function removeMaterialLabelPhoto(index) {
 
 function renderMaterialPhotoThumbnails() {
   console.log('Rendering material photo thumbnails');
-  
+
   // Use existing HTML structure (defined in HTML)
   const container = document.getElementById('material-photo-thumbnails');
   const photoCountSpan = document.getElementById('material-photo-count');
-  
+
   if (!container) {
     console.error('material-photo-thumbnails container not found in HTML - this element should exist in DCP iReporter.html');
     console.log('Creating fallback container...');
-    
+
     // Create fallback container dynamically
     const fallbackContainer = document.createElement('div');
     fallbackContainer.id = 'material-photo-thumbnails';
     fallbackContainer.style.cssText = 'display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0;';
-    
+
     // Try to find the material label button area
     const makerButton = document.getElementById('makerLabelButton');
     if (makerButton && makerButton.parentElement) {
       makerButton.parentElement.appendChild(fallbackContainer);
       console.log('Created fallback material-photo-thumbnails container');
-      
+
       // Also create photo count if missing
       if (!photoCountSpan) {
         const countDiv = document.createElement('div');
@@ -2281,7 +2281,7 @@ function renderMaterialPhotoThumbnails() {
         countDiv.style.cssText = 'margin: 10px 0; font-weight: bold; color: #007cba;';
         makerButton.parentElement.insertBefore(countDiv, fallbackContainer);
       }
-      
+
       // Retry rendering now that container exists
       return renderMaterialPhotoThumbnails();
     } else {
@@ -2289,16 +2289,16 @@ function renderMaterialPhotoThumbnails() {
       return;
     }
   }
-  
+
   // Clear existing thumbnails
   container.innerHTML = '';
-  
+
   // Update photo count display
   if (photoCountSpan) {
     photoCountSpan.textContent = `Photo ${materialLabelPhotos.length}/${MAX_MATERIAL_PHOTOS}`;
     photoCountSpan.style.display = materialLabelPhotos.length > 0 ? 'inline' : 'none';
   }
-  
+
   // Hide/show container based on photo count
   if (materialLabelPhotos.length === 0) {
     container.style.display = 'none';
@@ -2306,7 +2306,7 @@ function renderMaterialPhotoThumbnails() {
   } else {
     container.style.display = 'flex';
     console.log(`Rendering ${materialLabelPhotos.length} material label photos`);
-    
+
     materialLabelPhotos.forEach((photo, index) => {
       const thumbItem = document.createElement('div');
       thumbItem.style.cssText = `
@@ -2314,12 +2314,12 @@ function renderMaterialPhotoThumbnails() {
         display: inline-block;
         margin: 5px;
       `;
-      
+
       const img = document.createElement('img');
-      
+
       // Determine image source — blobUrl is created from IndexedDB on load
       const imageSrc = photo.blobUrl || '';
-      
+
       img.src = imageSrc;
       img.style.cssText = `
         width: 80px;
@@ -2331,13 +2331,13 @@ function renderMaterialPhotoThumbnails() {
         border-radius: 5px;
       `;
       img.onclick = () => showMaterialPhotoPreview(imageSrc);
-      
+
       // Add error handling
       img.onerror = () => {
         console.error('Failed to load material label photo:', imageSrc);
         img.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODAiIGhlaWdodD0iODAiIHZpZXdCb3g9IjAgMCA4MCA4MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjgwIiBoZWlnaHQ9IjgwIiBmaWxsPSIjZjBmMGYwIi8+Cjx0ZXh0IHg9IjQwIiB5PSI0NSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEyIiBmaWxsPSIjOTk5Ij5FcnJvcjwvdGV4dD4KPC9zdmc+';
       };
-      
+
       // Delete button
       const deleteBtn = document.createElement('button');
       deleteBtn.innerHTML = '×';
@@ -2361,7 +2361,7 @@ function renderMaterialPhotoThumbnails() {
           removeMaterialLabelPhoto(index);
         }
       };
-      
+
       thumbItem.appendChild(img);
       thumbItem.appendChild(deleteBtn);
       container.appendChild(thumbItem);
@@ -2425,23 +2425,23 @@ function updateMaterialPhotoCount() {
   const countElement = document.getElementById('material-photo-count');
   const statusLabel = document.getElementById('makerLabel');
   const statusLabelJP = document.getElementById('材料ラベル_L');
-  
+
   if (countElement) {
     countElement.textContent = `Photo ${materialLabelPhotos.length}/${MAX_MATERIAL_PHOTOS}`;
     countElement.style.display = materialLabelPhotos.length > 0 ? 'block' : 'none';
   }
-  
+
   // Update Material Label status based on photo count
   const hasPhotos = materialLabelPhotos.length > 0;
-  
+
   if (statusLabel) {
     statusLabel.textContent = hasPhotos ? 'TRUE' : 'FALSE';
   }
-  
+
   if (statusLabelJP) {
     statusLabelJP.textContent = hasPhotos ? 'TRUE' : 'FALSE';
   }
-  
+
   // Update the hidden 材料ラベル element as well (for compatibility)
   updateMaterialLabelElement();
 }
@@ -2473,28 +2473,28 @@ async function loadMaterialLabelPhotos() {
 // Function to update the hidden 材料ラベル element for compatibility
 function updateMaterialLabelElement() {
   // Try different possible selectors for material label image element
-  const makerPic = document.getElementById('材料ラベル') || 
-                  document.querySelector('img[id="材料ラベル"]') || 
-                  document.querySelector('img[name="材料ラベル"]');
-  
+  const makerPic = document.getElementById('材料ラベル') ||
+    document.querySelector('img[id="材料ラベル"]') ||
+    document.querySelector('img[name="材料ラベル"]');
+
   if (!makerPic) {
     console.warn('Could not find 材料ラベル element to update. Creating one if needed.');
-    
+
     // Try to find a parent element to attach to
     const makerLabelButton = document.getElementById('makerLabelButton');
-    const makerLabelArea = document.querySelector('div:has(> #材料ラベル_L)') || 
-                          makerLabelButton?.parentElement;
-                          
+    const makerLabelArea = document.querySelector('div:has(> #材料ラベル_L)') ||
+      makerLabelButton?.parentElement;
+
     if (makerLabelArea) {
       // Create the image element if it doesn't exist
       const newImg = document.createElement('img');
       newImg.id = '材料ラベル';
       newImg.style.cssText = 'max-width: 200px; max-height: 200px; margin-top: 10px; display: none;';
-      
+
       // Insert after the button's parent div or at the end of the target area
       makerLabelArea.appendChild(newImg);
       console.log('Created new 材料ラベル image element');
-      
+
       // Now use the newly created element
       updateMaterialLabelElement();
       return;
@@ -2503,17 +2503,17 @@ function updateMaterialLabelElement() {
       return;
     }
   }
-  
+
   // Try different possible selectors for material label status elements
   const materialLabelJP = document.getElementById('材料ラベル_L');
   const materialLabelEN = document.getElementById('makerLabel');
-  
+
   console.log('Material label elements found for update:', {
     '材料ラベル': !!makerPic,
     '材料ラベル_L': !!materialLabelJP,
     'makerLabel': !!materialLabelEN
   });
-  
+
   if (materialLabelPhotos.length > 0) {
     // Use the blobUrl of the first photo for the legacy single-image element
     const src = materialLabelPhotos[0].blobUrl;
@@ -2585,7 +2585,7 @@ function renderMaintenanceRecords() {
     const title = document.createElement('div');
     title.className = 'record-title';
     title.innerHTML = `${record.startTime} ~ ${record.endTime} <span class="record-dur">(${duration}分)</span>` +
-                      (photoCount > 0 ? ` <span class="record-dur">· 📷 ${photoCount}</span>` : '');
+      (photoCount > 0 ? ` <span class="record-dur">· 📷 ${photoCount}</span>` : '');
     const sub = document.createElement('div');
     sub.className = 'record-sub';
     sub.textContent = record.comment || '';
@@ -2613,7 +2613,7 @@ async function deleteMaintenanceRecord(index) {
   if (!rec) return;
   if (!confirm('この機械故障記録を削除しますか？ / Delete this maintenance record?')) return;
   for (const ph of (rec.photos || [])) {
-    if (ph && ph.id) { try { await maintenanceDB.deletePhoto(ph.id); } catch (e) {} }
+    if (ph && ph.id) { try { await maintenanceDB.deletePhoto(ph.id); } catch (e) { } }
   }
   if (typeof logTabletAction === 'function') {
     logTabletAction('Maintenance record deleted', 'Reset', { startTime: rec.startTime, endTime: rec.endTime, comment: rec.comment });
@@ -2627,10 +2627,10 @@ async function deleteMaintenanceRecord(index) {
 // Calculate duration between start and end time
 function calculateDuration(startTime, endTime) {
   if (!startTime || !endTime) return 0;
-  
+
   const start = new Date(`2000-01-01T${startTime}:00`);
   const end = new Date(`2000-01-01T${endTime}:00`);
-  
+
   if (end > start) {
     return Math.floor((end - start) / (1000 * 60));
   }
@@ -2667,7 +2667,7 @@ function calculateTotalMachineTroubleTime() {
     localStorage.setItem(`${prefix}total-trouble-display`, `${totalMinutes}分`);
     localStorage.setItem(`${prefix}trouble-time-mins`, totalMinutes);
   }
-  
+
   return totalMinutes;
 }
 
@@ -2707,7 +2707,7 @@ async function testMaintenanceData() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(testPayload)
     });
-    
+
     const testResult = await testResponse.json();
     console.log("🧪 Test response received:", testResult);
     alert("Check console for test results");
@@ -2745,13 +2745,13 @@ function setDefaultDate(input) {
 }
 
 // Set current date as default on page load
-document.addEventListener("DOMContentLoaded", function() {
+document.addEventListener("DOMContentLoaded", function () {
   const dateInput = document.getElementById("Lot No.");
   setDefaultDate(dateInput);
 });
 
 //Get worker list
-document.addEventListener("DOMContentLoaded", async function() {
+document.addEventListener("DOMContentLoaded", async function () {
   const selectedFactory = document.getElementById("selected工場").value;
 
   if (selectedFactory) {
@@ -2760,10 +2760,10 @@ document.addEventListener("DOMContentLoaded", async function() {
       if (!response.ok) throw new Error("Failed to fetch worker names");
 
       const workerNames = await response.json();
-      
+
       // Store worker names for modal
       workerNamesData = workerNames;
-      
+
       const dataList = document.getElementById("machine-operator-suggestions");
       dataList.innerHTML = ""; // Clear any existing options
 
@@ -2833,7 +2833,7 @@ function showAlert(message) {
   document.body.classList.add('flash-red');
 
   const closeScanModalButton = document.getElementById('closeScanModalButton');
-  closeScanModalButton.onclick = function() {
+  closeScanModalButton.onclick = function () {
     scanAlertModal.style.display = 'none';
     alertSound.pause();
     alertSound.currentTime = 0; // Reset sound to the beginning
@@ -2856,18 +2856,18 @@ function getRecentWorkers() {
 // Add worker to recent list
 function addToRecentWorkers(name) {
   if (!name || name.trim() === '') return; // Don't add empty names
-  
+
   let recent = getRecentWorkers();
-  
+
   // Remove if already exists
   recent = recent.filter(w => w !== name);
-  
+
   // Add to beginning
   recent.unshift(name);
-  
+
   // Keep only max recent
   recent = recent.slice(0, MAX_RECENT_WORKERS);
-  
+
   localStorage.setItem(RECENT_WORKERS_KEY, JSON.stringify(recent));
 }
 
@@ -2882,11 +2882,11 @@ function removeFromRecentWorkers(name) {
 // Group names alphabetically
 function groupNamesByLetter(names) {
   const grouped = {};
-  
+
   names.forEach(name => {
     // Get first character (handle Japanese, English, etc.)
     let firstChar = name.charAt(0).toUpperCase();
-    
+
     // For Japanese characters, try to group by first character
     if (firstChar.match(/[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/)) {
       // Japanese character - use as is
@@ -2898,18 +2898,18 @@ function groupNamesByLetter(names) {
       // Other characters - group under '#'
       firstChar = '#';
     }
-    
+
     if (!grouped[firstChar]) {
       grouped[firstChar] = [];
     }
     grouped[firstChar].push(name);
   });
-  
+
   // Sort each group
   Object.keys(grouped).forEach(key => {
     grouped[key].sort();
   });
-  
+
   return grouped;
 }
 
@@ -2917,33 +2917,33 @@ function groupNamesByLetter(names) {
 function renderWorkerNames() {
   const container = document.getElementById('workerNamesContainer');
   container.innerHTML = '';
-  
+
   // Get recent workers
   const recentWorkers = getRecentWorkers();
-  
+
   // Add recent section if there are recent workers
   if (recentWorkers.length > 0) {
     const recentSection = document.createElement('div');
     recentSection.className = 'worker-section recent-section';
-    
+
     const header = document.createElement('div');
     header.className = 'worker-section-header';
     header.textContent = '⭐ 最近使用 / Recent';
     recentSection.appendChild(header);
-    
+
     const grid = document.createElement('div');
     grid.className = 'worker-names-grid';
-    
+
     recentWorkers.forEach(name => {
       const wrapper = document.createElement('div');
       wrapper.style.position = 'relative';
-      
+
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'worker-name-btn';
       btn.textContent = name;
       btn.onclick = () => selectWorkerName(name);
-      
+
       const deleteBtn = document.createElement('button');
       deleteBtn.type = 'button';
       deleteBtn.className = 'delete-recent-btn';
@@ -2952,33 +2952,33 @@ function renderWorkerNames() {
         e.stopPropagation(); // Prevent selecting the worker
         removeFromRecentWorkers(name);
       };
-      
+
       wrapper.appendChild(btn);
       wrapper.appendChild(deleteBtn);
       grid.appendChild(wrapper);
     });
-    
+
     recentSection.appendChild(grid);
     container.appendChild(recentSection);
   }
-  
+
   // Group all names alphabetically
   const grouped = groupNamesByLetter(workerNamesData);
   const sortedKeys = Object.keys(grouped).sort();
-  
+
   // Render each alphabetical group
   sortedKeys.forEach(letter => {
     const section = document.createElement('div');
     section.className = 'worker-section';
-    
+
     const header = document.createElement('div');
     header.className = 'worker-section-header';
     header.textContent = letter;
     section.appendChild(header);
-    
+
     const grid = document.createElement('div');
     grid.className = 'worker-names-grid';
-    
+
     grouped[letter].forEach(name => {
       const btn = document.createElement('button');
       btn.type = 'button';
@@ -2987,7 +2987,7 @@ function renderWorkerNames() {
       btn.onclick = () => selectWorkerName(name);
       grid.appendChild(btn);
     });
-    
+
     section.appendChild(grid);
     container.appendChild(section);
   });
@@ -2997,10 +2997,10 @@ function renderWorkerNames() {
 function selectWorkerName(name) {
   const input = document.getElementById('Machine Operator');
   input.value = name;
-  
+
   // Add to recent workers
   addToRecentWorkers(name);
-  
+
   // Save to localStorage (programmatic changes don't trigger 'input' event)
   const pageName = location.pathname.split('/').pop();
   const currentSelectedFactory = document.getElementById('selected工場')?.value;
@@ -3010,15 +3010,15 @@ function selectWorkerName(name) {
     localStorage.setItem(key, name);
     console.log('Worker name saved to localStorage:', key, '=', name);
   }
-  
+
   // Log worker name selection
   logTabletAction('Worker name selected', 'in-progress', {
     workerName: name
   });
-  
+
   // Close modal
   closeWorkerModal();
-  
+
   // Trigger change event
   input.dispatchEvent(new Event('change'));
 }
@@ -3038,33 +3038,33 @@ function closeWorkerModal() {
 }
 
 // Initialize worker name modal (runs after DOMContentLoaded)
-setTimeout(function() {
+setTimeout(function () {
   const workerInput = document.getElementById('Machine Operator');
   const closeModalBtn = document.getElementById('closeWorkerModal');
   const manualEntryBtn = document.getElementById('manualEntryBtn');
-  
+
   // Open modal when clicking on worker input (only if readonly)
   if (workerInput) {
     // Prevent default keyboard from showing on mobile
-    workerInput.addEventListener('click', function(e) {
+    workerInput.addEventListener('click', function (e) {
       // Only open modal if input is readonly (not in manual entry mode)
       if (workerInput.readOnly && workerNamesData.length > 0) {
         e.preventDefault();
         openWorkerModal();
       }
     });
-    
+
     // Also open on focus
-    workerInput.addEventListener('focus', function(e) {
+    workerInput.addEventListener('focus', function (e) {
       // Only open modal if input is readonly (not in manual entry mode)
       if (workerInput.readOnly && workerNamesData.length > 0) {
         e.preventDefault();
         openWorkerModal();
       }
     });
-    
+
     // Prevent keyboard from showing on touch devices
-    workerInput.addEventListener('touchstart', function(e) {
+    workerInput.addEventListener('touchstart', function (e) {
       // Only prevent and open modal if input is readonly
       if (workerInput.readOnly && workerNamesData.length > 0) {
         e.preventDefault();
@@ -3075,7 +3075,7 @@ setTimeout(function() {
     // When the production worker name changes, mirror it into the Kensa
     // inspector name — but only if kensa is toggled on and the inspector
     // name is still empty (never overwrite an existing inspector value).
-    const mirrorWorkerToKensa = function() {
+    const mirrorWorkerToKensa = function () {
       const kensaToggle = document.getElementById('enable-inputs');
       if (!kensaToggle || !kensaToggle.checked) return;
       const kensaInput = document.getElementById('Kensa Name');
@@ -3089,71 +3089,71 @@ setTimeout(function() {
     workerInput.addEventListener('change', mirrorWorkerToKensa);
     workerInput.addEventListener('input', mirrorWorkerToKensa);
   }
-  
+
   // Close modal button
   if (closeModalBtn) {
     closeModalBtn.addEventListener('click', closeWorkerModal);
   }
-  
+
   // Manual entry button - close modal and let user type
   if (manualEntryBtn) {
-    manualEntryBtn.addEventListener('click', function() {
+    manualEntryBtn.addEventListener('click', function () {
       // Determine which input field to enable for manual entry
-      const targetInput = currentModalInputField === 'kensa' 
+      const targetInput = currentModalInputField === 'kensa'
         ? document.getElementById('Kensa Name')
         : document.getElementById('Machine Operator');
-      
+
       // Close the modal
       if (currentModalInputField === 'kensa') {
         closeKensaModal();
       } else {
         closeWorkerModal();
       }
-      
+
       if (targetInput) {
         // Remove readonly and datalist to allow free typing
         targetInput.removeAttribute('list');
         targetInput.removeAttribute('readonly');
         targetInput.readOnly = false;
         targetInput.style.cursor = 'text';
-        targetInput.placeholder = currentModalInputField === 'kensa' 
+        targetInput.placeholder = currentModalInputField === 'kensa'
           ? 'Type inspector name manually...'
           : 'Type worker name manually...';
-        
+
         // Clear current value and focus after modal closes
-        setTimeout(function() {
+        setTimeout(function () {
           targetInput.value = '';
           targetInput.focus();
-          
+
           // Trigger click to ensure keyboard shows on mobile
           targetInput.click();
         }, 100);
       }
     });
   }
-  
+
   // Close modal when clicking outside
   const modal = document.getElementById('workerNameModal');
   if (modal) {
-    modal.addEventListener('click', function(e) {
+    modal.addEventListener('click', function (e) {
       if (e.target === modal) {
         closeWorkerModal();
       }
     });
   }
-  
+
   // Save manually entered worker name to recents when user finishes typing
   if (workerInput) {
-    workerInput.addEventListener('blur', function() {
+    workerInput.addEventListener('blur', function () {
       const enteredName = workerInput.value.trim();
       if (enteredName && !workerInput.readOnly) {
         // Only save if user manually typed (not readonly)
         addToRecentWorkers(enteredName);
       }
     });
-    
+
     // Also save on Enter key
-    workerInput.addEventListener('keypress', function(e) {
+    workerInput.addEventListener('keypress', function (e) {
       if (e.key === 'Enter') {
         const enteredName = workerInput.value.trim();
         if (enteredName && !workerInput.readOnly) {
@@ -3165,57 +3165,57 @@ setTimeout(function() {
 }, 100);
 
 // Initialize Kensa Name modal (same as worker modal but for inspector)
-setTimeout(function() {
+setTimeout(function () {
   const kensaInput = document.getElementById('Kensa Name');
   const enableInputsCheckbox = document.getElementById('enable-inputs');
-  
+
   if (!kensaInput) return; // Element doesn't exist, skip
-  
+
   // Function to check if kensa is enabled
   function isKensaEnabled() {
     return enableInputsCheckbox && enableInputsCheckbox.checked;
   }
-  
+
   // Open worker modal when clicking on kensa input (only if checkbox is checked)
   if (kensaInput) {
     // Prevent default keyboard from showing on mobile
-    kensaInput.addEventListener('click', function(e) {
+    kensaInput.addEventListener('click', function (e) {
       // Only open modal if checkbox is checked and input is readonly
       if (isKensaEnabled() && kensaInput.readOnly && workerNamesData.length > 0) {
         e.preventDefault();
         openKensaModal();
       }
     });
-    
+
     // Also open on focus
-    kensaInput.addEventListener('focus', function(e) {
+    kensaInput.addEventListener('focus', function (e) {
       // Only open modal if checkbox is checked and input is readonly
       if (isKensaEnabled() && kensaInput.readOnly && workerNamesData.length > 0) {
         e.preventDefault();
         openKensaModal();
       }
     });
-    
+
     // Prevent keyboard from showing on touch devices
-    kensaInput.addEventListener('touchstart', function(e) {
+    kensaInput.addEventListener('touchstart', function (e) {
       // Only prevent and open modal if checkbox is checked and input is readonly
       if (isKensaEnabled() && kensaInput.readOnly && workerNamesData.length > 0) {
         e.preventDefault();
         openKensaModal();
       }
     });
-    
+
     // Save manually entered kensa name to recents when user finishes typing
-    kensaInput.addEventListener('blur', function() {
+    kensaInput.addEventListener('blur', function () {
       const enteredName = kensaInput.value.trim();
       if (enteredName && !kensaInput.readOnly && isKensaEnabled()) {
         // Only save if user manually typed (not readonly) and checkbox is checked
         addToRecentWorkers(enteredName);
       }
     });
-    
+
     // Also save on Enter key
-    kensaInput.addEventListener('keypress', function(e) {
+    kensaInput.addEventListener('keypress', function (e) {
       if (e.key === 'Enter') {
         const enteredName = kensaInput.value.trim();
         if (enteredName && !kensaInput.readOnly && isKensaEnabled()) {
@@ -3230,20 +3230,20 @@ setTimeout(function() {
 function selectKensaName(name) {
   const input = document.getElementById('Kensa Name');
   if (!input) return;
-  
+
   input.value = name;
-  
+
   // Add to recent workers
   addToRecentWorkers(name);
-  
+
   // Log inspector name selection
   logTabletAction('Inspector name selected', 'in-progress', {
     inspectorName: name
   });
-  
+
   // Close modal
   closeKensaModal();
-  
+
   // Trigger change event
   input.dispatchEvent(new Event('change'));
 }
@@ -3266,35 +3266,35 @@ function closeKensaModal() {
 function renderKensaNames() {
   const container = document.getElementById('workerNamesContainer');
   if (!container) return;
-  
+
   container.innerHTML = '';
-  
+
   // Get recent workers
   const recentWorkers = getRecentWorkers();
-  
+
   // Create recent section if there are recent workers
   if (recentWorkers.length > 0) {
     const recentSection = document.createElement('div');
     recentSection.className = 'worker-section recent-section';
-    
+
     const recentHeader = document.createElement('div');
     recentHeader.className = 'worker-section-header';
     recentHeader.textContent = '最近使用 / Recent';
     recentSection.appendChild(recentHeader);
-    
+
     const recentGrid = document.createElement('div');
     recentGrid.className = 'worker-names-grid';
-    
+
     recentWorkers.forEach(name => {
       const wrapper = document.createElement('div');
       wrapper.style.position = 'relative';
-      
+
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'worker-name-btn';
       btn.textContent = name;
       btn.onclick = () => selectKensaName(name);
-      
+
       const deleteBtn = document.createElement('button');
       deleteBtn.type = 'button';
       deleteBtn.className = 'delete-recent-btn';
@@ -3304,28 +3304,28 @@ function renderKensaNames() {
         removeFromRecentWorkers(name);
         renderKensaNames(); // Re-render
       };
-      
+
       wrapper.appendChild(btn);
       wrapper.appendChild(deleteBtn);
       recentGrid.appendChild(wrapper);
     });
-    
+
     recentSection.appendChild(recentGrid);
     container.appendChild(recentSection);
   }
-  
+
   // Create all workers section
   const allSection = document.createElement('div');
   allSection.className = 'worker-section';
-  
+
   const allHeader = document.createElement('div');
   allHeader.className = 'worker-section-header';
   allHeader.textContent = 'すべての作業者 / All Workers';
   allSection.appendChild(allHeader);
-  
+
   const allGrid = document.createElement('div');
   allGrid.className = 'worker-names-grid';
-  
+
   workerNamesData.forEach(name => {
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -3334,14 +3334,14 @@ function renderKensaNames() {
     btn.onclick = () => selectKensaName(name);
     allGrid.appendChild(btn);
   });
-  
+
   allSection.appendChild(allGrid);
   container.appendChild(allSection);
-  
+
   // Update modal button handlers for kensa
   const closeModalBtn = document.getElementById('closeWorkerModal');
   const manualEntryBtn = document.getElementById('manualEntryBtn');
-  
+
   // Note: Manual entry button handler is set globally in the initialization
   // No need to override it here, it will use currentModalInputField to determine which field to edit
 }
@@ -3371,7 +3371,7 @@ function updateCycleTime() {
   const kStartTimeElement = document.getElementById("KStart Time");
   const kEndTimeElement = document.getElementById("KEnd Time");
   const totalElement = document.getElementById("total");
-  
+
   if (kStartTimeElement && kEndTimeElement && totalElement) {
     const kStartTime = kStartTimeElement.value;
     const kEndTime = kEndTimeElement.value;
@@ -3397,7 +3397,7 @@ function updateCycleTime() {
 }
 
 //scan BUtton javascript
-document.getElementById('scan-button')?.addEventListener('click', function() {
+document.getElementById('scan-button')?.addEventListener('click', function () {
   const qrScannerModal = document.getElementById('qrScannerModal');
   const scanAlertModal = document.getElementById('scanAlertModal');
   const scanAlertText = document.getElementById('scanAlertText');
@@ -3419,28 +3419,28 @@ document.getElementById('scan-button')?.addEventListener('click', function() {
     {
       facingMode: "environment"
     }, {
-      fps: 30,
-      qrbox: {
-        width: 800,
-        height: 800
-      },
-      aspectRatio: 1.0,
-      disableFlip: false,
-      advanced: [{
-        focusMode: "continuous",
-        focusDistance: { ideal: 0 }
-      }]
+    fps: 30,
+    qrbox: {
+      width: 800,
+      height: 800
     },
+    aspectRatio: 1.0,
+    disableFlip: false,
+    advanced: [{
+      focusMode: "continuous",
+      focusDistance: { ideal: 0 }
+    }]
+  },
     async qrCodeMessage => {
       const subDropdown = document.getElementById('sub-dropdown');
       const options = [...subDropdown.options].map(option => option.value);
 
       console.log("Scanned QR Code:", qrCodeMessage);
-      
+
       // Save current state of sendtoNCButtonisPressed before potentially changing dropdown
       const currentState = localStorage.getItem(`${uniquePrefix}sendtoNCButtonisPressed`);
       console.log("Current sendtoNCButtonisPressed state before scan:", currentState);
-      
+
       // Check if the scanned QR code does NOT exist in the dropdown options
       if (!options.includes(qrCodeMessage)) {
         // Display error modal
@@ -3458,7 +3458,7 @@ document.getElementById('scan-button')?.addEventListener('click', function() {
         document.body.classList.add('flash-red');
 
         const closeScanModalButton = document.getElementById('closeScanModalButton');
-        closeScanModalButton.onclick = function() {
+        closeScanModalButton.onclick = function () {
           scanAlertModal.style.display = 'none';
           alertSound.pause();
           alertSound.currentTime = 0; // Reset sound to the beginning
@@ -3480,25 +3480,25 @@ document.getElementById('scan-button')?.addEventListener('click', function() {
         const key = `${uniquePrefix}sendtoNCButtonisPressed`;
         const currentButtonState = localStorage.getItem(key);
         console.log(`Saving current button state before changing dropdown: ${currentButtonState}`);
-        
+
         try {
           // First stop the QR scanner to prevent continued scanning during processing
           await html5QrCode.stop();
           qrScannerModal.style.display = 'none';
-          
+
           // Update the previous dropdown value to allow this change (bypassing leader verification)
           updatePreviousDropdownValue(qrCodeMessage);
-          
+
           // Now that the scanner is closed, change dropdown value
           console.log(`Setting sub-dropdown value to: ${qrCodeMessage}`);
           subDropdown.value = qrCodeMessage;
-          
+
           // Save the dropdown value to localStorage so it persists on refresh
           localStorage.setItem(`${uniquePrefix}sub-dropdown`, qrCodeMessage);
-          
+
           // Call fetchProductDetails but don't reset button state
           await fetchProductDetails();
-          
+
           // Restore button state if it was true (do this after product details are fetched)
           if (currentButtonState === 'true') {
             localStorage.setItem(key, 'true');
@@ -3520,14 +3520,14 @@ document.getElementById('scan-button')?.addEventListener('click', function() {
   });
 
   // Close the QR scanner modal
-  document.getElementById('closeQRScannerModal').onclick = function() {
+  document.getElementById('closeQRScannerModal').onclick = function () {
     html5QrCode.stop().then(() => {
       qrScannerModal.style.display = 'none';
     }).catch(err => console.error("Failed to stop scanning:", err));
   };
 
   // Close scanner if user clicks outside the modal
-  window.onclick = function(event) {
+  window.onclick = function (event) {
     if (event.target == qrScannerModal) {
       html5QrCode.stop().then(() => {
         qrScannerModal.style.display = 'none';
@@ -3606,139 +3606,139 @@ window.lotHtml5QrCode = null;
 // Scan Lot Button functionality (only if button exists)
 const scanLotButton = document.getElementById('scan-lot');
 if (scanLotButton) {
-  scanLotButton.addEventListener('click', function() {
+  scanLotButton.addEventListener('click', function () {
     const scanLotModal = document.getElementById('scanLotModal');
     const scanLotStatus = document.getElementById('scanLotStatus');
     const materialCodeInput = document.getElementById('material-code');
     const materialLotInput = document.getElementById('材料ロット');
     const html5QrCode = new Html5Qrcode("lotQrReader");
-  
-  // Store reference globally
-  window.lotHtml5QrCode = html5QrCode;
 
-  // Reset status
-  scanLotStatus.textContent = '';
-  scanLotStatus.style.color = '#666';
+    // Store reference globally
+    window.lotHtml5QrCode = html5QrCode;
 
-  // Show modal
-  scanLotModal.style.display = 'block';
+    // Reset status
+    scanLotStatus.textContent = '';
+    scanLotStatus.style.color = '#666';
 
-  // Start QR code scanning with near-focus detection (optimized for 10-inch tablet)
-  html5QrCode.start(
-    { facingMode: "environment" },
-    { 
-      fps: 30,
-      qrbox: { width: 800, height: 800 },
-      aspectRatio: 1.0,
-      disableFlip: false,
-      advanced: [{
-        focusMode: "continuous",
-        focusDistance: { ideal: 0 }
-      }]
-    },
-    async (qrCodeMessage) => {
-      console.log("Scanned Lot QR Code:", qrCodeMessage);
+    // Show modal
+    scanLotModal.style.display = 'block';
 
-      try {
-        // ✅ IMMEDIATELY stop the scanner to prevent multiple scans
-        await html5QrCode.stop();
-        
-        // Parse QR code: "97B,251020-1,12000"
-        const parts = qrCodeMessage.split(',');
-        
-        if (parts.length < 2) {
-          throw new Error('Invalid QR code format');
-        }
+    // Start QR code scanning with near-focus detection (optimized for 10-inch tablet)
+    html5QrCode.start(
+      { facingMode: "environment" },
+      {
+        fps: 30,
+        qrbox: { width: 800, height: 800 },
+        aspectRatio: 1.0,
+        disableFlip: false,
+        advanced: [{
+          focusMode: "continuous",
+          focusDistance: { ideal: 0 }
+        }]
+      },
+      async (qrCodeMessage) => {
+        console.log("Scanned Lot QR Code:", qrCodeMessage);
 
-        const scannedMaterialCode = parts[0].trim();
-        const lotNumber = parts[1].trim();
-        // parts[2] is ignored for now
+        try {
+          // ✅ IMMEDIATELY stop the scanner to prevent multiple scans
+          await html5QrCode.stop();
 
-        // Get Material Code from the form (may contain comma-separated values)
-        const materialCodeString = materialCodeInput ? materialCodeInput.value.trim() : '';
+          // Parse QR code: "97B,251020-1,12000"
+          const parts = qrCodeMessage.split(',');
 
-        console.log("Comparison:", { scannedMaterialCode, materialCodeString, lotNumber });
+          if (parts.length < 2) {
+            throw new Error('Invalid QR code format');
+          }
 
-        // Validate Material Code using new multi-value support
-        const validation = validateMaterialCode(scannedMaterialCode, materialCodeString);
-        
-        console.log("Lot Scanner Validation:", {
-          scanned: scannedMaterialCode,
-          allValidCodes: validation.allCodes,
-          isValid: validation.isValid,
-          matchedCode: validation.matchedCode
-        });
+          const scannedMaterialCode = parts[0].trim();
+          const lotNumber = parts[1].trim();
+          // parts[2] is ignored for now
 
-        // Compare Material Codes
-        if (!validation.isValid) {
-          // Material code mismatch - show error
-          const expectedDisplay = formatMaterialCodesForDisplay(materialCodeString);
-          
-          scanLotStatus.innerHTML = '<span style="color: #e74c3c;">❌ 材料コードが一致しません<br>Material code mismatch</span>';
-          
-          // Use showAlert function
-          showAlert(`材料コードが一致しません / Material code mismatch\n\nExpected: ${expectedDisplay}\nScanned: ${scannedMaterialCode}`);
-          
-          // Close modal
-          scanLotModal.style.display = 'none';
-          return;
-        }
-        
-        // Log which specific code was matched
-        console.log(`Lot scanner: Material code validated successfully. Matched: ${validation.matchedCode}`);
+          // Get Material Code from the form (may contain comma-separated values)
+          const materialCodeString = materialCodeInput ? materialCodeInput.value.trim() : '';
 
-        // Material code matches - add lot number using the new system
-        const success = addScannedLot(lotNumber);
-        
-        if (!success) {
-          // Duplicate
-          scanLotStatus.innerHTML = '<span style="color: #f39c12;">⚠️ このロット番号は既に追加されています<br>Lot number already added</span>';
-          
-          // Close after showing message briefly
-          setTimeout(() => {
+          console.log("Comparison:", { scannedMaterialCode, materialCodeString, lotNumber });
+
+          // Validate Material Code using new multi-value support
+          const validation = validateMaterialCode(scannedMaterialCode, materialCodeString);
+
+          console.log("Lot Scanner Validation:", {
+            scanned: scannedMaterialCode,
+            allValidCodes: validation.allCodes,
+            isValid: validation.isValid,
+            matchedCode: validation.matchedCode
+          });
+
+          // Compare Material Codes
+          if (!validation.isValid) {
+            // Material code mismatch - show error
+            const expectedDisplay = formatMaterialCodesForDisplay(materialCodeString);
+
+            scanLotStatus.innerHTML = '<span style="color: #e74c3c;">❌ 材料コードが一致しません<br>Material code mismatch</span>';
+
+            // Use showAlert function
+            showAlert(`材料コードが一致しません / Material code mismatch\n\nExpected: ${expectedDisplay}\nScanned: ${scannedMaterialCode}`);
+
+            // Close modal
             scanLotModal.style.display = 'none';
-          }, 1500);
-          
-          return;
-        }
+            return;
+          }
 
-        // Show success animation
-        scanLotStatus.innerHTML = '<span class="success-checkmark">✓</span><br><span style="color: #4CAF50; font-weight: bold;">成功！ / Success!</span>';
-        document.body.classList.add('flash-green');
+          // Log which specific code was matched
+          console.log(`Lot scanner: Material code validated successfully. Matched: ${validation.matchedCode}`);
 
-        // Close modal after short delay
-        setTimeout(() => {
-          document.body.classList.remove('flash-green');
+          // Material code matches - add lot number using the new system
+          const success = addScannedLot(lotNumber);
+
+          if (!success) {
+            // Duplicate
+            scanLotStatus.innerHTML = '<span style="color: #f39c12;">⚠️ このロット番号は既に追加されています<br>Lot number already added</span>';
+
+            // Close after showing message briefly
+            setTimeout(() => {
+              scanLotModal.style.display = 'none';
+            }, 1500);
+
+            return;
+          }
+
+          // Show success animation
+          scanLotStatus.innerHTML = '<span class="success-checkmark">✓</span><br><span style="color: #4CAF50; font-weight: bold;">成功！ / Success!</span>';
+          document.body.classList.add('flash-green');
+
+          // Close modal after short delay
+          setTimeout(() => {
+            document.body.classList.remove('flash-green');
+            scanLotModal.style.display = 'none';
+          }, 1000);
+
+        } catch (error) {
+          console.error("Error processing lot QR code:", error);
+          scanLotStatus.innerHTML = '<span style="color: #e74c3c;">❌ QRコードの処理エラー<br>QR code processing error</span>';
+
+          showAlert('QRコードの形式が正しくありません / Invalid QR code format');
+
+          // Scanner already stopped, just close modal
           scanLotModal.style.display = 'none';
-        }, 1000);
-
-      } catch (error) {
-        console.error("Error processing lot QR code:", error);
-        scanLotStatus.innerHTML = '<span style="color: #e74c3c;">❌ QRコードの処理エラー<br>QR code processing error</span>';
-        
-        showAlert('QRコードの形式が正しくありません / Invalid QR code format');
-        
-        // Scanner already stopped, just close modal
-        scanLotModal.style.display = 'none';
+        }
+      },
+      (errorMessage) => {
+        // QR scan error (ignore continuous scanning errors)
       }
-    },
-    (errorMessage) => {
-      // QR scan error (ignore continuous scanning errors)
-    }
-  ).catch(err => {
-    console.error("Failed to start lot scanning:", err);
-    scanLotStatus.innerHTML = '<span style="color: #e74c3c;">❌ カメラを起動できませんでした<br>Could not start camera</span>';
-  });
-
-  // Close button handler
-  document.getElementById('closeScanLotModal').onclick = function() {
-    html5QrCode.stop().then(() => {
-      scanLotModal.style.display = 'none';
-    }).catch(err => {
-      console.error("Failed to stop scanning:", err);
-      scanLotModal.style.display = 'none';
+    ).catch(err => {
+      console.error("Failed to start lot scanning:", err);
+      scanLotStatus.innerHTML = '<span style="color: #e74c3c;">❌ カメラを起動できませんでした<br>Could not start camera</span>';
     });
-  };
+
+    // Close button handler
+    document.getElementById('closeScanLotModal').onclick = function () {
+      html5QrCode.stop().then(() => {
+        scanLotModal.style.display = 'none';
+      }).catch(err => {
+        console.error("Failed to stop scanning:", err);
+        scanLotModal.style.display = 'none';
+      });
+    };
   });
 }
 
@@ -3874,12 +3874,12 @@ function renderMaterialLotTags() {
     tagsContainer.style.marginTop = anyMissing ? '30px' : '8px';
 
     materialLots.forEach((lot, index) => {
-    const hasPhoto = (typeof materialLabelPhotos !== 'undefined') &&
-                     materialLabelPhotos.some(p => p.lotNumber === lot.lotNumber);
+      const hasPhoto = (typeof materialLabelPhotos !== 'undefined') &&
+        materialLabelPhotos.some(p => p.lotNumber === lot.lotNumber);
 
-    const tag = document.createElement('div');
-    tag.className = 'lot-pill' + (hasPhoto ? '' : ' lot-pill-nophoto');
-    tag.style.cssText = `
+      const tag = document.createElement('div');
+      tag.className = 'lot-pill' + (hasPhoto ? '' : ' lot-pill-nophoto');
+      tag.style.cssText = `
       position: relative;
       display: inline-flex;
       align-items: center;
@@ -3891,60 +3891,60 @@ function renderMaterialLotTags() {
       gap: 6px;
       cursor: pointer;
     `;
-    tag.title = hasPhoto ? '写真を変更 / Tap to change photo' : '写真がありません / Tap to add photo';
+      tag.title = hasPhoto ? '写真を変更 / Tap to change photo' : '写真がありません / Tap to add photo';
 
-    const icon = document.createElement('span');
-    icon.textContent = hasPhoto ? '📷' : '⚠️';
-    icon.style.fontSize = '13px';
-    tag.appendChild(icon);
+      const icon = document.createElement('span');
+      icon.textContent = hasPhoto ? '📷' : '⚠️';
+      icon.style.fontSize = '13px';
+      tag.appendChild(icon);
 
-    const lotText = document.createElement('span');
-    lotText.textContent = lot.lotNumber;
-    tag.appendChild(lotText);
+      const lotText = document.createElement('span');
+      lotText.textContent = lot.lotNumber;
+      tag.appendChild(lotText);
 
-    // Delete button — also deletes the lot's linked photo
-    const deleteBtn = document.createElement('span');
-    deleteBtn.textContent = '×';
-    deleteBtn.style.cssText = `cursor: pointer; font-size: 18px; font-weight: bold; margin-left: 2px;`;
-    deleteBtn.onclick = async (e) => {
-      e.stopPropagation();
-      const lotNum = lot.lotNumber;
-      if (typeof materialLabelPhotos !== 'undefined') {
-        const linked = materialLabelPhotos.filter(p => p.lotNumber === lotNum);
-        for (const ph of linked) {
-          try { URL.revokeObjectURL(ph.blobUrl); } catch (err) {}
-          try { await materialLabelDB.delete(ph.id); } catch (err) {}
+      // Delete button — also deletes the lot's linked photo
+      const deleteBtn = document.createElement('span');
+      deleteBtn.textContent = '×';
+      deleteBtn.style.cssText = `cursor: pointer; font-size: 18px; font-weight: bold; margin-left: 2px;`;
+      deleteBtn.onclick = async (e) => {
+        e.stopPropagation();
+        const lotNum = lot.lotNumber;
+        if (typeof materialLabelPhotos !== 'undefined') {
+          const linked = materialLabelPhotos.filter(p => p.lotNumber === lotNum);
+          for (const ph of linked) {
+            try { URL.revokeObjectURL(ph.blobUrl); } catch (err) { }
+            try { await materialLabelDB.delete(ph.id); } catch (err) { }
+          }
+          materialLabelPhotos = materialLabelPhotos.filter(p => p.lotNumber !== lotNum);
         }
-        materialLabelPhotos = materialLabelPhotos.filter(p => p.lotNumber !== lotNum);
-      }
-      materialLots.splice(index, 1);
-      saveMaterialLots();
-      renderMaterialLotTags();
-      if (typeof renderMaterialPhotoThumbnails === 'function') renderMaterialPhotoThumbnails();
-      if (typeof updateMaterialPhotoCount === 'function') updateMaterialPhotoCount();
-      if (typeof updateMaterialLabelElement === 'function') updateMaterialLabelElement();
-      if (typeof window.renderImageGallery === 'function') window.renderImageGallery();
-    };
-    tag.appendChild(deleteBtn);
+        materialLots.splice(index, 1);
+        saveMaterialLots();
+        renderMaterialLotTags();
+        if (typeof renderMaterialPhotoThumbnails === 'function') renderMaterialPhotoThumbnails();
+        if (typeof updateMaterialPhotoCount === 'function') updateMaterialPhotoCount();
+        if (typeof updateMaterialLabelElement === 'function') updateMaterialLabelElement();
+        if (typeof window.renderImageGallery === 'function') window.renderImageGallery();
+      };
+      tag.appendChild(deleteBtn);
 
-    // "No photo" speech-bubble callout
-    if (!hasPhoto) {
-      const callout = document.createElement('span');
-      callout.className = 'lot-callout';
-      callout.textContent = '写真なし・タップで撮影 / Tap to add photo';
-      tag.appendChild(callout);
-    }
-
-    // Tap a pill: with a photo -> popup (thumbnail + Replace); without -> capture
-    tag.onclick = () => {
-      if (hasPhoto) {
-        showLotPhotoPopup(lot.lotNumber, tag);
-      } else {
-        window.__captureLotTarget = lot.lotNumber;
-        const b = document.getElementById('makerLabelButton');
-        if (b) b.click();
+      // "No photo" speech-bubble callout
+      if (!hasPhoto) {
+        const callout = document.createElement('span');
+        callout.className = 'lot-callout';
+        callout.textContent = '写真なし・タップで撮影 / Tap to add photo';
+        tag.appendChild(callout);
       }
-    };
+
+      // Tap a pill: with a photo -> popup (thumbnail + Replace); without -> capture
+      tag.onclick = () => {
+        if (hasPhoto) {
+          showLotPhotoPopup(lot.lotNumber, tag);
+        } else {
+          window.__captureLotTarget = lot.lotNumber;
+          const b = document.getElementById('makerLabelButton');
+          if (b) b.click();
+        }
+      };
 
       tagsContainer.appendChild(tag);
     });
@@ -4005,13 +4005,13 @@ const materialLotInput = document.getElementById('材料ロット');
 if (materialLotInput) {
   // Flag to control if we should allow keypad
   let allowKeypadForManualEntry = false;
-  
+
   materialLotInput.addEventListener('focus', (e) => {
     // If manual entry is allowed, let the keypad open naturally
     if (allowKeypadForManualEntry) {
       return; // Let the default behavior happen (keypad opens)
     }
-    
+
     // Check if sub-dropdown has a value
     const subDropdown = document.getElementById('sub-dropdown');
     if (!subDropdown || !subDropdown.value) {
@@ -4021,7 +4021,7 @@ if (materialLotInput) {
       showAlert('Please select a product code first / まず製品コードを選択してください');
       return;
     }
-    
+
     // Block keypad and open the material QR scanner (same flow as the
     // "Scan Material" button). The legacy #scan-lot button no longer exists
     // in the redesigned HTML, so route through triggerMaterialScan().
@@ -4035,30 +4035,30 @@ if (materialLotInput) {
       setTimeout(() => document.getElementById('startStep2Scan')?.click(), 250);
     }
   });
-  
+
   // Store reference to allow keypad function
-  window.enableManualLotEntry = function() {
+  window.enableManualLotEntry = function () {
     allowKeypadForManualEntry = true;
-    
+
     // Store current lots before opening keypad
     const lotsBeforeKeypad = materialLots.map(lot => lot.lotNumber);
-    
+
     // Open the keypad directly in NEW ENTRY MODE (starts empty, appends on confirm)
     window.openDirectNumericKeypad('材料ロット', true);
-    
+
     // Set up listener for when keypad closes to detect new lots
     const checkForNewLot = setInterval(() => {
       const keypadModal = document.getElementById('numericKeypadModalDirect');
       const isKeypadOpen = keypadModal && keypadModal.style.display === 'block';
-      
+
       // Only check after keypad is closed
       if (!isKeypadOpen) {
         const currentValue = materialLotInput.value;
         const valuesInInput = currentValue ? currentValue.split(',').map(v => v.trim()).filter(v => v) : [];
-        
+
         // Check if there's a new lot added (compare with lots before keypad)
         const newLots = valuesInInput.filter(lot => lot && !lotsBeforeKeypad.includes(lot));
-        
+
         if (newLots.length > 0) {
           // New lot(s) added via keypad - add as blue tags
           newLots.forEach(lotNumber => {
@@ -4068,7 +4068,7 @@ if (materialLotInput) {
             }
           });
         }
-        
+
         // Disable manual entry mode and stop checking
         allowKeypadForManualEntry = false;
         clearInterval(checkForNewLot);
@@ -4078,43 +4078,43 @@ if (materialLotInput) {
 }
 
 // Override button - Leader verification for manual entry
-document.getElementById('overrideLotButton').addEventListener('click', function() {
+document.getElementById('overrideLotButton').addEventListener('click', function () {
   const scanLotModal = document.getElementById('scanLotModal');
   const leaderVerificationModal = document.getElementById('leaderVerificationModal');
   const leaderVerificationStatus = document.getElementById('leaderVerificationStatus');
-  
+
   // Close scan lot modal first
   if (window.lotHtml5QrCode) {
     window.lotHtml5QrCode.stop().catch(err => console.error("Error stopping lot scanner:", err));
   }
   scanLotModal.style.display = 'none';
-  
+
   // Get material code from input
   const materialCodeInput = document.getElementById('material-code');
   const materialCode = materialCodeInput ? materialCodeInput.value.trim() : 'N/A';
-  
+
   // Find and update the warning text to show material code instead
   const modalContent = leaderVerificationModal.querySelector('.modal-content');
   const warningTextElement = modalContent.querySelector('p[style*="color: #666"]');
-  
+
   if (warningTextElement) {
     // Replace the warning text with blinking material code
     warningTextElement.innerHTML = `<span class="material-code-blink">材料: ${materialCode} / Material Code: ${materialCode}</span>`;
     warningTextElement.style.fontSize = '18px';
     warningTextElement.style.margin = '15px 0';
   }
-  
+
   // Show leader verification modal
   leaderVerificationStatus.textContent = 'リーダーのQRコードをスキャンしてください / Please scan leader QR code';
   leaderVerificationStatus.style.color = '#2d5f4f';
   leaderVerificationModal.style.display = 'block';
-  
+
   // Use global scanner variable for leader verification
   leaderVerificationScanner = new Html5Qrcode("leaderQrReader");
-  
+
   leaderVerificationScanner.start(
     { facingMode: "environment" },
-    { 
+    {
       fps: 30,
       qrbox: { width: 800, height: 800 },
       aspectRatio: 1.0,
@@ -4126,25 +4126,25 @@ document.getElementById('overrideLotButton').addEventListener('click', function(
     },
     async (decodedText) => {
       console.log("Leader QR Code scanned for override:", decodedText);
-      
+
       try {
         const response = await fetch(`${serverURL}/verifyLeader`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ username: decodedText })
         });
-        
+
         const result = await response.json();
-        
+
         if (result.authorized) {
           leaderVerificationStatus.textContent = `✅ 認証成功！ / Verified! Opening keypad...`;
           leaderVerificationStatus.style.color = '#006400';
-          
+
           leaderVerificationScanner.stop().then(() => {
             setTimeout(() => {
               leaderVerificationModal.style.display = 'none';
               leaderVerificationScanner = null;
-              
+
               // Enable keypad for manual entry
               if (window.enableManualLotEntry) {
                 window.enableManualLotEntry();
@@ -4169,9 +4169,9 @@ document.getElementById('overrideLotButton').addEventListener('click', function(
     leaderVerificationStatus.textContent = '❌ カメラを起動できませんでした / Could not start camera';
     leaderVerificationStatus.style.color = '#cc0000';
   });
-  
+
   // Set up cancel button handler for override flow
-  document.getElementById('closeLeaderVerificationModal').onclick = function() {
+  document.getElementById('closeLeaderVerificationModal').onclick = function () {
     if (leaderVerificationScanner) {
       leaderVerificationScanner.stop().then(() => {
         leaderVerificationModal.style.display = 'none';
@@ -4200,7 +4200,7 @@ function resetForm() {
   const current品番 = document.getElementById('product-number')?.value || '';
   const current工場 = document.getElementById('selected工場')?.value || '';
   const current設備 = document.getElementById('process')?.value || '';
-  
+
   // Log if we have machine info at minimum (before clearing session)
   if (current設備 && (current背番号 || current品番 || current工場)) {
     logTabletAction('Reset button pressed', 'Reset', {
@@ -4210,7 +4210,7 @@ function resetForm() {
       previous設備: current設備
     });
   }
-  
+
   // Clear session AFTER logging
   clearSessionID();
   closeVideoManualPicker();
@@ -4265,11 +4265,11 @@ function resetForm() {
   }
   localStorage.removeItem(`${uniquePrefix}trouble-time-mins`);
   localStorage.removeItem(`${uniquePrefix}total-trouble-display`);
-  
+
   // Clear maintenance records
   localStorage.removeItem(`${uniquePrefix}maintenanceRecords`);
   maintenanceRecords = [];
-  
+
   // Clear material label photos from IndexedDB and revoke object URLs
   materialLabelPhotos.forEach(p => URL.revokeObjectURL(p.blobUrl));
   materialLabelPhotos = [];
@@ -4307,7 +4307,7 @@ function resetForm() {
     image.style.display = 'none'; // Hide the image
     console.log(`Reset image ${image.id || image.name}`);
   });
-  
+
   // Explicitly reset the sendtoNCButtonisPressed state
   sendtoNCButtonisPressed = false;
   localStorage.setItem(`${uniquePrefix}sendtoNCButtonisPressed`, 'false');
@@ -4333,7 +4333,7 @@ function showPrintStatusMessage(message) {
     scanAlertModal.style.display = 'block';
 
     if (closeScanModalButton) {
-      closeScanModalButton.onclick = function() {
+      closeScanModalButton.onclick = function () {
         scanAlertModal.style.display = 'none';
       };
     }
@@ -4598,7 +4598,7 @@ async function printLabel() {
 
     // Close modal on button click
     const closeScanModalButton = document.getElementById('closeScanModalButton');
-    closeScanModalButton.onclick = function() {
+    closeScanModalButton.onclick = function () {
       scanAlertModal.style.display = 'none';
       alertSound.pause();
       alertSound.currentTime = 0; // Reset sound to the beginning
@@ -4939,7 +4939,7 @@ const buttonMappings = [{
   imgId: '材料ラベル',
   labelText: '材料ラベル',
   fileInputId: 'makerLabelFileInput'
-}, ];
+},];
 
 // Device detection
 function isMobileDevice() {
@@ -4950,34 +4950,34 @@ function isMobileDevice() {
 async function compressBase64Image(base64DataURL, maxWidth = 1024, quality = 0.7) {
   return new Promise((resolve, reject) => {
     const img = new Image();
-    
+
     img.onload = () => {
       const canvas = document.createElement('canvas');
       let width = img.width;
       let height = img.height;
-      
+
       // Calculate new dimensions
       if (width > maxWidth) {
         height = Math.round((height * maxWidth) / width);
         width = maxWidth;
       }
-      
+
       canvas.width = width;
       canvas.height = height;
-      
+
       const ctx = canvas.getContext('2d');
       ctx.drawImage(img, 0, 0, width, height);
-      
+
       // Compress with specified quality
       const compressedDataURL = canvas.toDataURL('image/jpeg', quality);
       resolve(compressedDataURL);
     };
-    
+
     img.onerror = (error) => {
       console.error('Error loading image for compression:', error);
       reject(error);
     };
-    
+
     img.src = base64DataURL;
   });
 }
@@ -5025,17 +5025,17 @@ async function openWebcamModal(mapping) {
   const modal = document.getElementById('webcamModal');
   const video = document.getElementById('webcamVideo');
   const title = document.getElementById('webcamModalTitle');
-  
+
   currentPhotoMapping = mapping;
   // Keep currentButtonId set (it was set before calling this function)
   title.textContent = `写真撮影: ${mapping.labelText} / Take Photo: ${mapping.labelText}`;
   modal.style.display = 'flex';
-  
+
   console.log(`Opening webcam for ${mapping.labelText}, buttonId: ${currentButtonId}`);
-  
+
   try {
-    webcamStream = await navigator.mediaDevices.getUserMedia({ 
-      video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } } 
+    webcamStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
     });
     video.srcObject = webcamStream;
     console.log('📹 Webcam opened successfully');
@@ -5049,12 +5049,12 @@ async function openWebcamModal(mapping) {
 function closeWebcamModal() {
   const modal = document.getElementById('webcamModal');
   const video = document.getElementById('webcamVideo');
-  
+
   if (webcamStream) {
     webcamStream.getTracks().forEach(track => track.stop());
     webcamStream = null;
   }
-  
+
   video.srcObject = null;
   modal.style.display = 'none';
   currentPhotoMapping = null;
@@ -5065,34 +5065,34 @@ async function captureFromWebcam() {
   const video = document.getElementById('webcamVideo');
   const canvas = document.getElementById('webcamCanvas');
   const ctx = canvas.getContext('2d');
-  
+
   // Set canvas dimensions to match video
   canvas.width = video.videoWidth;
   canvas.height = video.videoHeight;
-  
+
   // Draw video frame to canvas
   ctx.drawImage(video, 0, 0);
-  
+
   // Convert to base64
   const base64Image = canvas.toDataURL('image/jpeg', 0.95);
-  
+
   console.log(`📸 Captured from webcam: ${(base64Image.length / 1024).toFixed(2)} KB`);
   console.log(`Current mapping:`, currentPhotoMapping);
   console.log(`Current buttonId:`, currentButtonId);
-  
+
   // Save these before closeWebcamModal() resets them
   const savedMapping = currentPhotoMapping;
   const savedButtonId = currentButtonId;
-  
+
   // Close webcam
   closeWebcamModal();
-  
+
   // Check if this is for material label (multi-photo system)
   if (savedButtonId === 'makerLabelButton') {
     console.log('📸 Processing material label photo (multi-photo system)');
-    
+
     const added = await addMaterialLabelPhoto(base64Image);
-    
+
     if (added) {
       console.log('✅ Successfully added material label photo from webcam');
       logTabletAction('Photo captured: 材料ラベル (webcam)', 'in-progress', {
@@ -5122,17 +5122,17 @@ async function processPhotoCapture(base64Image, mapping, buttonId) {
     console.log(`   - Button ID: ${buttonId}`);
     console.log(`   - Image ID: ${mapping.imgId}`);
     console.log(`   - Label ID: ${mapping.labelId}`);
-    
+
     // Update photo preview immediately
     const photoPreview = document.getElementById(mapping.imgId);
     console.log(`   - Photo element found: ${!!photoPreview}`);
-    
+
     if (photoPreview) {
       photoPreview.src = base64Image;
       photoPreview.style.display = 'block';
-      
+
       console.log(`   - Set src (${(base64Image.length / 1024).toFixed(2)} KB) and display: block`);
-      
+
       // Compress image before saving to localStorage to avoid quota issues
       const compressedImage = await compressBase64Image(base64Image, 1024, 0.7);
       const photoPreviewKey = `${uniquePrefix}${mapping.imgId}.src`;
@@ -5141,11 +5141,11 @@ async function processPhotoCapture(base64Image, mapping, buttonId) {
     } else {
       console.error(`❌ Photo preview element not found: ${mapping.imgId}`);
     }
-    
+
     // Update label to TRUE
     const label = document.getElementById(mapping.labelId);
     console.log(`   - Label element found: ${!!label}`);
-    
+
     if (label) {
       label.textContent = 'TRUE';
       const labelKey = `${uniquePrefix}${mapping.labelId}.textContent`;
@@ -5154,15 +5154,15 @@ async function processPhotoCapture(base64Image, mapping, buttonId) {
     } else {
       console.error(`❌ Label element not found: ${mapping.labelId}`);
     }
-    
+
     // Log photo capture
     logTabletAction(`Photo captured: ${mapping.labelText}`, 'in-progress', {
       photoType: mapping.labelText,
       buttonId: buttonId
     });
-    
+
     currentButtonId = null;
-    
+
   } catch (error) {
     console.error(`❌ Error processing ${mapping.labelText}:`, error);
     showAlert(`写真撮影エラー: ${error.message}`);
@@ -5173,13 +5173,13 @@ async function processPhotoCapture(base64Image, mapping, buttonId) {
 // Show photo option modal (webcam or file)
 function showPhotoOptionModal(mapping, buttonId, fileInput) {
   currentButtonId = buttonId;
-  
+
   // On mobile, directly use file input (native camera)
   if (isMobileDevice()) {
     fileInput.click();
     return;
   }
-  
+
   // On desktop, show option modal
   const optionModal = document.createElement('div');
   optionModal.style.cssText = 'display: flex; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 9999; justify-content: center; align-items: center;';
@@ -5200,20 +5200,20 @@ function showPhotoOptionModal(mapping, buttonId, fileInput) {
       </button>
     </div>
   `;
-  
+
   document.body.appendChild(optionModal);
-  
+
   // Button handlers
   document.getElementById('useWebcamBtn').addEventListener('click', () => {
     document.body.removeChild(optionModal);
     openWebcamModal(mapping);
   });
-  
+
   document.getElementById('chooseFileBtn').addEventListener('click', () => {
     document.body.removeChild(optionModal);
     fileInput.click();
   });
-  
+
   document.getElementById('cancelOptionBtn').addEventListener('click', () => {
     document.body.removeChild(optionModal);
     currentButtonId = null;
@@ -5224,13 +5224,13 @@ function showPhotoOptionModal(mapping, buttonId, fileInput) {
 ['hatsumonoButton', 'atomonoButton'].forEach(buttonId => {
   const button = document.getElementById(buttonId);
   if (!button) return;
-  
+
   const mapping = buttonMappings.find(m => m.buttonId === buttonId);
   if (!mapping) return;
-  
+
   const fileInput = document.getElementById(mapping.fileInputId);
   if (!fileInput) return;
-  
+
   // Button click shows options or triggers native camera
   button.addEventListener('click', () => {
     const subDropdown = document.getElementById('sub-dropdown');
@@ -5258,7 +5258,7 @@ function showPhotoOptionModal(mapping, buttonId, fileInput) {
 
       // Set modal close behavior
       const closeScanModalButton = document.getElementById('closeScanModalButton');
-      closeScanModalButton.onclick = function() {
+      closeScanModalButton.onclick = function () {
         scanAlertModal.style.display = 'none';
         document.body.classList.remove('flash-red');
         subDropdown.classList.remove('flash-red-border');
@@ -5276,23 +5276,23 @@ function showPhotoOptionModal(mapping, buttonId, fileInput) {
     // If value is selected, show photo options
     showPhotoOptionModal(mapping, buttonId, fileInput);
   });
-  
+
   // Handle file selection from file browser
   fileInput.addEventListener('change', async (event) => {
     const file = event.target.files[0];
     if (!file) return;
-    
+
     try {
       // Convert to base64
       const base64Image = await fileToBase64(file);
       console.log(`📸 Original image size: ${(base64Image.length / 1024).toFixed(2)} KB`);
-      
+
       // Process the photo
       await processPhotoCapture(base64Image, mapping, currentButtonId);
-      
+
       // Reset file input
       event.target.value = '';
-      
+
     } catch (error) {
       console.error(`❌ Error capturing ${mapping.labelText}:`, error);
       showAlert(`写真撮影エラー: ${error.message}`);
@@ -5307,7 +5307,7 @@ const makerLabelButton = document.getElementById('makerLabelButton');
 if (makerLabelButton) {
   const mapping = buttonMappings.find(m => m.buttonId === 'makerLabelButton');
   const fileInput = mapping ? document.getElementById(mapping.fileInputId) : null;
-  
+
   if (fileInput) {
     // Button click triggers file input
     makerLabelButton.addEventListener('click', () => {
@@ -5336,7 +5336,7 @@ if (makerLabelButton) {
 
         // Set modal close behavior
         const closeScanModalButton = document.getElementById('closeScanModalButton');
-        closeScanModalButton.onclick = function() {
+        closeScanModalButton.onclick = function () {
           scanAlertModal.style.display = 'none';
           document.body.classList.remove('flash-red');
           subDropdown.classList.remove('flash-red-border');
@@ -5354,21 +5354,21 @@ if (makerLabelButton) {
       // Show photo options modal for material label
       showPhotoOptionModalForMaterial(mapping, fileInput);
     });
-    
+
     // Handle file selection from file browser for material label
     fileInput.addEventListener('change', async (event) => {
       const file = event.target.files[0];
       if (!file) return;
-      
+
       try {
         console.log('📸 Processing material label photo...');
-        
+
         // Convert to base64 for localStorage (full quality)
         const base64Image = await fileToBase64(file);
-        
+
         // Add to material label photos array
         const added = await addMaterialLabelPhoto(base64Image);
-        
+
         if (added) {
           console.log('✅ Successfully added material label photo');
           logTabletAction('Photo captured: 材料ラベル', 'in-progress', {
@@ -5378,11 +5378,11 @@ if (makerLabelButton) {
         } else {
           showAlert(`最大${MAX_MATERIAL_PHOTOS}枚までです / Maximum ${MAX_MATERIAL_PHOTOS} photos allowed`);
         }
-        
+
         // Reset file input
         event.target.value = '';
         currentButtonId = null;
-        
+
       } catch (error) {
         console.error('❌ Error capturing material label photo:', error);
         showAlert(`写真撮影エラー: ${error.message}`);
@@ -5396,13 +5396,13 @@ if (makerLabelButton) {
 // Photo option modal for material label (with webcam support)
 function showPhotoOptionModalForMaterial(mapping, fileInput) {
   currentButtonId = 'makerLabelButton';
-  
+
   // On mobile, directly use file input (native camera)
   if (isMobileDevice()) {
     fileInput.click();
     return;
   }
-  
+
   // On desktop, show option modal
   const optionModal = document.createElement('div');
   optionModal.style.cssText = 'display: flex; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 9999; justify-content: center; align-items: center;';
@@ -5423,20 +5423,20 @@ function showPhotoOptionModalForMaterial(mapping, fileInput) {
       </button>
     </div>
   `;
-  
+
   document.body.appendChild(optionModal);
-  
+
   // Button handlers
   document.getElementById('useMaterialWebcamBtn').addEventListener('click', () => {
     document.body.removeChild(optionModal);
     openWebcamModalForMaterial(mapping);
   });
-  
+
   document.getElementById('chooseMaterialFileBtn').addEventListener('click', () => {
     document.body.removeChild(optionModal);
     fileInput.click();
   });
-  
+
   document.getElementById('cancelMaterialOptionBtn').addEventListener('click', () => {
     document.body.removeChild(optionModal);
     currentButtonId = null;
@@ -5448,16 +5448,16 @@ async function openWebcamModalForMaterial(mapping) {
   const modal = document.getElementById('webcamModal');
   const video = document.getElementById('webcamVideo');
   const title = document.getElementById('webcamModalTitle');
-  
+
   currentPhotoMapping = mapping;
   currentButtonId = 'makerLabelButton'; // Set this explicitly
   title.textContent = `写真撮影: ${mapping.labelText} (${materialLabelPhotos.length + 1}/${MAX_MATERIAL_PHOTOS}) / Take Photo`;
   modal.style.display = 'flex';
-  
+
   // Start webcam
   try {
-    webcamStream = await navigator.mediaDevices.getUserMedia({ 
-      video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } } 
+    webcamStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
     });
     video.srcObject = webcamStream;
     console.log('📹 Webcam opened for material label');
@@ -5470,10 +5470,10 @@ async function openWebcamModalForMaterial(mapping) {
 
 // Legacy message handler (kept for backward compatibility if captureImage.html is still used elsewhere)
 // NEW: Native camera system above replaces this for 初物/終物/材料ラベル
-window.addEventListener('message', async function(event) {
+window.addEventListener('message', async function (event) {
   if (event.origin === window.location.origin) {
     const data = event.data;
-    
+
     // First, preserve the sub-dropdown value if it exists
     const subDropdown = document.getElementById('sub-dropdown');
     const selectedSubDropdownValue = subDropdown?.value;
@@ -5487,76 +5487,76 @@ window.addEventListener('message', async function(event) {
         // Handle material label photos separately using the multi-photo system
         if (currentButtonId === 'makerLabelButton') {
           console.log('Processing material label photo from popup window');
-          
+
           // Log elements for debugging
           const materialLabelJP = document.getElementById('材料ラベル_L');
           const materialLabelEN = document.getElementById('makerLabel');
           const materialImg = document.getElementById('材料ラベル');
-          
+
           console.log('Material label elements found:', {
             '材料ラベル_L': !!materialLabelJP,
             'makerLabel': !!materialLabelEN,
             '材料ラベル': !!materialImg
           });
-          
+
           // Create/ensure elements exist if they don't
           if (!materialLabelJP && !materialLabelEN) {
             console.warn('Material label status elements not found, attempting to create...');
-            
+
             // Find a place to add them if they don't exist
             const makerLabelButton = document.getElementById('makerLabelButton');
             if (makerLabelButton && makerLabelButton.parentElement) {
               const container = document.createElement('div');
               container.style.cssText = 'margin: 5px 0;';
-              
+
               const jpLabel = document.createElement('span');
               jpLabel.id = '材料ラベル_L';
               jpLabel.textContent = 'FALSE';
               jpLabel.style.cssText = 'display: none;'; // Hidden by default
-              
+
               const enLabel = document.createElement('span');
               enLabel.id = 'makerLabel';
               enLabel.textContent = 'FALSE';
               enLabel.style.cssText = 'display: none;'; // Hidden by default
-              
+
               container.appendChild(jpLabel);
               container.appendChild(enLabel);
-              
+
               makerLabelButton.parentElement.appendChild(container);
               console.log('Created material label status elements');
             }
           }
-          
+
           // We pass the full data URL to addMaterialLabelPhoto
           const added = await addMaterialLabelPhoto(data.image);
-          
+
           if (added) {
             console.log('Successfully added material label photo');
           }
-          
+
           // Reset the current button ID after processing
           currentButtonId = null;
           return;
         }
-        
+
         // Handle other buttons with original functionality
         // Find the mapping for the current button
         const mapping = buttonMappings.find(({
           buttonId
         }) => buttonId === currentButtonId);
-  
+
         if (mapping) {
           const {
             labelId,
             imgId
           } = mapping;
-  
+
           // Update photo preview
           const photoPreview = document.getElementById(imgId);
           if (photoPreview) {
             photoPreview.src = data.image;
             photoPreview.style.display = 'block';
-            
+
             // Save image source to localStorage
             const photoPreviewKey = `${uniquePrefix}${imgId}.src`;
             localStorage.setItem(photoPreviewKey, photoPreview.src);
@@ -5564,17 +5564,17 @@ window.addEventListener('message', async function(event) {
           } else {
             console.error(`Image element ${imgId} not found`);
           }
-  
+
           // Update the associated label to TRUE
           const label = document.getElementById(labelId);
           if (label) {
             label.textContent = 'TRUE';
-            
+
             // Save label textContent to localStorage
             const labelKey = `${uniquePrefix}${labelId}.textContent`;
             localStorage.setItem(labelKey, label.textContent);
             console.log(`Updated and saved ${labelId} as TRUE`);
-            
+
             // Log photo capture
             const photoType = mapping.labelText;
             logTabletAction(`Photo captured: ${photoType}`, 'in-progress', {
@@ -5592,13 +5592,13 @@ window.addEventListener('message', async function(event) {
       } finally {
         // Reset the current button ID after processing
         currentButtonId = null;
-        
+
         // Double check the sub-dropdown value is preserved
         if (selectedSubDropdownValue && subDropdown) {
           setTimeout(() => {
             subDropdown.value = selectedSubDropdownValue;
             console.log(`Re-applied sub-dropdown value: ${selectedSubDropdownValue}`);
-            
+
             // Make sure the "send to machine" button isn't reset
             const sendtoNCKey = `${uniquePrefix}sendtoNCButtonisPressed`;
             const savedSendToNCState = localStorage.getItem(sendtoNCKey);
@@ -5631,7 +5631,7 @@ function uploadPhotou() {
   }, {
     imgId: '材料ラベル',
     label: '材料ラベル'
-  }, ];
+  },];
 
   imageMappings.forEach(({
     imgId,
@@ -5649,7 +5649,7 @@ function uploadPhotou() {
       .then(response => response.blob())
       .then(blob => {
         const reader = new FileReader();
-        reader.onloadend = function() {
+        reader.onloadend = function () {
           const base64data = reader.result.split(',')[1]; // Get the base64 encoded string
 
           const formData = new FormData();
@@ -5663,11 +5663,11 @@ function uploadPhotou() {
 
           // Send the blob to Apps Script via POST request
           fetch(
-              'https://script.google.com/macros/s/AKfycbxDWa2RTdI2_aHBgzq9GA9GtQx5MrwqaRnW4F26VZdoptwJ1Pg_Enr_xI3vw1t7WHYbTw/exec', {
-                method: 'POST',
-                body: formData,
-              }
-            )
+            'https://script.google.com/macros/s/AKfycbxDWa2RTdI2_aHBgzq9GA9GtQx5MrwqaRnW4F26VZdoptwJ1Pg_Enr_xI3vw1t7WHYbTw/exec', {
+            method: 'POST',
+            body: formData,
+          }
+          )
             .then((response) => response.text()) // Fetch raw text response
             .then((text) => {
               console.log(`Raw response for ${label}:`, text); // Log the raw response
@@ -6169,567 +6169,567 @@ function showDateChoiceModal(enteredDate, currentDate) {
 }
 
 function updateUploadProgress(percent, text) {
-    const bar = document.getElementById('uploadProgressBar');
-    const textEl = document.getElementById('uploadProgressText');
-    const percentEl = document.getElementById('uploadProgressPercent');
-    const clamped = Math.round(Math.min(100, Math.max(0, percent)));
-    if (bar) bar.style.width = `${clamped}%`;
-    if (textEl) textEl.textContent = text || '';
-    if (percentEl) percentEl.textContent = `${clamped}%`;
+  const bar = document.getElementById('uploadProgressBar');
+  const textEl = document.getElementById('uploadProgressText');
+  const percentEl = document.getElementById('uploadProgressPercent');
+  const clamped = Math.round(Math.min(100, Math.max(0, percent)));
+  if (bar) bar.style.width = `${clamped}%`;
+  if (textEl) textEl.textContent = text || '';
+  if (percentEl) percentEl.textContent = `${clamped}%`;
 }
 
 document.getElementById('submit').addEventListener('click', async (event) => {
-    event.preventDefault();
-    updateCycleTime();
+  event.preventDefault();
+  updateCycleTime();
 
-    const hatsumono = document.getElementById("hatsumonoLabel").textContent;
-    const atomono = document.getElementById("atomonoLabel").textContent;
-    const enableInputsElement = document.getElementById('enable-inputs');
-    const isToggleChecked = enableInputsElement ? enableInputsElement.checked : false;
+  const hatsumono = document.getElementById("hatsumonoLabel").textContent;
+  const atomono = document.getElementById("atomonoLabel").textContent;
+  const enableInputsElement = document.getElementById('enable-inputs');
+  const isToggleChecked = enableInputsElement ? enableInputsElement.checked : false;
 
-    const alertSound = document.getElementById('alert-sound');
-    const scanAlertModal = document.getElementById('scanAlertModal');
-    const scanAlertText = document.getElementById('scanAlertText');
-    const uploadingModal = document.getElementById('uploadingModal');
+  const alertSound = document.getElementById('alert-sound');
+  const scanAlertModal = document.getElementById('scanAlertModal');
+  const scanAlertText = document.getElementById('scanAlertText');
+  const uploadingModal = document.getElementById('uploadingModal');
 
-    const shotInput = document.getElementById('shot');
+  const shotInput = document.getElementById('shot');
 
-    if (!shotInput.value || parseInt(shotInput.value) < 1) {
-        showAlert('ショット数 (Shot Count) is required and must be at least 1.');
-        shotInput.focus();
+  if (!shotInput.value || parseInt(shotInput.value) < 1) {
+    showAlert('ショット数 (Shot Count) is required and must be at least 1.');
+    shotInput.focus();
+    return;
+  }
+
+  uploadingModal.style.display = 'flex';
+  updateUploadProgress(0, '');
+
+  // Use the new material label photo system for validation
+  if (materialLabelPhotos.length === 0) {
+    // Check legacy system as fallback
+    const makerPic = document.getElementById('材料ラベル');
+    if (!makerPic || !makerPic.src || makerPic.src === '' || makerPic.src === 'data:,' || makerPic.style.display === 'none') {
+      console.error("材料ラベル validation failed - no photos in either system:", {
+        newSystemPhotoCount: materialLabelPhotos.length,
+        legacyExists: !!makerPic,
+        legacyHasSrc: !!(makerPic && makerPic.src),
+        legacySrc: makerPic ? makerPic.src.substring(0, 30) + '...' : 'none',
+        legacyDisplay: makerPic ? makerPic.style.display : 'N/A'
+      });
+      uploadingModal.style.display = 'none';
+      showAlert("材料ラベルの写真を撮影してください / Please capture the 材料ラベル image");
+      return;
+    }
+  }
+
+  console.log("材料ラベル validation passed:", {
+    newSystemPhotoCount: materialLabelPhotos.length
+  });
+
+  try {
+    const 品番 = document.getElementById('product-number').value;
+    const 背番号 = document.getElementById('sub-dropdown').value;
+    const 工場 = document.getElementById('selected工場').value;
+    const 設備 = document.getElementById('process').value;
+    const Process_Quantity = parseInt(document.getElementById('ProcessQuantity').value, 10) || 0;
+    const 疵引不良 = parseInt(document.getElementById('counter-18').value, 10) || 0;
+    const 加工不良 = parseInt(document.getElementById('counter-19').value, 10) || 0;
+    const その他 = parseInt(document.getElementById('counter-20').value, 10) || 0;
+    const Total_NG = 疵引不良 + 加工不良 + その他;
+    const Total_PressDB = Process_Quantity - Total_NG;
+    const Worker_Name = document.getElementById('Machine Operator').value;
+    let WorkDate = document.getElementById('Lot No.').value;
+    const Time_start = document.getElementById('Start Time').value;
+    const Time_end = document.getElementById('End Time').value;
+    const 材料ロット = document.getElementById('材料ロット').value;
+    const Spare = parseInt(document.getElementById('在庫').value, 10) || 0;
+    const Comment = document.querySelector('textarea[name="Comments1"]').value;
+    const Cycle_Time = parseFloat(document.getElementById('cycleTime').value) || 0;
+    const ショット数 = parseInt(document.getElementById('shot').value, 10) || 0;
+
+    // ==================== VALIDATION SECTION ====================
+    // Validate all required fields before submission
+
+    // 1. Check required fields
+    if (!品番 || 品番.trim() === '') {
+      uploadingModal.style.display = 'none';
+      showAlert('品番が必要です / Product Number is required');
+      document.getElementById('product-number').focus();
+      return;
+    }
+
+    if (!背番号 || 背番号.trim() === '') {
+      uploadingModal.style.display = 'none';
+      showAlert('背番号が必要です / Sebanggo is required');
+      document.getElementById('sub-dropdown').focus();
+      return;
+    }
+
+    if (!工場 || 工場.trim() === '') {
+      uploadingModal.style.display = 'none';
+      showAlert('工場が必要です / Factory is required');
+      document.getElementById('selected工場').focus();
+      return;
+    }
+
+    if (!設備 || 設備.trim() === '') {
+      uploadingModal.style.display = 'none';
+      showAlert('設備が必要です / Equipment is required');
+      document.getElementById('process').focus();
+      return;
+    }
+
+    if (!Process_Quantity || Process_Quantity <= 0) {
+      uploadingModal.style.display = 'none';
+      showAlert('加工数（良品）が必要です / Process Quantity is required and must be greater than 0');
+      document.getElementById('ProcessQuantity').focus();
+      return;
+    }
+
+    if (!Worker_Name || Worker_Name.trim() === '') {
+      uploadingModal.style.display = 'none';
+      showAlert('作業者名が必要です / Worker Name is required');
+      document.getElementById('Machine Operator').focus();
+      return;
+    }
+
+    if (!WorkDate || WorkDate.trim() === '') {
+      uploadingModal.style.display = 'none';
+      showAlert('加工日が必要です / Work Date is required');
+      document.getElementById('Lot No.').focus();
+      return;
+    }
+
+    // Compare entered date vs current date and ask user which to use
+    const currentDate = getTodayDateString();
+    if (WorkDate !== currentDate) {
+      uploadingModal.style.display = 'none';
+      const choice = await showDateChoiceModal(WorkDate, currentDate);
+      if (choice === 'cancel') {
         return;
-    }
-
-    uploadingModal.style.display = 'flex';
-    updateUploadProgress(0, '');
-
-    // Use the new material label photo system for validation
-    if (materialLabelPhotos.length === 0) {
-        // Check legacy system as fallback
-        const makerPic = document.getElementById('材料ラベル');
-        if (!makerPic || !makerPic.src || makerPic.src === '' || makerPic.src === 'data:,' || makerPic.style.display === 'none') {
-            console.error("材料ラベル validation failed - no photos in either system:", {
-                newSystemPhotoCount: materialLabelPhotos.length,
-                legacyExists: !!makerPic,
-                legacyHasSrc: !!(makerPic && makerPic.src),
-                legacySrc: makerPic ? makerPic.src.substring(0, 30) + '...' : 'none',
-                legacyDisplay: makerPic ? makerPic.style.display : 'N/A'
-            });
-            uploadingModal.style.display = 'none';
-            showAlert("材料ラベルの写真を撮影してください / Please capture the 材料ラベル image");
-            return;
+      }
+      if (choice === 'current') {
+        WorkDate = currentDate;
+        const dateInput = document.getElementById('Lot No.');
+        if (dateInput) {
+          dateInput.value = currentDate;
+          localStorage.setItem(`${uniquePrefix}${dateInput.id}`, currentDate);
         }
+      }
+      uploadingModal.style.display = 'flex';
     }
-    
-    console.log("材料ラベル validation passed:", {
-        newSystemPhotoCount: materialLabelPhotos.length
+
+    if (!材料ロット || 材料ロット.trim() === '') {
+      uploadingModal.style.display = 'none';
+      showAlert('材料ロットが必要です / Material Lot is required');
+      document.getElementById('材料ロット').focus();
+      return;
+    }
+
+    // ==================== NEW: Validate Material Label Photos vs Lot Count ====================
+    // Count unique lot numbers (comma-separated values)
+    const lotNumbers = 材料ロット.split(',').map(lot => lot.trim()).filter(lot => lot !== '');
+    const uniqueLotCount = lotNumbers.length;
+    const materialPhotoCount = materialLabelPhotos.length;
+
+    console.log('Material lot validation:', {
+      材料ロット,
+      lotNumbers,
+      uniqueLotCount,
+      materialPhotoCount
     });
 
-    try {
-        const 品番 = document.getElementById('product-number').value;
-        const 背番号 = document.getElementById('sub-dropdown').value;
-        const 工場 = document.getElementById('selected工場').value;
-        const 設備 = document.getElementById('process').value;
-        const Process_Quantity = parseInt(document.getElementById('ProcessQuantity').value, 10) || 0;
-        const 疵引不良 = parseInt(document.getElementById('counter-18').value, 10) || 0;
-        const 加工不良 = parseInt(document.getElementById('counter-19').value, 10) || 0;
-        const その他 = parseInt(document.getElementById('counter-20').value, 10) || 0;
-        const Total_NG = 疵引不良 + 加工不良 + その他;
-        const Total_PressDB = Process_Quantity - Total_NG;
-        const Worker_Name = document.getElementById('Machine Operator').value;
-        let WorkDate = document.getElementById('Lot No.').value;
-        const Time_start = document.getElementById('Start Time').value;
-        const Time_end = document.getElementById('End Time').value;
-        const 材料ロット = document.getElementById('材料ロット').value;
-        const Spare = parseInt(document.getElementById('在庫').value, 10) || 0;
-        const Comment = document.querySelector('textarea[name="Comments1"]').value;
-        const Cycle_Time = parseFloat(document.getElementById('cycleTime').value) || 0;
-        const ショット数 = parseInt(document.getElementById('shot').value, 10) || 0;
+    // Check if material label photo count is sufficient
+    if (materialPhotoCount < uniqueLotCount) {
+      uploadingModal.style.display = 'none';
+      showAlert(
+        `材料ラベルの写真が不足しています\n\n` +
+        `ロット数: ${uniqueLotCount}個\n` +
+        `写真数: ${materialPhotoCount}枚\n\n` +
+        `各ロットの材料ラベル写真を撮影してください\n\n` +
+        `---\n\n` +
+        `Insufficient material label photos\n\n` +
+        `Lot count: ${uniqueLotCount}\n` +
+        `Photo count: ${materialPhotoCount}\n\n` +
+        `Please capture a material label photo for each lot`
+      );
 
-        // ==================== VALIDATION SECTION ====================
-        // Validate all required fields before submission
+      // Log the validation failure
+      logTabletAction('Material label photo validation failed', 'error', {
+        lotCount: uniqueLotCount,
+        photoCount: materialPhotoCount,
+        lotNumbers: lotNumbers
+      });
 
-        // 1. Check required fields
-        if (!品番 || 品番.trim() === '') {
-            uploadingModal.style.display = 'none';
-            showAlert('品番が必要です / Product Number is required');
-            document.getElementById('product-number').focus();
-            return;
-        }
+      return;
+    }
 
-        if (!背番号 || 背番号.trim() === '') {
-            uploadingModal.style.display = 'none';
-            showAlert('背番号が必要です / Sebanggo is required');
-            document.getElementById('sub-dropdown').focus();
-            return;
-        }
+    console.log('✅ Material label photo validation passed:', {
+      uniqueLotCount,
+      materialPhotoCount
+    });
+    // ==================== END Material Label Photos Validation ====================
 
-        if (!工場 || 工場.trim() === '') {
-            uploadingModal.style.display = 'none';
-            showAlert('工場が必要です / Factory is required');
-            document.getElementById('selected工場').focus();
-            return;
-        }
+    // 2. Validate Time fields
+    if (!Time_start || Time_start.trim() === '') {
+      uploadingModal.style.display = 'none';
+      showAlert('加工開始時間が必要です / Start Time is required');
+      document.getElementById('Start Time').focus();
+      return;
+    }
 
-        if (!設備 || 設備.trim() === '') {
-            uploadingModal.style.display = 'none';
-            showAlert('設備が必要です / Equipment is required');
-            document.getElementById('process').focus();
-            return;
-        }
+    if (!Time_end || Time_end.trim() === '') {
+      uploadingModal.style.display = 'none';
+      showAlert('加工終了時間が必要です / End Time is required');
+      document.getElementById('End Time').focus();
+      return;
+    }
 
-        if (!Process_Quantity || Process_Quantity <= 0) {
-            uploadingModal.style.display = 'none';
-            showAlert('加工数（良品）が必要です / Process Quantity is required and must be greater than 0');
-            document.getElementById('ProcessQuantity').focus();
-            return;
-        }
+    // 3. Validate Time_start < Time_end and Time_start ≠ Time_end
+    const startTimeDate = new Date(`2000-01-01T${Time_start}:00`);
+    const endTimeDate = new Date(`2000-01-01T${Time_end}:00`);
 
-        if (!Worker_Name || Worker_Name.trim() === '') {
-            uploadingModal.style.display = 'none';
-            showAlert('作業者名が必要です / Worker Name is required');
-            document.getElementById('Machine Operator').focus();
-            return;
-        }
+    if (Time_start === Time_end) {
+      uploadingModal.style.display = 'none';
+      showAlert('加工開始時間と加工終了時間は同じにできません\n\nStart Time and End Time cannot be the same\n\n開始: ' + Time_start + '\n終了: ' + Time_end);
+      document.getElementById('End Time').focus();
+      return;
+    }
 
-        if (!WorkDate || WorkDate.trim() === '') {
-            uploadingModal.style.display = 'none';
-            showAlert('加工日が必要です / Work Date is required');
-            document.getElementById('Lot No.').focus();
-            return;
-        }
+    if (startTimeDate >= endTimeDate) {
+      uploadingModal.style.display = 'none';
+      showAlert('加工開始時間は加工終了時間より前である必要があります\n\nStart Time must be before End Time\n\n開始: ' + Time_start + '\n終了: ' + Time_end);
+      document.getElementById('End Time').focus();
+      return;
+    }
 
-        // Compare entered date vs current date and ask user which to use
-        const currentDate = getTodayDateString();
-        if (WorkDate !== currentDate) {
-          uploadingModal.style.display = 'none';
-          const choice = await showDateChoiceModal(WorkDate, currentDate);
-          if (choice === 'cancel') {
-            return;
-          }
-          if (choice === 'current') {
-            WorkDate = currentDate;
-            const dateInput = document.getElementById('Lot No.');
-            if (dateInput) {
-              dateInput.value = currentDate;
-              localStorage.setItem(`${uniquePrefix}${dateInput.id}`, currentDate);
-            }
-          }
-          uploadingModal.style.display = 'flex';
-        }
+    console.log('✅ All required fields validated successfully');
+    // ==================== END VALIDATION SECTION ====================
 
-        if (!材料ロット || 材料ロット.trim() === '') {
-            uploadingModal.style.display = 'none';
-            showAlert('材料ロットが必要です / Material Lot is required');
-            document.getElementById('材料ロット').focus();
-            return;
-        }
+    const maintenancePhotoTotal = maintenanceRecords.reduce((sum, r) => sum + (r.photos?.length || 0), 0);
+    const materialPhotoTotal = materialLabelPhotos.length;
+    const totalPhotos = maintenancePhotoTotal + materialPhotoTotal;
+    let processedPhotos = 0;
 
-        // ==================== NEW: Validate Material Label Photos vs Lot Count ====================
-        // Count unique lot numbers (comma-separated values)
-        const lotNumbers = 材料ロット.split(',').map(lot => lot.trim()).filter(lot => lot !== '');
-        const uniqueLotCount = lotNumbers.length;
-        const materialPhotoCount = materialLabelPhotos.length;
+    updateUploadProgress(5, 'Preparing data...');
 
-        console.log('Material lot validation:', {
-            材料ロット,
-            lotNumbers,
-            uniqueLotCount,
-            materialPhotoCount
-        });
+    const breakTimeData = {
+      break1: { start: document.getElementById('break1-start')?.value || '', end: document.getElementById('break1-end')?.value || '' },
+      break2: { start: document.getElementById('break2-start')?.value || '', end: document.getElementById('break2-end')?.value || '' },
+      break3: { start: document.getElementById('break3-start')?.value || '', end: document.getElementById('break3-end')?.value || '' },
+      break4: { start: document.getElementById('break4-start')?.value || '', end: document.getElementById('break4-end')?.value || '' }
+    };
 
-        // Check if material label photo count is sufficient
-        if (materialPhotoCount < uniqueLotCount) {
-            uploadingModal.style.display = 'none';
-            showAlert(
-                `材料ラベルの写真が不足しています\n\n` +
-                `ロット数: ${uniqueLotCount}個\n` +
-                `写真数: ${materialPhotoCount}枚\n\n` +
-                `各ロットの材料ラベル写真を撮影してください\n\n` +
-                `---\n\n` +
-                `Insufficient material label photos\n\n` +
-                `Lot count: ${uniqueLotCount}\n` +
-                `Photo count: ${materialPhotoCount}\n\n` +
-                `Please capture a material label photo for each lot`
-            );
-            
-            // Log the validation failure
-            logTabletAction('Material label photo validation failed', 'error', {
-                lotCount: uniqueLotCount,
-                photoCount: materialPhotoCount,
-                lotNumbers: lotNumbers
-            });
-            
-            return;
-        }
+    const totalBreakMinutes = calculateTotalBreakTime();
+    const totalBreakHours = totalBreakMinutes / 60;
 
-        console.log('✅ Material label photo validation passed:', {
-            uniqueLotCount,
-            materialPhotoCount
-        });
-        // ==================== END Material Label Photos Validation ====================
+    const totalTroubleMinutes = calculateTotalMachineTroubleTime();
+    const totalTroubleHours = totalTroubleMinutes / 60;
 
-        // 2. Validate Time fields
-        if (!Time_start || Time_start.trim() === '') {
-            uploadingModal.style.display = 'none';
-            showAlert('加工開始時間が必要です / Start Time is required');
-            document.getElementById('Start Time').focus();
-            return;
-        }
+    // Prepare maintenance images data for the new submitToDCP route with compression
+    const maintenanceImages = [];
 
-        if (!Time_end || Time_end.trim() === '') {
-            uploadingModal.style.display = 'none';
-            showAlert('加工終了時間が必要です / End Time is required');
-            document.getElementById('End Time').focus();
-            return;
-        }
+    if (maintenanceRecords.length > 0) {
+      console.log(`📸 Preparing ${maintenanceRecords.length} maintenance records for submission...`);
 
-        // 3. Validate Time_start < Time_end and Time_start ≠ Time_end
-        const startTimeDate = new Date(`2000-01-01T${Time_start}:00`);
-        const endTimeDate = new Date(`2000-01-01T${Time_end}:00`);
+      for (const record of maintenanceRecords) {
+        if (record.photos && record.photos.length > 0) {
+          for (const photo of record.photos) {
+            // Hydrate base64 from IndexedDB (new reference-only records) or use
+            // the embedded base64 (legacy records).
+            const photoBase64 = await getMaintenancePhotoBase64(photo);
+            if (photoBase64 && photo.id && photo.timestamp) {
+              // Ensure base64 data has proper data URL prefix
+              const photoDataURL = photoBase64.startsWith('data:')
+                ? photoBase64
+                : `data:image/jpeg;base64,${photoBase64}`;
 
-        if (Time_start === Time_end) {
-            uploadingModal.style.display = 'none';
-            showAlert('加工開始時間と加工終了時間は同じにできません\n\nStart Time and End Time cannot be the same\n\n開始: ' + Time_start + '\n終了: ' + Time_end);
-            document.getElementById('End Time').focus();
-            return;
-        }
+              // Compress maintenance photo for upload (80% quality, max 1024px)
+              const originalSize = (photoBase64.length / 1024).toFixed(2);
+              const compressedDataURL = await compressBase64Image(photoDataURL, 1024, 0.8);
+              const compressedSize = (compressedDataURL.length / 1024).toFixed(2);
+              console.log(`Maintenance photo ${photo.id}: ${originalSize} KB → ${compressedSize} KB`);
 
-        if (startTimeDate >= endTimeDate) {
-            uploadingModal.style.display = 'none';
-            showAlert('加工開始時間は加工終了時間より前である必要があります\n\nStart Time must be before End Time\n\n開始: ' + Time_start + '\n終了: ' + Time_end);
-            document.getElementById('End Time').focus();
-            return;
-        }
+              // Extract just the base64 part (remove data:image/jpeg;base64, prefix) for server upload
+              const compressedBase64Only = compressedDataURL.split(',')[1] || compressedDataURL;
 
-        console.log('✅ All required fields validated successfully');
-        // ==================== END VALIDATION SECTION ====================
-
-        const maintenancePhotoTotal = maintenanceRecords.reduce((sum, r) => sum + (r.photos?.length || 0), 0);
-        const materialPhotoTotal = materialLabelPhotos.length;
-        const totalPhotos = maintenancePhotoTotal + materialPhotoTotal;
-        let processedPhotos = 0;
-
-        updateUploadProgress(5, 'Preparing data...');
-
-        const breakTimeData = {
-            break1: { start: document.getElementById('break1-start')?.value || '', end: document.getElementById('break1-end')?.value || '' },
-            break2: { start: document.getElementById('break2-start')?.value || '', end: document.getElementById('break2-end')?.value || '' },
-            break3: { start: document.getElementById('break3-start')?.value || '', end: document.getElementById('break3-end')?.value || '' },
-            break4: { start: document.getElementById('break4-start')?.value || '', end: document.getElementById('break4-end')?.value || '' }
-        };
-
-        const totalBreakMinutes = calculateTotalBreakTime();
-        const totalBreakHours = totalBreakMinutes / 60;
-
-        const totalTroubleMinutes = calculateTotalMachineTroubleTime();
-        const totalTroubleHours = totalTroubleMinutes / 60;
-
-        // Prepare maintenance images data for the new submitToDCP route with compression
-        const maintenanceImages = [];
-        
-        if (maintenanceRecords.length > 0) {
-            console.log(`📸 Preparing ${maintenanceRecords.length} maintenance records for submission...`);
-            
-            for (const record of maintenanceRecords) {
-                if (record.photos && record.photos.length > 0) {
-                    for (const photo of record.photos) {
-                        // Hydrate base64 from IndexedDB (new reference-only records) or use
-                        // the embedded base64 (legacy records).
-                        const photoBase64 = await getMaintenancePhotoBase64(photo);
-                        if (photoBase64 && photo.id && photo.timestamp) {
-                            // Ensure base64 data has proper data URL prefix
-                            const photoDataURL = photoBase64.startsWith('data:')
-                                ? photoBase64
-                                : `data:image/jpeg;base64,${photoBase64}`;
-
-                            // Compress maintenance photo for upload (80% quality, max 1024px)
-                            const originalSize = (photoBase64.length / 1024).toFixed(2);
-                            const compressedDataURL = await compressBase64Image(photoDataURL, 1024, 0.8);
-                            const compressedSize = (compressedDataURL.length / 1024).toFixed(2);
-                            console.log(`Maintenance photo ${photo.id}: ${originalSize} KB → ${compressedSize} KB`);
-                            
-                            // Extract just the base64 part (remove data:image/jpeg;base64, prefix) for server upload
-                            const compressedBase64Only = compressedDataURL.split(',')[1] || compressedDataURL;
-                            
-                            maintenanceImages.push({
-                                base64: compressedBase64Only, // Server expects base64 without prefix
-                                id: photo.id,
-                                timestamp: photo.timestamp,
-                                maintenanceRecordId: record.id
-                            });
-                            processedPhotos++;
-                            updateUploadProgress(5 + (processedPhotos / Math.max(1, totalPhotos)) * 65, `Processing photo ${processedPhotos}/${totalPhotos}...`);
-                        }
-                    }
-                }
-            }
-            
-            console.log(`📊 Prepared ${maintenanceImages.length} maintenance images for upload (compressed)`);
-        }
-
-        // Prepare maintenance data structure (without photos - they'll be added by server)
-        const maintenanceDataForSubmission = {
-            records: maintenanceRecords.map(record => ({
-                id: record.id,
-                startTime: record.startTime,
-                endTime: record.endTime,
-                comment: record.comment,
-                timestamp: record.timestamp
-                // photos will be populated by the server after upload
-            })),
-            totalMinutes: totalTroubleMinutes,
-            totalHours: totalTroubleHours
-        };
-
-        console.log("📊 Maintenance data prepared for submission:", {
-            recordCount: maintenanceDataForSubmission.records.length,
-            totalImages: maintenanceImages.length,
-            totalMinutes: totalTroubleMinutes
-        });
-
-        let totalWorkHours = 0;
-        if (Time_start && Time_end) {
-            const startWork = new Date(`2000-01-01T${Time_start}:00`);
-            const endWork = new Date(`2000-01-01T${Time_end}:00`);
-            if (endWork > startWork) {
-                const workDiffMs = endWork - startWork;
-                const workHours = workDiffMs / (1000 * 60 * 60);
-                totalWorkHours = Math.max(0, workHours - totalBreakHours - totalTroubleHours);
-            }
-        }
-        console.log('Time Calculations:', {
-            totalBreakMinutes, totalBreakHours: totalBreakHours.toFixed(2),
-            totalMaintenanceMinutes: totalTroubleMinutes, totalMaintenanceHours: totalTroubleHours.toFixed(2),
-            workTimeWithoutBreakAndMaintenance: totalWorkHours.toFixed(2),
-            startTime: Time_start, endTime: Time_end, maintenanceRecordsCount: maintenanceRecords.length
-        });
-
-        if (!背番号) {
-            uploadingModal.style.display = 'none';
-            scanAlertText.innerText = '背番号が必要です。 / Sebanggo is required.';
-            scanAlertModal.style.display = 'block';
-            if (alertSound) { alertSound.muted = false; alertSound.volume = 1; alertSound.play().catch(console.error); }
-            document.body.classList.add('flash-red');
-            document.getElementById('closeScanModalButton').onclick = function() {
-                scanAlertModal.style.display = 'none'; alertSound.pause(); alertSound.currentTime = 0;
-                alertSound.muted = true; document.body.classList.remove('flash-red');
-            };
-            return;
-        }
-
-        const uploadedImages = await collectImagesForUpload();
-        
-        // Process all material label photos from the new system with compression
-        const materialLabelImages = [];
-        
-        console.log(`📸 Processing ${materialLabelPhotos.length} material label photos for submission`);
-        console.log('Material photos array:', materialLabelPhotos.map((p, i) => ({ index: i, id: p.id, timestamp: p.timestamp })));
-        
-        // Read blobs from IndexedDB and convert to base64 for server upload
-        // Build a lookup map so we only call getAll() once
-        let idbRecordMap = {};
-        try {
-            const idbRecords = await materialLabelDB.getAll();
-            idbRecords.forEach(r => { idbRecordMap[r.id] = r; });
-        } catch (idbErr) {
-            console.error('⚠️ Could not read IndexedDB records for material label upload:', idbErr);
-        }
-
-        for (let i = 0; i < materialLabelPhotos.length; i++) {
-            const photo = materialLabelPhotos[i];
-            const record = idbRecordMap[photo.id];
-            if (!record || !record.blob) {
-                console.warn(`⚠️ Skipping material label photo ${i} - no blob in IndexedDB`);
-                continue;
-            }
-
-            const base64Only = await new Promise((res, rej) => {
-                const reader = new FileReader();
-                reader.onloadend = () => res(reader.result.split(',')[1]);
-                reader.onerror = rej;
-                reader.readAsDataURL(record.blob);
-            });
-
-            console.log(`✅ Material label ${i+1}/${materialLabelPhotos.length}: ${(base64Only.length / 1024).toFixed(1)} KB`);
-
-            materialLabelImages.push({
-                base64: base64Only,
+              maintenanceImages.push({
+                base64: compressedBase64Only, // Server expects base64 without prefix
                 id: photo.id,
                 timestamp: photo.timestamp,
-                description: `材料ラベル ${i+1}/${materialLabelPhotos.length}`
-            });
-            processedPhotos++;
-            updateUploadProgress(5 + (processedPhotos / Math.max(1, totalPhotos)) * 65, `Processing photo ${processedPhotos}/${totalPhotos}...`);
-        }
-        
-        console.log(`📊 Total material label images prepared for upload: ${materialLabelImages.length}`);
-        
-        // Fallback to legacy method if no photos in new system
-        if (materialLabelImages.length === 0) {
-            const makerPic = document.getElementById('材料ラベル');
-            
-            // Only process if the image element exists and has content
-            if (makerPic && makerPic.src && makerPic.src !== '' && makerPic.src !== 'data:,' && makerPic.style.display !== 'none') {
-                try {
-                    console.log("No photos in new system - Processing legacy material label image");
-                    const response = await fetch(makerPic.src);
-                    const blob = await response.blob();
-                    const base64Data = await blobToBase64(blob);
-                    
-                    // Add material label as a separate entry with timestamp for uniqueness
-                    materialLabelImages.push({
-                        base64: base64Data,
-                        id: 'material-label-legacy-' + new Date().getTime(),
-                        timestamp: new Date().getTime(),
-                        description: '材料ラベル (Legacy)'
-                    });
-                    
-                    console.log(`Legacy material label image processed: ${(base64Data.length / 1024).toFixed(2)} KB`);
-                } catch (error) {
-                    console.error("Error processing legacy material label image:", error);
-                }
-            } else {
-                console.warn("Material label image not available in either system");
+                maintenanceRecordId: record.id
+              });
+              processedPhotos++;
+              updateUploadProgress(5 + (processedPhotos / Math.max(1, totalPhotos)) * 65, `Processing photo ${processedPhotos}/${totalPhotos}...`);
             }
+          }
         }
-        
-        // Prepare data for the new submitToDCP route
-        const dcpSubmissionData = {
-            品番, 背番号, 設備, Total: Total_PressDB, 工場, Worker_Name, Process_Quantity, Date: WorkDate,
-            Time_start, Time_end, 材料ロット, 疵引不良, 加工不良, その他, Total_NG, Spare, Comment,
-            Cycle_Time, ショット数, Break_Time_Data: breakTimeData,
-            Total_Break_Minutes: totalBreakMinutes, Total_Break_Hours: parseFloat(totalBreakHours.toFixed(2)),
-            Maintenance_Data: maintenanceDataForSubmission,
-            Total_Trouble_Minutes: totalTroubleMinutes, Total_Trouble_Hours: parseFloat(totalTroubleHours.toFixed(2)),
-            Total_Work_Hours: parseFloat(totalWorkHours.toFixed(2)),
+      }
 
-            // Stop / call-leader events (pressDB only). Tracks each time the leader was
-            // called during processing: who arrived, when, and how long the wait was.
-            StopCall: (typeof window.getStopCallData === 'function'
-                ? window.getStopCallData()
-                : { count: 0, totalWaitSeconds: 0, totalWaitMinutes: 0, records: [] }),
-
-            // Include image data
-            images: uploadedImages, // Cycle check images (existing logic)
-            maintenanceImages: maintenanceImages, // Maintenance images
-            materialLabelImages: materialLabelImages, // NEW: Special handling for material label
-            
-            // Include toggle state and counter data for kensaDB
-            isToggleChecked: isToggleChecked
-        };
-
-        // Per-lot production tracking (pressDB only, additive): shots / meters /
-        // pieces per material lot. ショット数 is overwritten with the auto-summed
-        // total of all lots. The server spreads formData into pressDB only.
-        try {
-            const _lp = (typeof window.buildLotProductionPayload === 'function') ? window.buildLotProductionPayload() : null;
-            if (_lp) {
-                dcpSubmissionData.Lot_Details = _lp.Lot_Details;
-                dcpSubmissionData.Total_Meters = _lp.Total_Meters;
-                dcpSubmissionData.Total_Pieces = _lp.Total_Pieces;
-                if (_lp.totalShots > 0) dcpSubmissionData.ショット数 = _lp.totalShots;
-            }
-        } catch (e) { console.warn('Lot production payload build failed:', e); }
-
-        // Add counter + inspection data if toggle is checked (for kensaDB)
-        if (isToggleChecked) {
-            const counters = Array.from({ length: 12 }, (_, i) => {
-                const counter = document.getElementById(`counter-${i + 1}`);
-                return parseInt(counter?.value || 0, 10);
-            });
-            dcpSubmissionData.Counters = counters.reduce((acc, val, i) => {
-                acc[`counter-${i + 1}`] = val;
-                return acc;
-            }, {});
-
-            // Inspection-specific fields so kensaDB records the inspector/date/times
-            // (the server falls back to the production values if these are blank)
-            dcpSubmissionData.Inspection_Name = document.getElementById('Kensa Name')?.value || '';
-            dcpSubmissionData.Inspection_Date = document.getElementById('KDate')?.value || '';
-            dcpSubmissionData.Inspection_Time_start = document.getElementById('KStart Time')?.value || '';
-            dcpSubmissionData.Inspection_Time_end = document.getElementById('KEnd Time')?.value || '';
-        }
-
-        console.log("🚀 Submitting to new DCP route:", {
-            品番, 背番号, 工場, 設備, Worker_Name,
-            cycleCheckImages: uploadedImages.length,
-            maintenanceImages: maintenanceImages.length,
-            materialLabelImages: materialLabelImages.length, // ✅ Added logging for material labels
-            maintenanceRecords: maintenanceDataForSubmission.records.length,
-            isToggleChecked
-        });
-        
-        console.log('📋 Material label images being sent:', materialLabelImages.map(img => ({ 
-            id: img.id, 
-            size: (img.base64.length / 1024).toFixed(2) + ' KB',
-            description: img.description 
-        })));
-
-        updateUploadProgress(75, 'Submitting...');
-
-        // Submit to the new combined route
-        const dcpResponse = await fetch(`${serverURL}/submitToDCP`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(dcpSubmissionData)
-        });
-
-        if (!dcpResponse.ok) {
-            const errorData = await dcpResponse.json();
-            throw new Error(errorData.message || 'Failed to submit DCP data');
-        }
-
-        const dcpResult = await dcpResponse.json();
-        console.log("✅ DCP submission successful:", dcpResult);
-        updateUploadProgress(100, '');
-
-        // Log submit button action ONLY after successful submission
-        logTabletAction('Submit button pressed', 'Completed', { 
-            shotCount: shotInput.value,
-            品番,
-            背番号,
-            工場,
-            設備,
-            processQuantity: Process_Quantity,
-            totalNG: Total_NG
-        });
-        
-        // Clear session ONLY after successful submission
-        clearSessionID();
-
-        // Clear stop-call events so they are not re-submitted after the reload
-        if (typeof window.clearStopCallData === 'function') window.clearStopCallData();
-
-        setTimeout(() => {
-            uploadingModal.style.display = 'none'; scanAlertText.innerText = 'Form submitted successfully / 保存しました';
-            scanAlertModal.style.display = 'block'; document.body.classList.add('flash-green');
-            
-            // Auto-close after 5 seconds to prevent duplicate submissions
-            const autoCloseTimer = setTimeout(() => {
-                scanAlertModal.style.display = 'none'; document.body.classList.remove('flash-green');
-                resetAllSteps(); window.location.reload();
-            }, 5000);
-            
-            // Allow manual close by clicking the × button
-            document.getElementById('closeScanModalButton').onclick = function() {
-                clearTimeout(autoCloseTimer); // Cancel auto-close if user clicks manually
-                scanAlertModal.style.display = 'none'; document.body.classList.remove('flash-green');
-                resetAllSteps(); window.location.reload();
-            };
-        }, 3000);
-
-    } catch (error) {
-        console.error('Error during submission:', error);
-        uploadingModal.style.display = 'none'; scanAlertText.innerText = 'An error occurred. Please try again.';
-        scanAlertModal.style.display = 'block';
-        if (alertSound) { alertSound.muted = false; alertSound.volume = 1; alertSound.play().catch(console.error); }
-        document.body.classList.add('flash-red');
-        document.getElementById('closeScanModalButton').onclick = function() {
-            scanAlertModal.style.display = 'none'; alertSound.pause(); alertSound.currentTime = 0;
-            alertSound.muted = true; document.body.classList.remove('flash-red');
-        };
+      console.log(`📊 Prepared ${maintenanceImages.length} maintenance images for upload (compressed)`);
     }
+
+    // Prepare maintenance data structure (without photos - they'll be added by server)
+    const maintenanceDataForSubmission = {
+      records: maintenanceRecords.map(record => ({
+        id: record.id,
+        startTime: record.startTime,
+        endTime: record.endTime,
+        comment: record.comment,
+        timestamp: record.timestamp
+        // photos will be populated by the server after upload
+      })),
+      totalMinutes: totalTroubleMinutes,
+      totalHours: totalTroubleHours
+    };
+
+    console.log("📊 Maintenance data prepared for submission:", {
+      recordCount: maintenanceDataForSubmission.records.length,
+      totalImages: maintenanceImages.length,
+      totalMinutes: totalTroubleMinutes
+    });
+
+    let totalWorkHours = 0;
+    if (Time_start && Time_end) {
+      const startWork = new Date(`2000-01-01T${Time_start}:00`);
+      const endWork = new Date(`2000-01-01T${Time_end}:00`);
+      if (endWork > startWork) {
+        const workDiffMs = endWork - startWork;
+        const workHours = workDiffMs / (1000 * 60 * 60);
+        totalWorkHours = Math.max(0, workHours - totalBreakHours - totalTroubleHours);
+      }
+    }
+    console.log('Time Calculations:', {
+      totalBreakMinutes, totalBreakHours: totalBreakHours.toFixed(2),
+      totalMaintenanceMinutes: totalTroubleMinutes, totalMaintenanceHours: totalTroubleHours.toFixed(2),
+      workTimeWithoutBreakAndMaintenance: totalWorkHours.toFixed(2),
+      startTime: Time_start, endTime: Time_end, maintenanceRecordsCount: maintenanceRecords.length
+    });
+
+    if (!背番号) {
+      uploadingModal.style.display = 'none';
+      scanAlertText.innerText = '背番号が必要です。 / Sebanggo is required.';
+      scanAlertModal.style.display = 'block';
+      if (alertSound) { alertSound.muted = false; alertSound.volume = 1; alertSound.play().catch(console.error); }
+      document.body.classList.add('flash-red');
+      document.getElementById('closeScanModalButton').onclick = function () {
+        scanAlertModal.style.display = 'none'; alertSound.pause(); alertSound.currentTime = 0;
+        alertSound.muted = true; document.body.classList.remove('flash-red');
+      };
+      return;
+    }
+
+    const uploadedImages = await collectImagesForUpload();
+
+    // Process all material label photos from the new system with compression
+    const materialLabelImages = [];
+
+    console.log(`📸 Processing ${materialLabelPhotos.length} material label photos for submission`);
+    console.log('Material photos array:', materialLabelPhotos.map((p, i) => ({ index: i, id: p.id, timestamp: p.timestamp })));
+
+    // Read blobs from IndexedDB and convert to base64 for server upload
+    // Build a lookup map so we only call getAll() once
+    let idbRecordMap = {};
+    try {
+      const idbRecords = await materialLabelDB.getAll();
+      idbRecords.forEach(r => { idbRecordMap[r.id] = r; });
+    } catch (idbErr) {
+      console.error('⚠️ Could not read IndexedDB records for material label upload:', idbErr);
+    }
+
+    for (let i = 0; i < materialLabelPhotos.length; i++) {
+      const photo = materialLabelPhotos[i];
+      const record = idbRecordMap[photo.id];
+      if (!record || !record.blob) {
+        console.warn(`⚠️ Skipping material label photo ${i} - no blob in IndexedDB`);
+        continue;
+      }
+
+      const base64Only = await new Promise((res, rej) => {
+        const reader = new FileReader();
+        reader.onloadend = () => res(reader.result.split(',')[1]);
+        reader.onerror = rej;
+        reader.readAsDataURL(record.blob);
+      });
+
+      console.log(`✅ Material label ${i + 1}/${materialLabelPhotos.length}: ${(base64Only.length / 1024).toFixed(1)} KB`);
+
+      materialLabelImages.push({
+        base64: base64Only,
+        id: photo.id,
+        timestamp: photo.timestamp,
+        description: `材料ラベル ${i + 1}/${materialLabelPhotos.length}`
+      });
+      processedPhotos++;
+      updateUploadProgress(5 + (processedPhotos / Math.max(1, totalPhotos)) * 65, `Processing photo ${processedPhotos}/${totalPhotos}...`);
+    }
+
+    console.log(`📊 Total material label images prepared for upload: ${materialLabelImages.length}`);
+
+    // Fallback to legacy method if no photos in new system
+    if (materialLabelImages.length === 0) {
+      const makerPic = document.getElementById('材料ラベル');
+
+      // Only process if the image element exists and has content
+      if (makerPic && makerPic.src && makerPic.src !== '' && makerPic.src !== 'data:,' && makerPic.style.display !== 'none') {
+        try {
+          console.log("No photos in new system - Processing legacy material label image");
+          const response = await fetch(makerPic.src);
+          const blob = await response.blob();
+          const base64Data = await blobToBase64(blob);
+
+          // Add material label as a separate entry with timestamp for uniqueness
+          materialLabelImages.push({
+            base64: base64Data,
+            id: 'material-label-legacy-' + new Date().getTime(),
+            timestamp: new Date().getTime(),
+            description: '材料ラベル (Legacy)'
+          });
+
+          console.log(`Legacy material label image processed: ${(base64Data.length / 1024).toFixed(2)} KB`);
+        } catch (error) {
+          console.error("Error processing legacy material label image:", error);
+        }
+      } else {
+        console.warn("Material label image not available in either system");
+      }
+    }
+
+    // Prepare data for the new submitToDCP route
+    const dcpSubmissionData = {
+      品番, 背番号, 設備, Total: Total_PressDB, 工場, Worker_Name, Process_Quantity, Date: WorkDate,
+      Time_start, Time_end, 材料ロット, 疵引不良, 加工不良, その他, Total_NG, Spare, Comment,
+      Cycle_Time, ショット数, Break_Time_Data: breakTimeData,
+      Total_Break_Minutes: totalBreakMinutes, Total_Break_Hours: parseFloat(totalBreakHours.toFixed(2)),
+      Maintenance_Data: maintenanceDataForSubmission,
+      Total_Trouble_Minutes: totalTroubleMinutes, Total_Trouble_Hours: parseFloat(totalTroubleHours.toFixed(2)),
+      Total_Work_Hours: parseFloat(totalWorkHours.toFixed(2)),
+
+      // Stop / call-leader events (pressDB only). Tracks each time the leader was
+      // called during processing: who arrived, when, and how long the wait was.
+      StopCall: (typeof window.getStopCallData === 'function'
+        ? window.getStopCallData()
+        : { count: 0, totalWaitSeconds: 0, totalWaitMinutes: 0, records: [] }),
+
+      // Include image data
+      images: uploadedImages, // Cycle check images (existing logic)
+      maintenanceImages: maintenanceImages, // Maintenance images
+      materialLabelImages: materialLabelImages, // NEW: Special handling for material label
+
+      // Include toggle state and counter data for kensaDB
+      isToggleChecked: isToggleChecked
+    };
+
+    // Per-lot production tracking (pressDB only, additive): shots / meters /
+    // pieces per material lot. ショット数 is overwritten with the auto-summed
+    // total of all lots. The server spreads formData into pressDB only.
+    try {
+      const _lp = (typeof window.buildLotProductionPayload === 'function') ? window.buildLotProductionPayload() : null;
+      if (_lp) {
+        dcpSubmissionData.Lot_Details = _lp.Lot_Details;
+        dcpSubmissionData.Total_Meters = _lp.Total_Meters;
+        dcpSubmissionData.Total_Pieces = _lp.Total_Pieces;
+        if (_lp.totalShots > 0) dcpSubmissionData.ショット数 = _lp.totalShots;
+      }
+    } catch (e) { console.warn('Lot production payload build failed:', e); }
+
+    // Add counter + inspection data if toggle is checked (for kensaDB)
+    if (isToggleChecked) {
+      const counters = Array.from({ length: 12 }, (_, i) => {
+        const counter = document.getElementById(`counter-${i + 1}`);
+        return parseInt(counter?.value || 0, 10);
+      });
+      dcpSubmissionData.Counters = counters.reduce((acc, val, i) => {
+        acc[`counter-${i + 1}`] = val;
+        return acc;
+      }, {});
+
+      // Inspection-specific fields so kensaDB records the inspector/date/times
+      // (the server falls back to the production values if these are blank)
+      dcpSubmissionData.Inspection_Name = document.getElementById('Kensa Name')?.value || '';
+      dcpSubmissionData.Inspection_Date = document.getElementById('KDate')?.value || '';
+      dcpSubmissionData.Inspection_Time_start = document.getElementById('KStart Time')?.value || '';
+      dcpSubmissionData.Inspection_Time_end = document.getElementById('KEnd Time')?.value || '';
+    }
+
+    console.log("🚀 Submitting to new DCP route:", {
+      品番, 背番号, 工場, 設備, Worker_Name,
+      cycleCheckImages: uploadedImages.length,
+      maintenanceImages: maintenanceImages.length,
+      materialLabelImages: materialLabelImages.length, // ✅ Added logging for material labels
+      maintenanceRecords: maintenanceDataForSubmission.records.length,
+      isToggleChecked
+    });
+
+    console.log('📋 Material label images being sent:', materialLabelImages.map(img => ({
+      id: img.id,
+      size: (img.base64.length / 1024).toFixed(2) + ' KB',
+      description: img.description
+    })));
+
+    updateUploadProgress(75, 'Submitting...');
+
+    // Submit to the new combined route
+    const dcpResponse = await fetch(`${serverURL}/submitToDCP`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(dcpSubmissionData)
+    });
+
+    if (!dcpResponse.ok) {
+      const errorData = await dcpResponse.json();
+      throw new Error(errorData.message || 'Failed to submit DCP data');
+    }
+
+    const dcpResult = await dcpResponse.json();
+    console.log("✅ DCP submission successful:", dcpResult);
+    updateUploadProgress(100, '');
+
+    // Log submit button action ONLY after successful submission
+    logTabletAction('Submit button pressed', 'Completed', {
+      shotCount: shotInput.value,
+      品番,
+      背番号,
+      工場,
+      設備,
+      processQuantity: Process_Quantity,
+      totalNG: Total_NG
+    });
+
+    // Clear session ONLY after successful submission
+    clearSessionID();
+
+    // Clear stop-call events so they are not re-submitted after the reload
+    if (typeof window.clearStopCallData === 'function') window.clearStopCallData();
+
+    setTimeout(() => {
+      uploadingModal.style.display = 'none'; scanAlertText.innerText = 'Form submitted successfully / 保存しました';
+      scanAlertModal.style.display = 'block'; document.body.classList.add('flash-green');
+
+      // Auto-close after 5 seconds to prevent duplicate submissions
+      const autoCloseTimer = setTimeout(() => {
+        scanAlertModal.style.display = 'none'; document.body.classList.remove('flash-green');
+        resetAllSteps(); window.location.reload();
+      }, 5000);
+
+      // Allow manual close by clicking the × button
+      document.getElementById('closeScanModalButton').onclick = function () {
+        clearTimeout(autoCloseTimer); // Cancel auto-close if user clicks manually
+        scanAlertModal.style.display = 'none'; document.body.classList.remove('flash-green');
+        resetAllSteps(); window.location.reload();
+      };
+    }, 3000);
+
+  } catch (error) {
+    console.error('Error during submission:', error);
+    uploadingModal.style.display = 'none'; scanAlertText.innerText = 'An error occurred. Please try again.';
+    scanAlertModal.style.display = 'block';
+    if (alertSound) { alertSound.muted = false; alertSound.volume = 1; alertSound.play().catch(console.error); }
+    document.body.classList.add('flash-red');
+    document.getElementById('closeScanModalButton').onclick = function () {
+      scanAlertModal.style.display = 'none'; alertSound.pause(); alertSound.currentTime = 0;
+      alertSound.muted = true; document.body.classList.remove('flash-red');
+    };
+  }
 });
 
 // Image Collection with Base64 + Metadata (with compression for upload)
@@ -6754,9 +6754,9 @@ async function collectImagesForUpload() {
   console.log("Checking image elements:");
   for (const { imgId, label } of imageMappings) {
     const photoPreview = document.getElementById(imgId);
-    console.log(`Image element '${imgId}' (${label}): ${photoPreview ? 'Found' : 'Not found'}, ` + 
-                `Has src: ${photoPreview && photoPreview.src ? 'Yes' : 'No'}, ` +
-                `Display: ${photoPreview ? photoPreview.style.display : 'N/A'}`);
+    console.log(`Image element '${imgId}' (${label}): ${photoPreview ? 'Found' : 'Not found'}, ` +
+      `Has src: ${photoPreview && photoPreview.src ? 'Yes' : 'No'}, ` +
+      `Display: ${photoPreview ? photoPreview.style.display : 'N/A'}`);
   }
 
   // Process regular cycle check images (hatsumono and atomono) with compression
@@ -6764,31 +6764,31 @@ async function collectImagesForUpload() {
   for (const { imgId, label } of imageMappings) {
     const photoPreview = document.getElementById(imgId);
     // Skip if element doesn't exist, has no src, or is hidden
-    if (!photoPreview || !photoPreview.src || photoPreview.src === '' || photoPreview.src === 'data:,' || 
-        photoPreview.style.display === 'none') {
+    if (!photoPreview || !photoPreview.src || photoPreview.src === '' || photoPreview.src === 'data:,' ||
+      photoPreview.style.display === 'none') {
       console.log(`Skipping ${label} image: not available or hidden`);
       continue;
     }
 
     try {
       console.log(`Processing ${label} image from element: ${imgId}`);
-      
+
       // Get original image (should be a data URL)
       const originalDataURL = photoPreview.src;
       const originalSize = (originalDataURL.length / 1024).toFixed(2);
       console.log(`Original ${label}: ${originalSize} KB`);
-      
+
       // Compress for upload (80% quality, max 1024px)
       const compressedDataURL = await compressBase64Image(originalDataURL, 1024, 0.8);
       const compressedSize = (compressedDataURL.length / 1024).toFixed(2);
       console.log(`Compressed ${label}: ${compressedSize} KB`);
-      
+
       // Extract just the base64 part (remove data:image/jpeg;base64, prefix) for server upload
       const compressedBase64Only = compressedDataURL.split(',')[1] || compressedDataURL;
 
       // Create unique ID using label, timestamp, and index to prevent overwrites
       const uniqueId = `${imgId}-${Date.now()}-${imageIndex++}`;
-      
+
       imagesToUpload.push({
         base64: compressedBase64Only, // Server expects base64 without prefix
         label,
@@ -6801,13 +6801,13 @@ async function collectImagesForUpload() {
         sebanggo: selectedSebanggo,
         timestamp: Date.now() + imageIndex // Ensure unique timestamp by adding index
       });
-      
+
       console.log(`✅ Added ${label} to upload queue with unique ID: ${uniqueId}`);
     } catch (error) {
       console.error(`Error processing ${label} image:`, error);
     }
   }
-  
+
   // NOTE: Material label photos are processed separately in materialLabelImages array
   // and sent via dcpSubmissionData.materialLabelImages, not in the images array.
   // This avoids duplicate processing and ensures all photos are uploaded correctly.
@@ -6832,15 +6832,15 @@ function toggleInputs() {
     // Element doesn't exist (e.g., in DCP Grouping.html), skip this function
     return;
   }
-  
+
   var isChecked = enableInputsCheckbox.checked;
-  
+
   // Log checkbox toggle action
   logTabletAction('Kensa mode checkbox toggled', isChecked ? 'Completed' : 'Reset', { kensaEnabled: isChecked });
-  
+
   var inputs = document.querySelectorAll('#Kensa\\ Name, #KDate, #KStart\\ Time, #KEnd\\ Time,.plus-btn,.minus-btn, textarea[name="Comments2"], #在庫');
 
-  inputs.forEach(function(input) {
+  inputs.forEach(function (input) {
     input.disabled = !isChecked;
   });
 
@@ -6853,7 +6853,7 @@ function toggleInputs() {
   }
 
   // Ensure plus and minus buttons of 18, 19, and 20 remain functional
-  [18, 19, 20].forEach(function(counterId) {
+  [18, 19, 20].forEach(function (counterId) {
     var plusBtn = document.querySelector(`#counter-box-${counterId} .plus-btn`);
     var minusBtn = document.querySelector(`#counter-box-${counterId} .minus-btn`);
     if (plusBtn) plusBtn.disabled = false;
@@ -6894,17 +6894,17 @@ function toggleInputs() {
 function updateSheetStatus(selectedValue, machineName) {
   const selectedFactory = document.getElementById('hidden工場').value;
   fetch(googleSheetLiveStatusURL, {
-      method: 'POST',
-      mode: 'no-cors',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded'
-      },
-      body: new URLSearchParams({
-        'current': selectedValue,
-        'machine': machineName,
-        'factory': selectedFactory
-      })
+    method: 'POST',
+    mode: 'no-cors',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded'
+    },
+    body: new URLSearchParams({
+      'current': selectedValue,
+      'machine': machineName,
+      'factory': selectedFactory
     })
+  })
     .then(response => response.text())
     .then(data => {
       console.log(data);
@@ -7051,7 +7051,7 @@ function updateSendToMachineProgressMessage(message) {
 async function sendtoNC(selectedValue) {
 
   //sendCommand("off"); // this is for arduino (emergency button)
-  
+
   // Validate grouped shot inputs if present (REMOVED - validation happens in Step 3 modal workflow)
   // const groupedInputs = document.querySelectorAll('.grouped-shot-input');
   // if (groupedInputs.length > 0) {
@@ -7073,7 +7073,7 @@ async function sendtoNC(selectedValue) {
   //     return;
   //   }
   // }
-  
+
   const ipAddress = document.getElementById('ipInfo').value;
   console.log(ipAddress);
   const currentSebanggo = document.getElementById('sub-dropdown').value;
@@ -7104,19 +7104,19 @@ async function sendtoNC(selectedValue) {
   // Check if this is grouped machines (by page detection OR comma-separated IPs)
   const hasMultipleIPs = ipAddress && ipAddress.includes(',');
   const hasGroupedMachines = Object.keys(groupedMachineIPs).length > 1;
-  
+
   if ((isGroupedMachinePage && hasGroupedMachines) || hasMultipleIPs) {
     // Ensure we have machine IPs populated
     let machineIPMap = {};
-    
+
     if (hasGroupedMachines) {
       machineIPMap = groupedMachineIPs;
     } else if (hasMultipleIPs) {
       // Parse comma-separated IPs and machines
       const ips = ipAddress.split(',').map(ip => ip.trim());
-      const machines = groupedMachines.length > 0 ? groupedMachines : 
-                      document.getElementById('process').value.split(',').map(m => m.trim());
-      
+      const machines = groupedMachines.length > 0 ? groupedMachines :
+        document.getElementById('process').value.split(',').map(m => m.trim());
+
       // Create mapping
       machines.forEach((machine, index) => {
         if (ips[index]) {
@@ -7124,7 +7124,7 @@ async function sendtoNC(selectedValue) {
         }
       });
     }
-    
+
     // Send only to the machine(s) assigned in this lot-change cycle (each grouped
     // machine has its own lot timeline). Falls back to the single chosen machine.
     const _chosen = (window.__lotCycleMachinesDone && window.__lotCycleMachinesDone.length)
@@ -7144,27 +7144,27 @@ async function sendtoNC(selectedValue) {
     // Store machine group globally for individual send modal
     window.currentMachineGroup = Object.entries(machineIPMap).map(([name, ip]) => ({ name, ip }));
     console.log("💾 Stored currentMachineGroup:", window.currentMachineGroup);
-    
+
     updateSendToMachineProgressMessage(`Sending to ${Object.keys(machineIPMap).length} machines`);
-    
+
     // Send command to each machine
     const sendPromises = Object.entries(machineIPMap).map(async ([machine, ip]) => {
       const url = `http://${ip}:5000/request?filename=${currentSebanggo}.pce`;
-      
+
       try {
         console.log(`📤 Sending to ${machine} (${ip}): ${url}`);
-        
+
         const response = await fetch(url, {
           method: 'GET',
           mode: 'no-cors'
         });
-        
+
         console.log(`✅ Command sent successfully to ${machine}`);
         return { machine, success: true };
-        
+
       } catch (error) {
         console.error(`❌ Failed to send command to ${machine}:`, error);
-        
+
         // Fallback: Try opening in new tab if fetch fails
         console.log(`Trying fallback method for ${machine}...`);
         try {
@@ -7179,43 +7179,43 @@ async function sendtoNC(selectedValue) {
         }
       }
     });
-    
+
     // Wait for all commands to complete
     try {
       const results = await Promise.all(sendPromises);
       const successCount = results.filter(r => r.success).length;
       console.log(`✅ Sent to ${successCount}/${results.length} machines successfully`);
-      
+
       // Check if any failed
       const failed = results.filter(r => !r.success);
       if (failed.length > 0) {
         console.warn('⚠️ Failed machines:', failed.map(f => f.machine).join(', '));
       }
-      
+
       // Per-machine status is now handled inline in the completedSendPanel chips.
       // No separate modal needed.
-      
+
     } catch (error) {
       console.error('Error sending to multiple machines:', error);
     }
-    
+
   } else {
     // Single machine - original logic
     const url = `http://${ipAddress}:5000/request?filename=${currentSebanggo}.pce`;
-    
+
     try {
       console.log(`Sending command to mini PC: ${url}`);
-      
+
       const response = await fetch(url, {
         method: 'GET',
         mode: 'no-cors'
       });
-      
+
       console.log('Command sent successfully to mini PC');
-      
+
     } catch (error) {
       console.error('Failed to send command to mini PC:', error);
-      
+
       // Fallback: Try opening in new tab if fetch fails
       console.log('Fetch failed, trying fallback method...');
       const newTab = window.open(url, '_blank');
@@ -7228,7 +7228,7 @@ async function sendtoNC(selectedValue) {
 
 // Send to NC button - triggers 3-step modal workflow OR individual send modal
 // (Legacy trigger; redesigned scan tab uses the always-visible Step 1/2/3 cards.)
-document.getElementById('sendtoNC')?.addEventListener('click', async function() {
+document.getElementById('sendtoNC')?.addEventListener('click', async function () {
   if (isSendToMachineCooldownActive()) {
     updateSendToMachineCooldownUI();
     return;
@@ -7237,22 +7237,22 @@ document.getElementById('sendtoNC')?.addEventListener('click', async function() 
   // Check if this is a single machine (DCP iReporter) or grouped machines (DCP Grouping)
   const machineName = document.getElementById('process').value;
   const isSingleMachine = !isGroupedMachinePage && !machineName.includes(',');
-  
+
   if (isSingleMachine) {
     // Single machine (DCP iReporter) - send directly
     const currentSebanggo = document.getElementById('sub-dropdown').value;
-    
+
     if (!currentSebanggo) {
       showAlert('背番号を選んでください / Please select sebanggo first');
       return;
     }
-    
+
     // Log send to machine action (main button)
     logTabletAction('Send to machine pressed (Main button)', 'in-progress', {
       sebanggo: currentSebanggo,
       source: 'Main Send to Machine button'
     }).catch(error => console.error('Failed to log main send to machine action:', error));
-    
+
     // Send directly to machine
     await sendtoNC(currentSebanggo);
   } else {
@@ -7340,18 +7340,18 @@ for (let i = 18; i <= 20; i++) {
 function getIP() {
   const ipInput = document.getElementById('ipInfo');
   const machineName = document.getElementById('process').value;
-  
+
   // Check if this is grouped machines (either by page detection or comma in machine name)
-  const hasMultipleMachines = (isGroupedMachinePage && groupedMachines.length > 1) || 
-                              (machineName && machineName.includes(','));
-  
+  const hasMultipleMachines = (isGroupedMachinePage && groupedMachines.length > 1) ||
+    (machineName && machineName.includes(','));
+
   if (hasMultipleMachines) {
     // Ensure groupedMachines array is populated
     const machines = groupedMachines.length > 0 ? groupedMachines : machineName.split(',').map(m => m.trim());
     console.log("🔵 Fetching IPs for grouped machines:", machines);
-    
+
     // Fetch IP for each machine individually
-    const ipPromises = machines.map(machine => 
+    const ipPromises = machines.map(machine =>
       fetch(`${ipURL}?filter=${machine}`)
         .then(response => {
           if (!response.ok) {
@@ -7370,21 +7370,21 @@ function getIP() {
           return { machine, ip: null };
         })
     );
-    
+
     // Wait for all IPs to be fetched
     Promise.all(ipPromises).then(results => {
       console.log("✅ All IPs fetched:", groupedMachineIPs);
       // Store comma-separated IPs in the hidden input for reference
       const ips = results.map(r => r.ip).filter(ip => ip).join(',');
       ipInput.value = ips;
-      
+
       // Store machine group globally for individual send modal
       window.currentMachineGroup = results
         .filter(r => r.ip) // Only include machines with valid IPs
         .map(r => ({ name: r.machine, ip: r.ip }));
       console.log("💾 Stored currentMachineGroup on page load:", window.currentMachineGroup);
     });
-    
+
   } else {
     // Single machine - original logic
     fetch(`${ipURL}?filter=${machineName}`)
@@ -7410,7 +7410,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Log Comments1 (main comments) - only when focus leaves the textarea
   const comments1 = document.querySelector('textarea[name="Comments1"]');
   if (comments1) {
-    comments1.addEventListener('blur', function() {
+    comments1.addEventListener('blur', function () {
       // Only log if there's actual content
       if (this.value.trim().length > 0) {
         logTabletAction('Comments entered', 'in-progress', {
@@ -7421,11 +7421,11 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   }
-  
+
   // Log Comments2 (kensa section comments) - only when focus leaves the textarea
   const comments2 = document.querySelector('textarea[name="Comments2"]');
   if (comments2) {
-    comments2.addEventListener('blur', function() {
+    comments2.addEventListener('blur', function () {
       // Only log if there's actual content
       if (this.value.trim().length > 0) {
         logTabletAction('Kensa comments entered', 'in-progress', {
@@ -7443,7 +7443,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const regularShotInput = document.getElementById('shot');
   if (regularShotInput && !regularShotInput.readOnly) {
     // Only add listener if it's not in grouped mode (readOnly is set in grouped mode)
-    regularShotInput.addEventListener('input', function() {
+    regularShotInput.addEventListener('input', function () {
       logTabletAction('Shot count set', 'in-progress', {
         shotCount: this.value
       });
@@ -7456,14 +7456,14 @@ function createGroupedShotInputs() {
   console.log("🔵 ========== createGroupedShotInputs called ==========");
   console.log("🔵 Current URL:", window.location.href);
   console.log("🔵 Pathname:", window.location.pathname);
-  
+
   const shotSection = document.getElementById('shotCountSection');
-  
+
   if (!shotSection) {
     console.log("❌ shotCountSection not found!");
     return;
   }
-  
+
   console.log("✅ shotCountSection found");
   console.log("🔵 isGroupedMachinePage:", isGroupedMachinePage);
   console.log("🔵 groupedMachines:", groupedMachines);
@@ -7474,10 +7474,10 @@ function createGroupedShotInputs() {
   // Check if this is a grouped machine page with multiple machines
   if (isGroupedMachinePage && groupedMachines.length > 1) {
     console.log("✅✅✅ Condition met! Creating shot count inputs for grouped machines:", groupedMachines);
-    
+
     // Clear existing content
     shotSection.innerHTML = '';
-    
+
     // Add title
     const title = document.createElement('label');
     title.style.cssText = 'display: block; font-weight: 700; margin-bottom: 15px; color: var(--text-main, #101828);';
@@ -7506,40 +7506,40 @@ function createGroupedShotInputs() {
       input.value = ''; // Start with blank value
       input.readOnly = true; // Make readonly so keypad is used
       input.style.cssText = 'flex: 1; padding: 12px; border: 1px solid var(--border-strong, #D0D5DD); border-radius: 8px; cursor: pointer; background-color: var(--bg-surface, #fff); color: var(--text-main, #101828); font-weight: 700;';
-      
+
       // Restore value from localStorage
       const savedValue = localStorage.getItem(`${uniquePrefix}shot-${machine}`);
       if (savedValue) {
         input.value = savedValue;
       }
-      
+
       // Add click event to open keypad
-      input.addEventListener('click', function() {
+      input.addEventListener('click', function () {
         window.openDirectNumericKeypad(`shot-${machine}`);
       });
-      
+
       // Add input event listener for when keypad updates the value
-      input.addEventListener('input', function() {
+      input.addEventListener('input', function () {
         // Save to localStorage
         localStorage.setItem(`${uniquePrefix}shot-${machine}`, this.value);
-        
+
         // Log shot count change for this machine
         logTabletAction(`Shot count set for ${machine}`, 'in-progress', {
           machine: machine,
           shotCount: this.value
         });
-        
+
         // Update total
         updateTotalShot();
       });
-      
+
       machineDiv.appendChild(label);
       machineDiv.appendChild(input);
       container.appendChild(machineDiv);
     });
-    
+
     shotSection.appendChild(container);
-    
+
     // Add total display
     const totalDiv = document.createElement('div');
     totalDiv.style.cssText = 'display: flex; align-items: center; gap: 10px; background: var(--brand-soft, #E7F7EF); padding: 12px; border-radius: 10px; border: 1px solid var(--brand, #12B76A); margin-top: 10px;';
@@ -7555,14 +7555,14 @@ function createGroupedShotInputs() {
     totalInput.readOnly = true;
     totalInput.value = '0';
     totalInput.style.cssText = 'flex: 1; padding: 12px; border: 1px solid var(--brand, #12B76A); border-radius: 8px; background: var(--bg-surface, #fff); font-weight: 800; font-size: 1rem; color: var(--text-main, #101828);';
-    
+
     totalDiv.appendChild(totalLabel);
     totalDiv.appendChild(totalInput);
     shotSection.appendChild(totalDiv);
-    
+
     // Initial calculation to set total from restored values
     updateTotalShot();
-    
+
   } else {
     // Single machine - keep original input
     console.log("❌ Condition NOT met - using standard shot input");
@@ -7575,18 +7575,18 @@ function createGroupedShotInputs() {
 function updateTotalShot() {
   const groupedInputs = document.querySelectorAll('.grouped-shot-input');
   let total = 0;
-  
+
   groupedInputs.forEach(input => {
     const value = parseInt(input.value, 10) || 0;
     total += value;
   });
-  
+
   const totalInput = document.getElementById('shot');
   if (totalInput) {
     totalInput.value = total;
     // Save total to localStorage
     localStorage.setItem(`${uniquePrefix}shot`, total);
-    
+
     // Log total shot count update
     logTabletAction('Total shot count calculated', 'in-progress', {
       totalShot: total,
@@ -7596,7 +7596,7 @@ function updateTotalShot() {
       }))
     });
   }
-  
+
   console.log(`📊 Shot count updated - Total: ${total}`);
 }
 
@@ -7745,7 +7745,7 @@ function showPopup() {
 
     var button = document.createElement('button');
     button.textContent = 'Send to Machine';
-    button.onclick = function() {
+    button.onclick = function () {
       sendtoNCButtonisPressed = true;
 
       // Save to localStorage with a unique key format
@@ -7865,10 +7865,10 @@ async function openMaintenanceCamera() {
 
   // Camera constraints
   const constraints = {
-    video: { 
-      facingMode: { ideal: "environment" }, 
-      width: { ideal: 1280 }, 
-      height: { ideal: 720 } 
+    video: {
+      facingMode: { ideal: "environment" },
+      width: { ideal: 1280 },
+      height: { ideal: 720 }
     },
     audio: false
   };
@@ -7923,7 +7923,7 @@ async function openMaintenanceCamera() {
     const freshCanvas = document.createElement('canvas');
     freshCanvas.width = videoFeed.videoWidth;
     freshCanvas.height = videoFeed.videoHeight;
-    
+
     console.log(`🔍 DCP Fresh canvas created: ${freshCanvas.width}x${freshCanvas.height} (video: ${videoFeed.videoWidth}x${videoFeed.videoHeight})`);
 
     const context = freshCanvas.getContext('2d');
@@ -7934,7 +7934,7 @@ async function openMaintenanceCamera() {
     }
 
     context.drawImage(videoFeed, 0, 0, freshCanvas.width, freshCanvas.height);
-    
+
     // Use the EXACT same approach as the working test
     const imageDataURL = freshCanvas.toDataURL('image/jpeg', 0.8);
     console.log(`🔍 DCP Canvas capture:`, {
@@ -7943,7 +7943,7 @@ async function openMaintenanceCamera() {
       dataURLLength: imageDataURL.length,
       startsWithDataURL: imageDataURL.startsWith('data:image/jpeg;base64,')
     });
-    
+
     // Validate data URL format
     if (!imageDataURL.startsWith('data:image/jpeg;base64,')) {
       console.error('❌ Invalid data URL format:', imageDataURL.substring(0, 100));
@@ -7951,14 +7951,14 @@ async function openMaintenanceCamera() {
       closeMaintenanceCamera(cameraModal);
       return;
     }
-    
+
     // Extract clean base64 data WITHOUT the data URL prefix (same as test)
     const base64Data = imageDataURL.split(',')[1];
     console.log(`🔍 DCP Extracted clean base64 length: ${base64Data.length}`);
     console.log(`🔍 DCP Base64 first 50 chars: ${base64Data.substring(0, 50)}`);
     console.log(`🔍 DCP Using video dimensions: ${videoFeed.videoWidth}x${videoFeed.videoHeight}`);
     console.log(`🔍 DCP Canvas dimensions: ${captureCanvas.width}x${captureCanvas.height}`);
-    
+
     // Validate base64 data
     if (!base64Data || base64Data.length === 0) {
       console.error('❌ Empty base64 data');
@@ -7972,12 +7972,12 @@ async function openMaintenanceCamera() {
       const buffer = atob(base64Data);
       console.log(`🔍 DCP Client validation: Successfully decoded ${buffer.length} bytes`);
       console.log(`🔍 DCP Buffer first 10 bytes: [${Array.from(buffer.slice(0, 10)).map(b => b.charCodeAt(0)).join(', ')}]`);
-      
+
       // Check JPEG headers
       const firstByte = buffer.charCodeAt(0);
       const secondByte = buffer.charCodeAt(1);
       console.log(`🔍 DCP JPEG header check: [${firstByte}, ${secondByte}] (should be [255, 216])`);
-      
+
       if (firstByte !== 255 || secondByte !== 216) {
         console.warn('⚠️ DCP WARNING: Invalid JPEG header detected!');
       } else {
@@ -7992,7 +7992,7 @@ async function openMaintenanceCamera() {
 
     // Add photo with clean base64 data (same as test)
     const success = addMaintenancePhoto(base64Data);
-    
+
     if (success) {
       console.log('✅ Photo successfully added to maintenance photos');
       // Close camera after successful capture
@@ -8021,12 +8021,12 @@ function closeMaintenanceCamera(cameraModal) {
     maintenanceCameraStream.getTracks().forEach(track => track.stop());
     maintenanceCameraStream = null;
   }
-  
+
   const videoFeed = document.getElementById('maintenanceVideoFeed');
   if (videoFeed) {
     videoFeed.srcObject = null;
   }
-  
+
   if (cameraModal && cameraModal.parentNode) {
     document.body.removeChild(cameraModal);
   }
@@ -8039,7 +8039,7 @@ function createNumericKeypadModal() {
   // This function is intentionally left empty to avoid creating duplicate keypads
   console.log("Using direct HTML implementation instead of createNumericKeypadModal");
   return;
-  
+
   // Create header
   const header = document.createElement('div');
   header.style.cssText = `
@@ -8048,11 +8048,11 @@ function createNumericKeypadModal() {
     align-items: center;
     margin-bottom: 15px;
   `;
-  
+
   // Original implementation removed to avoid creating duplicate keypads
-  
+
   // Original implementation removed to avoid creating duplicate keypads
-  
+
   // Original implementation removed to avoid creating duplicate keypads
 }
 
@@ -8092,24 +8092,24 @@ function confirmNumericInput() {
 function initNumericKeypad() {
   // We're now only using the direct implementation
   console.log("Numeric keypad initialization using direct implementation only");
-  
+
   // No need to do anything here as the shot input is already configured in the load event handler
 }
 
 // Define direct keypad functions in the global scope first
-window.openDirectNumericKeypad = function(inputId, isNewEntryMode = false) {
+window.openDirectNumericKeypad = function (inputId, isNewEntryMode = false) {
   window.currentDirectInputId = inputId;
   window.isNewEntryMode = isNewEntryMode; // Store the mode
   const modal = document.getElementById('numericKeypadModalDirect');
   const display = document.getElementById('numericDisplayDirect');
   const currentInput = document.getElementById(inputId);
-  
+
   if (modal && display && currentInput) {
     // If new entry mode, start with empty display, otherwise show current value
     display.value = isNewEntryMode ? '' : (currentInput.value || '');
     modal.style.display = 'block';
     document.body.style.overflow = 'hidden';
-    
+
     // Update keypad title based on which input field was clicked
     const keypadTitle = modal.querySelector('h2');
     if (keypadTitle) {
@@ -8121,7 +8121,7 @@ window.openDirectNumericKeypad = function(inputId, isNewEntryMode = false) {
         keypadTitle.textContent = '加工数 (良品) + NG:を入力';
       }
     }
-    
+
     // Show/hide the hyphen button based on input field
     const hyphenButton = document.getElementById('hyphenButton');
     if (hyphenButton) {
@@ -8131,12 +8131,12 @@ window.openDirectNumericKeypad = function(inputId, isNewEntryMode = false) {
         hyphenButton.style.display = 'none';
       }
     }
-    
+
     // Setup keyboard event handling for the keypad
-    window.directKeypadKeydownHandler = function(event) {
+    window.directKeypadKeydownHandler = function (event) {
       if (modal.style.display === 'block') {
         event.preventDefault(); // Prevent default keyboard behavior
-        
+
         if (event.key >= '0' && event.key <= '9') {
           window.addToDirectNumericDisplay(event.key);
         } else if (event.key === 'Backspace') {
@@ -8154,19 +8154,19 @@ window.openDirectNumericKeypad = function(inputId, isNewEntryMode = false) {
         }
       }
     };
-    
+
     // Add the keyboard event listener
     document.addEventListener('keydown', window.directKeypadKeydownHandler);
   }
 };
 
-window.closeDirectNumericKeypad = function() {
+window.closeDirectNumericKeypad = function () {
   const modal = document.getElementById('numericKeypadModalDirect');
   if (modal) {
     modal.style.display = 'none';
     window.currentDirectInputId = null;
     document.body.style.overflow = 'auto';
-    
+
     // Remove the keyboard event handler
     if (window.directKeypadKeydownHandler) {
       document.removeEventListener('keydown', window.directKeypadKeydownHandler);
@@ -8175,36 +8175,36 @@ window.closeDirectNumericKeypad = function() {
   }
 };
 
-window.addToDirectNumericDisplay = function(digit) {
+window.addToDirectNumericDisplay = function (digit) {
   const display = document.getElementById('numericDisplayDirect');
   if (display) {
     display.value += digit;
   }
 };
 
-window.clearDirectNumericDisplay = function() {
+window.clearDirectNumericDisplay = function () {
   const display = document.getElementById('numericDisplayDirect');
   if (display) {
     display.value = '';
   }
 };
 
-window.backspaceDirectNumericDisplay = function() {
+window.backspaceDirectNumericDisplay = function () {
   const display = document.getElementById('numericDisplayDirect');
   if (display) {
     display.value = display.value.slice(0, -1);
   }
 };
 
-window.confirmDirectNumericInput = function() {
+window.confirmDirectNumericInput = function () {
   if (!window.currentDirectInputId) return;
-  
+
   const display = document.getElementById('numericDisplayDirect');
   const targetInput = document.getElementById(window.currentDirectInputId);
-  
+
   if (display && targetInput) {
     const value = display.value;
-    
+
     // Different validation based on input type
     if (window.currentDirectInputId === '材料ロット') {
       // For material lot, allow numbers, hyphens, spaces, and blank values
@@ -8243,7 +8243,7 @@ window.confirmDirectNumericInput = function() {
         return;
       }
     }
-    
+
     // Handle new entry mode for 材料ロット
     if (window.isNewEntryMode && window.currentDirectInputId === '材料ロット') {
       // In new entry mode, append the new lot to existing lots with comma
@@ -8260,35 +8260,35 @@ window.confirmDirectNumericInput = function() {
       // Normal mode - replace the value
       targetInput.value = value;
     }
-    
+
     // Get the current uniquePrefix for localStorage
     const pageName = location.pathname.split('/').pop();
     const currentSelectedFactory = document.getElementById('selected工場')?.value;
     const selectedMachine = document.getElementById('process')?.value;
     const uniquePrefix = `${pageName}_${currentSelectedFactory}_${selectedMachine}_`;
-    
+
     // Save to localStorage with the unique key format
     const key = `${uniquePrefix}${targetInput.id}`;
     localStorage.setItem(key, targetInput.value);
-    
+
     // Log the input action for shot count
     if (window.currentDirectInputId === 'shot') {
       logTabletAction('ショット数 input', 'Completed', { shotCount: targetInput.value });
     }
-    
+
     // Trigger the input event to handle any event listeners
     const event = new Event('input', { bubbles: true });
     targetInput.dispatchEvent(event);
-    
+
     window.closeDirectNumericKeypad();
   }
 };
 
 // Run initialization after page is fully loaded to ensure it runs after other DOM events
-window.addEventListener('load', function() {
+window.addEventListener('load', function () {
   // Update processing time lock statuses
   updateAllProcessingTimeLockStatus();
-  
+
   // Create a completely different implementation of the modal as direct HTML
   const modalHTML = `
     <div id="numericKeypadModalDirect" style="
@@ -8353,12 +8353,12 @@ window.addEventListener('load', function() {
       </div>
     </div>
   `;
-  
+
   // Inject the HTML directly into the body
   const modalContainer = document.createElement('div');
   modalContainer.innerHTML = modalHTML;
   document.body.appendChild(modalContainer.firstElementChild);
-  
+
   // Add number buttons dynamically
   const keypadContainer = document.getElementById('keypadContainerDirect');
   if (keypadContainer) {
@@ -8367,7 +8367,7 @@ window.addEventListener('load', function() {
       const btn = document.createElement('button');
       btn.textContent = i.toString();
       const digit = i.toString(); // Capture the current value in a closure
-      btn.onclick = function() { window.addToDirectNumericDisplay(digit); };
+      btn.onclick = function () { window.addToDirectNumericDisplay(digit); };
       btn.style.cssText = `
         padding: 15px;
         font-size: 24px;
@@ -8378,19 +8378,19 @@ window.addEventListener('load', function() {
         transition: background-color 0.2s;
       `;
       // Add touch feedback
-      btn.addEventListener('touchstart', function() {
+      btn.addEventListener('touchstart', function () {
         this.style.backgroundColor = '#d0d0d0';
       });
-      btn.addEventListener('touchend', function() {
+      btn.addEventListener('touchend', function () {
         this.style.backgroundColor = '#f1f1f1';
       });
       keypadContainer.appendChild(btn);
     }
-    
+
     // Add C, 0, and backspace buttons
     const clearBtn = document.createElement('button');
     clearBtn.textContent = 'C';
-    clearBtn.onclick = function() { window.clearDirectNumericDisplay(); };
+    clearBtn.onclick = function () { window.clearDirectNumericDisplay(); };
     clearBtn.style.cssText = `
       padding: 15px;
       font-size: 24px;
@@ -8401,16 +8401,16 @@ window.addEventListener('load', function() {
       transition: background-color 0.2s;
     `;
     // Add touch feedback
-    clearBtn.addEventListener('touchstart', function() {
+    clearBtn.addEventListener('touchstart', function () {
       this.style.backgroundColor = '#ff9999';
     });
-    clearBtn.addEventListener('touchend', function() {
+    clearBtn.addEventListener('touchend', function () {
       this.style.backgroundColor = '#ffcccc';
     });
-    
+
     const zeroBtn = document.createElement('button');
     zeroBtn.textContent = '0';
-    zeroBtn.onclick = function() { window.addToDirectNumericDisplay('0'); };
+    zeroBtn.onclick = function () { window.addToDirectNumericDisplay('0'); };
     zeroBtn.style.cssText = `
       padding: 15px;
       font-size: 24px;
@@ -8421,16 +8421,16 @@ window.addEventListener('load', function() {
       transition: background-color 0.2s;
     `;
     // Add touch feedback
-    zeroBtn.addEventListener('touchstart', function() {
+    zeroBtn.addEventListener('touchstart', function () {
       this.style.backgroundColor = '#d0d0d0';
     });
-    zeroBtn.addEventListener('touchend', function() {
+    zeroBtn.addEventListener('touchend', function () {
       this.style.backgroundColor = '#f1f1f1';
     });
-    
+
     const backBtn = document.createElement('button');
     backBtn.innerHTML = '&#9003;';
-    backBtn.onclick = function() { window.backspaceDirectNumericDisplay(); };
+    backBtn.onclick = function () { window.backspaceDirectNumericDisplay(); };
     backBtn.style.cssText = `
       padding: 15px;
       font-size: 24px;
@@ -8441,18 +8441,18 @@ window.addEventListener('load', function() {
       transition: background-color 0.2s;
     `;
     // Add touch feedback
-    backBtn.addEventListener('touchstart', function() {
+    backBtn.addEventListener('touchstart', function () {
       this.style.backgroundColor = '#d0d0d0';
     });
-    backBtn.addEventListener('touchend', function() {
+    backBtn.addEventListener('touchend', function () {
       this.style.backgroundColor = '#f1f1f1';
     });
-    
+
     // Create hyphen button for material lot input
     const hyphenBtn = document.createElement('button');
     hyphenBtn.textContent = '-';
     hyphenBtn.id = 'hyphenButton';
-    hyphenBtn.onclick = function() { window.addToDirectNumericDisplay('-'); };
+    hyphenBtn.onclick = function () { window.addToDirectNumericDisplay('-'); };
     hyphenBtn.style.cssText = `
       padding: 15px;
       font-size: 24px;
@@ -8464,18 +8464,18 @@ window.addEventListener('load', function() {
       display: none; // Initially hidden, shown only for material lot input
     `;
     // Add touch feedback
-    hyphenBtn.addEventListener('touchstart', function() {
+    hyphenBtn.addEventListener('touchstart', function () {
       this.style.backgroundColor = '#c0c0ff';
     });
-    hyphenBtn.addEventListener('touchend', function() {
+    hyphenBtn.addEventListener('touchend', function () {
       this.style.backgroundColor = '#e0e0ff';
     });
-    
+
     // Create space button
     const spaceBtn = document.createElement('button');
     spaceBtn.textContent = 'Space';
     spaceBtn.id = 'spaceButton';
-    spaceBtn.onclick = function() { window.addToDirectNumericDisplay(' '); };
+    spaceBtn.onclick = function () { window.addToDirectNumericDisplay(' '); };
     spaceBtn.style.cssText = `
       padding: 15px;
       font-size: 20px;
@@ -8486,13 +8486,13 @@ window.addEventListener('load', function() {
       transition: background-color 0.2s;
     `;
     // Add touch feedback
-    spaceBtn.addEventListener('touchstart', function() {
+    spaceBtn.addEventListener('touchstart', function () {
       this.style.backgroundColor = '#c0ffd8';
     });
-    spaceBtn.addEventListener('touchend', function() {
+    spaceBtn.addEventListener('touchend', function () {
       this.style.backgroundColor = '#e0ffec';
     });
-    
+
     // Append all buttons
     keypadContainer.appendChild(clearBtn);
     keypadContainer.appendChild(zeroBtn);
@@ -8500,85 +8500,85 @@ window.addEventListener('load', function() {
     keypadContainer.appendChild(hyphenBtn); // Add hyphen button to the keypad
     keypadContainer.appendChild(spaceBtn); // Add space button to the keypad
   }
-  
+
   // Functions have been moved to the global scope before the load event
-  
+
   // Configure the shot input with the direct keypad
   const shotInput = document.getElementById('shot');
   if (shotInput) {
     shotInput.readOnly = true;
-    
+
     // Use a more robust event attachment
     if (shotInput.addEventListener) {
-      shotInput.addEventListener('click', function() {
+      shotInput.addEventListener('click', function () {
         window.openDirectNumericKeypad('shot');
       });
     } else {
       // Fallback for older browsers
-      shotInput.onclick = function() {
+      shotInput.onclick = function () {
         window.openDirectNumericKeypad('shot');
       };
     }
-    
+
     // Styling handled by the .tap-field CSS class (uniform tap-to-open look)
     shotInput.classList.add('tap-field');
 
     console.log('Shot input configured with direct keypad');
   }
-  
+
   // Configure ProcessQuantity input with the direct keypad
   const processQuantityInput = document.getElementById('ProcessQuantity');
   if (processQuantityInput) {
     processQuantityInput.readOnly = true;
-    
+
     // Use a more robust event attachment
     if (processQuantityInput.addEventListener) {
-      processQuantityInput.addEventListener('click', function() {
+      processQuantityInput.addEventListener('click', function () {
         window.openDirectNumericKeypad('ProcessQuantity');
       });
     } else {
       // Fallback for older browsers
-      processQuantityInput.onclick = function() {
+      processQuantityInput.onclick = function () {
         window.openDirectNumericKeypad('ProcessQuantity');
       };
     }
-    
+
     // Styling handled by the .tap-field CSS class (uniform tap-to-open look)
     processQuantityInput.classList.add('tap-field');
 
     console.log('ProcessQuantity input configured with direct keypad');
   }
-  
+
   // Configure 在庫 (Spare) input with the direct keypad
   const spareInput = document.getElementById('在庫');
   if (spareInput) {
     spareInput.readOnly = true;
-    
+
     // Use a more robust event attachment
     if (spareInput.addEventListener) {
-      spareInput.addEventListener('click', function() {
+      spareInput.addEventListener('click', function () {
         window.openDirectNumericKeypad('在庫');
       });
     } else {
       // Fallback for older browsers
-      spareInput.onclick = function() {
+      spareInput.onclick = function () {
         window.openDirectNumericKeypad('在庫');
       };
     }
-    
+
     // Styling handled by the .tap-field CSS class (uniform tap-to-open look)
     spareInput.classList.add('tap-field');
 
     console.log('Spare (在庫) input configured with direct keypad');
-    
+
     // Add logging when spare value changes
-    spareInput.addEventListener('input', function() {
+    spareInput.addEventListener('input', function () {
       logTabletAction('Spare count set', 'in-progress', {
         spareCount: this.value
       });
     });
   }
-  
+
   // Configure material lot input - DISABLED, now using QR scanner with override
   // const materialLotInput = document.getElementById('材料ロット');
   // if (materialLotInput) {
@@ -8614,7 +8614,7 @@ window.addEventListener('load', function() {
   //   
   //   console.log('Material lot input configured with direct keypad');
   // }
-  
+
   // Also run the original initialization
   initNumericKeypad();
 });
@@ -9849,13 +9849,13 @@ function validateMaterialCode(scannedCode, expectedCodeString) {
   if (!expectedCodeString) {
     return { isValid: false, matchedCode: null, allCodes: [] };
   }
-  
+
   // Split by comma and trim whitespace
   const allCodes = expectedCodeString.split(',').map(code => code.trim()).filter(code => code);
-  
+
   // Case-sensitive exact match
   const matchedCode = allCodes.find(code => code === scannedCode);
-  
+
   return {
     isValid: !!matchedCode,
     matchedCode: matchedCode || null,
@@ -9869,9 +9869,9 @@ function formatMaterialCodesForDisplay(materialCodeString) {
   if (!materialCodeString) {
     return '';
   }
-  
+
   const codes = materialCodeString.split(',').map(code => code.trim()).filter(code => code);
-  
+
   if (codes.length === 0) {
     return '';
   } else if (codes.length === 1) {
@@ -9900,10 +9900,10 @@ function getCurrentStepFromStorage() {
 // The scan workflow is "complete" ONLY after Step 3 (send to machine, or for
 // OZMANAS/400D the トムソンボード scan). Refreshing during Step 1/2 must restart.
 function markScanWorkflowComplete() {
-  try { localStorage.setItem(`${uniquePrefix}scanComplete`, 'true'); } catch (e) {}
+  try { localStorage.setItem(`${uniquePrefix}scanComplete`, 'true'); } catch (e) { }
 }
 function clearScanWorkflowComplete() {
-  try { localStorage.removeItem(`${uniquePrefix}scanComplete`); } catch (e) {}
+  try { localStorage.removeItem(`${uniquePrefix}scanComplete`); } catch (e) { }
 }
 window.isScanWorkflowComplete = function () {
   return localStorage.getItem(`${uniquePrefix}scanComplete`) === 'true';
@@ -9916,7 +9916,7 @@ function showStep1Modal() {
   const machineName = document.getElementById('step1MachineName');
   const content = document.getElementById('step1Content');
   const scanner = document.getElementById('step1Scanner');
-  
+
   machineName.textContent = getMachineName();
   content.style.display = 'flex';
   scanner.style.display = 'none';
@@ -9930,13 +9930,13 @@ function showStep2Modal() {
   const machineName = document.getElementById('step2MachineName');
   const content = document.getElementById('step2Content');
   const scanner = document.getElementById('step2Scanner');
-  
+
   // Use cached product details instead of reading from DOM
   document.getElementById('step2Sebanggo').textContent = currentProductDetails.sebanggo;
   document.getElementById('step2Hinban').textContent = currentProductDetails.hinban;
   // Format material codes for display: "MA44,MA90" -> "MA44 or MA90"
   document.getElementById('step2Material').textContent = formatMaterialCodesForDisplay(currentProductDetails.materialCode);
-  
+
   machineName.textContent = getMachineName();
   content.style.display = 'flex';
   scanner.style.display = 'none';
@@ -10011,13 +10011,13 @@ function showStep3Modal() {
       actionButton.style.boxShadow = '0 4px 15px rgba(76, 175, 80, 0.4)';
     }
   }
-  
+
   // Use cached product details instead of reading from DOM
   document.getElementById('step3Sebanggo').textContent = currentProductDetails.sebanggo;
   document.getElementById('step3Hinban').textContent = currentProductDetails.hinban;
   // Format material codes for display: "MA44,MA90" -> "MA44 or MA90"
   document.getElementById('step3Material').textContent = formatMaterialCodesForDisplay(currentProductDetails.materialCode);
-  
+
   machineName.textContent = getMachineName();
   modal.style.display = 'block';
   saveCurrentStep(3);
@@ -10028,7 +10028,7 @@ function closeAllStepModals() {
   document.getElementById('step1Modal').style.display = 'none';
   document.getElementById('step2Modal').style.display = 'none';
   document.getElementById('step3Modal').style.display = 'none';
-  
+
   // Stop any running scanners
   if (step1Scanner) {
     step1Scanner.stop().catch(err => console.error("Error stopping step1 scanner:", err));
@@ -10047,13 +10047,13 @@ function closeAllStepModals() {
 // Function to reset all steps
 function resetAllSteps() {
   closeAllStepModals();
-  
+
   // Clear sub-dropdown
   const subDropdown = document.getElementById('sub-dropdown');
   if (subDropdown) {
     subDropdown.selectedIndex = 0;
   }
-  
+
   // Clear material lots
   materialLots = [];
   saveMaterialLots();
@@ -10073,14 +10073,14 @@ function resetAllSteps() {
     model: '',
     kataban: ''
   };
-  
+
   // Clear cached product details from localStorage
   localStorage.removeItem(`${uniquePrefix}cached-sebanggo`);
   localStorage.removeItem(`${uniquePrefix}cached-hinban`);
   localStorage.removeItem(`${uniquePrefix}cached-materialCode`);
   localStorage.removeItem(`${uniquePrefix}cached-model`);
   localStorage.removeItem(`${uniquePrefix}cached-kataban`);
-  
+
   // Reset step to 0 and clear from localStorage
   saveCurrentStep(0);
   clearScanWorkflowComplete();
@@ -10093,14 +10093,14 @@ function resetAllSteps() {
   // Reset params lock state unconditionally
   window.paramsVisited = false;
   window.paramsLocked = false;
-  
+
   const prefix = typeof uniquePrefix !== 'undefined' ? uniquePrefix : '';
   const confirmedKey = prefix ? `${prefix}paramsConfirmed` : 'DCP_paramsConfirmed';
   localStorage.removeItem(confirmedKey);
-  
+
   // Also clear the saved tab index so it doesn't remember the locked tab after a reset
   localStorage.removeItem(`${prefix}activeTabIndex`);
-  
+
   // Explicitly reset Values Changed button to prevent it from staying green
   const btn = document.getElementById('valuesChangedBtn');
   if (btn) {
@@ -10111,12 +10111,12 @@ function resetAllSteps() {
 }
 
 // Step 1: Start Scan Button
-document.getElementById('startStep1Scan').addEventListener('click', function(event) {
+document.getElementById('startStep1Scan').addEventListener('click', function (event) {
   event.preventDefault(); // Prevent form submission
-  
+
   const content = document.getElementById('step1Content');
   const scanner = document.getElementById('step1Scanner');
-  
+
   // Stop any active alert sound and close alert modal
   const alertSound = document.getElementById('alert-sound');
   const scanAlertModal = document.getElementById('scanAlertModal');
@@ -10130,21 +10130,21 @@ document.getElementById('startStep1Scan').addEventListener('click', function(eve
   }
   // Remove red flash effect
   document.body.classList.remove('flash-red');
-  
+
   // Clear any previous error messages
   const errorMsg = document.getElementById('step1ErrorMsg');
   if (errorMsg) {
     errorMsg.style.display = 'none';
   }
-  
+
   content.style.display = 'none';
   scanner.style.display = 'block';
-  
+
   step1Scanner = new Html5Qrcode("step1QrReader");
-  
+
   step1Scanner.start(
     { facingMode: "environment" },
-    { 
+    {
       fps: 30,
       qrbox: { width: 1000, height: 1000 },
       aspectRatio: 1.0,
@@ -10156,49 +10156,49 @@ document.getElementById('startStep1Scan').addEventListener('click', function(eve
     },
     async (qrCodeMessage) => {
       console.log("Step 1 QR Scanned:", qrCodeMessage);
-      
+
       const subDropdown = document.getElementById('sub-dropdown');
       const options = [...subDropdown.options].map(option => option.value);
-      
+
       if (!options.includes(qrCodeMessage)) {
         // Stop scanner
         await step1Scanner.stop();
         step1Scanner = null;
-        
+
         // Hide scanner, show button again
         scanner.style.display = 'none';
         content.style.display = 'flex';
-        
+
         // Show error message in modal
         const errorMsg = document.getElementById('step1ErrorMsg');
         const errorText = errorMsg.querySelector('p');
         errorText.innerHTML = `❌ <strong>背番号が存在しません / Sebanggo does not exist</strong><br><br>Scanned: <code style="background: #f8f9fa; padding: 2px 8px; border-radius: 4px;">${qrCodeMessage}</code>`;
         errorMsg.style.display = 'block';
-        
+
         // Also show alert with red flash and sound
         showAlert(`❌ 背番号が存在しません / Sebanggo does not exist\n\nScanned: ${qrCodeMessage}`);
-        
+
         return;
       }
-      
+
       // Stop scanner
       await step1Scanner.stop();
       step1Scanner = null;
-      
+
       // Set dropdown value
       subDropdown.value = qrCodeMessage;
-      
+
       // Update previous value for leader verification
       if (typeof updatePreviousDropdownValue === 'function') {
         updatePreviousDropdownValue(qrCodeMessage);
       }
-      
+
       // Save to localStorage
       localStorage.setItem(`${uniquePrefix}sub-dropdown`, qrCodeMessage);
-      
+
       // Fetch product details
       await fetchProductDetails();
-      
+
       // Cache product details after fetching
       currentProductDetails = {
         sebanggo: qrCodeMessage,
@@ -10207,9 +10207,9 @@ document.getElementById('startStep1Scan').addEventListener('click', function(eve
         model: document.getElementById('model')?.value || '',
         kataban: document.getElementById('kataban')?.value || ''
       };
-      
+
       console.log('Cached product details:', currentProductDetails);
-      
+
       // Save cached product details to localStorage
       localStorage.setItem(`${uniquePrefix}cached-sebanggo`, currentProductDetails.sebanggo);
       localStorage.setItem(`${uniquePrefix}cached-hinban`, currentProductDetails.hinban);
@@ -10217,11 +10217,11 @@ document.getElementById('startStep1Scan').addEventListener('click', function(eve
       localStorage.setItem(`${uniquePrefix}cached-model`, currentProductDetails.model);
       localStorage.setItem(`${uniquePrefix}cached-kataban`, currentProductDetails.kataban);
       syncVideoManualLauncherState();
-      
+
       // 🔴 BROADCAST SCAN TO SSE - Send to machine display page (includes logging)
       const machineNameForSSE = getMachineName(); // Get the current machine name (e.g., "OZNC04,OZNC06" or "OZNC09")
       const currentFactory = document.getElementById('selected工場')?.value || '';
-      
+
       // Generate sessionID for this scan session
       const current設備 = document.getElementById('process')?.value || '';
       const todayDate = new Date().toISOString().split('T')[0];
@@ -10231,7 +10231,7 @@ document.getElementById('startStep1Scan').addEventListener('click', function(eve
         currentFactory,
         todayDate
       );
-      
+
       if (newSessionID) {
         setSessionID(newSessionID);
         // Fresh production entry: clear any per-lot tracking left over from a
@@ -10245,7 +10245,7 @@ document.getElementById('startStep1Scan').addEventListener('click', function(eve
       } else {
         console.warn('⚠️ Failed to generate sessionID');
       }
-      
+
       // 🔊 GROUPED MACHINE SUPPORT
       // If using DCP Grouping.html with grouped machines (e.g., "OZNC04,OZNC06"),
       // server will split and send SSE to both machines
@@ -10255,7 +10255,7 @@ document.getElementById('startStep1Scan').addEventListener('click', function(eve
         const isGrouped = machineNameForSSE.includes(',');
         const machineList = machineNameForSSE.split(',').map(m => m.trim());
         console.log(`📡 Broadcasting QR scan to ${isGrouped ? 'grouped' : 'solo'} machine(s):`, machineList);
-        
+
         fetch(`${serverURL}/api/broadcast-scan`, {
           method: 'POST',
           headers: {
@@ -10275,19 +10275,19 @@ document.getElementById('startStep1Scan').addEventListener('click', function(eve
             }
           })
         })
-        .then(response => response.json())
-        .then(data => {
-          console.log('✅ SSE Broadcast successful:', data);
-        })
-        .catch(error => {
-          console.error('❌ SSE Broadcast failed:', error);
-          // Don't block the workflow if broadcast fails
-        });
+          .then(response => response.json())
+          .then(data => {
+            console.log('✅ SSE Broadcast successful:', data);
+          })
+          .catch(error => {
+            console.error('❌ SSE Broadcast failed:', error);
+            // Don't block the workflow if broadcast fails
+          });
       }
-      
+
       // Apply NC button logic
       NCPresstoFalse();
-      
+
       // Close Step 1, Open Step 2
       document.getElementById('step1Modal').style.display = 'none';
       showStep2Modal();
@@ -10302,12 +10302,19 @@ document.getElementById('startStep1Scan').addEventListener('click', function(eve
 });
 
 // Step 2: Start Scan Button
-document.getElementById('startStep2Scan').addEventListener('click', async function(event) {
+document.getElementById('startStep2Scan').addEventListener('click', async function (event) {
   event.preventDefault(); // Prevent form submission
+
+  console.log('🟡 [startStep2Scan] click handler fired');
+  console.log('🟡 [startStep2Scan] __lotScanMachine:', window.__lotScanMachine);
+  console.log('🟡 [startStep2Scan] __step2Processing:', window.__step2Processing);
+  console.log('🟡 [startStep2Scan] step2Modal display:', document.getElementById('step2Modal')?.style.display);
+  console.log('🟡 [startStep2Scan] step2Scanner exists:', !!step2Scanner);
 
   // Grouped machine: pick which machine this lot is for BEFORE scanning, then
   // re-enter this handler with the choice made. Single machine skips this.
   if (typeof groupedMachines !== 'undefined' && groupedMachines.length > 1 && !window.__lotScanMachine) {
+    console.log('🟡 [startStep2Scan] No machine chosen yet, opening chooser...');
     if (typeof window.chooseScanMachine === 'function') {
       window.chooseScanMachine(() => document.getElementById('startStep2Scan').click());
       return;
@@ -10316,7 +10323,7 @@ document.getElementById('startStep2Scan').addEventListener('click', async functi
 
   const content = document.getElementById('step2Content');
   const scanner = document.getElementById('step2Scanner');
-  
+
   // Stop any active alert sound and close alert modal
   const alertSound = document.getElementById('alert-sound');
   const scanAlertModal = document.getElementById('scanAlertModal');
@@ -10330,15 +10337,30 @@ document.getElementById('startStep2Scan').addEventListener('click', async functi
   }
   // Remove red flash effect
   document.body.classList.remove('flash-red');
-  
+
   // Clear any previous error messages
   const errorMsg = document.getElementById('step2ErrorMsg');
   if (errorMsg) {
     errorMsg.style.display = 'none';
   }
-  
+
+  // Ensure the step2Modal itself is visible before starting the camera.
+  // In grouped-machine flows, _recordAndAdvance() hides the modal after the
+  // first machine is done; if we don't re-show it the scanner starts inside a
+  // display:none container and the camera acquires but never renders.
+  const step2Modal = document.getElementById('step2Modal');
+  if (step2Modal && step2Modal.style.display === 'none') {
+    console.log('🟡 [startStep2Scan] step2Modal was hidden — re-showing it');
+    showStep2Modal();
+  }
+
   content.style.display = 'none';
   scanner.style.display = 'block';
+
+  console.log('🟡 [startStep2Scan] content hidden, scanner shown');
+  console.log('🟡 [startStep2Scan] step2Modal display (after fix):', step2Modal?.style.display);
+  console.log('🟡 [startStep2Scan] scanner element display:', scanner.style.display);
+  console.log('🟡 [startStep2Scan] scanner offsetWidth:', scanner.offsetWidth, 'offsetHeight:', scanner.offsetHeight);
 
   // Fresh scan: allow processing one successful QR (guards against the scanner
   // firing its callback multiple times for the same code before stop() finishes,
@@ -10349,21 +10371,25 @@ document.getElementById('startStep2Scan').addEventListener('click', async functi
   // a new one. Without this, re-scanning (e.g. the 2nd grouped machine) reuses a
   // stale #step2QrReader and the camera stays locked / never activates.
   if (step2Scanner) {
-    try { await step2Scanner.stop(); } catch (e) { /* already stopped */ }
+    console.log('🟡 [startStep2Scan] Stopping previous step2Scanner...');
+    try { await step2Scanner.stop(); } catch (e) { console.log('🟡 [startStep2Scan] stop() error (ok):', e.message); }
     try { step2Scanner.clear(); } catch (e) { }
     step2Scanner = null;
+    console.log('🟡 [startStep2Scan] Previous scanner cleared');
   }
   const step2ReaderHost = document.getElementById('step2QrReader');
   if (step2ReaderHost) step2ReaderHost.innerHTML = '';
 
   // Let the DOM apply the cleared reader before the camera stream attaches.
-  await new Promise(resolve => setTimeout(resolve, 50));
+  await new Promise(resolve => setTimeout(resolve, 100));
 
+  console.log('🟡 [startStep2Scan] Creating new Html5Qrcode instance...');
+  console.log('🟡 [startStep2Scan] step2QrReader offsetWidth:', document.getElementById('step2QrReader')?.offsetWidth);
   step2Scanner = new Html5Qrcode("step2QrReader");
-  
+
   step2Scanner.start(
     { facingMode: "environment" },
-    { 
+    {
       fps: 30,
       qrbox: { width: 800, height: 800 },
       aspectRatio: 1.0,
@@ -10375,81 +10401,85 @@ document.getElementById('startStep2Scan').addEventListener('click', async functi
     },
     async (qrCodeMessage) => {
       // Ignore duplicate fires of the same scan while we're already handling one.
-      if (window.__step2Processing) return;
+      if (window.__step2Processing) {
+        console.log('🟡 [step2Scan] Ignoring duplicate scan (already processing)');
+        return;
+      }
       window.__step2Processing = true;
       console.log("Step 2 QR Scanned:", qrCodeMessage);
+      console.log('🟡 [step2Scan] __lotScanMachine:', window.__lotScanMachine);
 
       try {
         // Parse QR code: "Z1Z9,250805-5,500"
         const parts = qrCodeMessage.split(',');
-        
+
         if (parts.length < 2) {
           // Stop scanner
           await step2Scanner.stop();
           step2Scanner = null;
-          
+
           // Hide scanner, show button again
           scanner.style.display = 'none';
           content.style.display = 'flex';
-          
+
           // Show error in modal
           const errorMsg = document.getElementById('step2ErrorMsg');
           const errorText = errorMsg.querySelector('p');
           errorText.innerHTML = `❌ <strong>QRコードの形式が正しくありません / Invalid QR code format</strong><br><br>Scanned: <code style="background: #f8f9fa; padding: 2px 8px; border-radius: 4px;">${qrCodeMessage}</code><br><br>Expected format: <code style="background: #f8f9fa; padding: 2px 8px; border-radius: 4px;">MaterialCode,LotNumber,Quantity</code>`;
           errorMsg.style.display = 'block';
-          
+
           // Also show alert with red flash and sound
           showAlert(`❌ QRコードの形式が正しくありません / Invalid QR code format\n\nScanned: ${qrCodeMessage}\n\nExpected format: MaterialCode,LotNumber,Quantity`);
-          
+
           return;
         }
 
         const scannedMaterialCode = parts[0].trim();
         const lotNumber = parts[1].trim();
-        
+
         // Validate Material Code using cached product details with new multi-value support
         const expectedMaterialCodeString = currentProductDetails.materialCode || '';
         const validation = validateMaterialCode(scannedMaterialCode, expectedMaterialCodeString);
-        
-        console.log("Material Code Comparison:", { 
-          scanned: scannedMaterialCode, 
+
+        console.log("Material Code Comparison:", {
+          scanned: scannedMaterialCode,
           expected: expectedMaterialCodeString,
           allValidCodes: validation.allCodes,
           isValid: validation.isValid,
           matchedCode: validation.matchedCode
         });
-        
+
         if (!validation.isValid) {
           // Stop scanner
           await step2Scanner.stop();
           step2Scanner = null;
-          
+
           // Hide scanner, show button again
           scanner.style.display = 'none';
           content.style.display = 'flex';
-          
+
           // Format expected codes for display
           const expectedDisplay = formatMaterialCodesForDisplay(expectedMaterialCodeString);
-          
+
           // Show error in modal
           const errorMsg = document.getElementById('step2ErrorMsg');
           const errorText = errorMsg.querySelector('p');
           errorText.innerHTML = `❌ <strong>材料コードが一致しません / Material code mismatch</strong><br><br>Expected: <code style="background: #e8f5e9; padding: 2px 8px; border-radius: 4px; color: #2e7d32;">${expectedDisplay}</code><br>Scanned: <code style="background: #ffebee; padding: 2px 8px; border-radius: 4px; color: #c62828;">${scannedMaterialCode}</code><br><br>Please scan the correct material lot.`;
           errorMsg.style.display = 'block';
-          
+
           // Also show alert with red flash and sound
           showAlert(`❌ 材料コードが一致しません / Material code mismatch\n\nExpected: ${expectedDisplay}\nScanned: ${scannedMaterialCode}\n\nPlease scan the correct material lot.`);
-          
+
           return;
         }
-        
+
         // Log which specific code was matched
         console.log(`Material code validated successfully. Matched: ${validation.matchedCode}`);
-        
+
         // Store the actual scanned material code (not all valid codes, just the one scanned)
         // This could be used later if needed for tracking which specific code was used
         const actualScannedCode = validation.matchedCode;
-        
+
         // Which machine is this lot for (chosen in the grouped chooser, else the
         // single machine).
         const _scanMachine = window.__lotScanMachine
@@ -10461,16 +10491,25 @@ document.getElementById('startStep2Scan').addEventListener('click', async functi
         // Record the lot on the chosen machine's timeline, then photo + previous-lot
         // ショット数 + (grouped) re-prompt for the other machine before Step 3.
         const _recordAndAdvance = () => {
+          console.log('🟢 [_recordAndAdvance] called for machine:', _scanMachine, 'lot:', lotNumber);
           if (typeof window.recordLotScan === 'function') {
             window.__pendingPrevLot = window.recordLotScan(lotNumber, _scanMachine, 'scanned');
+            console.log('🟢 [_recordAndAdvance] recordLotScan done, __pendingPrevLot:', !!window.__pendingPrevLot);
           }
+          console.log('🟢 [_recordAndAdvance] Hiding step2Modal');
           document.getElementById('step2Modal').style.display = 'none';
+          console.log('🟢 [_recordAndAdvance] __lotCycleMachinesDone:', window.__lotCycleMachinesDone);
           const _afterPhoto = () => {
+            console.log('🟢 [_afterPhoto] called');
             const _next = () => {
+              console.log('🟢 [_next] called — will call proceedAfterMachineDone or showStep3Modal');
               if (typeof window.proceedAfterMachineDone === 'function') window.proceedAfterMachineDone();
               else showStep3Modal();
             };
-            if (typeof window.afterLotPhotoProceed === 'function') window.afterLotPhotoProceed(_next);
+            if (typeof window.afterLotPhotoProceed === 'function') {
+              console.log('🟢 [_afterPhoto] calling afterLotPhotoProceed...');
+              window.afterLotPhotoProceed(_next);
+            }
             else _next();
           };
           // Only require a material-label photo if this lot has none yet. When the
@@ -10479,9 +10518,12 @@ document.getElementById('startStep2Scan').addEventListener('click', async functi
           const _hasPhoto = (typeof materialLabelPhotos !== 'undefined')
             && Array.isArray(materialLabelPhotos)
             && materialLabelPhotos.some(p => p && p.lotNumber === lotNumber);
+          console.log('🟢 [_recordAndAdvance] _hasPhoto for lot', lotNumber, ':', _hasPhoto);
           if (!_hasPhoto && typeof window.materialPhotoGate === 'function') {
+            console.log('🟢 [_recordAndAdvance] Opening materialPhotoGate...');
             window.materialPhotoGate(_afterPhoto);
           } else {
+            console.log('🟢 [_recordAndAdvance] Skipping photo gate (already has photo), calling _afterPhoto directly');
             _afterPhoto();
           }
         };
@@ -10517,8 +10559,10 @@ document.getElementById('startStep2Scan').addEventListener('click', async functi
         }
 
         // Success - stop scanner and advance
+        console.log('🟡 [step2Scan] Stopping scanner after successful scan...');
         await step2Scanner.stop();
         step2Scanner = null;
+        console.log('🟡 [step2Scan] Scanner stopped and nullified');
 
         console.log("Lot added successfully:", lotNumber);
 
@@ -10533,81 +10577,90 @@ document.getElementById('startStep2Scan').addEventListener('click', async functi
 
       } catch (error) {
         console.error("Error processing lot QR code:", error);
-        
+
         // Stop scanner if still running
         if (step2Scanner) {
           await step2Scanner.stop();
           step2Scanner = null;
         }
-        
+
         // Hide scanner, show button again
         scanner.style.display = 'none';
         content.style.display = 'flex';
-        
+
         // Show error in modal
         const errorMsg = document.getElementById('step2ErrorMsg');
         const errorText = errorMsg.querySelector('p');
         errorText.innerHTML = `❌ <strong>QRコードの処理エラー / QR code processing error</strong><br><br>${error.message}`;
         errorMsg.style.display = 'block';
-        
+
         // Also show alert with red flash and sound
         showAlert(`❌ QRコードの処理エラー / QR code processing error\n\n${error.message}`);
+      } finally {
+        // Always reset the processing flag so the scanner can be used again
+        window.__step2Processing = false;
+        console.log('🟡 [step2Scan] __step2Processing reset to false (finally block)');
       }
     },
     (errorMessage) => {
       // Ignore scan errors
     }
-  ).catch(err => {
+  ).then(() => {
+    console.log('🟡 [startStep2Scan] ✅ Scanner started successfully');
+  }).catch(err => {
     console.error("Failed to start Step 2 scanner:", err);
+    console.error('🔴 [startStep2Scan] Scanner start FAILED:', err.message);
+    console.error('🔴 [startStep2Scan] step2QrReader dimensions:', document.getElementById('step2QrReader')?.offsetWidth, 'x', document.getElementById('step2QrReader')?.offsetHeight);
+    console.error('🔴 [startStep2Scan] step2Modal display:', document.getElementById('step2Modal')?.style.display);
     showAlert('カメラを起動できませんでした / Could not start camera');
   });
 });
 
 // Step 2: Override Button (Manual Entry with Leader Verification)
-document.getElementById('overrideStep2').addEventListener('click', function(event) {
+document.getElementById('overrideStep2').addEventListener('click', function (event) {
   event.preventDefault(); // Prevent form submission
-  
+
   const step2Modal = document.getElementById('step2Modal');
   const leaderVerificationModal = document.getElementById('leaderVerificationModal');
   const leaderVerificationStatus = document.getElementById('leaderVerificationStatus');
   const materialLotInput = document.getElementById('材料ロット');
-  
+
   // Stop Step 2 scanner if running
   if (step2Scanner) {
     step2Scanner.stop().catch(err => console.error("Error stopping step2 scanner:", err));
     step2Scanner = null;
   }
-  
+
   // Close Step 2 modal
   step2Modal.style.display = 'none';
-  
+
   // Get material code from input (may contain comma-separated values)
   const materialCodeInput = document.getElementById('material-code');
   const materialCodeString = materialCodeInput ? materialCodeInput.value.trim() : 'N/A';
   const materialCodeDisplay = formatMaterialCodesForDisplay(materialCodeString);
-  
+
   // Find and update the warning text to show material code with blinking
   const modalContent = leaderVerificationModal.querySelector('.modal-content');
   const warningTextElement = modalContent.querySelector('p[style*="font-size"], p[style*="color: #666"]');
-  
+
   if (warningTextElement) {
     // Replace the warning text with blinking material code (formatted for multiple codes)
     warningTextElement.innerHTML = `<span class="material-code-blink">材料: ${materialCodeDisplay} / Material Code: ${materialCodeDisplay}</span>`;
     warningTextElement.style.fontSize = '18px';
     warningTextElement.style.margin = '15px 0';
   }
-  
+
   // Show leader verification modal
   leaderVerificationStatus.textContent = 'リーダーのQRコードをスキャンしてください / Please scan leader QR code';
   leaderVerificationStatus.style.color = '#2d5f4f';
   leaderVerificationModal.style.display = 'block';
-  
+
   // Start leader verification scanner
   let leaderScanner = new Html5Qrcode("leaderQrReader");
-  
+
   leaderScanner.start(
     { facingMode: "environment" },
-    { 
+    {
       fps: 30,
       qrbox: { width: 800, height: 800 },
       aspectRatio: 1.0,
@@ -10619,52 +10672,52 @@ document.getElementById('overrideStep2').addEventListener('click', function(even
     },
     async (decodedText) => {
       console.log("Leader QR Code scanned for Step 2 override:", decodedText);
-      
+
       try {
         const response = await fetch(`${serverURL}/verifyLeader`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ username: decodedText })
         });
-        
+
         const result = await response.json();
-        
+
         if (result.authorized) {
           leaderVerificationStatus.textContent = `✅ 認証成功！ / Verified! Opening keypad...`;
           leaderVerificationStatus.style.color = '#006400';
-          
+
           leaderScanner.stop().then(() => {
             setTimeout(() => {
               leaderVerificationModal.style.display = 'none';
-              
+
               // Open keypad for manual lot entry
               const currentLots = materialLotInput.value ? materialLotInput.value.split(',').map(v => v.trim()).filter(v => v) : [];
-              
+
               // Open keypad in new entry mode
               window.openDirectNumericKeypad('材料ロット', true);
-              
+
               // Monitor keypad closure and capture the entered value
               const checkKeypadClosure = setInterval(() => {
                 const keypadModal = document.getElementById('numericKeypadModalDirect');
                 const isKeypadOpen = keypadModal && keypadModal.style.display === 'block';
-                
+
                 if (!isKeypadOpen) {
                   clearInterval(checkKeypadClosure);
-                  
+
                   // Get the newly entered value
                   const newValue = materialLotInput.value;
                   const newLots = newValue ? newValue.split(',').map(v => v.trim()).filter(v => v && !currentLots.includes(v)) : [];
-                  
+
                   if (newLots.length > 0) {
                     // Add the manual lot as a blue tag (visually different)
                     const lotNumber = newLots[0]; // Take the first new lot
-                    
+
                     // Add to material lots array with manual flag
                     if (window.addManualLot) {
                       window.addManualLot(lotNumber);
                       console.log("Manual lot added via Step 2 override:", lotNumber);
                     }
-                    
+
                     // Automatically proceed to Step 3 (after mandatory material-label photo)
                     setTimeout(() => {
                       if (typeof window.materialPhotoGate === 'function') {
@@ -10679,13 +10732,13 @@ document.getElementById('overrideStep2').addEventListener('click', function(even
                   }
                 }
               }, 300);
-              
+
             }, 1000);
           }).catch(err => console.error("Error stopping leader scanner:", err));
         } else {
           leaderVerificationStatus.textContent = `❌ 権限がありません / Not authorized`;
           leaderVerificationStatus.style.color = '#cc0000';
-          
+
           // Return to Step 2 after 2 seconds
           setTimeout(() => {
             leaderScanner.stop().then(() => {
@@ -10698,7 +10751,7 @@ document.getElementById('overrideStep2').addEventListener('click', function(even
         console.error("Error verifying leader:", error);
         leaderVerificationStatus.textContent = `❌ エラーが発生しました / Error occurred`;
         leaderVerificationStatus.style.color = '#cc0000';
-        
+
         // Return to Step 2 after 2 seconds
         setTimeout(() => {
           leaderScanner.stop().then(() => {
@@ -10717,9 +10770,9 @@ document.getElementById('overrideStep2').addEventListener('click', function(even
     leaderVerificationModal.style.display = 'none';
     showStep2Modal();
   });
-  
+
   // Set up cancel button handler for Step 2 override flow
-  document.getElementById('closeLeaderVerificationModal').onclick = function() {
+  document.getElementById('closeLeaderVerificationModal').onclick = function () {
     if (leaderScanner) {
       leaderScanner.stop().then(() => {
         leaderVerificationModal.style.display = 'none';
@@ -10749,24 +10802,24 @@ function autoFillProductionStartTime() {
   el.dispatchEvent(new Event('input', { bubbles: true }));
   el.dispatchEvent(new Event('change', { bubbles: true }));
   if (typeof updateProcessingTimeLockStatus === 'function') {
-    try { updateProcessingTimeLockStatus('start'); } catch (e) {}
+    try { updateProcessingTimeLockStatus('start'); } catch (e) { }
   }
   console.log('Auto-filled production Start Time:', el.value);
 }
 
 // Step 3: Send to Machine Button
-document.getElementById('startStep3Send').addEventListener('click', async function(event) {
+document.getElementById('startStep3Send').addEventListener('click', async function (event) {
   event.preventDefault(); // Prevent form submission
 
   try {
     // Get the current 背番号
     const currentSebanggo = document.getElementById('sub-dropdown').value;
-    
+
     if (!currentSebanggo) {
       showAlert('背番号を選んでください / Please select sebanggo first');
       return;
     }
-    
+
     if (isOZMANASMachine()) {
       const content = document.getElementById('step3Content');
       const instruction = content?.querySelector('p');
@@ -10811,7 +10864,7 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
       await new Promise(resolve => setTimeout(resolve, 50));
 
       if (step3Scanner) {
-        await step3Scanner.stop().catch(() => {});
+        await step3Scanner.stop().catch(() => { });
         step3Scanner = null;
       }
 
@@ -10910,19 +10963,19 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
 
     // Close Step 3 modal immediately (sending in background)
     document.getElementById('step3Modal').style.display = 'none';
-    
+
     // Log send to machine action (Step 3)
     logTabletAction('Send to machine pressed (Step 3)', 'in-progress', {
       背番号: currentSebanggo,
       source: 'Step 3 Modal'
     }).catch(error => console.error('Failed to log Step 3 send to machine action:', error));
-    
+
     // Clear cached product details from localStorage
     localStorage.removeItem(`${uniquePrefix}cached-sebanggo`);
     localStorage.removeItem(`${uniquePrefix}cached-hinban`);
     localStorage.removeItem(`${uniquePrefix}cached-materialCode`);
     localStorage.removeItem(`${uniquePrefix}cached-kataban`);
-    
+
     // Mark workflow as complete (Step 3 send to machine pressed)
     saveCurrentStep(0);
     markScanWorkflowComplete();
@@ -10955,15 +11008,15 @@ function confirmReset(msg) {
 }
 // The 3-step Reset buttons fire before any data is committed, so they don't
 // need a confirmation.
-document.getElementById('resetStep1').addEventListener('click', function(event) {
+document.getElementById('resetStep1').addEventListener('click', function (event) {
   event.preventDefault(); // Prevent form submission
   resetAllSteps();
 });
-document.getElementById('resetStep2').addEventListener('click', function(event) {
+document.getElementById('resetStep2').addEventListener('click', function (event) {
   event.preventDefault(); // Prevent form submission
   resetAllSteps();
 });
-document.getElementById('resetStep3').addEventListener('click', function(event) {
+document.getElementById('resetStep3').addEventListener('click', function (event) {
   event.preventDefault(); // Prevent form submission
   resetAllSteps();
 });
@@ -10975,25 +11028,25 @@ document.getElementById('resetStep3').addEventListener('click', function(event) 
 function showIndividualSendModal() {
   const modal = document.getElementById('individualSendModal');
   const machineList = document.getElementById('individualSendContainer')
-                   || document.getElementById('individualMachineList');
+    || document.getElementById('individualMachineList');
 
   if (!modal || !machineList) return;
-  
+
   // Clear previous content
   machineList.innerHTML = '';
-  
+
   // Get the machine config from global variables
   const machines = window.currentMachineGroup || [];
   // Get the 背番号 (sebanggo) value for the filename
   const sebanggo = document.getElementById('sub-dropdown').value;
   const ncFilename = sebanggo ? `${sebanggo}.pce` : 'program.pce';
-  
+
   if (machines.length === 0) {
     machineList.innerHTML = '<p style="text-align: center; color: #999;">No machines configured</p>';
     modal.style.display = 'flex';
     return;
   }
-  
+
   // Create a card for each machine
   machines.forEach((machine, index) => {
     const card = document.createElement('div');
@@ -11013,17 +11066,17 @@ function showIndividualSendModal() {
     sendButton.id = `sendBtn-${index}`;
     sendButton.style.cssText = 'background: var(--blue, #2E6FF2); color: #fff; border: none; padding: 14px 24px; border-radius: 10px; cursor: pointer; font-size: 1rem; font-weight: 700; width: 100%; font-family: inherit;';
     sendButton.innerHTML = `Send to ${machine.name}<br><span style="font-size: 0.82rem; opacity: 0.9;">送信</span>`;
-    
-    sendButton.addEventListener('click', async function() {
+
+    sendButton.addEventListener('click', async function () {
       await sendToIndividualMachine(machine, ncFilename, index);
     });
-    
+
     card.appendChild(machineName);
     card.appendChild(statusIndicator);
     card.appendChild(sendButton);
     machineList.appendChild(card);
   });
-  
+
   // Show the modal
   modal.style.display = 'flex';
 }
@@ -11031,37 +11084,37 @@ function showIndividualSendModal() {
 async function sendToIndividualMachine(machine, ncFilename, index) {
   const sendButton = document.getElementById(`sendBtn-${index}`);
   const statusIndicator = document.getElementById(`sendStatus-${index}`);
-  
+
   if (!sendButton) return;
-  
+
   // Disable button
   sendButton.disabled = true;
   sendButton.style.opacity = '0.6';
   sendButton.style.cursor = 'not-allowed';
   sendButton.innerHTML = 'Sending... / 送信中...';
-  
+
   // Use the same URL format as Step 3 modal (port 5000 with /request?filename=)
   const ncProgramUrl = `http://${machine.ip}:5000/request?filename=${ncFilename}`;
-  
+
   try {
     // Try background fetch first
     const response = await fetch(ncProgramUrl, {
       method: 'GET',
       mode: 'no-cors' // This prevents CORS errors but doesn't return response data
     });
-    
+
     console.log(`Sent to ${machine.name} (${machine.ip}) via fetch`);
-    
+
     // Show success indicator
     statusIndicator.style.display = 'block';
     sendButton.style.display = 'none';
-    
+
   } catch (error) {
     console.error(`Fetch failed for ${machine.name}, trying new tab fallback:`, error);
-    
+
     // Fallback: Open in new tab
     const newTab = window.open(ncProgramUrl, '_blank', 'width=100,height=100,left=-1000,top=-1000');
-    
+
     if (newTab) {
       setTimeout(() => {
         try {
@@ -11070,7 +11123,7 @@ async function sendToIndividualMachine(machine, ncFilename, index) {
           console.log('Could not close tab automatically');
         }
       }, 3000);
-      
+
       // Show success indicator
       statusIndicator.style.display = 'block';
       sendButton.style.display = 'none';
@@ -11086,19 +11139,19 @@ async function sendToIndividualMachine(machine, ncFilename, index) {
 }
 
 // Close button for individual send modal
-document.getElementById('closeIndividualSendModal')?.addEventListener('click', function() {
+document.getElementById('closeIndividualSendModal')?.addEventListener('click', function () {
   document.getElementById('individualSendModal').style.display = 'none';
 });
 
 // Close modal when clicking outside
-document.getElementById('individualSendModal')?.addEventListener('click', function(e) {
+document.getElementById('individualSendModal')?.addEventListener('click', function (e) {
   if (e.target === this) {
     this.style.display = 'none';
   }
 });
 
 // Auto-show modal on page load based on workflow state
-window.addEventListener('load', function() {
+window.addEventListener('load', function () {
   setTimeout(() => {
     const subDropdown = document.getElementById('sub-dropdown');
     const savedStep = getCurrentStepFromStorage();
@@ -11109,7 +11162,7 @@ window.addEventListener('load', function() {
     // refresh. Re-attempt here from the saved/cached value, injecting the option
     // if the list still isn't populated, so the workflow state survives a reload.
     const savedSub = localStorage.getItem(`${uniquePrefix}sub-dropdown`)
-                  || localStorage.getItem(`${uniquePrefix}cached-sebanggo`);
+      || localStorage.getItem(`${uniquePrefix}cached-sebanggo`);
     if (subDropdown && savedSub && (!subDropdown.value || subDropdown.selectedIndex === 0)) {
       if (![...subDropdown.options].some(o => o.value === savedSub)) {
         // Keep a placeholder at index 0 so the injected value never lands at
@@ -11129,27 +11182,27 @@ window.addEventListener('load', function() {
       console.log('Re-restored sub-dropdown from cache on load:', savedSub);
       if (typeof fetchProductDetails === 'function') fetchProductDetails();
     }
-    
+
     console.log('=== 3-Step Modal Auto-Load Debug ===');
     console.log('Dropdown value:', subDropdown?.value);
     console.log('Dropdown selectedIndex:', subDropdown?.selectedIndex);
     console.log('Saved step from localStorage:', savedStep);
-    
+
     // 🔴 SSE BROADCAST ON PAGE LOAD
     const machineNameForSSE = getMachineName();
-    
+
     // If sub-dropdown is empty, always start at Step 1 AND broadcast clear
     if (!subDropdown.value || subDropdown.selectedIndex === 0) {
       console.log('Empty dropdown detected - showing Step 1 and broadcasting clear');
       saveCurrentStep(0);
-      
+
       // Broadcast clear message to pdfDisplayer(s)
       // If grouped machine (OZNC04,OZNC06), broadcasts to both
       // If solo machine (OZNC09), broadcasts to only that one
       if (machineNameForSSE) {
         const machineIds = machineNameForSSE.split(',').map(m => m.trim());
         console.log(`🔊 Broadcasting clear action to ${machineIds.length} machine(s):`, machineIds);
-        
+
         fetch(`${serverURL}/api/broadcast-scan`, {
           method: 'POST',
           headers: {
@@ -11165,15 +11218,15 @@ window.addEventListener('load', function() {
             }
           })
         })
-        .then(response => response.json())
-        .then(data => console.log('✅ SSE Clear broadcast on load successful:', data))
-        .catch(error => console.error('❌ SSE Clear broadcast on load failed:', error));
+          .then(response => response.json())
+          .then(data => console.log('✅ SSE Clear broadcast on load successful:', data))
+          .catch(error => console.error('❌ SSE Clear broadcast on load failed:', error));
       }
-      
+
       showStep1Modal();
       return;
     }
-    
+
     // A 背番号 is present. Only treat it as "complete" if Step 3 actually ran
     // (send to machine, or OZMANAS トムソンボード scan) — tracked by the
     // scanComplete flag. Otherwise the workflow was abandoned mid-way (refresh
@@ -11193,7 +11246,7 @@ window.addEventListener('load', function() {
         if (m) m.style.display = 'none';
       });
       if (typeof window.syncScanTabState === 'function') window.syncScanTabState();
-      
+
       // Restore active tab if we have a valid workflow state
       const savedTabIndexStr = localStorage.getItem(`${uniquePrefix}activeTabIndex`);
       if (savedTabIndexStr !== null) {
@@ -11229,7 +11282,7 @@ window.addEventListener('beforeunload', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ machineId: videoManualState.sessionKey, controllerId: videoManualState.controllerId }),
       keepalive: true,
-    }).catch(() => {});
+    }).catch(() => { });
   }
 });
 
@@ -11243,28 +11296,28 @@ function showManualSendModal(sebanggo) {
     console.log('Not a grouped machine page or no IPs available');
     return;
   }
-  
+
   const modal = document.getElementById('manualSendModal');
   if (!modal) {
     console.error('Manual send modal not found in HTML');
     return;
   }
-  
+
   const container = document.getElementById('machineLinksContainer');
   if (!container) {
     console.error('Machine links container not found');
     return;
   }
-  
+
   // Update filename display
   const filenameDisplay = document.getElementById('manualSendFilename');
   if (filenameDisplay) {
     filenameDisplay.textContent = `${sebanggo}.pce`;
   }
-  
+
   // Clear previous content
   container.innerHTML = '';
-  
+
   // Create a button for each machine
   Object.entries(groupedMachineIPs).forEach(([machine, ip]) => {
     const button = document.createElement('button');
@@ -11304,7 +11357,7 @@ function showManualSendModal(sebanggo) {
       setTimeout(() => {
         if (newTab) newTab.close();
       }, 3000);
-      
+
       // Visual feedback
       button.style.background = '#4CAF50';
       button.innerHTML = `
@@ -11321,7 +11374,7 @@ function showManualSendModal(sebanggo) {
     };
     container.appendChild(button);
   });
-  
+
   // Show the modal
   modal.style.display = 'flex';
   console.log('✅ Manual send modal shown');
@@ -11330,7 +11383,7 @@ function showManualSendModal(sebanggo) {
 // Close manual send modal
 const closeManualSendBtn = document.getElementById('closeManualSendModal');
 if (closeManualSendBtn) {
-  closeManualSendBtn.addEventListener('click', function() {
+  closeManualSendBtn.addEventListener('click', function () {
     const modal = document.getElementById('manualSendModal');
     if (modal) {
       modal.style.display = 'none';
@@ -11341,7 +11394,7 @@ if (closeManualSendBtn) {
 // Close modal when clicking outside
 const manualSendModal = document.getElementById('manualSendModal');
 if (manualSendModal) {
-  manualSendModal.addEventListener('click', function(event) {
+  manualSendModal.addEventListener('click', function (event) {
     if (event.target === manualSendModal) {
       manualSendModal.style.display = 'none';
     }
@@ -11554,25 +11607,45 @@ if (manualSendModal) {
   // cycle, re-open the chooser (handled machines greyed) so the operator does the
   // other machine; otherwise continue to Step 3 (send).
   window.proceedAfterMachineDone = function () {
+    console.log('🟣 [proceedAfterMachineDone] called');
     const grouped = (typeof groupedMachines !== 'undefined' && groupedMachines.length > 1);
+    console.log('🟣 [proceedAfterMachineDone] grouped:', grouped);
     if (grouped) {
       const done = window.__lotCycleMachinesDone || [];
       const remaining = groupedMachines.filter(m => done.indexOf(m) < 0);
+      console.log('🟣 [proceedAfterMachineDone] done:', done, 'remaining:', remaining);
       if (remaining.length > 0) {
         window.__lotScanMachine = null; // force a fresh choice
-        window.chooseScanMachine(() => document.getElementById('startStep2Scan').click());
+        console.log('🟣 [proceedAfterMachineDone] Opening machine chooser for remaining machines:', remaining);
+        window.chooseScanMachine(() => {
+          console.log('🟣 [proceedAfterMachineDone] Machine chosen:', window.__lotScanMachine);
+          console.log('🟣 [proceedAfterMachineDone] step2Modal display before click:', document.getElementById('step2Modal')?.style.display);
+          // Re-show the step2Modal so the scanner has a visible container.
+          // Without this the camera acquires but cannot render into a hidden element.
+          if (typeof showStep2Modal === 'function') {
+            console.log('🟣 [proceedAfterMachineDone] Re-showing step2Modal before scan...');
+            showStep2Modal();
+          }
+          document.getElementById('startStep2Scan').click();
+        });
         return;
       }
     }
+    console.log('🟣 [proceedAfterMachineDone] All machines done (or not grouped) → showStep3Modal');
     if (typeof showStep3Modal === 'function') showStep3Modal();
   };
   window.afterLotPhotoProceed = function (onDone) {
     const prev = window.__pendingPrevLot;
     window.__pendingPrevLot = null;
+    console.log('🟣 [afterLotPhotoProceed] called, prev:', prev ? (prev.machine + ' lot ' + prev.lotNumber + ' open=' + prev.open) : 'null');
     if (prev && prev.open) {
+      console.log('🟣 [afterLotPhotoProceed] Prompting shots for previous lot...');
       promptShots('前ロットのショット数 / Previous lot shots', prev.machine + ' — ロット ' + prev.lotNumber,
-        v => { closeRecord(prev, v); if (onDone) onDone(); });
-    } else if (onDone) { onDone(); }
+        v => { closeRecord(prev, v); console.log('🟣 [afterLotPhotoProceed] Shots entered, calling onDone...'); if (onDone) onDone(); });
+    } else {
+      console.log('🟣 [afterLotPhotoProceed] No previous open lot, calling onDone directly');
+      if (onDone) { onDone(); }
+    }
   };
 
   // Final/open lot capture when End Time is entered.

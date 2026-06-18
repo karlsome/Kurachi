@@ -5006,23 +5006,35 @@
             if (typeof window.addMaterialLabelPhoto === 'function') {
                 const origAdd = window.addMaterialLabelPhoto;
                 window.addMaterialLabelPhoto = async function () {
+                    console.log('🟠 [materialPhotoGate] addMaterialLabelPhoto wrapper called, matWaiters count:', matWaiters.length);
                     const r = await origAdd.apply(this, arguments);
                     if (r) {
+                        console.log('🟠 [materialPhotoGate] Photo added successfully, flushing', matWaiters.length, 'waiter(s)...');
                         const ws = matWaiters.slice(); matWaiters.length = 0;
                         ws.forEach(f => { try { f(); } catch (_) { } });
                         renderImageGallery();
+                        console.log('🟠 [materialPhotoGate] All waiters flushed');
+                    } else {
+                        console.log('🟠 [materialPhotoGate] addMaterialLabelPhoto returned false (max photos or error)');
                     }
                     return r;
                 };
             }
             window.materialPhotoGate = function (proceed) {
+                console.log('🟠 [materialPhotoGate] Gate opened, registering proceed callback');
                 const modal = document.getElementById('materialPhotoGateModal');
-                matWaiters.push(() => { if (modal) modal.classList.remove('open'); if (typeof proceed === 'function') proceed(); });
+                matWaiters.push(() => {
+                    console.log('🟠 [materialPhotoGate] Waiter fired — closing gate modal and calling proceed');
+                    if (modal) modal.classList.remove('open');
+                    if (typeof proceed === 'function') proceed();
+                });
                 if (modal) modal.classList.add('open');
+                console.log('🟠 [materialPhotoGate] Gate modal shown, waiting for photo capture...');
             };
             (function bindGateCapture() {
                 const btn = document.getElementById('materialPhotoGateCapture');
                 if (btn) btn.addEventListener('click', () => {
+                    console.log('🟠 [materialPhotoGate] Capture button clicked, triggering makerLabelButton');
                     const b = document.getElementById('makerLabelButton');
                     if (b) b.click();
                 });
