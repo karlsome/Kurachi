@@ -5039,6 +5039,11 @@
             window.materialPhotoGate = function (proceed) {
                 console.log('🟠 [materialPhotoGate] Gate opened, registering proceed callback');
                 const modal = document.getElementById('materialPhotoGateModal');
+                const btn = document.getElementById('materialPhotoGateCapture');
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = '📷 写真を撮影 / Take Photo';
+                }
                 matWaiters.push(() => {
                     console.log('🟠 [materialPhotoGate] Waiter fired — closing gate modal and calling proceed');
                     if (modal) modal.classList.remove('open');
@@ -5053,6 +5058,17 @@
                     console.log('🟠 [materialPhotoGate] Capture button clicked, triggering makerLabelButton');
                     const b = document.getElementById('makerLabelButton');
                     if (b) b.click();
+                });
+                
+                // Show loading spinner when the photo is actually selected and processing begins
+                document.body.addEventListener('change', (e) => {
+                    if (e.target && e.target.id === 'makerLabelFileInput' && e.target.files && e.target.files.length > 0) {
+                        const capBtn = document.getElementById('materialPhotoGateCapture');
+                        if (capBtn) {
+                            capBtn.disabled = true;
+                            capBtn.innerHTML = '<span style="display:inline-block;width:18px;height:18px;border:3px solid rgba(255,255,255,0.3);border-top:3px solid #fff;border-radius:50%;animation:spin 1s linear infinite;margin-right:8px;vertical-align:middle;"></span> 処理中 / Processing...';
+                        }
+                    }
                 });
             })();
 
