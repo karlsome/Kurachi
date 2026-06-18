@@ -10315,6 +10315,10 @@ document.getElementById('startStep2Scan').addEventListener('click', async functi
   // re-enter this handler with the choice made. Single machine skips this.
   if (typeof groupedMachines !== 'undefined' && groupedMachines.length > 1 && !window.__lotScanMachine) {
     console.log('🟡 [startStep2Scan] No machine chosen yet, opening chooser...');
+    // Hide step2Modal while the chooser is open so it doesn't show behind it
+    // (especially on the production page where step modals shouldn't be visible).
+    const _s2m = document.getElementById('step2Modal');
+    if (_s2m) _s2m.style.display = 'none';
     if (typeof window.chooseScanMachine === 'function') {
       window.chooseScanMachine(() => document.getElementById('startStep2Scan').click());
       return;
@@ -11619,13 +11623,9 @@ if (manualSendModal) {
         console.log('🟣 [proceedAfterMachineDone] Opening machine chooser for remaining machines:', remaining);
         window.chooseScanMachine(() => {
           console.log('🟣 [proceedAfterMachineDone] Machine chosen:', window.__lotScanMachine);
-          console.log('🟣 [proceedAfterMachineDone] step2Modal display before click:', document.getElementById('step2Modal')?.style.display);
-          // Re-show the step2Modal so the scanner has a visible container.
-          // Without this the camera acquires but cannot render into a hidden element.
-          if (typeof showStep2Modal === 'function') {
-            console.log('🟣 [proceedAfterMachineDone] Re-showing step2Modal before scan...');
-            showStep2Modal();
-          }
+          // Don't show step2Modal here — the startStep2Scan handler has a safety
+          // check that will re-show it right when the scanner needs it. Showing it
+          // now would flash the modal behind the chooser on the production page.
           document.getElementById('startStep2Scan').click();
         });
         return;
