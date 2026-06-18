@@ -22,6 +22,8 @@ const { extractGENTokens } = require('./gen-token-extractor');
 const fetch = require('node-fetch');
 const heicConvert = require('heic-convert');
 const https = require('https');
+// Workaround for Render NAT / Node-fetch dropping Keep-Alive connections to Google APIs
+https.globalAgent.keepAlive = false;
 const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 
 const app = express();
@@ -2325,14 +2327,18 @@ app.post("/submitTopressDBiReporter", async (req, res) => {
       const filePath = `CycleCheck/${img.factory}/${fileName}`;
       const file = admin.storage().bucket().file(filePath);
 
-      await uploadToFirebaseWithRetry(file, buffer, {
-        metadata: {
-          contentType: "image/jpeg",
+      try {
+        await uploadToFirebaseWithRetry(file, buffer, {
           metadata: {
-            firebaseStorageDownloadTokens: downloadToken
+            contentType: "image/jpeg",
+            metadata: {
+              firebaseStorageDownloadTokens: downloadToken
+            }
           }
-        }
-      });
+        });
+      } catch (uploadError) {
+        console.error(`❌ Error uploading CycleCheck image ${img.label}:`, uploadError);
+      }
 
       const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${file.bucket.name}/o/${encodeURIComponent(file.name)}?alt=media&token=${downloadToken}`;
       const fieldName = labelToField[img.label] || `${img.label}画像`;
@@ -2353,14 +2359,18 @@ app.post("/submitTopressDBiReporter", async (req, res) => {
         const filePath = `materialLabel/${formData.工場}/${formData.設備}/${fileName}`;
         const file = admin.storage().bucket().file(filePath);
 
-        await uploadToFirebaseWithRetry(file, buffer, {
-          metadata: {
-            contentType: "image/jpeg",
+        try {
+          await uploadToFirebaseWithRetry(file, buffer, {
             metadata: {
-              firebaseStorageDownloadTokens: downloadToken
+              contentType: "image/jpeg",
+              metadata: {
+                firebaseStorageDownloadTokens: downloadToken
+              }
             }
-          }
-        });
+          });
+        } catch (uploadError) {
+          console.error(`❌ Error uploading material label image ${img.id}:`, uploadError);
+        }
 
         const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${file.bucket.name}/o/${encodeURIComponent(file.name)}?alt=media&token=${downloadToken}`;
         materialLabelImageURLs.push(publicUrl);
@@ -2395,14 +2405,18 @@ app.post("/submitTopressDBiReporter", async (req, res) => {
         const filePath = `maintenance/${formData.工場}/${formData.設備}/${fileName}`;
         const file = admin.storage().bucket().file(filePath);
 
-        await uploadToFirebaseWithRetry(file, buffer, {
-          metadata: {
-            contentType: "image/jpeg",
+        try {
+          await uploadToFirebaseWithRetry(file, buffer, {
             metadata: {
-              firebaseStorageDownloadTokens: downloadToken
+              contentType: "image/jpeg",
+              metadata: {
+                firebaseStorageDownloadTokens: downloadToken
+              }
             }
-          }
-        });
+          });
+        } catch (uploadError) {
+          console.error(`❌ Error uploading maintenance image ${img.id}:`, uploadError);
+        }
 
         const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${file.bucket.name}/o/${encodeURIComponent(file.name)}?alt=media&token=${downloadToken}`;
         imagesByRecordId[img.maintenanceRecordId].push(publicUrl);
