@@ -9,7 +9,7 @@
     "migrate:classic-shotstack": "node scripts/migrate-classic-to-shotstack.js"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": "22.x"
   },
   "dependencies": {
     "@sparticuz/chromium": "^121.0.0",
