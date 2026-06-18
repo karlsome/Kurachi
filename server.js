@@ -1979,6 +1979,22 @@ const fdb = admin.firestore();
 // Or Firebase Storage:
 const storage = admin.storage();
 
+// Helper to upload files to Firebase Storage with retry logic to handle intermittent "Premature close" network errors
+const uploadToFirebaseWithRetry = async (file, buffer, options, maxRetries = 3) => {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      await file.save(buffer, options);
+      return; // Success
+    } catch (error) {
+      if (attempt === maxRetries) {
+        throw error;
+      }
+      console.warn(`[Firebase Upload] Attempt ${attempt}/${maxRetries} failed: ${error.message}. Retrying in 1s...`);
+      await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+    }
+  }
+};
+
 
 
 
@@ -2305,7 +2321,7 @@ app.post("/submitTopressDBiReporter", async (req, res) => {
       const filePath = `CycleCheck/${img.factory}/${fileName}`;
       const file = admin.storage().bucket().file(filePath);
 
-      await file.save(buffer, {
+      await uploadToFirebaseWithRetry(file, buffer, {
         metadata: {
           contentType: "image/jpeg",
           metadata: {
@@ -2333,7 +2349,7 @@ app.post("/submitTopressDBiReporter", async (req, res) => {
         const filePath = `materialLabel/${formData.工場}/${formData.設備}/${fileName}`;
         const file = admin.storage().bucket().file(filePath);
 
-        await file.save(buffer, {
+        await uploadToFirebaseWithRetry(file, buffer, {
           metadata: {
             contentType: "image/jpeg",
             metadata: {
@@ -2375,7 +2391,7 @@ app.post("/submitTopressDBiReporter", async (req, res) => {
         const filePath = `maintenance/${formData.工場}/${formData.設備}/${fileName}`;
         const file = admin.storage().bucket().file(filePath);
 
-        await file.save(buffer, {
+        await uploadToFirebaseWithRetry(file, buffer, {
           metadata: {
             contentType: "image/jpeg",
             metadata: {
@@ -2506,7 +2522,7 @@ app.post('/logPrintAndUpdateMaterialRequest', async (req, res) => {
                     const file = bucket.file(fileName);
                     const downloadToken = "materialLabelToken_" + Date.now() + "_" + Math.random().toString(36).substring(2, 15);
 
-                    await file.save(buffer, {
+                    await uploadToFirebaseWithRetry(file, buffer, {
                         metadata: {
                             contentType: 'image/jpeg',
                             metadata: { firebaseStorageDownloadTokens: downloadToken }
@@ -2634,7 +2650,7 @@ app.post('/submitToDCP', async (req, res) => {
                 const file = bucket.file(filePath);
                 const downloadToken = "masterDBToken69";
 
-                await file.save(buffer, {
+                await uploadToFirebaseWithRetry(file, buffer, {
                     metadata: {
                         contentType: "image/jpeg",
                         metadata: { firebaseStorageDownloadTokens: downloadToken }
@@ -2669,7 +2685,7 @@ app.post('/submitToDCP', async (req, res) => {
                 const file = bucket.file(filePath);
                 const downloadToken = "masterDBToken69";
 
-                await file.save(buffer, {
+                await uploadToFirebaseWithRetry(file, buffer, {
                     metadata: {
                         contentType: "image/jpeg",
                         metadata: { firebaseStorageDownloadTokens: downloadToken }
@@ -2732,7 +2748,7 @@ app.post('/submitToDCP', async (req, res) => {
                     const file = bucket.file(filePath);
                     const downloadToken = "masterDBToken69";
 
-                    await file.save(buffer, {
+                    await uploadToFirebaseWithRetry(file, buffer, {
                         metadata: {
                             contentType: "image/jpeg",
                             metadata: { firebaseStorageDownloadTokens: downloadToken }
