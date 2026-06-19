@@ -11562,6 +11562,31 @@ if (manualSendModal) {
     const done = opts.done || [];
     closeLP();
     const card = shell();
+    
+    if (window.__materialScanMode === 'production') {
+      const ov = document.getElementById('lpModal');
+      if (ov) {
+        ov.addEventListener('click', function(e) {
+          if (e.target === ov) {
+            closeLP();
+            window.__materialScanMode = null;
+          }
+        });
+      }
+      
+      card.style.position = 'relative';
+      const closeBtn = document.createElement('button');
+      closeBtn.innerHTML = '✕';
+      closeBtn.style.cssText = 'position:absolute;top:16px;right:16px;background:none;border:none;font-size:1.4rem;font-weight:bold;color:#667085;cursor:pointer;padding:0;line-height:1;z-index:10;';
+      closeBtn.setAttribute('aria-label', 'Close');
+      closeBtn.onclick = function(e) {
+        e.stopPropagation();
+        closeLP();
+        window.__materialScanMode = null;
+      };
+      card.appendChild(closeBtn);
+    }
+
     const btns = (machines || []).map(m => {
       const isDone = done.indexOf(m) >= 0;
       const style = isDone
