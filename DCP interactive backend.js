@@ -2172,7 +2172,14 @@ function clearMaterialLabelPhotos() {
   updateMaterialPhotoCount();
 }
 
-async function addMaterialLabelPhoto(photoDataURL) {
+async function addMaterialLabelPhoto(photoDataURL, lotTarget = null) {
+  // Try to use the passed lotTarget, else fallback to global (and consume it)
+  let lotNumber = lotTarget;
+  if (!lotNumber && window.__captureLotTarget) {
+    lotNumber = window.__captureLotTarget;
+    window.__captureLotTarget = null;
+  }
+
   if (materialLabelPhotos.length >= MAX_MATERIAL_PHOTOS) {
     alert(`最大${MAX_MATERIAL_PHOTOS}枚まで撮影できます / Maximum ${MAX_MATERIAL_PHOTOS} photos allowed`);
     return false;
@@ -2195,9 +2202,7 @@ async function addMaterialLabelPhoto(photoDataURL) {
 
   const id = `material-label-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
   const timestamp = new Date().toISOString();
-  // Link this photo to the lot it was captured for (set before opening the camera)
-  const lotNumber = window.__captureLotTarget || null;
-
+  
   // Retaking a photo for a lot that already has one: replace it (keep the link)
   if (lotNumber && typeof materialLabelPhotos !== 'undefined') {
     const existingIdx = materialLabelPhotos.findIndex(p => p.lotNumber === lotNumber);
@@ -2215,8 +2220,6 @@ async function addMaterialLabelPhoto(photoDataURL) {
   // Object URL is used only for display in this session
   const blobUrl = URL.createObjectURL(blob);
   materialLabelPhotos.push({ id, timestamp, blobUrl, lotNumber });
-
-  window.__captureLotTarget = null; // consume the link target
 
   console.log(`Added material label photo #${materialLabelPhotos.length}`);
 
@@ -5361,6 +5364,9 @@ if (makerLabelButton) {
       const file = event.target.files[0];
       if (!file) return;
 
+      const lotTarget = window.__captureLotTarget || null;
+      if (window.__captureLotTarget) window.__captureLotTarget = null;
+
       try {
         console.log('📸 Processing material label photo...');
 
@@ -5368,7 +5374,7 @@ if (makerLabelButton) {
         const base64Image = await fileToBase64(file);
 
         // Add to material label photos array
-        const added = await addMaterialLabelPhoto(base64Image);
+        const added = await addMaterialLabelPhoto(base64Image, lotTarget);
 
         if (added) {
           console.log('✅ Successfully added material label photo');
