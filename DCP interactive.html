@@ -5023,6 +5023,8 @@
                 const origAdd = window.addMaterialLabelPhoto;
                 window.addMaterialLabelPhoto = async function () {
                     console.log('🟠 [materialPhotoGate] addMaterialLabelPhoto wrapper called, matWaiters count:', matWaiters.length);
+                    const wasBackground = (matWaiters.length === 0);
+                    
                     const r = await origAdd.apply(this, arguments);
                     if (r) {
                         console.log('🟠 [materialPhotoGate] Photo added successfully, flushing', matWaiters.length, 'waiter(s)...');
@@ -5032,6 +5034,22 @@
                         console.log('🟠 [materialPhotoGate] All waiters flushed');
                     } else {
                         console.log('🟠 [materialPhotoGate] addMaterialLabelPhoto returned false (max photos or error)');
+                        
+                        // Fail-safe: Restore the capture button state so the user can retry
+                        const capBtn = document.getElementById('materialPhotoGateCapture');
+                        if (capBtn) {
+                            capBtn.disabled = false;
+                            capBtn.innerHTML = '📷 写真を撮影 / Take Photo';
+                        }
+                        
+                        const msg = '❌ 写真の処理に失敗しました。もう一度撮影してください / Photo processing failed. Please take the photo again';
+                        if (wasBackground) {
+                            if (typeof window.showAlert === 'function') window.showAlert(msg);
+                            else alert(msg);
+                        } else {
+                            if (typeof window.showToast === 'function') window.showToast(msg, 4000);
+                            else alert(msg);
+                        }
                     }
                     return r;
                 };
@@ -5068,6 +5086,16 @@
                             capBtn.disabled = true;
                             capBtn.innerHTML = '<span style="display:inline-block;width:18px;height:18px;border:3px solid rgba(255,255,255,0.3);border-top:3px solid #fff;border-radius:50%;animation:spin 1s linear infinite;margin-right:8px;vertical-align:middle;"></span> 処理中 / Processing...';
                         }
+                        
+                        // Immediately dismiss the gate to let the user proceed,
+                        // while the photo processes in the background.
+                        console.log('🟠 [materialPhotoGate] Flushing waiters immediately for background processing');
+                        const modal = document.getElementById('materialPhotoGateModal');
+                        if (modal) modal.classList.remove('open');
+                        
+                        const ws = matWaiters.slice(); 
+                        matWaiters.length = 0;
+                        ws.forEach(f => { try { f(); } catch (_) { } });
                     }
                 });
             })();
