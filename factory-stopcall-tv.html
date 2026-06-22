@@ -254,14 +254,33 @@
             color: #FFE3E5;
         }
 
-        /* Each calling tile alternates: machine name <-> big rank number, in
-           sync across all tiles, driven by toggling .flip on the grid. */
-        .grid.flip .tile.calling .name {
-            display: none;
-        }
+        /* Each calling tile alternates: machine name <-> big rank number <-> type, in
+           sync across all tiles, driven by updating data-phase on the grid. */
+        .grid[data-phase="1"] .tile.calling .name { display: none; }
+        .grid[data-phase="1"] .tile.calling .big-rank { display: block; }
+        
+        .grid[data-phase="2"] .tile.calling .name { display: none; }
+        .grid[data-phase="2"] .tile.calling .type-display { display: flex; }
+        
+        /* If only leader is active, phase 2 acts like phase 0 (shows name) */
+        .grid[data-phase="2"] .tile.calling[data-only-leader="true"] .name { display: block; }
+        .grid[data-phase="2"] .tile.calling[data-only-leader="true"] .type-display { display: none; }
 
-        .grid.flip .tile.calling .big-rank {
-            display: block;
+        .type-display {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            gap: 2vh;
+        }
+        
+        .type-display > div {
+            font-size: clamp(40px, 6vw, 110px);
+            font-weight: 900;
+            color: #fff;
+            line-height: 0.9;
+            text-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
         }
 
         /* Big full-card mode word (休憩中 / 整備中) — always shown on break/
@@ -597,7 +616,7 @@
     <script>
         //const serverURL = "https://kurachi.onrender.com";
         //const serverURL = "http://localhost:3000";
-        const serverURL = "http://192.168.0.101:3000";
+        const serverURL = "http://192.168.0.145:3000";
 
         const params = new URLSearchParams(location.search);
         const FACTORY = params.get('filter') || params.get('factory') || '';
@@ -645,6 +664,7 @@
                 tile.innerHTML =
                     '<div class="name">' + m + '</div>' +
                     '<div class="big-rank"></div>' +
+                    '<div class="type-display"></div>' +
                     '<div class="seb"></div>' +
                     '<div class="big-mode"></div>' +
                     '<div class="status">停止 / IDLE</div>' +
@@ -788,12 +808,18 @@
         }
         setInterval(refreshElapsed, 1000);
 
-        // Once per second, flip calling tiles (name <-> rank) so the order
+        // Once per second, cycle calling tiles (name -> rank -> type) so the order
         // reads from afar. Break/maintenance tiles no longer flip — they keep
         // the big mode word with a small 背番号 in the corner.
+        let callPhase = 0;
         setInterval(() => {
-            if (activeList.length > 0) grid.classList.toggle('flip');
-            else if (grid.classList.contains('flip')) grid.classList.remove('flip');
+            if (activeList.length > 0) {
+                callPhase = (callPhase + 1) % 3;
+                grid.dataset.phase = callPhase;
+            } else {
+                callPhase = 0;
+                grid.dataset.phase = 0;
+            }
         }, 1000);
 
         // Size text as large as fits on one line (empirical width factor for the bold font).
@@ -818,8 +844,18 @@
             const idx = activeList.findIndex(it => it.machine === machine);
             tile.classList.remove('running', 'idle', 'brk', 'maint');
             if (idx >= 0) {
+                const item = activeList[idx];
                 tile.classList.add('calling');
                 tile.querySelector('.big-rank').textContent = '#' + (idx + 1);
+                
+                tile.dataset.onlyLeader = (item.leader && !item.box && !item.material) ? 'true' : 'false';
+                
+                let typeHtml = '';
+                if (item.box) typeHtml += '<div>BOX</div>';
+                if (item.material) typeHtml += '<div>ROLL</div>';
+                if (!item.box && !item.material && item.leader) typeHtml += '<div>CALL</div>';
+                tile.querySelector('.type-display').innerHTML = typeHtml;
+                
                 fitCallingName(tile, machine);
             } else {
                 tile.classList.remove('calling');

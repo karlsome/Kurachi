@@ -184,15 +184,32 @@ function broadcastToFactory(factoryId, data) {
 
 // ============================================
 // Stop-call (call-leader) state per factory — drives the factory TV blinking.
-// factoryStopCalls: factory -> Map(machine -> { since })
+// factoryStopCalls: factory -> Map(machine -> { leader: {since}, box: {since}, material: {since} })
 // ============================================
 const factoryStopCalls = new Map();
 
 function buildStopCallPayload(factoryId) {
   const machines = factoryStopCalls.get(factoryId) || new Map();
-  const active = Array.from(machines.entries())
-    .map(([machine, info]) => ({ machine, since: info.since }))
-    .sort((a, b) => a.since - b.since); // earliest call first → #1
+  const active = [];
+  
+  machines.forEach((info, machine) => {
+    let earliest = Infinity;
+    if (info.leader && info.leader.since < earliest) earliest = info.leader.since;
+    if (info.box && info.box.since < earliest) earliest = info.box.since;
+    if (info.material && info.material.since < earliest) earliest = info.material.since;
+    
+    if (earliest !== Infinity) {
+      active.push({
+        machine,
+        since: earliest,
+        leader: !!info.leader,
+        box: !!info.box,
+        material: !!info.material
+      });
+    }
+  });
+  
+  active.sort((a, b) => a.since - b.since); // earliest call first → #1
   return { type: 'stopcall', factory: factoryId, active };
 }
 
@@ -612,6 +629,7 @@ app.post("/api/stop-call", (req, res) => {
   const factory = String(req.body?.factory || '').trim();
   const machine = String(req.body?.machine || '').trim().toUpperCase();
   const action = String(req.body?.action || '').trim();
+  const callType = String(req.body?.callType || 'leader').trim(); // 'leader', 'box', 'material'
 
   if (!factory || !machine) {
     return res.status(400).json({ error: "factory and machine are required" });
@@ -626,16 +644,25 @@ app.post("/api/stop-call", (req, res) => {
   // A tablet machine id may be grouped, e.g. "OZNC04,OZNC06" — apply to each.
   const ids = machine.split(',').map(m => m.trim()).filter(Boolean);
   ids.forEach(id => {
+    let info = machines.get(id) || {};
+    
     if (action === 'activate') {
-      if (!machines.has(id)) machines.set(id, { since: Date.now() });
+      if (!info[callType]) info[callType] = { since: Date.now() };
+      machines.set(id, info);
     } else {
-      machines.delete(id);
+      if (info[callType]) delete info[callType];
+      
+      if (Object.keys(info).length === 0) {
+        machines.delete(id);
+      } else {
+        machines.set(id, info);
+      }
     }
   });
 
   const payload = buildStopCallPayload(factory);
   broadcastToFactory(factory, payload);
-  console.log(`🟥 stop-call ${action} for ${factory}/${ids.join(',')} → ${payload.active.length} active`);
+  console.log(`🟥 stop-call ${action} (${callType}) for ${factory}/${ids.join(',')} → ${payload.active.length} active`);
   res.json({ ok: true, active: payload.active });
 });
 

@@ -4020,11 +4020,40 @@
         }
 
         /* ---------- Stop / Call-leader (floating button + overlay) ---------- */
-        .stopcall-fab {
+        .fab-menu-wrapper {
             position: fixed;
             left: 16px;
             bottom: 32px;
             z-index: 99990;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 16px;
+            touch-action: none;
+        }
+
+        .fab-menu-items {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 16px;
+            overflow: visible;
+            transition: opacity 0.3s, transform 0.3s, visibility 0.3s;
+            opacity: 0;
+            transform: translateY(20px);
+            visibility: hidden;
+            pointer-events: none;
+        }
+
+        .fab-menu-wrapper.open .fab-menu-items {
+            opacity: 1;
+            transform: translateY(0);
+            visibility: visible;
+            pointer-events: auto;
+        }
+
+        .stopcall-fab {
+            position: relative;
             width: 86px;
             height: 86px;
             background: #E11D2A;
@@ -4036,21 +4065,115 @@
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            gap: 3px;
             cursor: pointer;
             font-family: inherit;
             font-weight: 800;
-            animation: stopFabPulse 2s ease-in-out infinite;
             touch-action: none;
             -webkit-touch-callout: none;
             -webkit-user-select: none;
             user-select: none;
+            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+        }
+
+        .main-fab {
+            animation: stopFabPulse 2s ease-in-out infinite;
+        }
+
+        .fab-content {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 3px;
+            width: 100%;
+            transition: opacity 0.3s;
         }
 
         .stopcall-fab.holding {
             transform: scale(1.08);
             animation: none;
             box-shadow: 0 0 0 10px rgba(225, 29, 42, 0.25);
+        }
+
+        /* Active slider state */
+        .sub-fab.is-active {
+            width: 220px;
+            border-radius: 43px;
+            clip-path: none;
+            background: #FF9800;
+            border-color: #fff;
+            animation: none;
+            box-shadow: 0 6px 18px rgba(255, 152, 0, 0.5);
+        }
+
+        .sub-fab.is-active .fab-content {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        /* Pure icon buttons for Box and Material (no background/border until active) */
+        .sub-fab[data-type="box"]:not(.is-active),
+        .sub-fab[data-type="material"]:not(.is-active) {
+            background: transparent;
+            border: none;
+            box-shadow: none;
+            clip-path: none;
+        }
+
+        .slide-track-text {
+            position: absolute;
+            left: 0;
+            right: 0;
+            top: 0;
+            bottom: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.95rem;
+            white-space: nowrap;
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+            color: #fff;
+            padding-left: 20px;
+        }
+
+        .sub-fab.is-active .slide-track-text {
+            opacity: 1;
+        }
+
+        .slide-thumb {
+            position: absolute;
+            left: 6px;
+            top: 6px;
+            width: 68px;
+            height: 68px;
+            border-radius: 50%;
+            background: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+            z-index: 2;
+        }
+
+        .slide-thumb svg {
+            width: 32px;
+            height: 32px;
+            stroke: #FF9800;
+        }
+
+        .sub-fab.is-active .slide-thumb {
+            opacity: 1;
+            pointer-events: auto;
+            cursor: grab;
+        }
+
+        .sub-fab.is-active .slide-thumb:active {
+            cursor: grabbing;
         }
 
         /* Press-and-hold 3-2-1 countdown */
@@ -4114,7 +4237,7 @@
             100% { transform: scale(1); }
         }
 
-        .stopcall-fab svg {
+        .stopcall-fab svg, .fab-content svg {
             width: 26px;
             height: 26px;
             stroke: #fff;
@@ -4124,10 +4247,11 @@
             stroke-linejoin: round;
         }
 
-        .stopcall-fab span {
+        .stopcall-fab span, .fab-content span {
             font-size: 0.62rem;
             line-height: 1.05;
             letter-spacing: 0.02em;
+            text-align: center;
         }
 
         .stopcall-fab:active {
@@ -4260,17 +4384,54 @@
             data-i18n="finish_maintenance">故障対応を終了 / End Maintenance</button>
     </div>
 
-    <!-- Floating "Stop / Call leader" button (hold 3s to activate; left side) -->
-    <button type="button" id="stopCallButton" class="stopcall-fab"
-        aria-label="リーダー呼び出し（3秒長押し） / Call leader (hold 3s)">
-        <svg viewBox="0 0 24 24">
-            <path d="M18.5 12a6.5 6.5 0 0 0-13 0" />
-            <path d="M5 12v3a2 2 0 0 0 2 2h1v-5H6a1 1 0 0 0-1 0z" />
-            <path d="M19 12v3a2 2 0 0 1-2 2h-1v-5h2a1 1 0 0 1 1 0z" />
-            <path d="M8 19a4 4 0 0 0 4 2" />
-        </svg>
-        <span>呼出<br>Call</span>
-    </button>
+    <!-- Floating Menu: Call Leader, Box, Material -->
+    <div class="fab-menu-wrapper" id="callMenuWrapper">
+        <div class="fab-menu-items">
+            <!-- Material Button -->
+            <button type="button" class="stopcall-fab sub-fab" id="callMaterialBtn" data-type="material">
+                <div class="slide-track-text">スライドして解除</div>
+                <div class="slide-thumb"><svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></div>
+                <div class="fab-content">
+                    <svg viewBox="-351 153 256 256" style="width: 70px; height: 70px; fill: #000; stroke: none; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));">
+                        <path d="M-168.6,256.5c0-20.3,8.9-36.6,21.1-44.7h-165c-14.6,2.4-24.3,25.2-24.3,44.7c0,20.3,8,42.3,24.3,44.7h164.9
+                        C-159.7,293.1-168.6,276.9-168.6,256.5 M-104,286.6c-9.8,22.7-34.2,21.1-34.2,21.1h-174.5c-1.6,18.7-9.8,35.8-33.3,49.5h198.2
+                        C-107.9,337.8-104,286.6-104,286.6 M-132.7,299.2c-16.4,0-29.8-19.1-29.8-42.7s13.4-42.7,29.8-42.7s29.8,19.1,29.8,42.7
+                        S-116.3,299.2-132.7,299.2z M-132.7,221.2c-12.6,0-22.9,15.9-22.9,35.3s10.3,35.3,22.9,35.3s22.9-15.9,22.9-35.3
+                        S-120,221.2-132.7,221.2z M-132.7,287c-11.4,0-19-15.8-19-30.4s7.7-30.4,19-30.4s19,15.8,19,30.4S-121.2,287-132.7,287z
+                        M-132.7,233.5c-6.3,0-12.3,11.3-12.3,23.1s6,23.1,12.3,23.1s12.3-11.3,12.3-23.1S-126.3,233.5-132.7,233.5z M-132.7,241.5
+                        c3.5,0,6.4,6.7,6.4,15c0,8.3-2.9,15-6.4,15s-6.4-6.7-6.4-15C-139.1,248.2-136.2,241.5-132.7,241.5z"/>
+                    </svg>
+                </div>
+            </button>
+            
+            <!-- Box Button -->
+            <button type="button" class="stopcall-fab sub-fab" id="callBoxBtn" data-type="box">
+                <div class="slide-track-text">スライドして解除</div>
+                <div class="slide-thumb"><svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></div>
+                <div class="fab-content">
+                    <svg viewBox="0 0 100 100" style="width: 70px; height: 70px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3)); pointer-events: none;">
+                        <path d="M15 35 L50 55 L50 95 L15 75 Z" fill="#C59B6D" stroke="#3d3127" stroke-width="3" stroke-linejoin="round"/>
+                        <path d="M50 55 L85 35 L85 75 L50 95 Z" fill="#A87F54" stroke="#3d3127" stroke-width="3" stroke-linejoin="round"/>
+                        <path d="M50 15 L85 35 L50 55 L15 35 Z" fill="#E2B787" stroke="#3d3127" stroke-width="3" stroke-linejoin="round"/>
+                        <path d="M29 27 L36 23 L71 43 L64 47 Z" fill="#FFFFFF" stroke="#3d3127" stroke-width="2.5" stroke-linejoin="round"/>
+                        <path d="M64 47 L71 43 L71 53 L64 57 Z" fill="#D4D4D4" stroke="#3d3127" stroke-width="2.5" stroke-linejoin="round"/>
+                    </svg>
+                </div>
+            </button>
+        </div>
+
+        <!-- Main Toggle Button -->
+        <button type="button" id="stopCallMainToggle" class="stopcall-fab main-fab" aria-label="メニューを開く / Open Menu">
+            <div class="fab-content">
+                <svg viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M3 18v-6a9 9 0 0 1 18 0v6"></path>
+                    <path d="M21 19a2 2 0 0 1-2 2h-1v-6h3v4z"></path>
+                    <path d="M3 19a2 2 0 0 0 2 2h1v-6H3v4z"></path>
+                </svg>
+                <span>呼出<br>Call</span>
+            </div>
+        </button>
+    </div>
 
     <!-- Hold-to-activate 3-2-1 countdown -->
     <div id="stopHoldCountdown" class="stop-hold-countdown">
@@ -4767,7 +4928,7 @@
             };
 
             // Notify the server so the factory TV can blink this machine in real time (SSE).
-            function notifyStopCall(action) {
+            function notifyStopCall(action, callType = 'leader') {
                 try {
                     const factory = document.getElementById('selected工場')?.value || '';
                     const machine = new URLSearchParams(location.search).get('machine') || '';
@@ -4776,7 +4937,7 @@
                     fetch(`${base}/api/stop-call`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ factory, machine, action })
+                        body: JSON.stringify({ factory, machine, action, callType })
                     }).catch(() => { });
                 } catch (e) { }
             }
@@ -4810,8 +4971,8 @@
             function openStopCallOverlay(startEpoch) {
                 const ov = document.getElementById('stopCallOverlay');
                 if (ov) ov.classList.add('open');
-                const fab = document.getElementById('stopCallButton');
-                if (fab) fab.style.display = 'none';
+                const menuWrap = document.getElementById('callMenuWrapper');
+                if (menuWrap) menuWrap.style.display = 'none';
                 const unlockBtn = document.getElementById('stopCallUnlockButton');
                 if (unlockBtn) unlockBtn.style.display = '';
                 const qrWrap = document.getElementById('stopCallQrWrap');
@@ -4827,15 +4988,18 @@
                 stopStopCallScanner();
                 const ov = document.getElementById('stopCallOverlay');
                 if (ov) ov.classList.remove('open');
-                const fab = document.getElementById('stopCallButton');
-                if (fab) fab.style.display = '';
+                const menuWrap = document.getElementById('callMenuWrapper');
+                if (menuWrap) {
+                    menuWrap.style.display = '';
+                    menuWrap.classList.remove('open');
+                }
             }
             function startStopCall() {
                 if (localStorage.getItem(breakPrefix + 'activeStopCallStart')) return; // already calling
                 const startEpoch = Date.now();
                 localStorage.setItem(breakPrefix + 'activeStopCallStart', String(startEpoch));
                 openStopCallOverlay(startEpoch);
-                notifyStopCall('activate');
+                notifyStopCall('activate', 'leader');
             }
             function cancelStopCall() {
                 const raw = localStorage.getItem(breakPrefix + 'activeStopCallStart');
@@ -4843,7 +5007,7 @@
                 if (raw && (Date.now() - parseInt(raw, 10)) > STOP_CANCEL_WINDOW_MS) return;
                 localStorage.removeItem(breakPrefix + 'activeStopCallStart');
                 closeStopCallOverlay();
-                notifyStopCall('clear');
+                notifyStopCall('clear', 'leader');
                 showToast('呼び出しをキャンセルしました / Call canceled');
             }
             function beginStopCallUnlock() {
@@ -4917,17 +5081,34 @@
                 saveStopCallData(data);
                 localStorage.removeItem(breakPrefix + 'activeStopCallStart');
                 closeStopCallOverlay();
-                notifyStopCall('clear');
+                notifyStopCall('clear', 'leader');
                 showToast('リーダー対応を記録しました / Leader arrival recorded');
             }
             function resumeStopCallIfActive() {
                 const raw = localStorage.getItem(breakPrefix + 'activeStopCallStart');
                 if (raw) {
                     openStopCallOverlay(parseInt(raw, 10));
-                    notifyStopCall('activate'); // re-assert to the TV after a reload/server restart
+                    notifyStopCall('activate', 'leader'); // re-assert to the TV after a reload/server restart
                 }
             }
             window.startStopCall = startStopCall;
+            
+            function startSpecificCall(btn, type) {
+                if (type === 'leader') {
+                    document.getElementById('callMenuWrapper')?.classList.remove('open');
+                    startStopCall();
+                } else {
+                    btn.classList.add('is-active');
+                    notifyStopCall('activate', type);
+                    const ov = document.getElementById('requestConfirmOverlay');
+                    if (ov) {
+                        document.getElementById('requestConfirmTitle').textContent = 
+                            type === 'box' ? '空箱をリクエストしました / Box Requested' : '部材をリクエストしました / Material Requested';
+                        ov.classList.add('open');
+                        setTimeout(() => { ov.classList.remove('open'); }, 4000);
+                    }
+                }
+            }
 
             // ---------- Machine-state re-assert (keeps the factory TV correct) ----------
             // Periodically tell the server this machine's current state. This keeps
@@ -4976,6 +5157,8 @@
             const STOP_HOLD_MS = 3000;
             let stopHoldRAF = null;
             let stopHoldStart = 0;
+            let stopHoldTarget = null;
+            let stopHoldType = 'leader';
             function showHoldCountdown() { document.getElementById('stopHoldCountdown')?.classList.add('show'); }
             function hideHoldCountdown() { document.getElementById('stopHoldCountdown')?.classList.remove('show'); }
             function setHoldNum(n) {
@@ -4984,12 +5167,16 @@
                 el.textContent = n;
                 el.classList.remove('bump'); void el.offsetWidth; el.classList.add('bump');
             }
-            function beginStopHold(e) {
+            function beginStopHold(e, btnId, type) {
                 if (e && e.cancelable) e.preventDefault();
-                if (localStorage.getItem(breakPrefix + 'activeStopCallStart')) return; // already calling
+                const btn = document.getElementById(btnId);
+                if (!btn) return;
+                if (btn.classList.contains('is-active')) return;
+                if (type === 'leader' && localStorage.getItem(breakPrefix + 'activeStopCallStart')) return;
                 if (stopHoldRAF) return;
-                const fab = document.getElementById('stopCallButton');
-                if (fab) fab.classList.add('holding');
+                btn.classList.add('holding');
+                stopHoldTarget = btn;
+                stopHoldType = type;
                 stopHoldStart = Date.now();
                 showHoldCountdown();
                 let lastShown = 3;
@@ -4997,8 +5184,11 @@
                 const tick = () => {
                     const remaining = STOP_HOLD_MS - (Date.now() - stopHoldStart);
                     if (remaining <= 0) {
+                        const target = stopHoldTarget;
+                        const typeToCall = stopHoldType;
                         endStopHold();
-                        startStopCall(); // hides countdown + FAB via openStopCallOverlay
+                        if (btnId === 'stopCallMainToggle') window.__mainHoldExecuted = true;
+                        startSpecificCall(target, typeToCall);
                         return;
                     }
                     const shown = Math.ceil(remaining / 1000);
@@ -5010,7 +5200,8 @@
             function endStopHold() {
                 if (stopHoldRAF) { cancelAnimationFrame(stopHoldRAF); stopHoldRAF = null; }
                 hideHoldCountdown();
-                document.getElementById('stopCallButton')?.classList.remove('holding');
+                if (stopHoldTarget) stopHoldTarget.classList.remove('holding');
+                stopHoldTarget = null;
             }
             function cancelStopHold() {
                 if (!stopHoldRAF) return; // not holding (or already completed)
@@ -5273,17 +5464,148 @@
                 if (stopUnlockBtn) stopUnlockBtn.addEventListener('click', beginStopCallUnlock);
                 if (stopCancelBtn) stopCancelBtn.addEventListener('click', cancelStopCall);
 
-                // Press-and-hold (3s) on the floating button to arm the call
-                const stopFab = document.getElementById('stopCallButton');
-                if (stopFab) {
-                    stopFab.addEventListener('pointerdown', (e) => {
-                        try { stopFab.setPointerCapture(e.pointerId); } catch (_) { }
-                        beginStopHold(e);
-                    });
-                    stopFab.addEventListener('pointerup', cancelStopHold);
-                    stopFab.addEventListener('pointercancel', cancelStopHold);
-                    stopFab.addEventListener('contextmenu', (e) => e.preventDefault());
+                // Stop / Call leader menu logic
+                const menuWrap = document.getElementById('callMenuWrapper');
+                const mainToggle = document.getElementById('stopCallMainToggle');
+                
+                let menuCollapseTimer = null;
+                window.__mainHoldExecuted = false;
+
+                function resetMenuCollapseTimer() {
+                    clearTimeout(menuCollapseTimer);
+                    if (menuWrap && menuWrap.classList.contains('open')) {
+                        menuCollapseTimer = setTimeout(() => {
+                            menuWrap.classList.remove('open');
+                        }, 3000);
+                    }
                 }
+
+                if (mainToggle && menuWrap) {
+                    mainToggle.addEventListener('pointerdown', (e) => {
+                        if (e.pointerType === 'mouse' && e.button !== 0) return;
+                        clearTimeout(menuCollapseTimer);
+                        window.__mainHoldExecuted = false;
+                        
+                        if (menuWrap.classList.contains('open')) {
+                            try { mainToggle.setPointerCapture(e.pointerId); } catch (_) { }
+                            beginStopHold(e, 'stopCallMainToggle', 'leader');
+                        }
+                    });
+                    
+                    const handleMainUp = (e) => {
+                        cancelStopHold();
+                        resetMenuCollapseTimer();
+                    };
+                    
+                    mainToggle.addEventListener('pointerup', handleMainUp);
+                    mainToggle.addEventListener('pointercancel', handleMainUp);
+                    mainToggle.addEventListener('contextmenu', (e) => e.preventDefault());
+
+                    mainToggle.addEventListener('click', (e) => {
+                        if (window.__mainHoldExecuted) {
+                            window.__mainHoldExecuted = false;
+                            return; // ignore click if hold was executed
+                        }
+                        if (!menuWrap.classList.contains('open')) {
+                            menuWrap.classList.add('open');
+                            resetMenuCollapseTimer();
+                        } else {
+                            menuWrap.classList.remove('open');
+                            clearTimeout(menuCollapseTimer);
+                        }
+                    });
+                }
+                
+                document.addEventListener('click', (e) => {
+                    if (menuWrap && menuWrap.classList.contains('open') && !menuWrap.contains(e.target)) {
+                        menuWrap.classList.remove('open');
+                        clearTimeout(menuCollapseTimer);
+                    }
+                });
+
+                document.getElementById('requestConfirmOkBtn')?.addEventListener('click', () => {
+                    document.getElementById('requestConfirmOverlay')?.classList.remove('open');
+                });
+
+                // Slider logic for Box and Material
+                function setupSlider(btnId, type) {
+                    const btn = document.getElementById(btnId);
+                    if (!btn) return;
+                    const thumb = btn.querySelector('.slide-thumb');
+                    if (!thumb) return;
+                    
+                    let isDragging = false;
+                    let startX = 0;
+                    let currentX = 0;
+                    const maxSlide = 140;
+
+                    const onMove = (e) => {
+                        if (!isDragging) return;
+                        e.preventDefault();
+                        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                        currentX = Math.max(0, Math.min(clientX - startX, maxSlide));
+                        thumb.style.transform = `translateX(${currentX}px)`;
+                    };
+
+                    const onEnd = () => {
+                        if (!isDragging) return;
+                        isDragging = false;
+                        document.removeEventListener('pointermove', onMove);
+                        document.removeEventListener('pointerup', onEnd);
+                        document.removeEventListener('pointercancel', onEnd);
+
+                        if (currentX >= maxSlide * 0.85) {
+                            btn.classList.remove('is-active');
+                            thumb.style.transform = '';
+                            notifyStopCall('clear', type);
+                            showToast((type === 'box' ? '空箱' : '部材') + 'リクエストを解除しました');
+                        } else {
+                            thumb.style.transition = 'transform 0.3s ease';
+                            thumb.style.transform = 'translateX(0)';
+                        }
+                        resetMenuCollapseTimer();
+                    };
+
+                    const onStart = (e) => {
+                        if (!btn.classList.contains('is-active')) return;
+                        if (e.pointerType && e.pointerType === 'mouse' && e.button !== 0) return;
+                        e.preventDefault();
+                        isDragging = true;
+                        startX = e.clientX || (e.touches && e.touches[0].clientX);
+                        currentX = 0;
+                        thumb.style.transition = 'none';
+                        clearTimeout(menuCollapseTimer);
+                        try { thumb.setPointerCapture(e.pointerId); } catch (_) { }
+                        
+                        document.addEventListener('pointermove', onMove, { passive: false });
+                        document.addEventListener('pointerup', onEnd);
+                        document.addEventListener('pointercancel', onEnd);
+                    };
+
+                    thumb.addEventListener('pointerdown', onStart);
+                    thumb.addEventListener('contextmenu', (e) => { if (btn.classList.contains('is-active')) e.preventDefault(); });
+
+                    const holdStart = (e) => {
+                        if (e.target.closest('.slide-thumb')) return;
+                        clearTimeout(menuCollapseTimer);
+                        try { btn.setPointerCapture(e.pointerId); } catch (_) { }
+                        beginStopHold(e, btnId, type);
+                    };
+                    
+                    const holdEnd = (e) => {
+                        cancelStopHold();
+                        resetMenuCollapseTimer();
+                    };
+
+                    btn.addEventListener('pointerdown', holdStart);
+                    btn.addEventListener('pointerup', holdEnd);
+                    btn.addEventListener('pointercancel', holdEnd);
+                    btn.addEventListener('contextmenu', (e) => e.preventDefault());
+                }
+
+                setupSlider('callBoxBtn', 'box');
+                setupSlider('callMaterialBtn', 'material');
+
                 resumeStopCallIfActive();
 
                 // Collapsible Setup card: collapse once a worker is set (set-once fields)
