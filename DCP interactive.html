@@ -4176,7 +4176,7 @@
             cursor: grabbing;
         }
 
-        /* Press-and-hold 3-2-1 countdown */
+        /* Press-and-hold 2-1 countdown */
         .stop-hold-countdown {
             position: fixed;
             inset: 0;
@@ -4436,7 +4436,7 @@
     <!-- Hold-to-activate 3-2-1 countdown -->
     <div id="stopHoldCountdown" class="stop-hold-countdown">
         <div class="stop-hold-ring">
-            <div class="stop-hold-num" id="stopHoldNum">3</div>
+            <div class="stop-hold-num" id="stopHoldNum">2</div>
             <div class="stop-hold-label" data-i18n="stopcall_keephold">押し続けてください<br>Keep holding…</div>
         </div>
     </div>
@@ -5153,8 +5153,8 @@
             window.addEventListener('online', assertMachineState);
             document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') assertMachineState(); });
 
-            // Press-and-hold (3s) to arm the call, to avoid accidental taps.
-            const STOP_HOLD_MS = 3000;
+            // Press-and-hold (2s) to arm the call, to avoid accidental taps.
+            const STOP_HOLD_MS = 2000;
             let stopHoldRAF = null;
             let stopHoldStart = 0;
             let stopHoldTarget = null;
@@ -5179,8 +5179,8 @@
                 stopHoldType = type;
                 stopHoldStart = Date.now();
                 showHoldCountdown();
-                let lastShown = 3;
-                setHoldNum(3);
+                let lastShown = 2;
+                setHoldNum(2);
                 const tick = () => {
                     const remaining = STOP_HOLD_MS - (Date.now() - stopHoldStart);
                     if (remaining <= 0) {
