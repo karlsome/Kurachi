@@ -1948,6 +1948,17 @@
                                 <div class="tap-label" data-i18n="defect_pull">疵引不良</div>
                                 <input readonly id="counter-18" value="0" type="number" name="疵引不良"
                                     style="display:none;">
+                                <button type="button" class="tap-photo-btn" id="defectPhotoBtn"
+                                    onclick="event.stopPropagation(); if(window.startDefectPhotoFlow) window.startDefectPhotoFlow();"
+                                    aria-label="defect photo">
+                                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+                                        stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                                        <path
+                                            d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                                        <circle cx="12" cy="13" r="4" />
+                                    </svg>
+                                    <span data-i18n="defect_photo">写真 / Photo</span>
+                                </button>
                             </div>
                             <div class="tap-counter" id="counter-box-19" onclick="prodCounterTap(event, 19)">
                                 <button type="button" class="tap-minus" onclick="prodCounterMinus(event, 19)"
@@ -3518,6 +3529,32 @@
             align-items: center;
             justify-content: center;
             transition: var(--transition-smooth);
+        }
+
+        .tap-counter .tap-photo-btn {
+            margin-top: 4px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            padding: 7px 14px;
+            border-radius: 999px;
+            border: 1px solid var(--border-strong);
+            background: var(--bg-card);
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 0.8rem;
+            font-weight: 700;
+            transition: var(--transition-smooth);
+        }
+
+        .tap-counter .tap-photo-btn:hover {
+            border-color: var(--brand);
+            color: var(--brand);
+        }
+
+        .tap-counter .tap-photo-btn:active {
+            transform: scale(0.94);
         }
 
         .tap-counter .tap-minus:hover {

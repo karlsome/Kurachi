@@ -11726,3 +11726,229 @@ if (manualSendModal) {
   // Reflect any persisted lots into the (hidden) #shot total on load.
   updateShotTotalField();
 })();
+
+/* ============================================================
+   疵引き (MATERIAL DEFECT) PHOTO CAPTURE
+   ------------------------------------------------------------
+   Camera button under the 疵引き defect counter on the production
+   page. Flow:
+     leader QR scan (verifyLeader) → camera (webcam / native) →
+     burn-in overlay at the bottom of the photo (current lot
+     number, leader name, timestamp) → flatten → save into the
+     SAME material-label photo group (materialLabelPhotos).
+   The overlay is rasterised into the JPEG so it is permanent.
+   Self-contained: builds its own modals, no extra HTML needed.
+   ============================================================ */
+(function () {
+  'use strict';
+
+  function srvURL() { return (typeof serverURL !== 'undefined' && serverURL) ? serverURL : ''; }
+
+  // Best-effort "current lot": the most recent OPEN lot in the per-machine
+  // tracker, else the last entry in the material-lot list.
+  function getCurrentLot() {
+    try {
+      const PFX = (typeof uniquePrefix !== 'undefined' && uniquePrefix) ? uniquePrefix : 'dcp-';
+      const lbm = JSON.parse(localStorage.getItem(PFX + 'lotsByMachine') || '{}') || {};
+      let best = null;
+      Object.keys(lbm).forEach(m => (lbm[m] || []).forEach(r => { if (r && r.open && r.lotNumber) best = r; }));
+      if (best) return best.lotNumber;
+    } catch (e) { }
+    try {
+      if (typeof materialLots !== 'undefined' && materialLots.length) {
+        return materialLots[materialLots.length - 1].lotNumber;
+      }
+    } catch (e) { }
+    return '';
+  }
+
+  // Draw the captured image to a canvas and burn a translucent caption bar
+  // (lot / leader / timestamp) onto the bottom, then flatten to a JPEG.
+  function burnOverlay(srcImage, info) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = function () {
+        const W = img.naturalWidth || img.width;
+        const H = img.naturalHeight || img.height;
+        const canvas = document.createElement('canvas');
+        canvas.width = W;
+        canvas.height = H;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, W, H);
+
+        const lines = [
+          'ロット / Lot: ' + (info.lot || '—'),
+          'リーダー / Leader: ' + (info.leader || '—'),
+          info.time
+        ];
+        const pad = Math.max(14, Math.round(W * 0.022));
+        const fontSize = Math.max(18, Math.round(W * 0.030));
+        const lineH = Math.round(fontSize * 1.4);
+        const barH = lineH * lines.length + pad * 2;
+
+        ctx.fillStyle = 'rgba(0,0,0,0.60)';
+        ctx.fillRect(0, H - barH, W, barH);
+
+        ctx.fillStyle = '#ffffff';
+        ctx.textBaseline = 'top';
+        ctx.font = 'bold ' + fontSize + 'px sans-serif';
+        let y = H - barH + pad;
+        lines.forEach(t => { ctx.fillText(t, pad, y); y += lineH; });
+
+        resolve(canvas.toDataURL('image/jpeg', 0.92));
+      };
+      img.onerror = function () { resolve(srcImage); };
+      img.src = srcImage.startsWith('data:') ? srcImage : 'data:image/jpeg;base64,' + srcImage;
+    });
+  }
+
+  // Native camera (mobile) via a one-shot file input with capture hint.
+  function captureViaFileInput(cb) {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.setAttribute('capture', 'environment');
+    input.style.display = 'none';
+    document.body.appendChild(input);
+    input.addEventListener('change', function () {
+      const file = input.files && input.files[0];
+      if (input.parentElement) document.body.removeChild(input);
+      if (!file) { cb(null); return; }
+      const reader = new FileReader();
+      reader.onload = e => cb(e.target.result);
+      reader.onerror = () => cb(null);
+      reader.readAsDataURL(file);
+    });
+    input.click();
+  }
+
+  // Webcam (desktop) via getUserMedia in a dedicated modal.
+  function captureViaWebcam(cb) {
+    const modal = document.createElement('div');
+    modal.style.cssText = 'display:flex; position:fixed; inset:0; background:rgba(0,0,0,0.9); z-index:100001; justify-content:center; align-items:center;';
+    modal.innerHTML =
+      '<div style="background:#fff; padding:20px; border-radius:12px; max-width:760px; width:92%; text-align:center;">' +
+      '<h2 style="margin:0 0 12px;">疵引き写真撮影 / Defect Photo</h2>' +
+      '<video id="defectVid" autoplay playsinline style="width:100%; max-width:640px; border-radius:8px; background:#000;"></video>' +
+      '<div style="margin-top:16px; display:flex; gap:10px; justify-content:center;">' +
+      '<button id="defectCapBtn" style="padding:12px 22px; font-size:16px; background:#2196F3; color:#fff; border:none; border-radius:6px; cursor:pointer;">📸 撮影 / Capture</button>' +
+      '<button id="defectCamClose" style="padding:12px 22px; font-size:16px; background:#f44336; color:#fff; border:none; border-radius:6px; cursor:pointer;">✕ 閉じる / Close</button>' +
+      '</div></div>';
+    document.body.appendChild(modal);
+    const video = modal.querySelector('#defectVid');
+    let stream = null;
+    function cleanup() {
+      if (stream) { try { stream.getTracks().forEach(t => t.stop()); } catch (e) { } }
+      if (modal.parentElement) document.body.removeChild(modal);
+    }
+    modal.querySelector('#defectCamClose').onclick = () => { cleanup(); cb(null); };
+    modal.querySelector('#defectCapBtn').onclick = () => {
+      const c = document.createElement('canvas');
+      c.width = video.videoWidth; c.height = video.videoHeight;
+      c.getContext('2d').drawImage(video, 0, 0);
+      const b64 = c.toDataURL('image/jpeg', 0.95);
+      cleanup();
+      cb(b64);
+    };
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } } })
+      .then(s => { stream = s; video.srcObject = s; })
+      .catch(err => { console.error('Defect webcam error:', err); cleanup(); captureViaFileInput(cb); });
+  }
+
+  // Leader QR verification modal (own scanner + cancel).
+  function openLeaderScan(onVerified) {
+    const modal = document.createElement('div');
+    modal.style.cssText = 'display:flex; position:fixed; inset:0; background:rgba(0,0,0,0.85); z-index:100001; justify-content:center; align-items:center;';
+    modal.innerHTML =
+      '<div style="background:#fff; padding:24px; border-radius:14px; max-width:360px; width:92%; text-align:center;">' +
+      '<h3 style="margin:0 0 6px;">リーダー認証 / Leader Verification</h3>' +
+      '<p style="margin:0 0 12px; font-size:0.85rem; color:#666;">疵引き写真を撮影するにはリーダーQRをスキャン<br>Scan leader QR to take a defect photo</p>' +
+      '<div id="defectLeaderQr" style="width:100%; aspect-ratio:1; max-width:280px; margin:0 auto; border-radius:10px; overflow:hidden; background:#000;"></div>' +
+      '<p id="defectLeaderStatus" style="margin:12px 0; font-size:0.85rem; color:#2d5f4f; min-height:18px;">リーダーのQRコードをスキャンしてください</p>' +
+      '<button id="defectLeaderCancel" style="width:100%; padding:12px; font-size:15px; background:#f44336; color:#fff; border:none; border-radius:8px; cursor:pointer;">キャンセル / Cancel</button>' +
+      '</div>';
+    document.body.appendChild(modal);
+    const statusEl = modal.querySelector('#defectLeaderStatus');
+    let scanner = new Html5Qrcode('defectLeaderQr');
+    let processing = false;
+
+    function removeModal() { if (modal.parentElement) document.body.removeChild(modal); }
+    function closeScanner(then) {
+      if (scanner) {
+        scanner.stop().then(() => { try { scanner.clear(); } catch (e) { } scanner = null; if (then) then(); })
+          .catch(() => { scanner = null; if (then) then(); });
+      } else if (then) { then(); }
+    }
+    modal.querySelector('#defectLeaderCancel').onclick = () => closeScanner(removeModal);
+
+    scanner.start(
+      { facingMode: 'environment' },
+      { fps: 30, qrbox: { width: 800, height: 800 }, aspectRatio: 1.0, disableFlip: false },
+      async (decodedText) => {
+        if (processing) return;
+        processing = true;
+        statusEl.style.color = '#2d5f4f';
+        statusEl.textContent = '確認中... / Verifying...';
+        try {
+          const resp = await fetch(srvURL() + '/verifyLeader', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: decodedText })
+          });
+          const result = await resp.json();
+          if (result.authorized) {
+            const name = ((result.firstName || '') + ' ' + (result.lastName || '')).trim();
+            statusEl.style.color = '#006400';
+            statusEl.textContent = '✅ ' + (name || 'Verified');
+            setTimeout(() => closeScanner(() => { removeModal(); onVerified(name); }), 600);
+          } else {
+            processing = false;
+            statusEl.style.color = '#cc0000';
+            statusEl.textContent = '❌ 権限がありません / Not authorized';
+          }
+        } catch (e) {
+          processing = false;
+          statusEl.style.color = '#cc0000';
+          statusEl.textContent = '❌ エラーが発生しました / Error';
+        }
+      },
+      () => { }
+    ).catch(err => {
+      console.error('Defect leader scanner error:', err);
+      statusEl.style.color = '#cc0000';
+      statusEl.textContent = '❌ カメラを起動できませんでした / Could not start camera';
+    });
+  }
+
+  // Public entry point — wired to the camera button under 疵引不良.
+  window.startDefectPhotoFlow = function () {
+    openLeaderScan(function (leaderName) {
+      const lot = getCurrentLot();
+      const capture = (typeof isMobileDevice === 'function' && isMobileDevice()) ? captureViaFileInput : captureViaWebcam;
+      capture(async function (base64) {
+        if (!base64) return; // cancelled / no image
+        const stamped = await burnOverlay(base64, {
+          lot: lot,
+          leader: leaderName,
+          time: new Date().toLocaleString('ja-JP')
+        });
+        try {
+          // lotTarget intentionally null: this is an EXTRA photo in the group,
+          // it must NOT replace the material-label photo for the lot.
+          const ok = await addMaterialLabelPhoto(stamped, null);
+          if (ok) {
+            if (typeof showAlert === 'function') showAlert('疵引き写真を保存しました / Defect photo saved');
+            if (typeof logTabletAction === 'function') {
+              logTabletAction('Defect (疵引き) photo captured', 'in-progress', { lotNumber: lot, leader: leaderName });
+            }
+          } else if (typeof showAlert === 'function') {
+            const max = (typeof MAX_MATERIAL_PHOTOS !== 'undefined') ? MAX_MATERIAL_PHOTOS : '';
+            showAlert('最大' + max + '枚までです / Maximum photos reached');
+          }
+        } catch (e) {
+          console.error('Defect photo save error:', e);
+          if (typeof showAlert === 'function') showAlert('写真の保存に失敗しました / Failed to save photo');
+        }
+      });
+    });
+  };
+})();
