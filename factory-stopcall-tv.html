@@ -199,10 +199,52 @@
         .tile.maint .seb-mini { display: block; color: #FCD980; }
 
         /* calling */
-        .tile.calling {
+        .tile.calling[data-primary-call="leader"] {
             background: var(--red);
             border-color: #fff;
-            animation: tileBlink 0.9s steps(1) infinite;
+            animation: tileBlinkRed 0.9s steps(1) infinite;
+        }
+        @keyframes tileBlinkRed {
+            0%, 100% {
+                background: var(--red);
+                box-shadow: 0 0 0 0 rgba(255, 59, 71, 0.0), 0 0 40px rgba(225, 29, 42, 0.6);
+            }
+            50% {
+                background: #7d0f17;
+                box-shadow: 0 0 0 0 rgba(255, 59, 71, 0.0), 0 0 10px rgba(225, 29, 42, 0.2);
+            }
+        }
+
+        .tile.calling[data-primary-call="box"] {
+            background: #D97706;
+            border-color: #fff;
+            animation: tileBlinkYellow 0.9s steps(1) infinite;
+        }
+        @keyframes tileBlinkYellow {
+            0%, 100% {
+                background: #F59E0B;
+                box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.0), 0 0 40px rgba(245, 158, 11, 0.6);
+            }
+            50% {
+                background: #92400E;
+                box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.0), 0 0 10px rgba(245, 158, 11, 0.2);
+            }
+        }
+
+        .tile.calling[data-primary-call="material"] {
+            background: #2563EB;
+            border-color: #fff;
+            animation: tileBlinkBlue 0.9s steps(1) infinite;
+        }
+        @keyframes tileBlinkBlue {
+            0%, 100% {
+                background: #3B82F6;
+                box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.0), 0 0 40px rgba(59, 130, 246, 0.6);
+            }
+            50% {
+                background: #1D4ED8;
+                box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.0), 0 0 10px rgba(59, 130, 246, 0.2);
+            }
         }
 
         .tile.calling .name {
@@ -217,20 +259,6 @@
            alternating with the big rank — so the machine reads big from far away. */
         .tile.calling .state {
             display: none;
-        }
-
-        @keyframes tileBlink {
-
-            0%,
-            100% {
-                background: var(--red);
-                box-shadow: 0 0 0 0 rgba(255, 59, 71, 0.0), 0 0 40px rgba(225, 29, 42, 0.6);
-            }
-
-            50% {
-                background: #7d0f17;
-                box-shadow: 0 0 0 0 rgba(255, 59, 71, 0.0), 0 0 10px rgba(225, 29, 42, 0.2);
-            }
         }
 
         /* Big full-tile rank shown while flipping (see .grid.flip below) */
@@ -308,24 +336,37 @@
             align-items: center;
             justify-content: center;
             gap: 2vh;
-            background: radial-gradient(circle at 50% 40%, #C2151F, #5A0A0E 80%);
-            animation: takeoverBlink 0.7s steps(1) infinite;
         }
 
         .takeover.show {
             display: flex;
         }
 
-        @keyframes takeoverBlink {
+        .takeover[data-type="leader"] {
+            background: radial-gradient(circle at 50% 40%, #C2151F, #5A0A0E 80%);
+            animation: takeoverBlinkRed 0.7s steps(1) infinite;
+        }
+        @keyframes takeoverBlinkRed {
+            0%, 100% { background: radial-gradient(circle at 50% 40%, #E11D2A, #5A0A0E 80%); }
+            50% { background: radial-gradient(circle at 50% 40%, #8d1118, #380a0c 80%); }
+        }
 
-            0%,
-            100% {
-                background: radial-gradient(circle at 50% 40%, #E11D2A, #5A0A0E 80%);
-            }
+        .takeover[data-type="box"] {
+            background: radial-gradient(circle at 50% 40%, #D97706, #78350F 80%);
+            animation: takeoverBlinkYellow 0.7s steps(1) infinite;
+        }
+        @keyframes takeoverBlinkYellow {
+            0%, 100% { background: radial-gradient(circle at 50% 40%, #F59E0B, #78350F 80%); }
+            50% { background: radial-gradient(circle at 50% 40%, #92400E, #451A03 80%); }
+        }
 
-            50% {
-                background: radial-gradient(circle at 50% 40%, #8d1118, #380a0c 80%);
-            }
+        .takeover[data-type="material"] {
+            background: radial-gradient(circle at 50% 40%, #2563EB, #1E3A8A 80%);
+            animation: takeoverBlinkBlue 0.7s steps(1) infinite;
+        }
+        @keyframes takeoverBlinkBlue {
+            0%, 100% { background: radial-gradient(circle at 50% 40%, #3B82F6, #1E3A8A 80%); }
+            50% { background: radial-gradient(circle at 50% 40%, #1D4ED8, #172554 80%); }
         }
 
         .takeover .to-label {
@@ -560,7 +601,7 @@
     </div>
 
     <!-- Full-screen new-call takeover -->
-    <div class="takeover" id="takeover">
+    <div class="takeover" id="takeover" data-type="leader">
         <div class="to-label">呼び出し / CALLING LEADER</div>
         <div class="to-machine" id="toMachine">—</div>
         <div class="to-rank" id="toRank">#1</div>
@@ -744,31 +785,69 @@
         // Ascending 3-chime "attention" call (PA / airport pre-announcement
         // style): three rising bell-like notes that grab attention without being
         // harsh, and carry across the floor.
-        function playAlert() {
+        function playAlert(type = 'leader') {
             if (!ensureAudio()) return;
             const ctx = audioCtx;
             const t0 = ctx.currentTime + 0.02;
-            const notes = [587.33, 783.99, 1046.50]; // D5 → G5 → C6 (rising)
-            const step = 0.34;   // time between chime onsets
-            const dur = 0.9;     // each chime rings out (bell-like decay)
-            notes.forEach((freq, i) => {
-                const t = t0 + i * step;
+
+            if (type === 'box') {
+                // High, bright, single "elevator ping" (C6, glassy bell)
+                const freq = 1046.50; // C6
                 const g = ctx.createGain();
                 g.connect(ctx.destination);
-                g.gain.setValueAtTime(0.0001, t);
-                g.gain.exponentialRampToValueAtTime(0.32, t + 0.015); // soft attack
-                g.gain.exponentialRampToValueAtTime(0.0001, t + dur); // bell decay
-                // Fundamental + soft octave overtone for a chime/bell timbre
-                [[freq, 1], [freq * 2, 0.25]].forEach(([f, amp]) => {
+                g.gain.setValueAtTime(0.0001, t0);
+                g.gain.exponentialRampToValueAtTime(0.4, t0 + 0.01);
+                g.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.5);
+
+                [[freq, 1], [freq * 2, 0.2], [freq * 3, 0.05]].forEach(([f, amp]) => {
                     const o = ctx.createOscillator();
                     const og = ctx.createGain();
                     o.type = 'sine';
-                    o.frequency.setValueAtTime(f, t);
+                    o.frequency.setValueAtTime(f, t0);
                     og.gain.value = amp;
                     o.connect(og); og.connect(g);
-                    o.start(t); o.stop(t + dur + 0.05);
+                    o.start(t0); o.stop(t0 + 1.6);
                 });
-            });
+            } else if (type === 'material') {
+                // Low, warm, quick double "woodblock / marimba" bloop (F4 -> C4)
+                const notes = [349.23, 261.63]; 
+                notes.forEach((freq, i) => {
+                    const t = t0 + i * 0.2; // fast succession
+                    const g = ctx.createGain();
+                    g.connect(ctx.destination);
+                    g.gain.setValueAtTime(0.0001, t);
+                    g.gain.exponentialRampToValueAtTime(0.5, t + 0.01); // sharp attack
+                    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.35); // fast decay
+                    
+                    const o = ctx.createOscillator();
+                    o.type = 'triangle'; // warm, hollow tone
+                    o.frequency.setValueAtTime(freq, t);
+                    o.connect(g);
+                    o.start(t); o.stop(t + 0.4);
+                });
+            } else {
+                // Leader (Ascending 3-chime)
+                const notes = [587.33, 783.99, 1046.50]; // D5 → G5 → C6
+                const step = 0.34;
+                const dur = 0.9;
+                notes.forEach((freq, i) => {
+                    const t = t0 + i * step;
+                    const g = ctx.createGain();
+                    g.connect(ctx.destination);
+                    g.gain.setValueAtTime(0.0001, t);
+                    g.gain.exponentialRampToValueAtTime(0.32, t + 0.015);
+                    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+                    [[freq, 1], [freq * 2, 0.25]].forEach(([f, amp]) => {
+                        const o = ctx.createOscillator();
+                        const og = ctx.createGain();
+                        o.type = 'sine';
+                        o.frequency.setValueAtTime(f, t);
+                        og.gain.value = amp;
+                        o.connect(og); og.connect(g);
+                        o.start(t); o.stop(t + dur + 0.05);
+                    });
+                });
+            }
         }
 
         // ----- State helpers (state declared above, before renderRoster) -----
@@ -848,8 +927,10 @@
                 tile.classList.add('calling');
                 tile.querySelector('.big-rank').textContent = '#' + (idx + 1);
                 
-                tile.dataset.onlyLeader = (item.leader && !item.box && !item.material) ? 'true' : 'false';
-                
+                if (item.leader) tile.dataset.primaryCall = 'leader';
+                else if (item.box) tile.dataset.primaryCall = 'box';
+                else tile.dataset.primaryCall = 'material';
+
                 let typeHtml = '';
                 if (item.leader) {
                     typeHtml += '<div>CALL</div>';
@@ -928,13 +1009,13 @@
                 const prevTypes = lastMachineCallTypes.get(it.machine) || {};
                 
                 if (it.leader && !prevTypes.leader) {
-                    newlyAddedEvents.push({ machine: it.machine, title: '呼び出し / CALLING LEADER', since: it.since });
+                    newlyAddedEvents.push({ machine: it.machine, title: '呼び出し / CALLING LEADER', type: 'leader', since: it.since });
                 }
                 if (it.box && !prevTypes.box) {
-                    newlyAddedEvents.push({ machine: it.machine, title: '空箱リクエスト / BOX REQUEST', since: it.since });
+                    newlyAddedEvents.push({ machine: it.machine, title: '空箱リクエスト / BOX REQUEST', type: 'box', since: it.since });
                 }
                 if (it.material && !prevTypes.material) {
-                    newlyAddedEvents.push({ machine: it.machine, title: '部材リクエスト / MATERIAL REQUEST', since: it.since });
+                    newlyAddedEvents.push({ machine: it.machine, title: '部材リクエスト / MATERIAL REQUEST', type: 'material', since: it.since });
                 }
 
                 nextMachineCallTypes.set(it.machine, { leader: !!it.leader, box: !!it.box, material: !!it.material });
@@ -952,10 +1033,9 @@
                     // suppressed
                 } else {
                     if (scheduledMode === 'chime') endChime();
-                    playAlert();
                     newlyAddedEvents
                         .sort((a, b) => a.since - b.since)
-                        .forEach(ev => queueTakeover(ev.machine, ev.title));
+                        .forEach(ev => queueTakeover(ev.machine, ev.title, ev.type));
                 }
             }
         }
@@ -978,8 +1058,8 @@
         // ----- Takeover queue -----
         const takeoverQueue = [];
         let takeoverRunning = false;
-        function queueTakeover(machine, title) {
-            takeoverQueue.push({ machine, title });
+        function queueTakeover(machine, title, type) {
+            takeoverQueue.push({ machine, title, type });
             if (!takeoverRunning) runTakeover();
         }
         function runTakeover() {
@@ -989,7 +1069,11 @@
             // Only announce if still active
             const idx = activeList.findIndex(it => it.machine === item.machine);
             if (idx < 0) { runTakeover(); return; }
+            
+            playAlert(item.type);
+            
             const el = document.getElementById('takeover');
+            el.dataset.type = item.type;
             document.querySelector('#takeover .to-label').textContent = item.title;
             document.getElementById('toMachine').textContent = item.machine;
             document.getElementById('toRank').textContent = '#' + (idx + 1) + ' に呼ばれました / called';
