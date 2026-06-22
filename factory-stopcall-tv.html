@@ -851,9 +851,12 @@
                 tile.dataset.onlyLeader = (item.leader && !item.box && !item.material) ? 'true' : 'false';
                 
                 let typeHtml = '';
-                if (item.box) typeHtml += '<div>BOX</div>';
-                if (item.material) typeHtml += '<div>ROLL</div>';
-                if (!item.box && !item.material && item.leader) typeHtml += '<div>CALL</div>';
+                if (item.leader) {
+                    typeHtml += '<div>CALL</div>';
+                } else {
+                    if (item.box) typeHtml += '<div>BOX</div>';
+                    if (item.material) typeHtml += '<div>ROLL</div>';
+                }
                 tile.querySelector('.type-display').innerHTML = typeHtml;
                 
                 fitCallingName(tile, machine);
@@ -905,6 +908,8 @@
             refreshElapsed();
         }
 
+        let lastMachineCallTypes = new Map();
+
         // ----- Apply active call list (stop-call) -----
         function applyActive(list) {
             let rosterChanged = false;
@@ -913,36 +918,44 @@
             });
             if (rosterChanged) renderRoster();
 
-            const prev = new Set(activeSince.keys());
             activeList = list.slice().sort((a, b) => a.since - b.since);
             activeSince = new Map();
-            activeList.forEach(it => activeSince.set(it.machine, it.since));
+            const newlyAddedEvents = [];
+            const nextMachineCallTypes = new Map();
 
-            const newlyAdded = activeList.filter(it => !prev.has(it.machine));
+            activeList.forEach(it => {
+                activeSince.set(it.machine, it.since);
+                const prevTypes = lastMachineCallTypes.get(it.machine) || {};
+                
+                if (it.leader && !prevTypes.leader) {
+                    newlyAddedEvents.push({ machine: it.machine, title: '呼び出し / CALLING LEADER', since: it.since });
+                }
+                if (it.box && !prevTypes.box) {
+                    newlyAddedEvents.push({ machine: it.machine, title: '空箱リクエスト / BOX REQUEST', since: it.since });
+                }
+                if (it.material && !prevTypes.material) {
+                    newlyAddedEvents.push({ machine: it.machine, title: '部材リクエスト / MATERIAL REQUEST', since: it.since });
+                }
+
+                nextMachineCallTypes.set(it.machine, { leader: !!it.leader, box: !!it.box, material: !!it.material });
+            });
+
+            lastMachineCallTypes = nextMachineCallTypes;
 
             tileByMachine.forEach((tile, machine) => refreshTile(machine));
 
             updateBanner();
             refreshElapsed();
 
-            // Announce each newly-added machine (full-screen takeover, 3s each).
-            // The chime plays once per new call — only during that announcement.
-            //
-            // Scheduled-event gating:
-            //  - During ラジオ体操 the exercise stays on top: do NOT interrupt or
-            //    chime. The call is still recorded and its tile keeps blinking on
-            //    the board, becoming visible the moment the exercise ends.
-            //  - During a 時報 chime a real stop-call outranks the time signal, so
-            //    we dismiss the chime and announce the call normally.
-            if (newlyAdded.length) {
+            if (newlyAddedEvents.length > 0) {
                 if (scheduledMode === 'exercise') {
-                    // suppressed on purpose — see above
+                    // suppressed
                 } else {
                     if (scheduledMode === 'chime') endChime();
                     playAlert();
-                    newlyAdded
+                    newlyAddedEvents
                         .sort((a, b) => a.since - b.since)
-                        .forEach(it => queueTakeover(it.machine));
+                        .forEach(ev => queueTakeover(ev.machine, ev.title));
                 }
             }
         }
@@ -965,19 +978,20 @@
         // ----- Takeover queue -----
         const takeoverQueue = [];
         let takeoverRunning = false;
-        function queueTakeover(machine) {
-            takeoverQueue.push(machine);
+        function queueTakeover(machine, title) {
+            takeoverQueue.push({ machine, title });
             if (!takeoverRunning) runTakeover();
         }
         function runTakeover() {
             if (!takeoverQueue.length) { takeoverRunning = false; return; }
             takeoverRunning = true;
-            const machine = takeoverQueue.shift();
+            const item = takeoverQueue.shift();
             // Only announce if still active
-            const idx = activeList.findIndex(it => it.machine === machine);
+            const idx = activeList.findIndex(it => it.machine === item.machine);
             if (idx < 0) { runTakeover(); return; }
             const el = document.getElementById('takeover');
-            document.getElementById('toMachine').textContent = machine;
+            document.querySelector('#takeover .to-label').textContent = item.title;
+            document.getElementById('toMachine').textContent = item.machine;
             document.getElementById('toRank').textContent = '#' + (idx + 1) + ' に呼ばれました / called';
             el.classList.add('show');
             setTimeout(() => {
