@@ -3193,8 +3193,11 @@
             html += row('作業者 (Worker):', (values.workerName || '---'), edit(2, 'Machine Operator'));
             html += row('加工日 (Date):', (values.date || '---'), edit(2, 'Lot No.'));
             html += row('時間 (Time):', (values.startTime || '--:--') + ' ~ ' + (values.endTime || '--:--'), edit(2, 'Start Time'));
-            html += row('加工数 (Qty):', values.processQty, edit(2, 'ProcessQuantity'));
-            html += row('ショット数 (Shots):', values.shotCount, edit(2, 'shot'));
+            const machines = (typeof groupedMachines !== 'undefined' && groupedMachines.length > 0) ? groupedMachines : [document.getElementById('machine-selector')?.value || 'UNKNOWN'];
+            const missingPc = typeof resolveFeed === 'function' ? machines.some(m => resolveFeed(m).pcPerCycle == null) : false;
+            
+            html += row('加工数 (Qty):', values.processQty, missingPc ? edit(2, 'ProcessQuantity') : '');
+            html += row('ショット数 (Shots):', values.shotCount, '<button type="button" class="row-edit-btn" onclick="if(window.openShotEditModal) window.openShotEditModal();">✎ 編集</button>');
             html += row('材料ロット (Material Lot):', (values.materialLot || '---'), edit(2, '材料ロット'));
             html += row('不良 (Defects):', '疵引: ' + values.defectsPull + ' | 加工: ' + values.defectsProcess + ' | その他: ' + values.defectsOther + ' (NG: ' + values.totalNG + ')', edit(2, 'counter-box-18'));
             html += row('良品合計 (Good Total):', '<span style="font-weight: bold; color: var(--accent-green);">' + values.totalGood + '</span>');

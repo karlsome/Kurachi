@@ -8131,6 +8131,10 @@ function initNumericKeypad() {
 
 // Define direct keypad functions in the global scope first
 window.openDirectNumericKeypad = function (inputId, isNewEntryMode = false) {
+  if (inputId === 'ProcessQuantity' && window.__processQuantityAutoCalculated) {
+    console.log('Process Quantity is auto-calculated. Manual entry disabled.');
+    return;
+  }
   window.currentDirectInputId = inputId;
   window.isNewEntryMode = isNewEntryMode; // Store the mode
   const modal = document.getElementById('numericKeypadModalDirect');
@@ -11552,6 +11556,23 @@ if (manualSendModal) {
   function updateShotTotalField() {
     const el = document.getElementById('shot');
     if (el) { el.value = String(totalShots()); try { el.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) { } }
+
+    const pqEl = document.getElementById('ProcessQuantity');
+    if (pqEl) {
+      const payload = buildPayload();
+      const machines = (typeof groupedMachines !== 'undefined' && groupedMachines.length > 0) ? groupedMachines : [document.getElementById('machine-selector')?.value || 'UNKNOWN'];
+      const missingPc = machines.some(m => resolveFeed(m).pcPerCycle == null);
+
+      if (!missingPc && payload.Total_Pieces != null) {
+          pqEl.value = String(payload.Total_Pieces);
+          pqEl.readOnly = true;
+          pqEl.style.backgroundColor = '#f3f4f6';
+          try { pqEl.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) { }
+          window.__processQuantityAutoCalculated = true; // flag to block keypad
+      } else {
+          window.__processQuantityAutoCalculated = false;
+      }
+    }
   }
 
   // Add a newly scanned lot to a machine's timeline; return the previously-open
@@ -11613,11 +11634,19 @@ if (manualSendModal) {
     return card;
   }
 
-  function promptShots(machine, lot, onSubmit) {
+  function promptShots(machine, lot, onSubmit, opts) {
+    opts = opts || {};
     closeLP();
     const card = shell();
-    card.innerHTML =
-      '<div style="font-size:1.6rem;font-weight:900;color:#101828;text-align:center;margin-bottom:4px;">' + machine + '</div>' +
+    
+    let closeHtml = '';
+    if (opts.allowCancel) {
+      card.style.position = 'relative';
+      closeHtml = '<button id="lpClose" style="position:absolute;top:16px;right:16px;background:none;border:none;font-size:1.4rem;font-weight:bold;color:#667085;cursor:pointer;padding:0;line-height:1;z-index:10;">✕</button>';
+    }
+
+    card.innerHTML = closeHtml +
+      '<div style="font-size:1.6rem;font-weight:900;color:#101828;text-align:center;margin-bottom:4px;padding-top:' + (opts.allowCancel ? '10px' : '0') + ';">' + machine + '</div>' +
       '<div style="font-size:1.1rem;font-weight:700;color:#f39c12;text-align:center;margin-bottom:12px;">Lot: ' + lot + '</div>' +
       '<div style="font-size:1.1rem;font-weight:800;color:#2E6FF2;text-align:center;margin-bottom:8px;">ショット数を入力<br><span style="font-size:0.85rem;color:#475467;font-weight:600;">Enter cur times value</span></div>' +
       '<div style="text-align:center; margin-bottom:12px;"><img src="src/curTimes.jpeg" alt="cur times" style="max-height:100px; width:auto; max-width:100%; border-radius:6px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); cursor:pointer;" onclick="if(window.openPreview) window.openPreview(this.src, \'' + machine + '\');"></div>' +
@@ -11634,6 +11663,14 @@ if (manualSendModal) {
       keys.appendChild(b);
     });
     card.querySelector('#lpOk').onclick = () => { const v = parseInt(disp.value, 10) || 0; closeLP(); if (onSubmit) onSubmit(v); };
+    
+    const closeBtn = card.querySelector('#lpClose');
+    if (closeBtn) {
+      closeBtn.onclick = () => {
+        closeLP();
+        if (opts.onCancel) opts.onCancel();
+      };
+    }
   }
 
   function chooseMachine(machines, onPick, opts) {
@@ -11736,6 +11773,148 @@ if (manualSendModal) {
   });
 
   /* ---------- Public hooks ---------- */
+  window.verifyLeaderUI = function(onVerified) {
+    const srvURL = () => (typeof serverURL !== 'undefined' && serverURL) ? serverURL : '';
+    const modal = document.createElement('div');
+    modal.style.cssText = 'display:flex; position:fixed; inset:0; background:rgba(0,0,0,0.85); z-index:100300; justify-content:center; align-items:center;';
+    modal.innerHTML =
+      '<div style="background:#fff; padding:24px; border-radius:14px; max-width:360px; width:92%; text-align:center;">' +
+      '<h3 style="margin:0 0 6px;">リーダー認証 / Leader Verification</h3>' +
+      '<p style="margin:0 0 12px; font-size:0.85rem; color:#666;">ショット数を編集するにはリーダーQRをスキャン<br>Scan leader QR to edit shots</p>' +
+      '<div id="shotLeaderQr" style="width:100%; aspect-ratio:1; max-width:280px; margin:0 auto; border-radius:10px; overflow:hidden; background:#000;"></div>' +
+      '<p id="shotLeaderStatus" style="margin:12px 0; font-size:0.85rem; color:#2d5f4f; min-height:18px;">リーダーのQRコードをスキャンしてください</p>' +
+      '<button id="shotLeaderCancel" style="width:100%; padding:12px; font-size:15px; background:#f44336; color:#fff; border:none; border-radius:8px; cursor:pointer;">キャンセル / Cancel</button>' +
+      '</div>';
+    document.body.appendChild(modal);
+    const statusEl = modal.querySelector('#shotLeaderStatus');
+    let scanner = new Html5Qrcode('shotLeaderQr');
+    let processing = false;
+
+    function removeModal() { if (modal.parentElement) document.body.removeChild(modal); }
+    function closeScanner(then) {
+      if (scanner) {
+        scanner.stop()
+          .then(() => { try { scanner.clear(); } catch(e){} scanner = null; setTimeout(() => { if (then) then(); }, 500); })
+          .catch(() => { scanner = null; setTimeout(() => { if (then) then(); }, 500); });
+      } else if (then) { then(); }
+    }
+    modal.querySelector('#shotLeaderCancel').onclick = () => closeScanner(() => { removeModal(); });
+
+    scanner.start(
+      { facingMode: 'environment' },
+      { fps: 30, qrbox: { width: 800, height: 800 }, aspectRatio: 1.0, disableFlip: false },
+      async (decodedText) => {
+        if (processing) return;
+        processing = true;
+        statusEl.style.color = '#2d5f4f';
+        statusEl.textContent = '確認中... / Verifying...';
+        try {
+          const resp = await fetch(srvURL() + '/verifyLeader', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: decodedText })
+          });
+          const result = await resp.json();
+          if (result.authorized) {
+            statusEl.style.color = '#006400';
+            statusEl.innerHTML = `✅ 認証成功！ / Verified!`;
+            closeScanner(() => { removeModal(); if (onVerified) onVerified(); });
+          } else {
+            processing = false;
+            statusEl.style.color = '#cc0000';
+            statusEl.textContent = '❌ 権限がありません / Not authorized';
+          }
+        } catch (error) {
+          processing = false;
+          statusEl.style.color = '#cc0000';
+          statusEl.textContent = '❌ エラーが発生しました / Error occurred';
+        }
+      },
+      (errorMessage) => {}
+    ).catch(err => {
+      statusEl.style.color = '#cc0000';
+      statusEl.textContent = 'カメラの起動に失敗しました';
+    });
+  };
+
+  window.openShotEditModal = function() {
+    window.verifyLeaderUI(() => {
+      renderShotEditModal();
+    });
+  };
+
+  function renderShotEditModal() {
+    const modal = document.createElement('div');
+    modal.style.cssText = 'position:fixed;inset:0;z-index:100200;background:rgba(10,15,26,.8);display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(5px);';
+    
+    const card = document.createElement('div');
+    card.style.cssText = 'background:#fff;border-radius:16px;max-width:500px;width:100%;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.3);font-family:inherit;max-height:90vh;overflow-y:auto;';
+    
+    let html = '<h2 style="margin:0 0 20px;color:#101828;text-align:center;">ショット数編集 / Edit Shots</h2>';
+    const machines = (typeof groupedMachines !== 'undefined' && groupedMachines.length > 0) ? groupedMachines : [document.getElementById('machine-selector')?.value || 'UNKNOWN'];
+    
+    machines.forEach(m => {
+        html += `<div style="background:#F9FAFB;border:1px solid #E4E7EC;border-radius:12px;padding:16px;margin-bottom:16px;">`;
+        html += `<h3 style="margin:0 0 12px;color:#344054;font-size:1.1rem;">${m}</h3>`;
+        
+        const records = lotsByMachine[m] || [];
+        if (records.length === 0) {
+            html += `<p style="color:#667085;margin:0;">No records</p>`;
+        } else {
+            records.forEach((rec, idx) => {
+                html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:${idx===records.length-1?'none':'1px solid #EAECF0'};">`;
+                html += `<div style="flex:1;">`;
+                html += `<div style="font-weight:600;color:#101828;font-size:0.95rem;">Lot: ${rec.lotNumber || '---'}</div>`;
+                if (!rec.open) {
+                    html += `<div style="color:#667085;font-size:0.85rem;">Time: ${new Date(rec.ts).toLocaleTimeString()}</div>`;
+                } else {
+                    html += `<div style="color:#f39c12;font-size:0.85rem;font-weight:bold;">Active / 開く</div>`;
+                }
+                html += `</div>`;
+                
+                const currentShots = rec.shots != null ? rec.shots : '---';
+                html += `<button type="button" style="background:#2E6FF2;color:#fff;border:none;border-radius:8px;padding:8px 16px;font-weight:700;font-size:1rem;cursor:pointer;" onclick="editSpecificShot('${m}', ${rec.ts})">${currentShots} ✎</button>`;
+                html += `</div>`;
+            });
+        }
+        html += `</div>`;
+    });
+    
+    html += '<button type="button" id="closeShotEdit" style="width:100%;padding:14px;background:#E4E7EC;color:#344054;border:none;border-radius:10px;font-size:1.1rem;font-weight:700;cursor:pointer;">閉じる / Close</button>';
+    card.innerHTML = html;
+    modal.appendChild(card);
+    document.body.appendChild(modal);
+    
+    card.querySelector('#closeShotEdit').onclick = () => {
+        document.body.removeChild(modal);
+        if (typeof updateSummary === 'function') updateSummary();
+    };
+    window.__shotEditModalRef = modal;
+  }
+
+  window.editSpecificShot = function(machine, ts) {
+    const records = lotsByMachine[machine] || [];
+    const rec = records.find(r => r.ts === ts);
+    if (!rec) return;
+    
+    if (window.__shotEditModalRef) window.__shotEditModalRef.style.display = 'none';
+    
+    promptShots(machine, rec.lotNumber, (newShots) => {
+        closeRecord(rec, newShots);
+        
+        // Re-render modal
+        if (window.__shotEditModalRef && window.__shotEditModalRef.parentNode) {
+            window.__shotEditModalRef.parentNode.removeChild(window.__shotEditModalRef);
+        }
+        renderShotEditModal();
+        if (typeof updateSummary === 'function') updateSummary();
+    }, {
+        allowCancel: true,
+        onCancel: () => {
+            if (window.__shotEditModalRef) window.__shotEditModalRef.style.display = 'flex';
+        }
+    });
+  };
+
   window.recordLotScan = recordLotScan;
   window.buildLotProductionPayload = buildPayload;
   window.lotProductionReset = function () { lotsByMachine = {}; save(); updateShotTotalField(); };
