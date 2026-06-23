@@ -1961,11 +1961,11 @@
                             onclick="if(this.src && typeof window.openPreview==='function') window.openPreview(this.src);">
                         <div class="prod-info-text" onclick="if(typeof window.toggleSidebar==='function') window.toggleSidebar(true);">
                             <div class="prod-info-row">
-                                <span class="prod-info-label">背番号</span>
+                                <span class="prod-info-label" data-i18n="sebango_lbl">背番号</span>
                                 <span class="prod-info-value" id="prodInfoSebanggo">—</span>
                             </div>
                             <div class="prod-info-row">
-                                <span class="prod-info-label">品番</span>
+                                <span class="prod-info-label" data-i18n="hinban_lbl">品番</span>
                                 <span class="prod-info-value" id="prodInfoHinban">—</span>
                             </div>
                         </div>
@@ -1973,7 +1973,7 @@
 
                     <!-- 1. Defect counters — most used during the run -->
                     <div class="glass-card">
-                        <h3>加工不良カウンター / Defect Counters</h3>
+                        <h3 data-i18n="defect_counter_title">加工不良カウンター</h3>
                         <div class="tap-counter-grid">
                             <div class="tap-counter" id="counter-box-18" onclick="prodCounterTap(event, 18)">
                                 <button type="button" class="tap-minus" onclick="prodCounterMinus(event, 18)"
@@ -1991,7 +1991,7 @@
                                             d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
                                         <circle cx="12" cy="13" r="4" />
                                     </svg>
-                                    <span data-i18n="defect_photo">写真 / Photo</span>
+                                    <span data-i18n="defect_photo">写真</span>
                                 </button>
                             </div>
                             <div class="tap-counter" id="counter-box-19" onclick="prodCounterTap(event, 19)">
@@ -2011,12 +2011,12 @@
                                     style="display:none;">
                             </div>
                         </div>
-                        <p class="tap-hint">カードをタップで +1 ・ 左上の − で訂正 / Tap card to add, minus to correct</p>
+                        <p class="tap-hint" data-i18n="tap_hint">カードをタップで +1 ・ 左上の − で訂正</p>
                     </div>
 
                     <!-- 2. Material & print — frequent actions during the run -->
                     <div class="glass-card">
-                        <h3>材料・印刷 / Material &amp; Print</h3>
+                        <h3 data-i18n="material_print_title">材料・印刷</h3>
                         <div class="prod-action-grid" style="margin-bottom:14px;">
                             <button type="button" id="prodScanMaterialButton" class="prod-action-btn">
                                 <svg viewBox="0 0 24 24">
@@ -2024,7 +2024,7 @@
                                         d="M4 7V5a1 1 0 0 1 1-1h2M4 17v2a1 1 0 0 0 1 1h2M20 7V5a1 1 0 0 0-1-1h-2M20 17v2a1 1 0 0 1-1 1h-2" />
                                     <line x1="4" y1="12" x2="20" y2="12" />
                                 </svg>
-                                <span>材料スキャン<small>Scan Material + Photo</small></span>
+                                <span data-i18n="scan_material_btn">材料スキャン</span><small data-i18n="scan_material_sub">Scan Material + Photo</small>
                             </button>
                             <button type="button" id="prodPrintLabelButton" class="prod-action-btn print-btn">
                                 <svg viewBox="0 0 24 24">
@@ -2033,7 +2033,7 @@
                                         d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
                                     <rect x="6" y="14" width="12" height="8" />
                                 </svg>
-                                <span class="print-btn-label">ラベル印刷<small>Print Label</small></span>
+                                <span class="print-btn-label"><span data-i18n="print_label_main">ラベル印刷</span><small data-i18n="print_label_sub">Print Label</small></span>
                             </button>
                         </div>
                         <div class="form-group full-width">
@@ -2048,7 +2048,7 @@
 
                     <!-- 4. First / last piece checks -->
                     <div class="glass-card">
-                        <h3>初物・終物チェック / Cycle Checks</h3>
+                        <h3 data-i18n="cycle_checks_title">初物・終物チェック</h3>
                         <div class="prod-check-grid">
                             <button type="button" id="hatsumonoButton" class="prod-check-btn" data-check="hatsumono">
                                 <span class="check-ico"><svg viewBox="0 0 24 24">
@@ -2072,7 +2072,7 @@
                     <!-- 5. Setup — set once at the start; collapsible -->
                     <div class="glass-card collapsible-card collapsed" id="setupCard">
                         <h3 class="collapsible-head" onclick="toggleSetupCard()">
-                            <span>生産設定 / Setup</span>
+                            <span data-i18n="prod_setup_title">生産設定</span>
                             <span class="collapse-chevron">▾</span>
                         </h3>
                         <div class="collapsible-body">
@@ -2095,7 +2095,7 @@
 
                     <!-- 3. Quantities -->
                     <div class="glass-card">
-                        <h3>生産数量 / Production Quantity</h3>
+                        <h3 data-i18n="prod_quantity_title">生産数量</h3>
                         <div class="form-grid">
                             <div class="form-group">
                                 <label for="Process Quantity" data-i18n="process_quantity">加工数（良品）+ NG:</label>
@@ -2124,8 +2124,8 @@
 
                     <!-- 6. Comments -->
                     <div class="glass-card">
-                        <h3>コメント / Comments</h3>
-                        <textarea name="Comments1" rows="3" placeholder="Enter Comments"></textarea>
+                        <h3 data-i18n="comments_title">コメント</h3>
+                        <textarea name="Comments1" rows="3" placeholder="Enter Comments" data-i18n="comments_placeholder"></textarea>
                     </div>
 
                     <!-- Toggleable Inspection Checklist -->
@@ -2167,7 +2167,7 @@
                             </div>
 
                             <div style="margin-top: 10px;">
-                                <label style="margin-bottom: 10px;">検査不良カウンター / Inspection Defect Counters</label>
+                                <label style="margin-bottom: 10px;" data-i18n="kensa_defect_counter_lbl">検査不良カウンター</label>
                                 <div class="kensa-counter-grid">
                                     <div class="tap-counter" id="counter-box-1" onclick="prodCounterTap(event, 1)">
                                         <button type="button" class="tap-minus" onclick="prodCounterMinus(event, 1)"
@@ -2278,7 +2278,7 @@
 
                             <div class="form-group" style="margin-top: 10px;">
                                 <label data-i18n="comments">Comments (Inspection)</label>
-                                <textarea name="Comments2" rows="3" placeholder="Enter Comments" disabled></textarea>
+                                <textarea name="Comments2" rows="3" placeholder="Enter Comments" data-i18n="comments_placeholder" disabled></textarea>
                             </div>
                         </div>
                     </div>
@@ -2287,7 +2287,7 @@
 
                     <!-- Break time (timer-based) + total at the bottom of production -->
                     <div class="glass-card">
-                        <h3 data-i18n="break_time_title">休憩時間 / Break Time</h3>
+                        <h3 data-i18n="break_time_title">休憩時間</h3>
                         <button type="button" id="breakStartButton" class="btn btn-secondary btn-full"
                             style="height: 56px; font-size: 1.05rem;">
                             <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor"
@@ -2296,7 +2296,7 @@
                                 <circle cx="12" cy="12" r="9" />
                                 <polyline points="12 7 12 12 15 14" />
                             </svg>
-                            休憩を開始 / Start Break
+                            <span data-i18n="break_start_btn">休憩を開始</span>
                         </button>
                         <div class="break-summary">
                             <span data-i18n="total_break_time">合計休憩時間:</span>
@@ -2323,14 +2323,14 @@
                 <div class="tab-panel" id="panel-kensa">
                     <!-- The kensa card (toggle + inspection fields) is moved here by JS when checked -->
                     <div class="glass-card">
-                        <h3>材料・印刷 / Material &amp; Print</h3>
+                        <h3 data-i18n="material_print_title">材料・印刷</h3>
                         <div class="prod-action-grid" style="margin-bottom:14px;">
                             <button type="button" id="kensaScanMaterialButton" class="prod-action-btn">
                                 <svg viewBox="0 0 24 24">
                                     <path d="M4 7V5a1 1 0 0 1 1-1h2M4 17v2a1 1 0 0 0 1 1h2M20 7V5a1 1 0 0 0-1-1h-2M20 17v2a1 1 0 0 1-1 1h-2" />
                                     <line x1="4" y1="12" x2="20" y2="12" />
                                 </svg>
-                                <span>材料スキャン<small>Scan Material + Photo</small></span>
+                                <span data-i18n="scan_material_btn">材料スキャン</span><small data-i18n="scan_material_sub">Scan Material + Photo</small>
                             </button>
                             <button type="button" id="kensaPrintLabelButton" class="prod-action-btn print-btn">
                                 <svg viewBox="0 0 24 24">
@@ -2338,7 +2338,7 @@
                                     <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
                                     <rect x="6" y="14" width="12" height="8" />
                                 </svg>
-                                <span class="print-btn-label">ラベル印刷<small>Print Label</small></span>
+                                <span class="print-btn-label"><span data-i18n="print_label_main">ラベル印刷</span><small data-i18n="print_label_sub">Print Label</small></span>
                             </button>
                         </div>
                         <div class="form-group full-width">
@@ -2351,9 +2351,8 @@
                 <!-- TAB 4: IMAGES (gallery view) -->
                 <div class="tab-panel" id="panel-3">
                     <div class="glass-card">
-                        <h3>撮影画像 / Captured Photos</h3>
-                        <p class="gallery-sub">初物・終物・材料ラベルの写真はここに集約されます。サムネイルをタップで拡大 / All captures collect here. Tap a
-                            thumbnail to preview.</p>
+                        <h3 data-i18n="captured_photos_title">撮影画像</h3>
+                        <p class="gallery-sub" data-i18n="captured_photos_desc">初物・終物・材料ラベルの写真はここに集約されます。サムネイルをタップで拡大</p>
                         <div id="imageGallery" class="gallery-sections"></div>
                         <div id="imageGalleryEmpty" class="gallery-empty">
                             <svg viewBox="0 0 24 24">
@@ -2361,7 +2360,7 @@
                                 <circle cx="8.5" cy="9.5" r="1.6" />
                                 <polyline points="4 17 9 12 13 16 16.5 12.5 20 16" />
                             </svg>
-                            <p>まだ写真がありません / No photos captured yet</p>
+                            <p data-i18n="no_photos_yet">まだ写真がありません</p>
                         </div>
                         <div id="material-photo-count"
                             style="margin-top: 12px; font-weight: 700; color: var(--blue); text-align:center;"></div>
@@ -2388,7 +2387,7 @@
                 <div class="tab-panel" id="panel-4">
                     <!-- Machine Maintenance -->
                     <div class="glass-card">
-                        <h3 data-i18n="machine_trouble_title">機械故障時間 / Machine Maintenance Time</h3>
+                        <h3 data-i18n="machine_trouble_title">機械故障時間</h3>
                         <button type="button" id="maintenanceStartButton" class="btn btn-primary btn-full"
                             style="height: 56px; font-size: 1.05rem; margin-bottom: 12px;">
                             <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor"
@@ -2397,11 +2396,11 @@
                                 <path
                                     d="M14.7 6.3a4 4 0 0 0-5.4 5.3L3 18l3 3 6.4-6.3a4 4 0 0 0 5.3-5.4l-2.7 2.7-2-2 2.7-2.7z" />
                             </svg>
-                            故障タイマー開始 / Start Maintenance Timer
+                            <span data-i18n="maintenance_start_btn">故障タイマー開始</span>
                         </button>
                         <button type="button" id="add-maintenance-btn" class="btn btn-secondary btn-full"
-                            style="margin-bottom: 20px;">
-                            手動で追加 / Add Manually
+                            style="margin-bottom: 20px;" data-i18n="maintenance_add_manual">
+                            手動で追加
                         </button>
 
                         <div id="maintenance-records-container"
@@ -2428,7 +2427,7 @@
                     <!-- Action buttons -->
                     <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 25px;">
                         <input type="submit" value="Submit" id="submit" class="btn btn-primary btn-full"
-                            style="height: 52px; font-size: 1.1rem;">
+                            style="height: 52px; font-size: 1.1rem;" data-i18n="submit">
                         <button type="button" onclick="if (confirmReset()) resetForm()" class="btn btn-alert btn-full" style="height: 48px;"
                             data-i18n="reset">Reset</button>
                     </div>
@@ -2442,7 +2441,7 @@
     <div class="sidebar-backdrop" onclick="toggleSidebar(false)"></div>
     <div class="info-sidebar">
         <div class="sidebar-header">
-            <h2 data-i18n="product_name">製品情報 / Product Info</h2>
+            <h2 data-i18n="product_info_title">製品情報</h2>
             <button type="button" class="sidebar-close" onclick="toggleSidebar(false)">&times;</button>
         </div>
 
@@ -2452,19 +2451,19 @@
             </div>
 
             <div>
-                <label>品番 / Product Number</label>
+                <label data-i18n="product_number">品番</label>
                 <input readonly id="product-number" value="" name="品番"
                     style="background: transparent; border: none; padding: 0; font-size: 1rem; font-weight: bold;">
             </div>
 
             <div>
-                <label>モデル / Model</label>
+                <label data-i18n="model">モデル</label>
                 <input readonly id="model" value=""
                     style="background: transparent; border: none; padding: 0; font-weight: 600;">
             </div>
 
             <div>
-                <label>形状 / Shape</label>
+                <label data-i18n="shape">形状</label>
                 <input readonly id="shape" value=""
                     style="background: transparent; border: none; padding: 0; font-weight: 600;">
             </div>
@@ -2476,65 +2475,65 @@
             </div>
 
             <div>
-                <label>材料 / Material</label>
+                <label data-i18n="material">材料</label>
                 <input readonly id="material" value=""
                     style="background: transparent; border: none; padding: 0; font-weight: 600;">
             </div>
 
             <div>
-                <label>材料コード / Material Code</label>
+                <label data-i18n="material_code">材料コード</label>
                 <input readonly id="material-code" value=""
                     style="background: transparent; border: none; padding: 0; font-weight: 600;">
             </div>
 
             <div>
-                <label>材料色 / Material Color</label>
+                <label data-i18n="material_color">材料色</label>
                 <input readonly id="material-color" value=""
                     style="background: transparent; border: none; padding: 0; font-weight: 600;">
             </div>
 
             <div>
-                <label>型番 / Kataban</label>
+                <label data-i18n="kataban">型番</label>
                 <input readonly id="kataban" value=""
                     style="background: transparent; border: none; padding: 0; font-weight: 600;">
             </div>
 
             <div style="border-top: 1px solid var(--border-color); padding-top: 15px;">
-                <label>送りピッチ / Feeding Pitch</label>
+                <label data-i18n="sending_pitch">送りピッチ</label>
                 <p id="送りピッチ">---</p>
             </div>
 
             <div>
-                <label>離型紙 / Release Paper</label>
+                <label data-i18n="rikeshi_paper">離型紙</label>
                 <p id="rikeshitext">---</p>
             </div>
 
             <div style="border-top: 1px solid var(--border-color); padding-top: 15px;">
-                <label>加工合計時間 (Total Time)</label>
+                <label data-i18n="total_time">加工合計時間</label>
                 <input readonly id="totalTime" value="0" name="Total Time"
                     style="background: transparent; border: none; padding: 0; font-weight: 600;">
             </div>
 
             <div>
-                <label>Cycle Time DCP</label>
+                <label data-i18n="cycle_time_dcp">Cycle Time DCP</label>
                 <input readonly id="cycleTime" value="0" name="Cycle Time"
                     style="background: transparent; border: none; padding: 0; font-weight: 600;">
             </div>
 
             <div>
-                <label>Cycle Time Kensa</label>
+                <label data-i18n="cycle_time_kensa">Cycle Time Kensa</label>
                 <input readonly id="cycleTimeK" value="0" name="Cycle TimeK"
                     style="background: transparent; border: none; padding: 0; font-weight: 600;">
             </div>
 
             <div>
-                <label>休憩 (Break Time Mins)</label>
+                <label data-i18n="breaktime">休憩</label>
                 <input readonly id="breaktime-mins" value="0" name="Breaktime"
                     style="background: transparent; border: none; padding: 0; font-weight: 600;">
             </div>
 
             <div>
-                <label>故障時間 (Trouble Time)</label>
+                <label data-i18n="trouble_time">故障時間</label>
                 <input type="text" id="trouble-time-display" name="trouble-time-display" placeholder="00h 00m" readonly
                     style="background: transparent; border: none; padding: 0; font-weight: 600; color: var(--text-main);">
             </div>
@@ -4044,11 +4043,10 @@
                 <line x1="15" y1="2" x2="15" y2="5" />
             </svg>
         </div>
-        <h2 data-i18n="break_in_progress">休憩中 / Break in Progress</h2>
-        <p class="break-sub">作業を一時停止しています / Production is paused</p>
+        <h2 data-i18n="break_in_progress">休憩中</h2>
+        <p class="break-sub" data-i18n="break_sub">作業を一時停止しています</p>
         <div class="break-timer" id="breakTimerDisplay">00:00</div>
-        <button type="button" class="btn-finish-break" id="finishBreakButton" data-i18n="finish_break">休憩を終了 / Finish
-            Break</button>
+        <button type="button" class="btn-finish-break" id="finishBreakButton" data-i18n="finish_break">休憩を終了</button>
     </div>
 
     <style>
@@ -4445,11 +4443,11 @@
                 <path d="M14.7 6.3a4 4 0 0 0-5.4 5.3L3 18l3 3 6.4-6.3a4 4 0 0 0 5.3-5.4l-2.7 2.7-2-2 2.7-2.7z" />
             </svg>
         </div>
-        <h2 data-i18n="maintenance_in_progress">機械故障中 / Machine Maintenance</h2>
-        <p class="break-sub">機械を修理中です / Machine is being serviced</p>
+        <h2 data-i18n="maintenance_in_progress">機械故障中</h2>
+        <p class="break-sub" data-i18n="maintenance_sub">機械を修理中です</p>
         <div class="break-timer" id="maintenanceTimerDisplay">00:00</div>
         <button type="button" class="btn-finish-break" id="finishMaintenanceButton"
-            data-i18n="finish_maintenance">故障対応を終了 / End Maintenance</button>
+            data-i18n="finish_maintenance">故障対応を終了</button>
     </div>
 
     <!-- Floating Menu: Call Leader, Box, Material -->
@@ -4496,7 +4494,7 @@
                     <path d="M21 19a2 2 0 0 1-2 2h-1v-6h3v4z"></path>
                     <path d="M3 19a2 2 0 0 0 2 2h1v-6H3v4z"></path>
                 </svg>
-                <span>呼出<br>Call</span>
+                <span data-i18n="call_btn_label">呼出</span>
             </div>
         </button>
     </div>
@@ -4505,7 +4503,7 @@
     <div id="stopHoldCountdown" class="stop-hold-countdown">
         <div class="stop-hold-ring">
             <div class="stop-hold-num" id="stopHoldNum">2</div>
-            <div class="stop-hold-label" data-i18n="stopcall_keephold">押し続けてください<br>Keep holding…</div>
+            <div class="stop-hold-label" data-i18n="stopcall_keephold">押し続けてください</div>
         </div>
     </div>
 
@@ -4519,13 +4517,13 @@
                 <path d="M8 18a4 4 0 0 0 4 2" />
             </svg>
         </div>
-        <h2 data-i18n="stopcall_wait">リーダーをお待ちください / Please wait for the leader</h2>
-        <p class="break-sub" data-i18n="stopcall_inprogress">呼び出し中… / Calling in progress…</p>
+        <h2 data-i18n="stopcall_wait">リーダーをお待ちください</h2>
+        <p class="break-sub" data-i18n="stopcall_inprogress">呼び出し中…</p>
         <div class="break-timer" id="stopCallTimerDisplay">00:00</div>
         <button type="button" class="btn-finish-break" id="stopCallUnlockButton"
-            data-i18n="stopcall_unlock">リーダーQRで解除 / Unlock with leader QR</button>
+            data-i18n="stopcall_unlock">リーダーQRで解除</button>
         <button type="button" class="stopcall-cancel-btn" id="stopCallCancelButton"
-            data-i18n="stopcall_cancel">間違えました / Cancel (mis-press)</button>
+            data-i18n="stopcall_cancel">間違えました</button>
         <div class="stopcall-qr-wrap" id="stopCallQrWrap">
             <div id="stopCallQrReader"></div>
             <p id="stopCallStatus"
@@ -4541,7 +4539,7 @@
             <polyline points="23 4 23 10 17 10" />
             <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
         </svg>
-        新規スキャン / New Scan
+        <span data-i18n="new_scan_btn">新規スキャン</span>
     </button>
 
     <!-- Image preview modal -->
