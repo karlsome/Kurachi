@@ -4241,7 +4241,7 @@ function resetForm() {
   localStorage.removeItem(`${uniquePrefix}cached-kataban`);
   syncVideoManualLauncherState();
 
-  const excludedInputs = ['process', 'languageSelector']; // IDs or names of inputs to exclude from reset
+  const excludedInputs = ['process', 'languageSelector', 'Machine Operator']; // IDs or names of inputs to exclude from reset
 
   // Preserve language preference
   const currentLanguage = localStorage.getItem('appLanguage');
@@ -7281,8 +7281,8 @@ document.getElementById('sendtoNC')?.addEventListener('click', async function ()
       // 3-step workflow was completed, show individual send modal
       showIndividualSendModal();
     } else {
-      // 3-step workflow not completed, show Step 1 modal
-      showStep1Modal();
+      // 3-step workflow not completed, show Step 0 modal
+      showStep0Modal();
     }
   }
 });
@@ -9928,6 +9928,61 @@ window.isScanWorkflowComplete = function () {
   return localStorage.getItem(`${uniquePrefix}scanComplete`) === 'true';
 };
 
+// Function to show Step 0 Modal (Worker Name Verification)
+window.showStep0Modal = function() {
+  clearScanWorkflowComplete(); 
+  
+  const modal = document.getElementById('step0Modal');
+  const confirmState = document.getElementById('step0ConfirmState');
+  const selectState = document.getElementById('step0SelectState');
+  const workerInput = document.getElementById('Machine Operator');
+  const currentWorkerLabel = document.getElementById('step0CurrentWorkerName');
+  
+  // Make sure to hide Step 1, 2, 3 Modals
+  ['step1Modal', 'step2Modal', 'step3Modal'].forEach(id => {
+    const m = document.getElementById(id);
+    if (m) m.style.display = 'none';
+  });
+
+  // Check if we have an existing worker name
+  if (workerInput && workerInput.value && workerInput.value.trim() !== '') {
+    currentWorkerLabel.textContent = workerInput.value;
+    confirmState.style.display = 'flex';
+    selectState.style.display = 'none';
+  } else {
+    confirmState.style.display = 'none';
+    selectState.style.display = 'flex';
+  }
+  
+  modal.style.display = 'block';
+  saveCurrentStep(0); 
+};
+
+window.proceedFromStep0 = function() {
+  const workerInput = document.getElementById("Machine Operator");
+  if (!workerInput || !workerInput.value.trim()) {
+    if (typeof showToast === 'function') showToast("作業者名を入力してください / Please select a worker");
+    return;
+  }
+  
+  // Make sure it gets cached to localStorage
+  if (typeof saveInputs === 'function') saveInputs();
+  
+  document.getElementById('step0Modal').style.display = 'none';
+  showStep1Modal();
+};
+
+window.confirmWorkerName = function() {
+  document.getElementById('step0Modal').style.display = 'none';
+  showStep1Modal();
+};
+
+window.changeWorkerName = function() {
+  document.getElementById('step0ConfirmState').style.display = 'none';
+  document.getElementById('step0SelectState').style.display = 'flex';
+  document.getElementById('Machine Operator').value = '';
+};
+
 // Function to show Step 1 Modal
 function showStep1Modal() {
   clearScanWorkflowComplete(); // (re)starting the workflow -> not complete
@@ -11238,7 +11293,7 @@ window.addEventListener('load', function () {
           .catch(error => console.error('❌ SSE Clear broadcast on load failed:', error));
       }
 
-      showStep1Modal();
+      showStep0Modal();
       return;
     }
 
@@ -11274,7 +11329,7 @@ window.addEventListener('load', function () {
     } else {
       // Scanned but Step 3 not done — restart from Step 1
       console.log('Incomplete workflow on load (step ' + savedStep + ') - restarting from Step 1');
-      showStep1Modal();
+      showStep0Modal();
     }
 
     currentProductDetails.model = currentProductDetails.model || document.getElementById('model')?.value || localStorage.getItem(`${uniquePrefix}cached-model`) || '';

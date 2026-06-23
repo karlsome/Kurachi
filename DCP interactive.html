@@ -1665,6 +1665,48 @@
 
                 <!-- TAB 1: SCAN -->
                 <div class="tab-panel" id="panel-0">
+                    <!-- Step 0 Card: Worker Name Selection -->
+                    <div id="step0Modal" style="display: none; background: var(--bg-surface); border-radius: var(--card-radius); padding: 20px; box-shadow: var(--shadow-sm); border: 1px solid var(--border); margin-bottom: 20px;">
+                        <h2 style="font-size: 1.15rem; font-weight: 700; text-align: center; margin-bottom: 20px;">
+                            <span style="color: var(--accent-green);">作業者確認 / Worker Setup</span>
+                        </h2>
+                        
+                        <!-- State B: Confirm Existing Worker -->
+                        <div id="step0ConfirmState" style="display: none; flex-direction: column; align-items: center; gap: 15px;">
+                            <p style="font-size: 1.1rem; color: var(--text-main); margin: 0; text-align: center; line-height: 1.5;">
+                                作業を続ける作業者は<br><strong id="step0CurrentWorkerName" style="color: var(--brand); font-size: 1.4rem; display: block; margin: 8px 0;"></strong> ですか？<br>
+                                <span style="font-size: 0.9rem; color: var(--text-muted);">Are you still this worker?</span>
+                            </p>
+                            <div style="display: flex; gap: 10px; width: 100%; margin-top: 10px;">
+                                <button type="button" class="btn btn-secondary" style="flex: 1;" onclick="changeWorkerName()">
+                                    変更 / Change
+                                </button>
+                                <button type="button" class="btn btn-primary" style="flex: 2;" onclick="confirmWorkerName()">
+                                    はい / Yes
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- State A: Select New Worker -->
+                        <div id="step0SelectState" style="display: none; flex-direction: column; align-items: center; gap: 15px;">
+                            <p style="font-size: 1rem; color: var(--text-main); margin: 0; text-align: center;">
+                                作業者を選択してください<br>
+                                <span style="font-size: 0.9rem; color: var(--text-muted);">Please select worker name</span>
+                            </p>
+                            
+                            <div class="form-group" style="width: 100%;">
+                                <input list="machine-operator-suggestions" class="tap-field"
+                                    placeholder="タップして選択 / Tap to select" id="Machine Operator"
+                                    name="Machine Operator" data-i18n="worker_name_placeholder" required readonly>
+                                <datalist id="machine-operator-suggestions"></datalist>
+                            </div>
+
+                            <button type="button" class="btn btn-primary btn-full" onclick="proceedFromStep0()" style="margin-top: 10px;">
+                                次へ / Proceed
+                            </button>
+                        </div>
+                    </div>
+
                     <!-- Step 1 Card: Scan Kanban -->
                     <div id="step1Modal">
                         <div>
@@ -2043,13 +2085,7 @@
                         </h3>
                         <div class="collapsible-body">
                             <div class="form-grid">
-                                <div class="form-group">
-                                    <label for="Machine Operator" data-i18n="worker_name">作業者:</label>
-                                    <input list="machine-operator-suggestions" class="tap-field"
-                                        placeholder="タップして選択 / Tap to select" id="Machine Operator"
-                                        name="Machine Operator" data-i18n="worker_name_placeholder" required readonly>
-                                    <datalist id="machine-operator-suggestions"></datalist>
-                                </div>
+                                <!-- Machine Operator field moved to Step 0 (Scan Tab) -->
                                 <div class="form-group">
                                     <label for="Lot No." data-i18n="processing_date">加工日:</label>
                                     <input type="date" name="Lot No." id="Lot No." placeholder="Date"
