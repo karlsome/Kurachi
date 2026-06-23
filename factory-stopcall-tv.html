@@ -817,6 +817,8 @@
         //  - running     → PRODUCTION time (accumulated, paused during break/maint)
         //  - break/maint → time since that mode started
         //  - idle        → blank
+        const reNotifiedIntervals = new Map();
+
         function refreshElapsed() {
             const now = Date.now();
             tileByMachine.forEach((tile, machine) => {
@@ -824,8 +826,28 @@
                 if (!el) return;
                 let text = '';
                 if (activeSince.has(machine)) {
-                    text = fmtWait(now - activeSince.get(machine));
+                    const elapsedMs = now - activeSince.get(machine);
+                    text = fmtWait(elapsedMs);
+
+                    // Re-notify leader calls every 8 minutes (480,000 ms)
+                    const types = lastMachineCallTypes.get(machine);
+                    if (types && types.leader) {
+                        const intervalIdx = Math.floor(elapsedMs / 480000);
+                        if (intervalIdx >= 1) {
+                            const lastIdx = reNotifiedIntervals.get(machine) || 0;
+                            // Trigger if within a 10s window of the boundary (prevents retroactive spam on page reload)
+                            if (intervalIdx > lastIdx && (elapsedMs % 480000) < 10000) {
+                                reNotifiedIntervals.set(machine, intervalIdx);
+                                const mins = intervalIdx * 8;
+                                queueTakeover(machine, `呼び出し (${mins}分経過) / CALLING (${mins} MIN)`, 'leader');
+                            } else if (intervalIdx > lastIdx) {
+                                // Missed the window (e.g. page just loaded), just catch up silently
+                                reNotifiedIntervals.set(machine, intervalIdx);
+                            }
+                        }
+                    }
                 } else {
+                    reNotifiedIntervals.delete(machine);
                     const ms = machineState.get(machine);
                     if (ms) {
                         if (ms.mode === 'running') {
