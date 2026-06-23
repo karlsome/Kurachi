@@ -707,7 +707,22 @@ app.post("/api/machine-assert", (req, res) => {
       }
       map.set(id, st);
       updated.push(id);
+    } else {
+      // The server already has a record. Enforce the tablet's authoritative time!
+      // The tablet sends runStartedAt adjusted exactly for all breaks and maintenance.
+      if (mode === 'running' && runStartedAt > 0) {
+        const serverElapsed = (st.prodAccumMs || 0) + (st.runSince ? (now - st.runSince) : 0);
+        const authoritativeElapsed = Math.max(0, now - runStartedAt);
+        
+        // If drifted by more than 15 seconds, forcibly snap to the tablet's exact mathematical reality
+        if (Math.abs(serverElapsed - authoritativeElapsed) > 15000) {
+          st.prodAccumMs = 0;
+          st.runSince = runStartedAt;
+          if (!updated.includes(id)) updated.push(id);
+        }
+      }
     }
+    
     // Update totalNG and flag for broadcast if it changed
     const oldTotalNG = st.totalNG || 0;
     st.totalNG = totalNG;
