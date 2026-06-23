@@ -232,6 +232,39 @@ const translations = {
         'stopcall_keephold': '押し続けてください',
         'call_btn_label': '呼出',
         'new_scan_btn': '新規スキャン',
+
+        // Tab labels (new)
+        'params_tab': 'パラメーター',
+        'production_tab': '生産',
+        'kensa_tab_label': '検査',
+        'images_tab': '画像',
+        'maintenance_tab': '保守',
+
+        // Gallery & JS-generated (new)
+        'gallery_hatsumono': '初物チェック',
+        'gallery_atomono': '終物チェック',
+        'gallery_material_label': '材料ラベル',
+        'tap_to_capture': 'タップして撮影',
+        'not_captured': '未撮影',
+        'send_completed_btn': '送信',
+        'take_photo_webcam': '写真撮影',
+        'capture_webcam_btn': '📸 撮影',
+        'close_webcam_btn': '✕ 閉じる',
+
+        // Toast messages (new)
+        'toast_complete_3steps': '先に3ステップのスキャンを完了してください',
+        'toast_press_values_changed': '「変更完了」を押してください',
+        'toast_settings_confirmed': '設定が確認されました',
+        'toast_max_breaks': '休憩は最大4回までです',
+        'toast_break_recorded': '休憩を記録しました',
+        'toast_break_removed': '休憩を削除しました',
+        'toast_enter_reason_photo': '理由を入力し写真を撮影してください',
+        'toast_call_canceled': '呼び出しをキャンセルしました',
+        'toast_leader_recorded': 'リーダー対応を記録しました',
+        'toast_sending_machine': '機械へ送信中...',
+        'toast_send_complete': '送信完了',
+        'toast_send_failed': '送信失敗',
+        'toast_no_product': '背番号がありません',
     },
 
     en: {
@@ -464,6 +497,39 @@ const translations = {
         'stopcall_keephold': 'Keep holding…',
         'call_btn_label': 'Call',
         'new_scan_btn': 'New Scan',
+
+        // Tab labels (new)
+        'params_tab': 'Params',
+        'production_tab': 'Production',
+        'kensa_tab_label': 'Inspection',
+        'images_tab': 'Images',
+        'maintenance_tab': 'Maintenance',
+
+        // Gallery & JS-generated (new)
+        'gallery_hatsumono': 'First Cycle Check',
+        'gallery_atomono': 'Last Cycle Check',
+        'gallery_material_label': 'Material Label',
+        'tap_to_capture': 'Tap to capture',
+        'not_captured': 'Not captured',
+        'send_completed_btn': 'Send to Machine',
+        'take_photo_webcam': 'Take Photo',
+        'capture_webcam_btn': '📸 Capture',
+        'close_webcam_btn': '✕ Close',
+
+        // Toast messages (new)
+        'toast_complete_3steps': 'Complete the 3-step scan first',
+        'toast_press_values_changed': 'Please press "Values changed"',
+        'toast_settings_confirmed': 'Settings confirmed',
+        'toast_max_breaks': 'Max 4 breaks recorded',
+        'toast_break_recorded': 'Break recorded',
+        'toast_break_removed': 'Break removed',
+        'toast_enter_reason_photo': 'Enter reason and take a photo',
+        'toast_call_canceled': 'Call canceled',
+        'toast_leader_recorded': 'Leader arrival recorded',
+        'toast_sending_machine': 'Sending to machine...',
+        'toast_send_complete': 'Send complete',
+        'toast_send_failed': 'Send failed',
+        'toast_no_product': 'No product scanned',
     },
 
     pt: {
@@ -696,8 +762,48 @@ const translations = {
         'stopcall_keephold': 'Continue pressionando…',
         'call_btn_label': 'Chamar',
         'new_scan_btn': 'Nova Varredura',
+
+        // Tab labels (new)
+        'params_tab': 'Parâmetros',
+        'production_tab': 'Produção',
+        'kensa_tab_label': 'Inspeção',
+        'images_tab': 'Imagens',
+        'maintenance_tab': 'Manutenção',
+
+        // Gallery & JS-generated (new)
+        'gallery_hatsumono': 'Verificação do Primeiro Ciclo',
+        'gallery_atomono': 'Verificação do Último Ciclo',
+        'gallery_material_label': 'Etiqueta de Material',
+        'tap_to_capture': 'Toque para capturar',
+        'not_captured': 'Não capturado',
+        'send_completed_btn': 'Enviar para Máquina',
+        'take_photo_webcam': 'Tirar Foto',
+        'capture_webcam_btn': '📸 Capturar',
+        'close_webcam_btn': '✕ Fechar',
+
+        // Toast messages (new)
+        'toast_complete_3steps': 'Complete as 3 etapas de escaneamento primeiro',
+        'toast_press_values_changed': 'Por favor pressione "Valores alterados"',
+        'toast_settings_confirmed': 'Configurações confirmadas',
+        'toast_max_breaks': 'Máximo de 4 intervalos registrados',
+        'toast_break_recorded': 'Intervalo registrado',
+        'toast_break_removed': 'Intervalo removido',
+        'toast_enter_reason_photo': 'Insira o motivo e tire uma foto',
+        'toast_call_canceled': 'Chamada cancelada',
+        'toast_leader_recorded': 'Chegada do líder registrada',
+        'toast_sending_machine': 'Enviando para a máquina...',
+        'toast_send_complete': 'Envio concluído',
+        'toast_send_failed': 'Envio falhou',
+        'toast_no_product': 'Nenhum produto escaneado',
     }
 };
+
+// Lightweight translation helper for use in JS-generated HTML
+function _t(key) {
+    const lang = getCurrentLanguage();
+    const t = translations[lang];
+    return (t && key in t) ? t[key] : key;
+}
 
 // Get current language from localStorage or default to Japanese
 function getCurrentLanguage() {

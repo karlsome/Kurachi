@@ -1573,7 +1573,7 @@
                     <line x1="4" y1="16" x2="20" y2="16" />
                     <circle cx="15" cy="16" r="2.4" />
                 </svg></span>
-            <span class="tab-label">Params</span>
+            <span class="tab-label" data-i18n="params_tab">Params</span>
         </button>
         <button type="button" class="tab-btn" data-tab="2">
             <span class="tab-icon"><svg viewBox="0 0 24 24">
@@ -1582,14 +1582,14 @@
                     <polyline points="3.3 7 12 12 20.7 7" />
                     <line x1="12" y1="12" x2="12" y2="21.5" />
                 </svg></span>
-            <span class="tab-label">Production</span>
+            <span class="tab-label" data-i18n="production_tab">Production</span>
         </button>
         <button type="button" class="tab-btn" id="kensaTabBtn" data-tab="3" style="display:none;">
             <span class="tab-icon"><svg viewBox="0 0 24 24">
                     <path d="M9 3h6v4l4 9a3 3 0 0 1-2.7 4.3H7.7A3 3 0 0 1 5 16l4-9z" />
                     <line x1="9" y1="3" x2="15" y2="3" />
                 </svg></span>
-            <span class="tab-label">検査 Kensa</span>
+            <span class="tab-label" data-i18n="kensa_tab_label">検査</span>
         </button>
         <button type="button" class="tab-btn" data-tab="4">
             <span class="tab-icon"><svg viewBox="0 0 24 24">
@@ -1597,14 +1597,14 @@
                     <circle cx="8.5" cy="9.5" r="1.6" />
                     <polyline points="4 17 9 12 13 16 16.5 12.5 20 16" />
                 </svg></span>
-            <span class="tab-label">Images</span>
+            <span class="tab-label" data-i18n="images_tab">Images</span>
         </button>
         <button type="button" class="tab-btn" data-tab="5">
             <span class="tab-icon"><svg viewBox="0 0 24 24">
                     <path d="M14.7 6.3a4 4 0 0 0 5 5l-7.6 7.6a2.1 2.1 0 0 1-3-3L16.7 8.3" />
                     <path d="M14.7 6.3 18 3l3 3-3.3 3.3" />
                 </svg></span>
-            <span class="tab-label">Maintenance</span>
+            <span class="tab-label" data-i18n="maintenance_tab">Maintenance</span>
         </button>
         <button type="button" class="tab-btn" data-tab="6">
             <span class="tab-icon"><svg viewBox="0 0 24 24">
@@ -2377,7 +2377,7 @@
                         <div class="photo-status-indicator" id="materialLabelStatusIndicator">FALSE</div>
                         <span id="材料ラベル_L">FALSE</span>
                         <span id="makerLabel">FALSE</span>
-                        <button type="button" id="makerLabelButton">写真撮影 / Take Photo</button>
+                        <button type="button" id="makerLabelButton" data-i18n="take_photo">写真撮影</button>
                         <img id="材料ラベル" src="" alt="材料ラベル">
                         <div id="material-photo-thumbnails"></div>
                     </div>
@@ -2790,7 +2790,7 @@
             // Lock: cannot leave the Scan tab until the 3-step scan is complete
             if (index !== 0 && !isScanComplete()) {
                 if (typeof window.showAppToast === 'function') {
-                    window.showAppToast('先に3ステップのスキャンを完了してください / Complete the 3-step scan first');
+                    window.showAppToast(_t('toast_complete_3steps'));
                 }
                 updateTabLock();
                 return;
@@ -2799,7 +2799,7 @@
             // Lock: cannot visit pages beyond Scan (0) and Params (1) until "Values changed" is pressed
             if (index > 1 && window.paramsLocked) {
                 if (typeof window.showAppToast === 'function') {
-                    window.showAppToast('「Values changed」を押してください / Please press "Values changed"');
+                    window.showAppToast(_t('toast_press_values_changed'));
                 }
                 return;
             }
@@ -2873,7 +2873,7 @@
                     btn.classList.add('btn-primary');
                     btn.onclick = function () {
                         if (typeof window.showAppToast === 'function') {
-                            window.showAppToast('設定が確認されました / Settings confirmed');
+                            window.showAppToast(_t('toast_settings_confirmed'));
                         }
                         if (typeof window.goToTab === 'function') window.goToTab(2);
                     };
@@ -2907,7 +2907,7 @@
                         localStorage.setItem(confirmedKey, 'true');
                         updateTabLock();
                         if (typeof window.showAppToast === 'function') {
-                            window.showAppToast('設定が確認されました / Settings confirmed');
+                            window.showAppToast(_t('toast_settings_confirmed'));
                         }
                         if (typeof window.goToTab === 'function') window.goToTab(2);
                     };
@@ -4690,7 +4690,7 @@
                 
                 const labelHTML = simpleBlank 
                     ? '<span class="thumb-tag" style="position:static;background:none;color:var(--red);margin-top:6px;text-align:center;font-weight:800;word-break:break-all;">' + tag + '</span>'
-                    : '<span class="thumb-tag" style="position:static;background:none;color:var(--red);margin-top:6px;text-align:center;">' + tag + ' 未撮影<br><small style="font-weight:700;">タップして撮影 / Tap to capture</small></span>';
+                    : '<span class="thumb-tag" style="position:static;background:none;color:var(--red);margin-top:6px;text-align:center;">' + tag + ' ' + _t('not_captured') + '<br><small style="font-weight:700;">' + _t('tap_to_capture') + '</small></span>';
 
                 return '<div class="gallery-thumb empty"' + capAttr + ' style="display:flex;flex-direction:column;align-items:center;justify-content:center;border:1px dashed var(--red);background:var(--red-soft);cursor:pointer;">' +
                     '<span style="position:absolute;top:6px;right:6px;width:12px;height:12px;border-radius:50%;background:var(--red);border:2px solid #fff;"></span>' +
@@ -4750,9 +4750,9 @@
                     '</div>';
 
                 let html = '';
-                html += section('初物チェック / First Cycle', hCard, null);
-                html += section('終物チェック / Last Cycle', aCard, null);
-                html += section('材料ラベル / Material Label', matCards, matImgs.length);
+                html += section(_t('gallery_hatsumono'), hCard, null);
+                html += section(_t('gallery_atomono'), aCard, null);
+                html += section(_t('gallery_material_label'), matCards, matImgs.length);
                 g.innerHTML = html;
                 if (empty) empty.style.display = 'none';
                 g.querySelectorAll('.gallery-thumb[data-src]').forEach(el => {
@@ -4830,7 +4830,7 @@
                     const si = document.getElementById('break' + i + '-start');
                     if (si && !si.value) { slot = i; break; }
                 }
-                if (!slot) { showToast('休憩は最大4回までです / Max 4 breaks recorded'); return; }
+                if (!slot) { showToast(_t('toast_max_breaks')); return; }
                 const si = document.getElementById('break' + slot + '-start');
                 const ei = document.getElementById('break' + slot + '-end');
                 if (si) {
@@ -4844,7 +4844,7 @@
                 if (typeof calculateTotalBreakTime === 'function') calculateTotalBreakTime();
                 updateBreakCount();
                 renderBreakList();
-                showToast('休憩を記録しました / Break recorded');
+                showToast(_t('toast_break_recorded'));
             }
             function updateBreakCount() {
                 let n = 0;
@@ -4904,7 +4904,7 @@
                 if (typeof calculateTotalBreakTime === 'function') calculateTotalBreakTime();
                 updateBreakCount();
                 renderBreakList();
-                showToast('休憩を削除しました / Break removed');
+                showToast(_t('toast_break_removed'));
             }
             function resumeBreakIfActive() {
                 const raw = localStorage.getItem(breakPrefix + 'activeBreakStart');
@@ -4954,7 +4954,7 @@
                         if (e) e.value = fmtClock(end);
                         const reason = document.getElementById('maintenance-comment');
                         if (reason) reason.focus();
-                        showToast('理由を入力し写真を撮影してください / Enter reason and take a photo');
+                        showToast(_t('toast_enter_reason_photo'));
                     }, 120);
                 }
             }
@@ -5078,7 +5078,7 @@
                 localStorage.removeItem(breakPrefix + 'activeStopCallStart');
                 closeStopCallOverlay();
                 notifyStopCall('clear', 'leader');
-                showToast('呼び出しをキャンセルしました / Call canceled');
+                showToast(_t('toast_call_canceled'));
             }
             function beginStopCallUnlock() {
                 const qrWrap = document.getElementById('stopCallQrWrap');
@@ -5152,7 +5152,7 @@
                 localStorage.removeItem(breakPrefix + 'activeStopCallStart');
                 closeStopCallOverlay();
                 notifyStopCall('clear', 'leader');
-                showToast('リーダー対応を記録しました / Leader arrival recorded');
+                showToast(_t('toast_leader_recorded'));
             }
             function resumeStopCallIfActive() {
                 const raw = localStorage.getItem(breakPrefix + 'activeStopCallStart');
@@ -5398,15 +5398,15 @@
                     if (window.__materialScanMode === 'production') {
                         const seb = document.getElementById('scannedKanban')?.value || document.getElementById('sub-dropdown')?.value;
                         if (seb && typeof window.sendtoNC === 'function') {
-                            if (window.showToast) window.showToast('機械へ送信中... / Sending to machine...', 2000);
+                            if (window.showToast) window.showToast(_t('toast_sending_machine'), 2000);
                             window.sendtoNC(seb).then(() => {
-                                if (window.showToast) window.showToast('送信完了 / Send complete', 3000);
+                                if (window.showToast) window.showToast(_t('toast_send_complete'), 3000);
                                 const m = document.getElementById('step2Modal');
                                 if (m) m.style.display = 'none';
                                 if (typeof window.closeAllStepModals === 'function') window.closeAllStepModals();
                                 if (typeof window.renderImageGallery === 'function') window.renderImageGallery();
                             }).catch(err => {
-                                if (window.showToast) window.showToast('送信失敗 / Send failed', 4000);
+                                if (window.showToast) window.showToast(_t('toast_send_failed'), 4000);
                             });
                         } else {
                             if (window.showToast) window.showToast('エラー：背番号がありません / Error: No product selected');
@@ -5748,10 +5748,10 @@
                         btn.type = 'button';
                         btn.id = 'completedSendToMachine';
                         btn.className = 'btn btn-primary btn-full';
-                        btn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:6px;"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>送信 / Send to Machine';
+                        btn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:6px;"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>' + _t('send_completed_btn');
                         btn.addEventListener('click', () => {
                             const seb = document.getElementById('sub-dropdown')?.value;
-                            if (!seb) { if (window.showAppToast) window.showAppToast('背番号がありません / No product scanned'); return; }
+                            if (!seb) { if (window.showAppToast) window.showAppToast(_t('toast_no_product')); return; }
                             if (typeof sendtoNC === 'function') {
                                 sendtoNC(seb);
                                 if (typeof window.goToTab === 'function') window.goToTab(1);
@@ -5769,11 +5769,13 @@
                         const btn = document.createElement('button');
                         btn.type = 'button';
                         btn.className = 'machine-send-all';
-                        btn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>' + name + ' に送信 / Send to ' + name;
+                        const _lang = getCurrentLanguage();
+                        const _sendLabel = _lang === 'ja' ? name + ' に送信' : _lang === 'pt' ? 'Enviar para ' + name : 'Send to ' + name;
+                        btn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>' + _sendLabel;
 
                         btn.addEventListener('click', async () => {
                             const seb = document.getElementById('sub-dropdown')?.value;
-                            if (!seb) { if (window.showAppToast) window.showAppToast('背番号がありません / No product scanned'); return; }
+                            if (!seb) { if (window.showAppToast) window.showAppToast(_t('toast_no_product')); return; }
                             const ips = (typeof groupedMachineIPs !== 'undefined') ? groupedMachineIPs : {};
                             const ip = ips[name];
                             if (!ip) { if (window.showAppToast) window.showAppToast(name + ' の IP が不明です'); return; }

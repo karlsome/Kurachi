@@ -5133,21 +5133,25 @@ buttonMappings.forEach(mapping => {
 const webcamModalHTML = `
 <div id="webcamModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 10000; justify-content: center; align-items: center;">
   <div style="background: white; padding: 20px; border-radius: 10px; max-width: 800px; width: 90%; text-align: center;">
-    <h2 id="webcamModalTitle" style="margin-top: 0;">写真撮影 / Take Photo</h2>
+    <h2 id="webcamModalTitle" data-i18n="take_photo_webcam" style="margin-top: 0;">写真撮影</h2>
     <video id="webcamVideo" autoplay playsinline style="width: 100%; max-width: 640px; border: 2px solid #333; border-radius: 8px; background: #000;"></video>
     <canvas id="webcamCanvas" style="display: none;"></canvas>
     <div style="margin-top: 20px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
-      <button id="captureWebcamBtn" style="padding: 12px 24px; font-size: 16px; background: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer;">
-        📸 撮影 / Capture
+      <button id="captureWebcamBtn" data-i18n="capture_webcam_btn" style="padding: 12px 24px; font-size: 16px; background: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer;">
+        📸 撮影
       </button>
-      <button id="closeWebcamBtn" style="padding: 12px 24px; font-size: 16px; background: #f44336; color: white; border: none; border-radius: 5px; cursor: pointer;">
-        ✕ 閉じる / Close
+      <button id="closeWebcamBtn" data-i18n="close_webcam_btn" style="padding: 12px 24px; font-size: 16px; background: #f44336; color: white; border: none; border-radius: 5px; cursor: pointer;">
+        ✕ 閉じる
       </button>
     </div>
   </div>
 </div>`;
 
 document.body.insertAdjacentHTML('beforeend', webcamModalHTML);
+// Apply current language to the newly injected modal
+if (typeof applyTranslations === 'function' && typeof getCurrentLanguage === 'function') {
+    applyTranslations(getCurrentLanguage());
+}
 
 let webcamStream = null;
 let currentButtonId = null;
