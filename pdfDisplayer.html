@@ -2341,6 +2341,16 @@
                     return;
                 }
 
+                if (data.additionalData && data.additionalData.action === 'page_next') {
+                    nextPDF();
+                    return;
+                }
+
+                if (data.additionalData && data.additionalData.action === 'page_prev') {
+                    prevPDF();
+                    return;
+                }
+
                 if (data.additionalData && data.additionalData.action === 'video-manual-load' && data.additionalData.projectId) {
                     void loadVideoManualProject(data.additionalData.projectId);
                     return;
@@ -2385,6 +2395,7 @@
 
         // Update the display with scan data
         async function updateDisplay(data) {
+            window.currentSebanggo = data.sebanggo; // Added for data integrity check
             resetManualPlayer({ restorePdf: false });
 
             // Save to localStorage for persistence
@@ -2529,6 +2540,12 @@
             }
         }
 
+        function prevPDF() {
+            if (pdfPages.length === 0) return;
+            currentPDFIndex = (currentPDFIndex - 1 + pdfPages.length) % pdfPages.length;
+            displayCurrentPDF();
+        }
+
         function nextPDF() {
             if (pdfPages.length === 0) return;
             currentPDFIndex = (currentPDFIndex + 1) % pdfPages.length;
@@ -2556,6 +2573,31 @@
             if (MACHINE_ID) {
                 console.log(`🚀 Starting ${MACHINE_ID} display page...`);
             }
+
+            // Failsafe 1: Auto-reload every 12 hours to prevent memory leaks/freezes
+            setTimeout(() => {
+                console.log('🔄 12-hour failsafe: Auto-reloading page to maintain stability.');
+                window.location.reload();
+            }, 12 * 60 * 60 * 1000);
+
+            // Failsafe 2: Heartbeat check for data integrity
+            setInterval(async () => {
+                if (!MACHINE_ID) return;
+                try {
+                    const response = await fetch(`${SERVER_URL}/api/machine-state/${MACHINE_ID}`);
+                    if (response.ok) {
+                        const state = await response.json();
+                        if (state && state.lastScan && state.lastScan.sebanggo) {
+                            if (window.currentSebanggo && window.currentSebanggo !== state.lastScan.sebanggo) {
+                                console.log(`⚠️ Heartbeat detected stale data! Server: ${state.lastScan.sebanggo}, Local: ${window.currentSebanggo}. Forcing reload.`);
+                                window.location.reload();
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.warn('Heartbeat check failed', e);
+                }
+            }, 60000); // Check every minute
         });
 
         // Cleanup on page unload

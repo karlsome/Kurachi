@@ -9083,6 +9083,12 @@ function syncVideoManualLauncherState() {
     <span class="video-manual-launcher__icon">🎬</span>
     <span class="video-manual-launcher__label">${enabled ? 'Manual' : 'Manual<small>Scan first</small>'}</span>
   `;
+
+  // Sync PDF buttons too
+  const prevBtn = document.getElementById('pdfPrevPageBtn');
+  const nextBtn = document.getElementById('pdfNextPageBtn');
+  if (prevBtn) prevBtn.className = `video-manual-launcher pdf-page-btn${enabled ? '' : ' is-disabled'}`;
+  if (nextBtn) nextBtn.className = `video-manual-launcher pdf-page-btn${enabled ? '' : ' is-disabled'}`;
 }
 
 function renderVideoManualProjects() {
@@ -9369,6 +9375,26 @@ function ensureVideoManualPickerUi() {
       box-shadow: 0 2px 8px rgba(0,0,0,0.25);
       white-space: nowrap;
     }
+    .pdf-page-btn {
+      width: 48px;
+      height: 48px;
+      padding: 0;
+      border-radius: 24px !important;
+      display: inline-flex;
+      justify-content: center;
+      align-items: center;
+      transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    .pdf-page-btn.is-interacting {
+      width: 64px;
+      height: 64px;
+      border-radius: 32px !important;
+    }
+    .pdf-page-btn.is-interacting .video-manual-launcher__icon {
+      font-size: 28px;
+      width: 64px;
+      height: 64px;
+    }
     .video-manual-launcher__icon {
       flex-shrink: 0;
       width: 48px;
@@ -9377,6 +9403,7 @@ function ensureVideoManualPickerUi() {
       align-items: center;
       justify-content: center;
       font-size: 20px;
+      transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
     }
     .video-manual-launcher__label {
       padding-right: 14px;
@@ -9858,6 +9885,67 @@ function ensureVideoManualPickerUi() {
     }
   });
   document.body.appendChild(launcher);
+
+  const pdfPrevBtn = document.createElement('button');
+  pdfPrevBtn.id = 'pdfPrevPageBtn';
+  pdfPrevBtn.type = 'button';
+  pdfPrevBtn.className = 'video-manual-launcher pdf-page-btn';
+  pdfPrevBtn.style.bottom = 'calc(max(12px, env(safe-area-inset-bottom)) + 120px)';
+  pdfPrevBtn.innerHTML = '<span class="video-manual-launcher__icon">⬆️</span>';
+
+  const pdfNextBtn = document.createElement('button');
+  pdfNextBtn.id = 'pdfNextPageBtn';
+  pdfNextBtn.type = 'button';
+  pdfNextBtn.className = 'video-manual-launcher pdf-page-btn';
+  pdfNextBtn.style.bottom = 'calc(max(12px, env(safe-area-inset-bottom)) + 60px)';
+  pdfNextBtn.innerHTML = '<span class="video-manual-launcher__icon">⬇️</span>';
+
+  const handlePdfBtnInteraction = (btn) => {
+    btn.classList.add('is-interacting');
+    
+    // Clear any existing timeouts for THIS specific button
+    if (btn.interactionTimeout) clearTimeout(btn.interactionTimeout);
+    if (btn.failsafeTimeout) clearTimeout(btn.failsafeTimeout);
+    
+    // Main shrink timeout
+    btn.interactionTimeout = setTimeout(() => {
+      btn.classList.remove('is-interacting');
+    }, 1500);
+    
+    // Absolute failsafe to guarantee it shrinks back
+    btn.failsafeTimeout = setTimeout(() => {
+      btn.classList.remove('is-interacting');
+    }, 2500);
+  };
+
+  pdfPrevBtn.onclick = () => { 
+    handlePdfBtnInteraction(pdfPrevBtn);
+    if(window.broadcastPdfCommand) window.broadcastPdfCommand('page_prev'); 
+  };
+  document.body.appendChild(pdfPrevBtn);
+
+  pdfNextBtn.onclick = () => { 
+    handlePdfBtnInteraction(pdfNextBtn);
+    if(window.broadcastPdfCommand) window.broadcastPdfCommand('page_next'); 
+  };
+  document.body.appendChild(pdfNextBtn);
+
+  window.broadcastPdfCommand = function(action) {
+    const machineNameForSSE = getMachineName();
+    if (machineNameForSSE) {
+      fetch(`${serverURL}/api/broadcast-scan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          machineId: machineNameForSSE,
+          sebanggo: currentProductDetails?.sebanggo || '',
+          hinban: currentProductDetails?.hinban || '',
+          timestamp: new Date().toISOString(),
+          additionalData: { action: action }
+        })
+      }).catch(e => console.error('Failed to broadcast PDF command:', e));
+    }
+  };
 
   const modal = document.createElement('div');
   modal.id = 'videoManualModal';
