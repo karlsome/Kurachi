@@ -5205,14 +5205,36 @@
                     else if (breakStart) { mode = 'break'; modeStartedAt = breakStart; }
                     else if (背番号) { mode = 'running'; }
 
-                    // Persist when production started so a recovered run shows a sane elapsed
-                    let prodStart = parseInt(localStorage.getItem(breakPrefix + 'prodStartEpoch') || '0', 10);
+                    // Use actual Start Time if available so TV monitor accurately matches elapsed time
+                    let prodStart = 0;
                     if (mode === 'idle' || !背番号) {
                         localStorage.removeItem(breakPrefix + 'prodStartEpoch');
-                        prodStart = 0;
-                    } else if (!prodStart) {
-                        prodStart = Date.now();
-                        localStorage.setItem(breakPrefix + 'prodStartEpoch', String(prodStart));
+                    } else {
+                        const startTimeStr = document.getElementById('Start Time')?.value;
+                        if (startTimeStr && startTimeStr.includes(':')) {
+                            const now = new Date();
+                            const [hh, mm] = startTimeStr.split(':');
+                            now.setHours(parseInt(hh, 10), parseInt(mm, 10), 0, 0);
+                            prodStart = now.getTime();
+                            
+                            // If start time was yesterday (more than 1 hour in the future of today's time)
+                            if (prodStart > Date.now() + 3600000) {
+                                prodStart -= 24 * 60 * 60 * 1000;
+                            }
+                            
+                            // Adjust for breaks and maintenance so TV monitor's elapsed time is perfectly accurate
+                            if (typeof window.appGetTotalBreakAndMaintMinutes === 'function') {
+                                const breakMs = window.appGetTotalBreakAndMaintMinutes() * 60000;
+                                prodStart += breakMs; // moving the start time FORWARD by the break time, reduces elapsed time exactly!
+                            }
+                        } else {
+                            // Fallback if Start Time isn't populated yet
+                            prodStart = parseInt(localStorage.getItem(breakPrefix + 'prodStartEpoch') || '0', 10);
+                            if (!prodStart) {
+                                prodStart = Date.now();
+                                localStorage.setItem(breakPrefix + 'prodStartEpoch', String(prodStart));
+                            }
+                        }
                     }
 
                     let totalNG = 0;

@@ -1457,6 +1457,15 @@ function updateAllProcessingTimeLockStatus() {
   updateProcessingTimeLockStatus('end');
 }
 
+// Expose break and maint times for the TV monitor sync
+window.appGetTotalBreakAndMaintMinutes = function() {
+    try {
+        let b = 0; if (typeof calculateTotalBreakTime === 'function') b = calculateTotalBreakTime();
+        let m = 0; if (typeof calculateTotalMachineTroubleTime === 'function') m = calculateTotalMachineTroubleTime();
+        return b + m;
+    } catch(e) { return 0; }
+};
+
 // Function to calculate total break time in minutes
 function calculateTotalBreakTime() {
   let totalMinutes = 0;
