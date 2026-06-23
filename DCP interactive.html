@@ -4598,6 +4598,8 @@
     <script>
         (function () {
             "use strict";
+            
+            const pageInstanceId = Math.random().toString(36).substring(2, 15);
 
             // ---------- Toast ----------
             let toastTimer = null;
@@ -5249,7 +5251,7 @@
                     fetch(`${base}/api/machine-assert`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ 工場, 設備, 背番号, 品番, mode, modeStartedAt, runStartedAt: prodStart, totalNG })
+                        body: JSON.stringify({ 工場, 設備, 背番号, 品番, mode, modeStartedAt, runStartedAt: prodStart, totalNG, pageInstanceId })
                     }).catch(() => { });
                 } catch (e) { }
             }

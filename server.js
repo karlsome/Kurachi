@@ -324,7 +324,8 @@ function machineStateView(id, st) {
     runSince: (mode === 'running') ? (st.runSince || 0) : 0,
     // Break/maintenance elapsed = now - modeSince.
     modeSince: (mode === 'break' || mode === 'maintenance') ? (st.modeSince || 0) : 0,
-    totalNG: st.totalNG || 0
+    totalNG: st.totalNG || 0,
+    deviceCount: st.activeDevices ? st.activeDevices.size : 0
   };
 }
 
@@ -685,6 +686,7 @@ app.post("/api/machine-assert", (req, res) => {
   const modeStartedAt = Number(req.body?.modeStartedAt) || 0;
   const runStartedAt = Number(req.body?.runStartedAt) || 0;
   const totalNG = Number(req.body?.totalNG) || 0;
+  const pageInstanceId = String(req.body?.pageInstanceId || '');
   const now = Date.now();
   const map = getMachineStateMap(factory);
   const updated = [];
@@ -697,7 +699,8 @@ app.post("/api/machine-assert", (req, res) => {
       st = {
         sebanggo: '', hinban: '', worker: '',
         breakActive: false, maintActive: false,
-        runSince: 0, modeSince: 0, prodAccumMs: 0, updatedAt: now, lastSeen: now
+        runSince: 0, modeSince: 0, prodAccumMs: 0, updatedAt: now, lastSeen: now,
+        activeDevices: new Map()
       };
       if (mode !== 'idle' && seb) {
         st.sebanggo = seb; st.hinban = hinban;
@@ -721,6 +724,20 @@ app.post("/api/machine-assert", (req, res) => {
           if (!updated.includes(id)) updated.push(id);
         }
       }
+    }
+    
+    if (!st.activeDevices) st.activeDevices = new Map();
+    if (pageInstanceId) st.activeDevices.set(pageInstanceId, now);
+    
+    // Prune stale devices
+    const oldDeviceCount = st.activeDevices.size;
+    for (const [pId, ts] of st.activeDevices.entries()) {
+        if (now - ts > 45000) st.activeDevices.delete(pId);
+    }
+    const newDeviceCount = st.activeDevices.size;
+    
+    if (oldDeviceCount !== newDeviceCount && !updated.includes(id)) {
+        updated.push(id);
     }
     
     // Update totalNG and flag for broadcast if it changed
@@ -749,20 +766,38 @@ setInterval(() => {
   const now = Date.now();
   const STALE_MS = 150000; // ~2.5 min (tablets re-assert every 30s)
   factoryMachineState.forEach((map, factory) => {
-    const idled = [];
+    const updated = [];
     map.forEach((st, id) => {
+      let needsUpdate = false;
+      
+      // Prune active devices
+      let oldDeviceCount = st.activeDevices ? st.activeDevices.size : 0;
+      if (st.activeDevices) {
+        for (const [pId, ts] of st.activeDevices.entries()) {
+            if (now - ts > 45000) st.activeDevices.delete(pId);
+        }
+      }
+      if ((st.activeDevices ? st.activeDevices.size : 0) !== oldDeviceCount) {
+          needsUpdate = true;
+      }
+      
       const mode = st.maintActive ? 'maintenance' : st.breakActive ? 'break' : (st.sebanggo ? 'running' : 'idle');
       if (mode !== 'idle' && (now - (st.lastSeen || st.updatedAt || 0)) > STALE_MS) {
         st.sebanggo = ''; st.hinban = '';
         st.breakActive = false; st.maintActive = false;
         st.runSince = 0; st.modeSince = 0; st.prodAccumMs = 0;
-        idled.push(id);
+        if (st.activeDevices) st.activeDevices.clear();
+        needsUpdate = true;
+      }
+      
+      if (needsUpdate) {
+        updated.push(id);
       }
     });
-    if (idled.length) {
+    if (updated.length) {
       broadcastToFactory(factory, {
         type: 'machine_state', factory,
-        machines: idled.map(id => machineStateView(id, map.get(id)))
+        machines: updated.map(id => machineStateView(id, map.get(id)))
       });
     }
   });

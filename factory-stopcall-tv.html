@@ -133,6 +133,18 @@
             z-index: 10;
         }
 
+        .device-badge {
+            position: absolute;
+            bottom: 6px;
+            left: 10px;
+            color: rgba(255, 255, 255, 0.4); /* subtle */
+            font-size: clamp(10px, 1vw, 14px);
+            font-weight: 500;
+            z-index: 10;
+        }
+
+        .tile.calling .device-badge { display: none; }
+
         .tile .name {
             font-size: clamp(16px, 1.8vw, 36px);
             font-weight: 900;
@@ -937,6 +949,19 @@
                     badgeEl.remove();
                 }
 
+                // --- Device Counter Badge ---
+                let devBadgeEl = tile.querySelector('.device-badge');
+                if (ms.deviceCount > 0) {
+                    if (!devBadgeEl) {
+                        devBadgeEl = document.createElement('div');
+                        devBadgeEl.className = 'device-badge';
+                        tile.appendChild(devBadgeEl);
+                    }
+                    devBadgeEl.textContent = ms.deviceCount;
+                } else if (devBadgeEl) {
+                    devBadgeEl.remove();
+                }
+
                 tile.classList.add(mode === 'break' ? 'brk' : mode === 'maintenance' ? 'maint' : mode === 'running' ? 'running' : 'idle');
                 // Running shows the 背番号 big & centered; idle shows nothing big.
                 const sebEl = tile.querySelector('.seb');
@@ -973,7 +998,8 @@
                     prodAccumMs: m.prodAccumMs || 0,
                     runSince: m.runSince || 0,
                     modeSince: m.modeSince || 0,
-                    totalNG: m.totalNG || 0
+                    totalNG: m.totalNG || 0,
+                    deviceCount: m.deviceCount || 0
                 });
             });
             if (rosterChanged) renderRoster(); // renderRoster re-applies all tiles
