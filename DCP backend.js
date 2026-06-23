@@ -9686,8 +9686,9 @@ document.getElementById('startStep1Scan').addEventListener('click', function(eve
       if (machineNameForSSE) {
         const isGrouped = machineNameForSSE.includes(',');
         const machineList = machineNameForSSE.split(',').map(m => m.trim());
-        console.log(`📡 Broadcasting QR scan to ${isGrouped ? 'grouped' : 'solo'} machine(s):`, machineList);
+        console.log(`📡 Broadcasting QR scan disabled in legacy backend for:`, machineList);
         
+        /*
         fetch(`${serverURL}/api/broadcast-scan`, {
           method: 'POST',
           headers: {
@@ -9715,6 +9716,7 @@ document.getElementById('startStep1Scan').addEventListener('click', function(eve
           console.error('❌ SSE Broadcast failed:', error);
           // Don't block the workflow if broadcast fails
         });
+        */
       }
       
       // Apply NC button logic
@@ -10440,8 +10442,9 @@ window.addEventListener('load', function() {
       // If solo machine (OZNC09), broadcasts to only that one
       if (machineNameForSSE) {
         const machineIds = machineNameForSSE.split(',').map(m => m.trim());
-        console.log(`🔊 Broadcasting clear action to ${machineIds.length} machine(s):`, machineIds);
+        console.log(`🔊 Broadcasting clear action disabled in legacy backend for:`, machineIds);
         
+        /*
         fetch(`${serverURL}/api/broadcast-scan`, {
           method: 'POST',
           headers: {
@@ -10460,6 +10463,7 @@ window.addEventListener('load', function() {
         .then(response => response.json())
         .then(data => console.log('✅ SSE Clear broadcast on load successful:', data))
         .catch(error => console.error('❌ SSE Clear broadcast on load failed:', error));
+        */
       }
       
       showStep1Modal();
