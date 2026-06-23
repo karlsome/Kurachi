@@ -1668,41 +1668,41 @@
                     <!-- Step 0 Card: Worker Name Selection -->
                     <div id="step0Modal" style="display: none; background: var(--bg-surface); border-radius: var(--card-radius); padding: 20px; box-shadow: var(--shadow-sm); border: 1px solid var(--border); margin-bottom: 20px;">
                         <h2 style="font-size: 1.15rem; font-weight: 700; text-align: center; margin-bottom: 20px;">
-                            <span style="color: var(--accent-green);">作業者確認 / Worker Setup</span>
+                            <span style="color: var(--accent-green);" data-i18n="worker_setup_title">作業者確認</span>
                         </h2>
-                        
+
                         <!-- State B: Confirm Existing Worker -->
                         <div id="step0ConfirmState" style="display: none; flex-direction: column; align-items: center; gap: 15px;">
                             <p style="font-size: 1.1rem; color: var(--text-main); margin: 0; text-align: center; line-height: 1.5;">
-                                作業を続ける作業者は<br><strong id="step0CurrentWorkerName" style="color: var(--brand); font-size: 1.4rem; display: block; margin: 8px 0;"></strong> ですか？<br>
-                                <span style="font-size: 0.9rem; color: var(--text-muted);">Are you still this worker?</span>
+                                <span data-i18n="confirm_worker_pre">作業を続ける作業者は</span><br>
+                                <strong id="step0CurrentWorkerName" style="color: var(--brand); font-size: 1.4rem; display: block; margin: 8px 0;"></strong>
+                                <span data-i18n="confirm_worker_post"> ですか？</span>
                             </p>
                             <div style="display: flex; gap: 10px; width: 100%; margin-top: 10px;">
-                                <button type="button" class="btn btn-secondary" style="flex: 1;" onclick="changeWorkerName()">
-                                    変更 / Change
+                                <button type="button" class="btn btn-secondary" style="flex: 1;" onclick="changeWorkerName()" data-i18n="change_btn">
+                                    変更
                                 </button>
-                                <button type="button" class="btn btn-primary" style="flex: 2;" onclick="confirmWorkerName()">
-                                    はい / Yes
+                                <button type="button" class="btn btn-primary" style="flex: 2;" onclick="confirmWorkerName()" data-i18n="yes">
+                                    はい
                                 </button>
                             </div>
                         </div>
 
                         <!-- State A: Select New Worker -->
                         <div id="step0SelectState" style="display: none; flex-direction: column; align-items: center; gap: 15px;">
-                            <p style="font-size: 1rem; color: var(--text-main); margin: 0; text-align: center;">
-                                作業者を選択してください<br>
-                                <span style="font-size: 0.9rem; color: var(--text-muted);">Please select worker name</span>
+                            <p style="font-size: 1rem; color: var(--text-main); margin: 0; text-align: center;" data-i18n="select_worker_prompt">
+                                作業者を選択してください
                             </p>
-                            
+
                             <div class="form-group" style="width: 100%;">
                                 <input list="machine-operator-suggestions" class="tap-field"
-                                    placeholder="タップして選択 / Tap to select" id="Machine Operator"
-                                    name="Machine Operator" data-i18n="worker_name_placeholder" required readonly>
+                                    id="Machine Operator" name="Machine Operator"
+                                    data-i18n="worker_name_placeholder" required readonly>
                                 <datalist id="machine-operator-suggestions"></datalist>
                             </div>
 
-                            <button type="button" class="btn btn-primary btn-full" onclick="proceedFromStep0()" style="margin-top: 10px;">
-                                次へ / Proceed
+                            <button type="button" class="btn btn-primary btn-full" onclick="proceedFromStep0()" style="margin-top: 10px;" data-i18n="proceed_btn">
+                                次へ
                             </button>
                         </div>
                     </div>
@@ -1710,9 +1710,8 @@
                     <!-- Step 1 Card: Scan Kanban -->
                     <div id="step1Modal">
                         <div>
-                            <h2 style="font-size: 1.15rem; font-weight: 700; text-align: center;">
-                                Step <span style="color: var(--accent-green);">1</span>: SCAN <strong>Kanban</strong> /
-                                スキャン看板
+                            <h2 style="font-size: 1.15rem; font-weight: 700; text-align: center;" data-i18n="step_1_header">
+                                ステップ 1：看板をスキャン
                             </h2>
                             <div id="step1Content"
                                 style="display: flex; flex-direction: column; align-items: center; gap: 15px;">
@@ -1722,16 +1721,15 @@
                                         style="color: var(--accent-red); font-size: 0.9rem; margin: 0; line-height: 1.4;">
                                     </p>
                                 </div>
-                                <p style="font-size: 0.9rem; color: var(--text-muted);" data-i18n="press_button">Press
-                                    this button / このボタンを押して</p>
+                                <p style="font-size: 0.9rem; color: var(--text-muted);" data-i18n="press_button">このボタンを押してください</p>
                                 <div style="color: var(--text-soft); margin: 6px 0;"><svg viewBox="0 0 24 24" width="30"
                                         height="30" fill="none" stroke="currentColor" stroke-width="1.8"
                                         stroke-linecap="round" stroke-linejoin="round">
                                         <line x1="12" y1="5" x2="12" y2="19" />
                                         <polyline points="6 13 12 19 18 13" />
                                     </svg></div>
-                                <button type="button" id="startStep1Scan" class="btn btn-primary btn-full">
-                                    Scan Kanban<br>スキャン看板
+                                <button type="button" id="startStep1Scan" class="btn btn-primary btn-full" data-i18n="scan_kanban_btn">
+                                    看板をスキャン
                                 </button>
                             </div>
                             <div id="step1Scanner"
@@ -1743,7 +1741,7 @@
                                 <p style="font-size: 0.85rem; font-weight: 600; color: var(--text-muted);"><span
                                         id="step1MachineName"></span></p>
                                 <button type="button" id="resetStep1" class="btn btn-alert"
-                                    style="padding: 6px 12px; font-size: 0.8rem;">Reset / リセット</button>
+                                    style="padding: 6px 12px; font-size: 0.8rem;" data-i18n="reset">リセット</button>
                             </div>
                         </div>
                     </div>
@@ -1751,15 +1749,14 @@
                     <!-- Step 2 Card: Scan Material -->
                     <div id="step2Modal">
                         <div>
-                            <h2 style="font-size: 1.15rem; font-weight: 700; text-align: center;">
-                                Step <span style="color: var(--accent-blue);">2</span>: SCAN <strong>Material</strong> /
-                                スキャン材料
+                            <h2 style="font-size: 1.15rem; font-weight: 700; text-align: center;" data-i18n="step_2_header">
+                                ステップ 2：材料をスキャン
                             </h2>
                             <div class="step-modal-info-box">
                                 <p style="font-size: 0.85rem;">
-                                    背番号: <strong id="step2Sebanggo" style="color: var(--accent-green);"></strong><br>
-                                    品番: <strong id="step2Hinban" style="color: var(--accent-blue);"></strong><br>
-                                    材料: <strong id="step2Material" style="color: var(--accent-red);"></strong>
+                                    <span data-i18n="sebango_lbl">背番号</span>: <strong id="step2Sebanggo" style="color: var(--accent-green);"></strong><br>
+                                    <span data-i18n="hinban_lbl">品番</span>: <strong id="step2Hinban" style="color: var(--accent-blue);"></strong><br>
+                                    <span data-i18n="material_lbl_short">材料</span>: <strong id="step2Material" style="color: var(--accent-red);"></strong>
                                 </p>
                             </div>
                             <div id="step2Content"
@@ -1770,16 +1767,15 @@
                                         style="color: var(--accent-red); font-size: 0.9rem; margin: 0; line-height: 1.4;">
                                     </p>
                                 </div>
-                                <p style="font-size: 0.9rem; color: var(--text-muted);" data-i18n="press_button">Press
-                                    this button / このボタンを押して</p>
+                                <p style="font-size: 0.9rem; color: var(--text-muted);" data-i18n="press_button">このボタンを押してください</p>
                                 <div style="color: var(--text-soft); margin: 6px 0;"><svg viewBox="0 0 24 24" width="30"
                                         height="30" fill="none" stroke="currentColor" stroke-width="1.8"
                                         stroke-linecap="round" stroke-linejoin="round">
                                         <line x1="12" y1="5" x2="12" y2="19" />
                                         <polyline points="6 13 12 19 18 13" />
                                     </svg></div>
-                                <button type="button" id="startStep2Scan" class="btn btn-primary btn-full">
-                                    Scan Lot. No. / スキャンロット
+                                <button type="button" id="startStep2Scan" class="btn btn-primary btn-full" data-i18n="scan_lot_btn">
+                                    ロット番号をスキャン
                                 </button>
                             </div>
                             <div id="step2Scanner"
@@ -1791,10 +1787,9 @@
                                 <p style="font-size: 0.85rem; font-weight: 600; color: var(--text-muted); flex: 1;">
                                     <span id="step2MachineName"></span></p>
                                 <button type="button" id="overrideStep2" class="btn btn-secondary"
-                                    style="padding: 6px 12px; font-size: 0.8rem; background: rgba(255, 235, 59, 0.1); border-color: #fbc02d; color: #fbc02d;">Override
-                                    / 手動</button>
+                                    style="padding: 6px 12px; font-size: 0.8rem; background: rgba(255, 235, 59, 0.1); border-color: #fbc02d; color: #fbc02d;" data-i18n="override_step_btn">手動</button>
                                 <button type="button" id="resetStep2" class="btn btn-alert"
-                                    style="padding: 6px 12px; font-size: 0.8rem;">Reset / リセット</button>
+                                    style="padding: 6px 12px; font-size: 0.8rem;" data-i18n="reset">リセット</button>
                             </div>
                         </div>
                     </div>
@@ -1802,28 +1797,27 @@
                     <!-- Step 3 Card: Send to Machine -->
                     <div id="step3Modal">
                         <div>
-                            <h2 id="step3Title" style="font-size: 1.15rem; font-weight: 700; text-align: center;">
-                                Step <span style="color: #f39c12;">3</span>: send to <strong>Machine</strong> / データ送信
+                            <h2 id="step3Title" style="font-size: 1.15rem; font-weight: 700; text-align: center;" data-i18n="step_3_header">
+                                ステップ 3：マシンにデータ送信
                             </h2>
                             <div class="step-modal-info-box">
                                 <p style="font-size: 0.85rem;">
-                                    背番号: <strong id="step3Sebanggo" style="color: var(--accent-green);"></strong><br>
-                                    品番: <strong id="step3Hinban" style="color: var(--accent-blue);"></strong><br>
-                                    材料: <strong id="step3Material" style="color: #f39c12;"></strong>
+                                    <span data-i18n="sebango_lbl">背番号</span>: <strong id="step3Sebanggo" style="color: var(--accent-green);"></strong><br>
+                                    <span data-i18n="hinban_lbl">品番</span>: <strong id="step3Hinban" style="color: var(--accent-blue);"></strong><br>
+                                    <span data-i18n="material_lbl_short">材料</span>: <strong id="step3Material" style="color: #f39c12;"></strong>
                                 </p>
                             </div>
                             <div id="step3Content"
                                 style="display: flex; flex-direction: column; align-items: center; gap: 15px;">
-                                <p style="font-size: 0.9rem; color: var(--text-muted);" data-i18n="press_button">Press
-                                    this button / このボタンを押して</p>
+                                <p style="font-size: 0.9rem; color: var(--text-muted);" data-i18n="press_button">このボタンを押してください</p>
                                 <div style="color: var(--text-soft); margin: 6px 0;"><svg viewBox="0 0 24 24" width="30"
                                         height="30" fill="none" stroke="currentColor" stroke-width="1.8"
                                         stroke-linecap="round" stroke-linejoin="round">
                                         <line x1="12" y1="5" x2="12" y2="19" />
                                         <polyline points="6 13 12 19 18 13" />
                                     </svg></div>
-                                <button type="button" id="startStep3Send" class="btn btn-primary btn-full">
-                                    Send to machine
+                                <button type="button" id="startStep3Send" class="btn btn-primary btn-full" data-i18n="send_machine_btn">
+                                    マシンに送信
                                 </button>
                             </div>
                             <div
@@ -1831,7 +1825,7 @@
                                 <p style="font-size: 0.85rem; font-weight: 600; color: var(--text-muted);"><span
                                         id="step3MachineName"></span></p>
                                 <button type="button" id="resetStep3" class="btn btn-alert"
-                                    style="padding: 6px 12px; font-size: 0.8rem;">Reset / リセット</button>
+                                    style="padding: 6px 12px; font-size: 0.8rem;" data-i18n="reset">リセット</button>
                             </div>
                         </div>
                     </div>
@@ -1839,20 +1833,18 @@
                     <!-- Completed Card -->
                     <div id="scanCompletedCard" class="scan-completed-card" style="display: none;">
                         <div class="success-icon-badge">✓</div>
-                        <h2 style="font-size: 1.25rem; font-weight: 700;">スキャン完了 / Scan Completed</h2>
-                        <p style="color: var(--text-muted); font-size: 0.9rem;">現在アクティブな生産データ / Active Production Info:
-                        </p>
+                        <h2 style="font-size: 1.25rem; font-weight: 700;" data-i18n="scan_completed_title">スキャン完了</h2>
+                        <p style="color: var(--text-muted); font-size: 0.9rem;" data-i18n="active_prod_info">現在アクティブな生産データ:</p>
                         <img id="activeProductThumb" class="active-prod-thumb" src="" alt="Product"
                             style="display:none;">
-                        <div class="active-prod-details" onclick="if(typeof window.toggleSidebar==='function') window.toggleSidebar(true);" style="cursor: pointer;" title="製品情報を表示 / Show product info">
-                            <div><span class="lbl">背番号 (Code):</span> <strong id="activeSebanggoDisplay"></strong></div>
-                            <div><span class="lbl">品番 (Product Number):</span> <strong
+                        <div class="active-prod-details" onclick="if(typeof window.toggleSidebar==='function') window.toggleSidebar(true);" style="cursor: pointer;" data-i18n-title="show_product_info" title="製品情報を表示">
+                            <div><span class="lbl" data-i18n="sebango_code_lbl">背番号:</span> <strong id="activeSebanggoDisplay"></strong></div>
+                            <div><span class="lbl" data-i18n="product_num_lbl">品番:</span> <strong
                                     id="activeHinbanDisplay"></strong></div>
                         </div>
                         <!-- Send to Machine panel (dynamically built by JS) -->
                         <div id="completedSendPanel" style="margin-top: 12px;"></div>
-                        <p style="color: var(--text-soft); font-size: 0.75rem; margin-top: 8px;">ステップ3が失敗した場合に再送信できます /
-                            Re-send if Step 3 failed</p>
+                        <p style="color: var(--text-soft); font-size: 0.75rem; margin-top: 8px;" data-i18n="resend_step3_hint">ステップ3が失敗した場合に再送信できます</p>
                     </div>
                 </div>
 
@@ -2559,12 +2551,12 @@
                 <!-- dynamic -->
             </div>
             <button type="button" class="btn btn-secondary btn-full manual-entry-btn" id="manualEntryBtn"
-                style="margin-top: 15px;">
-                手動入力 / Manual Entry
+                style="margin-top: 15px;" data-i18n="manual_entry_btn">
+                手動入力
             </button>
             <button type="button" class="btn btn-alert btn-full close-modal-btn" id="closeWorkerModal"
-                style="margin-top: 10px;">
-                閉じる / Close
+                style="margin-top: 10px;" data-i18n="close">
+                閉じる
             </button>
         </div>
     </div>
@@ -2572,12 +2564,12 @@
     <!-- Grouped Machines Manual Send Modal -->
     <div id="individualSendModal" class="modal">
         <div class="modal-content" style="max-width: 450px !important;">
-            <h3 style="text-align: center; margin-bottom: 15px;">DCP Data Transmission Status</h3>
+            <h3 style="text-align: center; margin-bottom: 15px;" data-i18n="dcp_transmission_title">DCPデータ送信状況</h3>
             <div id="individualSendContainer"
                 style="display: flex; flex-direction: column; gap: 12px; max-height: 250px; overflow-y: auto; margin-bottom: 20px;">
                 <!-- Filled dynamically by backend -->
             </div>
-            <button type="button" class="btn btn-alert btn-full" id="closeIndividualSendModal">Close</button>
+            <button type="button" class="btn btn-alert btn-full" id="closeIndividualSendModal" data-i18n="close">閉じる</button>
         </div>
     </div>
 
@@ -4570,12 +4562,12 @@
                     <circle cx="12" cy="13" r="4" />
                 </svg>
             </div>
-            <h2 style="font-size:1.2rem;font-weight:800;margin-bottom:8px;">材料ラベルを撮影 / Material Label Photo</h2>
-            <p style="color:var(--text-muted,#475467);font-size:0.9rem;line-height:1.5;margin-bottom:22px;">
-                この材料ロットのラベル写真が必要です。撮影すると次へ進みます。<br>A label photo of this material lot is required to continue.</p>
+            <h2 style="font-size:1.2rem;font-weight:800;margin-bottom:8px;" data-i18n="material_photo_title">材料ラベルを撮影</h2>
+            <p style="color:var(--text-muted,#475467);font-size:0.9rem;line-height:1.5;margin-bottom:22px;" data-i18n="material_photo_msg">
+                この材料ロットのラベル写真が必要です。撮影すると次へ進みます。</p>
             <button type="button" id="materialPhotoGateCapture" class="btn btn-secondary btn-full"
-                style="height:54px;font-size:1rem;">
-                📷 写真を撮影 / Take Photo
+                style="height:54px;font-size:1rem;" data-i18n="take_photo_gate_btn">
+                📷 写真を撮影
             </button>
         </div>
     </div>
