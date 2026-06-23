@@ -2846,6 +2846,18 @@ function showAlert(message) {
   };
 }
 
+// Helper function to handle success modal display without sound/flashing
+function showSuccessModal(message) {
+  const scanAlertModal = document.getElementById('scanAlertModal');
+  document.getElementById('scanAlertText').innerText = message;
+  scanAlertModal.style.display = 'block';
+
+  const closeScanModalButton = document.getElementById('closeScanModalButton');
+  closeScanModalButton.onclick = function () {
+    scanAlertModal.style.display = 'none';
+  };
+}
+
 // Worker Name Selection Modal Functionality
 let workerNamesData = [];
 const RECENT_WORKERS_KEY = 'recentWorkerNames';
@@ -10941,12 +10953,8 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
             source: 'Step 3 Modal'
           });
 
-          // Clear cached product details from localStorage
-          localStorage.removeItem(`${uniquePrefix}cached-sebanggo`);
-          localStorage.removeItem(`${uniquePrefix}cached-hinban`);
-          localStorage.removeItem(`${uniquePrefix}cached-materialCode`);
-          localStorage.removeItem(`${uniquePrefix}cached-kataban`);
-
+          // Do NOT clear cached product details here so they survive page reloads
+          // while the product is still active on the production page.
           // Mark workflow as complete (OZMANAS: トムソンボード scan == Step 3 done)
           saveCurrentStep(0);
           markScanWorkflowComplete();
@@ -10981,12 +10989,8 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
       source: 'Step 3 Modal'
     }).catch(error => console.error('Failed to log Step 3 send to machine action:', error));
 
-    // Clear cached product details from localStorage
-    localStorage.removeItem(`${uniquePrefix}cached-sebanggo`);
-    localStorage.removeItem(`${uniquePrefix}cached-hinban`);
-    localStorage.removeItem(`${uniquePrefix}cached-materialCode`);
-    localStorage.removeItem(`${uniquePrefix}cached-kataban`);
-
+    // Do NOT clear cached product details here so they survive page reloads
+    // while the product is still active on the production page.
     // Mark workflow as complete (Step 3 send to machine pressed)
     saveCurrentStep(0);
     markScanWorkflowComplete();
@@ -11244,11 +11248,11 @@ window.addEventListener('load', function () {
     // during Step 1/2) and must restart from the beginning.
     if (window.isScanWorkflowComplete && window.isScanWorkflowComplete()) {
       currentProductDetails = {
-        sebanggo: subDropdown.value,
-        hinban: document.getElementById('product-number')?.value || '',
-        materialCode: document.getElementById('material-code')?.value || '',
+        sebanggo: subDropdown.value || localStorage.getItem(`${uniquePrefix}cached-sebanggo`) || '',
+        hinban: document.getElementById('product-number')?.value || localStorage.getItem(`${uniquePrefix}cached-hinban`) || '',
+        materialCode: document.getElementById('material-code')?.value || localStorage.getItem(`${uniquePrefix}cached-materialCode`) || '',
         model: document.getElementById('model')?.value || localStorage.getItem(`${uniquePrefix}cached-model`) || '',
-        kataban: document.getElementById('kataban')?.value || ''
+        kataban: document.getElementById('kataban')?.value || localStorage.getItem(`${uniquePrefix}cached-kataban`) || ''
       };
       saveCurrentStep(0);
       // Make sure no step card is showing, then render the completed card
@@ -11822,7 +11826,7 @@ if (manualSendModal) {
     input.click();
   }
 
-  // Webcam (desktop) via getUserMedia in a dedicated modal.
+  // Webcam via getUserMedia in a dedicated modal.
   function captureViaWebcam(cb) {
     const modal = document.createElement('div');
     modal.style.cssText = 'display:flex; position:fixed; inset:0; background:rgba(0,0,0,0.9); z-index:100001; justify-content:center; align-items:center;';
@@ -11844,15 +11848,34 @@ if (manualSendModal) {
     modal.querySelector('#defectCamClose').onclick = () => { cleanup(); cb(null); };
     modal.querySelector('#defectCapBtn').onclick = () => {
       const c = document.createElement('canvas');
-      c.width = video.videoWidth; c.height = video.videoHeight;
-      c.getContext('2d').drawImage(video, 0, 0);
+      c.width = video.videoWidth || 1920; c.height = video.videoHeight || 1080;
+      c.getContext('2d').drawImage(video, 0, 0, c.width, c.height);
       const b64 = c.toDataURL('image/jpeg', 0.95);
       cleanup();
       cb(b64);
     };
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } } })
-      .then(s => { stream = s; video.srcObject = s; })
-      .catch(err => { console.error('Defect webcam error:', err); cleanup(); captureViaFileInput(cb); });
+
+    function tryGetUserMedia(retriesLeft) {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        console.warn('getUserMedia is not supported by this browser');
+        cleanup();
+        captureViaFileInput(cb);
+        return;
+      }
+      navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } } })
+        .then(s => { stream = s; video.srcObject = s; })
+        .catch(err => {
+          console.error('Defect webcam error:', err);
+          if (retriesLeft > 0) {
+            console.log(`Retrying camera access... (${retriesLeft} attempts left)`);
+            setTimeout(() => tryGetUserMedia(retriesLeft - 1), 500);
+          } else {
+            cleanup();
+            captureViaFileInput(cb);
+          }
+        });
+    }
+    tryGetUserMedia(3); // Retry up to 3 times to mitigate camera lock race condition
   }
 
   // Leader QR verification modal (own scanner + cancel).
@@ -11875,11 +11898,22 @@ if (manualSendModal) {
     function removeModal() { if (modal.parentElement) document.body.removeChild(modal); }
     function closeScanner(then) {
       if (scanner) {
-        scanner.stop().then(() => { try { scanner.clear(); } catch (e) { } scanner = null; if (then) then(); })
-          .catch(() => { scanner = null; if (then) then(); });
-      } else if (then) { then(); }
+        scanner.stop()
+          .then(() => { 
+            try { scanner.clear(); } catch (e) { } 
+            scanner = null; 
+            // Wait 500ms to ensure iOS Safari fully releases the camera hardware lock
+            setTimeout(() => { if (then) then(); }, 500); 
+          })
+          .catch(() => { 
+            scanner = null; 
+            setTimeout(() => { if (then) then(); }, 500); 
+          });
+      } else if (then) { 
+        then(); 
+      }
     }
-    modal.querySelector('#defectLeaderCancel').onclick = () => closeScanner(removeModal);
+    modal.querySelector('#defectLeaderCancel').onclick = () => closeScanner(() => { removeModal(); onVerified(null); });
 
     scanner.start(
       { facingMode: 'environment' },
@@ -11898,8 +11932,22 @@ if (manualSendModal) {
           if (result.authorized) {
             const name = ((result.firstName || '') + ' ' + (result.lastName || '')).trim();
             statusEl.style.color = '#006400';
-            statusEl.textContent = '✅ ' + (name || 'Verified');
-            setTimeout(() => closeScanner(() => { removeModal(); onVerified(name); }), 600);
+            statusEl.innerHTML = `✅ ${name || 'Verified'}<br><span style="font-size:0.85em;color:#666;">下のボタンをタップ / Tap below</span>`;
+            
+            // Stop the scanner in the background so it frees the camera
+            if (scanner) {
+              scanner.stop().then(() => { try { scanner.clear(); } catch(e) {} }).catch(() => {});
+              scanner = null;
+            }
+            
+            // Transform the Cancel button into a "Take Photo" button to capture the user gesture
+            const btn = modal.querySelector('#defectLeaderCancel');
+            btn.textContent = '📸 写真を撮る / Take Photo';
+            btn.style.background = '#2196F3';
+            btn.onclick = () => {
+              onVerified(name); // Opens native camera synchronously from user tap
+              removeModal();
+            };
           } else {
             processing = false;
             statusEl.style.color = '#cc0000';
@@ -11920,23 +11968,38 @@ if (manualSendModal) {
   }
 
   // Public entry point — wired to the camera button under 疵引不良.
+  let isDefectPhotoFlowActive = false;
   window.startDefectPhotoFlow = function () {
+    if (isDefectPhotoFlowActive) return;
+    isDefectPhotoFlowActive = true;
+
     openLeaderScan(function (leaderName) {
+      if (!leaderName) {
+        isDefectPhotoFlowActive = false;
+        return; // cancelled
+      }
       const lot = getCurrentLot();
-      const capture = (typeof isMobileDevice === 'function' && isMobileDevice()) ? captureViaFileInput : captureViaWebcam;
+      
+      // The user explicitly requested the native camera app for taking photos.
+      const capture = captureViaFileInput;
+      
       capture(async function (base64) {
+        isDefectPhotoFlowActive = false;
         if (!base64) return; // cancelled / no image
+        
+        // The flattening (burnOverlay) happens asynchronously before upload
         const stamped = await burnOverlay(base64, {
           lot: lot,
           leader: leaderName,
           time: new Date().toLocaleString('ja-JP')
         });
+        
         try {
           // lotTarget intentionally null: this is an EXTRA photo in the group,
           // it must NOT replace the material-label photo for the lot.
           const ok = await addMaterialLabelPhoto(stamped, null);
           if (ok) {
-            if (typeof showAlert === 'function') showAlert('疵引き写真を保存しました / Defect photo saved');
+            if (typeof showSuccessModal === 'function') showSuccessModal('疵引き写真を保存しました / Defect photo saved');
             if (typeof logTabletAction === 'function') {
               logTabletAction('Defect (疵引き) photo captured', 'in-progress', { lotNumber: lot, leader: leaderName });
             }
