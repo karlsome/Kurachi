@@ -259,7 +259,7 @@ function applyTabletLogToMachineState(logEntry) {
     const st = map.get(id) || {
       sebanggo: '', hinban: '', worker: '',
       breakActive: false, maintActive: false,
-      runSince: 0, modeSince: 0, prodAccumMs: 0, updatedAt: 0, lastSeen: 0
+      runSince: 0, modeSince: 0, prodAccumMs: 0, updatedAt: 0, lastSeen: 0, totalNG: 0
     };
 
     const isRunning = () => !!st.sebanggo && !st.breakActive && !st.maintActive;
@@ -271,7 +271,7 @@ function applyTabletLogToMachineState(logEntry) {
     const startNewRun = (s) => {
       st.sebanggo = s; st.hinban = hinban;
       st.prodAccumMs = 0; st.runSince = ts;
-      st.breakActive = false; st.maintActive = false; st.modeSince = 0;
+      st.breakActive = false; st.maintActive = false; st.modeSince = 0; st.totalNG = 0;
     };
 
     if (action.includes('Reset button pressed') ||
@@ -279,7 +279,7 @@ function applyTabletLogToMachineState(logEntry) {
       // Session finished/cleared → machine goes idle
       st.sebanggo = ''; st.hinban = '';
       st.breakActive = false; st.maintActive = false;
-      st.runSince = 0; st.modeSince = 0; st.prodAccumMs = 0;
+      st.runSince = 0; st.modeSince = 0; st.prodAccumMs = 0; st.totalNG = 0;
     } else if (action.includes('Break started')) {
       if (seb && seb !== st.sebanggo) startNewRun(seb);
       pauseProd();                                  // production clock pauses during break
@@ -309,7 +309,7 @@ function applyTabletLogToMachineState(logEntry) {
 }
 
 function machineStateView(id, st) {
-  if (!st) return { equipment: id, sebanggo: '', hinban: '', worker: '', mode: 'idle', prodAccumMs: 0, runSince: 0, modeSince: 0 };
+  if (!st) return { equipment: id, sebanggo: '', hinban: '', worker: '', mode: 'idle', prodAccumMs: 0, runSince: 0, modeSince: 0, totalNG: 0 };
   const mode = st.maintActive ? 'maintenance'
     : st.breakActive ? 'break'
       : (st.sebanggo ? 'running' : 'idle');
@@ -323,7 +323,8 @@ function machineStateView(id, st) {
     prodAccumMs: st.prodAccumMs || 0,
     runSince: (mode === 'running') ? (st.runSince || 0) : 0,
     // Break/maintenance elapsed = now - modeSince.
-    modeSince: (mode === 'break' || mode === 'maintenance') ? (st.modeSince || 0) : 0
+    modeSince: (mode === 'break' || mode === 'maintenance') ? (st.modeSince || 0) : 0,
+    totalNG: st.totalNG || 0
   };
 }
 
@@ -683,6 +684,7 @@ app.post("/api/machine-assert", (req, res) => {
   const mode = String(req.body?.mode || 'idle');
   const modeStartedAt = Number(req.body?.modeStartedAt) || 0;
   const runStartedAt = Number(req.body?.runStartedAt) || 0;
+  const totalNG = Number(req.body?.totalNG) || 0;
   const now = Date.now();
   const map = getMachineStateMap(factory);
   const updated = [];
@@ -706,6 +708,13 @@ app.post("/api/machine-assert", (req, res) => {
       map.set(id, st);
       updated.push(id);
     }
+    // Update totalNG and flag for broadcast if it changed
+    const oldTotalNG = st.totalNG || 0;
+    st.totalNG = totalNG;
+    if (oldTotalNG !== totalNG && !updated.includes(id)) {
+      updated.push(id);
+    }
+    
     // Always refresh liveness (prevents the idle sweep from idling an active machine)
     st.lastSeen = now;
   });

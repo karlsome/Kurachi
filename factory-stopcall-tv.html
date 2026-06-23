@@ -114,6 +114,25 @@
             transition: background 0.2s, border-color 0.2s;
         }
 
+        .ng-badge {
+            position: absolute;
+            top: 1.5vh;
+            right: 1vw;
+            background-color: #EF4444; /* Red for defects */
+            color: #fff;
+            font-size: clamp(14px, 1.8vw, 24px);
+            font-weight: 900;
+            border-radius: 50%;
+            min-width: clamp(28px, 3.5vw, 45px);
+            height: clamp(28px, 3.5vw, 45px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4);
+            border: 3px solid var(--tile-border);
+            z-index: 10;
+        }
+
         .tile .name {
             font-size: clamp(16px, 1.8vw, 36px);
             font-weight: 900;
@@ -902,8 +921,22 @@
             } else {
                 tile.classList.remove('calling');
                 tile.querySelector('.name').style.fontSize = '';
-                const ms = machineState.get(machine) || { mode: 'idle', sebanggo: '' };
+                const ms = machineState.get(machine) || { mode: 'idle', sebanggo: '', totalNG: 0 };
                 const mode = ms.mode || 'idle';
+                
+                // --- Defect Counter Badge ---
+                let badgeEl = tile.querySelector('.ng-badge');
+                if (ms.totalNG > 0) {
+                    if (!badgeEl) {
+                        badgeEl = document.createElement('div');
+                        badgeEl.className = 'ng-badge';
+                        tile.appendChild(badgeEl);
+                    }
+                    badgeEl.textContent = ms.totalNG;
+                } else if (badgeEl) {
+                    badgeEl.remove();
+                }
+
                 tile.classList.add(mode === 'break' ? 'brk' : mode === 'maintenance' ? 'maint' : mode === 'running' ? 'running' : 'idle');
                 // Running shows the 背番号 big & centered; idle shows nothing big.
                 const sebEl = tile.querySelector('.seb');
@@ -939,7 +972,8 @@
                     mode: m.mode || 'idle',
                     prodAccumMs: m.prodAccumMs || 0,
                     runSince: m.runSince || 0,
-                    modeSince: m.modeSince || 0
+                    modeSince: m.modeSince || 0,
+                    totalNG: m.totalNG || 0
                 });
             });
             if (rosterChanged) renderRoster(); // renderRoster re-applies all tiles
