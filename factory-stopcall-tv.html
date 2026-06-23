@@ -635,24 +635,7 @@
         <div class="ch-time" id="chTime">12:00</div>
     </div>
 
-    <!-- TEMPORARY: manual test panel for scheduled events. Remove after testing
-         (or add ?test=0 to hide). -->
-    <div id="testPanel" style="position:fixed;bottom:16px;right:16px;z-index:90;display:flex;flex-wrap:wrap;gap:8px;max-width:60vw;justify-content:flex-end;">
-        <button type="button" data-test="taiso"   style="background:#123A2E;color:#EAFBF2;border:2px solid #29C36A;border-radius:999px;padding:8px 14px;font-size:14px;font-weight:800;cursor:pointer;">▶ 8:45 体操</button>
-        <button type="button" data-test="noon"    style="background:#1A2740;color:#EAF0FB;border:2px solid #2E6FF2;border-radius:999px;padding:8px 14px;font-size:14px;font-weight:800;cursor:pointer;">▶ 12:00</button>
-        <button type="button" data-test="three"   style="background:#1A2740;color:#EAF0FB;border:2px solid #2E6FF2;border-radius:999px;padding:8px 14px;font-size:14px;font-weight:800;cursor:pointer;">▶ 15:00</button>
-        <button type="button" data-test="evening" style="background:#1A2740;color:#EAF0FB;border:2px solid #2E6FF2;border-radius:999px;padding:8px 14px;font-size:14px;font-weight:800;cursor:pointer;">▶ 17:30</button>
-    </div>
 
-    <button type="button" class="sound-enable" id="soundEnable">🔇 音を有効化 / Enable sound</button>
-
-    <!-- One-time start gate: a single tap per page load unlocks audio output
-         (browsers keep sound muted until a real user gesture). -->
-    <div class="audio-gate" id="audioGate">
-        <div class="ag-icon">🔊</div>
-        <div class="ag-title">タップして開始</div>
-        <div class="ag-sub">Tap anywhere to start the monitor &amp; enable sound</div>
-    </div>
 
     <script>
         //const serverURL = "https://kurachi.onrender.com";
@@ -755,32 +738,7 @@
         }
         updateSoundButton();
 
-        // One-time start gate: a single user gesture is required by the browser
-        // before any audio actually plays (even when the context reports
-        // "running"). The first tap/click/key anywhere resumes audio, plays a
-        // confirmation chime, and hides the gate for the rest of the session.
-        let audioUnlocked = false;
-        function unlockAudioAndStart() {
-            if (audioUnlocked) return;
-            audioUnlocked = true;
-            ensureAudio();
-            const gate = document.getElementById('audioGate');
-            if (gate) gate.classList.add('hidden');
-            updateSoundButton();
-            playAlert(); // confirmation chime so the operator hears it works
-            ['pointerdown', 'touchstart', 'keydown', 'click'].forEach(e2 => window.removeEventListener(e2, unlockAudioAndStart));
-        }
-        ['pointerdown', 'touchstart', 'keydown', 'click'].forEach(ev => {
-            window.addEventListener(ev, unlockAudioAndStart, { passive: true });
-        });
 
-        // Button toggles mute on/off (after the gate is dismissed)
-        document.getElementById('soundEnable').addEventListener('click', function (e) {
-            e.stopPropagation();
-            soundOn = !soundOn;
-            if (soundOn) { ensureAudio(); playAlert(); }
-            updateSoundButton();
-        });
 
         // Ascending 3-chime "attention" call (PA / airport pre-announcement
         // style): three rising bell-like notes that grab attention without being
@@ -1457,22 +1415,7 @@
         // scheduler also re-checks this ~30s before 08:45 as a safety net.
         preloadExerciseAudio();
 
-        // ----- TEMPORARY test buttons (fire each event immediately) -----
-        const testPanel = document.getElementById('testPanel');
-        if (testPanel) {
-            if (params.get('test') === '0') {
-                testPanel.style.display = 'none';
-            } else {
-                testPanel.addEventListener('click', (e) => {
-                    const btn = e.target.closest('[data-test]');
-                    if (!btn) return;
-                    e.stopPropagation();
-                    ensureAudio(); // make sure the WebAudio context is unlocked for the bell
-                    const ev = SCHEDULE.find(s => s.id === btn.dataset.test);
-                    if (ev) fireEvent(ev);
-                });
-            }
-        }
+
 
         connect();
     </script>
