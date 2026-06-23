@@ -5007,9 +5007,112 @@ async function compressBase64Image(base64DataURL, maxWidth = 1024, quality = 0.7
       console.error('Error loading image for compression:', error);
       reject(error);
     };
-
     img.src = base64DataURL;
   });
+}
+
+// --- Blur Detection Utilities ---
+async function detectBlur(base64Image, threshold = 100) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      // Downscale to max 400x400 for speed
+      const scale = Math.min(400 / img.width, 400 / img.height, 1);
+      const w = Math.round(img.width * scale);
+      const h = Math.round(img.height * scale);
+      canvas.width = w;
+      canvas.height = h;
+      ctx.drawImage(img, 0, 0, w, h);
+      
+      const imgData = ctx.getImageData(0, 0, w, h);
+      const pixels = imgData.data;
+      const width = imgData.width;
+      const height = imgData.height;
+      
+      // Convert to grayscale
+      const gray = new Uint8Array(width * height);
+      for (let i = 0; i < pixels.length; i += 4) {
+        gray[i / 4] = pixels[i] * 0.299 + pixels[i + 1] * 0.587 + pixels[i + 2] * 0.114;
+      }
+      
+      // Laplacian kernel: [0, 1, 0, 1, -4, 1, 0, 1, 0]
+      let sum = 0;
+      let sumSq = 0;
+      let count = 0;
+      
+      for (let y = 1; y < height - 1; y++) {
+        for (let x = 1; x < width - 1; x++) {
+          const idx = y * width + x;
+          const val = 
+            gray[idx - width] + 
+            gray[idx - 1] + 
+            (gray[idx] * -4) + 
+            gray[idx + 1] + 
+            gray[idx + width];
+            
+          sum += val;
+          sumSq += val * val;
+          count++;
+        }
+      }
+      
+      const mean = sum / count;
+      const variance = (sumSq / count) - (mean * mean);
+      
+      console.log(`Blur score (Laplacian Variance): ${variance.toFixed(2)} (Threshold: ${threshold})`);
+      resolve({ isBlurry: variance < threshold, score: variance });
+    };
+    img.onerror = () => resolve({ isBlurry: false, score: 999 }); // bypass on error
+    img.src = base64Image.startsWith('data:') ? base64Image : 'data:image/jpeg;base64,' + base64Image;
+  });
+}
+
+function showBlurWarning(score, onRetake, onOk) {
+  const modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:100500;display:flex;justify-content:center;align-items:center;padding:20px;';
+  
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:16px;padding:24px;max-width:350px;width:100%;text-align:center;box-shadow:0 10px 40px rgba(0,0,0,0.3);font-family:inherit;">
+      <div style="font-size:3rem;margin-bottom:10px;">⚠️</div>
+      <h3 style="margin:0 0 8px;color:#b3261e;font-size:1.3rem;">写真が少しぼやけています<br><span style="font-size:1rem;font-weight:600;">Photo appears blurry</span></h3>
+      <p style="margin:0 0 20px;color:#49454f;font-size:0.95rem;">
+        このまま使用しますか？<br>Would you like to use this photo?
+      </p>
+      <div style="display:flex;gap:12px;flex-direction:column;">
+        <button id="blurRetakeBtn" style="width:100%;padding:14px;background:#2E6FF2;color:#fff;border:none;border-radius:10px;font-size:1.1rem;font-weight:700;cursor:pointer;">
+          📸 再撮影 / Retake
+        </button>
+        <button id="blurOkBtn" style="width:100%;padding:14px;background:#F2F4F7;color:#344054;border:none;border-radius:10px;font-size:1.1rem;font-weight:700;cursor:pointer;">
+          このまま使用 / OK (Ignore)
+        </button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  
+  modal.querySelector('#blurRetakeBtn').onclick = () => {
+    document.body.removeChild(modal);
+    if (onRetake) onRetake();
+  };
+  
+  modal.querySelector('#blurOkBtn').onclick = () => {
+    document.body.removeChild(modal);
+    if (onOk) onOk();
+  };
+}
+
+async function checkBlurAndProceed(base64Image, onProceed, onRetake) {
+  const result = await detectBlur(base64Image, 100);
+  if (result.isBlurry) {
+    showBlurWarning(result.score, 
+      () => { console.log('User chose to retake blurry photo'); if (onRetake) onRetake(); }, // Retake
+      () => { onProceed(); } // OK proceeds anyway
+    );
+  } else {
+    onProceed();
+  }
 }
 
 // Create hidden file inputs for each button
@@ -5106,39 +5209,44 @@ async function captureFromWebcam() {
   // Convert to base64
   const base64Image = canvas.toDataURL('image/jpeg', 0.95);
 
-  console.log(`📸 Captured from webcam: ${(base64Image.length / 1024).toFixed(2)} KB`);
-  console.log(`Current mapping:`, currentPhotoMapping);
-  console.log(`Current buttonId:`, currentButtonId);
+  checkBlurAndProceed(base64Image, async () => {
+    console.log(`📸 Captured from webcam: ${(base64Image.length / 1024).toFixed(2)} KB`);
+    console.log(`Current mapping:`, currentPhotoMapping);
+    console.log(`Current buttonId:`, currentButtonId);
 
-  // Save these before closeWebcamModal() resets them
-  const savedMapping = currentPhotoMapping;
-  const savedButtonId = currentButtonId;
+    // Save these before closeWebcamModal() resets them
+    const savedMapping = currentPhotoMapping;
+    const savedButtonId = currentButtonId;
 
-  // Close webcam
-  closeWebcamModal();
+    // Close webcam
+    closeWebcamModal();
 
-  // Check if this is for material label (multi-photo system)
-  if (savedButtonId === 'makerLabelButton') {
-    console.log('📸 Processing material label photo (multi-photo system)');
+    // Check if this is for material label (multi-photo system)
+    if (savedButtonId === 'makerLabelButton') {
+      console.log('📸 Processing material label photo (multi-photo system)');
 
-    const added = await addMaterialLabelPhoto(base64Image);
+      const added = await addMaterialLabelPhoto(base64Image);
 
-    if (added) {
-      console.log('✅ Successfully added material label photo from webcam');
-      logTabletAction('Photo captured: 材料ラベル (webcam)', 'in-progress', {
-        photoType: '材料ラベル',
-        photoCount: materialLabelPhotos.length
-      });
+      if (added) {
+        console.log('✅ Successfully added material label photo from webcam');
+        logTabletAction('Photo captured: 材料ラベル (webcam)', 'in-progress', {
+          photoType: '材料ラベル',
+          photoCount: materialLabelPhotos.length
+        });
+      } else {
+        showAlert(`最大${MAX_MATERIAL_PHOTOS}枚までです / Maximum ${MAX_MATERIAL_PHOTOS} photos allowed`);
+      }
+    } else if (savedMapping && savedButtonId) {
+      // Process single photo for 初物 or 終物
+      console.log('✅ Processing single photo for', savedMapping.labelText);
+      await processPhotoCapture(base64Image, savedMapping, savedButtonId);
     } else {
-      showAlert(`最大${MAX_MATERIAL_PHOTOS}枚までです / Maximum ${MAX_MATERIAL_PHOTOS} photos allowed`);
+      console.error('❌ Missing mapping or buttonId for webcam capture');
     }
-  } else if (savedMapping && savedButtonId) {
-    // Process single photo for 初物 or 終物
-    console.log('✅ Processing single photo for', savedMapping.labelText);
-    await processPhotoCapture(base64Image, savedMapping, savedButtonId);
-  } else {
-    console.error('❌ Missing mapping or buttonId for webcam capture');
-  }
+  }, () => {
+    // onRetake for webcam: just do nothing, let them click capture again.
+    // The webcam modal remains open.
+  });
 }
 
 // Setup webcam modal buttons
@@ -5317,11 +5425,15 @@ function showPhotoOptionModal(mapping, buttonId, fileInput) {
       const base64Image = await fileToBase64(file);
       console.log(`📸 Original image size: ${(base64Image.length / 1024).toFixed(2)} KB`);
 
-      // Process the photo
-      await processPhotoCapture(base64Image, mapping, currentButtonId);
-
-      // Reset file input
-      event.target.value = '';
+      checkBlurAndProceed(base64Image, async () => {
+        // Process the photo
+        await processPhotoCapture(base64Image, mapping, currentButtonId);
+        // Reset file input
+        event.target.value = '';
+      }, () => {
+        event.target.value = ''; // Clear on retake
+        fileInput.click();       // Immediately re-open camera
+      });
 
     } catch (error) {
       console.error(`❌ Error capturing ${mapping.labelText}:`, error);
@@ -5399,22 +5511,28 @@ if (makerLabelButton) {
         // Convert to base64 for localStorage (full quality)
         const base64Image = await fileToBase64(file);
 
-        // Add to material label photos array
-        const added = await addMaterialLabelPhoto(base64Image, lotTarget);
+        checkBlurAndProceed(base64Image, async () => {
+          // Add to material label photos array
+          const added = await addMaterialLabelPhoto(base64Image, lotTarget);
 
-        if (added) {
-          console.log('✅ Successfully added material label photo');
-          logTabletAction('Photo captured: 材料ラベル', 'in-progress', {
-            photoType: '材料ラベル',
-            photoCount: materialLabelPhotos.length
-          });
-        } else {
-          showAlert(`最大${MAX_MATERIAL_PHOTOS}枚までです / Maximum ${MAX_MATERIAL_PHOTOS} photos allowed`);
-        }
+          if (added) {
+            console.log('✅ Successfully added material label photo');
+            logTabletAction('Photo captured: 材料ラベル', 'in-progress', {
+              photoType: '材料ラベル',
+              photoCount: materialLabelPhotos.length
+            });
+          } else {
+            showAlert(`最大${MAX_MATERIAL_PHOTOS}枚までです / Maximum ${MAX_MATERIAL_PHOTOS} photos allowed`);
+          }
 
-        // Reset file input
-        event.target.value = '';
-        currentButtonId = null;
+          // Reset file input
+          event.target.value = '';
+          currentButtonId = null;
+        }, () => {
+          event.target.value = '';
+          currentButtonId = null;
+          fileInput.click();       // Immediately re-open camera
+        });
 
       } catch (error) {
         console.error('❌ Error capturing material label photo:', error);
@@ -12067,7 +12185,12 @@ if (manualSendModal) {
       if (input.parentElement) document.body.removeChild(input);
       if (!file) { cb(null); return; }
       const reader = new FileReader();
-      reader.onload = e => cb(e.target.result);
+      reader.onload = e => {
+        checkBlurAndProceed(e.target.result, 
+          () => cb(e.target.result), 
+          () => captureViaFileInput(cb)
+        );
+      };
       reader.onerror = () => cb(null);
       reader.readAsDataURL(file);
     });
@@ -12100,7 +12223,10 @@ if (manualSendModal) {
       c.getContext('2d').drawImage(video, 0, 0, c.width, c.height);
       const b64 = c.toDataURL('image/jpeg', 0.95);
       cleanup();
-      cb(b64);
+      checkBlurAndProceed(b64, 
+        () => cb(b64), 
+        () => captureViaWebcam(cb)
+      );
     };
 
     function tryGetUserMedia(retriesLeft) {
