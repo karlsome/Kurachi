@@ -2007,7 +2007,7 @@ function showMaintenanceModal(editIndex = -1) {
         if (draft && draft.length) {
           maintenancePhotos = draft;
           if (typeof window.showAppToast === 'function') {
-            window.showAppToast('未保存の故障写真を復元しました / Restored unsaved maintenance photos');
+            window.showAppToast(_t('toast_restored_maintenance'));
           }
         }
       }
@@ -2042,7 +2042,7 @@ function setupMaintenanceModalEvents(modal, existingRecord) {
   // Clear all photos functionality
   clearPhotosBtn.addEventListener('click', () => {
     if (maintenancePhotos.length > 0) {
-      if (confirm('すべての写真を削除しますか？ / Delete all photos?')) {
+      if (confirm(_t('confirm_delete_all_photos'))) {
         clearMaintenancePhotos();
       }
     }
@@ -2135,7 +2135,7 @@ function setupMaintenanceModalEvents(modal, existingRecord) {
   // Delete functionality
   if (deleteBtn) {
     deleteBtn.addEventListener('click', async () => {
-      if (confirm('この機械故障記録を削除しますか？ / Delete this maintenance record?')) {
+      if (confirm(_t('confirm_delete_maintenance'))) {
         const deletedRecord = maintenanceRecords[currentEditingIndex];
         // Log maintenance record delete
         logTabletAction('Maintenance record deleted', 'Reset', {
@@ -2190,7 +2190,9 @@ async function addMaterialLabelPhoto(photoDataURL, lotTarget = null) {
   }
 
   if (materialLabelPhotos.length >= MAX_MATERIAL_PHOTOS) {
-    alert(`最大${MAX_MATERIAL_PHOTOS}枚まで撮影できます / Maximum ${MAX_MATERIAL_PHOTOS} photos allowed`);
+    const _mpLang = (typeof getCurrentLanguage === 'function') ? getCurrentLanguage() : 'ja';
+    const _mpMsg = _mpLang === 'en' ? `Maximum ${MAX_MATERIAL_PHOTOS} photos allowed` : _mpLang === 'pt' ? `Máximo de ${MAX_MATERIAL_PHOTOS} fotos permitidas` : `最大${MAX_MATERIAL_PHOTOS}枚まで撮影できます`;
+    alert(_mpMsg);
     return false;
   }
 
@@ -2370,7 +2372,7 @@ function renderMaterialPhotoThumbnails() {
       `;
       deleteBtn.onclick = (e) => {
         e.stopPropagation();
-        if (confirm('Delete this material label photo?')) {
+        if (confirm(_t('confirm_delete_material_photo'))) {
           removeMaterialLabelPhoto(index);
         }
       };
@@ -2624,7 +2626,7 @@ function renderMaintenanceRecords() {
 async function deleteMaintenanceRecord(index) {
   const rec = maintenanceRecords[index];
   if (!rec) return;
-  if (!confirm('この機械故障記録を削除しますか？ / Delete this maintenance record?')) return;
+  if (!confirm(_t('confirm_delete_maintenance'))) return;
   for (const ph of (rec.photos || [])) {
     if (ph && ph.id) { try { await maintenanceDB.deletePhoto(ph.id); } catch (e) { } }
   }
@@ -7235,7 +7237,7 @@ async function sendtoNC(selectedValue) {
 
   //window.alert(machineName + currentSebanggo);
   if (!currentSebanggo) {
-    window.alert("Please select product first / 背番号選んでください");
+    window.alert(_t('alert_select_product_first'));
     return;
   }
 
@@ -7832,8 +7834,7 @@ function showVideo(videoToShowId) {
 }
 
 function closeVideoPopup() {
-  window.alert("CONFIRM RELEASE PAPER DIRECTION");
-  window.alert("離型紙セット確認する事");
+  window.alert(_t('alert_confirm_release_paper'));
   const videoContainer = document.getElementById('videoContainer');
   const allVideos = document.querySelectorAll('.video-element');
 
@@ -10189,7 +10190,7 @@ window.showStep0Modal = function() {
 window.proceedFromStep0 = function() {
   const workerInput = document.getElementById("Machine Operator");
   if (!workerInput || !workerInput.value.trim()) {
-    if (typeof showToast === 'function') showToast("作業者名を入力してください / Please select a worker");
+    if (typeof showToast === 'function') showToast(_t('toast_select_worker'));
     return;
   }
   
@@ -11302,7 +11303,7 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
 // (Called only from user-initiated buttons — programmatic resets after a
 //  successful submit skip this on purpose.)
 function confirmReset(msg) {
-  return confirm(msg || 'リセットしてもよろしいですか？\nスキャンしたデータはすべて消去されます。\n\nReset? All scanned data will be cleared. This cannot be undone.');
+  return confirm(msg || _t('confirm_reset_all'));
 }
 // The 3-step Reset buttons fire before any data is committed, so they don't
 // need a confirmation.
@@ -11430,8 +11431,10 @@ async function sendToIndividualMachine(machine, ncFilename, index) {
       sendButton.disabled = false;
       sendButton.style.opacity = '1';
       sendButton.style.cursor = 'pointer';
-      sendButton.innerHTML = `Send to ${machine.name}<br><span style="font-size: 14px;">送信 (Retry)</span>`;
-      alert('Could not send. Please check popup blocker.');
+      const _rLang = (typeof getCurrentLanguage === 'function') ? getCurrentLanguage() : 'ja';
+      const _retryLabel = _rLang === 'en' ? `Send to ${machine.name}<br><span style="font-size: 14px;">Retry</span>` : _rLang === 'pt' ? `Enviar para ${machine.name}<br><span style="font-size: 14px;">Tentar novamente</span>` : `${machine.name} に送信<br><span style="font-size: 14px;">再送信</span>`;
+      sendButton.innerHTML = _retryLabel;
+      alert(_t('alert_send_failed_popup'));
     }
   }
 }

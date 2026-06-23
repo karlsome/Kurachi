@@ -5330,10 +5330,10 @@
                         const capBtn = document.getElementById('materialPhotoGateCapture');
                         if (capBtn) {
                             capBtn.disabled = false;
-                            capBtn.innerHTML = '📷 写真を撮影 / Take Photo';
+                            capBtn.innerHTML = _t('take_photo_btn');
                         }
-                        
-                        const msg = '❌ 写真の処理に失敗しました。もう一度撮影してください / Photo processing failed. Please take the photo again';
+
+                        const msg = _t('toast_photo_failed');
                         if (wasBackground) {
                             if (typeof window.showAlert === 'function') window.showAlert(msg);
                             else alert(msg);
@@ -5409,7 +5409,7 @@
                                 if (window.showToast) window.showToast(_t('toast_send_failed'), 4000);
                             });
                         } else {
-                            if (window.showToast) window.showToast('エラー：背番号がありません / Error: No product selected');
+                            if (window.showToast) window.showToast(_t('toast_error_no_product'));
                         }
                         return;
                     }
@@ -5658,7 +5658,7 @@
                             btn.classList.remove('is-active');
                             thumb.style.transform = '';
                             notifyStopCall('clear', type);
-                            showToast((type === 'box' ? '空箱' : '部材') + 'リクエストを解除しました');
+                            showToast(_t(type === 'box' ? 'toast_request_released_box' : 'toast_request_released_material'));
                         } else {
                             thumb.style.transition = 'transform 0.3s ease';
                             thumb.style.transform = 'translateX(0)';
@@ -5778,7 +5778,9 @@
                             if (!seb) { if (window.showAppToast) window.showAppToast(_t('toast_no_product')); return; }
                             const ips = (typeof groupedMachineIPs !== 'undefined') ? groupedMachineIPs : {};
                             const ip = ips[name];
-                            if (!ip) { if (window.showAppToast) window.showAppToast(name + ' の IP が不明です'); return; }
+                            const _ipLang = getCurrentLanguage();
+                            const _ipMsg = _ipLang === 'en' ? name + "'s IP is unknown" : _ipLang === 'pt' ? 'IP de ' + name + ' é desconhecido' : name + ' の IP が不明です';
+                            if (!ip) { if (window.showAppToast) window.showAppToast(_ipMsg); return; }
 
                             // Send to this machine
                             await fireSendToMachine(ip, seb);
@@ -5786,7 +5788,9 @@
                             // 17 second cooldown lock on ALL send buttons
                             if (typeof beginSendToMachineCooldown === 'function') beginSendToMachineCooldown(name + ' に送信中');
 
-                            if (window.showAppToast) window.showAppToast(name + ' に送信しました / Sent to ' + name);
+                            const _sentLang = getCurrentLanguage();
+                            const _sentMsg = _sentLang === 'en' ? 'Sent to ' + name : _sentLang === 'pt' ? 'Enviado para ' + name : name + ' に送信しました';
+                            if (window.showAppToast) window.showAppToast(_sentMsg);
                         });
 
                         wrap.appendChild(btn);
@@ -5824,7 +5828,7 @@
                 const pl = document.getElementById('prodPrintLabelButton');
                 if (pl) pl.addEventListener('click', () => {
                     if (typeof printLabel === 'function') printLabel();
-                    else showToast('印刷機能が利用できません / Print unavailable');
+                    else showToast(_t('toast_print_unavailable'));
                 });
 
                 // Scan material directly (production mode, no product re-scan, no send).
@@ -5832,7 +5836,7 @@
                 // material-label photo gate fires, then the lot is added.
                 window.triggerMaterialScan = function () {
                     if (typeof currentProductDetails === 'undefined' || !currentProductDetails || !currentProductDetails.materialCode) {
-                        showToast('先に製品をスキャンしてください / Scan the product first');
+                        showToast(_t('toast_scan_product_first'));
                         return;
                     }
                     window.__materialScanMode = 'production';

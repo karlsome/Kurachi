@@ -265,6 +265,24 @@ const translations = {
         'toast_send_complete': '送信完了',
         'toast_send_failed': '送信失敗',
         'toast_no_product': '背番号がありません',
+
+        // Alert / confirm / toast (popups and modals)
+        'toast_restored_maintenance': '未保存の故障写真を復元しました',
+        'confirm_delete_all_photos': 'すべての写真を削除しますか？',
+        'confirm_delete_maintenance': 'この機械故障記録を削除しますか？',
+        'confirm_delete_material_photo': 'この材料ラベル写真を削除しますか？',
+        'alert_select_product_first': '背番号を選んでください',
+        'alert_confirm_release_paper': '離型紙セット確認する事',
+        'toast_select_worker': '作業者名を入力してください',
+        'confirm_reset_all': 'リセットしてもよろしいですか？\nスキャンしたデータはすべて消去されます。',
+        'alert_send_failed_popup': '送信できませんでした。ポップアップブロッカーを確認してください。',
+        'toast_print_unavailable': '印刷機能が利用できません',
+        'toast_scan_product_first': '先に製品をスキャンしてください',
+        'toast_error_no_product': 'エラー：背番号がありません',
+        'toast_photo_failed': '❌ 写真の処理に失敗しました。もう一度撮影してください',
+        'take_photo_btn': '📷 写真を撮影',
+        'toast_request_released_box': '空箱リクエストを解除しました',
+        'toast_request_released_material': '部材リクエストを解除しました',
     },
 
     en: {
@@ -530,6 +548,24 @@ const translations = {
         'toast_send_complete': 'Send complete',
         'toast_send_failed': 'Send failed',
         'toast_no_product': 'No product scanned',
+
+        // Alert / confirm / toast (popups and modals)
+        'toast_restored_maintenance': 'Restored unsaved maintenance photos',
+        'confirm_delete_all_photos': 'Delete all photos?',
+        'confirm_delete_maintenance': 'Delete this maintenance record?',
+        'confirm_delete_material_photo': 'Delete this material label photo?',
+        'alert_select_product_first': 'Please select product first',
+        'alert_confirm_release_paper': 'CONFIRM RELEASE PAPER DIRECTION',
+        'toast_select_worker': 'Please select a worker',
+        'confirm_reset_all': 'Reset? All scanned data will be cleared. This cannot be undone.',
+        'alert_send_failed_popup': 'Could not send. Please check popup blocker.',
+        'toast_print_unavailable': 'Print unavailable',
+        'toast_scan_product_first': 'Scan the product first',
+        'toast_error_no_product': 'Error: No product selected',
+        'toast_photo_failed': '❌ Photo processing failed. Please take the photo again',
+        'take_photo_btn': '📷 Take Photo',
+        'toast_request_released_box': 'Empty box request released',
+        'toast_request_released_material': 'Material request released',
     },
 
     pt: {
@@ -795,6 +831,24 @@ const translations = {
         'toast_send_complete': 'Envio concluído',
         'toast_send_failed': 'Envio falhou',
         'toast_no_product': 'Nenhum produto escaneado',
+
+        // Alert / confirm / toast (popups and modals)
+        'toast_restored_maintenance': 'Fotos de manutenção não salvas restauradas',
+        'confirm_delete_all_photos': 'Excluir todas as fotos?',
+        'confirm_delete_maintenance': 'Excluir este registro de manutenção?',
+        'confirm_delete_material_photo': 'Excluir esta foto de etiqueta de material?',
+        'alert_select_product_first': 'Selecione o produto primeiro',
+        'alert_confirm_release_paper': 'CONFIRME A DIREÇÃO DO PAPEL SEPARADOR',
+        'toast_select_worker': 'Selecione um operador',
+        'confirm_reset_all': 'Redefinir? Todos os dados escaneados serão apagados. Isso não pode ser desfeito.',
+        'alert_send_failed_popup': 'Não foi possível enviar. Verifique o bloqueador de pop-ups.',
+        'toast_print_unavailable': 'Impressão indisponível',
+        'toast_scan_product_first': 'Escaneie o produto primeiro',
+        'toast_error_no_product': 'Erro: Nenhum produto selecionado',
+        'toast_photo_failed': '❌ Falha no processamento da foto. Tire a foto novamente',
+        'take_photo_btn': '📷 Tirar Foto',
+        'toast_request_released_box': 'Pedido de caixa vazia cancelado',
+        'toast_request_released_material': 'Pedido de material cancelado',
     }
 };
 
