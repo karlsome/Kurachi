@@ -4217,19 +4217,23 @@ function resetForm() {
   const current工場 = document.getElementById('selected工場')?.value || '';
   const current設備 = document.getElementById('process')?.value || '';
 
+  // Return a promise to handle the async log
+  let logPromise = Promise.resolve();
+
   // Log if we have machine info at minimum (before clearing session)
   if (current設備 && (current背番号 || current品番 || current工場)) {
-    logTabletAction('Reset button pressed', 'Reset', {
+    logPromise = logTabletAction('Reset button pressed', 'Reset', {
       previous背番号: current背番号,
       previous品番: current品番,
       previous工場: current工場,
       previous設備: current設備
-    });
+    }).catch(err => console.error("Reset log failed:", err));
   }
 
-  // Clear session AFTER logging
-  clearSessionID();
-  closeVideoManualPicker();
+  return logPromise.then(() => {
+    // Clear session AFTER logging
+    clearSessionID();
+    closeVideoManualPicker();
   currentProductDetails = {
     sebanggo: '',
     hinban: '',
@@ -4330,13 +4334,14 @@ function resetForm() {
   localStorage.removeItem(`${uniquePrefix}previous-sebanggo`);
   console.log('Reset button pressed: Set sendtoNCButtonisPressed to false');
 
-  // Restore language preference after reset
-  if (currentLanguage) {
-    localStorage.setItem('appLanguage', currentLanguage);
-  }
+    // Restore language preference after reset
+    if (currentLanguage) {
+      localStorage.setItem('appLanguage', currentLanguage);
+    }
 
-  // Reload the page - the load event will broadcast clear if dropdown is empty
-  window.location.reload();
+    // Reload the page - the load event will broadcast clear if dropdown is empty
+    window.location.reload();
+  });
 }
 
 function showPrintStatusMessage(message) {
@@ -6704,7 +6709,7 @@ document.getElementById('submit').addEventListener('click', async (event) => {
     updateUploadProgress(100, '');
 
     // Log submit button action ONLY after successful submission
-    logTabletAction('Submit button pressed', 'Completed', {
+    await logTabletAction('Submit button pressed', 'Completed', {
       shotCount: shotInput.value,
       品番,
       背番号,
@@ -6712,7 +6717,7 @@ document.getElementById('submit').addEventListener('click', async (event) => {
       設備,
       processQuantity: Process_Quantity,
       totalNG: Total_NG
-    });
+    }).catch(err => console.error("Submit log failed:", err));
 
     // Clear session ONLY after successful submission
     clearSessionID();
@@ -6727,14 +6732,14 @@ document.getElementById('submit').addEventListener('click', async (event) => {
       // Auto-close after 5 seconds to prevent duplicate submissions
       const autoCloseTimer = setTimeout(() => {
         scanAlertModal.style.display = 'none'; document.body.classList.remove('flash-green');
-        resetAllSteps(); window.location.reload();
+        resetAllSteps();
       }, 5000);
 
       // Allow manual close by clicking the × button
       document.getElementById('closeScanModalButton').onclick = function () {
         clearTimeout(autoCloseTimer); // Cancel auto-close if user clicks manually
         scanAlertModal.style.display = 'none'; document.body.classList.remove('flash-green');
-        resetAllSteps(); window.location.reload();
+        resetAllSteps();
       };
     }, 3000);
 
