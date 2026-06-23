@@ -110,6 +110,17 @@ const translations = {
         'hinban': '品番:',
         'material_label_ja': '材料:',
 
+        // Params page (new)
+        'cutter_guide_title': 'カッター設定ガイド',
+        'cutter_guide_desc': 'AOLカッターのパラメーター設定手順',
+        'param_rolldist_label': '= 送りピッチ',
+        'param_step1': '左の speed ボタンを押す',
+        'param_step2_pre': 'rolldist に送りピッチの値を入力:',
+        'param_step2_note': '送りピッチは「i」情報で確認できます',
+        'rolldist_warning_msg': '⚠️ 送りピッチが設定されていません',
+        'rolldist_warning_call': 'リーダーを呼んでください！',
+        'values_changed_btn': '変更完了',
+
         // Scan page (new)
         'worker_setup_title': '作業者確認',
         'confirm_worker_pre': '作業を続ける作業者は',
@@ -296,6 +307,17 @@ const translations = {
         'hinban': 'Product Number:',
         'material_label_ja': 'Material:',
 
+        // Params page (new)
+        'cutter_guide_title': 'Cutter Setup Guide',
+        'cutter_guide_desc': 'How to set the AOL cutter parameters',
+        'param_rolldist_label': '= Feeding Pitch',
+        'param_step1': 'Press the speed button on the left',
+        'param_step2_pre': 'Set rolldist to the feeding pitch:',
+        'param_step2_note': 'The feeding pitch is shown in the "i" info panel',
+        'rolldist_warning_msg': '⚠️ 送りピッチ (rolldist) is not set',
+        'rolldist_warning_call': 'Call leader!',
+        'values_changed_btn': 'Values changed',
+
         // Scan page (new)
         'worker_setup_title': 'Worker Setup',
         'confirm_worker_pre': 'Are you still',
@@ -481,6 +503,17 @@ const translations = {
         'sebango': 'Código do Produto:',
         'hinban': 'Número do Produto:',
         'material_label_ja': 'Material:',
+
+        // Params page (new)
+        'cutter_guide_title': 'Guia de Configuração do Cortador',
+        'cutter_guide_desc': 'Como configurar os parâmetros do cortador AOL',
+        'param_rolldist_label': '= Passo de Alimentação',
+        'param_step1': 'Pressione o botão speed à esquerda',
+        'param_step2_pre': 'Defina rolldist para o passo de alimentação:',
+        'param_step2_note': 'O passo de alimentação é exibido no painel de informações "i"',
+        'rolldist_warning_msg': '⚠️ 送りピッチ (rolldist) não está definido',
+        'rolldist_warning_call': 'Chame o líder!',
+        'values_changed_btn': 'Valores alterados',
 
         // Scan page (new)
         'worker_setup_title': 'Configuração do Trabalhador',

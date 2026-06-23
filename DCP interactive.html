@@ -1851,8 +1851,8 @@
                 <!-- TAB 2: PARAMS -->
                 <div class="tab-panel" id="panel-1">
                     <div class="glass-card">
-                        <h3>カッター設定ガイド / Cutter Setup Guide</h3>
-                        <p class="gallery-sub">AOLカッターのパラメーター設定手順 / How to set the AOL cutter parameters</p>
+                        <h3 data-i18n="cutter_guide_title">カッター設定ガイド</h3>
+                        <p class="gallery-sub" data-i18n="cutter_guide_desc">AOLカッターのパラメーター設定手順</p>
                         <div class="param-guide">
                             <svg id="paramsSvg" viewBox="0 0 800 410" role="img" aria-label="AOL controller guide">
                                 <animate id="svgZoomAnim" attributeName="viewBox"
@@ -1928,27 +1928,27 @@
                                 <circle cx="470" cy="358" r="17" fill="#FFD11A" /><text x="470" y="365"
                                     text-anchor="middle" font-size="18" font-weight="800" fill="#14304e">2</text>
                                 <text x="498" y="363" font-family="inherit" font-size="14" font-weight="800"
-                                    fill="#FFD11A">= 送りピッチ</text>
+                                    fill="#FFD11A" data-i18n="param_rolldist_label">= 送りピッチ</text>
                             </svg>
                         </div>
                         <ol class="param-steps">
-                            <li><span class="step-num">1</span><span>左の <b>speed</b> ボタンを押す<br>Press the <b>speed</b>
-                                    button on the left</span></li>
-                            <li><span class="step-num">2</span><span><b>rolldist</b> に <b>送りピッチ</b> の値を入力 / Set
-                                    <b>rolldist</b> to the feeding pitch:<br><b id="guideFeedPitch"
-                                        class="feed-pitch">—</b><br><small
-                                        style="color:var(--text-muted);font-weight:600;">送りピッチは「i」情報で確認できます / The
-                                        feeding pitch is shown in the "i" info panel</small></span></li>
+                            <li><span class="step-num">1</span><span data-i18n="param_step1">左の speed ボタンを押す</span></li>
+                            <li><span class="step-num">2</span><span>
+                                <span data-i18n="param_step2_pre">rolldist に送りピッチの値を入力:</span><br>
+                                <b id="guideFeedPitch" class="feed-pitch">—</b><br>
+                                <small style="color:var(--text-muted);font-weight:600;" data-i18n="param_step2_note">送りピッチは「i」情報で確認できます</small>
+                            </span></li>
                         </ol>
 
                         <div id="rollDistWarning"
                             style="display: none; background: var(--red-soft); border: 1px solid var(--red); border-radius: var(--btn-radius); padding: 12px; margin-top: 16px; text-align: center; color: var(--red); font-weight: 800; font-size: 0.95rem;">
-                            ⚠️ 送りピッチが設定されていません (rolldist is blank or null).<br>Call leader!
+                            <span data-i18n="rolldist_warning_msg">⚠️ 送りピッチが設定されていません</span><br>
+                            <span data-i18n="rolldist_warning_call">リーダーを呼んでください！</span>
                         </div>
 
                         <button type="button" id="valuesChangedBtn" class="btn btn-secondary btn-full" disabled
-                            style="margin-top: 20px;">
-                            Values changed / 変更完了
+                            style="margin-top: 20px;" data-i18n="values_changed_btn">
+                            変更完了
                         </button>
                     </div>
                 </div>
