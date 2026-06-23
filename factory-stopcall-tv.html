@@ -1,0 +1,1424 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>呼び出しモニター / Call Monitor</title>
+    <style>
+        :root {
+            --bg: #0A0F1A;
+            --bg-2: #111A2B;
+            --tile: #16223A;
+            --tile-border: #243450;
+            --text: #E7EEF9;
+            --muted: #8499B8;
+            --red: #E11D2A;
+            --red-2: #FF3B47;
+            --green: #29C36A;
+            --amber: #F5A524;
+            --blue: #2E6FF2;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        html,
+        body {
+            height: 100%;
+            background: var(--bg);
+            color: var(--text);
+            font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", system-ui, -apple-system, sans-serif;
+            overflow: hidden;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .app {
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            padding: 2vh 2.2vw;
+            gap: 1.6vh;
+        }
+
+        /* ---------- Header ---------- */
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 24px;
+        }
+
+        .head-right {
+            display: flex;
+            align-items: center;
+            gap: 26px;
+        }
+
+        .clock {
+            font-size: clamp(24px, 2.8vw, 52px);
+            font-weight: 800;
+            font-variant-numeric: tabular-nums;
+            letter-spacing: 0.02em;
+        }
+
+        .conn {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: clamp(12px, 1.1vw, 20px);
+            font-weight: 700;
+            color: var(--muted);
+        }
+
+        .conn .dot {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: var(--muted);
+        }
+
+        .conn.online .dot {
+            background: var(--green);
+            box-shadow: 0 0 12px var(--green);
+        }
+
+        .conn.offline .dot {
+            background: var(--amber);
+            box-shadow: 0 0 12px var(--amber);
+        }
+
+        /* ---------- Grid ---------- */
+        .grid {
+            flex: 1;
+            display: grid;
+            gap: 1.4vh 1.2vw;
+            grid-auto-rows: 1fr;
+            min-height: 0;
+        }
+
+        .tile {
+            position: relative;
+            background: var(--tile);
+            border: 3px solid var(--tile-border);
+            border-radius: 18px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 0.6vh;
+            overflow: hidden;
+            transition: background 0.2s, border-color 0.2s;
+        }
+
+        .tile .name {
+            font-size: clamp(16px, 1.8vw, 36px);
+            font-weight: 900;
+            letter-spacing: 0.02em;
+            color: var(--muted);
+        }
+
+        /* current running 背番号 (big, center) */
+        .tile .seb {
+            font-weight: 900;
+            color: var(--text);
+            line-height: 1;
+            white-space: nowrap;
+            max-width: 100%;
+            padding: 0 6px;
+            display: none;
+            /* font-size set by JS (fitSeb) */
+        }
+
+        .tile .status {
+            font-size: clamp(12px, 1.2vw, 26px);
+            font-weight: 800;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+
+        .tile .elapsed {
+            position: absolute;
+            bottom: 8px;
+            right: 12px;
+            font-size: clamp(12px, 1.2vw, 24px);
+            font-weight: 800;
+            color: var(--muted);
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* ----- machine modes ----- */
+        .tile.running { border-color: #1E4733; }
+        .tile.running .seb { display: block; }
+        .tile.running .status { color: var(--green); }
+
+        .tile.idle { opacity: 0.5; }
+
+        /* Break / maintenance: calm "chill" breathing glow (not a hard blink).
+           The big mode word stays up; a small 背番号 sits bottom-left. */
+        .tile.brk {
+            background: #10263F;
+            border-color: var(--blue);
+            animation: chillPulseBlue 3.4s ease-in-out infinite;
+        }
+        .tile.brk .status { display: none; }
+
+        .tile.maint {
+            background: #2F2410;
+            border-color: var(--amber);
+            animation: chillPulseAmber 3.4s ease-in-out infinite;
+        }
+        .tile.maint .status { display: none; }
+
+        @keyframes chillPulseBlue {
+            0%, 100% { box-shadow: inset 0 0 0 rgba(46, 111, 242, 0); }
+            50% { box-shadow: inset 0 0 70px rgba(46, 111, 242, 0.32), 0 0 26px rgba(46, 111, 242, 0.14); }
+        }
+
+        @keyframes chillPulseAmber {
+            0%, 100% { box-shadow: inset 0 0 0 rgba(245, 165, 36, 0); }
+            50% { box-shadow: inset 0 0 70px rgba(245, 165, 36, 0.30), 0 0 26px rgba(245, 165, 36, 0.14); }
+        }
+
+        /* small 背番号 (bottom-left, aligned with the elapsed timer) */
+        .seb-mini {
+            position: absolute;
+            bottom: 8px;
+            left: 12px;
+            font-size: clamp(12px, 1.2vw, 24px);
+            font-weight: 800;
+            letter-spacing: 0.02em;
+            font-variant-numeric: tabular-nums;
+            display: none;
+        }
+        .tile.brk .seb-mini { display: block; color: #9FC2FF; }
+        .tile.maint .seb-mini { display: block; color: #FCD980; }
+
+        /* calling */
+        .tile.calling[data-primary-call="leader"] {
+            background: var(--red);
+            border-color: #fff;
+            animation: tileBlinkRed 0.9s steps(1) infinite;
+        }
+        @keyframes tileBlinkRed {
+            0%, 100% {
+                background: var(--red);
+                box-shadow: 0 0 0 0 rgba(255, 59, 71, 0.0), 0 0 40px rgba(225, 29, 42, 0.6);
+            }
+            50% {
+                background: #7d0f17;
+                box-shadow: 0 0 0 0 rgba(255, 59, 71, 0.0), 0 0 10px rgba(225, 29, 42, 0.2);
+            }
+        }
+
+        .tile.calling[data-primary-call="box"] {
+            background: #D97706;
+            border-color: #fff;
+            animation: tileBlinkYellow 0.9s steps(1) infinite;
+        }
+        @keyframes tileBlinkYellow {
+            0%, 100% {
+                background: #F59E0B;
+                box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.0), 0 0 40px rgba(245, 158, 11, 0.6);
+            }
+            50% {
+                background: #92400E;
+                box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.0), 0 0 10px rgba(245, 158, 11, 0.2);
+            }
+        }
+
+        .tile.calling[data-primary-call="material"] {
+            background: #2563EB;
+            border-color: #fff;
+            animation: tileBlinkBlue 0.9s steps(1) infinite;
+        }
+        @keyframes tileBlinkBlue {
+            0%, 100% {
+                background: #3B82F6;
+                box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.0), 0 0 40px rgba(59, 130, 246, 0.6);
+            }
+            50% {
+                background: #1D4ED8;
+                box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.0), 0 0 10px rgba(59, 130, 246, 0.2);
+            }
+        }
+
+        .tile.calling .name {
+            color: #fff;
+            white-space: nowrap;
+            max-width: 100%;
+            padding: 0 8px;
+            /* font-size is set by JS (fitCallingName) to be as large as fits */
+        }
+
+        /* On a calling tile the name alone fills the card (no "CALLING" subtitle),
+           alternating with the big rank — so the machine reads big from far away. */
+        .tile.calling .state {
+            display: none;
+        }
+
+        /* Big full-tile rank shown while flipping (see .grid.flip below) */
+        .big-rank {
+            display: none;
+            font-size: clamp(56px, 8vw, 200px);
+            font-weight: 900;
+            color: #fff;
+            line-height: 0.9;
+            font-variant-numeric: tabular-nums;
+            text-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+        }
+
+        /* A calling tile shows only the red name/rank (its mode info is hidden) */
+        .tile.calling .seb,
+        .tile.calling .status {
+            display: none;
+        }
+
+        .tile.calling .elapsed {
+            color: #FFE3E5;
+        }
+
+        /* Each calling tile alternates: machine name <-> big rank number <-> type, in
+           sync across all tiles, driven by updating data-phase on the grid. */
+        .grid[data-phase="1"] .tile.calling .name { display: none; }
+        .grid[data-phase="1"] .tile.calling .big-rank { display: block; }
+        
+        .grid[data-phase="2"] .tile.calling .name { display: none; }
+        .grid[data-phase="2"] .tile.calling .type-display { display: flex; }
+        
+        /* If only leader is active, phase 2 acts like phase 0 (shows name) */
+        .grid[data-phase="2"] .tile.calling[data-only-leader="true"] .name { display: block; }
+        .grid[data-phase="2"] .tile.calling[data-only-leader="true"] .type-display { display: none; }
+
+        .type-display {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            gap: 2vh;
+        }
+        
+        .type-display > div {
+            font-size: clamp(40px, 6vw, 110px);
+            font-weight: 900;
+            color: #fff;
+            line-height: 0.9;
+            text-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+        }
+
+        /* Big full-card mode word (休憩中 / 整備中) — always shown on break/
+           maintenance tiles (the 背番号 sits small at the bottom-left). */
+        .big-mode {
+            display: none;
+            font-weight: 900;
+            line-height: 0.95;
+            text-align: center;
+            white-space: nowrap;
+            max-width: 100%;
+            padding: 0 6px;
+        }
+
+        .tile.brk .big-mode { display: block; color: #BFD8FF; }
+        .tile.maint .big-mode { display: block; color: #FFD980; }
+
+        /* ---------- Full-screen takeover ---------- */
+        .takeover {
+            position: fixed;
+            inset: 0;
+            z-index: 50;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 2vh;
+        }
+
+        .takeover.show {
+            display: flex;
+        }
+
+        .takeover[data-type="leader"] {
+            background: radial-gradient(circle at 50% 40%, #C2151F, #5A0A0E 80%);
+            animation: takeoverBlinkRed 0.7s steps(1) infinite;
+        }
+        @keyframes takeoverBlinkRed {
+            0%, 100% { background: radial-gradient(circle at 50% 40%, #E11D2A, #5A0A0E 80%); }
+            50% { background: radial-gradient(circle at 50% 40%, #8d1118, #380a0c 80%); }
+        }
+
+        .takeover[data-type="box"] {
+            background: radial-gradient(circle at 50% 40%, #D97706, #78350F 80%);
+            animation: takeoverBlinkYellow 0.7s steps(1) infinite;
+        }
+        @keyframes takeoverBlinkYellow {
+            0%, 100% { background: radial-gradient(circle at 50% 40%, #F59E0B, #78350F 80%); }
+            50% { background: radial-gradient(circle at 50% 40%, #92400E, #451A03 80%); }
+        }
+
+        .takeover[data-type="material"] {
+            background: radial-gradient(circle at 50% 40%, #2563EB, #1E3A8A 80%);
+            animation: takeoverBlinkBlue 0.7s steps(1) infinite;
+        }
+        @keyframes takeoverBlinkBlue {
+            0%, 100% { background: radial-gradient(circle at 50% 40%, #3B82F6, #1E3A8A 80%); }
+            50% { background: radial-gradient(circle at 50% 40%, #1D4ED8, #172554 80%); }
+        }
+
+        .takeover .to-label {
+            font-size: clamp(28px, 4vw, 80px);
+            font-weight: 900;
+            color: #FFD7DA;
+            letter-spacing: 0.1em;
+        }
+
+        .takeover .to-machine {
+            font-size: clamp(80px, 18vw, 360px);
+            font-weight: 900;
+            color: #fff;
+            line-height: 0.95;
+            text-shadow: 0 8px 40px rgba(0, 0, 0, 0.4);
+        }
+
+        .takeover .to-rank {
+            font-size: clamp(20px, 2.4vw, 48px);
+            font-weight: 900;
+            color: #fff;
+            background: rgba(0, 0, 0, 0.25);
+            border: 3px solid #fff;
+            border-radius: 999px;
+            padding: 0.2em 1em;
+        }
+
+        .sound-enable {
+            position: fixed;
+            bottom: 16px;
+            left: 16px;
+            z-index: 60;
+            background: var(--bg-2);
+            color: var(--muted);
+            border: 2px solid var(--tile-border);
+            border-radius: 999px;
+            padding: 8px 16px;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .sound-enable.on {
+            color: var(--green);
+            border-color: var(--green);
+        }
+
+        /* One-time audio-unlock start gate */
+        .audio-gate {
+            position: fixed;
+            inset: 0;
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 2.4vh;
+            background: rgba(10, 15, 26, 0.97);
+            cursor: pointer;
+            text-align: center;
+            padding: 24px;
+        }
+
+        .audio-gate.hidden {
+            display: none;
+        }
+
+        .audio-gate .ag-icon {
+            font-size: clamp(60px, 9vw, 160px);
+        }
+
+        .audio-gate .ag-title {
+            font-size: clamp(30px, 4.5vw, 96px);
+            font-weight: 900;
+            color: var(--text);
+        }
+
+        .audio-gate .ag-sub {
+            font-size: clamp(16px, 1.8vw, 34px);
+            font-weight: 700;
+            color: var(--muted);
+        }
+
+        /* ---------- Scheduled events (ラジオ体操 / 時報) ---------- */
+        /* Shared full-screen layer for the lead-in countdown, the radio-taiso
+           exercise, and the hourly time chimes. Sits above the call takeover
+           but below the one-time audio-unlock gate. */
+        .sched {
+            position: fixed;
+            inset: 0;
+            z-index: 80;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 3vh;
+            text-align: center;
+            padding: 24px;
+        }
+
+        .sched.show {
+            display: flex;
+        }
+
+        /* Countdown (10 → 1) */
+        #countdownOverlay {
+            background: radial-gradient(circle at 50% 40%, #0E1830, #05080F 85%);
+        }
+
+        #countdownOverlay .cd-label {
+            font-size: clamp(22px, 3vw, 60px);
+            font-weight: 800;
+            color: var(--muted);
+            letter-spacing: 0.08em;
+        }
+
+        #countdownOverlay .cd-num {
+            font-size: clamp(140px, 34vw, 620px);
+            font-weight: 900;
+            color: #fff;
+            line-height: 0.9;
+            font-variant-numeric: tabular-nums;
+            text-shadow: 0 10px 60px rgba(0, 0, 0, 0.5);
+            animation: cdPulse 1s ease-in-out infinite;
+        }
+
+        @keyframes cdPulse {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.08); opacity: 0.82; }
+        }
+
+        /* Exercise: title + progress ring + remaining-time */
+        #exOverlay {
+            background: radial-gradient(circle at 50% 35%, #123A2E, #06140F 85%);
+        }
+
+        #exOverlay .ex-title {
+            font-size: clamp(34px, 6vw, 140px);
+            font-weight: 900;
+            color: #EAFBF2;
+            letter-spacing: 0.04em;
+        }
+
+        .ex-ring {
+            position: relative;
+            width: min(46vh, 46vw);
+            height: min(46vh, 46vw);
+        }
+
+        .ex-ring svg {
+            width: 100%;
+            height: 100%;
+            transform: rotate(-90deg);
+            overflow: visible; /* let the arc's glow extend past the viewBox */
+        }
+
+        .ex-ring .track {
+            fill: none;
+            stroke: rgba(255, 255, 255, 0.12);
+            stroke-width: 9;
+        }
+
+        .ex-ring .prog {
+            fill: none;
+            stroke: var(--green);
+            stroke-width: 9;
+            stroke-linecap: round;
+            transition: stroke-dashoffset 0.25s linear;
+            filter: url(#ringGlow); /* soft glow with a large region (no square clip) */
+        }
+
+        .ex-ring .ex-timer {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: clamp(40px, 7vw, 150px);
+            font-weight: 900;
+            color: #fff;
+            font-variant-numeric: tabular-nums;
+        }
+
+        #exOverlay .ex-sub {
+            font-size: clamp(18px, 2vw, 42px);
+            font-weight: 800;
+            color: #9FE9C2;
+            letter-spacing: 0.06em;
+        }
+
+        /* Time chime (12:00 / 15:00 / 17:30) */
+        #chimeOverlay {
+            background: radial-gradient(circle at 50% 40%, #1A2740, #070C16 85%);
+            animation: chimeFade 1.2s ease-out;
+        }
+
+        @keyframes chimeFade {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        #chimeOverlay .ch-label {
+            font-size: clamp(22px, 3vw, 64px);
+            font-weight: 800;
+            color: #9DB4E0;
+            letter-spacing: 0.1em;
+        }
+
+        #chimeOverlay .ch-time {
+            font-size: clamp(120px, 26vw, 520px);
+            font-weight: 900;
+            color: #fff;
+            line-height: 0.9;
+            font-variant-numeric: tabular-nums;
+            text-shadow: 0 10px 60px rgba(0, 0, 0, 0.5);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="app">
+        <header>
+            <div class="head-right">
+                <div class="clock" id="clock">--:--</div>
+                <div class="conn" id="conn">
+                    <span class="dot"></span><span id="connText">接続中… / Connecting…</span>
+                </div>
+            </div>
+        </header>
+
+        <div class="grid" id="grid"></div>
+    </div>
+
+    <!-- Full-screen new-call takeover -->
+    <div class="takeover" id="takeover" data-type="leader">
+        <div class="to-label">呼び出し / CALLING LEADER</div>
+        <div class="to-machine" id="toMachine">—</div>
+        <div class="to-rank" id="toRank">#1</div>
+    </div>
+
+    <!-- Scheduled-event overlays: lead-in countdown, ラジオ体操 exercise, 時報 chime -->
+    <div class="sched" id="countdownOverlay">
+        <div class="cd-label" id="cdLabel">まもなく</div>
+        <div class="cd-num" id="cdNum">10</div>
+    </div>
+
+    <div class="sched" id="exOverlay">
+        <div class="ex-title">ラジオ体操第一</div>
+        <div class="ex-ring">
+            <svg viewBox="0 0 200 200">
+                <defs>
+                    <filter id="ringGlow" x="-75%" y="-75%" width="250%" height="250%">
+                        <feDropShadow dx="0" dy="0" stdDeviation="3.5" flood-color="#29C36A" flood-opacity="0.75" />
+                    </filter>
+                </defs>
+                <circle class="track" cx="100" cy="100" r="90"></circle>
+                <circle class="prog" id="exProg" cx="100" cy="100" r="90"></circle>
+            </svg>
+            <div class="ex-timer" id="exTimer">3:11</div>
+        </div>
+        <div class="ex-sub" id="exSub">残り時間 / remaining</div>
+    </div>
+
+    <div class="sched" id="chimeOverlay">
+        <div class="ch-label">時報 / TIME</div>
+        <div class="ch-time" id="chTime">12:00</div>
+    </div>
+
+
+
+    <script>
+        //const serverURL = "https://kurachi.onrender.com";
+        //const serverURL = "http://localhost:3000";
+        const serverURL = "http://192.168.0.145:3000";
+
+        const params = new URLSearchParams(location.search);
+        const FACTORY = params.get('filter') || params.get('factory') || '';
+        const SERVER = params.get('server') || serverURL; // ?server= override for local testing
+
+        // Per-factory machine roster (mirrors chooseMachine.html). Office/entrance ignored.
+        const FACTORY_MACHINES = {
+            '小瀬': [
+                'OZNC01', 'OZNC02', 'OZNC03', 'OZNC04', 'OZNC05', 'OZNC06',
+                'OZNC07', 'OZNC08', 'OZNC09', 'OZNC10', 'OZNC11', 'OZNC12',
+                'OZNC13', 'OZNC14', 'OZNC15', 'OZNC16', 'OZNC17', 'OZNC18',
+                'OZMANAS'
+            ]
+        };
+
+        document.title = (FACTORY || '工場') + ' 呼び出しモニター / Call Monitor';
+
+        // ----- Build the grid -----
+        const grid = document.getElementById('grid');
+        const tileByMachine = new Map();
+        let roster = (FACTORY_MACHINES[FACTORY] || []).slice();
+
+        // State (declared before renderRoster, which references it on first paint)
+        let activeList = [];                  // [{machine, since}] calls, earliest-first
+        let activeSince = new Map();          // machine -> call start (calling wait timer)
+        const machineState = new Map();       // machine -> { sebanggo, hinban, mode, since }
+
+        function chooseColumns(n) {
+            if (n <= 4) return n || 1;
+            if (n <= 6) return 3;
+            if (n <= 12) return 4;
+            if (n <= 20) return 5;
+            return 6;
+        }
+
+        function renderRoster() {
+            grid.innerHTML = '';
+            tileByMachine.clear();
+            const cols = chooseColumns(roster.length);
+            grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+            roster.forEach(m => {
+                const tile = document.createElement('div');
+                tile.className = 'tile';
+                tile.dataset.machine = m;
+                tile.innerHTML =
+                    '<div class="name">' + m + '</div>' +
+                    '<div class="big-rank"></div>' +
+                    '<div class="type-display"></div>' +
+                    '<div class="seb"></div>' +
+                    '<div class="big-mode"></div>' +
+                    '<div class="status">停止 / IDLE</div>' +
+                    '<div class="seb-mini"></div>' +
+                    '<div class="elapsed"></div>';
+                grid.appendChild(tile);
+                tileByMachine.set(m, tile);
+            });
+            // Re-apply any known state to the freshly built tiles
+            tileByMachine.forEach((t, m) => refreshTile(m));
+        }
+        renderRoster();
+
+        // ----- Clock -----
+        function tickClock() {
+            const d = new Date();
+            const p = n => String(n).padStart(2, '0');
+            document.getElementById('clock').textContent = p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+        }
+        tickClock();
+        setInterval(tickClock, 1000);
+
+        // ----- Sound: ON by default. Browser autoplay rules keep the audio
+        // context "suspended" until a user gesture, so we create it up front,
+        // try to resume immediately, and also unlock on the first interaction
+        // (kiosk/TV browsers launched with autoplay allowed start instantly).
+        let audioCtx = null;
+        let soundOn = true;
+        function ensureAudio() {
+            if (!soundOn) return false;
+            try {
+                if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+                return audioCtx.state === 'running';
+            } catch (e) { return false; }
+        }
+        function updateSoundButton() {
+            const btn = document.getElementById('soundEnable');
+            if (!btn) return;
+            if (soundOn) {
+                btn.classList.add('on');
+                btn.textContent = '🔊 音 ON / Sound on';
+            } else {
+                btn.classList.remove('on');
+                btn.textContent = '🔇 音 OFF / Muted';
+            }
+        }
+        updateSoundButton();
+
+
+
+        // Ascending 3-chime "attention" call (PA / airport pre-announcement
+        // style): three rising bell-like notes that grab attention without being
+        // harsh, and carry across the floor.
+        function playAlert(type = 'leader') {
+            if (!ensureAudio()) return;
+            const ctx = audioCtx;
+            const t0 = ctx.currentTime + 0.02;
+
+            if (type === 'box') {
+                // High, bright, single "elevator ping" (C6, glassy bell)
+                const freq = 1046.50; // C6
+                const g = ctx.createGain();
+                g.connect(ctx.destination);
+                g.gain.setValueAtTime(0.0001, t0);
+                g.gain.exponentialRampToValueAtTime(0.4, t0 + 0.01);
+                g.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.5);
+
+                [[freq, 1], [freq * 2, 0.2], [freq * 3, 0.05]].forEach(([f, amp]) => {
+                    const o = ctx.createOscillator();
+                    const og = ctx.createGain();
+                    o.type = 'sine';
+                    o.frequency.setValueAtTime(f, t0);
+                    og.gain.value = amp;
+                    o.connect(og); og.connect(g);
+                    o.start(t0); o.stop(t0 + 1.6);
+                });
+            } else if (type === 'material') {
+                // Low, warm, quick double "woodblock / marimba" bloop (F4 -> C4)
+                const notes = [349.23, 261.63]; 
+                notes.forEach((freq, i) => {
+                    const t = t0 + i * 0.2; // fast succession
+                    const g = ctx.createGain();
+                    g.connect(ctx.destination);
+                    g.gain.setValueAtTime(0.0001, t);
+                    g.gain.exponentialRampToValueAtTime(0.5, t + 0.01); // sharp attack
+                    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.35); // fast decay
+                    
+                    const o = ctx.createOscillator();
+                    o.type = 'triangle'; // warm, hollow tone
+                    o.frequency.setValueAtTime(freq, t);
+                    o.connect(g);
+                    o.start(t); o.stop(t + 0.4);
+                });
+            } else {
+                // Leader (Ascending 3-chime)
+                const notes = [587.33, 783.99, 1046.50]; // D5 → G5 → C6
+                const step = 0.34;
+                const dur = 0.9;
+                notes.forEach((freq, i) => {
+                    const t = t0 + i * step;
+                    const g = ctx.createGain();
+                    g.connect(ctx.destination);
+                    g.gain.setValueAtTime(0.0001, t);
+                    g.gain.exponentialRampToValueAtTime(0.32, t + 0.015);
+                    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+                    [[freq, 1], [freq * 2, 0.25]].forEach(([f, amp]) => {
+                        const o = ctx.createOscillator();
+                        const og = ctx.createGain();
+                        o.type = 'sine';
+                        o.frequency.setValueAtTime(f, t);
+                        og.gain.value = amp;
+                        o.connect(og); og.connect(g);
+                        o.start(t); o.stop(t + dur + 0.05);
+                    });
+                });
+            }
+        }
+
+        // ----- State helpers (state declared above, before renderRoster) -----
+        function fmtWait(ms) {
+            const s = Math.max(0, Math.floor(ms / 1000));
+            const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = s % 60;
+            const p = n => String(n).padStart(2, '0');
+            return h > 0 ? (p(h) + ':' + p(m) + ':' + p(ss)) : (p(m) + ':' + p(ss));
+        }
+
+        // Single elapsed-timer loop. By mode:
+        //  - calling     → time since the call started
+        //  - running     → PRODUCTION time (accumulated, paused during break/maint)
+        //  - break/maint → time since that mode started
+        //  - idle        → blank
+        function refreshElapsed() {
+            const now = Date.now();
+            tileByMachine.forEach((tile, machine) => {
+                const el = tile.querySelector('.elapsed');
+                if (!el) return;
+                let text = '';
+                if (activeSince.has(machine)) {
+                    text = fmtWait(now - activeSince.get(machine));
+                } else {
+                    const ms = machineState.get(machine);
+                    if (ms) {
+                        if (ms.mode === 'running') {
+                            const prod = (ms.prodAccumMs || 0) + (ms.runSince ? (now - ms.runSince) : 0);
+                            text = fmtWait(prod);
+                        } else if (ms.mode === 'break' || ms.mode === 'maintenance') {
+                            text = ms.modeSince ? fmtWait(now - ms.modeSince) : '';
+                        }
+                    }
+                }
+                el.textContent = text;
+            });
+        }
+        setInterval(refreshElapsed, 1000);
+
+        // Once per second, cycle calling tiles (name -> rank -> type) so the order
+        // reads from afar. Break/maintenance tiles no longer flip — they keep
+        // the big mode word with a small 背番号 in the corner.
+        let callPhase = 0;
+        setInterval(() => {
+            if (activeList.length > 0) {
+                callPhase = (callPhase + 1) % 3;
+                grid.dataset.phase = callPhase;
+            } else {
+                callPhase = 0;
+                grid.dataset.phase = 0;
+            }
+        }, 1000);
+
+        // Size text as large as fits on one line (empirical width factor for the bold font).
+        function fitText(el, text, w, cap) {
+            if (!el) return;
+            const chars = Math.max(1, String(text || '').length);
+            const size = Math.max(20, Math.min(cap, Math.floor((w - 24) / (chars * 0.82))));
+            el.style.fontSize = size + 'px';
+        }
+        function fitCallingName(tile, machine) { fitText(tile.querySelector('.name'), machine, tile.clientWidth || 300, 110); }
+        function fitSeb(tile, seb) { fitText(tile.querySelector('.seb'), seb, tile.clientWidth || 300, 96); }
+
+        window.addEventListener('resize', () => {
+            tileByMachine.forEach((tile, machine) => refreshTile(machine));
+        });
+
+        // Unified per-tile paint: calling state (red name/rank) takes priority,
+        // otherwise show the machine's mode (running 背番号 / break / maint / idle).
+        function refreshTile(machine) {
+            const tile = tileByMachine.get(machine);
+            if (!tile) return;
+            const idx = activeList.findIndex(it => it.machine === machine);
+            tile.classList.remove('running', 'idle', 'brk', 'maint');
+            if (idx >= 0) {
+                const item = activeList[idx];
+                tile.classList.add('calling');
+                tile.querySelector('.big-rank').textContent = '#' + (idx + 1);
+                
+                if (item.leader) tile.dataset.primaryCall = 'leader';
+                else if (item.box) tile.dataset.primaryCall = 'box';
+                else tile.dataset.primaryCall = 'material';
+
+                let typeHtml = '';
+                if (item.leader) {
+                    typeHtml += '<div>CALL</div>';
+                } else {
+                    if (item.box) typeHtml += '<div>BOX</div>';
+                    if (item.material) typeHtml += '<div>ROLL</div>';
+                }
+                tile.querySelector('.type-display').innerHTML = typeHtml;
+                
+                fitCallingName(tile, machine);
+            } else {
+                tile.classList.remove('calling');
+                tile.querySelector('.name').style.fontSize = '';
+                const ms = machineState.get(machine) || { mode: 'idle', sebanggo: '' };
+                const mode = ms.mode || 'idle';
+                tile.classList.add(mode === 'break' ? 'brk' : mode === 'maintenance' ? 'maint' : mode === 'running' ? 'running' : 'idle');
+                // Running shows the 背番号 big & centered; idle shows nothing big.
+                const sebEl = tile.querySelector('.seb');
+                sebEl.textContent = (mode === 'running') ? (ms.sebanggo || '') : '';
+                if (mode === 'running' && ms.sebanggo) fitSeb(tile, ms.sebanggo);
+                tile.querySelector('.status').textContent =
+                    mode === 'running' ? '稼働 / RUNNING' : '停止 / IDLE';
+                // Break/maintenance: big mode word in the center, small 背番号 bottom-left
+                const bigMode = tile.querySelector('.big-mode');
+                const sebMini = tile.querySelector('.seb-mini');
+                if (mode === 'break' || mode === 'maintenance') {
+                    const word = mode === 'break' ? '休憩中' : '整備中';
+                    bigMode.textContent = word;
+                    fitText(bigMode, word, tile.clientWidth || 300, 96);
+                    sebMini.textContent = ms.sebanggo || '';
+                } else {
+                    bigMode.textContent = '';
+                    sebMini.textContent = '';
+                }
+            }
+        }
+
+        // ----- Apply machine status snapshot/updates from the server -----
+        function applyMachineState(machines) {
+            if (!Array.isArray(machines)) return;
+            let rosterChanged = false;
+            machines.forEach(m => {
+                if (!m || !m.equipment) return;
+                if (!tileByMachine.has(m.equipment)) { roster.push(m.equipment); rosterChanged = true; }
+                machineState.set(m.equipment, {
+                    sebanggo: m.sebanggo || '',
+                    hinban: m.hinban || '',
+                    mode: m.mode || 'idle',
+                    prodAccumMs: m.prodAccumMs || 0,
+                    runSince: m.runSince || 0,
+                    modeSince: m.modeSince || 0
+                });
+            });
+            if (rosterChanged) renderRoster(); // renderRoster re-applies all tiles
+            else machines.forEach(m => refreshTile(m.equipment));
+            refreshElapsed();
+        }
+
+        let lastMachineCallTypes = new Map();
+
+        // ----- Apply active call list (stop-call) -----
+        function applyActive(list) {
+            let rosterChanged = false;
+            list.forEach(item => {
+                if (!tileByMachine.has(item.machine)) { roster.push(item.machine); rosterChanged = true; }
+            });
+            if (rosterChanged) renderRoster();
+
+            activeList = list.slice().sort((a, b) => a.since - b.since);
+            activeSince = new Map();
+            const newlyAddedEvents = [];
+            const nextMachineCallTypes = new Map();
+
+            activeList.forEach(it => {
+                activeSince.set(it.machine, it.since);
+                const prevTypes = lastMachineCallTypes.get(it.machine) || {};
+                
+                if (it.leader && !prevTypes.leader) {
+                    newlyAddedEvents.push({ machine: it.machine, title: '呼び出し / CALLING LEADER', type: 'leader', since: it.since });
+                }
+                if (it.box && !prevTypes.box) {
+                    newlyAddedEvents.push({ machine: it.machine, title: '空箱リクエスト / BOX REQUEST', type: 'box', since: it.since });
+                }
+                if (it.material && !prevTypes.material) {
+                    newlyAddedEvents.push({ machine: it.machine, title: '部材リクエスト / MATERIAL REQUEST', type: 'material', since: it.since });
+                }
+
+                nextMachineCallTypes.set(it.machine, { leader: !!it.leader, box: !!it.box, material: !!it.material });
+            });
+
+            lastMachineCallTypes = nextMachineCallTypes;
+
+            tileByMachine.forEach((tile, machine) => refreshTile(machine));
+
+            updateBanner();
+            refreshElapsed();
+
+            if (newlyAddedEvents.length > 0) {
+                if (scheduledMode === 'exercise') {
+                    // suppressed
+                } else {
+                    if (scheduledMode === 'chime') endChime();
+                    newlyAddedEvents
+                        .sort((a, b) => a.since - b.since)
+                        .forEach(ev => queueTakeover(ev.machine, ev.title, ev.type));
+                }
+            }
+        }
+
+        function updateBanner() {
+            const banner = document.getElementById('banner');
+            if (!banner) return; // banner removed from layout
+            const text = document.getElementById('bannerText');
+            const n = activeList.length;
+            if (n > 0) {
+                banner.classList.add('alert');
+                const names = activeList.map((it, i) => '#' + (i + 1) + ' ' + it.machine).join('　');
+                text.innerHTML = '<span class="pill">' + n + '</span> 台 呼び出し中 / Calling — ' + names;
+            } else {
+                banner.classList.remove('alert');
+                text.textContent = 'すべて正常 / All clear';
+            }
+        }
+
+        // ----- Takeover queue -----
+        const takeoverQueue = [];
+        let takeoverRunning = false;
+        function queueTakeover(machine, title, type) {
+            takeoverQueue.push({ machine, title, type });
+            if (!takeoverRunning) runTakeover();
+        }
+        function runTakeover() {
+            if (!takeoverQueue.length) { takeoverRunning = false; return; }
+            takeoverRunning = true;
+            const item = takeoverQueue.shift();
+            // Only announce if still active
+            const idx = activeList.findIndex(it => it.machine === item.machine);
+            if (idx < 0) { runTakeover(); return; }
+            
+            playAlert(item.type);
+            
+            const el = document.getElementById('takeover');
+            el.dataset.type = item.type;
+            document.querySelector('#takeover .to-label').textContent = item.title;
+            document.getElementById('toMachine').textContent = item.machine;
+            document.getElementById('toRank').textContent = '#' + (idx + 1) + ' に呼ばれました / called';
+            el.classList.add('show');
+            setTimeout(() => {
+                el.classList.remove('show');
+                setTimeout(runTakeover, 350); // brief gap before next
+            }, 3000);
+        }
+
+        // Expose for offline/unit testing without a live SSE server
+        window.__applyStopCallPayload = function (payload) {
+            if (payload && payload.type === 'stopcall' && Array.isArray(payload.active)) {
+                applyActive(payload.active);
+            } else if (payload && payload.type === 'machine_state') {
+                applyMachineState(payload.machines);
+            }
+        };
+
+        // ----- SSE connection -----
+        function setConn(state, label) {
+            const c = document.getElementById('conn');
+            c.classList.remove('online', 'offline');
+            if (state) c.classList.add(state);
+            document.getElementById('connText').textContent = label;
+        }
+
+        let es = null;
+        let lastMessageAt = Date.now();   // updated on ANY server message (incl. heartbeat)
+        let reconnectTimer = null;
+
+        function closeES() {
+            if (es) {
+                try { es.onopen = es.onmessage = es.onerror = null; es.close(); } catch (e) { }
+                es = null;
+            }
+        }
+
+        function connect() {
+            if (!FACTORY) { setConn('offline', '工場が指定されていません / No factory'); return; }
+            closeES(); // never stack connections
+            try {
+                es = new EventSource(`${SERVER}/sse/factory/${encodeURIComponent(FACTORY)}`);
+            } catch (e) {
+                setConn('offline', '接続エラー / Connection error');
+                scheduleReconnect();
+                return;
+            }
+            lastMessageAt = Date.now();
+            es.onopen = () => { lastMessageAt = Date.now(); setConn('online', '接続済み / Connected'); };
+            es.onmessage = (ev) => {
+                lastMessageAt = Date.now();
+                let data;
+                try { data = JSON.parse(ev.data); } catch (e) { return; }
+                if (data.type === 'ping') {
+                    setConn('online', '接続済み / Connected'); // heartbeat keeps us green
+                } else if (data.type === 'connected') {
+                    setConn('online', '接続済み / Connected');
+                } else if (data.type === 'stopcall') {
+                    // Full state is replayed by the server on (re)connect, so this
+                    // also resynchronizes the board after any outage.
+                    applyActive(Array.isArray(data.active) ? data.active : []);
+                } else if (data.type === 'machine_state') {
+                    applyMachineState(data.machines);
+                } else if (data.type === 'in_progress_update') {
+                    // (machine_state carries the derived view; in_progress_update
+                    //  is handled server-side, no extra client work needed.)
+                }
+            };
+            es.onerror = () => {
+                setConn('offline', '再接続中… / Reconnecting…');
+                // EventSource tries to auto-reconnect, but if it is stuck CLOSED
+                // we recreate it ourselves.
+                if (!es || es.readyState === 2 /* CLOSED */) scheduleReconnect();
+            };
+        }
+
+        function scheduleReconnect(delay) {
+            if (reconnectTimer) return;
+            reconnectTimer = setTimeout(() => {
+                reconnectTimer = null;
+                connect();
+            }, delay || 3000);
+        }
+
+        // ----- Watchdog: the ultimate fail-safe for a 24/7 display -----
+        // The server sends a heartbeat every ~25s. If we hear NOTHING (no data,
+        // no heartbeat) for 70s, the link is dead even if the browser hasn't
+        // noticed — so we tear it down and reconnect. On reconnect the server
+        // resends the current call state, so the board self-heals.
+        const STALE_MS = 70000;
+        setInterval(() => {
+            const silentFor = Date.now() - lastMessageAt;
+            if (silentFor > STALE_MS) {
+                setConn('offline', '再接続中… / Reconnecting…');
+                closeES();
+                connect();
+                lastMessageAt = Date.now(); // give the fresh connection time
+            }
+        }, 15000);
+
+        // If the OS/browser ever throttled or suspended the tab (power saving,
+        // screensaver wake, etc.), force an immediate liveness check on return.
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+                if (!es || es.readyState === 2 || (Date.now() - lastMessageAt) > STALE_MS) {
+                    closeES();
+                    connect();
+                }
+            }
+        });
+        // Reconnect immediately if the network comes back.
+        window.addEventListener('online', () => { closeES(); connect(); });
+
+        /* ============================================================
+           Scheduled events — ラジオ体操第一 (08:45) + 時報 chimes
+           (12:00 / 15:00 / 17:30). Weekdays (Mon–Fri) only. All times are
+           evaluated in Asia/Tokyo, so the schedule is correct regardless of
+           the TV's own clock/timezone. Runs entirely client-side — no server
+           involvement, on every factory display independently.
+           ============================================================ */
+        const AUDIO_URL = params.get('audio') || 'src/rajio.mp3';
+        const EX_FALLBACK_SECONDS = 192; // used until real audio metadata loads
+
+        const PRELOAD_LEAD = 30;   // begin loading the audio this many seconds ahead
+        const COUNTDOWN_LEAD = 10; // lead-in countdown length (seconds)
+        const FIRE_GRACE = 3;      // tolerate a few seconds of timer drift/throttling
+        const CHIME_HOLD_MS = 15000;
+
+        const SCHEDULE = [
+            { id: 'taiso',   at: '08:45', kind: 'exercise' },
+            { id: 'noon',    at: '12:00', kind: 'chime' },
+            { id: 'three',   at: '15:00', kind: 'chime' },
+            { id: 'evening', at: '17:30', kind: 'chime' },
+        ].map(e => {
+            const [h, m] = e.at.split(':').map(Number);
+            return Object.assign({}, e, { sec: h * 3600 + m * 60 });
+        });
+
+        let scheduledMode = null; // null | 'exercise' | 'chime' — gates stop-call takeover
+        const firedToday = { dateKey: '', done: new Set() };
+
+        // Scheduled-event overlay elements
+        const countdownOverlay = document.getElementById('countdownOverlay');
+        const cdNumEl = document.getElementById('cdNum');
+        const cdLabelEl = document.getElementById('cdLabel');
+        const exOverlay = document.getElementById('exOverlay');
+        const exProgEl = document.getElementById('exProg');
+        const exTimerEl = document.getElementById('exTimer');
+        const chimeOverlay = document.getElementById('chimeOverlay');
+        const chTimeEl = document.getElementById('chTime');
+
+        const RING_C = 2 * Math.PI * 90; // progress-ring circumference (r=90)
+        exProgEl.style.strokeDasharray = RING_C;
+        exProgEl.style.strokeDashoffset = RING_C;
+
+        // Current Asia/Tokyo time, broken into the parts the scheduler needs.
+        function jstNow() {
+            const parts = new Intl.DateTimeFormat('en-CA', {
+                timeZone: 'Asia/Tokyo', hour12: false,
+                year: 'numeric', month: '2-digit', day: '2-digit',
+                hour: '2-digit', minute: '2-digit', second: '2-digit', weekday: 'short'
+            }).formatToParts(new Date());
+            const g = t => (parts.find(p => p.type === t) || {}).value;
+            let h = +g('hour'); if (h === 24) h = 0; // some engines emit 24 at midnight
+            return {
+                dateKey: g('year') + '-' + g('month') + '-' + g('day'),
+                weekday: g('weekday'),                 // 'Mon'..'Sun'
+                secOfDay: h * 3600 + (+g('minute')) * 60 + (+g('second'))
+            };
+        }
+        const isWeekday = wd => ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].indexOf(wd) >= 0;
+
+        function rollDay(dateKey) {
+            if (firedToday.dateKey !== dateKey) { firedToday.dateKey = dateKey; firedToday.done.clear(); }
+        }
+        function onceToday(key) {
+            if (firedToday.done.has(key)) return false;
+            firedToday.done.add(key);
+            return true;
+        }
+
+        function fmtClock(totalSec) {
+            const s = Math.max(0, Math.round(totalSec));
+            return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+        }
+
+        // ----- Exercise audio: fully pre-fetched into memory so it can't stutter -----
+        let exAudio = null;
+        let exDuration = EX_FALLBACK_SECONDS;
+        function preloadExerciseAudio() {
+            if (exAudio) return; // already cached for this session
+            const audio = new Audio();
+            audio.preload = 'auto';
+            exAudio = audio;
+            audio.addEventListener('loadedmetadata', () => {
+                if (isFinite(audio.duration) && audio.duration > 0) {
+                    exDuration = audio.duration;
+                    exTimerEl.textContent = fmtClock(exDuration);
+                }
+            });
+            // Pull the whole file into memory; fall back to streaming if blocked.
+            fetch(AUDIO_URL).then(r => r.blob()).then(b => {
+                audio.src = URL.createObjectURL(b);
+                audio.load();
+            }).catch(() => {
+                audio.src = AUDIO_URL;
+                audio.load();
+            });
+        }
+
+        // ----- Exercise run -----
+        let exRAF = 0;
+        function startExercise() {
+            scheduledMode = 'exercise';
+            hideCountdown();
+            // The exercise outranks any in-flight call announcement.
+            takeoverQueue.length = 0;
+            document.getElementById('takeover').classList.remove('show');
+
+            if (!exAudio) preloadExerciseAudio();
+            exProgEl.style.strokeDashoffset = RING_C;
+            exTimerEl.textContent = fmtClock(exDuration);
+            exOverlay.classList.add('show');
+
+            const begin = () => {
+                const total = (exAudio && isFinite(exAudio.duration) && exAudio.duration > 0)
+                    ? exAudio.duration : exDuration;
+                const tick = () => {
+                    const cur = exAudio ? exAudio.currentTime : 0;
+                    const frac = total ? Math.min(1, cur / total) : 0;
+                    exProgEl.style.strokeDashoffset = RING_C * (1 - frac);
+                    exTimerEl.textContent = fmtClock(Math.max(0, total - cur));
+                    exRAF = requestAnimationFrame(tick);
+                };
+                cancelAnimationFrame(exRAF);
+                tick();
+                // Safety net: end even if 'ended' never fires (bad encode etc.).
+                clearTimeout(window.__exGuard);
+                window.__exGuard = setTimeout(endExercise, (total + 8) * 1000);
+            };
+
+            try {
+                exAudio.onended = endExercise;
+                const tryPlay = () => {
+                    try {
+                        exAudio.currentTime = 0;
+                        exAudio.volume = 1;
+                        exAudio.muted = false;
+                        const p = exAudio.play();
+                        if (p && p.then) p.then(begin).catch(onPlayFail);
+                        else begin();
+                    } catch (e) { onPlayFail(); }
+                };
+                // If the file isn't buffered yet (e.g. a manual test fired before
+                // the 30s preload finished), wait until it can play through, then
+                // start — instead of freezing on the first frame. If it's already
+                // playable but autoplay was blocked, still animate the ring.
+                const onPlayFail = () => {
+                    if (exAudio.readyState >= 3) { begin(); return; }
+                    exAudio.addEventListener('canplaythrough', tryPlay, { once: true });
+                };
+                tryPlay();
+            } catch (e) { begin(); }
+        }
+
+        function endExercise() {
+            cancelAnimationFrame(exRAF); exRAF = 0;
+            clearTimeout(window.__exGuard);
+            try { if (exAudio) { exAudio.pause(); exAudio.onended = null; } } catch (e) { }
+            exOverlay.classList.remove('show');
+            scheduledMode = null;
+            // Re-sync the board: surface any calls that arrived during the exercise.
+            tileByMachine.forEach((t, m) => refreshTile(m));
+            refreshElapsed();
+        }
+
+        // ----- Time chime -----
+        let chimeTimer = 0;
+        function startChime(hhmm) {
+            scheduledMode = 'chime';
+            hideCountdown();
+            chTimeEl.textContent = hhmm;
+            chimeOverlay.classList.add('show');
+            playSingingBowl();
+            clearTimeout(chimeTimer);
+            chimeTimer = setTimeout(endChime, CHIME_HOLD_MS);
+        }
+        function endChime() {
+            clearTimeout(chimeTimer);
+            chimeOverlay.classList.remove('show');
+            scheduledMode = null;
+            tileByMachine.forEach((t, m) => refreshTile(m));
+        }
+
+        // Relaxing "singing bowl" strike: a warm fundamental plus a few
+        // inharmonic partials, soft mallet attack and a long, gently shimmering
+        // decay. Two strikes, the second softer.
+        function playSingingBowl() {
+            if (!ensureAudio()) return;
+            const ctx = audioCtx;
+            const strike = (t0, base, gain) => {
+                const partials = [[1, 1], [2.0, 0.5], [2.76, 0.28], [5.40, 0.12]];
+                const master = ctx.createGain();
+                master.connect(ctx.destination);
+                master.gain.setValueAtTime(0.0001, t0);
+                master.gain.exponentialRampToValueAtTime(gain, t0 + 0.06); // soft attack
+                master.gain.exponentialRampToValueAtTime(0.0001, t0 + 6.0); // long decay
+                partials.forEach(([ratio, amp]) => {
+                    const o = ctx.createOscillator();
+                    const g = ctx.createGain();
+                    o.type = 'sine';
+                    o.frequency.setValueAtTime(base * ratio, t0);
+                    // subtle shimmer (slow detune)
+                    const lfo = ctx.createOscillator(), lg = ctx.createGain();
+                    lfo.frequency.value = 4 + ratio;
+                    lg.gain.value = base * ratio * 0.003;
+                    lfo.connect(lg); lg.connect(o.frequency);
+                    g.gain.value = amp;
+                    o.connect(g); g.connect(master);
+                    o.start(t0); lfo.start(t0);
+                    o.stop(t0 + 6.3); lfo.stop(t0 + 6.3);
+                });
+            };
+            const now = ctx.currentTime + 0.05;
+            strike(now, 320, 0.5);
+            strike(now + 1.4, 320, 0.32);
+        }
+
+        // ----- Countdown overlay -----
+        function showCountdown(label, num) {
+            cdLabelEl.textContent = label;
+            cdNumEl.textContent = String(num);
+            countdownOverlay.classList.add('show');
+        }
+        function hideCountdown() { countdownOverlay.classList.remove('show'); }
+
+        // ----- Manual fire (used by both the test buttons and the scheduler) -----
+        function fireEvent(ev) {
+            if (ev.kind === 'exercise') startExercise();
+            else startChime(ev.at);
+        }
+
+        // ----- 1 Hz scheduler -----
+        function schedulerTick() {
+            const t = jstNow();
+            rollDay(t.dateKey);
+            if (!isWeekday(t.weekday)) { if (!scheduledMode) hideCountdown(); return; }
+            const sec = t.secOfDay;
+
+            SCHEDULE.forEach(ev => {
+                // Pre-fetch the exercise audio ~30s ahead (once/day).
+                if (ev.kind === 'exercise' && sec >= ev.sec - PRELOAD_LEAD && sec < ev.sec) {
+                    if (onceToday(ev.id + ':preload')) preloadExerciseAudio();
+                }
+                // Fire at the scheduled second within a small grace window (once/day).
+                if (sec >= ev.sec && sec <= ev.sec + FIRE_GRACE) {
+                    if (onceToday(ev.id + ':fire')) fireEvent(ev);
+                }
+            });
+
+            // Lead-in countdown for the next not-yet-fired event.
+            let showing = false;
+            for (let i = 0; i < SCHEDULE.length; i++) {
+                const ev = SCHEDULE[i];
+                const remaining = ev.sec - sec;
+                if (remaining >= 1 && remaining <= COUNTDOWN_LEAD && !firedToday.done.has(ev.id + ':fire')) {
+                    if (ev.kind === 'exercise') scheduledMode = 'exercise'; // hold calls during the lead-in
+                    showCountdown(ev.kind === 'exercise' ? 'まもなく ラジオ体操' : '時報まで', remaining);
+                    showing = true;
+                    break;
+                }
+            }
+            if (!showing && !scheduledMode && countdownOverlay.classList.contains('show')) hideCountdown();
+        }
+        setInterval(schedulerTick, 1000);
+        schedulerTick();
+
+        // Pre-fetch the exercise audio into memory at page load so the first
+        // play (manual test or the 08:45 trigger) starts instantly. The
+        // scheduler also re-checks this ~30s before 08:45 as a safety net.
+        preloadExerciseAudio();
+
+
+
+        connect();
+    </script>
+</body>
+
+</html>

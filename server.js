@@ -182,6 +182,157 @@ function broadcastToFactory(factoryId, data) {
   console.log(`📡 Broadcasted to ${clients.length} factory TV client(s) on ${factoryId}:`, data);
 }
 
+// ============================================
+// Stop-call (call-leader) state per factory — drives the factory TV blinking.
+// factoryStopCalls: factory -> Map(machine -> { leader: {since}, box: {since}, material: {since} })
+// ============================================
+const factoryStopCalls = new Map();
+
+function buildStopCallPayload(factoryId) {
+  const machines = factoryStopCalls.get(factoryId) || new Map();
+  const active = [];
+  
+  machines.forEach((info, machine) => {
+    let earliest = Infinity;
+    if (info.leader && info.leader.since < earliest) earliest = info.leader.since;
+    if (info.box && info.box.since < earliest) earliest = info.box.since;
+    if (info.material && info.material.since < earliest) earliest = info.material.since;
+    
+    if (earliest !== Infinity) {
+      active.push({
+        machine,
+        since: earliest,
+        leader: !!info.leader,
+        box: !!info.box,
+        material: !!info.material
+      });
+    }
+  });
+  
+  active.sort((a, b) => a.since - b.since); // earliest call first → #1
+  return { type: 'stopcall', factory: factoryId, active };
+}
+
+// Heartbeat: keep factory TV SSE connections alive through proxies/idle
+// timeouts and let 24/7 displays detect a dead link. Prunes any client whose
+// write fails. Runs for the lifetime of the server.
+setInterval(() => {
+  const ping = `data: ${JSON.stringify({ type: 'ping', t: Date.now() })}\n\n`;
+  factoryConnections.forEach((clients) => {
+    for (let i = clients.length - 1; i >= 0; i--) {
+      try { clients[i].write(ping); }
+      catch (e) { clients.splice(i, 1); }
+    }
+  });
+}, 25000);
+
+// ============================================
+// Live machine status per factory (drives the TV's running 背番号 / break /
+// maintenance / idle display). Derived from the tablet-log stream and replayed
+// to TVs on (re)connect so an always-on display recovers instantly.
+// factory -> Map(equipment -> { sebanggo, hinban, worker, breakActive,
+//                               maintActive, runSince, modeSince, updatedAt })
+// ============================================
+const factoryMachineState = new Map();
+
+function getMachineStateMap(factory) {
+  if (!factoryMachineState.has(factory)) factoryMachineState.set(factory, new Map());
+  return factoryMachineState.get(factory);
+}
+
+// Update in-memory machine state from one tablet log. Returns the affected
+// equipment ids (a grouped 設備 like "OZNC08,OZNC10" updates both).
+function applyTabletLogToMachineState(logEntry) {
+  const factory = logEntry.工場;
+  const equipmentRaw = logEntry.設備 || '';
+  if (!factory || !equipmentRaw) return [];
+  const ids = equipmentRaw.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+  const ts = Date.parse(logEntry.Timestamp) || Date.now();
+  const action = String(logEntry.Action || '');
+  const status = String(logEntry.Status || '');
+  const seb = logEntry.背番号 || '';
+  const hinban = logEntry.品番 || '';
+  const worker = logEntry.Worker_Name || '';
+  const map = getMachineStateMap(factory);
+
+  ids.forEach(id => {
+    const st = map.get(id) || {
+      sebanggo: '', hinban: '', worker: '',
+      breakActive: false, maintActive: false,
+      runSince: 0, modeSince: 0, prodAccumMs: 0, updatedAt: 0, lastSeen: 0
+    };
+
+    const isRunning = () => !!st.sebanggo && !st.breakActive && !st.maintActive;
+    // Accumulate the current running segment, then pause production time
+    const pauseProd = () => { if (st.runSince > 0) { st.prodAccumMs += Math.max(0, ts - st.runSince); st.runSince = 0; } };
+    // Resume production time if the machine is running again
+    const resumeProd = () => { if (isRunning() && st.runSince === 0) st.runSince = ts; };
+    // A brand-new 背番号 → fresh production session
+    const startNewRun = (s) => {
+      st.sebanggo = s; st.hinban = hinban;
+      st.prodAccumMs = 0; st.runSince = ts;
+      st.breakActive = false; st.maintActive = false; st.modeSince = 0;
+    };
+
+    if (action.includes('Reset button pressed') ||
+        (action.includes('Submit button pressed') && status === 'Completed')) {
+      // Session finished/cleared → machine goes idle
+      st.sebanggo = ''; st.hinban = '';
+      st.breakActive = false; st.maintActive = false;
+      st.runSince = 0; st.modeSince = 0; st.prodAccumMs = 0;
+    } else if (action.includes('Break started')) {
+      if (seb && seb !== st.sebanggo) startNewRun(seb);
+      pauseProd();                                  // production clock pauses during break
+      st.breakActive = true; st.modeSince = ts;
+    } else if (action.includes('Break ended')) {
+      st.breakActive = false; st.modeSince = 0;
+      resumeProd();                                 // production clock continues
+    } else if (action.includes('Maintenance started')) {
+      if (seb && seb !== st.sebanggo) startNewRun(seb);
+      pauseProd();                                  // production clock pauses during maintenance
+      st.maintActive = true; st.modeSince = ts;
+    } else if (action.includes('Maintenance ended')) {
+      st.maintActive = false; st.modeSince = 0;
+      resumeProd();
+    } else if (seb) {
+      // Any normal action carrying a 背番号 means this machine is running it
+      if (seb !== st.sebanggo) startNewRun(seb);
+      else { st.hinban = hinban; resumeProd(); }
+    }
+
+    if (worker) st.worker = worker;
+    st.updatedAt = ts;
+    st.lastSeen = Date.now(); // server-receipt time, for the idle sweep
+    map.set(id, st);
+  });
+  return ids;
+}
+
+function machineStateView(id, st) {
+  if (!st) return { equipment: id, sebanggo: '', hinban: '', worker: '', mode: 'idle', prodAccumMs: 0, runSince: 0, modeSince: 0 };
+  const mode = st.maintActive ? 'maintenance'
+    : st.breakActive ? 'break'
+      : (st.sebanggo ? 'running' : 'idle');
+  return {
+    equipment: id,
+    sebanggo: st.sebanggo || '',
+    hinban: st.hinban || '',
+    worker: st.worker || '',
+    mode,
+    // Production elapsed = prodAccumMs + (now - runSince) while running.
+    prodAccumMs: st.prodAccumMs || 0,
+    runSince: (mode === 'running') ? (st.runSince || 0) : 0,
+    // Break/maintenance elapsed = now - modeSince.
+    modeSince: (mode === 'break' || mode === 'maintenance') ? (st.modeSince || 0) : 0
+  };
+}
+
+function buildMachineStatePayload(factory) {
+  const map = factoryMachineState.get(factory) || new Map();
+  const machines = Array.from(map.entries()).map(([id, st]) => machineStateView(id, st));
+  return { type: 'machine_state', factory, machines };
+}
+
 const uri = process.env.MONGODB_URI;
 const client = new MongoClient(uri, {
   serverApi: {
@@ -454,7 +605,13 @@ app.get("/sse/factory/:factoryId", (req, res) => {
   
   // Send initial connection message
   res.write(`data: ${JSON.stringify({ type: 'connected', factoryId, timestamp: new Date().toISOString() })}\n\n`);
-  
+
+  // Send the current stop-call state so a freshly-loaded TV blinks the right machines
+  res.write(`data: ${JSON.stringify(buildStopCallPayload(factoryId))}\n\n`);
+
+  // Send the current machine status (running 背番号 / break / maintenance / idle)
+  res.write(`data: ${JSON.stringify(buildMachineStatePayload(factoryId))}\n\n`);
+
   // Handle client disconnect
   req.on('close', () => {
     const clients = factoryConnections.get(factoryId) || [];
@@ -465,6 +622,127 @@ app.get("/sse/factory/:factoryId", (req, res) => {
     console.log(`❌ Factory TV disconnected from ${factoryId}. Remaining: ${clients.length}`);
   });
 });
+
+// Tablet → server: a machine started or cleared a call-leader (stop) request.
+// Broadcasts the full active set to the factory TV(s) so they can rank/blink.
+app.post("/api/stop-call", (req, res) => {
+  const factory = String(req.body?.factory || '').trim();
+  const machine = String(req.body?.machine || '').trim().toUpperCase();
+  const action = String(req.body?.action || '').trim();
+  const callType = String(req.body?.callType || 'leader').trim(); // 'leader', 'box', 'material'
+
+  if (!factory || !machine) {
+    return res.status(400).json({ error: "factory and machine are required" });
+  }
+  if (action !== 'activate' && action !== 'clear') {
+    return res.status(400).json({ error: "action must be 'activate' or 'clear'" });
+  }
+
+  if (!factoryStopCalls.has(factory)) factoryStopCalls.set(factory, new Map());
+  const machines = factoryStopCalls.get(factory);
+
+  // A tablet machine id may be grouped, e.g. "OZNC04,OZNC06" — apply to each.
+  const ids = machine.split(',').map(m => m.trim()).filter(Boolean);
+  ids.forEach(id => {
+    let info = machines.get(id) || {};
+    
+    if (action === 'activate') {
+      if (!info[callType]) info[callType] = { since: Date.now() };
+      machines.set(id, info);
+    } else {
+      if (info[callType]) delete info[callType];
+      
+      if (Object.keys(info).length === 0) {
+        machines.delete(id);
+      } else {
+        machines.set(id, info);
+      }
+    }
+  });
+
+  const payload = buildStopCallPayload(factory);
+  broadcastToFactory(factory, payload);
+  console.log(`🟥 stop-call ${action} (${callType}) for ${factory}/${ids.join(',')} → ${payload.active.length} active`);
+  res.json({ ok: true, active: payload.active });
+});
+
+// Tablet → server: periodic state re-assert. Keeps the live machine state
+// alive (idle sweep below) and, after a server restart when memory is empty,
+// re-establishes a machine's state without any DB read. Does NOT clobber state
+// the live tablet-log stream is already maintaining — it just refreshes
+// liveness in that case.
+app.post("/api/machine-assert", (req, res) => {
+  const factory = String(req.body?.工場 || req.body?.factory || '').trim();
+  const equipmentRaw = String(req.body?.設備 || req.body?.machine || '').trim();
+  if (!factory || !equipmentRaw) {
+    return res.status(400).json({ error: "工場 and 設備 are required" });
+  }
+  const ids = equipmentRaw.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+  const seb = String(req.body?.背番号 || '');
+  const hinban = String(req.body?.品番 || '');
+  const mode = String(req.body?.mode || 'idle');
+  const modeStartedAt = Number(req.body?.modeStartedAt) || 0;
+  const runStartedAt = Number(req.body?.runStartedAt) || 0;
+  const now = Date.now();
+  const map = getMachineStateMap(factory);
+  const updated = [];
+
+  ids.forEach(id => {
+    let st = map.get(id);
+    if (!st) {
+      // Recovery: server has no record (e.g., after a restart) → adopt the
+      // tablet's snapshot as the source of truth.
+      st = {
+        sebanggo: '', hinban: '', worker: '',
+        breakActive: false, maintActive: false,
+        runSince: 0, modeSince: 0, prodAccumMs: 0, updatedAt: now, lastSeen: now
+      };
+      if (mode !== 'idle' && seb) {
+        st.sebanggo = seb; st.hinban = hinban;
+        if (mode === 'break') { st.breakActive = true; st.modeSince = modeStartedAt || now; }
+        else if (mode === 'maintenance') { st.maintActive = true; st.modeSince = modeStartedAt || now; }
+        else { st.runSince = runStartedAt || now; } // running
+      }
+      map.set(id, st);
+      updated.push(id);
+    }
+    // Always refresh liveness (prevents the idle sweep from idling an active machine)
+    st.lastSeen = now;
+  });
+
+  if (updated.length) {
+    broadcastToFactory(factory, {
+      type: 'machine_state', factory,
+      machines: updated.map(id => machineStateView(id, map.get(id)))
+    });
+  }
+  res.json({ ok: true });
+});
+
+// Idle sweep: if a machine hasn't been seen (no tablet log AND no re-assert)
+// for a while, its tablet is off/closed — show it as idle rather than stale.
+setInterval(() => {
+  const now = Date.now();
+  const STALE_MS = 150000; // ~2.5 min (tablets re-assert every 30s)
+  factoryMachineState.forEach((map, factory) => {
+    const idled = [];
+    map.forEach((st, id) => {
+      const mode = st.maintActive ? 'maintenance' : st.breakActive ? 'break' : (st.sebanggo ? 'running' : 'idle');
+      if (mode !== 'idle' && (now - (st.lastSeen || st.updatedAt || 0)) > STALE_MS) {
+        st.sebanggo = ''; st.hinban = '';
+        st.breakActive = false; st.maintActive = false;
+        st.runSince = 0; st.modeSince = 0; st.prodAccumMs = 0;
+        idled.push(id);
+      }
+    });
+    if (idled.length) {
+      broadcastToFactory(factory, {
+        type: 'machine_state', factory,
+        machines: idled.map(id => machineStateView(id, map.get(id)))
+      });
+    }
+  });
+}, 60000);
 
 // API endpoint to broadcast scan data to specific machine(s)
 // Supports both single machines (OZNC09) and grouped machines (OZNC04,OZNC06)
@@ -860,6 +1138,16 @@ app.post("/api/tablet-log", async (req, res) => {
 
     if (!insertResult.duplicate && logEntry.工場) {
       broadcastToFactory(logEntry.工場, broadcastPayload);
+      // Update + broadcast live machine status (running 背番号 / break / maint / idle)
+      const affected = applyTabletLogToMachineState(logEntry);
+      if (affected.length) {
+        const map = factoryMachineState.get(logEntry.工場);
+        broadcastToFactory(logEntry.工場, {
+          type: 'machine_state',
+          factory: logEntry.工場,
+          machines: affected.map(id => machineStateView(id, map.get(id)))
+        });
+      }
     }
 
     res.json({
@@ -2886,7 +3174,7 @@ app.post('/submitToDCP', async (req, res) => {
                 工場: formData.工場,
                 Total: Total_KensaDB,
                 Worker_Name: formData.Inspector_Name || formData.Worker_Name, // Use Inspector_Name if available, fallback to Worker_Name
-                Process_Quantity: formData.Process_Quantity,
+                Process_Quantity: formData.Total, // kensaDB Process_Quantity = production Total (already minus production defects)
                 Remaining_Quantity: formData.Inspection_Good_Total || formData.Total,
                 Date: formData.Inspection_Date || formData.Date, // Use Inspection_Date if available
                 Time_start: formData.Inspection_Time_start || formData.Time_start, // Use Inspection times
