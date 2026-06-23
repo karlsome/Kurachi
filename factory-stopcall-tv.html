@@ -769,73 +769,38 @@
         }
         updateSoundButton();
 
+        // Preload the new MP3 alert files
+        const audioLeader = new Audio('src/leader.mp3');
+        const audioBox = new Audio('src/box.mp3');
+        const audioRoll = new Audio('src/roll.mp3');
 
-
-        // Ascending 3-chime "attention" call (PA / airport pre-announcement
-        // style): three rising bell-like notes that grab attention without being
-        // harsh, and carry across the floor.
+        // Optional: unlock audio on first interaction if autoplay is blocked
+        function unlockMp3s() {
+            [audioLeader, audioBox, audioRoll].forEach(a => {
+                a.muted = true;
+                a.play().then(() => {
+                    a.pause();
+                    a.currentTime = 0;
+                    a.muted = false;
+                }).catch(e => {});
+            });
+            document.removeEventListener('click', unlockMp3s);
+            document.removeEventListener('touchstart', unlockMp3s);
+        }
+        document.addEventListener('click', unlockMp3s);
+        document.addEventListener('touchstart', unlockMp3s);        // Play the assigned MP3 files instead of synthesized tones
         function playAlert(type = 'leader') {
-            if (!ensureAudio()) return;
-            const ctx = audioCtx;
-            const t0 = ctx.currentTime + 0.02;
-
-            if (type === 'box') {
-                // High, bright, single "elevator ping" (C6, glassy bell)
-                const freq = 1046.50; // C6
-                const g = ctx.createGain();
-                g.connect(ctx.destination);
-                g.gain.setValueAtTime(0.0001, t0);
-                g.gain.exponentialRampToValueAtTime(0.4, t0 + 0.01);
-                g.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.5);
-
-                [[freq, 1], [freq * 2, 0.2], [freq * 3, 0.05]].forEach(([f, amp]) => {
-                    const o = ctx.createOscillator();
-                    const og = ctx.createGain();
-                    o.type = 'sine';
-                    o.frequency.setValueAtTime(f, t0);
-                    og.gain.value = amp;
-                    o.connect(og); og.connect(g);
-                    o.start(t0); o.stop(t0 + 1.6);
-                });
-            } else if (type === 'material') {
-                // Low, warm, quick double "woodblock / marimba" bloop (F4 -> C4)
-                const notes = [349.23, 261.63]; 
-                notes.forEach((freq, i) => {
-                    const t = t0 + i * 0.2; // fast succession
-                    const g = ctx.createGain();
-                    g.connect(ctx.destination);
-                    g.gain.setValueAtTime(0.0001, t);
-                    g.gain.exponentialRampToValueAtTime(0.5, t + 0.01); // sharp attack
-                    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.35); // fast decay
-                    
-                    const o = ctx.createOscillator();
-                    o.type = 'triangle'; // warm, hollow tone
-                    o.frequency.setValueAtTime(freq, t);
-                    o.connect(g);
-                    o.start(t); o.stop(t + 0.4);
-                });
-            } else {
-                // Leader (Ascending 3-chime)
-                const notes = [587.33, 783.99, 1046.50]; // D5 → G5 → C6
-                const step = 0.34;
-                const dur = 0.9;
-                notes.forEach((freq, i) => {
-                    const t = t0 + i * step;
-                    const g = ctx.createGain();
-                    g.connect(ctx.destination);
-                    g.gain.setValueAtTime(0.0001, t);
-                    g.gain.exponentialRampToValueAtTime(0.32, t + 0.015);
-                    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-                    [[freq, 1], [freq * 2, 0.25]].forEach(([f, amp]) => {
-                        const o = ctx.createOscillator();
-                        const og = ctx.createGain();
-                        o.type = 'sine';
-                        o.frequency.setValueAtTime(f, t);
-                        og.gain.value = amp;
-                        o.connect(og); og.connect(g);
-                        o.start(t); o.stop(t + dur + 0.05);
-                    });
-                });
+            if (!soundOn) return;
+            try {
+                let a;
+                if (type === 'box') a = audioBox;
+                else if (type === 'material') a = audioRoll;
+                else a = audioLeader;
+                
+                a.currentTime = 0;
+                a.play().catch(e => console.log('Audio play blocked (needs user interaction or autoplay enabled):', e));
+            } catch (err) {
+                console.error("Error playing alert:", err);
             }
         }
 
