@@ -5239,6 +5239,14 @@ async function captureFromWebcam() {
   // Convert to base64
   const base64Image = canvas.toDataURL('image/jpeg', 0.95);
 
+  // Snapshot the target lot NOW (synchronously, before any await). The photo is
+  // processed in the background, during which the user may scan the next lot and
+  // overwrite window.__captureLotTarget — so we must capture and consume it here,
+  // then thread it explicitly into addMaterialLabelPhoto (same pattern as the
+  // file-input path) to keep the photo bound to the correct lot.
+  const lotTarget = window.__captureLotTarget || null;
+  if (window.__captureLotTarget) window.__captureLotTarget = null;
+
   checkBlurAndProceed(base64Image, async () => {
     console.log(`📸 Captured from webcam: ${(base64Image.length / 1024).toFixed(2)} KB`);
     console.log(`Current mapping:`, currentPhotoMapping);
@@ -5255,7 +5263,7 @@ async function captureFromWebcam() {
     if (savedButtonId === 'makerLabelButton') {
       console.log('📸 Processing material label photo (multi-photo system)');
 
-      const added = await addMaterialLabelPhoto(base64Image);
+      const added = await addMaterialLabelPhoto(base64Image, lotTarget);
 
       if (added) {
         console.log('✅ Successfully added material label photo from webcam');
@@ -5655,6 +5663,13 @@ window.addEventListener('message', async function (event) {
   if (event.origin === window.location.origin) {
     const data = event.data;
 
+    // Snapshot the target lot NOW (before any await). The photo processes in the
+    // background, during which the user may scan the next lot and overwrite
+    // window.__captureLotTarget — so capture/consume it here and pass it
+    // explicitly into addMaterialLabelPhoto to keep the photo bound to its lot.
+    const lotTarget = window.__captureLotTarget || null;
+    if (window.__captureLotTarget) window.__captureLotTarget = null;
+
     // First, preserve the sub-dropdown value if it exists
     const subDropdown = document.getElementById('sub-dropdown');
     const selectedSubDropdownValue = subDropdown?.value;
@@ -5708,8 +5723,10 @@ window.addEventListener('message', async function (event) {
             }
           }
 
-          // We pass the full data URL to addMaterialLabelPhoto
-          const added = await addMaterialLabelPhoto(data.image);
+          // We pass the full data URL to addMaterialLabelPhoto, with the lot
+          // snapshotted at message-receive time (above) so background processing
+          // can't bind it to a lot the user scanned afterwards.
+          const added = await addMaterialLabelPhoto(data.image, lotTarget);
 
           if (added) {
             console.log('Successfully added material label photo');
