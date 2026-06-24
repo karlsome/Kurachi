@@ -4550,6 +4550,7 @@
         <div class="break-timer" id="stopCallTimerDisplay">00:00</div>
         <button type="button" class="btn-finish-break" id="stopCallUnlockButton"
             data-i18n="stopcall_unlock">リーダーQRで解除</button>
+        <button type="button" class="btn-finish-break" id="stopCallResumeCNCButton" style="display:none; background-color: var(--blue);" data-i18n="stopcall_resume_cnc">CNC再開 (OK)</button>
         <button type="button" class="stopcall-cancel-btn" id="stopCallCancelButton"
             data-i18n="stopcall_cancel">間違えました</button>
         <div class="stopcall-qr-wrap" id="stopCallQrWrap">
@@ -5071,6 +5072,8 @@
                 if (menuWrap) menuWrap.style.display = 'none';
                 const unlockBtn = document.getElementById('stopCallUnlockButton');
                 if (unlockBtn) unlockBtn.style.display = '';
+                const resumeBtn = document.getElementById('stopCallResumeCNCButton');
+                if (resumeBtn) resumeBtn.style.display = 'none';
                 const qrWrap = document.getElementById('stopCallQrWrap');
                 if (qrWrap) qrWrap.classList.remove('show');
                 tickStopCall(startEpoch);
@@ -5090,12 +5093,38 @@
                     menuWrap.classList.remove('open');
                 }
             }
+
+            function sendCNCCallStop(callStopValue) {
+                const ipStr = document.getElementById('ipInfo')?.value;
+                if (!ipStr) return;
+                const ips = ipStr.split(',').map(ip => ip.trim()).filter(ip => ip);
+                ips.forEach(async ip => {
+                    const url = `http://${ip}:5000/request?callStop=${callStopValue}`;
+                    try {
+                        await fetch(url, { method: 'GET', mode: 'no-cors' });
+                        console.log(`callStop=${callStopValue} sent to ${ip}`);
+                    } catch (e) {
+                        console.error(`Error sending callStop=${callStopValue} to ${ip}:`, e);
+                        console.log('Fetch failed, trying fallback method...');
+                        try {
+                            const newTab = window.open(url, '_blank');
+                            setTimeout(() => {
+                                if (newTab) newTab.close();
+                            }, 3000);
+                        } catch (fallbackErr) {
+                            console.error('Fallback also failed:', fallbackErr);
+                        }
+                    }
+                });
+            }
+
             function startStopCall() {
                 if (localStorage.getItem(breakPrefix + 'activeStopCallStart')) return; // already calling
                 const startEpoch = Date.now();
                 localStorage.setItem(breakPrefix + 'activeStopCallStart', String(startEpoch));
                 openStopCallOverlay(startEpoch);
                 notifyStopCall('activate', 'leader');
+                sendCNCCallStop(1);
             }
             function cancelStopCall() {
                 const raw = localStorage.getItem(breakPrefix + 'activeStopCallStart');
@@ -5105,6 +5134,7 @@
                 closeStopCallOverlay();
                 notifyStopCall('clear', 'leader');
                 showToast(_t('toast_call_canceled'));
+                sendCNCCallStop(0);
             }
             function beginStopCallUnlock() {
                 const qrWrap = document.getElementById('stopCallQrWrap');
@@ -5154,6 +5184,8 @@
                     if (statusEl) { statusEl.textContent = '❌ スキャナーエラー / Scanner error'; statusEl.style.color = '#FFB3B8'; }
                 }
             }
+            let pendingStopCallRecord = null;
+
             function completeStopCall(leader) {
                 const raw = localStorage.getItem(breakPrefix + 'activeStopCallStart');
                 const startEpoch = raw ? parseInt(raw, 10) : Date.now();
@@ -5161,8 +5193,8 @@
                 const end = new Date();
                 const waitSeconds = Math.max(0, Math.round((end - start) / 1000));
                 const waitMinutes = Math.round(waitSeconds / 60);
-                const data = getStopCallData();
-                data.records.push({
+                
+                pendingStopCallRecord = {
                     calledAt: fmtClock(start),
                     arrivedAt: fmtClock(end),
                     waitSeconds: waitSeconds,
@@ -5170,11 +5202,37 @@
                     leaderName: ((leader.lastName || '') + ' ' + (leader.firstName || '')).trim(),
                     leaderUsername: leader.username || '',
                     leaderRole: leader.role || ''
-                });
+                };
+                
+                stopStopCallScanner();
+                const unlockBtn = document.getElementById('stopCallUnlockButton');
+                if (unlockBtn) unlockBtn.style.display = 'none';
+                const cancelBtn = document.getElementById('stopCallCancelButton');
+                if (cancelBtn) cancelBtn.style.display = 'none';
+                
+                const statusEl = document.getElementById('stopCallStatus');
+                if (statusEl) {
+                    statusEl.textContent = `✅ ${(leader.lastName || '')} ${(leader.firstName || '')} - OKを押して再開 / Press OK to resume`;
+                    statusEl.style.color = '#9DEAB0';
+                }
+                
+                const resumeBtn = document.getElementById('stopCallResumeCNCButton');
+                if (resumeBtn) resumeBtn.style.display = '';
+            }
+
+            function finalizeStopCall() {
+                if (!pendingStopCallRecord) return;
+                
+                sendCNCCallStop(0);
+                
+                const data = getStopCallData();
+                data.records.push(pendingStopCallRecord);
                 data.count = data.records.length;
                 data.totalWaitSeconds = data.records.reduce((s, r) => s + (r.waitSeconds || 0), 0);
                 data.totalWaitMinutes = Math.round(data.totalWaitSeconds / 60);
                 saveStopCallData(data);
+                
+                pendingStopCallRecord = null;
                 localStorage.removeItem(breakPrefix + 'activeStopCallStart');
                 closeStopCallOverlay();
                 notifyStopCall('clear', 'leader');
@@ -5588,8 +5646,10 @@
                 // Stop / Call leader
                 const stopUnlockBtn = document.getElementById('stopCallUnlockButton');
                 const stopCancelBtn = document.getElementById('stopCallCancelButton');
+                const stopResumeBtn = document.getElementById('stopCallResumeCNCButton');
                 if (stopUnlockBtn) stopUnlockBtn.addEventListener('click', beginStopCallUnlock);
                 if (stopCancelBtn) stopCancelBtn.addEventListener('click', cancelStopCall);
+                if (stopResumeBtn) stopResumeBtn.addEventListener('click', finalizeStopCall);
 
                 // Stop / Call leader menu logic
                 const menuWrap = document.getElementById('callMenuWrapper');
