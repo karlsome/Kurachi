@@ -669,6 +669,26 @@
             background: var(--red-hover);
         }
 
+        .btn-break {
+            background: linear-gradient(135deg, #FFB75E 0%, #ED8F03 100%);
+            color: #FFFFFF;
+            border: none;
+            box-shadow: 0 4px 10px rgba(237, 143, 3, 0.3);
+            font-weight: 800;
+            letter-spacing: 0.02em;
+        }
+
+        .btn-break:hover {
+            background: linear-gradient(135deg, #FFC173 0%, #F59B14 100%);
+            box-shadow: 0 6px 14px rgba(237, 143, 3, 0.4);
+            transform: translateY(-1px);
+        }
+
+        .btn-break:active {
+            box-shadow: 0 2px 5px rgba(237, 143, 3, 0.3);
+            transform: translateY(2px);
+        }
+
         .btn-full {
             width: 100%;
         }
@@ -2288,13 +2308,16 @@
                     <!-- Break time (timer-based) + total at the bottom of production -->
                     <div class="glass-card">
                         <h3 data-i18n="break_time_title">休憩時間</h3>
-                        <button type="button" id="breakStartButton" class="btn btn-secondary btn-full"
-                            style="height: 56px; font-size: 1.05rem;">
-                            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor"
-                                stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
-                                style="margin-right:6px;">
-                                <circle cx="12" cy="12" r="9" />
-                                <polyline points="12 7 12 12 15 14" />
+                        <button type="button" id="breakStartButton" class="btn btn-break btn-full"
+                            style="height: 56px; font-size: 1.15rem; border-radius: 12px; transition: all 0.2s ease;">
+                            <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor"
+                                stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"
+                                style="margin-right:8px;">
+                                <path d="M17 8h1a4 4 0 1 1 0 8h-1"></path>
+                                <path d="M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Z"></path>
+                                <line x1="6" y1="2" x2="6" y2="4"></line>
+                                <line x1="10" y1="2" x2="10" y2="4"></line>
+                                <line x1="14" y1="2" x2="14" y2="4"></line>
                             </svg>
                             <span data-i18n="break_start_btn">休憩を開始</span>
                         </button>
@@ -3095,59 +3118,62 @@
             const issues = [];
 
             if (!values.sebanggo) {
-                issues.push({ text: '背番号がスキャンされていません / Product Code is required', tab: 0, fieldId: 'startStep1Scan' });
+                issues.push({ text: _t('submit_err_no_sebanggo'), tab: 0, fieldId: 'startStep1Scan' });
             }
             if (!values.workerName) {
-                issues.push({ text: '作業者名が入力されていません / Worker Name is required', tab: 2, fieldId: 'Machine Operator' });
+                issues.push({ text: _t('submit_err_no_worker'), tab: 2, fieldId: 'Machine Operator' });
             }
             if (!values.date) {
-                issues.push({ text: '加工日が入力されていません / Date is required', tab: 2, fieldId: 'Lot No.' });
+                issues.push({ text: _t('submit_err_no_date'), tab: 2, fieldId: 'Lot No.' });
             }
             if (!values.startTime) {
-                issues.push({ text: '加工開始時間が入力されていません / Start Time is required', tab: 2, fieldId: 'Start Time' });
+                issues.push({ text: _t('submit_err_no_start'), tab: 2, fieldId: 'Start Time' });
             }
             if (!values.endTime) {
-                issues.push({ text: '加工終了時間が入力されていません / End Time is required', tab: 2, fieldId: 'End Time' });
+                issues.push({ text: _t('submit_err_no_end'), tab: 2, fieldId: 'End Time' });
             }
             if (values.startTime && values.endTime && values.startTime === values.endTime) {
-                issues.push({ text: '加工開始時間と終了時間が同じです / Start and End Time cannot be same', tab: 2, fieldId: 'End Time' });
+                issues.push({ text: _t('submit_err_same_time'), tab: 2, fieldId: 'End Time' });
             }
             if (values.processQty <= 0) {
-                issues.push({ text: '加工数が0または空です / Process Quantity must be greater than 0', tab: 2, fieldId: 'ProcessQuantity' });
+                issues.push({ text: _t('submit_err_qty_zero'), tab: 2, fieldId: 'ProcessQuantity' });
             }
             if (values.shotCount < 1) {
-                issues.push({ text: 'ショット数が入力されていません / Shot Count must be at least 1', tab: 2, fieldId: 'shot' });
+                issues.push({ text: _t('submit_err_no_shots'), tab: 2, fieldId: 'shot' });
             }
             if (!values.materialLot) {
-                issues.push({ text: '材料ロットが入力されていません / Material Lot is required', tab: 2, fieldId: '材料ロット' });
+                issues.push({ text: _t('submit_err_no_lot'), tab: 2, fieldId: '材料ロット' });
             }
 
             if (values.photosHatsumono !== 'TRUE') {
-                issues.push({ text: '初物チェックの写真がありません / Hatsumono Photo is missing', tab: 3, fieldId: 'hatsumonoButton' });
+                issues.push({ text: _t('submit_err_no_hatsumono'), tab: 3, fieldId: 'hatsumonoButton' });
             }
 
             if (values.photosAtomono !== 'TRUE') {
-                issues.push({ text: '終物チェックの写真がありません / Atomono Photo is missing', tab: 3, fieldId: 'atomonoButton' });
+                issues.push({ text: _t('submit_err_no_atomono'), tab: 3, fieldId: 'atomonoButton' });
             }
 
             const lotCount = values.materialLot ? values.materialLot.split(',').map(l => l.trim()).filter(l => l).length : 0;
             if (lotCount > 0 && values.photosMaterial < lotCount) {
-                issues.push({ text: `材料ラベル写真が不足しています (必要: ${lotCount}枚以上, 撮影: ${values.photosMaterial}枚) / Insufficient material label photos`, tab: 2, fieldId: '材料ロット' });
+                const msg = _t('submit_insufficient_photos')
+                    .replace('{needed}', lotCount)
+                    .replace('{taken}', values.photosMaterial);
+                issues.push({ text: msg, tab: 2, fieldId: '材料ロット' });
             }
 
             // Kensa (inspection) fields are required only when the kensa toggle is ON
             if (document.getElementById('enable-inputs')?.checked) {
                 if (!document.getElementById('Kensa Name')?.value) {
-                    issues.push({ text: '検査者が入力されていません / Inspector name is required', tab: 2, fieldId: 'Kensa Name' });
+                    issues.push({ text: _t('submit_err_no_inspector'), tab: 2, fieldId: 'Kensa Name' });
                 }
                 if (!document.getElementById('KDate')?.value) {
-                    issues.push({ text: '検査日付が入力されていません / Inspection date is required', tab: 2, fieldId: 'KDate' });
+                    issues.push({ text: _t('submit_err_no_kdate'), tab: 2, fieldId: 'KDate' });
                 }
                 if (!document.getElementById('KStart Time')?.value) {
-                    issues.push({ text: '検査開始時間が入力されていません / Inspection start time is required', tab: 2, fieldId: 'KStart Time' });
+                    issues.push({ text: _t('submit_err_no_kstart'), tab: 2, fieldId: 'KStart Time' });
                 }
                 if (!document.getElementById('KEnd Time')?.value) {
-                    issues.push({ text: '検査終了時間が入力されていません / Inspection end time is required', tab: 2, fieldId: 'KEnd Time' });
+                    issues.push({ text: _t('submit_err_no_kend'), tab: 2, fieldId: 'KEnd Time' });
                 }
             }
 
@@ -3155,12 +3181,12 @@
 
             if (issues.length > 0) {
                 html += '<div class="validation-errors-card">';
-                html += '  <h4 style="color: var(--accent-red); margin-top: 0; margin-bottom: 12px; font-size: 0.95rem;">修正が必要な項目 / Required Fields to Fix:</h4>';
+                html += `  <h4 style="color: var(--accent-red); margin-top: 0; margin-bottom: 12px; font-size: 0.95rem;">${_t('submit_required_title')}</h4>`;
                 html += '  <ul class="validation-list">';
                 issues.forEach(issue => {
                     html += `    <li class="validation-item error" onclick="goToTabAndFocus(${issue.tab}, '${issue.fieldId}')">`;
                     html += `       <span>${issue.text}</span>`;
-                    html += `       <span class="fix-btn">修正 / Go Fix →</span>`;
+                    html += `       <span class="fix-btn">${_t('submit_fix_btn')}</span>`;
                     html += `    </li>`;
                 });
                 html += '  </ul>';
@@ -3168,32 +3194,32 @@
             } else {
                 html += '<div class="validation-success-card">';
                 html += '  <span class="success-checkmark">✓</span>';
-                html += '  <p style="margin: 0; font-weight: bold; color: var(--accent-green);">すべての入力内容が正しいです / All inputs validated successfully</p>';
+                html += `  <p style="margin: 0; font-weight: bold; color: var(--accent-green);">${_t('submit_all_valid')}</p>`;
                 html += '</div>';
             }
 
             // Edit button helper: jumps to the field's tab and highlights it
-            const edit = (tab, fieldId) => `<button type="button" class="row-edit-btn" onclick="goToTabAndFocus(${tab}, '${fieldId}')">✎ 編集</button>`;
+            const edit = (tab, fieldId) => `<button type="button" class="row-edit-btn" onclick="goToTabAndFocus(${tab}, '${fieldId}')">${_t('submit_edit_btn')}</button>`;
             const row = (label, valHtml, editBtn) =>
                 '  <div class="summary-row"><span class="lbl">' + label + '</span> <span class="val">' + valHtml + (editBtn || '') + '</span></div>';
 
             html += '<div class="summary-details-grid">';
-            html += '  <h3>入力データ概要 / Data Summary</h3>';
-            html += row('背番号 (Code):', (values.sebanggo || '---'), edit(0, 'startStep1Scan'));
-            html += row('品番 (Product Number):', (values.hinban || '---'));
-            html += row('作業者 (Worker):', (values.workerName || '---'), edit(2, 'Machine Operator'));
-            html += row('加工日 (Date):', (values.date || '---'), edit(2, 'Lot No.'));
-            html += row('時間 (Time):', (values.startTime || '--:--') + ' ~ ' + (values.endTime || '--:--'), edit(2, 'Start Time'));
+            html += `  <h3>${_t('submit_data_summary')}</h3>`;
+            html += row(_t('submit_lbl_sebanggo'), (values.sebanggo || '---'), edit(0, 'startStep1Scan'));
+            html += row(_t('submit_lbl_hinban'), (values.hinban || '---'));
+            html += row(_t('submit_lbl_worker'), (values.workerName || '---'), edit(2, 'Machine Operator'));
+            html += row(_t('submit_lbl_date'), (values.date || '---'), edit(2, 'Lot No.'));
+            html += row(_t('submit_lbl_time'), (values.startTime || '--:--') + ' ~ ' + (values.endTime || '--:--'), edit(2, 'Start Time'));
             const machines = (typeof groupedMachines !== 'undefined' && groupedMachines.length > 0) ? groupedMachines : [document.getElementById('machine-selector')?.value || 'UNKNOWN'];
             const missingPc = typeof resolveFeed === 'function' ? machines.some(m => resolveFeed(m).pcPerCycle == null) : false;
             
-            html += row('加工数 (Qty):', values.processQty, missingPc ? edit(2, 'ProcessQuantity') : '');
-            html += row('ショット数 (Shots):', values.shotCount, '<button type="button" class="row-edit-btn" onclick="if(window.openShotEditModal) window.openShotEditModal();">✎ 編集</button>');
-            html += row('材料ロット (Material Lot):', (values.materialLot || '---'), edit(2, '材料ロット'));
-            html += row('不良 (Defects):', '疵引: ' + values.defectsPull + ' | 加工: ' + values.defectsProcess + ' | その他: ' + values.defectsOther + ' (NG: ' + values.totalNG + ')', edit(2, 'counter-box-18'));
-            html += row('良品合計 (Good Total):', '<span style="font-weight: bold; color: var(--accent-green);">' + values.totalGood + '</span>');
-            html += row('初物/終物チェック:', '初物: ' + values.photosHatsumono + ' | 終物: ' + values.photosAtomono, edit(3, 'imageGallery'));
-            html += row('材料ラベル画像数 (Label Photos):', values.photosMaterial + '枚', edit(3, 'imageGallery'));
+            html += row(_t('submit_lbl_qty'), values.processQty, missingPc ? edit(2, 'ProcessQuantity') : '');
+            html += row(_t('submit_lbl_shots'), values.shotCount, `<button type="button" class="row-edit-btn" onclick="if(window.openShotEditModal) window.openShotEditModal();">${_t('submit_edit_btn')}</button>`);
+            html += row(_t('submit_lbl_material_lot'), (values.materialLot || '---'), edit(2, '材料ロット'));
+            html += row(_t('submit_lbl_defects'), _t('submit_lbl_defect_pull') + ': ' + values.defectsPull + ' | ' + _t('submit_lbl_defect_process') + ': ' + values.defectsProcess + ' | ' + _t('submit_lbl_defect_other') + ': ' + values.defectsOther + ' (NG: ' + values.totalNG + ')', edit(2, 'counter-box-18'));
+            html += row(_t('submit_lbl_good_total'), '<span style="font-weight: bold; color: var(--accent-green);">' + values.totalGood + '</span>');
+            html += row(_t('submit_lbl_cycle_check'), _t('submit_lbl_first_check') + ': ' + values.photosHatsumono + ' | ' + _t('submit_lbl_last_check') + ': ' + values.photosAtomono, edit(3, 'imageGallery'));
+            html += row(_t('submit_lbl_label_photos'), values.photosMaterial + _t('submit_lbl_photos_unit'), edit(3, 'imageGallery'));
             html += '</div>';
 
             // ----- Calculated values (recalculated live so edits stay consistent) -----
@@ -3211,16 +3237,17 @@
             const netMins = Math.max(0, grossMins - breakMins - maintMins);
             const fmtHM = (m) => Math.floor(m / 60).toString().padStart(2, '0') + 'h ' + (m % 60).toString().padStart(2, '0') + 'm';
             html += '<div class="summary-details-grid summary-calc-grid" style="margin-top: 16px;">';
-            html += '  <h3>計算値 / Calculated Values</h3>';
-            html += row('サイクルタイム (Cycle Time):', cycleTimeVal + ' 秒/個');
-            html += row('総時間 (Gross Time):', fmtHM(grossMins));
-            html += row('休憩合計 (Break):', breakMins + '分');
-            html += row('故障合計 (Maintenance):', maintMins + '分');
-            html += row('実働時間 (Work Time):', '<span style="font-weight: bold; color: var(--blue, #2E6FF2);">' + fmtHM(netMins) + '</span>');
+            html += `  <h3>${_t('submit_calc_values')}</h3>`;
+            html += row(_t('submit_lbl_cycle_time'), cycleTimeVal + _t('submit_lbl_cycle_unit'));
+            html += row(_t('submit_lbl_gross_time'), fmtHM(grossMins));
+            html += row(_t('submit_lbl_break_total'), breakMins + _t('minutes'));
+            html += row(_t('submit_lbl_maintenance_total'), maintMins + _t('minutes'));
+            html += row(_t('submit_lbl_work_time'), '<span style="font-weight: bold; color: var(--blue, #2E6FF2);">' + fmtHM(netMins) + '</span>');
             html += '</div>';
 
             summaryList.innerHTML = html;
         }
+
 
         window.goToTabAndFocus = function (tabIndex, fieldId) {
             goToTab(tabIndex);
