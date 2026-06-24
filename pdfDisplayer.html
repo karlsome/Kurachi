@@ -2588,8 +2588,14 @@
                     if (response.ok) {
                         const state = await response.json();
                         if (state && state.lastScan && state.lastScan.sebanggo) {
-                            if (window.currentSebanggo && window.currentSebanggo !== state.lastScan.sebanggo) {
+                            if (window.currentSebanggo !== state.lastScan.sebanggo) {
                                 console.log(`⚠️ Heartbeat detected stale data! Server: ${state.lastScan.sebanggo}, Local: ${window.currentSebanggo}. Forcing reload.`);
+                                window.location.reload();
+                            }
+                        } else if (!state || !state.lastScan || !state.lastScan.sebanggo) {
+                            // If server says NO scan is active but local says YES, reload
+                            if (window.currentSebanggo) {
+                                console.log(`⚠️ Heartbeat detected stale data! Server has NO scan, Local has: ${window.currentSebanggo}. Forcing reload.`);
                                 window.location.reload();
                             }
                         }

@@ -365,12 +365,23 @@ app.get("/", (req, res) => {
 // Debug endpoint to check stored machine states
 app.get("/api/machine-state/:machineId", (req, res) => {
   const machineId = normalizeMachineSessionKey(req.params.machineId);
-  const lastScan = machineLastScan.get(machineId);
+  let lastScan = machineLastScan.get(machineId);
+  
+  if (!lastScan) {
+    for (const [factory, map] of factoryMachineState.entries()) {
+      const st = map.get(machineId);
+      if (st && st.sebanggo) {
+        lastScan = { type: 'scan', machineId, sebanggo: st.sebanggo, hinban: st.hinban || '' };
+        break;
+      }
+    }
+  }
+
   const playerState = sanitizeMachinePlayerState(getOrCreateMachinePlayerState(machineId));
   
   res.json({
     machineId,
-    hasStoredData: machineLastScan.has(machineId),
+    hasStoredData: !!lastScan,
     lastScan: lastScan || null,
     connectedClients: (machineConnections.get(machineId) || []).length,
     playerState,
@@ -572,8 +583,18 @@ app.get("/sse/machine/:machineId", (req, res) => {
   res.write(`data: ${JSON.stringify({ type: 'connected', machineId, timestamp: new Date().toISOString() })}\n\n`);
   
   // Send last scan data if available (for persistence on page reload)
-  if (machineLastScan.has(machineId)) {
-    const lastScan = machineLastScan.get(machineId);
+  let lastScan = machineLastScan.get(machineId);
+  if (!lastScan) {
+    for (const [factory, map] of factoryMachineState.entries()) {
+      const st = map.get(machineId);
+      if (st && st.sebanggo) {
+        lastScan = { type: 'scan', machineId, sebanggo: st.sebanggo, hinban: st.hinban || '' };
+        break;
+      }
+    }
+  }
+
+  if (lastScan) {
     console.log(`📤 Sending last scan data to new client for ${machineId}:`, lastScan);
     res.write(`data: ${JSON.stringify(lastScan)}\n\n`);
   }
