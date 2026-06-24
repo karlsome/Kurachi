@@ -744,6 +744,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // Initialize material label photo system
   loadMaterialLabelPhotos();
 
+  // Initialize cycle-check (初物/終物) photo system (restores previews from IndexedDB)
+  loadCycleCheckPhotos();
+
   // Add maintenance button
   const addMaintenanceBtn = document.getElementById('add-maintenance-btn');
   if (addMaintenanceBtn) {
@@ -1592,8 +1595,69 @@ const materialLabelDB = (() => {
   };
 })();
 
-// Compress a dataURL to a Blob at the highest quality that fits within maxBytes.
-// Tries quality steps from high to low; falls back to halved dimensions as last resort.
+// IndexedDB for cycle-check photos (初物 / 終物) — keeps image bytes out of
+// localStorage (avoids the ~5MB quota), mirroring the material-label store.
+// These are single photos, so each record is keyed by its imgId
+// ('hatsumonoPic' / 'atomonoPic'); re-capturing simply overwrites it.
+const cycleCheckDB = (() => {
+  let _db = null;
+  const DB_VERSION = 1;
+  const STORE = 'photos';
+
+  function open() {
+    if (_db) return Promise.resolve(_db);
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(`${uniquePrefix}cycleCheckDB`, DB_VERSION);
+      req.onupgradeneeded = e => e.target.result.createObjectStore(STORE, { keyPath: 'id' });
+      req.onsuccess = e => { _db = e.target.result; resolve(_db); };
+      req.onerror = e => reject(e.target.error);
+    });
+  }
+
+  return {
+    put(record) {
+      return open().then(db => new Promise((res, rej) => {
+        const tx = db.transaction(STORE, 'readwrite');
+        tx.objectStore(STORE).put(record).onsuccess = () => res();
+        tx.onerror = e => rej(e.target.error);
+      }));
+    },
+    get(id) {
+      return open().then(db => new Promise((res, rej) => {
+        const req = db.transaction(STORE, 'readonly').objectStore(STORE).get(id);
+        req.onsuccess = e => res(e.target.result);
+        req.onerror = e => rej(e.target.error);
+      }));
+    },
+    getAll() {
+      return open().then(db => new Promise((res, rej) => {
+        const req = db.transaction(STORE, 'readonly').objectStore(STORE).getAll();
+        req.onsuccess = e => res(e.target.result);
+        req.onerror = e => rej(e.target.error);
+      }));
+    },
+    delete(id) {
+      return open().then(db => new Promise((res, rej) => {
+        const tx = db.transaction(STORE, 'readwrite');
+        tx.objectStore(STORE).delete(id).onsuccess = () => res();
+        tx.onerror = e => rej(e.target.error);
+      }));
+    },
+    clear() {
+      return open().then(db => new Promise((res, rej) => {
+        const tx = db.transaction(STORE, 'readwrite');
+        tx.objectStore(STORE).clear().onsuccess = () => res();
+        tx.onerror = e => rej(e.target.error);
+      }));
+    }
+  };
+})();
+
+// Live object URLs for the cycle-check (初物/終物) preview <img>s, so the previous
+// one can be revoked when a photo is replaced or cleared (no localStorage involved).
+const cycleCheckObjectURLs = {};
+
+
 async function compressBlobToLimit(dataURL, maxBytes = 1024 * 1024) {
   const img = await new Promise((res, rej) => {
     const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = dataURL;
@@ -2520,6 +2584,56 @@ async function loadMaterialLabelPhotos() {
   } catch (error) {
     console.error('Error loading material label photos from IndexedDB:', error);
     materialLabelPhotos = [];
+  }
+}
+
+// Point a cycle-check <img> at a stored blob via an object URL, revoking the
+// previous one first. Used both on capture and when restoring on load.
+function setCycleCheckImage(imgId, blob) {
+  const img = document.getElementById(imgId);
+  if (!img) return;
+  const prev = cycleCheckObjectURLs[imgId];
+  if (prev) { try { URL.revokeObjectURL(prev); } catch (e) { } }
+  const url = URL.createObjectURL(blob);
+  cycleCheckObjectURLs[imgId] = url;
+  img.src = url;
+  img.style.display = 'block';
+}
+
+// Restore 初物/終物 previews from IndexedDB on page load. Runs after the generic
+// localStorage→img restore, so it wins. Also drops any legacy localStorage image
+// bytes (and migrates them into IndexedDB once) so images never live in
+// localStorage going forward.
+async function loadCycleCheckPhotos() {
+  const ids = ['hatsumonoPic', 'atomonoPic'];
+  // Capture + remove any legacy localStorage image bytes so they can't be
+  // resurrected by the generic restore on later loads.
+  const legacy = {};
+  ids.forEach(id => {
+    const k = `${uniquePrefix}${id}.src`;
+    const v = localStorage.getItem(k);
+    if (v) { legacy[id] = v; localStorage.removeItem(k); }
+  });
+  try {
+    const records = await cycleCheckDB.getAll();
+    const byId = {};
+    (records || []).forEach(r => { byId[r.id] = r; });
+    for (const id of ids) {
+      if (!document.getElementById(id)) continue;
+      let blob = byId[id] ? byId[id].blob : null;
+      // One-time migration of a photo captured under the old localStorage system.
+      if (!blob && legacy[id]) {
+        try {
+          blob = await compressBlobToLimit(legacy[id], 1024 * 1024);
+          await cycleCheckDB.put({ id, blob, timestamp: new Date().toISOString() });
+          console.log(`Migrated legacy ${id} image from localStorage to IndexedDB`);
+        } catch (e) { console.warn(`Cycle-check migrate failed for ${id}:`, e); }
+      }
+      if (blob) setCycleCheckImage(id, blob);
+    }
+    console.log('Loaded cycle-check photos from IndexedDB');
+  } catch (error) {
+    console.error('Error loading cycle-check photos from IndexedDB:', error);
   }
 }
 
@@ -4352,6 +4466,13 @@ function resetForm() {
   renderMaterialPhotoThumbnails();
   updateMaterialPhotoCount();
 
+  // Revoke cycle-check (初物/終物) object URLs; their blobs in IndexedDB are wiped
+  // (awaited) just before the reload below.
+  Object.keys(cycleCheckObjectURLs).forEach(id => {
+    try { URL.revokeObjectURL(cycleCheckObjectURLs[id]); } catch (e) { }
+    delete cycleCheckObjectURLs[id];
+  });
+
   // Clear material lots
   localStorage.removeItem(`${uniquePrefix}材料ロット-data`);
   materialLots = [];
@@ -4406,6 +4527,7 @@ function resetForm() {
     ]);
     await withTimeout(materialLabelDB.clear(), 2000);
     await withTimeout(maintenanceDB.clearAll(), 2000);
+    await withTimeout(cycleCheckDB.clear(), 2000);
 
     // Reload the page - the load event will broadcast clear if dropdown is empty
     window.location.reload();
@@ -5335,21 +5457,16 @@ async function processPhotoCapture(base64Image, mapping, buttonId) {
     console.log(`   - Image ID: ${mapping.imgId}`);
     console.log(`   - Label ID: ${mapping.labelId}`);
 
-    // Update photo preview immediately
+    // Persist the photo as a Blob in IndexedDB (no base64 in localStorage), then
+    // show it via an object URL — mirroring the material-label photo system.
     const photoPreview = document.getElementById(mapping.imgId);
     console.log(`   - Photo element found: ${!!photoPreview}`);
 
     if (photoPreview) {
-      photoPreview.src = base64Image;
-      photoPreview.style.display = 'block';
-
-      console.log(`   - Set src (${(base64Image.length / 1024).toFixed(2)} KB) and display: block`);
-
-      // Compress image before saving to localStorage to avoid quota issues
-      const compressedImage = await compressBase64Image(base64Image, 1024, 0.7);
-      const photoPreviewKey = `${uniquePrefix}${mapping.imgId}.src`;
-      localStorage.setItem(photoPreviewKey, compressedImage);
-      console.log(`✅ Saved compressed image to localStorage for ${mapping.imgId} (${(compressedImage.length / 1024).toFixed(2)} KB)`);
+      const blob = await compressBlobToLimit(base64Image, 1024 * 1024);
+      await cycleCheckDB.put({ id: mapping.imgId, blob, timestamp: new Date().toISOString() });
+      setCycleCheckImage(mapping.imgId, blob);
+      console.log(`✅ Saved ${mapping.imgId} to IndexedDB (${(blob.size / 1024).toFixed(1)} KB) and set object URL`);
     } else {
       console.error(`❌ Photo preview element not found: ${mapping.imgId}`);
     }
@@ -5805,16 +5922,18 @@ window.addEventListener('message', async function (event) {
             imgId
           } = mapping;
 
-          // Update photo preview
+          // Update photo preview — persist as a Blob in IndexedDB (no base64 in
+          // localStorage) and display via an object URL.
           const photoPreview = document.getElementById(imgId);
           if (photoPreview) {
-            photoPreview.src = data.image;
-            photoPreview.style.display = 'block';
-
-            // Save image source to localStorage
-            const photoPreviewKey = `${uniquePrefix}${imgId}.src`;
-            localStorage.setItem(photoPreviewKey, photoPreview.src);
-            console.log(`Updated and saved image for ${imgId}`);
+            try {
+              const blob = await compressBlobToLimit(data.image, 1024 * 1024);
+              await cycleCheckDB.put({ id: imgId, blob, timestamp: new Date().toISOString() });
+              setCycleCheckImage(imgId, blob);
+              console.log(`Updated and saved image for ${imgId} to IndexedDB`);
+            } catch (e) {
+              console.error(`Failed to store ${imgId} in IndexedDB:`, e);
+            }
           } else {
             console.error(`Image element ${imgId} not found`);
           }
@@ -7013,38 +7132,43 @@ async function collectImagesForUpload() {
       `Display: ${photoPreview ? photoPreview.style.display : 'N/A'}`);
   }
 
-  // Process regular cycle check images (hatsumono and atomono) with compression
+  // Read the stored cycle-check blobs from IndexedDB once (the source of truth now).
+  const cycleRecords = {};
+  try {
+    (await cycleCheckDB.getAll()).forEach(r => { cycleRecords[r.id] = r; });
+  } catch (idbErr) {
+    console.error('⚠️ Could not read IndexedDB records for cycle-check upload:', idbErr);
+  }
+
+  // Process regular cycle check images (hatsumono and atomono)
   let imageIndex = 0; // Counter to ensure unique timestamps
   for (const { imgId, label } of imageMappings) {
+    const record = cycleRecords[imgId];
     const photoPreview = document.getElementById(imgId);
-    // Skip if element doesn't exist, has no src, or is hidden
-    if (!photoPreview || !photoPreview.src || photoPreview.src === '' || photoPreview.src === 'data:,' ||
-      photoPreview.style.display === 'none') {
-      console.log(`Skipping ${label} image: not available or hidden`);
-      continue;
-    }
 
     try {
-      console.log(`Processing ${label} image from element: ${imgId}`);
+      let base64Only = null;
 
-      // Get original image (should be a data URL)
-      const originalDataURL = photoPreview.src;
-      const originalSize = (originalDataURL.length / 1024).toFixed(2);
-      console.log(`Original ${label}: ${originalSize} KB`);
-
-      // Compress for upload (80% quality, max 1024px)
-      const compressedDataURL = await compressBase64Image(originalDataURL, 1024, 0.8);
-      const compressedSize = (compressedDataURL.length / 1024).toFixed(2);
-      console.log(`Compressed ${label}: ${compressedSize} KB`);
-
-      // Extract just the base64 part (remove data:image/jpeg;base64, prefix) for server upload
-      const compressedBase64Only = compressedDataURL.split(',')[1] || compressedDataURL;
+      if (record && record.blob) {
+        // Preferred path: upload the stored blob directly (same as material labels).
+        base64Only = await blobToBase64(record.blob);
+        console.log(`Processing ${label} image from IndexedDB (${(record.blob.size / 1024).toFixed(1)} KB)`);
+      } else if (photoPreview && photoPreview.src && photoPreview.src !== '' &&
+        photoPreview.src !== 'data:,' && photoPreview.style.display !== 'none') {
+        // Fallback: compress from the live <img> (handles any pre-migration edge case).
+        const compressedDataURL = await compressBase64Image(photoPreview.src, 1024, 0.8);
+        base64Only = compressedDataURL.split(',')[1] || compressedDataURL;
+        console.log(`Processing ${label} image from <img> fallback`);
+      } else {
+        console.log(`Skipping ${label} image: not available`);
+        continue;
+      }
 
       // Create unique ID using label, timestamp, and index to prevent overwrites
       const uniqueId = `${imgId}-${Date.now()}-${imageIndex++}`;
 
       imagesToUpload.push({
-        base64: compressedBase64Only, // Server expects base64 without prefix
+        base64: base64Only, // Server expects base64 without prefix
         label,
         id: uniqueId, // Add unique ID for each image
         imgId: imgId, // Keep original imgId for reference
