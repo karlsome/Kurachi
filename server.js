@@ -31130,16 +31130,24 @@ app.get('/api/masterdb/pce-data', async (req, res) => {
 
 app.post('/api/pce/upload', async (req, res) => {
   try {
-    const { fileBase64, sebanggoList, machineSuffix } = req.body;
-    if (!fileBase64 || !Array.isArray(sebanggoList) || !sebanggoList.length || !machineSuffix) {
-      return res.status(400).json({ error: 'fileBase64, sebanggoList, and machineSuffix are required' });
+    const { fileBase64, sebanggoList, machineSuffix, entries, overwrite } = req.body;
+    
+    let uploadEntries = [];
+    if (Array.isArray(entries) && entries.length) {
+      uploadEntries = entries;
+    } else if (Array.isArray(sebanggoList) && machineSuffix) {
+      uploadEntries = sebanggoList.map(code => ({ code, suffix: machineSuffix }));
+    } else {
+      return res.status(400).json({ error: 'fileBase64 and either entries or sebanggoList/machineSuffix are required' });
     }
+    if (!fileBase64) return res.status(400).json({ error: 'fileBase64 is required' });
+
     const folderId = process.env.GOOGLE_DRIVE_PCE_FOLDER_ID;
     if (!folderId) {
       return res.status(500).json({ error: 'GOOGLE_DRIVE_PCE_FOLDER_ID is not set in .env' });
     }
     const drive = _buildDriveClient();
-    const fileNames = sebanggoList.map((s) => `${s}_${machineSuffix}.pce`);
+    const fileNames = uploadEntries.map((e) => `${e.code}${e.suffix ? '_' + e.suffix : ''}.pce`);
 
     // Check for existing files in one query
     const nameConditions = fileNames.map((n) => `name = '${n}'`).join(' or ');
@@ -31147,27 +31155,50 @@ app.post('/api/pce/upload', async (req, res) => {
       q: `(${nameConditions}) and '${folderId}' in parents and trashed = false`,
       supportsAllDrives: true,
       includeItemsFromAllDrives: true,
-      fields: 'files(name)',
+      fields: 'files(id, name)',
     });
-    const conflicts = (searchRes.data.files || []).map((f) => f.name);
-    if (conflicts.length > 0) {
-      return res.status(409).json({ error: 'File already exists', conflicts });
+    const conflictsFiles = searchRes.data.files || [];
+    const conflicts = conflictsFiles.map((f) => f.name);
+    
+    const authorizedToOverwrite = Array.isArray(overwrite) ? overwrite : (overwrite === true ? conflicts : []);
+    const unhandledConflicts = conflicts.filter(c => !authorizedToOverwrite.includes(c));
+
+    if (unhandledConflicts.length > 0) {
+      return res.status(409).json({ error: 'File already exists', conflicts: unhandledConflicts });
     }
 
     const fileBuffer = Buffer.from(fileBase64, 'base64');
     const uploaded = [];
-    for (const sebanggo of sebanggoList) {
-      const fileName = `${sebanggo}_${machineSuffix}.pce`;
+    for (const entry of uploadEntries) {
+      const fileName = `${entry.code}${entry.suffix ? '_' + entry.suffix : ''}.pce`;
+      const existingFile = conflictsFiles.find((f) => f.name === fileName);
+      
+      // If file exists but is NOT authorized for overwrite, skip it.
+      if (existingFile && !authorizedToOverwrite.includes(fileName)) {
+        continue;
+      }
+      
       const stream = new Readable();
       stream.push(fileBuffer);
       stream.push(null);
-      const response = await drive.files.create({
-        requestBody: { name: fileName, parents: [folderId] },
-        media: { mimeType: 'application/octet-stream', body: stream },
-        supportsAllDrives: true,
-        fields: 'id,name',
-      });
-      uploaded.push({ sebanggo, name: response.data.name, id: response.data.id });
+
+      let response;
+      if (existingFile) {
+        response = await drive.files.update({
+          fileId: existingFile.id,
+          media: { mimeType: 'application/octet-stream', body: stream },
+          supportsAllDrives: true,
+          fields: 'id,name',
+        });
+      } else {
+        response = await drive.files.create({
+          requestBody: { name: fileName, parents: [folderId] },
+          media: { mimeType: 'application/octet-stream', body: stream },
+          supportsAllDrives: true,
+          fields: 'id,name',
+        });
+      }
+      uploaded.push({ code: entry.code, name: response.data.name, id: response.data.id });
     }
     res.json({ success: true, files: uploaded });
   } catch (error) {
