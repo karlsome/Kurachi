@@ -321,6 +321,15 @@
         .grid[data-phase="2"] .tile.calling .name { display: none; }
         .grid[data-phase="2"] .tile.calling .type-display { display: flex; }
         
+        /* Phase 3 shows the 背番号 (seb) if available, otherwise falls back to name */
+        .grid[data-phase="3"] .tile.calling .name { display: none; }
+        .grid[data-phase="3"] .tile.calling[data-has-seb="true"] .seb { 
+            display: block; 
+            color: #fff;
+            text-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+        }
+        .grid[data-phase="3"] .tile.calling:not([data-has-seb="true"]) .name { display: block; }
+        
         /* If only leader is active, phase 2 acts like phase 0 (shows name) */
         .grid[data-phase="2"] .tile.calling[data-only-leader="true"] .name { display: block; }
         .grid[data-phase="2"] .tile.calling[data-only-leader="true"] .type-display { display: none; }
@@ -869,7 +878,7 @@
         let callPhase = 0;
         setInterval(() => {
             if (activeList.length > 0) {
-                callPhase = (callPhase + 1) % 3;
+                callPhase = (callPhase + 1) % 4;
                 grid.dataset.phase = callPhase;
             } else {
                 callPhase = 0;
@@ -915,6 +924,17 @@
                     if (item.material) typeHtml += '<div>ROLL</div>';
                 }
                 tile.querySelector('.type-display').innerHTML = typeHtml;
+                
+                const ms = machineState.get(machine);
+                const sebEl = tile.querySelector('.seb');
+                if (ms && ms.sebanggo) {
+                    sebEl.textContent = ms.sebanggo;
+                    fitSeb(tile, ms.sebanggo);
+                    tile.dataset.hasSeb = "true";
+                } else {
+                    sebEl.textContent = "";
+                    tile.dataset.hasSeb = "false";
+                }
                 
                 fitCallingName(tile, machine);
             } else {
