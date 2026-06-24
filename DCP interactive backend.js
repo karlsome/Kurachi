@@ -1649,7 +1649,15 @@ const maintenanceDB = (() => {
     deletePhoto(id) { return tx(PHOTOS, 'readwrite', s => s.delete(id)); },
     saveDraft(photos) { return tx(DRAFT, 'readwrite', s => s.put({ key: 'current', photos })); },
     getDraft() { return tx(DRAFT, 'readonly', s => s.get('current')).then(r => r ? r.photos : null); },
-    clearDraft() { return tx(DRAFT, 'readwrite', s => s.delete('current')); }
+    clearDraft() { return tx(DRAFT, 'readwrite', s => s.delete('current')); },
+    // Wipe every stored maintenance photo blob AND the unsaved-photo draft. Used on
+    // reset / successful submit so photo blobs don't pile up in IndexedDB across sessions.
+    clearAll() {
+      return Promise.all([
+        tx(PHOTOS, 'readwrite', s => s.clear()),
+        tx(DRAFT, 'readwrite', s => s.clear())
+      ]);
+    }
   };
 })();
 
@@ -2196,6 +2204,9 @@ function setupMaintenanceModalEvents(modal, existingRecord) {
 function clearMaterialLabelPhotos() {
   materialLabelPhotos.forEach(p => URL.revokeObjectURL(p.blobUrl));
   materialLabelPhotos = [];
+  // Also drop the persisted blobs — clearing only the in-memory array would leave
+  // them in IndexedDB to be reloaded (and re-submitted) on the next page load.
+  materialLabelDB.clear().catch(e => console.warn('materialLabelDB clear failed:', e));
   renderMaterialPhotoThumbnails();
   updateMaterialPhotoCount();
 }
@@ -4273,7 +4284,7 @@ function resetForm() {
     }).catch(err => console.error("Reset log failed:", err));
   }
 
-  return logPromise.then(() => {
+  return logPromise.then(async () => {
     // Clear session AFTER logging
     clearSessionID();
     closeVideoManualPicker();
@@ -4333,10 +4344,11 @@ function resetForm() {
   localStorage.removeItem(`${uniquePrefix}maintenanceRecords`);
   maintenanceRecords = [];
 
-  // Clear material label photos from IndexedDB and revoke object URLs
+  // Revoke object URLs and drop the in-memory array now; the persisted blobs in
+  // IndexedDB are wiped (awaited) just before the reload below so they can't be
+  // reloaded into the next session.
   materialLabelPhotos.forEach(p => URL.revokeObjectURL(p.blobUrl));
   materialLabelPhotos = [];
-  materialLabelDB.clear(); // async fire-and-forget; page reloads immediately after
   renderMaterialPhotoThumbnails();
   updateMaterialPhotoCount();
 
@@ -4381,6 +4393,19 @@ function resetForm() {
     if (currentLanguage) {
       localStorage.setItem('appLanguage', currentLanguage);
     }
+
+    // Empty the on-disk photo stores BEFORE reloading. A fire-and-forget clear
+    // races the reload and can leave the previous session's blobs in IndexedDB —
+    // which loadMaterialLabelPhotos() would then read back in (and could re-submit)
+    // on the next load, piling up tablet storage. We await the clears, but guard
+    // each with a timeout so a blocked IndexedDB transaction can never wedge the
+    // reload.
+    const withTimeout = (p, ms) => Promise.race([
+      Promise.resolve(p).catch(e => console.warn('IndexedDB clear failed:', e)),
+      new Promise(res => setTimeout(res, ms))
+    ]);
+    await withTimeout(materialLabelDB.clear(), 2000);
+    await withTimeout(maintenanceDB.clearAll(), 2000);
 
     // Reload the page - the load event will broadcast clear if dropdown is empty
     window.location.reload();
