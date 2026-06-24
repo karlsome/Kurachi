@@ -3067,6 +3067,11 @@ function selectWorkerName(name) {
 
   // Trigger change event
   input.dispatchEvent(new Event('change'));
+
+  // Update submit summary if it exists (so edits in submit tab reflect immediately)
+  if (typeof updateSubmitSummary === 'function') {
+    updateSubmitSummary();
+  }
 }
 
 // Open worker modal

@@ -3205,9 +3205,9 @@
 
             html += '<div class="summary-details-grid">';
             html += `  <h3>${_t('submit_data_summary')}</h3>`;
-            html += row(_t('submit_lbl_sebanggo'), (values.sebanggo || '---'), edit(0, 'startStep1Scan'));
+            html += row(_t('submit_lbl_sebanggo'), (values.sebanggo || '---'));
             html += row(_t('submit_lbl_hinban'), (values.hinban || '---'));
-            html += row(_t('submit_lbl_worker'), (values.workerName || '---'), edit(2, 'Machine Operator'));
+            html += row(_t('submit_lbl_worker'), (values.workerName || '---'), `<button type="button" class="row-edit-btn" onclick="openWorkerModal()">${_t('submit_edit_btn')}</button>`);
             html += row(_t('submit_lbl_date'), (values.date || '---'), edit(2, 'Lot No.'));
             html += row(_t('submit_lbl_time'), (values.startTime || '--:--') + ' ~ ' + (values.endTime || '--:--'), edit(2, 'Start Time'));
             const machines = (typeof groupedMachines !== 'undefined' && groupedMachines.length > 0) ? groupedMachines : [document.getElementById('machine-selector')?.value || 'UNKNOWN'];
@@ -3218,8 +3218,8 @@
             html += row(_t('submit_lbl_material_lot'), (values.materialLot || '---'), edit(2, '材料ロット'));
             html += row(_t('submit_lbl_defects'), _t('submit_lbl_defect_pull') + ': ' + values.defectsPull + ' | ' + _t('submit_lbl_defect_process') + ': ' + values.defectsProcess + ' | ' + _t('submit_lbl_defect_other') + ': ' + values.defectsOther + ' (NG: ' + values.totalNG + ')', edit(2, 'counter-box-18'));
             html += row(_t('submit_lbl_good_total'), '<span style="font-weight: bold; color: var(--accent-green);">' + values.totalGood + '</span>');
-            html += row(_t('submit_lbl_cycle_check'), _t('submit_lbl_first_check') + ': ' + values.photosHatsumono + ' | ' + _t('submit_lbl_last_check') + ': ' + values.photosAtomono, edit(3, 'imageGallery'));
-            html += row(_t('submit_lbl_label_photos'), values.photosMaterial + _t('submit_lbl_photos_unit'), edit(3, 'imageGallery'));
+            html += row(_t('submit_lbl_cycle_check'), _t('submit_lbl_first_check') + ': ' + values.photosHatsumono + ' | ' + _t('submit_lbl_last_check') + ': ' + values.photosAtomono);
+            html += row(_t('submit_lbl_label_photos'), values.photosMaterial + _t('submit_lbl_photos_unit'));
             html += '</div>';
 
             // ----- Calculated values (recalculated live so edits stay consistent) -----
