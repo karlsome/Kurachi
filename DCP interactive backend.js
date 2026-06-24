@@ -873,6 +873,21 @@ async function fetchSebanggo() {
 // Call fetchSetsubiList when the page loads
 document.addEventListener("DOMContentLoaded", fetchSetsubiList);
 
+function toggleCallButtonsState(isEnabled) {
+  const boxBtn = document.getElementById('callBoxBtn');
+  const matBtn = document.getElementById('callMaterialBtn');
+  if (boxBtn) {
+    boxBtn.disabled = !isEnabled;
+    boxBtn.style.opacity = isEnabled ? '1' : '0.4';
+    boxBtn.style.pointerEvents = isEnabled ? 'auto' : 'none';
+  }
+  if (matBtn) {
+    matBtn.disabled = !isEnabled;
+    matBtn.style.opacity = isEnabled ? '1' : '0.4';
+    matBtn.style.pointerEvents = isEnabled ? 'auto' : 'none';
+  }
+}
+
 //blanks the info page
 function blankInfo() {
   // Clear the value of the label with id "SRScode"
@@ -891,6 +906,8 @@ function blankInfo() {
   if (typeof window.updateParamsGuide === 'function') {
     window.updateParamsGuide();
   }
+
+  toggleCallButtonsState(false);
 }
 
 async function fetchProductDetails() {
@@ -1030,6 +1047,8 @@ async function fetchProductDetails() {
     if (typeof window.updateParamsGuide === 'function') {
       window.updateParamsGuide();
     }
+
+    toggleCallButtonsState(true);
 
   } catch (error) {
     console.error("Error fetching product details:", error);
