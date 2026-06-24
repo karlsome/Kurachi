@@ -96,6 +96,7 @@
             flex: 1;
             display: grid;
             gap: 1.4vh 1.2vw;
+            grid-template-rows: 1fr 1fr 3vh 1fr 1fr;
             grid-auto-rows: 1fr;
             min-height: 0;
         }
@@ -689,10 +690,11 @@
         // Per-factory machine roster (mirrors chooseMachine.html). Office/entrance ignored.
         const FACTORY_MACHINES = {
             '小瀬': [
-                'OZNC01', 'OZNC02', 'OZNC03', 'OZNC04', 'OZNC05', 'OZNC06',
-                'OZNC07', 'OZNC08', 'OZNC09', 'OZNC10', 'OZNC11', 'OZNC12',
-                'OZNC13', 'OZNC14', 'OZNC15', 'OZNC16', 'OZNC17', 'OZNC18',
-                'OZMANAS'
+                'OZNC01', 'OZNC03', 'OZNC05', 'OZNC07', 'OZNC09', 'OZNC18',
+                'OZNC02', 'OZNC04', 'OZNC06', 'OZNC08', 'OZNC10', 'OZNC17',
+                'ROW_SPACER',
+                'OZNC11', 'OZNC13', 'OZNC15', 'OZNC16', 'SPACER', 'SPACER',
+                'OZNC12', 'OZNC14', 'OZMANAS', 'SPACER', 'SPACER', 'SPACER'
             ]
         };
 
@@ -722,6 +724,17 @@
             const cols = chooseColumns(roster.length);
             grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
             roster.forEach(m => {
+                if (m === 'ROW_SPACER') {
+                    const spacer = document.createElement('div');
+                    spacer.style.gridColumn = '1 / -1';
+                    grid.appendChild(spacer);
+                    return;
+                }
+                if (m === 'SPACER') {
+                    const spacer = document.createElement('div');
+                    grid.appendChild(spacer);
+                    return;
+                }
                 const tile = document.createElement('div');
                 tile.className = 'tile';
                 tile.dataset.machine = m;
@@ -997,7 +1010,23 @@
             let rosterChanged = false;
             machines.forEach(m => {
                 if (!m || !m.equipment) return;
-                if (!tileByMachine.has(m.equipment)) { roster.push(m.equipment); rosterChanged = true; }
+                if (!tileByMachine.has(m.equipment)) { 
+                    let inserted = false;
+                    const ozmanasIdx = roster.indexOf('OZMANAS');
+                    if (ozmanasIdx !== -1) {
+                        for (let i = ozmanasIdx + 1; i < roster.length; i++) {
+                            if (roster[i] === 'SPACER') {
+                                roster[i] = m.equipment;
+                                inserted = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (!inserted) {
+                        roster.push(m.equipment); 
+                    }
+                    rosterChanged = true; 
+                }
                 machineState.set(m.equipment, {
                     sebanggo: m.sebanggo || '',
                     hinban: m.hinban || '',
