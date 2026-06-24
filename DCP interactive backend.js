@@ -2200,12 +2200,20 @@ function clearMaterialLabelPhotos() {
   updateMaterialPhotoCount();
 }
 
-async function addMaterialLabelPhoto(photoDataURL, lotTarget = null) {
-  // Try to use the passed lotTarget, else fallback to global (and consume it)
-  let lotNumber = lotTarget;
-  if (!lotNumber && window.__captureLotTarget) {
+async function addMaterialLabelPhoto(photoDataURL, lotTarget = undefined) {
+  // Resolve which lot this photo links to. An explicitly supplied value — including
+  // null, which means "no lot" (e.g. a general gallery capture or an extra defect
+  // photo) — is always respected. We only fall back to the global capture target
+  // when the caller didn't specify a lot at all, and consume it so a later photo
+  // can't accidentally reuse it.
+  let lotNumber;
+  if (lotTarget !== undefined) {
+    lotNumber = lotTarget;
+  } else if (window.__captureLotTarget) {
     lotNumber = window.__captureLotTarget;
     window.__captureLotTarget = null;
+  } else {
+    lotNumber = null;
   }
 
   if (materialLabelPhotos.length >= MAX_MATERIAL_PHOTOS) {
@@ -5239,13 +5247,13 @@ async function captureFromWebcam() {
   // Convert to base64
   const base64Image = canvas.toDataURL('image/jpeg', 0.95);
 
-  // Snapshot the target lot NOW (synchronously, before any await). The photo is
-  // processed in the background, during which the user may scan the next lot and
-  // overwrite window.__captureLotTarget — so we must capture and consume it here,
-  // then thread it explicitly into addMaterialLabelPhoto (same pattern as the
-  // file-input path) to keep the photo bound to the correct lot.
-  const lotTarget = window.__captureLotTarget || null;
-  if (window.__captureLotTarget) window.__captureLotTarget = null;
+  // For material-label captures, bind to the lot held by the capture session (set
+  // on the makerLabelButton click). Reusing the session holder keeps a blur retake
+  // — the user re-clicks Capture — bound to the SAME lot, even if another lot was
+  // scanned in the background meanwhile.
+  const lotTarget = (currentButtonId === 'makerLabelButton')
+    ? (window.__captureSessionLot ? window.__captureSessionLot.lot : (window.__captureLotTarget || null))
+    : null;
 
   checkBlurAndProceed(base64Image, async () => {
     console.log(`📸 Captured from webcam: ${(base64Image.length / 1024).toFixed(2)} KB`);
@@ -5264,6 +5272,8 @@ async function captureFromWebcam() {
       console.log('📸 Processing material label photo (multi-photo system)');
 
       const added = await addMaterialLabelPhoto(base64Image, lotTarget);
+      // Photo saved — release the session's lot binding.
+      window.__captureSessionLot = null;
 
       if (added) {
         console.log('✅ Successfully added material label photo from webcam');
@@ -5282,8 +5292,9 @@ async function captureFromWebcam() {
       console.error('❌ Missing mapping or buttonId for webcam capture');
     }
   }, () => {
-    // onRetake for webcam: just do nothing, let them click capture again.
-    // The webcam modal remains open.
+    // onRetake for webcam: do nothing — let them click Capture again. The webcam
+    // modal stays open and __captureSessionLot stays armed, so the retaken photo
+    // binds to the same lot.
   });
 }
 
@@ -5531,6 +5542,14 @@ if (makerLabelButton) {
         return; // stop further action
       }
 
+      // Open a capture SESSION bound to the lot that is active right now. This
+      // holder is the single source of truth for which lot the photo belongs to:
+      // it survives blur retakes (which re-open the camera without re-clicking
+      // this button) and is immune to the user scanning the next lot in the
+      // background while the photo processes. It is cleared only once the photo
+      // is actually saved.
+      window.__captureSessionLot = { lot: window.__captureLotTarget || null };
+
       // Show photo options modal for material label
       showPhotoOptionModalForMaterial(mapping, fileInput);
     });
@@ -5540,8 +5559,13 @@ if (makerLabelButton) {
       const file = event.target.files[0];
       if (!file) return;
 
-      const lotTarget = window.__captureLotTarget || null;
-      if (window.__captureLotTarget) window.__captureLotTarget = null;
+      // Bind to the lot held by this capture session (set on the makerLabelButton
+      // click). Reusing the session holder — rather than re-reading the global —
+      // means a blur retake re-opens the camera and still binds to the SAME lot,
+      // even if another lot was scanned in the background meanwhile.
+      const lotTarget = window.__captureSessionLot
+        ? window.__captureSessionLot.lot
+        : (window.__captureLotTarget || null);
 
       try {
         console.log('📸 Processing material label photo...');
@@ -5552,6 +5576,8 @@ if (makerLabelButton) {
         checkBlurAndProceed(base64Image, async () => {
           // Add to material label photos array
           const added = await addMaterialLabelPhoto(base64Image, lotTarget);
+          // Photo saved — release the session's lot binding.
+          window.__captureSessionLot = null;
 
           if (added) {
             console.log('✅ Successfully added material label photo');
@@ -5567,12 +5593,15 @@ if (makerLabelButton) {
           event.target.value = '';
           currentButtonId = null;
         }, () => {
+          // Blurry → retake. Keep __captureSessionLot armed so the re-opened
+          // camera binds to the same lot, then re-open the camera.
           event.target.value = '';
           currentButtonId = null;
           fileInput.click();       // Immediately re-open camera
         });
 
       } catch (error) {
+        window.__captureSessionLot = null;
         console.error('❌ Error capturing material label photo:', error);
         showAlert(`写真撮影エラー: ${error.message}`);
         event.target.value = '';
@@ -5663,12 +5692,12 @@ window.addEventListener('message', async function (event) {
   if (event.origin === window.location.origin) {
     const data = event.data;
 
-    // Snapshot the target lot NOW (before any await). The photo processes in the
-    // background, during which the user may scan the next lot and overwrite
-    // window.__captureLotTarget — so capture/consume it here and pass it
-    // explicitly into addMaterialLabelPhoto to keep the photo bound to its lot.
-    const lotTarget = window.__captureLotTarget || null;
-    if (window.__captureLotTarget) window.__captureLotTarget = null;
+    // Bind to the active capture session's lot if one is open, else the current
+    // global target. Read synchronously before any await so background processing
+    // can't rebind the photo to a lot scanned afterwards.
+    const lotTarget = window.__captureSessionLot
+      ? window.__captureSessionLot.lot
+      : (window.__captureLotTarget || null);
 
     // First, preserve the sub-dropdown value if it exists
     const subDropdown = document.getElementById('sub-dropdown');
@@ -5724,9 +5753,11 @@ window.addEventListener('message', async function (event) {
           }
 
           // We pass the full data URL to addMaterialLabelPhoto, with the lot
-          // snapshotted at message-receive time (above) so background processing
+          // resolved at message-receive time (above) so background processing
           // can't bind it to a lot the user scanned afterwards.
           const added = await addMaterialLabelPhoto(data.image, lotTarget);
+          // Photo saved — release the session's lot binding.
+          window.__captureSessionLot = null;
 
           if (added) {
             console.log('Successfully added material label photo');
