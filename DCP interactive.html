@@ -4744,8 +4744,8 @@
                 if (!g) return;
                 const hPic = document.getElementById('hatsumonoPic');
                 const aPic = document.getElementById('atomonoPic');
-                const hCard = statusCardHTML('初物チェック', hPic ? hPic.getAttribute('src') : '', isTrue('hatsumonoLabel'), 'hatsumono');
-                const aCard = statusCardHTML('終物チェック', aPic ? aPic.getAttribute('src') : '', isTrue('atomonoLabel'), 'atomono');
+                const hCard = statusCardHTML(_t('gallery_hatsumono'), hPic ? hPic.getAttribute('src') : '', isTrue('hatsumonoLabel'), 'hatsumono');
+                const aCard = statusCardHTML(_t('gallery_atomono'), aPic ? aPic.getAttribute('src') : '', isTrue('atomonoLabel'), 'atomono');
 
                 // Material label photos (up to 25) get their own row; placeholder when none yet.
                 const matImgs = document.querySelectorAll('#material-photo-thumbnails img');
@@ -4756,7 +4756,7 @@
                 
                 // Show actual captured images first
                 matImgs.forEach((img, i) => { 
-                    matCards += statusCardHTML('材料ラベル ' + (i + 1), img.src, true, 'material'); 
+                    matCards += statusCardHTML(_t('gallery_material_label') + ' ' + (i + 1), img.src, true, 'material'); 
                 });
 
                 // Generate red blank thumbnails for unfulfilled lots
@@ -4765,7 +4765,7 @@
                         matCards += statusCardHTML(materialLots[i], '', false, 'material', true);
                     }
                 } else if (materialLots.length === 0 && matImgs.length === 0) {
-                    matCards = statusCardHTML('材料ラベル', '', false, 'material');
+                    matCards = statusCardHTML(_t('gallery_material_label'), '', false, 'material');
                 }
 
                 // Each capture type on its own row/section.
@@ -5567,6 +5567,7 @@
                 observeLabel('atomonoLabel', () => { syncCheckButtons(); renderImageGallery(); });
                 observeAttr('hatsumonoPic', 'src', renderImageGallery);
                 observeAttr('atomonoPic', 'src', renderImageGallery);
+                document.addEventListener('languageChanged', renderImageGallery);
                 const matThumbs = document.getElementById('material-photo-thumbnails');
                 if (matThumbs) new MutationObserver(renderImageGallery).observe(matThumbs, { childList: true, subtree: true });
 
