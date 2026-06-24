@@ -3015,7 +3015,7 @@
             if (!completed) { card.style.display = 'none'; return; }
             card.style.display = 'flex';
             const sebanggo = document.getElementById('sub-dropdown')?.value || '—';
-            const hinban = document.getElementById('product-number')?.value || '—';
+            const hinban = (typeof currentProductDetails !== 'undefined' && currentProductDetails.hinban) ? currentProductDetails.hinban : (document.getElementById('product-number')?.value || '—');
             const imgSrc = document.getElementById('dynamicImage')?.getAttribute('src') || '';
             document.getElementById('prodInfoSebanggo').textContent = sebanggo;
             document.getElementById('prodInfoHinban').textContent = hinban;
@@ -3097,7 +3097,7 @@
 
             const values = {
                 sebanggo: document.getElementById('sub-dropdown')?.value || '',
-                hinban: document.getElementById('product-number')?.value || '',
+                hinban: (typeof currentProductDetails !== 'undefined' && currentProductDetails.hinban) ? currentProductDetails.hinban : (document.getElementById('product-number')?.value || ''),
                 workerName: document.getElementById('Machine Operator')?.value || '',
                 date: document.getElementById('Lot No.')?.value || '',
                 startTime: document.getElementById('Start Time')?.value || '',
