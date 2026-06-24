@@ -10174,11 +10174,20 @@ window.showStep0Modal = function() {
   });
 
   // Check if we have an existing worker name
-  if (workerInput && workerInput.value && workerInput.value.trim() !== '') {
-    currentWorkerLabel.textContent = workerInput.value;
+  const workerValue = workerInput ? workerInput.value.trim() : '';
+  const isPlaceholderValue = workerValue === '作業者名' || 
+                             workerValue === "Worker's Name" || 
+                             workerValue === 'Nome do Trabalhador';
+
+  if (workerValue !== '' && !isPlaceholderValue) {
+    currentWorkerLabel.textContent = workerValue;
     confirmState.style.display = 'flex';
     selectState.style.display = 'none';
   } else {
+    // If it was a placeholder value (e.g. from old localStorage), clear it out
+    if (isPlaceholderValue && workerInput) {
+      workerInput.value = '';
+    }
     confirmState.style.display = 'none';
     selectState.style.display = 'flex';
   }
