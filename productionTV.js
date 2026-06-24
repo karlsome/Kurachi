@@ -2,8 +2,8 @@
 // Displays goal vs actual and time ahead/behind for all equipment
 
 // Configuration
-//const SERVER_URL = 'https://kurachi.onrender.com';
- const SERVER_URL = 'http://localhost:3000';
+const SERVER_URL = 'https://kurachi.onrender.com';
+// const SERVER_URL = 'http://localhost:3000';
 // const SERVER_URL = 'http://192.168.1.176:3000';
 
 // State
@@ -39,26 +39,26 @@ function getFactoryFromURL() {
 // Initialize on page load
 window.addEventListener('DOMContentLoaded', async () => {
     factoryId = getFactoryFromURL();
-    
+
     if (!factoryId) {
         showError('❌ Factory parameter is missing!<br><br>Please use: <code>?factory=小瀬</code>');
         return;
     }
-    
+
     // Get current date
     currentDate = new Date().toISOString().split('T')[0];
-    
+
     // Update header
     factoryDisplay.textContent = factoryId;
     dateDisplay.textContent = formatDate(currentDate);
     document.title = `${factoryId} - Production Monitor`;
-    
+
     // Load initial data
     await loadInitialData();
-    
+
     // Connect to SSE for real-time updates
     connectSSE();
-    
+
     // Update refresh time every second
     setInterval(updateRefreshTime, 1000);
 });
@@ -70,24 +70,24 @@ window.addEventListener('DOMContentLoaded', async () => {
 async function loadInitialData() {
     try {
         console.log(`📊 Loading production data for ${factoryId} on ${currentDate}...`);
-        
+
         // Load equipment list first
         await loadEquipmentList();
-        
+
         // Load production plan
         await loadProductionPlan();
-        
+
         // Load actual production data
         await loadActualProduction();
-        
+
         // Load in-progress data
         await loadInProgressData();
-        
+
         // Render the display
         renderEquipmentGrid();
-        
+
         loadingIndicator.style.display = 'none';
-        
+
     } catch (error) {
         console.error('❌ Error loading initial data:', error);
         showError('Failed to load production data. Please refresh the page.');
@@ -98,9 +98,9 @@ async function loadInitialData() {
 async function loadEquipmentList() {
     try {
         const response = await fetch(`${SERVER_URL}/getSetsubiList?factory=${factoryId}`);
-        
+
         const data = await response.json();
-        
+
         // Get unique equipment values (keep comma-separated names intact)
         const equipmentSet = new Set();
         data.forEach(item => {
@@ -108,10 +108,10 @@ async function loadEquipmentList() {
                 equipmentSet.add(item.設備);
             }
         });
-        
+
         equipmentList = Array.from(equipmentSet).sort();
         console.log(`✅ Equipment list loaded (${equipmentList.length} unique items):`, equipmentList);
-        
+
     } catch (error) {
         console.error('❌ Error loading equipment list:', error);
         // Fallback: use equipment from pressDB
@@ -131,9 +131,9 @@ async function loadEquipmentListFromPressDB() {
                 query: { 工場: factoryId }
             })
         });
-        
+
         const data = await response.json();
-        
+
         // Extract unique equipment
         const equipmentSet = new Set();
         data.forEach(item => {
@@ -141,10 +141,10 @@ async function loadEquipmentListFromPressDB() {
                 equipmentSet.add(item.設備);
             }
         });
-        
+
         equipmentList = Array.from(equipmentSet).sort();
         console.log(`⚠️ Equipment list loaded from pressDB (${equipmentList.length} items):`, equipmentList);
-        
+
     } catch (error) {
         console.error('❌ Error loading equipment from pressDB:', error);
         equipmentList = [];
@@ -166,9 +166,9 @@ async function loadProductionPlan() {
                 }
             })
         });
-        
+
         const plans = await response.json();
-        
+
         if (plans && plans.length > 0) {
             productionPlan = plans[0];
             console.log('✅ Production plan loaded:', productionPlan);
@@ -176,7 +176,7 @@ async function loadProductionPlan() {
             productionPlan = null;
             console.log('⚠️ No production plan found for today');
         }
-        
+
     } catch (error) {
         console.error('❌ Error loading production plan:', error);
         throw error;
@@ -187,33 +187,33 @@ async function loadProductionPlan() {
 async function loadActualProduction() {
     try {
         const response = await fetch(`${SERVER_URL}/getActualProductionByEquipment?factory=${factoryId}&date=${currentDate}`);
-        
+
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
-        
+
         const records = await response.json();
-        
+
         console.log('📦 Raw actual production data from server:', records);
-        
+
         // Convert array to object for easy lookup by equipment name
         // Keep equipment names EXACTLY as they are (don't split comma-separated names)
         actualProduction = {};
         records.forEach(record => {
             if (record.設備) {
                 const equipmentName = record.設備; // Keep exact name including commas
-                
+
                 console.log(`  ➡️ Mapping equipment "${equipmentName}" to quantity: ${record.totalQuantity}`);
-                
+
                 actualProduction[equipmentName] = {
                     totalQuantity: record.totalQuantity || 0,
                     recordCount: record.recordCount || 0
                 };
             }
         });
-        
+
         console.log('✅ Actual production mapped by equipment:', actualProduction);
-        
+
     } catch (error) {
         console.error('❌ Error loading actual production:', error);
         actualProduction = {};
@@ -237,14 +237,14 @@ async function loadInProgressData() {
                 }
             })
         });
-        
+
         const records = await response.json();
-        
+
         // Process records to get active in-progress sessions per equipment
         inProgressData = processInProgressData(records);
-        
+
         console.log('✅ In-progress data loaded:', inProgressData);
-        
+
     } catch (error) {
         console.error('❌ Error loading in-progress data:', error);
         throw error;
@@ -254,23 +254,23 @@ async function loadInProgressData() {
 // Process in-progress data - group by equipment and sessionID, then filter for active sessions
 function processInProgressData(records) {
     if (!records || records.length === 0) return {};
-    
+
     // Group by equipment and sessionID
     const sessionData = {};
-    
+
     records.forEach(record => {
         const equipment = record['設備'];
         const sessionID = record['sessionID'];
         const status = record['Status'];
         const timestamp = record['Timestamp'];
         const seiban = record['背番号'];
-        
+
         if (!equipment || !sessionID || !timestamp) return;
-        
+
         if (!sessionData[equipment]) {
             sessionData[equipment] = {};
         }
-        
+
         if (!sessionData[equipment][sessionID]) {
             sessionData[equipment][sessionID] = {
                 背番号: seiban,
@@ -283,12 +283,12 @@ function processInProgressData(records) {
             // Update if this is a more recent record
             const existingLast = new Date(sessionData[equipment][sessionID].lastTimestamp);
             const currentTime = new Date(timestamp);
-            
+
             if (currentTime > existingLast) {
                 sessionData[equipment][sessionID].lastTimestamp = timestamp;
                 sessionData[equipment][sessionID].lastStatus = status;
             }
-            
+
             // Update first timestamp if earlier
             const existingFirst = new Date(sessionData[equipment][sessionID].firstTimestamp);
             if (currentTime < existingFirst) {
@@ -296,19 +296,19 @@ function processInProgressData(records) {
             }
         }
     });
-    
+
     // For each equipment, return only active sessions (not Completed or Reset)
     const activeData = {};
-    
+
     for (const equipment in sessionData) {
         for (const sessionID in sessionData[equipment]) {
             const session = sessionData[equipment][sessionID];
-            
+
             // Skip if session is completed or reset
             if (session.lastStatus === 'Completed' || session.lastStatus === 'Reset') {
                 continue;
             }
-            
+
             // Keep the first active session for this equipment (or most recent if multiple)
             if (!activeData[equipment]) {
                 activeData[equipment] = {
@@ -332,7 +332,7 @@ function processInProgressData(records) {
             }
         }
     }
-    
+
     return activeData;
 }
 
@@ -342,20 +342,20 @@ function processInProgressData(records) {
 
 function connectSSE() {
     console.log(`🔌 Connecting to factory SSE: ${factoryId}...`);
-    
+
     eventSource = new EventSource(`${SERVER_URL}/sse/factory/${factoryId}`);
-    
-    eventSource.onopen = function() {
+
+    eventSource.onopen = function () {
         console.log('✅ SSE Connection opened');
         statusDot.classList.add('connected');
         statusText.textContent = '接続済み';
     };
-    
-    eventSource.onerror = function(error) {
+
+    eventSource.onerror = function (error) {
         console.error('❌ SSE Connection error:', error);
         statusDot.classList.remove('connected');
         statusText.textContent = '接続エラー';
-        
+
         // Attempt to reconnect after 5 seconds
         setTimeout(() => {
             console.log('🔄 Attempting to reconnect...');
@@ -363,10 +363,10 @@ function connectSSE() {
             connectSSE();
         }, 5000);
     };
-    
-    eventSource.onmessage = function(event) {
+
+    eventSource.onmessage = function (event) {
         console.log('📨 Received SSE message:', event.data);
-        
+
         try {
             const data = JSON.parse(event.data);
             handleSSEMessage(data);
@@ -379,12 +379,12 @@ function connectSSE() {
 // Handle incoming SSE messages
 function handleSSEMessage(data) {
     console.log('📊 Processing SSE message:', data);
-    
+
     if (data.type === 'connected') {
         console.log(`✅ Connected to factory ${data.factoryId}`);
         return;
     }
-    
+
     if (data.type === 'production_update') {
         console.log('🔄 Production update received, reloading actual production...');
         // Reload actual production data for accurate count
@@ -392,7 +392,7 @@ function handleSSEMessage(data) {
             renderEquipmentGrid();
         });
     }
-    
+
     if (data.type === 'in_progress_update') {
         // Update in-progress data
         if (data.equipment) {
@@ -404,7 +404,7 @@ function handleSSEMessage(data) {
                 Status: data.status,
                 Timestamp: data.timestamp
             };
-            
+
             renderEquipmentGrid();
         }
     }
@@ -428,18 +428,18 @@ function renderEquipmentGrid() {
         updateGoalActualDisplay();
         return;
     }
-    
+
     let html = '<div class="equipment-grid">';
-    
+
     // Create a tile for each equipment
     equipmentList.forEach(equipment => {
         html += renderEquipmentCard(equipment);
     });
-    
+
     html += '</div>';
-    
+
     mainContent.innerHTML = html;
-    
+
     // Update goal vs actual in header
     updateGoalActualDisplay();
 }
@@ -447,16 +447,16 @@ function renderEquipmentGrid() {
 function renderEquipmentCard(equipment) {
     // Find production plan for this equipment
     const plannedProduct = productionPlan?.products?.find(p => p.equipment === equipment);
-    
+
     // Get actual production for this equipment (even if no plan)
     const actual = actualProduction[equipment];
     const actualQuantity = actual ? actual.totalQuantity : 0;
-    
+
     // Get in-progress status
     const inProgress = inProgressData[equipment];
     const isInProgress = !!inProgress;
     const inProgressSebanggo = inProgress ? inProgress.背番号 : null;
-    
+
     // If no plan, show idle state but still show actual production
     if (!plannedProduct) {
         return `
@@ -490,18 +490,18 @@ function renderEquipmentCard(equipment) {
             </div>
         `;
     }
-    
+
     const sebanggo = plannedProduct.背番号;
     const goalQuantity = plannedProduct.quantity || 0;
-    
+
     // Prioritize in-progress sebanggo over planned sebanggo
     const displaySebanggo = isInProgress && inProgressSebanggo ? inProgressSebanggo : sebanggo;
-    
+
     console.log(`📊 Equipment ${equipment}: Goal=${goalQuantity}, Actual=${actualQuantity}, HasData=${!!actual}`);
-    
+
     // Calculate time status
     const timeStatus = calculateTimeStatus(plannedProduct, actualQuantity);
-    
+
     // Determine card class
     let cardClass = 'equipment-card';
     if (actualQuantity === 0) {
@@ -511,7 +511,7 @@ function renderEquipmentCard(equipment) {
     } else if (timeStatus.status === 'behind') {
         cardClass += ' behind';
     }
-    
+
     return `
         <div class="${cardClass}">
             <div class="equipment-name">
@@ -557,16 +557,16 @@ function calculateTimeStatus(product, actualQuantity) {
             message: '生産開始待ち'
         };
     }
-    
+
     // Get current time in minutes from start of day
     const now = new Date();
     const currentMinutes = now.getHours() * 60 + now.getMinutes();
-    
+
     // Get planned start time in minutes
     const startTime = product.startTime || '08:45';
     const [startHour, startMinute] = startTime.split(':').map(Number);
     const startMinutes = startHour * 60 + startMinute;
-    
+
     // If before start time, show waiting
     if (currentMinutes < startMinutes) {
         return {
@@ -575,26 +575,26 @@ function calculateTimeStatus(product, actualQuantity) {
             message: `開始予定: ${startTime}`
         };
     }
-    
+
     // Calculate elapsed time since start (in minutes)
     const elapsedMinutes = currentMinutes - startMinutes;
-    
+
     // Get estimated production time
     const estimatedTime = product.estimatedTime || {};
     const totalSeconds = estimatedTime.totalSeconds || 0;
     const cycleTimeSeconds = totalSeconds / (product.quantity || 1);
-    
+
     // Calculate expected quantity at this time
     const elapsedSeconds = elapsedMinutes * 60;
     const expectedQuantity = Math.floor(elapsedSeconds / cycleTimeSeconds);
-    
+
     // Calculate difference
     const difference = actualQuantity - expectedQuantity;
-    
+
     // Calculate time difference in minutes
     const timeDiffSeconds = Math.abs(difference * cycleTimeSeconds);
     const timeDiffMinutes = Math.round(timeDiffSeconds / 60);
-    
+
     if (difference > 0) {
         // Ahead of schedule
         return {
@@ -651,13 +651,13 @@ function updateGoalActualDisplay() {
             return sum + (product.quantity || 0);
         }, 0);
     }
-    
+
     // Calculate total actual from actual production (sum of all equipment)
     let totalActual = 0;
     for (const equipment in actualProduction) {
         totalActual += actualProduction[equipment].totalQuantity || 0;
     }
-    
+
     // Update display
     if (totalGoalElement) {
         totalGoalElement.textContent = totalGoal > 0 ? totalGoal.toLocaleString() : '-';
@@ -665,7 +665,7 @@ function updateGoalActualDisplay() {
     if (totalActualElement) {
         totalActualElement.textContent = totalActual > 0 ? totalActual.toLocaleString() : '-';
     }
-    
+
     console.log(`📊 Total Goal: ${totalGoal}, Total Actual: ${totalActual}`);
 }
 

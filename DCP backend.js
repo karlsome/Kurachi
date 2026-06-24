@@ -294,7 +294,7 @@ async function logTabletAction(action, status = 'in-progress', additionalData = 
       Action: action,
       Status: status,
       sessionID: sessionID,
-      AdditionalData: additionalData
+      AdditionalData: { ...additionalData, legacyApp: true }
     };
     
     // Try to send immediately
@@ -325,7 +325,7 @@ async function logTabletAction(action, status = 'in-progress', additionalData = 
           Action: action,
           Status: status,
           sessionID: sessionID,
-          AdditionalData: additionalData
+          AdditionalData: { ...additionalData, legacyApp: true }
         });
       }
     } catch (queueError) {

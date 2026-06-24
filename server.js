@@ -243,6 +243,10 @@ function getMachineStateMap(factory) {
 // Update in-memory machine state from one tablet log. Returns the affected
 // equipment ids (a grouped 設備 like "OZNC08,OZNC10" updates both).
 function applyTabletLogToMachineState(logEntry) {
+  if (logEntry.AdditionalData && logEntry.AdditionalData.legacyApp) {
+    return [];
+  }
+  
   const factory = logEntry.工場;
   const equipmentRaw = logEntry.設備 || '';
   if (!factory || !equipmentRaw) return [];
