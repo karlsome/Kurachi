@@ -1068,6 +1068,9 @@ function applyTranslations(lang) {
     }
 
     console.log(`Language changed to: ${lang}`);
+    
+    // Dispatch event so other scripts can re-render dynamic content
+    document.dispatchEvent(new CustomEvent('languageChanged', { detail: { lang } }));
 }
 
 // Initialize language on page load

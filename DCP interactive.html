@@ -3248,6 +3248,7 @@
             summaryList.innerHTML = html;
         }
 
+        document.addEventListener('languageChanged', updateSubmitSummary);
 
         window.goToTabAndFocus = function (tabIndex, fieldId) {
             goToTab(tabIndex);
