@@ -22,7 +22,7 @@ const CHECKLIST_SELECTED_NAME_PREFIX = 'checkListSelectedName2::';
 const MAX_RECENT_NAMES              = 4;
 
 const ANNOTATOR_BRUSH_SIZE = 14;
-const ANNOTATOR_COLORS     = ['#ffffff', '#f59e0b', '#ef4444'];
+const ANNOTATOR_COLORS     = ['#ffffff', '#1F9D6B', '#E5484D'];
 
 const STRINGS = {
   en: {
@@ -427,45 +427,16 @@ function cacheDom() {
 // ── Events ───────────────────────────────────────────────────────
 
 function bindEvents() {
-  dom.workerNameInput.addEventListener('input', () => {
-    const val = dom.workerNameInput.value.trim();
-    state.nameSearch = val;
-    if (val.length > 0) state.selectedName = '';
-    const hasChosen = state.selectedName.length > 0;
-    dom.btnBegin.disabled = !hasChosen && val.length === 0;
-    dom.btnSkip.disabled  = !hasChosen && val.length === 0;
-    renderNameDropdown(val);
-  });
+  dom.workerNameInput.addEventListener('click', openWorkerModal);
 
-  dom.workerNameInput.addEventListener('focus', () => {
-    // Always start search from blank so full list is visible.
-    state.nameSearch = '';
-    dom.workerNameInput.value = '';
-    renderNameDropdown('');
-  });
-
-  dom.workerNameInput.addEventListener('click', () => {
-    state.nameSearch = '';
-    dom.workerNameInput.value = '';
-    renderNameDropdown('');
-  });
+  const closeWorkerModalBtn = document.getElementById('closeWorkerModal');
+  if (closeWorkerModalBtn) {
+    closeWorkerModalBtn.addEventListener('click', closeWorkerModal);
+  }
 
   document.getElementById('lang-switcher').addEventListener('click', (e) => {
     const lang = e.target.closest('[data-lang]')?.dataset.lang;
     if (lang && lang !== state.lang) setLang(lang);
-  });
-
-  dom.workerNameInput.addEventListener('blur', () => {
-    if (!dom.workerNameInput.value.trim() && state.selectedName) {
-      dom.workerNameInput.value = state.selectedName;
-    }
-    // Delay so click on option fires first
-    setTimeout(() => dom.nameDropdown.classList.add('hidden'), 150);
-  });
-
-  dom.workerNameInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !dom.btnBegin.disabled) { closeNameDropdown(); beginInspection(); }
-    if (e.key === 'Escape') closeNameDropdown();
   });
 
   dom.btnBegin.addEventListener('click', beginInspection);
@@ -728,55 +699,45 @@ function showNameError(msg) {
 
 // ── Name autocomplete ────────────────────────────────────────────
 
-function selectNameOption(name) {
-  // Save immediately so the next open shows this at the top of recents.
+function openWorkerModal() {
+  const modal = document.getElementById('workerNameModal');
+  if (modal) {
+    renderWorkerNames();
+    modal.classList.add('show');
+  }
+}
+
+function closeWorkerModal() {
+  const modal = document.getElementById('workerNameModal');
+  if (modal) {
+    modal.classList.remove('show');
+  }
+}
+
+function selectWorkerName(name) {
   rememberRecentName(name);
   state.selectedName = name;
-  state.nameSearch = '';
   persistSelectedName(name);
   dom.workerNameInput.value = name;
   dom.btnBegin.disabled = false;
-  dom.btnSkip.disabled  = false;
-  closeNameDropdown();
+  dom.btnSkip.disabled = false;
+  closeWorkerModal();
 }
 
-function appendNameOption(name) {
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.className = 'name-option';
-  btn.textContent = name;
-  btn.addEventListener('mousedown', (e) => {
-    e.preventDefault();
-    selectNameOption(name);
+function groupNamesByLetter(namesArray) {
+  const grouped = {};
+  namesArray.forEach(name => {
+    if (!name || typeof name !== 'string') return;
+    const firstChar = name.charAt(0).toUpperCase();
+    if (!grouped[firstChar]) {
+      grouped[firstChar] = [];
+    }
+    grouped[firstChar].push(name);
   });
-  dom.nameDropdown.appendChild(btn);
-}
-
-function appendRecentNameChip(name, index) {
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.className = 'name-recent-chip';
-  btn.innerHTML = `
-    <span class="name-recent-chip__name">${escapeHtml(name)}</span>
-    <span class="name-recent-chip__meta">#${index + 1}</span>`;
-  btn.addEventListener('mousedown', (e) => {
-    e.preventDefault();
-    selectNameOption(name);
+  Object.keys(grouped).forEach(key => {
+    grouped[key].sort();
   });
-  return btn;
-}
-
-function appendDropdownLabel(text) {
-  const el = document.createElement('span');
-  el.className = 'name-dropdown-label';
-  el.textContent = text;
-  dom.nameDropdown.appendChild(el);
-}
-
-function appendDropdownDivider() {
-  const el = document.createElement('div');
-  el.className = 'name-dropdown-divider';
-  dom.nameDropdown.appendChild(el);
+  return grouped;
 }
 
 function getVisibleRecentNames() {
@@ -795,56 +756,87 @@ function getVisibleRecentNames() {
   return out.slice(0, MAX_RECENT_NAMES);
 }
 
-function renderNameDropdown(query = '') {
-  if (!state.allNames.length && !state.recentNames.length) {
-    dom.nameDropdown.classList.add('hidden');
-    return;
-  }
+function renderWorkerNames() {
+  const container = document.getElementById('workerNamesContainer');
+  if (!container) return;
+  container.innerHTML = '';
 
-  const q = String(query || '').trim().toLowerCase();
-  dom.nameDropdown.innerHTML = '';
+  const recentWorkers = getVisibleRecentNames();
 
-  const recents = getVisibleRecentNames();
-  if (recents.length > 0) {
-    appendDropdownLabel('Recent');
-    const recentWrap = document.createElement('div');
-    recentWrap.className = 'name-recent-grid';
-    recents.forEach((name, index) => {
-      recentWrap.appendChild(appendRecentNameChip(name, index));
+  if (recentWorkers.length > 0) {
+    const recentSection = document.createElement('div');
+    recentSection.className = 'worker-section recent-section';
+
+    const header = document.createElement('div');
+    header.className = 'worker-section-header';
+    header.textContent = '⭐ 最近使用 / Recent';
+    recentSection.appendChild(header);
+
+    const grid = document.createElement('div');
+    grid.className = 'worker-names-grid';
+
+    recentWorkers.forEach(name => {
+      const wrapper = document.createElement('div');
+      wrapper.style.position = 'relative';
+
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'worker-name-btn';
+      btn.textContent = name;
+      btn.onclick = () => selectWorkerName(name);
+
+      const deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
+      deleteBtn.className = 'delete-recent-btn';
+      deleteBtn.innerHTML = '×';
+      deleteBtn.onclick = (e) => {
+        e.stopPropagation();
+        removeFromRecentNames(name);
+        renderWorkerNames();
+      };
+
+      wrapper.appendChild(btn);
+      wrapper.appendChild(deleteBtn);
+      grid.appendChild(wrapper);
     });
-    dom.nameDropdown.appendChild(recentWrap);
-    if (state.allNames.length > 0) appendDropdownDivider();
+
+    recentSection.appendChild(grid);
+    container.appendChild(recentSection);
   }
 
-  const recentSet = new Set(recents.map(n => n.toLowerCase()));
-  const rest = state.allNames.filter((name) => {
-    if (recentSet.has(name.toLowerCase())) return false;
-    if (!q) return true;
-    return name.toLowerCase().includes(q);
+  const grouped = groupNamesByLetter(state.allNames);
+  const sortedKeys = Object.keys(grouped).sort();
+
+  sortedKeys.forEach(letter => {
+    const section = document.createElement('div');
+    section.className = 'worker-section';
+
+    const header = document.createElement('div');
+    header.className = 'worker-section-header';
+    header.textContent = letter;
+    section.appendChild(header);
+
+    const grid = document.createElement('div');
+    grid.className = 'worker-names-grid';
+
+    grouped[letter].forEach(name => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'worker-name-btn';
+      btn.textContent = name;
+      btn.onclick = () => selectWorkerName(name);
+      grid.appendChild(btn);
+    });
+
+    section.appendChild(grid);
+    container.appendChild(section);
   });
-
-  if (rest.length === 0 && q) {
-    const empty = document.createElement('div');
-    empty.className = 'name-dropdown-empty';
-    empty.textContent = 'No names match your search.';
-    dom.nameDropdown.appendChild(empty);
-  } else {
-    rest.forEach(name => appendNameOption(name));
-  }
-
-  if (dom.nameDropdown.childElementCount === 0) { dom.nameDropdown.classList.add('hidden'); return; }
-
-  dom.nameDropdown.classList.remove('hidden');
-}
-
-function closeNameDropdown() {
-  dom.nameDropdown.classList.add('hidden');
 }
 
 // ── Name screen ──────────────────────────────────────────────────
 
 function beginInspection() {
-  closeNameDropdown();
+  closeWorkerModal();
   const typed = dom.workerNameInput.value.trim();
   state.workerName = state.selectedName || typed;
   if (!state.workerName) return;
@@ -2760,6 +2752,14 @@ function rememberRecentName(name) {
     cleanName,
     ...state.recentNames.filter(n => String(n || '').trim().toLowerCase() !== lower),
   ].slice(0, MAX_RECENT_NAMES);
+  persistRecentNames();
+}
+
+function removeFromRecentNames(name) {
+  const cleanName = String(name || '').trim();
+  if (!cleanName) return;
+  const lower = cleanName.toLowerCase();
+  state.recentNames = state.recentNames.filter(n => String(n || '').trim().toLowerCase() !== lower);
   persistRecentNames();
 }
 

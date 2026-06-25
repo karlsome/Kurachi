@@ -4,23 +4,23 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Machine Inspection</title>
-  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Nunito+Sans:ital,opsz,wght@0,6..12,400;0,6..12,600;0,6..12,700;0,6..12,800;0,6..12,900&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg:        #0d0e10;
-      --fg:        #f0f0ee;
-      --card:      #161820;
-      --secondary: #1e2028;
-      --muted:     #252830;
-      --muted-fg:  #8a8f9e;
-      --primary:   #f59e0b;
-      --border:    rgba(255,255,255,0.07);
-      --ok:        #10b981;
-      --ng:        #ef4444;
+      --bg:        #F4F6FA;
+      --fg:        #1F2733;
+      --card:      #FFFFFF;
+      --secondary: #F7F8FB;
+      --muted:     #EEF1F6;
+      --muted-fg:  #6B7280;
+      --primary:   #1F9D6B;
+      --border:    #E6E8EF;
+      --ok:        #1F9D6B;
+      --ng:        #E5484D;
       --keyboard-inset: 0px;
-      --font-display: 'Barlow Condensed', sans-serif;
-      --font-sans:    'Inter', sans-serif;
-      --font-mono:    'JetBrains Mono', monospace;
+      --font-display: 'Nunito Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      --font-sans:    'Nunito Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      --font-mono:    'Nunito Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -134,13 +134,13 @@
     }
     .skip-cancel-btn:hover { background: var(--muted); }
     .skip-submit-btn {
-      flex: 2; padding: 0.75rem; border-radius: 0.625rem;
-      background: rgba(239,68,68,0.18); border: 1px solid rgba(239,68,68,0.4);
-      color: #f87171; font-family: var(--font-mono); font-size: 0.7rem;
-      font-weight: 700; letter-spacing: 0.08em; cursor: pointer; transition: background 0.15s;
+      flex: 2; padding: 0.75rem; border-radius: 8px;
+      background: var(--ng); border: none;
+      color: #ffffff; font-family: var(--font-mono); font-size: 0.7rem;
+      font-weight: 700; letter-spacing: 0.08em; cursor: pointer; transition: opacity 0.15s;
     }
     .skip-submit-btn:disabled { opacity: 0.35; cursor: not-allowed; }
-    .skip-submit-btn:not(:disabled):hover { background: rgba(239,68,68,0.28); }
+    .skip-submit-btn:not(:disabled):hover { opacity: 0.88; }
 
     /* ── Name screen ─────────────────────────────────────────────── */
     /* Content sits near the top — keyboard appearing doesn't shift the layout */
@@ -149,91 +149,72 @@
     .name-inner .eyebrow { margin-bottom: 0.3rem; }
     .name-inner .page-title { margin-bottom: 2rem; }
     .name-prompt {
-      font-family: var(--font-mono); font-size: 0.65rem; letter-spacing: 0.15em;
+      font-family: inherit; font-size: 0.8125rem; font-weight: 700; letter-spacing: 0.01em;
       color: var(--muted-fg); text-transform: uppercase; margin-bottom: 0.75rem;
     }
     .name-input {
       width: 100%; background: var(--card); border: 1px solid var(--border);
-      color: var(--fg); border-radius: 0.75rem; padding: 1rem 1.25rem;
-      font-family: var(--font-display); font-size: 1.6rem; font-weight: 500;
+      color: var(--fg); border-radius: 8px; padding: 10px 12px;
+      font-family: inherit; font-size: 0.9375rem; font-weight: 600; min-height: 44px;
       outline: none; transition: border-color 0.15s;
       margin-bottom: 1rem;
     }
     .name-input::placeholder { color: var(--muted-fg); }
     .name-input:focus { border-color: rgba(245,158,11,0.4); }
-    /* Autocomplete dropdown */
-    .name-autocomplete-wrap { position: relative; margin-bottom: 1rem; }
-    .name-autocomplete-wrap .name-input { margin-bottom: 0; }
-    .name-dropdown {
-      position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 10;
-      background: var(--card); border: 1px solid rgba(245,158,11,0.3);
-      border-radius: 0.75rem; overflow: hidden;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
-      max-height: 14rem; overflow-y: auto;
+    /* Worker modal styles */
+    #workerNameModal {
+      display: none;
+      position: fixed; inset: 0; z-index: 9999;
+      background: rgba(13, 14, 16, 0.45); backdrop-filter: blur(8px);
+      align-items: center; justify-content: center;
+      animation: modal-bg-enter 0.2s ease-out forwards;
     }
-    .name-option {
-      display: block; width: 100%; padding: 0.75rem 1.25rem; text-align: left;
-      background: none; border: none; color: var(--fg); cursor: pointer;
-      font-family: var(--font-display); font-size: 1.2rem; font-weight: 500;
-      border-bottom: 1px solid var(--border); transition: background 0.1s;
+    #workerNameModal.show { display: flex; }
+    #workerNameModal > div {
+      background: var(--bg); border: 1px solid var(--border);
+      border-radius: 12px; padding: 24px; color: var(--fg);
+      box-shadow: 0 12px 32px rgba(0,0,0,0.2);
+      width: 100%; max-width: 580px; max-height: 86vh;
+      display: flex; flex-direction: column; box-sizing: border-box;
     }
-    .name-option:last-child { border-bottom: none; }
-    .name-option:hover, .name-option.focused { background: rgba(245,158,11,0.1); color: var(--primary); }
-    .name-dropdown-label {
-      display: block; padding: 0.45rem 1.25rem 0.2rem;
-      font-family: var(--font-mono); font-size: 0.6rem; letter-spacing: 0.15em;
-      color: var(--muted-fg); text-transform: uppercase; pointer-events: none;
+    #workerNameModal h2 {
+      font-size: 1.25rem; font-weight: 800; text-align: center; margin-bottom: 20px;
     }
-    .name-dropdown-divider { height: 1px; background: var(--border); margin: 0.25rem 1rem; }
-    .name-recent-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 0.5rem;
-      padding: 0.4rem 0.8rem 0.6rem;
+    .worker-names-container {
+      max-height: 50vh; overflow-y: auto;
     }
-    .name-recent-chip {
-      display: flex;
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 0.15rem;
-      width: 100%;
-      padding: 0.55rem 0.7rem;
-      border-radius: 0.7rem;
-      border: 1px solid var(--border);
-      background: var(--secondary);
-      color: var(--fg);
-      cursor: pointer;
-      text-align: left;
-      transition: border-color 0.12s, background 0.12s;
+    .worker-section { margin-bottom: 18px; }
+    .worker-section-header {
+      background: var(--primary); color: #ffffff;
+      font-size: 0.78rem; font-weight: 800; letter-spacing: 0.03em;
+      padding: 6px 14px; border-radius: 999px; display: inline-block; margin-bottom: 12px;
     }
-    .name-recent-chip:hover {
-      border-color: rgba(245,158,11,0.45);
-      background: rgba(245,158,11,0.12);
+    .worker-names-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px;
     }
-    .name-recent-chip__name {
-      font-family: var(--font-display);
-      font-size: 1.02rem;
-      line-height: 1.15;
-      font-weight: 600;
+    .worker-name-btn {
+      width: 100%; min-height: 58px; padding: 12px 14px;
+      font-size: 1rem; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; text-align: center;
+      background: var(--card); border: 1px solid var(--border); color: var(--fg);
+      border-radius: 8px; transition: background 0.15s, transform 0.1s;
     }
-    .name-recent-chip__meta {
-      font-family: var(--font-mono);
-      font-size: 0.64rem;
-      letter-spacing: 0.08em;
-      color: var(--muted-fg);
+    .worker-name-btn:hover { background: rgba(245,158,11,0.1); border-color: var(--primary); }
+    .worker-name-btn:active { transform: scale(0.97); }
+    .recent-section .worker-name-btn {
+      background: rgba(245,158,11,0.1); border-color: rgba(245,158,11,0.3); color: var(--primary);
     }
-    .name-dropdown-empty {
-      padding: 0.75rem 1.25rem 0.95rem;
-      font-size: 0.82rem;
-      color: var(--muted-fg);
+    .recent-section .worker-section-header { background: var(--primary); }
+    .delete-recent-btn {
+      position: absolute; top: -7px; right: -7px; width: 26px; height: 26px;
+      border-radius: 50%; background: #ef4444; color: #fff;
+      border: 2px solid var(--bg); font-size: 0.9rem; font-weight: 700; cursor: pointer;
     }
-
     .begin-btn {
       width: 100%; display: flex; align-items: center; justify-content: center;
-      gap: 0.625rem; background: var(--primary); border: none; color: #0d0e10;
-      border-radius: 0.75rem; padding: 1rem;
-      font-family: var(--font-display); font-size: 1.1rem; font-weight: 700;
-      letter-spacing: 0.1em; cursor: pointer; transition: opacity 0.15s;
+      gap: 0.625rem; background: var(--primary); border: none; color: #ffffff;
+      border-radius: 8px; padding: 0 18px; min-height: 44px;
+      font-family: inherit; font-size: 0.9375rem; font-weight: 700;
+      letter-spacing: -0.01em; cursor: pointer; transition: opacity 0.15s;
     }
     .begin-btn:disabled { opacity: 0.3; cursor: not-allowed; }
     .begin-btn:not(:disabled):hover { opacity: 0.88; }
@@ -301,8 +282,8 @@
     }
     .reset-all-btn svg { width: 0.92rem; height: 0.92rem; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
     .reset-all-btn:disabled { opacity: 0.25; pointer-events: none; }
-    .eyebrow { font-family: var(--font-mono); font-size: 0.65rem; letter-spacing: 0.2em; color: var(--muted-fg); text-transform: uppercase; margin-bottom: 0.2rem; }
-    h1.page-title { font-family: var(--font-display); font-size: 1.7rem; font-weight: 700; letter-spacing: 0.04em; line-height: 1; }
+    .eyebrow { font-family: inherit; font-size: 0.8125rem; font-weight: 700; color: var(--muted-fg); letter-spacing: 0.01em; text-transform: uppercase; margin-bottom: 0.2rem; }
+    h1.page-title { font-family: inherit; font-size: 1.125rem; font-weight: 800; letter-spacing: -0.02em; line-height: 1; }
     #step-counter { font-family: var(--font-mono); font-size: 1.9rem; font-weight: 500; color: var(--primary); line-height: 1; }
     #step-counter .total { font-size: 1rem; font-weight: 400; color: var(--muted-fg); }
     .ticket-mini-btn {
@@ -466,31 +447,33 @@
     .action-row.single-btn .check-btn:not(.hidden) { grid-column: 1 / -1; }
     .check-btn {
       display: flex; flex-direction: column; align-items: center; justify-content: center;
-      gap: 0.3rem; padding: 1rem 0.9rem; border-radius: 1rem;
-      border: 2px solid transparent; cursor: pointer; user-select: none; touch-action: none;
+      gap: 0.3rem; padding: 1rem 0.9rem; border-radius: 12px;
+      border: 1px solid var(--border); cursor: pointer; user-select: none; touch-action: none;
       transition: background 0.12s, border-color 0.12s, box-shadow 0.12s, transform 0.12s;
-      background: none; font-family: inherit;
+      background: var(--card); font-family: inherit;
     }
     .check-btn:disabled { opacity: 0.25; pointer-events: none; }
-    .ng-btn { background: rgba(127,29,29,0.35); border-color: rgba(239,68,68,0.4); }
-    .ng-btn.pressed { background: rgb(153,27,27); border-color: rgb(239,68,68); box-shadow: 0 0 32px 8px rgba(239,68,68,0.35); transform: scale(0.91); }
-    .ok-btn { background: rgba(6,78,59,0.35); border-color: rgba(16,185,129,0.4); }
-    .ok-btn.pressed { background: rgb(6,95,70); border-color: rgb(16,185,129); box-shadow: 0 0 32px 8px rgba(16,185,129,0.35); transform: scale(0.91); }
+    .ng-btn { background: var(--card); border-color: var(--border); }
+    .ng-btn:hover { background: #FCEBEC; border-color: #E5484D; }
+    .ng-btn.pressed { background: #E5484D; border-color: #E5484D; box-shadow: none; transform: scale(0.98); }
+    .ok-btn { background: var(--card); border-color: var(--border); }
+    .ok-btn:hover { background: #E7F5EF; border-color: #1F9D6B; }
+    .ok-btn.pressed { background: #1F9D6B; border-color: #1F9D6B; box-shadow: none; transform: scale(0.98); }
     .btn-icon { width: 2rem; height: 2rem; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; transition: color 0.1s; }
-    .ng-btn .btn-icon { color: #f87171; }
-    .ng-btn.pressed .btn-icon { color: #fecaca; }
-    .ok-btn .btn-icon { color: #34d399; }
-    .ok-btn.pressed .btn-icon { color: #a7f3d0; }
+    .ng-btn .btn-icon { color: #E5484D; }
+    .ng-btn.pressed .btn-icon { color: #ffffff; }
+    .ok-btn .btn-icon { color: #1F9D6B; }
+    .ok-btn.pressed .btn-icon { color: #ffffff; }
     .btn-label { font-family: var(--font-display); font-size: 1.8rem; font-weight: 700; letter-spacing: 0.18em; line-height: 1; transition: color 0.1s; }
-    .ng-btn .btn-label { color: #f87171; }
-    .ng-btn.pressed .btn-label { color: #fecaca; }
-    .ok-btn .btn-label { color: #34d399; }
-    .ok-btn.pressed .btn-label { color: #a7f3d0; }
+    .ng-btn .btn-label { color: #E5484D; }
+    .ng-btn.pressed .btn-label { color: #ffffff; }
+    .ok-btn .btn-label { color: #1F9D6B; }
+    .ok-btn.pressed .btn-label { color: #ffffff; }
     .btn-sub { font-family: var(--font-mono); font-size: 0.6rem; letter-spacing: 0.15em; transition: color 0.1s; }
-    .ng-btn .btn-sub { color: rgba(239,68,68,0.6); }
-    .ng-btn.pressed .btn-sub { color: rgba(252,165,165,0.8); }
-    .ok-btn .btn-sub { color: rgba(16,185,129,0.6); }
-    .ok-btn.pressed .btn-sub { color: rgba(167,243,208,0.8); }
+    .ng-btn .btn-sub { color: #E5484D; }
+    .ng-btn.pressed .btn-sub { color: #ffffff; }
+    .ok-btn .btn-sub { color: #1F9D6B; }
+    .ok-btn.pressed .btn-sub { color: #ffffff; }
 
     @media (max-height: 860px) {
       header { padding: 0.72rem 1rem 0.4rem; }
@@ -544,11 +527,11 @@
     .result-row.ok      .result-verdict { color: #34d399; }
     .result-row.ng      .result-verdict { color: #f87171; }
     .result-row.skipped .result-verdict { color: var(--primary); }
-    #btn-reset { width: 100%; display: flex; align-items: center; justify-content: center; gap: 0.75rem; background: rgba(6,78,59,0.35); border: 1px solid rgba(16,185,129,0.4); color: #34d399; border-radius: 0.75rem; padding: 1.5rem 1rem; font-family: var(--font-display); font-size: 1.4rem; font-weight: 700; letter-spacing: 0.1em; cursor: pointer; transition: background 0.15s, border-color 0.15s; }
-    #btn-reset:hover { background: rgb(6,95,70); border-color: rgb(16,185,129); }
+    #btn-reset { width: 100%; display: flex; align-items: center; justify-content: center; gap: 0.75rem; background: var(--ok); border: 1px solid var(--ok); color: #ffffff; border-radius: 8px; padding: 1.5rem 1rem; font-family: var(--font-display); font-size: 1.4rem; font-weight: 700; letter-spacing: 0.1em; cursor: pointer; transition: opacity 0.15s; }
+    #btn-reset:hover { opacity: 0.88; }
     #btn-reset svg { width: 1.2rem; height: 1.2rem; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-    .btn-start-over { width: 100%; display: flex; align-items: center; justify-content: center; gap: 0.625rem; background: none; border: 1px solid rgba(239,68,68,0.3); color: #f87171; border-radius: 0.75rem; padding: 1rem; font-family: var(--font-display); font-size: 1rem; font-weight: 600; letter-spacing: 0.1em; cursor: pointer; transition: background 0.15s, border-color 0.15s; margin-bottom: 0.75rem; }
-    .btn-start-over:hover { background: rgba(239,68,68,0.08); border-color: rgba(239,68,68,0.5); }
+    .btn-start-over { width: 100%; display: flex; align-items: center; justify-content: center; gap: 0.625rem; background: none; border: 1px solid var(--border); color: var(--text-main); border-radius: 8px; padding: 1rem; font-family: var(--font-display); font-size: 1rem; font-weight: 600; letter-spacing: 0.1em; cursor: pointer; transition: background 0.15s, border-color 0.15s; margin-bottom: 0.75rem; }
+    .btn-start-over:hover { background: var(--secondary); border-color: var(--muted-fg); }
     .btn-start-over svg { width: 1rem; height: 1rem; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 
     /* ── Numpad ──────────────────────────────────────────────────── */
@@ -762,7 +745,7 @@
       color: #f87171;
     }
     .ticket-save-btn {
-      width: 100%; padding: 1rem; border-radius: 0.75rem; border: none;
+      width: 100%; padding: 1rem; border-radius: 8px; border: none;
       background: var(--ng); color: #fff;
       font-family: var(--font-display); font-size: 1.1rem; font-weight: 700;
       letter-spacing: 0.1em; cursor: pointer; transition: opacity 0.15s;
@@ -870,11 +853,8 @@
       <p id="name-eyebrow" class="eyebrow">PRE-USE INSPECTION</p>
       <h1 class="page-title" id="name-screen-title">Machine Check</h1>
       <p id="name-prompt" class="name-prompt">Enter your name to begin</p>
-      <div class="name-autocomplete-wrap">
-        <input id="worker-name-input" class="name-input" type="text"
-               placeholder="Search or select your name…" autocomplete="off" spellcheck="false">
-        <div id="name-dropdown" class="name-dropdown hidden"></div>
-      </div>
+      <input id="worker-name-input" class="name-input" type="text"
+             placeholder="Search or select your name…" readonly style="cursor: pointer;">
       <button id="btn-begin" class="begin-btn" type="button" disabled>
         <svg viewBox="0 0 24 24">
           <path d="M5 12h14"/><path d="M13 6l6 6-6 6"/>
@@ -1034,6 +1014,17 @@
       </div>
       <p id="submit-success-title" class="success-modal-title">Submitted Successfully</p>
       <p id="submit-success-sub" class="success-modal-sub">Resetting in a moment…</p>
+    </div>
+  </div>
+
+  <!-- Worker Select Modal -->
+  <div id="workerNameModal">
+    <div>
+      <h2 id="worker-modal-title">Select Worker</h2>
+      <div class="worker-names-container" id="workerNamesContainer"></div>
+      <button type="button" class="btn-cancel" id="closeWorkerModal" style="margin-top:15px; width:100%; padding: 12px; border-radius: 8px; background: #ef4444; color: #fff; border:none; font-weight: 700; cursor: pointer; font-size: 1rem;">
+        CLOSE
+      </button>
     </div>
   </div>
 
