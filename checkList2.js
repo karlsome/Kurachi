@@ -909,8 +909,8 @@ function beginInspection() {
   state.inputValue   = null;
   state.photoAssetId = null;
   buildProgressBar();
-  renderStep();
   transitionTo('inspection');
+  renderStep();
 
   const stepResult = state.results[state.step];
   const curStep    = state.steps[state.step];
