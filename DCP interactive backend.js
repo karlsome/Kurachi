@@ -11474,6 +11474,7 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
           // Mark workflow as complete (OZMANAS: トムソンボード scan == Step 3 done)
           saveCurrentStep(0);
           markScanWorkflowComplete();
+          if (typeof assertMachineState === 'function') assertMachineState();
           autoFillProductionStartTime();
 
           // Close Step 3 modal (OZMANAS does not send command to machine at this step)
@@ -11510,6 +11511,7 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
     // Mark workflow as complete (Step 3 send to machine pressed)
     saveCurrentStep(0);
     markScanWorkflowComplete();
+    if (typeof assertMachineState === 'function') assertMachineState();
     autoFillProductionStartTime();
 
     // Navigate to params page immediately, send in background
