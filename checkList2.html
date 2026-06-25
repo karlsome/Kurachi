@@ -288,18 +288,19 @@
     #step-counter .total { font-size: 1rem; font-weight: 400; color: var(--muted-fg); }
     .ticket-mini-btn {
       display: inline-flex; align-items: center; gap: 0.35rem;
-      padding: 0.24rem 0.52rem; border-radius: 999px;
-      border: 1px solid rgba(255,255,255,0.16);
-      background: rgba(255,255,255,0.05); color: var(--muted-fg);
-      font-family: var(--font-mono); font-size: 0.56rem; font-weight: 700;
-      letter-spacing: 0.1em; text-transform: uppercase;
+      padding: 0.4rem 0.75rem; border-radius: 0.5rem;
+      border: 1px solid var(--border-strong, #D6DAE3);
+      background: var(--card, #ffffff); color: var(--fg, #1F2733);
+      font-family: var(--font-mono); font-size: 0.7rem; font-weight: 700;
+      letter-spacing: 0.08em; text-transform: uppercase;
       cursor: pointer; transition: background 0.12s, border-color 0.12s, color 0.12s;
+      box-shadow: 0 1px 2px rgba(16,24,40,0.04);
     }
-    .ticket-mini-btn svg { width: 0.82rem; height: 0.82rem; fill: none; stroke: currentColor; stroke-width: 2; }
-    .ticket-mini-btn:hover:not(:disabled) { color: #fca5a5; border-color: rgba(239,68,68,0.45); background: rgba(239,68,68,0.12); }
-    .ticket-mini-btn.required { color: #fca5a5; border-color: rgba(239,68,68,0.45); background: rgba(239,68,68,0.12); animation: ticket-mini-pulse 1.4s ease-in-out infinite; }
-    .ticket-mini-btn.saved { color: #6ee7b7; border-color: rgba(16,185,129,0.45); background: rgba(16,185,129,0.12); }
-    .ticket-mini-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+    .ticket-mini-btn svg { width: 0.85rem; height: 0.85rem; fill: none; stroke: currentColor; stroke-width: 2; }
+    .ticket-mini-btn:hover:not(:disabled) { background: var(--secondary, #F7F8FB); border-color: var(--muted-fg, #6B7280); }
+    .ticket-mini-btn.required { color: #ffffff; border-color: #E5484D; background: #E5484D; animation: ticket-mini-pulse 1.4s ease-in-out infinite; }
+    .ticket-mini-btn.saved { color: #ffffff; border-color: #1F9D6B; background: #1F9D6B; }
+    .ticket-mini-btn:disabled { opacity: 0.4; cursor: not-allowed; }
     @keyframes ticket-mini-pulse {
       0%, 100% { transform: scale(1); }
       50% { transform: scale(1.04); }
@@ -887,7 +888,7 @@
       <div class="header-right">
         <p id="step-eyebrow" class="eyebrow">STEP</p>
         <p id="step-counter"><span class="num">01</span><span class="total">/01</span></p>
-        <button id="btn-ticket-mini" class="ticket-mini-btn" type="button" disabled>
+        <button id="btn-ticket-mini" class="ticket-mini-btn" type="button">
           <svg viewBox="0 0 24 24"><path d="M3 9a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v3a2 2 0 0 0 0 4v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-3a2 2 0 0 0 0-4z"/><path d="M9 7v14"/></svg>
           <span id="ticket-mini-text">Ticket</span>
         </button>

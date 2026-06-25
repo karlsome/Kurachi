@@ -1164,7 +1164,7 @@ function executeSkip(reason) {
     ? `${approvedUser.firstName || ''} ${approvedUser.lastName || ''}`.trim() || approvedUser.username
     : null;
   closeSkipModal();  // stops QR scanner + clears modal
-  closeNameDropdown();
+  closeWorkerModal();
 
   state.workerName  = name;
   state.selectedName = name;
@@ -2519,7 +2519,7 @@ async function reset() {
   dom.btnBegin.disabled = true;
   dom.btnSkip.disabled  = true;
   dom.nameError.classList.add('hidden');
-  closeNameDropdown();
+  closeWorkerModal();
   transitionTo('name');
 }
 
@@ -2532,6 +2532,9 @@ async function handleResetAllRequest() {
 
   // Existing reset clears draft + selected name while preserving recent names.
   await reset();
+  
+  // Force a hard reload to ensure a completely clean state
+  window.location.reload();
 }
 
 // ── Utilities ────────────────────────────────────────────────────
