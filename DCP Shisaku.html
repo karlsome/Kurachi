@@ -153,8 +153,31 @@
     .detail-pdf-link {
       display: inline-block; margin-top: 1rem; padding: 0.6rem 1rem;
       border-radius: 0.6rem; border: 1px solid rgba(245,158,11,0.4);
-      color: var(--primary); text-decoration: none; font-family: var(--font-mono);
-      font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase;
+      background: none; color: var(--primary); font-family: var(--font-mono);
+      font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer;
+    }
+
+    /* ── PDF preview modal ───────────────────────────────────────── */
+    #pdf-preview-modal {
+      position: fixed; inset: 0; z-index: 120;
+      background: rgba(0,0,0,0.85);
+      align-items: center; justify-content: center;
+      padding: 1.25rem;
+    }
+    #pdf-preview-modal.hidden { display: none; }
+    .pdf-preview-card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 1rem; padding: 1.25rem; width: 100%; max-width: 36rem;
+      max-height: 92dvh; display: flex; flex-direction: column;
+    }
+    .pdf-preview-img-wrap { flex: 1; overflow: auto; border-radius: 0.6rem; background: #000; margin-bottom: 1rem; }
+    .pdf-preview-img-wrap img { width: 100%; height: auto; display: block; }
+    .pdf-preview-close-btn {
+      width: 100%; padding: 0.85rem;
+      border-radius: 0.75rem; border: 1px solid var(--border);
+      background: var(--secondary); color: var(--fg);
+      font-family: var(--font-mono); font-size: 0.75rem; letter-spacing: 0.1em;
+      text-transform: uppercase; cursor: pointer;
     }
     .detail-close-btn {
       width: 100%; margin-top: 1.25rem; padding: 0.85rem;
@@ -315,7 +338,7 @@
     <div class="detail-card">
       <h2 class="detail-card-title">Request Detail</h2>
       <div id="detail-rows"></div>
-      <a id="detail-pdf-link" class="detail-pdf-link hidden" href="#" target="_blank" rel="noopener">View PDF</a>
+      <button id="detail-pdf-link" class="detail-pdf-link hidden" type="button">View PDF</button>
       <button id="produce-btn" class="produce-btn" type="button">Produce</button>
       <div class="detail-actions">
         <button id="detail-close-btn" class="detail-close-btn" type="button">Close</button>
@@ -393,6 +416,16 @@
       <button id="produce-print-btn" class="produce-action-btn print-btn" type="button">Print Label</button>
       <div id="produce-status-msg" class="produce-status-msg"></div>
       <button id="produce-close-btn" class="produce-close-btn" type="button">Close</button>
+    </div>
+  </div>
+
+  <!-- PDF preview modal -->
+  <div id="pdf-preview-modal" class="hidden">
+    <div class="pdf-preview-card">
+      <div class="pdf-preview-img-wrap">
+        <img id="pdf-preview-img" alt="PDF preview">
+      </div>
+      <button id="pdf-preview-close-btn" class="pdf-preview-close-btn" type="button">Close</button>
     </div>
   </div>
 

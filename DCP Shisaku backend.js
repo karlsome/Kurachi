@@ -37,6 +37,9 @@ const dom = {
   detailModal: document.getElementById('detail-modal'),
   detailRows: document.getElementById('detail-rows'),
   detailPdfLink: document.getElementById('detail-pdf-link'),
+  pdfPreviewModal: document.getElementById('pdf-preview-modal'),
+  pdfPreviewImg: document.getElementById('pdf-preview-img'),
+  pdfPreviewCloseBtn: document.getElementById('pdf-preview-close-btn'),
   detailCloseBtn: document.getElementById('detail-close-btn'),
   produceBtn: document.getElementById('produce-btn'),
   produceModal: document.getElementById('produce-modal'),
@@ -263,7 +266,6 @@ function openDetailModal(record) {
   dom.detailRows.appendChild(createdRow);
 
   if (record.pdfLink) {
-    dom.detailPdfLink.href = record.pdfLink;
     dom.detailPdfLink.classList.remove('hidden');
   } else {
     dom.detailPdfLink.classList.add('hidden');
@@ -276,6 +278,19 @@ function openDetailModal(record) {
 function closeDetailModal() {
   dom.detailModal.classList.add('hidden');
   dom.detailModal.style.display = 'none';
+}
+
+function openPdfPreviewModal(pdfLink) {
+  if (!pdfLink) return;
+  dom.pdfPreviewImg.src = pdfLink;
+  dom.pdfPreviewModal.classList.remove('hidden');
+  dom.pdfPreviewModal.style.display = 'flex';
+}
+
+function closePdfPreviewModal() {
+  dom.pdfPreviewModal.classList.add('hidden');
+  dom.pdfPreviewModal.style.display = 'none';
+  dom.pdfPreviewImg.src = '';
 }
 
 // ── Produce modal ─────────────────────────────────────────────────
@@ -543,6 +558,11 @@ async function init() {
   dom.detailCloseBtn.addEventListener('click', closeDetailModal);
   dom.detailModal.addEventListener('click', (e) => {
     if (e.target === dom.detailModal) closeDetailModal();
+  });
+  dom.detailPdfLink.addEventListener('click', () => openPdfPreviewModal(state.activeRecord?.pdfLink));
+  dom.pdfPreviewCloseBtn.addEventListener('click', closePdfPreviewModal);
+  dom.pdfPreviewModal.addEventListener('click', (e) => {
+    if (e.target === dom.pdfPreviewModal) closePdfPreviewModal();
   });
 
   populateMachineSelect();
