@@ -569,9 +569,11 @@ async function loadTemplates() {
       ? `${CHECKLIST_API.templateById}/${encodeURIComponent(templateId)}`
       : `${CHECKLIST_API.templates}?factory=${encodeURIComponent(state.factory)}&machine=${encodeURIComponent(state.machine)}`;
 
+    const namesUrl = `${API_BASE_URL}/getWorkerNames?selectedFactory=${encodeURIComponent(state.factory)}`;
+
     const [tplData, nameData] = await Promise.allSettled([
       fetchJson(templateUrl),
-      fetchJson(CHECKLIST_API.names),
+      fetchJson(namesUrl),
     ]);
 
     state.allNames = resolveNameOptions(nameData);
@@ -636,6 +638,12 @@ function resolveNameOptions(nameData) {
   if (nameData.status !== 'fulfilled' || !nameData.value) return [];
 
   const payload = nameData.value;
+  
+  // If the payload is already an array of strings (from /getWorkerNames)
+  if (Array.isArray(payload)) {
+    return normalizeAndSortNames(payload);
+  }
+
   // New payload shape: { workerDBNames: [], userNames: [], names: [] }
   // Keep compatibility with older payload shape: { names: [] }
   if (Array.isArray(payload.workerDBNames) || Array.isArray(payload.userNames)) {
