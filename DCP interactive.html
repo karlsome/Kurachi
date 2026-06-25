@@ -5403,7 +5403,15 @@
             setTimeout(assertMachineState, 3000);          // shortly after load
             setInterval(assertMachineState, 30000);        // every 30s
             window.addEventListener('online', assertMachineState);
-            document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') assertMachineState(); });
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible') {
+                    // Fire immediately, then retry after 2.5s — the network stack
+                    // takes a moment to resume after screen-lock, so the first
+                    // attempt often fails silently and needs a follow-up.
+                    assertMachineState();
+                    setTimeout(assertMachineState, 2500);
+                }
+            });
 
             // Press-and-hold (2s) to arm the call, to avoid accidental taps.
             const STOP_HOLD_MS = 2000;
