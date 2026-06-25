@@ -210,7 +210,7 @@
       border-radius: 1rem; padding: 1.5rem; width: 100%; max-width: 30rem;
       max-height: 92dvh; overflow-y: auto;
     }
-    .produce-card-title { font-family: var(--font-display); font-size: 1.5rem; font-weight: 700; margin-bottom: 0.25rem; }
+    .produce-card-title { font-family: var(--font-display); font-size: 1.3rem; font-weight: 700; margin-bottom: 0.25rem; overflow-wrap: anywhere; word-break: break-word; line-height: 1.25; }
     .produce-card-subtitle { font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.08em; color: var(--muted-fg); margin-bottom: 1.25rem; }
     .produce-section { margin-bottom: 1.25rem; }
     .produce-section-title {
@@ -218,18 +218,21 @@
       color: var(--primary); text-transform: uppercase; margin-bottom: 0.6rem;
     }
     .produce-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
-    .produce-field { display: flex; flex-direction: column; gap: 0.35rem; }
+    .produce-grid-production { grid-template-columns: 1fr 0.95fr 1fr; column-gap: 0.5rem; row-gap: 0.75rem; }
+    .produce-field { display: flex; flex-direction: column; gap: 0.35rem; min-width: 0; }
     .produce-field label {
       font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.08em;
       color: var(--muted-fg); text-transform: uppercase;
     }
     .produce-field input, .produce-field select {
+      width: 100%; box-sizing: border-box;
       background: var(--secondary); border: 1px solid var(--border);
       color: var(--fg); border-radius: 0.6rem; padding: 0.6rem 0.7rem;
       font-family: var(--font-sans); font-size: 0.9rem; outline: none;
     }
     .produce-field input:focus, .produce-field select:focus { border-color: rgba(245,158,11,0.4); }
     .produce-field input[readonly] { color: var(--muted-fg); }
+    .produce-readonly-grid { display: grid; grid-template-columns: 1fr 1fr; column-gap: 1.5rem; }
     .produce-readonly-row {
       display: flex; justify-content: space-between; gap: 1rem;
       font-size: 0.85rem; padding: 0.4rem 0;
@@ -258,6 +261,11 @@
     }
     .produce-photo-status.captured { color: #6ee7b7; }
 
+    .produce-button-row { display: flex; gap: 0.75rem; margin-top: 0.5rem; margin-bottom: 1.25rem; }
+    .produce-button-row .produce-action-btn,
+    .produce-button-row .produce-send-btn,
+    .produce-button-row .produce-close-btn,
+    .produce-button-row .produce-submit-btn { flex: 1; width: auto; margin-top: 0; }
     .produce-send-btn {
       width: 100%; margin-top: 0.5rem; padding: 0.9rem; border-radius: 0.75rem;
       border: none; background: var(--primary); color: #0d0e10;
@@ -277,6 +285,13 @@
       border-radius: 0.7rem; border: 1px solid var(--border);
       background: transparent; color: var(--fg);
       font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.08em;
+      text-transform: uppercase; cursor: pointer;
+    }
+    .produce-submit-btn {
+      width: 100%; margin-top: 0.75rem; padding: 0.8rem;
+      border-radius: 0.7rem; border: none;
+      background: var(--primary); color: #0d0e10;
+      font-family: var(--font-mono); font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em;
       text-transform: uppercase; cursor: pointer;
     }
   </style>
@@ -325,6 +340,7 @@
             <th>Name</th>
             <th>Material</th>
             <th>Quantity</th>
+            <th>Deadline</th>
           </tr>
         </thead>
         <tbody id="queue-rows"></tbody>
@@ -349,11 +365,11 @@
   <!-- Produce modal -->
   <div id="produce-modal" class="hidden">
     <div class="produce-card">
-      <h2 class="produce-card-title">Prepare for Cutting</h2>
+      <h2 id="produce-card-title" class="produce-card-title"></h2>
       <p id="produce-card-subtitle" class="produce-card-subtitle"></p>
 
       <div class="produce-section">
-        <p class="produce-section-title">Label</p>
+        <p class="produce-section-title">Details</p>
         <div class="produce-grid">
           <div class="produce-field">
             <label for="produce-productNo">Product No. (品番)</label>
@@ -368,21 +384,32 @@
             <select id="produce-machine"></select>
           </div>
         </div>
-        <div class="produce-readonly-row"><span class="label">Material</span><span id="produce-material-readonly"></span></div>
-        <div class="produce-readonly-row"><span class="label">Color</span><span id="produce-color-readonly"></span></div>
+        <div class="produce-readonly-grid">
+          <div class="produce-readonly-row"><span class="label">Material</span><span id="produce-material-readonly"></span></div>
+          <div class="produce-readonly-row"><span class="label">Color</span><span id="produce-color-readonly"></span></div>
+          <div class="produce-readonly-row"><span class="label">Quantity Requested</span><span id="produce-quantity-requested-readonly"></span></div>
+        </div>
+      </div>
+
+      <div class="produce-button-row">
+        <button id="produce-print-btn" class="produce-action-btn print-btn" type="button">Print Label</button>
         <button id="produce-send-btn" class="produce-send-btn" type="button" disabled>Send to Machine</button>
       </div>
 
       <div class="produce-section">
         <p class="produce-section-title">Production</p>
-        <div class="produce-grid">
+        <div class="produce-grid produce-grid-production">
           <div class="produce-field">
             <label for="produce-date">Processing Date</label>
             <input id="produce-date" type="date">
           </div>
           <div class="produce-field">
-            <label for="produce-quantity">Process Quantity</label>
-            <input id="produce-quantity" type="number" min="0">
+            <label for="produce-quantity-produced">Quantity Produced</label>
+            <input id="produce-quantity-produced" type="number" min="0">
+          </div>
+          <div class="produce-field">
+            <label for="produce-parts-per-cycle">Parts Per Cycle</label>
+            <input id="produce-parts-per-cycle" type="number" min="0">
           </div>
           <div class="produce-field">
             <label for="produce-start-time">Start Time</label>
@@ -391,6 +418,10 @@
           <div class="produce-field">
             <label for="produce-end-time">End Time</label>
             <input id="produce-end-time" type="time">
+          </div>
+          <div class="produce-field">
+            <label for="produce-time-per-cycle">Time Per Cycle</label>
+            <input id="produce-time-per-cycle" type="number" min="0">
           </div>
         </div>
       </div>
@@ -413,9 +444,11 @@
         </div>
       </div>
 
-      <button id="produce-print-btn" class="produce-action-btn print-btn" type="button">Print Label</button>
       <div id="produce-status-msg" class="produce-status-msg"></div>
-      <button id="produce-close-btn" class="produce-close-btn" type="button">Close</button>
+      <div class="produce-button-row">
+        <button id="produce-close-btn" class="produce-close-btn" type="button">Cancel</button>
+        <button id="produce-submit-btn" class="produce-submit-btn" type="button">Submit Report</button>
+      </div>
     </div>
   </div>
 

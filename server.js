@@ -31439,12 +31439,32 @@ app.delete('/api/shisaku/:id', async (req, res) => {
 app.get('/api/shisaku-request/list', async (req, res) => {
   try {
     await client.connect();
-    const records = await client
-      .db('Sasaki_Coating_MasterDB')
+    const db = client.db('Sasaki_Coating_MasterDB');
+    const records = await db
       .collection('shisakuRequestDB')
       .find({})
       .sort({ createdAt: -1 })
       .toArray();
+
+    const shisakudbIds = [...new Set(
+      records.map((r) => r.shisakudb_id).filter(Boolean).map((id) => String(id))
+    )].map((id) => new ObjectId(id));
+
+    if (shisakudbIds.length > 0) {
+      const shisakuRecords = await db
+        .collection('shisakuDB')
+        .find({ _id: { $in: shisakudbIds } })
+        .project({ deadline: 1 })
+        .toArray();
+      const deadlineById = new Map(shisakuRecords.map((s) => [String(s._id), s.deadline]));
+
+      records.forEach((r) => {
+        if (r.shisakudb_id) {
+          r.deadline = deadlineById.get(String(r.shisakudb_id)) ?? null;
+        }
+      });
+    }
+
     res.json(records);
   } catch (error) {
     console.error('❌ Error fetching shisakuRequestDB records:', error);

@@ -43,17 +43,21 @@ const dom = {
   detailCloseBtn: document.getElementById('detail-close-btn'),
   produceBtn: document.getElementById('produce-btn'),
   produceModal: document.getElementById('produce-modal'),
+  produceTitle: document.getElementById('produce-card-title'),
   produceSubtitle: document.getElementById('produce-card-subtitle'),
   produceProductNo: document.getElementById('produce-productNo'),
   produceModel: document.getElementById('produce-model'),
   produceMachine: document.getElementById('produce-machine'),
   produceMaterialReadonly: document.getElementById('produce-material-readonly'),
   produceColorReadonly: document.getElementById('produce-color-readonly'),
+  produceQuantityRequestedReadonly: document.getElementById('produce-quantity-requested-readonly'),
   producePrintBtn: document.getElementById('produce-print-btn'),
   produceDate: document.getElementById('produce-date'),
-  produceQuantity: document.getElementById('produce-quantity'),
+  produceQuantityProduced: document.getElementById('produce-quantity-produced'),
+  producePartsPerCycle: document.getElementById('produce-parts-per-cycle'),
   produceStartTime: document.getElementById('produce-start-time'),
   produceEndTime: document.getElementById('produce-end-time'),
+  produceTimePerCycle: document.getElementById('produce-time-per-cycle'),
   produceFrontStatus: document.getElementById('produce-front-status'),
   produceFrontPreview: document.getElementById('produce-front-preview'),
   produceFrontBtn: document.getElementById('produce-front-btn'),
@@ -65,6 +69,7 @@ const dom = {
   produceSendBtn: document.getElementById('produce-send-btn'),
   produceStatusMsg: document.getElementById('produce-status-msg'),
   produceCloseBtn: document.getElementById('produce-close-btn'),
+  produceSubmitBtn: document.getElementById('produce-submit-btn'),
 };
 
 async function fetchJson(url) {
@@ -216,7 +221,8 @@ function renderQueue() {
     tr.innerHTML = `
       <td>${escapeHtml(record.name || '—')}</td>
       <td>${escapeHtml(record.material || '—')}</td>
-      <td>${escapeHtml(record.quantity ?? '—')}</td>`;
+      <td>${escapeHtml(record.quantity ?? '—')}</td>
+      <td>${escapeHtml(formatDate(record.deadline))}</td>`;
     tr.addEventListener('click', () => openDetailModal(record));
     dom.queueRows.appendChild(tr);
   });
@@ -333,9 +339,7 @@ function resetPhotoCapture() {
 }
 
 function updateProduceSendGate() {
-  const hasMachine = !!dom.produceMachine.value;
-  const hasQuantity = String(dom.produceQuantity.value || '').trim() !== '';
-  dom.produceSendBtn.disabled = !(hasMachine && hasQuantity);
+  dom.produceSendBtn.disabled = !dom.produceMachine.value;
 }
 
 function showProduceStatus(message, tone) {
@@ -353,17 +357,21 @@ function openProduceModal(record) {
   clearProduceStatus();
   resetPhotoCapture();
 
-  dom.produceSubtitle.textContent = `${record.name || '—'} · ${record.pce || '—'}`;
+  dom.produceTitle.textContent = record.pce || '—';
+  dom.produceSubtitle.textContent = record.name || '—';
   dom.produceProductNo.value = record.name || '';
   dom.produceModel.value = '';
   dom.produceMachine.value = '';
   dom.produceMaterialReadonly.textContent = record.material || '—';
   dom.produceColorReadonly.textContent = record.color || '—';
+  dom.produceQuantityRequestedReadonly.textContent = record.quantity ?? '—';
 
   dom.produceDate.value = todayDateValue();
-  dom.produceQuantity.value = record.quantity ?? '';
+  dom.produceQuantityProduced.value = '';
+  dom.producePartsPerCycle.value = '';
   dom.produceStartTime.value = nowTimeValue();
   dom.produceEndTime.value = nowTimeValue();
+  dom.produceTimePerCycle.value = '';
 
   updateProduceSendGate();
 
@@ -495,6 +503,14 @@ async function sendProduceToMachine() {
   }
 }
 
+// ── Submit report ─────────────────────────────────────────────────
+// No backend endpoint exists yet to persist the production report (times,
+// quantity produced, photos) — this is a placeholder until that's added.
+
+function submitProduceReport() {
+  showProduceStatus('Submit Report is not yet wired up to a backend — coming in a later iteration.', 'error');
+}
+
 // ── Screen transitions ───────────────────────────────────────────
 
 function showNameScreen() {
@@ -573,11 +589,11 @@ async function init() {
     openProduceModal(state.activeRecord);
   });
   dom.produceCloseBtn.addEventListener('click', closeProduceModal);
+  dom.produceSubmitBtn.addEventListener('click', submitProduceReport);
   dom.produceModal.addEventListener('click', (e) => {
     if (e.target === dom.produceModal) closeProduceModal();
   });
   dom.produceMachine.addEventListener('change', updateProduceSendGate);
-  dom.produceQuantity.addEventListener('input', updateProduceSendGate);
   dom.producePrintBtn.addEventListener('click', printProduceLabel);
   dom.produceSendBtn.addEventListener('click', sendProduceToMachine);
 
