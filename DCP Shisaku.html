@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Shisaku Processing</title>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg:        #0d0e10;
+      --fg:        #f0f0ee;
+      --card:      #161820;
+      --secondary: #1e2028;
+      --muted:     #252830;
+      --muted-fg:  #8a8f9e;
+      --primary:   #f59e0b;
+      --border:    rgba(255,255,255,0.07);
+      --font-display: 'Barlow Condensed', sans-serif;
+      --font-sans:    'Inter', sans-serif;
+      --font-mono:    'JetBrains Mono', monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100dvh; overflow: hidden;
+      background: var(--bg); color: var(--fg); font-family: var(--font-sans);
+    }
+    .hidden { display: none !important; }
+
+    .full-screen {
+      height: 100dvh; display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+    }
+
+    #loading-screen { background: var(--bg); }
+    .loading-ring {
+      width: 48px; height: 48px; border-radius: 50%;
+      border: 3px solid rgba(245,158,11,0.15);
+      border-top-color: var(--primary);
+      animation: spin 900ms linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .eyebrow { font-family: var(--font-mono); font-size: 0.65rem; letter-spacing: 0.2em; color: var(--muted-fg); text-transform: uppercase; margin-bottom: 0.2rem; }
+    h1.page-title { font-family: var(--font-display); font-size: 1.7rem; font-weight: 700; letter-spacing: 0.04em; line-height: 1; }
+
+    /* ── Name screen ─────────────────────────────────────────────── */
+    #name-screen { background: var(--bg); padding: 12dvh 1.25rem 1.25rem; justify-content: flex-start; position: relative; }
+    .name-inner { width: 100%; max-width: 22rem; }
+    .name-inner .eyebrow { margin-bottom: 0.3rem; }
+    .name-inner .page-title { margin-bottom: 2rem; }
+    .name-prompt {
+      font-family: var(--font-mono); font-size: 0.65rem; letter-spacing: 0.15em;
+      color: var(--muted-fg); text-transform: uppercase; margin-bottom: 0.75rem;
+    }
+    .name-input {
+      width: 100%; background: var(--card); border: 1px solid var(--border);
+      color: var(--fg); border-radius: 0.75rem; padding: 1rem 1.25rem;
+      font-family: var(--font-display); font-size: 1.6rem; font-weight: 500;
+      outline: none; transition: border-color 0.15s;
+      margin-bottom: 1rem;
+    }
+    .name-input::placeholder { color: var(--muted-fg); }
+    .name-input:focus { border-color: rgba(245,158,11,0.4); }
+    .name-autocomplete-wrap { position: relative; margin-bottom: 1rem; }
+    .name-autocomplete-wrap .name-input { margin-bottom: 0; }
+    .name-dropdown {
+      position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 10;
+      background: var(--card); border: 1px solid rgba(245,158,11,0.3);
+      border-radius: 0.75rem; overflow: hidden;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+      max-height: 14rem; overflow-y: auto;
+    }
+    .name-option {
+      display: block; width: 100%; padding: 0.75rem 1.25rem; text-align: left;
+      background: none; border: none; color: var(--fg); cursor: pointer;
+      font-family: var(--font-display); font-size: 1.2rem; font-weight: 500;
+      border-bottom: 1px solid var(--border); transition: background 0.1s;
+    }
+    .name-option:last-child { border-bottom: none; }
+    .name-option:hover { background: rgba(245,158,11,0.1); color: var(--primary); }
+    .name-dropdown-empty {
+      padding: 0.75rem 1.25rem 0.95rem;
+      font-size: 0.82rem;
+      color: var(--muted-fg);
+    }
+    .begin-btn {
+      width: 100%; display: flex; align-items: center; justify-content: center;
+      gap: 0.625rem; background: var(--primary); border: none; color: #0d0e10;
+      border-radius: 0.75rem; padding: 1rem;
+      font-family: var(--font-display); font-size: 1.1rem; font-weight: 700;
+      letter-spacing: 0.1em; cursor: pointer; transition: opacity 0.15s;
+    }
+    .begin-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+    .begin-btn:not(:disabled):hover { opacity: 0.88; }
+    .begin-btn svg { width: 1rem; height: 1rem; fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+    .error-msg {
+      margin-top: 1rem; padding: 0.875rem 1rem; border-radius: 0.75rem;
+      background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.25);
+      color: #f87171; font-size: 0.875rem; line-height: 1.5;
+    }
+
+    /* ── Queue screen ─────────────────────────────────────────────── */
+    #queue-view { height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+    header { display: flex; align-items: baseline; justify-content: space-between; padding: 0.875rem 1.25rem 0.75rem; flex-shrink: 0; }
+    #queue-worker-label { font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.1em; color: var(--muted-fg); }
+    #queue-worker-label span { color: var(--primary); }
+
+    #queue-body { flex: 1; overflow-y: auto; padding: 0 1.25rem 1.25rem; }
+    table#queue-table { width: 100%; border-collapse: collapse; }
+    table#queue-table thead th {
+      text-align: left; font-family: var(--font-mono); font-size: 0.65rem;
+      letter-spacing: 0.12em; color: var(--muted-fg); text-transform: uppercase;
+      padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border);
+      position: sticky; top: 0; background: var(--bg);
+    }
+    table#queue-table tbody tr {
+      cursor: pointer; transition: background 0.12s;
+    }
+    table#queue-table tbody tr:hover { background: var(--card); }
+    table#queue-table tbody td {
+      padding: 0.9rem 0.75rem; border-bottom: 1px solid var(--border);
+      font-family: var(--font-display); font-size: 1.1rem;
+    }
+    #queue-empty {
+      padding: 3rem 1.25rem; text-align: center; color: var(--muted-fg);
+      font-family: var(--font-mono); font-size: 0.8rem; letter-spacing: 0.08em;
+    }
+
+    /* ── Detail modal ─────────────────────────────────────────────── */
+    #detail-modal {
+      position: fixed; inset: 0; z-index: 100;
+      background: rgba(0,0,0,0.75);
+      align-items: center; justify-content: center;
+      padding: 1.25rem;
+    }
+    #detail-modal.hidden { display: none; }
+    .detail-card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 1rem; padding: 1.5rem; width: 100%; max-width: 28rem;
+      max-height: 88dvh; overflow-y: auto;
+    }
+    .detail-card-title { font-family: var(--font-display); font-size: 1.6rem; font-weight: 700; margin-bottom: 1rem; }
+    .detail-row {
+      display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem;
+      padding: 0.6rem 0; border-bottom: 1px solid var(--border);
+      font-size: 0.95rem; line-height: 1.4;
+    }
+    .detail-row:last-of-type { border-bottom: none; }
+    .detail-row-label { flex-shrink: 0; color: var(--muted-fg); font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase; padding-top: 0.15rem; }
+    .detail-row-value { text-align: right; font-weight: 500; overflow-wrap: anywhere; word-break: break-word; }
+    .detail-pdf-link {
+      display: inline-block; margin-top: 1rem; padding: 0.6rem 1rem;
+      border-radius: 0.6rem; border: 1px solid rgba(245,158,11,0.4);
+      color: var(--primary); text-decoration: none; font-family: var(--font-mono);
+      font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase;
+    }
+    .detail-close-btn {
+      width: 100%; margin-top: 1.25rem; padding: 0.85rem;
+      border-radius: 0.75rem; border: 1px solid var(--border);
+      background: var(--secondary); color: var(--fg);
+      font-family: var(--font-mono); font-size: 0.75rem; letter-spacing: 0.1em;
+      text-transform: uppercase; cursor: pointer;
+    }
+    .detail-actions { display: flex; gap: 0.75rem; margin-top: 1.25rem; }
+    .detail-actions .detail-close-btn { margin-top: 0; }
+    .produce-btn {
+      width: 100%; margin-top: 1.25rem; padding: 0.85rem;
+      border-radius: 0.75rem; border: none;
+      background: var(--primary); color: #0d0e10;
+      font-family: var(--font-mono); font-size: 0.75rem; font-weight: 700; letter-spacing: 0.1em;
+      text-transform: uppercase; cursor: pointer;
+    }
+    .produce-btn:not(:disabled):hover { opacity: 0.88; }
+
+    /* ── Produce modal ────────────────────────────────────────────── */
+    #produce-modal {
+      position: fixed; inset: 0; z-index: 110;
+      background: rgba(0,0,0,0.8);
+      align-items: center; justify-content: center;
+      padding: 1.25rem;
+    }
+    #produce-modal.hidden { display: none; }
+    .produce-card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 1rem; padding: 1.5rem; width: 100%; max-width: 30rem;
+      max-height: 92dvh; overflow-y: auto;
+    }
+    .produce-card-title { font-family: var(--font-display); font-size: 1.5rem; font-weight: 700; margin-bottom: 0.25rem; }
+    .produce-card-subtitle { font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.08em; color: var(--muted-fg); margin-bottom: 1.25rem; }
+    .produce-section { margin-bottom: 1.25rem; }
+    .produce-section-title {
+      font-family: var(--font-mono); font-size: 0.65rem; letter-spacing: 0.14em;
+      color: var(--primary); text-transform: uppercase; margin-bottom: 0.6rem;
+    }
+    .produce-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+    .produce-field { display: flex; flex-direction: column; gap: 0.35rem; }
+    .produce-field label {
+      font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.08em;
+      color: var(--muted-fg); text-transform: uppercase;
+    }
+    .produce-field input, .produce-field select {
+      background: var(--secondary); border: 1px solid var(--border);
+      color: var(--fg); border-radius: 0.6rem; padding: 0.6rem 0.7rem;
+      font-family: var(--font-sans); font-size: 0.9rem; outline: none;
+    }
+    .produce-field input:focus, .produce-field select:focus { border-color: rgba(245,158,11,0.4); }
+    .produce-field input[readonly] { color: var(--muted-fg); }
+    .produce-readonly-row {
+      display: flex; justify-content: space-between; gap: 1rem;
+      font-size: 0.85rem; padding: 0.4rem 0;
+    }
+    .produce-readonly-row .label { color: var(--muted-fg); font-family: var(--font-mono); font-size: 0.65rem; letter-spacing: 0.08em; text-transform: uppercase; }
+
+    .produce-action-btn {
+      width: 100%; padding: 0.8rem; border-radius: 0.7rem;
+      border: 1px solid var(--border); background: var(--secondary); color: var(--fg);
+      font-family: var(--font-mono); font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em;
+      text-transform: uppercase; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+    }
+    .produce-action-btn.print-btn { border-color: rgba(245,158,11,0.4); color: var(--primary); }
+    .produce-photo-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+    .produce-photo-box {
+      display: flex; flex-direction: column; align-items: center; gap: 0.5rem;
+      border: 1px dashed var(--border); border-radius: 0.75rem; padding: 0.75rem;
+    }
+    .produce-photo-box img {
+      width: 100%; max-height: 7rem; object-fit: cover; border-radius: 0.5rem; display: none;
+    }
+    .produce-photo-box img.has-image { display: block; }
+    .produce-photo-status {
+      font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.06em;
+      color: var(--muted-fg); text-transform: uppercase;
+    }
+    .produce-photo-status.captured { color: #6ee7b7; }
+
+    .produce-send-btn {
+      width: 100%; margin-top: 0.5rem; padding: 0.9rem; border-radius: 0.75rem;
+      border: none; background: var(--primary); color: #0d0e10;
+      font-family: var(--font-display); font-size: 1.05rem; font-weight: 700; letter-spacing: 0.06em;
+      text-transform: uppercase; cursor: pointer;
+    }
+    .produce-send-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+    .produce-status-msg {
+      margin-top: 0.75rem; padding: 0.7rem 0.9rem; border-radius: 0.6rem;
+      font-size: 0.8rem; line-height: 1.4; display: none;
+    }
+    .produce-status-msg.show { display: block; }
+    .produce-status-msg.ok { background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.3); color: #6ee7b7; }
+    .produce-status-msg.error { background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.3); color: #fca5a5; }
+    .produce-close-btn {
+      width: 100%; margin-top: 0.75rem; padding: 0.8rem;
+      border-radius: 0.7rem; border: 1px solid var(--border);
+      background: transparent; color: var(--fg);
+      font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.08em;
+      text-transform: uppercase; cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Loading screen -->
+  <div id="loading-screen" class="full-screen">
+    <div class="loading-ring"></div>
+  </div>
+
+  <!-- Name / worker screen -->
+  <div id="name-screen" class="full-screen hidden">
+    <div class="name-inner">
+      <p class="eyebrow">SHISAKU PROCESSING</p>
+      <h1 class="page-title">Cutting Queue</h1>
+      <p class="name-prompt">Enter your name to begin</p>
+      <div class="name-autocomplete-wrap">
+        <input id="worker-name-input" class="name-input" type="text"
+               placeholder="Search or select your name…" autocomplete="off" spellcheck="false">
+        <div id="name-dropdown" class="name-dropdown hidden"></div>
+      </div>
+      <button id="btn-begin" class="begin-btn" type="button" disabled>
+        <svg viewBox="0 0 24 24">
+          <path d="M5 12h14"/><path d="M13 6l6 6-6 6"/>
+        </svg>
+        <span>VIEW QUEUE</span>
+      </button>
+      <div id="name-error" class="error-msg hidden"></div>
+    </div>
+  </div>
+
+  <!-- Queue screen -->
+  <div id="queue-view" class="hidden">
+    <header>
+      <div>
+        <p class="eyebrow">SHISAKU PROCESSING</p>
+        <h1 class="page-title">Cutting Queue</h1>
+      </div>
+      <p id="queue-worker-label">Worker: <span id="queue-worker-name"></span></p>
+    </header>
+    <div id="queue-body">
+      <table id="queue-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Material</th>
+            <th>Quantity</th>
+          </tr>
+        </thead>
+        <tbody id="queue-rows"></tbody>
+      </table>
+      <div id="queue-empty" class="hidden">No prototype requests registered.</div>
+    </div>
+  </div>
+
+  <!-- Detail modal -->
+  <div id="detail-modal" class="hidden">
+    <div class="detail-card">
+      <h2 class="detail-card-title">Request Detail</h2>
+      <div id="detail-rows"></div>
+      <a id="detail-pdf-link" class="detail-pdf-link hidden" href="#" target="_blank" rel="noopener">View PDF</a>
+      <button id="produce-btn" class="produce-btn" type="button">Produce</button>
+      <div class="detail-actions">
+        <button id="detail-close-btn" class="detail-close-btn" type="button">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Produce modal -->
+  <div id="produce-modal" class="hidden">
+    <div class="produce-card">
+      <h2 class="produce-card-title">Prepare for Cutting</h2>
+      <p id="produce-card-subtitle" class="produce-card-subtitle"></p>
+
+      <div class="produce-section">
+        <p class="produce-section-title">Label</p>
+        <div class="produce-grid">
+          <div class="produce-field">
+            <label for="produce-productNo">Product No. (品番)</label>
+            <input id="produce-productNo" type="text">
+          </div>
+          <div class="produce-field">
+            <label for="produce-model">Model / Shape (車型)</label>
+            <input id="produce-model" type="text" placeholder="Enter model/shape">
+          </div>
+          <div class="produce-field">
+            <label for="produce-machine">Machine (setsubi)</label>
+            <select id="produce-machine"></select>
+          </div>
+        </div>
+        <div class="produce-readonly-row"><span class="label">Material</span><span id="produce-material-readonly"></span></div>
+        <div class="produce-readonly-row"><span class="label">Color</span><span id="produce-color-readonly"></span></div>
+        <button id="produce-send-btn" class="produce-send-btn" type="button" disabled>Send to Machine</button>
+      </div>
+
+      <div class="produce-section">
+        <p class="produce-section-title">Production</p>
+        <div class="produce-grid">
+          <div class="produce-field">
+            <label for="produce-date">Processing Date</label>
+            <input id="produce-date" type="date">
+          </div>
+          <div class="produce-field">
+            <label for="produce-quantity">Process Quantity</label>
+            <input id="produce-quantity" type="number" min="0">
+          </div>
+          <div class="produce-field">
+            <label for="produce-start-time">Start Time</label>
+            <input id="produce-start-time" type="time">
+          </div>
+          <div class="produce-field">
+            <label for="produce-end-time">End Time</label>
+            <input id="produce-end-time" type="time">
+          </div>
+        </div>
+      </div>
+
+      <div class="produce-section">
+        <p class="produce-section-title">Photos</p>
+        <div class="produce-photo-row">
+          <div class="produce-photo-box">
+            <span class="produce-photo-status" id="produce-front-status">Front Image</span>
+            <img id="produce-front-preview" alt="Front image preview">
+            <button id="produce-front-btn" class="produce-action-btn" type="button">Capture Front</button>
+            <input id="produce-front-input" type="file" accept="image/*" capture="environment" class="hidden">
+          </div>
+          <div class="produce-photo-box">
+            <span class="produce-photo-status" id="produce-back-status">Back Image</span>
+            <img id="produce-back-preview" alt="Back image preview">
+            <button id="produce-back-btn" class="produce-action-btn" type="button">Capture Back</button>
+            <input id="produce-back-input" type="file" accept="image/*" capture="environment" class="hidden">
+          </div>
+        </div>
+      </div>
+
+      <button id="produce-print-btn" class="produce-action-btn print-btn" type="button">Print Label</button>
+      <div id="produce-status-msg" class="produce-status-msg"></div>
+      <button id="produce-close-btn" class="produce-close-btn" type="button">Close</button>
+    </div>
+  </div>
+
+  <script src="DCP Shisaku backend.js"></script>
+</body>
+</html>

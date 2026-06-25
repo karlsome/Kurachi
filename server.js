@@ -30428,6 +30428,18 @@ app.get('/checkList2.js', (req, res) => {
   res.sendFile(path.join(__dirname, 'checkList2.js'));
 });
 
+app.get('/DCP%20Shisaku', (req, res) => {
+  res.sendFile(path.join(__dirname, 'DCP Shisaku.html'));
+});
+
+app.get('/DCP%20Shisaku.html', (req, res) => {
+  res.sendFile(path.join(__dirname, 'DCP Shisaku.html'));
+});
+
+app.get('/DCP%20Shisaku%20backend.js', (req, res) => {
+  res.sendFile(path.join(__dirname, 'DCP Shisaku backend.js'));
+});
+
 app.get('/api/check-forms/reference-images', async (req, res) => {
   const requestedFolderKey = normalizeCheckFormText(req.query.folderKey);
 
