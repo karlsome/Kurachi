@@ -7597,9 +7597,11 @@ async function sendtoNC(selectedValue) {
       // Fallback: Try opening in new tab if fetch fails
       console.log('Fetch failed, trying fallback method...');
       const newTab = window.open(url, '_blank');
-      setTimeout(() => {
-        newTab.close();
-      }, 5000);
+      if (newTab) {
+        setTimeout(() => {
+          newTab.close();
+        }, 5000);
+      }
     }
   }
 }
@@ -11881,13 +11883,19 @@ function showManualSendModal(sebanggo) {
       button.style.transform = 'translateY(0)';
       button.style.boxShadow = '0 2px 8px rgba(33, 150, 243, 0.3)';
     };
-    button.onclick = () => {
+    button.onclick = async () => {
       const url = `http://${ip}:5000/request?filename=${sebanggo}.pce`;
       console.log(`📤 Manual send to ${machine}: ${url}`);
-      const newTab = window.open(url, '_blank');
-      setTimeout(() => {
-        if (newTab) newTab.close();
-      }, 3000);
+      try {
+          await fetch(url, { method: 'GET', mode: 'no-cors' });
+      } catch (error) {
+          const newTab = window.open(url, '_blank');
+          if (newTab) {
+              setTimeout(() => {
+                  newTab.close();
+              }, 3000);
+          }
+      }
 
       // Visual feedback
       button.style.background = '#4CAF50';
