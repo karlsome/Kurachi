@@ -427,11 +427,39 @@ function cacheDom() {
 // ── Events ───────────────────────────────────────────────────────
 
 function bindEvents() {
-  dom.workerNameInput.addEventListener('click', openWorkerModal);
+  dom.workerNameInput.addEventListener('click', () => {
+    if (dom.workerNameInput.readOnly) {
+      openWorkerModal();
+    }
+  });
+
+  dom.workerNameInput.addEventListener('input', () => {
+    const val = dom.workerNameInput.value.trim();
+    dom.btnBegin.disabled = val.length === 0;
+    dom.btnSkip.disabled = val.length === 0;
+  });
 
   const closeWorkerModalBtn = document.getElementById('closeWorkerModal');
   if (closeWorkerModalBtn) {
     closeWorkerModalBtn.addEventListener('click', closeWorkerModal);
+  }
+
+  const manualWorkerBtn = document.getElementById('manualWorkerBtn');
+  if (manualWorkerBtn) {
+    manualWorkerBtn.addEventListener('click', () => {
+      closeWorkerModal();
+      dom.workerNameInput.removeAttribute('readonly');
+      dom.workerNameInput.readOnly = false;
+      dom.workerNameInput.style.cursor = 'text';
+      dom.workerNameInput.placeholder = 'Type worker name manually...';
+      
+      setTimeout(() => {
+        dom.workerNameInput.value = '';
+        dom.workerNameInput.focus();
+        dom.btnBegin.disabled = true;
+        dom.btnSkip.disabled = true;
+      }, 50);
+    });
   }
 
   document.getElementById('lang-switcher').addEventListener('click', (e) => {
