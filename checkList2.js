@@ -546,7 +546,7 @@ function updateKeyboardAwareLayout(shouldScrollInput) {
 
 function getSelectedFactoryFromUrl() {
   const p = new URLSearchParams(window.location.search);
-  return (p.get('selected') || p.get('factory') || '').trim();
+  return (p.get('filter') || p.get('factory') || '').trim();
 }
 
 function getSelectedMachineFromUrl() {
@@ -640,10 +640,7 @@ function resolveNameOptions(nameData) {
   // Keep compatibility with older payload shape: { names: [] }
   if (Array.isArray(payload.workerDBNames) || Array.isArray(payload.userNames)) {
     const workerNames = normalizeAndSortNames(payload.workerDBNames || []);
-    const userNames   = normalizeAndSortNames(payload.userNames || []);
-    const seen = new Set(workerNames.map(n => n.toLowerCase()));
-    const userOnly = userNames.filter(n => !seen.has(n.toLowerCase()));
-    return [...workerNames, ...userOnly];
+    return workerNames; // Only use factory value worker names, ignore mongoDB users
   }
 
   return Array.isArray(payload.names) ? normalizeAndSortNames(payload.names) : [];
