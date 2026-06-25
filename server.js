@@ -789,7 +789,7 @@ app.post("/api/machine-assert", (req, res) => {
 // for a while, its tablet is off/closed — show it as idle rather than stale.
 setInterval(() => {
   const now = Date.now();
-  const STALE_MS = 150000; // ~2.5 min (tablets re-assert every 30s)
+  const STALE_MS = 600000; // 10 min — tablets sleep during production; recover on wake
   factoryMachineState.forEach((map, factory) => {
     const updated = [];
     map.forEach((st, id) => {

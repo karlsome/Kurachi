@@ -111,8 +111,24 @@
             align-items: center;
             justify-content: space-between;
             padding: 0 20px;
+            position: relative;
             z-index: 1000;
             flex-shrink: 0;
+        }
+
+        .freya-center-mark {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 0.625rem;
+            font-weight: 700;
+            letter-spacing: 0.12em;
+            color: var(--text-soft);
+            text-transform: uppercase;
+            pointer-events: none;
+            white-space: nowrap;
+            user-select: none;
         }
 
         .header-title-section {
@@ -1562,6 +1578,7 @@
             <h1 id="nippoTitle" data-i18n="daily_report">日報</h1>
             <span class="status-tag" id="headerMachineTag">設備: Loading...</span>
         </div>
+        <span class="freya-center-mark">Freya System v4</span>
         <div class="header-action-section">
             <!-- Language Selector -->
             <div class="language-selector">
@@ -4062,6 +4079,11 @@
 
     <!-- Break full-screen overlay -->
     <div id="breakOverlay" class="break-overlay">
+        <div class="freya-top-wordmark">
+            <div class="wm-line"></div>
+            <span class="wm-text">Freya System v4</span>
+            <div class="wm-line right"></div>
+        </div>
         <div class="break-pulse">
             <svg viewBox="0 0 24 24">
                 <path d="M18 8h1a3 3 0 0 1 0 6h-1" />
@@ -4078,6 +4100,37 @@
     </div>
 
     <style>
+        /* Freya System v4 — top wordmark shared by all fullscreen overlays */
+        .break-overlay .freya-top-wordmark {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            padding: 28px 40px 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            pointer-events: none;
+        }
+        .break-overlay .freya-top-wordmark .wm-line {
+            flex: 1;
+            max-width: 80px;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.15));
+        }
+        .break-overlay .freya-top-wordmark .wm-line.right {
+            background: linear-gradient(90deg, rgba(255,255,255,0.15), transparent);
+        }
+        .break-overlay .freya-top-wordmark .wm-text {
+            font-size: 0.6875rem;
+            font-weight: 700;
+            letter-spacing: 0.2em;
+            color: rgba(255,255,255,0.28);
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+
         .maintenance-overlay {
             background: linear-gradient(160deg, #4A3415, #38260E);
         }
@@ -4466,6 +4519,11 @@
 
     <!-- Maintenance full-screen overlay (machine trouble timer) -->
     <div id="maintenanceOverlay" class="break-overlay maintenance-overlay">
+        <div class="freya-top-wordmark">
+            <div class="wm-line"></div>
+            <span class="wm-text">Freya System v4</span>
+            <div class="wm-line right"></div>
+        </div>
         <div class="break-pulse maintenance-pulse">
             <svg viewBox="0 0 24 24">
                 <path d="M14.7 6.3a4 4 0 0 0-5.4 5.3L3 18l3 3 6.4-6.3a4 4 0 0 0 5.3-5.4l-2.7 2.7-2-2 2.7-2.7z" />
@@ -4537,6 +4595,11 @@
 
     <!-- Stop / Call-leader full-screen overlay (production halted) -->
     <div id="stopCallOverlay" class="break-overlay stopcall-overlay">
+        <div class="freya-top-wordmark">
+            <div class="wm-line"></div>
+            <span class="wm-text">Freya System v4</span>
+            <div class="wm-line right"></div>
+        </div>
         <div class="break-pulse stopcall-pulse">
             <svg viewBox="0 0 24 24">
                 <path d="M18.5 10a6.5 6.5 0 0 0-13 0" />
@@ -5274,8 +5337,13 @@
                     const 設備 = document.getElementById('process')?.value
                         || new URLSearchParams(location.search).get('machine') || '';
                     if (!工場 || !設備) return;
-                    const 背番号 = document.getElementById('sub-dropdown')?.value || '';
-                    const 品番 = document.getElementById('product-number')?.value || '';
+                    const 背番号Raw = document.getElementById('sub-dropdown')?.value || '';
+                    const 品番Raw = document.getElementById('product-number')?.value || '';
+                    // Only tell the factory TV this machine is running once Step 3 is done.
+                    // A mid-workflow refresh would otherwise leave a stale 背番号 on the display.
+                    const workflowDone = typeof window.isScanWorkflowComplete === 'function' && window.isScanWorkflowComplete();
+                    const 背番号 = workflowDone ? 背番号Raw : '';
+                    const 品番 = workflowDone ? 品番Raw : '';
                     const breakStart = parseInt(localStorage.getItem(breakPrefix + 'activeBreakStart') || '0', 10);
                     const maintStart = parseInt(localStorage.getItem(breakPrefix + 'activeMaintStart') || '0', 10);
 
@@ -5335,7 +5403,15 @@
             setTimeout(assertMachineState, 3000);          // shortly after load
             setInterval(assertMachineState, 30000);        // every 30s
             window.addEventListener('online', assertMachineState);
-            document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') assertMachineState(); });
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible') {
+                    // Fire immediately, then retry after 2.5s — the network stack
+                    // takes a moment to resume after screen-lock, so the first
+                    // attempt often fails silently and needs a follow-up.
+                    assertMachineState();
+                    setTimeout(assertMachineState, 2500);
+                }
+            });
 
             // Press-and-hold (2s) to arm the call, to avoid accidental taps.
             const STOP_HOLD_MS = 2000;
