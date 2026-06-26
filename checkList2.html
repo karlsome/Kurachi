@@ -584,33 +584,27 @@
     .num-key--dash  { font-size: 1.8rem; color: var(--muted-fg); }
     .num-key--zero  { grid-column: span 4; height: 50px; }
     .numpad-range {
-      font-family: var(--font-mono); font-size: 1.8rem; font-weight: 700;
-      letter-spacing: 0.06em; color: #0d0e10;
-      background: var(--primary); border-radius: 0.5rem;
-      padding: 0.75rem 0.9rem; white-space: nowrap; flex-shrink: 0;
+      display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
+      font-family: var(--font-mono); font-size: 1.6rem; font-weight: 600;
+      letter-spacing: 0.05em; color: var(--primary);
+      background: transparent; border: none; box-shadow: none;
+      padding: 0; margin-top: 0.5rem; white-space: nowrap; flex-shrink: 0;
       text-align: center;
-      transform-origin: center;
-      animation: numpad-range-pulse 1.6s ease-in-out infinite;
+      transition: color 0.2s;
+    }
+    .numpad-range::before {
+      content: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="%231F9D6B" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="4"></circle><line x1="12" y1="2" x2="12" y2="4"></line><line x1="12" y1="20" x2="12" y2="22"></line><line x1="20" y1="12" x2="22" y2="12"></line><line x1="2" y1="12" x2="4" y2="12"></line></svg>');
+      display: block; width: 22px; height: 22px;
     }
     .numpad-range.numpad-range--alert {
-      color: #fff;
-      background: #ef4444;
-      box-shadow: 0 0 0 2px rgba(239,68,68,0.25), 0 0 22px rgba(239,68,68,0.35);
-      animation: numpad-range-alert-pulse 0.85s ease-in-out infinite;
-    }
-    .numpad-range.numpad-range--shake {
+      color: #E5484D;
       animation: numpad-range-shake 0.32s ease-in-out;
+    }
+    .numpad-range.numpad-range--alert::before {
+      content: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="%23E5484D" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>');
     }
     .numpad-range.hidden { display: none; }
 
-    @keyframes numpad-range-pulse {
-      0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(245,158,11,0.22); }
-      50% { transform: scale(1.02); box-shadow: 0 0 0 8px rgba(245,158,11,0); }
-    }
-    @keyframes numpad-range-alert-pulse {
-      0%, 100% { transform: scale(1); }
-      50% { transform: scale(1.03); }
-    }
     @keyframes numpad-range-shake {
       0%, 100% { transform: translateX(0); }
       20% { transform: translateX(-4px); }
