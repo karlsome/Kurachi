@@ -6,12 +6,6 @@ const API = {
 // Same Google Apps Script machine-IP lookup used by DCP interactive backend.js / DCP backend.js.
 const IP_URL = 'https://script.google.com/macros/s/AKfycbyC6-KiT3xwGiahhzhB-L-OOL8ufG0WqnT5mjEelGBKGnbiqVAS6qjT78FlzBUHqTn3Gg/exec';
 
-// 小瀬 factory NC cutting machines, same list as chooseMachine.html.
-const MACHINES = [
-  'OZNC01', 'OZNC02', 'OZNC03', 'OZNC04', 'OZNC05', 'OZNC06', 'OZNC07', 'OZNC08', 'OZNC09',
-  'OZNC10', 'OZNC11', 'OZNC12', 'OZNC13', 'OZNC14', 'OZNC15', 'OZNC16', 'OZNC17', 'OZNC18',
-];
-
 const SELECTED_NAME_KEY = 'dcpShisaku_selectedName';
 
 const state = {
@@ -47,7 +41,7 @@ const dom = {
   produceSubtitle: document.getElementById('produce-card-subtitle'),
   produceProductNo: document.getElementById('produce-productNo'),
   produceModel: document.getElementById('produce-model'),
-  produceMachine: document.getElementById('produce-machine'),
+  produceMachineReadonly: document.getElementById('produce-machine-readonly'),
   produceMaterialReadonly: document.getElementById('produce-material-readonly'),
   produceColorReadonly: document.getElementById('produce-color-readonly'),
   produceQuantityRequestedReadonly: document.getElementById('produce-quantity-requested-readonly'),
@@ -301,14 +295,8 @@ function closePdfPreviewModal() {
 
 // ── Produce modal ─────────────────────────────────────────────────
 
-function populateMachineSelect() {
-  dom.produceMachine.innerHTML = '<option value="">— Select machine —</option>';
-  MACHINES.forEach((machine) => {
-    const option = document.createElement('option');
-    option.value = machine;
-    option.textContent = machine;
-    dom.produceMachine.appendChild(option);
-  });
+function getMachineFromUrl() {
+  return new URLSearchParams(window.location.search).get('machine') || '';
 }
 
 function pad2(value) {
@@ -339,7 +327,7 @@ function resetPhotoCapture() {
 }
 
 function updateProduceSendGate() {
-  dom.produceSendBtn.disabled = !dom.produceMachine.value;
+  dom.produceSendBtn.disabled = !getMachineFromUrl();
 }
 
 function showProduceStatus(message, tone) {
@@ -361,7 +349,7 @@ function openProduceModal(record) {
   dom.produceSubtitle.textContent = record.name || '—';
   dom.produceProductNo.value = record.name || '';
   dom.produceModel.value = '';
-  dom.produceMachine.value = '';
+  dom.produceMachineReadonly.textContent = getMachineFromUrl() || '—';
   dom.produceMaterialReadonly.textContent = record.material || '—';
   dom.produceColorReadonly.textContent = record.color || '—';
   dom.produceQuantityRequestedReadonly.textContent = record.quantity ?? '—';
@@ -428,7 +416,7 @@ function printProduceLabel() {
   const R_L = '';
   const 材料 = record.material || '';
   const 色 = record.color || '';
-  const 設備名 = dom.produceMachine.value;
+  const 設備名 = getMachineFromUrl();
   const Date2 = dom.produceDate.value || todayDateValue();
   const 品番収容数 = `${品番},${収容数}`;
 
@@ -475,7 +463,7 @@ async function sendProduceToMachine() {
   const record = state.activeRecord;
   if (!record || !record.pce) return;
 
-  const machineName = dom.produceMachine.value;
+  const machineName = getMachineFromUrl();
   if (!machineName) {
     showProduceStatus('Select a machine first.', 'error');
     return;
@@ -504,11 +492,52 @@ async function sendProduceToMachine() {
 }
 
 // ── Submit report ─────────────────────────────────────────────────
-// No backend endpoint exists yet to persist the production report (times,
-// quantity produced, photos) — this is a placeholder until that's added.
 
-function submitProduceReport() {
-  showProduceStatus('Submit Report is not yet wired up to a backend — coming in a later iteration.', 'error');
+async function submitProduceReport() {
+  const record = state.activeRecord;
+  if (!record) return;
+
+  dom.produceSubmitBtn.disabled = true;
+  showProduceStatus('Submitting report…', 'ok');
+
+  try {
+    const payload = {
+      requestId: getRecordId(record),
+      requestName: record.name || '',
+      pce: record.pce || '',
+      material: record.material || '',
+      color: record.color || '',
+      boxType: record.boxType || '',
+      quantityRequested: record.quantity ?? null,
+      workerName: state.selectedName,
+      productNo: dom.produceProductNo.value.trim(),
+      model: dom.produceModel.value.trim(),
+      machine: getMachineFromUrl(),
+      processingDate: dom.produceDate.value,
+      quantityProduced: dom.produceQuantityProduced.value,
+      partsPerCycle: dom.producePartsPerCycle.value,
+      startTime: dom.produceStartTime.value,
+      endTime: dom.produceEndTime.value,
+      timePerCycle: dom.produceTimePerCycle.value,
+      frontPhotoBase64: state.frontPhotoBase64 || null,
+      backPhotoBase64: state.backPhotoBase64 || null,
+    };
+
+    const response = await fetch('/api/shisaku-production/submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Submission failed.');
+
+    showProduceStatus('Report submitted successfully.', 'ok');
+    setTimeout(() => closeProduceModal(), 1500);
+  } catch (err) {
+    showProduceStatus(err.message || 'Failed to submit report.', 'error');
+    dom.produceSubmitBtn.disabled = false;
+  }
 }
 
 // ── Screen transitions ───────────────────────────────────────────
@@ -581,8 +610,6 @@ async function init() {
     if (e.target === dom.pdfPreviewModal) closePdfPreviewModal();
   });
 
-  populateMachineSelect();
-
   dom.produceBtn.addEventListener('click', () => {
     if (!state.activeRecord) return;
     closeDetailModal();
@@ -593,7 +620,6 @@ async function init() {
   dom.produceModal.addEventListener('click', (e) => {
     if (e.target === dom.produceModal) closeProduceModal();
   });
-  dom.produceMachine.addEventListener('change', updateProduceSendGate);
   dom.producePrintBtn.addEventListener('click', printProduceLabel);
   dom.produceSendBtn.addEventListener('click', sendProduceToMachine);
 

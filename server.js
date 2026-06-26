@@ -1353,7 +1353,11 @@ async function ensureProductPdfIndexes() {
 }
 
 ensureProductPdfIndexes().catch((error) => {
-  console.error("❌ Failed to ensure productPDFsDB indexes:", error);
+  if (error.code === 13) {
+    console.warn("⚠️  productPDFsDB indexes skipped (insufficient DB permissions) — queries will still work");
+  } else {
+    console.error("❌ Failed to ensure productPDFsDB indexes:", error);
+  }
 });
 
 // Check for existing PDFs before upload
@@ -31522,6 +31526,72 @@ app.delete('/api/shisaku-request/:id', async (req, res) => {
   } catch (error) {
     console.error('❌ Error deleting prototype request:', error.message);
     res.status(500).json({ error: 'Failed to delete prototype request', details: error.message });
+  }
+});
+
+// ── Shisaku Production Report ────────────────────────────────────
+app.post('/api/shisaku-production/submit', async (req, res) => {
+  try {
+    const {
+      requestId, requestName, pce, material, color, boxType, quantityRequested,
+      workerName, productNo, model, machine,
+      processingDate, quantityProduced, partsPerCycle, startTime, endTime, timePerCycle,
+      frontPhotoBase64, backPhotoBase64,
+    } = req.body;
+
+    await client.connect();
+
+    const ts = Date.now();
+    const dateSlug = processingDate || new Date().toISOString().slice(0, 10);
+    const pceSlug = (pce || 'unknown').replace(/[^a-zA-Z0-9_\-]/g, '_');
+
+    async function uploadPhoto(base64DataUri, slot) {
+      if (!base64DataUri) return null;
+      const base64 = base64DataUri.replace(/^data:image\/\w+;base64,/, '');
+      const buffer = Buffer.from(base64, 'base64');
+      const token = `shisaku_${slot}_${ts}`;
+      const fileName = `${pceSlug}_${dateSlug}_${slot}_${ts}.jpg`;
+      const filePath = `ShisakuProduction/${dateSlug}/${fileName}`;
+      const file = admin.storage().bucket().file(filePath);
+      await uploadToFirebaseWithRetry(file, buffer, {
+        metadata: { contentType: 'image/jpeg', metadata: { firebaseStorageDownloadTokens: token } }
+      });
+      return `https://firebasestorage.googleapis.com/v0/b/${file.bucket.name}/o/${encodeURIComponent(file.name)}?alt=media&token=${token}`;
+    }
+
+    const [frontPhotoUrl, backPhotoUrl] = await Promise.all([
+      uploadPhoto(frontPhotoBase64, 'front'),
+      uploadPhoto(backPhotoBase64, 'back'),
+    ]);
+
+    const document = {
+      requestId: requestId || null,
+      requestName: requestName || null,
+      pce: pce || null,
+      material: material || null,
+      color: color || null,
+      boxType: boxType || null,
+      quantityRequested: quantityRequested ?? null,
+      workerName: workerName || null,
+      productNo: productNo || null,
+      model: model || null,
+      machine: machine || null,
+      processingDate: processingDate || null,
+      quantityProduced: quantityProduced !== '' && quantityProduced != null ? Number(quantityProduced) : null,
+      partsPerCycle: partsPerCycle !== '' && partsPerCycle != null ? Number(partsPerCycle) : null,
+      startTime: startTime || null,
+      endTime: endTime || null,
+      timePerCycle: timePerCycle !== '' && timePerCycle != null ? Number(timePerCycle) : null,
+      frontPhotoUrl,
+      backPhotoUrl,
+      submittedAt: new Date(),
+    };
+
+    const result = await client.db('submittedDB').collection('ShisakuProduction').insertOne(document);
+    res.json({ success: true, insertedId: result.insertedId });
+  } catch (error) {
+    console.error('❌ Error submitting shisaku production report:', error);
+    res.status(500).json({ error: 'Failed to submit production report', details: error.message });
   }
 });
 
