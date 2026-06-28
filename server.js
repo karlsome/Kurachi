@@ -30739,6 +30739,38 @@ app.post('/api/check-forms/translate', async (req, res) => {
   }
 });
 
+app.post('/api/check-forms/notify-ng-ticket', async (req, res) => {
+  const { factory, machine, status, reason } = req.body;
+  const roomId = '440654635';
+  const apiKey = process.env.CHATWORK_API_KEY;
+  const url = `https://api.chatwork.com/v2/rooms/${roomId}/messages`;
+  
+  const now = new Date();
+  const timestamp = now.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+  const messageBody = `Factory: ${factory}\n設備: ${machine}\nstatus: ${status}\nTimestamp: ${timestamp}\nReason: ${reason}`;
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'X-ChatWorkToken': apiKey,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: new URLSearchParams({ body: messageBody })
+    });
+
+    if (response.ok) {
+      const result = await response.json();
+      res.status(200).json({ message_id: result.message_id });
+    } else {
+      const errorText = await response.text();
+      res.status(response.status).json({ error: errorText });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.post('/api/check-forms/submit', async (req, res) => {
   const payload = req.body || {};
   const factory = normalizeCheckFormText(payload.factory);
@@ -30848,6 +30880,7 @@ app.post('/api/check-forms/submit', async (req, res) => {
           ? answerPayload.ticket
           : null;
         const ticketReason = normalizeCheckFormText(ticketPayload?.reason);
+        const chatworkMessageId = normalizeCheckFormText(ticketPayload?.chatworkMessageId);
         const ticketImagesData = Array.isArray(ticketPayload?.imagesData)
           ? ticketPayload.imagesData.filter(Boolean).slice(0, 5)
           : [];
@@ -30893,6 +30926,7 @@ app.post('/api/check-forms/submit', async (req, res) => {
             unit: field.unit,
             reason: ticketReason,
             imageURLs: ticketImageURLs,
+            chatworkMessageId,
             status: 'open',
             createdAt: now,
             ...(approvedBy ? { approvedBy } : {}),
@@ -30969,6 +31003,31 @@ app.post('/api/check-forms/submit', async (req, res) => {
       });
     } finally {
       await session.endSession();
+    }
+
+    // Send Chatwork Edit messages if needed
+    for (const report of ngReportDocs) {
+      if (report.chatworkMessageId && report.imageURLs && report.imageURLs.length > 0) {
+        try {
+          const roomId = '440654635';
+          const apiKey = process.env.CHATWORK_API_KEY;
+          const url = `https://api.chatwork.com/v2/rooms/${roomId}/messages/${report.chatworkMessageId}`;
+          const timestamp = report.createdAt.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+          
+          let editedBody = `Factory: ${report.factory}\n設備: ${report.加工設備}\nstatus: NG\nTimestamp: ${timestamp}\nReason: ${report.reason}\nImage: ${report.imageURLs[0]}`;
+          
+          await fetch(url, {
+            method: 'PUT',
+            headers: {
+              'X-ChatWorkToken': apiKey,
+              'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            body: new URLSearchParams({ body: editedBody })
+          });
+        } catch (err) {
+          console.error('Failed to edit chatwork message', err);
+        }
+      }
     }
 
     return res.status(201).json({
