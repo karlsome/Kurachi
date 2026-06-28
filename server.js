@@ -31014,7 +31014,16 @@ app.post('/api/check-forms/submit', async (req, res) => {
           const url = `https://api.chatwork.com/v2/rooms/${roomId}/messages/${report.chatworkMessageId}`;
           const timestamp = report.createdAt.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
           
-          let editedBody = `Factory: ${report.factory}\n設備: ${report.加工設備}\nstatus: NG\nTimestamp: ${timestamp}\nReason: ${report.reason}\nImage: ${report.imageURLs[0]}`;
+          const formatter = new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' });
+          const parts = formatter.formatToParts(new Date(report.createdAt));
+          const year = parts.find(p => p.type === 'year').value;
+          const month = parts.find(p => p.type === 'month').value;
+          const day = parts.find(p => p.type === 'day').value;
+          const dateStr = `${year}-${month}-${day}`;
+          
+          const adminLink = `https://karlsome.github.io/freyaAdmin2/maintenance/submissions/tickets?startDate=${dateStr}&endDate=${dateStr}`;
+          
+          let editedBody = `Factory: ${report.factory}\n設備: ${report.加工設備}\nstatus: NG\nTimestamp: ${timestamp}\nReason: ${report.reason}\nImage: ${report.imageURLs[0]}\nLink: ${adminLink}`;
           
           await fetch(url, {
             method: 'PUT',
