@@ -2104,6 +2104,7 @@ async function buildSubmissionPayload() {
         ticketKey: `ticket_${step.templateId}_${step.fieldId}`,
         reason: ticketReason,
         imagesData: ticketImagesData.filter(Boolean),
+        chatworkMessageId: result.ticket.chatworkMessageId,
       };
     }
 
@@ -2880,7 +2881,11 @@ function persistDraft() {
           result: r.result,
           value: r.value,
           photoAssetId: r.photoAssetId || '',
-          ticket: r.ticket ? { reason: r.ticket.reason, imageAssetIds: [...r.ticket.imageAssetIds] } : null,
+          ticket: r.ticket ? { 
+            reason: r.ticket.reason, 
+            imageAssetIds: [...r.ticket.imageAssetIds],
+            chatworkMessageId: r.ticket.chatworkMessageId 
+          } : null,
         }
         : null),
       pending: hasPendingStep
@@ -2897,6 +2902,7 @@ function persistDraft() {
           {
             reason: String(ticket?.reason || ''),
             imageAssetIds: Array.isArray(ticket?.imageAssetIds) ? [...ticket.imageAssetIds] : [],
+            chatworkMessageId: ticket?.chatworkMessageId || '',
           },
         ])
       ),
