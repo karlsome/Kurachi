@@ -30747,7 +30747,7 @@ app.post('/api/check-forms/notify-ng-ticket', async (req, res) => {
   
   const now = new Date();
   const timestamp = now.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
-  const messageBody = `Factory: ${factory}\n設備: ${machine}\nstatus: ${status}\nTimestamp: ${timestamp}\nReason: ${reason}`;
+  const messageBody = `工場: ${factory}\n設備: ${machine}\nステータス: ${status}\n日時: ${timestamp}\n理由: ${reason}`;
 
   try {
     const response = await fetch(url, {
@@ -31024,7 +31024,7 @@ app.post('/api/check-forms/submit', async (req, res) => {
           
           const adminLink = `https://karlsome.github.io/freyaAdmin2/maintenance/submissions/tickets?startDate=${dateStr}&endDate=${dateStr}`;
           
-          let editedBody = `Factory: ${report.factory}\n設備: ${report.加工設備}\nstatus: NG\nTimestamp: ${timestamp}\nReason: ${report.reason}\nImage: ${report.imageURLs[0]}\nLink: ${adminLink}`;
+          let editedBody = `工場: ${report.factory}\n設備: ${report.加工設備}\nステータス: NG\n日時: ${timestamp}\n理由: ${report.reason}\n画像: ${report.imageURLs[0]}\n管理リンク: ${adminLink}`;
           
           await fetch(url, {
             method: 'PUT',
