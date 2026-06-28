@@ -30938,6 +30938,7 @@ app.post('/api/check-forms/submit', async (req, res) => {
             required: ticketRequired,
             reason: ticketReason,
             imageURLs: ticketImageURLs,
+            chatworkMessageId,
           };
           recordTicketSummaries.push({
             fieldId: field.id,
