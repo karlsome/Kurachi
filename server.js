@@ -30804,9 +30804,7 @@ app.post('/api/check-forms/tickets/resolve', async (req, res) => {
       for (let i = 0; i < fixImageBase64s.length; i++) {
         const uploadResult = await saveBase64AssetToFirebase({
           base64: fixImageBase64s[i],
-          directory: `maintenanceForm/${ticket.factory}/tickets/fixes`,
-          label: `fix_${ticketId}_${Date.now()}_${i}`,
-          id: ticketId
+          filePathPrefix: `maintenanceForm/${ticket.factory}/tickets/fixes/fix_${ticketId}_${Date.now()}_${i}`
         });
         if (uploadResult && uploadResult.imageURL) {
           imageURLs.push(uploadResult.imageURL);
