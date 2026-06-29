@@ -162,22 +162,22 @@
     .name-input::placeholder { color: var(--muted-fg); }
     .name-input:focus { border-color: rgba(245,158,11,0.4); }
     /* Worker modal styles */
-    #workerNameModal {
+    #workerNameModal, #maintenanceNameModal {
       display: none;
       position: fixed; inset: 0; z-index: 9999;
       background: rgba(13, 14, 16, 0.45); backdrop-filter: blur(8px);
       align-items: center; justify-content: center;
       animation: modal-bg-enter 0.2s ease-out forwards;
     }
-    #workerNameModal.show { display: flex; }
-    #workerNameModal > div {
+    #workerNameModal.show, #maintenanceNameModal.show { display: flex; }
+    #workerNameModal > div, #maintenanceNameModal > div {
       background: var(--bg); border: 1px solid var(--border);
       border-radius: 12px; padding: 24px; color: var(--fg);
       box-shadow: 0 12px 32px rgba(0,0,0,0.2);
       width: 100%; max-width: 580px; max-height: 86vh;
       display: flex; flex-direction: column; box-sizing: border-box;
     }
-    #workerNameModal h2 {
+    #workerNameModal h2, #maintenanceNameModal h2 {
       font-size: 1.25rem; font-weight: 800; text-align: center; margin-bottom: 20px;
     }
     .worker-names-container {
@@ -1099,17 +1099,16 @@
 
   <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
   <!-- Maintenance Worker Name Modal -->
-  <div id="maintenance-name-modal" class="modal-overlay hidden" style="align-items: center; justify-content: center; padding: 1.25rem;">
-    <div class="skip-modal-card" style="height: auto; min-height: 200px;">
-      <h2 class="skip-modal-title">Maintenance</h2>
-      <p class="skip-modal-body">Please select your name to proceed.</p>
-      <select id="maintenance-worker-name" class="skip-modal-textarea" style="height: auto; padding: 0.75rem;">
-        <option value="">Select Name...</option>
-      </select>
-      <div style="display: flex; gap: 1rem; margin-top: 1rem;">
-        <button type="button" class="check-btn ok-btn" id="maintenance-name-submit" style="flex: 1;">Proceed</button>
-        <button type="button" class="check-btn ng-btn" id="maintenance-name-cancel" style="flex: 1;">Cancel</button>
-      </div>
+  <div id="maintenanceNameModal">
+    <div>
+      <h2 id="maintenance-worker-modal-title">Select Worker</h2>
+      <div class="worker-names-container" id="maintenanceWorkerNamesContainer"></div>
+      <button type="button" class="btn-manual" id="maintenanceManualWorkerBtn" style="margin-top:15px; width:100%; padding: 12px; border-radius: 8px; background: #ffffff; color: var(--fg); border:1px solid var(--border); font-weight: 700; cursor: pointer; font-size: 1rem;">
+        手動入力
+      </button>
+      <button type="button" class="btn-cancel" id="closeMaintenanceWorkerModal" style="margin-top:10px; width:100%; padding: 12px; border-radius: 8px; background: #ef4444; color: #fff; border:none; font-weight: 700; cursor: pointer; font-size: 1rem;">
+        CLOSE
+      </button>
     </div>
   </div>
 

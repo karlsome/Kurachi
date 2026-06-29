@@ -430,10 +430,9 @@ function cacheDom() {
   // Maintenance UI
   dom.maintenanceBtn = document.getElementById('maintenance-btn');
   dom.maintenanceBadge = document.getElementById('maintenance-badge');
-  dom.maintenanceNameModal = document.getElementById('maintenance-name-modal');
-  dom.maintenanceWorkerName = document.getElementById('maintenance-worker-name');
-  dom.maintenanceNameSubmit = document.getElementById('maintenance-name-submit');
-  dom.maintenanceNameCancel = document.getElementById('maintenance-name-cancel');
+  dom.maintenanceNameModal = document.getElementById('maintenanceNameModal');
+  dom.maintenanceWorkerNamesContainer = document.getElementById('maintenanceWorkerNamesContainer');
+  dom.closeMaintenanceWorkerModal = document.getElementById('closeMaintenanceWorkerModal');
   dom.maintenanceView = document.getElementById('maintenance-view');
   dom.btnMaintBack = document.getElementById('btn-maint-back');
   dom.maintenanceTicketsContainer = document.getElementById('maintenance-tickets-container');
@@ -493,9 +492,21 @@ function bindEvents() {
 
   dom.btnBegin.addEventListener('click', beginInspection);
   
+  const maintenanceManualBtn = document.getElementById('maintenanceManualWorkerBtn');
+  if (maintenanceManualBtn) {
+    maintenanceManualBtn.addEventListener('click', () => {
+      const name = prompt(state.lang === 'ja' ? '手動で名前を入力してください:' : 'Please enter your name manually:');
+      if (name && name.trim()) {
+        state.maintenanceWorkerName = name.trim();
+        state.maintenanceWorkerUsername = name.trim();
+        hideMaintenanceNameModal();
+        openMaintenanceView();
+      }
+    });
+  }
+  
   dom.maintenanceBtn.addEventListener('click', showMaintenanceNameModal);
-  dom.maintenanceNameCancel.addEventListener('click', hideMaintenanceNameModal);
-  dom.maintenanceNameSubmit.addEventListener('click', handleMaintenanceNameSubmit);
+  dom.closeMaintenanceWorkerModal.addEventListener('click', hideMaintenanceNameModal);
   dom.btnMaintBack.addEventListener('click', () => {
     dom.maintenanceView.classList.add('hidden');
     dom.nameScreen.classList.remove('hidden');
@@ -1877,8 +1888,8 @@ async function goBack() {
 
 // ── Flash ────────────────────────────────────────────────────────
 
-function showFlash(result) {
-  const isOK = result === 'OK';
+function showFlash(result, forceOK = false) {
+  const isOK = forceOK || result === 'OK';
   dom.flash.classList.remove('hidden', 'ok', 'ng');
   dom.flash.classList.add(isOK ? 'ok' : 'ng');
   dom.flashIcon.innerHTML = isOK
@@ -3107,38 +3118,67 @@ async function fetchOpenTickets() {
 }
 
 async function showMaintenanceNameModal() {
-  dom.maintenanceNameModal.classList.remove('hidden');
+  dom.maintenanceNameModal.classList.add('show');
   
-  if (dom.maintenanceWorkerName.options.length <= 1) {
+  if (!state.maintenanceWorkersFetched) {
     try {
       const response = await fetch(CHECKLIST_API.maintenanceWorkers);
       if (response.ok) {
         const data = await response.json();
-        const workers = data.workers || [];
-        workers.forEach(w => {
-          const opt = document.createElement('option');
-          opt.value = w;
-          opt.textContent = w;
-          dom.maintenanceWorkerName.appendChild(opt);
-        });
+        state.maintenanceWorkersList = data.workers || [];
+        state.maintenanceWorkersFetched = true;
       }
     } catch (e) {
       console.error('Failed to load maintenance workers', e);
+      state.maintenanceWorkersList = [];
     }
   }
+  renderMaintenanceWorkerNames();
 }
 
 function hideMaintenanceNameModal() {
-  dom.maintenanceNameModal.classList.add('hidden');
+  dom.maintenanceNameModal.classList.remove('show');
 }
 
-function handleMaintenanceNameSubmit() {
-  const name = dom.maintenanceWorkerName.value;
-  if (!name) {
-    alert('Please select your name.');
-    return;
-  }
-  state.maintenanceWorkerName = name;
+function renderMaintenanceWorkerNames() {
+  const container = dom.maintenanceWorkerNamesContainer;
+  if (!container) return;
+  container.innerHTML = '';
+
+  const names = state.maintenanceWorkersList.map(w => w.fullName);
+  const grouped = groupNamesByLetter(names);
+  const sortedKeys = Object.keys(grouped).sort();
+
+  sortedKeys.forEach(letter => {
+    const section = document.createElement('div');
+    section.className = 'worker-section';
+
+    const header = document.createElement('div');
+    header.className = 'worker-section-header';
+    header.textContent = letter;
+    section.appendChild(header);
+
+    const grid = document.createElement('div');
+    grid.className = 'worker-names-grid';
+
+    grouped[letter].forEach(name => {
+      const worker = state.maintenanceWorkersList.find(w => w.fullName === name);
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'worker-name-btn';
+      btn.textContent = name;
+      btn.onclick = () => selectMaintenanceWorkerName(worker);
+      grid.appendChild(btn);
+    });
+
+    section.appendChild(grid);
+    container.appendChild(section);
+  });
+}
+
+function selectMaintenanceWorkerName(worker) {
+  state.maintenanceWorkerName = worker.fullName;
+  state.maintenanceWorkerUsername = worker.username;
   hideMaintenanceNameModal();
   openMaintenanceView();
 }
@@ -3196,9 +3236,12 @@ function captureResolvePhoto() {
     const file = e.target.files[0];
     if (!file) return;
     try {
-      const base64 = await readFileAsDataUrl(file);
-      state.resolvePhotoBase64 = base64;
-      dom.resolvePhotoPreview.src = base64;
+      const compressed = await compressImageFile(file, 1600, 0.78);
+      const annotated = await openAnnotator(compressed);
+      if (!annotated) return;
+      
+      state.resolvePhotoBase64 = annotated;
+      dom.resolvePhotoPreview.src = annotated;
       dom.resolvePhotoPreview.classList.remove('hidden');
     } catch(err) {
       console.error(err);
@@ -3225,6 +3268,7 @@ async function submitResolveTicket() {
       body: JSON.stringify({
         ticketId: ticket._id,
         workerName: state.maintenanceWorkerName,
+        workerUsername: state.maintenanceWorkerUsername,
         fixReason: reason,
         fixImageBase64: state.resolvePhotoBase64 || null
       })
@@ -3245,6 +3289,9 @@ async function submitResolveTicket() {
       }
       
       showFlash('Ticket Resolved!', true);
+      setTimeout(() => {
+        hideFlash();
+      }, 1500);
     } else {
       throw new Error('Failed to submit resolution');
     }

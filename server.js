@@ -30771,7 +30771,10 @@ app.get('/api/check-forms/maintenance-workers', async (req, res) => {
       const first = u.firstName || '';
       const last = u.lastName || '';
       const fullName = `${first} ${last}`.trim();
-      return fullName || u.username || 'Unknown';
+      return {
+        fullName: fullName || u.username || 'Unknown',
+        username: u.username || 'unknown'
+      };
     });
     
     return res.json({ workers });
@@ -30783,7 +30786,7 @@ app.get('/api/check-forms/maintenance-workers', async (req, res) => {
 
 app.post('/api/check-forms/tickets/resolve', async (req, res) => {
   try {
-    const { ticketId, workerName, fixReason, fixImageBase64 } = req.body;
+    const { ticketId, workerName, workerUsername, fixReason, fixImageBase64 } = req.body;
     if (!ticketId || !workerName || !fixReason) {
       return res.status(400).json({ error: 'ticketId, workerName, and fixReason are required' });
     }
@@ -30813,11 +30816,22 @@ app.post('/api/check-forms/tickets/resolve', async (req, res) => {
       { _id: new ObjectId(ticketId) },
       {
         $set: {
-          status: 'fixed',
-          resolvedAt: now,
-          resolvedBy: workerName,
+          status: 'closed',
+          closedAt: now.toISOString(),
+          closedBy: workerName,
+          closedByUsername: workerUsername,
           fixReason: fixReason,
           fixImageURL: fixImageURL
+        },
+        $push: {
+          statusHistory: {
+            action: 'Ticket Closed',
+            fromStatus: 'open',
+            toStatus: 'closed',
+            timestamp: now.toISOString(),
+            user: workerName,
+            username: workerUsername
+          }
         }
       }
     );
@@ -30830,7 +30844,7 @@ app.post('/api/check-forms/tickets/resolve', async (req, res) => {
       
       const resolvedAtStr = now.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
       
-      let infoBlock = `\n[info][title]解決済み (Fixed)[/title]`;
+      let infoBlock = `\n[info][title]解決済み (Closed)[/title]`;
       infoBlock += `\n対応者: ${workerName}`;
       infoBlock += `\n対応日時: ${resolvedAtStr}`;
       infoBlock += `\n対応内容: ${fixReason}`;
