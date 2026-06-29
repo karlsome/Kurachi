@@ -30834,6 +30834,7 @@ app.post('/api/check-forms/tickets/resolve', async (req, res) => {
             timestamp: now.toISOString(),
             user: workerName,
             username: workerUsername,
+            fixReason: fixReason,
             imageURLs: imageURLs
           }
         }
