@@ -12,6 +12,9 @@ const CHECKLIST_API = {
   submit: `${API_BASE_URL}/api/check-forms/submit`,
   verifyQr: `${API_BASE_URL}/api/check-forms/verify-qr`,
   notifyNgTicket: `${API_BASE_URL}/api/check-forms/notify-ng-ticket`,
+  openTickets: `${API_BASE_URL}/api/check-forms/tickets/open`,
+  resolveTicket: `${API_BASE_URL}/api/check-forms/tickets/resolve`,
+  maintenanceWorkers: `${API_BASE_URL}/api/check-forms/maintenance-workers`,
 };
 
 const CHECKLIST_DB_NAME = 'kurachi-checklist-assets';
@@ -423,6 +426,26 @@ function cacheDom() {
   dom.skipModal = document.getElementById('skip-modal');
 
   dom.segs = [];
+  
+  // Maintenance UI
+  dom.maintenanceBtn = document.getElementById('maintenance-btn');
+  dom.maintenanceBadge = document.getElementById('maintenance-badge');
+  dom.maintenanceNameModal = document.getElementById('maintenance-name-modal');
+  dom.maintenanceWorkerName = document.getElementById('maintenance-worker-name');
+  dom.maintenanceNameSubmit = document.getElementById('maintenance-name-submit');
+  dom.maintenanceNameCancel = document.getElementById('maintenance-name-cancel');
+  dom.maintenanceView = document.getElementById('maintenance-view');
+  dom.btnMaintBack = document.getElementById('btn-maint-back');
+  dom.maintenanceTicketsContainer = document.getElementById('maintenance-tickets-container');
+  dom.maintenanceEmptyState = document.getElementById('maintenance-empty-state');
+  dom.maintenanceResolveView = document.getElementById('maintenance-resolve-view');
+  dom.btnMaintResolveBack = document.getElementById('btn-maint-resolve-back');
+  dom.resolveTicketTitle = document.getElementById('resolve-ticket-title');
+  dom.resolveTicketReason = document.getElementById('resolve-ticket-reason');
+  dom.resolveFixReason = document.getElementById('resolve-fix-reason');
+  dom.btnResolvePhoto = document.getElementById('btn-resolve-photo');
+  dom.resolvePhotoPreview = document.getElementById('resolve-photo-preview');
+  dom.btnResolveSubmit = document.getElementById('btn-resolve-submit');
 }
 
 // ── Events ───────────────────────────────────────────────────────
@@ -469,6 +492,21 @@ function bindEvents() {
   });
 
   dom.btnBegin.addEventListener('click', beginInspection);
+  
+  dom.maintenanceBtn.addEventListener('click', showMaintenanceNameModal);
+  dom.maintenanceNameCancel.addEventListener('click', hideMaintenanceNameModal);
+  dom.maintenanceNameSubmit.addEventListener('click', handleMaintenanceNameSubmit);
+  dom.btnMaintBack.addEventListener('click', () => {
+    dom.maintenanceView.classList.add('hidden');
+    dom.nameScreen.classList.remove('hidden');
+    state.phase = 'name';
+  });
+  dom.btnMaintResolveBack.addEventListener('click', () => {
+    dom.maintenanceResolveView.classList.add('hidden');
+    dom.maintenanceView.classList.remove('hidden');
+  });
+  dom.btnResolvePhoto.addEventListener('click', captureResolvePhoto);
+  dom.btnResolveSubmit.addEventListener('click', submitResolveTicket);
   dom.btnSkip.addEventListener('click', openSkipModal);
   dom.skipModal.addEventListener('click', handleSkipModalClick);
   dom.skipModal.addEventListener('input', handleSkipModalInput);
@@ -655,6 +693,9 @@ async function loadTemplates() {
         dom.btnSkip.disabled = false;
       }
     }
+    
+    fetchOpenTickets();
+    dom.maintenanceBtn.classList.remove('hidden');
 
   } catch (err) {
     applyLang(state.lang);
@@ -3041,4 +3082,176 @@ function runAssetTransaction(db, mode, callback) {
     tx.onerror = () => reject(tx.error || new Error('IndexedDB transaction failed.'));
     tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction aborted.'));
   });
+}
+
+// ── Maintenance ──────────────────────────────────────────────────
+
+async function fetchOpenTickets() {
+  if (!state.factory || !state.machine) return;
+  try {
+    const url = `${CHECKLIST_API.openTickets}?factory=${encodeURIComponent(state.factory)}&machine=${encodeURIComponent(state.machine)}`;
+    const response = await fetch(url);
+    if (!response.ok) return;
+    const data = await response.json();
+    state.openTickets = data.tickets || [];
+    
+    if (state.openTickets.length > 0) {
+      dom.maintenanceBadge.textContent = state.openTickets.length;
+      dom.maintenanceBadge.classList.remove('hidden');
+    } else {
+      dom.maintenanceBadge.classList.add('hidden');
+    }
+  } catch (err) {
+    console.error('Failed to fetch open tickets', err);
+  }
+}
+
+async function showMaintenanceNameModal() {
+  dom.maintenanceNameModal.classList.remove('hidden');
+  
+  if (dom.maintenanceWorkerName.options.length <= 1) {
+    try {
+      const response = await fetch(CHECKLIST_API.maintenanceWorkers);
+      if (response.ok) {
+        const data = await response.json();
+        const workers = data.workers || [];
+        workers.forEach(w => {
+          const opt = document.createElement('option');
+          opt.value = w;
+          opt.textContent = w;
+          dom.maintenanceWorkerName.appendChild(opt);
+        });
+      }
+    } catch (e) {
+      console.error('Failed to load maintenance workers', e);
+    }
+  }
+}
+
+function hideMaintenanceNameModal() {
+  dom.maintenanceNameModal.classList.add('hidden');
+}
+
+function handleMaintenanceNameSubmit() {
+  const name = dom.maintenanceWorkerName.value;
+  if (!name) {
+    alert('Please select your name.');
+    return;
+  }
+  state.maintenanceWorkerName = name;
+  hideMaintenanceNameModal();
+  openMaintenanceView();
+}
+
+function openMaintenanceView() {
+  state.phase = 'maintenance';
+  dom.nameScreen.classList.add('hidden');
+  dom.maintenanceView.classList.remove('hidden');
+  renderOpenTickets();
+}
+
+function renderOpenTickets() {
+  dom.maintenanceTicketsContainer.innerHTML = '';
+  if (!state.openTickets || state.openTickets.length === 0) {
+    dom.maintenanceEmptyState.classList.remove('hidden');
+    return;
+  }
+  dom.maintenanceEmptyState.classList.add('hidden');
+  
+  state.openTickets.forEach(ticket => {
+    const card = document.createElement('div');
+    card.className = 'maintenance-ticket-card';
+    
+    const dateStr = new Date(ticket.createdAt).toLocaleString(state.lang === 'ja' ? 'ja-JP' : 'en-US', { timeZone: 'Asia/Tokyo' });
+    
+    card.innerHTML = `
+      <h3>${escapeHtml(ticket.加工設備 || state.machine)} - ${escapeHtml(ticket.reason || 'Unknown Issue')}</h3>
+      <p>Reported: ${dateStr}</p>
+      <div class="ticket-date">${ticket.status.toUpperCase()}</div>
+    `;
+    card.addEventListener('click', () => openResolveView(ticket));
+    dom.maintenanceTicketsContainer.appendChild(card);
+  });
+}
+
+function openResolveView(ticket) {
+  state.activeResolveTicket = ticket;
+  dom.resolveTicketTitle.textContent = `Fix: ${ticket.加工設備 || state.machine}`;
+  dom.resolveTicketReason.textContent = `Issue: ${ticket.reason}`;
+  dom.resolveFixReason.value = '';
+  dom.resolvePhotoPreview.src = '';
+  dom.resolvePhotoPreview.classList.add('hidden');
+  state.resolvePhotoBase64 = null;
+  
+  dom.maintenanceView.classList.add('hidden');
+  dom.maintenanceResolveView.classList.remove('hidden');
+}
+
+function captureResolvePhoto() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.capture = 'environment';
+  input.onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const base64 = await readFileAsDataUrl(file);
+      state.resolvePhotoBase64 = base64;
+      dom.resolvePhotoPreview.src = base64;
+      dom.resolvePhotoPreview.classList.remove('hidden');
+    } catch(err) {
+      console.error(err);
+    }
+  };
+  input.click();
+}
+
+async function submitResolveTicket() {
+  const ticket = state.activeResolveTicket;
+  const reason = dom.resolveFixReason.value.trim();
+  if (!reason) {
+    alert('Please enter a resolution reason.');
+    return;
+  }
+  
+  dom.btnResolveSubmit.disabled = true;
+  dom.btnResolveSubmit.textContent = 'Submitting...';
+  
+  try {
+    const response = await fetch(CHECKLIST_API.resolveTicket, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ticketId: ticket._id,
+        workerName: state.maintenanceWorkerName,
+        fixReason: reason,
+        fixImageBase64: state.resolvePhotoBase64 || null
+      })
+    });
+    
+    if (response.ok) {
+      state.openTickets = state.openTickets.filter(t => t._id !== ticket._id);
+      
+      dom.maintenanceResolveView.classList.add('hidden');
+      dom.maintenanceView.classList.remove('hidden');
+      renderOpenTickets();
+      
+      if (state.openTickets.length > 0) {
+        dom.maintenanceBadge.textContent = state.openTickets.length;
+        dom.maintenanceBadge.classList.remove('hidden');
+      } else {
+        dom.maintenanceBadge.classList.add('hidden');
+      }
+      
+      showFlash('Ticket Resolved!', true);
+    } else {
+      throw new Error('Failed to submit resolution');
+    }
+  } catch (err) {
+    alert('Error resolving ticket: ' + err.message);
+  } finally {
+    dom.btnResolveSubmit.disabled = false;
+    dom.btnResolveSubmit.textContent = 'Mark as Fixed';
+  }
 }

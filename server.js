@@ -30739,6 +30739,134 @@ app.post('/api/check-forms/translate', async (req, res) => {
   }
 });
 
+app.get('/api/check-forms/tickets/open', async (req, res) => {
+  try {
+    const { factory, machine } = req.query;
+    if (!factory || !machine) {
+      return res.status(400).json({ error: 'factory and machine are required' });
+    }
+    const submittedDb = client.db('submittedDB');
+    const ngReportsCollection = submittedDb.collection(CHECK_FORM_NG_REPORTS_COLLECTION);
+    const tickets = await ngReportsCollection.find({
+      factory,
+      加工設備: machine,
+      status: 'open'
+    }).sort({ createdAt: -1 }).toArray();
+    
+    return res.json({ tickets });
+  } catch (error) {
+    console.error('Failed to fetch open tickets:', error);
+    return res.status(500).json({ error: 'Failed to fetch open tickets' });
+  }
+});
+
+app.get('/api/check-forms/maintenance-workers', async (req, res) => {
+  try {
+    const masterDb = client.db('Sasaki_Coating_MasterDB');
+    const usersCollection = masterDb.collection('users');
+    const users = await usersCollection.find({}).toArray();
+    
+    // The user has firstName and lastName. Format as "FirstName LastName"
+    const workers = users.map(u => {
+      const first = u.firstName || '';
+      const last = u.lastName || '';
+      const fullName = `${first} ${last}`.trim();
+      return fullName || u.username || 'Unknown';
+    });
+    
+    return res.json({ workers });
+  } catch (error) {
+    console.error('Failed to fetch maintenance workers:', error);
+    return res.status(500).json({ error: 'Failed to fetch maintenance workers' });
+  }
+});
+
+app.post('/api/check-forms/tickets/resolve', async (req, res) => {
+  try {
+    const { ticketId, workerName, fixReason, fixImageBase64 } = req.body;
+    if (!ticketId || !workerName || !fixReason) {
+      return res.status(400).json({ error: 'ticketId, workerName, and fixReason are required' });
+    }
+
+    const submittedDb = client.db('submittedDB');
+    const ngReportsCollection = submittedDb.collection(CHECK_FORM_NG_REPORTS_COLLECTION);
+    
+    const ticket = await ngReportsCollection.findOne({ _id: new ObjectId(ticketId) });
+    if (!ticket) {
+      return res.status(404).json({ error: 'Ticket not found' });
+    }
+    
+    let fixImageURL = '';
+    if (fixImageBase64) {
+      const uploadResult = await saveBase64AssetToFirebase({
+        base64: fixImageBase64,
+        directory: `maintenanceForm/${ticket.factory}/tickets/fixes`,
+        label: `fix_${ticketId}_${Date.now()}`,
+        id: ticketId
+      });
+      fixImageURL = uploadResult.imageURL;
+    }
+    
+    const now = new Date();
+    
+    await ngReportsCollection.updateOne(
+      { _id: new ObjectId(ticketId) },
+      {
+        $set: {
+          status: 'fixed',
+          resolvedAt: now,
+          resolvedBy: workerName,
+          fixReason: fixReason,
+          fixImageURL: fixImageURL
+        }
+      }
+    );
+    
+    // Update Chatwork message if exists
+    if (ticket.chatworkMessageId) {
+      const roomId = '440654635';
+      const apiKey = process.env.CHATWORK_API_KEY;
+      const url = `https://api.chatwork.com/v2/rooms/${roomId}/messages/${ticket.chatworkMessageId}`;
+      
+      const resolvedAtStr = now.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+      
+      let infoBlock = `\n[info][title]解決済み (Fixed)[/title]`;
+      infoBlock += `\n対応者: ${workerName}`;
+      infoBlock += `\n対応日時: ${resolvedAtStr}`;
+      infoBlock += `\n対応内容: ${fixReason}`;
+      if (fixImageURL) {
+        infoBlock += `\n画像: ${fixImageURL}`;
+      }
+      infoBlock += `\n[/info]`;
+      
+      const getMsgUrl = `https://api.chatwork.com/v2/rooms/${roomId}/messages/${ticket.chatworkMessageId}`;
+      const getResponse = await fetch(getMsgUrl, {
+        method: 'GET',
+        headers: { 'X-ChatWorkToken': apiKey }
+      });
+      if (getResponse.ok) {
+        const msgData = await getResponse.json();
+        const originalBody = msgData.body;
+        const newBody = originalBody + infoBlock;
+        
+        await fetch(url, {
+          method: 'PUT',
+          headers: {
+            'X-ChatWorkToken': apiKey,
+            'Content-Type': 'application/x-www-form-urlencoded'
+          },
+          body: new URLSearchParams({ body: newBody })
+        });
+      }
+    }
+    
+    return res.json({ success: true });
+  } catch (error) {
+    console.error('Failed to resolve ticket:', error);
+    return res.status(500).json({ error: 'Failed to resolve ticket' });
+  }
+});
+
 app.post('/api/check-forms/notify-ng-ticket', async (req, res) => {
   const { factory, machine, status, reason } = req.body;
   const roomId = '440654635';
