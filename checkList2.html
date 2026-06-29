@@ -1145,12 +1145,12 @@
       <label class="skip-modal-label">対応内容 (How it was fixed) *</label>
       <textarea id="resolve-fix-reason" class="skip-modal-textarea" rows="4" placeholder="Enter resolution details..."></textarea>
       
-      <label class="skip-modal-label" style="margin-top: 1rem;">画像 (Optional Fix Photo)</label>
+      <label class="skip-modal-label" style="margin-top: 1rem;">画像 (Optional Fix Photos, max 10)</label>
       <div style="display:flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1.5rem;">
         <button id="btn-resolve-photo" type="button" class="btn-manual" style="padding: 12px; border-radius: 8px; background: var(--secondary); color: var(--fg); border: 1px solid var(--border); font-weight: bold; cursor: pointer;">
           📸 Take Photo
         </button>
-        <img id="resolve-photo-preview" src="" class="hidden" style="width: 100%; max-height: 200px; object-fit: contain; border-radius: 8px; border: 1px solid var(--border);">
+        <div id="resolve-photos-container" style="display: flex; gap: 0.5rem; overflow-x: auto; padding-bottom: 0.5rem;"></div>
       </div>
       
       <button id="btn-resolve-submit" type="button" class="check-btn ok-btn" style="width: 100%;">Mark as Fixed</button>

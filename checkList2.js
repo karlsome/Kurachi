@@ -443,7 +443,7 @@ function cacheDom() {
   dom.resolveTicketReason = document.getElementById('resolve-ticket-reason');
   dom.resolveFixReason = document.getElementById('resolve-fix-reason');
   dom.btnResolvePhoto = document.getElementById('btn-resolve-photo');
-  dom.resolvePhotoPreview = document.getElementById('resolve-photo-preview');
+  dom.resolvePhotosContainer = document.getElementById('resolve-photos-container');
   dom.btnResolveSubmit = document.getElementById('btn-resolve-submit');
 }
 
@@ -3219,12 +3219,59 @@ function openResolveView(ticket) {
   dom.resolveTicketTitle.textContent = `Fix: ${ticket.加工設備 || state.machine}`;
   dom.resolveTicketReason.textContent = `Issue: ${ticket.reason}`;
   dom.resolveFixReason.value = '';
-  dom.resolvePhotoPreview.src = '';
-  dom.resolvePhotoPreview.classList.add('hidden');
-  state.resolvePhotoBase64 = null;
+  state.resolvePhotos = [];
+  renderResolvePhotos();
   
   dom.maintenanceView.classList.add('hidden');
   dom.maintenanceResolveView.classList.remove('hidden');
+}
+
+function renderResolvePhotos() {
+  const container = dom.resolvePhotosContainer;
+  if (!container) return;
+  
+  container.innerHTML = '';
+  if (state.resolvePhotos.length >= 10) {
+    dom.btnResolvePhoto.style.display = 'none';
+  } else {
+    dom.btnResolvePhoto.style.display = 'block';
+  }
+  
+  state.resolvePhotos.forEach(assetId => {
+    const wrapper = document.createElement('div');
+    wrapper.style.position = 'relative';
+    wrapper.style.flexShrink = '0';
+    wrapper.style.width = '100px';
+    wrapper.style.height = '100px';
+    
+    const img = document.createElement('img');
+    img.style.width = '100%';
+    img.style.height = '100%';
+    img.style.objectFit = 'cover';
+    img.style.borderRadius = '8px';
+    img.style.border = '1px solid var(--border)';
+    
+    // load from db
+    getAsset(assetId).then(src => {
+      if (src) img.src = src;
+    });
+    
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'delete-recent-btn';
+    delBtn.innerHTML = '×';
+    delBtn.style.top = '-5px';
+    delBtn.style.right = '-5px';
+    delBtn.onclick = async () => {
+      await deleteAsset(assetId);
+      state.resolvePhotos = state.resolvePhotos.filter(id => id !== assetId);
+      renderResolvePhotos();
+    };
+    
+    wrapper.appendChild(img);
+    wrapper.appendChild(delBtn);
+    container.appendChild(wrapper);
+  });
 }
 
 function captureResolvePhoto() {
@@ -3240,9 +3287,10 @@ function captureResolvePhoto() {
       const annotated = await openAnnotator(compressed);
       if (!annotated) return;
       
-      state.resolvePhotoBase64 = annotated;
-      dom.resolvePhotoPreview.src = annotated;
-      dom.resolvePhotoPreview.classList.remove('hidden');
+      const assetId = 'resolve_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+      await saveAsset(assetId, annotated);
+      state.resolvePhotos.push(assetId);
+      renderResolvePhotos();
     } catch(err) {
       console.error(err);
     }
@@ -3262,6 +3310,12 @@ async function submitResolveTicket() {
   dom.btnResolveSubmit.textContent = 'Submitting...';
   
   try {
+    const base64s = [];
+    for (const assetId of state.resolvePhotos) {
+      const b64 = await getAsset(assetId);
+      if (b64) base64s.push(b64);
+    }
+  
     const response = await fetch(CHECKLIST_API.resolveTicket, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -3270,11 +3324,16 @@ async function submitResolveTicket() {
         workerName: state.maintenanceWorkerName,
         workerUsername: state.maintenanceWorkerUsername,
         fixReason: reason,
-        fixImageBase64: state.resolvePhotoBase64 || null
+        fixImageBase64s: base64s
       })
     });
     
     if (response.ok) {
+      // Clear out indexed DB assets
+      for (const assetId of state.resolvePhotos) {
+        await deleteAsset(assetId);
+      }
+      state.resolvePhotos = [];
       state.openTickets = state.openTickets.filter(t => t._id !== ticket._id);
       
       dom.maintenanceResolveView.classList.add('hidden');

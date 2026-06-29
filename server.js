@@ -30786,7 +30786,7 @@ app.get('/api/check-forms/maintenance-workers', async (req, res) => {
 
 app.post('/api/check-forms/tickets/resolve', async (req, res) => {
   try {
-    const { ticketId, workerName, workerUsername, fixReason, fixImageBase64 } = req.body;
+    const { ticketId, workerName, workerUsername, fixReason, fixImageBase64s } = req.body;
     if (!ticketId || !workerName || !fixReason) {
       return res.status(400).json({ error: 'ticketId, workerName, and fixReason are required' });
     }
@@ -30799,15 +30799,19 @@ app.post('/api/check-forms/tickets/resolve', async (req, res) => {
       return res.status(404).json({ error: 'Ticket not found' });
     }
     
-    let fixImageURL = '';
-    if (fixImageBase64) {
-      const uploadResult = await saveBase64AssetToFirebase({
-        base64: fixImageBase64,
-        directory: `maintenanceForm/${ticket.factory}/tickets/fixes`,
-        label: `fix_${ticketId}_${Date.now()}`,
-        id: ticketId
-      });
-      fixImageURL = uploadResult.imageURL;
+    let imageURLs = [];
+    if (fixImageBase64s && Array.isArray(fixImageBase64s)) {
+      for (let i = 0; i < fixImageBase64s.length; i++) {
+        const uploadResult = await saveBase64AssetToFirebase({
+          base64: fixImageBase64s[i],
+          directory: `maintenanceForm/${ticket.factory}/tickets/fixes`,
+          label: `fix_${ticketId}_${Date.now()}_${i}`,
+          id: ticketId
+        });
+        if (uploadResult && uploadResult.imageURL) {
+          imageURLs.push(uploadResult.imageURL);
+        }
+      }
     }
     
     const now = new Date();
@@ -30820,8 +30824,7 @@ app.post('/api/check-forms/tickets/resolve', async (req, res) => {
           closedAt: now.toISOString(),
           closedBy: workerName,
           closedByUsername: workerUsername,
-          fixReason: fixReason,
-          fixImageURL: fixImageURL
+          fixReason: fixReason
         },
         $push: {
           statusHistory: {
@@ -30830,7 +30833,8 @@ app.post('/api/check-forms/tickets/resolve', async (req, res) => {
             toStatus: 'closed',
             timestamp: now.toISOString(),
             user: workerName,
-            username: workerUsername
+            username: workerUsername,
+            imageURLs: imageURLs
           }
         }
       }
@@ -30848,8 +30852,8 @@ app.post('/api/check-forms/tickets/resolve', async (req, res) => {
       infoBlock += `\n対応者: ${workerName}`;
       infoBlock += `\n対応日時: ${resolvedAtStr}`;
       infoBlock += `\n対応内容: ${fixReason}`;
-      if (fixImageURL) {
-        infoBlock += `\n画像: ${fixImageURL}`;
+      if (imageURLs.length > 0) {
+        infoBlock += `\n画像: ${imageURLs.join('\n')}`;
       }
       infoBlock += `\n[/info]`;
       
