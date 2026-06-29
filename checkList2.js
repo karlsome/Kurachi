@@ -3190,6 +3190,18 @@ function openMaintenanceView() {
   renderOpenTickets();
 }
 
+function buildDefectString(ticket) {
+  if (!ticket.fieldLabel) return '';
+  let ans = ticket.answerValue;
+  if (Array.isArray(ans)) ans = ans.join(', ');
+  let str = `Field: ${escapeHtml(ticket.fieldLabel)} | Input: ${escapeHtml(String(ans))}`;
+  if (ticket.unit) str += ` ${escapeHtml(ticket.unit)}`;
+  if (ticket.fieldType === 'number' && typeof ticket.min === 'number' && typeof ticket.max === 'number') {
+    str += ` | Expected: ${ticket.min} - ${ticket.max} ${escapeHtml(ticket.unit || '')}`;
+  }
+  return str;
+}
+
 function renderOpenTickets() {
   dom.maintenanceTicketsContainer.innerHTML = '';
   if (!state.openTickets || state.openTickets.length === 0) {
@@ -3204,8 +3216,12 @@ function renderOpenTickets() {
     
     const dateStr = new Date(ticket.createdAt).toLocaleString(state.lang === 'ja' ? 'ja-JP' : 'en-US', { timeZone: 'Asia/Tokyo' });
     
+    const defectStr = buildDefectString(ticket);
+    const defectHtml = defectStr ? `<p style="color: #ef4444; font-size: 0.85rem; margin-top: 4px; font-weight: 500;">${defectStr}</p>` : '';
+    
     card.innerHTML = `
       <h3>${escapeHtml(ticket.加工設備 || state.machine)} - ${escapeHtml(ticket.reason || 'Unknown Issue')}</h3>
+      ${defectHtml}
       <p>Reported: ${dateStr}</p>
       <div class="ticket-date">${ticket.status.toUpperCase()}</div>
     `;
@@ -3218,6 +3234,18 @@ function openResolveView(ticket) {
   state.activeResolveTicket = ticket;
   dom.resolveTicketTitle.textContent = `Fix: ${ticket.加工設備 || state.machine}`;
   dom.resolveTicketReason.textContent = `Issue: ${ticket.reason}`;
+  
+  const defectStr = buildDefectString(ticket);
+  const defectEl = document.getElementById('resolve-ticket-defect-details');
+  if (defectEl) {
+    if (defectStr) {
+      defectEl.innerHTML = `<strong>Defect Context:</strong><br/>${defectStr}`;
+      defectEl.classList.remove('hidden');
+    } else {
+      defectEl.classList.add('hidden');
+    }
+  }
+  
   dom.resolveFixReason.value = '';
   state.resolvePhotos = [];
   renderResolvePhotos();
