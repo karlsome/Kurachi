@@ -1,8 +1,8 @@
 'use strict';
 
 //const API_BASE_URL = window.location.origin;
-const API_BASE_URL = 'http://localhost:3000';
-//const API_BASE_URL = "https://kurachi.onrender.com";
+//const API_BASE_URL = 'http://localhost:3000';
+const API_BASE_URL = "https://kurachi.onrender.com";
 
 const CHECKLIST_API = {
   templates: `${API_BASE_URL}/api/check-forms/templates`,
