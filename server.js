@@ -30739,6 +30739,185 @@ app.post('/api/check-forms/translate', async (req, res) => {
   }
 });
 
+app.get('/api/check-forms/tickets/open', async (req, res) => {
+  try {
+    const { factory, machine } = req.query;
+    if (!factory || !machine) {
+      return res.status(400).json({ error: 'factory and machine are required' });
+    }
+    const submittedDb = client.db('submittedDB');
+    const ngReportsCollection = submittedDb.collection(CHECK_FORM_NG_REPORTS_COLLECTION);
+    const tickets = await ngReportsCollection.find({
+      factory,
+      加工設備: machine,
+      status: 'open'
+    }).sort({ createdAt: -1 }).toArray();
+    
+    return res.json({ tickets });
+  } catch (error) {
+    console.error('Failed to fetch open tickets:', error);
+    return res.status(500).json({ error: 'Failed to fetch open tickets' });
+  }
+});
+
+app.get('/api/check-forms/maintenance-workers', async (req, res) => {
+  try {
+    const masterDb = client.db('Sasaki_Coating_MasterDB');
+    const usersCollection = masterDb.collection('users');
+    const users = await usersCollection.find({}).toArray();
+    
+    // The user has firstName and lastName. Format as "FirstName LastName"
+    const workers = users.map(u => {
+      const first = u.firstName || '';
+      const last = u.lastName || '';
+      const fullName = `${first} ${last}`.trim();
+      return {
+        fullName: fullName || u.username || 'Unknown',
+        username: u.username || 'unknown'
+      };
+    });
+    
+    return res.json({ workers });
+  } catch (error) {
+    console.error('Failed to fetch maintenance workers:', error);
+    return res.status(500).json({ error: 'Failed to fetch maintenance workers' });
+  }
+});
+
+app.post('/api/check-forms/tickets/resolve', async (req, res) => {
+  try {
+    const { ticketId, workerName, workerUsername, fixReason, fixImageBase64s } = req.body;
+    if (!ticketId || !workerName || !fixReason) {
+      return res.status(400).json({ error: 'ticketId, workerName, and fixReason are required' });
+    }
+
+    const submittedDb = client.db('submittedDB');
+    const ngReportsCollection = submittedDb.collection(CHECK_FORM_NG_REPORTS_COLLECTION);
+    
+    const ticket = await ngReportsCollection.findOne({ _id: new ObjectId(ticketId) });
+    if (!ticket) {
+      return res.status(404).json({ error: 'Ticket not found' });
+    }
+    
+    let imageURLs = [];
+    if (fixImageBase64s && Array.isArray(fixImageBase64s)) {
+      for (let i = 0; i < fixImageBase64s.length; i++) {
+        const uploadResult = await saveBase64AssetToFirebase({
+          base64: fixImageBase64s[i],
+          directory: `maintenanceForm/${ticket.factory}/tickets/fixes`,
+          label: `fix_${ticketId}_${Date.now()}_${i}`,
+          id: ticketId
+        });
+        if (uploadResult && uploadResult.imageURL) {
+          imageURLs.push(uploadResult.imageURL);
+        }
+      }
+    }
+    
+    const now = new Date();
+    
+    await ngReportsCollection.updateOne(
+      { _id: new ObjectId(ticketId) },
+      {
+        $set: {
+          status: 'closed',
+          closedAt: now.toISOString(),
+          closedBy: workerName,
+          closedByUsername: workerUsername,
+          fixReason: fixReason
+        },
+        $push: {
+          statusHistory: {
+            action: 'Ticket Closed',
+            fromStatus: 'open',
+            toStatus: 'closed',
+            timestamp: now.toISOString(),
+            user: workerName,
+            username: workerUsername,
+            fixReason: fixReason,
+            imageURLs: imageURLs
+          }
+        }
+      }
+    );
+    
+    // Update Chatwork message if exists
+    if (ticket.chatworkMessageId) {
+      const roomId = '440654635';
+      const apiKey = process.env.CHATWORK_API_KEY;
+      const url = `https://api.chatwork.com/v2/rooms/${roomId}/messages/${ticket.chatworkMessageId}`;
+      
+      const resolvedAtStr = now.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+      
+      let infoBlock = `\n[info][title]解決済み (Closed)[/title]`;
+      infoBlock += `\n対応者: ${workerName}`;
+      infoBlock += `\n対応日時: ${resolvedAtStr}`;
+      infoBlock += `\n対応内容: ${fixReason}`;
+      if (imageURLs.length > 0) {
+        infoBlock += `\n画像: ${imageURLs.join('\n')}`;
+      }
+      infoBlock += `\n[/info]`;
+      
+      const getMsgUrl = `https://api.chatwork.com/v2/rooms/${roomId}/messages/${ticket.chatworkMessageId}`;
+      const getResponse = await fetch(getMsgUrl, {
+        method: 'GET',
+        headers: { 'X-ChatWorkToken': apiKey }
+      });
+      if (getResponse.ok) {
+        const msgData = await getResponse.json();
+        const originalBody = msgData.body;
+        const newBody = originalBody + infoBlock;
+        
+        await fetch(url, {
+          method: 'PUT',
+          headers: {
+            'X-ChatWorkToken': apiKey,
+            'Content-Type': 'application/x-www-form-urlencoded'
+          },
+          body: new URLSearchParams({ body: newBody })
+        });
+      }
+    }
+    
+    return res.json({ success: true });
+  } catch (error) {
+    console.error('Failed to resolve ticket:', error);
+    return res.status(500).json({ error: 'Failed to resolve ticket' });
+  }
+});
+
+app.post('/api/check-forms/notify-ng-ticket', async (req, res) => {
+  const { factory, machine, status, reason } = req.body;
+  const roomId = '440654635';
+  const apiKey = process.env.CHATWORK_API_KEY;
+  const url = `https://api.chatwork.com/v2/rooms/${roomId}/messages`;
+  
+  const now = new Date();
+  const timestamp = now.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+  const messageBody = `工場: ${factory}\n設備: ${machine}\nステータス: ${status}\n日時: ${timestamp}\n理由: ${reason}`;
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'X-ChatWorkToken': apiKey,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: new URLSearchParams({ body: messageBody })
+    });
+
+    if (response.ok) {
+      const result = await response.json();
+      res.status(200).json({ message_id: result.message_id });
+    } else {
+      const errorText = await response.text();
+      res.status(response.status).json({ error: errorText });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.post('/api/check-forms/submit', async (req, res) => {
   const payload = req.body || {};
   const factory = normalizeCheckFormText(payload.factory);
@@ -30848,6 +31027,7 @@ app.post('/api/check-forms/submit', async (req, res) => {
           ? answerPayload.ticket
           : null;
         const ticketReason = normalizeCheckFormText(ticketPayload?.reason);
+        const chatworkMessageId = normalizeCheckFormText(ticketPayload?.chatworkMessageId);
         const ticketImagesData = Array.isArray(ticketPayload?.imagesData)
           ? ticketPayload.imagesData.filter(Boolean).slice(0, 5)
           : [];
@@ -30893,6 +31073,7 @@ app.post('/api/check-forms/submit', async (req, res) => {
             unit: field.unit,
             reason: ticketReason,
             imageURLs: ticketImageURLs,
+            chatworkMessageId,
             status: 'open',
             createdAt: now,
             ...(approvedBy ? { approvedBy } : {}),
@@ -30904,6 +31085,7 @@ app.post('/api/check-forms/submit', async (req, res) => {
             required: ticketRequired,
             reason: ticketReason,
             imageURLs: ticketImageURLs,
+            chatworkMessageId,
           };
           recordTicketSummaries.push({
             fieldId: field.id,
@@ -30969,6 +31151,40 @@ app.post('/api/check-forms/submit', async (req, res) => {
       });
     } finally {
       await session.endSession();
+    }
+
+    // Send Chatwork Edit messages if needed
+    for (const report of ngReportDocs) {
+      if (report.chatworkMessageId && report.imageURLs && report.imageURLs.length > 0) {
+        try {
+          const roomId = '440654635';
+          const apiKey = process.env.CHATWORK_API_KEY;
+          const url = `https://api.chatwork.com/v2/rooms/${roomId}/messages/${report.chatworkMessageId}`;
+          const timestamp = report.createdAt.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+          
+          const formatter = new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' });
+          const parts = formatter.formatToParts(new Date(report.createdAt));
+          const year = parts.find(p => p.type === 'year').value;
+          const month = parts.find(p => p.type === 'month').value;
+          const day = parts.find(p => p.type === 'day').value;
+          const dateStr = `${year}-${month}-${day}`;
+          
+          const adminLink = `https://karlsome.github.io/freyaAdmin2/maintenance/submissions/tickets?startDate=${dateStr}&endDate=${dateStr}`;
+          
+          let editedBody = `工場: ${report.factory}\n設備: ${report.加工設備}\nステータス: NG\n日時: ${timestamp}\n理由: ${report.reason}\n画像: ${report.imageURLs[0]}\n管理リンク: ${adminLink}`;
+          
+          await fetch(url, {
+            method: 'PUT',
+            headers: {
+              'X-ChatWorkToken': apiKey,
+              'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            body: new URLSearchParams({ body: editedBody })
+          });
+        } catch (err) {
+          console.error('Failed to edit chatwork message', err);
+        }
+      }
     }
 
     return res.status(201).json({

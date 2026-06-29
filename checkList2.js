@@ -5,202 +5,206 @@
 const API_BASE_URL = "https://kurachi.onrender.com";
 
 const CHECKLIST_API = {
-  templates:    `${API_BASE_URL}/api/check-forms/templates`,
+  templates: `${API_BASE_URL}/api/check-forms/templates`,
   templateById: `${API_BASE_URL}/api/check-forms/template`,
-  names:        `${API_BASE_URL}/api/check-forms/names`,
-  translate:    `${API_BASE_URL}/api/check-forms/translate`,
-  submit:       `${API_BASE_URL}/api/check-forms/submit`,
-  verifyQr:     `${API_BASE_URL}/api/check-forms/verify-qr`,
+  names: `${API_BASE_URL}/api/check-forms/names`,
+  translate: `${API_BASE_URL}/api/check-forms/translate`,
+  submit: `${API_BASE_URL}/api/check-forms/submit`,
+  verifyQr: `${API_BASE_URL}/api/check-forms/verify-qr`,
+  notifyNgTicket: `${API_BASE_URL}/api/check-forms/notify-ng-ticket`,
+  openTickets: `${API_BASE_URL}/api/check-forms/tickets/open`,
+  resolveTicket: `${API_BASE_URL}/api/check-forms/tickets/resolve`,
+  maintenanceWorkers: `${API_BASE_URL}/api/check-forms/maintenance-workers`,
 };
 
-const CHECKLIST_DB_NAME     = 'kurachi-checklist-assets';
-const CHECKLIST_DB_VERSION  = 1;
+const CHECKLIST_DB_NAME = 'kurachi-checklist-assets';
+const CHECKLIST_DB_VERSION = 1;
 const CHECKLIST_ASSET_STORE = 'assets';
-const CHECKLIST_DRAFT_KEY          = 'checkListDraft2';
+const CHECKLIST_DRAFT_KEY = 'checkListDraft2';
 const CHECKLIST_RECENT_NAMES_PREFIX = 'checkListRecentNames2::';
 const CHECKLIST_SELECTED_NAME_PREFIX = 'checkListSelectedName2::';
-const MAX_RECENT_NAMES              = 4;
+const MAX_RECENT_NAMES = 4;
 
 const ANNOTATOR_BRUSH_SIZE = 14;
-const ANNOTATOR_COLORS     = ['#ffffff', '#1F9D6B', '#E5484D'];
+const ANNOTATOR_COLORS = ['#ffffff', '#1F9D6B', '#E5484D'];
 
 const STRINGS = {
   en: {
-    eyebrow:         'PRE-USE INSPECTION',
-    stepLabel:       'STEP',
-    namePrompt:      'Select your name to begin',
+    eyebrow: 'PRE-USE INSPECTION',
+    stepLabel: 'STEP',
+    namePrompt: 'Select your name to begin',
     namePlaceholder: 'Search or select your name…',
-    beginBtn:        'BEGIN INSPECTION',
-    ngSub:           'Not Good',
-    okSub:           'Confirmed',
-    okFlash:         'CONFIRMED',
-    ngFlash:         'NOT GOOD',
-    complete:        'PRE-USE INSPECTION COMPLETE',
-    passed:          'PASSED',
-    failed:          'FAILED',
-    allClear:        'All checks cleared. Machine is ready to operate.',
-    someNg:          (n, t) => `${n} of ${t} check${n > 1 ? 's' : ''} failed — do not operate.`,
-    submitBtn:       'SUBMIT RESULTS',
+    beginBtn: 'BEGIN INSPECTION',
+    ngSub: 'Not Good',
+    okSub: 'Confirmed',
+    okFlash: 'CONFIRMED',
+    ngFlash: 'NOT GOOD',
+    complete: 'PRE-USE INSPECTION COMPLETE',
+    passed: 'PASSED',
+    failed: 'FAILED',
+    allClear: 'All checks cleared. Machine is ready to operate.',
+    someNg: (n, t) => `${n} of ${t} check${n > 1 ? 's' : ''} failed — do not operate.`,
+    submitBtn: 'SUBMIT RESULTS',
     submitSuccessTitle: 'Submitted Successfully',
     submitSuccessSub: 'Resetting in a moment…',
-    takePhoto:       'Take photo',
-    retakePhoto:     'Retake photo',
-    photoRequiredHint:'Photo is required to continue',
-    noTemplates:     'No active inspection templates found.',
-    loadError:       (e) => `Could not load template: ${e}`,
-    translating:     'Translating…',
-    backBtn:         'Back',
-    resetAllBtn:     'Reset All',
-    startOver:       'Start Over',
-    ticketTitle:     'NG Report',
+    takePhoto: 'Take photo',
+    retakePhoto: 'Retake photo',
+    photoRequiredHint: 'Photo is required to continue',
+    noTemplates: 'No active inspection templates found.',
+    loadError: (e) => `Could not load template: ${e}`,
+    translating: 'Translating…',
+    backBtn: 'Back',
+    resetAllBtn: 'Reset All',
+    startOver: 'Start Over',
+    ticketTitle: 'NG Report',
     ticketReasonLabel: 'Reason for failure',
     ticketReasonHint: 'Describe the issue in detail…',
     ticketPhotoLabel: 'Photo evidence',
-    ticketPhoto:     'Add photo',
-    ticketSave:      'Save ticket',
-    ticketCancel:    'Change answer',
-    ticketBtn:       'Ticket',
-    ticketReqBtn:    'Required',
-    ticketViewBtn:   'Review',
+    ticketPhoto: 'Add photo',
+    ticketSave: 'Save ticket',
+    ticketCancel: 'Change answer',
+    ticketBtn: 'Ticket',
+    ticketReqBtn: 'Required',
+    ticketViewBtn: 'Review',
     ticketReasonReq: 'A reason is required before saving.',
-    ticketPhotoReq:  'At least one photo is required.',
-    ticketContentReq:'Enter a comment or add a photo before saving.',
-    skipped:         'SKIPPED',
-    skipSub:         'Inspection skipped — results recorded for reference only.',
-    skipBtn:         'SKIP CHECK',
-    skipModalTitle:  'Skip Inspection',
-    skipModalBody:   'All checks will be recorded as NG. Provide a reason below.',
+    ticketPhotoReq: 'At least one photo is required.',
+    ticketContentReq: 'Enter a comment or add a photo before saving.',
+    skipped: 'SKIPPED',
+    skipSub: 'Inspection skipped — results recorded for reference only.',
+    skipBtn: 'SKIP CHECK',
+    skipModalTitle: 'Skip Inspection',
+    skipModalBody: 'All checks will be recorded as NG. Provide a reason below.',
     skipReasonLabel: 'Reason for skipping',
-    skipReasonHint:  'Explain why this inspection is being skipped…',
-    skipConfirm:     'Skip & Record NG',
-    skipCancel:      'Cancel',
-    skipReasonReq:          'A reason is required to skip.',
-    skipQrLabel:            'SUPERVISOR AUTHORISATION',
-    skipQrPrompt:           'Hold QR code in front of camera',
-    skipQrLooking:          'Verifying…',
-    skipQrNotFound:         'User not found — try again',
-    skipQrDenied:           'Insufficient permissions',
-    skipQrNoCamera:         'Camera unavailable',
-    skipQrManualPlaceholder:'Enter QR code value…',
-    skipQrManualPrompt:     'Enter the QR code value to verify',
+    skipReasonHint: 'Explain why this inspection is being skipped…',
+    skipConfirm: 'Skip & Record NG',
+    skipCancel: 'Cancel',
+    skipReasonReq: 'A reason is required to skip.',
+    skipQrLabel: 'SUPERVISOR AUTHORISATION',
+    skipQrPrompt: 'Hold QR code in front of camera',
+    skipQrLooking: 'Verifying…',
+    skipQrNotFound: 'User not found — try again',
+    skipQrDenied: 'Insufficient permissions',
+    skipQrNoCamera: 'Camera unavailable',
+    skipQrManualPlaceholder: 'Enter QR code value…',
+    skipQrManualPrompt: 'Enter the QR code value to verify',
   },
   ja: {
-    eyebrow:         '事前点検',
-    stepLabel:       'ステップ',
-    namePrompt:      '名前を選択して開始してください',
+    eyebrow: '事前点検',
+    stepLabel: 'ステップ',
+    namePrompt: '名前を選択して開始してください',
     namePlaceholder: '名前を検索または選択…',
-    beginBtn:        '点検を開始',
-    ngSub:           '不良',
-    okSub:           '確認済',
-    okFlash:         '確認済',
-    ngFlash:         '不良',
-    complete:        '点検完了',
-    passed:          '合格',
-    failed:          '不合格',
-    allClear:        '全項目確認。機械は稼働可能です。',
-    someNg:          (n, t) => `${t}項目中${n}項目が不良 — 操作しないでください。`,
-    submitBtn:       '結果を送信',
+    beginBtn: '点検を開始',
+    ngSub: '不良',
+    okSub: '確認済',
+    okFlash: '確認済',
+    ngFlash: '不良',
+    complete: '点検完了',
+    passed: '合格',
+    failed: '不合格',
+    allClear: '全項目確認。機械は稼働可能です。',
+    someNg: (n, t) => `${t}項目中${n}項目が不良 — 操作しないでください。`,
+    submitBtn: '結果を送信',
     submitSuccessTitle: '送信が完了しました',
     submitSuccessSub: 'まもなくリセットします…',
-    takePhoto:       '写真を撮る',
-    retakePhoto:     '撮り直す',
-    photoRequiredHint:'続行するには写真が必要です',
-    noTemplates:     '有効な点検テンプレートが見つかりません。',
-    loadError:       (e) => `テンプレートを読み込めません: ${e}`,
-    translating:     '翻訳中…',
-    backBtn:         '戻る',
-    resetAllBtn:     '全リセット',
-    startOver:       'やり直す',
-    ticketTitle:     '不合格報告',
+    takePhoto: '写真を撮る',
+    retakePhoto: '撮り直す',
+    photoRequiredHint: '続行するには写真が必要です',
+    noTemplates: '有効な点検テンプレートが見つかりません。',
+    loadError: (e) => `テンプレートを読み込めません: ${e}`,
+    translating: '翻訳中…',
+    backBtn: '戻る',
+    resetAllBtn: '全リセット',
+    startOver: 'やり直す',
+    ticketTitle: '不合格報告',
     ticketReasonLabel: '不合格の理由',
     ticketReasonHint: '問題を詳しく説明してください…',
     ticketPhotoLabel: '写真証拠',
-    ticketPhoto:     '写真を追加',
-    ticketSave:      'チケットを保存',
-    ticketCancel:    '回答を変更',
-    ticketBtn:       'チケット',
-    ticketReqBtn:    '必須',
-    ticketViewBtn:   '確認',
+    ticketPhoto: '写真を追加',
+    ticketSave: 'チケットを保存',
+    ticketCancel: '回答を変更',
+    ticketBtn: 'チケット',
+    ticketReqBtn: '必須',
+    ticketViewBtn: '確認',
     ticketReasonReq: '保存する前に理由が必要です。',
-    ticketPhotoReq:  '写真が少なくとも1枚必要です。',
-    ticketContentReq:'保存するにはコメントまたは写真が必要です。',
-    skipped:         'スキップ済',
-    skipSub:         '点検はスキップされました — 記録のみ保存されます。',
-    skipBtn:         'スキップ',
-    skipModalTitle:  '点検のスキップ',
-    skipModalBody:   '全ての項目がNGとして記録されます。',
+    ticketPhotoReq: '写真が少なくとも1枚必要です。',
+    ticketContentReq: '保存するにはコメントまたは写真が必要です。',
+    skipped: 'スキップ済',
+    skipSub: '点検はスキップされました — 記録のみ保存されます。',
+    skipBtn: 'スキップ',
+    skipModalTitle: '点検のスキップ',
+    skipModalBody: '全ての項目がNGとして記録されます。',
     skipReasonLabel: 'スキップの理由',
-    skipReasonHint:  '点検をスキップする理由を説明してください…',
-    skipConfirm:     'スキップして記録',
-    skipCancel:      'キャンセル',
-    skipReasonReq:          '理由を入力してください。',
-    skipQrLabel:            'スーパーバイザー認証',
-    skipQrPrompt:           'QRコードをカメラに向けてください',
-    skipQrLooking:          '確認中…',
-    skipQrNotFound:         'ユーザーが見つかりません',
-    skipQrDenied:           '権限が不足しています',
-    skipQrNoCamera:         'カメラが利用できません',
-    skipQrManualPlaceholder:'QRコードの値を入力…',
-    skipQrManualPrompt:     'QRコードの値を入力して確認',
+    skipReasonHint: '点検をスキップする理由を説明してください…',
+    skipConfirm: 'スキップして記録',
+    skipCancel: 'キャンセル',
+    skipReasonReq: '理由を入力してください。',
+    skipQrLabel: 'スーパーバイザー認証',
+    skipQrPrompt: 'QRコードをカメラに向けてください',
+    skipQrLooking: '確認中…',
+    skipQrNotFound: 'ユーザーが見つかりません',
+    skipQrDenied: '権限が不足しています',
+    skipQrNoCamera: 'カメラが利用できません',
+    skipQrManualPlaceholder: 'QRコードの値を入力…',
+    skipQrManualPrompt: 'QRコードの値を入力して確認',
   },
   tl: {
-    eyebrow:         'INSPEKSYON BAGO GAMITIN',
-    stepLabel:       'HAKBANG',
-    namePrompt:      'Piliin ang iyong pangalan upang magsimula',
+    eyebrow: 'INSPEKSYON BAGO GAMITIN',
+    stepLabel: 'HAKBANG',
+    namePrompt: 'Piliin ang iyong pangalan upang magsimula',
     namePlaceholder: 'Hanapin o piliin ang iyong pangalan…',
-    beginBtn:        'SIMULAN ANG INSPEKSYON',
-    ngSub:           'Hindi Maganda',
-    okSub:           'Nakumpirma',
-    okFlash:         'NAKUMPIRMA',
-    ngFlash:         'HINDI MAGANDA',
-    complete:        'KUMPLETO NA ANG INSPEKSYON',
-    passed:          'PUMASA',
-    failed:          'NABIGO',
-    allClear:        'Lahat ng pagsusuri ay maayos. Handa na ang makina.',
-    someNg:          (n, t) => `${n} sa ${t} pagsusuri ay nabigo — huwag ipaandar.`,
-    submitBtn:       'ISUMITE ANG MGA RESULTA',
+    beginBtn: 'SIMULAN ANG INSPEKSYON',
+    ngSub: 'Hindi Maganda',
+    okSub: 'Nakumpirma',
+    okFlash: 'NAKUMPIRMA',
+    ngFlash: 'HINDI MAGANDA',
+    complete: 'KUMPLETO NA ANG INSPEKSYON',
+    passed: 'PUMASA',
+    failed: 'NABIGO',
+    allClear: 'Lahat ng pagsusuri ay maayos. Handa na ang makina.',
+    someNg: (n, t) => `${n} sa ${t} pagsusuri ay nabigo — huwag ipaandar.`,
+    submitBtn: 'ISUMITE ANG MGA RESULTA',
     submitSuccessTitle: 'Matagumpay na naisumite',
     submitSuccessSub: 'Magre-reset sa loob ng ilang sandali…',
-    takePhoto:       'Kumuha ng larawan',
-    retakePhoto:     'Kumuha muli',
-    photoRequiredHint:'Kailangan ang larawan para magpatuloy',
-    noTemplates:     'Walang aktibong template ng inspeksyon na natagpuan.',
-    loadError:       (e) => `Hindi ma-load ang template: ${e}`,
-    translating:     'Nagsasalin…',
-    backBtn:         'Bumalik',
-    resetAllBtn:     'Reset All',
-    startOver:       'Magsimula Muli',
-    ticketTitle:     'Ulat ng NG',
+    takePhoto: 'Kumuha ng larawan',
+    retakePhoto: 'Kumuha muli',
+    photoRequiredHint: 'Kailangan ang larawan para magpatuloy',
+    noTemplates: 'Walang aktibong template ng inspeksyon na natagpuan.',
+    loadError: (e) => `Hindi ma-load ang template: ${e}`,
+    translating: 'Nagsasalin…',
+    backBtn: 'Bumalik',
+    resetAllBtn: 'Reset All',
+    startOver: 'Magsimula Muli',
+    ticketTitle: 'Ulat ng NG',
     ticketReasonLabel: 'Dahilan ng Pagkabigo',
     ticketReasonHint: 'Ilarawan ang isyu nang detalyado…',
     ticketPhotoLabel: 'Patunay ng Larawan',
-    ticketPhoto:     'Magdagdag ng larawan',
-    ticketSave:      'I-save ang tiket',
-    ticketCancel:    'Baguhin ang sagot',
-    ticketBtn:       'Ticket',
-    ticketReqBtn:    'Required',
-    ticketViewBtn:   'Review',
+    ticketPhoto: 'Magdagdag ng larawan',
+    ticketSave: 'I-save ang tiket',
+    ticketCancel: 'Baguhin ang sagot',
+    ticketBtn: 'Ticket',
+    ticketReqBtn: 'Required',
+    ticketViewBtn: 'Review',
     ticketReasonReq: 'Kinakailangan ang dahilan bago i-save.',
-    ticketPhotoReq:  'Kailangan ng hindi bababa sa isang larawan.',
-    ticketContentReq:'Maglagay ng komento o magdagdag ng larawan bago i-save.',
-    skipped:         'NILAKTAWAN',
-    skipSub:         'Nilaktawan ang inspeksyon — mga resulta ay naitala para sa sanggunian.',
-    skipBtn:         'LAKTAWAN',
-    skipModalTitle:  'Laktawan ang Inspeksyon',
-    skipModalBody:   'Lahat ng hakbang ay itatala bilang NG.',
+    ticketPhotoReq: 'Kailangan ng hindi bababa sa isang larawan.',
+    ticketContentReq: 'Maglagay ng komento o magdagdag ng larawan bago i-save.',
+    skipped: 'NILAKTAWAN',
+    skipSub: 'Nilaktawan ang inspeksyon — mga resulta ay naitala para sa sanggunian.',
+    skipBtn: 'LAKTAWAN',
+    skipModalTitle: 'Laktawan ang Inspeksyon',
+    skipModalBody: 'Lahat ng hakbang ay itatala bilang NG.',
     skipReasonLabel: 'Dahilan ng paglaktaw',
-    skipReasonHint:  'Ipaliwanag kung bakit nilalaktawan ang inspeksyon…',
-    skipConfirm:     'Laktawan at I-record',
-    skipCancel:      'Kanselahin',
-    skipReasonReq:          'Kinakailangan ang dahilan upang laktawan.',
-    skipQrLabel:            'AWTORISASYON NG SUPERBISOR',
-    skipQrPrompt:           'Ituro ang QR code sa harap ng camera',
-    skipQrLooking:          'Sinusuri…',
-    skipQrNotFound:         'Hindi nahanap ang user',
-    skipQrDenied:           'Hindi sapat ang pahintulot',
-    skipQrNoCamera:         'Hindi available ang camera',
-    skipQrManualPlaceholder:'Ilagay ang QR code na halaga…',
-    skipQrManualPrompt:     'Ilagay ang QR code na halaga upang i-verify',
+    skipReasonHint: 'Ipaliwanag kung bakit nilalaktawan ang inspeksyon…',
+    skipConfirm: 'Laktawan at I-record',
+    skipCancel: 'Kanselahin',
+    skipReasonReq: 'Kinakailangan ang dahilan upang laktawan.',
+    skipQrLabel: 'AWTORISASYON NG SUPERBISOR',
+    skipQrPrompt: 'Ituro ang QR code sa harap ng camera',
+    skipQrLooking: 'Sinusuri…',
+    skipQrNotFound: 'Hindi nahanap ang user',
+    skipQrDenied: 'Hindi sapat ang pahintulot',
+    skipQrNoCamera: 'Hindi available ang camera',
+    skipQrManualPlaceholder: 'Ilagay ang QR code na halaga…',
+    skipQrManualPrompt: 'Ilagay ang QR code na halaga upang i-verify',
   },
 };
 
@@ -256,13 +260,13 @@ const annotator = {
 };
 
 const skipQr = {
-  stream:      null,
-  rafId:       null,
+  stream: null,
+  rafId: null,
   manualTimer: null,
-  canvas:      null,
-  ctx:         null,
-  user:        null,
-  approved:    false,
+  canvas: null,
+  ctx: null,
+  user: null,
+  approved: false,
 };
 
 document.addEventListener('DOMContentLoaded', init);
@@ -292,18 +296,18 @@ function applyLang(lang) {
   );
   // Static text elements
   const set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
-  set('name-eyebrow',       s.eyebrow);
+  set('name-eyebrow', s.eyebrow);
   set('inspection-eyebrow', s.eyebrow);
-  set('step-eyebrow',       s.stepLabel);
-  set('name-prompt',        s.namePrompt);
-  set('begin-btn-text',     s.beginBtn);
-  set('ng-sub',             s.ngSub);
-  set('ok-sub',             s.okSub);
-  set('summary-eyebrow',    s.complete);
-  set('submit-btn-text',    s.submitBtn);
+  set('step-eyebrow', s.stepLabel);
+  set('name-prompt', s.namePrompt);
+  set('begin-btn-text', s.beginBtn);
+  set('ng-sub', s.ngSub);
+  set('ok-sub', s.okSub);
+  set('summary-eyebrow', s.complete);
+  set('submit-btn-text', s.submitBtn);
   set('submit-success-title', s.submitSuccessTitle);
   set('submit-success-sub', s.submitSuccessSub);
-  set('back-btn-text',      s.backBtn);
+  set('back-btn-text', s.backBtn);
   set('reset-all-btn-text', s.resetAllBtn);
   set('start-over-btn-text', s.startOver);
   if (dom.btnSkip) dom.btnSkip.textContent = s.skipBtn;
@@ -335,16 +339,16 @@ async function translateSteps(lang) {
   const texts = new Set();
   texts.add(state.pageTitle);
   state.steps.forEach(step => {
-    if (step.title)       texts.add(step.title);
+    if (step.title) texts.add(step.title);
     if (step.instruction) texts.add(step.instruction);
     step.options.forEach(o => { if (o) texts.add(o); });
   });
 
   try {
     const res = await fetchJson(CHECKLIST_API.translate, {
-      method:  'POST',
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ texts: [...texts].filter(Boolean), targetLang: lang }),
+      body: JSON.stringify({ texts: [...texts].filter(Boolean), targetLang: lang }),
     });
     state.translationCache[lang] = res.translations || {};
   } catch {
@@ -366,62 +370,81 @@ async function init() {
 // ── DOM cache ────────────────────────────────────────────────────
 
 function cacheDom() {
-  dom.loadingScreen    = document.getElementById('loading-screen');
-  dom.nameScreen       = document.getElementById('name-screen');
-  dom.nameScreenTitle  = document.getElementById('name-screen-title');
-  dom.workerNameInput  = document.getElementById('worker-name-input');
-  dom.btnBegin         = document.getElementById('btn-begin');
-  dom.nameError        = document.getElementById('name-error');
-  dom.nameDropdown     = document.getElementById('name-dropdown');
+  dom.loadingScreen = document.getElementById('loading-screen');
+  dom.nameScreen = document.getElementById('name-screen');
+  dom.nameScreenTitle = document.getElementById('name-screen-title');
+  dom.workerNameInput = document.getElementById('worker-name-input');
+  dom.btnBegin = document.getElementById('btn-begin');
+  dom.nameError = document.getElementById('name-error');
+  dom.nameDropdown = document.getElementById('name-dropdown');
 
-  dom.flash            = document.getElementById('result-flash');
-  dom.flashIcon        = document.getElementById('flash-icon');
-  dom.flashResultText  = document.getElementById('flash-result-text');
-  dom.flashSubText     = document.getElementById('flash-sub-text');
+  dom.flash = document.getElementById('result-flash');
+  dom.flashIcon = document.getElementById('flash-icon');
+  dom.flashResultText = document.getElementById('flash-result-text');
+  dom.flashSubText = document.getElementById('flash-sub-text');
 
-  dom.inspectionView   = document.getElementById('inspection-view');
-  dom.inspectionTitle  = document.getElementById('inspection-title');
-  dom.stepCounter      = document.getElementById('step-counter');
-  dom.progressBar      = document.getElementById('progress-bar');
-  dom.stepContent      = document.getElementById('step-content');
-  dom.photoWrap        = document.getElementById('photo-wrap');
-  dom.stepImg          = document.getElementById('step-img');
-  dom.stepTitle        = document.getElementById('step-title');
-  dom.stepInstruction  = document.getElementById('step-instruction');
-  dom.fieldInputArea   = document.getElementById('field-input-area');
-  dom.numpad           = document.getElementById('numpad');
-  dom.numpadValue      = document.getElementById('numpad-value');
-  dom.numpadUnit       = document.getElementById('numpad-unit');
-  dom.numpadRange      = document.getElementById('numpad-range');
-  dom.btnOK            = document.getElementById('btn-ok');
-  dom.btnNG            = document.getElementById('btn-ng');
-  dom.actionRow        = document.getElementById('action-row');
+  dom.inspectionView = document.getElementById('inspection-view');
+  dom.inspectionTitle = document.getElementById('inspection-title');
+  dom.stepCounter = document.getElementById('step-counter');
+  dom.progressBar = document.getElementById('progress-bar');
+  dom.stepContent = document.getElementById('step-content');
+  dom.photoWrap = document.getElementById('photo-wrap');
+  dom.stepImg = document.getElementById('step-img');
+  dom.stepTitle = document.getElementById('step-title');
+  dom.stepInstruction = document.getElementById('step-instruction');
+  dom.fieldInputArea = document.getElementById('field-input-area');
+  dom.numpad = document.getElementById('numpad');
+  dom.numpadValue = document.getElementById('numpad-value');
+  dom.numpadUnit = document.getElementById('numpad-unit');
+  dom.numpadRange = document.getElementById('numpad-range');
+  dom.btnOK = document.getElementById('btn-ok');
+  dom.btnNG = document.getElementById('btn-ng');
+  dom.actionRow = document.getElementById('action-row');
   dom.photoRequiredDock = document.getElementById('photo-required-dock');
-  dom.btnTicketMini    = document.getElementById('btn-ticket-mini');
-  dom.ticketMiniText   = document.getElementById('ticket-mini-text');
+  dom.btnTicketMini = document.getElementById('btn-ticket-mini');
+  dom.ticketMiniText = document.getElementById('ticket-mini-text');
 
-  dom.summaryView      = document.getElementById('summary-view');
-  dom.summaryWorker    = document.getElementById('summary-worker');
-  dom.verdictCard      = document.getElementById('verdict-card');
-  dom.verdictIconSvg   = document.getElementById('verdict-icon-svg');
-  dom.verdictText      = document.getElementById('verdict-text');
-  dom.verdictSub       = document.getElementById('verdict-sub');
-  dom.resultsList      = document.getElementById('results-list');
-  dom.btnReset         = document.getElementById('btn-reset');
-  dom.submitBtnText    = document.getElementById('submit-btn-text');
-  dom.summaryError     = document.getElementById('summary-error');
+  dom.summaryView = document.getElementById('summary-view');
+  dom.summaryWorker = document.getElementById('summary-worker');
+  dom.verdictCard = document.getElementById('verdict-card');
+  dom.verdictIconSvg = document.getElementById('verdict-icon-svg');
+  dom.verdictText = document.getElementById('verdict-text');
+  dom.verdictSub = document.getElementById('verdict-sub');
+  dom.resultsList = document.getElementById('results-list');
+  dom.btnReset = document.getElementById('btn-reset');
+  dom.submitBtnText = document.getElementById('submit-btn-text');
+  dom.summaryError = document.getElementById('summary-error');
   dom.submitSuccessModal = document.getElementById('submit-success-modal');
-  dom.ticketModal      = document.getElementById('ticket-modal');
-  dom.btnBack          = document.getElementById('btn-back');
-  dom.btnResetAll      = document.getElementById('btn-reset-all');
-  dom.btnStartOver     = document.getElementById('btn-start-over');
-  dom.annotatorOverlay  = document.getElementById('annotator-overlay');
-  dom.photoLightbox     = document.getElementById('photo-lightbox');
-  dom.photoLightboxImg  = document.getElementById('photo-lightbox-img');
-  dom.btnSkip           = document.getElementById('skip-btn');
-  dom.skipModal         = document.getElementById('skip-modal');
+  dom.ticketModal = document.getElementById('ticket-modal');
+  dom.btnBack = document.getElementById('btn-back');
+  dom.btnResetAll = document.getElementById('btn-reset-all');
+  dom.btnStartOver = document.getElementById('btn-start-over');
+  dom.annotatorOverlay = document.getElementById('annotator-overlay');
+  dom.photoLightbox = document.getElementById('photo-lightbox');
+  dom.photoLightboxImg = document.getElementById('photo-lightbox-img');
+  dom.btnSkip = document.getElementById('skip-btn');
+  dom.skipModal = document.getElementById('skip-modal');
 
   dom.segs = [];
+  
+  // Maintenance UI
+  dom.maintenanceBtn = document.getElementById('maintenance-btn');
+  dom.maintenanceBadge = document.getElementById('maintenance-badge');
+  dom.maintenanceNameModal = document.getElementById('maintenanceNameModal');
+  dom.maintenanceWorkerNamesContainer = document.getElementById('maintenanceWorkerNamesContainer');
+  dom.closeMaintenanceWorkerModal = document.getElementById('closeMaintenanceWorkerModal');
+  dom.maintenanceView = document.getElementById('maintenance-view');
+  dom.btnMaintBack = document.getElementById('btn-maint-back');
+  dom.maintenanceTicketsContainer = document.getElementById('maintenance-tickets-container');
+  dom.maintenanceEmptyState = document.getElementById('maintenance-empty-state');
+  dom.maintenanceResolveView = document.getElementById('maintenance-resolve-view');
+  dom.btnMaintResolveBack = document.getElementById('btn-maint-resolve-back');
+  dom.resolveTicketTitle = document.getElementById('resolve-ticket-title');
+  dom.resolveTicketReason = document.getElementById('resolve-ticket-reason');
+  dom.resolveFixReason = document.getElementById('resolve-fix-reason');
+  dom.btnResolvePhoto = document.getElementById('btn-resolve-photo');
+  dom.resolvePhotosContainer = document.getElementById('resolve-photos-container');
+  dom.btnResolveSubmit = document.getElementById('btn-resolve-submit');
 }
 
 // ── Events ───────────────────────────────────────────────────────
@@ -452,7 +475,7 @@ function bindEvents() {
       dom.workerNameInput.readOnly = false;
       dom.workerNameInput.style.cursor = 'text';
       dom.workerNameInput.placeholder = 'Type worker name manually...';
-      
+
       setTimeout(() => {
         dom.workerNameInput.value = '';
         dom.workerNameInput.focus();
@@ -468,6 +491,33 @@ function bindEvents() {
   });
 
   dom.btnBegin.addEventListener('click', beginInspection);
+  
+  const maintenanceManualBtn = document.getElementById('maintenanceManualWorkerBtn');
+  if (maintenanceManualBtn) {
+    maintenanceManualBtn.addEventListener('click', () => {
+      const name = prompt(state.lang === 'ja' ? '手動で名前を入力してください:' : 'Please enter your name manually:');
+      if (name && name.trim()) {
+        state.maintenanceWorkerName = name.trim();
+        state.maintenanceWorkerUsername = name.trim();
+        hideMaintenanceNameModal();
+        openMaintenanceView();
+      }
+    });
+  }
+  
+  dom.maintenanceBtn.addEventListener('click', showMaintenanceNameModal);
+  dom.closeMaintenanceWorkerModal.addEventListener('click', hideMaintenanceNameModal);
+  dom.btnMaintBack.addEventListener('click', () => {
+    dom.maintenanceView.classList.add('hidden');
+    dom.nameScreen.classList.remove('hidden');
+    state.phase = 'name';
+  });
+  dom.btnMaintResolveBack.addEventListener('click', () => {
+    dom.maintenanceResolveView.classList.add('hidden');
+    dom.maintenanceView.classList.remove('hidden');
+  });
+  dom.btnResolvePhoto.addEventListener('click', captureResolvePhoto);
+  dom.btnResolveSubmit.addEventListener('click', submitResolveTicket);
   dom.btnSkip.addEventListener('click', openSkipModal);
   dom.skipModal.addEventListener('click', handleSkipModalClick);
   dom.skipModal.addEventListener('input', handleSkipModalInput);
@@ -475,13 +525,13 @@ function bindEvents() {
   dom.btnOK.addEventListener('pointerdown', () => startPress('OK'));
   dom.btnNG.addEventListener('pointerdown', () => startPress('NG'));
 
-  dom.btnOK.addEventListener('pointerup',     () => endPress('OK', true));
+  dom.btnOK.addEventListener('pointerup', () => endPress('OK', true));
   dom.btnOK.addEventListener('pointercancel', () => endPress('OK', false));
-  dom.btnOK.addEventListener('pointerleave',  () => endPress('OK', false));
+  dom.btnOK.addEventListener('pointerleave', () => endPress('OK', false));
 
-  dom.btnNG.addEventListener('pointerup',     () => endPress('NG', true));
+  dom.btnNG.addEventListener('pointerup', () => endPress('NG', true));
   dom.btnNG.addEventListener('pointercancel', () => endPress('NG', false));
-  dom.btnNG.addEventListener('pointerleave',  () => endPress('NG', false));
+  dom.btnNG.addEventListener('pointerleave', () => endPress('NG', false));
 
   dom.btnReset.addEventListener('click', () => { void handleSubmitRequest(); });
 
@@ -501,11 +551,11 @@ function bindEvents() {
     if (key !== undefined) { e.preventDefault(); handleNumKey(key); }
   });
 
-  dom.annotatorOverlay.addEventListener('click',        handleAnnotatorClick);
-  dom.annotatorOverlay.addEventListener('pointerdown',  handleAnnotatorPointerDown);
-  dom.annotatorOverlay.addEventListener('pointermove',  handleAnnotatorPointerMove);
-  dom.annotatorOverlay.addEventListener('pointerup',    handleAnnotatorPointerUp);
-  dom.annotatorOverlay.addEventListener('pointercancel',handleAnnotatorPointerUp);
+  dom.annotatorOverlay.addEventListener('click', handleAnnotatorClick);
+  dom.annotatorOverlay.addEventListener('pointerdown', handleAnnotatorPointerDown);
+  dom.annotatorOverlay.addEventListener('pointermove', handleAnnotatorPointerMove);
+  dom.annotatorOverlay.addEventListener('pointerup', handleAnnotatorPointerUp);
+  dom.annotatorOverlay.addEventListener('pointercancel', handleAnnotatorPointerUp);
 
   dom.stepImg.addEventListener('click', () => {
     if (dom.photoWrap.classList.contains('hidden')) return;
@@ -533,9 +583,9 @@ function bindEvents() {
 function transitionTo(phase) {
   state.phase = phase;
   dom.loadingScreen.classList.toggle('hidden', phase !== 'loading');
-  dom.nameScreen.classList.toggle('hidden',    phase !== 'name');
+  dom.nameScreen.classList.toggle('hidden', phase !== 'name');
   dom.inspectionView.classList.toggle('hidden', phase !== 'inspection');
-  dom.summaryView.classList.toggle('hidden',   phase !== 'summary');
+  dom.summaryView.classList.toggle('hidden', phase !== 'summary');
   if (phase !== 'inspection') {
     dom.inspectionView.classList.remove('text-keyboard-open');
     document.documentElement.style.setProperty('--keyboard-inset', '0px');
@@ -620,8 +670,8 @@ async function loadTemplates() {
     }
 
     state.templates = templates;
-    state.steps     = buildSteps(templates);
-    state.results   = Array(state.steps.length).fill(null);
+    state.steps = buildSteps(templates);
+    state.results = Array(state.steps.length).fill(null);
     state.pageTitle = templates[0].name || 'Machine Check';
 
     // Apply current language to static UI, then translate dynamic content
@@ -636,7 +686,7 @@ async function loadTemplates() {
 
     const savedDraft = loadDraft();
     if (savedDraft && savedDraft.workerName &&
-        Array.isArray(savedDraft.results) && savedDraft.results.some(r => r !== null)) {
+      Array.isArray(savedDraft.results) && savedDraft.results.some(r => r !== null)) {
       // In-progress draft — skip name screen and restore directly
       state.selectedName = savedDraft.workerName;
       dom.workerNameInput.value = savedDraft.workerName;
@@ -647,13 +697,16 @@ async function loadTemplates() {
         state.selectedName = savedDraft.workerName;
         dom.workerNameInput.value = savedDraft.workerName;
         dom.btnBegin.disabled = false;
-        dom.btnSkip.disabled  = false;
+        dom.btnSkip.disabled = false;
       } else if (state.selectedName) {
         dom.workerNameInput.value = state.selectedName;
         dom.btnBegin.disabled = false;
-        dom.btnSkip.disabled  = false;
+        dom.btnSkip.disabled = false;
       }
     }
+    
+    fetchOpenTickets();
+    dom.maintenanceBtn.classList.remove('hidden');
 
   } catch (err) {
     applyLang(state.lang);
@@ -666,7 +719,7 @@ function resolveNameOptions(nameData) {
   if (nameData.status !== 'fulfilled' || !nameData.value) return [];
 
   const payload = nameData.value;
-  
+
   // If the payload is already an array of strings (from /getWorkerNames)
   if (Array.isArray(payload)) {
     return normalizeAndSortNames(payload);
@@ -706,18 +759,18 @@ function buildSteps(templates) {
         ? 'checkbox'
         : String(field.type || 'checkbox');
       steps.push({
-        templateId:   String(tpl._id || ''),
+        templateId: String(tpl._id || ''),
         templateName: String(tpl.name || ''),
-        fieldId:      String(field.id || ''),
-        type:         normalizedType,
-        title:        String(field.label || ''),
-        instruction:  String(field.description || ''),
-        imageUrl:     String(field.imageURL || ''),
-        options:      Array.isArray(field.options) ? field.options : [],
-        min:          field.min ?? null,
-        max:          field.max ?? null,
-        unit:         String(field.unit || ''),
-        required:      Boolean(field.required),
+        fieldId: String(field.id || ''),
+        type: normalizedType,
+        title: String(field.label || ''),
+        instruction: String(field.description || ''),
+        imageUrl: String(field.imageURL || ''),
+        options: Array.isArray(field.options) ? field.options : [],
+        min: field.min ?? null,
+        max: field.max ?? null,
+        unit: String(field.unit || ''),
+        required: Boolean(field.required),
         photoRequired: Boolean(field.photoRequired),
       });
     }
@@ -901,24 +954,24 @@ function beginInspection() {
     }
     state.step = firstIncomplete;
   } else {
-    state.step    = 0;
+    state.step = 0;
     state.results = Array(state.steps.length).fill(null);
     state.pendingTicketsByStep = {};
   }
 
-  state.inputValue   = null;
+  state.inputValue = null;
   state.photoAssetId = null;
   buildProgressBar();
   transitionTo('inspection');
   renderStep();
 
   const stepResult = state.results[state.step];
-  const curStep    = state.steps[state.step];
+  const curStep = state.steps[state.step];
   if (stepResult && curStep) {
     const answerForTicket = curStep.type === 'checkbox' ? stepResult.result : stepResult.value;
     const requiredTicket = isTicketNeeded(curStep, answerForTicket, stepResult.result);
     if (requiredTicket && !doesTicketSatisfyRequirement(stepResult.ticket, true)) {
-        ensureTicketModalOpen(state.step, 'auto');
+      ensureTicketModalOpen(state.step, 'auto');
     }
   } else if (curStep && draft?.pending && Number(draft.pending.step) === state.step) {
     void restorePendingStep(curStep, draft.pending);
@@ -970,7 +1023,7 @@ function handleSkipModalClick(e) {
   if (btn.dataset.action === 'skip-cancel') { closeSkipModal(); return; }
   if (btn.dataset.action === 'skip-submit') {
     const textarea = dom.skipModal.querySelector('#skip-reason-input');
-    const reason   = textarea ? textarea.value.trim() : '';
+    const reason = textarea ? textarea.value.trim() : '';
     if (!reason || !skipQr.approved) return;
     executeSkip(reason);
   }
@@ -978,7 +1031,7 @@ function handleSkipModalClick(e) {
 
 function updateSkipSubmit() {
   const submitBtn = dom.skipModal.querySelector('[data-action="skip-submit"]');
-  const textarea  = dom.skipModal.querySelector('#skip-reason-input');
+  const textarea = dom.skipModal.querySelector('#skip-reason-input');
   if (!submitBtn) return;
   submitBtn.disabled = !(skipQr.approved && (textarea?.value.trim().length ?? 0) > 0);
 }
@@ -1007,14 +1060,14 @@ async function startQrScanner() {
       video.srcObject = skipQr.stream;
       try { await video.play(); } catch { /* already autoplaying */ }
       skipQr.canvas = document.createElement('canvas');
-      skipQr.ctx    = skipQr.canvas.getContext('2d');
+      skipQr.ctx = skipQr.canvas.getContext('2d');
       startScanLoop(video, statusEl);
       return; // live path — done
     } catch (err) {
       stopQrScanner();
       const msg = err?.name === 'NotAllowedError' ? 'Camera access denied — check browser permissions'
-                : err?.name === 'NotFoundError'   ? 'No camera found on this device'
-                : S().skipQrNoCamera;
+        : err?.name === 'NotFoundError' ? 'No camera found on this device'
+          : S().skipQrNoCamera;
       if (statusEl) { statusEl.className = 'skip-qr-status qr-error'; statusEl.textContent = msg; }
       // fall through to capture overlay
     }
@@ -1068,7 +1121,7 @@ async function decodeQrFromFile(file) {
       img.onload = () => {
         const MAX = 1200;
         const scale = Math.min(1, MAX / Math.max(img.width, img.height));
-        const w = Math.round(img.width  * scale);
+        const w = Math.round(img.width * scale);
         const h = Math.round(img.height * scale);
         const canvas = document.createElement('canvas');
         canvas.width = w; canvas.height = h;
@@ -1092,7 +1145,7 @@ function startScanLoop(video, statusEl) {
     if (now - lastScan < 250) return;
     lastScan = now;
     if (video.readyState < 2 || !video.videoWidth) return;
-    skipQr.canvas.width  = video.videoWidth;
+    skipQr.canvas.width = video.videoWidth;
     skipQr.canvas.height = video.videoHeight;
     skipQr.ctx.drawImage(video, 0, 0);
     const imageData = skipQr.ctx.getImageData(0, 0, skipQr.canvas.width, skipQr.canvas.height);
@@ -1115,7 +1168,7 @@ async function lookupQrUser(code, statusEl) {
       if (statusEl) { statusEl.className = 'skip-qr-status qr-error'; statusEl.textContent = S().skipQrDenied; }
       resumeScanAfterDelay(statusEl);
     } else {
-      skipQr.user     = user;
+      skipQr.user = user;
       skipQr.approved = true;
       if (skipQr.stream) { skipQr.stream.getTracks().forEach(t => t.stop()); skipQr.stream = null; }
       if (statusEl) {
@@ -1135,7 +1188,7 @@ function resumeScanAfterDelay(statusEl) {
   setTimeout(() => {
     if (skipQr.approved) return;
     const viewport = dom.skipModal.querySelector('#skip-qr-viewport');
-    const video    = dom.skipModal.querySelector('#skip-qr-video');
+    const video = dom.skipModal.querySelector('#skip-qr-video');
     if (video && skipQr.stream) {
       if (statusEl) { statusEl.className = 'skip-qr-status'; statusEl.textContent = S().skipQrPrompt; }
       startScanLoop(video, statusEl);
@@ -1147,12 +1200,12 @@ function resumeScanAfterDelay(statusEl) {
 }
 
 function stopQrScanner() {
-  if (skipQr.rafId)       { cancelAnimationFrame(skipQr.rafId); skipQr.rafId       = null; }
-  if (skipQr.manualTimer) { clearTimeout(skipQr.manualTimer);   skipQr.manualTimer = null; }
-  if (skipQr.stream)      { skipQr.stream.getTracks().forEach(t => t.stop()); skipQr.stream = null; }
-  skipQr.canvas   = null;
-  skipQr.ctx      = null;
-  skipQr.user     = null;
+  if (skipQr.rafId) { cancelAnimationFrame(skipQr.rafId); skipQr.rafId = null; }
+  if (skipQr.manualTimer) { clearTimeout(skipQr.manualTimer); skipQr.manualTimer = null; }
+  if (skipQr.stream) { skipQr.stream.getTracks().forEach(t => t.stop()); skipQr.stream = null; }
+  skipQr.canvas = null;
+  skipQr.ctx = null;
+  skipQr.user = null;
   skipQr.approved = false;
 }
 
@@ -1166,22 +1219,22 @@ function executeSkip(reason) {
   closeSkipModal();  // stops QR scanner + clears modal
   closeWorkerModal();
 
-  state.workerName  = name;
+  state.workerName = name;
   state.selectedName = name;
   persistSelectedName(name);
   rememberRecentName(name);
 
   const skipValue = `skipped by ${name}`;
   state.results = state.steps.map(() => ({
-    result:      'NG',
-    value:       skipValue,
-    skipReason:  reason,
+    result: 'NG',
+    value: skipValue,
+    skipReason: reason,
     photoAssetId: null,
-    ticket:       null,
+    ticket: null,
   }));
 
-  state.step        = 0;
-  state.inputValue  = null;
+  state.step = 0;
+  state.inputValue = null;
   state.photoAssetId = null;
 
   buildProgressBar();
@@ -1205,10 +1258,10 @@ function buildProgressBar() {
 function updateProgressBar() {
   dom.segs.forEach((seg, i) => {
     const r = state.results[i];
-    if      (r && r.result === 'OK') seg.dataset.state = 'ok';
+    if (r && r.result === 'OK') seg.dataset.state = 'ok';
     else if (r && r.result === 'NG') seg.dataset.state = 'ng';
-    else if (i === state.step)       seg.dataset.state = 'current';
-    else                             seg.dataset.state = 'pending';
+    else if (i === state.step) seg.dataset.state = 'current';
+    else seg.dataset.state = 'pending';
   });
 }
 
@@ -1230,11 +1283,11 @@ function renderStep() {
     dom.stepImg.onload = null;
     dom.stepImg.src = '';
   }
-  dom.stepTitle.textContent   = tx(s.title);
+  dom.stepTitle.textContent = tx(s.title);
   dom.stepInstruction.textContent = tx(s.instruction);
   dom.inspectionTitle.textContent = tx(state.pageTitle);
 
-  state.inputValue   = null;
+  state.inputValue = null;
   state.photoAssetId = null;
   state.pendingStepResult = null;
   dom.inspectionView.classList.remove('photo-taken');
@@ -1264,9 +1317,9 @@ function showNumpad(step) {
   const hasMax = step.max !== null;
   if (hasMin || hasMax) {
     const u = step.unit ? ` ${step.unit}` : '';
-    if (hasMin && hasMax)   dom.numpadRange.textContent = `${step.min} – ${step.max}${u}`;
-    else if (hasMin)        dom.numpadRange.textContent = `min ${step.min}${u}`;
-    else                    dom.numpadRange.textContent = `max ${step.max}${u}`;
+    if (hasMin && hasMax) dom.numpadRange.textContent = `${step.min} – ${step.max}${u}`;
+    else if (hasMin) dom.numpadRange.textContent = `min ${step.min}${u}`;
+    else dom.numpadRange.textContent = `max ${step.max}${u}`;
     dom.numpadRange.classList.remove('hidden');
     updateNumpadRangeState(step, '');
   } else {
@@ -1351,13 +1404,13 @@ function buildPhotoCapture(isRequired) {
   if (isRequired) wrap.classList.add('required');
 
   const fileInput = document.createElement('input');
-  fileInput.type   = 'file';
+  fileInput.type = 'file';
   fileInput.accept = 'image/*';
   fileInput.setAttribute('capture', 'environment');
   fileInput.style.display = 'none';
 
   const btn = document.createElement('button');
-  btn.type      = 'button';
+  btn.type = 'button';
   btn.className = 'photo-btn';
   btn.innerHTML = `
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
@@ -1368,7 +1421,7 @@ function buildPhotoCapture(isRequired) {
 
   const thumb = document.createElement('img');
   thumb.className = 'photo-thumb hidden';
-  thumb.alt       = '';
+  thumb.alt = '';
 
   fileInput.addEventListener('change', async () => {
     const file = fileInput.files[0];
@@ -1472,8 +1525,8 @@ function renderFieldInput(step) {
 
   if (step.type === 'text') {
     const input = document.createElement('input');
-    input.type        = 'text';
-    input.className   = 'field-text-input';
+    input.type = 'text';
+    input.className = 'field-text-input';
     input.placeholder = step.title ? `Enter ${step.title.toLowerCase()}…` : 'Enter value…';
     input.addEventListener('input', () => {
       state.inputValue = input.value.trim() || null;
@@ -1504,10 +1557,10 @@ function renderFieldInput(step) {
     grid.className = 'field-select-grid';
     step.options.forEach((opt) => {
       const btn = document.createElement('button');
-      btn.type         = 'button';
-      btn.className    = 'field-select-btn';
+      btn.type = 'button';
+      btn.className = 'field-select-btn';
       btn.dataset.option = opt;
-      btn.textContent  = tx(opt);
+      btn.textContent = tx(opt);
       btn.addEventListener('click', () => {
         grid.querySelectorAll('.field-select-btn').forEach(b => b.classList.remove('selected'));
         btn.classList.add('selected');
@@ -1524,7 +1577,7 @@ function renderFieldInput(step) {
 // ── Answer restoration (back navigation / draft reload) ──────────
 
 async function restoreStepAnswer(step, result) {
-  state.inputValue   = result.value ?? null;
+  state.inputValue = result.value ?? null;
   state.photoAssetId = result.photoAssetId || null;
 
   if (step.type === 'number' && result.value != null) {
@@ -1550,11 +1603,11 @@ async function restoreStepAnswer(step, result) {
     if (data) {
       const scope = dom.photoRequiredDock || dom.fieldInputArea;
       const thumb = scope.querySelector('.photo-thumb');
-      const btn   = scope.querySelector('.photo-btn');
-      const wrap  = scope.querySelector('.photo-capture');
+      const btn = scope.querySelector('.photo-btn');
+      const wrap = scope.querySelector('.photo-capture');
       if (thumb) { thumb.src = data; thumb.classList.remove('hidden'); }
-      if (btn)   { btn.classList.add('has-photo'); const sp = btn.querySelector('span'); if (sp) sp.textContent = S().retakePhoto; }
-      if (wrap)  wrap.classList.add('has-photo');
+      if (btn) { btn.classList.add('has-photo'); const sp = btn.querySelector('span'); if (sp) sp.textContent = S().retakePhoto; }
+      if (wrap) wrap.classList.add('has-photo');
       dom.inspectionView.classList.add('photo-taken');
     }
   }
@@ -1594,11 +1647,11 @@ async function restorePendingStep(step, pending) {
     if (data) {
       const scope = dom.photoRequiredDock || dom.fieldInputArea;
       const thumb = scope.querySelector('.photo-thumb');
-      const btn   = scope.querySelector('.photo-btn');
-      const wrap  = scope.querySelector('.photo-capture');
+      const btn = scope.querySelector('.photo-btn');
+      const wrap = scope.querySelector('.photo-capture');
       if (thumb) { thumb.src = data; thumb.classList.remove('hidden'); }
-      if (btn)   { btn.classList.add('has-photo'); const sp = btn.querySelector('span'); if (sp) sp.textContent = S().retakePhoto; }
-      if (wrap)  {
+      if (btn) { btn.classList.add('has-photo'); const sp = btn.querySelector('span'); if (sp) sp.textContent = S().retakePhoto; }
+      if (wrap) {
         wrap.classList.add('has-photo');
         wrap.classList.remove('required');
       }
@@ -1615,9 +1668,9 @@ function updateButtonLock() {
   const step = state.steps[state.step];
   if (!step) return;
   const needsValue = step.type !== 'checkbox';
-  const hasValue   = state.inputValue !== null;
+  const hasValue = state.inputValue !== null;
   const needsPhoto = step.photoRequired && state.pendingStepResult === 'OK';
-  const hasPhoto   = state.photoAssetId !== null;
+  const hasPhoto = state.photoAssetId !== null;
   const locked = state.animating
     || ticketModal.open
     || (needsValue && !hasValue)
@@ -1835,15 +1888,15 @@ async function goBack() {
 
 // ── Flash ────────────────────────────────────────────────────────
 
-function showFlash(result) {
-  const isOK = result === 'OK';
+function showFlash(result, forceOK = false) {
+  const isOK = forceOK || result === 'OK';
   dom.flash.classList.remove('hidden', 'ok', 'ng');
   dom.flash.classList.add(isOK ? 'ok' : 'ng');
   dom.flashIcon.innerHTML = isOK
     ? '<circle cx="12" cy="12" r="10"/><path d="M8 12l3 3 5-5"/>'
     : '<circle cx="12" cy="12" r="10"/><path d="M15 9l-6 6M9 9l6 6"/>';
   dom.flashResultText.textContent = result;
-  dom.flashSubText.textContent    = isOK ? S().okFlash : S().ngFlash;
+  dom.flashSubText.textContent = isOK ? S().okFlash : S().ngFlash;
 }
 
 function hideFlash() {
@@ -1855,9 +1908,9 @@ function hideFlash() {
 function showSummary() {
   transitionTo('summary');
 
-  const allOK     = state.results.every(r => r && r.result === 'OK');
+  const allOK = state.results.every(r => r && r.result === 'OK');
   const isSkipped = state.results.every(r => r && r.skipReason);
-  const ngCount   = state.results.filter(r => r && r.result === 'NG').length;
+  const ngCount = state.results.filter(r => r && r.result === 'NG').length;
 
   dom.summaryWorker.textContent = state.workerName || '';
 
@@ -1868,7 +1921,7 @@ function showSummary() {
       ? '<circle cx="12" cy="12" r="10"/><line x1="8" y1="12" x2="16" y2="12"/>'
       : '<path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>';
   dom.verdictText.textContent = allOK ? S().passed : isSkipped ? S().skipped : S().failed;
-  dom.verdictSub.textContent  = allOK
+  dom.verdictSub.textContent = allOK
     ? S().allClear
     : isSkipped
       ? S().skipSub
@@ -1876,9 +1929,9 @@ function showSummary() {
 
   dom.resultsList.innerHTML = '';
   state.steps.forEach((s, i) => {
-    const r   = state.results[i];
+    const r = state.results[i];
     const res = r ? r.result : '—';
-    const val = r ? r.value  : null;
+    const val = r ? r.value : null;
     const answerForTicket = r ? (s.type === 'checkbox' ? r.result : r.value) : null;
 
     const isSkippedRow = !!(r && r.skipReason);
@@ -1930,7 +1983,7 @@ async function handleSubmitRequest() {
   if (state.submitting) return;
 
   for (let i = 0; i < state.steps.length; i++) {
-    const step   = state.steps[i];
+    const step = state.steps[i];
     const result = state.results[i];
     if (!result || result.skipReason) continue;
     const answerForTicket = step.type === 'checkbox' ? result.result : result.value;
@@ -1950,9 +2003,9 @@ async function handleSubmitRequest() {
   try {
     const payload = await buildSubmissionPayload();
     const response = await fetchJson(CHECKLIST_API.submit, {
-      method:  'POST',
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify(payload),
+      body: JSON.stringify(payload),
     });
 
     const verification = verifySubmitResponse(response, payload);
@@ -2028,24 +2081,24 @@ async function buildSubmissionPayload() {
   const templateMap = new Map();
 
   for (let i = 0; i < state.steps.length; i++) {
-    const step   = state.steps[i];
+    const step = state.steps[i];
     const result = state.results[i];
 
     if (!templateMap.has(step.templateId)) {
       const tpl = state.templates.find(t => String(t._id) === step.templateId) || {};
       const eqId = resolveEquipmentId(tpl);
       templateMap.set(step.templateId, {
-        templateId:        step.templateId,
-        templateName:      step.templateName,
-        description:       tpl.description || '',
-        schedule:          tpl.schedule    || '',
-        startDate:         tpl.startDate   || '',
-        equipmentId:       eqId,
-        加工設備:            state.machine,
-        selectedMachine:   state.machine,
+        templateId: step.templateId,
+        templateName: step.templateName,
+        description: tpl.description || '',
+        schedule: tpl.schedule || '',
+        startDate: tpl.startDate || '',
+        equipmentId: eqId,
+        加工設備: state.machine,
+        selectedMachine: state.machine,
         selectedMachineId: eqId,
-        workerName:        state.workerName,
-        answers:           [],
+        workerName: state.workerName,
+        answers: [],
       });
     }
 
@@ -2054,31 +2107,31 @@ async function buildSubmissionPayload() {
     const answerValue = isSkipped
       ? (step.type === 'checkbox' ? result.result : result.skipReason)
       : (step.type === 'checkbox'
-          ? result.result
-          : (step.type === 'number' && !String(result.value || '').includes('-')
-              ? parseFloat(result.value)
-              : (result.value || '')));
+        ? result.result
+        : (step.type === 'number' && !String(result.value || '').includes('-')
+          ? parseFloat(result.value)
+          : (result.value || '')));
 
     const displayValue = step.type === 'checkbox'
       ? result.result
       : `${result.value || ''}${step.unit ? ' ' + step.unit : ''}`.trim();
 
     const answer = {
-      id:           step.fieldId,
-      label:        step.title,
-      description:  step.instruction,
-      imageURL:     step.imageUrl,
-      type:         isSkipped && step.type === 'number' ? 'text' : step.type,
-      required:     step.required,
-      locked:       false,
+      id: step.fieldId,
+      label: step.title,
+      description: step.instruction,
+      imageURL: step.imageUrl,
+      type: isSkipped && step.type === 'number' ? 'text' : step.type,
+      required: step.required,
+      locked: false,
       photoRequired: isSkipped ? false : step.photoRequired,
-      options:      step.options,
-      min:          step.min,
-      max:          step.max,
-      unit:         step.unit,
-      value:        answerValue,
+      options: step.options,
+      min: step.min,
+      max: step.max,
+      unit: step.unit,
+      value: answerValue,
       displayValue,
-      answeredAt:   new Date().toISOString(),
+      answeredAt: new Date().toISOString(),
     };
 
     if (!isSkipped && result.photoAssetId) {
@@ -2087,9 +2140,9 @@ async function buildSubmissionPayload() {
 
     if (isSkipped && step.type === 'checkbox') {
       answer.ticket = {
-        saved:      true,
-        ticketKey:  `ticket_${step.templateId}_${step.fieldId}`,
-        reason:     result.skipReason,
+        saved: true,
+        ticketKey: `ticket_${step.templateId}_${step.fieldId}`,
+        reason: result.skipReason,
         imagesData: [],
       };
     } else if (!isSkipped && result.ticket) {
@@ -2099,10 +2152,11 @@ async function buildSubmissionPayload() {
       const isRequiredTicket = isTicketNeeded(step, answerValue, result.result);
       const ticketReason = normalizeTicketSubmissionReason(result.ticket.reason, isRequiredTicket);
       answer.ticket = {
-        saved:      true,
-        ticketKey:  `ticket_${step.templateId}_${step.fieldId}`,
-        reason:     ticketReason,
+        saved: true,
+        ticketKey: `ticket_${step.templateId}_${step.fieldId}`,
+        reason: ticketReason,
         imagesData: ticketImagesData.filter(Boolean),
+        chatworkMessageId: result.ticket.chatworkMessageId,
       };
     }
 
@@ -2110,10 +2164,10 @@ async function buildSubmissionPayload() {
   }
 
   const payload = {
-    factory:           state.factory,
-    machine:           state.machine,
+    factory: state.factory,
+    machine: state.machine,
     submittedAtClient: new Date().toISOString(),
-    templates:         [...templateMap.values()],
+    templates: [...templateMap.values()],
   };
   if (state.skipApprovedBy) payload.approvedBy = state.skipApprovedBy;
   return payload;
@@ -2158,11 +2212,11 @@ function isTicketNeeded(step, answerValue, buttonResult) {
 function openTicketModal(stepIndex, options = {}) {
   const source = options.source === 'auto' ? 'auto' : 'manual';
   const existing = state.results[stepIndex]?.ticket || getPendingStepTicket(stepIndex) || null;
-  ticketModal.open          = true;
-  ticketModal.source        = source;
+  ticketModal.open = true;
+  ticketModal.source = source;
   ticketModal.hasExistingTicket = Boolean(existing);
-  ticketModal.stepIndex     = stepIndex;
-  ticketModal.reason        = existing ? String(existing.reason || '') : '';
+  ticketModal.stepIndex = stepIndex;
+  ticketModal.reason = existing ? String(existing.reason || '') : '';
   ticketModal.imageAssetIds = existing ? [...(existing.imageAssetIds || [])] : [];
   ticketModal.originalImageAssetIds = existing ? [...(existing.imageAssetIds || [])] : [];
   ticketModal.reasonInvalid = false;
@@ -2179,10 +2233,10 @@ function renderTicketModal() {
     return;
   }
 
-  const s    = S();
+  const s = S();
   const step = state.steps[ticketModal.stepIndex];
-  const num  = ticketModal.stepIndex + 1;
-  const r    = state.results[ticketModal.stepIndex];
+  const num = ticketModal.stepIndex + 1;
+  const r = state.results[ticketModal.stepIndex];
   const requiredTicket = getTicketRequirementForStep(ticketModal.stepIndex);
 
   let context = '';
@@ -2242,7 +2296,7 @@ function renderTicketModal() {
 }
 
 async function saveTicketModal() {
-  const reason    = ticketModal.reason.trim();
+  const reason = ticketModal.reason.trim();
   const hasImages = ticketModal.imageAssetIds.length > 0;
   const requiredTicket = getTicketRequirementForStep(ticketModal.stepIndex);
 
@@ -2283,6 +2337,31 @@ async function saveTicketModal() {
     imageAssetIds: [...ticketModal.imageAssetIds],
   };
 
+  const curResult = state.results[idx]?.result || state.pendingStepResult;
+  const existingTicket = state.results[idx]?.ticket || state.pendingStepTicket;
+
+  if (existingTicket && existingTicket.chatworkMessageId) {
+    savedTicket.chatworkMessageId = existingTicket.chatworkMessageId;
+  } else if (curResult === 'NG') {
+    try {
+      const response = await fetchJson(CHECKLIST_API.notifyNgTicket, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          factory: state.factory,
+          machine: state.machine,
+          status: 'NG',
+          reason
+        })
+      });
+      if (response && response.message_id) {
+        savedTicket.chatworkMessageId = response.message_id;
+      }
+    } catch (err) {
+      console.error('Failed to notify NG ticket', err);
+    }
+  }
+
   if (state.results[idx]) {
     state.results[idx].ticket = savedTicket;
   } else {
@@ -2291,12 +2370,12 @@ async function saveTicketModal() {
 
   const wasAuto = ticketModal.source === 'auto';
 
-  ticketModal.open          = false;
-  ticketModal.source        = 'manual';
+  ticketModal.open = false;
+  ticketModal.source = 'manual';
   ticketModal.hasExistingTicket = false;
   ticketModal.originalImageAssetIds = [];
-  ticketModal.stepIndex     = null;
-  ticketModal.reason        = '';
+  ticketModal.stepIndex = null;
+  ticketModal.reason = '';
   ticketModal.imageAssetIds = [];
   ticketModal.reasonInvalid = false;
   ticketModal.imagesInvalid = false;
@@ -2322,12 +2401,12 @@ async function cancelTicketModal() {
     persistDraft();
   }
 
-  ticketModal.open          = false;
-  ticketModal.source        = 'manual';
+  ticketModal.open = false;
+  ticketModal.source = 'manual';
   ticketModal.hasExistingTicket = false;
   ticketModal.originalImageAssetIds = [];
-  ticketModal.stepIndex     = null;
-  ticketModal.reason        = '';
+  ticketModal.stepIndex = null;
+  ticketModal.reason = '';
   ticketModal.imageAssetIds = [];
   ticketModal.reasonInvalid = false;
   ticketModal.imagesInvalid = false;
@@ -2348,9 +2427,9 @@ async function addTicketImage() {
 
   for (const file of files.slice(0, remaining)) {
     const compressed = await compressImageFile(file, 1600, 0.78);
-    const annotated  = await openAnnotator(compressed);
+    const annotated = await openAnnotator(compressed);
     if (!annotated) continue;
-    const assetId    = createAssetId('ticket');
+    const assetId = createAssetId('ticket');
     await saveAsset(assetId, annotated);
     ticketModal.imageAssetIds.push(assetId);
   }
@@ -2372,7 +2451,7 @@ async function removeTicketImage(index) {
 function pickTicketImages() {
   return new Promise(resolve => {
     const input = document.createElement('input');
-    input.type  = 'file';
+    input.type = 'file';
     input.accept = 'image/*';
     input.setAttribute('capture', 'environment');
     input.multiple = true;
@@ -2394,10 +2473,10 @@ function handleTicketModalClick(e) {
   const btn = e.target.closest('[data-action]');
   if (!btn) return;
   switch (btn.dataset.action) {
-    case 'ticket-save':         void saveTicketModal();                       break;
-    case 'ticket-add-photo':    void addTicketImage();                        break;
+    case 'ticket-save': void saveTicketModal(); break;
+    case 'ticket-add-photo': void addTicketImage(); break;
     case 'ticket-remove-photo': void removeTicketImage(Number(btn.dataset.index)); break;
-    case 'ticket-cancel':       void cancelTicketModal();                     break;
+    case 'ticket-cancel': void cancelTicketModal(); break;
   }
 }
 
@@ -2504,20 +2583,20 @@ async function reset() {
   renderTicketModal();
   removeDraft();
 
-  state.step         = 0;
-  state.results      = Array(state.steps.length).fill(null);
-  state.animating    = false;
-  state.pressedBtn   = null;
-  state.inputValue   = null;
+  state.step = 0;
+  state.results = Array(state.steps.length).fill(null);
+  state.animating = false;
+  state.pressedBtn = null;
+  state.inputValue = null;
   state.photoAssetId = null;
   state.pendingStepResult = null;
   state.pendingTicketsByStep = {};
   state.selectedName = '';
-  state.nameSearch   = '';
+  state.nameSearch = '';
   clearSelectedName();
   dom.workerNameInput.value = '';
   dom.btnBegin.disabled = true;
-  dom.btnSkip.disabled  = true;
+  dom.btnSkip.disabled = true;
   dom.nameError.classList.add('hidden');
   closeWorkerModal();
   transitionTo('name');
@@ -2532,7 +2611,7 @@ async function handleResetAllRequest() {
 
   // Existing reset clears draft + selected name while preserving recent names.
   await reset();
-  
+
   // Force a hard reload to ensure a completely clean state
   window.location.reload();
 }
@@ -2576,15 +2655,15 @@ function openAnnotator(dataUrl) {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
-      annotator.sourceDataUrl  = dataUrl;
-      annotator.sourceImage    = img;
-      annotator.strokes        = [];
-      annotator.activeColor    = '#ef4444';
-      annotator.drawing        = false;
-      annotator.currentStroke  = null;
-      annotator.pointerId      = null;
-      annotator.open           = true;
-      annotator.resolve        = resolve;
+      annotator.sourceDataUrl = dataUrl;
+      annotator.sourceImage = img;
+      annotator.strokes = [];
+      annotator.activeColor = '#ef4444';
+      annotator.drawing = false;
+      annotator.currentStroke = null;
+      annotator.pointerId = null;
+      annotator.open = true;
+      annotator.resolve = resolve;
       renderAnnotator();
     };
     img.src = dataUrl;
@@ -2623,7 +2702,7 @@ function renderAnnotator() {
   const ratio = img.width / img.height;
   const w = (sw / sh > ratio) ? Math.round(sh * ratio) : sw;
   const h = (sw / sh > ratio) ? sh : Math.round(sw / ratio);
-  stack.style.width  = w + 'px';
+  stack.style.width = w + 'px';
   stack.style.height = h + 'px';
 
   // Draw photo onto base canvas
@@ -2643,10 +2722,10 @@ function annotatorPaintStroke(ctx, stroke) {
   if (!stroke.points.length) return;
   ctx.save();
   ctx.strokeStyle = stroke.color;
-  ctx.fillStyle   = stroke.color;
-  ctx.lineWidth   = stroke.width;
-  ctx.lineCap     = 'round';
-  ctx.lineJoin    = 'round';
+  ctx.fillStyle = stroke.color;
+  ctx.lineWidth = stroke.width;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
   if (stroke.points.length === 1) {
     ctx.beginPath();
     ctx.arc(stroke.points[0].x, stroke.points[0].y, stroke.width / 2, 0, Math.PI * 2);
@@ -2663,14 +2742,14 @@ function annotatorPaintStroke(ctx, stroke) {
 function annotatorCanvasPoint(canvas, e) {
   const r = canvas.getBoundingClientRect();
   return {
-    x: (e.clientX - r.left) * (canvas.width  / r.width),
-    y: (e.clientY - r.top)  * (canvas.height / r.height),
+    x: (e.clientX - r.left) * (canvas.width / r.width),
+    y: (e.clientY - r.top) * (canvas.height / r.height),
   };
 }
 
 function flattenAnnotation() {
   const out = document.createElement('canvas');
-  out.width  = annotator.sourceImage.width;
+  out.width = annotator.sourceImage.width;
   out.height = annotator.sourceImage.height;
   const ctx = out.getContext('2d');
   ctx.drawImage(annotator.sourceImage, 0, 0);
@@ -2700,7 +2779,7 @@ function handleAnnotatorClick(e) {
   if (!btn) return;
   switch (btn.dataset.action) {
     case 'annotator-confirm': closeAnnotator(flattenAnnotation()); break;
-    case 'annotator-cancel':  closeAnnotator(null);                break;
+    case 'annotator-cancel': closeAnnotator(null); break;
     case 'annotator-clear':
       annotator.strokes = [];
       redrawAnnotatorStrokes();
@@ -2712,12 +2791,12 @@ function handleAnnotatorPointerDown(e) {
   const canvas = e.target.closest('.annotator-draw-canvas');
   if (!canvas) return;
   e.preventDefault();
-  const pt     = annotatorCanvasPoint(canvas, e);
+  const pt = annotatorCanvasPoint(canvas, e);
   const stroke = { color: annotator.activeColor, width: ANNOTATOR_BRUSH_SIZE, points: [pt] };
   annotator.strokes.push(stroke);
   annotator.currentStroke = stroke;
-  annotator.drawing       = true;
-  annotator.pointerId     = e.pointerId;
+  annotator.drawing = true;
+  annotator.pointerId = e.pointerId;
   canvas.setPointerCapture?.(e.pointerId);
   annotatorPaintStroke(canvas.getContext('2d'), stroke);
 }
@@ -2727,8 +2806,8 @@ function handleAnnotatorPointerMove(e) {
   const canvas = dom.annotatorOverlay.querySelector('.annotator-draw-canvas');
   if (!canvas || !annotator.currentStroke) return;
   e.preventDefault();
-  const pt   = annotatorCanvasPoint(canvas, e);
-  const pts  = annotator.currentStroke.points;
+  const pt = annotatorCanvasPoint(canvas, e);
+  const pts = annotator.currentStroke.points;
   const last = pts[pts.length - 1];
   if (last && Math.hypot(last.x - pt.x, last.y - pt.y) < 2) return;
   pts.push(pt);
@@ -2736,7 +2815,7 @@ function handleAnnotatorPointerMove(e) {
   const ctx = canvas.getContext('2d');
   ctx.save();
   ctx.strokeStyle = annotator.currentStroke.color;
-  ctx.lineWidth   = annotator.currentStroke.width;
+  ctx.lineWidth = annotator.currentStroke.width;
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
   ctx.beginPath();
   ctx.moveTo(pts[pts.length - 2].x, pts[pts.length - 2].y);
@@ -2746,9 +2825,9 @@ function handleAnnotatorPointerMove(e) {
 }
 
 function handleAnnotatorPointerUp() {
-  annotator.drawing       = false;
+  annotator.drawing = false;
   annotator.currentStroke = null;
-  annotator.pointerId     = null;
+  annotator.pointerId = null;
 }
 
 // ── Recent names ─────────────────────────────────────────────────
@@ -2851,19 +2930,23 @@ function persistDraft() {
       step: state.step,
       results: state.results.map(r => r
         ? {
-            result:       r.result,
-            value:        r.value,
-            photoAssetId: r.photoAssetId || '',
-            ticket:       r.ticket ? { reason: r.ticket.reason, imageAssetIds: [...r.ticket.imageAssetIds] } : null,
-          }
+          result: r.result,
+          value: r.value,
+          photoAssetId: r.photoAssetId || '',
+          ticket: r.ticket ? { 
+            reason: r.ticket.reason, 
+            imageAssetIds: [...r.ticket.imageAssetIds],
+            chatworkMessageId: r.ticket.chatworkMessageId 
+          } : null,
+        }
         : null),
       pending: hasPendingStep
         ? {
-            step:        state.step,
-            inputValue:  state.inputValue ?? '',
-            photoAssetId: state.photoAssetId || '',
-            result:      state.pendingStepResult || '',
-          }
+          step: state.step,
+          inputValue: state.inputValue ?? '',
+          photoAssetId: state.photoAssetId || '',
+          result: state.pendingStepResult || '',
+        }
         : null,
       pendingTicketsByStep: Object.fromEntries(
         Object.entries(state.pendingTicketsByStep || {}).map(([key, ticket]) => [
@@ -2871,6 +2954,7 @@ function persistDraft() {
           {
             reason: String(ticket?.reason || ''),
             imageAssetIds: Array.isArray(ticket?.imageAssetIds) ? [...ticket.imageAssetIds] : [],
+            chatworkMessageId: ticket?.chatworkMessageId || '',
           },
         ])
       ),
@@ -2906,10 +2990,10 @@ function createAssetId(prefix) {
 
 async function compressImageFile(file, maxWidth, quality) {
   const dataUrl = await readFileAsDataUrl(file);
-  const image   = await loadImage(dataUrl);
-  const scale   = Math.min(1, maxWidth / image.width);
-  const canvas  = document.createElement('canvas');
-  canvas.width  = Math.max(1, Math.round(image.width  * scale));
+  const image = await loadImage(dataUrl);
+  const scale = Math.min(1, maxWidth / image.width);
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(image.width * scale));
   canvas.height = Math.max(1, Math.round(image.height * scale));
   canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
   return canvas.toDataURL('image/jpeg', quality);
@@ -2918,7 +3002,7 @@ async function compressImageFile(file, maxWidth, quality) {
 function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload  = () => resolve(String(reader.result || ''));
+    reader.onload = () => resolve(String(reader.result || ''));
     reader.onerror = () => reject(new Error('Failed to read image file.'));
     reader.readAsDataURL(file);
   });
@@ -2927,7 +3011,7 @@ function readFileAsDataUrl(file) {
 function loadImage(src) {
   return new Promise((resolve, reject) => {
     const img = new Image();
-    img.onload  = () => resolve(img);
+    img.onload = () => resolve(img);
     img.onerror = () => reject(new Error('Failed to load image for compression.'));
     img.src = src;
   });
@@ -2945,7 +3029,7 @@ async function openAssetDatabase() {
         }
       };
       request.onsuccess = () => resolve(request.result);
-      request.onerror   = () => reject(request.error || new Error('Failed to open IndexedDB.'));
+      request.onerror = () => reject(request.error || new Error('Failed to open IndexedDB.'));
     });
   }
   return indexedDbPromise;
@@ -2963,10 +3047,10 @@ async function saveAsset(assetId, dataUrl) {
 
 async function getAsset(assetId) {
   if (!assetId) return '';
-  if (state.assetCache.has(assetId))   return state.assetCache.get(assetId);
+  if (state.assetCache.has(assetId)) return state.assetCache.get(assetId);
   if (state.memoryAssets.has(assetId)) return state.memoryAssets.get(assetId);
   try {
-    const db     = await openAssetDatabase();
+    const db = await openAssetDatabase();
     const record = await runAssetTransaction(db, 'readonly', store => store.get(assetId));
     const dataUrl = record?.dataUrl || '';
     if (dataUrl) state.assetCache.set(assetId, dataUrl);
@@ -3002,11 +3086,306 @@ async function clearAllStoredAssets() {
 
 function runAssetTransaction(db, mode, callback) {
   return new Promise((resolve, reject) => {
-    const tx    = db.transaction(CHECKLIST_ASSET_STORE, mode);
+    const tx = db.transaction(CHECKLIST_ASSET_STORE, mode);
     const store = tx.objectStore(CHECKLIST_ASSET_STORE);
-    const req   = callback(store);
+    const req = callback(store);
     tx.oncomplete = () => resolve(req?.result);
-    tx.onerror    = () => reject(tx.error || new Error('IndexedDB transaction failed.'));
-    tx.onabort    = () => reject(tx.error || new Error('IndexedDB transaction aborted.'));
+    tx.onerror = () => reject(tx.error || new Error('IndexedDB transaction failed.'));
+    tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction aborted.'));
   });
+}
+
+// ── Maintenance ──────────────────────────────────────────────────
+
+async function fetchOpenTickets() {
+  if (!state.factory || !state.machine) return;
+  try {
+    const url = `${CHECKLIST_API.openTickets}?factory=${encodeURIComponent(state.factory)}&machine=${encodeURIComponent(state.machine)}`;
+    const response = await fetch(url);
+    if (!response.ok) return;
+    const data = await response.json();
+    state.openTickets = data.tickets || [];
+    
+    if (state.openTickets.length > 0) {
+      dom.maintenanceBadge.textContent = state.openTickets.length;
+      dom.maintenanceBadge.classList.remove('hidden');
+    } else {
+      dom.maintenanceBadge.classList.add('hidden');
+    }
+  } catch (err) {
+    console.error('Failed to fetch open tickets', err);
+  }
+}
+
+async function showMaintenanceNameModal() {
+  dom.maintenanceNameModal.classList.add('show');
+  
+  if (!state.maintenanceWorkersFetched) {
+    try {
+      const response = await fetch(CHECKLIST_API.maintenanceWorkers);
+      if (response.ok) {
+        const data = await response.json();
+        state.maintenanceWorkersList = data.workers || [];
+        state.maintenanceWorkersFetched = true;
+      }
+    } catch (e) {
+      console.error('Failed to load maintenance workers', e);
+      state.maintenanceWorkersList = [];
+    }
+  }
+  renderMaintenanceWorkerNames();
+}
+
+function hideMaintenanceNameModal() {
+  dom.maintenanceNameModal.classList.remove('show');
+}
+
+function renderMaintenanceWorkerNames() {
+  const container = dom.maintenanceWorkerNamesContainer;
+  if (!container) return;
+  container.innerHTML = '';
+
+  const names = state.maintenanceWorkersList.map(w => w.fullName);
+  const grouped = groupNamesByLetter(names);
+  const sortedKeys = Object.keys(grouped).sort();
+
+  sortedKeys.forEach(letter => {
+    const section = document.createElement('div');
+    section.className = 'worker-section';
+
+    const header = document.createElement('div');
+    header.className = 'worker-section-header';
+    header.textContent = letter;
+    section.appendChild(header);
+
+    const grid = document.createElement('div');
+    grid.className = 'worker-names-grid';
+
+    grouped[letter].forEach(name => {
+      const worker = state.maintenanceWorkersList.find(w => w.fullName === name);
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'worker-name-btn';
+      btn.textContent = name;
+      btn.onclick = () => selectMaintenanceWorkerName(worker);
+      grid.appendChild(btn);
+    });
+
+    section.appendChild(grid);
+    container.appendChild(section);
+  });
+}
+
+function selectMaintenanceWorkerName(worker) {
+  state.maintenanceWorkerName = worker.fullName;
+  state.maintenanceWorkerUsername = worker.username;
+  hideMaintenanceNameModal();
+  openMaintenanceView();
+}
+
+function openMaintenanceView() {
+  state.phase = 'maintenance';
+  dom.nameScreen.classList.add('hidden');
+  dom.maintenanceView.classList.remove('hidden');
+  renderOpenTickets();
+}
+
+function buildDefectString(ticket) {
+  if (!ticket.fieldLabel) return '';
+  let ans = ticket.answerValue;
+  if (Array.isArray(ans)) ans = ans.join(', ');
+  let str = `Field: ${escapeHtml(ticket.fieldLabel)} | Input: ${escapeHtml(String(ans))}`;
+  if (ticket.unit) str += ` ${escapeHtml(ticket.unit)}`;
+  if (ticket.fieldType === 'number' && typeof ticket.min === 'number' && typeof ticket.max === 'number') {
+    str += ` | Expected: ${ticket.min} - ${ticket.max} ${escapeHtml(ticket.unit || '')}`;
+  }
+  return str;
+}
+
+function renderOpenTickets() {
+  dom.maintenanceTicketsContainer.innerHTML = '';
+  if (!state.openTickets || state.openTickets.length === 0) {
+    dom.maintenanceEmptyState.classList.remove('hidden');
+    return;
+  }
+  dom.maintenanceEmptyState.classList.add('hidden');
+  
+  state.openTickets.forEach(ticket => {
+    const card = document.createElement('div');
+    card.className = 'maintenance-ticket-card';
+    
+    const dateStr = new Date(ticket.createdAt).toLocaleString(state.lang === 'ja' ? 'ja-JP' : 'en-US', { timeZone: 'Asia/Tokyo' });
+    
+    const defectStr = buildDefectString(ticket);
+    const defectHtml = defectStr ? `<p style="color: #ef4444; font-size: 0.85rem; margin-top: 4px; font-weight: 500;">${defectStr}</p>` : '';
+    
+    card.innerHTML = `
+      <h3>${escapeHtml(ticket.加工設備 || state.machine)} - ${escapeHtml(ticket.reason || 'Unknown Issue')}</h3>
+      ${defectHtml}
+      <p>Reported: ${dateStr}</p>
+      <div class="ticket-date">${ticket.status.toUpperCase()}</div>
+    `;
+    card.addEventListener('click', () => openResolveView(ticket));
+    dom.maintenanceTicketsContainer.appendChild(card);
+  });
+}
+
+function openResolveView(ticket) {
+  state.activeResolveTicket = ticket;
+  dom.resolveTicketTitle.textContent = `Fix: ${ticket.加工設備 || state.machine}`;
+  dom.resolveTicketReason.textContent = `Issue: ${ticket.reason}`;
+  
+  const defectStr = buildDefectString(ticket);
+  const defectEl = document.getElementById('resolve-ticket-defect-details');
+  if (defectEl) {
+    if (defectStr) {
+      defectEl.innerHTML = `<strong>Defect Context:</strong><br/>${defectStr}`;
+      defectEl.classList.remove('hidden');
+    } else {
+      defectEl.classList.add('hidden');
+    }
+  }
+  
+  dom.resolveFixReason.value = '';
+  state.resolvePhotos = [];
+  renderResolvePhotos();
+  
+  dom.maintenanceView.classList.add('hidden');
+  dom.maintenanceResolveView.classList.remove('hidden');
+}
+
+function renderResolvePhotos() {
+  const container = dom.resolvePhotosContainer;
+  if (!container) return;
+  
+  container.innerHTML = '';
+  if (state.resolvePhotos.length >= 10) {
+    dom.btnResolvePhoto.style.display = 'none';
+  } else {
+    dom.btnResolvePhoto.style.display = 'block';
+  }
+  
+  state.resolvePhotos.forEach(assetId => {
+    const wrapper = document.createElement('div');
+    wrapper.style.position = 'relative';
+    wrapper.style.flexShrink = '0';
+    wrapper.style.width = '100px';
+    wrapper.style.height = '100px';
+    
+    const img = document.createElement('img');
+    img.style.width = '100%';
+    img.style.height = '100%';
+    img.style.objectFit = 'cover';
+    img.style.borderRadius = '8px';
+    img.style.border = '1px solid var(--border)';
+    
+    // load from db
+    getAsset(assetId).then(src => {
+      if (src) img.src = src;
+    });
+    
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'delete-recent-btn';
+    delBtn.innerHTML = '×';
+    delBtn.style.top = '-5px';
+    delBtn.style.right = '-5px';
+    delBtn.onclick = async () => {
+      await deleteAsset(assetId);
+      state.resolvePhotos = state.resolvePhotos.filter(id => id !== assetId);
+      renderResolvePhotos();
+    };
+    
+    wrapper.appendChild(img);
+    wrapper.appendChild(delBtn);
+    container.appendChild(wrapper);
+  });
+}
+
+function captureResolvePhoto() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.capture = 'environment';
+  input.onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const compressed = await compressImageFile(file, 1600, 0.78);
+      const annotated = await openAnnotator(compressed);
+      if (!annotated) return;
+      
+      const assetId = 'resolve_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+      await saveAsset(assetId, annotated);
+      state.resolvePhotos.push(assetId);
+      renderResolvePhotos();
+    } catch(err) {
+      console.error(err);
+    }
+  };
+  input.click();
+}
+
+async function submitResolveTicket() {
+  const ticket = state.activeResolveTicket;
+  const reason = dom.resolveFixReason.value.trim();
+  if (!reason) {
+    alert('Please enter a resolution reason.');
+    return;
+  }
+  
+  dom.btnResolveSubmit.disabled = true;
+  dom.btnResolveSubmit.textContent = 'Submitting...';
+  
+  try {
+    const base64s = [];
+    for (const assetId of state.resolvePhotos) {
+      const b64 = await getAsset(assetId);
+      if (b64) base64s.push(b64);
+    }
+  
+    const response = await fetch(CHECKLIST_API.resolveTicket, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ticketId: ticket._id,
+        workerName: state.maintenanceWorkerName,
+        workerUsername: state.maintenanceWorkerUsername,
+        fixReason: reason,
+        fixImageBase64s: base64s
+      })
+    });
+    
+    if (response.ok) {
+      // Clear out indexed DB assets
+      for (const assetId of state.resolvePhotos) {
+        await deleteAsset(assetId);
+      }
+      state.resolvePhotos = [];
+      state.openTickets = state.openTickets.filter(t => t._id !== ticket._id);
+      
+      dom.maintenanceResolveView.classList.add('hidden');
+      dom.maintenanceView.classList.remove('hidden');
+      renderOpenTickets();
+      
+      if (state.openTickets.length > 0) {
+        dom.maintenanceBadge.textContent = state.openTickets.length;
+        dom.maintenanceBadge.classList.remove('hidden');
+      } else {
+        dom.maintenanceBadge.classList.add('hidden');
+      }
+      
+      showFlash('Ticket Resolved!', true);
+      setTimeout(() => {
+        hideFlash();
+      }, 1500);
+    } else {
+      throw new Error('Failed to submit resolution');
+    }
+  } catch (err) {
+    alert('Error resolving ticket: ' + err.message);
+  } finally {
+    dom.btnResolveSubmit.disabled = false;
+    dom.btnResolveSubmit.textContent = 'Mark as Fixed';
+  }
 }
