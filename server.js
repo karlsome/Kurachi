@@ -31142,6 +31142,22 @@ app.post('/api/check-forms/submit', async (req, res) => {
 
     try {
       await session.withTransaction(async () => {
+        if (ngReportDocs.length > 0) {
+          const countersCollection = submittedDb.collection('counters');
+          const counterResult = await countersCollection.findOneAndUpdate(
+            { _id: 'ticketNo' },
+            { $inc: { seq: ngReportDocs.length } },
+            { returnDocument: 'after', upsert: true, session }
+          );
+          const doc = counterResult.value || counterResult;
+          const endSeq = doc.seq;
+          const startSeq = endSeq - ngReportDocs.length + 1;
+          
+          for (let i = 0; i < ngReportDocs.length; i++) {
+            ngReportDocs[i].ticketNo = startSeq + i;
+          }
+        }
+
         if (recordDocs.length > 0) {
           await recordsCollection.insertMany(recordDocs, { session });
         }
@@ -31172,7 +31188,7 @@ app.post('/api/check-forms/submit', async (req, res) => {
           
           const adminLink = `https://karlsome.github.io/freyaAdmin2/maintenance/submissions/tickets?startDate=${dateStr}&endDate=${dateStr}`;
           
-          let editedBody = `工場: ${report.factory}\n設備: ${report.加工設備}\nステータス: NG\n日時: ${timestamp}`;
+          let editedBody = `チケット番号: #${report.ticketNo}\n工場: ${report.factory}\n設備: ${report.加工設備}\nステータス: NG\n日時: ${timestamp}`;
           if (report.fieldType === 'number' && typeof report.min === 'number' && typeof report.max === 'number') {
             editedBody += `\n期待値: ${report.min} - ${report.max} ${report.unit || ''}`;
           }

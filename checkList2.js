@@ -3232,8 +3232,9 @@ function renderOpenTickets() {
     const defectStr = buildDefectString(ticket);
     const defectHtml = defectStr ? `<p style="color: #ef4444; font-size: 0.85rem; margin-top: 4px; font-weight: 500;">${defectStr}</p>` : '';
     
+    const ticketNoStr = ticket.ticketNo ? `#${ticket.ticketNo}: ` : '';
     card.innerHTML = `
-      <h3>${escapeHtml(ticket.加工設備 || state.machine)} - ${escapeHtml(ticket.reason || 'Unknown Issue')}</h3>
+      <h3>${ticketNoStr}${escapeHtml(ticket.加工設備 || state.machine)} - ${escapeHtml(ticket.reason || 'Unknown Issue')}</h3>
       ${defectHtml}
       <p>Reported: ${dateStr}</p>
       <div class="ticket-date">${ticket.status.toUpperCase()}</div>
@@ -3245,7 +3246,8 @@ function renderOpenTickets() {
 
 function openResolveView(ticket) {
   state.activeResolveTicket = ticket;
-  dom.resolveTicketTitle.textContent = `Fix: ${ticket.加工設備 || state.machine}`;
+  const ticketNoStr = ticket.ticketNo ? `#${ticket.ticketNo} - ` : '';
+  dom.resolveTicketTitle.textContent = `Fix ${ticketNoStr}${ticket.加工設備 || state.machine}`;
   dom.resolveTicketReason.textContent = `Issue: ${ticket.reason}`;
   
   const defectStr = buildDefectString(ticket);
