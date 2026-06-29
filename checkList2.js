@@ -2342,18 +2342,31 @@ async function saveTicketModal() {
 
   if (existingTicket && existingTicket.chatworkMessageId) {
     savedTicket.chatworkMessageId = existingTicket.chatworkMessageId;
-  } else if (curResult === 'NG') {
-    try {
-      const response = await fetchJson(CHECKLIST_API.notifyNgTicket, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          factory: state.factory,
-          machine: state.machine,
-          status: 'NG',
-          reason
-        })
-      });
+    } else if (curResult === 'NG') {
+      let userInputStr = '';
+      let expectedStr = '';
+      const step = state.steps[idx];
+      if (step) {
+        const val = state.results[idx] ? state.results[idx].value : state.inputValue;
+        userInputStr = Array.isArray(val) ? val.join(', ') : String(val ?? '');
+        if (step.type === 'number' && typeof step.min === 'number' && typeof step.max === 'number') {
+          expectedStr = `${step.min} - ${step.max} ${step.unit || ''}`;
+        }
+      }
+      
+      try {
+        const response = await fetchJson(CHECKLIST_API.notifyNgTicket, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            factory: state.factory,
+            machine: state.machine,
+            status: 'NG',
+            reason,
+            userInput: userInputStr,
+            expectedInput: expectedStr
+          })
+        });
       if (response && response.message_id) {
         savedTicket.chatworkMessageId = response.message_id;
       }

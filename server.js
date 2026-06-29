@@ -30885,14 +30885,17 @@ app.post('/api/check-forms/tickets/resolve', async (req, res) => {
 });
 
 app.post('/api/check-forms/notify-ng-ticket', async (req, res) => {
-  const { factory, machine, status, reason } = req.body;
+  const { factory, machine, status, reason, userInput, expectedInput } = req.body;
   const roomId = '440654635';
   const apiKey = process.env.CHATWORK_API_KEY;
   const url = `https://api.chatwork.com/v2/rooms/${roomId}/messages`;
   
   const now = new Date();
   const timestamp = now.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
-  const messageBody = `工場: ${factory}\n設備: ${machine}\nステータス: ${status}\n日時: ${timestamp}\n理由: ${reason}`;
+  let messageBody = `工場: ${factory}\n設備: ${machine}\nステータス: ${status}\n日時: ${timestamp}`;
+  if (expectedInput) messageBody += `\n期待値: ${expectedInput}`;
+  if (userInput !== undefined && userInput !== '') messageBody += `\n入力値: ${userInput}`;
+  messageBody += `\n理由: ${reason}`;
 
   try {
     const response = await fetch(url, {
@@ -31169,7 +31172,16 @@ app.post('/api/check-forms/submit', async (req, res) => {
           
           const adminLink = `https://karlsome.github.io/freyaAdmin2/maintenance/submissions/tickets?startDate=${dateStr}&endDate=${dateStr}`;
           
-          let editedBody = `工場: ${report.factory}\n設備: ${report.加工設備}\nステータス: NG\n日時: ${timestamp}\n理由: ${report.reason}\n画像: ${report.imageURLs[0]}\n管理リンク: ${adminLink}`;
+          let editedBody = `工場: ${report.factory}\n設備: ${report.加工設備}\nステータス: NG\n日時: ${timestamp}`;
+          if (report.fieldType === 'number' && typeof report.min === 'number' && typeof report.max === 'number') {
+            editedBody += `\n期待値: ${report.min} - ${report.max} ${report.unit || ''}`;
+          }
+          if (report.answerValue !== undefined && report.answerValue !== null && report.answerValue !== '') {
+            let ans = report.answerValue;
+            if (Array.isArray(ans)) ans = ans.join(', ');
+            editedBody += `\n入力値: ${ans}`;
+          }
+          editedBody += `\n理由: ${report.reason}\n画像: ${report.imageURLs[0]}\n管理リンク: ${adminLink}`;
           
           await fetch(url, {
             method: 'PUT',
