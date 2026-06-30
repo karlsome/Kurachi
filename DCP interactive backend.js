@@ -4199,6 +4199,10 @@ function renderMaterialLotTags() {
               }
               materialLabelPhotos = materialLabelPhotos.filter(p => p.lotNumber !== lotNum);
             }
+            // Also purge the shot-count records for this lot so ショット数 total stays correct
+            if (typeof window.removeLotFromTracking === 'function') {
+              window.removeLotFromTracking(lotNum);
+            }
             materialLots.splice(index, 1);
             saveMaterialLots();
             renderMaterialLotTags();
@@ -12480,6 +12484,25 @@ if (manualSendModal) {
   window.recordLotScan = recordLotScan;
   window.buildLotProductionPayload = buildPayload;
   window.lotProductionReset = function () { lotsByMachine = {}; save(); updateShotTotalField(); };
+
+  /**
+   * Remove all shot-tracking records for a given lot number (across all machines).
+   * Called when the operator deletes a lot pill/tag so ショット数 total stays accurate.
+   */
+  window.removeLotFromTracking = function (lotNumber) {
+    let changed = false;
+    Object.keys(lotsByMachine).forEach(machine => {
+      const before = (lotsByMachine[machine] || []).length;
+      lotsByMachine[machine] = (lotsByMachine[machine] || []).filter(r => r.lotNumber !== lotNumber);
+      if (lotsByMachine[machine].length !== before) changed = true;
+    });
+    if (changed) {
+      save();
+      updateShotTotalField();
+      console.log(`🗑️ [removeLotFromTracking] Removed shot records for lot: ${lotNumber}`);
+    }
+  };
+
   window.chooseScanMachine = function (onPicked) {
     const done = window.__lotCycleMachinesDone || [];
     chooseMachine((typeof groupedMachines !== 'undefined') ? groupedMachines : [],
