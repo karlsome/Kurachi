@@ -2468,7 +2468,7 @@
                     <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 25px;">
                         <input type="submit" value="Submit" id="submit" class="btn btn-primary btn-full"
                             style="height: 52px; font-size: 1.1rem;" data-i18n="submit">
-                        <button type="button" onclick="if (confirmReset()) resetForm()" class="btn btn-alert btn-full" style="height: 48px;"
+                        <button type="button" onclick="if (confirmReset('新規スキャンを開始しますか？\n現在のデータはすべて消去されます。\n\nStart a new scan? All current data will be cleared.')) resetAllSteps()" class="btn btn-alert btn-full" style="height: 48px;"
                             data-i18n="reset">Reset</button>
                     </div>
                 </div>
