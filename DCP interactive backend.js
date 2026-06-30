@@ -4171,13 +4171,13 @@ function addManualLot(lotNumber) {
   materialLots.push({ lotNumber, source: 'manual' });
   // The next captured material-label photo links to this lot
   window.__captureLotTarget = lotNumber;
-  // Track on the machine timeline too (manual lots are closed by the End-Time
-  // popup; no per-scan prompt, so the previous-lot return value is ignored).
+  // Track on the machine timeline. Capture the previous open lot so the
+  // override flow can prompt for its ショット数 (same as the scanned path).
   if (typeof window.recordLotScan === 'function') {
     const _m = window.__lotScanMachine
       || (typeof groupedMachines !== 'undefined' && groupedMachines[0])
       || (document.getElementById('process') ? document.getElementById('process').value : '');
-    window.recordLotScan(lotNumber, _m, 'manual');
+    window.__pendingPrevLot = window.recordLotScan(lotNumber, _m, 'manual');
   }
   saveMaterialLots();
   renderMaterialLotTags();
@@ -11257,12 +11257,21 @@ document.getElementById('overrideStep2').addEventListener('click', function (eve
                       console.log("Manual lot added via Step 2 override:", lotNumber);
                     }
 
-                    // Automatically proceed to Step 3 (after mandatory material-label photo)
+                    // Automatically proceed to Step 3 (after mandatory material-label photo).
+                    // After the photo, call afterLotPhotoProceed so the previous lot's
+                    // ショット数 is prompted — same as the scanned-lot path.
                     setTimeout(() => {
+                      const _proceedToStep3 = () => {
+                        if (typeof window.afterLotPhotoProceed === 'function') {
+                          window.afterLotPhotoProceed(() => showStep3Modal());
+                        } else {
+                          showStep3Modal();
+                        }
+                      };
                       if (typeof window.materialPhotoGate === 'function') {
-                        window.materialPhotoGate(() => showStep3Modal());
+                        window.materialPhotoGate(_proceedToStep3);
                       } else {
-                        showStep3Modal();
+                        _proceedToStep3();
                       }
                     }, 500);
                   } else {
