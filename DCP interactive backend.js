@@ -1480,12 +1480,12 @@ function updateAllProcessingTimeLockStatus() {
 }
 
 // Expose break and maint times for the TV monitor sync
-window.appGetTotalBreakAndMaintMinutes = function() {
-    try {
-        let b = 0; if (typeof calculateTotalBreakTime === 'function') b = calculateTotalBreakTime();
-        let m = 0; if (typeof calculateTotalMachineTroubleTime === 'function') m = calculateTotalMachineTroubleTime();
-        return b + m;
-    } catch(e) { return 0; }
+window.appGetTotalBreakAndMaintMinutes = function () {
+  try {
+    let b = 0; if (typeof calculateTotalBreakTime === 'function') b = calculateTotalBreakTime();
+    let m = 0; if (typeof calculateTotalMachineTroubleTime === 'function') m = calculateTotalMachineTroubleTime();
+    return b + m;
+  } catch (e) { return 0; }
 };
 
 // Function to calculate total break time in minutes
@@ -1978,6 +1978,165 @@ function showMaintenancePhotoPreview(imageDataURL) {
   document.body.appendChild(previewModal);
 }
 
+// Show Quick Maintenance Reason Modal
+function showQuickMaintenanceReasonModal(startStr, endStr) {
+  const modal = document.createElement('div');
+  modal.id = 'quickMaintenanceReasonModal';
+  modal.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.7);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 10000;
+    padding: 20px;
+    box-sizing: border-box;
+    font-family: 'Nunito Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  `;
+
+  const modalContent = document.createElement('div');
+  modalContent.style.cssText = `
+    background: white;
+    padding: 30px;
+    border-radius: 16px;
+    width: 100%;
+    max-width: 450px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    font-family: inherit;
+  `;
+
+  modalContent.innerHTML = `
+    <div style="text-align:center; margin-bottom:24px;">
+      <div style="font-size:1.25rem;font-weight:800;color:#1F2733;">理由を選択 / Select Reason</div>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 10px;">
+      <button type="button" class="quick-reason-btn" data-reason="刃物交換" style="
+        display:flex; align-items:center; justify-content:space-between;
+        width:100%; padding:16px 18px; margin-bottom:10px;
+        background:#E8F0FE; border:1.5px solid #2E6FF2;
+        border-radius:12px; font-family:inherit; font-size:1.05rem;
+        font-weight:700; color:#2E6FF2; cursor:pointer;
+        transition:background 0.15s;
+      ">
+        <span>🔧 刃物交換 (Change Blade)</span>
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+      </button>
+      
+      <button type="button" id="manual-reason-btn" style="
+        display:flex; align-items:center; justify-content:space-between;
+        width:100%; padding:16px 18px; margin-bottom:10px;
+        background:#F7F8FB; border:1.5px solid #9AA1AC;
+        border-radius:12px; font-family:inherit; font-size:1.05rem;
+        font-weight:700; color:#374151; cursor:pointer;
+        transition:background 0.15s;
+      ">
+        <span>✍️ 手動入力 / Manual Entry</span>
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+      </button>
+    </div>
+  `;
+
+  modal.appendChild(modalContent);
+  document.body.appendChild(modal);
+
+  // Quick reason buttons
+  modalContent.querySelectorAll('.quick-reason-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const reason = btn.dataset.reason;
+
+      // Replace modal content with "Take Photo?" prompt
+      modalContent.innerHTML = `
+        <div style="text-align:center; margin-bottom:24px;">
+          <div style="font-size:1.25rem;font-weight:800;color:#1F2733;">写真を追加しますか？</div>
+          <div style="font-size:0.95rem;color:#6B7280;margin-top:8px;">Add a photo for this maintenance?</div>
+        </div>
+        <div style="display: flex; gap: 10px;">
+          <button type="button" id="quick-photo-no" style="
+            flex: 1; padding: 16px; background: #F7F8FB; color: #374151; border: 1.5px solid #9AA1AC; border-radius: 12px; font-size: 1.05rem; font-weight: bold; cursor: pointer; transition: background 0.15s;">
+            いいえ (No)
+          </button>
+          <button type="button" id="quick-photo-yes" style="
+            flex: 1; padding: 16px; background: #E8F0FE; color: #2E6FF2; border: 1.5px solid #2E6FF2; border-radius: 12px; font-size: 1.05rem; font-weight: bold; cursor: pointer; transition: background 0.15s;">
+            📷 はい (Yes)
+          </button>
+        </div>
+      `;
+
+      // If "No", save instantly (like before)
+      modalContent.querySelector('#quick-photo-no').addEventListener('click', () => {
+        const recordId = Date.now();
+        const record = {
+          id: recordId,
+          startTime: startStr,
+          endTime: endStr,
+          comment: reason,
+          photos: [],
+          timestamp: new Date().toISOString()
+        };
+
+        maintenanceRecords.push(record);
+        if (typeof logTabletAction === 'function') {
+          logTabletAction('Maintenance record added', 'Completed', {
+            startTime: record.startTime,
+            endTime: record.endTime,
+            comment: record.comment,
+            photoCount: 0
+          });
+        }
+
+        saveMaintenanceRecords();
+        renderMaintenanceRecords();
+        calculateTotalMachineTroubleTime();
+
+        document.body.removeChild(modal);
+      });
+
+      // If "Yes", open normal modal, prefill reason, and auto-open camera
+      modalContent.querySelector('#quick-photo-yes').addEventListener('click', () => {
+        document.body.removeChild(modal);
+        showMaintenanceModal(-1);
+        setTimeout(() => {
+          const s = document.getElementById('maintenance-start');
+          const e = document.getElementById('maintenance-end');
+          const reasonInput = document.getElementById('maintenance-comment');
+          if (s) s.value = startStr;
+          if (e) e.value = endStr;
+          if (reasonInput) {
+            reasonInput.value = reason;
+            reasonInput.focus();
+          }
+          if (typeof showToast === 'function') showToast(_t('toast_enter_reason_photo'));
+
+          // Auto-open camera since they said yes to photo
+          setTimeout(() => {
+            if (typeof openMaintenanceCamera === 'function') openMaintenanceCamera();
+          }, 300);
+        }, 120);
+      });
+    });
+  });
+
+  // Manual entry button
+  modalContent.querySelector('#manual-reason-btn').addEventListener('click', () => {
+    document.body.removeChild(modal);
+    // Show normal modal
+    showMaintenanceModal(-1);
+    setTimeout(() => {
+      const s = document.getElementById('maintenance-start');
+      const e = document.getElementById('maintenance-end');
+      if (s) s.value = startStr;
+      if (e) e.value = endStr;
+      const reasonInput = document.getElementById('maintenance-comment');
+      if (reasonInput) reasonInput.focus();
+      if (typeof showToast === 'function') showToast(_t('toast_enter_reason_photo'));
+    }, 120);
+  });
+}
+
 // Show maintenance modal
 function showMaintenanceModal(editIndex = -1) {
   currentEditingIndex = editIndex;
@@ -2002,6 +2161,7 @@ function showMaintenanceModal(editIndex = -1) {
     justify-content: center;
     align-items: center;
     z-index: 10000;
+    font-family: 'Nunito Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   `;
 
   const modalContent = document.createElement('div');
@@ -2253,15 +2413,7 @@ function setupMaintenanceModalEvents(modal, existingRecord) {
     });
   }
 
-  // Close on background click
-  modal.addEventListener('click', async (e) => {
-    if (e.target === modal) {
-      // Discard the unsaved-photo draft (add flow) and clear the working array
-      if (currentEditingIndex < 0) { try { await maintenanceDB.clearDraft(); } catch (err) { } }
-      maintenancePhotos = [];
-      document.body.removeChild(modal);
-    }
-  });
+  // (Removed close on background click so users don't accidentally lose data)
 }
 
 // === Material Label Photo Functions ===
@@ -2315,7 +2467,7 @@ async function addMaterialLabelPhoto(photoDataURL, lotTarget = undefined) {
 
   const id = `material-label-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
   const timestamp = new Date().toISOString();
-  
+
   // Retaking a photo for a lot that already has one: replace it (keep the link)
   if (lotNumber && typeof materialLabelPhotos !== 'undefined') {
     const existingIdx = materialLabelPhotos.findIndex(p => p.lotNumber === lotNumber);
@@ -4506,113 +4658,113 @@ function resetForm() {
     // Clear session AFTER logging
     clearSessionID();
     closeVideoManualPicker();
-  currentProductDetails = {
-    sebanggo: '',
-    hinban: '',
-    materialCode: '',
-    model: '',
-    kataban: ''
-  };
-  localStorage.removeItem(`${uniquePrefix}cached-model`);
-  localStorage.removeItem(`${uniquePrefix}cached-kataban`);
-  syncVideoManualLauncherState();
+    currentProductDetails = {
+      sebanggo: '',
+      hinban: '',
+      materialCode: '',
+      model: '',
+      kataban: ''
+    };
+    localStorage.removeItem(`${uniquePrefix}cached-model`);
+    localStorage.removeItem(`${uniquePrefix}cached-kataban`);
+    syncVideoManualLauncherState();
 
-  const excludedInputs = ['process', 'languageSelector', 'Machine Operator']; // IDs or names of inputs to exclude from reset
+    const excludedInputs = ['process', 'languageSelector', 'Machine Operator']; // IDs or names of inputs to exclude from reset
 
-  // Preserve language preference
-  const currentLanguage = localStorage.getItem('appLanguage');
+    // Preserve language preference
+    const currentLanguage = localStorage.getItem('appLanguage');
 
-  // Clear all form inputs with unique prefix except excluded ones
-  const inputs = document.querySelectorAll('input, select, textarea');
-  inputs.forEach(input => {
-    const key = `${uniquePrefix}${input.id || input.name}`;
-    if (!excludedInputs.includes(input.id) && !excludedInputs.includes(input.name)) {
+    // Clear all form inputs with unique prefix except excluded ones
+    const inputs = document.querySelectorAll('input, select, textarea');
+    inputs.forEach(input => {
+      const key = `${uniquePrefix}${input.id || input.name}`;
+      if (!excludedInputs.includes(input.id) && !excludedInputs.includes(input.name)) {
+        localStorage.removeItem(key);
+        input.value = ''; // Reset input value
+      }
+    });
+
+    // Clear counters with unique prefix
+    for (let i = 1; i <= 20; i++) { // Adjusted loop to clear all counter values
+      const key = `${uniquePrefix}counter-${i}`;
       localStorage.removeItem(key);
-      input.value = ''; // Reset input value
+      const counterElement = document.getElementById(`counter-${i}`);
+      if (counterElement) {
+        counterElement.value = '0'; // Reset counter display
+      }
     }
-  });
 
-  // Clear counters with unique prefix
-  for (let i = 1; i <= 20; i++) { // Adjusted loop to clear all counter values
-    const key = `${uniquePrefix}counter-${i}`;
-    localStorage.removeItem(key);
-    const counterElement = document.getElementById(`counter-${i}`);
-    if (counterElement) {
-      counterElement.value = '0'; // Reset counter display
+    // Clear break time inputs and total
+    for (let i = 1; i <= 4; i++) {
+      localStorage.removeItem(`${uniquePrefix}break${i}-start`);
+      localStorage.removeItem(`${uniquePrefix}break${i}-end`);
     }
-  }
+    localStorage.removeItem(`${uniquePrefix}breaktime-mins`);
+    localStorage.removeItem(`${uniquePrefix}total-break-display`);
 
-  // Clear break time inputs and total
-  for (let i = 1; i <= 4; i++) {
-    localStorage.removeItem(`${uniquePrefix}break${i}-start`);
-    localStorage.removeItem(`${uniquePrefix}break${i}-end`);
-  }
-  localStorage.removeItem(`${uniquePrefix}breaktime-mins`);
-  localStorage.removeItem(`${uniquePrefix}total-break-display`);
-
-  // Clear machine trouble inputs and total
-  for (let i = 1; i <= 4; i++) {
-    localStorage.removeItem(`${uniquePrefix}trouble${i}-start`);
-    localStorage.removeItem(`${uniquePrefix}trouble${i}-end`);
-  }
-  localStorage.removeItem(`${uniquePrefix}trouble-time-mins`);
-  localStorage.removeItem(`${uniquePrefix}total-trouble-display`);
-
-  // Clear maintenance records
-  localStorage.removeItem(`${uniquePrefix}maintenanceRecords`);
-  maintenanceRecords = [];
-
-  // Revoke object URLs and drop the in-memory array now; the persisted blobs in
-  // IndexedDB are wiped (awaited) just before the reload below so they can't be
-  // reloaded into the next session.
-  materialLabelPhotos.forEach(p => URL.revokeObjectURL(p.blobUrl));
-  materialLabelPhotos = [];
-  renderMaterialPhotoThumbnails();
-  updateMaterialPhotoCount();
-
-  // Revoke cycle-check (初物/終物) object URLs; their blobs in IndexedDB are wiped
-  // (awaited) just before the reload below.
-  Object.keys(cycleCheckObjectURLs).forEach(id => {
-    try { URL.revokeObjectURL(cycleCheckObjectURLs[id]); } catch (e) { }
-    delete cycleCheckObjectURLs[id];
-  });
-
-  // Clear material lots
-  localStorage.removeItem(`${uniquePrefix}材料ロット-data`);
-  materialLots = [];
-  renderMaterialLotTags();
-
-  // Clear any stop/call-leader events for this session
-  localStorage.removeItem(`${uniquePrefix}stopCallData`);
-  localStorage.removeItem(`${uniquePrefix}activeStopCallStart`);
-
-
-  // Reset all textContent elements
-  const textContentElements = document.querySelectorAll('[id]'); // Select all elements with an ID
-  textContentElements.forEach(element => {
-    const textKey = `${uniquePrefix}${element.id}.textContent`;
-    if (localStorage.getItem(textKey)) {
-      localStorage.removeItem(textKey); // Remove from localStorage
-      element.textContent = ''; // Reset to default empty textContent
-      console.log(`Reset textContent for element with ID: ${element.id}`);
+    // Clear machine trouble inputs and total
+    for (let i = 1; i <= 4; i++) {
+      localStorage.removeItem(`${uniquePrefix}trouble${i}-start`);
+      localStorage.removeItem(`${uniquePrefix}trouble${i}-end`);
     }
-  });
+    localStorage.removeItem(`${uniquePrefix}trouble-time-mins`);
+    localStorage.removeItem(`${uniquePrefix}total-trouble-display`);
 
-  // Reset all <img> elements
-  const images = document.querySelectorAll('img'); // Get all <img> elements
-  images.forEach(image => {
-    const imageKey = `${uniquePrefix}${image.id || image.name}.src`;
-    localStorage.removeItem(imageKey); // Remove image source from localStorage
-    image.src = ''; // Reset the image source
-    image.style.display = 'none'; // Hide the image
-    console.log(`Reset image ${image.id || image.name}`);
-  });
+    // Clear maintenance records
+    localStorage.removeItem(`${uniquePrefix}maintenanceRecords`);
+    maintenanceRecords = [];
 
-  // Explicitly reset the sendtoNCButtonisPressed state
-  sendtoNCButtonisPressed = false;
-  localStorage.setItem(`${uniquePrefix}sendtoNCButtonisPressed`, 'false');
-  localStorage.removeItem(`${uniquePrefix}previous-sebanggo`);
-  console.log('Reset button pressed: Set sendtoNCButtonisPressed to false');
+    // Revoke object URLs and drop the in-memory array now; the persisted blobs in
+    // IndexedDB are wiped (awaited) just before the reload below so they can't be
+    // reloaded into the next session.
+    materialLabelPhotos.forEach(p => URL.revokeObjectURL(p.blobUrl));
+    materialLabelPhotos = [];
+    renderMaterialPhotoThumbnails();
+    updateMaterialPhotoCount();
+
+    // Revoke cycle-check (初物/終物) object URLs; their blobs in IndexedDB are wiped
+    // (awaited) just before the reload below.
+    Object.keys(cycleCheckObjectURLs).forEach(id => {
+      try { URL.revokeObjectURL(cycleCheckObjectURLs[id]); } catch (e) { }
+      delete cycleCheckObjectURLs[id];
+    });
+
+    // Clear material lots
+    localStorage.removeItem(`${uniquePrefix}材料ロット-data`);
+    materialLots = [];
+    renderMaterialLotTags();
+
+    // Clear any stop/call-leader events for this session
+    localStorage.removeItem(`${uniquePrefix}stopCallData`);
+    localStorage.removeItem(`${uniquePrefix}activeStopCallStart`);
+
+
+    // Reset all textContent elements
+    const textContentElements = document.querySelectorAll('[id]'); // Select all elements with an ID
+    textContentElements.forEach(element => {
+      const textKey = `${uniquePrefix}${element.id}.textContent`;
+      if (localStorage.getItem(textKey)) {
+        localStorage.removeItem(textKey); // Remove from localStorage
+        element.textContent = ''; // Reset to default empty textContent
+        console.log(`Reset textContent for element with ID: ${element.id}`);
+      }
+    });
+
+    // Reset all <img> elements
+    const images = document.querySelectorAll('img'); // Get all <img> elements
+    images.forEach(image => {
+      const imageKey = `${uniquePrefix}${image.id || image.name}.src`;
+      localStorage.removeItem(imageKey); // Remove image source from localStorage
+      image.src = ''; // Reset the image source
+      image.style.display = 'none'; // Hide the image
+      console.log(`Reset image ${image.id || image.name}`);
+    });
+
+    // Explicitly reset the sendtoNCButtonisPressed state
+    sendtoNCButtonisPressed = false;
+    localStorage.setItem(`${uniquePrefix}sendtoNCButtonisPressed`, 'false');
+    localStorage.removeItem(`${uniquePrefix}previous-sebanggo`);
+    console.log('Reset button pressed: Set sendtoNCButtonisPressed to false');
 
     // Restore language preference after reset
     if (currentLanguage) {
@@ -5310,42 +5462,42 @@ async function detectBlur(base64Image, threshold = 100) {
       canvas.width = w;
       canvas.height = h;
       ctx.drawImage(img, 0, 0, w, h);
-      
+
       const imgData = ctx.getImageData(0, 0, w, h);
       const pixels = imgData.data;
       const width = imgData.width;
       const height = imgData.height;
-      
+
       // Convert to grayscale
       const gray = new Uint8Array(width * height);
       for (let i = 0; i < pixels.length; i += 4) {
         gray[i / 4] = pixels[i] * 0.299 + pixels[i + 1] * 0.587 + pixels[i + 2] * 0.114;
       }
-      
+
       // Laplacian kernel: [0, 1, 0, 1, -4, 1, 0, 1, 0]
       let sum = 0;
       let sumSq = 0;
       let count = 0;
-      
+
       for (let y = 1; y < height - 1; y++) {
         for (let x = 1; x < width - 1; x++) {
           const idx = y * width + x;
-          const val = 
-            gray[idx - width] + 
-            gray[idx - 1] + 
-            (gray[idx] * -4) + 
-            gray[idx + 1] + 
+          const val =
+            gray[idx - width] +
+            gray[idx - 1] +
+            (gray[idx] * -4) +
+            gray[idx + 1] +
             gray[idx + width];
-            
+
           sum += val;
           sumSq += val * val;
           count++;
         }
       }
-      
+
       const mean = sum / count;
       const variance = (sumSq / count) - (mean * mean);
-      
+
       console.log(`Blur score (Laplacian Variance): ${variance.toFixed(2)} (Threshold: ${threshold})`);
       resolve({ isBlurry: variance < threshold, score: variance });
     };
@@ -5357,7 +5509,7 @@ async function detectBlur(base64Image, threshold = 100) {
 function showBlurWarning(score, onRetake, onOk) {
   const modal = document.createElement('div');
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:100500;display:flex;justify-content:center;align-items:center;padding:20px;';
-  
+
   modal.innerHTML = `
     <div style="background:#fff;border-radius:16px;padding:24px;max-width:350px;width:100%;text-align:center;box-shadow:0 10px 40px rgba(0,0,0,0.3);font-family:inherit;">
       <div style="font-size:3rem;margin-bottom:10px;">⚠️</div>
@@ -5376,12 +5528,12 @@ function showBlurWarning(score, onRetake, onOk) {
     </div>
   `;
   document.body.appendChild(modal);
-  
+
   modal.querySelector('#blurRetakeBtn').onclick = () => {
     document.body.removeChild(modal);
     if (onRetake) onRetake();
   };
-  
+
   modal.querySelector('#blurOkBtn').onclick = () => {
     document.body.removeChild(modal);
     if (onOk) onOk();
@@ -5391,7 +5543,7 @@ function showBlurWarning(score, onRetake, onOk) {
 async function checkBlurAndProceed(base64Image, onProceed, onRetake) {
   const result = await detectBlur(base64Image, 100);
   if (result.isBlurry) {
-    showBlurWarning(result.score, 
+    showBlurWarning(result.score,
       () => { console.log('User chose to retake blurry photo'); if (onRetake) onRetake(); }, // Retake
       () => { onProceed(); } // OK proceeds anyway
     );
@@ -5435,7 +5587,7 @@ const webcamModalHTML = `
 document.body.insertAdjacentHTML('beforeend', webcamModalHTML);
 // Apply current language to the newly injected modal
 if (typeof applyTranslations === 'function' && typeof getCurrentLanguage === 'function') {
-    applyTranslations(getCurrentLanguage());
+  applyTranslations(getCurrentLanguage());
 }
 
 let webcamStream = null;
@@ -10234,35 +10386,35 @@ function ensureVideoManualPickerUi() {
 
   const handlePdfBtnInteraction = (btn) => {
     btn.classList.add('is-interacting');
-    
+
     // Clear any existing timeouts for THIS specific button
     if (btn.interactionTimeout) clearTimeout(btn.interactionTimeout);
     if (btn.failsafeTimeout) clearTimeout(btn.failsafeTimeout);
-    
+
     // Main shrink timeout
     btn.interactionTimeout = setTimeout(() => {
       btn.classList.remove('is-interacting');
     }, 1500);
-    
+
     // Absolute failsafe to guarantee it shrinks back
     btn.failsafeTimeout = setTimeout(() => {
       btn.classList.remove('is-interacting');
     }, 2500);
   };
 
-  pdfPrevBtn.onclick = () => { 
+  pdfPrevBtn.onclick = () => {
     handlePdfBtnInteraction(pdfPrevBtn);
-    if(window.broadcastPdfCommand) window.broadcastPdfCommand('page_prev'); 
+    if (window.broadcastPdfCommand) window.broadcastPdfCommand('page_prev');
   };
   document.body.appendChild(pdfPrevBtn);
 
-  pdfNextBtn.onclick = () => { 
+  pdfNextBtn.onclick = () => {
     handlePdfBtnInteraction(pdfNextBtn);
-    if(window.broadcastPdfCommand) window.broadcastPdfCommand('page_next'); 
+    if (window.broadcastPdfCommand) window.broadcastPdfCommand('page_next');
   };
   document.body.appendChild(pdfNextBtn);
 
-  window.broadcastPdfCommand = function(action) {
+  window.broadcastPdfCommand = function (action) {
     const machineNameForSSE = getMachineName();
     if (machineNameForSSE) {
       fetch(`${serverURL}/api/broadcast-scan`, {
@@ -10485,15 +10637,15 @@ window.isScanWorkflowComplete = function () {
 };
 
 // Function to show Step 0 Modal (Worker Name Verification)
-window.showStep0Modal = function() {
-  clearScanWorkflowComplete(); 
-  
+window.showStep0Modal = function () {
+  clearScanWorkflowComplete();
+
   const modal = document.getElementById('step0Modal');
   const confirmState = document.getElementById('step0ConfirmState');
   const selectState = document.getElementById('step0SelectState');
   const workerInput = document.getElementById('Machine Operator');
   const currentWorkerLabel = document.getElementById('step0CurrentWorkerName');
-  
+
   // Make sure to hide Step 1, 2, 3 Modals
   ['step1Modal', 'step2Modal', 'step3Modal'].forEach(id => {
     const m = document.getElementById(id);
@@ -10502,9 +10654,9 @@ window.showStep0Modal = function() {
 
   // Check if we have an existing worker name
   const workerValue = workerInput ? workerInput.value.trim() : '';
-  const isPlaceholderValue = workerValue === '作業者名' || 
-                             workerValue === "Worker's Name" || 
-                             workerValue === 'Nome do Trabalhador';
+  const isPlaceholderValue = workerValue === '作業者名' ||
+    workerValue === "Worker's Name" ||
+    workerValue === 'Nome do Trabalhador';
 
   if (workerValue !== '' && !isPlaceholderValue) {
     currentWorkerLabel.textContent = workerValue;
@@ -10518,31 +10670,31 @@ window.showStep0Modal = function() {
     confirmState.style.display = 'none';
     selectState.style.display = 'flex';
   }
-  
+
   modal.style.display = 'block';
-  saveCurrentStep(0); 
+  saveCurrentStep(0);
 };
 
-window.proceedFromStep0 = function() {
+window.proceedFromStep0 = function () {
   const workerInput = document.getElementById("Machine Operator");
   if (!workerInput || !workerInput.value.trim()) {
     if (typeof showToast === 'function') showToast(_t('toast_select_worker'));
     return;
   }
-  
+
   // Make sure it gets cached to localStorage
   if (typeof saveInputs === 'function') saveInputs();
-  
+
   document.getElementById('step0Modal').style.display = 'none';
   showStep1Modal();
 };
 
-window.confirmWorkerName = function() {
+window.confirmWorkerName = function () {
   document.getElementById('step0Modal').style.display = 'none';
   showStep1Modal();
 };
 
-window.changeWorkerName = function() {
+window.changeWorkerName = function () {
   document.getElementById('step0ConfirmState').style.display = 'none';
   document.getElementById('step0SelectState').style.display = 'flex';
   document.getElementById('Machine Operator').value = '';
@@ -12002,14 +12154,14 @@ function showManualSendModal(sebanggo) {
       const url = `http://${ip}:5000/request?filename=${sebanggo}.pce`;
       console.log(`📤 Manual send to ${machine}: ${url}`);
       try {
-          await fetch(url, { method: 'GET', mode: 'no-cors' });
+        await fetch(url, { method: 'GET', mode: 'no-cors' });
       } catch (error) {
-          const newTab = window.open(url, '_blank');
-          if (newTab) {
-              setTimeout(() => {
-                  newTab.close();
-              }, 3000);
-          }
+        const newTab = window.open(url, '_blank');
+        if (newTab) {
+          setTimeout(() => {
+            newTab.close();
+          }, 3000);
+        }
       }
 
       // Visual feedback
@@ -12130,13 +12282,13 @@ if (manualSendModal) {
       const missingPc = machines.some(m => resolveFeed(m).pcPerCycle == null);
 
       if (!missingPc && payload.Total_Pieces != null) {
-          pqEl.value = String(payload.Total_Pieces);
-          pqEl.readOnly = true;
-          pqEl.style.backgroundColor = '#f3f4f6';
-          try { pqEl.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) { }
-          window.__processQuantityAutoCalculated = true; // flag to block keypad
+        pqEl.value = String(payload.Total_Pieces);
+        pqEl.readOnly = true;
+        pqEl.style.backgroundColor = '#f3f4f6';
+        try { pqEl.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) { }
+        window.__processQuantityAutoCalculated = true; // flag to block keypad
       } else {
-          window.__processQuantityAutoCalculated = false;
+        window.__processQuantityAutoCalculated = false;
       }
     }
   }
@@ -12204,7 +12356,7 @@ if (manualSendModal) {
     opts = opts || {};
     closeLP();
     const card = shell();
-    
+
     let closeHtml = '';
     if (opts.allowCancel) {
       card.style.position = 'relative';
@@ -12229,7 +12381,7 @@ if (manualSendModal) {
       keys.appendChild(b);
     });
     card.querySelector('#lpOk').onclick = () => { const v = parseInt(disp.value, 10) || 0; closeLP(); if (onSubmit) onSubmit(v); };
-    
+
     const closeBtn = card.querySelector('#lpClose');
     if (closeBtn) {
       closeBtn.onclick = () => {
@@ -12244,24 +12396,24 @@ if (manualSendModal) {
     const done = opts.done || [];
     closeLP();
     const card = shell();
-    
+
     if (window.__materialScanMode === 'production') {
       const ov = document.getElementById('lpModal');
       if (ov) {
-        ov.addEventListener('click', function(e) {
+        ov.addEventListener('click', function (e) {
           if (e.target === ov) {
             closeLP();
             window.__materialScanMode = null;
           }
         });
       }
-      
+
       card.style.position = 'relative';
       const closeBtn = document.createElement('button');
       closeBtn.innerHTML = '✕';
       closeBtn.style.cssText = 'position:absolute;top:16px;right:16px;background:none;border:none;font-size:1.4rem;font-weight:bold;color:#667085;cursor:pointer;padding:0;line-height:1;z-index:10;';
       closeBtn.setAttribute('aria-label', 'Close');
-      closeBtn.onclick = function(e) {
+      closeBtn.onclick = function (e) {
         e.stopPropagation();
         closeLP();
         window.__materialScanMode = null;
@@ -12303,7 +12455,7 @@ if (manualSendModal) {
 
   // Failsafe: if the user refreshes the page before entering shots for a previous lot,
   // we detect open lots that are NOT the current (last) lot, and prompt for their shots.
-  window.checkMissingShots = function() {
+  window.checkMissingShots = function () {
     const missing = [];
     Object.keys(lotsByMachine).forEach(machine => {
       const list = lotsByMachine[machine];
@@ -12339,7 +12491,7 @@ if (manualSendModal) {
   });
 
   /* ---------- Public hooks ---------- */
-  window.verifyLeaderUI = function(onVerified) {
+  window.verifyLeaderUI = function (onVerified) {
     const srvURL = () => (typeof serverURL !== 'undefined' && serverURL) ? serverURL : '';
     const modal = document.createElement('div');
     modal.style.cssText = 'display:flex; position:fixed; inset:0; background:rgba(0,0,0,0.85); z-index:100300; justify-content:center; align-items:center;';
@@ -12360,7 +12512,7 @@ if (manualSendModal) {
     function closeScanner(then) {
       if (scanner) {
         scanner.stop()
-          .then(() => { try { scanner.clear(); } catch(e){} scanner = null; setTimeout(() => { if (then) then(); }, 500); })
+          .then(() => { try { scanner.clear(); } catch (e) { } scanner = null; setTimeout(() => { if (then) then(); }, 500); })
           .catch(() => { scanner = null; setTimeout(() => { if (then) then(); }, 500); });
       } else if (then) { then(); }
     }
@@ -12395,14 +12547,14 @@ if (manualSendModal) {
           statusEl.textContent = '❌ エラーが発生しました / Error occurred';
         }
       },
-      (errorMessage) => {}
+      (errorMessage) => { }
     ).catch(err => {
       statusEl.style.color = '#cc0000';
       statusEl.textContent = 'カメラの起動に失敗しました';
     });
   };
 
-  window.openShotEditModal = function() {
+  window.openShotEditModal = function () {
     window.verifyLeaderUI(() => {
       renderShotEditModal();
     });
@@ -12411,73 +12563,73 @@ if (manualSendModal) {
   function renderShotEditModal() {
     const modal = document.createElement('div');
     modal.style.cssText = 'position:fixed;inset:0;z-index:100200;background:rgba(10,15,26,.8);display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(5px);';
-    
+
     const card = document.createElement('div');
     card.style.cssText = 'background:#fff;border-radius:16px;max-width:500px;width:100%;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.3);font-family:inherit;max-height:90vh;overflow-y:auto;';
-    
+
     let html = '<h2 style="margin:0 0 20px;color:#101828;text-align:center;">ショット数編集 / Edit Shots</h2>';
     const machines = (typeof groupedMachines !== 'undefined' && groupedMachines.length > 0) ? groupedMachines : [document.getElementById('machine-selector')?.value || 'UNKNOWN'];
-    
+
     machines.forEach(m => {
-        html += `<div style="background:#F9FAFB;border:1px solid #E4E7EC;border-radius:12px;padding:16px;margin-bottom:16px;">`;
-        html += `<h3 style="margin:0 0 12px;color:#344054;font-size:1.1rem;">${m}</h3>`;
-        
-        const records = lotsByMachine[m] || [];
-        if (records.length === 0) {
-            html += `<p style="color:#667085;margin:0;">No records</p>`;
-        } else {
-            records.forEach((rec, idx) => {
-                html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:${idx===records.length-1?'none':'1px solid #EAECF0'};">`;
-                html += `<div style="flex:1;">`;
-                html += `<div style="font-weight:600;color:#101828;font-size:0.95rem;">Lot: ${rec.lotNumber || '---'}</div>`;
-                if (!rec.open) {
-                    html += `<div style="color:#667085;font-size:0.85rem;">Time: ${new Date(rec.ts).toLocaleTimeString()}</div>`;
-                } else {
-                    html += `<div style="color:#f39c12;font-size:0.85rem;font-weight:bold;">Active / 開く</div>`;
-                }
-                html += `</div>`;
-                
-                const currentShots = rec.shots != null ? rec.shots : '---';
-                html += `<button type="button" style="background:#2E6FF2;color:#fff;border:none;border-radius:8px;padding:8px 16px;font-weight:700;font-size:1rem;cursor:pointer;" onclick="editSpecificShot('${m}', ${rec.ts})">${currentShots} ✎</button>`;
-                html += `</div>`;
-            });
-        }
-        html += `</div>`;
+      html += `<div style="background:#F9FAFB;border:1px solid #E4E7EC;border-radius:12px;padding:16px;margin-bottom:16px;">`;
+      html += `<h3 style="margin:0 0 12px;color:#344054;font-size:1.1rem;">${m}</h3>`;
+
+      const records = lotsByMachine[m] || [];
+      if (records.length === 0) {
+        html += `<p style="color:#667085;margin:0;">No records</p>`;
+      } else {
+        records.forEach((rec, idx) => {
+          html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:${idx === records.length - 1 ? 'none' : '1px solid #EAECF0'};">`;
+          html += `<div style="flex:1;">`;
+          html += `<div style="font-weight:600;color:#101828;font-size:0.95rem;">Lot: ${rec.lotNumber || '---'}</div>`;
+          if (!rec.open) {
+            html += `<div style="color:#667085;font-size:0.85rem;">Time: ${new Date(rec.ts).toLocaleTimeString()}</div>`;
+          } else {
+            html += `<div style="color:#f39c12;font-size:0.85rem;font-weight:bold;">Active / 開く</div>`;
+          }
+          html += `</div>`;
+
+          const currentShots = rec.shots != null ? rec.shots : '---';
+          html += `<button type="button" style="background:#2E6FF2;color:#fff;border:none;border-radius:8px;padding:8px 16px;font-weight:700;font-size:1rem;cursor:pointer;" onclick="editSpecificShot('${m}', ${rec.ts})">${currentShots} ✎</button>`;
+          html += `</div>`;
+        });
+      }
+      html += `</div>`;
     });
-    
+
     html += '<button type="button" id="closeShotEdit" style="width:100%;padding:14px;background:#E4E7EC;color:#344054;border:none;border-radius:10px;font-size:1.1rem;font-weight:700;cursor:pointer;">閉じる / Close</button>';
     card.innerHTML = html;
     modal.appendChild(card);
     document.body.appendChild(modal);
-    
+
     card.querySelector('#closeShotEdit').onclick = () => {
-        document.body.removeChild(modal);
-        if (typeof updateSummary === 'function') updateSummary();
+      document.body.removeChild(modal);
+      if (typeof updateSummary === 'function') updateSummary();
     };
     window.__shotEditModalRef = modal;
   }
 
-  window.editSpecificShot = function(machine, ts) {
+  window.editSpecificShot = function (machine, ts) {
     const records = lotsByMachine[machine] || [];
     const rec = records.find(r => r.ts === ts);
     if (!rec) return;
-    
+
     if (window.__shotEditModalRef) window.__shotEditModalRef.style.display = 'none';
-    
+
     promptShots(machine, rec.lotNumber, (newShots) => {
-        closeRecord(rec, newShots);
-        
-        // Re-render modal
-        if (window.__shotEditModalRef && window.__shotEditModalRef.parentNode) {
-            window.__shotEditModalRef.parentNode.removeChild(window.__shotEditModalRef);
-        }
-        renderShotEditModal();
-        if (typeof updateSummary === 'function') updateSummary();
+      closeRecord(rec, newShots);
+
+      // Re-render modal
+      if (window.__shotEditModalRef && window.__shotEditModalRef.parentNode) {
+        window.__shotEditModalRef.parentNode.removeChild(window.__shotEditModalRef);
+      }
+      renderShotEditModal();
+      if (typeof updateSummary === 'function') updateSummary();
     }, {
-        allowCancel: true,
-        onCancel: () => {
-            if (window.__shotEditModalRef) window.__shotEditModalRef.style.display = 'flex';
-        }
+      allowCancel: true,
+      onCancel: () => {
+        if (window.__shotEditModalRef) window.__shotEditModalRef.style.display = 'flex';
+      }
     });
   };
 
@@ -12653,8 +12805,8 @@ if (manualSendModal) {
       if (!file) { cb(null); return; }
       const reader = new FileReader();
       reader.onload = e => {
-        checkBlurAndProceed(e.target.result, 
-          () => cb(e.target.result), 
+        checkBlurAndProceed(e.target.result,
+          () => cb(e.target.result),
           () => captureViaFileInput(cb)
         );
       };
@@ -12690,8 +12842,8 @@ if (manualSendModal) {
       c.getContext('2d').drawImage(video, 0, 0, c.width, c.height);
       const b64 = c.toDataURL('image/jpeg', 0.95);
       cleanup();
-      checkBlurAndProceed(b64, 
-        () => cb(b64), 
+      checkBlurAndProceed(b64,
+        () => cb(b64),
         () => captureViaWebcam(cb)
       );
     };
@@ -12740,18 +12892,18 @@ if (manualSendModal) {
     function closeScanner(then) {
       if (scanner) {
         scanner.stop()
-          .then(() => { 
-            try { scanner.clear(); } catch (e) { } 
-            scanner = null; 
+          .then(() => {
+            try { scanner.clear(); } catch (e) { }
+            scanner = null;
             // Wait 500ms to ensure iOS Safari fully releases the camera hardware lock
-            setTimeout(() => { if (then) then(); }, 500); 
+            setTimeout(() => { if (then) then(); }, 500);
           })
-          .catch(() => { 
-            scanner = null; 
-            setTimeout(() => { if (then) then(); }, 500); 
+          .catch(() => {
+            scanner = null;
+            setTimeout(() => { if (then) then(); }, 500);
           });
-      } else if (then) { 
-        then(); 
+      } else if (then) {
+        then();
       }
     }
     modal.querySelector('#defectLeaderCancel').onclick = () => closeScanner(() => { removeModal(); onVerified(null); });
@@ -12774,13 +12926,13 @@ if (manualSendModal) {
             const name = ((result.firstName || '') + ' ' + (result.lastName || '')).trim();
             statusEl.style.color = '#006400';
             statusEl.innerHTML = `✅ ${name || 'Verified'}<br><span style="font-size:0.85em;color:#666;">下のボタンをタップ / Tap below</span>`;
-            
+
             // Stop the scanner in the background so it frees the camera
             if (scanner) {
-              scanner.stop().then(() => { try { scanner.clear(); } catch(e) {} }).catch(() => {});
+              scanner.stop().then(() => { try { scanner.clear(); } catch (e) { } }).catch(() => { });
               scanner = null;
             }
-            
+
             // Transform the Cancel button into a "Take Photo" button to capture the user gesture
             const btn = modal.querySelector('#defectLeaderCancel');
             btn.textContent = '📸 写真を撮る / Take Photo';
@@ -12820,21 +12972,21 @@ if (manualSendModal) {
         return; // cancelled
       }
       const lot = getCurrentLot();
-      
+
       // The user explicitly requested the native camera app for taking photos.
       const capture = captureViaFileInput;
-      
+
       capture(async function (base64) {
         isDefectPhotoFlowActive = false;
         if (!base64) return; // cancelled / no image
-        
+
         // The flattening (burnOverlay) happens asynchronously before upload
         const stamped = await burnOverlay(base64, {
           lot: lot,
           leader: leaderName,
           time: new Date().toLocaleString('ja-JP')
         });
-        
+
         try {
           // lotTarget intentionally null: this is an EXTRA photo in the group,
           // it must NOT replace the material-label photo for the lot.

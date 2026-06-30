@@ -5034,18 +5034,10 @@
                 if (!raw) return;
                 const start = new Date(parseInt(raw, 10));
                 const end = new Date();
-                // Open the existing maintenance record modal pre-filled (reason + photo required there)
-                if (typeof showMaintenanceModal === 'function') {
-                    showMaintenanceModal(-1);
-                    setTimeout(() => {
-                        const s = document.getElementById('maintenance-start');
-                        const e = document.getElementById('maintenance-end');
-                        if (s) s.value = fmtClock(start);
-                        if (e) e.value = fmtClock(end);
-                        const reason = document.getElementById('maintenance-comment');
-                        if (reason) reason.focus();
-                        showToast(_t('toast_enter_reason_photo'));
-                    }, 120);
+                
+                // Open the new quick reason picker
+                if (typeof showQuickMaintenanceReasonModal === 'function') {
+                    showQuickMaintenanceReasonModal(fmtClock(start), fmtClock(end));
                 }
             }
             function resumeMaintIfActive() {
