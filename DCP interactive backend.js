@@ -3021,6 +3021,98 @@ function showSuccessModal(message) {
   };
 }
 
+/**
+ * Show a confirmation dialog with Cancel / Confirm buttons.
+ * Styled to match the app's design system (flat white card, design tokens).
+ *
+ * @param {Object} opts
+ * @param {string}   opts.title        - Bold heading text
+ * @param {string}   opts.message      - Body message (HTML allowed)
+ * @param {string}  [opts.confirmText] - Confirm button label (default: '削除 / Delete')
+ * @param {string}  [opts.cancelText]  - Cancel button label  (default: 'キャンセル / Cancel')
+ * @param {Function} opts.onConfirm    - Called when user presses Confirm
+ * @param {Function}[opts.onCancel]    - Called when user presses Cancel (optional)
+ */
+function showConfirm({ title, message, confirmText = '削除 / Delete', cancelText = 'キャンセル / Cancel', onConfirm, onCancel }) {
+  // Remove any previous instance
+  const existing = document.getElementById('_confirmDialog');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = '_confirmDialog';
+  overlay.style.cssText = [
+    'position:fixed', 'inset:0', 'width:100vw', 'height:100vh',
+    'background:rgba(16,24,40,0.55)', 'z-index:200000',
+    'display:flex', 'align-items:center', 'justify-content:center', 'padding:20px'
+  ].join(';');
+
+  overlay.innerHTML = `
+    <div style="
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--card-radius);
+      padding: 28px 24px 24px;
+      box-shadow: var(--shadow-pop);
+      max-width: 400px;
+      width: 100%;
+      box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      text-align: center;
+    ">
+      <!-- Warning icon -->
+      <div style="margin: 0 auto; width:52px; height:52px; border-radius:50%; background:var(--red-soft); color:var(--red); display:flex; align-items:center; justify-content:center;">
+        <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+          <line x1="12" y1="9" x2="12" y2="13"/>
+          <line x1="12" y1="17" x2="12.01" y2="17"/>
+        </svg>
+      </div>
+      <!-- Title -->
+      <div style="font-size:1.0625rem; font-weight:800; color:var(--text-main); letter-spacing:-0.01em;">${title}</div>
+      <!-- Message -->
+      <div style="font-size:0.9rem; color:var(--text-muted); line-height:1.55;">${message}</div>
+      <!-- Buttons -->
+      <div style="display:flex; gap:10px; margin-top:4px;">
+        <button id="_confirmCancel" type="button" style="
+          flex:1; min-height:48px; font-family:inherit; font-size:0.9375rem;
+          font-weight:700; border-radius:var(--btn-radius);
+          border:1px solid var(--border-strong);
+          background:var(--bg-surface); color:var(--text-main);
+          cursor:pointer; transition:background 0.18s;
+        ">${cancelText}</button>
+        <button id="_confirmOk" type="button" style="
+          flex:1; min-height:48px; font-family:inherit; font-size:0.9375rem;
+          font-weight:700; border-radius:var(--btn-radius);
+          border:1px solid transparent;
+          background:var(--red); color:#fff;
+          cursor:pointer; transition:background 0.18s;
+        ">${confirmText}</button>
+      </div>
+    </div>`;
+
+  const close = () => overlay.remove();
+
+  overlay.querySelector('#_confirmCancel').addEventListener('click', () => {
+    close();
+    if (typeof onCancel === 'function') onCancel();
+  });
+
+  overlay.querySelector('#_confirmOk').addEventListener('click', () => {
+    close();
+    if (typeof onConfirm === 'function') onConfirm();
+  });
+
+  // Tap backdrop to cancel
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) { close(); if (typeof onCancel === 'function') onCancel(); }
+  });
+
+  document.body.appendChild(overlay);
+}
+
+
 // Worker Name Selection Modal Functionality
 let workerNamesData = [];
 const RECENT_WORKERS_KEY = 'recentWorkerNames';
@@ -4093,21 +4185,29 @@ function renderMaterialLotTags() {
       deleteBtn.onclick = async (e) => {
         e.stopPropagation();
         const lotNum = lot.lotNumber;
-        if (typeof materialLabelPhotos !== 'undefined') {
-          const linked = materialLabelPhotos.filter(p => p.lotNumber === lotNum);
-          for (const ph of linked) {
-            try { URL.revokeObjectURL(ph.blobUrl); } catch (err) { }
-            try { await materialLabelDB.delete(ph.id); } catch (err) { }
+        showConfirm({
+          title: 'ロット番号を削除しますか？ / Delete lot number?',
+          message: `ロット番号 <strong>${lotNum}</strong> および紐付けられた写真を削除します。<br>この操作は取り消せません。<br><br>Delete lot <strong>${lotNum}</strong> and its linked photo(s).<br>This action cannot be undone.`,
+          confirmText: '削除 / Delete',
+          cancelText: 'キャンセル / Cancel',
+          onConfirm: async () => {
+            if (typeof materialLabelPhotos !== 'undefined') {
+              const linked = materialLabelPhotos.filter(p => p.lotNumber === lotNum);
+              for (const ph of linked) {
+                try { URL.revokeObjectURL(ph.blobUrl); } catch (err) { }
+                try { await materialLabelDB.delete(ph.id); } catch (err) { }
+              }
+              materialLabelPhotos = materialLabelPhotos.filter(p => p.lotNumber !== lotNum);
+            }
+            materialLots.splice(index, 1);
+            saveMaterialLots();
+            renderMaterialLotTags();
+            if (typeof renderMaterialPhotoThumbnails === 'function') renderMaterialPhotoThumbnails();
+            if (typeof updateMaterialPhotoCount === 'function') updateMaterialPhotoCount();
+            if (typeof updateMaterialLabelElement === 'function') updateMaterialLabelElement();
+            if (typeof window.renderImageGallery === 'function') window.renderImageGallery();
           }
-          materialLabelPhotos = materialLabelPhotos.filter(p => p.lotNumber !== lotNum);
-        }
-        materialLots.splice(index, 1);
-        saveMaterialLots();
-        renderMaterialLotTags();
-        if (typeof renderMaterialPhotoThumbnails === 'function') renderMaterialPhotoThumbnails();
-        if (typeof updateMaterialPhotoCount === 'function') updateMaterialPhotoCount();
-        if (typeof updateMaterialLabelElement === 'function') updateMaterialLabelElement();
-        if (typeof window.renderImageGallery === 'function') window.renderImageGallery();
+        });
       };
       tag.appendChild(deleteBtn);
 
