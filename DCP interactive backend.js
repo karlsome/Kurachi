@@ -8135,151 +8135,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Function to create dynamic shot count inputs for grouped machines
 function createGroupedShotInputs() {
-  console.log("🔵 ========== createGroupedShotInputs called ==========");
-  console.log("🔵 Current URL:", window.location.href);
-  console.log("🔵 Pathname:", window.location.pathname);
-
-  const shotSection = document.getElementById('shotCountSection');
-
-  if (!shotSection) {
-    console.log("❌ shotCountSection not found!");
-    return;
-  }
-
-  console.log("✅ shotCountSection found");
-  console.log("🔵 isGroupedMachinePage:", isGroupedMachinePage);
-  console.log("🔵 groupedMachines:", groupedMachines);
-  console.log("🔵 groupedMachines.length:", groupedMachines.length);
-  console.log("🔵 groupedMachines type:", typeof groupedMachines);
-  console.log("🔵 Is Array?", Array.isArray(groupedMachines));
-
-  // Check if this is a grouped machine page with multiple machines
-  if (isGroupedMachinePage && groupedMachines.length > 1) {
-    console.log("✅✅✅ Condition met! Creating shot count inputs for grouped machines:", groupedMachines);
-
-    // Clear existing content
-    shotSection.innerHTML = '';
-
-    // Add title
-    const title = document.createElement('label');
-    title.style.cssText = 'display: block; font-weight: 700; margin-bottom: 15px; color: var(--text-main, #101828);';
-    title.innerHTML = 'ショット数 (Shot Count) <span style="color: var(--blue, #2E6FF2); font-weight: 700;">- Per Machine</span>';
-    shotSection.appendChild(title);
-
-    // Create container for machine inputs
-    const container = document.createElement('div');
-    container.style.cssText = 'display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px;';
-
-    // Create input for each machine
-    groupedMachines.forEach((machine, index) => {
-      const machineDiv = document.createElement('div');
-      machineDiv.style.cssText = 'display: flex; align-items: center; gap: 10px; background: var(--bg-inset, #F9FAFB); border: 1px solid var(--border, #E4E7EC); padding: 12px; border-radius: 10px;';
-
-      const label = document.createElement('label');
-      label.style.cssText = 'min-width: 120px; color: var(--text-main, #101828); font-weight: 700;';
-      label.textContent = `${machine}:`;
-
-      const input = document.createElement('input');
-      input.type = 'number';
-      input.id = `shot-${machine}`;
-      input.className = 'grouped-shot-input';
-      input.placeholder = '0';
-      input.min = '0';
-      input.value = ''; // Start with blank value
-      input.readOnly = true; // Make readonly so keypad is used
-      input.style.cssText = 'flex: 1; padding: 12px; border: 1px solid var(--border-strong, #D0D5DD); border-radius: 8px; cursor: pointer; background-color: var(--bg-surface, #fff); color: var(--text-main, #101828); font-weight: 700;';
-
-      // Restore value from localStorage
-      const savedValue = localStorage.getItem(`${uniquePrefix}shot-${machine}`);
-      if (savedValue) {
-        input.value = savedValue;
-      }
-
-      // Add click event to open keypad
-      input.addEventListener('click', function () {
-        window.openDirectNumericKeypad(`shot-${machine}`);
-      });
-
-      // Add input event listener for when keypad updates the value
-      input.addEventListener('input', function () {
-        // Save to localStorage
-        localStorage.setItem(`${uniquePrefix}shot-${machine}`, this.value);
-
-        // Log shot count change for this machine
-        logTabletAction(`Shot count set for ${machine}`, 'in-progress', {
-          machine: machine,
-          shotCount: this.value
-        });
-
-        // Update total
-        updateTotalShot();
-      });
-
-      machineDiv.appendChild(label);
-      machineDiv.appendChild(input);
-      container.appendChild(machineDiv);
-    });
-
-    shotSection.appendChild(container);
-
-    // Add total display
-    const totalDiv = document.createElement('div');
-    totalDiv.style.cssText = 'display: flex; align-items: center; gap: 10px; background: var(--brand-soft, #E7F7EF); padding: 12px; border-radius: 10px; border: 1px solid var(--brand, #12B76A); margin-top: 10px;';
-
-    const totalLabel = document.createElement('label');
-    totalLabel.style.cssText = 'min-width: 120px; color: var(--brand, #0E9F6E); font-weight: 800; font-size: 1rem;';
-    totalLabel.textContent = '合計 (Total):';
-
-    const totalInput = document.createElement('input');
-    totalInput.type = 'number';
-    totalInput.id = 'shot';
-    totalInput.name = 'shot';
-    totalInput.readOnly = true;
-    totalInput.value = '0';
-    totalInput.style.cssText = 'flex: 1; padding: 12px; border: 1px solid var(--brand, #12B76A); border-radius: 8px; background: var(--bg-surface, #fff); font-weight: 800; font-size: 1rem; color: var(--text-main, #101828);';
-
-    totalDiv.appendChild(totalLabel);
-    totalDiv.appendChild(totalInput);
-    shotSection.appendChild(totalDiv);
-
-    // Initial calculation to set total from restored values
-    updateTotalShot();
-
-  } else {
-    // Single machine - keep original input
-    console.log("❌ Condition NOT met - using standard shot input");
-    console.log("   Reason: isGroupedMachinePage =", isGroupedMachinePage, "AND groupedMachines.length =", groupedMachines.length);
-  }
-  console.log("🔵 ========== createGroupedShotInputs finished ==========");
+  // Retired per lot-shot-tracking-spec.md
+  // The new lotsByMachine logic and updateShotTotalField handle this now.
+  return;
 }
 
 // Function to update total shot count
 function updateTotalShot() {
-  const groupedInputs = document.querySelectorAll('.grouped-shot-input');
-  let total = 0;
-
-  groupedInputs.forEach(input => {
-    const value = parseInt(input.value, 10) || 0;
-    total += value;
-  });
-
-  const totalInput = document.getElementById('shot');
-  if (totalInput) {
-    totalInput.value = total;
-    // Save total to localStorage
-    localStorage.setItem(`${uniquePrefix}shot`, total);
-
-    // Log total shot count update
-    logTabletAction('Total shot count calculated', 'in-progress', {
-      totalShot: total,
-      individualMachines: Array.from(groupedInputs).map(input => ({
-        machine: input.id.replace('shot-', ''),
-        count: parseInt(input.value, 10) || 0
-      }))
-    });
-  }
-
-  console.log(`📊 Shot count updated - Total: ${total}`);
+  // Retired per lot-shot-tracking-spec.md
+  // The new lotsByMachine logic and updateShotTotalField handle this now.
+  return;
 }
 
 // Function to fetch rikeshi up or down color info
