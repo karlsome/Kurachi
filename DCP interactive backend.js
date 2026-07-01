@@ -6824,7 +6824,7 @@ document.getElementById('submit').addEventListener('click', async (event) => {
   const shotInput = document.getElementById('shot');
 
   if (!shotInput.value || parseInt(shotInput.value) < 1) {
-    showAlert('ショット数 (Shot Count) is required and must be at least 1.');
+    showAlert('加工終了時間を入力して、ショット数を入力してください。\n(Shot Count is required. Please enter End Time first to activate the shot count input.)');
     shotInput.focus();
     return;
   }
@@ -6997,6 +6997,52 @@ document.getElementById('submit').addEventListener('click', async (event) => {
       materialPhotoCount
     });
     // ==================== END Material Label Photos Validation ====================
+
+    // Validate cycle checks (Hatsumono/Atomono)
+    if (hatsumono !== 'TRUE') {
+      uploadingModal.style.display = 'none';
+      showAlert('初物チェックの写真がありません / First Cycle Photo is missing');
+      return;
+    }
+
+    if (atomono !== 'TRUE') {
+      uploadingModal.style.display = 'none';
+      showAlert('終物チェックの写真がありません / Last Cycle Photo is missing');
+      return;
+    }
+
+    // Validate Kensa fields if Kensa mode is active
+    if (isToggleChecked) {
+      const kensaName = document.getElementById('Kensa Name')?.value;
+      const kDate = document.getElementById('KDate')?.value;
+      const kStart = document.getElementById('KStart Time')?.value;
+      const kEnd = document.getElementById('KEnd Time')?.value;
+      
+      if (!kensaName || kensaName.trim() === '') {
+        uploadingModal.style.display = 'none';
+        showAlert('検査者名が必要です / Inspector Name is required');
+        document.getElementById('Kensa Name')?.focus();
+        return;
+      }
+      if (!kDate || kDate.trim() === '') {
+        uploadingModal.style.display = 'none';
+        showAlert('検査日が必要です / Inspection Date is required');
+        document.getElementById('KDate')?.focus();
+        return;
+      }
+      if (!kStart || kStart.trim() === '') {
+        uploadingModal.style.display = 'none';
+        showAlert('検査開始時間が必要です / Inspection Start Time is required');
+        document.getElementById('KStart Time')?.focus();
+        return;
+      }
+      if (!kEnd || kEnd.trim() === '') {
+        uploadingModal.style.display = 'none';
+        showAlert('検査終了時間が必要です / Inspection End Time is required');
+        document.getElementById('KEnd Time')?.focus();
+        return;
+      }
+    }
 
     // 2. Validate Time fields
     if (!Time_start || Time_start.trim() === '') {
