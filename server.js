@@ -204,7 +204,8 @@ function buildStopCallPayload(factoryId) {
         since: earliest,
         leader: !!info.leader,
         box: !!info.box,
-        material: !!info.material
+        material: !!info.material,
+        zairyoSebanggo: info.material ? info.material.zairyoSebanggo : undefined
       });
     }
   });
@@ -674,7 +675,13 @@ app.post("/api/stop-call", (req, res) => {
     let info = machines.get(id) || {};
     
     if (action === 'activate') {
-      if (!info[callType]) info[callType] = { since: Date.now() };
+      if (!info[callType]) {
+        info[callType] = { since: Date.now() };
+        if (callType === 'material' && req.body?.zairyoSebanggo) {
+          info[callType].zairyoSebanggo = String(req.body.zairyoSebanggo).trim();
+          console.log(`[Material Call] Server received zairyoSebanggo: "${info[callType].zairyoSebanggo}" for machine: ${id}`);
+        }
+      }
       machines.set(id, info);
     } else {
       if (info[callType]) delete info[callType];
@@ -689,7 +696,7 @@ app.post("/api/stop-call", (req, res) => {
 
   const payload = buildStopCallPayload(factory);
   broadcastToFactory(factory, payload);
-  console.log(`🟥 stop-call ${action} (${callType}) for ${factory}/${ids.join(',')} → ${payload.active.length} active`);
+  console.log(`🟥 stop-call ${action} (${callType}) for ${factory}/${ids.join(',')} → ${payload.active.length} active. Payload:`, JSON.stringify(payload.active));
   res.json({ ok: true, active: payload.active });
 });
 

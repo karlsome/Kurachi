@@ -5092,11 +5092,16 @@
                     // Use specificMachine if given, else the full URL param (all grouped machines)
                     const machine = specificMachine || new URLSearchParams(location.search).get('machine') || '';
                     if (!factory || !machine) return;
+                    let zairyoSebanggo = '';
+                    if (callType === 'material') {
+                        zairyoSebanggo = document.getElementById('material-code')?.value || '';
+                        console.log(`[Material Call] grabbed zairyoSebanggo from UI: "${zairyoSebanggo}"`);
+                    }
                     const base = (typeof serverURL !== 'undefined' && serverURL) ? serverURL : '';
                     fetch(`${base}/api/stop-call`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ factory, machine, action, callType })
+                        body: JSON.stringify({ factory, machine, action, callType, zairyoSebanggo })
                     }).catch(() => { });
                 } catch (e) { }
             }
