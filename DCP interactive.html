@@ -2468,7 +2468,7 @@
                     <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 25px;">
                         <input type="submit" value="Submit" id="submit" class="btn btn-primary btn-full"
                             style="height: 52px; font-size: 1.1rem;" data-i18n="submit">
-                        <button type="button" onclick="if (confirmReset()) resetForm()" class="btn btn-alert btn-full" style="height: 48px;"
+                        <button type="button" onclick="if (confirmReset('新規スキャンを開始しますか？\n現在のデータはすべて消去されます。\n\nStart a new scan? All current data will be cleared.')) resetAllSteps()" class="btn btn-alert btn-full" style="height: 48px;"
                             data-i18n="reset">Reset</button>
                     </div>
                 </div>
@@ -5034,18 +5034,10 @@
                 if (!raw) return;
                 const start = new Date(parseInt(raw, 10));
                 const end = new Date();
-                // Open the existing maintenance record modal pre-filled (reason + photo required there)
-                if (typeof showMaintenanceModal === 'function') {
-                    showMaintenanceModal(-1);
-                    setTimeout(() => {
-                        const s = document.getElementById('maintenance-start');
-                        const e = document.getElementById('maintenance-end');
-                        if (s) s.value = fmtClock(start);
-                        if (e) e.value = fmtClock(end);
-                        const reason = document.getElementById('maintenance-comment');
-                        if (reason) reason.focus();
-                        showToast(_t('toast_enter_reason_photo'));
-                    }, 120);
+                
+                // Open the new quick reason picker
+                if (typeof showQuickMaintenanceReasonModal === 'function') {
+                    showQuickMaintenanceReasonModal(fmtClock(start), fmtClock(end));
                 }
             }
             function resumeMaintIfActive() {
@@ -5087,17 +5079,28 @@
                 localStorage.removeItem(breakPrefix + 'activeStopCallStart');
             };
 
+            // ---- Tracks the machine chosen in the per-call picker ----
+            // For grouped pages: material/leader picker stores the chosen machine here.
+            // Box call leaves this null (broadcasts to all).
+            let stopCallPickedMachine = null;
+
             // Notify the server so the factory TV can blink this machine in real time (SSE).
-            function notifyStopCall(action, callType = 'leader') {
+            // specificMachine: if provided, only that machine name is sent (for per-machine calls).
+            function notifyStopCall(action, callType = 'leader', specificMachine = null) {
                 try {
                     const factory = document.getElementById('selected工場')?.value || '';
-                    const machine = new URLSearchParams(location.search).get('machine') || '';
+                    // Use specificMachine if given, else the full URL param (all grouped machines)
+                    const machine = specificMachine || new URLSearchParams(location.search).get('machine') || '';
                     if (!factory || !machine) return;
+                    let zairyoSebanggo = '';
+                    if (callType === 'material') {
+                        zairyoSebanggo = document.getElementById('material-code')?.value || '';
+                    }
                     const base = (typeof serverURL !== 'undefined' && serverURL) ? serverURL : '';
                     fetch(`${base}/api/stop-call`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ factory, machine, action, callType })
+                        body: JSON.stringify({ factory, machine, action, callType, zairyoSebanggo })
                     }).catch(() => { });
                 } catch (e) { }
             }
@@ -5157,10 +5160,16 @@
                 }
             }
 
-            function sendCNCCallStop(callStopValue) {
-                const ipStr = document.getElementById('ipInfo')?.value;
-                if (!ipStr) return;
-                const ips = ipStr.split(',').map(ip => ip.trim()).filter(ip => ip);
+            // specificIP: if provided, only sends to that IP (for per-machine leader call).
+            function sendCNCCallStop(callStopValue, specificIP = null) {
+                let ips;
+                if (specificIP) {
+                    ips = [specificIP];
+                } else {
+                    const ipStr = document.getElementById('ipInfo')?.value;
+                    if (!ipStr) return;
+                    ips = ipStr.split(',').map(ip => ip.trim()).filter(ip => ip);
+                }
                 ips.forEach(async ip => {
                     const url = `http://${ip}:5000/request?callStop=${callStopValue}`;
                     try {
@@ -5181,23 +5190,29 @@
                 });
             }
 
-            function startStopCall() {
+            function startStopCall(pickedMachine) {
                 if (localStorage.getItem(breakPrefix + 'activeStopCallStart')) return; // already calling
+                stopCallPickedMachine = pickedMachine || null;
                 const startEpoch = Date.now();
                 localStorage.setItem(breakPrefix + 'activeStopCallStart', String(startEpoch));
                 openStopCallOverlay(startEpoch);
-                notifyStopCall('activate', 'leader');
-                sendCNCCallStop(1);
+                notifyStopCall('activate', 'leader', pickedMachine || null);
+                // Stop only the picked machine (or all if not grouped)
+                const pickedIP = pickedMachine ? (groupedMachineIPs[pickedMachine] || null) : null;
+                sendCNCCallStop(1, pickedIP);
             }
             function cancelStopCall() {
                 const raw = localStorage.getItem(breakPrefix + 'activeStopCallStart');
                 // Only allowed within the 15s window; ignore otherwise.
                 if (raw && (Date.now() - parseInt(raw, 10)) > STOP_CANCEL_WINDOW_MS) return;
+                const pickedMachine = stopCallPickedMachine;
+                const pickedIP = pickedMachine ? (groupedMachineIPs[pickedMachine] || null) : null;
                 localStorage.removeItem(breakPrefix + 'activeStopCallStart');
                 closeStopCallOverlay();
-                notifyStopCall('clear', 'leader');
+                notifyStopCall('clear', 'leader', pickedMachine || null);
                 showToast(_t('toast_call_canceled'));
-                sendCNCCallStop(0);
+                sendCNCCallStop(0, pickedIP);
+                stopCallPickedMachine = null;
             }
             function beginStopCallUnlock() {
                 const qrWrap = document.getElementById('stopCallQrWrap');
@@ -5286,7 +5301,9 @@
             function finalizeStopCall() {
                 if (!pendingStopCallRecord) return;
                 
-                sendCNCCallStop(0);
+                const pickedMachine = stopCallPickedMachine;
+                const pickedIP = pickedMachine ? (groupedMachineIPs[pickedMachine] || null) : null;
+                sendCNCCallStop(0, pickedIP);
                 
                 const data = getStopCallData();
                 data.records.push(pendingStopCallRecord);
@@ -5296,9 +5313,10 @@
                 saveStopCallData(data);
                 
                 pendingStopCallRecord = null;
+                stopCallPickedMachine = null;
                 localStorage.removeItem(breakPrefix + 'activeStopCallStart');
                 closeStopCallOverlay();
-                notifyStopCall('clear', 'leader');
+                notifyStopCall('clear', 'leader', pickedMachine || null);
                 showToast(_t('toast_leader_recorded'));
             }
             function resumeStopCallIfActive() {
@@ -5310,17 +5328,156 @@
             }
             window.startStopCall = startStopCall;
             
+            /**
+             * For grouped-machine pages: show a bottom-sheet picker so the operator
+             * selects which machine this call is for. Calls onPick(machineName) when
+             * chosen. On single-machine pages, calls onPick(null) immediately.
+             * @param {'leader'|'material'} type  - used to colour the header
+             * @param {Function} onPick           - callback(machineName|null)
+             */
+            function pickMachineForCall(type, onPick) {
+                const machines = (typeof groupedMachines !== 'undefined' && groupedMachines.length > 1)
+                    ? groupedMachines
+                    : [];
+                if (machines.length === 0) {
+                    // Single machine — no picker needed
+                    onPick(null);
+                    return;
+                }
+
+                // Build the picker overlay
+                const existing = document.getElementById('_machineCallPicker');
+                if (existing) existing.remove();
+
+                const isLeader = type === 'leader';
+                const accentColor = isLeader ? '#E5484D' : '#2E6FF2';
+                const accentSoft  = isLeader ? '#FCEBEC' : '#E8F0FE';
+                const icon        = isLeader ? '🚨' : '📦';
+                const titleJp     = isLeader ? 'リーダー呼び出し' : '部材リクエスト';
+                const titleEn     = isLeader ? 'Call Leader' : 'Material Request';
+
+                const overlay = document.createElement('div');
+                overlay.id = '_machineCallPicker';
+                overlay.style.cssText = [
+                    'position:fixed', 'inset:0', 'z-index:300000',
+                    'background:rgba(16,24,40,0.6)',
+                    'display:flex', 'align-items:flex-end', 'justify-content:center',
+                    'padding:0'
+                ].join(';');
+
+                const sheet = document.createElement('div');
+                sheet.style.cssText = [
+                    'background:#fff', 'border-radius:20px 20px 0 0',
+                    'padding:24px 20px 32px', 'width:100%', 'max-width:520px',
+                    `box-shadow:0 -8px 32px rgba(16,24,40,0.18)`,
+                    'font-family:inherit', 'animation:_sheetSlideUp 0.25s ease'
+                ].join(';');
+
+                // Inject slide-up animation once
+                if (!document.getElementById('_sheetSlideUpStyle')) {
+                    const style = document.createElement('style');
+                    style.id = '_sheetSlideUpStyle';
+                    style.textContent = `@keyframes _sheetSlideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }`;
+                    document.head.appendChild(style);
+                }
+
+                let btns = '';
+                machines.forEach(m => {
+                    btns += `
+                      <button data-machine="${m}" style="
+                        display:flex; align-items:center; justify-content:space-between;
+                        width:100%; padding:16px 18px; margin-bottom:10px;
+                        background:${accentSoft}; border:1.5px solid ${accentColor};
+                        border-radius:12px; font-family:inherit; font-size:1.05rem;
+                        font-weight:700; color:${accentColor}; cursor:pointer;
+                        transition:background 0.15s;
+                      ">
+                        <span>${icon} ${m}</span>
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
+                          stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                          <polyline points="9 18 15 12 9 6"/></svg>
+                      </button>`;
+                });
+
+                // "Both" button — broadcasts to all grouped machines (same as old behaviour)
+                btns += `
+                  <button data-machine="__ALL__" style="
+                    display:flex; align-items:center; justify-content:space-between;
+                    width:100%; padding:16px 18px; margin-bottom:10px;
+                    background:#F7F8FB; border:1.5px solid #9AA1AC;
+                    border-radius:12px; font-family:inherit; font-size:1.05rem;
+                    font-weight:700; color:#374151; cursor:pointer;
+                    transition:background 0.15s;
+                  ">
+                    <span>⚡ 両方 / Both</span>
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
+                      stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                      <polyline points="9 18 15 12 9 6"/></svg>
+                  </button>`;
+
+                sheet.innerHTML = `
+                  <div style="text-align:center; margin-bottom:20px;">
+                    <div style="width:40px;height:4px;border-radius:2px;background:#E4E7EC;margin:0 auto 18px;"></div>
+                    <div style="font-size:1.1rem;font-weight:800;color:#1F2733;">${titleJp} / ${titleEn}</div>
+                    <div style="font-size:0.85rem;color:#6B7280;margin-top:6px;">どの設備ですか？ / Which machine?</div>
+                  </div>
+                  <div id="_machinePickerBtns">${btns}</div>
+                  <button id="_machinePickerCancel" style="
+                    width:100%; padding:14px; margin-top:4px; background:transparent;
+                    border:1px solid #E4E7EC; border-radius:12px; font-family:inherit;
+                    font-size:0.9rem; font-weight:700; color:#6B7280; cursor:pointer;
+                  ">キャンセル / Cancel</button>`;
+
+                overlay.appendChild(sheet);
+                document.body.appendChild(overlay);
+
+                // Wire buttons — __ALL__ sentinel maps to onPick(null) = broadcast to all
+                sheet.querySelectorAll('[data-machine]').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        overlay.remove();
+                        const machine = btn.dataset.machine;
+                        onPick(machine === '__ALL__' ? null : machine);
+                    });
+                });
+                document.getElementById('_machinePickerCancel').addEventListener('click', () => {
+                    overlay.remove();
+                });
+                // Tap backdrop to cancel
+                overlay.addEventListener('click', e => {
+                    if (e.target === overlay) overlay.remove();
+                });
+            }
+
             function startSpecificCall(btn, type) {
                 if (type === 'leader') {
                     document.getElementById('callMenuWrapper')?.classList.remove('open');
-                    startStopCall();
+                    // For grouped machines: pick which machine before starting the call
+                    pickMachineForCall('leader', (pickedMachine) => {
+                        startStopCall(pickedMachine);
+                    });
+                } else if (type === 'material') {
+                    // For grouped machines: pick which machine; for box: broadcast to all
+                    pickMachineForCall('material', (pickedMachine) => {
+                        btn.classList.add('is-active');
+                        notifyStopCall('activate', 'material', pickedMachine || null);
+                        const ov = document.getElementById('requestConfirmOverlay');
+                        if (ov) {
+                            document.getElementById('requestConfirmTitle').textContent =
+                                pickedMachine
+                                    ? `部材をリクエストしました (${pickedMachine}) / Material Requested (${pickedMachine})`
+                                    : '部材をリクエストしました / Material Requested';
+                            ov.classList.add('open');
+                            setTimeout(() => { ov.classList.remove('open'); }, 4000);
+                        }
+                    });
                 } else {
+                    // box — broadcast to all machines (no picker)
                     btn.classList.add('is-active');
                     notifyStopCall('activate', type);
                     const ov = document.getElementById('requestConfirmOverlay');
                     if (ov) {
-                        document.getElementById('requestConfirmTitle').textContent = 
-                            type === 'box' ? '空箱をリクエストしました / Box Requested' : '部材をリクエストしました / Material Requested';
+                        document.getElementById('requestConfirmTitle').textContent =
+                            '空箱をリクエストしました / Box Requested';
                         ov.classList.add('open');
                         setTimeout(() => { ov.classList.remove('open'); }, 4000);
                     }
@@ -5337,13 +5494,27 @@
                     const 設備 = document.getElementById('process')?.value
                         || new URLSearchParams(location.search).get('machine') || '';
                     if (!工場 || !設備) return;
-                    const 背番号Raw = document.getElementById('sub-dropdown')?.value || '';
-                    const 品番Raw = document.getElementById('product-number')?.value || '';
+                    
+                    let 背番号Raw = document.getElementById('sub-dropdown')?.value || '';
+                    if (!背番号Raw && typeof breakPrefix !== 'undefined') {
+                        背番号Raw = localStorage.getItem(breakPrefix + 'cached-sebanggo') || '';
+                    }
+                    
+                    let 品番Raw = document.getElementById('product-number')?.value || '';
+                    if (!品番Raw && typeof breakPrefix !== 'undefined') {
+                        品番Raw = localStorage.getItem(breakPrefix + 'cached-hinban') || '';
+                    }
+                    
                     // Only tell the factory TV this machine is running once Step 3 is done.
                     // A mid-workflow refresh would otherwise leave a stale 背番号 on the display.
                     const workflowDone = typeof window.isScanWorkflowComplete === 'function' && window.isScanWorkflowComplete();
                     const 背番号 = workflowDone ? 背番号Raw : '';
                     const 品番 = workflowDone ? 品番Raw : '';
+                    
+                    console.log(`[assertMachineState] 工場=${工場}, 設備=${設備}`);
+                    console.log(`[assertMachineState] breakPrefix=${typeof breakPrefix !== 'undefined' ? breakPrefix : 'UNDEFINED'}`);
+                    console.log(`[assertMachineState] 背番号Raw="${背番号Raw}", 品番Raw="${品番Raw}"`);
+                    console.log(`[assertMachineState] workflowDone=${workflowDone} -> Final 背番号="${背番号}", 品番="${品番}"`);
                     const breakStart = parseInt(localStorage.getItem(breakPrefix + 'activeBreakStart') || '0', 10);
                     const maintStart = parseInt(localStorage.getItem(breakPrefix + 'activeMaintStart') || '0', 10);
 

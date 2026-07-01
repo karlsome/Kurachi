@@ -119,7 +119,8 @@
             position: absolute;
             top: 1.5vh;
             right: 1vw;
-            background-color: #EF4444; /* Red for defects */
+            background-color: #EF4444;
+            /* Red for defects */
             color: #fff;
             font-size: clamp(14px, 1.8vw, 24px);
             font-weight: 900;
@@ -138,13 +139,16 @@
             position: absolute;
             bottom: 6px;
             left: 10px;
-            color: rgba(255, 255, 255, 0.4); /* subtle */
+            color: rgba(255, 255, 255, 0.4);
+            /* subtle */
             font-size: clamp(10px, 1vw, 14px);
             font-weight: 500;
             z-index: 10;
         }
 
-        .tile.calling .device-badge { display: none; }
+        .tile.calling .device-badge {
+            display: none;
+        }
 
         .tile .name {
             font-size: clamp(16px, 1.8vw, 36px);
@@ -184,11 +188,21 @@
         }
 
         /* ----- machine modes ----- */
-        .tile.running { border-color: #1E4733; }
-        .tile.running .seb { display: block; }
-        .tile.running .status { color: var(--green); }
+        .tile.running {
+            border-color: #1E4733;
+        }
 
-        .tile.idle { opacity: 0.5; }
+        .tile.running .seb {
+            display: block;
+        }
+
+        .tile.running .status {
+            color: var(--green);
+        }
+
+        .tile.idle {
+            opacity: 0.5;
+        }
 
         /* Break / maintenance: calm "chill" breathing glow (not a hard blink).
            The big mode word stays up; a small 背番号 sits bottom-left. */
@@ -197,23 +211,43 @@
             border-color: var(--blue);
             animation: chillPulseBlue 3.4s ease-in-out infinite;
         }
-        .tile.brk .status { display: none; }
+
+        .tile.brk .status {
+            display: none;
+        }
 
         .tile.maint {
             background: #2F2410;
             border-color: var(--amber);
             animation: chillPulseAmber 3.4s ease-in-out infinite;
         }
-        .tile.maint .status { display: none; }
+
+        .tile.maint .status {
+            display: none;
+        }
 
         @keyframes chillPulseBlue {
-            0%, 100% { box-shadow: inset 0 0 0 rgba(46, 111, 242, 0); }
-            50% { box-shadow: inset 0 0 70px rgba(46, 111, 242, 0.32), 0 0 26px rgba(46, 111, 242, 0.14); }
+
+            0%,
+            100% {
+                box-shadow: inset 0 0 0 rgba(46, 111, 242, 0);
+            }
+
+            50% {
+                box-shadow: inset 0 0 70px rgba(46, 111, 242, 0.32), 0 0 26px rgba(46, 111, 242, 0.14);
+            }
         }
 
         @keyframes chillPulseAmber {
-            0%, 100% { box-shadow: inset 0 0 0 rgba(245, 165, 36, 0); }
-            50% { box-shadow: inset 0 0 70px rgba(245, 165, 36, 0.30), 0 0 26px rgba(245, 165, 36, 0.14); }
+
+            0%,
+            100% {
+                box-shadow: inset 0 0 0 rgba(245, 165, 36, 0);
+            }
+
+            50% {
+                box-shadow: inset 0 0 70px rgba(245, 165, 36, 0.30), 0 0 26px rgba(245, 165, 36, 0.14);
+            }
         }
 
         /* small 背番号 (bottom-left, aligned with the elapsed timer) */
@@ -227,8 +261,16 @@
             font-variant-numeric: tabular-nums;
             display: none;
         }
-        .tile.brk .seb-mini { display: block; color: #9FC2FF; }
-        .tile.maint .seb-mini { display: block; color: #FCD980; }
+
+        .tile.brk .seb-mini {
+            display: block;
+            color: #9FC2FF;
+        }
+
+        .tile.maint .seb-mini {
+            display: block;
+            color: #FCD980;
+        }
 
         /* calling */
         .tile.calling[data-primary-call="leader"] {
@@ -236,11 +278,15 @@
             border-color: #fff;
             animation: tileBlinkRed 0.9s steps(1) infinite;
         }
+
         @keyframes tileBlinkRed {
-            0%, 100% {
+
+            0%,
+            100% {
                 background: var(--red);
                 box-shadow: 0 0 0 0 rgba(255, 59, 71, 0.0), 0 0 40px rgba(225, 29, 42, 0.6);
             }
+
             50% {
                 background: #7d0f17;
                 box-shadow: 0 0 0 0 rgba(255, 59, 71, 0.0), 0 0 10px rgba(225, 29, 42, 0.2);
@@ -252,11 +298,15 @@
             border-color: #fff;
             animation: tileBlinkYellow 0.9s steps(1) infinite;
         }
+
         @keyframes tileBlinkYellow {
-            0%, 100% {
+
+            0%,
+            100% {
                 background: #F59E0B;
                 box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.0), 0 0 40px rgba(245, 158, 11, 0.6);
             }
+
             50% {
                 background: #92400E;
                 box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.0), 0 0 10px rgba(245, 158, 11, 0.2);
@@ -268,11 +318,15 @@
             border-color: #fff;
             animation: tileBlinkBlue 0.9s steps(1) infinite;
         }
+
         @keyframes tileBlinkBlue {
-            0%, 100% {
+
+            0%,
+            100% {
                 background: #3B82F6;
                 box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.0), 0 0 40px rgba(59, 130, 246, 0.6);
             }
+
             50% {
                 background: #1D4ED8;
                 box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.0), 0 0 10px rgba(59, 130, 246, 0.2);
@@ -316,24 +370,70 @@
 
         /* Each calling tile alternates: machine name <-> big rank number <-> type, in
            sync across all tiles, driven by updating data-phase on the grid. */
-        .grid[data-phase="1"] .tile.calling .name { display: none; }
-        .grid[data-phase="1"] .tile.calling .big-rank { display: block; }
-        
-        .grid[data-phase="2"] .tile.calling .name { display: none; }
-        .grid[data-phase="2"] .tile.calling .type-display { display: flex; }
-        
+        .grid[data-phase="1"] .tile.calling .name {
+            display: none;
+        }
+
+        .grid[data-phase="1"] .tile.calling .big-rank {
+            display: block;
+        }
+
+        .grid[data-phase="2"] .tile.calling .name {
+            display: none;
+        }
+
+        .grid[data-phase="2"] .tile.calling .type-display {
+            display: flex;
+        }
+
         /* Phase 3 shows the 背番号 (seb) if available, otherwise falls back to name */
-        .grid[data-phase="3"] .tile.calling .name { display: none; }
-        .grid[data-phase="3"] .tile.calling[data-has-seb="true"] .seb { 
-            display: block; 
+        .grid[data-phase="3"] .tile.calling .name {
+            display: none;
+        }
+
+        .grid[data-phase="3"] .tile.calling[data-has-seb="true"] .seb {
+            display: block;
             color: #fff;
             text-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
         }
-        .grid[data-phase="3"] .tile.calling:not([data-has-seb="true"]) .name { display: block; }
-        
+
+        .grid[data-phase="3"] .tile.calling:not([data-has-seb="true"]) .name {
+            display: block;
+        }
+
+        /* Default mat-seb style */
+        .mat-seb {
+            display: none;
+            font-weight: 900;
+            line-height: 0.9;
+            text-align: center;
+            padding: 0 6px;
+            white-space: nowrap;
+        }
+
+        /* Phase 4 shows the 材料背番号 (mat-seb) if available (material call), otherwise falls back to name */
+        .grid[data-phase="4"] .tile.calling .name {
+            display: none;
+        }
+
+        .grid[data-phase="4"] .tile.calling[data-has-mat-seb="true"] .mat-seb {
+            display: block;
+            color: #fff;
+            text-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+        }
+
+        .grid[data-phase="4"] .tile.calling:not([data-has-mat-seb="true"]) .name {
+            display: block;
+        }
+
         /* If only leader is active, phase 2 acts like phase 0 (shows name) */
-        .grid[data-phase="2"] .tile.calling[data-only-leader="true"] .name { display: block; }
-        .grid[data-phase="2"] .tile.calling[data-only-leader="true"] .type-display { display: none; }
+        .grid[data-phase="2"] .tile.calling[data-only-leader="true"] .name {
+            display: block;
+        }
+
+        .grid[data-phase="2"] .tile.calling[data-only-leader="true"] .type-display {
+            display: none;
+        }
 
         .type-display {
             display: none;
@@ -343,8 +443,8 @@
             width: 100%;
             gap: 2vh;
         }
-        
-        .type-display > div {
+
+        .type-display>div {
             font-size: clamp(40px, 6vw, 110px);
             font-weight: 900;
             color: #fff;
@@ -364,8 +464,15 @@
             padding: 0 6px;
         }
 
-        .tile.brk .big-mode { display: block; color: #BFD8FF; }
-        .tile.maint .big-mode { display: block; color: #FFD980; }
+        .tile.brk .big-mode {
+            display: block;
+            color: #BFD8FF;
+        }
+
+        .tile.maint .big-mode {
+            display: block;
+            color: #FFD980;
+        }
 
         /* ---------- Full-screen takeover ---------- */
         .takeover {
@@ -387,27 +494,51 @@
             background: radial-gradient(circle at 50% 40%, #C2151F, #5A0A0E 80%);
             animation: takeoverBlinkRed 0.7s steps(1) infinite;
         }
+
         @keyframes takeoverBlinkRed {
-            0%, 100% { background: radial-gradient(circle at 50% 40%, #E11D2A, #5A0A0E 80%); }
-            50% { background: radial-gradient(circle at 50% 40%, #8d1118, #380a0c 80%); }
+
+            0%,
+            100% {
+                background: radial-gradient(circle at 50% 40%, #E11D2A, #5A0A0E 80%);
+            }
+
+            50% {
+                background: radial-gradient(circle at 50% 40%, #8d1118, #380a0c 80%);
+            }
         }
 
         .takeover[data-type="box"] {
             background: radial-gradient(circle at 50% 40%, #D97706, #78350F 80%);
             animation: takeoverBlinkYellow 0.7s steps(1) infinite;
         }
+
         @keyframes takeoverBlinkYellow {
-            0%, 100% { background: radial-gradient(circle at 50% 40%, #F59E0B, #78350F 80%); }
-            50% { background: radial-gradient(circle at 50% 40%, #92400E, #451A03 80%); }
+
+            0%,
+            100% {
+                background: radial-gradient(circle at 50% 40%, #F59E0B, #78350F 80%);
+            }
+
+            50% {
+                background: radial-gradient(circle at 50% 40%, #92400E, #451A03 80%);
+            }
         }
 
         .takeover[data-type="material"] {
             background: radial-gradient(circle at 50% 40%, #2563EB, #1E3A8A 80%);
             animation: takeoverBlinkBlue 0.7s steps(1) infinite;
         }
+
         @keyframes takeoverBlinkBlue {
-            0%, 100% { background: radial-gradient(circle at 50% 40%, #3B82F6, #1E3A8A 80%); }
-            50% { background: radial-gradient(circle at 50% 40%, #1D4ED8, #172554 80%); }
+
+            0%,
+            100% {
+                background: radial-gradient(circle at 50% 40%, #3B82F6, #1E3A8A 80%);
+            }
+
+            50% {
+                background: radial-gradient(circle at 50% 40%, #1D4ED8, #172554 80%);
+            }
         }
 
         .takeover .to-label {
@@ -535,8 +666,17 @@
         }
 
         @keyframes cdPulse {
-            0%, 100% { transform: scale(1); opacity: 1; }
-            50% { transform: scale(1.08); opacity: 0.82; }
+
+            0%,
+            100% {
+                transform: scale(1);
+                opacity: 1;
+            }
+
+            50% {
+                transform: scale(1.08);
+                opacity: 0.82;
+            }
         }
 
         /* Exercise: title + progress ring + remaining-time */
@@ -561,7 +701,8 @@
             width: 100%;
             height: 100%;
             transform: rotate(-90deg);
-            overflow: visible; /* let the arc's glow extend past the viewBox */
+            overflow: visible;
+            /* let the arc's glow extend past the viewBox */
         }
 
         .ex-ring .track {
@@ -576,7 +717,8 @@
             stroke-width: 9;
             stroke-linecap: round;
             transition: stroke-dashoffset 0.25s linear;
-            filter: url(#ringGlow); /* soft glow with a large region (no square clip) */
+            filter: url(#ringGlow);
+            /* soft glow with a large region (no square clip) */
         }
 
         .ex-ring .ex-timer {
@@ -605,8 +747,13 @@
         }
 
         @keyframes chimeFade {
-            from { opacity: 0; }
-            to { opacity: 1; }
+            from {
+                opacity: 0;
+            }
+
+            to {
+                opacity: 1;
+            }
         }
 
         #chimeOverlay .ch-label {
@@ -681,7 +828,7 @@
     <script>
         const serverURL = "https://kurachi.onrender.com";
         //const serverURL = "http://localhost:3000";
-        //const serverURL = "http://192.168.0.145:3000";
+        //const serverURL = "http://192.168.0.105:3000";
 
         const params = new URLSearchParams(location.search);
         const FACTORY = params.get('filter') || params.get('factory') || '';
@@ -743,6 +890,7 @@
                     '<div class="big-rank"></div>' +
                     '<div class="type-display"></div>' +
                     '<div class="seb"></div>' +
+                    '<div class="mat-seb"></div>' +
                     '<div class="big-mode"></div>' +
                     '<div class="status">停止 / IDLE</div>' +
                     '<div class="seb-mini"></div>' +
@@ -804,7 +952,7 @@
                     a.pause();
                     a.currentTime = 0;
                     a.muted = false;
-                }).catch(e => {});
+                }).catch(e => { });
             });
             document.removeEventListener('click', unlockMp3s);
             document.removeEventListener('touchstart', unlockMp3s);
@@ -818,7 +966,7 @@
                 if (type === 'box') a = audioBox;
                 else if (type === 'material') a = audioRoll;
                 else a = audioLeader;
-                
+
                 a.currentTime = 0;
                 a.play().catch(e => console.log('Audio play blocked (needs user interaction or autoplay enabled):', e));
             } catch (err) {
@@ -891,7 +1039,7 @@
         let callPhase = 0;
         setInterval(() => {
             if (activeList.length > 0) {
-                callPhase = (callPhase + 1) % 4;
+                callPhase = (callPhase + 1) % 5;
                 grid.dataset.phase = callPhase;
             } else {
                 callPhase = 0;
@@ -908,6 +1056,7 @@
         }
         function fitCallingName(tile, machine) { fitText(tile.querySelector('.name'), machine, tile.clientWidth || 300, 110); }
         function fitSeb(tile, seb) { fitText(tile.querySelector('.seb'), seb, tile.clientWidth || 300, 96); }
+        function fitMatSeb(tile, seb) { fitText(tile.querySelector('.mat-seb'), seb, tile.clientWidth || 300, 96); }
 
         window.addEventListener('resize', () => {
             tileByMachine.forEach((tile, machine) => refreshTile(machine));
@@ -924,7 +1073,7 @@
                 const item = activeList[idx];
                 tile.classList.add('calling');
                 tile.querySelector('.big-rank').textContent = '#' + (idx + 1);
-                
+
                 if (item.leader) tile.dataset.primaryCall = 'leader';
                 else if (item.box) tile.dataset.primaryCall = 'box';
                 else tile.dataset.primaryCall = 'material';
@@ -937,7 +1086,17 @@
                     if (item.material) typeHtml += '<div>ROLL</div>';
                 }
                 tile.querySelector('.type-display').innerHTML = typeHtml;
-                
+
+                const matSebEl = tile.querySelector('.mat-seb');
+                if (item.material && item.zairyoSebanggo) {
+                    matSebEl.textContent = item.zairyoSebanggo;
+                    fitMatSeb(tile, item.zairyoSebanggo);
+                    tile.dataset.hasMatSeb = "true";
+                } else {
+                    matSebEl.textContent = "";
+                    tile.dataset.hasMatSeb = "false";
+                }
+
                 const ms = machineState.get(machine);
                 const sebEl = tile.querySelector('.seb');
                 if (ms && ms.sebanggo) {
@@ -948,14 +1107,14 @@
                     sebEl.textContent = "";
                     tile.dataset.hasSeb = "false";
                 }
-                
+
                 fitCallingName(tile, machine);
             } else {
                 tile.classList.remove('calling');
                 tile.querySelector('.name').style.fontSize = '';
                 const ms = machineState.get(machine) || { mode: 'idle', sebanggo: '', totalNG: 0 };
                 const mode = ms.mode || 'idle';
-                
+
                 // --- Defect Counter Badge ---
                 let badgeEl = tile.querySelector('.ng-badge');
                 if (ms.totalNG > 0) {
@@ -1010,7 +1169,7 @@
             let rosterChanged = false;
             machines.forEach(m => {
                 if (!m || !m.equipment) return;
-                if (!tileByMachine.has(m.equipment)) { 
+                if (!tileByMachine.has(m.equipment)) {
                     let inserted = false;
                     const ozmanasIdx = roster.indexOf('OZMANAS');
                     if (ozmanasIdx !== -1) {
@@ -1023,9 +1182,9 @@
                         }
                     }
                     if (!inserted) {
-                        roster.push(m.equipment); 
+                        roster.push(m.equipment);
                     }
-                    rosterChanged = true; 
+                    rosterChanged = true;
                 }
                 machineState.set(m.equipment, {
                     sebanggo: m.sebanggo || '',
@@ -1061,7 +1220,7 @@
             activeList.forEach(it => {
                 activeSince.set(it.machine, it.since);
                 const prevTypes = lastMachineCallTypes.get(it.machine) || {};
-                
+
                 if (it.leader && !prevTypes.leader) {
                     newlyAddedEvents.push({ machine: it.machine, title: '呼び出し / CALLING LEADER', type: 'leader', since: it.since });
                 }
@@ -1123,9 +1282,9 @@
             // Only announce if still active
             const idx = activeList.findIndex(it => it.machine === item.machine);
             if (idx < 0) { runTakeover(); return; }
-            
+
             playAlert(item.type);
-            
+
             const el = document.getElementById('takeover');
             el.dataset.type = item.type;
             document.querySelector('#takeover .to-label').textContent = item.title;
@@ -1258,9 +1417,9 @@
         const CHIME_HOLD_MS = 15000;
 
         const SCHEDULE = [
-            { id: 'taiso',   at: '08:45', kind: 'exercise' },
-            { id: 'noon',    at: '12:00', kind: 'chime' },
-            { id: 'three',   at: '15:00', kind: 'chime' },
+            { id: 'taiso', at: '08:45', kind: 'exercise' },
+            { id: 'noon', at: '12:00', kind: 'chime' },
+            { id: 'three', at: '15:00', kind: 'chime' },
             { id: 'evening', at: '17:30', kind: 'chime' },
         ].map(e => {
             const [h, m] = e.at.split(':').map(Number);
