@@ -2685,6 +2685,65 @@
         </div>
     </div>
 
+    <!-- Sending to Machine Floating Indicator -->
+    <div id="sendingToMachineIndicator" style="
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 100001;
+      background: rgba(0, 0, 0, 0.6);
+      font-family: 'Nunito Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      align-items: center;
+      justify-content: center;
+    ">
+      <div style="
+        background: #1a1d23;
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 18px;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), 0 0 80px rgba(46, 111, 242, 0.15);
+        padding: 32px 36px;
+        width: 90%;
+        max-width: 420px;
+        text-align: center;
+        animation: sendIndicatorPopIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+      ">
+        <!-- Spinner -->
+        <div style="margin: 0 auto 20px auto; width: 56px; height: 56px; border: 4px solid rgba(46, 111, 242, 0.2); border-top: 4px solid #5B9BFF; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+        <!-- Title -->
+        <div style="font-size: 1.25rem; font-weight: 800; color: #FFFFFF; margin-bottom: 6px;">送信中 / Sending to Machine</div>
+        <!-- Subtitle -->
+        <div style="font-size: 0.95rem; font-weight: 600; color: rgba(255,255,255,0.5); margin-bottom: 24px;">しばらくお待ちください / Please wait...</div>
+        <!-- Progress bar -->
+        <div style="background: rgba(255,255,255,0.08); border-radius: 6px; height: 5px; overflow: hidden; margin-bottom: 24px;">
+          <div id="sendingToMachineProgressBar" style="height: 100%; width: 100%; background: linear-gradient(90deg, #2E6FF2, #5B9BFF); border-radius: 6px; animation: sendIndicatorCountdown 17s linear forwards;"></div>
+        </div>
+        <!-- Close button -->
+        <button onclick="closeSendingToMachineIndicator()" style="
+          background: rgba(255,255,255,0.08);
+          border: 1px solid rgba(255,255,255,0.12);
+          border-radius: 10px;
+          padding: 12px 32px;
+          color: rgba(255,255,255,0.7);
+          font-family: inherit;
+          font-size: 0.9375rem;
+          font-weight: 700;
+          cursor: pointer;
+          transition: all 0.18s ease;
+        " onmouseover="this.style.background='rgba(255,255,255,0.15)';this.style.color='#fff'" onmouseout="this.style.background='rgba(255,255,255,0.08)';this.style.color='rgba(255,255,255,0.7)'">閉じる / Close</button>
+      </div>
+    </div>
+
+    <style>
+      @keyframes sendIndicatorPopIn {
+        from { opacity: 0; transform: scale(0.9); }
+        to   { opacity: 1; transform: scale(1); }
+      }
+      @keyframes sendIndicatorCountdown {
+        from { width: 100%; }
+        to   { width: 0%; }
+      }
+    </style>
+
     <!-- Uploading Modal -->
     <div id="uploadingModal" class="modal" style="display: none; background: rgba(0, 0, 0, 0.4); z-index: 100000;">
         <div

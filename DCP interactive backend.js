@@ -7741,6 +7741,66 @@ function updateSendToMachineProgressMessage(message) {
   }
 }
 
+// ============================================
+// SENDING TO MACHINE FLOATING INDICATOR
+// ============================================
+let _sendingIndicatorTimer = null;
+
+/**
+ * Show floating indicator to tell the user that "sending to machine" is in progress.
+ * Auto-closes after 8 seconds. User can also manually dismiss it.
+ */
+function showSendingToMachineIndicator() {
+  const indicator = document.getElementById('sendingToMachineIndicator');
+  if (!indicator) return;
+
+  // Clear any previous auto-close timer
+  if (_sendingIndicatorTimer) {
+    clearTimeout(_sendingIndicatorTimer);
+    _sendingIndicatorTimer = null;
+  }
+
+  // Reset progress bar animation (force reflow to restart CSS animation)
+  const progressBar = document.getElementById('sendingToMachineProgressBar');
+  if (progressBar) {
+    progressBar.style.animation = 'none';
+    // Force reflow
+    void progressBar.offsetWidth;
+    progressBar.style.animation = 'sendIndicatorCountdown 17s linear forwards';
+  }
+
+  // Reset pop-in animation on the inner card (force reflow to restart)
+  const innerCard = indicator.querySelector('div');
+  if (innerCard) {
+    innerCard.style.animation = 'none';
+    void innerCard.offsetWidth;
+    innerCard.style.animation = 'sendIndicatorPopIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)';
+  }
+
+  indicator.style.display = 'flex';
+
+  // Auto-close after 8 seconds
+  _sendingIndicatorTimer = setTimeout(() => {
+    closeSendingToMachineIndicator();
+  }, 17000);
+
+  console.log('📡 Sending to machine indicator shown (auto-close in 17s)');
+}
+
+/**
+ * Close the floating "sending to machine" indicator.
+ */
+function closeSendingToMachineIndicator() {
+  const indicator = document.getElementById('sendingToMachineIndicator');
+  if (indicator) {
+    indicator.style.display = 'none';
+  }
+  if (_sendingIndicatorTimer) {
+    clearTimeout(_sendingIndicatorTimer);
+    _sendingIndicatorTimer = null;
+  }
+}
+
 //this function sends request to nc cutter's pC (supports single or multiple machines)
 async function sendtoNC(selectedValue) {
 
@@ -7794,6 +7854,9 @@ async function sendtoNC(selectedValue) {
   console.log(`Send to Machine button pressed. Set state to true for ${currentSebanggo}`);
 
   beginSendToMachineCooldown('Send to machine in progress');
+
+  // Show floating indicator to the user
+  showSendingToMachineIndicator();
 
   // Check if this is grouped machines (by page detection OR comma-separated IPs)
   const hasMultipleIPs = ipAddress && ipAddress.includes(',');
