@@ -39,9 +39,9 @@ const googleSheetLiveStatusURL = 'https://script.google.com/macros/s/AKfycbwbL30
 // Link for Rikeshi (up/down color info) - This was missing in the original, adding it here.
 const dbURL = 'https://script.google.com/macros/s/AKfycbx0qBw0_wF5X-hA2t1yY-d5h5M7Z_a8z_V9R5D6k/exec'; // Placeholder, replace with your actual URL if different.
 
-//const serverURL = "https://kurachi.onrender.com";
+const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
-const serverURL = "http://192.168.0.105:3000";
+//const serverURL = "http://192.168.0.105:3000";
 
 // Global variable to track if sendtoNC button has been pressed
 let sendtoNCButtonisPressed = false;
@@ -7031,7 +7031,7 @@ document.getElementById('submit').addEventListener('click', async (event) => {
       const kDate = document.getElementById('KDate')?.value;
       const kStart = document.getElementById('KStart Time')?.value;
       const kEnd = document.getElementById('KEnd Time')?.value;
-      
+
       if (!kensaName || kensaName.trim() === '') {
         uploadingModal.style.display = 'none';
         showAlert('検査者名が必要です / Inspector Name is required');
@@ -12239,7 +12239,7 @@ if (manualSendModal) {
       if (typeof updateProcessingTimeLockStatus === 'function') {
         updateProcessingTimeLockStatus('end');
       }
-      try { endTimeEl.dispatchEvent(new Event('change', { bubbles: true })); } catch(e) {}
+      try { endTimeEl.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) { }
     }
 
     // Mark this machine as handled in the current grouped lot-change cycle so the
