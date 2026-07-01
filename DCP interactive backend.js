@@ -7843,7 +7843,7 @@ async function sendtoNC(selectedValue) {
 
     // Send command to each machine
     const sendPromises = Object.entries(machineIPMap).map(async ([machine, ip]) => {
-      const url = `http://${ip}:5000/request?filename=${currentSebanggo}.pce`;
+      const url = `http://${ip}:5000/request?filename=${currentSebanggo}.pce&mode=mass&machine=${machine}`;
 
       try {
         console.log(`📤 Sending to ${machine} (${ip}): ${url}`);
@@ -7895,7 +7895,8 @@ async function sendtoNC(selectedValue) {
 
   } else {
     // Single machine - original logic
-    const url = `http://${ipAddress}:5000/request?filename=${currentSebanggo}.pce`;
+    const singleMachineName = document.getElementById('process').value || 'UNKNOWN';
+    const url = `http://${ipAddress}:5000/request?filename=${currentSebanggo}.pce&mode=mass&machine=${singleMachineName}`;
 
     try {
       console.log(`Sending command to mini PC: ${url}`);
@@ -11817,7 +11818,7 @@ async function sendToIndividualMachine(machine, ncFilename, index) {
   sendButton.innerHTML = 'Sending... / 送信中...';
 
   // Use the same URL format as Step 3 modal (port 5000 with /request?filename=)
-  const ncProgramUrl = `http://${machine.ip}:5000/request?filename=${ncFilename}`;
+  const ncProgramUrl = `http://${machine.ip}:5000/request?filename=${ncFilename}&mode=mass&machine=${machine.id}`;
 
   try {
     // Try background fetch first
@@ -12076,7 +12077,7 @@ function showManualSendModal(sebanggo) {
       button.style.boxShadow = '0 2px 8px rgba(33, 150, 243, 0.3)';
     };
     button.onclick = async () => {
-      const url = `http://${ip}:5000/request?filename=${sebanggo}.pce`;
+      const url = `http://${ip}:5000/request?filename=${sebanggo}.pce&mode=mass&machine=${machine}`;
       console.log(`📤 Manual send to ${machine}: ${url}`);
       try {
         await fetch(url, { method: 'GET', mode: 'no-cors' });
