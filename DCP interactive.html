@@ -5095,7 +5095,6 @@
                     let zairyoSebanggo = '';
                     if (callType === 'material') {
                         zairyoSebanggo = document.getElementById('material-code')?.value || '';
-                        console.log(`[Material Call] grabbed zairyoSebanggo from UI: "${zairyoSebanggo}"`);
                     }
                     const base = (typeof serverURL !== 'undefined' && serverURL) ? serverURL : '';
                     fetch(`${base}/api/stop-call`, {
@@ -5495,13 +5494,27 @@
                     const 設備 = document.getElementById('process')?.value
                         || new URLSearchParams(location.search).get('machine') || '';
                     if (!工場 || !設備) return;
-                    const 背番号Raw = document.getElementById('sub-dropdown')?.value || '';
-                    const 品番Raw = document.getElementById('product-number')?.value || '';
+                    
+                    let 背番号Raw = document.getElementById('sub-dropdown')?.value || '';
+                    if (!背番号Raw && typeof breakPrefix !== 'undefined') {
+                        背番号Raw = localStorage.getItem(breakPrefix + 'cached-sebanggo') || '';
+                    }
+                    
+                    let 品番Raw = document.getElementById('product-number')?.value || '';
+                    if (!品番Raw && typeof breakPrefix !== 'undefined') {
+                        品番Raw = localStorage.getItem(breakPrefix + 'cached-hinban') || '';
+                    }
+                    
                     // Only tell the factory TV this machine is running once Step 3 is done.
                     // A mid-workflow refresh would otherwise leave a stale 背番号 on the display.
                     const workflowDone = typeof window.isScanWorkflowComplete === 'function' && window.isScanWorkflowComplete();
                     const 背番号 = workflowDone ? 背番号Raw : '';
                     const 品番 = workflowDone ? 品番Raw : '';
+                    
+                    console.log(`[assertMachineState] 工場=${工場}, 設備=${設備}`);
+                    console.log(`[assertMachineState] breakPrefix=${typeof breakPrefix !== 'undefined' ? breakPrefix : 'UNDEFINED'}`);
+                    console.log(`[assertMachineState] 背番号Raw="${背番号Raw}", 品番Raw="${品番Raw}"`);
+                    console.log(`[assertMachineState] workflowDone=${workflowDone} -> Final 背番号="${背番号}", 品番="${品番}"`);
                     const breakStart = parseInt(localStorage.getItem(breakPrefix + 'activeBreakStart') || '0', 10);
                     const maintStart = parseInt(localStorage.getItem(breakPrefix + 'activeMaintStart') || '0', 10);
 

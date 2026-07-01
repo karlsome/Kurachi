@@ -679,7 +679,6 @@ app.post("/api/stop-call", (req, res) => {
         info[callType] = { since: Date.now() };
         if (callType === 'material' && req.body?.zairyoSebanggo) {
           info[callType].zairyoSebanggo = String(req.body.zairyoSebanggo).trim();
-          console.log(`[Material Call] Server received zairyoSebanggo: "${info[callType].zairyoSebanggo}" for machine: ${id}`);
         }
       }
       machines.set(id, info);
@@ -696,7 +695,7 @@ app.post("/api/stop-call", (req, res) => {
 
   const payload = buildStopCallPayload(factory);
   broadcastToFactory(factory, payload);
-  console.log(`🟥 stop-call ${action} (${callType}) for ${factory}/${ids.join(',')} → ${payload.active.length} active. Payload:`, JSON.stringify(payload.active));
+  console.log(`🟥 stop-call ${action} (${callType}) for ${factory}/${ids.join(',')} → ${payload.active.length} active`);
   res.json({ ok: true, active: payload.active });
 });
 
@@ -743,7 +742,21 @@ app.post("/api/machine-assert", (req, res) => {
       map.set(id, st);
       updated.push(id);
     } else {
-      // The server already has a record. Enforce the tablet's authoritative time!
+      // The server already has a record.
+      // If the tablet asserts an active product and it differs from the server (e.g., server
+      // created an empty state from an early tablet log after a restart), trust the tablet.
+      if (seb && mode !== 'idle' && st.sebanggo !== seb) {
+        st.sebanggo = seb;
+        st.hinban = hinban;
+        st.breakActive = false;
+        st.maintActive = false;
+        if (mode === 'break') { st.breakActive = true; st.modeSince = modeStartedAt || now; }
+        else if (mode === 'maintenance') { st.maintActive = true; st.modeSince = modeStartedAt || now; }
+        else { st.runSince = runStartedAt || now; }
+        if (!updated.includes(id)) updated.push(id);
+      }
+
+      // Enforce the tablet's authoritative time!
       // The tablet sends runStartedAt adjusted exactly for all breaks and maintenance.
       if (mode === 'running' && runStartedAt > 0) {
         const serverElapsed = (st.prodAccumMs || 0) + (st.runSince ? (now - st.runSince) : 0);

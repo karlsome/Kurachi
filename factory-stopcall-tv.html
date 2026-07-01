@@ -828,7 +828,7 @@
     <script>
         //const serverURL = "https://kurachi.onrender.com";
         //const serverURL = "http://localhost:3000";
-        const serverURL = "http://192.168.0.101:3000";
+        const serverURL = "http://192.168.0.105:3000";
 
         const params = new URLSearchParams(location.search);
         const FACTORY = params.get('filter') || params.get('factory') || '';
@@ -1088,9 +1088,6 @@
                 tile.querySelector('.type-display').innerHTML = typeHtml;
 
                 const matSebEl = tile.querySelector('.mat-seb');
-                if (item.material) {
-                    console.log(`[Material Call TV] Rendering material call for ${machine}. zairyoSebanggo received: "${item.zairyoSebanggo}"`);
-                }
                 if (item.material && item.zairyoSebanggo) {
                     matSebEl.textContent = item.zairyoSebanggo;
                     fitMatSeb(tile, item.zairyoSebanggo);
