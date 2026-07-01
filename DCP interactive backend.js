@@ -6821,10 +6821,16 @@ document.getElementById('submit').addEventListener('click', async (event) => {
   const scanAlertText = document.getElementById('scanAlertText');
   const uploadingModal = document.getElementById('uploadingModal');
 
-  const shotInput = document.getElementById('shot');
+  // Validate that no lot is missing shot count
+  let hasMissingShots = false;
+  if (typeof allRecords === 'function') {
+    const records = allRecords();
+    hasMissingShots = records.some(r => r.open || r.shots == null || r.shots === '');
+  }
 
-  if (!shotInput.value || parseInt(shotInput.value) < 1) {
-    showAlert('加工終了時間を入力して、ショット数を入力してください。\n(Shot Count is required. Please enter End Time first to activate the shot count input.)');
+  const shotInput = document.getElementById('shot');
+  if (hasMissingShots || !shotInput.value || parseInt(shotInput.value) < 1) {
+    showAlert('未入力のショット数があります。終了時間を入力するか、「ショット数編集 (Edit Shots)」から入力してください。\n(Missing shot counts for some lots. Please enter End Time or use Edit Shots to enter them.)');
     shotInput.focus();
     return;
   }
@@ -12217,6 +12223,14 @@ if (manualSendModal) {
       meters: null, pieces: null, source: source || 'scanned', open: true, ts: Date.now()
     });
     save();
+
+    // Auto-reset End Time if a new lot is scanned, so the user is forced to re-enter it at the real end of production.
+    const endTimeEl = document.getElementById('End Time');
+    if (endTimeEl && endTimeEl.value) {
+      endTimeEl.value = '';
+      try { endTimeEl.dispatchEvent(new Event('change', { bubbles: true })); } catch(e) {}
+    }
+
     // Mark this machine as handled in the current grouped lot-change cycle so the
     // chooser can grey it out and we send to every assigned machine.
     if (!window.__lotCycleMachinesDone) window.__lotCycleMachinesDone = [];
