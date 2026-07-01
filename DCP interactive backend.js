@@ -6823,14 +6823,22 @@ document.getElementById('submit').addEventListener('click', async (event) => {
 
   // Validate that no lot is missing shot count
   let hasMissingShots = false;
-  if (typeof allRecords === 'function') {
-    const records = allRecords();
+  if (typeof window.getAllLotRecords === 'function') {
+    const records = window.getAllLotRecords();
     hasMissingShots = records.some(r => r.open || r.shots == null || r.shots === '');
   }
 
   const shotInput = document.getElementById('shot');
-  if (hasMissingShots || !shotInput.value || parseInt(shotInput.value) < 1) {
-    showAlert('未入力のショット数があります。終了時間を入力するか、「ショット数編集 (Edit Shots)」から入力してください。\n(Missing shot counts for some lots. Please enter End Time or use Edit Shots to enter them.)');
+  if (hasMissingShots) {
+    // Automatically trigger the shot count popup to force user to enter missing shots
+    if (typeof window.promptFinalLots === 'function') {
+      window.promptFinalLots();
+    } else {
+      showAlert('未入力のショット数があります。「ショット数編集 (Edit Shots)」から入力してください。');
+    }
+    return;
+  } else if (!shotInput.value || parseInt(shotInput.value) < 1) {
+    showAlert('ショット数 (Shot Count) is required and must be at least 1.');
     shotInput.focus();
     return;
   }
@@ -12228,6 +12236,9 @@ if (manualSendModal) {
     const endTimeEl = document.getElementById('End Time');
     if (endTimeEl && endTimeEl.value) {
       endTimeEl.value = '';
+      if (typeof updateProcessingTimeLockStatus === 'function') {
+        updateProcessingTimeLockStatus('end');
+      }
       try { endTimeEl.dispatchEvent(new Event('change', { bubbles: true })); } catch(e) {}
     }
 
@@ -12364,9 +12375,9 @@ if (manualSendModal) {
     if (db) db.onclick = () => { closeLP(); if (opts.onDone) opts.onDone(); };
   }
 
-  // Collect ショット数 for each still-open lot (triggered when End Time is set).
+  // Collect ショット数 for each still-open lot or lot with missing shots.
   function promptFinalLots() {
-    const open = allRecords().filter(r => r.open);
+    const open = allRecords().filter(r => r.open || r.shots == null || r.shots === '');
     if (!open.length) return;
     let i = 0;
     const next = () => {
@@ -12560,6 +12571,8 @@ if (manualSendModal) {
 
   window.recordLotScan = recordLotScan;
   window.buildLotProductionPayload = buildPayload;
+  window.getAllLotRecords = allRecords;
+  window.promptFinalLots = promptFinalLots;
   window.lotProductionReset = function () { lotsByMachine = {}; save(); updateShotTotalField(); };
 
   /**
