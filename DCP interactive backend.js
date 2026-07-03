@@ -1021,7 +1021,25 @@ async function fetchProductDetails() {
     document.getElementById("material-color").value = data.色 || "";
     document.getElementById("kataban").value = data.型番 || "";
     document.getElementById("収容数").value = data.収容数 || "";
-    document.getElementById("送りピッチ").textContent = "送りピッチ: " + (data.送りピッチ || "");
+    let displayPitch = data.送りピッチ || "";
+    const processVal = document.getElementById("process") ? document.getElementById("process").value : "";
+    if (data.machineConfig && processVal) {
+      const machines = processVal.split(',').map(m => m.trim()).filter(Boolean);
+      const pitches = [];
+      let foundInConfig = false;
+      for (const m of machines) {
+        if (data.machineConfig[m] && data.machineConfig[m].送りピッチ !== undefined) {
+          pitches.push(data.machineConfig[m].送りピッチ);
+          foundInConfig = true;
+        } else {
+          pitches.push(data.送りピッチ || "");
+        }
+      }
+      if (foundInConfig) {
+        displayPitch = [...new Set(pitches)].filter(Boolean).join(", ");
+      }
+    }
+    document.getElementById("送りピッチ").textContent = "送りピッチ: " + displayPitch;
 
     // Set 離型紙 value with Japanese/English labels
     const rikeshiValue = data.離型紙上下 || data["離型紙上/下"] || "";
