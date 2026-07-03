@@ -5384,6 +5384,17 @@
                     openStopCallOverlay(parseInt(raw, 10));
                     notifyStopCall('activate', 'leader'); // re-assert to the TV after a reload/server restart
                 }
+                const matTarget = localStorage.getItem(breakPrefix + 'activeCall_material');
+                if (matTarget) {
+                    const btn = document.getElementById('callMaterialBtn');
+                    if (btn) btn.classList.add('is-active');
+                    notifyStopCall('activate', 'material', matTarget === 'all' ? null : matTarget);
+                }
+                if (localStorage.getItem(breakPrefix + 'activeCall_box')) {
+                    const btn = document.getElementById('callBoxBtn');
+                    if (btn) btn.classList.add('is-active');
+                    notifyStopCall('activate', 'box');
+                }
             }
             window.startStopCall = startStopCall;
             
@@ -5518,6 +5529,7 @@
                     // For grouped machines: pick which machine; for box: broadcast to all
                     pickMachineForCall('material', (pickedMachine) => {
                         btn.classList.add('is-active');
+                        localStorage.setItem(breakPrefix + 'activeCall_material', pickedMachine || 'all');
                         notifyStopCall('activate', 'material', pickedMachine || null);
                         const ov = document.getElementById('requestConfirmOverlay');
                         if (ov) {
@@ -5532,6 +5544,7 @@
                 } else {
                     // box — broadcast to all machines (no picker)
                     btn.classList.add('is-active');
+                    localStorage.setItem(breakPrefix + 'activeCall_box', 'all');
                     notifyStopCall('activate', type);
                     const ov = document.getElementById('requestConfirmOverlay');
                     if (ov) {
@@ -6049,6 +6062,7 @@
 
                         if (currentX >= maxSlide * 0.85) {
                             btn.classList.remove('is-active');
+                            localStorage.removeItem(breakPrefix + 'activeCall_' + type);
                             thumb.style.transform = '';
                             notifyStopCall('clear', type);
                             showToast(_t(type === 'box' ? 'toast_request_released_box' : 'toast_request_released_material'));

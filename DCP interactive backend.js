@@ -4655,6 +4655,32 @@ function resetForm() {
   }
 
   return logPromise.then(async () => {
+    // Release box and material calls
+    try {
+      if (typeof notifyStopCall === 'function') {
+        notifyStopCall('clear', 'box');
+        notifyStopCall('clear', 'material');
+      } else {
+        const factory = document.getElementById('selected工場')?.value || '';
+        const machine = new URLSearchParams(window.location.search).get('machine') || '';
+        if (factory && machine) {
+          fetch(`${serverURL}/api/stop-call`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ factory, machine, action: 'clear', callType: 'box', zairyoSebanggo: '' })
+          }).catch(() => { });
+          fetch(`${serverURL}/api/stop-call`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ factory, machine, action: 'clear', callType: 'material', zairyoSebanggo: '' })
+          }).catch(() => { });
+        }
+      }
+    } catch (e) { console.error('Error clearing calls on reset:', e); }
+
+    localStorage.removeItem(`${uniquePrefix}activeCall_box`);
+    localStorage.removeItem(`${uniquePrefix}activeCall_material`);
+
     // Clear session AFTER logging
     clearSessionID();
     closeVideoManualPicker();
