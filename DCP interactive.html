@@ -3603,6 +3603,7 @@
             align-items: center;
             justify-content: center;
             gap: 6px;
+            touch-action: manipulation;
         }
 
         .tap-counter:hover {
@@ -3663,6 +3664,7 @@
             align-items: center;
             justify-content: center;
             transition: var(--transition-smooth);
+            touch-action: manipulation;
         }
 
         .tap-counter .tap-photo-btn {
@@ -3697,7 +3699,7 @@
         }
 
         .tap-counter .tap-minus:active {
-            transform: scale(0.9);
+            opacity: 0.6;
         }
 
         .tap-hint {
@@ -3809,8 +3811,9 @@
             padding: 5px 10px; border-radius: 6px; cursor: pointer;
             font-size: 0.75rem; font-weight: 700; font-family: inherit;
             transition: opacity 0.2s;
+            touch-action: manipulation;
         }
-        .machine-chip .chip-retry:active { transform: scale(0.94); }
+        .machine-chip .chip-retry:active { opacity: 0.6; }
         .machine-chip .chip-retry:disabled { opacity: 0.5; cursor: not-allowed; }
 
         .machine-chip.sent { border-color: var(--brand); background: color-mix(in srgb, var(--brand) 8%, transparent); }
@@ -4781,7 +4784,12 @@
                 if (typeof incrementCounter === 'function') incrementCounter(n);
                 syncDefectDisplays();
                 const card = document.getElementById('counter-box-' + n);
-                if (card) { card.classList.remove('bump'); void card.offsetWidth; card.classList.add('bump'); }
+                if (card) { 
+                    card.classList.remove('bump'); 
+                    void card.offsetWidth; 
+                    card.classList.add('bump'); 
+                    setTimeout(() => card.classList.remove('bump'), 200);
+                }
                 if (typeof assertMachineState === 'function') assertMachineState();
             };
             window.prodCounterMinus = function (e, n) {
@@ -5384,6 +5392,20 @@
                     openStopCallOverlay(parseInt(raw, 10));
                     notifyStopCall('activate', 'leader'); // re-assert to the TV after a reload/server restart
                 }
+                const matTarget = localStorage.getItem(breakPrefix + 'activeCall_material');
+                const menuWrap = document.getElementById('callMenuWrapper');
+                if (matTarget) {
+                    const btn = document.getElementById('callMaterialBtn');
+                    if (btn) btn.classList.add('is-active');
+                    notifyStopCall('activate', 'material', matTarget === 'all' ? null : matTarget);
+                    if (menuWrap) menuWrap.classList.add('open');
+                }
+                if (localStorage.getItem(breakPrefix + 'activeCall_box')) {
+                    const btn = document.getElementById('callBoxBtn');
+                    if (btn) btn.classList.add('is-active');
+                    notifyStopCall('activate', 'box');
+                    if (menuWrap) menuWrap.classList.add('open');
+                }
             }
             window.startStopCall = startStopCall;
             
@@ -5518,6 +5540,7 @@
                     // For grouped machines: pick which machine; for box: broadcast to all
                     pickMachineForCall('material', (pickedMachine) => {
                         btn.classList.add('is-active');
+                        localStorage.setItem(breakPrefix + 'activeCall_material', pickedMachine || 'all');
                         notifyStopCall('activate', 'material', pickedMachine || null);
                         const ov = document.getElementById('requestConfirmOverlay');
                         if (ov) {
@@ -5532,6 +5555,7 @@
                 } else {
                     // box — broadcast to all machines (no picker)
                     btn.classList.add('is-active');
+                    localStorage.setItem(breakPrefix + 'activeCall_box', 'all');
                     notifyStopCall('activate', type);
                     const ov = document.getElementById('requestConfirmOverlay');
                     if (ov) {
@@ -5967,6 +5991,10 @@
                 function resetMenuCollapseTimer() {
                     clearTimeout(menuCollapseTimer);
                     if (menuWrap && menuWrap.classList.contains('open')) {
+                        if (localStorage.getItem(breakPrefix + 'activeCall_box') || 
+                            localStorage.getItem(breakPrefix + 'activeCall_material')) {
+                            return; // keep open
+                        }
                         menuCollapseTimer = setTimeout(() => {
                             menuWrap.classList.remove('open');
                         }, 3000);
@@ -6003,6 +6031,10 @@
                             menuWrap.classList.add('open');
                             resetMenuCollapseTimer();
                         } else {
+                            if (localStorage.getItem(breakPrefix + 'activeCall_box') || 
+                                localStorage.getItem(breakPrefix + 'activeCall_material')) {
+                                return; // prevent closing
+                            }
                             menuWrap.classList.remove('open');
                             clearTimeout(menuCollapseTimer);
                         }
@@ -6011,6 +6043,10 @@
                 
                 document.addEventListener('click', (e) => {
                     if (menuWrap && menuWrap.classList.contains('open') && !menuWrap.contains(e.target)) {
+                        if (localStorage.getItem(breakPrefix + 'activeCall_box') || 
+                            localStorage.getItem(breakPrefix + 'activeCall_material')) {
+                            return; // keep open
+                        }
                         menuWrap.classList.remove('open');
                         clearTimeout(menuCollapseTimer);
                     }
@@ -6049,6 +6085,7 @@
 
                         if (currentX >= maxSlide * 0.85) {
                             btn.classList.remove('is-active');
+                            localStorage.removeItem(breakPrefix + 'activeCall_' + type);
                             thumb.style.transform = '';
                             notifyStopCall('clear', type);
                             showToast(_t(type === 'box' ? 'toast_request_released_box' : 'toast_request_released_material'));
@@ -6123,8 +6160,8 @@
                     const machines = (typeof groupedMachines !== 'undefined' && groupedMachines.length > 1) ? groupedMachines : null;
 
                     // Helper: send to a single machine IP with fallback
-                    async function fireSendToMachine(ip, seb) {
-                        const url = 'http://' + ip + ':5000/request?filename=' + seb + '.pce';
+                    async function fireSendToMachine(ip, seb, machineName) {
+                        const url = 'http://' + ip + ':5000/request?filename=' + seb + '.pce' + (machineName ? '&mode=mass&machine=' + machineName : '');
                         try {
                             await fetch(url, { method: 'GET', mode: 'no-cors' });
                         } catch (_) {
@@ -6176,7 +6213,7 @@
                             if (!ip) { if (window.showAppToast) window.showAppToast(_ipMsg); return; }
 
                             // Send to this machine
-                            await fireSendToMachine(ip, seb);
+                            await fireSendToMachine(ip, seb, name);
 
                             // 17 second cooldown lock on ALL send buttons
                             if (typeof beginSendToMachineCooldown === 'function') beginSendToMachineCooldown(name + ' に送信中');

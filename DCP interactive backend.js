@@ -1021,7 +1021,25 @@ async function fetchProductDetails() {
     document.getElementById("material-color").value = data.色 || "";
     document.getElementById("kataban").value = data.型番 || "";
     document.getElementById("収容数").value = data.収容数 || "";
-    document.getElementById("送りピッチ").textContent = "送りピッチ: " + (data.送りピッチ || "");
+    let displayPitch = data.送りピッチ || "";
+    const processVal = document.getElementById("process") ? document.getElementById("process").value : "";
+    if (data.machineConfig && processVal) {
+      const machines = processVal.split(',').map(m => m.trim()).filter(Boolean);
+      const pitches = [];
+      let foundInConfig = false;
+      for (const m of machines) {
+        if (data.machineConfig[m] && data.machineConfig[m].送りピッチ !== undefined) {
+          pitches.push(data.machineConfig[m].送りピッチ);
+          foundInConfig = true;
+        } else {
+          pitches.push(data.送りピッチ || "");
+        }
+      }
+      if (foundInConfig) {
+        displayPitch = [...new Set(pitches)].filter(Boolean).join(", ");
+      }
+    }
+    document.getElementById("送りピッチ").textContent = "送りピッチ: " + displayPitch;
 
     // Set 離型紙 value with Japanese/English labels
     const rikeshiValue = data.離型紙上下 || data["離型紙上/下"] || "";
@@ -4655,6 +4673,30 @@ function resetForm() {
   }
 
   return logPromise.then(async () => {
+    // Release box and material calls
+    try {
+      const factory = document.getElementById('selected工場')?.value || '';
+      const machine = new URLSearchParams(window.location.search).get('machine') || '';
+      if (factory && machine) {
+        // We must await these fetches before the page reloads, otherwise the browser will cancel them
+        await Promise.all([
+          fetch(`${serverURL}/api/stop-call`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ factory, machine, action: 'clear', callType: 'box', zairyoSebanggo: '' })
+          }).catch(() => { }),
+          fetch(`${serverURL}/api/stop-call`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ factory, machine, action: 'clear', callType: 'material', zairyoSebanggo: '' })
+          }).catch(() => { })
+        ]);
+      }
+    } catch (e) { console.error('Error clearing calls on reset:', e); }
+
+    localStorage.removeItem(`${uniquePrefix}activeCall_box`);
+    localStorage.removeItem(`${uniquePrefix}activeCall_material`);
+
     // Clear session AFTER logging
     clearSessionID();
     closeVideoManualPicker();
