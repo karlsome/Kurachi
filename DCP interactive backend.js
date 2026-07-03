@@ -919,6 +919,12 @@ async function fetchProductDetails() {
   const dynamicImage = document.getElementById("dynamicImage");
   dynamicImage.src = "";
 
+  // Always refresh dates to the current date to prevent stale dates when tablet is left idle overnight
+  const lotDateInput = document.getElementById("Lot No.");
+  if (lotDateInput && typeof setDefaultDate === 'function') setDefaultDate(lotDateInput);
+  const kDateInput = document.getElementById("KDate");
+  if (kDateInput && typeof setDefaultDate === 'function') setDefaultDate(kDateInput);
+
   if (!serialNumber) {
     console.error("Please select a valid 背番号.");
     blankInfo();
