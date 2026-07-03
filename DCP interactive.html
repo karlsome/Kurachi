@@ -3603,6 +3603,7 @@
             align-items: center;
             justify-content: center;
             gap: 6px;
+            touch-action: manipulation;
         }
 
         .tap-counter:hover {
@@ -3663,6 +3664,7 @@
             align-items: center;
             justify-content: center;
             transition: var(--transition-smooth);
+            touch-action: manipulation;
         }
 
         .tap-counter .tap-photo-btn {
@@ -3697,7 +3699,7 @@
         }
 
         .tap-counter .tap-minus:active {
-            transform: scale(0.9);
+            opacity: 0.6;
         }
 
         .tap-hint {
@@ -3809,8 +3811,9 @@
             padding: 5px 10px; border-radius: 6px; cursor: pointer;
             font-size: 0.75rem; font-weight: 700; font-family: inherit;
             transition: opacity 0.2s;
+            touch-action: manipulation;
         }
-        .machine-chip .chip-retry:active { transform: scale(0.94); }
+        .machine-chip .chip-retry:active { opacity: 0.6; }
         .machine-chip .chip-retry:disabled { opacity: 0.5; cursor: not-allowed; }
 
         .machine-chip.sent { border-color: var(--brand); background: color-mix(in srgb, var(--brand) 8%, transparent); }
@@ -4781,7 +4784,12 @@
                 if (typeof incrementCounter === 'function') incrementCounter(n);
                 syncDefectDisplays();
                 const card = document.getElementById('counter-box-' + n);
-                if (card) { card.classList.remove('bump'); void card.offsetWidth; card.classList.add('bump'); }
+                if (card) { 
+                    card.classList.remove('bump'); 
+                    void card.offsetWidth; 
+                    card.classList.add('bump'); 
+                    setTimeout(() => card.classList.remove('bump'), 200);
+                }
                 if (typeof assertMachineState === 'function') assertMachineState();
             };
             window.prodCounterMinus = function (e, n) {
