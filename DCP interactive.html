@@ -5385,15 +5385,18 @@
                     notifyStopCall('activate', 'leader'); // re-assert to the TV after a reload/server restart
                 }
                 const matTarget = localStorage.getItem(breakPrefix + 'activeCall_material');
+                const menuWrap = document.getElementById('callMenuWrapper');
                 if (matTarget) {
                     const btn = document.getElementById('callMaterialBtn');
                     if (btn) btn.classList.add('is-active');
                     notifyStopCall('activate', 'material', matTarget === 'all' ? null : matTarget);
+                    if (menuWrap) menuWrap.classList.add('open');
                 }
                 if (localStorage.getItem(breakPrefix + 'activeCall_box')) {
                     const btn = document.getElementById('callBoxBtn');
                     if (btn) btn.classList.add('is-active');
                     notifyStopCall('activate', 'box');
+                    if (menuWrap) menuWrap.classList.add('open');
                 }
             }
             window.startStopCall = startStopCall;
@@ -5980,6 +5983,10 @@
                 function resetMenuCollapseTimer() {
                     clearTimeout(menuCollapseTimer);
                     if (menuWrap && menuWrap.classList.contains('open')) {
+                        if (localStorage.getItem(breakPrefix + 'activeCall_box') || 
+                            localStorage.getItem(breakPrefix + 'activeCall_material')) {
+                            return; // keep open
+                        }
                         menuCollapseTimer = setTimeout(() => {
                             menuWrap.classList.remove('open');
                         }, 3000);
@@ -6016,6 +6023,10 @@
                             menuWrap.classList.add('open');
                             resetMenuCollapseTimer();
                         } else {
+                            if (localStorage.getItem(breakPrefix + 'activeCall_box') || 
+                                localStorage.getItem(breakPrefix + 'activeCall_material')) {
+                                return; // prevent closing
+                            }
                             menuWrap.classList.remove('open');
                             clearTimeout(menuCollapseTimer);
                         }
@@ -6024,6 +6035,10 @@
                 
                 document.addEventListener('click', (e) => {
                     if (menuWrap && menuWrap.classList.contains('open') && !menuWrap.contains(e.target)) {
+                        if (localStorage.getItem(breakPrefix + 'activeCall_box') || 
+                            localStorage.getItem(breakPrefix + 'activeCall_material')) {
+                            return; // keep open
+                        }
                         menuWrap.classList.remove('open');
                         clearTimeout(menuCollapseTimer);
                     }
