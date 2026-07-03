@@ -4657,24 +4657,22 @@ function resetForm() {
   return logPromise.then(async () => {
     // Release box and material calls
     try {
-      if (typeof notifyStopCall === 'function') {
-        notifyStopCall('clear', 'box');
-        notifyStopCall('clear', 'material');
-      } else {
-        const factory = document.getElementById('selected工場')?.value || '';
-        const machine = new URLSearchParams(window.location.search).get('machine') || '';
-        if (factory && machine) {
+      const factory = document.getElementById('selected工場')?.value || '';
+      const machine = new URLSearchParams(window.location.search).get('machine') || '';
+      if (factory && machine) {
+        // We must await these fetches before the page reloads, otherwise the browser will cancel them
+        await Promise.all([
           fetch(`${serverURL}/api/stop-call`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ factory, machine, action: 'clear', callType: 'box', zairyoSebanggo: '' })
-          }).catch(() => { });
+          }).catch(() => { }),
           fetch(`${serverURL}/api/stop-call`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ factory, machine, action: 'clear', callType: 'material', zairyoSebanggo: '' })
-          }).catch(() => { });
-        }
+          }).catch(() => { })
+        ]);
       }
     } catch (e) { console.error('Error clearing calls on reset:', e); }
 
