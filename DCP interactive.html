@@ -6160,8 +6160,8 @@
                     const machines = (typeof groupedMachines !== 'undefined' && groupedMachines.length > 1) ? groupedMachines : null;
 
                     // Helper: send to a single machine IP with fallback
-                    async function fireSendToMachine(ip, seb) {
-                        const url = 'http://' + ip + ':5000/request?filename=' + seb + '.pce';
+                    async function fireSendToMachine(ip, seb, machineName) {
+                        const url = 'http://' + ip + ':5000/request?filename=' + seb + '.pce' + (machineName ? '&mode=mass&machine=' + machineName : '');
                         try {
                             await fetch(url, { method: 'GET', mode: 'no-cors' });
                         } catch (_) {
@@ -6213,7 +6213,7 @@
                             if (!ip) { if (window.showAppToast) window.showAppToast(_ipMsg); return; }
 
                             // Send to this machine
-                            await fireSendToMachine(ip, seb);
+                            await fireSendToMachine(ip, seb, name);
 
                             // 17 second cooldown lock on ALL send buttons
                             if (typeof beginSendToMachineCooldown === 'function') beginSendToMachineCooldown(name + ' に送信中');
