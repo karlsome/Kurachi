@@ -44,22 +44,30 @@
             gap: 1.6vh;
         }
 
-        /* ---------- Header ---------- */
+        /* ---------- Header ----------
+           Tucked into the corner (currently-empty bottom-right area of the
+           grid) instead of a full-width top bar, so the grid can use the
+           reclaimed space. */
         header {
-            display: flex;
-            align-items: center;
-            justify-content: flex-end;
-            gap: 24px;
+            position: fixed;
+            right: 2.2vw;
+            bottom: 2vh;
+            z-index: 5;
         }
 
         .head-right {
             display: flex;
-            align-items: center;
-            gap: 26px;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 4px;
+            padding: 0.6vh 0.9vw;
+            background: rgba(10, 15, 26, 0.6);
+            border: 1px solid var(--tile-border);
+            border-radius: 10px;
         }
 
         .clock {
-            font-size: clamp(24px, 2.8vw, 52px);
+            font-size: clamp(14px, 1.3vw, 22px);
             font-weight: 800;
             font-variant-numeric: tabular-nums;
             letter-spacing: 0.02em;
@@ -68,15 +76,15 @@
         .conn {
             display: flex;
             align-items: center;
-            gap: 10px;
-            font-size: clamp(12px, 1.1vw, 20px);
+            gap: 6px;
+            font-size: clamp(9px, 0.8vw, 13px);
             font-weight: 700;
             color: var(--muted);
         }
 
         .conn .dot {
-            width: 14px;
-            height: 14px;
+            width: 9px;
+            height: 9px;
             border-radius: 50%;
             background: var(--muted);
         }
@@ -95,9 +103,9 @@
         .grid {
             flex: 1;
             display: grid;
-            gap: 1.4vh 1.2vw;
-            grid-template-rows: 1fr 1fr 3vh 1fr 1fr;
-            grid-auto-rows: 1fr;
+            gap: 1vh 1vw;
+            grid-template-columns: 1fr 1fr 3vw 1fr 1fr;
+            grid-template-rows: repeat(6, 1fr);
             min-height: 0;
         }
 
@@ -110,23 +118,23 @@
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            gap: 0.6vh;
+            gap: 0.4vh;
             overflow: hidden;
             transition: background 0.2s, border-color 0.2s;
         }
 
         .ng-badge {
             position: absolute;
-            top: 1.5vh;
+            top: 1vh;
             right: 1vw;
             background-color: #EF4444;
             /* Red for defects */
             color: #fff;
-            font-size: clamp(14px, 1.8vw, 24px);
+            font-size: clamp(11px, 1.4vw, 18px);
             font-weight: 900;
             border-radius: 50%;
-            min-width: clamp(28px, 3.5vw, 45px);
-            height: clamp(28px, 3.5vw, 45px);
+            min-width: clamp(20px, 2.6vw, 32px);
+            height: clamp(20px, 2.6vw, 32px);
             display: flex;
             align-items: center;
             justify-content: center;
@@ -137,11 +145,11 @@
 
         .device-badge {
             position: absolute;
-            bottom: 6px;
-            left: 10px;
+            bottom: 4px;
+            left: 8px;
             color: rgba(255, 255, 255, 0.4);
             /* subtle */
-            font-size: clamp(10px, 1vw, 14px);
+            font-size: clamp(8px, 0.8vw, 11px);
             font-weight: 500;
             z-index: 10;
         }
@@ -151,7 +159,7 @@
         }
 
         .tile .name {
-            font-size: clamp(16px, 1.8vw, 36px);
+            font-size: clamp(13px, 1.4vw, 26px);
             font-weight: 900;
             letter-spacing: 0.02em;
             color: var(--muted);
@@ -170,7 +178,7 @@
         }
 
         .tile .status {
-            font-size: clamp(12px, 1.2vw, 26px);
+            font-size: clamp(10px, 1vw, 18px);
             font-weight: 800;
             color: var(--muted);
             text-transform: uppercase;
@@ -179,25 +187,71 @@
 
         .tile .elapsed {
             position: absolute;
-            bottom: 8px;
-            right: 12px;
-            font-size: clamp(12px, 1.2vw, 24px);
+            bottom: 4px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: clamp(10px, 1vw, 16px);
             font-weight: 800;
             color: var(--muted);
             font-variant-numeric: tabular-nums;
         }
 
         /* ----- machine modes ----- */
+        /* Shared layout for every "occupied" state (running/break/maintenance):
+           machine name on the left, the state's headline value on the right. */
+        .tile.running,
+        .tile.brk,
+        .tile.maint {
+            display: grid;
+            grid-template-columns: auto 1fr;
+            grid-template-rows: auto auto;
+            align-items: center;
+            align-content: center;
+            justify-items: center;
+            column-gap: 1vw;
+            row-gap: 0.2vh;
+            padding: 0 1vw;
+        }
+
         .tile.running {
             border-color: #1E4733;
         }
 
+        .tile.running .name,
+        .tile.brk .name,
+        .tile.maint .name {
+            grid-column: 1;
+            grid-row: 1 / -1;
+            justify-self: start;
+            text-align: left;
+            font-size: clamp(22px, 3vw, 50px);
+        }
+
         .tile.running .seb {
+            grid-column: 2;
+            grid-row: 1 / -1;
             display: block;
         }
 
+        /* Pulled out of the grid so it sits beside .elapsed on the same
+           bottom strip, freeing the rest of the column for a bigger .seb. */
         .tile.running .status {
+            position: absolute;
+            bottom: 4px;
+            right: 50%;
+            padding-right: 4px;
+            text-align: right;
             color: var(--green);
+            font-size: clamp(8px, 0.75vw, 13px);
+            letter-spacing: 0.02em;
+            white-space: nowrap;
+        }
+
+        .tile.running .elapsed {
+            left: 50%;
+            transform: none;
+            padding-left: 4px;
+            text-align: left;
         }
 
         .tile.idle {
@@ -250,12 +304,15 @@
             }
         }
 
-        /* small 背番号 (bottom-left, aligned with the elapsed timer) */
+        /* small 背番号, paired with .elapsed on the same bottom strip
+           (mirrors the running-state status+elapsed pairing). */
         .seb-mini {
             position: absolute;
-            bottom: 8px;
-            left: 12px;
-            font-size: clamp(12px, 1.2vw, 24px);
+            bottom: 4px;
+            right: 50%;
+            padding-right: 4px;
+            text-align: right;
+            font-size: clamp(8px, 0.75vw, 13px);
             font-weight: 800;
             letter-spacing: 0.02em;
             font-variant-numeric: tabular-nums;
@@ -270,6 +327,14 @@
         .tile.maint .seb-mini {
             display: block;
             color: #FCD980;
+        }
+
+        .tile.brk .elapsed,
+        .tile.maint .elapsed {
+            left: 50%;
+            transform: none;
+            padding-left: 4px;
+            text-align: left;
         }
 
         /* calling */
@@ -350,7 +415,7 @@
         /* Big full-tile rank shown while flipping (see .grid.flip below) */
         .big-rank {
             display: none;
-            font-size: clamp(56px, 8vw, 200px);
+            font-size: clamp(40px, 6vw, 140px);
             font-weight: 900;
             color: #fff;
             line-height: 0.9;
@@ -441,21 +506,23 @@
             align-items: center;
             justify-content: center;
             width: 100%;
-            gap: 2vh;
+            gap: 1.2vh;
         }
 
         .type-display>div {
-            font-size: clamp(40px, 6vw, 110px);
+            font-size: clamp(28px, 4.5vw, 80px);
             font-weight: 900;
             color: #fff;
             line-height: 0.9;
             text-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
         }
 
-        /* Big full-card mode word (休憩中 / 整備中) — always shown on break/
-           maintenance tiles (the 背番号 sits small at the bottom-left). */
+        /* Big mode word (休憩中 / 整備中) — sits in the same right-hand column
+           as .seb does for running tiles (the 背番号 pairs with .elapsed below). */
         .big-mode {
             display: none;
+            grid-column: 2;
+            grid-row: 1 / -1;
             font-weight: 900;
             line-height: 0.95;
             text-align: center;
@@ -835,13 +902,17 @@
         const SERVER = params.get('server') || serverURL; // ?server= override for local testing
 
         // Per-factory machine roster (mirrors chooseMachine.html). Office/entrance ignored.
+        // Row-major: 6 rows x 5 columns (2 tile cols, GAP col, 2 tile cols).
+        // GAP marks the vertical divider and is never auto-filled with new machines;
+        // SPACER is a blank filler cell that CAN be claimed when a new machine appears.
         const FACTORY_MACHINES = {
             '小瀬': [
-                'OZNC01', 'OZNC03', 'OZNC05', 'OZNC07', 'OZNC09', 'OZNC18',
-                'OZNC02', 'OZNC04', 'OZNC06', 'OZNC08', 'OZNC10', 'OZNC17',
-                'ROW_SPACER',
-                'OZNC11', 'OZNC13', 'OZNC15', 'OZNC16', 'SPACER', 'SPACER',
-                'OZNC12', 'OZNC14', 'OZMANAS', 'SPACER', 'SPACER', 'SPACER'
+                'OZNC01', 'OZNC02', 'GAP', 'OZNC11', 'OZNC12',
+                'OZNC03', 'OZNC04', 'GAP', 'OZNC13', 'OZNC14',
+                'OZNC05', 'OZNC06', 'GAP', 'OZNC15', 'OZMANAS',
+                'OZNC07', 'OZNC08', 'GAP', 'OZNC16', 'SPACER',
+                'OZNC09', 'OZNC10', 'GAP', 'SPACER', 'SPACER',
+                'OZNC18', 'OZNC17', 'GAP', 'SPACER', 'SPACER'
             ]
         };
 
@@ -857,27 +928,16 @@
         let activeSince = new Map();          // machine -> call start (calling wait timer)
         const machineState = new Map();       // machine -> { sebanggo, hinban, mode, since }
 
-        function chooseColumns(n) {
-            if (n <= 4) return n || 1;
-            if (n <= 6) return 3;
-            if (n <= 12) return 4;
-            if (n <= 20) return 5;
-            return 6;
-        }
+        // Display-only shortening — the server/roster still identify machines by
+        // their full equipment ID (e.g. "OZNC04"); only the on-screen label drops
+        // the "OZ" prefix to free up cell width (e.g. "NC04").
+        function displayLabel(m) { return String(m).replace(/^OZ/, ''); }
 
         function renderRoster() {
             grid.innerHTML = '';
             tileByMachine.clear();
-            const cols = chooseColumns(roster.length);
-            grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
             roster.forEach(m => {
-                if (m === 'ROW_SPACER') {
-                    const spacer = document.createElement('div');
-                    spacer.style.gridColumn = '1 / -1';
-                    grid.appendChild(spacer);
-                    return;
-                }
-                if (m === 'SPACER') {
+                if (m === 'GAP' || m === 'SPACER') {
                     const spacer = document.createElement('div');
                     grid.appendChild(spacer);
                     return;
@@ -886,7 +946,7 @@
                 tile.className = 'tile';
                 tile.dataset.machine = m;
                 tile.innerHTML =
-                    '<div class="name">' + m + '</div>' +
+                    '<div class="name">' + displayLabel(m) + '</div>' +
                     '<div class="big-rank"></div>' +
                     '<div class="type-display"></div>' +
                     '<div class="seb"></div>' +
@@ -1048,15 +1108,34 @@
         }, 1000);
 
         // Size text as large as fits on one line (empirical width factor for the bold font).
-        function fitText(el, text, w, cap) {
+        function fitText(el, text, w, h, cap) {
             if (!el) return;
             const chars = Math.max(1, String(text || '').length);
-            const size = Math.max(20, Math.min(cap, Math.floor((w - 24) / (chars * 0.82))));
+            const widthFit = Math.floor((w - 24) / (chars * 0.82));
+            const heightFit = Math.floor(h * 0.6);
+            const size = Math.max(20, Math.min(cap, widthFit, heightFit));
             el.style.fontSize = size + 'px';
         }
-        function fitCallingName(tile, machine) { fitText(tile.querySelector('.name'), machine, tile.clientWidth || 300, 110); }
-        function fitSeb(tile, seb) { fitText(tile.querySelector('.seb'), seb, tile.clientWidth || 300, 96); }
-        function fitMatSeb(tile, seb) { fitText(tile.querySelector('.mat-seb'), seb, tile.clientWidth || 300, 96); }
+        function fitCallingName(tile, machine) { fitText(tile.querySelector('.name'), displayLabel(machine), tile.clientWidth || 300, tile.clientHeight || 150, 110); }
+        // Running/break/maintenance tiles are a 2-column grid (name | value) — the
+        // value (seb / big-mode) must fit the second column's actual width, not
+        // the whole tile.
+        function isSplitLayoutTile(tile) {
+            return tile.classList.contains('running') || tile.classList.contains('brk') || tile.classList.contains('maint');
+        }
+        function valueColumnWidth(tile) {
+            if (!isSplitLayoutTile(tile)) return tile.clientWidth || 300;
+            const cols = getComputedStyle(tile).gridTemplateColumns.split(' ').map(parseFloat);
+            return (cols.length === 2 && !isNaN(cols[1])) ? cols[1] : (tile.clientWidth || 300);
+        }
+        // These tiles pack a status/seb-mini + elapsed pair into an absolute
+        // bottom strip, so the big value only gets ~85% of the column height.
+        function valueColumnHeight(tile) {
+            const h = tile.clientHeight || 150;
+            return isSplitLayoutTile(tile) ? h * 0.85 : h;
+        }
+        function fitSeb(tile, seb) { fitText(tile.querySelector('.seb'), seb, valueColumnWidth(tile), valueColumnHeight(tile), 96); }
+        function fitMatSeb(tile, seb) { fitText(tile.querySelector('.mat-seb'), seb, valueColumnWidth(tile), tile.clientHeight || 150, 96); }
 
         window.addEventListener('resize', () => {
             tileByMachine.forEach((tile, machine) => refreshTile(machine));
@@ -1154,7 +1233,7 @@
                 if (mode === 'break' || mode === 'maintenance') {
                     const word = mode === 'break' ? '休憩中' : '整備中';
                     bigMode.textContent = word;
-                    fitText(bigMode, word, tile.clientWidth || 300, 96);
+                    fitText(bigMode, word, valueColumnWidth(tile), valueColumnHeight(tile), 96);
                     sebMini.textContent = ms.sebanggo || '';
                 } else {
                     bigMode.textContent = '';
