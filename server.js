@@ -31755,6 +31755,8 @@ app.delete('/api/shisaku-request/:id', async (req, res) => {
   }
 });
 
+require('./firstFactoryRoutes')(app, client);
+
 app.listen(port, () => {
   console.log(`✅ Combined server is running at http://localhost:${port}`);
   console.log(`🌐 GEN CSV Download available at: http://localhost:${port}/gen-automated`);
