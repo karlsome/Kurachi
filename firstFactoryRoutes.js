@@ -160,10 +160,15 @@ module.exports = function(app, client) {
         // Let's assume Hinban is in one of the first few columns (A, B, C, D)
         // Usually, complex headers might merge cells. We'll search columns 0 to 3.
         let hinbanCandidate = '';
-        for (let c = 0; c < 4; c++) {
-          if (row[c] && String(row[c]).trim().length > 5 && String(row[c]).includes('/')) {
-            hinbanCandidate = String(row[c]).trim();
-            break;
+        const allowedPrefixes = ['C13', 'C12', 'ATU', 'AKF', 'ANU', 'CUS'];
+        
+        // Since all hinbans are strictly in Column B (index 1), we only check row[1]
+        const valB = String(row[1] || '').trim();
+        if (valB.length > 5 && allowedPrefixes.some(prefix => valB.startsWith(prefix))) {
+          hinbanCandidate = valB;
+          // Debug log for the specific C13 to help verify in the terminal
+          if (hinbanCandidate.includes('C13/3D1Z9DG3D')) {
+             console.log(`Found missing hinban at row ${r + 1}: ${hinbanCandidate}`);
           }
         }
 
@@ -171,6 +176,7 @@ module.exports = function(app, client) {
           if (currentBlock) {
             parsedData.push(currentBlock);
           }
+          
           currentBlock = {
             id: new ObjectId().toString(),
             hinban: hinbanCandidate,
@@ -189,11 +195,13 @@ module.exports = function(app, client) {
           if (rowLabel.includes('受注')) {
             // Days 1-31 are in F to AJ (index 5 to 35)
             for (let i = 0; i < 31; i++) {
-              currentBlock.orders[i] = Number(row[5 + i]) || 0;
+              const val = Number(row[5 + i]) || 0;
+              currentBlock.orders[i] = Number(val.toFixed(1));
             }
           } else if (rowLabel.includes('生産')) {
             for (let i = 0; i < 31; i++) {
-              currentBlock.production[i] = Number(row[5 + i]) || 0;
+              const val = Number(row[5 + i]) || 0;
+              currentBlock.production[i] = Number(val.toFixed(1));
             }
           }
         }
