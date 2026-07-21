@@ -35,32 +35,19 @@ module.exports = function(app, client) {
 
   app.get('/api/production/schedule', async (req, res) => {
     try {
+      const month = req.query.month || '2026-07';
       const db = client.db('Sasaki_Coating_MasterDB');
       const collection = db.collection('firstFactoryProduction');
       
       const submittedDb = client.db('submittedDB');
       const scheduleCollection = submittedDb.collection('firstFactorySchedule');
 
-      // Fetch live parsed data
-      const liveData = await collection.find({}).toArray();
-      // Fetch user's saved schedule order
-      const savedSchedule = await scheduleCollection.findOne({ type: 'currentSchedule' });
-
-      // Merge sort order if it exists
-      if (savedSchedule && savedSchedule.scheduleOrder && savedSchedule.scheduleOrder.length > 0) {
-        const orderMap = new Map();
-        savedSchedule.scheduleOrder.forEach((hinban, index) => {
-          orderMap.set(hinban, index);
-        });
-
-        liveData.sort((a, b) => {
-          const indexA = orderMap.has(a.hinban) ? orderMap.get(a.hinban) : 999999;
-          const indexB = orderMap.has(b.hinban) ? orderMap.get(b.hinban) : 999999;
-          return indexA - indexB;
-        });
-      }
+      // Fetch live parsed data for the month
+      const liveData = await collection.find({ month }).toArray();
+      // Fetch user's saved daily schedules for the month
+      const savedSchedules = await scheduleCollection.find({ type: 'dailySchedule', month }).toArray();
       
-      res.json({ success: true, data: liveData });
+      res.json({ success: true, data: liveData, schedules: savedSchedules });
     } catch (error) {
       console.error('Error fetching schedule:', error);
       res.status(500).json({ error: 'Failed to fetch schedule' });
@@ -69,13 +56,17 @@ module.exports = function(app, client) {
 
   app.post('/api/production/schedule', async (req, res) => {
     try {
-      const { scheduleOrder } = req.body;
+      const { scheduleOrder, month, date } = req.body;
+      if (!month || date === undefined) {
+        return res.status(400).json({ success: false, message: 'month and date are required' });
+      }
+
       const submittedDb = client.db('submittedDB');
       const scheduleCollection = submittedDb.collection('firstFactorySchedule');
 
       await scheduleCollection.updateOne(
-        { type: 'currentSchedule' },
-        { $set: { type: 'currentSchedule', scheduleOrder, updatedAt: new Date() } },
+        { type: 'dailySchedule', month, date: Number(date) },
+        { $set: { type: 'dailySchedule', month, date: Number(date), scheduleOrder, updatedAt: new Date() } },
         { upsert: true }
       );
 
@@ -152,6 +143,7 @@ module.exports = function(app, client) {
 
       let parsedData = [];
       let currentBlock = null;
+      const requestMonth = req.body.month || '2026-07';
 
       // 4. Algorithm to detect Hinban blocks and 4 rows
       for (let r = 0; r < rows.length; r++) {
@@ -179,6 +171,7 @@ module.exports = function(app, client) {
           
           currentBlock = {
             id: new ObjectId().toString(),
+            month: requestMonth,
             hinban: hinbanCandidate,
             orders: Array(31).fill(0),
             production: Array(31).fill(0)
@@ -219,8 +212,8 @@ module.exports = function(app, client) {
         const db = client.db('Sasaki_Coating_MasterDB');
         const collection = db.collection('firstFactoryProduction');
         
-        // Clear old data and insert new (or you can do upserts by hinban)
-        await collection.deleteMany({});
+        // Clear old data for this month and insert new
+        await collection.deleteMany({ month: requestMonth });
         await collection.insertMany(parsedData);
         
         res.json({ success: true, message: `Successfully synced ${parsedData.length} hinbans`, data: parsedData });
