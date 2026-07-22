@@ -61,7 +61,7 @@ module.exports = function(app, client) {
             workTime = process2010['作業時間'] || 0;
          }
          
-         masterMap[master['品番']] = { packCount, workTime };
+         masterMap[master['品番']] = { packCount, workTime, rawMaster: master };
       });
       
       const enrichedData = liveData.map(item => {
