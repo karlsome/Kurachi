@@ -44,10 +44,35 @@ module.exports = function(app, client) {
 
       // Fetch live parsed data for the month
       const liveData = await collection.find({ month }).toArray();
+
+      // Enrich with material master data
+      const hinbans = liveData.map(item => item.hinban);
+      const masterCollection = db.collection('materialMasterDB3');
+      const masterData = await masterCollection.find({ "品番": { $in: hinbans } }).toArray();
+      
+      const masterMap = {};
+      masterData.forEach(master => {
+         const packCount = master['品目マスタ']?.['梱包数'] || 0;
+         let workTime = 0;
+         
+         const bomItems = master['BOM'] || [];
+         const process2010 = bomItems.find(b => b['工程コード'] === 2010);
+         if (process2010) {
+            workTime = process2010['作業時間'] || 0;
+         }
+         
+         masterMap[master['品番']] = { packCount, workTime };
+      });
+      
+      const enrichedData = liveData.map(item => {
+         const masterInfo = masterMap[item.hinban] || { packCount: 0, workTime: 0 };
+         return { ...item, materialInfo: masterInfo };
+      });
+
       // Fetch user's saved daily schedules for the month
       const savedSchedules = await scheduleCollection.find({ type: 'dailySchedule', month }).toArray();
       
-      res.json({ success: true, data: liveData, schedules: savedSchedules });
+      res.json({ success: true, data: enrichedData, schedules: savedSchedules });
     } catch (error) {
       console.error('Error fetching schedule:', error);
       res.status(500).json({ error: 'Failed to fetch schedule' });
@@ -56,7 +81,7 @@ module.exports = function(app, client) {
 
   app.post('/api/production/schedule', async (req, res) => {
     try {
-      const { scheduleOrder, month, date } = req.body;
+      const { scheduleOrder, startTime, month, date } = req.body;
       if (!month || date === undefined) {
         return res.status(400).json({ success: false, message: 'month and date are required' });
       }
@@ -66,7 +91,7 @@ module.exports = function(app, client) {
 
       await scheduleCollection.updateOne(
         { type: 'dailySchedule', month, date: Number(date) },
-        { $set: { type: 'dailySchedule', month, date: Number(date), scheduleOrder, updatedAt: new Date() } },
+        { $set: { type: 'dailySchedule', month, date: Number(date), scheduleOrder, startTime, updatedAt: new Date() } },
         { upsert: true }
       );
 
