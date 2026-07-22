@@ -93,6 +93,9 @@ module.exports = function(app, client) {
         return res.status(400).json({ success: false, message: 'Please provide the fileId of the Excel file.' });
       }
 
+      // Based on the user's requirement, we include any 品番 that is exactly 20 characters long
+      // so we don't need to fetch from the DB anymore.
+
       const drive = getDriveAuth();
       const tempFilePath = path.join(os.tmpdir(), `temp_excel_${Date.now()}.xls`);
 
@@ -149,33 +152,30 @@ module.exports = function(app, client) {
       for (let r = 0; r < rows.length; r++) {
         const row = rows[r];
         
-        // Let's assume Hinban is in one of the first few columns (A, B, C, D)
-        // Usually, complex headers might merge cells. We'll search columns 0 to 3.
         let hinbanCandidate = '';
-        const allowedPrefixes = ['C13', 'C12', 'ATU', 'AKF', 'ANU', 'CUS'];
         
         // Since all hinbans are strictly in Column B (index 1), we only check row[1]
         const valB = String(row[1] || '').trim();
-        if (valB.length > 5 && allowedPrefixes.some(prefix => valB.startsWith(prefix))) {
-          hinbanCandidate = valB;
-          // Debug log for the specific C13 to help verify in the terminal
-          if (hinbanCandidate.includes('C13/3D1Z9DG3D')) {
-             console.log(`Found missing hinban at row ${r + 1}: ${hinbanCandidate}`);
-          }
-        }
+        
+        // Detect a hinban row using a regex (uppercase letters, numbers, slash, dash, asterisk, dot)
+        const isHinbanRow = valB.length > 5 && /^[A-Z0-9\/\*\-\.]+$/.test(valB);
 
-        if (hinbanCandidate) {
+        if (isHinbanRow) {
           if (currentBlock) {
             parsedData.push(currentBlock);
+            currentBlock = null; // Reset block to prevent data bleeding from ignored hinbans
           }
           
-          currentBlock = {
-            id: new ObjectId().toString(),
-            month: requestMonth,
-            hinban: hinbanCandidate,
-            orders: Array(31).fill(0),
-            production: Array(31).fill(0)
-          };
+          // Check if valB is exactly 20 characters long
+          if (valB.length === 20) {
+            currentBlock = {
+              id: new ObjectId().toString(),
+              month: requestMonth,
+              hinban: valB,
+              orders: Array(31).fill(0),
+              production: Array(31).fill(0)
+            };
+          }
         }
 
         if (currentBlock) {
