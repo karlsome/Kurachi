@@ -6666,6 +6666,7 @@ app.post('/api/iot-device-names/save', async (req, res) => {
   const hasName = Object.prototype.hasOwnProperty.call(req.body || {}, 'name');
   const hasImageURLs = Object.prototype.hasOwnProperty.call(req.body || {}, 'imageURLs');
   const hasUsername = Object.prototype.hasOwnProperty.call(req.body || {}, 'username');
+  const hasOffset = Object.prototype.hasOwnProperty.call(req.body || {}, 'offset');
 
   if (!normalizedDeviceId || !normalizedFactoryName) {
     return res.status(400).json({
@@ -6703,6 +6704,13 @@ app.post('/api/iot-device-names/save', async (req, res) => {
 
     if (hasUsername) {
       updateDoc.$set.username = normalizeIotDeviceNameValue(req.body.username);
+    }
+
+    if (hasOffset) {
+      const parsedOffset = Number(req.body.offset);
+      updateDoc.$set.offset = Number.isNaN(parsedOffset) ? 0 : parsedOffset;
+    } else {
+      updateDoc.$setOnInsert.offset = 0;
     }
 
     if (hasImageURLs) {
