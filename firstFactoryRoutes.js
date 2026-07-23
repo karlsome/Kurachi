@@ -198,7 +198,8 @@ module.exports = function(app, client) {
               month: requestMonth,
               hinban: valB,
               orders: Array(31).fill(0),
-              production: Array(31).fill(0)
+              production: Array(31).fill(0),
+              syncedAt: new Date()
             };
           }
         }
