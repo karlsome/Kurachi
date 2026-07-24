@@ -1684,6 +1684,49 @@ app.get("/api/product-pdfs/:sebanggo", async (req, res) => {
   }
 });
 
+// Check for existing Material PDFs before upload
+app.post("/api/check-existing-material-pdfs", async (req, res) => {
+  try {
+    const { pdfType, 図番Array } = req.body;
+    
+    if (!pdfType || !図番Array) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    await ensureMaterialPdfIndexes();
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const materialPDFsDB = database.collection("materialPDFsDB");
+
+    // Check which materials already have PDFs of this type
+    const existingPDFs = await materialPDFsDB.find({
+      pdfType,
+      図番Array: { $in: 図番Array },
+      isActive: true
+    }).project({ 図番Array: 1, uploadedAt: 1, uploadedBy: 1, fileName: 1 }).toArray();
+
+    // Build conflict map
+    const conflictMap = {};
+    existingPDFs.forEach(pdf => {
+      pdf.図番Array.forEach(zuban => {
+        if (図番Array.includes(zuban)) {
+          if (!conflictMap[zuban]) conflictMap[zuban] = [];
+          conflictMap[zuban].push({
+            fileName: pdf.fileName,
+            uploadedAt: pdf.uploadedAt,
+            uploadedBy: pdf.uploadedBy
+          });
+        }
+      });
+    });
+
+    res.json({ conflicts: conflictMap });
+  } catch (error) {
+    console.error("❌ Error checking existing material PDFs:", error);
+    res.status(500).json({ error: "Error checking existing PDFs", details: error.message });
+  }
+});
+
 // Upload Material PDF File
 app.post("/api/upload-material-pdf", async (req, res) => {
   try {
