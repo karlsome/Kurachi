@@ -851,13 +851,13 @@ setInterval(() => {
 // API endpoint to broadcast scan data to specific machine(s)
 // Supports both single machines (OZNC09) and grouped machines (OZNC04,OZNC06)
 app.post("/api/broadcast-scan", async (req, res) => {
-  const { machineId, sebanggo, hinban, timestamp, additionalData } = req.body;
+  const { machineId, sebanggo, hinban, zuban, timestamp, additionalData } = req.body;
   
-  // Allow empty sebanggo only if action is 'clear'
+  // Allow empty sebanggo/zuban only if action is 'clear'
   const isClearAction = additionalData?.action === 'clear';
   
-  if (!machineId || (!sebanggo && !isClearAction)) {
-    return res.status(400).json({ error: "machineId and sebanggo are required (unless action is 'clear')" });
+  if (!machineId || (!sebanggo && !zuban && !isClearAction)) {
+    return res.status(400).json({ error: "machineId and sebanggo/zuban are required (unless action is 'clear')" });
   }
   
   // Parse machine IDs: handle both "OZNC09" and "OZNC04,OZNC06"
@@ -879,6 +879,7 @@ app.post("/api/broadcast-scan", async (req, res) => {
       type: 'scan',
       machineId: normalizedSessionKey,
       sebanggo,
+      zuban,
       hinban: hinban || '',
       timestamp: timestamp || new Date().toISOString(),
       additionalData: additionalData || {}
@@ -888,12 +889,12 @@ app.post("/api/broadcast-scan", async (req, res) => {
     if (isClearAction) {
       machineLastScan.delete(normalizedMachineId);
       console.log(`🗑️ Cleared last scan data for ${normalizedMachineId}`);
-    } else if (sebanggo && hinban) {
-      // Only store if we have valid sebanggo and hinban
+    } else if ((sebanggo || zuban) && hinban) {
+      // Only store if we have valid sebanggo/zuban and hinban
       machineLastScan.set(normalizedMachineId, scanData);
-      console.log(`💾 Stored last scan for ${normalizedMachineId}:`, { sebanggo, hinban });
+      console.log(`💾 Stored last scan for ${normalizedMachineId}:`, { sebanggo, zuban, hinban });
     } else {
-      console.log(`⚠️ Skipping storage for ${normalizedMachineId} - missing sebanggo or hinban`);
+      console.log(`⚠️ Skipping storage for ${normalizedMachineId} - missing sebanggo/zuban or hinban`);
     }
     
     // Broadcast to all clients listening to this specific machine
@@ -901,7 +902,7 @@ app.post("/api/broadcast-scan", async (req, res) => {
   });
   
   // ✅ Insert log to tabletLogDB in parallel with SSE broadcast
-  if (sebanggo && hinban) {
+  if ((sebanggo || zuban) && hinban) {
     try {
       await client.connect();
       const database = client.db("submittedDB");
@@ -925,6 +926,7 @@ app.post("/api/broadcast-scan", async (req, res) => {
         const logEntry = {
           sessionID: sessionID,
           背番号: sebanggo,
+          図番: zuban,
           品番: hinban,
           工場: 工場,
           設備: normalizedMachineId,
@@ -1376,6 +1378,30 @@ ensureProductPdfIndexes().catch((error) => {
   console.error("❌ Failed to ensure productPDFsDB indexes:", error);
 });
 
+let materialPdfIndexesEnsured = false;
+
+async function ensureMaterialPdfIndexes() {
+  if (materialPdfIndexesEnsured) return;
+
+  await client.connect();
+  const database = client.db(DB_NAME);
+  const materialPDFsDB = database.collection("materialPDFsDB");
+
+  await materialPDFsDB.createIndexes([
+    { key: { pdfType: 1, isActive: 1, uploadedAt: -1 } },
+    { key: { pdfType: 1, "図番Array": 1, isActive: 1 } },
+    { key: { "図番Array": 1, isActive: 1 } },
+    { key: { isActive: 1, deletedAt: -1 } }
+  ]);
+
+  materialPdfIndexesEnsured = true;
+  console.log("✅ materialPDFsDB indexes ensured");
+}
+
+ensureMaterialPdfIndexes().catch((error) => {
+  console.error("❌ Failed to ensure materialPDFsDB indexes:", error);
+});
+
 // Check for existing PDFs before upload
 app.post("/api/check-existing-pdfs", async (req, res) => {
   try {
@@ -1654,6 +1680,199 @@ app.get("/api/product-pdfs/:sebanggo", async (req, res) => {
 
   } catch (error) {
     console.error("❌ Error fetching product PDFs:", error);
+    res.status(500).json({ error: "Error fetching PDFs", details: error.message });
+  }
+});
+
+// Check for existing Material PDFs before upload
+app.post("/api/check-existing-material-pdfs", async (req, res) => {
+  try {
+    const { pdfType, 図番Array } = req.body;
+    
+    if (!pdfType || !図番Array) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    await ensureMaterialPdfIndexes();
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const materialPDFsDB = database.collection("materialPDFsDB");
+
+    // Check which materials already have PDFs of this type
+    const existingPDFs = await materialPDFsDB.find({
+      pdfType,
+      図番Array: { $in: 図番Array },
+      isActive: true
+    }).project({ 図番Array: 1, uploadedAt: 1, uploadedBy: 1, fileName: 1 }).toArray();
+
+    // Build conflict map
+    const conflictMap = {};
+    existingPDFs.forEach(pdf => {
+      pdf.図番Array.forEach(zuban => {
+        if (図番Array.includes(zuban)) {
+          if (!conflictMap[zuban]) conflictMap[zuban] = [];
+          conflictMap[zuban].push({
+            fileName: pdf.fileName,
+            uploadedAt: pdf.uploadedAt,
+            uploadedBy: pdf.uploadedBy
+          });
+        }
+      });
+    });
+
+    res.json({ conflicts: conflictMap });
+  } catch (error) {
+    console.error("❌ Error checking existing material PDFs:", error);
+    res.status(500).json({ error: "Error checking existing PDFs", details: error.message });
+  }
+});
+
+// Upload Material PDF File
+app.post("/api/upload-material-pdf", async (req, res) => {
+  try {
+    const { pdfType, 図番Array, pdfBase64, fileName, uploadedBy, resolutions, excludedMaterialIds = [] } = req.body;
+    
+    if (!pdfType || !図番Array || !pdfBase64 || !fileName) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    const validTypes = ["作業条件表", "その他1", "その他2"];
+    if (!validTypes.includes(pdfType)) {
+      return res.status(400).json({ error: "Invalid PDF type" });
+    }
+
+    await ensureMaterialPdfIndexes();
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const materialPDFsDB = database.collection("materialPDFsDB");
+    
+    // Convert base64 to buffer
+    const pdfBuffer = Buffer.from(pdfBase64.split(',')[1] || pdfBase64, 'base64');
+    const timestamp = Date.now();
+    const storageFileName = `${pdfType}_${timestamp}_${fileName}`;
+    const pdfFile = admin.storage().bucket().file(`materialPDFs/${pdfType}/${storageFileName}`);
+    
+    await pdfFile.save(pdfBuffer, {
+      metadata: {
+        contentType: 'application/pdf',
+        metadata: { firebaseStorageDownloadTokens: 'masterDBToken69' }
+      },
+      public: true
+    });
+
+    const pdfURL = `https://storage.googleapis.com/${pdfFile.bucket.name}/${encodeURIComponent(pdfFile.name)}?alt=media&token=masterDBToken69`;
+
+    const newDocument = {
+      pdfType,
+      図番Array,
+      fileName,
+      pdfURL,
+      imageURL: null,
+      uploadedBy,
+      uploadedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      isActive: true,
+      excludedMaterialIds,
+    };
+
+    const result = await materialPDFsDB.insertOne(newDocument);
+    _invalidateMaterialPDFsCache('upload-material-pdf');
+
+    res.status(200).json({
+      success: true,
+      documentId: result.insertedId,
+      message: "Material PDF uploaded successfully",
+    });
+
+  } catch (error) {
+    console.error("❌ Error uploading material PDF:", error);
+    res.status(500).json({ error: "Error uploading PDF", details: error.message });
+  }
+});
+
+// Upload converted image for Material PDF
+app.post("/api/upload-material-pdf-image", async (req, res) => {
+  try {
+    const { documentId, imageBase64, pdfType } = req.body;
+    
+    if (!documentId || !imageBase64 || !pdfType) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    await ensureMaterialPdfIndexes();
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const materialPDFsDB = database.collection("materialPDFsDB");
+
+    const imageBuffer = Buffer.from(imageBase64.split(',')[1] || imageBase64, 'base64');
+    const timestamp = Date.now();
+    const imageFileName = `${pdfType}_${documentId}_${timestamp}.jpg`;
+    const imageFile = admin.storage().bucket().file(`materialPDFs/images/${pdfType}/${imageFileName}`);
+    
+    await imageFile.save(imageBuffer, {
+      metadata: {
+        contentType: 'image/jpeg',
+        metadata: { firebaseStorageDownloadTokens: 'masterDBToken69' }
+      },
+      public: true
+    });
+
+    const imageURL = `https://storage.googleapis.com/${imageFile.bucket.name}/${encodeURIComponent(imageFile.name)}?alt=media&token=masterDBToken69`;
+
+    await materialPDFsDB.updateOne(
+      { _id: new ObjectId(documentId) },
+      { $set: { imageURL, updatedAt: new Date().toISOString() } }
+    );
+
+    _invalidateMaterialPDFsCache('upload-material-pdf-image');
+
+    res.status(200).json({
+      success: true,
+      message: "Image uploaded successfully",
+      imageURL
+    });
+
+  } catch (error) {
+    console.error("❌ Error uploading material PDF image:", error);
+    res.status(500).json({ error: "Error uploading image", details: error.message });
+  }
+});
+
+// Get PDFs by 図番
+app.get("/api/material-pdfs/:zuban", async (req, res) => {
+  try {
+    const { zuban } = req.params;
+
+    await ensureMaterialPdfIndexes();
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const materialPDFsDB = database.collection("materialPDFsDB");
+
+    // Find all active PDFs that include this 図番
+    const pdfs = await materialPDFsDB.find({
+      図番Array: zuban,
+      isActive: true
+    }).project({
+      pdfType: 1,
+      図番Array: 1,
+      fileName: 1,
+      pdfURL: 1,
+      imageURL: 1,
+      uploadedBy: 1,
+      uploadedAt: 1
+    }).toArray();
+
+    // Organize by type
+    const result = {
+      作業条件表: pdfs.find(p => p.pdfType === "作業条件表") || null,
+      "その他1": pdfs.find(p => p.pdfType === "その他1") || null,
+      "その他2": pdfs.find(p => p.pdfType === "その他2") || null,
+    };
+
+    res.json(result);
+
+  } catch (error) {
+    console.error("❌ Error fetching material PDFs:", error);
     res.status(500).json({ error: "Error fetching PDFs", details: error.message });
   }
 });
@@ -2176,6 +2395,546 @@ async function cleanupOldTrash() {
 setInterval(cleanupOldTrash, 24 * 60 * 60 * 1000); // Every 24 hours
 // Run cleanup on server start
 cleanupOldTrash();
+
+
+// ==========================================
+// MATERIAL PDFS 
+// ==========================================
+// Get all PDFs by type
+app.get("/api/material-pdfs-by-type/:pdfType", async (req, res) => {
+  const { pdfType } = req.params;
+  const includeHinban = req.query.includeHinban === '1';
+  const searchQuery = String(req.query.q || '').trim();
+  const processFilter = String(req.query.model || '').trim();
+  const sortField = String(req.query.sortField || 'uploadedAt');
+  const sortDir = req.query.sortDir === 'asc' ? 1 : -1;
+  const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 25, 1), 200);
+
+  const _material_pdfCacheKey = `materialpdfs:${pdfType}:${page}:${limit}:${includeHinban}:${searchQuery}:${processFilter}:${sortField}:${sortDir}`;
+  let _material_pdfInflightResolve, _material_pdfInflightReject;
+
+  // Validate pdfType before touching cache
+  const validTypes = ["作業条件表", "その他1", "その他2"];
+  if (!validTypes.includes(pdfType)) {
+    return res.status(400).json({ error: "Invalid PDF type" });
+  }
+
+  // Cache HIT
+  const _material_pdfCached = _materialPDFsCache.get(_material_pdfCacheKey);
+  if (_material_pdfCached && (Date.now() - _material_pdfCached.ts) < _MASTER_DB_TTL) {
+    console.log(`📦 materialPDFs cache HIT: ${_material_pdfCacheKey}`);
+    return res.json(_material_pdfCached.data);
+  }
+
+  // Stampede guard
+  const _material_pdfExisting = _materialPDFsInflight.get(_material_pdfCacheKey);
+  if (_material_pdfExisting) {
+    const _r = await _material_pdfExisting.catch(() => null);
+    if (_r) return res.json(_r);
+  }
+  const _material_pdfInflightPromise = new Promise((resolve, reject) => { _material_pdfInflightResolve = resolve; _material_pdfInflightReject = reject; });
+  _materialPDFsInflight.set(_material_pdfCacheKey, _material_pdfInflightPromise);
+
+  try {
+    await ensureMaterialPdfIndexes();
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const materialPDFsDB = database.collection("materialPDFsDB");
+
+    const filter = { pdfType, isActive: true };
+    const skip = (page - 1) * limit;
+
+    const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const tokens = searchQuery ? searchQuery.split(/[\s,]+/).filter(Boolean) : [];
+    const regexes = tokens.map((token) => new RegExp(escapeRegex(token), "i"));
+
+    const needsLookup = includeHinban || regexes.length > 0 || Boolean(processFilter);
+    const sortMap = {
+      zuban: "図番Array",
+      hinban: "materialDocs.品番",
+      model: "materialDocs.工程コード",
+      fileName: "fileName",
+      uploader: "uploadedBy",
+      uploadedAt: "uploadedAt",
+      updatedAt: "updatedAt"
+    };
+
+    let sortKey = sortMap[sortField] || "uploadedAt";
+    if (!needsLookup && sortKey.startsWith("materialDocs")) {
+      sortKey = "uploadedAt";
+    }
+
+    const sortStage = { [sortKey]: sortDir };
+    let items = [];
+    let total = 0;
+
+    if (!needsLookup) {
+      const totalCount = await materialPDFsDB.countDocuments(filter);
+      total = totalCount;
+      items = await materialPDFsDB.find(filter)
+        .project({
+          pdfType: 1,
+          図番Array: 1,
+          fileName: 1,
+          pdfURL: 1,
+          imageURL: 1,
+          uploadedBy: 1,
+          uploadedAt: 1,
+          updatedAt: 1
+        })
+        .sort(sortStage)
+        .skip(skip)
+        .limit(limit)
+        .toArray();
+    } else {
+      const pipeline = [{ $match: filter }];
+
+      pipeline.push({
+        $lookup: {
+          from: "materialMasterDB3",
+          localField: "図番Array",
+          foreignField: "図番",
+          pipeline: [{ $project: { 図番: 1, 品番: 1, 工程コード: 1, _id: 1 } }],
+          as: "materialDocs"
+        }
+      });
+
+      // Filter out explicitly excluded materials
+      pipeline.push({
+        $addFields: {
+          materialDocs: {
+            $filter: {
+              input: "$materialDocs",
+              as: "doc",
+              cond: {
+                $not: {
+                  $in: [{ $toString: "$$doc._id" }, { $ifNull: ["$excludedMaterialIds", []] }]
+                }
+              }
+            }
+          }
+        }
+      });
+
+      if (processFilter) {
+        pipeline.push({ $match: { "materialDocs.工程コード": processFilter } });
+      }
+
+      if (regexes.length > 0) {
+        const orFilters = [];
+        regexes.forEach((regex) => {
+          orFilters.push({ fileName: regex });
+          orFilters.push({ uploadedBy: regex });
+          orFilters.push({ 図番Array: { $in: [regex] } });
+          orFilters.push({ "materialDocs.品番": regex });
+          orFilters.push({ "materialDocs.工程コード": regex });
+        });
+
+        pipeline.push({ $match: { $or: orFilters } });
+      }
+
+      pipeline.push({
+        $facet: {
+          items: [
+            { $sort: sortStage },
+            { $skip: skip },
+            { $limit: limit },
+            {
+              $project: {
+                pdfType: 1,
+                図番Array: 1,
+                fileName: 1,
+                pdfURL: 1,
+                imageURL: 1,
+                uploadedBy: 1,
+                uploadedAt: 1,
+                updatedAt: 1,
+                hinbanList: {
+                  $map: {
+                    input: "$materialDocs",
+                    as: "doc",
+                    in: { 図番: "$doc.図番", 品番: "$doc.品番" }
+                  }
+                },
+                processList: {
+                  $map: {
+                    input: "$materialDocs",
+                    as: "doc",
+                    in: "$doc.工程コード"
+                  }
+                }
+              }
+            }
+          ],
+          totalCount: [{ $count: "count" }]
+        }
+      });
+
+      const result = await materialPDFsDB.aggregate(pipeline).toArray();
+      items = result[0]?.items || [];
+      total = result[0]?.totalCount?.[0]?.count || 0;
+    }
+
+    const totalPages = Math.max(Math.ceil(total / limit), 1);
+
+    const _material_pdfResult = { items, page, limit, total, totalPages };
+    _materialPDFsCache.set(_material_pdfCacheKey, { ts: Date.now(), data: _material_pdfResult });
+    _materialPDFsInflight.delete(_material_pdfCacheKey);
+    if (_material_pdfInflightResolve) _material_pdfInflightResolve(_material_pdfResult);
+
+    res.json(_material_pdfResult);
+
+  } catch (error) {
+    _materialPDFsInflight.delete(_material_pdfCacheKey);
+    if (_material_pdfInflightReject) _material_pdfInflightReject(error);
+    console.error("❌ Error fetching PDFs by type:", error);
+    res.status(500).json({ error: "Error fetching PDFs", details: error.message });
+  }
+});
+
+// Delete PDF (soft delete - moved to trash)
+app.delete("/api/material-pdf/:documentId", async (req, res) => {
+  try {
+    const { documentId } = req.params;
+
+    await ensureMaterialPdfIndexes();
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const materialPDFsDB = database.collection("materialPDFsDB");
+
+    // Soft delete - move to trash
+    await materialPDFsDB.updateOne(
+      { _id: new ObjectId(documentId) },
+      { $set: { isActive: false, deletedAt: new Date().toISOString() } }
+    );
+
+    // Invalidate product-PDFs cache – document soft-deleted
+    _invalidateMaterialPDFsCache('material-pdf soft-delete');
+    console.log(`🗑️ PDF moved to trash: ${documentId}`);
+    res.json({ success: true, message: "PDF moved to trash" });
+
+  } catch (error) {
+    console.error("❌ Error deleting PDF:", error);
+    res.status(500).json({ error: "Error deleting PDF", details: error.message });
+  }
+});
+
+// Batch delete PDFs (soft delete to trash)
+app.post("/api/material-pdf-batch-delete", async (req, res) => {
+  try {
+    const { documentIds } = req.body;
+
+    if (!Array.isArray(documentIds) || documentIds.length === 0) {
+      return res.status(400).json({ error: "documentIds is required" });
+    }
+
+    await ensureMaterialPdfIndexes();
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const materialPDFsDB = database.collection("materialPDFsDB");
+
+    const objectIds = documentIds.map(id => new ObjectId(id));
+    const result = await materialPDFsDB.updateMany(
+      { _id: { $in: objectIds } },
+      { $set: { isActive: false, deletedAt: new Date().toISOString() } }
+    );
+
+    // Invalidate product-PDFs cache – batch soft-delete
+    _invalidateMaterialPDFsCache('material-pdf-batch-delete');
+    res.json({ success: true, modifiedCount: result.modifiedCount });
+  } catch (error) {
+    console.error("❌ Error batch deleting PDFs:", error);
+    res.status(500).json({ error: "Error batch deleting PDFs", details: error.message });
+  }
+});
+
+// Get trash items
+app.get("/api/material-pdfs-trash", async (req, res) => {
+  try {
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 25, 1), 200);
+
+    await ensureMaterialPdfIndexes();
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const materialPDFsDB = database.collection("materialPDFsDB");
+
+    const filter = { isActive: false };
+    const total = await materialPDFsDB.countDocuments(filter);
+    const totalPages = Math.max(Math.ceil(total / limit), 1);
+    const skip = (page - 1) * limit;
+
+    const items = await materialPDFsDB.find(filter)
+      .project({
+        pdfType: 1,
+        図番Array: 1,
+        fileName: 1,
+        pdfURL: 1,
+        imageURL: 1,
+        uploadedBy: 1,
+        uploadedAt: 1,
+        deletedAt: 1
+      })
+      .sort({ deletedAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .toArray();
+
+    res.json({
+      items,
+      page,
+      limit,
+      total,
+      totalPages
+    });
+
+  } catch (error) {
+    console.error("❌ Error fetching trash:", error);
+    res.status(500).json({ error: "Error fetching trash", details: error.message });
+  }
+});
+
+// Recover PDF from trash
+app.post("/api/material-pdf-recover/:documentId", async (req, res) => {
+  try {
+    const { documentId } = req.params;
+    
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const materialPDFsDB = database.collection("materialPDFsDB");
+
+    // Restore PDF
+    await materialPDFsDB.updateOne(
+      { _id: new ObjectId(documentId) },
+      { 
+        $set: { isActive: true },
+        $unset: { deletedAt: "" }
+      }
+    );
+
+    // Invalidate product-PDFs cache – document restored to active
+    _invalidateMaterialPDFsCache('material-pdf-recover');
+    console.log(`♻️ PDF recovered from trash: ${documentId}`);
+    res.json({ success: true, message: "PDF recovered successfully" });
+
+  } catch (error) {
+    console.error("❌ Error recovering PDF:", error);
+    res.status(500).json({ error: "Error recovering PDF", details: error.message });
+  }
+});
+
+// Permanently delete PDF (delete from MongoDB and Firebase)
+app.delete("/api/material-pdf-permanent/:documentId", async (req, res) => {
+  try {
+    const { documentId } = req.params;
+    
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const materialPDFsDB = database.collection("materialPDFsDB");
+
+    // Get PDF data to find Firebase file paths
+    const pdf = await materialPDFsDB.findOne({ _id: new ObjectId(documentId) });
+    
+    if (!pdf) {
+      return res.status(404).json({ error: "PDF not found" });
+    }
+
+    // Delete from Firebase Storage
+    const bucket = admin.storage().bucket();
+    
+    // Helper function to extract file path from Firebase URL
+    function extractFirebasePath(url) {
+      if (!url || typeof url !== 'string') return null;
+      
+      try {
+        // Remove query string first
+        const urlWithoutQuery = url.split('?')[0];
+        
+        // Handle format: https://storage.googleapis.com/bucket-name/path/to/file
+        if (urlWithoutQuery.includes('storage.googleapis.com/')) {
+          const parts = urlWithoutQuery.split('storage.googleapis.com/');
+          if (parts[1]) {
+            // Split by first slash to separate bucket from path
+            const pathParts = parts[1].split('/');
+            if (pathParts.length > 1) {
+              // Remove bucket name, keep the path
+              pathParts.shift();
+              return decodeURIComponent(pathParts.join('/'));
+            }
+          }
+        }
+        
+        // Handle firebasestorage.googleapis.com format with /o/
+        if (urlWithoutQuery.includes('/o/')) {
+          const parts = urlWithoutQuery.split('/o/');
+          if (parts[1]) {
+            return decodeURIComponent(parts[1]);
+          }
+        }
+        
+        // Handle direct path format: materialPDFs/originals/...
+        if (urlWithoutQuery.startsWith('materialPDFs/')) {
+          return urlWithoutQuery;
+        }
+        
+        return null;
+      } catch (error) {
+        console.error('Error parsing Firebase URL:', error);
+        return null;
+      }
+    }
+    
+    // Delete original PDF
+    if (pdf.pdfURL) {
+      try {
+        const pdfPath = extractFirebasePath(pdf.pdfURL);
+        if (pdfPath) {
+          await bucket.file(pdfPath).delete();
+          console.log(`🔥 Deleted original PDF from Firebase: ${pdfPath}`);
+        } else {
+          console.warn(`⚠️ Could not parse PDF URL: ${pdf.pdfURL}`);
+        }
+      } catch (error) {
+        console.warn(`⚠️ Could not delete original PDF: ${error.message}`);
+      }
+    } else {
+      console.log('📝 No PDF URL found, skipping original PDF deletion');
+    }
+    
+    // Delete converted image
+    if (pdf.imageURL) {
+      try {
+        const imagePath = extractFirebasePath(pdf.imageURL);
+        if (imagePath) {
+          await bucket.file(imagePath).delete();
+          console.log(`🔥 Deleted image from Firebase: ${imagePath}`);
+        } else {
+          console.warn(`⚠️ Could not parse image URL: ${pdf.imageURL}`);
+        }
+      } catch (error) {
+        console.warn(`⚠️ Could not delete image: ${error.message}`);
+      }
+    }
+
+    // Delete from MongoDB
+    await materialPDFsDB.deleteOne({ _id: new ObjectId(documentId) });
+
+    // Invalidate product-PDFs cache – document fully removed
+    _invalidateMaterialPDFsCache('material-pdf-permanent-delete');
+    console.log(`💀 PDF permanently deleted: ${documentId}`);
+    res.json({ success: true, message: "PDF permanently deleted from all locations" });
+
+  } catch (error) {
+    console.error("❌ Error permanently deleting PDF:", error);
+    res.status(500).json({ error: "Error permanently deleting PDF", details: error.message });
+  }
+});
+
+// Cleanup old trash items (PDFs deleted > 30 days ago)
+async function cleanupOldMaterialTrash() {
+  try {
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const materialPDFsDB = database.collection("materialPDFsDB");
+
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    // Find items deleted more than 30 days ago
+    const oldItems = await materialPDFsDB.find({
+      isActive: false,
+      deletedAt: { $lt: thirtyDaysAgo.toISOString() }
+    }).toArray();
+
+    console.log(`🧹 Found ${oldItems.length} items to permanently delete (>30 days old)`);
+
+    const bucket = admin.storage().bucket();
+    
+    // Helper function to extract file path from Firebase URL
+    function extractFirebasePath(url) {
+      if (!url || typeof url !== 'string') return null;
+      
+      try {
+        // Remove query string first
+        const urlWithoutQuery = url.split('?')[0];
+        
+        // Handle format: https://storage.googleapis.com/bucket-name/path/to/file
+        if (urlWithoutQuery.includes('storage.googleapis.com/')) {
+          const parts = urlWithoutQuery.split('storage.googleapis.com/');
+          if (parts[1]) {
+            // Split by first slash to separate bucket from path
+            const pathParts = parts[1].split('/');
+            if (pathParts.length > 1) {
+              // Remove bucket name, keep the path
+              pathParts.shift();
+              return decodeURIComponent(pathParts.join('/'));
+            }
+          }
+        }
+        
+        // Handle firebasestorage.googleapis.com format with /o/
+        if (urlWithoutQuery.includes('/o/')) {
+          const parts = urlWithoutQuery.split('/o/');
+          if (parts[1]) {
+            return decodeURIComponent(parts[1]);
+          }
+        }
+        
+        // Handle direct path format: materialPDFs/originals/...
+        if (urlWithoutQuery.startsWith('materialPDFs/')) {
+          return urlWithoutQuery;
+        }
+        
+        return null;
+      } catch (error) {
+        console.error('Error parsing Firebase URL:', error);
+        return null;
+      }
+    }
+
+    for (const item of oldItems) {
+      // Delete from Firebase
+      if (item.pdfURL) {
+        try {
+          const pdfPath = extractFirebasePath(item.pdfURL);
+          if (pdfPath) {
+            await bucket.file(pdfPath).delete();
+          }
+        } catch (error) {
+          console.warn(`⚠️ Could not delete PDF: ${error.message}`);
+        }
+      }
+      
+      if (item.imageURL) {
+        try {
+          const imagePath = extractFirebasePath(item.imageURL);
+          if (imagePath) {
+            await bucket.file(imagePath).delete();
+          }
+        } catch (error) {
+          console.warn(`⚠️ Could not delete image: ${error.message}`);
+        }
+      }
+
+      // Delete from MongoDB
+      await materialPDFsDB.deleteOne({ _id: item._id });
+      console.log(`💀 Auto-deleted old PDF: ${item._id}`);
+    }
+
+    if (oldItems.length > 0) {
+      console.log(`✅ Cleanup complete: ${oldItems.length} items permanently deleted`);
+    }
+
+  } catch (error) {
+    console.error('❌ Error during trash cleanup:', error);
+  }
+}
+
+// Run cleanup daily at 3 AM
+setInterval(cleanupOldMaterialTrash, 24 * 60 * 60 * 1000); // Every 24 hours
+// Run cleanup on server start
+cleanupOldMaterialTrash();
 
 // Fetch all master users
 app.get("/masterUsers", async (req, res) => {
@@ -13273,6 +14032,8 @@ const _masterFiltersCache   = new Map();
 const _masterFiltersInflight = new Map();
 const _productPDFsCache     = new Map();
 const _productPDFsInflight  = new Map();
+const _materialPDFsCache    = new Map();
+const _materialPDFsInflight = new Map();
 const _MASTER_DB_TTL = 24 * 60 * 60 * 1000; // 1 day
 
 // Invalidate full-data cache (per collection, or all when no arg).
@@ -13314,6 +14075,15 @@ function _invalidateProductPDFsCache(reason = '') {
   _productPDFsCache.clear();
   _productPDFsInflight.clear();
   if (n > 0) console.log(`🗑️  productPDFs cache invalidated${reason ? ' — ' + reason : ''}: ${n} entries`);
+}
+
+// Invalidate material-PDF list cache.
+// Called on every material PDF upload, image update, or delete.
+function _invalidateMaterialPDFsCache(reason = '') {
+  const n = _materialPDFsCache.size;
+  _materialPDFsCache.clear();
+  _materialPDFsInflight.clear();
+  if (n > 0) console.log(`🗑️  materialPDFs cache invalidated${reason ? ' — ' + reason : ''}: ${n} entries`);
 }
 // =========================================================
 
@@ -31762,6 +32532,8 @@ app.delete('/api/shisaku-request/:id', async (req, res) => {
     res.status(500).json({ error: 'Failed to delete prototype request', details: error.message });
   }
 });
+
+require('./firstFactoryRoutes')(app, client);
 
 app.listen(port, () => {
   console.log(`✅ Combined server is running at http://localhost:${port}`);
