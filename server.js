@@ -32322,21 +32322,29 @@ async function _getOrCreateShisakuSubfolder(drive, parentFolderId, subfolderName
   return folder.id;
 }
 
-async function _uploadShisakuPdfPreviewImage(drive, fileName, base64, baseUrl) {
-  const pdfFolderId = await _getShisakuSubfolderId(drive, 'pdf');
-  const jpgFolderId = await _getOrCreateShisakuSubfolder(drive, pdfFolderId, 'jpg');
-
+async function _uploadShisakuPdfPreviewImage(shisakuNo, fileName, base64) {
   const fileBuffer = Buffer.from(base64, 'base64');
-  const stream = new Readable();
-  stream.push(fileBuffer);
-  stream.push(null);
-  const response = await drive.files.create({
-    requestBody: { name: fileName, parents: [jpgFolderId] },
-    media: { mimeType: 'image/jpeg', body: stream },
-    supportsAllDrives: true,
-    fields: 'id, name, webViewLink',
+  const bucketName = 'imagestorage-e7ed3.firebasestorage.app';
+  const destPath = `shisakuJpg/${shisakuNo}/${fileName}`;
+  const bucket = admin.storage().bucket(bucketName);
+  const file = bucket.file(destPath);
+  
+  await file.save(fileBuffer, {
+    metadata: { 
+      contentType: 'image/jpeg',
+      metadata: { firebaseStorageDownloadTokens: 'masterDBToken69' }
+    }
   });
-  return { id: response.data.id, name: response.data.name, link: `${baseUrl}/api/shisaku/image/${response.data.id}` };
+  
+  try {
+    await file.makePublic();
+  } catch (e) {
+    // Ignore error if bucket has uniform bucket-level access or is already public
+  }
+  
+  const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encodeURIComponent(destPath)}?alt=media&token=masterDBToken69`;
+  
+  return { id: destPath, name: fileName, link: publicUrl };
 }
 
 // Streams a Drive-hosted image (e.g. the PDF JPG preview) so it can be used directly as an <img> src.
@@ -32434,7 +32442,7 @@ app.post('/api/shisaku/register', async (req, res) => {
     const [dxfResults, pdfResults, pdfImageResults, pceResults] = await Promise.all([
       Promise.all(dxfFiles.map(f => _uploadShisakuFile(drive, 'dxf', f.name, f.base64, 'application/octet-stream'))),
       Promise.all(pdfFiles.map(f => _uploadShisakuFile(drive, 'pdf', f.name, f.base64, 'application/pdf'))),
-      Promise.all(pdfImageFiles.map(f => _uploadShisakuPdfPreviewImage(drive, f.name, f.base64, baseUrl))),
+      Promise.all(pdfImageFiles.map(f => _uploadShisakuPdfPreviewImage(shisakuNo, f.name, f.base64))),
       Promise.all(pceFiles.map(f => _uploadShisakuFile(drive, 'pce', f.name, f.base64, 'application/octet-stream'))),
     ]);
 
@@ -32453,6 +32461,7 @@ app.post('/api/shisaku/register', async (req, res) => {
       modelName: String(modelName).trim(),
       customerName: String(customerName).trim(),
       registeredBy: String(registeredBy).trim(),
+      ...(req.body.createdBy ? { createdBy: String(req.body.createdBy).trim() } : {}),
       cybozuLink: String(cybozuLink).trim(),
       createdAt: new Date(),
     };
@@ -32493,12 +32502,12 @@ app.post('/api/shisaku/update/:id', async (req, res) => {
       })).then(r => r.filter(Boolean));
     }
 
-    async function processPdfImages(files) {
+    async function processPdfImages(files, shisakuNoStr) {
       if (!Array.isArray(files)) return [];
       return Promise.all(files.map(async (f) => {
         if (f.link) return { name: f.name, link: f.link };
         if (f.base64) {
-          const r = await _uploadShisakuPdfPreviewImage(drive, f.name, f.base64, baseUrl);
+          const r = await _uploadShisakuPdfPreviewImage(shisakuNoStr, f.name, f.base64);
           return { name: r.name, link: r.link };
         }
         return null;
@@ -32508,7 +32517,7 @@ app.post('/api/shisaku/update/:id', async (req, res) => {
     const [dxfLinks, pdfLinks, pdfJpgLinks, pcelinks] = await Promise.all([
       processGenericFiles(dxfFiles, 'dxf', 'application/octet-stream'),
       processGenericFiles(pdfFiles, 'pdf', 'application/pdf'),
-      processPdfImages(pdfImageFiles),
+      processPdfImages(pdfImageFiles, String(shisakuNo).trim()),
       processGenericFiles(pceFiles, 'pce', 'application/octet-stream')
     ]);
 
@@ -32658,6 +32667,7 @@ app.post('/api/shisaku-request/register', async (req, res) => {
       quantity: Number(quantity),
       ...(shisakudb_id && ObjectId.isValid(shisakudb_id) && { shisakudb_id: new ObjectId(shisakudb_id) }),
       createdAt: new Date(),
+      ...(req.body.createdBy ? { createdBy: String(req.body.createdBy).trim() } : {}),
     };
 
     await client.connect();
@@ -32667,6 +32677,36 @@ app.post('/api/shisaku-request/register', async (req, res) => {
   } catch (error) {
     console.error('❌ Error registering prototype request:', error.message);
     res.status(500).json({ error: 'Failed to register prototype request', details: error.message });
+  }
+});
+app.post('/api/shisaku-request/update/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) return res.status(400).json({ error: 'Invalid id' });
+    
+    const { name, dxf, pdf, pce, okuriPitch, color, material, boxType, quantity } = req.body;
+    
+    const updateDoc = {};
+    if (name !== undefined) updateDoc.name = String(name).trim();
+    if (dxf !== undefined) updateDoc.dxf = dxf && dxf.name && dxf.link ? { name: String(dxf.name).trim(), link: String(dxf.link).trim() } : null;
+    if (pdf !== undefined) updateDoc.pdf = pdf && pdf.name && pdf.link ? { name: String(pdf.name).trim(), link: String(pdf.link).trim(), jpgLink: pdf.jpgLink ? String(pdf.jpgLink).trim() : null } : null;
+    if (pce !== undefined) updateDoc.pce = pce && pce.name && pce.link ? { name: String(pce.name).trim(), link: String(pce.link).trim() } : null;
+    if (okuriPitch !== undefined) updateDoc.okuriPitch = Number(okuriPitch);
+    if (color !== undefined) updateDoc.color = String(color).trim();
+    if (material !== undefined) updateDoc.material = String(material).trim();
+    if (boxType !== undefined) updateDoc.boxType = String(boxType).trim();
+    if (quantity !== undefined) updateDoc.quantity = Number(quantity);
+    
+    await client.connect();
+    const result = await client.db('Sasaki_Coating_MasterDB').collection('shisakuRequestDB').updateOne(
+      { _id: new ObjectId(id) },
+      { $set: updateDoc }
+    );
+    
+    res.json({ success: true, updatedCount: result.modifiedCount });
+  } catch (error) {
+    console.error('❌ Error updating prototype request:', error.message);
+    res.status(500).json({ error: 'Failed to update prototype request' });
   }
 });
 
