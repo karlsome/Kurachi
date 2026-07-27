@@ -32608,6 +32608,47 @@ app.delete('/api/shisaku/:id', async (req, res) => {
   }
 });
 
+app.get('/api/shisaku-request/available', async (req, res) => {
+  try {
+    await client.connect();
+    const shisakuColl = client.db('Sasaki_Coating_MasterDB').collection('shisakuDB');
+    
+    const available = await shisakuColl.aggregate([
+      {
+        $lookup: {
+          from: 'shisakuRequestDB',
+          let: { sId: { $toString: '$_id' } },
+          pipeline: [
+            { $match: { $expr: { $eq: ['$shisakudb_id', '$$sId'] } } },
+            { $limit: 1 }
+          ],
+          as: 'requests'
+        }
+      },
+      {
+        $match: {
+          requests: { $size: 0 }
+        }
+      },
+      {
+        $project: {
+          _id: 1,
+          shisakuNo: 1,
+          eventName: 1,
+          modelName: 1
+        }
+      },
+      { $sort: { shisakuNo: 1 } }
+    ]).toArray();
+
+    res.json(available);
+  } catch (error) {
+    console.error('❌ Error fetching available shisaku for requests:', error);
+    res.status(500).json({ error: 'Failed to fetch available prototypes', details: error.message });
+  }
+});
+
+
 app.get('/api/shisaku-request/list', async (req, res) => {
   try {
     await client.connect();
