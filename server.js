@@ -32463,6 +32463,7 @@ app.post('/api/shisaku/register', async (req, res) => {
       registeredBy: String(registeredBy).trim(),
       ...(req.body.createdBy ? { createdBy: String(req.body.createdBy).trim() } : {}),
       cybozuLink: String(cybozuLink).trim(),
+      status: "pending",
       createdAt: new Date(),
     };
 
@@ -32666,6 +32667,7 @@ app.post('/api/shisaku-request/register', async (req, res) => {
       boxType: String(boxType).trim(),
       quantity: Number(quantity),
       ...(shisakudb_id && ObjectId.isValid(shisakudb_id) && { shisakudb_id: new ObjectId(shisakudb_id) }),
+      status: "pending",
       createdAt: new Date(),
       ...(req.body.createdBy ? { createdBy: String(req.body.createdBy).trim() } : {}),
     };
@@ -32696,6 +32698,7 @@ app.post('/api/shisaku-request/update/:id', async (req, res) => {
     if (material !== undefined) updateDoc.material = String(material).trim();
     if (boxType !== undefined) updateDoc.boxType = String(boxType).trim();
     if (quantity !== undefined) updateDoc.quantity = Number(quantity);
+    if (req.body.status !== undefined) updateDoc.status = String(req.body.status).trim();
     
     await client.connect();
     const result = await client.db('Sasaki_Coating_MasterDB').collection('shisakuRequestDB').updateOne(
