@@ -32611,9 +32611,18 @@ app.get('/api/shisaku-request/list', async (req, res) => {
       query.shisakudb_id = new ObjectId(req.query.shisakudb_id);
     }
     
-    const records = await client
-      .db('Sasaki_Coating_MasterDB')
-      .collection('shisakuRequestDB')
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.max(1, parseInt(req.query.limit) || 30);
+    const skip = (page - 1) * limit;
+
+    const sortColumn = req.query.sortColumn || 'createdAt';
+    const sortDirection = parseInt(req.query.sortDirection) || -1;
+    const sort = { [sortColumn]: sortDirection };
+
+    const collection = client.db('Sasaki_Coating_MasterDB').collection('shisakuRequestDB');
+    const totalCount = await collection.countDocuments(query);
+
+    const records = await collection
       .aggregate([
         { $match: query },
         {
@@ -32626,17 +32635,95 @@ app.get('/api/shisaku-request/list', async (req, res) => {
         },
         {
           $addFields: {
-            shisakuNo: { $arrayElemAt: ["$parentShisaku.shisakuNo", 0] }
+            shisakuNo: { $arrayElemAt: ["$parentShisaku.shisakuNo", 0] },
+            parentStatus: { $arrayElemAt: ["$parentShisaku.status", 0] }
           }
         },
         { $project: { parentShisaku: 0 } },
-        { $sort: { createdAt: -1 } }
+        { $sort: sort },
+        { $skip: skip },
+        { $limit: limit }
       ])
       .toArray();
-    res.json(records);
+
+    res.json({
+      rows: records,
+      pagination: {
+        page,
+        limit,
+        totalCount,
+        totalPages: Math.ceil(totalCount / limit)
+      }
+    });
   } catch (error) {
     console.error('❌ Error fetching shisakuRequestDB records:', error);
     res.status(500).json({ error: 'Failed to fetch prototype request records', details: error.message });
+  }
+});
+
+app.get('/api/shisaku-request/grouped-list', async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.max(1, parseInt(req.query.limit) || 30);
+    const skip = (page - 1) * limit;
+
+    const sortColumn = req.query.sortColumn || 'latestDate';
+    const sortDirection = parseInt(req.query.sortDirection) || -1;
+    const sort = { [sortColumn]: sortDirection };
+
+    await client.connect();
+    const collection = client.db('Sasaki_Coating_MasterDB').collection('shisakuRequestDB');
+
+    // Grouping by shisakudb_id
+    const pipeline = [
+      {
+        $group: {
+          _id: "$shisakudb_id",
+          totalRequests: { $sum: 1 },
+          latestDate: { $max: "$createdAt" }
+        }
+      },
+      {
+        $lookup: {
+          from: "shisakuDB",
+          localField: "_id",
+          foreignField: "_id",
+          as: "parentShisaku"
+        }
+      },
+      {
+        $addFields: {
+          shisakuNo: { $arrayElemAt: ["$parentShisaku.shisakuNo", 0] },
+          parentStatus: { $arrayElemAt: ["$parentShisaku.status", 0] },
+          shisakudb_id: "$_id"
+        }
+      },
+      { $project: { parentShisaku: 0, _id: 0 } }
+    ];
+
+    const countPipeline = [...pipeline, { $count: "total" }];
+    const countResult = await collection.aggregate(countPipeline).toArray();
+    const totalCount = countResult.length > 0 ? countResult[0].total : 0;
+
+    const records = await collection.aggregate([
+      ...pipeline,
+      { $sort: sort },
+      { $skip: skip },
+      { $limit: limit }
+    ]).toArray();
+
+    res.json({
+      rows: records,
+      pagination: {
+        page,
+        limit,
+        totalCount,
+        totalPages: Math.ceil(totalCount / limit)
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error fetching grouped shisakuRequestDB records:', error);
+    res.status(500).json({ error: 'Failed to fetch grouped prototype request records', details: error.message });
   }
 });
 
