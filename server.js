@@ -32442,7 +32442,11 @@ app.post('/api/shisaku/register', async (req, res) => {
       shisakuNo: String(shisakuNo).trim(),
       deadline,
       dxfLinks: dxfResults.map((r) => ({ name: r.name, link: r.link })),
-      pdfLinks: pdfResults.map((r) => ({ name: r.name, link: r.link })),
+      pdfLinks: pdfResults.map((r, i) => ({ 
+        name: r.name, 
+        link: r.link,
+        jpgLink: pdfImageResults[i] ? pdfImageResults[i].link : null
+      })),
       pdfJpgLinks: pdfImageResults.map((r) => ({ name: r.name, link: r.link })),
       pcelinks: pceResults.map((r) => ({ name: r.name, link: r.link })),
       eventName: String(eventName).trim(),
@@ -32517,7 +32521,11 @@ app.post('/api/shisaku/update/:id', async (req, res) => {
       registeredBy: String(registeredBy).trim(),
       cybozuLink: String(cybozuLink).trim(),
       dxfLinks,
-      pdfLinks,
+      pdfLinks: pdfLinks.map((r, i) => ({
+        name: r.name,
+        link: r.link,
+        jpgLink: pdfJpgLinks[i] ? pdfJpgLinks[i].link : null
+      })),
       pdfJpgLinks,
       pcelinks,
       updatedAt: new Date(),
@@ -32538,6 +32546,27 @@ app.post('/api/shisaku/update/:id', async (req, res) => {
       details: error.message,
       google: googleDetails,
     });
+  }
+});
+
+app.get('/api/shisaku/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ error: 'Invalid shisaku ID' });
+    }
+    
+    await client.connect();
+    const document = await client.db('Sasaki_Coating_MasterDB').collection('shisakuDB').findOne({ _id: new ObjectId(id) });
+    
+    if (!document) {
+      return res.status(404).json({ error: 'Prototype record not found' });
+    }
+    
+    res.json(document);
+  } catch (error) {
+    console.error('❌ Error fetching prototype by id:', error.message);
+    res.status(500).json({ error: 'Failed to fetch prototype', details: error.message });
   }
 });
 
@@ -32566,11 +32595,33 @@ app.delete('/api/shisaku/:id', async (req, res) => {
 app.get('/api/shisaku-request/list', async (req, res) => {
   try {
     await client.connect();
+    
+    const query = {};
+    if (req.query.shisakudb_id && ObjectId.isValid(req.query.shisakudb_id)) {
+      query.shisakudb_id = new ObjectId(req.query.shisakudb_id);
+    }
+    
     const records = await client
       .db('Sasaki_Coating_MasterDB')
       .collection('shisakuRequestDB')
-      .find({})
-      .sort({ createdAt: -1 })
+      .aggregate([
+        { $match: query },
+        {
+          $lookup: {
+            from: "shisakuDB",
+            localField: "shisakudb_id",
+            foreignField: "_id",
+            as: "parentShisaku"
+          }
+        },
+        {
+          $addFields: {
+            shisakuNo: { $arrayElemAt: ["$parentShisaku.shisakuNo", 0] }
+          }
+        },
+        { $project: { parentShisaku: 0 } },
+        { $sort: { createdAt: -1 } }
+      ])
       .toArray();
     res.json(records);
   } catch (error) {
@@ -32581,21 +32632,30 @@ app.get('/api/shisaku-request/list', async (req, res) => {
 
 app.post('/api/shisaku-request/register', async (req, res) => {
   try {
-    const { name, pce, okuriPitch, color, material, boxType, quantity, pdfLink, shisakudb_id } = req.body;
+    const { name, dxf, pdf, pce, okuriPitch, color, material, boxType, quantity, shisakudb_id } = req.body;
 
-    if (!name || !pce || !okuriPitch || !color || !material || !boxType || !quantity || !pdfLink) {
-      return res.status(400).json({ error: 'name, pce, okuriPitch, color, material, boxType, quantity, and pdfLink are required' });
+    if (!name || !pce || !okuriPitch || !color || !material || !boxType || !quantity) {
+      return res.status(400).json({ error: 'name, pce, okuriPitch, color, material, boxType, and quantity are required' });
+    }
+
+    if (!pce.name || !pce.link) {
+      return res.status(400).json({ error: 'pce must contain name and link' });
     }
 
     const document = {
       name: String(name).trim(),
-      pce: String(pce).trim(),
+      dxf: dxf && dxf.name && dxf.link ? { name: String(dxf.name).trim(), link: String(dxf.link).trim() } : null,
+      pdf: pdf && pdf.name && pdf.link ? { 
+        name: String(pdf.name).trim(), 
+        link: String(pdf.link).trim(),
+        jpgLink: pdf.jpgLink ? String(pdf.jpgLink).trim() : null
+      } : null,
+      pce: { name: String(pce.name).trim(), link: String(pce.link).trim() },
       okuriPitch: Number(okuriPitch),
       color: String(color).trim(),
       material: String(material).trim(),
       boxType: String(boxType).trim(),
       quantity: Number(quantity),
-      pdfLink: String(pdfLink).trim(),
       ...(shisakudb_id && ObjectId.isValid(shisakudb_id) && { shisakudb_id: new ObjectId(shisakudb_id) }),
       createdAt: new Date(),
     };
