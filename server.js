@@ -32388,10 +32388,10 @@ app.get('/api/shisaku/list', async (req, res) => {
 
 app.post('/api/shisaku/register', async (req, res) => {
   try {
-    const { shisakuNo, deadline, eventName, modelName, customerName, registeredBy, dxfFile, pdfFile, pdfImageFile, pceFiles } = req.body;
+    const { shisakuNo, deadline, eventName, modelName, customerName, registeredBy, cybozuLink, dxfFile, pdfFile, pdfImageFile, pceFiles } = req.body;
 
-    if (!shisakuNo || !deadline || !eventName || !modelName || !customerName || !registeredBy) {
-      return res.status(400).json({ error: 'shisakuNo, deadline, eventName, modelName, customerName, and registeredBy are required' });
+    if (!shisakuNo || !deadline || !eventName || !modelName || !customerName || !registeredBy || !cybozuLink) {
+      return res.status(400).json({ error: 'shisakuNo, deadline, eventName, modelName, customerName, registeredBy, and cybozuLink are required' });
     }
     if (!dxfFile?.base64 || !dxfFile?.name || !pdfFile?.base64 || !pdfFile?.name) {
       return res.status(400).json({ error: 'dxfFile and pdfFile (each with name and base64) are required' });
@@ -32424,6 +32424,7 @@ app.post('/api/shisaku/register', async (req, res) => {
       modelName: String(modelName).trim(),
       customerName: String(customerName).trim(),
       registeredBy: String(registeredBy).trim(),
+      cybozuLink: String(cybozuLink).trim(),
       createdAt: new Date(),
     };
 
