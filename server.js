@@ -32430,7 +32430,7 @@ app.get('/api/shisaku', async (req, res) => {
 
 app.post('/api/shisaku/register', async (req, res) => {
   try {
-    const { shisakuNo, deadline, eventName, modelName, customerName, registeredBy, cybozuLink, dxfFiles = [], pdfFiles = [], pdfImageFiles = [], pceFiles = [] } = req.body;
+    const { shisakuNo, deadline, eventName, modelName, customerName, registeredBy, cybozuLink, dxfFiles = [], pdfFiles = [], pdfImageFiles = [], pceFiles = [], colors = [], materials = [], boxTypes = [] } = req.body;
 
     if (!shisakuNo || !deadline || !eventName || !modelName || !customerName || !registeredBy || !cybozuLink) {
       return res.status(400).json({ error: 'shisakuNo, deadline, eventName, modelName, customerName, registeredBy, and cybozuLink are required' });
@@ -32461,6 +32461,9 @@ app.post('/api/shisaku/register', async (req, res) => {
       modelName: String(modelName).trim(),
       customerName: String(customerName).trim(),
       registeredBy: String(registeredBy).trim(),
+      colors: Array.isArray(colors) ? colors.map(String) : [],
+      materials: Array.isArray(materials) ? materials.map(String) : [],
+      boxTypes: Array.isArray(boxTypes) ? boxTypes.map(String) : [],
       ...(req.body.createdBy ? { createdBy: String(req.body.createdBy).trim() } : {}),
       cybozuLink: String(cybozuLink).trim(),
       status: "pending",
@@ -32487,7 +32490,7 @@ app.post('/api/shisaku/update/:id', async (req, res) => {
     const { id } = req.params;
     if (!ObjectId.isValid(id)) return res.status(400).json({ error: 'Invalid ID' });
 
-    const { shisakuNo, deadline, eventName, modelName, customerName, registeredBy, cybozuLink, dxfFiles = [], pdfFiles = [], pdfImageFiles = [], pceFiles = [] } = req.body;
+    const { shisakuNo, deadline, eventName, modelName, customerName, registeredBy, cybozuLink, dxfFiles = [], pdfFiles = [], pdfImageFiles = [], pceFiles = [], colors = [], materials = [], boxTypes = [] } = req.body;
     const drive = _buildDriveClient();
     const baseUrl = `${req.protocol}://${req.get('host')}`;
 
@@ -32530,6 +32533,9 @@ app.post('/api/shisaku/update/:id', async (req, res) => {
       customerName: String(customerName).trim(),
       registeredBy: String(registeredBy).trim(),
       cybozuLink: String(cybozuLink).trim(),
+      colors: Array.isArray(colors) ? colors.map(String) : [],
+      materials: Array.isArray(materials) ? materials.map(String) : [],
+      boxTypes: Array.isArray(boxTypes) ? boxTypes.map(String) : [],
       dxfLinks,
       pdfLinks: pdfLinks.map((r, i) => ({
         name: r.name,
