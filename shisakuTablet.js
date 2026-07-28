@@ -477,11 +477,18 @@ function renderPrototypePreview() {
         }
     }
 
-    // Calculate material length based on okuriPitch
+    // Calculate material length based on okuriPitch and pcPerCycle
     const materialLengths = {};
     requests.forEach(r => {
-        if (r.material && r.okuriPitch) {
-            const length = parseFloat(r.okuriPitch) || 0;
+        if (r.material && r.okuriPitch && r.quantity) {
+            const pitch = parseFloat(r.okuriPitch) || 0;
+            const qty = parseInt(r.quantity) || 0;
+            const pcPerCycle = parseInt(r.pcPerCycle) || 1; // Default to 1 if missing or 0
+            
+            // Calculate total cycles needed
+            const cycles = Math.ceil(qty / pcPerCycle);
+            const length = cycles * pitch;
+            
             if (length > 0) {
                 const colorLabel = r.color ? ` - ${r.color}` : '';
                 const matKey = `${r.material}${colorLabel}`;
