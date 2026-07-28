@@ -309,6 +309,7 @@ function updateTabLocks() {
         mainTabs[1].classList.remove('locked');
         mainTabs[3].classList.remove('locked');
         mainTabs[4].classList.remove('locked');
+        mainTabs[5].classList.remove('locked');
 
         if (state.currentPrototype) {
             mainTabs[2].classList.remove('locked');
@@ -336,8 +337,9 @@ function switchMainTab(index) {
     tabs.forEach(t => t.classList.remove('active'));
     tabs[index].classList.add('active');
 
-    container.style.transform = `translateX(-${index * 20}%)`;
+    container.style.transform = `translateX(-${index * (100 / 6)}%)`;
     state.currentMainTab = index;
+    sessionStorage.setItem('shisaku_tablet_main_tab', index);
 
     if (index === 1) {
         fetchPrototypes();
@@ -368,6 +370,10 @@ function showRequestView(viewId) {
         document.getElementById('requestPlaceholder').style.display = 'block';
     } else {
         document.getElementById(`view-${viewId}`).classList.add('active');
+    }
+    
+    if (viewId !== 'details') {
+        sessionStorage.removeItem('shisaku_tablet_current_request_id');
     }
 }
 
@@ -552,6 +558,17 @@ async function fetchRequests(shisakudb_id, shisakuNo) {
         
         updateTabLocks();
         renderRequests();
+        
+        // Restore request view state if available
+        const savedReqId = sessionStorage.getItem('shisaku_tablet_current_request_id');
+        if (savedReqId) {
+            const req = state.requests.find(r => r._id?.$oid === savedReqId);
+            if (req) {
+                showRequestDetails(req);
+                return;
+            }
+        }
+        
         showRequestView('requests');
     } catch (error) {
         console.error(error);
@@ -647,6 +664,15 @@ function parseImageUrl(jpgLink) {
 
 function showRequestDetails(request) {
     state.currentRequest = request;
+    if (request._id && request._id.$oid) {
+        sessionStorage.setItem('shisaku_tablet_current_request_id', request._id.$oid);
+    }
+    
+    const startBtn = document.getElementById('startRequestBtn');
+    if (startBtn) {
+        startBtn.textContent = `Start request #${request.orderNumber || '?'}`;
+    }
+
     const grid = document.getElementById('detailsGrid');
     grid.innerHTML = `
         <div class="detail-item">
@@ -732,6 +758,14 @@ function sendToMachine() {
     setTimeout(() => {
         overlay.classList.remove('show');
     }, 400);
+}
+
+function startRequest() {
+    // Navigate to Data tab
+    const tabs = document.querySelectorAll('#mainTabBar .tab-btn');
+    if (tabs[3] && !tabs[3].classList.contains('locked')) {
+        switchMainTab(3);
+    }
 }
 
 // -----------------------------------------------------
@@ -913,5 +947,15 @@ window.addEventListener('DOMContentLoaded', () => {
         fetchRequests(state.currentPrototypeId, state.currentPrototype);
     } else {
         showRequestView('placeholder');
+    }
+
+    // Restore previously active tab from sessionStorage if it is unlocked
+    const savedTab = sessionStorage.getItem('shisaku_tablet_main_tab');
+    if (savedTab !== null) {
+        const tabIndex = parseInt(savedTab, 10);
+        const tabs = document.querySelectorAll('#mainTabBar .tab-btn');
+        if (tabs[tabIndex] && !tabs[tabIndex].classList.contains('locked')) {
+            switchMainTab(tabIndex);
+        }
     }
 });
