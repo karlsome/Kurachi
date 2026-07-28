@@ -749,7 +749,7 @@ function showRequestDetails(request) {
     showRequestView('details');
 }
 
-function sendToMachine() {
+async function sendToMachine() {
     const overlay = document.getElementById('flashOverlay');
     overlay.classList.add('show');
 
@@ -762,6 +762,66 @@ function sendToMachine() {
     setTimeout(() => {
         overlay.classList.remove('show');
     }, 400);
+
+    // 1. Get machine name from URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const machineName = urlParams.get('machine');
+    if (!machineName) {
+        console.error("No machine parameter found in URL");
+        alert("Machine name not found in URL.");
+        return;
+    }
+
+    // 2. Fetch IP address from Google Sheets
+    const ipURL = 'https://script.google.com/macros/s/AKfycbyC6-KiT3xwGiahhzhB-L-OOL8ufG0WqnT5mjEelGBKGnbiqVAS6qjT78FlzBUHqTn3Gg/exec';
+    let ipAddress = null;
+    try {
+        const ipResponse = await fetch(`${ipURL}?filter=${encodeURIComponent(machineName)}`);
+        if (!ipResponse.ok) throw new Error(`Failed to fetch IP for ${machineName}`);
+        
+        ipAddress = await ipResponse.text();
+        ipAddress = ipAddress.trim();
+        
+        if (!ipAddress || ipAddress.includes('Error')) {
+            throw new Error(`Invalid IP retrieved: ${ipAddress}`);
+        }
+    } catch (e) {
+        console.error("IP Fetch Error:", e);
+        alert(`Failed to get IP address for machine ${machineName}.`);
+        return;
+    }
+
+    // 3. Get PCE filename from current request
+    if (!state.currentRequest) {
+        alert("No request is currently active.");
+        return;
+    }
+    
+    let pceName = state.currentRequest?.pce?.name || state.currentRequest?.name;
+    if (!pceName) {
+        console.error("No PCE filename found in current request");
+        alert("Could not determine PCE filename for this request.");
+        return;
+    }
+
+    // Strip .pce if present so we can reliably append it later
+    if (pceName.toLowerCase().endsWith('.pce')) {
+        pceName = pceName.slice(0, -4);
+    }
+
+    // 4. Dispatch the request to the machine
+    const sendURL = `http://${ipAddress}:5000/request?filename=${encodeURIComponent(pceName)}.pce&mode=shisaku`;
+    console.log(`📤 Sending to machine: ${sendURL}`);
+
+    try {
+        await fetch(sendURL, { method: 'GET', mode: 'no-cors' });
+    } catch (error) {
+        console.error("Failed to send to machine in background, using fallback tab:", error);
+        const newTab = window.open(sendURL, '_blank');
+        setTimeout(() => {
+            if (newTab) newTab.close();
+        }, 3000);
+    }
 }
 
 async function startRequest() {
