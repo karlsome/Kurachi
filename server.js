@@ -32792,7 +32792,7 @@ app.get('/api/shisaku-request/grouped-list', async (req, res) => {
 
 app.post('/api/shisaku-request/register', async (req, res) => {
   try {
-    const { name, dxf, pdf, pce, okuriPitch, color, material, boxType, quantity, shisakudb_id, orderNumber } = req.body;
+    const { name, dxf, pdf, pce, okuriPitch, pcPerCycle, color, material, boxType, quantity, shisakudb_id, orderNumber } = req.body;
 
     if (!name || !pce || !okuriPitch || !color || !material || !boxType || !quantity) {
       return res.status(400).json({ error: 'name, pce, okuriPitch, color, material, boxType, and quantity are required' });
@@ -32812,6 +32812,7 @@ app.post('/api/shisaku-request/register', async (req, res) => {
       } : null,
       pce: { name: String(pce.name).trim(), link: String(pce.link).trim() },
       okuriPitch: Number(okuriPitch),
+      pcPerCycle: Number(pcPerCycle),
       color: String(color).trim(),
       material: String(material).trim(),
       boxType: String(boxType).trim(),
@@ -32837,7 +32838,7 @@ app.post('/api/shisaku-request/update/:id', async (req, res) => {
     const { id } = req.params;
     if (!ObjectId.isValid(id)) return res.status(400).json({ error: 'Invalid id' });
     
-    const { name, dxf, pdf, pce, okuriPitch, color, material, boxType, quantity, orderNumber } = req.body;
+    const { name, dxf, pdf, pce, okuriPitch, pcPerCycle, color, material, boxType, quantity, orderNumber } = req.body;
     
     const updateDoc = {};
     if (name !== undefined) updateDoc.name = String(name).trim();
@@ -32845,6 +32846,7 @@ app.post('/api/shisaku-request/update/:id', async (req, res) => {
     if (pdf !== undefined) updateDoc.pdf = pdf && pdf.name && pdf.link ? { name: String(pdf.name).trim(), link: String(pdf.link).trim(), jpgLink: pdf.jpgLink ? String(pdf.jpgLink).trim() : null } : null;
     if (pce !== undefined) updateDoc.pce = pce && pce.name && pce.link ? { name: String(pce.name).trim(), link: String(pce.link).trim() } : null;
     if (okuriPitch !== undefined) updateDoc.okuriPitch = Number(okuriPitch);
+    if (pcPerCycle !== undefined) updateDoc.pcPerCycle = Number(pcPerCycle);
     if (color !== undefined) updateDoc.color = String(color).trim();
     if (material !== undefined) updateDoc.material = String(material).trim();
     if (boxType !== undefined) updateDoc.boxType = String(boxType).trim();
