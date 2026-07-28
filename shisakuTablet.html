@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <link rel="icon" type="image/png" href="src/favicon2.png">
+    <title>Prototype Tablet - Shisaku</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Nunito+Sans:ital,opsz,wght@0,6..12,400;0,6..12,600;0,6..12,700;0,6..12,800;0,6..12,900&display=swap" rel="stylesheet">
+    <style>
+        /* DESIGN SYSTEM - Flat / Dashboard-UI-Kit inspired from DCP interactive */
+        :root {
+            --bg-app: #F4F6FA;
+            --bg-surface: #FFFFFF;
+            --bg-subtle: #F7F8FB;
+            --bg-inset: #EEF1F6;
+            --border: #E6E8EF;
+            --border-strong: #D6DAE3;
+            --text-main: #1F2733;
+            --text-muted: #6B7280;
+            --text-soft: #9AA1AC;
+
+            --brand: #1F9D6B;
+            --brand-hover: #178A5C;
+            --brand-soft: #E7F5EF;
+            --blue: #2E6FF2;
+            --blue-hover: #1F5DD8;
+            --blue-soft: #E8F0FE;
+            --red: #E5484D;
+            --red-hover: #CE3B40;
+            --red-soft: #FCEBEC;
+            --amber: #E0900E;
+            --amber-soft: #FBF0DC;
+            --orange: #FF9800;
+            --orange-soft: #FFF3E0;
+
+            --card-radius: 12px;
+            --btn-radius: 8px;
+            --r-pill: 6px;
+            --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04);
+            --shadow-pop: 0 12px 32px rgba(16, 24, 40, 0.14);
+            --transition-smooth: 0.18s ease;
+            --header-height: 64px;
+            --tab-bar-height: 66px;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            font-family: 'Nunito Sans', sans-serif;
+            background-color: var(--bg-app);
+            color: var(--text-main);
+            height: 100vh;
+            height: 100dvh;
+            width: 100vw;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        /* Header */
+        header {
+            height: var(--header-height);
+            background: var(--bg-surface);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 20px;
+            flex-shrink: 0;
+        }
+        .header-title-section { display: flex; align-items: center; gap: 12px; }
+        .header-title-section h1 { font-size: 1.125rem; font-weight: 800; color: var(--text-main); }
+        .status-tag {
+            background: var(--bg-inset);
+            border: 1px solid var(--border);
+            padding: 5px 10px;
+            border-radius: var(--r-pill);
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            font-weight: 700;
+            white-space: nowrap;
+        }
+        .header-action-section { display: flex; align-items: center; gap: 12px; }
+        .user-info-btn {
+            background: var(--blue-soft);
+            color: var(--blue);
+            border: 1px solid var(--blue);
+            padding: 8px 12px;
+            border-radius: var(--btn-radius);
+            font-weight: 700;
+            font-size: 0.875rem;
+            cursor: pointer;
+        }
+
+        /* Tab Navigation */
+        .tab-bar {
+            height: var(--tab-bar-height);
+            background: var(--bg-surface);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            flex-shrink: 0;
+        }
+        .tab-btn {
+            flex: 1;
+            background: transparent;
+            border: none;
+            color: var(--text-soft);
+            font-size: 0.8125rem;
+            font-weight: 700;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            transition: color var(--transition-smooth);
+            border-bottom: 3px solid transparent;
+        }
+        .tab-btn.active {
+            color: var(--brand);
+            border-bottom: 3px solid var(--brand);
+        }
+
+        /* Viewport */
+        .viewport {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        /* Lists and Cards */
+        .grid-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 16px;
+        }
+        .card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: var(--card-radius);
+            padding: 16px;
+            box-shadow: var(--shadow-card);
+            cursor: pointer;
+            transition: transform var(--transition-smooth);
+        }
+        .card:active {
+            transform: scale(0.98);
+        }
+        .card h3 { font-size: 1.1rem; font-weight: 800; margin-bottom: 4px; }
+        .card p { font-size: 0.85rem; color: var(--text-muted); font-weight: 600; margin-bottom: 8px; }
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: var(--r-pill);
+            font-size: 0.75rem;
+            font-weight: 800;
+        }
+        .badge.pending { background: var(--orange-soft); color: var(--orange); }
+        .badge.in-progress { background: var(--blue-soft); color: var(--blue); }
+        .badge.completed { background: var(--brand-soft); color: var(--brand); }
+        .badge.canceled { background: var(--red-soft); color: var(--red); }
+
+        /* Drilldown Views */
+        .view-section { display: none; }
+        .view-section.active { display: block; }
+        
+        .back-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: transparent;
+            border: 1px solid var(--border-strong);
+            padding: 8px 14px;
+            border-radius: var(--btn-radius);
+            font-weight: 700;
+            color: var(--text-muted);
+            cursor: pointer;
+            margin-bottom: 20px;
+        }
+
+        /* Request Rows */
+        .request-row {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: var(--card-radius);
+            padding: 16px;
+            margin-bottom: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+        }
+        .request-row .row-number {
+            font-size: 1.2rem;
+            font-weight: 900;
+            color: var(--blue);
+            width: 40px;
+        }
+        .request-row .row-info {
+            flex: 1;
+            font-size: 0.95rem;
+            font-weight: 700;
+        }
+
+        /* Request Details */
+        .details-card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: var(--card-radius);
+            padding: 20px;
+        }
+        .details-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+        .detail-item {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .detail-item label { font-size: 0.8rem; color: var(--text-muted); font-weight: 700; }
+        .detail-item span { font-size: 1rem; font-weight: 800; color: var(--text-main); }
+        
+        .details-image {
+            width: 100%;
+            height: 300px;
+            object-fit: contain;
+            background: var(--bg-subtle);
+            border: 1px solid var(--border);
+            border-radius: var(--card-radius);
+            margin-bottom: 20px;
+        }
+
+        .btn-send {
+            width: 100%;
+            padding: 16px;
+            background: var(--brand);
+            color: white;
+            border: none;
+            border-radius: var(--btn-radius);
+            font-size: 1.1rem;
+            font-weight: 800;
+            cursor: pointer;
+            transition: background var(--transition-smooth);
+        }
+        .btn-send:active { background: var(--brand-hover); }
+
+        /* Modals */
+        .modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(16, 24, 40, 0.45);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            z-index: 10000;
+        }
+        .modal.active { display: flex; }
+        .modal-content {
+            background: var(--bg-surface);
+            border-radius: var(--card-radius);
+            padding: 24px;
+            width: 100%;
+            max-width: 500px;
+            box-shadow: var(--shadow-pop);
+        }
+        .modal-content h2 { margin-bottom: 16px; font-weight: 800; }
+        .worker-names-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            gap: 10px;
+        }
+        .worker-btn {
+            padding: 12px;
+            background: var(--bg-subtle);
+            border: 1px solid var(--border-strong);
+            border-radius: var(--btn-radius);
+            font-weight: 700;
+            cursor: pointer;
+        }
+        .worker-btn:active { background: var(--bg-inset); }
+
+        .flash-overlay {
+            position: fixed;
+            inset: 0;
+            background: var(--brand);
+            opacity: 0;
+            pointer-events: none;
+            z-index: 99999;
+            transition: opacity 0.3s;
+        }
+        .flash-overlay.show {
+            opacity: 0.5;
+        }
+    </style>
+</head>
+
+<body>
+    <header>
+        <div class="header-title-section">
+            <h1>試作 Prototype</h1>
+            <span class="status-tag" id="machineNameTag">設備: -</span>
+        </div>
+        <div class="header-action-section">
+            <button class="user-info-btn" id="userInfoBtn" onclick="openWorkerModal()">User</button>
+        </div>
+    </header>
+
+    <div class="tab-bar" id="statusTabs">
+        <button class="tab-btn active" data-status="pending">Pending</button>
+        <button class="tab-btn" data-status="in-progress">In-Progress</button>
+        <button class="tab-btn" data-status="completed">Completed</button>
+        <button class="tab-btn" data-status="canceled">Canceled</button>
+    </div>
+
+    <div class="viewport">
+        <!-- Level 1: Prototype List -->
+        <div id="view-prototypes" class="view-section active">
+            <div class="grid-list" id="prototypesGrid">
+                <!-- Prototype cards injected here -->
+            </div>
+        </div>
+
+        <!-- Level 2: Requests List -->
+        <div id="view-requests" class="view-section">
+            <button class="back-btn" onclick="showView('prototypes')">← Back to Prototypes</button>
+            <h2 id="requestsViewTitle" style="margin-bottom: 16px;">Prototype #</h2>
+            <div id="requestsList">
+                <!-- Request rows injected here -->
+            </div>
+        </div>
+
+        <!-- Level 3: Request Details -->
+        <div id="view-details" class="view-section">
+            <button class="back-btn" onclick="showView('requests')">← Back to List</button>
+            <div class="details-card">
+                <div class="details-grid" id="detailsGrid">
+                    <!-- Detail items injected here -->
+                </div>
+                <img id="detailsImage" class="details-image" src="" alt="Request Image" style="display: none;" />
+                <button class="btn-send" onclick="sendToMachine()">Send to Machine</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Worker Selection Modal -->
+    <div id="workerModal" class="modal">
+        <div class="modal-content">
+            <h2 id="workerModalTitle">Select User</h2>
+            <div class="worker-names-grid" id="workerNamesGrid">
+                <!-- Hardcoded demo workers based on typical usage, matching DCP interactive approach -->
+                <button class="worker-btn" onclick="selectWorker('小瀬')">小瀬</button>
+                <button class="worker-btn" onclick="selectWorker('加藤')">加藤</button>
+                <button class="worker-btn" onclick="selectWorker('山田')">山田</button>
+                <button class="worker-btn" onclick="selectWorker('鈴木')">鈴木</button>
+                <button class="worker-btn" onclick="selectWorker('Guest')">Guest</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Confirmation Modal for returning user -->
+    <div id="confirmUserModal" class="modal">
+        <div class="modal-content">
+            <h2>Welcome Back</h2>
+            <p style="margin-bottom: 20px;">Are you still <strong id="confirmUserName"></strong>?</p>
+            <div style="display: flex; gap: 10px;">
+                <button class="btn-send" style="background: var(--blue);" onclick="confirmUser(true)">Yes, that's me</button>
+                <button class="btn-send" style="background: var(--bg-subtle); color: var(--text-main); border: 1px solid var(--border-strong);" onclick="confirmUser(false)">No, change user</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="flashOverlay" class="flash-overlay"></div>
+
+    <script src="shisakuTablet.js"></script>
+</body>
+
+</html>
