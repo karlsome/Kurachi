@@ -32775,7 +32775,7 @@ app.get('/api/shisaku-request/grouped-list', async (req, res) => {
       {
         $addFields: {
           shisakuNo: { $arrayElemAt: ["$parentShisaku.shisakuNo", 0] },
-          parentStatus: { $arrayElemAt: ["$parentShisaku.status", 0] },
+          parentStatus: { $ifNull: [{ $arrayElemAt: ["$parentShisaku.status", 0] }, "pending"] },
           shisakudb_id: "$_id"
         }
       },
