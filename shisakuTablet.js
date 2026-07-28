@@ -578,6 +578,31 @@ function renderPrototypePreview() {
             materialsContainer.appendChild(row);
         }
     }
+
+    const requestsContainer = document.getElementById('protoPreviewRequests');
+    requestsContainer.innerHTML = '';
+
+    if (requests.length === 0) {
+        requestsContainer.innerHTML = '<div style="color: var(--text-muted); font-size: 0.9rem;">No requests found.</div>';
+    } else {
+        requests.forEach(r => {
+            const reqName = r.name || 'Unnamed';
+            const reqQty = r.quantity || 0;
+            const row = document.createElement('div');
+            row.style.display = 'flex';
+            row.style.justifyContent = 'space-between';
+            row.style.padding = '12px 16px';
+            row.style.background = 'var(--bg-subtle)';
+            row.style.borderRadius = 'var(--btn-radius)';
+            row.style.border = '1px solid var(--border)';
+            
+            row.innerHTML = `
+                <span style="font-weight: 700; color: var(--text-main);">${reqName}</span>
+                <span style="font-weight: 800; color: var(--brand);">${reqQty} pc(s)</span>
+            `;
+            requestsContainer.appendChild(row);
+        });
+    }
 }
 
 function confirmPrototypeSelection() {

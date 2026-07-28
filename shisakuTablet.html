@@ -349,6 +349,8 @@
             border-radius: var(--card-radius);
             padding: 20px;
             box-shadow: var(--shadow-card);
+            max-height: calc(100vh - 160px);
+            overflow-y: auto;
         }
         .details-grid {
             display: grid;
@@ -819,6 +821,10 @@
                         <h3 style="font-size: 1.1rem; margin-bottom: 10px; color: var(--text-main);">Materials Needed</h3>
                         <div id="protoPreviewMaterials" style="margin-bottom: 20px; display: flex; flex-direction: column; gap: 8px;">
                             <!-- Material lengths injected here -->
+                        </div>
+                        <h3 style="font-size: 1.1rem; margin-bottom: 10px; color: var(--text-main);">Requests</h3>
+                        <div id="protoPreviewRequests" style="margin-bottom: 20px; display: flex; flex-direction: column; gap: 8px;">
+                            <!-- Request lists injected here -->
                         </div>
                         <button class="btn btn-send" onclick="confirmPrototypeSelection()">Select this Prototype</button>
                     </div>
