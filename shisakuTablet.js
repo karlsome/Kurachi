@@ -635,10 +635,14 @@ function renderRequests() {
         row.className = 'request-row';
         row.onclick = () => showRequestDetails(r);
 
+        const reqStatus = r.status || 'pending';
         row.innerHTML = `
             <div class="row-number">#${r.orderNumber || '?'}</div>
             <div class="row-info">
-                <div style="margin-bottom: 4px;"><strong>${r.name || 'Unnamed Request'}</strong></div>
+                <div style="margin-bottom: 4px; display: flex; align-items: center;">
+                    <strong>${r.name || 'Unnamed Request'}</strong>
+                    <span class="status-badge ${reqStatus}">${reqStatus}</span>
+                </div>
                 <div style="font-size: 0.85rem; color: var(--text-muted);">
                     Qty: ${r.quantity || '-'} | Box: ${r.boxType || '-'}
                 </div>
@@ -760,7 +764,38 @@ function sendToMachine() {
     }, 400);
 }
 
-function startRequest() {
+async function startRequest() {
+    if (!state.currentRequest) return;
+    
+    // Change status from pending to in-progress
+    try {
+        const id = state.currentRequest._id?.$oid || state.currentRequest._id;
+        if (id) {
+            const reqStatus = state.currentRequest.status || 'pending';
+            if (reqStatus === 'pending') {
+                const response = await fetch(`${serverURL}/api/shisaku-request/update/${id}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ status: 'in-progress' })
+                });
+                
+                if (response.ok) {
+                    state.currentRequest.status = 'in-progress';
+                    // Update in the local list so the badge changes
+                    const index = state.requests.findIndex(r => (r._id?.$oid || r._id) === id);
+                    if (index !== -1) {
+                        state.requests[index].status = 'in-progress';
+                        renderRequests();
+                    }
+                } else {
+                    console.error('Failed to update status to in-progress');
+                }
+            }
+        }
+    } catch (e) {
+        console.error('Error starting request:', e);
+    }
+
     // Navigate to Data tab
     const tabs = document.querySelectorAll('#mainTabBar .tab-btn');
     if (tabs[3] && !tabs[3].classList.contains('locked')) {
