@@ -690,14 +690,24 @@ function showRequestDetails(request) {
     const imgEl = document.getElementById('detailsImage');
     const jpgLink = request.pdf?.jpgLink || request.jpgLink;
     const parsedImgUrl = parseImageUrl(jpgLink);
+    const pdfLink = request.pdf?.link;
 
-    if (parsedImgUrl) {
-        imgEl.src = parsedImgUrl;
-        imgEl.style.display = 'block';
+    if (parsedImgUrl || pdfLink) {
+        if (parsedImgUrl) {
+            imgEl.src = parsedImgUrl;
+            imgEl.style.display = 'block';
+        } else {
+            imgEl.style.display = 'none';
+        }
+        
         imgEl.style.cursor = 'pointer'; // indicate it's clickable
         imgEl.onclick = () => {
             if (typeof window.openPreview === 'function') {
-                window.openPreview(parsedImgUrl);
+                if (pdfLink) {
+                    window.openPreview(parsedImgUrl, '', 'pdf', pdfLink);
+                } else {
+                    window.openPreview(parsedImgUrl, '', 'image');
+                }
             }
         };
     } else {
@@ -727,12 +737,55 @@ function sendToMachine() {
 // -----------------------------------------------------
 // Image Preview Modal
 // -----------------------------------------------------
-function openPreview(src, titleText = '') {
+
+function setViewportZoomable(zoomable) {
+    let metaViewport = document.querySelector('meta[name="viewport"]');
+    if (metaViewport) {
+        if (zoomable) {
+            metaViewport.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes');
+        } else {
+            metaViewport.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no');
+        }
+    }
+}
+
+let imgPreviewScale = 1;
+let imgPreviewTranslateX = 0;
+let imgPreviewTranslateY = 0;
+
+function updateImgPreviewTransform() {
+    const img = document.getElementById('imgPreviewTarget');
+    if (img) {
+        img.style.transform = `translate(${imgPreviewTranslateX}px, ${imgPreviewTranslateY}px) scale(${imgPreviewScale})`;
+    }
+}
+
+function openPreview(src, titleText = '', type = 'image', originalLink = '') {
     if (!src) return;
     const m = document.getElementById('imgPreviewModal');
     const img = document.getElementById('imgPreviewTarget');
-    if (!m || !img) return;
-    img.src = src;
+    const extBtn = document.getElementById('imgPreviewOpenExt');
+    if (!m) return;
+    
+    if (extBtn) {
+        if (originalLink) {
+            extBtn.style.display = 'flex';
+            extBtn.href = originalLink;
+        } else {
+            extBtn.style.display = 'none';
+        }
+    }
+    
+    if (img) {
+        img.style.display = 'block';
+        img.src = src;
+        
+        // Reset zoom and pan
+        imgPreviewScale = 1;
+        imgPreviewTranslateX = 0;
+        imgPreviewTranslateY = 0;
+        updateImgPreviewTransform();
+    }
     
     let titleEl = document.getElementById('imgPreviewTitle');
     if (!titleEl) {
@@ -756,8 +809,91 @@ window.openPreview = openPreview;
 function bindPreviewClose() {
     const m = document.getElementById('imgPreviewModal');
     const close = document.getElementById('imgPreviewClose');
-    if (close) close.addEventListener('click', () => m.classList.remove('open'));
-    if (m) m.addEventListener('click', (e) => { if (e.target === m) m.classList.remove('open'); });
+
+    const closeModal = () => {
+        m.classList.remove('open');
+        setViewportZoomable(false); // Always reset to no zoom when closed
+    };
+
+    if (close) close.addEventListener('click', closeModal);
+    if (m) m.addEventListener('click', (e) => { if (e.target === m) closeModal(); });
+}
+
+function bindPreviewZoomAndPan() {
+    const img = document.getElementById('imgPreviewTarget');
+    if (!img) return;
+
+    let isPointerDown = false;
+    let pointers = [];
+    let lastPanPosition = { x: 0, y: 0 };
+    let lastDistance = 0;
+
+    img.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        isPointerDown = true;
+        pointers.push({ id: e.pointerId, x: e.clientX, y: e.clientY });
+        if (pointers.length === 1) {
+            lastPanPosition = { x: e.clientX, y: e.clientY };
+        } else if (pointers.length === 2) {
+            lastDistance = Math.hypot(pointers[0].x - pointers[1].x, pointers[0].y - pointers[1].y);
+        }
+        img.setPointerCapture(e.pointerId);
+    });
+
+    img.addEventListener('pointermove', (e) => {
+        if (!isPointerDown) return;
+        
+        const pointer = pointers.find(p => p.id === e.pointerId);
+        if (pointer) {
+            pointer.x = e.clientX;
+            pointer.y = e.clientY;
+        }
+
+        if (pointers.length === 1) {
+            // Pan
+            const dx = e.clientX - lastPanPosition.x;
+            const dy = e.clientY - lastPanPosition.y;
+            imgPreviewTranslateX += dx;
+            imgPreviewTranslateY += dy;
+            lastPanPosition = { x: e.clientX, y: e.clientY };
+            updateImgPreviewTransform();
+        } else if (pointers.length === 2) {
+            // Zoom
+            const currentDistance = Math.hypot(pointers[0].x - pointers[1].x, pointers[0].y - pointers[1].y);
+            if (lastDistance > 0) {
+                const distanceDelta = currentDistance - lastDistance;
+                const zoomDelta = distanceDelta * 0.01;
+                imgPreviewScale += zoomDelta;
+                if (imgPreviewScale < 0.5) imgPreviewScale = 0.5;
+                if (imgPreviewScale > 5) imgPreviewScale = 5;
+                updateImgPreviewTransform();
+            }
+            lastDistance = currentDistance;
+        }
+    });
+
+    const pointerUp = (e) => {
+        pointers = pointers.filter(p => p.id !== e.pointerId);
+        if (pointers.length === 0) {
+            isPointerDown = false;
+        } else if (pointers.length === 1) {
+            lastPanPosition = { x: pointers[0].x, y: pointers[0].y };
+        }
+    };
+
+    img.addEventListener('pointerup', pointerUp);
+    img.addEventListener('pointercancel', pointerUp);
+    img.addEventListener('pointerout', pointerUp);
+
+    // Mouse wheel zoom
+    img.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const zoomDelta = e.deltaY > 0 ? -0.1 : 0.1;
+        imgPreviewScale += zoomDelta;
+        if (imgPreviewScale < 0.5) imgPreviewScale = 0.5;
+        if (imgPreviewScale > 5) imgPreviewScale = 5;
+        updateImgPreviewTransform();
+    });
 }
 
 // -----------------------------------------------------
@@ -769,6 +905,7 @@ window.addEventListener('DOMContentLoaded', () => {
     setupSubTabs();
     initWorker();
     bindPreviewClose();
+    bindPreviewZoomAndPan();
     fetchWorkersFromMongoDB(); // Fetch names immediately
 
     // If we have a locked prototype on load, fetch its requests

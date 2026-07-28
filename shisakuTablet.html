@@ -627,6 +627,8 @@
             max-height: 82vh;
             border-radius: var(--card-radius);
             box-shadow: var(--shadow-pop);
+            touch-action: none; /* Prevent default browser zoom/pan */
+            transform-origin: center;
         }
 
         .img-preview-modal .img-preview-close {
@@ -853,6 +855,10 @@
     <!-- Image preview modal -->
     <div id="imgPreviewModal" class="img-preview-modal">
         <button type="button" class="img-preview-close" id="imgPreviewClose">&times;</button>
+        <a href="#" target="_blank" id="imgPreviewOpenExt" style="display:none; position:absolute; bottom:40px; left:50%; transform:translateX(-50%); padding: 14px 32px; border-radius: 32px; font-weight: 800; font-size: 1.15rem; z-index: 100010; box-shadow: 0 10px 25px rgba(0,0,0,0.5); text-decoration: none; align-items: center; gap: 10px; background: var(--blue); color: #ffffff; border: 2px solid rgba(255,255,255,0.3);">
+            <svg style="width:22px; height:22px; fill:none; stroke:currentColor; stroke-width:2.5; stroke-linecap:round; stroke-linejoin:round;" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+            View PDF in Detail
+        </a>
         <img id="imgPreviewTarget" src="" alt="preview">
     </div>
 
