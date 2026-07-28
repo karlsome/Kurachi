@@ -700,11 +700,11 @@ function showRequestDetails(request) {
             imgEl.style.display = 'none';
         }
         
-        imgEl.style.cursor = 'pointer'; // indicate it's clickable
         imgEl.onclick = () => {
             if (typeof window.openPreview === 'function') {
                 if (pdfLink) {
-                    window.openPreview(parsedImgUrl, '', 'pdf', pdfLink);
+                    let rawPdfUrl = parseImageUrl(pdfLink) || pdfLink;
+                    window.openPreview(parsedImgUrl, '', 'pdf', rawPdfUrl);
                 } else {
                     window.openPreview(parsedImgUrl, '', 'image');
                 }
