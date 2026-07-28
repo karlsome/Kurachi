@@ -242,9 +242,59 @@ function changeWorkerName() {
     initWorker();
 }
 
-function resetAll() {
-    if (!confirm("Are you sure you want to reset all selections? This will clear the locked prototype.")) return;
+async function resetAll() {
+    if (!confirm("Are you sure you want to reset all selections? This will clear the locked prototype and revert active requests.")) return;
     
+    // 1. Revert the database statuses BEFORE we wipe our local memory
+    if (state.currentPrototypeId) {
+        let hasCompleted = false;
+        
+        try {
+            // Force fetch the LATEST database state so we don't rely on local arrays that might be out of sync
+            const reqRes = await fetch(`${serverURL}/api/shisaku-request/list?shisakudb_id=${state.currentPrototypeId}&limit=1000`);
+            if (reqRes.ok) {
+                const reqData = await reqRes.json();
+                
+                // Revert any in-progress requests back to pending
+                for (const req of reqData.rows) {
+                    const reqStatus = req.status || 'pending';
+                    if (reqStatus === 'completed') {
+                        hasCompleted = true;
+                    } else if (reqStatus === 'in-progress') {
+                        const reqId = req._id?.$oid || req._id;
+                        if (reqId) {
+                            try {
+                                await fetch(`${serverURL}/api/shisaku-request/update/${reqId}`, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ status: 'pending' })
+                                });
+                            } catch (e) {
+                                console.error('Failed to reset request status', e);
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (e) {
+            console.error('Failed to fetch latest request status for reset', e);
+        }
+        
+        // 2. Revert Parent Prototype if there are zero completed requests
+        if (!hasCompleted) {
+            try {
+                await fetch(`${serverURL}/api/shisaku/update-status/${state.currentPrototypeId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ status: 'pending' })
+                });
+            } catch (e) {
+                console.error('Failed to reset prototype status', e);
+            }
+        }
+    }
+
+    // 3. Now it is safe to wipe the tablet's memory
     state.currentPrototype = null;
     state.currentPrototypeId = null;
     state.requests = [];
@@ -307,14 +357,17 @@ function updateTabLocks() {
         });
     } else {
         mainTabs[1].classList.remove('locked');
-        mainTabs[3].classList.remove('locked');
-        mainTabs[4].classList.remove('locked');
-        mainTabs[5].classList.remove('locked');
 
         if (state.currentPrototype) {
             mainTabs[2].classList.remove('locked');
+            mainTabs[3].classList.remove('locked');
+            mainTabs[4].classList.remove('locked');
+            mainTabs[5].classList.remove('locked');
         } else {
             mainTabs[2].classList.add('locked');
+            mainTabs[3].classList.add('locked');
+            mainTabs[4].classList.add('locked');
+            mainTabs[5].classList.add('locked');
         }
     }
 }

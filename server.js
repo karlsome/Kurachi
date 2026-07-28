@@ -32753,9 +32753,6 @@ app.get('/api/shisaku-request/grouped-list', async (req, res) => {
     if (req.query.machine) {
       matchStage.push({ $match: { name: req.query.machine } });
     }
-    if (req.query.status) {
-      matchStage.push({ $match: { status: req.query.status } });
-    }
 
     // Grouping by shisakudb_id
     const pipeline = [
@@ -32784,6 +32781,10 @@ app.get('/api/shisaku-request/grouped-list', async (req, res) => {
       },
       { $project: { parentShisaku: 0, _id: 0 } }
     ];
+
+    if (req.query.status) {
+      pipeline.push({ $match: { parentStatus: req.query.status } });
+    }
 
     const countPipeline = [...pipeline, { $count: "total" }];
     const countResult = await collection.aggregate(countPipeline).toArray();
