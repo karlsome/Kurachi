@@ -352,7 +352,7 @@
         }
         .details-grid {
             display: grid;
-            grid-template-columns: repeat(2, 1fr);
+            grid-template-columns: repeat(3, 1fr);
             gap: 16px;
             margin-bottom: 20px;
         }
@@ -605,6 +605,46 @@
         .flash-overlay.show {
             opacity: 0.5;
         }
+
+        /* Image preview modal */
+        .img-preview-modal {
+            position: fixed;
+            inset: 0;
+            z-index: 100150;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            background: rgba(16, 24, 40, 0.82);
+            padding: 20px;
+        }
+
+        .img-preview-modal.open {
+            display: flex;
+        }
+
+        .img-preview-modal img {
+            max-width: 96vw;
+            max-height: 82vh;
+            border-radius: var(--card-radius);
+            box-shadow: var(--shadow-pop);
+        }
+
+        .img-preview-modal .img-preview-close {
+            position: absolute;
+            top: 18px;
+            right: 20px;
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            border: none;
+            background: rgba(255, 255, 255, 0.16);
+            color: #fff;
+            font-size: 24px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
     </style>
 </head>
 
@@ -808,7 +848,15 @@
     </div>
 
     <!-- Flash Effect -->
-    <div id="flashOverlay" class="flash-overlay"></div>
+    <div class="flash-overlay" id="flashOverlay"></div>
+
+    <!-- Image preview modal -->
+    <div id="imgPreviewModal" class="img-preview-modal">
+        <button type="button" class="img-preview-close" id="imgPreviewClose">&times;</button>
+        <img id="imgPreviewTarget" src="" alt="preview">
+    </div>
+
+    <!-- Script imports -->
     <audio id="alert-sound" src="src/alert.mp3" preload="auto"></audio>
 
     <script src="shisakuTablet.js"></script>

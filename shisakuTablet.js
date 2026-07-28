@@ -650,6 +650,10 @@ function showRequestDetails(request) {
     const grid = document.getElementById('detailsGrid');
     grid.innerHTML = `
         <div class="detail-item">
+            <label>Prototype Number</label>
+            <span>${state.currentPrototype || '-'}</span>
+        </div>
+        <div class="detail-item">
             <label>Name</label>
             <span>${request.name || '-'}</span>
         </div>
@@ -673,6 +677,14 @@ function showRequestDetails(request) {
             <label>Okuri Pitch</label>
             <span>${request.okuriPitch || '-'}</span>
         </div>
+        <div class="detail-item">
+            <label>Pc/Cycle</label>
+            <span>${request.pcPerCycle || '-'}</span>
+        </div>
+        <div class="detail-item">
+            <label>Times</label>
+            <span>${Math.ceil((parseInt(request.quantity) || 0) / (parseInt(request.pcPerCycle) || 1))}</span>
+        </div>
     `;
 
     const imgEl = document.getElementById('detailsImage');
@@ -682,8 +694,15 @@ function showRequestDetails(request) {
     if (parsedImgUrl) {
         imgEl.src = parsedImgUrl;
         imgEl.style.display = 'block';
+        imgEl.style.cursor = 'pointer'; // indicate it's clickable
+        imgEl.onclick = () => {
+            if (typeof window.openPreview === 'function') {
+                window.openPreview(parsedImgUrl);
+            }
+        };
     } else {
         imgEl.style.display = 'none';
+        imgEl.onclick = null;
         imgEl.src = '';
     }
 
@@ -706,6 +725,42 @@ function sendToMachine() {
 }
 
 // -----------------------------------------------------
+// Image Preview Modal
+// -----------------------------------------------------
+function openPreview(src, titleText = '') {
+    if (!src) return;
+    const m = document.getElementById('imgPreviewModal');
+    const img = document.getElementById('imgPreviewTarget');
+    if (!m || !img) return;
+    img.src = src;
+    
+    let titleEl = document.getElementById('imgPreviewTitle');
+    if (!titleEl) {
+        titleEl = document.createElement('div');
+        titleEl.id = 'imgPreviewTitle';
+        titleEl.style.cssText = 'position:absolute; top:15%; left:50%; transform:translateX(-50%); color:#fff; font-size:3rem; font-weight:900; text-shadow: 2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 0 4px 12px rgba(0,0,0,0.9); background: rgba(0,0,0,0.5); padding: 12px 32px; border-radius: 16px; pointer-events:none; z-index: 100010; white-space:nowrap; letter-spacing:3px; border: 3px solid rgba(255,255,255,0.3);';
+        m.appendChild(titleEl);
+    }
+    
+    if (titleText) {
+        titleEl.textContent = titleText;
+        titleEl.style.display = 'block';
+    } else {
+        titleEl.style.display = 'none';
+    }
+
+    m.classList.add('open');
+}
+window.openPreview = openPreview;
+
+function bindPreviewClose() {
+    const m = document.getElementById('imgPreviewModal');
+    const close = document.getElementById('imgPreviewClose');
+    if (close) close.addEventListener('click', () => m.classList.remove('open'));
+    if (m) m.addEventListener('click', (e) => { if (e.target === m) m.classList.remove('open'); });
+}
+
+// -----------------------------------------------------
 // Initialization
 // -----------------------------------------------------
 window.addEventListener('DOMContentLoaded', () => {
@@ -713,6 +768,7 @@ window.addEventListener('DOMContentLoaded', () => {
     setupMainTabs();
     setupSubTabs();
     initWorker();
+    bindPreviewClose();
     fetchWorkersFromMongoDB(); // Fetch names immediately
 
     // If we have a locked prototype on load, fetch its requests
