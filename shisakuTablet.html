@@ -398,8 +398,10 @@
             border: 1px solid var(--border);
             border-radius: var(--card-radius);
             padding: 24px;
+            width: 100%;
             max-width: 500px;
             margin: 0 auto;
+            box-sizing: border-box;
             box-shadow: var(--shadow-card);
         }
         .user-setup-card h2 {
@@ -664,7 +666,7 @@
         <div class="tab-panels-container" id="tabPanelsContainer">
             
             <!-- Panel 0: User -->
-            <div class="tab-panel">
+            <div class="tab-panel" style="display: flex; flex-direction: column;">
                 <div class="user-setup-card">
                     
                     <!-- State B: Confirm Existing Worker -->
@@ -696,18 +698,47 @@
                     </div>
 
                 </div>
+                
+                <div style="margin-top: auto; text-align: center; padding: 20px 0 0 0;">
+                    <button type="button" class="btn" onclick="resetAll()" style="width: 100%; max-width: 400px; padding: 14px; background: var(--red); color: white; border: none; font-size: 1.1rem;">
+                        Reset All
+                    </button>
+                </div>
             </div>
 
             <!-- Panel 1: Prototype -->
             <div class="tab-panel">
-                <div class="sub-tab-bar" id="statusTabs">
-                    <button class="sub-tab-btn active" data-status="pending">Pending</button>
-                    <button class="sub-tab-btn" data-status="in-progress">In-Progress</button>
-                    <button class="sub-tab-btn" data-status="completed">Completed</button>
-                    <button class="sub-tab-btn" data-status="canceled">Canceled</button>
+                <!-- Level 1: Prototype List -->
+                <div id="view-prototype-list" class="view-section active">
+                    <div class="sub-tab-bar" id="statusTabs">
+                        <button class="sub-tab-btn active" data-status="pending">Pending</button>
+                        <button class="sub-tab-btn" data-status="in-progress">In-Progress</button>
+                        <button class="sub-tab-btn" data-status="completed">Completed</button>
+                        <button class="sub-tab-btn" data-status="canceled">Canceled</button>
+                    </div>
+                    <div class="grid-list" id="prototypesGrid">
+                        <!-- Prototype cards injected here -->
+                    </div>
                 </div>
-                <div class="grid-list" id="prototypesGrid">
-                    <!-- Prototype cards injected here -->
+
+                <!-- Level 2: Prototype Detailed Info -->
+                <div id="view-prototype-details" class="view-section">
+                    <button class="back-btn" onclick="showPrototypeView('list')">← Back to List</button>
+                    <div class="details-card">
+                        <h2 id="protoPreviewTitle" style="margin-bottom: 15px; font-weight: 800;">Prototype #</h2>
+                        <div class="details-grid" id="protoPreviewGrid" style="margin-bottom: 15px;">
+                            <!-- Info injected here -->
+                        </div>
+                        <h3 style="font-size: 1.1rem; margin-bottom: 10px; color: var(--text-main);">Box needed:</h3>
+                        <div id="protoPreviewBoxes" style="margin-bottom: 20px; display: flex; flex-direction: column; gap: 8px;">
+                            <!-- Box counts injected here -->
+                        </div>
+                        <h3 style="font-size: 1.1rem; margin-bottom: 10px; color: var(--text-main);">Materials Needed</h3>
+                        <div id="protoPreviewMaterials" style="margin-bottom: 20px; display: flex; flex-direction: column; gap: 8px;">
+                            <!-- Material lengths injected here -->
+                        </div>
+                        <button class="btn btn-send" onclick="confirmPrototypeSelection()">Select this Prototype</button>
+                    </div>
                 </div>
             </div>
 

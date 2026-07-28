@@ -17,7 +17,8 @@ const state = {
 
     prototypes: [],
     requests: [],
-    currentPrototype: null,
+    currentPrototype: localStorage.getItem('shisaku_tablet_prototype') || null,
+    currentPrototypeId: localStorage.getItem('shisaku_tablet_prototype_id') || null,
     currentRequest: null,
 };
 
@@ -241,6 +242,25 @@ function changeWorkerName() {
     initWorker();
 }
 
+function resetAll() {
+    if (!confirm("Are you sure you want to reset all selections? This will clear the locked prototype.")) return;
+    
+    state.currentPrototype = null;
+    state.currentPrototypeId = null;
+    state.requests = [];
+    state.currentRequest = null;
+    
+    localStorage.removeItem('shisaku_tablet_prototype');
+    localStorage.removeItem('shisaku_tablet_prototype_id');
+    
+    initWorker();
+    updateTabLocks();
+    switchMainTab(0); // Jump back to User Tab
+    
+    // Refresh prototype view to show all
+    fetchPrototypes();
+}
+
 // Modal event listeners
 const workerInputEl = document.getElementById('workerInput');
 
@@ -364,6 +384,155 @@ async function fetchPrototypes() {
     }
 }
 
+let pendingSelection = null;
+
+function showPrototypeView(viewId) {
+    document.getElementById('view-prototype-list').classList.remove('active');
+    document.getElementById('view-prototype-details').classList.remove('active');
+    
+    if (viewId === 'list') {
+        document.getElementById('view-prototype-list').classList.add('active');
+    } else {
+        document.getElementById('view-prototype-details').classList.add('active');
+    }
+}
+
+async function previewPrototype(shisakudb_id, shisakuNo) {
+    try {
+        // Fetch full prototype details
+        const protoRes = await fetch(`${serverURL}/api/shisaku/${shisakudb_id}`);
+        if (!protoRes.ok) throw new Error('Failed to fetch prototype details');
+        const protoData = await protoRes.json();
+        
+        // Fetch requests for parts needed calculation
+        const reqRes = await fetch(`${serverURL}/api/shisaku-request/list?shisakudb_id=${shisakudb_id}&sortColumn=orderNumber&sortDirection=1&limit=1000`);
+        if (!reqRes.ok) throw new Error('Failed to fetch requests');
+        const reqData = await reqRes.json();
+        
+        pendingSelection = {
+            shisakudb_id,
+            shisakuNo,
+            protoData,
+            requests: reqData.rows
+        };
+        
+        renderPrototypePreview();
+        showPrototypeView('details');
+    } catch (error) {
+        console.error(error);
+        alert('Error loading prototype details.');
+    }
+}
+
+function renderPrototypePreview() {
+    if (!pendingSelection) return;
+    const { shisakuNo, protoData, requests } = pendingSelection;
+    
+    document.getElementById('protoPreviewTitle').textContent = `Prototype #${shisakuNo}`;
+    
+    // Render basic info
+    const grid = document.getElementById('protoPreviewGrid');
+    
+    let deadlineStr = '-';
+    if (protoData.deadline) {
+        // Parse date from string or { $date: ... }
+        deadlineStr = typeof protoData.deadline === 'object' && protoData.deadline.$date ? new Date(protoData.deadline.$date).toLocaleDateString() : new Date(protoData.deadline).toLocaleDateString();
+    }
+
+    grid.innerHTML = `
+        <div class="detail-item"><span>Deadline:</span> <strong>${deadlineStr}</strong></div>
+        <div class="detail-item"><span>Event:</span> <strong>${protoData.eventName || '-'}</strong></div>
+        <div class="detail-item"><span>Model:</span> <strong>${protoData.modelName || '-'}</strong></div>
+        <div class="detail-item"><span>Customer:</span> <strong>${protoData.customerName || '-'}</strong></div>
+    `;
+    
+    // Calculate box counts based on requests
+    const boxCounts = {};
+    requests.forEach(r => {
+        if (r.boxType) {
+            boxCounts[r.boxType] = (boxCounts[r.boxType] || 0) + 1; // 1 pc per request
+        }
+    });
+    
+    const boxesContainer = document.getElementById('protoPreviewBoxes');
+    boxesContainer.innerHTML = '';
+    
+    if (Object.keys(boxCounts).length === 0) {
+        boxesContainer.innerHTML = '<div style="color: var(--text-muted); font-size: 0.9rem;">No boxes required.</div>';
+    } else {
+        for (const [boxType, count] of Object.entries(boxCounts)) {
+            const row = document.createElement('div');
+            row.style.display = 'flex';
+            row.style.justifyContent = 'space-between';
+            row.style.padding = '12px 16px';
+            row.style.background = 'var(--bg-subtle)';
+            row.style.borderRadius = 'var(--btn-radius)';
+            row.style.border = '1px solid var(--border)';
+            
+            row.innerHTML = `
+                <span style="font-weight: 700; color: var(--text-main);">${boxType}</span>
+                <span style="font-weight: 800; color: var(--brand);">${count} pc(s)</span>
+            `;
+            boxesContainer.appendChild(row);
+        }
+    }
+
+    // Calculate material length based on okuriPitch
+    const materialLengths = {};
+    requests.forEach(r => {
+        if (r.material && r.okuriPitch) {
+            const length = parseFloat(r.okuriPitch) || 0;
+            if (length > 0) {
+                const colorLabel = r.color ? ` - ${r.color}` : '';
+                const matKey = `${r.material}${colorLabel}`;
+                materialLengths[matKey] = (materialLengths[matKey] || 0) + length;
+            }
+        }
+    });
+
+    const materialsContainer = document.getElementById('protoPreviewMaterials');
+    materialsContainer.innerHTML = '';
+    
+    if (Object.keys(materialLengths).length === 0) {
+        materialsContainer.innerHTML = '<div style="color: var(--text-muted); font-size: 0.9rem;">No materials calculated.</div>';
+    } else {
+        for (const [material, totalLength] of Object.entries(materialLengths)) {
+            const row = document.createElement('div');
+            row.style.display = 'flex';
+            row.style.justifyContent = 'space-between';
+            row.style.padding = '12px 16px';
+            row.style.background = 'var(--bg-subtle)';
+            row.style.borderRadius = 'var(--btn-radius)';
+            row.style.border = '1px solid var(--border)';
+            
+            row.innerHTML = `
+                <span style="font-weight: 700; color: var(--text-main);">${material}</span>
+                <span style="font-weight: 800; color: var(--brand);">${totalLength} mm</span>
+            `;
+            materialsContainer.appendChild(row);
+        }
+    }
+}
+
+function confirmPrototypeSelection() {
+    if (!pendingSelection) return;
+    
+    const { shisakudb_id, shisakuNo, requests } = pendingSelection;
+    
+    state.requests = requests;
+    state.currentPrototype = shisakuNo;
+    state.currentPrototypeId = shisakudb_id;
+    
+    localStorage.setItem('shisaku_tablet_prototype', shisakuNo);
+    localStorage.setItem('shisaku_tablet_prototype_id', shisakudb_id);
+    
+    updateTabLocks();
+    renderRequests();
+    showRequestView('requests');
+    switchMainTab(2); // Jump to Request tab
+}
+
+// Keep fetchRequests for initialization when already locked (page refresh)
 async function fetchRequests(shisakudb_id, shisakuNo) {
     try {
         const response = await fetch(`${serverURL}/api/shisaku-request/list?shisakudb_id=${shisakudb_id}&sortColumn=orderNumber&sortDirection=1&limit=1000`);
@@ -372,12 +541,11 @@ async function fetchRequests(shisakudb_id, shisakuNo) {
 
         state.requests = data.rows;
         state.currentPrototype = shisakuNo;
-
+        state.currentPrototypeId = shisakudb_id;
+        
         updateTabLocks();
         renderRequests();
         showRequestView('requests');
-        switchMainTab(2); // Jump to Request tab
-
     } catch (error) {
         console.error(error);
         alert('Error loading requests.');
@@ -387,10 +555,13 @@ async function fetchRequests(shisakudb_id, shisakuNo) {
 function renderPrototypes() {
     const grid = document.getElementById('prototypesGrid');
     grid.innerHTML = '';
-
+    
     // We already fetched by currentPrototypeStatus, so state.prototypes is the filtered list.
-    const filtered = state.prototypes;
-
+    // If locked to a prototype, ONLY show that prototype.
+    const filtered = state.currentPrototype 
+        ? state.prototypes.filter(p => p.shisakuNo === state.currentPrototype) 
+        : state.prototypes;
+    
     if (filtered.length === 0) {
         grid.innerHTML = '<div style="color: var(--text-muted); padding: 20px;">No prototypes found for this status.</div>';
         return;
@@ -399,7 +570,15 @@ function renderPrototypes() {
     filtered.forEach(p => {
         const card = document.createElement('div');
         card.className = 'card';
-        card.onclick = () => fetchRequests(p.shisakudb_id, p.shisakuNo);
+        card.onclick = () => {
+            if (state.currentPrototype) {
+                // If already locked, just jump straight to requests
+                switchMainTab(2);
+            } else {
+                // If not locked, show detailed preview first
+                previewPrototype(p.shisakudb_id, p.shisakuNo);
+            }
+        };
 
         let dateStr = '-';
         if (p.latestDate) {
@@ -522,12 +701,17 @@ function sendToMachine() {
 // -----------------------------------------------------
 // Initialization
 // -----------------------------------------------------
-document.addEventListener('DOMContentLoaded', () => {
+window.addEventListener('DOMContentLoaded', () => {
     parseParams();
     setupMainTabs();
     setupSubTabs();
     initWorker();
     fetchWorkersFromMongoDB(); // Fetch names immediately
 
-    showRequestView('placeholder');
+    // If we have a locked prototype on load, fetch its requests
+    if (state.currentPrototypeId && state.currentPrototype) {
+        fetchRequests(state.currentPrototypeId, state.currentPrototype);
+    } else {
+        showRequestView('placeholder');
+    }
 });
