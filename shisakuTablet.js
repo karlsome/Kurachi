@@ -787,6 +787,22 @@ async function startRequest() {
                         state.requests[index].status = 'in-progress';
                         renderRequests();
                     }
+                    
+                    // Also update the parent prototype to in-progress if it's currently pending
+                    if (state.currentPrototypeStatus === 'pending' && state.currentPrototypeId) {
+                        try {
+                            const protoResponse = await fetch(`${serverURL}/api/shisaku/update-status/${state.currentPrototypeId}`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ status: 'in-progress' })
+                            });
+                            if (protoResponse.ok) {
+                                state.currentPrototypeStatus = 'in-progress';
+                            }
+                        } catch (pe) {
+                            console.error('Failed to update prototype status:', pe);
+                        }
+                    }
                 } else {
                     console.error('Failed to update status to in-progress');
                 }

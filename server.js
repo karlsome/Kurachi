@@ -32565,6 +32565,27 @@ app.post('/api/shisaku/update/:id', async (req, res) => {
   }
 });
 
+app.post('/api/shisaku/update-status/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) return res.status(400).json({ error: 'Invalid ID' });
+    
+    const { status } = req.body;
+    if (!status) return res.status(400).json({ error: 'Status is required' });
+
+    await client.connect();
+    const result = await client.db('Sasaki_Coating_MasterDB').collection('shisakuDB').updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { status, updatedAt: new Date() } }
+    );
+    
+    res.json({ success: true, updatedCount: result.modifiedCount });
+  } catch (error) {
+    console.error('❌ Error updating prototype status:', error.message);
+    res.status(500).json({ error: 'Failed to update prototype status' });
+  }
+});
+
 app.get('/api/shisaku/:id', async (req, res) => {
   try {
     const { id } = req.params;
