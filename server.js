@@ -32776,7 +32776,7 @@ app.get('/api/shisaku-request/grouped-list', async (req, res) => {
 
 app.post('/api/shisaku-request/register', async (req, res) => {
   try {
-    const { name, dxf, pdf, pce, okuriPitch, color, material, boxType, quantity, shisakudb_id } = req.body;
+    const { name, dxf, pdf, pce, okuriPitch, color, material, boxType, quantity, shisakudb_id, orderNumber } = req.body;
 
     if (!name || !pce || !okuriPitch || !color || !material || !boxType || !quantity) {
       return res.status(400).json({ error: 'name, pce, okuriPitch, color, material, boxType, and quantity are required' });
@@ -32804,6 +32804,7 @@ app.post('/api/shisaku-request/register', async (req, res) => {
       status: "pending",
       createdAt: new Date(),
       ...(req.body.createdBy ? { createdBy: String(req.body.createdBy).trim() } : {}),
+      ...(orderNumber !== undefined ? { orderNumber: Number(orderNumber) } : {}),
     };
 
     await client.connect();
@@ -32820,7 +32821,7 @@ app.post('/api/shisaku-request/update/:id', async (req, res) => {
     const { id } = req.params;
     if (!ObjectId.isValid(id)) return res.status(400).json({ error: 'Invalid id' });
     
-    const { name, dxf, pdf, pce, okuriPitch, color, material, boxType, quantity } = req.body;
+    const { name, dxf, pdf, pce, okuriPitch, color, material, boxType, quantity, orderNumber } = req.body;
     
     const updateDoc = {};
     if (name !== undefined) updateDoc.name = String(name).trim();
@@ -32833,6 +32834,7 @@ app.post('/api/shisaku-request/update/:id', async (req, res) => {
     if (boxType !== undefined) updateDoc.boxType = String(boxType).trim();
     if (quantity !== undefined) updateDoc.quantity = Number(quantity);
     if (req.body.status !== undefined) updateDoc.status = String(req.body.status).trim();
+    if (orderNumber !== undefined) updateDoc.orderNumber = Number(orderNumber);
     
     await client.connect();
     const result = await client.db('Sasaki_Coating_MasterDB').collection('shisakuRequestDB').updateOne(
@@ -32866,6 +32868,50 @@ app.delete('/api/shisaku-request/:id', async (req, res) => {
   } catch (error) {
     console.error('❌ Error deleting prototype request:', error.message);
     res.status(500).json({ error: 'Failed to delete prototype request', details: error.message });
+  }
+});
+
+app.post('/api/shisaku-request/bulk-delete', async (req, res) => {
+  try {
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: 'ids array is required' });
+    
+    const objectIds = ids.filter(id => ObjectId.isValid(id)).map(id => new ObjectId(id));
+    if (objectIds.length === 0) return res.status(400).json({ error: 'No valid ids provided' });
+
+    await client.connect();
+    const result = await client.db('Sasaki_Coating_MasterDB').collection('shisakuRequestDB').deleteMany({ _id: { $in: objectIds } });
+
+    res.json({ success: true, deletedCount: result.deletedCount });
+  } catch (error) {
+    console.error('❌ Error in bulk deleting prototype requests:', error.message);
+    res.status(500).json({ error: 'Failed to bulk delete prototype requests', details: error.message });
+  }
+});
+
+app.post('/api/shisaku-request/reorder', async (req, res) => {
+  try {
+    const { updates } = req.body;
+    if (!Array.isArray(updates) || updates.length === 0) return res.status(400).json({ error: 'updates array is required' });
+
+    await client.connect();
+    const collection = client.db('Sasaki_Coating_MasterDB').collection('shisakuRequestDB');
+    
+    const bulkOps = updates.filter(u => u.id && ObjectId.isValid(u.id) && u.orderNumber !== undefined).map(u => ({
+      updateOne: {
+        filter: { _id: new ObjectId(u.id) },
+        update: { $set: { orderNumber: Number(u.orderNumber) } }
+      }
+    }));
+
+    if (bulkOps.length === 0) return res.status(400).json({ error: 'No valid updates provided' });
+
+    const result = await collection.bulkWrite(bulkOps);
+
+    res.json({ success: true, updatedCount: result.modifiedCount });
+  } catch (error) {
+    console.error('❌ Error in reordering prototype requests:', error.message);
+    res.status(500).json({ error: 'Failed to reorder prototype requests', details: error.message });
   }
 });
 
