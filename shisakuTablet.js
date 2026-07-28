@@ -3,82 +3,353 @@
  * Logic for Shisaku Tablet UI
  */
 
-//const serverURL = "https://kurachi.onrender.com";
 const serverURL = "http://localhost:3000";
+//const serverURL = "https://kurachi.onrender.com";
 
 const state = {
     workerName: localStorage.getItem('shisaku_tablet_worker_name') || null,
     machineName: null,
-    filterName: null,
-    currentTab: 'pending',
+    filterName: null, // "第一工場"
+    
+    currentMainTab: 0, // 0: User, 1: Prototype, 2: Request, 3: Images, 4: Submit
+    currentPrototypeStatus: 'pending',
+    
     prototypes: [],
     requests: [],
     currentPrototype: null,
     currentRequest: null,
 };
 
+// -----------------------------------------------------
 // URL Parsing
+// -----------------------------------------------------
 function parseParams() {
-    const params = new URLSearchParams(window.location.search);
-    if (params.has('machine')) {
-        state.machineName = params.get('machine');
+    let searchStr = window.location.search;
+    while (searchStr.startsWith('?')) {
+        searchStr = searchStr.substring(1);
+    }
+    const params = new URLSearchParams(searchStr);
+    
+    // Also support if the parameter itself got named '?filter'
+    if (params.has('machine') || params.has('?machine')) {
+        state.machineName = params.get('machine') || params.get('?machine');
         document.getElementById('machineNameTag').textContent = `設備: ${state.machineName}`;
     }
-    if (params.has('filter')) {
-        state.filterName = params.get('filter');
+    if (params.has('filter') || params.has('?filter')) {
+        state.filterName = params.get('filter') || params.get('?filter');
     }
 }
 
-// Worker Management
+// -----------------------------------------------------
+// Worker Setup & Modal Logic (DCP Interactive style)
+// -----------------------------------------------------
+let workerNamesData = [];
+
+// Initialize view on load
 function initWorker() {
     if (state.workerName) {
-        document.getElementById('userInfoBtn').textContent = state.workerName;
+        document.getElementById('welcomeBackContainer').classList.add('active');
+        document.getElementById('newWorkerContainer').classList.remove('active');
         document.getElementById('confirmUserName').textContent = state.workerName;
-        document.getElementById('confirmUserModal').classList.add('active');
     } else {
-        document.getElementById('userInfoBtn').textContent = 'User';
-        document.getElementById('workerModal').classList.add('active');
+        document.getElementById('welcomeBackContainer').classList.remove('active');
+        document.getElementById('newWorkerContainer').classList.add('active');
+    }
+    updateTabLocks();
+}
+
+async function fetchWorkersFromMongoDB() {
+    if (!state.filterName) return;
+    try {
+        const response = await fetch(`${serverURL}/getWorkerNames?selectedFactory=${encodeURIComponent(state.filterName)}`);
+        if (!response.ok) throw new Error("Failed to fetch worker names");
+        const workers = await response.json();
+        
+        workerNamesData = workers;
+        
+        const dataList = document.getElementById("machine-operator-suggestions");
+        dataList.innerHTML = "";
+        workerNamesData.forEach(name => {
+            const option = document.createElement("option");
+            option.value = name;
+            dataList.appendChild(option);
+        });
+        
+    } catch (error) {
+        console.error("Error fetching worker names from MongoDB:", error);
     }
 }
 
-function openWorkerModal() {
-    document.getElementById('workerModal').classList.add('active');
+function getRecentWorkers() {
+    try {
+        return JSON.parse(localStorage.getItem('shisaku_recent_workers') || '[]');
+    } catch {
+        return [];
+    }
 }
 
-function selectWorker(name) {
+function saveRecentWorker(name) {
+    if (!name) return;
+    let recent = getRecentWorkers();
+    recent = recent.filter(w => w !== name);
+    recent.unshift(name);
+    if (recent.length > 5) recent.pop();
+    localStorage.setItem('shisaku_recent_workers', JSON.stringify(recent));
+}
+
+function removeFromRecentWorkers(name) {
+    let recent = getRecentWorkers();
+    recent = recent.filter(w => w !== name);
+    localStorage.setItem('shisaku_recent_workers', JSON.stringify(recent));
+    renderWorkerNames(); // Re-render modal
+}
+
+function groupNamesByLetter(names) {
+    const grouped = {};
+    names.forEach(name => {
+        let firstChar = name.charAt(0).toUpperCase();
+        if (/[A-Z]/.test(firstChar)) {
+            firstChar = firstChar;
+        } else if (/[ぁ-ん]/.test(name.charAt(0))) {
+            const index = "あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをん".indexOf(name.charAt(0));
+            if (index !== -1) firstChar = "あかさたなはまやらわ"[Math.floor(index / 5)] || "あ";
+            else firstChar = "あ";
+        } else if (/[ァ-ン]/.test(name.charAt(0))) {
+            const index = "アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン".indexOf(name.charAt(0));
+            if (index !== -1) firstChar = "アカサタナハマヤラワ"[Math.floor(index / 5)] || "ア";
+            else firstChar = "ア";
+        } else if (/[\u4E00-\u9FFF]/.test(firstChar)) {
+            firstChar = "漢字";
+        } else {
+            firstChar = "#";
+        }
+
+        if (!grouped[firstChar]) grouped[firstChar] = [];
+        grouped[firstChar].push(name);
+    });
+    return grouped;
+}
+
+function renderWorkerNames() {
+    const container = document.getElementById('workerNamesContainer');
+    container.innerHTML = '';
+
+    const recentWorkers = getRecentWorkers();
+
+    if (recentWorkers.length > 0) {
+        const recentSection = document.createElement('div');
+        recentSection.className = 'worker-section recent-section';
+        const header = document.createElement('div');
+        header.className = 'worker-section-header';
+        header.textContent = '⭐ 最近使用 / Recent';
+        recentSection.appendChild(header);
+
+        const grid = document.createElement('div');
+        grid.className = 'worker-names-grid';
+
+        recentWorkers.forEach(name => {
+            const wrapper = document.createElement('div');
+            wrapper.style.position = 'relative';
+
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'worker-name-btn';
+            btn.textContent = name;
+            btn.onclick = () => selectWorkerName(name);
+
+            const deleteBtn = document.createElement('button');
+            deleteBtn.type = 'button';
+            deleteBtn.className = 'delete-recent-btn';
+            deleteBtn.innerHTML = '×';
+            deleteBtn.onclick = (e) => {
+                e.stopPropagation();
+                removeFromRecentWorkers(name);
+            };
+
+            wrapper.appendChild(btn);
+            wrapper.appendChild(deleteBtn);
+            grid.appendChild(wrapper);
+        });
+
+        recentSection.appendChild(grid);
+        container.appendChild(recentSection);
+    }
+
+    const grouped = groupNamesByLetter(workerNamesData);
+    const sortedKeys = Object.keys(grouped).sort();
+
+    sortedKeys.forEach(letter => {
+        const section = document.createElement('div');
+        section.className = 'worker-section';
+
+        const header = document.createElement('div');
+        header.className = 'worker-section-header';
+        header.textContent = letter;
+        section.appendChild(header);
+
+        const grid = document.createElement('div');
+        grid.className = 'worker-names-grid';
+
+        grouped[letter].forEach(name => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'worker-name-btn';
+            btn.textContent = name;
+            btn.onclick = () => selectWorkerName(name);
+            grid.appendChild(btn);
+        });
+
+        section.appendChild(grid);
+        container.appendChild(section);
+    });
+}
+
+// User Actions
+function selectWorkerName(name) {
     state.workerName = name;
     localStorage.setItem('shisaku_tablet_worker_name', name);
-    document.getElementById('userInfoBtn').textContent = name;
-    document.getElementById('workerModal').classList.remove('active');
+    document.getElementById("workerInput").value = name;
+    saveRecentWorker(name);
+    
+    document.getElementById('workerNameModal').style.display = 'none';
+    
+    initWorker();
+    switchMainTab(1); // Jump to Prototype Tab
 }
 
-function confirmUser(isSameUser) {
-    document.getElementById('confirmUserModal').classList.remove('active');
-    if (!isSameUser) {
-        openWorkerModal();
+function proceedFromStep0() {
+    const val = document.getElementById("workerInput").value;
+    if (!val) {
+        alert("Please select a worker first.");
+        return;
+    }
+    selectWorkerName(val);
+}
+
+function confirmWorkerName() {
+    // "Yes, that's me"
+    updateTabLocks();
+    switchMainTab(1); // Jump to Prototype Tab
+}
+
+function changeWorkerName() {
+    // Switch to Selection State
+    state.workerName = null;
+    localStorage.removeItem('shisaku_tablet_worker_name');
+    document.getElementById("workerInput").value = '';
+    initWorker();
+}
+
+// Modal event listeners
+const workerInputEl = document.getElementById('workerInput');
+
+function openWorkerModal(e) {
+    if (workerInputEl.readOnly) {
+        e.preventDefault();
+        if (workerNamesData && workerNamesData.length > 0) {
+            renderWorkerNames();
+            document.getElementById('workerNameModal').style.display = 'flex';
+        } else {
+            console.warn("Worker names not loaded yet or empty.");
+            // optionally try fetching again here
+        }
     }
 }
 
-// Navigation & Tabs
-function setupTabs() {
-    const tabs = document.querySelectorAll('.tab-btn');
-    tabs.forEach(tab => {
+workerInputEl.addEventListener('click', openWorkerModal);
+workerInputEl.addEventListener('focus', openWorkerModal);
+workerInputEl.addEventListener('touchstart', openWorkerModal);
+
+document.getElementById('closeWorkerModal').addEventListener('click', () => {
+    document.getElementById('workerNameModal').style.display = 'none';
+});
+
+document.getElementById('manualEntryBtn').addEventListener('click', () => {
+    const inputField = document.getElementById('workerInput');
+    inputField.readOnly = false;
+    inputField.focus();
+    document.getElementById('workerNameModal').style.display = 'none';
+});
+
+document.getElementById('workerInput').addEventListener('blur', (e) => {
+    e.target.readOnly = true;
+});
+
+// -----------------------------------------------------
+// Main Tab Navigation & Locking
+// -----------------------------------------------------
+function updateTabLocks() {
+    const mainTabs = document.querySelectorAll('#mainTabBar .tab-btn');
+    if (!state.workerName) {
+        mainTabs.forEach((btn, index) => {
+            if (index !== 0) btn.classList.add('locked');
+        });
+    } else {
+        mainTabs[1].classList.remove('locked');
+        mainTabs[3].classList.remove('locked');
+        mainTabs[4].classList.remove('locked');
+        
+        if (state.currentPrototype) {
+            mainTabs[2].classList.remove('locked');
+        } else {
+            mainTabs[2].classList.add('locked');
+        }
+    }
+}
+
+function setupMainTabs() {
+    const tabs = document.querySelectorAll('#mainTabBar .tab-btn');
+    
+    tabs.forEach((tab, index) => {
         tab.addEventListener('click', () => {
-            tabs.forEach(t => t.classList.remove('active'));
-            tab.classList.add('active');
-            state.currentTab = tab.dataset.status;
-            renderPrototypes();
-            showView('prototypes');
+            if (tab.classList.contains('locked')) return;
+            switchMainTab(index);
         });
     });
 }
 
-function showView(viewId) {
-    document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active'));
-    document.getElementById(`view-${viewId}`).classList.add('active');
+function switchMainTab(index) {
+    const tabs = document.querySelectorAll('#mainTabBar .tab-btn');
+    const container = document.getElementById('tabPanelsContainer');
+    
+    tabs.forEach(t => t.classList.remove('active'));
+    tabs[index].classList.add('active');
+    
+    container.style.transform = `translateX(-${index * 20}%)`;
+    state.currentMainTab = index;
+
+    if (index === 1 && state.prototypes.length === 0) {
+        fetchPrototypes();
+    }
 }
 
-// Data Fetching
+// -----------------------------------------------------
+// Prototype & Request Logic
+// -----------------------------------------------------
+function setupSubTabs() {
+    const tabs = document.querySelectorAll('.sub-tab-btn');
+    tabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            tabs.forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            state.currentPrototypeStatus = tab.dataset.status;
+            renderPrototypes();
+        });
+    });
+}
+
+function showRequestView(viewId) {
+    document.getElementById('requestPlaceholder').style.display = 'none';
+    document.getElementById('view-requests').classList.remove('active');
+    document.getElementById('view-details').classList.remove('active');
+    
+    if (viewId === 'placeholder') {
+        document.getElementById('requestPlaceholder').style.display = 'block';
+    } else {
+        document.getElementById(`view-${viewId}`).classList.add('active');
+    }
+}
+
 async function fetchPrototypes() {
     try {
         const response = await fetch(`${serverURL}/api/shisaku/list`);
@@ -96,24 +367,27 @@ async function fetchRequests(shisakudb_id, shisakuNo) {
         const response = await fetch(`${serverURL}/api/shisaku-request/list?shisakudb_id=${shisakudb_id}&sortColumn=orderNumber&sortDirection=1&limit=1000`);
         if (!response.ok) throw new Error('Failed to fetch requests');
         const data = await response.json();
+        
         state.requests = data.rows;
         state.currentPrototype = shisakuNo;
+        
+        updateTabLocks();
         renderRequests();
-        showView('requests');
+        showRequestView('requests');
+        switchMainTab(2); // Jump to Request tab
+        
     } catch (error) {
         console.error(error);
         alert('Error loading requests.');
     }
 }
 
-// Rendering
 function renderPrototypes() {
     const grid = document.getElementById('prototypesGrid');
     grid.innerHTML = '';
-
-    // Filter by tab status
-    const filtered = state.prototypes.filter(p => p.status === state.currentTab);
-
+    
+    const filtered = state.prototypes.filter(p => p.status === state.currentPrototypeStatus);
+    
     if (filtered.length === 0) {
         grid.innerHTML = '<div style="color: var(--text-muted); padding: 20px;">No prototypes found for this status.</div>';
         return;
@@ -123,7 +397,7 @@ function renderPrototypes() {
         const card = document.createElement('div');
         card.className = 'card';
         card.onclick = () => fetchRequests(p._id, p.shisakuNo);
-
+        
         let deadlineStr = '-';
         if (p.deadline) {
             deadlineStr = p.deadline;
@@ -142,7 +416,7 @@ function renderRequests() {
     document.getElementById('requestsViewTitle').textContent = `Requests for Prototype #${state.currentPrototype}`;
     const list = document.getElementById('requestsList');
     list.innerHTML = '';
-
+    
     if (state.requests.length === 0) {
         list.innerHTML = '<div style="color: var(--text-muted); padding: 20px;">No requests found.</div>';
         return;
@@ -152,7 +426,7 @@ function renderRequests() {
         const row = document.createElement('div');
         row.className = 'request-row';
         row.onclick = () => showRequestDetails(r);
-
+        
         row.innerHTML = `
             <div class="row-number">#${r.orderNumber || '?'}</div>
             <div class="row-info">
@@ -169,17 +443,15 @@ function renderRequests() {
 
 function parseImageUrl(jpgLink) {
     if (!jpgLink) return '';
-    // If it's a firebase URL or a relative /api/ URL, use as is
     if (jpgLink.startsWith('http') && !jpgLink.includes('drive.google.com')) {
         return jpgLink;
     }
-    // If it's a google drive URL, extract ID and use /api/shisaku/image/ID
     const driveMatch = jpgLink.match(/id=([a-zA-Z0-9_-]+)|d\/([a-zA-Z0-9_-]+)/);
     if (driveMatch) {
         const id = driveMatch[1] || driveMatch[2];
         return `${serverURL}/api/shisaku/image/${id}`;
     }
-    return jpgLink; // Fallback
+    return jpgLink; 
 }
 
 function showRequestDetails(request) {
@@ -215,7 +487,7 @@ function showRequestDetails(request) {
     const imgEl = document.getElementById('detailsImage');
     const jpgLink = request.pdf?.jpgLink || request.jpgLink;
     const parsedImgUrl = parseImageUrl(jpgLink);
-
+    
     if (parsedImgUrl) {
         imgEl.src = parsedImgUrl;
         imgEl.style.display = 'block';
@@ -224,22 +496,13 @@ function showRequestDetails(request) {
         imgEl.src = '';
     }
 
-    showView('details');
+    showRequestView('details');
 }
 
-// Send to Machine Action
 function sendToMachine() {
-    if (!state.workerName) {
-        alert("Please select a user first.");
-        openWorkerModal();
-        return;
-    }
-
-    // Flash screen effect
     const overlay = document.getElementById('flashOverlay');
     overlay.classList.add('show');
-
-    // Play sound if available (like DCP)
+    
     const audio = document.getElementById('alert-sound');
     if (audio) {
         audio.currentTime = 0;
@@ -249,15 +512,17 @@ function sendToMachine() {
     setTimeout(() => {
         overlay.classList.remove('show');
     }, 400);
-
-    // After success flash, we could automatically go back or show a checkmark
-    // For now we just stay on the page.
 }
 
+// -----------------------------------------------------
 // Initialization
+// -----------------------------------------------------
 document.addEventListener('DOMContentLoaded', () => {
     parseParams();
+    setupMainTabs();
+    setupSubTabs();
     initWorker();
-    setupTabs();
-    fetchPrototypes();
+    fetchWorkersFromMongoDB(); // Fetch names immediately
+    
+    showRequestView('placeholder');
 });
