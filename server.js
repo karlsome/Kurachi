@@ -32657,6 +32657,12 @@ app.get('/api/shisaku-request/list', async (req, res) => {
     if (req.query.shisakudb_id && ObjectId.isValid(req.query.shisakudb_id)) {
       query.shisakudb_id = new ObjectId(req.query.shisakudb_id);
     }
+    if (req.query.machine) {
+      query.name = req.query.machine;
+    }
+    if (req.query.status) {
+      query.status = req.query.status;
+    }
     
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.max(1, parseInt(req.query.limit) || 30);
@@ -32721,8 +32727,18 @@ app.get('/api/shisaku-request/grouped-list', async (req, res) => {
     await client.connect();
     const collection = client.db('Sasaki_Coating_MasterDB').collection('shisakuRequestDB');
 
+    // Filter by machine name if provided
+    const matchStage = [];
+    if (req.query.machine) {
+      matchStage.push({ $match: { name: req.query.machine } });
+    }
+    if (req.query.status) {
+      matchStage.push({ $match: { status: req.query.status } });
+    }
+
     // Grouping by shisakudb_id
     const pipeline = [
+      ...matchStage,
       {
         $group: {
           _id: "$shisakudb_id",

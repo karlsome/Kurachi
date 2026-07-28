@@ -3,17 +3,18 @@
  * Logic for Shisaku Tablet UI
  */
 
-const serverURL = "http://localhost:3000";
+//const serverURL = "http://localhost:3000";
 //const serverURL = "https://kurachi.onrender.com";
+const serverURL = "http://192.168.0.77:3000";
 
 const state = {
     workerName: localStorage.getItem('shisaku_tablet_worker_name') || null,
     machineName: null,
     filterName: null, // "第一工場"
-    
+
     currentMainTab: 0, // 0: User, 1: Prototype, 2: Request, 3: Images, 4: Submit
     currentPrototypeStatus: 'pending',
-    
+
     prototypes: [],
     requests: [],
     currentPrototype: null,
@@ -29,7 +30,7 @@ function parseParams() {
         searchStr = searchStr.substring(1);
     }
     const params = new URLSearchParams(searchStr);
-    
+
     // Also support if the parameter itself got named '?filter'
     if (params.has('machine') || params.has('?machine')) {
         state.machineName = params.get('machine') || params.get('?machine');
@@ -64,9 +65,9 @@ async function fetchWorkersFromMongoDB() {
         const response = await fetch(`${serverURL}/getWorkerNames?selectedFactory=${encodeURIComponent(state.filterName)}`);
         if (!response.ok) throw new Error("Failed to fetch worker names");
         const workers = await response.json();
-        
+
         workerNamesData = workers;
-        
+
         const dataList = document.getElementById("machine-operator-suggestions");
         dataList.innerHTML = "";
         workerNamesData.forEach(name => {
@@ -74,7 +75,7 @@ async function fetchWorkersFromMongoDB() {
             option.value = name;
             dataList.appendChild(option);
         });
-        
+
     } catch (error) {
         console.error("Error fetching worker names from MongoDB:", error);
     }
@@ -210,9 +211,9 @@ function selectWorkerName(name) {
     localStorage.setItem('shisaku_tablet_worker_name', name);
     document.getElementById("workerInput").value = name;
     saveRecentWorker(name);
-    
+
     document.getElementById('workerNameModal').style.display = 'none';
-    
+
     initWorker();
     switchMainTab(1); // Jump to Prototype Tab
 }
@@ -288,7 +289,7 @@ function updateTabLocks() {
         mainTabs[1].classList.remove('locked');
         mainTabs[3].classList.remove('locked');
         mainTabs[4].classList.remove('locked');
-        
+
         if (state.currentPrototype) {
             mainTabs[2].classList.remove('locked');
         } else {
@@ -299,7 +300,7 @@ function updateTabLocks() {
 
 function setupMainTabs() {
     const tabs = document.querySelectorAll('#mainTabBar .tab-btn');
-    
+
     tabs.forEach((tab, index) => {
         tab.addEventListener('click', () => {
             if (tab.classList.contains('locked')) return;
@@ -311,14 +312,14 @@ function setupMainTabs() {
 function switchMainTab(index) {
     const tabs = document.querySelectorAll('#mainTabBar .tab-btn');
     const container = document.getElementById('tabPanelsContainer');
-    
+
     tabs.forEach(t => t.classList.remove('active'));
     tabs[index].classList.add('active');
-    
+
     container.style.transform = `translateX(-${index * 20}%)`;
     state.currentMainTab = index;
 
-    if (index === 1 && state.prototypes.length === 0) {
+    if (index === 1) {
         fetchPrototypes();
     }
 }
@@ -333,7 +334,7 @@ function setupSubTabs() {
             tabs.forEach(t => t.classList.remove('active'));
             tab.classList.add('active');
             state.currentPrototypeStatus = tab.dataset.status;
-            renderPrototypes();
+            fetchPrototypes();
         });
     });
 }
@@ -342,7 +343,7 @@ function showRequestView(viewId) {
     document.getElementById('requestPlaceholder').style.display = 'none';
     document.getElementById('view-requests').classList.remove('active');
     document.getElementById('view-details').classList.remove('active');
-    
+
     if (viewId === 'placeholder') {
         document.getElementById('requestPlaceholder').style.display = 'block';
     } else {
@@ -352,9 +353,10 @@ function showRequestView(viewId) {
 
 async function fetchPrototypes() {
     try {
-        const response = await fetch(`${serverURL}/api/shisaku/list`);
+        const response = await fetch(`${serverURL}/api/shisaku-request/grouped-list?status=${encodeURIComponent(state.currentPrototypeStatus)}&limit=1000`);
         if (!response.ok) throw new Error('Failed to fetch prototypes');
-        state.prototypes = await response.json();
+        const data = await response.json();
+        state.prototypes = data.rows || [];
         renderPrototypes();
     } catch (error) {
         console.error(error);
@@ -367,15 +369,15 @@ async function fetchRequests(shisakudb_id, shisakuNo) {
         const response = await fetch(`${serverURL}/api/shisaku-request/list?shisakudb_id=${shisakudb_id}&sortColumn=orderNumber&sortDirection=1&limit=1000`);
         if (!response.ok) throw new Error('Failed to fetch requests');
         const data = await response.json();
-        
+
         state.requests = data.rows;
         state.currentPrototype = shisakuNo;
-        
+
         updateTabLocks();
         renderRequests();
         showRequestView('requests');
         switchMainTab(2); // Jump to Request tab
-        
+
     } catch (error) {
         console.error(error);
         alert('Error loading requests.');
@@ -385,9 +387,10 @@ async function fetchRequests(shisakudb_id, shisakuNo) {
 function renderPrototypes() {
     const grid = document.getElementById('prototypesGrid');
     grid.innerHTML = '';
-    
-    const filtered = state.prototypes.filter(p => p.status === state.currentPrototypeStatus);
-    
+
+    // We already fetched by currentPrototypeStatus, so state.prototypes is the filtered list.
+    const filtered = state.prototypes;
+
     if (filtered.length === 0) {
         grid.innerHTML = '<div style="color: var(--text-muted); padding: 20px;">No prototypes found for this status.</div>';
         return;
@@ -396,17 +399,19 @@ function renderPrototypes() {
     filtered.forEach(p => {
         const card = document.createElement('div');
         card.className = 'card';
-        card.onclick = () => fetchRequests(p._id, p.shisakuNo);
-        
-        let deadlineStr = '-';
-        if (p.deadline) {
-            deadlineStr = p.deadline;
+        card.onclick = () => fetchRequests(p.shisakudb_id, p.shisakuNo);
+
+        let dateStr = '-';
+        if (p.latestDate) {
+            const d = new Date(p.latestDate);
+            dateStr = d.toLocaleDateString();
         }
 
         card.innerHTML = `
-            <h3>Prototype #${p.shisakuNo}</h3>
-            <p>Deadline: ${deadlineStr}</p>
-            <span class="badge ${p.status || 'pending'}">${(p.status || 'pending').toUpperCase()}</span>
+            <h3>Prototype #${p.shisakuNo || '?'}</h3>
+            <p>Requests: ${p.totalRequests}</p>
+            <p>Last Updated: ${dateStr}</p>
+            <span class="badge ${state.currentPrototypeStatus}">${state.currentPrototypeStatus.toUpperCase()}</span>
         `;
         grid.appendChild(card);
     });
@@ -416,7 +421,7 @@ function renderRequests() {
     document.getElementById('requestsViewTitle').textContent = `Requests for Prototype #${state.currentPrototype}`;
     const list = document.getElementById('requestsList');
     list.innerHTML = '';
-    
+
     if (state.requests.length === 0) {
         list.innerHTML = '<div style="color: var(--text-muted); padding: 20px;">No requests found.</div>';
         return;
@@ -426,7 +431,7 @@ function renderRequests() {
         const row = document.createElement('div');
         row.className = 'request-row';
         row.onclick = () => showRequestDetails(r);
-        
+
         row.innerHTML = `
             <div class="row-number">#${r.orderNumber || '?'}</div>
             <div class="row-info">
@@ -451,7 +456,7 @@ function parseImageUrl(jpgLink) {
         const id = driveMatch[1] || driveMatch[2];
         return `${serverURL}/api/shisaku/image/${id}`;
     }
-    return jpgLink; 
+    return jpgLink;
 }
 
 function showRequestDetails(request) {
@@ -487,7 +492,7 @@ function showRequestDetails(request) {
     const imgEl = document.getElementById('detailsImage');
     const jpgLink = request.pdf?.jpgLink || request.jpgLink;
     const parsedImgUrl = parseImageUrl(jpgLink);
-    
+
     if (parsedImgUrl) {
         imgEl.src = parsedImgUrl;
         imgEl.style.display = 'block';
@@ -502,7 +507,7 @@ function showRequestDetails(request) {
 function sendToMachine() {
     const overlay = document.getElementById('flashOverlay');
     overlay.classList.add('show');
-    
+
     const audio = document.getElementById('alert-sound');
     if (audio) {
         audio.currentTime = 0;
@@ -523,6 +528,6 @@ document.addEventListener('DOMContentLoaded', () => {
     setupSubTabs();
     initWorker();
     fetchWorkersFromMongoDB(); // Fetch names immediately
-    
+
     showRequestView('placeholder');
 });
