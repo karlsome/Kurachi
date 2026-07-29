@@ -20,6 +20,7 @@ const state = {
     currentPrototype: localStorage.getItem('shisaku_tablet_prototype') || null,
     currentPrototypeId: localStorage.getItem('shisaku_tablet_prototype_id') || null,
     currentRequest: null,
+    isDataTabActive: sessionStorage.getItem('shisaku_tablet_data_tab_active') === 'true',
 };
 
 // -----------------------------------------------------
@@ -751,9 +752,19 @@ function showRequestDetails(request) {
         sessionStorage.setItem('shisaku_tablet_current_request_id', idStr);
     }
     
+    // Populate action button
     const startBtn = document.getElementById('startRequestBtn');
+    const restartBtn = document.getElementById('restartRequestBtn');
+    
     if (startBtn) {
-        startBtn.textContent = `Start request #${request.orderNumber || '?'}`;
+        if (request.status === 'completed') {
+            startBtn.style.display = 'none';
+            if (restartBtn) restartBtn.style.display = 'block';
+        } else {
+            startBtn.style.display = 'block';
+            startBtn.textContent = `Start request #${request.orderNumber || ''}`;
+            if (restartBtn) restartBtn.style.display = 'none';
+        }
     }
 
     const grid = document.getElementById('detailsGrid');
@@ -906,6 +917,55 @@ async function sendToMachine() {
     }
 }
 
+async function finishDataCollection() {
+    const req = state.currentRequest;
+    if (!req) return;
+    const id = req._id?.$oid || req._id;
+    if (!id) return;
+    
+    // Save end time
+    localStorage.setItem(`endTime_${id}`, Date.now().toString());
+
+    // Make sure latest pieces and notes are saved
+    if (typeof savePiecesCreated === 'function') savePiecesCreated();
+    if (typeof saveIssueNotes === 'function') saveIssueNotes();
+
+    try {
+        const response = await fetch(`${serverURL}/api/shisaku-request/update/${id}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'completed' })
+        });
+        
+        if (response.ok) {
+            // Update locally
+            const index = state.requests.findIndex(r => (r._id?.$oid || r._id) === id);
+            if (index !== -1) {
+                state.requests[index].status = 'completed';
+                renderRequests();
+            }
+            
+            // Clear current request context and reset UI
+            state.isDataTabActive = false;
+            sessionStorage.removeItem('shisaku_tablet_data_tab_active');
+            state.currentRequest = null;
+            sessionStorage.removeItem('shisaku_tablet_current_request_id');
+            refreshDataTab();
+            
+            
+            // Go back to Request list
+            switchMainTab(2);
+            showRequestView('requests');
+            
+        } else {
+            alert('Failed to mark request as completed on the server.');
+        }
+    } catch (err) {
+        console.error("Error completing request:", err);
+        alert('Error completing request.');
+    }
+}
+
 async function startRequest() {
     if (!state.currentRequest) return;
     
@@ -930,35 +990,54 @@ async function startRequest() {
                         renderRequests();
                     }
                     
+                    // Log start time locally if not already set
+                    if (!localStorage.getItem(`startTime_${id}`)) {
+                        localStorage.setItem(`startTime_${id}`, Date.now().toString());
+                    }
+                    
                     // Also update the parent prototype to in-progress if it's currently pending
                     if (state.currentPrototypeStatus === 'pending' && state.currentPrototypeId) {
                         try {
-                            const protoResponse = await fetch(`${serverURL}/api/shisaku/update-status/${state.currentPrototypeId}`, {
+                            const pId = state.currentPrototypeId;
+                            const pRes = await fetch(`${serverURL}/api/shisaku-prototype/update/${pId}`, {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({ status: 'in-progress' })
                             });
-                            if (protoResponse.ok) {
+                            if (pRes.ok) {
                                 state.currentPrototypeStatus = 'in-progress';
                             }
-                        } catch (pe) {
-                            console.error('Failed to update prototype status:', pe);
+                        } catch(e) {
+                            console.error("Failed to update parent prototype status:", e);
                         }
                     }
+
+                    state.isDataTabActive = true;
+                    sessionStorage.setItem('shisaku_tablet_data_tab_active', 'true');
+                    switchMainTab(3);
                 } else {
-                    console.error('Failed to update status to in-progress');
+                    alert("Failed to update status on server.");
                 }
+            } else {
+                // If it's already in-progress or completed, just switch to the data tab
+                state.isDataTabActive = true;
+                sessionStorage.setItem('shisaku_tablet_data_tab_active', 'true');
+                switchMainTab(3);
             }
         }
-    } catch (e) {
-        console.error('Error starting request:', e);
+    } catch (err) {
+        console.error("Error starting request:", err);
+        alert("Error starting request.");
     }
+}
 
-    // Navigate to Data tab
-    const tabs = document.querySelectorAll('#mainTabBar .tab-btn');
-    if (tabs[3] && !tabs[3].classList.contains('locked')) {
-        switchMainTab(3);
-    }
+function restartRequest() {
+    if (!state.currentRequest) return;
+    
+    state.isDataTabActive = true;
+    sessionStorage.setItem('shisaku_tablet_data_tab_active', 'true');
+    // Just switch to the data tab to edit the data
+    switchMainTab(3);
 }
 
 // -----------------------------------------------------
@@ -1263,7 +1342,7 @@ async function refreshDataTab() {
     const imagesPlaceholder = document.getElementById('imagesPlaceholder');
     const viewImages = document.getElementById('view-images');
 
-    if (!reqId) {
+    if (!reqId || !state.isDataTabActive) {
         if(dataPlaceholder) dataPlaceholder.style.display = 'block';
         if(viewData) viewData.style.display = 'none';
         if(imagesPlaceholder) imagesPlaceholder.style.display = 'block';

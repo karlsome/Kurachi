@@ -998,6 +998,7 @@
                         </div>
                         <img id="detailsImage" class="details-image" src="" alt="Request Image" style="display: none;" />
                         <button id="startRequestBtn" class="btn btn-send" onclick="startRequest()">Start request</button>
+                        <button id="restartRequestBtn" class="btn btn-send" style="display: none; background: #fb8c00; margin-top: 10px;" onclick="restartRequest()">Restart request (Edit data)</button>
                     </div>
                 </div>
 
@@ -1115,6 +1116,10 @@
                             <label style="font-size: 1rem; color: var(--text-muted);">Notes / Comments</label>
                             <textarea id="issueNotesInput" oninput="saveIssueNotes()" placeholder="Type any issues or comments here..." style="width: 100%; min-height: 80px; padding: 12px; border: 1px solid var(--border-strong); border-radius: 8px; font-size: 1rem; font-family: inherit; resize: vertical; box-sizing: border-box; background: var(--bg-surface); color: var(--text-main); margin-top: 5px;"></textarea>
                         </div>
+                    </div>
+                    
+                    <div style="margin-top: 20px; display: flex; justify-content: center;">
+                        <button class="btn btn-send" onclick="finishDataCollection()" style="background: var(--brand); color: #fff; width: 100%; border-radius: var(--btn-radius); padding: 16px; font-size: 1.2rem;">Done</button>
                     </div>
                 </div>
             </div>
