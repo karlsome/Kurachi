@@ -398,6 +398,13 @@ function switchMainTab(index) {
     if (index === 1) {
         fetchPrototypes();
     }
+    
+    if (index === 2 || index === 3 || index === 4) {
+        if (typeof refreshDataTab === 'function') refreshDataTab();
+    }
+    if (index === 5) {
+        if (typeof renderSubmitTab === 'function') renderSubmitTab();
+    }
 }
 
 // -----------------------------------------------------
@@ -644,11 +651,15 @@ async function fetchRequests(shisakudb_id, shisakuNo) {
             const req = state.requests.find(r => (r._id?.$oid || r._id) === savedReqId);
             if (req) {
                 showRequestDetails(req);
+                if (state.currentMainTab === 5) renderSubmitTab();
                 return;
             }
         }
         
         showRequestView('requests');
+        if (state.currentMainTab === 5) {
+            renderSubmitTab();
+        }
     } catch (error) {
         console.error(error);
         alert('Error loading requests.');
@@ -1625,17 +1636,6 @@ async function submitAllData() {
 }
 
 
-// Intercept tab switching to refresh data
-const originalSwitchMainTab = switchMainTab;
-window.switchMainTab = function(index) {
-    originalSwitchMainTab(index);
-    if (index === 2 || index === 3) {
-        refreshDataTab();
-    }
-    if (index === 4) {
-        renderSubmitTab();
-    }
-};
 
 // Annotator State
 let annotatorState = {
