@@ -1461,12 +1461,179 @@ async function refreshDataTab() {
     });
 }
 
+// Submit Tab Logic
+async function renderSubmitTab() {
+    const placeholder = document.getElementById('submitPlaceholder');
+    const viewSubmit = document.getElementById('view-submit');
+    const listContainer = document.getElementById('submitListContainer');
+
+    if (!state.currentPrototypeId || !state.requests || state.requests.length === 0) {
+        placeholder.style.display = 'block';
+        viewSubmit.style.display = 'none';
+        return;
+    }
+
+    const htmls = [];
+
+    for (const req of state.requests) {
+        const id = req._id?.$oid || req._id;
+        
+        // Data
+        const startTime = localStorage.getItem(`startTime_${id}`);
+        const endTime = localStorage.getItem(`endTime_${id}`);
+        const cycleTimer = localStorage.getItem(`cycleTimer_${id}`) || 0;
+        const pieces = localStorage.getItem(`piecesCreated_${id}`) || '';
+        const notes = localStorage.getItem(`issueNotes_${id}`) || '';
+
+        const hasData = startTime || endTime || pieces || notes || cycleTimer > 0;
+        
+        // Photos
+        let photos = [];
+        try {
+            photos = await getPhotosFromDB(id);
+        } catch(e) {
+            console.error("Failed to fetch photos", e);
+        }
+        
+        const hasMaterialSide = photos.some(p => p.type === 'MaterialSide');
+        const hasReleasePaper = photos.some(p => p.type === 'ReleasePaper');
+        const hasMaterialLabel = photos.some(p => p.type === 'MaterialLabel');
+        const hasOthers = photos.some(p => p.type.startsWith('Other'));
+
+        if (!hasData && photos.length === 0) {
+            continue; 
+        }
+
+        const formatTs = (ts) => ts ? new Date(parseInt(ts)).toLocaleTimeString() : '-';
+
+        const rowHTML = `
+            <div style="background: var(--bg-surface); border: 1px solid var(--border-light); border-radius: 12px; padding: 15px; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <h3 style="margin: 0; font-size: 1.1rem; color: var(--text);">Request #${req.orderNumber || ''}: ${req.name || '-'}</h3>
+                    <span class="badge ${req.status === 'completed' ? 'badge-completed' : 'badge-pending'}">${(req.status || 'pending').toUpperCase()}</span>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 0.9rem; margin-bottom: 10px; color: var(--text);">
+                    <div><strong>Start:</strong> ${formatTs(startTime)}</div>
+                    <div><strong>End:</strong> ${formatTs(endTime)}</div>
+                    <div><strong>Cycle Time:</strong> ${formatTime(parseInt(cycleTimer))}</div>
+                    <div><strong>Quantity:</strong> ${pieces || '-'}</div>
+                    <div style="grid-column: 1 / -1;"><strong>Notes:</strong> ${notes || '-'}</div>
+                </div>
+                <div style="border-top: 1px solid var(--border-light); padding-top: 10px; color: var(--text);">
+                    <strong style="display:block; margin-bottom: 5px;">Images Captured:</strong>
+                    <div style="display: flex; gap: 15px; font-size: 0.85rem; flex-wrap: wrap;">
+                        <div>Material Side: <span style="color: ${hasMaterialSide ? 'var(--brand)' : 'var(--alert)'}; font-weight: bold;">${hasMaterialSide ? 'TRUE' : 'FALSE'}</span></div>
+                        <div>Release Paper: <span style="color: ${hasReleasePaper ? 'var(--brand)' : 'var(--alert)'}; font-weight: bold;">${hasReleasePaper ? 'TRUE' : 'FALSE'}</span></div>
+                        <div>Material Label: <span style="color: ${hasMaterialLabel ? 'var(--brand)' : 'var(--alert)'}; font-weight: bold;">${hasMaterialLabel ? 'TRUE' : 'FALSE'}</span></div>
+                        <div>Others: <span style="color: ${hasOthers ? 'var(--brand)' : 'var(--alert)'}; font-weight: bold;">${hasOthers ? 'TRUE' : 'FALSE'}</span></div>
+                    </div>
+                </div>
+            </div>
+        `;
+        htmls.push(rowHTML);
+    }
+
+    if (htmls.length > 0) {
+        placeholder.style.display = 'none';
+        viewSubmit.style.display = 'block';
+        listContainer.innerHTML = htmls.join('');
+    } else {
+        placeholder.style.display = 'block';
+        viewSubmit.style.display = 'none';
+    }
+}
+
+async function submitAllData() {
+    if (!state.currentPrototypeId) return;
+
+    if (!confirm("Are you sure you want to submit all data to the server? This action cannot be undone.")) return;
+
+    const modal = document.getElementById('submitLoadingModal');
+    if (modal) modal.style.display = 'flex';
+
+    try {
+        const payload = {
+            prototypeId: state.currentPrototypeId,
+            shisakuNo: state.prototypeNumber || 'UNKNOWN',
+            workerName: state.workerName || localStorage.getItem('shisaku_tablet_worker_name'),
+            requests: {}
+        };
+
+        let hasData = false;
+        
+        for (const req of state.requests) {
+            const id = req._id?.$oid || req._id;
+            const startTime = localStorage.getItem(`startTime_${id}`);
+            const endTime = localStorage.getItem(`endTime_${id}`);
+            const cycleTimer = localStorage.getItem(`cycleTimer_${id}`) || 0;
+            const pieces = localStorage.getItem(`piecesCreated_${id}`) || '';
+            const notes = localStorage.getItem(`issueNotes_${id}`) || '';
+            
+            const photos = await getPhotosFromDB(id);
+            
+            if (startTime || endTime || pieces || notes || cycleTimer > 0 || photos.length > 0) {
+                hasData = true;
+                const reqName = req.name || `Req_${id}`;
+                
+                payload.requests[reqName] = {
+                    Time_start: startTime ? new Date(parseInt(startTime)).toLocaleTimeString() : null,
+                    Time_end: endTime ? new Date(parseInt(endTime)).toLocaleTimeString() : null,
+                    cycleTime: formatTime(parseInt(cycleTimer)),
+                    quantity: pieces,
+                    Comment: notes,
+                    images: photos.map(p => ({
+                        type: p.type,
+                        base64: p.base64
+                    }))
+                };
+            }
+        }
+
+        if (!hasData) {
+            alert("No data collected yet.");
+            if (modal) modal.style.display = 'none';
+            return;
+        }
+
+        const response = await fetch('/api/shisakuTablet/submit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        const result = await response.json();
+        
+        if (response.ok) {
+            alert("Data submitted successfully!");
+            // Perform Full Reset (simulate pressing the Reset All button)
+            if (typeof resetAll === 'function') {
+                // Since resetAll has a confirm, we might want to bypass it or just call it.
+                // It's better to clear localStorage and indexedDB directly for the current prototype.
+                
+                // Let's reload the page to give a completely fresh state.
+                window.location.reload();
+            }
+        } else {
+            alert("Failed to submit: " + (result.error || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error("Error submitting data", error);
+        alert("Network or server error during submission.");
+    } finally {
+        if (modal) modal.style.display = 'none';
+    }
+}
+
+
 // Intercept tab switching to refresh data
 const originalSwitchMainTab = switchMainTab;
 window.switchMainTab = function(index) {
     originalSwitchMainTab(index);
     if (index === 2 || index === 3) {
         refreshDataTab();
+    }
+    if (index === 4) {
+        renderSubmitTab();
     }
 };
 

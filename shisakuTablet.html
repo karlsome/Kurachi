@@ -1141,12 +1141,36 @@
 
             <!-- Panel 5: Submit -->
             <div class="tab-panel">
-                <div style="text-align: center; color: var(--text-muted); padding: 40px 20px;">
-                    <h3>Submit</h3>
-                    <p style="margin-top: 8px;">Feature coming soon.</p>
+                <div id="submitPlaceholder" style="text-align: center; color: var(--text-muted); padding: 40px 20px;">
+                    <h3>No Data to Submit</h3>
+                    <p style="margin-top: 8px;">Please complete a request first.</p>
+                </div>
+                
+                <div id="view-submit" class="view-section" style="display: none; padding: 20px; padding-bottom: 100px;">
+                    <h2 style="margin-bottom: 16px; font-weight: 800;">Submit Prototype Data</h2>
+                    
+                    <div id="submitListContainer" style="display: flex; flex-direction: column; gap: 15px;">
+                        <!-- Submit list items injected here -->
+                    </div>
+                    
+                    <button id="finalSubmitBtn" class="btn btn-send" style="width: 100%; margin-top: 30px; padding: 15px; font-size: 1.2rem; font-weight: bold;" onclick="submitAllData()">Submit All Data</button>
                 </div>
             </div>
 
+        </div>
+    </div>
+
+    <!-- Submit Loading Modal -->
+    <div id="submitLoadingModal" class="modal" style="display: none; z-index: 99999;">
+        <div style="text-align: center;">
+            <div class="timer-pulse" style="margin: 0 auto 20px auto;">
+                <svg viewBox="0 0 24 24" style="stroke: var(--brand);">
+                    <circle cx="12" cy="12" r="10" />
+                    <polyline points="12 6 12 12 16 14" />
+                </svg>
+            </div>
+            <h2 id="submitLoadingTitle">Submitting Data...</h2>
+            <p id="submitLoadingText" style="margin-top: 10px; color: var(--text-muted);">Please wait while we upload your images and data.</p>
         </div>
     </div>
 

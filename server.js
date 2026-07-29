@@ -32565,6 +32565,94 @@ app.post('/api/shisaku/update/:id', async (req, res) => {
   }
 });
 
+// ShisakuTablet: Submit All Data (Images to Firebase, Text to MongoDB)
+app.post('/api/shisakuTablet/submit', async (req, res) => {
+  try {
+    const { prototypeId, shisakuNo, workerName, requests } = req.body;
+
+    if (!requests || Object.keys(requests).length === 0) {
+      return res.status(400).json({ error: 'No request data provided' });
+    }
+
+    const bucket = admin.storage().bucket();
+    const downloadToken = `shisaku_${Date.now()}`;
+    const formattedRequests = {};
+
+    // Process each request
+    for (const [reqName, reqData] of Object.entries(requests)) {
+      const formattedData = {
+        Time_start: reqData.Time_start,
+        Time_end: reqData.Time_end,
+        cycleTime: reqData.cycleTime,
+        quantity: reqData.quantity,
+        Comment: reqData.Comment,
+        issue: {},
+        dxf: { name: "", link: "" },
+        pce: { name: "", link: "" },
+        pdf: { name: "", link: "", jpgLink: "" },
+      };
+
+      let issueIndex = 0;
+
+      // Process images if any
+      if (reqData.images && Array.isArray(reqData.images)) {
+        for (let i = 0; i < reqData.images.length; i++) {
+          const img = reqData.images[i];
+          if (!img.base64) continue;
+          
+          let imageTypeSlug = img.type.replace(/\s+/g, '');
+          const fileName = `${reqName}_${imageTypeSlug}_${i}.jpg`;
+          const filePath = `shisaku/${shisakuNo}/${fileName}`;
+          
+          // Handle base64 prefix
+          const base64Data = img.base64.replace(/^data:image\/\w+;base64,/, "");
+          const buffer = Buffer.from(base64Data, 'base64');
+
+          const file = bucket.file(filePath);
+          await file.save(buffer, {
+            metadata: {
+              contentType: 'image/jpeg',
+              metadata: { firebaseStorageDownloadTokens: downloadToken }
+            }
+          });
+
+          // Make public if needed, or rely on token
+          const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(filePath)}?alt=media&token=${downloadToken}`;
+
+          if (img.type === 'MaterialSide') formattedData.materialSidePhoto = publicUrl;
+          else if (img.type === 'ReleasePaper') formattedData.releasePaperSidePhoto = publicUrl;
+          else if (img.type === 'MaterialLabel') formattedData.materialLabelPhoto = publicUrl;
+          else {
+            formattedData.issue[issueIndex.toString()] = publicUrl;
+            issueIndex++;
+          }
+        }
+      }
+
+      formattedRequests[reqName] = formattedData;
+    }
+
+    // Save to MongoDB
+    await client.connect();
+    const document = {
+      createdAt: new Date(),
+      createdBy: workerName,
+      Date: new Date().toISOString().split('T')[0],
+      shisakuNo: shisakuNo,
+      shisakudb_id: prototypeId,
+      requests: formattedRequests
+    };
+
+    await client.db('Sasaki_Coating_MasterDB').collection('shisakuSubmittedDB').insertOne(document);
+
+    res.json({ success: true, message: 'Data submitted successfully' });
+  } catch (error) {
+    console.error('❌ Error submitting shisakuTablet data:', error);
+    res.status(500).json({ error: 'Failed to submit data', details: error.message });
+  }
+});
+
+
 app.post('/api/shisaku/update-status/:id', async (req, res) => {
   try {
     const { id } = req.params;
