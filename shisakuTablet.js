@@ -1249,6 +1249,13 @@ function savePiecesCreated() {
     localStorage.setItem(`piecesCreated_${reqId}`, val);
 }
 
+function saveIssueNotes() {
+    const reqId = state.currentRequest?._id?.$oid || state.currentRequest?._id;
+    if (!reqId) return;
+    const val = document.getElementById('issueNotesInput').value;
+    localStorage.setItem(`issueNotes_${reqId}`, val);
+}
+
 async function refreshDataTab() {
     const reqId = state.currentRequest?._id?.$oid || state.currentRequest?._id;
     const dataPlaceholder = document.getElementById('dataPlaceholder');
@@ -1308,8 +1315,12 @@ async function refreshDataTab() {
         resetBtn.style.display = savedTime > 0 ? 'block' : 'none';
     }
 
-    // Restore pieces
+    // Restore pieces and notes
     document.getElementById('inputPiecesCreated').value = localStorage.getItem(`piecesCreated_${reqId}`) || '';
+    const notesEl = document.getElementById('issueNotesInput');
+    if (notesEl) {
+        notesEl.value = localStorage.getItem(`issueNotes_${reqId}`) || '';
+    }
 
     // Load images
     const photos = await getPhotosFromDB(reqId);

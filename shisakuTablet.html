@@ -1026,7 +1026,7 @@
                             </div>
                         </div>
                         <div>
-                            <button class="btn" id="quickRefPdfBtn" style="background: var(--bg-surface); border: 2px solid var(--brand); color: var(--brand); padding: 10px 20px; border-radius: 30px; font-weight: bold; cursor: pointer; display: none;">
+                            <button class="btn" id="quickRefPdfBtn" style="background: var(--bg-surface); border: 1px solid var(--border-strong); color: var(--text-main); padding: 8px 16px; border-radius: var(--btn-radius); font-size: 0.95rem; font-weight: 600; cursor: pointer; display: none; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
                                 📄 View PDF
                             </button>
                         </div>
@@ -1095,7 +1095,7 @@
                     <!-- Issues Card -->
                     <div class="data-section-card">
                         <div class="data-section-title">その他/ 問題点 (Issues / Others)</div>
-                        <div class="data-field-row" style="margin-bottom: 0;">
+                        <div class="data-field-row" style="margin-bottom: 20px;">
                             <button class="photo-btn" onclick="document.getElementById('fileOtherPhotos').click()">
                                 <span>📷 Add Photo</span>
                             </button>
@@ -1103,6 +1103,10 @@
                             <div id="otherPhotosContainer" style="margin-top: 15px; display: flex; flex-wrap: wrap; gap: 10px;">
                                 <!-- Thumbs injected here -->
                             </div>
+                        </div>
+                        <div class="data-field-row" style="margin-bottom: 0;">
+                            <label style="font-size: 1rem; color: var(--text-muted);">Notes / Comments</label>
+                            <textarea id="issueNotesInput" oninput="saveIssueNotes()" placeholder="Type any issues or comments here..." style="width: 100%; min-height: 80px; padding: 12px; border: 1px solid var(--border-strong); border-radius: 8px; font-size: 1rem; font-family: inherit; resize: vertical; box-sizing: border-box; background: var(--bg-surface); color: var(--text-main); margin-top: 5px;"></textarea>
                         </div>
                     </div>
 
