@@ -1018,7 +1018,7 @@ function openPreview(src, titleText = '', type = 'image', originalLink = '') {
     if (!titleEl) {
         titleEl = document.createElement('div');
         titleEl.id = 'imgPreviewTitle';
-        titleEl.style.cssText = 'position:absolute; top:15%; left:50%; transform:translateX(-50%); color:#fff; font-size:3rem; font-weight:900; text-shadow: 2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 0 4px 12px rgba(0,0,0,0.9); background: rgba(0,0,0,0.5); padding: 12px 32px; border-radius: 16px; pointer-events:none; z-index: 100010; white-space:nowrap; letter-spacing:3px; border: 3px solid rgba(255,255,255,0.3);';
+        titleEl.style.cssText = 'position:absolute; top:10%; left:50%; transform:translateX(-50%); color:var(--text-main, #333); font-size:1.5rem; font-weight:700; background: var(--bg-surface, #fff); padding: 10px 24px; border-radius: 30px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); pointer-events:none; z-index: 100010; white-space:nowrap; border: 1px solid var(--border, #eee); font-family: inherit;';
         m.appendChild(titleEl);
     }
     
