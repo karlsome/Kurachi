@@ -1013,6 +1013,25 @@
 
                 <div id="view-data" class="view-section" style="padding: 20px; padding-bottom: 80px;">
                     
+                    <!-- Quick Reference Card -->
+                    <div class="data-section-card" id="quickRefCard" style="padding: 16px 24px; display: flex; flex-wrap: wrap; gap: 15px; align-items: center; justify-content: space-between; background: var(--bg-subtle);">
+                        <div style="display: flex; gap: 30px;">
+                            <div>
+                                <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 4px;">Prototype</div>
+                                <div style="font-weight: 800; font-size: 1.1rem; color: var(--text-main);" id="quickRefProto">-</div>
+                            </div>
+                            <div>
+                                <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 4px;">Request Name</div>
+                                <div style="font-weight: 800; font-size: 1.1rem; color: var(--text-main);" id="quickRefName">-</div>
+                            </div>
+                        </div>
+                        <div>
+                            <button class="btn" id="quickRefPdfBtn" style="background: var(--bg-surface); border: 2px solid var(--brand); color: var(--brand); padding: 10px 20px; border-radius: 30px; font-weight: bold; cursor: pointer; display: none;">
+                                📄 View PDF
+                            </button>
+                        </div>
+                    </div>
+
                     <!-- Cycle Time Card -->
                     <div class="data-section-card">
                         <div class="data-section-title">

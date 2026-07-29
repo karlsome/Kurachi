@@ -1269,6 +1269,36 @@ async function refreshDataTab() {
     if(imagesPlaceholder) imagesPlaceholder.style.display = 'none';
     if(viewImages) viewImages.style.display = 'block';
 
+    // Populate Quick Reference Card
+    if (state.currentRequest) {
+        document.getElementById('quickRefProto').textContent = state.currentPrototype || '-';
+        document.getElementById('quickRefName').textContent = state.currentRequest.name || '-';
+        
+        const pdfBtn = document.getElementById('quickRefPdfBtn');
+        const req = state.currentRequest;
+        const jpgLink = req.pdf?.jpgLink || req.jpgLink;
+        const parsedImgUrl = parseImageUrl(jpgLink);
+        const pdfLink = req.pdf?.link;
+        
+        if (parsedImgUrl || pdfLink) {
+            pdfBtn.style.display = 'block';
+            pdfBtn.onclick = () => {
+                if (pdfLink) {
+                    let rawPdfUrl = parseImageUrl(pdfLink) || pdfLink;
+                    window.open(rawPdfUrl, '_blank');
+                } else if (parsedImgUrl) {
+                    if (typeof window.openPreview === 'function') {
+                        window.openPreview(parsedImgUrl, 'Request Image');
+                    } else {
+                        window.open(parsedImgUrl, '_blank');
+                    }
+                }
+            };
+        } else {
+            pdfBtn.style.display = 'none';
+        }
+    }
+
     // Restore cycle time
     const savedTime = parseInt(localStorage.getItem(`cycleTimer_${reqId}`)) || 0;
     document.getElementById('cycleTimeDisplay').textContent = formatTime(savedTime);
