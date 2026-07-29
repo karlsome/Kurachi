@@ -1287,6 +1287,16 @@ async function refreshDataTab() {
         const parsedImgUrl = parseImageUrl(jpgLink);
         const pdfLink = req.pdf?.link;
         
+        const thumbEl = document.getElementById('quickRefImgThumb');
+        if (parsedImgUrl) {
+            thumbEl.src = parsedImgUrl;
+            thumbEl.dataset.fullUrl = parsedImgUrl;
+            thumbEl.style.display = 'block';
+        } else {
+            thumbEl.src = '';
+            thumbEl.style.display = 'none';
+        }
+
         if (parsedImgUrl || pdfLink) {
             pdfBtn.style.display = 'block';
             pdfBtn.onclick = () => {
