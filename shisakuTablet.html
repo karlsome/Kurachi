@@ -682,25 +682,73 @@
             display: flex;
             align-items: center;
             justify-content: center;
-        }        /* Timer Modal */
+        }        /* Break full-screen overlay */
         #timerModal {
             position: fixed;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background: #000;
-            color: #0f0;
+            inset: 0;
             z-index: 200000;
+            background: linear-gradient(160deg, #15324A, #0E2438);
             display: none;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            font-family: monospace;
+            color: #fff;
+            padding: 24px;
+            text-align: center;
         }
+
         #timerModal.open { display: flex; }
-        .timer-display { font-size: 20vw; font-weight: bold; margin-bottom: 30px; }
-        .btn-stop-timer {
-            padding: 20px 60px; font-size: 3rem; background: var(--red); color: white;
-            border: none; border-radius: 20px; font-weight: bold;
+
+        #timerModal .freya-top-wordmark {
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            padding: 28px 40px 0;
+            display: flex; align-items: center; justify-content: center; gap: 16px;
+            pointer-events: none;
         }
+        #timerModal .freya-top-wordmark .wm-line {
+            flex: 1; max-width: 80px; height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.15));
+        }
+        #timerModal .freya-top-wordmark .wm-line.right {
+            background: linear-gradient(90deg, rgba(255,255,255,0.15), transparent);
+        }
+        #timerModal .freya-top-wordmark .wm-text {
+            font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.2em;
+            color: rgba(255,255,255,0.28); text-transform: uppercase; white-space: nowrap;
+        }
+
+        #timerModal .timer-pulse {
+            width: 120px; height: 120px; border-radius: 50%;
+            background: rgba(46, 111, 242, 0.18); border: 2px solid #2E6FF2;
+            display: flex; align-items: center; justify-content: center;
+            margin-bottom: 28px;
+            animation: timerPulse 1.6s ease-in-out infinite;
+        }
+
+        #timerModal .timer-pulse svg {
+            width: 56px; height: 56px; stroke: #7FB0FF;
+            stroke-width: 1.6; fill: none; stroke-linecap: round; stroke-linejoin: round;
+        }
+
+        @keyframes timerPulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(46, 111, 242, 0.45); }
+            50% { box-shadow: 0 0 0 22px rgba(46, 111, 242, 0); }
+        }
+
+        #timerModal h2 { font-size: 1.6rem; font-weight: 800; letter-spacing: 0.02em; }
+        #timerModal .timer-sub { color: #9FB8D4; margin-top: 8px; font-weight: 600; }
+        #timerModal .timer-display {
+            font-size: 4rem; font-weight: 800; font-variant-numeric: tabular-nums;
+            margin: 24px 0 32px;
+        }
+
+        #timerModal .btn-stop-timer {
+            background: #fff; color: #15324A; min-height: 56px; padding: 0 40px;
+            border: none; border-radius: var(--btn-radius); font-family: inherit;
+            font-size: 1.05rem; font-weight: 800; cursor: pointer;
+        }
+        #timerModal .btn-stop-timer:active { transform: translateY(1px); }
 
         /* Annotator Overlay */
         #annotatorOverlay {
@@ -1022,8 +1070,21 @@
 
     <!-- Timer Modal -->
     <div id="timerModal">
+        <div class="freya-top-wordmark">
+            <div class="wm-line"></div>
+            <span class="wm-text">Freya System v4</span>
+            <div class="wm-line right"></div>
+        </div>
+        <div class="timer-pulse">
+            <svg viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="10" />
+                <polyline points="12 6 12 12 16 14" />
+            </svg>
+        </div>
+        <h2>Cycle Time</h2>
+        <p class="timer-sub">Recording active cycle</p>
         <div class="timer-display" id="fullScreenTimerDisplay">00:00:00</div>
-        <button class="btn-stop-timer" onclick="stopCycleTimer()">STOP</button>
+        <button class="btn-stop-timer" onclick="stopCycleTimer()">STOP TIMER</button>
     </div>
 
     <!-- Annotator Overlay Modal -->

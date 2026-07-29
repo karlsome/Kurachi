@@ -825,6 +825,9 @@ function showRequestDetails(request) {
     }
 
     showRequestView('details');
+    
+    // Refresh Data/Images tabs if they happen to be currently open (e.g. after reload)
+    if (typeof refreshDataTab === 'function') refreshDataTab();
 }
 
 async function sendToMachine() {
