@@ -32575,7 +32575,7 @@ app.post('/api/shisakuTablet/submit', async (req, res) => {
     }
 
     const bucket = admin.storage().bucket();
-    const downloadToken = `shisaku_${Date.now()}`;
+    const downloadToken = 'masterDBToken69';
     const formattedRequests = {};
 
     // Process each request
@@ -32587,9 +32587,9 @@ app.post('/api/shisakuTablet/submit', async (req, res) => {
         quantity: reqData.quantity,
         Comment: reqData.Comment,
         issue: {},
-        dxf: { name: "", link: "" },
-        pce: { name: "", link: "" },
-        pdf: { name: "", link: "", jpgLink: "" },
+        dxf: reqData.dxf || { name: "", link: "" },
+        pce: reqData.pce || { name: "", link: "" },
+        pdf: reqData.pdf || { name: "", link: "", jpgLink: "" },
       };
 
       let issueIndex = 0;
@@ -32643,7 +32643,37 @@ app.post('/api/shisakuTablet/submit', async (req, res) => {
       requests: formattedRequests
     };
 
-    await client.db('Sasaki_Coating_MasterDB').collection('shisakuSubmittedDB').insertOne(document);
+    const insertResult = await client.db('submittedDB').collection('shisakuSubmittedDB').insertOne(document);
+    const submittedId = insertResult.insertedId;
+    
+    // Update individual request documents with completedBy and completedDate
+    for (const reqName in req.body.requests) {
+       const reqData = req.body.requests[reqName];
+       if (reqData.reqId) {
+           await client.db('Sasaki_Coating_MasterDB').collection('shisakuRequestDB').updateOne(
+               { _id: new ObjectId(reqData.reqId) },
+               { $set: { 
+                   completedBy: workerName, 
+                   completedDate: new Date(),
+                   shisakuSubmittedID: submittedId
+               } }
+           );
+       }
+    }
+
+    // Check if all requests completed
+    if (req.body.isAllCompleted && prototypeId) {
+       await client.db('Sasaki_Coating_MasterDB').collection('shisakuDB').updateOne(
+           { _id: new ObjectId(prototypeId) },
+           { $set: { 
+               status: 'completed', 
+               updatedAt: new Date(),
+               completedBy: workerName,
+               completedDate: new Date(),
+               shisakuSubmittedID: submittedId
+           } }
+       );
+    }
 
     res.json({ success: true, message: 'Data submitted successfully' });
   } catch (error) {
@@ -32969,6 +32999,41 @@ app.post('/api/shisaku-request/update/:id', async (req, res) => {
       { _id: new ObjectId(id) },
       { $set: updateDoc }
     );
+    
+    // Status Synchronization logic
+    if (updateDoc.status !== undefined) {
+      const updatedReq = await client.db('Sasaki_Coating_MasterDB').collection('shisakuRequestDB').findOne({ _id: new ObjectId(id) });
+      if (updatedReq && updatedReq.shisakudb_id) {
+        const siblingRequests = await client.db('Sasaki_Coating_MasterDB').collection('shisakuRequestDB').find({ shisakudb_id: updatedReq.shisakudb_id }).toArray();
+        
+        if (siblingRequests.length > 0) {
+          let allCompleted = true;
+          let anyInProgress = false;
+
+          for (const req of siblingRequests) {
+            const reqStatus = req.status || 'pending';
+            if (reqStatus !== 'completed') {
+              allCompleted = false;
+            }
+            if (reqStatus === 'in-progress') {
+              anyInProgress = true;
+            }
+          }
+
+          let newParentStatus = 'pending';
+          if (allCompleted) {
+            newParentStatus = 'completed';
+          } else if (anyInProgress) {
+            newParentStatus = 'in-progress';
+          }
+
+          await client.db('Sasaki_Coating_MasterDB').collection('shisakuDB').updateOne(
+            { _id: updatedReq.shisakudb_id },
+            { $set: { status: newParentStatus, updatedAt: new Date() } }
+          );
+        }
+      }
+    }
     
     res.json({ success: true, updatedCount: result.modifiedCount });
   } catch (error) {

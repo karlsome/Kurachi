@@ -1563,10 +1563,12 @@ async function submitAllData() {
     if (modal) modal.style.display = 'flex';
 
     try {
+        const isAllCompleted = state.requests.every(r => r.status === 'completed');
         const payload = {
             prototypeId: state.currentPrototypeId,
-            shisakuNo: state.prototypeNumber || 'UNKNOWN',
+            shisakuNo: state.currentPrototype || 'UNKNOWN',
             workerName: state.workerName || localStorage.getItem('shisaku_tablet_worker_name'),
+            isAllCompleted: isAllCompleted,
             requests: {}
         };
 
@@ -1587,11 +1589,15 @@ async function submitAllData() {
                 const reqName = req.name || `Req_${id}`;
                 
                 payload.requests[reqName] = {
+                    reqId: id,
                     Time_start: startTime ? new Date(parseInt(startTime)).toLocaleTimeString() : null,
                     Time_end: endTime ? new Date(parseInt(endTime)).toLocaleTimeString() : null,
                     cycleTime: formatTime(parseInt(cycleTimer)),
                     quantity: pieces,
                     Comment: notes,
+                    dxf: req.dxf,
+                    pce: req.pce,
+                    pdf: req.pdf,
                     images: photos.map(p => ({
                         type: p.type,
                         base64: p.base64
@@ -1606,7 +1612,7 @@ async function submitAllData() {
             return;
         }
 
-        const response = await fetch('/api/shisakuTablet/submit', {
+        const response = await fetch(`${serverURL}/api/shisakuTablet/submit`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
@@ -1616,14 +1622,46 @@ async function submitAllData() {
         
         if (response.ok) {
             alert("Data submitted successfully!");
-            // Perform Full Reset (simulate pressing the Reset All button)
-            if (typeof resetAll === 'function') {
-                // Since resetAll has a confirm, we might want to bypass it or just call it.
-                // It's better to clear localStorage and indexedDB directly for the current prototype.
-                
-                // Let's reload the page to give a completely fresh state.
-                window.location.reload();
+            
+            // Clear local storage keys
+            for (const req of state.requests) {
+                const id = req._id?.$oid || req._id;
+                localStorage.removeItem(`startTime_${id}`);
+                localStorage.removeItem(`endTime_${id}`);
+                localStorage.removeItem(`cycleTimer_${id}`);
+                localStorage.removeItem(`piecesCreated_${id}`);
+                localStorage.removeItem(`issueNotes_${id}`);
             }
+
+            // Clear IndexedDB
+            try {
+                const db = await getDB();
+                const tx = db.transaction('images', 'readwrite');
+                tx.objectStore('images').clear();
+                await new Promise((resolve) => {
+                    tx.oncomplete = resolve;
+                    tx.onerror = resolve;
+                });
+            } catch (e) {
+                console.error("Failed to clear IndexedDB", e);
+            }
+
+            // Wipe tablet memory
+            state.currentPrototype = null;
+            state.currentPrototypeId = null;
+            state.requests = [];
+            state.currentRequest = null;
+            
+            localStorage.removeItem('shisaku_tablet_prototype');
+            localStorage.removeItem('shisaku_tablet_prototype_id');
+            sessionStorage.removeItem('shisaku_tablet_main_tab');
+            sessionStorage.removeItem('shisaku_tablet_current_request_id');
+            
+            initWorker();
+            updateTabLocks();
+            switchMainTab(0);
+            
+            setTimeout(() => window.location.reload(), 500);
         } else {
             alert("Failed to submit: " + (result.error || 'Unknown error'));
         }
