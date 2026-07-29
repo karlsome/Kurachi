@@ -640,7 +640,7 @@ async function fetchRequests(shisakudb_id, shisakuNo) {
         // Restore request view state if available
         const savedReqId = sessionStorage.getItem('shisaku_tablet_current_request_id');
         if (savedReqId) {
-            const req = state.requests.find(r => r._id?.$oid === savedReqId);
+            const req = state.requests.find(r => (r._id?.$oid || r._id) === savedReqId);
             if (req) {
                 showRequestDetails(req);
                 return;
@@ -746,8 +746,9 @@ function parseImageUrl(jpgLink) {
 
 function showRequestDetails(request) {
     state.currentRequest = request;
-    if (request._id && request._id.$oid) {
-        sessionStorage.setItem('shisaku_tablet_current_request_id', request._id.$oid);
+    const idStr = request._id?.$oid || request._id;
+    if (idStr) {
+        sessionStorage.setItem('shisaku_tablet_current_request_id', idStr);
     }
     
     const startBtn = document.getElementById('startRequestBtn');
