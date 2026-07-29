@@ -1272,6 +1272,11 @@ async function refreshDataTab() {
     // Restore cycle time
     const savedTime = parseInt(localStorage.getItem(`cycleTimer_${reqId}`)) || 0;
     document.getElementById('cycleTimeDisplay').textContent = formatTime(savedTime);
+    
+    const resetBtn = document.getElementById('resetCycleTimeBtn');
+    if (resetBtn) {
+        resetBtn.style.display = savedTime > 0 ? 'block' : 'none';
+    }
 
     // Restore pieces
     document.getElementById('inputPiecesCreated').value = localStorage.getItem(`piecesCreated_${reqId}`) || '';
