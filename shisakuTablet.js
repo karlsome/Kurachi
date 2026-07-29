@@ -1293,6 +1293,7 @@ async function refreshDataTab() {
         const img = document.createElement('img');
         img.src = p.base64;
         img.className = 'photo-thumb';
+        img.onclick = () => openPreview(p.base64, 'Other / Problem');
         container.appendChild(img);
     });
 
@@ -1303,7 +1304,7 @@ async function refreshDataTab() {
         const card = document.createElement('div');
         card.className = 'image-card';
         card.innerHTML = `
-            <img src="${p.base64}">
+            <img src="${p.base64}" onclick="openPreview(this.src, '${p.type}')" style="cursor: pointer;">
             <div class="img-title">${p.type}</div>
         `;
         grid.appendChild(card);

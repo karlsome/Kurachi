@@ -772,12 +772,33 @@
             position: absolute; top: 0; left: 0; width: 100%; height: 100%; touch-action: none; cursor: crosshair;
         }
 
+        /* Data Tab Sections */
+        .data-section-card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: var(--card-radius);
+            padding: 24px;
+            margin-bottom: 24px;
+            box-shadow: var(--shadow-card);
+        }
+        .data-section-title {
+            font-size: 1.3rem;
+            font-weight: 800;
+            color: var(--text-main);
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid var(--border-subtle);
+            padding-bottom: 12px;
+        }
+
         /* Photo capture fields */
         .data-field-row {
             margin-bottom: 20px;
         }
         .data-field-row label {
-            display: block; font-weight: 700; color: var(--text-main); margin-bottom: 8px;
+            display: block; font-weight: 700; color: var(--text-main); margin-bottom: 8px; font-size: 1.2rem;
         }
         .photo-btn {
             display: inline-flex; align-items: center; gap: 8px;
@@ -786,7 +807,7 @@
             font-weight: 600; color: var(--text-main); cursor: pointer;
         }
         .photo-btn.has-photo { border-style: solid; border-color: var(--brand); background: var(--bg-subtle); }
-        .photo-thumb { max-width: 100px; max-height: 100px; border-radius: 8px; margin-left: 15px; vertical-align: middle; }
+        .photo-thumb { max-width: 100px; max-height: 100px; border-radius: 8px; margin-left: 15px; vertical-align: middle; cursor: pointer; }
         
         .images-grid {
             display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 15px; padding: 20px;
@@ -983,60 +1004,74 @@
                 </div>
 
                 <div id="view-data" class="view-section" style="padding: 20px; padding-bottom: 80px;">
-                    <div class="data-field-row" style="display: flex; align-items: center; justify-content: space-between;">
-                        <label style="margin: 0; font-size: 1.2rem;">Cycle Time</label>
-                        <button class="btn btn-send" style="width: auto; padding: 12px 30px; border-radius: 30px;" onclick="startCycleTimer()">Start</button>
-                    </div>
-                    <div class="data-field-row" style="text-align: right; margin-top: -10px;">
-                        <span id="cycleTimeDisplay" style="font-weight: bold; color: var(--text-muted);">00:00:00</span>
-                    </div>
-
-                    <div class="data-field-row">
-                        <label>Material Side Photo</label>
-                        <button class="photo-btn" onclick="document.getElementById('fileMaterialSide').click()">
-                            <span>📷 Take Photo</span>
+                    
+                    <!-- Cycle Time Card -->
+                    <div class="data-section-card">
+                        <div class="data-section-title">
+                            Cycle Time
+                            <span id="cycleTimeDisplay" style="font-size: 1.1rem; color: var(--text-muted); font-weight: bold; font-family: monospace;">00:00:00</span>
+                        </div>
+                        <button class="btn btn-send" style="width: 100%; border-radius: var(--btn-radius); font-size: 1.1rem; padding: 14px;" onclick="startCycleTimer()">
+                            Start Timer
                         </button>
-                        <img class="photo-thumb hidden" id="thumbMaterialSide" alt="thumb">
-                        <input type="file" accept="image/*" capture="environment" style="display: none;" id="fileMaterialSide">
                     </div>
 
-                    <div class="data-field-row">
-                        <label>Release paper side photo</label>
-                        <button class="photo-btn" onclick="document.getElementById('fileReleasePaper').click()">
-                            <span>📷 Take Photo</span>
-                        </button>
-                        <img class="photo-thumb hidden" id="thumbReleasePaper" alt="thumb">
-                        <input type="file" accept="image/*" capture="environment" style="display: none;" id="fileReleasePaper">
-                    </div>
+                    <!-- Photos Card -->
+                    <div class="data-section-card">
+                        <div class="data-section-title">Required Photos</div>
+                        
+                        <div class="data-field-row" style="margin-bottom: 24px;">
+                            <label>Material Side Photo</label>
+                            <button class="photo-btn" onclick="document.getElementById('fileMaterialSide').click()">
+                                <span>📷 Take Photo</span>
+                            </button>
+                            <img class="photo-thumb hidden" id="thumbMaterialSide" alt="thumb" onclick="openPreview(this.src, 'Material Side')">
+                            <input type="file" accept="image/*" capture="environment" style="display: none;" id="fileMaterialSide">
+                        </div>
 
-                    <div class="data-field-row">
-                        <label>Material label image</label>
-                        <button class="photo-btn" onclick="document.getElementById('fileMaterialLabel').click()">
-                            <span>📷 Take Photo</span>
-                        </button>
-                        <img class="photo-thumb hidden" id="thumbMaterialLabel" alt="thumb">
-                        <input type="file" accept="image/*" capture="environment" style="display: none;" id="fileMaterialLabel">
-                    </div>
+                        <div class="data-field-row" style="margin-bottom: 24px;">
+                            <label>Release Paper Side Photo</label>
+                            <button class="photo-btn" onclick="document.getElementById('fileReleasePaper').click()">
+                                <span>📷 Take Photo</span>
+                            </button>
+                            <img class="photo-thumb hidden" id="thumbReleasePaper" alt="thumb" onclick="openPreview(this.src, 'Release Paper Side')">
+                            <input type="file" accept="image/*" capture="environment" style="display: none;" id="fileReleasePaper">
+                        </div>
 
-                    <div class="data-field-row">
-                        <label>Pieces created</label>
-                        <input type="number" class="tap-field" id="inputPiecesCreated" placeholder="0" oninput="savePiecesCreated()">
-                    </div>
-
-                    <hr style="border: none; border-top: 1px solid var(--border); margin: 25px 0;">
-
-                    <div class="data-field-row">
-                        <label>その他/ 問題点 (Others / Problems)</label>
-                        <button class="photo-btn" onclick="document.getElementById('fileOtherPhotos').click()">
-                            <span>📷 Add Photo</span>
-                        </button>
-                        <input type="file" accept="image/*" capture="environment" style="display: none;" id="fileOtherPhotos">
-                        <div id="otherPhotosContainer" style="margin-top: 15px; display: flex; flex-wrap: wrap; gap: 10px;">
-                            <!-- Thumbs injected here -->
+                        <div class="data-field-row" style="margin-bottom: 0;">
+                            <label>Material Label Image</label>
+                            <button class="photo-btn" onclick="document.getElementById('fileMaterialLabel').click()">
+                                <span>📷 Take Photo</span>
+                            </button>
+                            <img class="photo-thumb hidden" id="thumbMaterialLabel" alt="thumb" onclick="openPreview(this.src, 'Material Label')">
+                            <input type="file" accept="image/*" capture="environment" style="display: none;" id="fileMaterialLabel">
                         </div>
                     </div>
 
-                    <div style="margin-top: 40px;">
+                    <!-- Production Card -->
+                    <div class="data-section-card">
+                        <div class="data-section-title">Production</div>
+                        <div class="data-field-row" style="margin-bottom: 0;">
+                            <label>Pieces Created</label>
+                            <input type="number" class="tap-field" id="inputPiecesCreated" placeholder="0" oninput="savePiecesCreated()" style="margin-bottom: 0;">
+                        </div>
+                    </div>
+
+                    <!-- Issues Card -->
+                    <div class="data-section-card">
+                        <div class="data-section-title">その他/ 問題点 (Issues / Others)</div>
+                        <div class="data-field-row" style="margin-bottom: 0;">
+                            <button class="photo-btn" onclick="document.getElementById('fileOtherPhotos').click()">
+                                <span>📷 Add Photo</span>
+                            </button>
+                            <input type="file" accept="image/*" capture="environment" style="display: none;" id="fileOtherPhotos">
+                            <div id="otherPhotosContainer" style="margin-top: 15px; display: flex; flex-wrap: wrap; gap: 10px;">
+                                <!-- Thumbs injected here -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 30px;">
                         <button class="btn btn-send" onclick="sendToMachine()">Send to Machine</button>
                     </div>
                 </div>
