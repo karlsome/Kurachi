@@ -682,7 +682,72 @@
             display: flex;
             align-items: center;
             justify-content: center;
+        }        /* Timer Modal */
+        #timerModal {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: #000;
+            color: #0f0;
+            z-index: 200000;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-family: monospace;
         }
+        #timerModal.open { display: flex; }
+        .timer-display { font-size: 20vw; font-weight: bold; margin-bottom: 30px; }
+        .btn-stop-timer {
+            padding: 20px 60px; font-size: 3rem; background: var(--red); color: white;
+            border: none; border-radius: 20px; font-weight: bold;
+        }
+
+        /* Annotator Overlay */
+        #annotatorOverlay {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.95); z-index: 100050;
+            display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+            padding-top: 10vh;
+        }
+        #annotatorOverlay.hidden { display: none !important; }
+        .annotator-toolbar {
+            position: absolute; bottom: 30px; display: flex; gap: 20px; z-index: 100055;
+        }
+        .annotator-canvas-container {
+            position: relative; max-width: 90vw; max-height: 70vh; touch-action: none;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5); border: 2px solid #333;
+        }
+        .annotator-bg-canvas, .annotator-draw-canvas {
+            display: block; width: 100%; height: auto; object-fit: contain;
+        }
+        .annotator-draw-canvas {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; touch-action: none; cursor: crosshair;
+        }
+
+        /* Photo capture fields */
+        .data-field-row {
+            margin-bottom: 20px;
+        }
+        .data-field-row label {
+            display: block; font-weight: 700; color: var(--text-main); margin-bottom: 8px;
+        }
+        .photo-btn {
+            display: inline-flex; align-items: center; gap: 8px;
+            background: var(--bg-surface); border: 2px dashed var(--border-strong);
+            padding: 12px 20px; border-radius: var(--btn-radius);
+            font-weight: 600; color: var(--text-main); cursor: pointer;
+        }
+        .photo-btn.has-photo { border-style: solid; border-color: var(--brand); background: var(--bg-subtle); }
+        .photo-thumb { max-width: 100px; max-height: 100px; border-radius: 8px; margin-left: 15px; vertical-align: middle; }
+        
+        .images-grid {
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 15px; padding: 20px;
+        }
+        .image-card {
+            background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--card-radius); padding: 10px; text-align: center;
+        }
+        .image-card img { width: 100%; height: auto; border-radius: 4px; margin-bottom: 8px; }
+        .image-card .img-title { font-size: 0.85rem; font-weight: bold; color: var(--text-muted); }
     </style>
 </head>
 
@@ -863,20 +928,84 @@
 
             <!-- Panel 3: Data -->
             <div class="tab-panel">
-                <div style="padding: 20px;">
-                    <button class="btn btn-send" onclick="sendToMachine()">Send to Machine</button>
-                    <div style="text-align: center; color: var(--text-muted); margin-top: 40px;">
-                        <h3>Data</h3>
-                        <p style="margin-top: 8px;">Feature coming soon.</p>
+                
+                <div id="dataPlaceholder" style="text-align: center; color: var(--text-muted); padding: 40px 20px;">
+                    <h3>No Request Selected</h3>
+                    <p style="margin-top: 8px;">Please start a request from the Request tab first.</p>
+                </div>
+
+                <div id="view-data" class="view-section" style="padding: 20px; padding-bottom: 80px;">
+                    <div class="data-field-row" style="display: flex; align-items: center; justify-content: space-between;">
+                        <label style="margin: 0; font-size: 1.2rem;">Cycle Time</label>
+                        <button class="btn btn-send" style="width: auto; padding: 12px 30px; border-radius: 30px;" onclick="startCycleTimer()">Start</button>
+                    </div>
+                    <div class="data-field-row" style="text-align: right; margin-top: -10px;">
+                        <span id="cycleTimeDisplay" style="font-weight: bold; color: var(--text-muted);">00:00:00</span>
+                    </div>
+
+                    <div class="data-field-row">
+                        <label>Material Side Photo</label>
+                        <button class="photo-btn" onclick="document.getElementById('fileMaterialSide').click()">
+                            <span>📷 Take Photo</span>
+                        </button>
+                        <img class="photo-thumb hidden" id="thumbMaterialSide" alt="thumb">
+                        <input type="file" accept="image/*" capture="environment" style="display: none;" id="fileMaterialSide">
+                    </div>
+
+                    <div class="data-field-row">
+                        <label>Release paper side photo</label>
+                        <button class="photo-btn" onclick="document.getElementById('fileReleasePaper').click()">
+                            <span>📷 Take Photo</span>
+                        </button>
+                        <img class="photo-thumb hidden" id="thumbReleasePaper" alt="thumb">
+                        <input type="file" accept="image/*" capture="environment" style="display: none;" id="fileReleasePaper">
+                    </div>
+
+                    <div class="data-field-row">
+                        <label>Material label image</label>
+                        <button class="photo-btn" onclick="document.getElementById('fileMaterialLabel').click()">
+                            <span>📷 Take Photo</span>
+                        </button>
+                        <img class="photo-thumb hidden" id="thumbMaterialLabel" alt="thumb">
+                        <input type="file" accept="image/*" capture="environment" style="display: none;" id="fileMaterialLabel">
+                    </div>
+
+                    <div class="data-field-row">
+                        <label>Pieces created</label>
+                        <input type="number" class="tap-field" id="inputPiecesCreated" placeholder="0" oninput="savePiecesCreated()">
+                    </div>
+
+                    <hr style="border: none; border-top: 1px solid var(--border); margin: 25px 0;">
+
+                    <div class="data-field-row">
+                        <label>その他/ 問題点 (Others / Problems)</label>
+                        <button class="photo-btn" onclick="document.getElementById('fileOtherPhotos').click()">
+                            <span>📷 Add Photo</span>
+                        </button>
+                        <input type="file" accept="image/*" capture="environment" style="display: none;" id="fileOtherPhotos">
+                        <div id="otherPhotosContainer" style="margin-top: 15px; display: flex; flex-wrap: wrap; gap: 10px;">
+                            <!-- Thumbs injected here -->
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 40px;">
+                        <button class="btn btn-send" onclick="sendToMachine()">Send to Machine</button>
                     </div>
                 </div>
             </div>
 
             <!-- Panel 4: Images -->
             <div class="tab-panel">
-                <div style="text-align: center; color: var(--text-muted); padding: 40px 20px;">
-                    <h3>Images</h3>
-                    <p style="margin-top: 8px;">Feature coming soon.</p>
+                
+                <div id="imagesPlaceholder" style="text-align: center; color: var(--text-muted); padding: 40px 20px;">
+                    <h3>No Request Selected</h3>
+                    <p style="margin-top: 8px;">Please start a request from the Request tab first.</p>
+                </div>
+
+                <div id="view-images" class="view-section">
+                    <div class="images-grid" id="imagesGridContainer">
+                        <!-- Image cards injected here -->
+                    </div>
                 </div>
             </div>
 
@@ -888,6 +1017,25 @@
                 </div>
             </div>
 
+        </div>
+    </div>
+
+    <!-- Timer Modal -->
+    <div id="timerModal">
+        <div class="timer-display" id="fullScreenTimerDisplay">00:00:00</div>
+        <button class="btn-stop-timer" onclick="stopCycleTimer()">STOP</button>
+    </div>
+
+    <!-- Annotator Overlay Modal -->
+    <div id="annotatorOverlay" class="hidden">
+        <div class="annotator-canvas-container">
+            <canvas class="annotator-bg-canvas"></canvas>
+            <canvas class="annotator-draw-canvas"></canvas>
+        </div>
+        <div class="annotator-toolbar">
+            <button class="btn btn-secondary" onclick="closeAnnotator()">Cancel</button>
+            <button class="btn btn-secondary" onclick="clearAnnotator()">Clear</button>
+            <button class="btn btn-send" style="padding: 16px 32px;" onclick="saveAnnotator()">Save Photo</button>
         </div>
     </div>
 

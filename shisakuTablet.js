@@ -1148,3 +1148,321 @@ window.addEventListener('DOMContentLoaded', () => {
         }
     }
 });
+const DATA_DB_NAME = 'ShisakuTabletDB';
+const DATA_DB_VERSION = 1;
+let dataDbPromise = null;
+
+function getDB() {
+    if (!dataDbPromise) {
+        dataDbPromise = new Promise((resolve, reject) => {
+            const request = indexedDB.open(DATA_DB_NAME, DATA_DB_VERSION);
+            request.onupgradeneeded = e => {
+                const db = e.target.result;
+                if (!db.objectStoreNames.contains('photos')) {
+                    db.createObjectStore('photos', { keyPath: 'id' });
+                }
+            };
+            request.onsuccess = e => resolve(e.target.result);
+            request.onerror = e => reject(e.target.error);
+        });
+    }
+    return dataDbPromise;
+}
+
+async function savePhotoToDB(id, reqId, type, base64) {
+    const db = await getDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction('photos', 'readwrite');
+        const store = tx.objectStore('photos');
+        store.put({ id, reqId, type, base64, timestamp: Date.now() });
+        tx.oncomplete = () => resolve();
+        tx.onerror = e => reject(e.target.error);
+    });
+}
+
+async function getPhotosFromDB(reqId) {
+    const db = await getDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction('photos', 'readonly');
+        const store = tx.objectStore('photos');
+        const req = store.getAll();
+        req.onsuccess = e => {
+            const all = e.target.result;
+            resolve(all.filter(p => p.reqId === reqId).sort((a,b) => b.timestamp - a.timestamp));
+        };
+        req.onerror = e => reject(e.target.error);
+    });
+}
+
+let cycleTimerInterval = null;
+let cycleTimerSeconds = 0;
+
+function formatTime(sec) {
+    const h = String(Math.floor(sec / 3600)).padStart(2, '0');
+    const m = String(Math.floor((sec % 3600) / 60)).padStart(2, '0');
+    const s = String(sec % 60).padStart(2, '0');
+    return `${h}:${m}:${s}`;
+}
+
+function startCycleTimer() {
+    const reqId = state.currentRequest?._id?.$oid || state.currentRequest?._id;
+    if (!reqId) { alert("Select a request first"); return; }
+    
+    const modal = document.getElementById('timerModal');
+    const display = document.getElementById('fullScreenTimerDisplay');
+    modal.classList.add('open');
+    
+    cycleTimerSeconds = parseInt(localStorage.getItem(`cycleTimer_${reqId}`)) || 0;
+    display.textContent = formatTime(cycleTimerSeconds);
+    
+    cycleTimerInterval = setInterval(() => {
+        cycleTimerSeconds++;
+        display.textContent = formatTime(cycleTimerSeconds);
+        localStorage.setItem(`cycleTimer_${reqId}`, cycleTimerSeconds);
+    }, 1000);
+}
+
+function stopCycleTimer() {
+    clearInterval(cycleTimerInterval);
+    document.getElementById('timerModal').classList.remove('open');
+    refreshDataTab();
+}
+
+function savePiecesCreated() {
+    const reqId = state.currentRequest?._id?.$oid || state.currentRequest?._id;
+    if (!reqId) return;
+    const val = document.getElementById('inputPiecesCreated').value;
+    localStorage.setItem(`piecesCreated_${reqId}`, val);
+}
+
+async function refreshDataTab() {
+    const reqId = state.currentRequest?._id?.$oid || state.currentRequest?._id;
+    const dataPlaceholder = document.getElementById('dataPlaceholder');
+    const viewData = document.getElementById('view-data');
+    const imagesPlaceholder = document.getElementById('imagesPlaceholder');
+    const viewImages = document.getElementById('view-images');
+
+    if (!reqId) {
+        if(dataPlaceholder) dataPlaceholder.style.display = 'block';
+        if(viewData) viewData.style.display = 'none';
+        if(imagesPlaceholder) imagesPlaceholder.style.display = 'block';
+        if(viewImages) viewImages.style.display = 'none';
+        return;
+    }
+    
+    if(dataPlaceholder) dataPlaceholder.style.display = 'none';
+    if(viewData) viewData.style.display = 'block';
+    if(imagesPlaceholder) imagesPlaceholder.style.display = 'none';
+    if(viewImages) viewImages.style.display = 'block';
+
+    // Restore cycle time
+    const savedTime = parseInt(localStorage.getItem(`cycleTimer_${reqId}`)) || 0;
+    document.getElementById('cycleTimeDisplay').textContent = formatTime(savedTime);
+
+    // Restore pieces
+    document.getElementById('inputPiecesCreated').value = localStorage.getItem(`piecesCreated_${reqId}`) || '';
+
+    // Load images
+    const photos = await getPhotosFromDB(reqId);
+    
+    // Reset thumbnails
+    ['MaterialSide', 'ReleasePaper', 'MaterialLabel'].forEach(type => {
+        const p = photos.find(x => x.type === type);
+        const thumb = document.getElementById(`thumb${type}`);
+        const btn = thumb.previousElementSibling;
+        if (p) {
+            thumb.src = p.base64;
+            thumb.classList.remove('hidden');
+            btn.classList.add('has-photo');
+            btn.querySelector('span').textContent = '📷 Retake';
+        } else {
+            thumb.src = '';
+            thumb.classList.add('hidden');
+            btn.classList.remove('has-photo');
+            btn.querySelector('span').textContent = '📷 Take Photo';
+        }
+    });
+
+    const others = photos.filter(x => x.type === 'Other');
+    const container = document.getElementById('otherPhotosContainer');
+    container.innerHTML = '';
+    others.forEach(p => {
+        const img = document.createElement('img');
+        img.src = p.base64;
+        img.className = 'photo-thumb';
+        container.appendChild(img);
+    });
+
+    // Populate images tab
+    const grid = document.getElementById('imagesGridContainer');
+    grid.innerHTML = '';
+    photos.forEach(p => {
+        const card = document.createElement('div');
+        card.className = 'image-card';
+        card.innerHTML = `
+            <img src="${p.base64}">
+            <div class="img-title">${p.type}</div>
+        `;
+        grid.appendChild(card);
+    });
+}
+
+// Intercept tab switching to refresh data
+const originalSwitchMainTab = switchMainTab;
+window.switchMainTab = function(index) {
+    originalSwitchMainTab(index);
+    if (index === 2 || index === 3) {
+        refreshDataTab();
+    }
+};
+
+// Annotator State
+let annotatorState = {
+    drawing: false,
+    ctx: null,
+    base64: null,
+    type: null,
+    pointerId: null
+};
+
+function setupPhotoInput(inputId, type) {
+    const input = document.getElementById(inputId);
+    input.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            openAnnotator(ev.target.result, type);
+        };
+        reader.readAsDataURL(file);
+    });
+}
+
+function initPhotoInputs() {
+    setupPhotoInput('fileMaterialSide', 'MaterialSide');
+    setupPhotoInput('fileReleasePaper', 'ReleasePaper');
+    setupPhotoInput('fileMaterialLabel', 'MaterialLabel');
+    setupPhotoInput('fileOtherPhotos', 'Other');
+}
+
+function openAnnotator(base64Image, type) {
+    annotatorState.type = type;
+    annotatorState.base64 = base64Image;
+    
+    const overlay = document.getElementById('annotatorOverlay');
+    const bgCanvas = overlay.querySelector('.annotator-bg-canvas');
+    const drawCanvas = overlay.querySelector('.annotator-draw-canvas');
+    const bgCtx = bgCanvas.getContext('2d');
+    const drawCtx = drawCanvas.getContext('2d');
+    annotatorState.ctx = drawCtx;
+    
+    const img = new Image();
+    img.onload = () => {
+        // limit size for performance
+        let w = img.width, h = img.height;
+        const max = 1200;
+        if (w > max || h > max) {
+            const ratio = Math.min(max/w, max/h);
+            w *= ratio; h *= ratio;
+        }
+        
+        bgCanvas.width = w; bgCanvas.height = h;
+        drawCanvas.width = w; drawCanvas.height = h;
+        
+        bgCtx.drawImage(img, 0, 0, w, h);
+        
+        drawCtx.lineCap = 'round';
+        drawCtx.lineJoin = 'round';
+        drawCtx.strokeStyle = 'red';
+        drawCtx.lineWidth = Math.max(3, w * 0.005);
+        
+        overlay.classList.remove('hidden');
+    };
+    img.src = base64Image;
+}
+
+function closeAnnotator() {
+    document.getElementById('annotatorOverlay').classList.add('hidden');
+    const drawCtx = annotatorState.ctx;
+    if (drawCtx) drawCtx.clearRect(0, 0, drawCtx.canvas.width, drawCtx.canvas.height);
+}
+
+function clearAnnotator() {
+    const drawCtx = annotatorState.ctx;
+    if (drawCtx) drawCtx.clearRect(0, 0, drawCtx.canvas.width, drawCtx.canvas.height);
+}
+
+async function saveAnnotator() {
+    const reqId = state.currentRequest?._id?.$oid || state.currentRequest?._id;
+    if (!reqId) return;
+
+    const overlay = document.getElementById('annotatorOverlay');
+    const bgCanvas = overlay.querySelector('.annotator-bg-canvas');
+    const drawCanvas = overlay.querySelector('.annotator-draw-canvas');
+    
+    // Merge
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = bgCanvas.width;
+    tempCanvas.height = bgCanvas.height;
+    const tCtx = tempCanvas.getContext('2d');
+    tCtx.drawImage(bgCanvas, 0, 0);
+    tCtx.drawImage(drawCanvas, 0, 0);
+    
+    const finalB64 = tempCanvas.toDataURL('image/jpeg', 0.8);
+    
+    const id = annotatorState.type === 'Other' 
+        ? `${reqId}_Other_${Date.now()}` 
+        : `${reqId}_${annotatorState.type}`;
+        
+    await savePhotoToDB(id, reqId, annotatorState.type, finalB64);
+    closeAnnotator();
+    refreshDataTab();
+}
+
+// Drawing events
+document.addEventListener('DOMContentLoaded', () => {
+    initPhotoInputs();
+    
+    const drawCanvas = document.querySelector('.annotator-draw-canvas');
+    if (!drawCanvas) return;
+    
+    function getPos(e) {
+        const rect = drawCanvas.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        const scaleX = drawCanvas.width / rect.width;
+        const scaleY = drawCanvas.height / rect.height;
+        return {
+            x: (clientX - rect.left) * scaleX,
+            y: (clientY - rect.top) * scaleY
+        };
+    }
+    
+    const startDraw = (e) => {
+        e.preventDefault();
+        annotatorState.drawing = true;
+        annotatorState.pointerId = e.pointerId;
+        const pos = getPos(e);
+        annotatorState.ctx.beginPath();
+        annotatorState.ctx.moveTo(pos.x, pos.y);
+    };
+    
+    const moveDraw = (e) => {
+        if (!annotatorState.drawing || (e.pointerId && e.pointerId !== annotatorState.pointerId)) return;
+        e.preventDefault();
+        const pos = getPos(e);
+        annotatorState.ctx.lineTo(pos.x, pos.y);
+        annotatorState.ctx.stroke();
+    };
+    
+    const endDraw = (e) => {
+        annotatorState.drawing = false;
+        annotatorState.pointerId = null;
+    };
+    
+    drawCanvas.addEventListener('pointerdown', startDraw);
+    drawCanvas.addEventListener('pointermove', moveDraw);
+    window.addEventListener('pointerup', endDraw);
+    window.addEventListener('pointercancel', endDraw);
+});
