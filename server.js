@@ -33041,6 +33041,25 @@ app.post('/api/shisaku-request/update/:id', async (req, res) => {
     res.status(500).json({ error: 'Failed to update prototype request' });
   }
 });
+app.get('/api/shisaku-submitted/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ error: 'Invalid submitted id' });
+    }
+
+    await client.connect();
+    const doc = await client.db('submittedDB').collection('shisakuSubmittedDB').findOne({ _id: new ObjectId(id) });
+    if (!doc) {
+      return res.status(404).json({ error: 'Submitted document not found' });
+    }
+
+    res.json(doc);
+  } catch (error) {
+    console.error('❌ Error fetching submitted document:', error.message);
+    res.status(500).json({ error: 'Failed to fetch submitted document' });
+  }
+});
 
 app.delete('/api/shisaku-request/:id', async (req, res) => {
   try {
