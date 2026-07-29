@@ -808,6 +808,14 @@
         }
         .photo-btn.has-photo { border-style: solid; border-color: var(--brand); background: var(--bg-subtle); }
         .photo-thumb { max-width: 100px; max-height: 100px; border-radius: 8px; margin-left: 15px; vertical-align: middle; cursor: pointer; }
+        .photo-placeholder {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 100px; height: 100px; background: var(--bg-body);
+            border: 1px dashed var(--border-strong); border-radius: 8px;
+            margin-left: 15px; vertical-align: middle; color: var(--text-muted);
+            font-size: 0.85rem; text-align: center; font-weight: bold;
+        }
+        .hidden { display: none !important; }
         
         .images-grid {
             display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 15px; padding: 20px;
@@ -1011,9 +1019,14 @@
                             Cycle Time
                             <span id="cycleTimeDisplay" style="font-size: 1.1rem; color: var(--text-muted); font-weight: bold; font-family: monospace;">00:00:00</span>
                         </div>
-                        <button class="btn btn-send" style="width: 100%; border-radius: var(--btn-radius); font-size: 1.1rem; padding: 14px;" onclick="startCycleTimer()">
-                            Start Timer
-                        </button>
+                        <div style="display: flex; gap: 10px;">
+                            <button class="btn btn-send" style="flex: 1; border-radius: var(--btn-radius); font-size: 1.1rem; padding: 14px;" onclick="startCycleTimer()">
+                                Start Timer
+                            </button>
+                            <button id="resetCycleTimeBtn" style="display: none; flex: 0.3; background: var(--bg-surface); border: 1px solid var(--border-strong); color: var(--text-muted); border-radius: var(--btn-radius); font-size: 1.1rem; padding: 14px; font-weight: bold; cursor: pointer;" onclick="resetCycleTimer()">
+                                Reset
+                            </button>
+                        </div>
                     </div>
 
                     <!-- Photos Card -->
@@ -1025,6 +1038,7 @@
                             <button class="photo-btn" onclick="document.getElementById('fileMaterialSide').click()">
                                 <span>📷 Take Photo</span>
                             </button>
+                            <div class="photo-placeholder" id="placeholderMaterialSide">Not taken yet</div>
                             <img class="photo-thumb hidden" id="thumbMaterialSide" alt="thumb" onclick="openPreview(this.src, 'Material Side')">
                             <input type="file" accept="image/*" capture="environment" style="display: none;" id="fileMaterialSide">
                         </div>
@@ -1034,6 +1048,7 @@
                             <button class="photo-btn" onclick="document.getElementById('fileReleasePaper').click()">
                                 <span>📷 Take Photo</span>
                             </button>
+                            <div class="photo-placeholder" id="placeholderReleasePaper">Not taken yet</div>
                             <img class="photo-thumb hidden" id="thumbReleasePaper" alt="thumb" onclick="openPreview(this.src, 'Release Paper Side')">
                             <input type="file" accept="image/*" capture="environment" style="display: none;" id="fileReleasePaper">
                         </div>
@@ -1043,6 +1058,7 @@
                             <button class="photo-btn" onclick="document.getElementById('fileMaterialLabel').click()">
                                 <span>📷 Take Photo</span>
                             </button>
+                            <div class="photo-placeholder" id="placeholderMaterialLabel">Not taken yet</div>
                             <img class="photo-thumb hidden" id="thumbMaterialLabel" alt="thumb" onclick="openPreview(this.src, 'Material Label')">
                             <input type="file" accept="image/*" capture="environment" style="display: none;" id="fileMaterialLabel">
                         </div>

@@ -1232,6 +1232,16 @@ function stopCycleTimer() {
     refreshDataTab();
 }
 
+function resetCycleTimer() {
+    const reqId = state.currentRequest?._id?.$oid || state.currentRequest?._id;
+    if (!reqId) return;
+    
+    if (confirm('Are you sure you want to reset the cycle time to zero?')) {
+        localStorage.setItem(`cycleTimer_${reqId}`, 0);
+        refreshDataTab();
+    }
+}
+
 function savePiecesCreated() {
     const reqId = state.currentRequest?._id?.$oid || state.currentRequest?._id;
     if (!reqId) return;
@@ -1273,15 +1283,19 @@ async function refreshDataTab() {
     ['MaterialSide', 'ReleasePaper', 'MaterialLabel'].forEach(type => {
         const p = photos.find(x => x.type === type);
         const thumb = document.getElementById(`thumb${type}`);
-        const btn = thumb.previousElementSibling;
+        const placeholder = document.getElementById(`placeholder${type}`);
+        const btn = placeholder.previousElementSibling;
+        
         if (p) {
             thumb.src = p.base64;
             thumb.classList.remove('hidden');
+            if(placeholder) placeholder.classList.add('hidden');
             btn.classList.add('has-photo');
             btn.querySelector('span').textContent = '📷 Retake';
         } else {
             thumb.src = '';
             thumb.classList.add('hidden');
+            if(placeholder) placeholder.classList.remove('hidden');
             btn.classList.remove('has-photo');
             btn.querySelector('span').textContent = '📷 Take Photo';
         }
