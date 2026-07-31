@@ -4,8 +4,8 @@
  */
 
 //const serverURL = "http://localhost:3000";
-//const serverURL = "https://kurachi.onrender.com";
-const serverURL = "http://192.168.0.77:3000";
+const serverURL = "https://kurachi.onrender.com";
+//const serverURL = "http://192.168.0.77:3000";
 
 const state = {
     workerName: localStorage.getItem('shisaku_tablet_worker_name') || null,
@@ -245,17 +245,17 @@ function changeWorkerName() {
 
 async function resetAll() {
     if (!confirm("Are you sure you want to reset all selections? This will clear the locked prototype and revert active requests.")) return;
-    
+
     // 1. Revert the database statuses BEFORE we wipe our local memory
     if (state.currentPrototypeId) {
         let hasCompleted = false;
-        
+
         try {
             // Force fetch the LATEST database state so we don't rely on local arrays that might be out of sync
             const reqRes = await fetch(`${serverURL}/api/shisaku-request/list?shisakudb_id=${state.currentPrototypeId}&limit=1000`);
             if (reqRes.ok) {
                 const reqData = await reqRes.json();
-                
+
                 // Revert any in-progress requests back to pending
                 for (const req of reqData.rows) {
                     const reqStatus = req.status || 'pending';
@@ -280,7 +280,7 @@ async function resetAll() {
         } catch (e) {
             console.error('Failed to fetch latest request status for reset', e);
         }
-        
+
         // 2. Revert Parent Prototype if there are zero completed requests
         if (!hasCompleted) {
             try {
@@ -300,14 +300,14 @@ async function resetAll() {
     state.currentPrototypeId = null;
     state.requests = [];
     state.currentRequest = null;
-    
+
     localStorage.removeItem('shisaku_tablet_prototype');
     localStorage.removeItem('shisaku_tablet_prototype_id');
-    
+
     initWorker();
     updateTabLocks();
     switchMainTab(0); // Jump back to User Tab
-    
+
     // Refresh prototype view to show all
     fetchPrototypes();
 }
@@ -398,7 +398,7 @@ function switchMainTab(index) {
     if (index === 1) {
         fetchPrototypes();
     }
-    
+
     if (index === 2 || index === 3 || index === 4) {
         if (typeof refreshDataTab === 'function') refreshDataTab();
     }
@@ -432,7 +432,7 @@ function showRequestView(viewId) {
     } else {
         document.getElementById(`view-${viewId}`).classList.add('active');
     }
-    
+
     if (viewId !== 'details') {
         sessionStorage.removeItem('shisaku_tablet_current_request_id');
     }
@@ -456,7 +456,7 @@ let pendingSelection = null;
 function showPrototypeView(viewId) {
     document.getElementById('view-prototype-list').classList.remove('active');
     document.getElementById('view-prototype-details').classList.remove('active');
-    
+
     if (viewId === 'list') {
         document.getElementById('view-prototype-list').classList.add('active');
     } else {
@@ -470,19 +470,19 @@ async function previewPrototype(shisakudb_id, shisakuNo) {
         const protoRes = await fetch(`${serverURL}/api/shisaku/${shisakudb_id}`);
         if (!protoRes.ok) throw new Error('Failed to fetch prototype details');
         const protoData = await protoRes.json();
-        
+
         // Fetch requests for parts needed calculation
         const reqRes = await fetch(`${serverURL}/api/shisaku-request/list?shisakudb_id=${shisakudb_id}&sortColumn=orderNumber&sortDirection=1&limit=1000`);
         if (!reqRes.ok) throw new Error('Failed to fetch requests');
         const reqData = await reqRes.json();
-        
+
         pendingSelection = {
             shisakudb_id,
             shisakuNo,
             protoData,
             requests: reqData.rows
         };
-        
+
         renderPrototypePreview();
         showPrototypeView('details');
     } catch (error) {
@@ -494,12 +494,12 @@ async function previewPrototype(shisakudb_id, shisakuNo) {
 function renderPrototypePreview() {
     if (!pendingSelection) return;
     const { shisakuNo, protoData, requests } = pendingSelection;
-    
+
     document.getElementById('protoPreviewTitle').textContent = `Prototype #${shisakuNo}`;
-    
+
     // Render basic info
     const grid = document.getElementById('protoPreviewGrid');
-    
+
     let deadlineStr = '-';
     if (protoData.deadline) {
         // Parse date from string or { $date: ... }
@@ -512,7 +512,7 @@ function renderPrototypePreview() {
         <div class="detail-item"><span>Model:</span> <strong>${protoData.modelName || '-'}</strong></div>
         <div class="detail-item"><span>Customer:</span> <strong>${protoData.customerName || '-'}</strong></div>
     `;
-    
+
     // Calculate box counts based on requests
     const boxCounts = {};
     requests.forEach(r => {
@@ -520,10 +520,10 @@ function renderPrototypePreview() {
             boxCounts[r.boxType] = (boxCounts[r.boxType] || 0) + 1; // 1 pc per request
         }
     });
-    
+
     const boxesContainer = document.getElementById('protoPreviewBoxes');
     boxesContainer.innerHTML = '';
-    
+
     if (Object.keys(boxCounts).length === 0) {
         boxesContainer.innerHTML = '<div style="color: var(--text-muted); font-size: 0.9rem;">No boxes required.</div>';
     } else {
@@ -535,7 +535,7 @@ function renderPrototypePreview() {
             row.style.background = 'var(--bg-subtle)';
             row.style.borderRadius = 'var(--btn-radius)';
             row.style.border = '1px solid var(--border)';
-            
+
             row.innerHTML = `
                 <span style="font-weight: 700; color: var(--text-main);">${boxType}</span>
                 <span style="font-weight: 800; color: var(--brand);">${count} pc(s)</span>
@@ -551,11 +551,11 @@ function renderPrototypePreview() {
             const pitch = parseFloat(r.okuriPitch) || 0;
             const qty = parseInt(r.quantity) || 0;
             const pcPerCycle = parseInt(r.pcPerCycle) || 1; // Default to 1 if missing or 0
-            
+
             // Calculate total cycles needed
             const cycles = Math.ceil(qty / pcPerCycle);
             const length = cycles * pitch;
-            
+
             if (length > 0) {
                 const colorLabel = r.color ? ` - ${r.color}` : '';
                 const matKey = `${r.material}${colorLabel}`;
@@ -566,7 +566,7 @@ function renderPrototypePreview() {
 
     const materialsContainer = document.getElementById('protoPreviewMaterials');
     materialsContainer.innerHTML = '';
-    
+
     if (Object.keys(materialLengths).length === 0) {
         materialsContainer.innerHTML = '<div style="color: var(--text-muted); font-size: 0.9rem;">No materials calculated.</div>';
     } else {
@@ -578,7 +578,7 @@ function renderPrototypePreview() {
             row.style.background = 'var(--bg-subtle)';
             row.style.borderRadius = 'var(--btn-radius)';
             row.style.border = '1px solid var(--border)';
-            
+
             row.innerHTML = `
                 <span style="font-weight: 700; color: var(--text-main);">${material}</span>
                 <span style="font-weight: 800; color: var(--brand);">${totalLength} mm</span>
@@ -603,7 +603,7 @@ function renderPrototypePreview() {
             row.style.background = 'var(--bg-subtle)';
             row.style.borderRadius = 'var(--btn-radius)';
             row.style.border = '1px solid var(--border)';
-            
+
             row.innerHTML = `
                 <span style="font-weight: 700; color: var(--text-main);">${reqName}</span>
                 <span style="font-weight: 800; color: var(--brand);">${reqQty} pc(s)</span>
@@ -615,16 +615,16 @@ function renderPrototypePreview() {
 
 function confirmPrototypeSelection() {
     if (!pendingSelection) return;
-    
+
     const { shisakudb_id, shisakuNo, requests } = pendingSelection;
-    
+
     state.requests = requests;
     state.currentPrototype = shisakuNo;
     state.currentPrototypeId = shisakudb_id;
-    
+
     localStorage.setItem('shisaku_tablet_prototype', shisakuNo);
     localStorage.setItem('shisaku_tablet_prototype_id', shisakudb_id);
-    
+
     updateTabLocks();
     renderRequests();
     showRequestView('requests');
@@ -641,10 +641,10 @@ async function fetchRequests(shisakudb_id, shisakuNo) {
         state.requests = data.rows;
         state.currentPrototype = shisakuNo;
         state.currentPrototypeId = shisakudb_id;
-        
+
         updateTabLocks();
         renderRequests();
-        
+
         // Restore request view state if available
         const savedReqId = sessionStorage.getItem('shisaku_tablet_current_request_id');
         if (savedReqId) {
@@ -655,7 +655,7 @@ async function fetchRequests(shisakudb_id, shisakuNo) {
                 return;
             }
         }
-        
+
         showRequestView('requests');
         if (state.currentMainTab === 5) {
             renderSubmitTab();
@@ -669,13 +669,13 @@ async function fetchRequests(shisakudb_id, shisakuNo) {
 function renderPrototypes() {
     const grid = document.getElementById('prototypesGrid');
     grid.innerHTML = '';
-    
+
     // We already fetched by currentPrototypeStatus, so state.prototypes is the filtered list.
     // If locked to a prototype, ONLY show that prototype.
-    const filtered = state.currentPrototype 
-        ? state.prototypes.filter(p => p.shisakuNo === state.currentPrototype) 
+    const filtered = state.currentPrototype
+        ? state.prototypes.filter(p => p.shisakuNo === state.currentPrototype)
         : state.prototypes;
-    
+
     if (filtered.length === 0) {
         grid.innerHTML = '<div style="color: var(--text-muted); padding: 20px;">No prototypes found for this status.</div>';
         return;
@@ -762,11 +762,11 @@ function showRequestDetails(request) {
     if (idStr) {
         sessionStorage.setItem('shisaku_tablet_current_request_id', idStr);
     }
-    
+
     // Populate action button
     const startBtn = document.getElementById('startRequestBtn');
     const restartBtn = document.getElementById('restartRequestBtn');
-    
+
     if (startBtn) {
         if (request.status === 'completed') {
             startBtn.style.display = 'none';
@@ -830,7 +830,7 @@ function showRequestDetails(request) {
         } else {
             imgEl.style.display = 'none';
         }
-        
+
         imgEl.onclick = () => {
             if (typeof window.openPreview === 'function') {
                 if (pdfLink) {
@@ -848,7 +848,7 @@ function showRequestDetails(request) {
     }
 
     showRequestView('details');
-    
+
     // Refresh Data/Images tabs if they happen to be currently open (e.g. after reload)
     if (typeof refreshDataTab === 'function') refreshDataTab();
 }
@@ -882,10 +882,10 @@ async function sendToMachine() {
     try {
         const ipResponse = await fetch(`${ipURL}?filter=${encodeURIComponent(machineName)}`);
         if (!ipResponse.ok) throw new Error(`Failed to fetch IP for ${machineName}`);
-        
+
         ipAddress = await ipResponse.text();
         ipAddress = ipAddress.trim();
-        
+
         if (!ipAddress || ipAddress.includes('Error')) {
             throw new Error(`Invalid IP retrieved: ${ipAddress}`);
         }
@@ -900,7 +900,7 @@ async function sendToMachine() {
         alert("No request is currently active.");
         return;
     }
-    
+
     let pceName = state.currentRequest?.pce?.name || state.currentRequest?.name;
     if (!pceName) {
         console.error("No PCE filename found in current request");
@@ -933,7 +933,7 @@ async function finishDataCollection() {
     if (!req) return;
     const id = req._id?.$oid || req._id;
     if (!id) return;
-    
+
     // Save end time
     localStorage.setItem(`endTime_${id}`, Date.now().toString());
 
@@ -947,7 +947,7 @@ async function finishDataCollection() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ status: 'completed' })
         });
-        
+
         if (response.ok) {
             // Update locally
             const index = state.requests.findIndex(r => (r._id?.$oid || r._id) === id);
@@ -955,19 +955,19 @@ async function finishDataCollection() {
                 state.requests[index].status = 'completed';
                 renderRequests();
             }
-            
+
             // Clear current request context and reset UI
             state.isDataTabActive = false;
             sessionStorage.removeItem('shisaku_tablet_data_tab_active');
             state.currentRequest = null;
             sessionStorage.removeItem('shisaku_tablet_current_request_id');
             refreshDataTab();
-            
-            
+
+
             // Go back to Request list
             switchMainTab(2);
             showRequestView('requests');
-            
+
         } else {
             alert('Failed to mark request as completed on the server.');
         }
@@ -979,7 +979,7 @@ async function finishDataCollection() {
 
 async function startRequest() {
     if (!state.currentRequest) return;
-    
+
     // Change status from pending to in-progress
     try {
         const id = state.currentRequest._id?.$oid || state.currentRequest._id;
@@ -991,7 +991,7 @@ async function startRequest() {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ status: 'in-progress' })
                 });
-                
+
                 if (response.ok) {
                     state.currentRequest.status = 'in-progress';
                     // Update in the local list so the badge changes
@@ -1000,12 +1000,12 @@ async function startRequest() {
                         state.requests[index].status = 'in-progress';
                         renderRequests();
                     }
-                    
+
                     // Log start time locally if not already set
                     if (!localStorage.getItem(`startTime_${id}`)) {
                         localStorage.setItem(`startTime_${id}`, Date.now().toString());
                     }
-                    
+
                     // Also update the parent prototype to in-progress if it's currently pending
                     if (state.currentPrototypeStatus === 'pending' && state.currentPrototypeId) {
                         try {
@@ -1018,7 +1018,7 @@ async function startRequest() {
                             if (pRes.ok) {
                                 state.currentPrototypeStatus = 'in-progress';
                             }
-                        } catch(e) {
+                        } catch (e) {
                             console.error("Failed to update parent prototype status:", e);
                         }
                     }
@@ -1044,7 +1044,7 @@ async function startRequest() {
 
 function restartRequest() {
     if (!state.currentRequest) return;
-    
+
     state.isDataTabActive = true;
     sessionStorage.setItem('shisaku_tablet_data_tab_active', 'true');
     // Just switch to the data tab to edit the data
@@ -1083,7 +1083,7 @@ function openPreview(src, titleText = '', type = 'image', originalLink = '') {
     const img = document.getElementById('imgPreviewTarget');
     const extBtn = document.getElementById('imgPreviewOpenExt');
     if (!m) return;
-    
+
     if (extBtn) {
         if (originalLink) {
             extBtn.style.display = 'flex';
@@ -1092,18 +1092,18 @@ function openPreview(src, titleText = '', type = 'image', originalLink = '') {
             extBtn.style.display = 'none';
         }
     }
-    
+
     if (img) {
         img.style.display = 'block';
         img.src = src;
-        
+
         // Reset zoom and pan
         imgPreviewScale = 1;
         imgPreviewTranslateX = 0;
         imgPreviewTranslateY = 0;
         updateImgPreviewTransform();
     }
-    
+
     let titleEl = document.getElementById('imgPreviewTitle');
     if (!titleEl) {
         titleEl = document.createElement('div');
@@ -1111,7 +1111,7 @@ function openPreview(src, titleText = '', type = 'image', originalLink = '') {
         titleEl.style.cssText = 'position:absolute; top:10%; left:50%; transform:translateX(-50%); color:var(--text-main, #333); font-size:1.5rem; font-weight:700; background: var(--bg-surface, #fff); padding: 10px 24px; border-radius: 30px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); pointer-events:none; z-index: 100010; white-space:nowrap; border: 1px solid var(--border, #eee); font-family: inherit;';
         m.appendChild(titleEl);
     }
-    
+
     if (titleText) {
         titleEl.textContent = titleText;
         titleEl.style.display = 'block';
@@ -1159,7 +1159,7 @@ function bindPreviewZoomAndPan() {
 
     img.addEventListener('pointermove', (e) => {
         if (!isPointerDown) return;
-        
+
         const pointer = pointers.find(p => p.id === e.pointerId);
         if (pointer) {
             pointer.x = e.clientX;
@@ -1282,7 +1282,7 @@ async function getPhotosFromDB(reqId) {
         const req = store.getAll();
         req.onsuccess = e => {
             const all = e.target.result;
-            resolve(all.filter(p => p.reqId === reqId).sort((a,b) => b.timestamp - a.timestamp));
+            resolve(all.filter(p => p.reqId === reqId).sort((a, b) => b.timestamp - a.timestamp));
         };
         req.onerror = e => reject(e.target.error);
     });
@@ -1301,14 +1301,14 @@ function formatTime(sec) {
 function startCycleTimer() {
     const reqId = state.currentRequest?._id?.$oid || state.currentRequest?._id;
     if (!reqId) { alert("Select a request first"); return; }
-    
+
     const modal = document.getElementById('timerModal');
     const display = document.getElementById('fullScreenTimerDisplay');
     modal.classList.add('open');
-    
+
     cycleTimerSeconds = parseInt(localStorage.getItem(`cycleTimer_${reqId}`)) || 0;
     display.textContent = formatTime(cycleTimerSeconds);
-    
+
     cycleTimerInterval = setInterval(() => {
         cycleTimerSeconds++;
         display.textContent = formatTime(cycleTimerSeconds);
@@ -1325,7 +1325,7 @@ function stopCycleTimer() {
 function resetCycleTimer() {
     const reqId = state.currentRequest?._id?.$oid || state.currentRequest?._id;
     if (!reqId) return;
-    
+
     if (confirm('Are you sure you want to reset the cycle time to zero?')) {
         localStorage.setItem(`cycleTimer_${reqId}`, 0);
         refreshDataTab();
@@ -1354,29 +1354,29 @@ async function refreshDataTab() {
     const viewImages = document.getElementById('view-images');
 
     if (!reqId || !state.isDataTabActive) {
-        if(dataPlaceholder) dataPlaceholder.style.display = 'block';
-        if(viewData) viewData.style.display = 'none';
-        if(imagesPlaceholder) imagesPlaceholder.style.display = 'block';
-        if(viewImages) viewImages.style.display = 'none';
+        if (dataPlaceholder) dataPlaceholder.style.display = 'block';
+        if (viewData) viewData.style.display = 'none';
+        if (imagesPlaceholder) imagesPlaceholder.style.display = 'block';
+        if (viewImages) viewImages.style.display = 'none';
         return;
     }
-    
-    if(dataPlaceholder) dataPlaceholder.style.display = 'none';
-    if(viewData) viewData.style.display = 'block';
-    if(imagesPlaceholder) imagesPlaceholder.style.display = 'none';
-    if(viewImages) viewImages.style.display = 'block';
+
+    if (dataPlaceholder) dataPlaceholder.style.display = 'none';
+    if (viewData) viewData.style.display = 'block';
+    if (imagesPlaceholder) imagesPlaceholder.style.display = 'none';
+    if (viewImages) viewImages.style.display = 'block';
 
     // Populate Quick Reference Card
     if (state.currentRequest) {
         document.getElementById('quickRefProto').textContent = state.currentPrototype || '-';
         document.getElementById('quickRefName').textContent = state.currentRequest.name || '-';
-        
+
         const pdfBtn = document.getElementById('quickRefPdfBtn');
         const req = state.currentRequest;
         const jpgLink = req.pdf?.jpgLink || req.jpgLink;
         const parsedImgUrl = parseImageUrl(jpgLink);
         const pdfLink = req.pdf?.link;
-        
+
         const thumbEl = document.getElementById('quickRefImgThumb');
         if (parsedImgUrl) {
             thumbEl.src = parsedImgUrl;
@@ -1409,7 +1409,7 @@ async function refreshDataTab() {
     // Restore cycle time
     const savedTime = parseInt(localStorage.getItem(`cycleTimer_${reqId}`)) || 0;
     document.getElementById('cycleTimeDisplay').textContent = formatTime(savedTime);
-    
+
     const resetBtn = document.getElementById('resetCycleTimeBtn');
     if (resetBtn) {
         resetBtn.style.display = savedTime > 0 ? 'block' : 'none';
@@ -1424,24 +1424,24 @@ async function refreshDataTab() {
 
     // Load images
     const photos = await getPhotosFromDB(reqId);
-    
+
     // Reset thumbnails
     ['MaterialSide', 'ReleasePaper', 'MaterialLabel'].forEach(type => {
         const p = photos.find(x => x.type === type);
         const thumb = document.getElementById(`thumb${type}`);
         const placeholder = document.getElementById(`placeholder${type}`);
         const btn = placeholder.previousElementSibling;
-        
+
         if (p) {
             thumb.src = p.base64;
             thumb.classList.remove('hidden');
-            if(placeholder) placeholder.classList.add('hidden');
+            if (placeholder) placeholder.classList.add('hidden');
             btn.classList.add('has-photo');
             btn.querySelector('span').textContent = '📷 Retake';
         } else {
             thumb.src = '';
             thumb.classList.add('hidden');
-            if(placeholder) placeholder.classList.remove('hidden');
+            if (placeholder) placeholder.classList.remove('hidden');
             btn.classList.remove('has-photo');
             btn.querySelector('span').textContent = '📷 Take Photo';
         }
@@ -1488,7 +1488,7 @@ async function renderSubmitTab() {
 
     for (const req of state.requests) {
         const id = req._id?.$oid || req._id;
-        
+
         // Data
         const startTime = localStorage.getItem(`startTime_${id}`);
         const endTime = localStorage.getItem(`endTime_${id}`);
@@ -1497,22 +1497,22 @@ async function renderSubmitTab() {
         const notes = localStorage.getItem(`issueNotes_${id}`) || '';
 
         const hasData = startTime || endTime || pieces || notes || cycleTimer > 0;
-        
+
         // Photos
         let photos = [];
         try {
             photos = await getPhotosFromDB(id);
-        } catch(e) {
+        } catch (e) {
             console.error("Failed to fetch photos", e);
         }
-        
+
         const hasMaterialSide = photos.some(p => p.type === 'MaterialSide');
         const hasReleasePaper = photos.some(p => p.type === 'ReleasePaper');
         const hasMaterialLabel = photos.some(p => p.type === 'MaterialLabel');
         const hasOthers = photos.some(p => p.type.startsWith('Other'));
 
         if (!hasData && photos.length === 0) {
-            continue; 
+            continue;
         }
 
         const formatTs = (ts) => ts ? new Date(parseInt(ts)).toLocaleTimeString() : '-';
@@ -1573,7 +1573,7 @@ async function submitAllData() {
         };
 
         let hasData = false;
-        
+
         for (const req of state.requests) {
             const id = req._id?.$oid || req._id;
             const startTime = localStorage.getItem(`startTime_${id}`);
@@ -1581,13 +1581,13 @@ async function submitAllData() {
             const cycleTimer = localStorage.getItem(`cycleTimer_${id}`) || 0;
             const pieces = localStorage.getItem(`piecesCreated_${id}`) || '';
             const notes = localStorage.getItem(`issueNotes_${id}`) || '';
-            
+
             const photos = await getPhotosFromDB(id);
-            
+
             if (startTime || endTime || pieces || notes || cycleTimer > 0 || photos.length > 0) {
                 hasData = true;
                 const reqName = req.name || `Req_${id}`;
-                
+
                 payload.requests[reqName] = {
                     reqId: id,
                     Time_start: startTime ? new Date(parseInt(startTime)).toLocaleTimeString() : null,
@@ -1619,10 +1619,10 @@ async function submitAllData() {
         });
 
         const result = await response.json();
-        
+
         if (response.ok) {
             alert("Data submitted successfully!");
-            
+
             // Clear local storage keys
             for (const req of state.requests) {
                 const id = req._id?.$oid || req._id;
@@ -1651,16 +1651,16 @@ async function submitAllData() {
             state.currentPrototypeId = null;
             state.requests = [];
             state.currentRequest = null;
-            
+
             localStorage.removeItem('shisaku_tablet_prototype');
             localStorage.removeItem('shisaku_tablet_prototype_id');
             sessionStorage.removeItem('shisaku_tablet_main_tab');
             sessionStorage.removeItem('shisaku_tablet_current_request_id');
-            
+
             initWorker();
             updateTabLocks();
             switchMainTab(0);
-            
+
             setTimeout(() => window.location.reload(), 500);
         } else {
             alert("Failed to submit: " + (result.error || 'Unknown error'));
@@ -1689,7 +1689,7 @@ function setupPhotoInput(inputId, type) {
     input.addEventListener('change', (e) => {
         const file = e.target.files[0];
         if (!file) return;
-        
+
         const reader = new FileReader();
         reader.onload = (ev) => {
             openAnnotator(ev.target.result, type);
@@ -1708,34 +1708,34 @@ function initPhotoInputs() {
 function openAnnotator(base64Image, type) {
     annotatorState.type = type;
     annotatorState.base64 = base64Image;
-    
+
     const overlay = document.getElementById('annotatorOverlay');
     const bgCanvas = overlay.querySelector('.annotator-bg-canvas');
     const drawCanvas = overlay.querySelector('.annotator-draw-canvas');
     const bgCtx = bgCanvas.getContext('2d');
     const drawCtx = drawCanvas.getContext('2d');
     annotatorState.ctx = drawCtx;
-    
+
     const img = new Image();
     img.onload = () => {
         // limit size for performance
         let w = img.width, h = img.height;
         const max = 1200;
         if (w > max || h > max) {
-            const ratio = Math.min(max/w, max/h);
+            const ratio = Math.min(max / w, max / h);
             w *= ratio; h *= ratio;
         }
-        
+
         bgCanvas.width = w; bgCanvas.height = h;
         drawCanvas.width = w; drawCanvas.height = h;
-        
+
         bgCtx.drawImage(img, 0, 0, w, h);
-        
+
         drawCtx.lineCap = 'round';
         drawCtx.lineJoin = 'round';
         drawCtx.strokeStyle = 'red';
         drawCtx.lineWidth = Math.max(3, w * 0.005);
-        
+
         overlay.classList.remove('hidden');
     };
     img.src = base64Image;
@@ -1759,7 +1759,7 @@ async function saveAnnotator() {
     const overlay = document.getElementById('annotatorOverlay');
     const bgCanvas = overlay.querySelector('.annotator-bg-canvas');
     const drawCanvas = overlay.querySelector('.annotator-draw-canvas');
-    
+
     // Merge
     const tempCanvas = document.createElement('canvas');
     tempCanvas.width = bgCanvas.width;
@@ -1767,13 +1767,13 @@ async function saveAnnotator() {
     const tCtx = tempCanvas.getContext('2d');
     tCtx.drawImage(bgCanvas, 0, 0);
     tCtx.drawImage(drawCanvas, 0, 0);
-    
+
     const finalB64 = tempCanvas.toDataURL('image/jpeg', 0.8);
-    
-    const id = annotatorState.type === 'Other' 
-        ? `${reqId}_Other_${Date.now()}` 
+
+    const id = annotatorState.type === 'Other'
+        ? `${reqId}_Other_${Date.now()}`
         : `${reqId}_${annotatorState.type}`;
-        
+
     await savePhotoToDB(id, reqId, annotatorState.type, finalB64);
     closeAnnotator();
     refreshDataTab();
@@ -1782,10 +1782,10 @@ async function saveAnnotator() {
 // Drawing events
 document.addEventListener('DOMContentLoaded', () => {
     initPhotoInputs();
-    
+
     const drawCanvas = document.querySelector('.annotator-draw-canvas');
     if (!drawCanvas) return;
-    
+
     function getPos(e) {
         const rect = drawCanvas.getBoundingClientRect();
         const clientX = e.touches ? e.touches[0].clientX : e.clientX;
@@ -1797,7 +1797,7 @@ document.addEventListener('DOMContentLoaded', () => {
             y: (clientY - rect.top) * scaleY
         };
     }
-    
+
     const startDraw = (e) => {
         e.preventDefault();
         annotatorState.drawing = true;
@@ -1806,7 +1806,7 @@ document.addEventListener('DOMContentLoaded', () => {
         annotatorState.ctx.beginPath();
         annotatorState.ctx.moveTo(pos.x, pos.y);
     };
-    
+
     const moveDraw = (e) => {
         if (!annotatorState.drawing || (e.pointerId && e.pointerId !== annotatorState.pointerId)) return;
         e.preventDefault();
@@ -1814,12 +1814,12 @@ document.addEventListener('DOMContentLoaded', () => {
         annotatorState.ctx.lineTo(pos.x, pos.y);
         annotatorState.ctx.stroke();
     };
-    
+
     const endDraw = (e) => {
         annotatorState.drawing = false;
         annotatorState.pointerId = null;
     };
-    
+
     drawCanvas.addEventListener('pointerdown', startDraw);
     drawCanvas.addEventListener('pointermove', moveDraw);
     window.addEventListener('pointerup', endDraw);
