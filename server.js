@@ -32322,21 +32322,29 @@ async function _getOrCreateShisakuSubfolder(drive, parentFolderId, subfolderName
   return folder.id;
 }
 
-async function _uploadShisakuPdfPreviewImage(drive, fileName, base64, baseUrl) {
-  const pdfFolderId = await _getShisakuSubfolderId(drive, 'pdf');
-  const jpgFolderId = await _getOrCreateShisakuSubfolder(drive, pdfFolderId, 'jpg');
-
+async function _uploadShisakuPdfPreviewImage(shisakuNo, fileName, base64) {
   const fileBuffer = Buffer.from(base64, 'base64');
-  const stream = new Readable();
-  stream.push(fileBuffer);
-  stream.push(null);
-  const response = await drive.files.create({
-    requestBody: { name: fileName, parents: [jpgFolderId] },
-    media: { mimeType: 'image/jpeg', body: stream },
-    supportsAllDrives: true,
-    fields: 'id, name, webViewLink',
+  const bucketName = 'imagestorage-e7ed3.firebasestorage.app';
+  const destPath = `shisakuJpg/${shisakuNo}/${fileName}`;
+  const bucket = admin.storage().bucket(bucketName);
+  const file = bucket.file(destPath);
+  
+  await file.save(fileBuffer, {
+    metadata: { 
+      contentType: 'image/jpeg',
+      metadata: { firebaseStorageDownloadTokens: 'masterDBToken69' }
+    }
   });
-  return { id: response.data.id, name: response.data.name, link: `${baseUrl}/api/shisaku/image/${response.data.id}` };
+  
+  try {
+    await file.makePublic();
+  } catch (e) {
+    // Ignore error if bucket has uniform bucket-level access or is already public
+  }
+  
+  const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encodeURIComponent(destPath)}?alt=media&token=masterDBToken69`;
+  
+  return { id: destPath, name: fileName, link: publicUrl };
 }
 
 // Streams a Drive-hosted image (e.g. the PDF JPG preview) so it can be used directly as an <img> src.
@@ -32386,44 +32394,79 @@ app.get('/api/shisaku/list', async (req, res) => {
   }
 });
 
+// Prototype (試作) Endpoints
+
+app.get('/api/shisaku', async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.max(1, parseInt(req.query.limit) || 10);
+    const skip = (page - 1) * limit;
+
+    const sortColumn = req.query.sortColumn || 'createdAt';
+    const sortDirection = parseInt(req.query.sortDirection) || -1;
+
+    const sort = { [sortColumn]: sortDirection };
+
+    await client.connect();
+    const collection = client.db('Sasaki_Coating_MasterDB').collection('shisakuDB');
+
+    const totalCount = await collection.countDocuments();
+    const rows = await collection.find({}).sort(sort).skip(skip).limit(limit).toArray();
+
+    res.json({
+      rows,
+      pagination: {
+        page,
+        limit,
+        totalCount,
+        totalPages: Math.ceil(totalCount / limit)
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error fetching prototype list:', error.message);
+    res.status(500).json({ error: 'Failed to fetch prototype list' });
+  }
+});
+
 app.post('/api/shisaku/register', async (req, res) => {
   try {
-    const { shisakuNo, deadline, eventName, modelName, customerName, registeredBy, dxfFile, pdfFile, pdfImageFile, pceFiles } = req.body;
+    const { shisakuNo, deadline, eventName, modelName, customerName, registeredBy, cybozuLink, dxfFiles = [], pdfFiles = [], pdfImageFiles = [], pceFiles = [], colors = [], materials = [], boxTypes = [] } = req.body;
 
-    if (!shisakuNo || !deadline || !eventName || !modelName || !customerName || !registeredBy) {
-      return res.status(400).json({ error: 'shisakuNo, deadline, eventName, modelName, customerName, and registeredBy are required' });
-    }
-    if (!dxfFile?.base64 || !dxfFile?.name || !pdfFile?.base64 || !pdfFile?.name) {
-      return res.status(400).json({ error: 'dxfFile and pdfFile (each with name and base64) are required' });
-    }
-    if (!pdfImageFile?.base64 || !pdfImageFile?.name) {
-      return res.status(400).json({ error: 'pdfImageFile (the converted JPG preview of pdfFile, with name and base64) is required' });
-    }
-    if (!Array.isArray(pceFiles) || pceFiles.length === 0 || !pceFiles.every((f) => f?.base64 && f?.name)) {
-      return res.status(400).json({ error: 'pceFiles must be a non-empty array of files, each with name and base64' });
+    if (!shisakuNo || !deadline || !eventName || !modelName || !customerName || !registeredBy || !cybozuLink) {
+      return res.status(400).json({ error: 'shisakuNo, deadline, eventName, modelName, customerName, registeredBy, and cybozuLink are required' });
     }
 
     const drive = _buildDriveClient();
     const baseUrl = `${req.protocol}://${req.get('host')}`;
 
-    const [dxfResult, pdfResult, pdfImageResult, ...pceResults] = await Promise.all([
-      _uploadShisakuFile(drive, 'dxf', dxfFile.name, dxfFile.base64, 'application/octet-stream'),
-      _uploadShisakuFile(drive, 'pdf', pdfFile.name, pdfFile.base64, 'application/pdf'),
-      _uploadShisakuPdfPreviewImage(drive, pdfImageFile.name, pdfImageFile.base64, baseUrl),
-      ...pceFiles.map((f) => _uploadShisakuFile(drive, 'pce', f.name, f.base64, 'application/octet-stream')),
+    const [dxfResults, pdfResults, pdfImageResults, pceResults] = await Promise.all([
+      Promise.all(dxfFiles.map(f => _uploadShisakuFile(drive, 'dxf', f.name, f.base64, 'application/octet-stream'))),
+      Promise.all(pdfFiles.map(f => _uploadShisakuFile(drive, 'pdf', f.name, f.base64, 'application/pdf'))),
+      Promise.all(pdfImageFiles.map(f => _uploadShisakuPdfPreviewImage(shisakuNo, f.name, f.base64))),
+      Promise.all(pceFiles.map(f => _uploadShisakuFile(drive, 'pce', f.name, f.base64, 'application/octet-stream'))),
     ]);
 
     const document = {
       shisakuNo: String(shisakuNo).trim(),
       deadline,
-      dxflink: dxfResult.link,
-      pdflink: pdfResult.link,
-      pdfjpglink: pdfImageResult.link,
+      dxfLinks: dxfResults.map((r) => ({ name: r.name, link: r.link })),
+      pdfLinks: pdfResults.map((r, i) => ({ 
+        name: r.name, 
+        link: r.link,
+        jpgLink: pdfImageResults[i] ? pdfImageResults[i].link : null
+      })),
+      pdfJpgLinks: pdfImageResults.map((r) => ({ name: r.name, link: r.link })),
       pcelinks: pceResults.map((r) => ({ name: r.name, link: r.link })),
       eventName: String(eventName).trim(),
       modelName: String(modelName).trim(),
       customerName: String(customerName).trim(),
       registeredBy: String(registeredBy).trim(),
+      colors: Array.isArray(colors) ? colors.map(String) : [],
+      materials: Array.isArray(materials) ? materials.map(String) : [],
+      boxTypes: Array.isArray(boxTypes) ? boxTypes.map(String) : [],
+      ...(req.body.createdBy ? { createdBy: String(req.body.createdBy).trim() } : {}),
+      cybozuLink: String(cybozuLink).trim(),
+      status: "pending",
       createdAt: new Date(),
     };
 
@@ -32439,6 +32482,246 @@ app.post('/api/shisaku/register', async (req, res) => {
       details: error.message,
       google: googleDetails,
     });
+  }
+});
+
+app.post('/api/shisaku/update/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) return res.status(400).json({ error: 'Invalid ID' });
+
+    const { shisakuNo, deadline, eventName, modelName, customerName, registeredBy, cybozuLink, dxfFiles = [], pdfFiles = [], pdfImageFiles = [], pceFiles = [], colors = [], materials = [], boxTypes = [] } = req.body;
+    const drive = _buildDriveClient();
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+
+    async function processGenericFiles(files, type, mimeType) {
+      if (!Array.isArray(files)) return [];
+      return Promise.all(files.map(async (f) => {
+        if (f.link) return { name: f.name, link: f.link }; // Already uploaded
+        if (f.base64) {
+          const r = await _uploadShisakuFile(drive, type, f.name, f.base64, mimeType);
+          return { name: r.name, link: r.link };
+        }
+        return null;
+      })).then(r => r.filter(Boolean));
+    }
+
+    async function processPdfImages(files, shisakuNoStr) {
+      if (!Array.isArray(files)) return [];
+      return Promise.all(files.map(async (f) => {
+        if (f.link) return { name: f.name, link: f.link };
+        if (f.base64) {
+          const r = await _uploadShisakuPdfPreviewImage(shisakuNoStr, f.name, f.base64);
+          return { name: r.name, link: r.link };
+        }
+        return null;
+      })).then(r => r.filter(Boolean));
+    }
+
+    const [dxfLinks, pdfLinks, pdfJpgLinks, pcelinks] = await Promise.all([
+      processGenericFiles(dxfFiles, 'dxf', 'application/octet-stream'),
+      processGenericFiles(pdfFiles, 'pdf', 'application/pdf'),
+      processPdfImages(pdfImageFiles, String(shisakuNo).trim()),
+      processGenericFiles(pceFiles, 'pce', 'application/octet-stream')
+    ]);
+
+    const updateDoc = {
+      shisakuNo: String(shisakuNo).trim(),
+      deadline,
+      eventName: String(eventName).trim(),
+      modelName: String(modelName).trim(),
+      customerName: String(customerName).trim(),
+      registeredBy: String(registeredBy).trim(),
+      cybozuLink: String(cybozuLink).trim(),
+      colors: Array.isArray(colors) ? colors.map(String) : [],
+      materials: Array.isArray(materials) ? materials.map(String) : [],
+      boxTypes: Array.isArray(boxTypes) ? boxTypes.map(String) : [],
+      dxfLinks,
+      pdfLinks: pdfLinks.map((r, i) => ({
+        name: r.name,
+        link: r.link,
+        jpgLink: pdfJpgLinks[i] ? pdfJpgLinks[i].link : null
+      })),
+      pdfJpgLinks,
+      pcelinks,
+      updatedAt: new Date(),
+    };
+
+    await client.connect();
+    await client.db('Sasaki_Coating_MasterDB').collection('shisakuDB').updateOne(
+      { _id: new ObjectId(id) },
+      { $set: updateDoc }
+    );
+
+    res.json({ success: true, document: updateDoc });
+  } catch (error) {
+    const googleDetails = error.response?.data || error.errors || null;
+    console.error('❌ Error updating prototype (試作):', error.message, googleDetails || '');
+    res.status(500).json({
+      error: 'Failed to update prototype',
+      details: error.message,
+      google: googleDetails,
+    });
+  }
+});
+
+// ShisakuTablet: Submit All Data (Images to Firebase, Text to MongoDB)
+app.post('/api/shisakuTablet/submit', async (req, res) => {
+  try {
+    const { prototypeId, shisakuNo, workerName, requests } = req.body;
+
+    if (!requests || Object.keys(requests).length === 0) {
+      return res.status(400).json({ error: 'No request data provided' });
+    }
+
+    const bucket = admin.storage().bucket();
+    const downloadToken = 'masterDBToken69';
+    const formattedRequests = {};
+
+    // Process each request
+    for (const [reqName, reqData] of Object.entries(requests)) {
+      const formattedData = {
+        Time_start: reqData.Time_start,
+        Time_end: reqData.Time_end,
+        cycleTime: reqData.cycleTime,
+        quantity: reqData.quantity,
+        Comment: reqData.Comment,
+        issue: {},
+        dxf: reqData.dxf || { name: "", link: "" },
+        pce: reqData.pce || { name: "", link: "" },
+        pdf: reqData.pdf || { name: "", link: "", jpgLink: "" },
+      };
+
+      let issueIndex = 0;
+
+      // Process images if any
+      if (reqData.images && Array.isArray(reqData.images)) {
+        for (let i = 0; i < reqData.images.length; i++) {
+          const img = reqData.images[i];
+          if (!img.base64) continue;
+          
+          let imageTypeSlug = img.type.replace(/\s+/g, '');
+          const fileName = `${reqName}_${imageTypeSlug}_${i}.jpg`;
+          const filePath = `shisaku/${shisakuNo}/${fileName}`;
+          
+          // Handle base64 prefix
+          const base64Data = img.base64.replace(/^data:image\/\w+;base64,/, "");
+          const buffer = Buffer.from(base64Data, 'base64');
+
+          const file = bucket.file(filePath);
+          await file.save(buffer, {
+            metadata: {
+              contentType: 'image/jpeg',
+              metadata: { firebaseStorageDownloadTokens: downloadToken }
+            }
+          });
+
+          // Make public if needed, or rely on token
+          const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(filePath)}?alt=media&token=${downloadToken}`;
+
+          if (img.type === 'MaterialSide') formattedData.materialSidePhoto = publicUrl;
+          else if (img.type === 'ReleasePaper') formattedData.releasePaperSidePhoto = publicUrl;
+          else if (img.type === 'MaterialLabel') formattedData.materialLabelPhoto = publicUrl;
+          else {
+            formattedData.issue[issueIndex.toString()] = publicUrl;
+            issueIndex++;
+          }
+        }
+      }
+
+      formattedRequests[reqName] = formattedData;
+    }
+
+    // Save to MongoDB
+    await client.connect();
+    const document = {
+      createdAt: new Date(),
+      createdBy: workerName,
+      Date: new Date().toISOString().split('T')[0],
+      shisakuNo: shisakuNo,
+      shisakudb_id: prototypeId,
+      requests: formattedRequests
+    };
+
+    const insertResult = await client.db('submittedDB').collection('shisakuSubmittedDB').insertOne(document);
+    const submittedId = insertResult.insertedId;
+    
+    // Update individual request documents with completedBy and completedDate
+    for (const reqName in req.body.requests) {
+       const reqData = req.body.requests[reqName];
+       if (reqData.reqId) {
+           await client.db('Sasaki_Coating_MasterDB').collection('shisakuRequestDB').updateOne(
+               { _id: new ObjectId(reqData.reqId) },
+               { $set: { 
+                   completedBy: workerName, 
+                   completedDate: new Date(),
+                   shisakuSubmittedID: submittedId
+               } }
+           );
+       }
+    }
+
+    // Check if all requests completed
+    if (req.body.isAllCompleted && prototypeId) {
+       await client.db('Sasaki_Coating_MasterDB').collection('shisakuDB').updateOne(
+           { _id: new ObjectId(prototypeId) },
+           { $set: { 
+               status: 'completed', 
+               updatedAt: new Date(),
+               completedBy: workerName,
+               completedDate: new Date(),
+               shisakuSubmittedID: submittedId
+           } }
+       );
+    }
+
+    res.json({ success: true, message: 'Data submitted successfully' });
+  } catch (error) {
+    console.error('❌ Error submitting shisakuTablet data:', error);
+    res.status(500).json({ error: 'Failed to submit data', details: error.message });
+  }
+});
+
+
+app.post('/api/shisaku/update-status/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) return res.status(400).json({ error: 'Invalid ID' });
+    
+    const { status } = req.body;
+    if (!status) return res.status(400).json({ error: 'Status is required' });
+
+    await client.connect();
+    const result = await client.db('Sasaki_Coating_MasterDB').collection('shisakuDB').updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { status, updatedAt: new Date() } }
+    );
+    
+    res.json({ success: true, updatedCount: result.modifiedCount });
+  } catch (error) {
+    console.error('❌ Error updating prototype status:', error.message);
+    res.status(500).json({ error: 'Failed to update prototype status' });
+  }
+});
+
+app.get('/api/shisaku/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ error: 'Invalid shisaku ID' });
+    }
+    
+    await client.connect();
+    const document = await client.db('Sasaki_Coating_MasterDB').collection('shisakuDB').findOne({ _id: new ObjectId(id) });
+    
+    if (!document) {
+      return res.status(404).json({ error: 'Prototype record not found' });
+    }
+    
+    res.json(document);
+  } catch (error) {
+    console.error('❌ Error fetching prototype by id:', error.message);
+    res.status(500).json({ error: 'Failed to fetch prototype', details: error.message });
   }
 });
 
@@ -32464,41 +32747,221 @@ app.delete('/api/shisaku/:id', async (req, res) => {
   }
 });
 
+app.get('/api/shisaku-request/available', async (req, res) => {
+  try {
+    await client.connect();
+    const shisakuColl = client.db('Sasaki_Coating_MasterDB').collection('shisakuDB');
+    
+    const available = await shisakuColl.aggregate([
+      {
+        $lookup: {
+          from: 'shisakuRequestDB',
+          let: { sId: { $toString: '$_id' } },
+          pipeline: [
+            { $match: { $expr: { $eq: ['$shisakudb_id', '$$sId'] } } },
+            { $limit: 1 }
+          ],
+          as: 'requests'
+        }
+      },
+      {
+        $match: {
+          requests: { $size: 0 }
+        }
+      },
+      {
+        $project: {
+          _id: 1,
+          shisakuNo: 1,
+          eventName: 1,
+          modelName: 1
+        }
+      },
+      { $sort: { shisakuNo: 1 } }
+    ]).toArray();
+
+    res.json(available);
+  } catch (error) {
+    console.error('❌ Error fetching available shisaku for requests:', error);
+    res.status(500).json({ error: 'Failed to fetch available prototypes', details: error.message });
+  }
+});
+
+
 app.get('/api/shisaku-request/list', async (req, res) => {
   try {
     await client.connect();
-    const records = await client
-      .db('Sasaki_Coating_MasterDB')
-      .collection('shisakuRequestDB')
-      .find({})
-      .sort({ createdAt: -1 })
+    
+    const query = {};
+    if (req.query.shisakudb_id && ObjectId.isValid(req.query.shisakudb_id)) {
+      query.shisakudb_id = new ObjectId(req.query.shisakudb_id);
+    }
+    if (req.query.machine) {
+      query.name = req.query.machine;
+    }
+    if (req.query.status) {
+      query.status = req.query.status;
+    }
+    
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.max(1, parseInt(req.query.limit) || 30);
+    const skip = (page - 1) * limit;
+
+    const sortColumn = req.query.sortColumn || 'createdAt';
+    const sortDirection = parseInt(req.query.sortDirection) || -1;
+    const sort = { [sortColumn]: sortDirection };
+
+    const collection = client.db('Sasaki_Coating_MasterDB').collection('shisakuRequestDB');
+    const totalCount = await collection.countDocuments(query);
+
+    const records = await collection
+      .aggregate([
+        { $match: query },
+        {
+          $lookup: {
+            from: "shisakuDB",
+            localField: "shisakudb_id",
+            foreignField: "_id",
+            as: "parentShisaku"
+          }
+        },
+        {
+          $addFields: {
+            shisakuNo: { $arrayElemAt: ["$parentShisaku.shisakuNo", 0] },
+            parentStatus: { $arrayElemAt: ["$parentShisaku.status", 0] }
+          }
+        },
+        { $project: { parentShisaku: 0 } },
+        { $sort: sort },
+        { $skip: skip },
+        { $limit: limit }
+      ])
       .toArray();
-    res.json(records);
+
+    res.json({
+      rows: records,
+      pagination: {
+        page,
+        limit,
+        totalCount,
+        totalPages: Math.ceil(totalCount / limit)
+      }
+    });
   } catch (error) {
     console.error('❌ Error fetching shisakuRequestDB records:', error);
     res.status(500).json({ error: 'Failed to fetch prototype request records', details: error.message });
   }
 });
 
+app.get('/api/shisaku-request/grouped-list', async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.max(1, parseInt(req.query.limit) || 30);
+    const skip = (page - 1) * limit;
+
+    const sortColumn = req.query.sortColumn || 'latestDate';
+    const sortDirection = parseInt(req.query.sortDirection) || -1;
+    const sort = { [sortColumn]: sortDirection };
+
+    await client.connect();
+    const collection = client.db('Sasaki_Coating_MasterDB').collection('shisakuRequestDB');
+
+    // Filter by machine name if provided
+    const matchStage = [];
+    if (req.query.machine) {
+      matchStage.push({ $match: { name: req.query.machine } });
+    }
+
+    // Grouping by shisakudb_id
+    const pipeline = [
+      ...matchStage,
+      {
+        $group: {
+          _id: "$shisakudb_id",
+          totalRequests: { $sum: 1 },
+          latestDate: { $max: "$createdAt" }
+        }
+      },
+      {
+        $lookup: {
+          from: "shisakuDB",
+          localField: "_id",
+          foreignField: "_id",
+          as: "parentShisaku"
+        }
+      },
+      {
+        $addFields: {
+          shisakuNo: { $arrayElemAt: ["$parentShisaku.shisakuNo", 0] },
+          parentStatus: { $ifNull: [{ $arrayElemAt: ["$parentShisaku.status", 0] }, "pending"] },
+          shisakudb_id: "$_id"
+        }
+      },
+      { $project: { parentShisaku: 0, _id: 0 } }
+    ];
+
+    if (req.query.status) {
+      pipeline.push({ $match: { parentStatus: req.query.status } });
+    }
+
+    const countPipeline = [...pipeline, { $count: "total" }];
+    const countResult = await collection.aggregate(countPipeline).toArray();
+    const totalCount = countResult.length > 0 ? countResult[0].total : 0;
+
+    const records = await collection.aggregate([
+      ...pipeline,
+      { $sort: sort },
+      { $skip: skip },
+      { $limit: limit }
+    ]).toArray();
+
+    res.json({
+      rows: records,
+      pagination: {
+        page,
+        limit,
+        totalCount,
+        totalPages: Math.ceil(totalCount / limit)
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error fetching grouped shisakuRequestDB records:', error);
+    res.status(500).json({ error: 'Failed to fetch grouped prototype request records', details: error.message });
+  }
+});
+
 app.post('/api/shisaku-request/register', async (req, res) => {
   try {
-    const { name, pce, okuriPitch, color, material, boxType, quantity, pdfLink, shisakudb_id } = req.body;
+    const { name, dxf, pdf, pce, okuriPitch, pcPerCycle, color, material, boxType, quantity, shisakudb_id, orderNumber } = req.body;
 
-    if (!name || !pce || !okuriPitch || !color || !material || !boxType || !quantity || !pdfLink) {
-      return res.status(400).json({ error: 'name, pce, okuriPitch, color, material, boxType, quantity, and pdfLink are required' });
+    if (!name || !pce || !okuriPitch || !color || !material || !boxType || !quantity) {
+      return res.status(400).json({ error: 'name, pce, okuriPitch, color, material, boxType, and quantity are required' });
+    }
+
+    if (!pce.name || !pce.link) {
+      return res.status(400).json({ error: 'pce must contain name and link' });
     }
 
     const document = {
       name: String(name).trim(),
-      pce: String(pce).trim(),
+      dxf: dxf && dxf.name && dxf.link ? { name: String(dxf.name).trim(), link: String(dxf.link).trim() } : null,
+      pdf: pdf && pdf.name && pdf.link ? { 
+        name: String(pdf.name).trim(), 
+        link: String(pdf.link).trim(),
+        jpgLink: pdf.jpgLink ? String(pdf.jpgLink).trim() : null
+      } : null,
+      pce: { name: String(pce.name).trim(), link: String(pce.link).trim() },
       okuriPitch: Number(okuriPitch),
+      pcPerCycle: Number(pcPerCycle),
       color: String(color).trim(),
       material: String(material).trim(),
       boxType: String(boxType).trim(),
       quantity: Number(quantity),
-      pdfLink: String(pdfLink).trim(),
       ...(shisakudb_id && ObjectId.isValid(shisakudb_id) && { shisakudb_id: new ObjectId(shisakudb_id) }),
+      status: "pending",
       createdAt: new Date(),
+      ...(req.body.createdBy ? { createdBy: String(req.body.createdBy).trim() } : {}),
+      ...(orderNumber !== undefined ? { orderNumber: Number(orderNumber) } : {}),
     };
 
     await client.connect();
@@ -32508,6 +32971,93 @@ app.post('/api/shisaku-request/register', async (req, res) => {
   } catch (error) {
     console.error('❌ Error registering prototype request:', error.message);
     res.status(500).json({ error: 'Failed to register prototype request', details: error.message });
+  }
+});
+app.post('/api/shisaku-request/update/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) return res.status(400).json({ error: 'Invalid id' });
+    
+    const { name, dxf, pdf, pce, okuriPitch, pcPerCycle, color, material, boxType, quantity, orderNumber } = req.body;
+    
+    const updateDoc = {};
+    if (name !== undefined) updateDoc.name = String(name).trim();
+    if (dxf !== undefined) updateDoc.dxf = dxf && dxf.name && dxf.link ? { name: String(dxf.name).trim(), link: String(dxf.link).trim() } : null;
+    if (pdf !== undefined) updateDoc.pdf = pdf && pdf.name && pdf.link ? { name: String(pdf.name).trim(), link: String(pdf.link).trim(), jpgLink: pdf.jpgLink ? String(pdf.jpgLink).trim() : null } : null;
+    if (pce !== undefined) updateDoc.pce = pce && pce.name && pce.link ? { name: String(pce.name).trim(), link: String(pce.link).trim() } : null;
+    if (okuriPitch !== undefined) updateDoc.okuriPitch = Number(okuriPitch);
+    if (pcPerCycle !== undefined) updateDoc.pcPerCycle = Number(pcPerCycle);
+    if (color !== undefined) updateDoc.color = String(color).trim();
+    if (material !== undefined) updateDoc.material = String(material).trim();
+    if (boxType !== undefined) updateDoc.boxType = String(boxType).trim();
+    if (quantity !== undefined) updateDoc.quantity = Number(quantity);
+    if (req.body.status !== undefined) updateDoc.status = String(req.body.status).trim();
+    if (orderNumber !== undefined) updateDoc.orderNumber = Number(orderNumber);
+    
+    await client.connect();
+    const result = await client.db('Sasaki_Coating_MasterDB').collection('shisakuRequestDB').updateOne(
+      { _id: new ObjectId(id) },
+      { $set: updateDoc }
+    );
+    
+    // Status Synchronization logic
+    if (updateDoc.status !== undefined) {
+      const updatedReq = await client.db('Sasaki_Coating_MasterDB').collection('shisakuRequestDB').findOne({ _id: new ObjectId(id) });
+      if (updatedReq && updatedReq.shisakudb_id) {
+        const siblingRequests = await client.db('Sasaki_Coating_MasterDB').collection('shisakuRequestDB').find({ shisakudb_id: updatedReq.shisakudb_id }).toArray();
+        
+        if (siblingRequests.length > 0) {
+          let allCompleted = true;
+          let anyInProgress = false;
+
+          for (const req of siblingRequests) {
+            const reqStatus = req.status || 'pending';
+            if (reqStatus !== 'completed') {
+              allCompleted = false;
+            }
+            if (reqStatus === 'in-progress') {
+              anyInProgress = true;
+            }
+          }
+
+          let newParentStatus = 'pending';
+          if (allCompleted) {
+            newParentStatus = 'completed';
+          } else if (anyInProgress) {
+            newParentStatus = 'in-progress';
+          }
+
+          await client.db('Sasaki_Coating_MasterDB').collection('shisakuDB').updateOne(
+            { _id: updatedReq.shisakudb_id },
+            { $set: { status: newParentStatus, updatedAt: new Date() } }
+          );
+        }
+      }
+    }
+    
+    res.json({ success: true, updatedCount: result.modifiedCount });
+  } catch (error) {
+    console.error('❌ Error updating prototype request:', error.message);
+    res.status(500).json({ error: 'Failed to update prototype request' });
+  }
+});
+app.get('/api/shisaku-submitted/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ error: 'Invalid submitted id' });
+    }
+
+    await client.connect();
+    const doc = await client.db('submittedDB').collection('shisakuSubmittedDB').findOne({ _id: new ObjectId(id) });
+    if (!doc) {
+      return res.status(404).json({ error: 'Submitted document not found' });
+    }
+
+    res.json(doc);
+  } catch (error) {
+    console.error('❌ Error fetching submitted document:', error.message);
+    res.status(500).json({ error: 'Failed to fetch submitted document' });
   }
 });
 
@@ -32530,6 +33080,50 @@ app.delete('/api/shisaku-request/:id', async (req, res) => {
   } catch (error) {
     console.error('❌ Error deleting prototype request:', error.message);
     res.status(500).json({ error: 'Failed to delete prototype request', details: error.message });
+  }
+});
+
+app.post('/api/shisaku-request/bulk-delete', async (req, res) => {
+  try {
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: 'ids array is required' });
+    
+    const objectIds = ids.filter(id => ObjectId.isValid(id)).map(id => new ObjectId(id));
+    if (objectIds.length === 0) return res.status(400).json({ error: 'No valid ids provided' });
+
+    await client.connect();
+    const result = await client.db('Sasaki_Coating_MasterDB').collection('shisakuRequestDB').deleteMany({ _id: { $in: objectIds } });
+
+    res.json({ success: true, deletedCount: result.deletedCount });
+  } catch (error) {
+    console.error('❌ Error in bulk deleting prototype requests:', error.message);
+    res.status(500).json({ error: 'Failed to bulk delete prototype requests', details: error.message });
+  }
+});
+
+app.post('/api/shisaku-request/reorder', async (req, res) => {
+  try {
+    const { updates } = req.body;
+    if (!Array.isArray(updates) || updates.length === 0) return res.status(400).json({ error: 'updates array is required' });
+
+    await client.connect();
+    const collection = client.db('Sasaki_Coating_MasterDB').collection('shisakuRequestDB');
+    
+    const bulkOps = updates.filter(u => u.id && ObjectId.isValid(u.id) && u.orderNumber !== undefined).map(u => ({
+      updateOne: {
+        filter: { _id: new ObjectId(u.id) },
+        update: { $set: { orderNumber: Number(u.orderNumber) } }
+      }
+    }));
+
+    if (bulkOps.length === 0) return res.status(400).json({ error: 'No valid updates provided' });
+
+    const result = await collection.bulkWrite(bulkOps);
+
+    res.json({ success: true, updatedCount: result.modifiedCount });
+  } catch (error) {
+    console.error('❌ Error in reordering prototype requests:', error.message);
+    res.status(500).json({ error: 'Failed to reorder prototype requests', details: error.message });
   }
 });
 
