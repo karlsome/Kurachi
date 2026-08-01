@@ -33127,6 +33127,67 @@ app.post('/api/shisaku-request/reorder', async (req, res) => {
   }
 });
 
+
+app.post("/api/analytics/stop-calls", async (req, res) => {
+  try {
+    const { dateFrom, dateTo, factory, page = 1, limit = 20 } = req.body;
+    
+    const matchStage = { "StopCall.count": { $gt: 0 } };
+    if (dateFrom && dateTo) {
+      matchStage.Date = { $gte: dateFrom, $lte: dateTo };
+    } else if (dateFrom) {
+      matchStage.Date = dateFrom;
+    }
+    if (factory) matchStage["工場"] = factory;
+
+    const safeLimit = Math.max(1, Number(limit) || 20);
+    const safePage = Math.max(1, Number(page) || 1);
+    const skip = (safePage - 1) * safeLimit;
+
+    await client.connect();
+    const collection = client.db("submittedDB").collection("pressDB");
+
+    const projection = {
+      "品番": 1, "背番号": 1, "設備": 1, "工場": 1, "Worker_Name": 1,
+      "Date": 1, "Time_start": 1, "Time_end": 1,
+      "Process_Quantity": 1, "Total": 1, "Total_NG": 1,
+      "Total_Work_Hours": 1, "Cycle_Time": 1,
+      "StopCall": 1
+    };
+
+    const aggregationPipeline = [
+      { $match: matchStage },
+      { $unwind: "$StopCall.records" },
+      { $sort: { Date: -1, "StopCall.records.calledAt": -1 } },
+      // Wrap it back in an array so the frontend's flattenStopCalls works unmodified
+      { $addFields: { "StopCall.records": ["$StopCall.records"] } }
+    ];
+
+    const [data, countResult, summaryData] = await Promise.all([
+      collection.aggregate([...aggregationPipeline, { $skip: skip }, { $limit: safeLimit }, { $project: projection }]).toArray(),
+      collection.aggregate([{ $match: matchStage }, { $unwind: "$StopCall.records" }, { $count: "count" }]).toArray(),
+      collection.aggregate([...aggregationPipeline, { $project: projection }]).toArray()
+    ]);
+
+    const totalItems = countResult[0]?.count || 0;
+    const totalPages = totalItems > 0 ? Math.ceil(totalItems / safeLimit) : 0;
+
+    res.json({
+      data,
+      summaryData,
+      pagination: {
+        currentPage: totalPages > 0 ? Math.min(safePage, totalPages) : 1,
+        totalPages,
+        totalItems,
+        itemsPerPage: safeLimit
+      }
+    });
+  } catch (error) {
+    console.error("❌ Error in /api/analytics/stop-calls:", error);
+    res.status(500).json({ error: "Failed to fetch stop call analytics" });
+  }
+});
+
 require('./firstFactoryRoutes')(app, client);
 
 app.listen(port, () => {
