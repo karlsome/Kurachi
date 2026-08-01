@@ -33130,7 +33130,7 @@ app.post('/api/shisaku-request/reorder', async (req, res) => {
 
 app.post("/api/analytics/stop-calls", async (req, res) => {
   try {
-    const { dateFrom, dateTo, factory, page = 1, limit = 20 } = req.body;
+    const { dateFrom, dateTo, factory, page = 1, limit = 20, sortColumn, sortDirection } = req.body;
     
     const matchStage = { "StopCall.count": { $gt: 0 } };
     if (dateFrom && dateTo) {
@@ -33155,10 +33155,31 @@ app.post("/api/analytics/stop-calls", async (req, res) => {
       "StopCall": 1
     };
 
+    let sortStage = { Date: -1, "StopCall.records.calledAt": -1 };
+    if (sortColumn) {
+      const dir = sortDirection === "asc" ? 1 : -1;
+      const colMap = {
+        "date": "Date",
+        "工場": "工場",
+        "設備": "設備",
+        "背番号": "背番号",
+        "品番": "品番",
+        "Worker_Name": "Worker_Name",
+        "leaderName": "StopCall.records.leaderName",
+        "calledAt": "StopCall.records.calledAt",
+        "arrivedAt": "StopCall.records.arrivedAt",
+        "waitSeconds": "StopCall.records.waitSeconds"
+      };
+      if (colMap[sortColumn]) {
+        sortStage = { [colMap[sortColumn]]: dir };
+        if (sortColumn !== "calledAt") sortStage["StopCall.records.calledAt"] = -1;
+      }
+    }
+
     const aggregationPipeline = [
       { $match: matchStage },
       { $unwind: "$StopCall.records" },
-      { $sort: { Date: -1, "StopCall.records.calledAt": -1 } },
+      { $sort: sortStage },
       // Wrap it back in an array so the frontend's flattenStopCalls works unmodified
       { $addFields: { "StopCall.records": ["$StopCall.records"] } }
     ];
