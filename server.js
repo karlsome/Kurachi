@@ -1586,6 +1586,83 @@ app.post("/api/upload-product-pdf", async (req, res) => {
 });
 
 // Upload converted image for PDF
+app.post("/api/upload-maintenance-image", async (req, res) => {
+  try {
+    const { factory, equipment, date, timestamp, id, base64, sebanggo } = req.body;
+
+    if (!base64 || !factory || !equipment || !date || !timestamp || !id) {
+      return res.status(400).json({ error: "Missing required fields for maintenance image upload" });
+    }
+
+    const bucket = admin.storage().bucket();
+    const buffer = Buffer.from(base64, "base64");
+    const downloadToken = "masterDBToken69";
+
+    const fileName = `${sebanggo || "NO_SEBANGGO"}_${date}_${timestamp}_${id}_maintenanceImage.jpg`;
+    const filePath = `maintenance/${factory}/${equipment}/${fileName}`;
+    const file = bucket.file(filePath);
+
+    await uploadToFirebaseWithRetry(file, buffer, {
+      metadata: {
+        contentType: "image/jpeg",
+        metadata: { firebaseStorageDownloadTokens: downloadToken }
+      },
+      validation: false
+    });
+
+    const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(filePath)}?alt=media&token=${downloadToken}`;
+
+    console.log(`✅ Uploaded maintenance image successfully: ${publicUrl}`);
+    res.json({
+      success: true,
+      url: publicUrl,
+      message: "Maintenance image uploaded successfully"
+    });
+  } catch (error) {
+    console.error("❌ Error uploading maintenance image:", error);
+    res.status(500).json({ error: "Error uploading image", details: error.message });
+  }
+});
+
+// Upload material label image
+app.post("/api/upload-material-label-image", async (req, res) => {
+  try {
+    const { factory, equipment, date, timestamp, id, base64, sebanggo } = req.body;
+
+    if (!base64 || !factory || !equipment || !date || !timestamp || !id) {
+      return res.status(400).json({ error: "Missing required fields for material label image upload" });
+    }
+
+    const bucket = admin.storage().bucket();
+    const buffer = Buffer.from(base64, "base64");
+    const downloadToken = "masterDBToken69";
+
+    const fileName = `${sebanggo || "NO_SEBANGGO"}_${date}_${timestamp}_${id}_materialLabelImage.jpg`;
+    const filePath = `materialLabel/${factory}/${equipment}/${fileName}`;
+    const file = bucket.file(filePath);
+
+    await uploadToFirebaseWithRetry(file, buffer, {
+      metadata: {
+        contentType: "image/jpeg",
+        metadata: { firebaseStorageDownloadTokens: downloadToken }
+      },
+      validation: false
+    });
+
+    const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(filePath)}?alt=media&token=${downloadToken}`;
+
+    console.log(`✅ Uploaded material label image successfully: ${publicUrl}`);
+    res.json({
+      success: true,
+      url: publicUrl,
+      message: "Material label image uploaded successfully"
+    });
+  } catch (error) {
+    console.error("❌ Error uploading material label image:", error);
+    res.status(500).json({ error: "Error uploading image", details: error.message });
+  }
+});
+
 app.post("/api/upload-pdf-image", async (req, res) => {
   try {
     const { documentId, imageBase64, pdfType } = req.body;
