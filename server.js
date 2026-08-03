@@ -6320,6 +6320,372 @@ app.post('/schema/custom-fields', async (req, res) => {
   }
 });
 
+// ─── Sensor Aggregation Helpers ───
+function buildSensorFactoryNameExpression() {
+  return {
+    $trim: { input: { $toString: { $ifNull: ["$工場", ""] } } },
+  };
+}
+
+function buildSensorReadingTemperatureExpression(offsets = {}) {
+  const branches = Object.entries(offsets).map(([device, offset]) => ({
+    case: { $eq: ["$device", device] },
+    then: offset
+  }));
+
+  const baseTempExpr = {
+    $convert: {
+      input: {
+        $trim: {
+          input: {
+            $replaceAll: {
+              input: { $toString: { $ifNull: ["$Temperature", ""] } },
+              find: "°C",
+              replacement: "",
+            },
+          },
+        },
+      },
+      to: "double",
+      onError: null,
+      onNull: null,
+    },
+  };
+
+  if (branches.length === 0) return baseTempExpr;
+
+  return {
+    $round: [
+      {
+        $add: [
+          baseTempExpr,
+          { $switch: { branches, default: 0 } }
+        ]
+      },
+      2
+    ]
+  };
+}
+
+function buildSensorReadingHumidityExpression() {
+  return {
+    $convert: {
+      input: {
+        $trim: {
+          input: {
+            $replaceAll: {
+              input: { $toString: { $ifNull: ["$Humidity", ""] } },
+              find: "%",
+              replacement: "",
+            },
+          },
+        },
+      },
+      to: "double",
+      onError: null,
+      onNull: null,
+    },
+  };
+}
+
+function buildSensorReadingWBGTExpression() {
+  const temperature = "$temperatureValue";
+  const humidity = "$humidityValue";
+
+  const wetBulbTemperature = {
+    $subtract: [
+      {
+        $add: [
+          {
+            $multiply: [
+              temperature,
+              {
+                $atan: {
+                  $multiply: [
+                    0.151977,
+                    { $sqrt: { $add: [humidity, 8.313659] } },
+                  ],
+                },
+              },
+            ],
+          },
+          { $atan: { $add: [temperature, humidity] } },
+          {
+            $multiply: [
+              0.00391838,
+              { $pow: [humidity, 1.5] },
+              { $atan: { $multiply: [0.023101, humidity] } },
+            ],
+          },
+        ],
+      },
+      {
+        $add: [
+          { $atan: { $subtract: [humidity, 1.676331] } },
+          4.686035,
+        ],
+      },
+    ],
+  };
+
+  return {
+    $cond: [
+      {
+        $and: [
+          { $ne: [temperature, null] },
+          { $ne: [humidity, null] },
+          { $gte: [temperature, -50] },
+          { $lte: [temperature, 60] },
+          { $gte: [humidity, 0] },
+          { $lte: [humidity, 100] },
+        ],
+      },
+      {
+        $round: [
+          {
+            $add: [
+              { $multiply: [0.7, wetBulbTemperature] },
+              { $multiply: [0.3, temperature] },
+            ],
+          },
+          1,
+        ],
+      },
+      null,
+    ],
+  };
+}
+
+function buildSensorReadingBaseMatch({ factoryName, startDate, endDate, years }) {
+  const match = {};
+  if (factoryName) match["工場"] = factoryName;
+
+  if (years && years.length > 0) {
+    match.Date = { $regex: `^(${years.join('|')})` };
+  } else if (startDate || endDate) {
+    const dateMatch = {};
+    if (startDate) dateMatch.$gte = startDate;
+    if (endDate) dateMatch.$lte = endDate;
+    match.Date = dateMatch;
+  }
+  return match;
+}
+
+function buildSensorReadingDeviceMatch(deviceId = "all") {
+  if (!deviceId || deviceId === "all") return null;
+  return { device: deviceId };
+}
+
+function buildSensorReadingNormalizationStages({ factoryName, startDate, endDate, years, offsets = {} }) {
+  return [
+    { $match: buildSensorReadingBaseMatch({ factoryName, startDate, endDate, years }) },
+    {
+      $addFields: {
+        temperatureValue: buildSensorReadingTemperatureExpression(offsets),
+        humidityValue: buildSensorReadingHumidityExpression(),
+      },
+    },
+    {
+      $addFields: {
+        wbgtValue: buildSensorReadingWBGTExpression(),
+        Temperature: {
+          $cond: [
+            { $eq: ["$temperatureValue", null] },
+            "$Temperature",
+            { $concat: [{ $toString: "$temperatureValue" }, "°C"] }
+          ]
+        }
+      },
+    },
+  ];
+}
+
+function buildSensorReadingSortStage(sortKey) {
+  if (sortKey === "date_asc") return { Date: 1, Time: 1, _id: 1 };
+  if (sortKey === "temp_desc") return { temperatureValue: -1, Date: -1, Time: -1, _id: -1 };
+  if (sortKey === "temp_asc") return { temperatureValue: 1, Date: -1, Time: -1, _id: -1 };
+  return { Date: -1, Time: -1, _id: -1 };
+}
+
+// ─── Dedicated Factory API Routes ───
+
+app.get('/api/factory/production/:factoryName/:date', async (req, res) => {
+  try {
+    const { factoryName, date } = req.params;
+    const PROCESS_COLLECTIONS = ["kensaDB", "pressDB", "slitDB", "SRSDB"];
+    const database = client.db("submittedDB");
+
+    const settled = await Promise.allSettled(
+      PROCESS_COLLECTIONS.map((col) =>
+        database.collection(col)
+          .find({ 工場: factoryName, Date: date })
+          .sort({ Time_start: -1 })
+          .toArray()
+      )
+    );
+
+    const records = settled.flatMap((r, i) =>
+      r.status === "fulfilled"
+        ? r.value.map((row) => ({ ...row, _id: row._id.toString(), _source: PROCESS_COLLECTIONS[i] }))
+        : []
+    );
+
+    let total = 0, totalNG = 0;
+    records.forEach((r) => {
+      total   += Number(r.Total)    || 0;
+      totalNG += Number(r.Total_NG) || 0;
+    });
+    const defectRate = total > 0 ? Math.round((totalNG / total) * 10000) / 100 : 0;
+
+    res.json({ records, total, totalNG, defectRate });
+  } catch (error) {
+    console.error("❌ Error fetching production data:", error);
+    res.status(500).json({ error: "Failed to fetch production data" });
+  }
+});
+
+app.get('/api/factory/sensors/:factoryName/:date', async (req, res) => {
+  try {
+    const { factoryName, date } = req.params;
+    const database = client.db("submittedDB");
+    const readings = await database.collection("tempHumidityDB")
+      .find({ 工場: factoryName, Date: date })
+      .sort({ Time: -1 })
+      .limit(200)
+      .toArray();
+
+    const safeReadings = readings.map(r => ({ ...r, _id: r._id.toString() }));
+    res.json(safeReadings);
+  } catch (error) {
+    console.error("❌ Error fetching sensor readings:", error);
+    res.status(500).json({ error: "Failed to fetch sensor readings" });
+  }
+});
+
+app.post('/api/factory/sensors/overview', async (req, res) => {
+  try {
+    const { date, offsets = {} } = req.body;
+    const database = client.db("submittedDB");
+
+    const aggregation = [
+      {
+        $addFields: {
+          factoryName: buildSensorFactoryNameExpression(),
+        },
+      },
+      {
+        $facet: {
+          allFactories: [
+            { $match: { factoryName: { $ne: "" } } },
+            { $group: { _id: "$factoryName" } },
+            { $sort: { _id: 1 } },
+          ],
+          todayByFactory: [
+            { $match: { Date: date, factoryName: { $ne: "" } } },
+            {
+              $addFields: {
+                temperatureValue: buildSensorReadingTemperatureExpression(offsets),
+                humidityValue: buildSensorReadingHumidityExpression(),
+              },
+            },
+            {
+              $addFields: {
+                wbgtValue: buildSensorReadingWBGTExpression(),
+              },
+            },
+            { $sort: { factoryName: 1, device: 1, Time: -1, _id: -1 } },
+            {
+              $group: {
+                _id: {
+                  device: "$device",
+                  factory: "$factoryName",
+                },
+                latest: { $first: "$$ROOT" },
+              },
+            },
+            {
+              $group: {
+                _id: "$_id.factory",
+                highestTemp: { $max: "$latest.temperatureValue" },
+                averageHumidity: { $avg: "$latest.humidityValue" },
+                sensorCount: { $sum: 1 },
+                wbgt: { $max: "$latest.wbgtValue" },
+                deviceLatest: {
+                  $push: {
+                    date: "$latest.Date",
+                    time: "$latest.Time",
+                  },
+                },
+              },
+            },
+            {
+              $project: {
+                _id: 0,
+                averageHumidity: { $round: ["$averageHumidity", 1] },
+                factory: "$_id",
+                highestTemp: { $round: ["$highestTemp", 1] },
+                sensorCount: 1,
+                wbgt: { $round: ["$wbgt", 1] },
+                deviceLatest: 1,
+              },
+            },
+            { $sort: { factory: 1 } },
+          ],
+        },
+      },
+    ];
+
+    const result = await database.collection("tempHumidityDB").aggregate(aggregation).toArray();
+    res.json(result);
+  } catch (error) {
+    console.error("❌ Error fetching sensor overview:", error);
+    res.status(500).json({ error: "Failed to fetch sensor overview" });
+  }
+});
+
+app.post('/api/factory/sensors/historical', async (req, res) => {
+  try {
+    const { factoryName, startDate, endDate, years, deviceId = "all", sortKey = "date_desc", skip = 0, limit = 15, offsets = {} } = req.body;
+    const database = client.db("submittedDB");
+    const deviceMatch = buildSensorReadingDeviceMatch(deviceId);
+
+    const aggregation = [
+      ...buildSensorReadingNormalizationStages({ factoryName, startDate, endDate, years, offsets }),
+      ...(deviceMatch ? [{ $match: deviceMatch }] : []),
+      {
+        $facet: {
+          data: [
+            { $sort: buildSensorReadingSortStage(sortKey) },
+            { $skip: skip },
+            { $limit: limit },
+            {
+              $project: {
+                _id: 1,
+                Date: 1,
+                Time: 1,
+                device: 1,
+                Temperature: 1,
+                Humidity: 1,
+                sensorStatus: 1,
+                工場: 1,
+              },
+            },
+          ],
+          totalCount: [
+            { $count: "count" },
+          ],
+        },
+      },
+    ];
+
+    const result = await database.collection("tempHumidityDB").aggregate(aggregation).toArray();
+    res.json(result);
+  } catch (error) {
+    console.error("❌ Error fetching historical sensors:", error);
+    res.status(500).json({ error: "Failed to fetch historical sensors" });
+  }
+});
+
 app.post('/queries', async (req, res) => {
   console.log("🟢 Received POST request to /queries");
   // Destructure query from req.body to modify it if needed
