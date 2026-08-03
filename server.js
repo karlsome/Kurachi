@@ -6270,6 +6270,56 @@ app.post("/saveScannedQRData", async (req, res) => {
 // const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 // const client = new MongoClient(uri, { ... }); // Your MongoDB client initialization
 
+app.post('/schema/custom-fields', async (req, res) => {
+  console.log("🟢 Received POST request to /schema/custom-fields");
+  const { dbName = "submittedDB", collectionName } = req.body;
+
+  if (!collectionName) {
+    return res.status(400).json({ error: "collectionName is required" });
+  }
+
+  try {
+    const database = client.db(dbName);
+    const collection = database.collection(collectionName);
+
+    // Fetch the 50 newest documents using the naturally indexed _id
+    const docs = await collection.find({}).sort({ _id: -1 }).limit(50).toArray();
+
+    function flattenObject(obj, prefix = '') {
+      const flattened = {};
+      for (const key in obj) {
+        if (Object.prototype.hasOwnProperty.call(obj, key)) {
+          if (typeof obj[key] === 'object' && obj[key] !== null && !Array.isArray(obj[key])) {
+            Object.assign(flattened, flattenObject(obj[key], prefix + key + '.'));
+          } else {
+            flattened[prefix + key] = obj[key];
+          }
+        }
+      }
+      return flattened;
+    }
+
+    const IGNORED_KEYS = ["_id", "createdAt", "updatedAt", "__v", "id"];
+    const keySet = new Set();
+    
+    docs.forEach(doc => {
+      const flat = flattenObject(doc);
+      Object.keys(flat).forEach(k => {
+        if (IGNORED_KEYS.includes(k) || k.includes("[")) return;
+        keySet.add(k);
+      });
+    });
+
+    const fields = Array.from(keySet).sort();
+    console.log(`✅ Extracted ${fields.length} unique schema fields from ${collectionName}`);
+    res.json({ fields });
+
+  } catch (error) {
+    console.error("❌ Error fetching custom fields schema:", error);
+    res.status(500).json({ error: "Failed to extract database schema", details: error.message });
+  }
+});
+
 app.post('/queries', async (req, res) => {
   console.log("🟢 Received POST request to /queries");
   // Destructure query from req.body to modify it if needed
