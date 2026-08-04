@@ -6686,6 +6686,51 @@ app.post('/api/factory/sensors/historical', async (req, res) => {
   }
 });
 
+// ─── DEDICATED ROUTE FOR FACTORY OVERVIEW DATA ───
+app.post('/api/factory/production-period', async (req, res) => {
+  console.log("🟢 Received POST request to /api/factory/production-period");
+  const { queries } = req.body;
+  if (!Array.isArray(queries) || queries.length !== 4) {
+    return res.status(400).json({ error: "Expected exactly 4 queries." });
+  }
+
+  try {
+    const database = client.db("submittedDB");
+    const collections = ["kensaDB", "pressDB", "SRSDB", "slitDB"];
+    
+    // Explicitly define the projection to optimize the payload!
+    const projection = {
+      "工場": 1, "Date": 1, "Time_start": 1, "Time_end": 1, "品番": 1, "背番号": 1, "設備": 1, "Worker_Name": 1,
+      "Total": 1, "Total_NG": 1, "Process_Quantity": 1, "Cycle_Time": 1,
+      "Total_Work_Hours": 1, "Total_Break_Hours": 1, "Total_Trouble_Hours": 1,
+      "Total_Trouble_Minutes": 1, "Total_Break_Minutes": 1,
+      "疵引不良": 1, "加工不良": 1, "その他": 1, "Spare": 1,
+      "StopCall.count": 1, "StopCall.totalWaitMinutes": 1,
+      "createdAt": 1, "Comment": 1, "ショット数": 1,
+      "材料ロット": 1, "材料背番号": 1,
+      "Total_Meters": 1, "Total_Pieces": 1
+    };
+
+    const results = await Promise.all(collections.map((col, index) => {
+      // Create objects from the BSON ObjectId if they were converted on frontend to string, though frontend queries shouldn't have ObjectIds in this context.
+      return database.collection(col).find(queries[index]).project(projection).toArray();
+    }));
+
+    // Ensure _id is serialized cleanly
+    const serializeRecords = (records) => records.map(r => ({ ...r, _id: r._id?.toString() }));
+
+    res.json({
+      Kensa: serializeRecords(results[0]),
+      Press: serializeRecords(results[1]),
+      SRS: serializeRecords(results[2]),
+      Slit: serializeRecords(results[3])
+    });
+  } catch (error) {
+    console.error("❌ Error fetching production period:", error);
+    res.status(500).json({ error: "Failed to fetch production period" });
+  }
+});
+
 app.post('/queries', async (req, res) => {
   console.log("🟢 Received POST request to /queries");
   // Destructure query from req.body to modify it if needed
