@@ -12618,6 +12618,25 @@ async function collectFactoryStatusMatchingSessionIdsByOperator(collection, matc
     .filter(Boolean);
 }
 
+app.get('/api/factory-status/machines/:factoryName', async (req, res) => {
+  try {
+    const { factoryName } = req.params;
+    const db = client.db(DB_NAME);
+    const machines = await db.collection(CHECK_FORM_EQUIPMENT_COLLECTION)
+      .find({ 
+        工場: factoryName, 
+        _archived: { $ne: true } 
+      })
+      .sort({ name: 1 })
+      .toArray();
+      
+    res.json({ success: true, machines });
+  } catch (error) {
+    console.error(`Error fetching machines for ${req.params.factoryName}:`, error);
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
 app.post('/api/factory-status/snapshot', async (req, res) => {
   try {
     await client.connect();
