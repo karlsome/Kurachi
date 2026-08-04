@@ -6848,7 +6848,7 @@ app.post('/api/factory/production-period', async (req, res) => {
     // Explicitly define the projection to optimize the payload!
     const projection = {
       "工場": 1, "Date": 1, "Time_start": 1, "Time_end": 1, "品番": 1, "背番号": 1, "設備": 1, "Worker_Name": 1,
-      "Total": 1, "Total_NG": 1, "Process_Quantity": 1, "Cycle_Time": 1,
+      "Total": 1, "Total_NG": 1, "SRS_Total_NG": 1, "Process_Quantity": 1, "Cycle_Time": 1,
       "Total_Work_Hours": 1, "Total_Break_Hours": 1, "Total_Trouble_Hours": 1,
       "Total_Trouble_Minutes": 1, "Total_Break_Minutes": 1,
       "疵引不良": 1, "加工不良": 1, "その他": 1, "Spare": 1,
@@ -24517,6 +24517,7 @@ app.post('/api/equipment/data', async (req, res) => {
                 ショット数: 1,
                 Process_Quantity: 1,
                 Total_NG: 1,
+                SRS_Total_NG: 1,
                 Time_start: 1,
                 Time_end: 1,
                 作業者: 1,
