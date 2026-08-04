@@ -1254,8 +1254,17 @@
         <div id="counter-box-27" class="counter-box">  
             <label for="counter-27">疵引処理数</label>
             <button class="plus-btn" type="button" onclick="incrementCounter(27)" >+</button>  
-            <input id="counter-27" value="0" type="number" name="疵引処理数">  
+            <input id="counter-27" value="0" type="number" name="疵引処理数" oninput="updateTotal()">  
             <button class="minus-btn" type="button" onclick="decrementCounter(27)" >-</button>  
+        </div>
+        <br><br>
+
+        <!-- 11.5 非不良廃棄 -->
+        <div id="counter-box-28" class="counter-box" style="display: none;">  
+            <label for="counter-28">非不良廃棄</label>
+            <button class="plus-btn" type="button" onclick="incrementCounter(28)" >+</button>  
+            <input id="counter-28" value="0" type="number" name="非不良廃棄" oninput="updateTotal()">  
+            <button class="minus-btn" type="button" onclick="decrementCounter(28)" >-</button>  
         </div>
         <br><br>
 

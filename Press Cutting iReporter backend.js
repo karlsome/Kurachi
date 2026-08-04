@@ -824,7 +824,20 @@ if (selectedFactory){
   document.getElementById('selected工場').value = selectedFactory;
   document.getElementById('nippoTitle').textContent=selectedFactory + "日報";
   console.log("kojo changed to: " + selectedFactory);
+
+  const counter27Box = document.getElementById('counter-box-27');
+  const counter28Box = document.getElementById('counter-box-28');
+  if (counter27Box && counter28Box) {
+    if (selectedFactory === '肥田瀬') {
+      counter27Box.style.display = 'none';
+      counter28Box.style.display = '';
+    } else {
+      counter27Box.style.display = '';
+      counter28Box.style.display = 'none';
+    }
+  }
 }
+
 
 
 
@@ -2154,7 +2167,16 @@ function updateTotal() {
   document.getElementById('Total_NG').value = totalNG;
 
   // Calculate Total
-  const total = processQuantity - totalNG;
+  const selectedFactory = document.getElementById("selected工場").value;
+  let deduction = 0;
+  if (selectedFactory === "肥田瀬") {
+      const counter28 = document.getElementById('counter-28');
+      if (counter28) deduction = parseInt(counter28.value, 10) || 0;
+  } else {
+      const counter27 = document.getElementById('counter-27');
+      if (counter27) deduction = parseInt(counter27.value, 10) || 0;
+  }
+  const total = processQuantity - totalNG - deduction;
 
   // Update the Total field
   document.getElementById('total').value = total;
@@ -2328,6 +2350,7 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
       Time_end: document.getElementById('End Time').value,
       材料ロット: document.getElementById('材料ロット').value,
       疵引処理数: parseInt(document.getElementById('counter-27').value, 10) || 0,
+      非不良廃棄: document.getElementById('counter-28') ? (parseInt(document.getElementById('counter-28').value, 10) || 0) : 0,
       疵引不良: parseInt(document.getElementById('counter-18').value, 10) || 0,
       加工不良: parseInt(document.getElementById('counter-19').value, 10) || 0,
       その他: parseInt(document.getElementById('counter-20').value, 10) || 0,
