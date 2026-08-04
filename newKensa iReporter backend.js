@@ -1993,10 +1993,15 @@ function printLabel() {
       const SRS = document.getElementById("SRS").value;
       let filename = "";
 
-      const Date = extension ? `${Date2} - ${extension}` : Date2;
+      let Date = extension ? `${Date2} - ${extension}` : Date2;
+      const specialHidaseLabel6品番 = ["117330-0210", "117330-0220", "117330-0230"];
+      const lotNumberValue = document.getElementById('製造ロット')?.value || "";
 
       // Smooth Print URL scheme
-      if (SRS === "有り"){
+      if (specialHidaseLabel6品番.includes(品番)) {
+          filename = "hidaselabel6.lbx";
+          Date = lotNumberValue; // use 製造ロット instead of the date
+      } else if (SRS === "有り"){
           filename = "SRS3.lbx";
       } else if (背番号 === "NC2"){
           filename = "NC21.lbx"
@@ -2025,43 +2030,101 @@ function printLabel() {
   }
 
   // Default process for other 背番号 values
-  const 車型 = document.getElementById("model").value;
-  const 収容数 = document.getElementById("収容数").value;
-  const R_L = document.getElementById("R-L").value;
-  const 材料 = document.getElementById("material").value;
-  const 色 = document.getElementById("material-color").value;
-  const extension = document.getElementById("Labelextension").value;
-  const Date2 = document.getElementById('Lot No.').value;
-  const 品番収容数 = `${品番},${収容数}`;
-  const SRS = document.getElementById("SRS").value;
-  let filename = "";
+  const raw収容数 = document.getElementById("収容数").value;
+  const specialHidaseLabel6品番 = ["117330-0210", "117330-0220", "117330-0230"];
 
-  const Date = extension ? `${Date2} - ${extension}` : Date2;
+  function executeDefaultPrint(selected収容数) {
+    const 車型 = document.getElementById("model").value;
+    const R_L = document.getElementById("R-L").value;
+    const 材料 = document.getElementById("material").value;
+    const 色 = document.getElementById("material-color").value;
+    const extension = document.getElementById("Labelextension").value;
+    const Date2 = document.getElementById('Lot No.').value;
+    const 品番収容数 = `${品番},${selected収容数}`;
+    const SRS = document.getElementById("SRS").value;
+    let filename = "";
 
-  if (SRS === "有り"){
-    filename = "SRS3.lbx";
-  } else if (背番号 === "NC2"){
-      filename = "NC21.lbx"
-  } else {
-    filename = "sample6.lbx";
+    let Date = extension ? `${Date2} - ${extension}` : Date2;
+    const lotNumberValue = document.getElementById('製造ロット')?.value || "";
+
+    if (specialHidaseLabel6品番.includes(品番)) {
+        filename = "hidaselabel6.lbx";
+        Date = lotNumberValue; // use 製造ロット instead of the date
+    } else if (SRS === "有り"){
+      filename = "SRS3.lbx";
+    } else if (背番号 === "NC2"){
+        filename = "NC21.lbx"
+    } else {
+      filename = "sample6.lbx";
+    }
+    
+    const size = "RollW62";
+    const copies = 1;
+    const url =
+      `brotherwebprint://print?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent(size)}&copies=${encodeURIComponent(copies)}` +
+      `&text_品番=${encodeURIComponent(品番)}` +
+      `&text_車型=${encodeURIComponent(車型)}` +
+      `&text_収容数=${encodeURIComponent(selected収容数)}` +
+      `&text_背番号=${encodeURIComponent(背番号)}` +
+      `&text_RL=${encodeURIComponent(R_L)}` +
+      `&text_材料=${encodeURIComponent(材料)}` +
+      `&text_色=${encodeURIComponent(色)}` +
+      `&text_DateT=${encodeURIComponent(Date)}` +
+      `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
+
+    console.log(Date);
+    window.location.href = url;
   }
-  
-  const size = "RollW62";
-  const copies = 1;
-  const url =
-    `brotherwebprint://print?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent(size)}&copies=${encodeURIComponent(copies)}` +
-    `&text_品番=${encodeURIComponent(品番)}` +
-    `&text_車型=${encodeURIComponent(車型)}` +
-    `&text_収容数=${encodeURIComponent(収容数)}` +
-    `&text_背番号=${encodeURIComponent(背番号)}` +
-    `&text_RL=${encodeURIComponent(R_L)}` +
-    `&text_材料=${encodeURIComponent(材料)}` +
-    `&text_色=${encodeURIComponent(色)}` +
-    `&text_DateT=${encodeURIComponent(Date)}` +
-    `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
 
-  console.log(Date);
-  window.location.href = url;
+  if (raw収容数.includes(',')) {
+    const 収容数Options = raw収容数.split(',').map(v => v.trim()).filter(v => v);
+    
+    const modal = document.createElement('div');
+    modal.classList.add('modal');
+    modal.style.display = 'flex';
+    modal.style.position = 'fixed';
+    modal.style.top = '50%';
+    modal.style.left = '50%';
+    modal.style.transform = 'translate(-50%, -50%)';
+    modal.style.flexDirection = 'column';
+    modal.style.justifyContent = 'center';
+    modal.style.alignItems = 'center';
+    modal.style.padding = '30px';
+    modal.style.backgroundColor = 'white';
+    modal.style.boxShadow = '0 0 15px rgba(0, 0, 0, 0.5)';
+    modal.style.borderRadius = '10px';
+    modal.style.zIndex = '10001';
+
+    const message = document.createElement('p');
+    message.innerText = '収容数を選んでください / Please choose the value for Quantity';
+    message.style.fontSize = '24px';
+    message.style.textAlign = 'center';
+    message.style.marginBottom = '20px';
+    modal.appendChild(message);
+
+    収容数Options.forEach(option => {
+      const button = document.createElement('button');
+      button.innerText = option;
+      button.style.margin = '10px';
+      button.style.padding = '15px 30px';
+      button.style.fontSize = '20px';
+      button.style.cursor = 'pointer';
+      button.style.borderRadius = '5px';
+      button.style.border = '2px solid #007bff';
+      button.style.backgroundColor = '#007bff';
+      button.style.color = 'white';
+      button.onclick = () => {
+        document.body.removeChild(modal);
+        executeDefaultPrint(option);
+      };
+      modal.appendChild(button);
+    });
+
+    document.body.appendChild(modal);
+    return;
+  }
+
+  executeDefaultPrint(raw収容数);
 }
 
 
