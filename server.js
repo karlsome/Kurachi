@@ -1586,6 +1586,83 @@ app.post("/api/upload-product-pdf", async (req, res) => {
 });
 
 // Upload converted image for PDF
+app.post("/api/upload-maintenance-image", async (req, res) => {
+  try {
+    const { factory, equipment, date, timestamp, id, base64, sebanggo } = req.body;
+
+    if (!base64 || !factory || !equipment || !date || !timestamp || !id) {
+      return res.status(400).json({ error: "Missing required fields for maintenance image upload" });
+    }
+
+    const bucket = admin.storage().bucket();
+    const buffer = Buffer.from(base64, "base64");
+    const downloadToken = "masterDBToken69";
+
+    const fileName = `${sebanggo || "NO_SEBANGGO"}_${date}_${timestamp}_${id}_maintenanceImage.jpg`;
+    const filePath = `maintenance/${factory}/${equipment}/${fileName}`;
+    const file = bucket.file(filePath);
+
+    await uploadToFirebaseWithRetry(file, buffer, {
+      metadata: {
+        contentType: "image/jpeg",
+        metadata: { firebaseStorageDownloadTokens: downloadToken }
+      },
+      validation: false
+    });
+
+    const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(filePath)}?alt=media&token=${downloadToken}`;
+
+    console.log(`✅ Uploaded maintenance image successfully: ${publicUrl}`);
+    res.json({
+      success: true,
+      url: publicUrl,
+      message: "Maintenance image uploaded successfully"
+    });
+  } catch (error) {
+    console.error("❌ Error uploading maintenance image:", error);
+    res.status(500).json({ error: "Error uploading image", details: error.message });
+  }
+});
+
+// Upload material label image
+app.post("/api/upload-material-label-image", async (req, res) => {
+  try {
+    const { factory, equipment, date, timestamp, id, base64, sebanggo } = req.body;
+
+    if (!base64 || !factory || !equipment || !date || !timestamp || !id) {
+      return res.status(400).json({ error: "Missing required fields for material label image upload" });
+    }
+
+    const bucket = admin.storage().bucket();
+    const buffer = Buffer.from(base64, "base64");
+    const downloadToken = "masterDBToken69";
+
+    const fileName = `${sebanggo || "NO_SEBANGGO"}_${date}_${timestamp}_${id}_materialLabelImage.jpg`;
+    const filePath = `materialLabel/${factory}/${equipment}/${fileName}`;
+    const file = bucket.file(filePath);
+
+    await uploadToFirebaseWithRetry(file, buffer, {
+      metadata: {
+        contentType: "image/jpeg",
+        metadata: { firebaseStorageDownloadTokens: downloadToken }
+      },
+      validation: false
+    });
+
+    const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(filePath)}?alt=media&token=${downloadToken}`;
+
+    console.log(`✅ Uploaded material label image successfully: ${publicUrl}`);
+    res.json({
+      success: true,
+      url: publicUrl,
+      message: "Material label image uploaded successfully"
+    });
+  } catch (error) {
+    console.error("❌ Error uploading material label image:", error);
+    res.status(500).json({ error: "Error uploading image", details: error.message });
+  }
+});
+
 app.post("/api/upload-pdf-image", async (req, res) => {
   try {
     const { documentId, imageBase64, pdfType } = req.body;
@@ -6192,6 +6269,614 @@ app.post("/saveScannedQRData", async (req, res) => {
 // Ensure this is at the top of your server.js with other requires:
 // const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 // const client = new MongoClient(uri, { ... }); // Your MongoDB client initialization
+
+app.post('/schema/custom-fields', async (req, res) => {
+  console.log("🟢 Received POST request to /schema/custom-fields");
+  const { dbName = "submittedDB", collectionName } = req.body;
+
+  if (!collectionName) {
+    return res.status(400).json({ error: "collectionName is required" });
+  }
+
+  try {
+    const database = client.db(dbName);
+    const collection = database.collection(collectionName);
+
+    // Fetch the 50 newest documents using the naturally indexed _id
+    const docs = await collection.find({}).sort({ _id: -1 }).limit(50).toArray();
+
+    function flattenObject(obj, prefix = '') {
+      const flattened = {};
+      for (const key in obj) {
+        if (Object.prototype.hasOwnProperty.call(obj, key)) {
+          if (typeof obj[key] === 'object' && obj[key] !== null && !Array.isArray(obj[key])) {
+            Object.assign(flattened, flattenObject(obj[key], prefix + key + '.'));
+          } else {
+            flattened[prefix + key] = obj[key];
+          }
+        }
+      }
+      return flattened;
+    }
+
+    const IGNORED_KEYS = ["_id", "createdAt", "updatedAt", "__v", "id"];
+    const keySet = new Set();
+    
+    docs.forEach(doc => {
+      const flat = flattenObject(doc);
+      Object.keys(flat).forEach(k => {
+        if (IGNORED_KEYS.includes(k) || k.includes("[")) return;
+        keySet.add(k);
+      });
+    });
+
+    const fields = Array.from(keySet).sort();
+    console.log(`✅ Extracted ${fields.length} unique schema fields from ${collectionName}`);
+    res.json({ fields });
+
+  } catch (error) {
+    console.error("❌ Error fetching custom fields schema:", error);
+    res.status(500).json({ error: "Failed to extract database schema", details: error.message });
+  }
+});
+
+// ─── Sensor Aggregation Helpers ───
+function buildSensorFactoryNameExpression() {
+  return {
+    $trim: { input: { $toString: { $ifNull: ["$工場", ""] } } },
+  };
+}
+
+function buildSensorReadingTemperatureExpression(offsets = {}) {
+  const branches = Object.entries(offsets).map(([device, offset]) => ({
+    case: { $eq: ["$device", device] },
+    then: offset
+  }));
+
+  const baseTempExpr = {
+    $convert: {
+      input: {
+        $trim: {
+          input: {
+            $replaceAll: {
+              input: { $toString: { $ifNull: ["$Temperature", ""] } },
+              find: "°C",
+              replacement: "",
+            },
+          },
+        },
+      },
+      to: "double",
+      onError: null,
+      onNull: null,
+    },
+  };
+
+  if (branches.length === 0) return baseTempExpr;
+
+  return {
+    $round: [
+      {
+        $add: [
+          baseTempExpr,
+          { $switch: { branches, default: 0 } }
+        ]
+      },
+      2
+    ]
+  };
+}
+
+function buildSensorReadingHumidityExpression() {
+  return {
+    $convert: {
+      input: {
+        $trim: {
+          input: {
+            $replaceAll: {
+              input: { $toString: { $ifNull: ["$Humidity", ""] } },
+              find: "%",
+              replacement: "",
+            },
+          },
+        },
+      },
+      to: "double",
+      onError: null,
+      onNull: null,
+    },
+  };
+}
+
+function buildSensorReadingWBGTExpression() {
+  const temperature = "$temperatureValue";
+  const humidity = "$humidityValue";
+
+  const wetBulbTemperature = {
+    $subtract: [
+      {
+        $add: [
+          {
+            $multiply: [
+              temperature,
+              {
+                $atan: {
+                  $multiply: [
+                    0.151977,
+                    { $sqrt: { $add: [humidity, 8.313659] } },
+                  ],
+                },
+              },
+            ],
+          },
+          { $atan: { $add: [temperature, humidity] } },
+          {
+            $multiply: [
+              0.00391838,
+              { $pow: [humidity, 1.5] },
+              { $atan: { $multiply: [0.023101, humidity] } },
+            ],
+          },
+        ],
+      },
+      {
+        $add: [
+          { $atan: { $subtract: [humidity, 1.676331] } },
+          4.686035,
+        ],
+      },
+    ],
+  };
+
+  return {
+    $cond: [
+      {
+        $and: [
+          { $ne: [temperature, null] },
+          { $ne: [humidity, null] },
+          { $gte: [temperature, -50] },
+          { $lte: [temperature, 60] },
+          { $gte: [humidity, 0] },
+          { $lte: [humidity, 100] },
+        ],
+      },
+      {
+        $round: [
+          {
+            $add: [
+              { $multiply: [0.7, wetBulbTemperature] },
+              { $multiply: [0.3, temperature] },
+            ],
+          },
+          1,
+        ],
+      },
+      null,
+    ],
+  };
+}
+
+function buildSensorReadingBaseMatch({ factoryName, startDate, endDate, years }) {
+  const match = {};
+  if (factoryName) match["工場"] = factoryName;
+
+  if (years && years.length > 0) {
+    match.Date = { $regex: `^(${years.join('|')})` };
+  } else if (startDate || endDate) {
+    const dateMatch = {};
+    if (startDate) dateMatch.$gte = startDate;
+    if (endDate) dateMatch.$lte = endDate;
+    match.Date = dateMatch;
+  }
+  return match;
+}
+
+function buildSensorReadingDeviceMatch(deviceId = "all") {
+  if (!deviceId || deviceId === "all") return null;
+  return { device: deviceId };
+}
+
+function buildSensorReadingNormalizationStages({ factoryName, startDate, endDate, years, offsets = {} }) {
+  return [
+    { $match: buildSensorReadingBaseMatch({ factoryName, startDate, endDate, years }) },
+    {
+      $addFields: {
+        temperatureValue: buildSensorReadingTemperatureExpression(offsets),
+        humidityValue: buildSensorReadingHumidityExpression(),
+      },
+    },
+    {
+      $addFields: {
+        wbgtValue: buildSensorReadingWBGTExpression(),
+        Temperature: {
+          $cond: [
+            { $eq: ["$temperatureValue", null] },
+            "$Temperature",
+            { $concat: [{ $toString: "$temperatureValue" }, "°C"] }
+          ]
+        }
+      },
+    },
+  ];
+}
+
+function buildSensorReadingSortStage(sortKey) {
+  if (sortKey === "date_asc") return { Date: 1, Time: 1, _id: 1 };
+  if (sortKey === "temp_desc") return { temperatureValue: -1, Date: -1, Time: -1, _id: -1 };
+  if (sortKey === "temp_asc") return { temperatureValue: 1, Date: -1, Time: -1, _id: -1 };
+  return { Date: -1, Time: -1, _id: -1 };
+}
+
+// ─── Dedicated Factory API Routes ───
+
+app.get('/api/factory/production/:factoryName/:date', async (req, res) => {
+  try {
+    const { factoryName, date } = req.params;
+    const PROCESS_COLLECTIONS = ["kensaDB", "pressDB", "slitDB", "SRSDB"];
+    const database = client.db("submittedDB");
+
+    const settled = await Promise.allSettled(
+      PROCESS_COLLECTIONS.map((col) =>
+        database.collection(col)
+          .find({ 工場: factoryName, Date: date })
+          .sort({ Time_start: -1 })
+          .toArray()
+      )
+    );
+
+    const records = settled.flatMap((r, i) =>
+      r.status === "fulfilled"
+        ? r.value.map((row) => ({ ...row, _id: row._id.toString(), _source: PROCESS_COLLECTIONS[i] }))
+        : []
+    );
+
+    let total = 0, totalNG = 0;
+    records.forEach((r) => {
+      total   += Number(r.Total)    || 0;
+      totalNG += Number(r.Total_NG) || 0;
+    });
+    const defectRate = total > 0 ? Math.round((totalNG / total) * 10000) / 100 : 0;
+
+    res.json({ records, total, totalNG, defectRate });
+  } catch (error) {
+    console.error("❌ Error fetching production data:", error);
+    res.status(500).json({ error: "Failed to fetch production data" });
+  }
+});
+
+app.get('/api/factory/sensors/:factoryName/:date', async (req, res) => {
+  try {
+    const { factoryName, date } = req.params;
+    const database = client.db("submittedDB");
+    const readings = await database.collection("tempHumidityDB")
+      .find({ 工場: factoryName, Date: date })
+      .sort({ Time: -1 })
+      .limit(200)
+      .toArray();
+
+    const safeReadings = readings.map(r => ({ ...r, _id: r._id.toString() }));
+    res.json(safeReadings);
+  } catch (error) {
+    console.error("❌ Error fetching sensor readings:", error);
+    res.status(500).json({ error: "Failed to fetch sensor readings" });
+  }
+});
+
+app.post('/api/factory/sensors/overview', async (req, res) => {
+  try {
+    const { date, offsets = {} } = req.body;
+    const database = client.db("submittedDB");
+
+    const aggregation = [
+      {
+        $addFields: {
+          factoryName: buildSensorFactoryNameExpression(),
+        },
+      },
+      {
+        $facet: {
+          allFactories: [
+            { $match: { factoryName: { $ne: "" } } },
+            { $group: { _id: "$factoryName" } },
+            { $sort: { _id: 1 } },
+          ],
+          todayByFactory: [
+            { $match: { Date: date, factoryName: { $ne: "" } } },
+            {
+              $addFields: {
+                temperatureValue: buildSensorReadingTemperatureExpression(offsets),
+                humidityValue: buildSensorReadingHumidityExpression(),
+              },
+            },
+            {
+              $addFields: {
+                wbgtValue: buildSensorReadingWBGTExpression(),
+              },
+            },
+            { $sort: { factoryName: 1, device: 1, Time: -1, _id: -1 } },
+            {
+              $group: {
+                _id: {
+                  device: "$device",
+                  factory: "$factoryName",
+                },
+                latest: { $first: "$$ROOT" },
+              },
+            },
+            {
+              $group: {
+                _id: "$_id.factory",
+                highestTemp: { $max: "$latest.temperatureValue" },
+                averageHumidity: { $avg: "$latest.humidityValue" },
+                sensorCount: { $sum: 1 },
+                wbgt: { $max: "$latest.wbgtValue" },
+                deviceLatest: {
+                  $push: {
+                    date: "$latest.Date",
+                    time: "$latest.Time",
+                  },
+                },
+              },
+            },
+            {
+              $project: {
+                _id: 0,
+                averageHumidity: { $round: ["$averageHumidity", 1] },
+                factory: "$_id",
+                highestTemp: { $round: ["$highestTemp", 1] },
+                sensorCount: 1,
+                wbgt: { $round: ["$wbgt", 1] },
+                deviceLatest: 1,
+              },
+            },
+            { $sort: { factory: 1 } },
+          ],
+        },
+      },
+    ];
+
+    const result = await database.collection("tempHumidityDB").aggregate(aggregation).toArray();
+    res.json(result);
+  } catch (error) {
+    console.error("❌ Error fetching sensor overview:", error);
+    res.status(500).json({ error: "Failed to fetch sensor overview" });
+  }
+});
+
+app.post('/api/factory/sensors/historical', async (req, res) => {
+  try {
+    const { factoryName, startDate, endDate, years, deviceId = "all", sortKey = "date_desc", skip = 0, limit = 15, offsets = {} } = req.body;
+    const database = client.db("submittedDB");
+    const deviceMatch = buildSensorReadingDeviceMatch(deviceId);
+
+    const aggregation = [
+      ...buildSensorReadingNormalizationStages({ factoryName, startDate, endDate, years, offsets }),
+      ...(deviceMatch ? [{ $match: deviceMatch }] : []),
+      {
+        $facet: {
+          data: [
+            { $sort: buildSensorReadingSortStage(sortKey) },
+            { $skip: skip },
+            { $limit: limit },
+            {
+              $project: {
+                _id: 1,
+                Date: 1,
+                Time: 1,
+                device: 1,
+                Temperature: 1,
+                Humidity: 1,
+                sensorStatus: 1,
+                工場: 1,
+              },
+            },
+          ],
+          totalCount: [
+            { $count: "count" },
+          ],
+        },
+      },
+    ];
+
+    const result = await database.collection("tempHumidityDB").aggregate(aggregation).toArray();
+    res.json(result);
+  } catch (error) {
+    console.error("❌ Error fetching historical sensors:", error);
+    res.status(500).json({ error: "Failed to fetch historical sensors" });
+  }
+});
+
+app.post('/api/factory/sensors/historical/overview', async (req, res) => {
+  console.log("🟢 Received POST request to /api/factory/sensors/historical/overview");
+  try {
+    const { factoryName, startDate, endDate, years, deviceId = "all", offsets = {} } = req.body;
+    const database = client.db("submittedDB");
+    const deviceMatch = buildSensorReadingDeviceMatch(deviceId);
+    const isHourly = Boolean(startDate && endDate && startDate === endDate);
+
+    const aggregation = [
+      ...buildSensorReadingNormalizationStages({ factoryName, startDate, endDate, years, offsets }),
+      {
+        $facet: {
+          deviceOptions: [
+            { $match: { device: { $ne: "" } } },
+            { $group: { _id: "$device" } },
+            { $sort: { _id: 1 } },
+          ],
+          summary: [
+            ...(deviceMatch ? [{ $match: deviceMatch }] : []),
+            {
+              $group: {
+                _id: null,
+                totalReadings: { $sum: 1 },
+                avgTemp: { $avg: "$temperatureValue" },
+                peakTemp: { $max: "$temperatureValue" },
+                minTemp: { $min: "$temperatureValue" },
+                avgHumid: { $avg: "$humidityValue" },
+                heatAlerts: {
+                  $sum: {
+                    $cond: [
+                      { $gt: ["$wbgtValue", 28] },
+                      1,
+                      0,
+                    ],
+                  },
+                },
+              },
+            },
+            {
+              $project: {
+                _id: 0,
+                totalReadings: 1,
+                avgTemp: { $round: ["$avgTemp", 1] },
+                peakTemp: { $round: ["$peakTemp", 1] },
+                minTemp: { $round: ["$minTemp", 1] },
+                avgHumid: { $round: ["$avgHumid", 1] },
+                heatAlerts: 1,
+              },
+            },
+          ],
+          trends: [
+            { $match: { device: { $ne: "" }, ...(deviceMatch || {}) } },
+            {
+              $group: {
+                _id: {
+                  device: "$device",
+                  date: "$Date",
+                  hour: isHourly ? { $substr: ["$Time", 0, 2] } : null,
+                },
+                avgTemperature: { $avg: "$temperatureValue" },
+                avgHumidity: { $avg: "$humidityValue" },
+              },
+            },
+            {
+              $project: {
+                _id: 0,
+                device: "$_id.device",
+                Date: isHourly 
+                  ? { $concat: ["$_id.date", " ", "$_id.hour", ":00"] }
+                  : "$_id.date",
+                Temperature: { $round: ["$avgTemperature", 1] },
+                Humidity: { $round: ["$avgHumidity", 1] },
+              },
+            },
+            { $sort: { Date: 1, device: 1 } },
+          ],
+          latestDevices: [
+            { $match: { device: { $ne: "" }, ...(deviceMatch || {}) } },
+            { $sort: { device: 1, Date: -1, Time: -1, _id: -1 } },
+            {
+              $group: {
+                _id: "$device",
+                latest: { $first: "$$ROOT" },
+                readingCount: { $sum: 1 },
+              },
+            },
+            {
+              $project: {
+                _id: 0,
+                deviceId: "$_id",
+                readingCount: 1,
+                latest: {
+                  Date: "$latest.Date",
+                  Time: "$latest.Time",
+                  Temperature: "$latest.Temperature",
+                  Humidity: "$latest.Humidity",
+                  sensorStatus: "$latest.sensorStatus",
+                  factory: "$latest.工場",
+                },
+              },
+            },
+            { $sort: { "latest.Date": -1, "latest.Time": -1, deviceId: 1 } },
+          ],
+        },
+      },
+    ];
+
+    const result = await database.collection("tempHumidityDB").aggregate(aggregation).toArray();
+    res.json(result);
+  } catch (error) {
+    console.error("❌ Error fetching historical sensors overview:", error);
+    res.status(500).json({ error: "Failed to fetch historical sensors overview" });
+  }
+});
+
+app.post('/api/factory/sensors/historical/export', async (req, res) => {
+  try {
+    const { factoryName, startDate, endDate, deviceId = "all", sortKey = "date_desc", offsets = {} } = req.body;
+    const database = client.db("submittedDB");
+    const deviceMatch = buildSensorReadingDeviceMatch(deviceId);
+
+    const aggregation = [
+      ...buildSensorReadingNormalizationStages({ factoryName, startDate, endDate, offsets }),
+      ...(deviceMatch ? [{ $match: deviceMatch }] : []),
+      { $sort: buildSensorReadingSortStage(sortKey) },
+      {
+        $project: {
+          _id: 1,
+          Date: 1,
+          Time: 1,
+          device: 1,
+          Temperature: 1,
+          Humidity: 1,
+          sensorStatus: 1,
+          工場: 1,
+        },
+      },
+    ];
+
+    const result = await database.collection("tempHumidityDB").aggregate(aggregation).toArray();
+    res.json(result);
+  } catch (error) {
+    console.error("❌ Error fetching historical sensors export:", error);
+    res.status(500).json({ error: "Failed to fetch historical sensors export" });
+  }
+});
+
+// ─── DEDICATED ROUTE FOR FACTORY OVERVIEW DATA ───
+app.post('/api/factory/production-period', async (req, res) => {
+  console.log("🟢 Received POST request to /api/factory/production-period");
+  const { queries } = req.body;
+  if (!Array.isArray(queries) || queries.length !== 4) {
+    return res.status(400).json({ error: "Expected exactly 4 queries." });
+  }
+
+  try {
+    const database = client.db("submittedDB");
+    const collections = ["kensaDB", "pressDB", "SRSDB", "slitDB"];
+    
+    // Explicitly define the projection to optimize the payload!
+    const projection = {
+      "工場": 1, "Date": 1, "Time_start": 1, "Time_end": 1, "品番": 1, "背番号": 1, "設備": 1, "Worker_Name": 1,
+      "Total": 1, "Total_NG": 1, "SRS_Total_NG": 1, "Process_Quantity": 1, "Cycle_Time": 1,
+      "Total_Work_Hours": 1, "Total_Break_Hours": 1, "Total_Trouble_Hours": 1,
+      "Total_Trouble_Minutes": 1, "Total_Break_Minutes": 1,
+      "疵引不良": 1, "加工不良": 1, "その他": 1, "Spare": 1,
+      "StopCall.count": 1, "StopCall.totalWaitMinutes": 1,
+      "createdAt": 1, "Comment": 1, "ショット数": 1,
+      "材料ロット": 1, "材料背番号": 1,
+      "Total_Meters": 1, "Total_Pieces": 1
+    };
+
+    const results = await Promise.all(collections.map((col, index) => {
+      // Create objects from the BSON ObjectId if they were converted on frontend to string, though frontend queries shouldn't have ObjectIds in this context.
+      return database.collection(col).find(queries[index]).project(projection).toArray();
+    }));
+
+    // Ensure _id is serialized cleanly
+    const serializeRecords = (records) => records.map(r => ({ ...r, _id: r._id?.toString() }));
+
+    res.json({
+      Kensa: serializeRecords(results[0]),
+      Press: serializeRecords(results[1]),
+      SRS: serializeRecords(results[2]),
+      Slit: serializeRecords(results[3])
+    });
+  } catch (error) {
+    console.error("❌ Error fetching production period:", error);
+    res.status(500).json({ error: "Failed to fetch production period" });
+  }
+});
 
 app.post('/queries', async (req, res) => {
   console.log("🟢 Received POST request to /queries");
@@ -11932,6 +12617,25 @@ async function collectFactoryStatusMatchingSessionIdsByOperator(collection, matc
     .map((item) => normalizeFactoryStatusText(item?._id))
     .filter(Boolean);
 }
+
+app.get('/api/factory-status/machines/:factoryName', async (req, res) => {
+  try {
+    const { factoryName } = req.params;
+    const db = client.db(DB_NAME);
+    const machines = await db.collection(CHECK_FORM_EQUIPMENT_COLLECTION)
+      .find({ 
+        工場: factoryName, 
+        _archived: { $ne: true } 
+      })
+      .sort({ name: 1 })
+      .toArray();
+      
+    res.json({ success: true, machines });
+  } catch (error) {
+    console.error(`Error fetching machines for ${req.params.factoryName}:`, error);
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
 
 app.post('/api/factory-status/snapshot', async (req, res) => {
   try {
@@ -23832,6 +24536,7 @@ app.post('/api/equipment/data', async (req, res) => {
                 ショット数: 1,
                 Process_Quantity: 1,
                 Total_NG: 1,
+                SRS_Total_NG: 1,
                 Time_start: 1,
                 Time_end: 1,
                 作業者: 1,
@@ -33124,6 +33829,88 @@ app.post('/api/shisaku-request/reorder', async (req, res) => {
   } catch (error) {
     console.error('❌ Error in reordering prototype requests:', error.message);
     res.status(500).json({ error: 'Failed to reorder prototype requests', details: error.message });
+  }
+});
+
+
+app.post("/api/analytics/stop-calls", async (req, res) => {
+  try {
+    const { dateFrom, dateTo, factory, page = 1, limit = 20, sortColumn, sortDirection } = req.body;
+    
+    const matchStage = { "StopCall.count": { $gt: 0 } };
+    if (dateFrom && dateTo) {
+      matchStage.Date = { $gte: dateFrom, $lte: dateTo };
+    } else if (dateFrom) {
+      matchStage.Date = dateFrom;
+    }
+    if (factory) matchStage["工場"] = factory;
+
+    const safeLimit = Math.max(1, Number(limit) || 20);
+    const safePage = Math.max(1, Number(page) || 1);
+    const skip = (safePage - 1) * safeLimit;
+
+    await client.connect();
+    const collection = client.db("submittedDB").collection("pressDB");
+
+    const projection = {
+      "品番": 1, "背番号": 1, "設備": 1, "工場": 1, "Worker_Name": 1,
+      "Date": 1, "Time_start": 1, "Time_end": 1,
+      "Process_Quantity": 1, "Total": 1, "Total_NG": 1,
+      "Total_Work_Hours": 1, "Cycle_Time": 1,
+      "StopCall": 1
+    };
+
+    let sortStage = { Date: -1, "StopCall.records.calledAt": -1 };
+    if (sortColumn) {
+      const dir = sortDirection === "asc" ? 1 : -1;
+      const colMap = {
+        "date": "Date",
+        "工場": "工場",
+        "設備": "設備",
+        "背番号": "背番号",
+        "品番": "品番",
+        "Worker_Name": "Worker_Name",
+        "leaderName": "StopCall.records.leaderName",
+        "calledAt": "StopCall.records.calledAt",
+        "arrivedAt": "StopCall.records.arrivedAt",
+        "waitSeconds": "StopCall.records.waitSeconds"
+      };
+      if (colMap[sortColumn]) {
+        sortStage = { [colMap[sortColumn]]: dir };
+        if (sortColumn !== "calledAt") sortStage["StopCall.records.calledAt"] = -1;
+      }
+    }
+
+    const aggregationPipeline = [
+      { $match: matchStage },
+      { $unwind: "$StopCall.records" },
+      { $sort: sortStage },
+      // Wrap it back in an array so the frontend's flattenStopCalls works unmodified
+      { $addFields: { "StopCall.records": ["$StopCall.records"] } }
+    ];
+
+    const [data, countResult, summaryData] = await Promise.all([
+      collection.aggregate([...aggregationPipeline, { $skip: skip }, { $limit: safeLimit }, { $project: projection }]).toArray(),
+      collection.aggregate([{ $match: matchStage }, { $unwind: "$StopCall.records" }, { $count: "count" }]).toArray(),
+      collection.aggregate([...aggregationPipeline, { $project: projection }]).toArray()
+    ]);
+
+    const totalItems = countResult[0]?.count || 0;
+    const totalPages = totalItems > 0 ? Math.ceil(totalItems / safeLimit) : 0;
+
+    res.json({
+      data,
+      summaryData,
+      pagination: {
+        currentPage: totalPages > 0 ? Math.min(safePage, totalPages) : 1,
+        totalPages,
+        totalItems,
+        itemsPerPage: safeLimit
+      }
+    });
+  } catch (error) {
+    console.error("❌ Error in /api/analytics/stop-calls:", error);
+    res.status(500).json({ error: "Failed to fetch stop call analytics" });
   }
 });
 
