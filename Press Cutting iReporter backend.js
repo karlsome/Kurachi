@@ -2172,9 +2172,6 @@ function updateTotal() {
   if (selectedFactory === "肥田瀬") {
       const counter28 = document.getElementById('counter-28');
       if (counter28) deduction = parseInt(counter28.value, 10) || 0;
-  } else {
-      const counter27 = document.getElementById('counter-27');
-      if (counter27) deduction = parseInt(counter27.value, 10) || 0;
   }
   const total = processQuantity - totalNG - deduction;
 
