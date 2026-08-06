@@ -2109,9 +2109,86 @@ document.addEventListener("DOMContentLoaded", async function() {
   }
 });
 
+// --- 肥田瀬 非不良廃棄 Modal Logic ---
+function openHidasenDisposalModal() {
+  document.getElementById('hidasenDisposalModal').style.display = 'block';
+}
+
+function closeHidasenDisposalModal() {
+  document.getElementById('hidasenDisposalModal').style.display = 'none';
+}
+
+function updateHidasenTotal() {
+  const cat1 = parseInt(document.getElementById('hidasen-cat-1').value, 10) || 0;
+  const cat2 = parseInt(document.getElementById('hidasen-cat-2').value, 10) || 0;
+  const cat3 = parseInt(document.getElementById('hidasen-cat-3').value, 10) || 0;
+  const cat4 = parseInt(document.getElementById('hidasen-cat-4').value, 10) || 0;
+  const total = cat1 + cat2 + cat3 + cat4;
+  
+  const counterElement = document.getElementById('counter-28');
+  if (counterElement) {
+    counterElement.value = total;
+    localStorage.setItem(`${uniquePrefix}counter-28`, total);
+  }
+  updateTotal();
+}
+
+function incrementHidasenCat(categoryName) {
+  const map = {
+    '初回生産品': 'hidasen-cat-1',
+    '割れ・ひび割れ品': 'hidasen-cat-2',
+    'サンプル': 'hidasen-cat-3',
+    '調整用': 'hidasen-cat-4'
+  };
+  const inputId = map[categoryName];
+  if (!inputId) return;
+  const inputEl = document.getElementById(inputId);
+  if (inputEl) {
+    let val = parseInt(inputEl.value, 10) || 0;
+    val += 1;
+    inputEl.value = val;
+    localStorage.setItem(`${uniquePrefix}${inputId}`, val);
+    updateHidasenTotal();
+  }
+}
+
+function decrementHidasenCat(categoryName) {
+  const map = {
+    '初回生産品': 'hidasen-cat-1',
+    '割れ・ひび割れ品': 'hidasen-cat-2',
+    'サンプル': 'hidasen-cat-3',
+    '調整用': 'hidasen-cat-4'
+  };
+  const inputId = map[categoryName];
+  if (!inputId) return;
+  const inputEl = document.getElementById(inputId);
+  if (inputEl) {
+    let val = parseInt(inputEl.value, 10) || 0;
+    if (val > 0) {
+      val -= 1;
+      inputEl.value = val;
+      localStorage.setItem(`${uniquePrefix}${inputId}`, val);
+      updateHidasenTotal();
+    }
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  if (getQueryParam('filter') === '肥田瀬') {
+    const counter28 = document.getElementById('counter-28');
+    if (counter28) {
+      counter28.readOnly = true;
+    }
+  }
+});
+// ------------------------------------
+
 //function for plus minus button
 function incrementCounter(counterId) {
-  
+  if (counterId === 28 && getQueryParam('filter') === '肥田瀬') {
+    openHidasenDisposalModal();
+    return;
+  }
 
   const counterElement = document.getElementById(`counter-${counterId}`);
   let currentValue = parseInt(counterElement.value, 10);
@@ -2130,7 +2207,10 @@ function incrementCounter(counterId) {
 }
 
 function decrementCounter(counterId) {
-  
+  if (counterId === 28 && getQueryParam('filter') === '肥田瀬') {
+    openHidasenDisposalModal();
+    return;
+  }
 
   const counterElement = document.getElementById(`counter-${counterId}`);
   let currentValue = parseInt(counterElement.value, 10);
@@ -2362,6 +2442,15 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
       showAlert('背番号が必要です。 / Sebanggo is required.');
       document.getElementById('uploadingModal').style.display = 'none';
       return;
+    }
+
+    if (formData.工場 === '肥田瀬') {
+      formData.非不良廃棄_詳細 = {
+        '初回生産品': parseInt(document.getElementById('hidasen-cat-1') ? document.getElementById('hidasen-cat-1').value : 0, 10) || 0,
+        '割れ・ひび割れ品': parseInt(document.getElementById('hidasen-cat-2') ? document.getElementById('hidasen-cat-2').value : 0, 10) || 0,
+        'サンプル': parseInt(document.getElementById('hidasen-cat-3') ? document.getElementById('hidasen-cat-3').value : 0, 10) || 0,
+        '調整用': parseInt(document.getElementById('hidasen-cat-4') ? document.getElementById('hidasen-cat-4').value : 0, 10) || 0
+      };
     }
 
     // ==================== VALIDATION SECTION ====================

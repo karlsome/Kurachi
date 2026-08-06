@@ -1739,5 +1739,42 @@
 
     <!-- Firebase Storage -->
     <script src="https://www.gstatic.com/firebasejs/10.11.0/firebase-storage-compat.js"></script>
+    <!-- 肥田瀬 非不良廃棄 Modal -->
+    <div id="hidasenDisposalModal" style="display: none; position: fixed; z-index: 1001; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.7); backdrop-filter: blur(3px);">
+        <div style="background-color: white; margin: 10% auto; padding: 20px; border-radius: 15px; width: 90%; max-width: 500px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);">
+            <h2 style="text-align: center; color: #333; margin-bottom: 20px;">非不良廃棄 詳細</h2>
+            
+            <div class="counter-box" style="margin-bottom: 15px; justify-content: space-between; border: none; box-shadow: none; padding: 0;">  
+                <label for="hidasen-cat-1" style="flex: 1; text-align: left; color: #333;">初回生産品</label>
+                <button class="plus-btn" type="button" onclick="incrementHidasenCat('初回生産品')" >+</button>  
+                <input id="hidasen-cat-1" value="0" type="number" readonly style="width: 80px; text-align: center; margin: 0 10px;">  
+                <button class="minus-btn" type="button" onclick="decrementHidasenCat('初回生産品')" >-</button>
+            </div>
+            
+            <div class="counter-box" style="margin-bottom: 15px; justify-content: space-between; border: none; box-shadow: none; padding: 0;">  
+                <label for="hidasen-cat-2" style="flex: 1; text-align: left; color: #333;">割れ・ひび割れ品</label>
+                <button class="plus-btn" type="button" onclick="incrementHidasenCat('割れ・ひび割れ品')" >+</button>  
+                <input id="hidasen-cat-2" value="0" type="number" readonly style="width: 80px; text-align: center; margin: 0 10px;">  
+                <button class="minus-btn" type="button" onclick="decrementHidasenCat('割れ・ひび割れ品')" >-</button>
+            </div>
+            
+            <div class="counter-box" style="margin-bottom: 15px; justify-content: space-between; border: none; box-shadow: none; padding: 0;">  
+                <label for="hidasen-cat-3" style="flex: 1; text-align: left; color: #333;">サンプル</label>
+                <button class="plus-btn" type="button" onclick="incrementHidasenCat('サンプル')" >+</button>  
+                <input id="hidasen-cat-3" value="0" type="number" readonly style="width: 80px; text-align: center; margin: 0 10px;">  
+                <button class="minus-btn" type="button" onclick="decrementHidasenCat('サンプル')" >-</button>
+            </div>
+            
+            <div class="counter-box" style="margin-bottom: 20px; justify-content: space-between; border: none; box-shadow: none; padding: 0;">  
+                <label for="hidasen-cat-4" style="flex: 1; text-align: left; color: #333;">調整用</label>
+                <button class="plus-btn" type="button" onclick="incrementHidasenCat('調整用')" >+</button>  
+                <input id="hidasen-cat-4" value="0" type="number" readonly style="width: 80px; text-align: center; margin: 0 10px;">  
+                <button class="minus-btn" type="button" onclick="decrementHidasenCat('調整用')" >-</button>
+            </div>
+
+            <button type="button" onclick="closeHidasenDisposalModal()" style="background: #4CAF50; color: white; border: none; border-radius: 8px; padding: 12px 24px; font-size: 16px; cursor: pointer; display: block; margin: 0 auto; width: 100%;">完了 (Done)</button>
+        </div>
+    </div>
+
 </body>
 </html>
