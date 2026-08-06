@@ -2010,7 +2010,7 @@ function printLabel() {
       }
       const size = "RollW62";
       const copies = 1;
-      const url =
+      let url =
         `brotherwebprint://print?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent(size)}&copies=${encodeURIComponent(copies)}` +
         `&text_品番=${encodeURIComponent(品番)}` +
         `&text_車型=${encodeURIComponent(車型)}` +
@@ -2021,6 +2021,11 @@ function printLabel() {
         `&text_色=${encodeURIComponent(色)}` +
         `&text_DateT=${encodeURIComponent(Date)}` +
         `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
+
+      if (specialHidaseLabel6品番.includes(品番)) {
+        const Worker_Name = document.getElementById('Machine Operator')?.value || "";
+        url += `&text_kensa=${encodeURIComponent(Worker_Name)}`;
+      }
 
       console.log(Date);
       window.location.href = url; // Redirect to Smooth Print
@@ -2060,7 +2065,7 @@ function printLabel() {
     
     const size = "RollW62";
     const copies = 1;
-    const url =
+    let url =
       `brotherwebprint://print?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent(size)}&copies=${encodeURIComponent(copies)}` +
       `&text_品番=${encodeURIComponent(品番)}` +
       `&text_車型=${encodeURIComponent(車型)}` +
@@ -2071,6 +2076,11 @@ function printLabel() {
       `&text_色=${encodeURIComponent(色)}` +
       `&text_DateT=${encodeURIComponent(Date)}` +
       `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
+
+    if (specialHidaseLabel6品番.includes(品番)) {
+      const Worker_Name = document.getElementById('Machine Operator')?.value || "";
+      url += `&text_kensa=${encodeURIComponent(Worker_Name)}`;
+    }
 
     console.log(Date);
     window.location.href = url;
