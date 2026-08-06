@@ -28,7 +28,7 @@ const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 
 const app = express();
 const port = 3000;
-const REQUEST_BODY_LIMIT = '100mb';
+const REQUEST_BODY_LIMIT = '1000mb';
 
 app.use(cors());
 app.use(express.json({ limit: REQUEST_BODY_LIMIT }));
@@ -14359,6 +14359,32 @@ app.post("/api/upload-equipment-event-image", async (req, res) => {
   } catch (error) {
     console.error("Error uploading equipment event image:", error);
     res.status(500).json({ error: "Error uploading image", details: error.message });
+  }
+});
+
+// Delete an image attached to an equipment event from Firebase Storage.
+app.post("/api/delete-equipment-event-image", async (req, res) => {
+  const { imageURL } = req.body;
+  if (!imageURL) {
+    return res.status(400).json({ error: "imageURL is required" });
+  }
+
+  try {
+    const url = new URL(imageURL);
+    const pathSegments = url.pathname.split('/o/');
+    if (pathSegments.length > 1) {
+      const filePath = decodeURIComponent(pathSegments[1]);
+      await admin.storage().bucket().file(filePath).delete();
+      console.log(`🗑️ Deleted equipment event file from Firebase: ${filePath}`);
+    }
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Error deleting equipment event image:", error);
+    if (error.code === 404) {
+      res.json({ success: true, message: "File already deleted" });
+    } else {
+      res.status(500).json({ error: "Error deleting image", details: error.message });
+    }
   }
 });
 
