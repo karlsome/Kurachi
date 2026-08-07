@@ -14,6 +14,9 @@ const bodyParser = require('body-parser');
 const cors = require("cors");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const bcrypt = require("bcryptjs");
+const multer = require('multer');
+const os = require('os');
+const upload = multer({ dest: os.tmpdir() });
 
 // GEN-related imports
 const path = require('path');
@@ -6875,6 +6878,61 @@ app.post('/api/factory/production-period', async (req, res) => {
   } catch (error) {
     console.error("❌ Error fetching production period:", error);
     res.status(500).json({ error: "Failed to fetch production period" });
+  }
+});
+
+app.get('/api/setsubi-history', async (req, res) => {
+  try {
+    const { factory, equipmentId, status, search, dateFrom, dateTo, page = '1', limit = '50', sortDir = 'desc' } = req.query;
+    const pageNum = parseInt(page, 10) || 1;
+    const limitNum = parseInt(limit, 10) || 50;
+    const skip = (pageNum - 1) * limitNum;
+    const sortOrder = sortDir === 'asc' ? 1 : -1;
+
+    let query = { _deleted: { $ne: true } };
+
+    if (factory) query["工場"] = factory;
+    if (equipmentId) query.equipmentId = equipmentId;
+    if (status) query.status = status;
+    if (dateFrom || dateTo) {
+      query.date = {};
+      if (dateFrom) query.date.$gte = dateFrom;
+      if (dateTo) query.date.$lte = dateTo;
+    }
+
+    if (search) {
+      const regex = new RegExp(search, 'i');
+      query.$or = [
+        { title: regex }, { title_en: regex }, { title_ja: regex },
+        { details: regex }, { details_en: regex }, { details_ja: regex },
+        { equipmentName: regex }, { "工場": regex }, { "名前": regex },
+        { "attempts.title": regex }, { "attempts.title_en": regex }, { "attempts.title_ja": regex },
+        { "attempts.fixDescription": regex }, { "attempts.fixDescription_en": regex }, { "attempts.fixDescription_ja": regex },
+        { "attempts.result": regex }, { "attempts.result_en": regex }, { "attempts.result_ja": regex },
+        { "attempts.fixedBy": regex }
+      ];
+    }
+
+    const database = client.db("submittedDB");
+    const collection = database.collection("setsubiHistory");
+
+    const totalCount = await collection.countDocuments(query);
+    const items = await collection.find(query)
+      .sort({ date: sortOrder, createdAt: sortOrder })
+      .skip(skip)
+      .limit(limitNum)
+      .toArray();
+
+    res.json({
+      items,
+      totalCount,
+      page: pageNum,
+      totalPages: Math.ceil(totalCount / limitNum),
+      limit: limitNum
+    });
+  } catch (error) {
+    console.error("❌ Error fetching setsubi history:", error);
+    res.status(500).json({ error: "Failed to fetch equipment history" });
   }
 });
 
@@ -14338,6 +14396,28 @@ async function saveBase64AssetToFirebase({
   };
 }
 
+// Translation proxy via MyMemory API
+app.post("/api/translate", async (req, res) => {
+  const { text, langpair = "en|ja" } = req.body;
+  if (!text) return res.status(400).json({ error: "Text is required" });
+  try {
+    const email = process.env.MYMEMORY_EMAIL || "";
+    const emailParam = email ? `&de=${encodeURIComponent(email)}` : "";
+    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${langpair}${emailParam}`;
+    // using dynamic import for node-fetch if global fetch is not available
+    const fetchFn = typeof fetch === "undefined" ? (...args) => import("node-fetch").then(({default: f}) => f(...args)) : fetch;
+    const response = await fetchFn(url);
+    const data = await response.json();
+    if (data.responseStatus === 200) {
+      return res.json({ translatedText: data.responseData.translatedText });
+    }
+    return res.status(500).json({ error: "Translation failed", details: data });
+  } catch (error) {
+    console.error("Translation API error:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // Upload an image attached to an equipment event (事案) to Firebase Storage.
 // Does NOT update MongoDB — the returned URL is stored by the caller when saving the event record.
 app.post("/api/upload-equipment-event-image", async (req, res) => {
@@ -14349,9 +14429,10 @@ app.post("/api/upload-equipment-event-image", async (req, res) => {
 
   try {
     const timestamp = Date.now();
+    const randomSuffix = Math.random().toString(36).substring(2, 8);
     const factory  = (factoryName  || "unknown").replace(/[^a-zA-Z0-9　-鿿]/g, "_");
     const machine  = (equipmentName || "unknown").replace(/[^a-zA-Z0-9　-鿿]/g, "_");
-    const filePathPrefix = `equipmentEvents/${factory}/${machine}/${timestamp}`;
+    const filePathPrefix = `equipmentEvents/${factory}/${machine}/${timestamp}_${randomSuffix}`;
     const { filePath, imageURL } = await saveBase64AssetToFirebase({ base64, filePathPrefix });
 
     console.log(`📎 Equipment event file uploaded by ${username || "unknown"}: ${filePath}`);
@@ -14359,6 +14440,49 @@ app.post("/api/upload-equipment-event-image", async (req, res) => {
   } catch (error) {
     console.error("Error uploading equipment event image:", error);
     res.status(500).json({ error: "Error uploading image", details: error.message });
+  }
+});
+
+// Upload raw file (video/pdf/etc) attached to an equipment event to Firebase Storage via multipart/form-data
+app.post("/api/upload-equipment-event-file", upload.single('file'), async (req, res) => {
+  const { factoryName, equipmentName, username } = req.body;
+  if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+
+  try {
+    const timestamp = Date.now();
+    const randomSuffix = Math.random().toString(36).substring(2, 8);
+    const factory  = (factoryName  || "unknown").replace(/[^a-zA-Z0-9　-鿿]/g, "_");
+    const machine  = (equipmentName || "unknown").replace(/[^a-zA-Z0-9　-鿿]/g, "_");
+    
+    // Extract extension from original name
+    const ext = path.extname(req.file.originalname) || '';
+    const filePathPrefix = `equipmentEvents/${factory}/${machine}/${timestamp}_${randomSuffix}${ext}`;
+    
+    const bucket = admin.storage().bucket();
+    const fileOptions = {
+      destination: filePathPrefix,
+      metadata: {
+        contentType: req.file.mimetype,
+        metadata: {
+          firebaseStorageDownloadTokens: FIREBASE_DOWNLOAD_TOKEN,
+        },
+      }
+    };
+
+    await bucket.upload(req.file.path, fileOptions);
+    const uploadedFile = bucket.file(filePathPrefix);
+    const imageURL = buildFirebaseDownloadUrl(uploadedFile, FIREBASE_DOWNLOAD_TOKEN);
+    
+    // Cleanup local file
+    fs.unlink(req.file.path, () => {});
+
+    console.log(`📎 Equipment event raw file uploaded by ${username || "unknown"}: ${filePathPrefix}`);
+    res.json({ imageURL });
+  } catch (error) {
+    console.error("Error uploading equipment event raw file:", error);
+    // Cleanup local file
+    if (req.file && req.file.path) fs.unlink(req.file.path, () => {});
+    res.status(500).json({ error: "Error uploading file", details: error.message });
   }
 });
 
