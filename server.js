@@ -6883,7 +6883,7 @@ app.post('/api/factory/production-period', async (req, res) => {
 
 app.get('/api/setsubi-history', async (req, res) => {
   try {
-    const { factory, equipmentId, status, search, dateFrom, dateTo, page = '1', limit = '50', sortDir = 'desc' } = req.query;
+    const { factory, equipmentId, status, search, dateFrom, dateTo, page = '1', limit = '50', sortColumn, sortDir = 'desc' } = req.query;
     const pageNum = parseInt(page, 10) || 1;
     const limitNum = parseInt(limit, 10) || 50;
     const skip = (pageNum - 1) * limitNum;
@@ -6917,11 +6917,58 @@ app.get('/api/setsubi-history', async (req, res) => {
     const collection = database.collection("setsubiHistory");
 
     const totalCount = await collection.countDocuments(query);
-    const items = await collection.find(query)
-      .sort({ date: sortOrder, createdAt: sortOrder })
-      .skip(skip)
-      .limit(limitNum)
-      .toArray();
+
+    const sortMap = {
+      machine: "equipmentName",
+      equipmentName: "equipmentName",
+      factory: "工場",
+      "工場": "工場",
+      date: "date",
+      issueTitle: "title",
+      title: "title",
+      status: "status",
+      reportedBy: "名前",
+      "名前": "名前",
+      submittedBy: "名前"
+    };
+
+    let items;
+    if (sortColumn === "attempts") {
+      items = await collection.aggregate([
+        { $match: query },
+        {
+          $addFields: {
+            attemptsCount: {
+              $cond: {
+                if: { $isArray: "$attempts" },
+                then: { $size: "$attempts" },
+                else: 0
+              }
+            }
+          }
+        },
+        { $sort: { attemptsCount: sortOrder, date: -1, createdAt: -1 } },
+        { $skip: skip },
+        { $limit: limitNum },
+        { $project: { attemptsCount: 0 } }
+      ], { collation: { locale: "ja", numericOrdering: true } }).toArray();
+    } else {
+      const sortField = sortMap[sortColumn] || "date";
+      const sortObj = { [sortField]: sortOrder };
+      if (sortField !== "date") {
+        sortObj.date = -1;
+      }
+      if (sortField !== "createdAt") {
+        sortObj.createdAt = -1;
+      }
+
+      items = await collection.find(query)
+        .collation({ locale: "ja", numericOrdering: true })
+        .sort(sortObj)
+        .skip(skip)
+        .limit(limitNum)
+        .toArray();
+    }
 
     res.json({
       items,
