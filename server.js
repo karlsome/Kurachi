@@ -34145,7 +34145,8 @@ app.get('/api/production/schedule/daily', async (req, res) => {
           masterMap[doc['品番']] = {
             hinmei: doc['品目マスタ']?.['品名'] || '',
             kizai,
-            color
+            color,
+            zuban: doc['品目マスタ']?.['図番'] || ''
           };
         });
 
@@ -34156,7 +34157,8 @@ app.get('/api/production/schedule/daily', async (req, res) => {
               ...item,
               kizai: info.kizai || '',
               color: info.color || '',
-              hinmei: info.hinmei || ''
+              hinmei: info.hinmei || '',
+              zuban: info.zuban || ''
             };
           }
           return item;

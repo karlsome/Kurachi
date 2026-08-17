@@ -560,7 +560,47 @@ function selectScheduleItem(index) {
 
     // Jump to Info tab (tab index 2) and load full details
     switchMainTab(2);
+    
+    // Broadcast to pdfDisplayer monitor
+    if (item.zuban) {
+        notifyPdfDisplayer(item, item.zuban);
+    }
+    
     loadItemDetail(item);
+}
+
+// -----------------------------------------------------
+// PDF Displayer Synchronization via Server SSE Broadcast
+// -----------------------------------------------------
+async function notifyPdfDisplayer(item, zuban) {
+    if (!item || (!zuban && !item.hinban)) return;
+
+    const machineId = state.machineName || 'FIRST_FACTORY';
+    console.log(`📡 Notifying pdfDisplayer -> Machine: ${machineId}, 図番: ${zuban}, 品番: ${item.hinban}`);
+
+    try {
+        await fetch(`${serverURL}/api/broadcast-scan`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                machineId: machineId,
+                zuban: zuban || '',
+                hinban: item.hinban || '',
+                timestamp: new Date().toISOString(),
+                additionalData: {
+                    factory: state.filterName || '第一工場',
+                    工場: state.filterName || '第一工場',
+                    Worker_Name: state.workerName || '',
+                    lotIndex: item.rollIndex || 1,
+                    totalRolls: item.totalRolls || 1,
+                    meters: item.meters || 0,
+                    action: 'scan'
+                }
+            })
+        });
+    } catch (err) {
+        console.warn('⚠️ Error notifying pdfDisplayer:', err);
+    }
 }
 
 // -----------------------------------------------------
@@ -616,7 +656,7 @@ async function loadItemDetail(item) {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         if (data.success) {
-            renderInfoTab(data, item);
+            await renderInfoTab(data, item);
         } else {
             throw new Error(data.error || 'Failed to load details');
         }
@@ -633,7 +673,7 @@ async function loadItemDetail(item) {
     }
 }
 
-function renderInfoTab(data, item) {
+async function renderInfoTab(data, item) {
     const container = document.getElementById('infoTabContainer');
     if (!container) return;
 
@@ -645,6 +685,13 @@ function renderInfoTab(data, item) {
     const productSegments = product['品番構造']?.segments || [];
     const productMaster = product['品目マスタ'] || {};
     const process2010 = Array.isArray(bomData) ? bomData.find(b => b['工程コード'] === 2010) : null;
+
+    const zuban = productMaster['図番'] || item.zuban || '';
+
+    // Broadcast to external pdfDisplayer with resolved zuban
+    if (zuban) {
+        notifyPdfDisplayer(item, zuban);
+    }
 
     // --- Part 1: Product Structure Chips ---
     let productStructureHTML = '';
