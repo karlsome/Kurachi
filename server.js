@@ -34123,6 +34123,47 @@ app.get('/api/production/schedule/daily', async (req, res) => {
     const submittedDb = client.db('submittedDB');
     const scheduleCollection = submittedDb.collection('firstFactorySchedule');
     const schedule = await scheduleCollection.findOne({ type: 'dailySchedule', month, date: Number(date) });
+
+    if (schedule && Array.isArray(schedule.scheduleOrder) && schedule.scheduleOrder.length > 0) {
+      const hinbans = [...new Set(schedule.scheduleOrder.map(i => i.hinban).filter(Boolean))];
+      if (hinbans.length > 0) {
+        const masterDb = client.db('Sasaki_Coating_MasterDB');
+        const masterCollection = masterDb.collection('materialMasterDB3');
+        const masterDocs = await masterCollection.find({ "品番": { $in: hinbans } }).toArray();
+
+        const masterMap = {};
+        masterDocs.forEach(doc => {
+          let kizai = '';
+          let color = '';
+          if (doc['品番構造'] && Array.isArray(doc['品番構造'].segments)) {
+            const kizaiSeg = doc['品番構造'].segments.find(s => s.segment === '基材コード');
+            if (kizaiSeg) kizai = kizaiSeg.name || kizaiSeg['得意先'] || kizaiSeg['入出荷先'] || '';
+
+            const colorSeg = doc['品番構造'].segments.find(s => s.segment === '色コード');
+            if (colorSeg) color = colorSeg.name || colorSeg['得意先'] || colorSeg['入出荷先'] || '';
+          }
+          masterMap[doc['品番']] = {
+            hinmei: doc['品目マスタ']?.['品名'] || '',
+            kizai,
+            color
+          };
+        });
+
+        schedule.scheduleOrder = schedule.scheduleOrder.map(item => {
+          if (item.type === 'hinban' && item.hinban) {
+            const info = masterMap[item.hinban] || {};
+            return {
+              ...item,
+              kizai: info.kizai || '',
+              color: info.color || '',
+              hinmei: info.hinmei || ''
+            };
+          }
+          return item;
+        });
+      }
+    }
+
     res.json({ success: true, schedule: schedule || null });
   } catch (error) {
     console.error('❌ Error in /api/production/schedule/daily:', error);

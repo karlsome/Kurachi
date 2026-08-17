@@ -476,6 +476,8 @@ function renderScheduleList(items, startTimeStr) {
             // Hinban Item
             const rollText = item.totalRolls ? `${item.rollIndex} / ${item.totalRolls} 巻き` : `Roll ${item.rollIndex || 1}`;
             const metersText = item.meters ? `${item.meters} m` : '';
+            const kizaiBadge = item.kizai ? `<span class="tag-pill kizai-tag" title="基材コード: ${item.kizai}">基材: ${item.kizai}</span>` : '';
+            const colorBadge = item.color ? `<span class="tag-pill color-tag" title="色コード: ${item.color}">色: ${item.color}</span>` : '';
 
             html += `
                 <div class="schedule-item-card ${isGroupTinted ? 'group-tinted' : ''} ${isSelected ? 'selected' : ''}" 
@@ -489,10 +491,15 @@ function renderScheduleList(items, startTimeStr) {
                         </div>
                     </div>
                     <div class="item-center-col">
-                        <div class="hinban-title">${item.hinban || '---'}</div>
+                        <div class="hinban-row">
+                            <div class="hinban-title">${item.hinban || '---'}</div>
+                            ${kizaiBadge}
+                            ${colorBadge}
+                        </div>
                         <div class="meta-tags-row">
                             <span class="tag-pill roll-tag">${rollText}</span>
                             ${metersText ? `<span class="tag-pill meter-tag">${metersText}</span>` : ''}
+                            ${item.hinmei ? `<span class="tag-pill" style="color: var(--text-soft); font-weight: 600;">${item.hinmei}</span>` : ''}
                         </div>
                     </div>
                     <div class="item-right-col">
