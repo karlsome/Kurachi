@@ -778,6 +778,27 @@
             transform: translateY(-1px);
         }
 
+        /* Alternating subtle hint of color for same-hinban groups */
+        .schedule-item-card.group-tinted {
+            background-color: #EEF3FA;
+            border-color: #D3DEEE;
+        }
+
+        .schedule-item-card.group-tinted .order-badge {
+            background-color: #DEE7F4;
+            border-color: #CAD7EB;
+        }
+
+        .schedule-item-card.group-tinted .duration-pill {
+            background-color: #E2ECF7;
+            border-color: #CAD7EB;
+        }
+
+        .schedule-item-card.group-tinted:hover {
+            border-color: var(--blue);
+            background-color: #E7EEF8;
+        }
+
         .schedule-item-card.selected {
             border-color: var(--brand);
             background-color: #F8FCFA;

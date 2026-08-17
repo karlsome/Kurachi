@@ -434,14 +434,24 @@ function renderScheduleList(items, startTimeStr) {
     updateScheduleStats(items, startTimeStr);
 
     let html = '';
+    let currentHinbanKey = null;
+    let groupIndex = -1;
 
     items.forEach((item, index) => {
         const isSelected = state.selectedItem && state.selectedItem.id === item.id;
         const isSetup = item.type === 'setup';
 
+        // Grouping key: setup items get unique group or their own key, hinbans get grouped by hinban
+        const itemKey = isSetup ? `setup_${item.id || index}` : (item.hinban || `item_${index}`);
+        if (itemKey !== currentHinbanKey) {
+            currentHinbanKey = itemKey;
+            groupIndex++;
+        }
+        const isGroupTinted = (groupIndex % 2 === 0);
+
         if (isSetup) {
             html += `
-                <div class="schedule-item-card setup-item ${isSelected ? 'selected' : ''}" 
+                <div class="schedule-item-card setup-item ${isGroupTinted ? 'group-tinted' : ''} ${isSelected ? 'selected' : ''}" 
                      data-id="${item.id}" 
                      onclick="selectScheduleItem(${index})">
                     <div class="item-left-col">
@@ -468,7 +478,7 @@ function renderScheduleList(items, startTimeStr) {
             const metersText = item.meters ? `${item.meters} m` : '';
 
             html += `
-                <div class="schedule-item-card ${isSelected ? 'selected' : ''}" 
+                <div class="schedule-item-card ${isGroupTinted ? 'group-tinted' : ''} ${isSelected ? 'selected' : ''}" 
                      data-id="${item.id}" 
                      onclick="selectScheduleItem(${index})">
                     <div class="item-left-col">
