@@ -34111,6 +34111,25 @@ app.post("/api/analytics/stop-calls", async (req, res) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// First Factory Daily Schedule API (for firstKojoNippo Tablet & Nippo)
+// ---------------------------------------------------------------------------
+app.get('/api/production/schedule/daily', async (req, res) => {
+  try {
+    const { month, date } = req.query;
+    if (!month || date === undefined) {
+      return res.status(400).json({ error: 'month and date are required' });
+    }
+    const submittedDb = client.db('submittedDB');
+    const scheduleCollection = submittedDb.collection('firstFactorySchedule');
+    const schedule = await scheduleCollection.findOne({ type: 'dailySchedule', month, date: Number(date) });
+    res.json({ success: true, schedule: schedule || null });
+  } catch (error) {
+    console.error('❌ Error in /api/production/schedule/daily:', error);
+    res.status(500).json({ error: 'Failed to fetch daily schedule' });
+  }
+});
+
 require('./firstFactoryRoutes')(app, client);
 
 app.listen(port, () => {

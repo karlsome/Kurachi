@@ -635,6 +635,332 @@
             cursor: pointer;
             box-shadow: 0 2px 4px rgba(0,0,0,0.2);
         }
+
+        /* ---------------- List Tab (Schedule) - 10" Portrait Tablet ---------------- */
+        .schedule-header-card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: var(--card-radius);
+            padding: 16px 18px;
+            margin-bottom: 16px;
+            box-shadow: var(--shadow-card);
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        .date-nav-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .date-picker-wrap {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex: 1;
+            min-width: 260px;
+        }
+
+        .date-input {
+            min-height: 44px;
+            padding: 8px 12px;
+            background: var(--bg-subtle);
+            border: 1.5px solid var(--border-strong);
+            border-radius: var(--btn-radius);
+            color: var(--text-main);
+            font-family: inherit;
+            font-size: 1rem;
+            font-weight: 700;
+            outline: none;
+            cursor: pointer;
+            flex: 1;
+        }
+
+        .date-input:focus {
+            border-color: var(--blue);
+            background: var(--bg-surface);
+        }
+
+        .date-nav-btn {
+            min-width: 44px;
+            height: 44px;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-strong);
+            border-radius: var(--btn-radius);
+            color: var(--text-main);
+            font-weight: 800;
+            font-size: 1.1rem;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: var(--transition-smooth);
+            padding: 0 12px;
+        }
+
+        .date-nav-btn:hover {
+            border-color: var(--blue);
+            color: var(--blue);
+        }
+
+        .date-nav-btn.today-btn {
+            font-size: 0.85rem;
+            font-weight: 700;
+            background: var(--blue-soft);
+            border-color: var(--blue);
+            color: var(--blue);
+        }
+
+        .schedule-stats-bar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            overflow-x: auto;
+            padding-bottom: 2px;
+        }
+
+        .stat-chip {
+            background: var(--bg-subtle);
+            border: 1px solid var(--border);
+            border-radius: var(--r-pill);
+            padding: 6px 12px;
+            font-size: 0.825rem;
+            font-weight: 700;
+            color: var(--text-muted);
+            white-space: nowrap;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .stat-chip strong {
+            color: var(--text-main);
+            font-weight: 800;
+        }
+
+        .stat-chip.brand-chip {
+            background: var(--brand-soft);
+            border-color: rgba(31, 157, 107, 0.3);
+            color: var(--brand);
+        }
+
+        .stat-chip.brand-chip strong {
+            color: var(--brand);
+        }
+
+        .schedule-list-container {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .schedule-item-card {
+            background: var(--bg-surface);
+            border: 1.5px solid var(--border);
+            border-radius: var(--card-radius);
+            padding: 16px 18px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            box-shadow: var(--shadow-card);
+            cursor: pointer;
+            transition: all var(--transition-smooth);
+            position: relative;
+        }
+
+        .schedule-item-card:hover {
+            border-color: var(--blue);
+            transform: translateY(-1px);
+        }
+
+        .schedule-item-card.selected {
+            border-color: var(--brand);
+            background-color: #F8FCFA;
+            box-shadow: 0 4px 12px rgba(31, 157, 107, 0.12);
+        }
+
+        .schedule-item-card.selected::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 5px;
+            background: var(--brand);
+            border-radius: var(--card-radius) 0 0 var(--card-radius);
+        }
+
+        .item-left-col {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            flex-shrink: 0;
+        }
+
+        .order-badge {
+            width: 44px;
+            height: 44px;
+            border-radius: 10px;
+            background: var(--bg-inset);
+            border: 1px solid var(--border-strong);
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.1rem;
+            font-weight: 900;
+            letter-spacing: -0.02em;
+            flex-shrink: 0;
+        }
+
+        .schedule-item-card.selected .order-badge {
+            background: var(--brand);
+            border-color: var(--brand);
+            color: #FFFFFF;
+        }
+
+        .time-box {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+
+        .time-range {
+            font-size: 1.05rem;
+            font-weight: 800;
+            letter-spacing: -0.01em;
+            color: var(--text-main);
+            font-variant-numeric: tabular-nums;
+        }
+
+        .duration-pill {
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: var(--text-muted);
+            background: var(--bg-subtle);
+            border: 1px solid var(--border);
+            padding: 2px 6px;
+            border-radius: 4px;
+            display: inline-block;
+            width: fit-content;
+        }
+
+        .item-center-col {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .hinban-title {
+            font-size: 1.15rem;
+            font-weight: 900;
+            color: var(--text-main);
+            letter-spacing: -0.01em;
+            word-break: break-all;
+            line-height: 1.25;
+        }
+
+        .meta-tags-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .tag-pill {
+            font-size: 0.8rem;
+            font-weight: 700;
+            padding: 3px 8px;
+            border-radius: 6px;
+            background: var(--bg-inset);
+            color: var(--text-muted);
+            border: 1px solid var(--border);
+            white-space: nowrap;
+        }
+
+        .tag-pill.roll-tag {
+            background: var(--blue-soft);
+            color: var(--blue);
+            border-color: rgba(46, 111, 242, 0.25);
+            font-weight: 800;
+        }
+
+        .tag-pill.meter-tag {
+            background: var(--amber-soft);
+            color: var(--amber);
+            border-color: rgba(224, 144, 14, 0.25);
+            font-weight: 800;
+        }
+
+        .item-right-col {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+
+        .btn-select-item {
+            min-height: 38px;
+            padding: 0 16px;
+            font-size: 0.875rem;
+            font-weight: 800;
+            border-radius: var(--btn-radius);
+            background: var(--bg-surface);
+            border: 1.5px solid var(--border-strong);
+            color: var(--text-main);
+            cursor: pointer;
+            transition: var(--transition-smooth);
+        }
+
+        .btn-select-item:hover,
+        .schedule-item-card.selected .btn-select-item {
+            background: var(--brand);
+            border-color: var(--brand);
+            color: #FFFFFF;
+        }
+
+        /* Setup / Break Item Card */
+        .schedule-item-card.setup-item {
+            background: #FFFDF9;
+            border-color: rgba(224, 144, 14, 0.35);
+        }
+
+        .schedule-item-card.setup-item .order-badge {
+            background: var(--amber-soft);
+            border-color: rgba(224, 144, 14, 0.4);
+            color: var(--amber);
+        }
+
+        .schedule-item-card.setup-item .hinban-title {
+            color: var(--amber);
+        }
+
+        .loading-skeleton {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .skeleton-row {
+            height: 76px;
+            background: linear-gradient(90deg, var(--bg-surface) 25%, var(--bg-subtle) 50%, var(--bg-surface) 75%);
+            background-size: 200% 100%;
+            animation: skeletonLoading 1.5s infinite;
+            border-radius: var(--card-radius);
+            border: 1px solid var(--border);
+        }
+
+        @keyframes skeletonLoading {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
     </style>
 </head>
 
@@ -732,13 +1058,44 @@
 
             <!-- Panel 1: List -->
             <div class="tab-panel" id="panelList">
-                <div class="card">
-                    <h2>生産一覧 (Production List)</h2>
-                    <div class="placeholder-state">
-                        <svg viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
-                        <h3>List Tab</h3>
-                        <p>Production schedule and lot list items will be displayed here.</p>
+                <!-- Date & Schedule Controls -->
+                <div class="schedule-header-card">
+                    <div class="date-nav-row">
+                        <div class="date-picker-wrap">
+                            <button type="button" class="date-nav-btn" id="btnPrevDay" title="前日 (Previous Day)">‹</button>
+                            <input type="date" id="scheduleDateInput" class="date-input" title="日付選択 (Select Date)">
+                            <button type="button" class="date-nav-btn" id="btnNextDay" title="翌日 (Next Day)">›</button>
+                        </div>
+                        <div style="display: flex; gap: 8px;">
+                            <button type="button" class="date-nav-btn today-btn" id="btnToday">今日 (Today)</button>
+                            <button type="button" class="date-nav-btn" id="btnRefreshSchedule" title="再読み込み (Refresh)">↻</button>
+                        </div>
                     </div>
+
+                    <!-- Stats / Overview Bar -->
+                    <div class="schedule-stats-bar" id="scheduleStatsBar">
+                        <div class="stat-chip brand-chip" id="chipTotalItems">
+                            <span>全ロット:</span>
+                            <strong id="statTotalItemsVal">0 件</strong>
+                        </div>
+                        <div class="stat-chip" id="chipStartTime">
+                            <span>🕒 始業:</span>
+                            <strong id="statStartTimeVal">08:00</strong>
+                        </div>
+                        <div class="stat-chip" id="chipTotalDuration">
+                            <span>⏱️ 予定時間:</span>
+                            <strong id="statTotalDurationVal">0 分</strong>
+                        </div>
+                        <div class="stat-chip" id="chipEndTime">
+                            <span>🏁 終了目安:</span>
+                            <strong id="statEndTimeVal">--:--</strong>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Schedule Items List -->
+                <div class="schedule-list-container" id="scheduleListContainer">
+                    <!-- Dynamic Schedule items injected here -->
                 </div>
             </div>
 
