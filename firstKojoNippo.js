@@ -24,7 +24,13 @@ const state = {
     selectedDate: sessionStorage.getItem('firstkojo_nippo_date') || getTodayDateString(),
     dailySchedule: null,
     scheduledItems: [],
-    selectedItem: null,
+    selectedItem: (() => {
+        try {
+            return JSON.parse(sessionStorage.getItem('firstkojo_nippo_selected_item') || 'null');
+        } catch {
+            return null;
+        }
+    })(),
     isLoadingSchedule: false,
 };
 
@@ -301,6 +307,9 @@ function switchMainTab(index) {
     if (index === 1) {
         fetchDailySchedule(state.selectedDate);
     }
+    if (index === 2) {
+        loadItemDetail(state.selectedItem);
+    }
 }
 
 // -----------------------------------------------------
@@ -548,6 +557,290 @@ function selectScheduleItem(index) {
             if (btn) btn.textContent = '選択';
         }
     });
+
+    // Jump to Info tab (tab index 2) and load full details
+    switchMainTab(2);
+    loadItemDetail(item);
+}
+
+// -----------------------------------------------------
+// Info Tab: Load & Render Product and Ingredient Details
+// -----------------------------------------------------
+async function loadItemDetail(item) {
+    const container = document.getElementById('infoTabContainer');
+    if (!container) return;
+
+    if (!item || item.type !== 'hinban' || !item.hinban) {
+        if (item && item.type === 'setup') {
+            container.innerHTML = `
+                <div class="info-card">
+                    <div class="info-card-header">
+                        <div>
+                            <span class="info-badge-title" style="background: var(--amber-soft); color: var(--amber);">段取り (Setup)</span>
+                            <div class="info-main-title">⚙️ ${item.name || '段取り / 段替'}</div>
+                            <div class="info-sub-title">所要時間: <strong>${item.duration} 分</strong> | 予定時間: ${item.startTime} - ${item.endTime}</div>
+                        </div>
+                    </div>
+                    <div class="info-sub-section">
+                        <p style="color: var(--text-muted); font-size: 0.95rem;">金型の交換、材料のセッティング、初期調整を行ってください。</p>
+                    </div>
+                </div>
+            `;
+            return;
+        }
+        container.innerHTML = `
+            <div class="card">
+                <h2>指示・詳細情報 (Information & Instructions)</h2>
+                <div class="placeholder-state">
+                    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                    <h3>ロットが選択されていません (No Lot Selected)</h3>
+                    <p>生産一覧 (List) タブから対象のロットを選択すると、品番構造や構成材料の詳細情報が表示されます。</p>
+                    <button type="button" class="btn btn-primary" style="margin-top: 16px;" onclick="switchMainTab(1)">一覧へ戻る (Go to List)</button>
+                </div>
+            </div>
+        `;
+        return;
+    }
+
+    // Show loading skeleton
+    container.innerHTML = `
+        <div class="loading-skeleton">
+            <div class="skeleton-row" style="height: 140px;"></div>
+            <div class="skeleton-row" style="height: 200px;"></div>
+            <div class="skeleton-row" style="height: 200px;"></div>
+        </div>
+    `;
+
+    try {
+        const res = await fetch(`${serverURL}/api/production/material-detail?hinban=${encodeURIComponent(item.hinban)}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (data.success) {
+            renderInfoTab(data, item);
+        } else {
+            throw new Error(data.error || 'Failed to load details');
+        }
+    } catch (err) {
+        console.error("Error loading material detail:", err);
+        container.innerHTML = `
+            <div class="placeholder-state">
+                <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                <h3>詳細情報の取得に失敗しました (Error Loading Details)</h3>
+                <p>${err.message || 'Failed to fetch'}</p>
+                <button type="button" class="btn btn-secondary" style="margin-top: 15px;" onclick="loadItemDetail(state.selectedItem)">再試行 (Retry)</button>
+            </div>
+        `;
+    }
+}
+
+function renderInfoTab(data, item) {
+    const container = document.getElementById('infoTabContainer');
+    if (!container) return;
+
+    const product = data.product || {};
+    const bomData = data.bom || [];
+    const ingredient = data.ingredient || null;
+    const ingredientHinban = data.ingredientHinban || 'N/A';
+
+    const productSegments = product['品番構造']?.segments || [];
+    const productMaster = product['品目マスタ'] || {};
+    const process2010 = Array.isArray(bomData) ? bomData.find(b => b['工程コード'] === 2010) : null;
+
+    // --- Part 1: Product Structure Chips ---
+    let productStructureHTML = '';
+    if (productSegments.length > 0) {
+        productStructureHTML = productSegments.map(s => {
+            const val = s.name || s['得意先'] || s['入出荷先'];
+            if (!val) return '';
+            return `
+                <div class="structure-chip">
+                    <span class="structure-chip-label">${s.segment}</span>
+                    <span class="structure-chip-val">${val}</span>
+                </div>
+            `;
+        }).join('');
+    }
+
+    // Product Master Data Items
+    const masterFields = [
+        { label: '梱包数 (Pack Qty)', val: productMaster['梱包数'] },
+        { label: '生産単位数 (Prod Unit)', val: productMaster['生産単位数'] },
+        { label: '発注ロット数 (Order Lot)', val: productMaster['発注ロット数'] },
+        { label: '品目区分 (Category)', val: productMaster['品目区分'] },
+        { label: '出荷先名 (Shipping Dest)', val: productMaster['出荷先名'] },
+        { label: '受注先コード (Customer Code)', val: productMaster['受注先コード'] },
+        { label: '図番 (Drawing No.)', val: productMaster['図番'] },
+        { label: '仕様 (Specs)', val: productMaster['仕様'] },
+        { label: '型番 (Model)', val: productMaster['型番'] },
+        { label: '速度 (Speed)', val: productMaster['速度'] },
+        { label: 'ライン形態 (Line Form)', val: productMaster['ライン形態'] },
+        { label: '繰出機 (Unwinder)', val: productMaster['繰出機'] },
+        { 
+            label: '接着剤有無 (Adhesive)', 
+            val: productMaster['接着剤有無'] === 1 ? '有 (Yes)' : productMaster['接着剤有無'] === 2 ? '無 (No)' : productMaster['接着剤有無'] 
+        },
+        { label: 'クリーン度 (Cleanliness)', val: productMaster['クリーン度'] },
+        { label: '乾燥温度 (Dry Temp)', val: productMaster['乾燥温度'] },
+        { label: 'ロール温度 (Roll Temp)', val: productMaster['ロール温度'] },
+        { label: '基材厚 (Base Thick)', val: productMaster['基材厚'] },
+        { label: '基材幅 (Base Width)', val: productMaster['基材幅'] },
+        { label: '基材長 (Base Length)', val: productMaster['基材長'] },
+        { label: '粘着剤厚 (Adhesive Thick)', val: productMaster['粘着剤厚'] },
+        { label: '粘着剤幅 (Adhesive Width)', val: productMaster['粘着剤幅'] },
+        { label: '粘着剤長 (Adhesive Length)', val: productMaster['粘着剤長'] },
+        { label: '粘着倍率 (Adhesive Ratio)', val: productMaster['粘着倍率'] },
+    ];
+
+    const masterDataHTML = masterFields.filter(f => f.val !== undefined && f.val !== null && f.val !== '').map(f => `
+        <div class="master-data-item">
+            <span class="master-data-label">${f.label}</span>
+            <span class="master-data-val">${f.val}</span>
+        </div>
+    `).join('');
+
+    // --- Part 2: Ingredient (材料・構成品番) ---
+    let ingredientHTML = '';
+    if (ingredient) {
+        const ingSegments = ingredient['品番構造']?.segments || [];
+        const ingMaster = ingredient['品目マスタ'] || {};
+
+        let ingStructureHTML = '';
+        if (ingSegments.length > 0) {
+            ingStructureHTML = ingSegments.map(s => {
+                const val = s.name || s['得意先'] || s['入出荷先'];
+                if (!val) return '';
+                return `
+                    <div class="structure-chip" style="border-color: rgba(109, 40, 217, 0.25); background: #FAF5FF;">
+                        <span class="structure-chip-label" style="color: #7E22CE;">${s.segment}</span>
+                        <span class="structure-chip-val">${val}</span>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        const ingFields = [
+            { label: '品目区分 (Category)', val: ingMaster['品目区分'] },
+            { label: '手配先コード (Supplier)', val: ingMaster['手配先コード'] },
+            { label: '生産単位数 (Prod Unit)', val: ingMaster['生産単位数'] },
+            { label: '発注ロット数 (Order Lot)', val: ingMaster['発注ロット数'] },
+            { label: '出荷先名 (Shipping Dest)', val: ingMaster['出荷先名'] },
+            { label: '仕様 (Specs)', val: ingMaster['仕様'] },
+            { label: '型番 (Model)', val: ingMaster['型番'] },
+            { 
+                label: '接着剤有無 (Adhesive)', 
+                val: ingMaster['接着剤有無'] === 1 ? '有 (Yes)' : ingMaster['接着剤有無'] === 2 ? '無 (No)' : ingMaster['接着剤有無'] 
+            },
+            { label: '基材厚 (Base Thick)', val: ingMaster['基材厚'] },
+            { label: '基材幅 (Base Width)', val: ingMaster['基材幅'] },
+            { label: '基材長 (Base Length)', val: ingMaster['基材長'] },
+            { label: '粘着剤厚 (Adhesive Thick)', val: ingMaster['粘着剤厚'] },
+            { label: '粘着剤幅 (Adhesive Width)', val: ingMaster['粘着剤幅'] },
+            { label: '粘着剤長 (Adhesive Length)', val: ingMaster['粘着剤長'] },
+        ];
+
+        const ingDataHTML = ingFields.filter(f => f.val !== undefined && f.val !== null && f.val !== '').map(f => `
+            <div class="master-data-item">
+                <span class="master-data-label">${f.label}</span>
+                <span class="master-data-val">${f.val}</span>
+            </div>
+        `).join('');
+
+        ingredientHTML = `
+            <div class="ingredient-section-card">
+                <div class="info-card-header" style="border-color: rgba(109, 40, 217, 0.2);">
+                    <div>
+                        <span class="info-badge-title material-badge">構成材料・原材料 (Ingredient / Material)</span>
+                        <div class="info-main-title" style="color: #6D28D9;">${ingredient['品番']}</div>
+                        <div class="info-sub-title">${ingMaster['品名'] || ''} ${ingMaster['仕様'] ? `— ${ingMaster['仕様']}` : ''}</div>
+                    </div>
+                </div>
+
+                ${ingStructureHTML ? `
+                    <div class="info-sub-section">
+                        <div class="info-sub-section-title" style="color: #6D28D9;">材料品番構造 (Material Structure)</div>
+                        <div class="structure-grid">${ingStructureHTML}</div>
+                    </div>
+                ` : ''}
+
+                ${ingDataHTML ? `
+                    <div class="info-sub-section">
+                        <div class="info-sub-section-title" style="color: #6D28D9;">材料マスタ (Material Master Data)</div>
+                        <div class="master-data-grid">${ingDataHTML}</div>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    } else if (ingredientHinban && ingredientHinban !== 'N/A') {
+        ingredientHTML = `
+            <div class="ingredient-section-card">
+                <div class="info-card-header" style="border-color: rgba(109, 40, 217, 0.2);">
+                    <div>
+                        <span class="info-badge-title material-badge">構成材料・原材料 (Ingredient / Material)</span>
+                        <div class="info-main-title" style="color: #6D28D9;">${ingredientHinban}</div>
+                    </div>
+                </div>
+                <p style="color: var(--text-muted); font-size: 0.9rem;">材料マスタの詳細は未登録です。</p>
+            </div>
+        `;
+    }
+
+    container.innerHTML = `
+        <!-- PART 1: Top Part - Product Info -->
+        <div class="info-card">
+            <div class="info-card-header">
+                <div>
+                    <span class="info-badge-title product-badge">製品情報 (Product Info)</span>
+                    <div class="info-main-title">${item.hinban}</div>
+                    <div class="info-sub-title">${productMaster['品名'] || item.hinmei || ''} ${productMaster['仕様'] ? `— ${productMaster['仕様']}` : ''}</div>
+                </div>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                    <span class="tag-pill roll-tag" style="font-size: 0.9rem; padding: 6px 12px;">Roll ${item.rollIndex || 1} / ${item.totalRolls || 1}</span>
+                    <span class="tag-pill meter-tag" style="font-size: 0.9rem; padding: 6px 12px;">${item.meters || 0} m</span>
+                    <span class="tag-pill" style="font-size: 0.9rem; padding: 6px 12px; font-weight: 800;">${item.startTime} - ${item.endTime}</span>
+                </div>
+            </div>
+
+            <!-- Structure Segments -->
+            ${productStructureHTML ? `
+                <div class="info-sub-section">
+                    <div class="info-sub-section-title">品番構造 (Structure)</div>
+                    <div class="structure-grid">${productStructureHTML}</div>
+                </div>
+            ` : ''}
+
+            <!-- Process 2010 Data -->
+            ${process2010 ? `
+                <div class="info-sub-section">
+                    <div class="info-sub-section-title">工程データ (Process Data - 2010)</div>
+                    <div class="process-cards-grid">
+                        <div class="process-stat-card">
+                            <span class="process-stat-label">作業時間 (Work Time)</span>
+                            <span class="process-stat-val">${process2010['作業時間'] ?? 'N/A'}</span>
+                        </div>
+                        <div class="process-stat-card">
+                            <span class="process-stat-label">段取時間 (Setup Time)</span>
+                            <span class="process-stat-val">${process2010['段取時間'] ?? 'N/A'}</span>
+                        </div>
+                        <div class="process-stat-card">
+                            <span class="process-stat-label">型番 (Model)</span>
+                            <span class="process-stat-val">${process2010['型番'] ?? 'N/A'}</span>
+                        </div>
+                    </div>
+                </div>
+            ` : ''}
+
+            <!-- Master Data -->
+            ${masterDataHTML ? `
+                <div class="info-sub-section">
+                    <div class="info-sub-section-title">製品マスタ (Product Master Data)</div>
+                    <div class="master-data-grid">${masterDataHTML}</div>
+                </div>
+            ` : ''}
+        </div>
+
+        <!-- PART 2: Next Part - Ingredient Info -->
+        ${ingredientHTML}
+    `;
 }
 
 // -----------------------------------------------------

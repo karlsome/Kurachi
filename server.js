@@ -34171,6 +34171,62 @@ app.get('/api/production/schedule/daily', async (req, res) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// First Factory Material & Ingredient Detail API
+// ---------------------------------------------------------------------------
+app.get('/api/production/material-detail', async (req, res) => {
+  try {
+    const { hinban } = req.query;
+    if (!hinban) {
+      return res.status(400).json({ error: 'hinban is required' });
+    }
+    const masterDb = client.db('Sasaki_Coating_MasterDB');
+    const masterCollection = masterDb.collection('materialMasterDB3');
+    const bomCollection = masterDb.collection('bomMasterDB');
+
+    // 1. Fetch product master
+    const productDoc = await masterCollection.findOne({ "品番": hinban });
+
+    // 2. Fetch BOM data
+    let bomData = productDoc?.BOM || null;
+    if (!bomData) {
+      const bomDoc = await bomCollection.findOne({ "品番": hinban });
+      if (bomDoc && bomDoc.BOM) {
+        bomData = bomDoc.BOM;
+      }
+    }
+
+    // 3. Fetch Ingredient / Material Master (e.g. process 1010 or first 構成品番)
+    let ingredientDoc = null;
+    let ingredientHinban = null;
+
+    if (Array.isArray(bomData)) {
+      const bom1010 = bomData.find(b => b['工程コード'] === 1010 && b['構成品番']);
+      if (bom1010) {
+        ingredientHinban = bom1010['構成品番'];
+      } else {
+        const anyBom = bomData.find(b => b['構成品番'] && b['構成品番'] !== hinban);
+        if (anyBom) ingredientHinban = anyBom['構成品番'];
+      }
+    }
+
+    if (ingredientHinban) {
+      ingredientDoc = await masterCollection.findOne({ "品番": ingredientHinban });
+    }
+
+    res.json({
+      success: true,
+      product: productDoc,
+      bom: bomData,
+      ingredient: ingredientDoc,
+      ingredientHinban: ingredientHinban || null
+    });
+  } catch (error) {
+    console.error('❌ Error in /api/production/material-detail:', error);
+    res.status(500).json({ error: 'Failed to fetch material detail' });
+  }
+});
+
 require('./firstFactoryRoutes')(app, client);
 
 app.listen(port, () => {

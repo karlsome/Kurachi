@@ -970,6 +970,203 @@
             color: #FFFFFF;
         }
 
+        /* ---------------- Info Tab Styling ---------------- */
+        .info-layout-container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .info-card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: var(--card-radius);
+            padding: 22px;
+            box-shadow: var(--shadow-card);
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .info-card-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 16px;
+            border-bottom: 1.5px solid var(--border);
+            padding-bottom: 16px;
+            flex-wrap: wrap;
+        }
+
+        .info-badge-title {
+            font-size: 0.75rem;
+            font-weight: 800;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            padding: 4px 10px;
+            border-radius: var(--r-pill);
+            display: inline-block;
+            margin-bottom: 6px;
+        }
+
+        .info-badge-title.product-badge {
+            background: var(--brand-soft);
+            color: var(--brand);
+        }
+
+        .info-badge-title.material-badge {
+            background: #EDE9FE;
+            color: #6D28D9;
+        }
+
+        .info-main-title {
+            font-size: 1.35rem;
+            font-weight: 900;
+            color: var(--text-main);
+            letter-spacing: -0.02em;
+            word-break: break-all;
+        }
+
+        .info-sub-title {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        .info-sub-section {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .info-sub-section-title {
+            font-size: 0.8rem;
+            font-weight: 800;
+            color: var(--text-muted);
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .structure-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .structure-chip {
+            background: var(--bg-subtle);
+            border: 1px solid var(--border-strong);
+            border-radius: var(--btn-radius);
+            padding: 8px 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+            min-width: 100px;
+        }
+
+        .structure-chip-label {
+            font-size: 0.7rem;
+            font-weight: 700;
+            color: var(--text-muted);
+        }
+
+        .structure-chip-val {
+            font-size: 0.95rem;
+            font-weight: 800;
+            color: var(--text-main);
+        }
+
+        .process-cards-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 12px;
+        }
+
+        .process-stat-card {
+            background: var(--blue-soft);
+            border: 1px solid rgba(46, 111, 242, 0.2);
+            border-radius: var(--btn-radius);
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .process-stat-label {
+            font-size: 0.72rem;
+            font-weight: 700;
+            color: var(--blue);
+        }
+
+        .process-stat-val {
+            font-size: 1.15rem;
+            font-weight: 900;
+            color: var(--text-main);
+        }
+
+        .master-data-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+            gap: 10px;
+        }
+
+        .master-data-item {
+            background: var(--bg-subtle);
+            border: 1px solid var(--border);
+            border-radius: var(--btn-radius);
+            padding: 8px 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .master-data-label {
+            font-size: 0.68rem;
+            font-weight: 700;
+            color: var(--text-muted);
+        }
+
+        .master-data-val {
+            font-size: 0.9rem;
+            font-weight: 800;
+            color: var(--text-main);
+            word-break: break-all;
+        }
+
+        /* Material Highlight Box inside Product Info */
+        .ingredient-callout-card {
+            background: linear-gradient(135deg, #F8FAFC 0%, #EFF6FF 100%);
+            border: 1.5px solid #BFDBFE;
+            border-radius: var(--card-radius);
+            padding: 16px 18px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 14px;
+            cursor: pointer;
+            transition: var(--transition-smooth);
+        }
+
+        .ingredient-callout-card:hover {
+            border-color: var(--blue);
+            box-shadow: 0 4px 12px rgba(46, 111, 242, 0.12);
+        }
+
+        .ingredient-section-card {
+            background: #FCFDFF;
+            border: 1.5px solid #C7D2FE;
+            border-radius: var(--card-radius);
+            padding: 22px;
+            box-shadow: var(--shadow-card);
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
         /* Setup / Break Item Card */
         .schedule-item-card.setup-item {
             background: #FFFDF9;
@@ -1145,12 +1342,15 @@
 
             <!-- Panel 2: Info -->
             <div class="tab-panel" id="panelInfo">
-                <div class="card">
-                    <h2>指示・詳細情報 (Information & Instructions)</h2>
-                    <div class="placeholder-state">
-                        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-                        <h3>Info Tab</h3>
-                        <p>Work instructions, item specifications, and drawings will be displayed here.</p>
+                <div class="info-layout-container" id="infoTabContainer">
+                    <div class="card">
+                        <h2>指示・詳細情報 (Information & Instructions)</h2>
+                        <div class="placeholder-state">
+                            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                            <h3>ロットが選択されていません (No Lot Selected)</h3>
+                            <p>生産一覧 (List) タブから対象のロットを選択すると、品番構造や構成材料の詳細情報が表示されます。</p>
+                            <button type="button" class="btn btn-primary" style="margin-top: 16px;" onclick="switchMainTab(1)">一覧へ戻る (Go to List)</button>
+                        </div>
                     </div>
                 </div>
             </div>
