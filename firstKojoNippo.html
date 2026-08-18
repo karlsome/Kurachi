@@ -1995,6 +1995,17 @@
         </div>
     </div>
 
+    <!-- Printing Progress Modal -->
+    <div id="printProgressModal" class="modal">
+        <div style="background: var(--bg-surface); border: 1.5px solid var(--border); border-radius: var(--card-radius); padding: 26px 24px; max-width: 400px; width: 88%; text-align: center; position: relative; box-shadow: var(--shadow-pop);">
+            <button type="button" onclick="closePrintProgressModal(true)" style="position: absolute; top: 12px; right: 14px; background: transparent; border: none; font-size: 1.3rem; color: var(--text-soft); cursor: pointer; line-height: 1; padding: 6px;" title="閉じる">✕</button>
+            <div id="printModalIcon" style="font-size: 2.8rem; margin-bottom: 12px;">🖨️</div>
+            <h3 id="printModalTitle" style="font-size: 1.2rem; font-weight: 900; color: var(--text-main); margin-bottom: 6px;">印刷中...</h3>
+            <p id="printModalDetail" style="font-size: 0.95rem; font-weight: 800; color: var(--blue); margin-bottom: 10px;">1 / 3 巻き</p>
+            <p id="printModalSub" style="font-size: 0.8rem; color: var(--text-muted); line-height: 1.4;">プリンターに印刷データを送信しています。<br>しばらくお待ちください。</p>
+        </div>
+    </div>
+
     <!-- Script imports -->
     <script src="firstKojoNippo.js"></script>
 </body>

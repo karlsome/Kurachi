@@ -704,6 +704,59 @@ async function logPrintToServer(group, rollItem, rollIndex, totalRolls, fields) 
     }
 }
 
+let isPrintCancelled = false;
+
+function showPrintProgressModal(title, detailText) {
+    isPrintCancelled = false;
+    const modal = document.getElementById('printProgressModal');
+    const titleEl = document.getElementById('printModalTitle');
+    const detailEl = document.getElementById('printModalDetail');
+    const iconEl = document.getElementById('printModalIcon');
+    const subEl = document.getElementById('printModalSub');
+
+    if (titleEl) titleEl.textContent = title || '印刷中...';
+    if (detailEl) detailEl.textContent = detailText || '';
+    if (iconEl) iconEl.textContent = '🖨️';
+    if (subEl) subEl.innerHTML = 'プリンターに印刷データを送信しています。<br>しばらくお待ちください。';
+
+    if (modal) {
+        modal.classList.add('open', 'active');
+        modal.style.display = 'flex';
+    }
+}
+
+function updatePrintProgressModal(detailText) {
+    const detailEl = document.getElementById('printModalDetail');
+    if (detailEl) detailEl.textContent = detailText;
+}
+
+function finishPrintProgressModal(successMessage) {
+    const titleEl = document.getElementById('printModalTitle');
+    const detailEl = document.getElementById('printModalDetail');
+    const iconEl = document.getElementById('printModalIcon');
+    const subEl = document.getElementById('printModalSub');
+
+    if (iconEl) iconEl.textContent = '✅';
+    if (titleEl) titleEl.textContent = '印刷完了';
+    if (detailEl) detailEl.textContent = successMessage || '正常に印刷されました';
+    if (subEl) subEl.textContent = '';
+
+    setTimeout(() => {
+        closePrintProgressModal(false);
+    }, 700);
+}
+
+function closePrintProgressModal(userDismissed) {
+    if (userDismissed) {
+        isPrintCancelled = true;
+    }
+    const modal = document.getElementById('printProgressModal');
+    if (modal) {
+        modal.classList.remove('open', 'active');
+        modal.style.display = 'none';
+    }
+}
+
 async function printSingleRoll(groupIndex, rollIndex, event) {
     if (event) event.stopPropagation();
     if (!state.currentGroups || !state.currentGroups[groupIndex]) return;
@@ -715,14 +768,14 @@ async function printSingleRoll(groupIndex, rollIndex, event) {
     const totalRolls = group.items.length;
     const fields = buildBrotherPrintFields(group, rollItem, actualRollIndex, totalRolls);
 
-    showUndoSnackbar(`🖨️ ${actualRollIndex} / ${totalRolls} 巻きのラベルを印刷中... (${fields.text_DateT})`);
+    showPrintProgressModal('ラベル印刷中...', `#${rollItem.orderIndex} • ${actualRollIndex} / ${totalRolls} 巻き (${fields.text_DateT})`);
     const printResult = await executeBrotherPrint(fields);
 
     if (printResult.success) {
         await logPrintToServer(group, rollItem, actualRollIndex, totalRolls, fields);
-        showUndoSnackbar(`✅ ${actualRollIndex} / ${totalRolls} 巻きの印刷が完了しました (${fields.text_DateT})`);
+        finishPrintProgressModal(`Roll #${rollItem.orderIndex} 印刷完了`);
     } else {
-        showUndoSnackbar(`❌ 印刷失敗 (${actualRollIndex} / ${totalRolls} 巻き): ${printResult.error || '応答なし'}`);
+        closePrintProgressModal(false);
         alert(`❌ 印刷エラー (Roll #${rollItem.orderIndex} • ${actualRollIndex}/${totalRolls} 巻き)\n\n【エラー内容】 ${printResult.error || 'プリンターからの応答がありません。'}\n\nBrother Web Print サービス (localhost:8088) またはプリンターの電源・USB/Wi-Fi接続を確認してください。`);
     }
 }
@@ -815,35 +868,42 @@ async function executeBatchPrint(groupIndex, skipPrinted) {
     }
 
     if (targetRolls.length === 0) {
-        showUndoSnackbar(`ℹ️ 印刷対象の巻きはありません（すべて印刷済み）`);
+        alert('印刷対象の巻きはありません（すべて印刷済みです）');
         return;
     }
 
-    showUndoSnackbar(`🖨️ ロット「${group.kizai || group.hinban}」${targetRolls.length} 巻きの一括印刷を開始します...`);
+    showPrintProgressModal(`一括印刷中 (全${targetRolls.length}巻き)`, `1 / ${targetRolls.length} 巻き目 (${group.kizai || group.hinban})`);
 
     let successCount = 0;
     for (let i = 0; i < targetRolls.length; i++) {
+        if (isPrintCancelled) {
+            console.log('🛑 Batch printing cancelled by user');
+            break;
+        }
+
         const { rollItem, actualRollIndex } = targetRolls[i];
         const fields = buildBrotherPrintFields(group, rollItem, actualRollIndex, totalRolls);
 
-        showUndoSnackbar(`🖨️ 印刷中 (${actualRollIndex} / ${totalRolls} 巻き): ${fields.text_DateT}`);
+        updatePrintProgressModal(`${i + 1} / ${targetRolls.length} 巻き目 (#${rollItem.orderIndex} • ${fields.text_DateT})`);
         const printResult = await executeBrotherPrint(fields);
 
         if (printResult.success) {
             await logPrintToServer(group, rollItem, actualRollIndex, totalRolls, fields);
             successCount++;
-            if (i < targetRolls.length - 1) {
+            if (i < targetRolls.length - 1 && !isPrintCancelled) {
                 await new Promise(res => setTimeout(res, 1200));
             }
         } else {
+            closePrintProgressModal(false);
             console.error(`❌ Batch printing halted at roll ${actualRollIndex}/${totalRolls}:`, printResult.error);
-            showUndoSnackbar(`❌ 印刷が中断されました (${actualRollIndex} / ${totalRolls} 巻きで失敗): ${printResult.error || '接続エラー'}`);
             alert(`❌ 一括印刷が中断されました\n\n【進捗】 ${successCount} / ${targetRolls.length} 巻き完了\n【失敗した巻き】 ${actualRollIndex} 巻き目 (#${rollItem.orderIndex} • ${fields.text_DateT})\n【エラー原因】 ${printResult.error || 'プリンター応答なし'}\n\nプリンター接続を確認後、未印刷の巻きの「🖨️ 印刷」ボタンから個別印刷を行ってください。`);
             return;
         }
     }
 
-    showUndoSnackbar(`✅ ロット「${group.kizai || group.hinban}」${successCount} 巻きの印刷が完了しました`);
+    if (!isPrintCancelled) {
+        finishPrintProgressModal(`全 ${successCount} 巻きの印刷が完了しました`);
+    }
 }
 
 // -----------------------------------------------------
