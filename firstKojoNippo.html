@@ -1215,12 +1215,14 @@
         }
 
         /* ---------------- Batch Group State Styling (Flat Modern) ---------------- */
+        .batch-group-card.state-in-progress,
         .batch-group-card.state-running {
-            border: 2.5px solid #10B981 !important;
+            border: 2.5px solid #8B5CF6 !important;
             background: #FFFFFF !important;
-            box-shadow: 0 0 0 3.5px rgba(16, 185, 129, 0.22), 0 8px 24px rgba(16, 185, 129, 0.12) !important;
+            box-shadow: 0 0 0 3.5px rgba(139, 92, 246, 0.22), 0 8px 24px rgba(139, 92, 246, 0.12) !important;
         }
 
+        .batch-group-card.state-in-progress::before,
         .batch-group-card.state-running::before {
             content: '';
             position: absolute;
@@ -1228,23 +1230,26 @@
             left: 0;
             width: 6px;
             height: 100%;
-            background: #10B981;
+            background: #8B5CF6;
             z-index: 2;
         }
 
+        .batch-group-card.state-in-progress .batch-header,
         .batch-group-card.state-running .batch-header {
-            background: rgba(16, 185, 129, 0.06) !important;
-            border-bottom: 1.5px solid rgba(16, 185, 129, 0.25) !important;
+            background: rgba(139, 92, 246, 0.06) !important;
+            border-bottom: 1.5px solid rgba(139, 92, 246, 0.25) !important;
         }
 
+        .batch-group-card.state-in-progress .batch-order-range,
         .batch-group-card.state-running .batch-order-range {
-            background: #10B981 !important;
-            border-color: #10B981 !important;
+            background: #8B5CF6 !important;
+            border-color: #8B5CF6 !important;
             color: #FFFFFF !important;
         }
 
+        .batch-group-card.state-in-progress .batch-roll-row,
         .batch-group-card.state-running .batch-roll-row {
-            background: rgba(16, 185, 129, 0.02);
+            background: rgba(139, 92, 246, 0.02);
         }
 
         /* Completed State: Clean, Flat & Greyed Out */
@@ -1313,23 +1318,24 @@
             border: 1px solid var(--border);
         }
 
+        .batch-status-badge.status-in-progress,
         .batch-status-badge.status-running {
-            background: #ECFDF5;
-            color: #059669;
-            border: 1.5px solid #10B981;
-            box-shadow: 0 0 8px rgba(16, 185, 129, 0.2);
+            background: #F3E8FF;
+            color: #7E22CE;
+            border: 1.5px solid #C084FC;
+            box-shadow: 0 0 8px rgba(168, 85, 247, 0.25);
             animation: pulseRunning 2s infinite ease-in-out;
         }
 
         @keyframes pulseRunning {
-            0%, 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
-            50% { box-shadow: 0 0 0 5px rgba(16, 185, 129, 0); }
+            0%, 100% { box-shadow: 0 0 0 0 rgba(168, 85, 247, 0.4); }
+            50% { box-shadow: 0 0 0 5px rgba(168, 85, 247, 0); }
         }
 
         .batch-status-badge.status-completed {
-            background: #E2E8F0;
-            color: #475569;
-            border: 1px solid #CBD5E1;
+            background: #DEF7EC;
+            color: #03543F;
+            border: 1px solid #A7F3D0;
         }
 
         /* Action Buttons on Header */

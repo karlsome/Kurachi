@@ -436,8 +436,9 @@ async function fetchProductionStatus(dateStr) {
             const stored = JSON.parse(localStorage.getItem(storageKey) || '{}');
             data.records.forEach(rec => {
                 if (rec.groupId) {
+                    const normStatus = (rec.status === 'running') ? 'in-progress' : rec.status;
                     stored[rec.groupId] = {
-                        status: rec.status,
+                        status: normStatus,
                         actualStartTime: rec.actualStartTime,
                         startEpoch: rec.startEpoch,
                         actualEndTime: rec.actualEndTime,
@@ -568,7 +569,9 @@ function getGroupLifecycle(groupId) {
     const storageKey = `firstkojo_lifecycle_${state.selectedDate}`;
     try {
         const stored = JSON.parse(localStorage.getItem(storageKey) || '{}');
-        return stored[groupId] || { status: 'pending' };
+        const lc = stored[groupId] || { status: 'pending' };
+        if (lc.status === 'running') lc.status = 'in-progress';
+        return lc;
     } catch (e) {
         return { status: 'pending' };
     }
@@ -680,8 +683,8 @@ function renderScheduleList(items, startTimeStr) {
             let statusBadgeHTML = '';
             let actionButtonsHTML = '';
 
-            if (lifecycle.status === 'running') {
-                statusBadgeHTML = `<span class="batch-status-badge status-running">🟢 生産中 (${lifecycle.actualStartTime || ''}〜)</span>`;
+            if (lifecycle.status === 'in-progress' || lifecycle.status === 'running') {
+                statusBadgeHTML = `<span class="batch-status-badge status-in-progress">🟣 生産中 (${lifecycle.actualStartTime || ''}〜)</span>`;
                 actionButtonsHTML = `
                     <button type="button" class="btn-batch-action btn-batch-preview" onclick="previewBatchGroup(${gIdx}, event)" title="詳細確認">ℹ️ 詳細</button>
                     <button type="button" class="btn-batch-action btn-batch-done" onclick="showDoneConfirmation(${gIdx}, event)" title="生産完了">⏹ 完了</button>
@@ -735,7 +738,7 @@ function renderScheduleList(items, startTimeStr) {
                     <!-- Batch Roll Sub-Rows -->
                     <div class="batch-rolls-list">
                         ${group.items.map((rollItem, rIdx) => {
-                            const isRunning = lifecycle.status === 'running';
+                            const isRunning = (lifecycle.status === 'in-progress' || lifecycle.status === 'running');
                             const isCompleted = lifecycle.status === 'completed';
                             return `
                                 <div class="batch-roll-row ${isRunning ? 'active-roll' : ''}" 
@@ -792,7 +795,7 @@ function getCurrentlyRunningGroup() {
     for (let i = 0; i < state.currentGroups.length; i++) {
         const g = state.currentGroups[i];
         const lc = getGroupLifecycle(g.groupId);
-        if (lc && lc.status === 'running') {
+        if (lc && (lc.status === 'in-progress' || lc.status === 'running')) {
             return { group: g, index: i, lifecycle: lc };
         }
     }
@@ -832,7 +835,7 @@ function startBatchGroup(groupIndex, event) {
     const startTimeStr = now.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
 
     setGroupLifecycle(group.groupId, {
-        status: 'running',
+        status: 'in-progress',
         actualStartTime: startTimeStr,
         startEpoch: now.getTime(),
         actualEndTime: null,
@@ -841,7 +844,7 @@ function startBatchGroup(groupIndex, event) {
 
     // Sync to backend collection (firstFactoryProduction)
     syncProductionStatusToServer(group, {
-        status: 'running',
+        status: 'in-progress',
         actualStartTime: startTimeStr,
         startEpoch: now.getTime(),
         actualEndTime: null,
@@ -1062,14 +1065,14 @@ function resumeBatchGroup(groupIndex) {
     }
 
     setGroupLifecycle(group.groupId, {
-        status: 'running',
+        status: 'in-progress',
         actualEndTime: null,
         actualDurationMins: null
     });
 
     // Sync to backend collection (firstFactoryProduction)
     syncProductionStatusToServer(group, {
-        status: 'running',
+        status: 'in-progress',
         actualEndTime: null,
         actualDurationMins: null
     });
@@ -1119,7 +1122,7 @@ function undoLastDoneBatch() {
     const group = state.currentGroups && state.currentGroups[groupIndex];
     if (group) {
         syncProductionStatusToServer(group, prevState);
-        if (group.zuban && prevState.status === 'running') {
+        if (group.zuban && (prevState.status === 'in-progress' || prevState.status === 'running')) {
             notifyPdfDisplayer(group.items[0], group.zuban);
         }
     }
@@ -1455,14 +1458,14 @@ async function renderInfoTab(data, item) {
     const lifecycle = targetGroup ? getGroupLifecycle(targetGroup.groupId) : { status: 'pending' };
 
     let bannerHTML = '';
-    if (lifecycle.status === 'running') {
+    if (lifecycle.status === 'in-progress' || lifecycle.status === 'running') {
         bannerHTML = `
-            <div class="info-preview-banner running-banner">
+            <div class="info-preview-banner running-banner" style="background: #FAF5FF; border-color: #C084FC;">
                 <div style="display: flex; align-items: center; gap: 10px;">
-                    <span style="font-size: 1.3rem;">🟢</span>
+                    <span style="font-size: 1.3rem;">🟣</span>
                     <div>
-                        <strong style="color: #065F46; font-size: 0.95rem;">現在生産中 (Currently in Production)</strong>
-                        <div style="font-size: 0.8rem; color: #047857;">開始時間: ${lifecycle.actualStartTime || '--:--'} • モニター表示中</div>
+                        <strong style="color: #6B21A8; font-size: 0.95rem;">現在生産中 (Currently in Production)</strong>
+                        <div style="font-size: 0.8rem; color: #7E22CE;">開始時間: ${lifecycle.actualStartTime || '--:--'} • モニター表示中</div>
                     </div>
                 </div>
                 <div style="display: flex; gap: 8px;">
