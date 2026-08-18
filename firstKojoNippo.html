@@ -544,11 +544,13 @@
         }
 
         .modal.open,
+        .modal.active,
         .modal[style*="display: flex"],
         .modal[style*="display: block"] {
             display: flex !important;
         }
 
+        #batchActionModal>div,
         #workerNameModal>div {
             background: var(--bg-surface);
             border: 1px solid var(--border);
@@ -1197,47 +1199,218 @@
             font-variant-numeric: tabular-nums;
         }
 
-        .roll-count-pill {
-            font-size: 0.8rem;
-            font-weight: 800;
-            color: var(--blue);
-            background: var(--blue-soft);
-            border: 1px solid rgba(46, 111, 242, 0.2);
-            padding: 2px 8px;
-            border-radius: 6px;
+        /* Group State Styling */
+        .batch-group-card.state-running {
+            border-color: #10B981;
+            background: #FFFFFF;
+            box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.4), 0 8px 24px rgba(16, 185, 129, 0.12);
         }
 
-        .roll-meter-pill {
-            font-size: 0.8rem;
-            font-weight: 800;
-            color: var(--amber);
-            background: var(--amber-soft);
-            border: 1px solid rgba(224, 144, 14, 0.2);
-            padding: 2px 8px;
-            border-radius: 6px;
+        .batch-group-card.state-running::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 6px;
+            height: 100%;
+            background: #10B981;
+            z-index: 2;
         }
 
-        .roll-status-pill {
+        .batch-group-card.state-completed {
+            border-color: rgba(16, 185, 129, 0.3);
+            background: #F8FAF9;
+            opacity: 0.92;
+        }
+
+        .batch-group-card.state-completed::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 4px;
+            height: 100%;
+            background: #059669;
+            z-index: 2;
+        }
+
+        /* Batch Status Badges */
+        .batch-status-badge {
             font-size: 0.775rem;
-            font-weight: 800;
+            font-weight: 900;
             padding: 4px 10px;
             border-radius: var(--r-pill);
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            letter-spacing: 0.02em;
+        }
+
+        .batch-status-badge.status-pending {
             background: var(--bg-subtle);
             color: var(--text-muted);
             border: 1px solid var(--border);
         }
 
-        .batch-roll-row.active-roll .roll-status-pill {
-            background: var(--brand);
-            color: #FFFFFF;
-            border-color: var(--brand);
-            box-shadow: 0 2px 6px rgba(31, 157, 107, 0.3);
+        .batch-status-badge.status-running {
+            background: #ECFDF5;
+            color: #059669;
+            border: 1.5px solid #10B981;
+            box-shadow: 0 0 10px rgba(16, 185, 129, 0.25);
+            animation: pulseRunning 2s infinite ease-in-out;
         }
 
-        .batch-group-card.selected .batch-roll-row:not(.active-roll) .roll-status-pill {
-            background: var(--brand-soft);
+        @keyframes pulseRunning {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
+            50% { box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+        }
+
+        .batch-status-badge.status-completed {
+            background: #DEF7EC;
+            color: #03543F;
+            border: 1px solid rgba(5, 150, 105, 0.3);
+        }
+
+        /* Action Buttons on Header */
+        .batch-btn-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .btn-batch-action {
+            min-height: 40px;
+            padding: 0 16px;
+            font-size: 0.875rem;
+            font-weight: 800;
+            border-radius: var(--btn-radius);
+            cursor: pointer;
+            transition: var(--transition-smooth);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            border: none;
+            white-space: nowrap;
+        }
+
+        .btn-batch-preview {
+            background: var(--bg-surface);
+            border: 1.5px solid var(--border-strong);
+            color: var(--text-main);
+        }
+
+        .btn-batch-preview:hover {
+            border-color: var(--brand);
             color: var(--brand);
-            border-color: rgba(31, 157, 107, 0.25);
+            background: var(--brand-soft);
+        }
+
+        .btn-batch-start {
+            background: #10B981;
+            color: #FFFFFF;
+            box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+        }
+
+        .btn-batch-start:hover {
+            background: #059669;
+            transform: translateY(-1px);
+        }
+
+        .btn-batch-done {
+            background: #EF4444;
+            color: #FFFFFF;
+            box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3);
+        }
+
+        .btn-batch-done:hover {
+            background: #DC2626;
+            transform: translateY(-1px);
+        }
+
+        .btn-batch-cancel {
+            background: transparent;
+            color: var(--text-muted);
+            border: 1.5px solid var(--border);
+            padding: 0 12px;
+        }
+
+        .btn-batch-cancel:hover {
+            border-color: #EF4444;
+            color: #EF4444;
+            background: #FEF2F2;
+        }
+
+        .btn-batch-reopen {
+            background: var(--amber-soft);
+            color: var(--amber);
+            border: 1.5px solid rgba(224, 144, 14, 0.3);
+        }
+
+        .btn-batch-reopen:hover {
+            background: #FDE68A;
+            color: #92400E;
+        }
+
+        /* Floating Undo Toast */
+        .undo-snackbar {
+            position: fixed;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%) translateY(100px);
+            background: #1E293B;
+            color: #FFFFFF;
+            padding: 14px 22px;
+            border-radius: var(--r-pill);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            z-index: 2000;
+            opacity: 0;
+            transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+            font-size: 0.95rem;
+            font-weight: 700;
+        }
+
+        .undo-snackbar.show {
+            transform: translateX(-50%) translateY(0);
+            opacity: 1;
+        }
+
+        .btn-undo-action {
+            background: #10B981;
+            color: #FFFFFF;
+            border: none;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-weight: 900;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: var(--transition-smooth);
+        }
+
+        .btn-undo-action:hover {
+            background: #059669;
+        }
+
+        /* Info Tab Preview Banner */
+        .info-preview-banner {
+            background: #EFF6FF;
+            border: 1.5px solid #93C5FD;
+            border-radius: var(--card-radius);
+            padding: 14px 18px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 14px;
+            margin-bottom: 16px;
+        }
+
+        .info-preview-banner.running-banner {
+            background: #ECFDF5;
+            border-color: #6EE7B7;
         }
 
         /* ---------------- Info Tab Styling ---------------- */
@@ -1681,6 +1854,25 @@
                 閉じる (Close)
             </button>
         </div>
+    </div>
+
+    <!-- Batch Action / Confirmation Modal -->
+    <div id="batchActionModal" class="modal">
+        <div style="max-width: 520px; width: 90%; padding: 24px;">
+            <h2 id="batchModalTitle" style="text-align: center; margin-bottom: 12px; color: var(--text-main);">ロット確認</h2>
+            <div id="batchModalBody" style="margin-bottom: 20px; font-size: 0.95rem; line-height: 1.6; color: var(--text-soft);">
+                <!-- dynamic -->
+            </div>
+            <div id="batchModalActions" style="display: flex; gap: 10px; justify-content: flex-end;">
+                <!-- dynamic buttons -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Floating Undo Snackbar -->
+    <div id="undoSnackbar" class="undo-snackbar">
+        <span id="undoSnackbarText">ロットの生産を完了しました</span>
+        <button type="button" class="btn-undo-action" onclick="undoLastDoneBatch()">↩ 元に戻す (Undo)</button>
     </div>
 
     <!-- Script imports -->

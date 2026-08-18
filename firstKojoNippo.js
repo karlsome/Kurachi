@@ -486,6 +486,85 @@ function groupScheduledItems(items) {
     return groups;
 }
 
+// -----------------------------------------------------
+// Production Lifecycle State Helpers (Storage)
+// -----------------------------------------------------
+function getGroupLifecycle(groupId) {
+    if (!state.selectedDate || !groupId) return { status: 'pending' };
+    const storageKey = `firstkojo_lifecycle_${state.selectedDate}`;
+    try {
+        const stored = JSON.parse(localStorage.getItem(storageKey) || '{}');
+        return stored[groupId] || { status: 'pending' };
+    } catch (e) {
+        return { status: 'pending' };
+    }
+}
+
+function setGroupLifecycle(groupId, patch) {
+    if (!state.selectedDate || !groupId) return;
+    const storageKey = `firstkojo_lifecycle_${state.selectedDate}`;
+    try {
+        const stored = JSON.parse(localStorage.getItem(storageKey) || '{}');
+        stored[groupId] = { ...(stored[groupId] || { status: 'pending' }), ...patch };
+        localStorage.setItem(storageKey, JSON.stringify(stored));
+    } catch (e) {
+        console.error('Error saving group lifecycle:', e);
+    }
+}
+
+// -----------------------------------------------------
+// Modal & Undo Helpers
+// -----------------------------------------------------
+let undoTimer = null;
+
+function showBatchModal(title, bodyHTML, actionsHTML) {
+    console.log('📢 Opening batch modal:', title);
+    const modal = document.getElementById('batchActionModal');
+    const titleEl = document.getElementById('batchModalTitle');
+    const bodyEl = document.getElementById('batchModalBody');
+    const actionsEl = document.getElementById('batchModalActions');
+
+    if (!modal) {
+        console.error('❌ #batchActionModal element not found in DOM!');
+        return;
+    }
+    if (titleEl) titleEl.textContent = title;
+    if (bodyEl) bodyEl.innerHTML = bodyHTML;
+    if (actionsEl) actionsEl.innerHTML = actionsHTML;
+
+    modal.classList.add('open', 'active');
+    modal.style.display = 'flex';
+}
+
+function closeBatchModal() {
+    console.log('🔒 Closing batch modal');
+    const modal = document.getElementById('batchActionModal');
+    if (modal) {
+        modal.classList.remove('open', 'active');
+        modal.style.display = 'none';
+    }
+}
+
+function showUndoSnackbar(text) {
+    const snackbar = document.getElementById('undoSnackbar');
+    const snackbarText = document.getElementById('undoSnackbarText');
+    if (!snackbar) return;
+
+    if (snackbarText) snackbarText.textContent = text;
+    snackbar.classList.add('show');
+
+    if (undoTimer) clearTimeout(undoTimer);
+    undoTimer = setTimeout(() => {
+        snackbar.classList.remove('show');
+    }, 8000);
+}
+
+function hideUndoSnackbar() {
+    const snackbar = document.getElementById('undoSnackbar');
+    if (snackbar) snackbar.classList.remove('show');
+    if (undoTimer) clearTimeout(undoTimer);
+}
+
 function renderScheduleList(items, startTimeStr) {
     const container = document.getElementById('scheduleListContainer');
     if (!container) return;
@@ -499,6 +578,7 @@ function renderScheduleList(items, startTimeStr) {
 
     groups.forEach((group, gIdx) => {
         const isGroupTinted = (gIdx % 2 === 0);
+        const lifecycle = getGroupLifecycle(group.groupId);
         const isGroupSelected = state.selectedItem && group.items.some(it => it.id === state.selectedItem.id);
 
         if (group.type === 'setup') {
@@ -535,17 +615,44 @@ function renderScheduleList(items, startTimeStr) {
             const kizaiBadge = group.kizai ? `<span class="tag-pill kizai-tag" title="基材コード: ${group.kizai}">基材: ${group.kizai}</span>` : '';
             const colorBadge = group.color ? `<span class="tag-pill color-tag" title="色コード: ${group.color}">色: ${group.color}</span>` : '';
 
+            // Status Badge & Action Buttons according to Lifecycle
+            let statusBadgeHTML = '';
+            let actionButtonsHTML = '';
+
+            if (lifecycle.status === 'running') {
+                statusBadgeHTML = `<span class="batch-status-badge status-running">🟢 生産中 (${lifecycle.actualStartTime || ''}〜)</span>`;
+                actionButtonsHTML = `
+                    <button type="button" class="btn-batch-action btn-batch-preview" onclick="previewBatchGroup(${gIdx}, event)" title="詳細確認">ℹ️ 詳細</button>
+                    <button type="button" class="btn-batch-action btn-batch-done" onclick="showDoneConfirmation(${gIdx}, event)" title="生産完了">⏹ 完了</button>
+                    <button type="button" class="btn-batch-action btn-batch-cancel" onclick="cancelBatchGroup(${gIdx}, event)" title="中断・取消">✕ 取消</button>
+                `;
+            } else if (lifecycle.status === 'completed') {
+                statusBadgeHTML = `<span class="batch-status-badge status-completed">✅ 完了 (${lifecycle.actualStartTime} - ${lifecycle.actualEndTime} • ${lifecycle.actualDurationMins}分)</span>`;
+                actionButtonsHTML = `
+                    <button type="button" class="btn-batch-action btn-batch-preview" onclick="previewBatchGroup(${gIdx}, event)" title="詳細確認">ℹ️ 詳細</button>
+                    <button type="button" class="btn-batch-action btn-batch-reopen" onclick="showReopenModal(${gIdx}, event)" title="再開・リセット">🔄 再開</button>
+                `;
+            } else {
+                // Pending
+                statusBadgeHTML = `<span class="batch-status-badge status-pending">待機中</span>`;
+                actionButtonsHTML = `
+                    <button type="button" class="btn-batch-action btn-batch-preview" onclick="previewBatchGroup(${gIdx}, event)" title="詳細確認 (モニター非表示)">ℹ️ 詳細</button>
+                    <button type="button" class="btn-batch-action btn-batch-start" onclick="startBatchGroup(${gIdx}, event)" title="生産開始 (モニター表示)">▶ 開始</button>
+                `;
+            }
+
             html += `
-                <div class="batch-group-card ${isGroupTinted ? 'group-tinted' : ''} ${isGroupSelected ? 'selected' : ''}" 
+                <div class="batch-group-card state-${lifecycle.status} ${isGroupTinted ? 'group-tinted' : ''} ${isGroupSelected ? 'selected' : ''}" 
                      data-group-id="${group.groupId}">
                     
                     <!-- Batch Header -->
-                    <div class="batch-header" onclick="selectBatchGroup(${gIdx})">
+                    <div class="batch-header" onclick="previewBatchGroup(${gIdx}, event)">
                         <div class="batch-header-left">
                             <div class="batch-order-range">${orderRangeText}</div>
                             <div class="batch-title-col">
                                 <div class="batch-hinban-row">
                                     <span class="batch-hinban-title">${group.hinban}</span>
+                                    ${statusBadgeHTML}
                                     ${kizaiBadge}
                                     ${colorBadge}
                                 </div>
@@ -553,12 +660,14 @@ function renderScheduleList(items, startTimeStr) {
                                     ${group.hinmei ? `<span class="batch-hinmei">${group.hinmei}</span><span class="batch-stat-divider">•</span>` : ''}
                                     <span class="batch-summary-pill">全 ${group.items.length} 巻き (${group.totalMeters} m)</span>
                                     <span class="batch-stat-divider">•</span>
-                                    <span class="batch-summary-pill">🕒 ${group.startTime} - ${group.endTime} (計 ${group.totalDuration} 分)</span>
+                                    <span class="batch-summary-pill">🕒 予定: ${group.startTime} - ${group.endTime} (計 ${group.totalDuration} 分)</span>
                                 </div>
                             </div>
                         </div>
-                        <div class="batch-header-right">
-                            <button type="button" class="btn-select-batch">${isGroupSelected ? '一括選択中' : 'ロット選択'}</button>
+                        <div class="batch-header-right" onclick="event.stopPropagation()">
+                            <div class="batch-btn-group">
+                                ${actionButtonsHTML}
+                            </div>
                         </div>
                     </div>
 
@@ -578,7 +687,7 @@ function renderScheduleList(items, startTimeStr) {
                                     </div>
                                     <div class="roll-row-right">
                                         <span class="roll-status-pill ${isRollActive ? 'current-active' : ''}">
-                                            ${isRollActive ? '▶ 進行中' : (isGroupSelected ? 'ロット対象' : '待機')}
+                                            ${isRollActive ? '▶ 選択中' : (lifecycle.status === 'running' ? '生産中' : (lifecycle.status === 'completed' ? '完了' : '待機'))}
                                         </span>
                                     </div>
                                 </div>
@@ -591,6 +700,340 @@ function renderScheduleList(items, startTimeStr) {
     });
 
     container.innerHTML = html;
+}
+
+// -----------------------------------------------------
+// Batch Lifecycle Action Handlers
+// -----------------------------------------------------
+
+// 1. Preview Specs (Tablet Only - DOES NOT touch overhead monitor)
+function previewBatchGroup(groupIndex, event) {
+    if (event) event.stopPropagation();
+    if (!state.currentGroups || !state.currentGroups[groupIndex]) return;
+    const group = state.currentGroups[groupIndex];
+    if (group.type === 'setup') {
+        selectScheduleItem(group.itemIndexStart);
+        return;
+    }
+
+    const targetItem = group.items[0];
+    state.selectedItem = targetItem;
+    state.selectedGroup = group;
+    sessionStorage.setItem('firstkojo_nippo_selected_item', JSON.stringify(targetItem));
+
+    // Jump to Info tab without broadcasting to pdfDisplayer
+    switchMainTab(2);
+    loadItemDetail(targetItem);
+}
+
+function getCurrentlyRunningGroup() {
+    if (!state.currentGroups) return null;
+    for (let i = 0; i < state.currentGroups.length; i++) {
+        const g = state.currentGroups[i];
+        const lc = getGroupLifecycle(g.groupId);
+        if (lc && lc.status === 'running') {
+            return { group: g, index: i, lifecycle: lc };
+        }
+    }
+    return null;
+}
+
+// 2. Start Production (Records Start Time & Locks pdfDisplayer)
+function startBatchGroup(groupIndex, event) {
+    if (event) event.stopPropagation();
+    if (!state.currentGroups || !state.currentGroups[groupIndex]) return;
+    const group = state.currentGroups[groupIndex];
+
+    // Single Active Lot Guard: Prevent starting if another group is currently running
+    const activeRunning = getCurrentlyRunningGroup();
+    if (activeRunning && activeRunning.group.groupId !== group.groupId) {
+        console.warn('⚠️ Cannot start lot. Another lot is currently running:', activeRunning.group.hinban);
+        const bodyHTML = `
+            <div style="background: #FEF2F2; border: 1.5px solid #FCA5A5; border-radius: var(--btn-radius); padding: 14px; margin-bottom: 16px;">
+                <div style="font-size: 0.85rem; font-weight: 800; color: #DC2626; margin-bottom: 4px;">⚠️ 他のロットが生産中です</div>
+                <div style="font-size: 1.05rem; font-weight: 900; color: #991B1B;">${activeRunning.group.hinban}</div>
+                <div style="font-size: 0.8rem; color: #7F1D1D; margin-top: 4px;">開始時間: ${activeRunning.lifecycle.actualStartTime || '--:--'} (現在モニター表示中)</div>
+            </div>
+            <p style="font-size: 0.9rem; color: var(--text-soft); line-height: 1.6;">
+                1台のマシンで同時に複数のロットを開始することはできません。<br>
+                新しいロット「<strong>${group.hinban}</strong>」を開始する前に、進行中のロットを<strong>完了</strong>または<strong>中断</strong>してください。
+            </p>
+        `;
+        const actionsHTML = `
+            <button type="button" class="btn btn-secondary" onclick="closeBatchModal()">戻る</button>
+            <button type="button" class="btn btn-primary" style="background: #10B981; border-color: #10B981;" onclick="closeBatchModal(); showDoneConfirmation(${activeRunning.index})">進行中ロットを完了する</button>
+        `;
+        showBatchModal('生産開始の制限 (Single Active Lot)', bodyHTML, actionsHTML);
+        return;
+    }
+
+    const now = new Date();
+    const startTimeStr = now.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+
+    setGroupLifecycle(group.groupId, {
+        status: 'running',
+        actualStartTime: startTimeStr,
+        startEpoch: now.getTime(),
+        actualEndTime: null,
+        actualDurationMins: null
+    });
+
+    state.selectedItem = group.items[0];
+    state.selectedGroup = group;
+    sessionStorage.setItem('firstkojo_nippo_selected_item', JSON.stringify(group.items[0]));
+
+    // Broadcast to pdfDisplayer
+    if (group.zuban) {
+        notifyPdfDisplayer(group.items[0], group.zuban);
+    }
+
+    // Refresh UI & switch to Info tab
+    renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
+    switchMainTab(2);
+    loadItemDetail(group.items[0]);
+}
+
+// 3. Show Done Confirmation Modal
+function showDoneConfirmation(groupIndex, event) {
+    if (event) event.stopPropagation();
+    console.log('🔴 showDoneConfirmation called for groupIndex:', groupIndex);
+    if (!state.currentGroups || !state.currentGroups[groupIndex]) {
+        console.error('❌ Group not found for index:', groupIndex, state.currentGroups);
+        return;
+    }
+    const group = state.currentGroups[groupIndex];
+    const lifecycle = getGroupLifecycle(group.groupId);
+
+    const now = new Date();
+    const endTimeStr = now.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+    const startEpoch = lifecycle.startEpoch || (now.getTime() - 10 * 60 * 1000);
+    const elapsedMins = Math.max(1, Math.round((now.getTime() - startEpoch) / (60 * 1000)));
+
+    const bodyHTML = `
+        <div style="background: var(--bg-subtle); padding: 14px; border-radius: var(--btn-radius); margin-bottom: 12px;">
+            <div style="font-size: 1.1rem; font-weight: 900; color: var(--text-main); margin-bottom: 4px;">${group.hinban}</div>
+            <div style="font-size: 0.85rem; color: var(--text-muted);">全 ${group.items.length} 巻き (${group.totalMeters} m)</div>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; text-align: center;">
+            <div style="background: #FFFFFF; border: 1px solid var(--border); padding: 10px; border-radius: 6px;">
+                <div style="font-size: 0.75rem; color: var(--text-muted);">開始時間</div>
+                <div style="font-size: 1.05rem; font-weight: 800; color: var(--text-main);">${lifecycle.actualStartTime || '--:--'}</div>
+            </div>
+            <div style="background: #FFFFFF; border: 1px solid var(--border); padding: 10px; border-radius: 6px;">
+                <div style="font-size: 0.75rem; color: var(--text-muted);">終了時間 (現在)</div>
+                <div style="font-size: 1.05rem; font-weight: 800; color: var(--brand);">${endTimeStr}</div>
+            </div>
+            <div style="background: #ECFDF5; border: 1px solid #A7F3D0; padding: 10px; border-radius: 6px;">
+                <div style="font-size: 0.75rem; color: #059669;">実稼働時間</div>
+                <div style="font-size: 1.05rem; font-weight: 900; color: #047857;">${elapsedMins} 分</div>
+            </div>
+        </div>
+        <p style="margin-top: 14px; text-align: center; color: var(--text-soft); font-weight: 600;">このロットの生産を完了として記録しますか？</p>
+    `;
+
+    const actionsHTML = `
+        <button type="button" class="btn btn-secondary" onclick="closeBatchModal()">戻る (Cancel)</button>
+        <button type="button" class="btn btn-primary" style="background: #10B981; border-color: #10B981;" onclick="confirmDoneBatch(${groupIndex})">完了確定 (Confirm Done)</button>
+    `;
+
+    showBatchModal('生産完了の確認 (Confirm Completion)', bodyHTML, actionsHTML);
+}
+
+// 4. Confirm Done
+function confirmDoneBatch(groupIndex) {
+    console.log('✅ confirmDoneBatch confirmed for groupIndex:', groupIndex);
+    if (!state.currentGroups || !state.currentGroups[groupIndex]) return;
+    const group = state.currentGroups[groupIndex];
+    const lifecycle = getGroupLifecycle(group.groupId);
+
+    const now = new Date();
+    const endTimeStr = now.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+    const startEpoch = lifecycle.startEpoch || (now.getTime() - 10 * 60 * 1000);
+    const elapsedMins = Math.max(1, Math.round((now.getTime() - startEpoch) / (60 * 1000)));
+
+    // Save previous state for Undo
+    state.lastDoneGroup = {
+        groupId: group.groupId,
+        groupIndex: groupIndex,
+        prevState: { ...lifecycle }
+    };
+
+    setGroupLifecycle(group.groupId, {
+        status: 'completed',
+        actualEndTime: endTimeStr,
+        endEpoch: now.getTime(),
+        actualDurationMins: elapsedMins
+    });
+
+    closeBatchModal();
+
+    // Release pdfDisplayer monitor
+    clearPdfDisplayer();
+
+    // Re-render schedule list
+    renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
+
+    // Trigger floating undo toast
+    showUndoSnackbar(`ロット「${group.hinban}」を完了しました (${elapsedMins}分)`);
+}
+
+// 5. Cancel Batch
+function cancelBatchGroup(groupIndex, event) {
+    if (event) event.stopPropagation();
+    console.log('✕ cancelBatchGroup called for groupIndex:', groupIndex);
+    if (!state.currentGroups || !state.currentGroups[groupIndex]) {
+        console.error('❌ Group not found for index:', groupIndex, state.currentGroups);
+        return;
+    }
+    const group = state.currentGroups[groupIndex];
+
+    const bodyHTML = `
+        <p style="text-align: center; margin: 10px 0 20px 0; font-size: 1rem; color: var(--text-main);">
+            ロット「<strong>${group.hinban}</strong>」の生産を中断し、<strong>待機中</strong>に戻しますか？<br>
+            <span style="font-size: 0.85rem; color: var(--text-muted); display: block; margin-top: 6px;">※モニター表示も解除されます。</span>
+        </p>
+    `;
+
+    const actionsHTML = `
+        <button type="button" class="btn btn-secondary" onclick="closeBatchModal()">戻る</button>
+        <button type="button" class="btn btn-alert" onclick="confirmCancelBatch(${groupIndex})">中断・待機に戻す</button>
+    `;
+
+    showBatchModal('生産中断の確認', bodyHTML, actionsHTML);
+}
+
+function confirmCancelBatch(groupIndex) {
+    console.log('⚠️ confirmCancelBatch confirmed for groupIndex:', groupIndex);
+    if (!state.currentGroups || !state.currentGroups[groupIndex]) return;
+    const group = state.currentGroups[groupIndex];
+
+    setGroupLifecycle(group.groupId, {
+        status: 'pending',
+        actualStartTime: null,
+        startEpoch: null,
+        actualEndTime: null,
+        actualDurationMins: null
+    });
+
+    closeBatchModal();
+    clearPdfDisplayer();
+    renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
+}
+
+// 6. Reopen Modal
+function showReopenModal(groupIndex, event) {
+    if (event) event.stopPropagation();
+    if (!state.currentGroups || !state.currentGroups[groupIndex]) return;
+    const group = state.currentGroups[groupIndex];
+    const lifecycle = getGroupLifecycle(group.groupId);
+
+    const bodyHTML = `
+        <div style="background: var(--bg-subtle); padding: 14px; border-radius: var(--btn-radius); margin-bottom: 16px;">
+            <div style="font-size: 1.1rem; font-weight: 900; color: var(--text-main); margin-bottom: 4px;">${group.hinban}</div>
+            <div style="font-size: 0.85rem; color: var(--text-muted);">
+                完了記録: ${lifecycle.actualStartTime} - ${lifecycle.actualEndTime} (${lifecycle.actualDurationMins}分)
+            </div>
+        </div>
+        <p style="color: var(--text-soft); font-size: 0.9rem; margin-bottom: 16px;">
+            完了状態の変更方法を選択してください:
+        </p>
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+            <button type="button" class="btn btn-primary" style="background: #10B981; border-color: #10B981; text-align: left; padding: 12px 16px;" onclick="resumeBatchGroup(${groupIndex})">
+                <strong>▶ 生産を再開 (Resume)</strong><br>
+                <span style="font-size: 0.8rem; font-weight: normal; opacity: 0.9;">開始時間 (${lifecycle.actualStartTime}) を維持して「生産中」に戻し、モニターに再表示します。</span>
+            </button>
+            <button type="button" class="btn btn-secondary" style="text-align: left; padding: 12px 16px;" onclick="resetBatchGroup(${groupIndex})">
+                <strong>↺ 完全にリセット (Reset)</strong><br>
+                <span style="font-size: 0.8rem; font-weight: normal; color: var(--text-muted);">開始・終了記録を消去し、「待機中」に戻します。</span>
+            </button>
+        </div>
+    `;
+
+    const actionsHTML = `
+        <button type="button" class="btn btn-secondary" onclick="closeBatchModal()">閉じる (Close)</button>
+    `;
+
+    showBatchModal('ロット再開・リセット (Reopen / Reset)', bodyHTML, actionsHTML);
+}
+
+function resumeBatchGroup(groupIndex) {
+    if (!state.currentGroups || !state.currentGroups[groupIndex]) return;
+    const group = state.currentGroups[groupIndex];
+
+    // Single Active Lot Guard
+    const activeRunning = getCurrentlyRunningGroup();
+    if (activeRunning && activeRunning.group.groupId !== group.groupId) {
+        alert(`現在、別のロット「${activeRunning.group.hinban}」が生産中です。\n先に現在のロットを完了または中断してください。`);
+        return;
+    }
+
+    setGroupLifecycle(group.groupId, {
+        status: 'running',
+        actualEndTime: null,
+        actualDurationMins: null
+    });
+
+    closeBatchModal();
+
+    if (group.zuban) {
+        notifyPdfDisplayer(group.items[0], group.zuban);
+    }
+
+    renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
+}
+
+function resetBatchGroup(groupIndex) {
+    if (!state.currentGroups || !state.currentGroups[groupIndex]) return;
+    const group = state.currentGroups[groupIndex];
+
+    setGroupLifecycle(group.groupId, {
+        status: 'pending',
+        actualStartTime: null,
+        startEpoch: null,
+        actualEndTime: null,
+        actualDurationMins: null
+    });
+
+    closeBatchModal();
+    renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
+}
+
+// 7. Undo Last Done
+function undoLastDoneBatch() {
+    if (!state.lastDoneGroup) return;
+    const { groupId, groupIndex, prevState } = state.lastDoneGroup;
+
+    setGroupLifecycle(groupId, prevState);
+    hideUndoSnackbar();
+
+    const group = state.currentGroups && state.currentGroups[groupIndex];
+    if (group && group.zuban && prevState.status === 'running') {
+        notifyPdfDisplayer(group.items[0], group.zuban);
+    }
+
+    state.lastDoneGroup = null;
+    renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
+}
+
+// Clear PDF Displayer Monitor
+async function clearPdfDisplayer() {
+    try {
+        const payload = {
+            machineId: state.machineName || 'PSA2',
+            timestamp: new Date().toISOString(),
+            action: 'clear',
+            zuban: null,
+            hinban: null
+        };
+        await fetch(`${serverURL}/api/broadcast-scan`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        console.log('📡 Sent clear to pdfDisplayer');
+    } catch (err) {
+        console.warn('Could not send clear broadcast to pdfDisplayer:', err);
+    }
 }
 
 function renderEmptySchedule(dateStr) {
@@ -606,37 +1049,6 @@ function renderEmptySchedule(dateStr) {
             <p><strong>${dateStr}</strong> に登録された生産計画はありません。<br>管理画面 (Admin) で作成されたスケジュールが表示されます。</p>
         </div>
     `;
-}
-
-function selectBatchGroup(groupIndex) {
-    if (!state.currentGroups || !state.currentGroups[groupIndex]) return;
-    const group = state.currentGroups[groupIndex];
-    if (group.type === 'setup') {
-        selectScheduleItem(group.itemIndexStart);
-        return;
-    }
-
-    // Select the first roll in the batch (or keep current if already in this batch)
-    let targetItem = group.items[0];
-    if (state.selectedItem && group.items.some(it => it.id === state.selectedItem.id)) {
-        targetItem = state.selectedItem;
-    }
-
-    state.selectedItem = targetItem;
-    state.selectedGroup = group;
-    sessionStorage.setItem('firstkojo_nippo_selected_item', JSON.stringify(targetItem));
-
-    // Re-render schedule list to update active highlights across the entire batch
-    renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
-
-    // Jump to Info tab (tab index 2) and load details
-    switchMainTab(2);
-
-    if (group.zuban) {
-        notifyPdfDisplayer(targetItem, group.zuban);
-    }
-
-    loadItemDetail(targetItem);
 }
 
 function selectSpecificRoll(globalIndex, event) {
@@ -782,13 +1194,6 @@ async function renderInfoTab(data, item) {
     const productMaster = product['品目マスタ'] || {};
     const process2010 = Array.isArray(bomData) ? bomData.find(b => b['工程コード'] === 2010) : null;
 
-    const zuban = productMaster['図番'] || item.zuban || '';
-
-    // Broadcast to external pdfDisplayer with resolved zuban
-    if (zuban) {
-        notifyPdfDisplayer(item, zuban);
-    }
-
     // --- Part 1: Product Structure Chips ---
     let productStructureHTML = '';
     if (productSegments.length > 0) {
@@ -930,7 +1335,60 @@ async function renderInfoTab(data, item) {
     // Calculate duration in minutes if not already present on item
     const durationMins = item.duration || (process2010 && process2010['作業時間'] ? Math.round((Number(process2010['作業時間']) * (Number(item.meters) || 100) * 100) / 60) : 0);
 
+    // Group Lifecycle Info & Banner
+    const targetGroup = state.currentGroups ? state.currentGroups.find(g => g.items.some(it => it.id === item.id)) : null;
+    const groupIdx = state.currentGroups && targetGroup ? state.currentGroups.indexOf(targetGroup) : -1;
+    const lifecycle = targetGroup ? getGroupLifecycle(targetGroup.groupId) : { status: 'pending' };
+
+    let bannerHTML = '';
+    if (lifecycle.status === 'running') {
+        bannerHTML = `
+            <div class="info-preview-banner running-banner">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span style="font-size: 1.3rem;">🟢</span>
+                    <div>
+                        <strong style="color: #065F46; font-size: 0.95rem;">現在生産中 (Currently in Production)</strong>
+                        <div style="font-size: 0.8rem; color: #047857;">開始時間: ${lifecycle.actualStartTime || '--:--'} • モニター表示中</div>
+                    </div>
+                </div>
+                <div style="display: flex; gap: 8px;">
+                    <button type="button" class="btn-batch-action btn-batch-done" onclick="showDoneConfirmation(${groupIdx}, event)">⏹ 生産完了</button>
+                </div>
+            </div>
+        `;
+    } else if (lifecycle.status === 'completed') {
+        bannerHTML = `
+            <div class="info-preview-banner" style="background: #DEF7EC; border-color: #A7F3D0;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span style="font-size: 1.3rem;">✅</span>
+                    <div>
+                        <strong style="color: #03543F; font-size: 0.95rem;">生産完了済み (Completed)</strong>
+                        <div style="font-size: 0.8rem; color: #047857;">実績: ${lifecycle.actualStartTime} - ${lifecycle.actualEndTime} (${lifecycle.actualDurationMins}分)</div>
+                    </div>
+                </div>
+                <button type="button" class="btn-batch-action btn-batch-reopen" onclick="showReopenModal(${groupIdx}, event)">🔄 再開・リセット</button>
+            </div>
+        `;
+    } else {
+        // Pending (Preview Mode)
+        bannerHTML = `
+            <div class="info-preview-banner">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span style="font-size: 1.3rem;">👀</span>
+                    <div>
+                        <strong style="color: #1E40AF; font-size: 0.95rem;">事前確認中 (Preview Mode)</strong>
+                        <div style="font-size: 0.8rem; color: #3B82F6;">※タブレット上での事前確認です。モニター表示には影響しません。</div>
+                    </div>
+                </div>
+                ${groupIdx >= 0 ? `<button type="button" class="btn-batch-action btn-batch-start" onclick="startBatchGroup(${groupIdx}, event)">▶ このロットを開始</button>` : ''}
+            </div>
+        `;
+    }
+
     container.innerHTML = `
+        <!-- Contextual Status Banner -->
+        ${bannerHTML}
+
         <!-- PART 1: Top Part - Product Info -->
         <div class="info-card">
             <div class="info-card-header">
