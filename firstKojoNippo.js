@@ -598,7 +598,7 @@ function buildBrotherPrintFields(group, rollItem, rollIndex, totalRolls) {
         size: 'RollW62',
         copies: 1,
         text_品番: hinban,
-        text_収容数: String(totalRolls || group.items.length || 1),
+        text_収容数: String(rollItem.orderIndex !== undefined ? rollItem.orderIndex : (rollIndex || 1)),
         text_背番号: labelHinban,
         text_color: color,
         text_品名: hinmei,
