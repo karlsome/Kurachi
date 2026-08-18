@@ -1011,25 +1011,29 @@ function renderScheduleList(items, startTimeStr) {
                     
                     <!-- Batch Header -->
                     <div class="batch-header" onclick="previewBatchGroup(${gIdx}, event)">
-                        <div class="batch-header-left">
-                            <div class="batch-order-range">${orderRangeText}</div>
-                            <div class="batch-title-col">
-                                <div class="batch-hinban-row">
-                                    <span class="batch-hinban-title">${mainTitle}</span>
-                                    ${statusBadgeHTML}
-                                    ${destBadge}
-                                    ${colorBadge}
-                                    ${shoriBadge}
-                                    ${habanagaBadge}
-                                </div>
-                                <div class="batch-meta-sub">
-                                    <span class="batch-summary-pill">全 ${group.items.length} 巻き (${group.totalMeters} m)</span>
-                                    <span class="batch-stat-divider">•</span>
-                                    <span class="batch-summary-pill">🕒 予定: ${group.startTime} - ${group.endTime} (計 ${group.totalDuration} 分)</span>
-                                </div>
+                        <!-- Row 1: Order Range Badge + Big Title + Status Badge -->
+                        <div class="batch-header-top-row">
+                            <div class="batch-order-and-title">
+                                <div class="batch-order-range">${orderRangeText}</div>
+                                <span class="batch-hinban-title">${mainTitle}</span>
+                            </div>
+                            <div class="batch-top-status">
+                                ${statusBadgeHTML}
                             </div>
                         </div>
-                        <div class="batch-header-right" onclick="event.stopPropagation()">
+
+                        <!-- Row 2: Info Badges & Meta Chips -->
+                        <div class="batch-chips-row">
+                            ${destBadge}
+                            ${colorBadge}
+                            ${shoriBadge}
+                            ${habanagaBadge}
+                            <span class="batch-summary-pill">全 ${group.items.length} 巻き (${group.totalMeters} m)</span>
+                            <span class="batch-summary-pill">🕒 予定: ${group.startTime} - ${group.endTime} (計 ${group.totalDuration} 分)</span>
+                        </div>
+
+                        <!-- Row 3: Action Buttons -->
+                        <div class="batch-actions-row" onclick="event.stopPropagation()">
                             <div class="batch-btn-group">
                                 ${actionButtonsHTML}
                             </div>

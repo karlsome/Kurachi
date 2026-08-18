@@ -1021,9 +1021,8 @@
         /* Batch Header */
         .batch-header {
             display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 16px;
+            flex-direction: column;
+            gap: 12px;
             padding: 16px 20px;
             border-bottom: 1px solid var(--border);
             cursor: pointer;
@@ -1035,12 +1034,21 @@
             background: #F8FAFC;
         }
 
-        .batch-header-left {
+        .batch-header-top-row {
             display: flex;
             align-items: center;
-            gap: 16px;
-            flex: 1;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .batch-order-and-title {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
             min-width: 0;
+            flex: 1;
         }
 
         .batch-order-range {
@@ -1049,50 +1057,55 @@
             color: var(--text-main);
             font-size: 0.95rem;
             font-weight: 900;
-            padding: 8px 12px;
+            padding: 6px 12px;
             border-radius: var(--btn-radius);
             white-space: nowrap;
-            display: flex;
+            display: inline-flex;
             align-items: center;
             justify-content: center;
-            min-width: 54px;
-        }
-
-        .batch-title-col {
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-            flex: 1;
-            min-width: 0;
-        }
-
-        .batch-hinban-row {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            flex-wrap: wrap;
         }
 
         .batch-hinban-title {
-            font-size: 1.2rem;
+            font-size: 1.25rem;
             font-weight: 900;
             color: var(--text-main);
             letter-spacing: -0.01em;
-            word-break: break-all;
+            word-break: break-word;
         }
 
-        .batch-meta-sub {
+        .batch-top-status {
+            display: flex;
+            align-items: center;
+            flex-shrink: 0;
+        }
+
+        /* Chips Row */
+        .batch-chips-row {
             display: flex;
             align-items: center;
             gap: 8px;
             flex-wrap: wrap;
             font-size: 0.825rem;
-            color: var(--text-muted);
         }
 
-        .batch-hinmei {
-            font-weight: 700;
-            color: var(--text-soft);
+        /* Actions Row */
+        .batch-actions-row {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 8px;
+            margin-top: 4px;
+            padding-top: 10px;
+            border-top: 1px solid rgba(0, 0, 0, 0.05);
+        }
+
+        .batch-btn-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+            width: 100%;
         }
 
         .batch-summary-pill {
@@ -1100,8 +1113,8 @@
             color: var(--text-main);
             background: var(--bg-subtle);
             border: 1px solid var(--border);
-            padding: 2px 8px;
-            border-radius: 4px;
+            padding: 3px 8px;
+            border-radius: 6px;
         }
 
         .batch-header-right {
