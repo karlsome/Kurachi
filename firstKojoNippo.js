@@ -398,6 +398,10 @@ async function fetchDailySchedule(dateStr) {
         if (scheduleDoc && Array.isArray(scheduleDoc.scheduleOrder) && scheduleDoc.scheduleOrder.length > 0) {
             const startTime = scheduleDoc.startTime || '08:00';
             state.scheduledItems = computeTimeSchedule(scheduleDoc.scheduleOrder, startTime);
+            
+            // Sync live status from server (submittedDB.firstFactoryProduction)
+            await fetchProductionStatus(dateStr);
+
             renderScheduleList(state.scheduledItems, startTime);
         } else {
             state.scheduledItems = [];
@@ -416,6 +420,76 @@ async function fetchDailySchedule(dateStr) {
         `;
     } finally {
         state.isLoadingSchedule = false;
+    }
+}
+
+// -----------------------------------------------------
+// Server Sync for Production Status (firstFactoryProduction)
+// -----------------------------------------------------
+async function fetchProductionStatus(dateStr) {
+    try {
+        const res = await fetch(`${serverURL}/api/production/status?date=${encodeURIComponent(dateStr)}&machine=${encodeURIComponent(state.machineName || 'PSA2')}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.success && Array.isArray(data.records)) {
+            const storageKey = `firstkojo_lifecycle_${dateStr}`;
+            const stored = JSON.parse(localStorage.getItem(storageKey) || '{}');
+            data.records.forEach(rec => {
+                if (rec.groupId) {
+                    stored[rec.groupId] = {
+                        status: rec.status,
+                        actualStartTime: rec.actualStartTime,
+                        startEpoch: rec.startEpoch,
+                        actualEndTime: rec.actualEndTime,
+                        endEpoch: rec.endEpoch,
+                        actualDurationMins: rec.actualDurationMins,
+                        worker: rec.worker
+                    };
+                }
+            });
+            localStorage.setItem(storageKey, JSON.stringify(stored));
+            console.log(`🌐 Synced ${data.records.length} production record(s) from server for ${dateStr}`);
+        }
+    } catch (err) {
+        console.warn('Could not fetch server production status:', err);
+    }
+}
+
+async function syncProductionStatusToServer(group, patch) {
+    if (!group || !state.selectedDate) return;
+    try {
+        const lifecycle = { ...getGroupLifecycle(group.groupId), ...patch };
+        const payload = {
+            scheduleId: state.dailySchedule?._id || null,
+            groupId: group.groupId,
+            date: state.selectedDate,
+            machine: state.machineName || 'PSA2',
+            worker: state.workerName || '',
+            hinban: group.hinban,
+            hinmei: group.hinmei || '',
+            kizai: group.kizai || '',
+            color: group.color || '',
+            zuban: group.zuban || '',
+            totalRolls: group.items ? group.items.length : 1,
+            totalMeters: group.totalMeters || 0,
+            status: lifecycle.status || 'pending',
+            actualStartTime: lifecycle.actualStartTime || null,
+            startEpoch: lifecycle.startEpoch || null,
+            actualEndTime: lifecycle.actualEndTime || null,
+            endEpoch: lifecycle.endEpoch || null,
+            actualDurationMins: lifecycle.actualDurationMins !== undefined ? lifecycle.actualDurationMins : null,
+            items: group.items || []
+        };
+
+        const res = await fetch(`${serverURL}/api/production/status`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const resData = await res.json();
+        console.log('📡 Synced status to firstFactoryProduction:', resData);
+    } catch (err) {
+        console.warn('Error syncing production status to server:', err);
     }
 }
 
@@ -778,6 +852,15 @@ function startBatchGroup(groupIndex, event) {
         actualDurationMins: null
     });
 
+    // Sync to backend collection (firstFactoryProduction)
+    syncProductionStatusToServer(group, {
+        status: 'running',
+        actualStartTime: startTimeStr,
+        startEpoch: now.getTime(),
+        actualEndTime: null,
+        actualDurationMins: null
+    });
+
     state.selectedItem = group.items[0];
     state.selectedGroup = group;
     sessionStorage.setItem('firstkojo_nippo_selected_item', JSON.stringify(group.items[0]));
@@ -865,6 +948,14 @@ function confirmDoneBatch(groupIndex) {
         actualDurationMins: elapsedMins
     });
 
+    // Sync to backend collection (firstFactoryProduction)
+    syncProductionStatusToServer(group, {
+        status: 'completed',
+        actualEndTime: endTimeStr,
+        endEpoch: now.getTime(),
+        actualDurationMins: elapsedMins
+    });
+
     closeBatchModal();
 
     // Release pdfDisplayer monitor
@@ -908,6 +999,15 @@ function confirmCancelBatch(groupIndex) {
     const group = state.currentGroups[groupIndex];
 
     setGroupLifecycle(group.groupId, {
+        status: 'pending',
+        actualStartTime: null,
+        startEpoch: null,
+        actualEndTime: null,
+        actualDurationMins: null
+    });
+
+    // Sync to backend collection (firstFactoryProduction)
+    syncProductionStatusToServer(group, {
         status: 'pending',
         actualStartTime: null,
         startEpoch: null,
@@ -973,6 +1073,13 @@ function resumeBatchGroup(groupIndex) {
         actualDurationMins: null
     });
 
+    // Sync to backend collection (firstFactoryProduction)
+    syncProductionStatusToServer(group, {
+        status: 'running',
+        actualEndTime: null,
+        actualDurationMins: null
+    });
+
     closeBatchModal();
 
     if (group.zuban) {
@@ -994,6 +1101,15 @@ function resetBatchGroup(groupIndex) {
         actualDurationMins: null
     });
 
+    // Sync to backend collection (firstFactoryProduction)
+    syncProductionStatusToServer(group, {
+        status: 'pending',
+        actualStartTime: null,
+        startEpoch: null,
+        actualEndTime: null,
+        actualDurationMins: null
+    });
+
     closeBatchModal();
     renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
 }
@@ -1007,8 +1123,11 @@ function undoLastDoneBatch() {
     hideUndoSnackbar();
 
     const group = state.currentGroups && state.currentGroups[groupIndex];
-    if (group && group.zuban && prevState.status === 'running') {
-        notifyPdfDisplayer(group.items[0], group.zuban);
+    if (group) {
+        syncProductionStatusToServer(group, prevState);
+        if (group.zuban && prevState.status === 'running') {
+            notifyPdfDisplayer(group.items[0], group.zuban);
+        }
     }
 
     state.lastDoneGroup = null;

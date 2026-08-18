@@ -34229,6 +34229,106 @@ app.get('/api/production/material-detail', async (req, res) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// First Factory Production Status Tracking API (submittedDB.firstFactoryProduction)
+// ---------------------------------------------------------------------------
+app.get('/api/production/status', async (req, res) => {
+  try {
+    const { date, machine } = req.query;
+    if (!date) {
+      return res.status(400).json({ error: 'date is required (YYYY-MM-DD)' });
+    }
+
+    const submittedDb = client.db('submittedDB');
+    const productionCollection = submittedDb.collection('firstFactoryProduction');
+
+    const query = { date };
+    if (machine) {
+      query.machine = machine;
+    }
+
+    const records = await productionCollection.find(query).toArray();
+    res.json({ success: true, records });
+  } catch (error) {
+    console.error('❌ Error in GET /api/production/status:', error);
+    res.status(500).json({ error: 'Failed to fetch production status' });
+  }
+});
+
+app.post('/api/production/status', async (req, res) => {
+  try {
+    const {
+      scheduleId,
+      groupId,
+      date,
+      machine,
+      worker,
+      hinban,
+      hinmei,
+      kizai,
+      color,
+      zuban,
+      totalRolls,
+      totalMeters,
+      status,
+      actualStartTime,
+      startEpoch,
+      actualEndTime,
+      endEpoch,
+      actualDurationMins,
+      items
+    } = req.body;
+
+    if (!groupId || !date) {
+      return res.status(400).json({ error: 'groupId and date are required' });
+    }
+
+    const submittedDb = client.db('submittedDB');
+    const productionCollection = submittedDb.collection('firstFactoryProduction');
+
+    const filter = { date, groupId };
+    const updateDoc = {
+      $set: {
+        scheduleId: scheduleId || null,
+        groupId,
+        date,
+        machine: machine || 'PSA2',
+        worker: worker || '',
+        hinban: hinban || '',
+        hinmei: hinmei || '',
+        kizai: kizai || '',
+        color: color || '',
+        zuban: zuban || '',
+        totalRolls: Number(totalRolls) || 0,
+        totalMeters: Number(totalMeters) || 0,
+        status: status || 'pending',
+        actualStartTime: actualStartTime || null,
+        startEpoch: startEpoch || null,
+        actualEndTime: actualEndTime || null,
+        endEpoch: endEpoch || null,
+        actualDurationMins: actualDurationMins !== undefined ? Number(actualDurationMins) : null,
+        items: Array.isArray(items) ? items : [],
+        updatedAt: new Date()
+      },
+      $setOnInsert: {
+        createdAt: new Date()
+      }
+    };
+
+    const result = await productionCollection.findOneAndUpdate(
+      filter,
+      updateDoc,
+      { upsert: true, returnDocument: 'after' }
+    );
+
+    console.log(`📝 Updated firstFactoryProduction for [${hinban || groupId}] -> status: ${status}, worker: ${worker}`);
+    res.json({ success: true, record: result.value || result });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/status:', error);
+    res.status(500).json({ error: 'Failed to update production status' });
+  }
+});
+
 require('./firstFactoryRoutes')(app, client);
 
 app.listen(port, () => {
