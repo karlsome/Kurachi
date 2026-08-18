@@ -727,18 +727,103 @@ async function printSingleRoll(groupIndex, rollIndex, event) {
     }
 }
 
-async function printBatchGroup(groupIndex, event) {
+function printBatchGroup(groupIndex, event) {
     if (event) event.stopPropagation();
     if (!state.currentGroups || !state.currentGroups[groupIndex]) return;
     const group = state.currentGroups[groupIndex];
+    const lifecycle = getGroupLifecycle(group.groupId);
+
+    const printedRollIndices = new Set(
+        (lifecycle.printHistory || []).map(p => Number(p.rollIndex))
+    );
+
+    const alreadyPrintedList = [];
+    const unprintedList = [];
+
+    group.items.forEach((item, idx) => {
+        const actualRollIndex = item.rollIndex || (idx + 1);
+        if (printedRollIndices.has(Number(actualRollIndex))) {
+            alreadyPrintedList.push({ item, idx, actualRollIndex });
+        } else {
+            unprintedList.push({ item, idx, actualRollIndex });
+        }
+    });
+
+    // If some or all items are already printed, prompt modal with choices
+    if (alreadyPrintedList.length > 0) {
+        const printedRollsText = alreadyPrintedList.map(r => `#${r.item.orderIndex} (${r.actualRollIndex}/${group.items.length}巻き)`).join(', ');
+        
+        const bodyHTML = `
+            <div style="background: #F0FDF4; border: 1.5px solid #86EFAC; border-radius: var(--btn-radius); padding: 14px; margin-bottom: 16px;">
+                <div style="font-size: 0.85rem; font-weight: 800; color: #15803D; margin-bottom: 4px;">🖨️ 既に印刷済みの巻きがあります</div>
+                <div style="font-size: 1.05rem; font-weight: 900; color: #166534;">${group.kizai || group.hinban}</div>
+                <div style="font-size: 0.85rem; color: #15803D; margin-top: 4px;">
+                    印刷済: <strong>${alreadyPrintedList.length} / ${group.items.length} 巻き</strong> (${printedRollsText})
+                </div>
+            </div>
+            <p style="font-size: 0.9rem; color: var(--text-soft); line-height: 1.6; margin-bottom: 16px;">
+                一括印刷の実行方法を選択してください:
+            </p>
+            <div style="display: flex; flex-direction: column; gap: 10px;">
+                ${unprintedList.length > 0 ? `
+                <button type="button" class="btn btn-primary" style="background: #10B981; border-color: #10B981; text-align: left; padding: 12px 16px;" onclick="closeBatchModal(); executeBatchPrint(${groupIndex}, true)">
+                    <strong>⏩ 未印刷の巻きのみ印刷 (${unprintedList.length} 巻き)</strong><br>
+                    <span style="font-size: 0.8rem; font-weight: normal; opacity: 0.95;">印刷済みの巻きをスキップし、残りのみ印刷します。</span>
+                </button>
+                ` : `
+                <div style="background: #F8FAFC; border: 1px solid #CBD5E1; padding: 10px 14px; border-radius: 6px; font-size: 0.85rem; color: #64748B;">
+                    ※ すべての巻き（${group.items.length}巻き）が既に印刷済みです。
+                </div>
+                `}
+                <button type="button" class="btn btn-secondary" style="text-align: left; padding: 12px 16px;" onclick="closeBatchModal(); executeBatchPrint(${groupIndex}, false)">
+                    <strong>🖨️ 全て再印刷 (${group.items.length} 巻き)</strong><br>
+                    <span style="font-size: 0.8rem; font-weight: normal; color: var(--text-muted);">印刷済みの巻きも含め、全巻きを最初から印刷します。</span>
+                </button>
+            </div>
+        `;
+
+        const actionsHTML = `
+            <button type="button" class="btn btn-secondary" onclick="closeBatchModal()">戻る (Cancel)</button>
+        `;
+
+        showBatchModal('一括印刷の確認 (Batch Print)', bodyHTML, actionsHTML);
+        return;
+    }
+
+    // No rolls printed yet, directly execute all
+    executeBatchPrint(groupIndex, false);
+}
+
+async function executeBatchPrint(groupIndex, skipPrinted) {
+    if (!state.currentGroups || !state.currentGroups[groupIndex]) return;
+    const group = state.currentGroups[groupIndex];
     const totalRolls = group.items.length;
+    const lifecycle = getGroupLifecycle(group.groupId);
 
-    showUndoSnackbar(`🖨️ ロット「${group.kizai || group.hinban}」全 ${totalRolls} 巻きの一括印刷を開始します...`);
+    const printedRollIndices = new Set(
+        (lifecycle.printHistory || []).map(p => Number(p.rollIndex))
+    );
 
-    let successCount = 0;
+    const targetRolls = [];
     for (let r = 0; r < totalRolls; r++) {
         const rollItem = group.items[r];
         const actualRollIndex = rollItem.rollIndex || (r + 1);
+        if (skipPrinted && printedRollIndices.has(Number(actualRollIndex))) {
+            continue; // Skip already printed
+        }
+        targetRolls.push({ rollItem, actualRollIndex });
+    }
+
+    if (targetRolls.length === 0) {
+        showUndoSnackbar(`ℹ️ 印刷対象の巻きはありません（すべて印刷済み）`);
+        return;
+    }
+
+    showUndoSnackbar(`🖨️ ロット「${group.kizai || group.hinban}」${targetRolls.length} 巻きの一括印刷を開始します...`);
+
+    let successCount = 0;
+    for (let i = 0; i < targetRolls.length; i++) {
+        const { rollItem, actualRollIndex } = targetRolls[i];
         const fields = buildBrotherPrintFields(group, rollItem, actualRollIndex, totalRolls);
 
         showUndoSnackbar(`🖨️ 印刷中 (${actualRollIndex} / ${totalRolls} 巻き): ${fields.text_DateT}`);
@@ -747,18 +832,18 @@ async function printBatchGroup(groupIndex, event) {
         if (printResult.success) {
             await logPrintToServer(group, rollItem, actualRollIndex, totalRolls, fields);
             successCount++;
-            if (r < totalRolls - 1) {
+            if (i < targetRolls.length - 1) {
                 await new Promise(res => setTimeout(res, 1200));
             }
         } else {
             console.error(`❌ Batch printing halted at roll ${actualRollIndex}/${totalRolls}:`, printResult.error);
             showUndoSnackbar(`❌ 印刷が中断されました (${actualRollIndex} / ${totalRolls} 巻きで失敗): ${printResult.error || '接続エラー'}`);
-            alert(`❌ 一括印刷が中断されました\n\n【進捗】 ${successCount} / ${totalRolls} 巻き完了\n【失敗した巻き】 ${actualRollIndex} 巻き目 (#${rollItem.orderIndex} • ${fields.text_DateT})\n【エラー原因】 ${printResult.error || 'プリンター応答なし'}\n\nプリンター接続を確認後、未印刷の巻きの「🖨️ 印刷」ボタンから個別印刷を行ってください。`);
+            alert(`❌ 一括印刷が中断されました\n\n【進捗】 ${successCount} / ${targetRolls.length} 巻き完了\n【失敗した巻き】 ${actualRollIndex} 巻き目 (#${rollItem.orderIndex} • ${fields.text_DateT})\n【エラー原因】 ${printResult.error || 'プリンター応答なし'}\n\nプリンター接続を確認後、未印刷の巻きの「🖨️ 印刷」ボタンから個別印刷を行ってください。`);
             return;
         }
     }
 
-    showUndoSnackbar(`✅ ロット「${group.kizai || group.hinban}」全 ${totalRolls} 巻きの印刷が完了しました`);
+    showUndoSnackbar(`✅ ロット「${group.kizai || group.hinban}」${successCount} 巻きの印刷が完了しました`);
 }
 
 // -----------------------------------------------------
