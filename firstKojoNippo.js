@@ -908,23 +908,11 @@ function closeBatchModal() {
 }
 
 function showUndoSnackbar(text) {
-    const snackbar = document.getElementById('undoSnackbar');
-    const snackbarText = document.getElementById('undoSnackbarText');
-    if (!snackbar) return;
-
-    if (snackbarText) snackbarText.textContent = text;
-    snackbar.classList.add('show');
-
-    if (undoTimer) clearTimeout(undoTimer);
-    undoTimer = setTimeout(() => {
-        snackbar.classList.remove('show');
-    }, 8000);
+    console.log('ℹ️ Notification:', text);
 }
 
 function hideUndoSnackbar() {
-    const snackbar = document.getElementById('undoSnackbar');
-    if (snackbar) snackbar.classList.remove('show');
-    if (undoTimer) clearTimeout(undoTimer);
+    // No-op
 }
 
 function renderScheduleList(items, startTimeStr) {
