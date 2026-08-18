@@ -436,42 +436,87 @@ function updateScheduleStats(items, startTimeStr) {
     if (endTimeVal) endTimeVal.textContent = estimatedEnd;
 }
 
+function groupScheduledItems(items) {
+    if (!Array.isArray(items)) return [];
+    const groups = [];
+    let currentGroup = null;
+
+    items.forEach((item, idx) => {
+        if (item.type === 'setup') {
+            groups.push({
+                type: 'setup',
+                groupId: `setup_${item.id || idx}`,
+                items: [item],
+                itemIndexStart: idx,
+                totalDuration: Number(item.duration) || 0,
+                totalMeters: 0,
+                startTime: item.startTime,
+                endTime: item.endTime
+            });
+            currentGroup = null;
+            return;
+        }
+
+        // Hinban item: group consecutive items with the same hinban
+        if (currentGroup && currentGroup.type === 'hinban' && currentGroup.hinban === item.hinban) {
+            currentGroup.items.push(item);
+            currentGroup.totalDuration += Number(item.duration) || 0;
+            currentGroup.totalMeters += Number(item.meters) || 0;
+            currentGroup.endTime = item.endTime;
+        } else {
+            currentGroup = {
+                type: 'hinban',
+                groupId: `group_${item.hinban}_${idx}`,
+                hinban: item.hinban,
+                hinmei: item.hinmei || '',
+                kizai: item.kizai || '',
+                color: item.color || '',
+                zuban: item.zuban || '',
+                items: [item],
+                itemIndexStart: idx,
+                totalDuration: Number(item.duration) || 0,
+                totalMeters: Number(item.meters) || 0,
+                startTime: item.startTime,
+                endTime: item.endTime
+            };
+            groups.push(currentGroup);
+        }
+    });
+
+    return groups;
+}
+
 function renderScheduleList(items, startTimeStr) {
     const container = document.getElementById('scheduleListContainer');
     if (!container) return;
 
     updateScheduleStats(items, startTimeStr);
 
+    const groups = groupScheduledItems(items);
+    state.currentGroups = groups;
+
     let html = '';
-    let currentHinbanKey = null;
-    let groupIndex = -1;
 
-    items.forEach((item, index) => {
-        const isSelected = state.selectedItem && state.selectedItem.id === item.id;
-        const isSetup = item.type === 'setup';
+    groups.forEach((group, gIdx) => {
+        const isGroupTinted = (gIdx % 2 === 0);
+        const isGroupSelected = state.selectedItem && group.items.some(it => it.id === state.selectedItem.id);
 
-        // Grouping key: setup items get unique group or their own key, hinbans get grouped by hinban
-        const itemKey = isSetup ? `setup_${item.id || index}` : (item.hinban || `item_${index}`);
-        if (itemKey !== currentHinbanKey) {
-            currentHinbanKey = itemKey;
-            groupIndex++;
-        }
-        const isGroupTinted = (groupIndex % 2 === 0);
-
-        if (isSetup) {
+        if (group.type === 'setup') {
+            const setupItem = group.items[0];
+            const isSelected = state.selectedItem && state.selectedItem.id === setupItem.id;
             html += `
                 <div class="schedule-item-card setup-item ${isGroupTinted ? 'group-tinted' : ''} ${isSelected ? 'selected' : ''}" 
-                     data-id="${item.id}" 
-                     onclick="selectScheduleItem(${index})">
+                     data-id="${setupItem.id}" 
+                     onclick="selectScheduleItem(${group.itemIndexStart})">
                     <div class="item-left-col">
-                        <div class="order-badge">#${item.orderIndex}</div>
+                        <div class="order-badge">#${setupItem.orderIndex}</div>
                         <div class="time-box">
-                            <span class="time-range">${item.startTime} - ${item.endTime}</span>
-                            <span class="duration-pill">⚙️ ${item.duration} 分</span>
+                            <span class="time-range">${setupItem.startTime} - ${setupItem.endTime}</span>
+                            <span class="duration-pill">⚙️ ${setupItem.duration} 分</span>
                         </div>
                     </div>
                     <div class="item-center-col">
-                        <div class="hinban-title">⚙️ ${item.name || '段取り (Setup)'}</div>
+                        <div class="hinban-title">⚙️ ${setupItem.name || '段取り (Setup)'}</div>
                         <div class="meta-tags-row">
                             <span class="tag-pill">準備 / 段替</span>
                         </div>
@@ -482,37 +527,63 @@ function renderScheduleList(items, startTimeStr) {
                 </div>
             `;
         } else {
-            // Hinban Item
-            const rollText = item.totalRolls ? `${item.rollIndex} / ${item.totalRolls} 巻き` : `Roll ${item.rollIndex || 1}`;
-            const metersText = item.meters ? `${item.meters} m` : '';
-            const kizaiBadge = item.kizai ? `<span class="tag-pill kizai-tag" title="基材コード: ${item.kizai}">基材: ${item.kizai}</span>` : '';
-            const colorBadge = item.color ? `<span class="tag-pill color-tag" title="色コード: ${item.color}">色: ${item.color}</span>` : '';
+            // Unified Hinban Batch Group Card
+            const firstItem = group.items[0];
+            const lastItem = group.items[group.items.length - 1];
+            const orderRangeText = group.items.length > 1 ? `#${firstItem.orderIndex} — #${lastItem.orderIndex}` : `#${firstItem.orderIndex}`;
+
+            const kizaiBadge = group.kizai ? `<span class="tag-pill kizai-tag" title="基材コード: ${group.kizai}">基材: ${group.kizai}</span>` : '';
+            const colorBadge = group.color ? `<span class="tag-pill color-tag" title="色コード: ${group.color}">色: ${group.color}</span>` : '';
 
             html += `
-                <div class="schedule-item-card ${isGroupTinted ? 'group-tinted' : ''} ${isSelected ? 'selected' : ''}" 
-                     data-id="${item.id}" 
-                     onclick="selectScheduleItem(${index})">
-                    <div class="item-left-col">
-                        <div class="order-badge">#${item.orderIndex}</div>
-                        <div class="time-box">
-                            <span class="time-range">${item.startTime} - ${item.endTime}</span>
-                            <span class="duration-pill">${item.duration} 分</span>
+                <div class="batch-group-card ${isGroupTinted ? 'group-tinted' : ''} ${isGroupSelected ? 'selected' : ''}" 
+                     data-group-id="${group.groupId}">
+                    
+                    <!-- Batch Header -->
+                    <div class="batch-header" onclick="selectBatchGroup(${gIdx})">
+                        <div class="batch-header-left">
+                            <div class="batch-order-range">${orderRangeText}</div>
+                            <div class="batch-title-col">
+                                <div class="batch-hinban-row">
+                                    <span class="batch-hinban-title">${group.hinban}</span>
+                                    ${kizaiBadge}
+                                    ${colorBadge}
+                                </div>
+                                <div class="batch-meta-sub">
+                                    ${group.hinmei ? `<span class="batch-hinmei">${group.hinmei}</span><span class="batch-stat-divider">•</span>` : ''}
+                                    <span class="batch-summary-pill">全 ${group.items.length} 巻き (${group.totalMeters} m)</span>
+                                    <span class="batch-stat-divider">•</span>
+                                    <span class="batch-summary-pill">🕒 ${group.startTime} - ${group.endTime} (計 ${group.totalDuration} 分)</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="batch-header-right">
+                            <button type="button" class="btn-select-batch">${isGroupSelected ? '一括選択中' : 'ロット選択'}</button>
                         </div>
                     </div>
-                    <div class="item-center-col">
-                        <div class="hinban-row">
-                            <div class="hinban-title">${item.hinban || '---'}</div>
-                            ${kizaiBadge}
-                            ${colorBadge}
-                        </div>
-                        <div class="meta-tags-row">
-                            <span class="tag-pill roll-tag">${rollText}</span>
-                            ${metersText ? `<span class="tag-pill meter-tag">${metersText}</span>` : ''}
-                            ${item.hinmei ? `<span class="tag-pill" style="color: var(--text-soft); font-weight: 600;">${item.hinmei}</span>` : ''}
-                        </div>
-                    </div>
-                    <div class="item-right-col">
-                        <button type="button" class="btn-select-item">${isSelected ? '選択中' : '選択'}</button>
+
+                    <!-- Batch Roll Sub-Rows -->
+                    <div class="batch-rolls-list">
+                        ${group.items.map((rollItem, rIdx) => {
+                            const isRollActive = state.selectedItem && state.selectedItem.id === rollItem.id;
+                            const globalIdx = group.itemIndexStart + rIdx;
+                            return `
+                                <div class="batch-roll-row ${isRollActive ? 'active-roll' : ''}" 
+                                     onclick="selectSpecificRoll(${globalIdx}, event)">
+                                    <div class="roll-row-left">
+                                        <span class="roll-sub-badge">#${rollItem.orderIndex}</span>
+                                        <span class="roll-time">${rollItem.startTime} - ${rollItem.endTime}</span>
+                                        <span class="roll-count-pill">${rollItem.rollIndex || (rIdx + 1)} / ${rollItem.totalRolls || group.items.length} 巻き</span>
+                                        <span class="roll-meter-pill">${rollItem.meters || 100} m</span>
+                                    </div>
+                                    <div class="roll-row-right">
+                                        <span class="roll-status-pill ${isRollActive ? 'current-active' : ''}">
+                                            ${isRollActive ? '▶ 進行中' : (isGroupSelected ? 'ロット対象' : '待機')}
+                                        </span>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('')}
                     </div>
                 </div>
             `;
@@ -537,6 +608,42 @@ function renderEmptySchedule(dateStr) {
     `;
 }
 
+function selectBatchGroup(groupIndex) {
+    if (!state.currentGroups || !state.currentGroups[groupIndex]) return;
+    const group = state.currentGroups[groupIndex];
+    if (group.type === 'setup') {
+        selectScheduleItem(group.itemIndexStart);
+        return;
+    }
+
+    // Select the first roll in the batch (or keep current if already in this batch)
+    let targetItem = group.items[0];
+    if (state.selectedItem && group.items.some(it => it.id === state.selectedItem.id)) {
+        targetItem = state.selectedItem;
+    }
+
+    state.selectedItem = targetItem;
+    state.selectedGroup = group;
+    sessionStorage.setItem('firstkojo_nippo_selected_item', JSON.stringify(targetItem));
+
+    // Re-render schedule list to update active highlights across the entire batch
+    renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
+
+    // Jump to Info tab (tab index 2) and load details
+    switchMainTab(2);
+
+    if (group.zuban) {
+        notifyPdfDisplayer(targetItem, group.zuban);
+    }
+
+    loadItemDetail(targetItem);
+}
+
+function selectSpecificRoll(globalIndex, event) {
+    if (event) event.stopPropagation();
+    selectScheduleItem(globalIndex);
+}
+
 function selectScheduleItem(index) {
     const item = state.scheduledItems[index];
     if (!item) return;
@@ -544,19 +651,8 @@ function selectScheduleItem(index) {
     state.selectedItem = item;
     sessionStorage.setItem('firstkojo_nippo_selected_item', JSON.stringify(item));
 
-    // Update UI highlights
-    const cards = document.querySelectorAll('.schedule-item-card');
-    cards.forEach((card, idx) => {
-        if (idx === index) {
-            card.classList.add('selected');
-            const btn = card.querySelector('.btn-select-item');
-            if (btn) btn.textContent = '選択中';
-        } else {
-            card.classList.remove('selected');
-            const btn = card.querySelector('.btn-select-item');
-            if (btn) btn.textContent = '選択';
-        }
-    });
+    // Re-render schedule list to highlight the unified batch card and roll sub-row
+    renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
 
     // Jump to Info tab (tab index 2) and load full details
     switchMainTab(2);

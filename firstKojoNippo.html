@@ -970,6 +970,276 @@
             color: #FFFFFF;
         }
 
+        /* ---------------- Batch Group Card Styling ---------------- */
+        .batch-group-card {
+            background: var(--bg-surface);
+            border: 1.5px solid var(--border);
+            border-radius: var(--card-radius);
+            box-shadow: var(--shadow-card);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            transition: var(--transition-smooth);
+            position: relative;
+        }
+
+        .batch-group-card:hover {
+            border-color: var(--border-strong);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+        }
+
+        .batch-group-card.group-tinted {
+            background: #F8FAFC;
+        }
+
+        .batch-group-card.selected {
+            border-color: var(--brand);
+            background: #FFFFFF;
+            box-shadow: 0 0 0 1.5px var(--brand), 0 6px 20px rgba(31, 157, 107, 0.12);
+        }
+
+        .batch-group-card.selected::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 5px;
+            height: 100%;
+            background: var(--brand);
+            z-index: 2;
+        }
+
+        /* Batch Header */
+        .batch-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            background: var(--bg-surface);
+            transition: var(--transition-smooth);
+        }
+
+        .batch-group-card.group-tinted .batch-header {
+            background: #F8FAFC;
+        }
+
+        .batch-group-card.selected .batch-header {
+            background: rgba(31, 157, 107, 0.04);
+            border-bottom-color: rgba(31, 157, 107, 0.2);
+        }
+
+        .batch-header-left {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .batch-order-range {
+            background: var(--bg-inset);
+            border: 1.5px solid var(--border-strong);
+            color: var(--text-main);
+            font-size: 0.95rem;
+            font-weight: 900;
+            padding: 8px 12px;
+            border-radius: var(--btn-radius);
+            white-space: nowrap;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 54px;
+        }
+
+        .batch-group-card.selected .batch-order-range {
+            background: var(--brand);
+            border-color: var(--brand);
+            color: #FFFFFF;
+        }
+
+        .batch-title-col {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .batch-hinban-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .batch-hinban-title {
+            font-size: 1.2rem;
+            font-weight: 900;
+            color: var(--text-main);
+            letter-spacing: -0.01em;
+            word-break: break-all;
+        }
+
+        .batch-meta-sub {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+            font-size: 0.825rem;
+            color: var(--text-muted);
+        }
+
+        .batch-hinmei {
+            font-weight: 700;
+            color: var(--text-soft);
+        }
+
+        .batch-summary-pill {
+            font-weight: 800;
+            color: var(--text-main);
+            background: var(--bg-subtle);
+            border: 1px solid var(--border);
+            padding: 2px 8px;
+            border-radius: 4px;
+        }
+
+        .batch-header-right {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+
+        .btn-select-batch {
+            min-height: 42px;
+            padding: 0 18px;
+            font-size: 0.9rem;
+            font-weight: 800;
+            border-radius: var(--btn-radius);
+            background: var(--bg-surface);
+            border: 1.5px solid var(--border-strong);
+            color: var(--text-main);
+            cursor: pointer;
+            transition: var(--transition-smooth);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn-select-batch:hover,
+        .batch-group-card.selected .btn-select-batch {
+            background: var(--brand);
+            border-color: var(--brand);
+            color: #FFFFFF;
+            box-shadow: 0 2px 8px rgba(31, 157, 107, 0.25);
+        }
+
+        /* Batch Roll Sub-Rows */
+        .batch-rolls-list {
+            display: flex;
+            flex-direction: column;
+            background: var(--bg-surface);
+        }
+
+        .batch-roll-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 10px 20px 10px 76px;
+            border-top: 1px solid var(--border);
+            transition: var(--transition-smooth);
+            cursor: pointer;
+        }
+
+        .batch-roll-row:first-child {
+            border-top: none;
+        }
+
+        .batch-roll-row:hover {
+            background: rgba(46, 111, 242, 0.04);
+        }
+
+        .batch-roll-row.active-roll {
+            background: rgba(31, 157, 107, 0.08);
+        }
+
+        .roll-row-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .roll-sub-badge {
+            font-size: 0.8rem;
+            font-weight: 900;
+            color: var(--text-muted);
+            background: var(--bg-inset);
+            border: 1px solid var(--border);
+            padding: 2px 8px;
+            border-radius: 4px;
+        }
+
+        .batch-roll-row.active-roll .roll-sub-badge {
+            background: var(--brand-soft);
+            color: var(--brand);
+            border-color: rgba(31, 157, 107, 0.3);
+        }
+
+        .roll-time {
+            font-size: 0.95rem;
+            font-weight: 800;
+            color: var(--text-main);
+            font-variant-numeric: tabular-nums;
+        }
+
+        .roll-count-pill {
+            font-size: 0.8rem;
+            font-weight: 800;
+            color: var(--blue);
+            background: var(--blue-soft);
+            border: 1px solid rgba(46, 111, 242, 0.2);
+            padding: 2px 8px;
+            border-radius: 6px;
+        }
+
+        .roll-meter-pill {
+            font-size: 0.8rem;
+            font-weight: 800;
+            color: var(--amber);
+            background: var(--amber-soft);
+            border: 1px solid rgba(224, 144, 14, 0.2);
+            padding: 2px 8px;
+            border-radius: 6px;
+        }
+
+        .roll-status-pill {
+            font-size: 0.775rem;
+            font-weight: 800;
+            padding: 4px 10px;
+            border-radius: var(--r-pill);
+            background: var(--bg-subtle);
+            color: var(--text-muted);
+            border: 1px solid var(--border);
+        }
+
+        .batch-roll-row.active-roll .roll-status-pill {
+            background: var(--brand);
+            color: #FFFFFF;
+            border-color: var(--brand);
+            box-shadow: 0 2px 6px rgba(31, 157, 107, 0.3);
+        }
+
+        .batch-group-card.selected .batch-roll-row:not(.active-roll) .roll-status-pill {
+            background: var(--brand-soft);
+            color: var(--brand);
+            border-color: rgba(31, 157, 107, 0.25);
+        }
+
         /* ---------------- Info Tab Styling ---------------- */
         .info-layout-container {
             display: flex;
