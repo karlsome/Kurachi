@@ -34136,17 +34136,31 @@ app.get('/api/production/schedule/daily', async (req, res) => {
         masterDocs.forEach(doc => {
           let kizai = '';
           let color = '';
+          let shori = '';
+          let habanaga = '';
           if (doc['品番構造'] && Array.isArray(doc['品番構造'].segments)) {
             const kizaiSeg = doc['品番構造'].segments.find(s => s.segment === '基材コード');
             if (kizaiSeg) kizai = kizaiSeg.name || kizaiSeg['得意先'] || kizaiSeg['入出荷先'] || '';
 
             const colorSeg = doc['品番構造'].segments.find(s => s.segment === '色コード');
             if (colorSeg) color = colorSeg.name || colorSeg['得意先'] || colorSeg['入出荷先'] || '';
+
+            const shoriSeg = doc['品番構造'].segments.find(s => s.segment === '処理コード');
+            if (shoriSeg) shori = shoriSeg.name || shoriSeg['得意先'] || shoriSeg['入出荷先'] || '';
+
+            const habanagaSeg = doc['品番構造'].segments.find(s => s.segment === '幅長コード');
+            if (habanagaSeg) habanaga = habanagaSeg.name || habanagaSeg['得意先'] || habanagaSeg['入出荷先'] || '';
           }
+
+          const shippingDest = doc['品目マスタ']?.['出荷先名'] || doc['品目マスタ']?.['入出荷先名'] || doc['品目マスタ']?.['得意先名'] || '';
+
           masterMap[doc['品番']] = {
             hinmei: doc['品目マスタ']?.['品名'] || '',
             kizai,
             color,
+            shori,
+            habanaga,
+            shippingDest,
             zuban: doc['品目マスタ']?.['図番'] || ''
           };
         });
@@ -34158,6 +34172,9 @@ app.get('/api/production/schedule/daily', async (req, res) => {
               ...item,
               kizai: info.kizai || '',
               color: info.color || '',
+              shori: info.shori || '',
+              habanaga: info.habanaga || '',
+              shippingDest: info.shippingDest || '',
               hinmei: info.hinmei || '',
               zuban: info.zuban || ''
             };

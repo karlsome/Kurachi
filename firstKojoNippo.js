@@ -546,6 +546,9 @@ function groupScheduledItems(items) {
                 hinmei: item.hinmei || '',
                 kizai: item.kizai || '',
                 color: item.color || '',
+                shori: item.shori || '',
+                habanaga: item.habanaga || '',
+                shippingDest: item.shippingDest || '',
                 zuban: item.zuban || '',
                 items: [item],
                 itemIndexStart: idx,
@@ -676,8 +679,11 @@ function renderScheduleList(items, startTimeStr) {
             const lastItem = group.items[group.items.length - 1];
             const orderRangeText = group.items.length > 1 ? `#${firstItem.orderIndex} — #${lastItem.orderIndex}` : `#${firstItem.orderIndex}`;
 
-            const kizaiBadge = group.kizai ? `<span class="tag-pill kizai-tag" title="基材コード: ${group.kizai}">基材: ${group.kizai}</span>` : '';
+            // Segment Badges: Shipping Dest, Color, Shori, Habanaga
+            const destBadge = group.shippingDest ? `<span class="tag-pill dest-tag" title="出荷先名: ${group.shippingDest}">出荷先: ${group.shippingDest}</span>` : '';
             const colorBadge = group.color ? `<span class="tag-pill color-tag" title="色コード: ${group.color}">色: ${group.color}</span>` : '';
+            const shoriBadge = group.shori ? `<span class="tag-pill shori-tag" title="処理コード: ${group.shori}">処理: ${group.shori}</span>` : '';
+            const habanagaBadge = group.habanaga ? `<span class="tag-pill habanaga-tag" title="幅長コード: ${group.habanaga}">幅長: ${group.habanaga}</span>` : '';
 
             // Status Badge & Action Buttons according to Lifecycle
             let statusBadgeHTML = '';
@@ -705,6 +711,9 @@ function renderScheduleList(items, startTimeStr) {
                 `;
             }
 
+            // Big Bold Title uses 基材 (or falls back to 品番)
+            const mainTitle = group.kizai || group.hinban;
+
             html += `
                 <div class="batch-group-card state-${lifecycle.status} ${isGroupTinted ? 'group-tinted' : ''}" 
                      data-group-id="${group.groupId}">
@@ -715,13 +724,14 @@ function renderScheduleList(items, startTimeStr) {
                             <div class="batch-order-range">${orderRangeText}</div>
                             <div class="batch-title-col">
                                 <div class="batch-hinban-row">
-                                    <span class="batch-hinban-title">${group.hinban}</span>
+                                    <span class="batch-hinban-title">${mainTitle}</span>
                                     ${statusBadgeHTML}
-                                    ${kizaiBadge}
+                                    ${destBadge}
                                     ${colorBadge}
+                                    ${shoriBadge}
+                                    ${habanagaBadge}
                                 </div>
                                 <div class="batch-meta-sub">
-                                    ${group.hinmei ? `<span class="batch-hinmei">${group.hinmei}</span><span class="batch-stat-divider">•</span>` : ''}
                                     <span class="batch-summary-pill">全 ${group.items.length} 巻き (${group.totalMeters} m)</span>
                                     <span class="batch-stat-divider">•</span>
                                     <span class="batch-summary-pill">🕒 予定: ${group.startTime} - ${group.endTime} (計 ${group.totalDuration} 分)</span>
