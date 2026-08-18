@@ -2348,12 +2348,14 @@
                 return;
             }
 
-            if (data.type === 'scan') {
+            if (data.type === 'scan' || data.type === 'clear') {
                 if (data.machineId) {
                     manualState.sessionKey = data.machineId;
                 }
-                // Check if this is a clear action
-                if (data.additionalData && data.additionalData.action === 'clear') {
+
+                // Check if this is a clear command
+                if (data.type === 'clear' || data.action === 'clear' || (data.additionalData && data.additionalData.action === 'clear') || (!data.sebanggo && !data.zuban)) {
+                    console.log('🧹 Received clear broadcast -> resetting display to waiting state');
                     clearDisplay();
                     resetManualPlayer({ restorePdf: false });
                     manualSection.style.display = 'none';

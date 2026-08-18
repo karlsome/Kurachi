@@ -857,7 +857,7 @@ app.post("/api/broadcast-scan", async (req, res) => {
   const { machineId, sebanggo, hinban, zuban, timestamp, additionalData } = req.body;
   
   // Allow empty sebanggo/zuban only if action is 'clear'
-  const isClearAction = additionalData?.action === 'clear';
+  const isClearAction = additionalData?.action === 'clear' || req.body.action === 'clear';
   
   if (!machineId || (!sebanggo && !zuban && !isClearAction)) {
     return res.status(400).json({ error: "machineId and sebanggo/zuban are required (unless action is 'clear')" });
@@ -873,19 +873,20 @@ app.post("/api/broadcast-scan", async (req, res) => {
     return res.status(400).json({ error: "Invalid machineId format" });
   }
   
-  console.log(`📡 Broadcasting to machine(s): ${machineIds.join(', ')}`);
+  console.log(`📡 Broadcasting to machine(s): ${machineIds.join(', ')} (clear: ${isClearAction})`);
   
   // For each machine, create and store scan data
   machineIds.forEach(normalizedMachineId => {
     const normalizedSessionKey = machineIds.join(',');
     const scanData = {
-      type: 'scan',
+      type: isClearAction ? 'clear' : 'scan',
+      action: isClearAction ? 'clear' : 'scan',
       machineId: normalizedSessionKey,
       sebanggo,
       zuban,
       hinban: hinban || '',
       timestamp: timestamp || new Date().toISOString(),
-      additionalData: additionalData || {}
+      additionalData: additionalData || (isClearAction ? { action: 'clear' } : {})
     };
     
     // Store last scan for persistence (or clear it if action is 'clear')

@@ -653,31 +653,18 @@ function renderScheduleList(items, startTimeStr) {
     groups.forEach((group, gIdx) => {
         const isGroupTinted = (gIdx % 2 === 0);
         const lifecycle = getGroupLifecycle(group.groupId);
-        const isGroupSelected = state.selectedItem && group.items.some(it => it.id === state.selectedItem.id);
+        // Completed groups are never active/selected
+        const isGroupSelected = (lifecycle.status !== 'completed') && state.selectedItem && group.items.some(it => it.id === state.selectedItem.id);
 
         if (group.type === 'setup') {
             const setupItem = group.items[0];
-            const isSelected = state.selectedItem && state.selectedItem.id === setupItem.id;
             html += `
-                <div class="schedule-item-card setup-item ${isGroupTinted ? 'group-tinted' : ''} ${isSelected ? 'selected' : ''}" 
-                     data-id="${setupItem.id}" 
-                     onclick="selectScheduleItem(${group.itemIndexStart})">
-                    <div class="item-left-col">
-                        <div class="order-badge">#${setupItem.orderIndex}</div>
-                        <div class="time-box">
-                            <span class="time-range">${setupItem.startTime} - ${setupItem.endTime}</span>
-                            <span class="duration-pill">⚙️ ${setupItem.duration} 分</span>
-                        </div>
+                <div class="schedule-setup-row" data-id="${setupItem.id}">
+                    <div class="schedule-setup-left">
+                        <span class="setup-tag-pill">#${setupItem.orderIndex} 段替・段取</span>
+                        <span class="setup-title-text">${setupItem.name || '段替え (Setup)'}</span>
                     </div>
-                    <div class="item-center-col">
-                        <div class="hinban-title">⚙️ ${setupItem.name || '段取り (Setup)'}</div>
-                        <div class="meta-tags-row">
-                            <span class="tag-pill">準備 / 段替</span>
-                        </div>
-                    </div>
-                    <div class="item-right-col">
-                        <button type="button" class="btn-select-item">${isSelected ? '選択中' : '選択'}</button>
-                    </div>
+                    <div class="setup-time-text">🕒 ${setupItem.startTime} - ${setupItem.endTime} (${setupItem.duration} 分)</div>
                 </div>
             `;
         } else {
@@ -716,7 +703,7 @@ function renderScheduleList(items, startTimeStr) {
             }
 
             html += `
-                <div class="batch-group-card state-${lifecycle.status} ${isGroupTinted ? 'group-tinted' : ''} ${isGroupSelected ? 'selected' : ''}" 
+                <div class="batch-group-card state-${lifecycle.status} ${isGroupTinted ? 'group-tinted' : ''}" 
                      data-group-id="${group.groupId}">
                     
                     <!-- Batch Header -->
@@ -748,11 +735,11 @@ function renderScheduleList(items, startTimeStr) {
                     <!-- Batch Roll Sub-Rows -->
                     <div class="batch-rolls-list">
                         ${group.items.map((rollItem, rIdx) => {
-                            const isRollActive = state.selectedItem && state.selectedItem.id === rollItem.id;
-                            const globalIdx = group.itemIndexStart + rIdx;
+                            const isRunning = lifecycle.status === 'running';
+                            const isCompleted = lifecycle.status === 'completed';
                             return `
-                                <div class="batch-roll-row ${isRollActive ? 'active-roll' : ''}" 
-                                     onclick="selectSpecificRoll(${globalIdx}, event)">
+                                <div class="batch-roll-row ${isRunning ? 'active-roll' : ''}" 
+                                     onclick="previewBatchGroup(${gIdx}, event)">
                                     <div class="roll-row-left">
                                         <span class="roll-sub-badge">#${rollItem.orderIndex}</span>
                                         <span class="roll-time">${rollItem.startTime} - ${rollItem.endTime}</span>
@@ -760,8 +747,8 @@ function renderScheduleList(items, startTimeStr) {
                                         <span class="roll-meter-pill">${rollItem.meters || 100} m</span>
                                     </div>
                                     <div class="roll-row-right">
-                                        <span class="roll-status-pill ${isRollActive ? 'current-active' : ''}">
-                                            ${isRollActive ? '▶ 選択中' : (lifecycle.status === 'running' ? '生産中' : (lifecycle.status === 'completed' ? '完了' : '待機'))}
+                                        <span class="roll-status-pill ${isRunning ? 'current-active' : ''}">
+                                            ${isCompleted ? '完了' : (isRunning ? '生産中' : '待機')}
                                         </span>
                                     </div>
                                 </div>
@@ -956,6 +943,13 @@ function confirmDoneBatch(groupIndex) {
         actualDurationMins: elapsedMins
     });
 
+    // Deselect finished group from tablet so it is no longer highlighted
+    if (state.selectedItem && group.items.some(it => it.id === state.selectedItem.id)) {
+        state.selectedItem = null;
+        state.selectedGroup = null;
+        sessionStorage.removeItem('firstkojo_nippo_selected_item');
+    }
+
     closeBatchModal();
 
     // Release pdfDisplayer monitor
@@ -1141,6 +1135,7 @@ async function clearPdfDisplayer() {
             machineId: state.machineName || 'PSA2',
             timestamp: new Date().toISOString(),
             action: 'clear',
+            additionalData: { action: 'clear' },
             zuban: null,
             hinban: null
         };

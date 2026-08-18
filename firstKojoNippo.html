@@ -994,23 +994,6 @@
             background: #F8FAFC;
         }
 
-        .batch-group-card.selected {
-            border-color: var(--brand);
-            background: #FFFFFF;
-            box-shadow: 0 0 0 1.5px var(--brand), 0 6px 20px rgba(31, 157, 107, 0.12);
-        }
-
-        .batch-group-card.selected::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 5px;
-            height: 100%;
-            background: var(--brand);
-            z-index: 2;
-        }
-
         /* Batch Header */
         .batch-header {
             display: flex;
@@ -1026,11 +1009,6 @@
 
         .batch-group-card.group-tinted .batch-header {
             background: #F8FAFC;
-        }
-
-        .batch-group-card.selected .batch-header {
-            background: rgba(31, 157, 107, 0.04);
-            border-bottom-color: rgba(31, 157, 107, 0.2);
         }
 
         .batch-header-left {
@@ -1054,12 +1032,6 @@
             align-items: center;
             justify-content: center;
             min-width: 54px;
-        }
-
-        .batch-group-card.selected .batch-order-range {
-            background: var(--brand);
-            border-color: var(--brand);
-            color: #FFFFFF;
         }
 
         .batch-title-col {
@@ -1199,11 +1171,54 @@
             font-variant-numeric: tabular-nums;
         }
 
-        /* Group State Styling */
+        /* ---------------- Flat Setup / Changeover Row ---------------- */
+        .schedule-setup-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 18px;
+            background: #F8FAFC;
+            border: 1px dashed #CBD5E1;
+            border-radius: var(--card-radius);
+            color: #64748B;
+            font-size: 0.85rem;
+            font-weight: 700;
+            user-select: none;
+            cursor: default;
+        }
+
+        .schedule-setup-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .setup-tag-pill {
+            font-size: 0.75rem;
+            font-weight: 800;
+            background: #E2E8F0;
+            color: #475569;
+            padding: 3px 8px;
+            border-radius: 4px;
+        }
+
+        .setup-title-text {
+            font-size: 0.95rem;
+            font-weight: 800;
+            color: #475569;
+        }
+
+        .setup-time-text {
+            font-size: 0.825rem;
+            color: #94A3B8;
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* ---------------- Batch Group State Styling (Flat Modern) ---------------- */
         .batch-group-card.state-running {
-            border-color: #10B981;
-            background: #FFFFFF;
-            box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.4), 0 8px 24px rgba(16, 185, 129, 0.12);
+            border: 2.5px solid #10B981 !important;
+            background: #FFFFFF !important;
+            box-shadow: 0 0 0 3.5px rgba(16, 185, 129, 0.22), 0 8px 24px rgba(16, 185, 129, 0.12) !important;
         }
 
         .batch-group-card.state-running::before {
@@ -1217,33 +1232,79 @@
             z-index: 2;
         }
 
+        .batch-group-card.state-running .batch-header {
+            background: rgba(16, 185, 129, 0.06) !important;
+            border-bottom: 1.5px solid rgba(16, 185, 129, 0.25) !important;
+        }
+
+        .batch-group-card.state-running .batch-order-range {
+            background: #10B981 !important;
+            border-color: #10B981 !important;
+            color: #FFFFFF !important;
+        }
+
+        .batch-group-card.state-running .batch-roll-row {
+            background: rgba(16, 185, 129, 0.02);
+        }
+
+        /* Completed State: Clean, Flat & Greyed Out */
         .batch-group-card.state-completed {
-            border-color: rgba(16, 185, 129, 0.3);
-            background: #F8FAF9;
-            opacity: 0.92;
+            border-color: #E2E8F0;
+            background: #F8FAFC;
+            box-shadow: none;
+            opacity: 0.72;
+        }
+
+        .batch-group-card.state-completed:hover {
+            opacity: 0.95;
+            border-color: #CBD5E1;
         }
 
         .batch-group-card.state-completed::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 4px;
-            height: 100%;
-            background: #059669;
-            z-index: 2;
+            display: none;
+        }
+
+        .batch-group-card.state-completed .batch-header {
+            background: #F8FAFC;
+            border-bottom-color: #E2E8F0;
+        }
+
+        .batch-group-card.state-completed .batch-order-range {
+            background: #E2E8F0;
+            border-color: #CBD5E1;
+            color: #64748B;
+        }
+
+        .batch-group-card.state-completed .batch-hinban-title {
+            color: #475569;
+        }
+
+        .batch-group-card.state-completed .batch-rolls-list {
+            background: #F8FAFC;
+        }
+
+        .batch-group-card.state-completed .batch-roll-row {
+            border-top-color: #EDF2F7;
+        }
+
+        .batch-group-card.state-completed .roll-time,
+        .batch-group-card.state-completed .roll-status-pill {
+            color: #94A3B8;
+        }
+
+        .batch-group-card.state-completed .tag-pill {
+            opacity: 0.8;
         }
 
         /* Batch Status Badges */
         .batch-status-badge {
             font-size: 0.775rem;
-            font-weight: 900;
-            padding: 4px 10px;
+            font-weight: 800;
+            padding: 3px 8px;
             border-radius: var(--r-pill);
             display: inline-flex;
             align-items: center;
             gap: 6px;
-            letter-spacing: 0.02em;
         }
 
         .batch-status-badge.status-pending {
@@ -1256,19 +1317,19 @@
             background: #ECFDF5;
             color: #059669;
             border: 1.5px solid #10B981;
-            box-shadow: 0 0 10px rgba(16, 185, 129, 0.25);
+            box-shadow: 0 0 8px rgba(16, 185, 129, 0.2);
             animation: pulseRunning 2s infinite ease-in-out;
         }
 
         @keyframes pulseRunning {
             0%, 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
-            50% { box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+            50% { box-shadow: 0 0 0 5px rgba(16, 185, 129, 0); }
         }
 
         .batch-status-badge.status-completed {
-            background: #DEF7EC;
-            color: #03543F;
-            border: 1px solid rgba(5, 150, 105, 0.3);
+            background: #E2E8F0;
+            color: #475569;
+            border: 1px solid #CBD5E1;
         }
 
         /* Action Buttons on Header */
