@@ -4,7 +4,8 @@
  */
 
 // const serverURL = "https://kurachi.onrender.com";
-const serverURL = "http://localhost:3000";
+//const serverURL = "http://localhost:3000";
+const serverURL = "http://192.168.0.48:3000";
 
 function getTodayDateString() {
     const now = new Date();
@@ -398,7 +399,7 @@ async function fetchDailySchedule(dateStr) {
         if (scheduleDoc && Array.isArray(scheduleDoc.scheduleOrder) && scheduleDoc.scheduleOrder.length > 0) {
             const startTime = scheduleDoc.startTime || '08:00';
             state.scheduledItems = computeTimeSchedule(scheduleDoc.scheduleOrder, startTime);
-            
+
             // Sync live status from server (submittedDB.firstFactoryProduction)
             await fetchProductionStatus(dateStr);
 
@@ -444,7 +445,8 @@ async function fetchProductionStatus(dateStr) {
                         actualEndTime: rec.actualEndTime,
                         endEpoch: rec.endEpoch,
                         actualDurationMins: rec.actualDurationMins,
-                        worker: rec.worker
+                        worker: rec.worker,
+                        printHistory: rec.printHistory || []
                     };
                 }
             });
@@ -549,6 +551,7 @@ function groupScheduledItems(items) {
                 shori: item.shori || '',
                 habanaga: item.habanaga || '',
                 shippingDest: item.shippingDest || '',
+                labelHinban: item.labelHinban || '',
                 zuban: item.zuban || '',
                 items: [item],
                 itemIndexStart: idx,
@@ -562,6 +565,200 @@ function groupScheduledItems(items) {
     });
 
     return groups;
+}
+
+// -----------------------------------------------------
+// Brother Label Printing Helpers (iOS / Android)
+// -----------------------------------------------------
+function buildBrotherPrintFields(group, rollItem, rollIndex, totalRolls) {
+    // Auto calculated lot number: yymmdd-rollIndex
+    let yymmdd = '';
+    if (state.selectedDate && state.selectedDate.includes('-')) {
+        const parts = state.selectedDate.split('-');
+        yymmdd = `${parts[0].slice(-2)}${parts[1].padStart(2, '0')}${parts[2].padStart(2, '0')}`;
+    } else {
+        const now = new Date();
+        const yy = String(now.getFullYear()).slice(-2);
+        const mm = String(now.getMonth() + 1).padStart(2, '0');
+        const dd = String(now.getDate()).padStart(2, '0');
+        yymmdd = `${yy}${mm}${dd}`;
+    }
+
+    const lotNo = `${yymmdd}-${rollIndex}`;
+    const hinban = group.hinban || rollItem.hinban || '';
+    const labelHinban = group.labelHinban || rollItem.labelHinban || hinban;
+    const color = group.color || rollItem.color || '';
+    const hinmei = group.hinmei || rollItem.hinmei || '';
+    const shippingDest = group.shippingDest || rollItem.shippingDest || '';
+    const meters = rollItem.meters || 100;
+    const barcode = `${labelHinban || hinban},${lotNo},${meters}`;
+
+    return {
+        filename: 'firstkojo4.lbx',
+        size: 'RollW62',
+        copies: 1,
+        text_品番: hinban,
+        text_収容数: String(totalRolls || group.items.length || 1),
+        text_背番号: labelHinban,
+        text_color: color,
+        text_品名: hinmei,
+        text_location: shippingDest ? `${shippingDest}へ` : '',
+        text_DateT: lotNo,
+        barcode_barcode: barcode
+    };
+}
+
+async function executeBrotherPrint(fields) {
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const params = `filename=${encodeURIComponent(fields.filename)}&size=${encodeURIComponent(fields.size)}&copies=${fields.copies}` +
+        `&text_品番=${encodeURIComponent(fields.text_品番 || '')}` +
+        `&text_背番号=${encodeURIComponent(fields.text_背番号 || '')}` +
+        `&text_収容数=${encodeURIComponent(fields.text_収容数 || '')}` +
+        `&text_color=${encodeURIComponent(fields.text_color || '')}` +
+        `&text_品名=${encodeURIComponent(fields.text_品名 || '')}` +
+        `&text_location=${encodeURIComponent(fields.text_location || '')}` +
+        `&text_DateT=${encodeURIComponent(fields.text_DateT || '')}` +
+        `&barcode_barcode=${encodeURIComponent(fields.barcode_barcode || '')}`;
+
+    if (isIOS) {
+        const url = `brotherwebprint://print?${params}`;
+        console.log('🖨️ [iOS] Brother Print URL:', url, fields);
+        window.location.href = url;
+        await new Promise(resolve => setTimeout(resolve, 3500));
+        return { success: true };
+    } else {
+        const url = `http://localhost:8088/print?${params}`;
+        console.log('🖨️ [Android/Desktop] Brother Print URL:', url, fields);
+        try {
+            const response = await Promise.race([
+                fetch(url).then(res => res.text()),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('プリンター応答タイムアウト (30秒)')), 30000))
+            ]);
+            if (response && response.includes('<result>SUCCESS</result>')) {
+                return { success: true, response };
+            } else {
+                const errorMsg = response.includes('PrinterStatusErrorCoverOpen')
+                    ? 'プリンターのカバーが開いています (Cover Open)'
+                    : (response.includes('<error>') ? response : 'プリンターエラー (Printer Error)');
+                return { success: false, error: errorMsg, response };
+            }
+        } catch (err) {
+            console.warn('Print request error:', err);
+            const isConnectionRefused = err.message && (err.message.includes('Failed to fetch') || err.message.includes('NetworkError'));
+            return {
+                success: false,
+                error: isConnectionRefused
+                    ? 'プリンター未接続 (Connection Refused - localhost:8088)'
+                    : err.message
+            };
+        }
+    }
+}
+
+async function logPrintToServer(group, rollItem, rollIndex, totalRolls, fields) {
+    const worker = state.currentUser?.name || state.workerName || '担当者';
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+    const printEntry = {
+        rollIndex: Number(rollIndex),
+        totalRolls: Number(totalRolls),
+        lotNo: fields.text_DateT,
+        barcode: fields.barcode_barcode,
+        worker: worker,
+        machine: state.machineName || 'PSA2',
+        timestamp: now.toISOString(),
+        timeStr: timeStr
+    };
+
+    // Update local storage lifecycle
+    const lc = getGroupLifecycle(group.groupId);
+    const printHistory = Array.isArray(lc.printHistory) ? [...lc.printHistory, printEntry] : [printEntry];
+    setGroupLifecycle(group.groupId, { printHistory });
+
+    // Refresh UI to update printed badge immediately
+    renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
+
+    // Post to MongoDB endpoint
+    try {
+        await fetch(`${serverURL}/api/production/print-log`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                scheduleId: state.dailySchedule?._id || null,
+                groupId: group.groupId,
+                date: state.selectedDate,
+                machine: state.machineName || 'PSA2',
+                worker: worker,
+                hinban: group.hinban,
+                rollIndex: Number(rollIndex),
+                totalRolls: Number(totalRolls),
+                lotNo: fields.text_DateT,
+                barcode: fields.barcode_barcode,
+                timestamp: now.toISOString(),
+                timeStr: timeStr
+            })
+        });
+        console.log(`💾 Logged print for roll ${rollIndex}/${totalRolls} to MongoDB`);
+    } catch (err) {
+        console.warn('Could not save print log to server:', err);
+    }
+}
+
+async function printSingleRoll(groupIndex, rollIndex, event) {
+    if (event) event.stopPropagation();
+    if (!state.currentGroups || !state.currentGroups[groupIndex]) return;
+    const group = state.currentGroups[groupIndex];
+    const rollItem = group.items[rollIndex];
+    if (!rollItem) return;
+
+    const actualRollIndex = rollItem.rollIndex || (rollIndex + 1);
+    const totalRolls = group.items.length;
+    const fields = buildBrotherPrintFields(group, rollItem, actualRollIndex, totalRolls);
+
+    showUndoSnackbar(`🖨️ ${actualRollIndex} / ${totalRolls} 巻きのラベルを印刷中... (${fields.text_DateT})`);
+    const printResult = await executeBrotherPrint(fields);
+
+    if (printResult.success) {
+        await logPrintToServer(group, rollItem, actualRollIndex, totalRolls, fields);
+        showUndoSnackbar(`✅ ${actualRollIndex} / ${totalRolls} 巻きの印刷が完了しました (${fields.text_DateT})`);
+    } else {
+        showUndoSnackbar(`❌ 印刷失敗 (${actualRollIndex} / ${totalRolls} 巻き): ${printResult.error || '応答なし'}`);
+        alert(`❌ 印刷エラー (Roll #${rollItem.orderIndex} • ${actualRollIndex}/${totalRolls} 巻き)\n\n【エラー内容】 ${printResult.error || 'プリンターからの応答がありません。'}\n\nBrother Web Print サービス (localhost:8088) またはプリンターの電源・USB/Wi-Fi接続を確認してください。`);
+    }
+}
+
+async function printBatchGroup(groupIndex, event) {
+    if (event) event.stopPropagation();
+    if (!state.currentGroups || !state.currentGroups[groupIndex]) return;
+    const group = state.currentGroups[groupIndex];
+    const totalRolls = group.items.length;
+
+    showUndoSnackbar(`🖨️ ロット「${group.kizai || group.hinban}」全 ${totalRolls} 巻きの一括印刷を開始します...`);
+
+    let successCount = 0;
+    for (let r = 0; r < totalRolls; r++) {
+        const rollItem = group.items[r];
+        const actualRollIndex = rollItem.rollIndex || (r + 1);
+        const fields = buildBrotherPrintFields(group, rollItem, actualRollIndex, totalRolls);
+
+        showUndoSnackbar(`🖨️ 印刷中 (${actualRollIndex} / ${totalRolls} 巻き): ${fields.text_DateT}`);
+        const printResult = await executeBrotherPrint(fields);
+
+        if (printResult.success) {
+            await logPrintToServer(group, rollItem, actualRollIndex, totalRolls, fields);
+            successCount++;
+            if (r < totalRolls - 1) {
+                await new Promise(res => setTimeout(res, 1200));
+            }
+        } else {
+            console.error(`❌ Batch printing halted at roll ${actualRollIndex}/${totalRolls}:`, printResult.error);
+            showUndoSnackbar(`❌ 印刷が中断されました (${actualRollIndex} / ${totalRolls} 巻きで失敗): ${printResult.error || '接続エラー'}`);
+            alert(`❌ 一括印刷が中断されました\n\n【進捗】 ${successCount} / ${totalRolls} 巻き完了\n【失敗した巻き】 ${actualRollIndex} 巻き目 (#${rollItem.orderIndex} • ${fields.text_DateT})\n【エラー原因】 ${printResult.error || 'プリンター応答なし'}\n\nプリンター接続を確認後、未印刷の巻きの「🖨️ 印刷」ボタンから個別印刷を行ってください。`);
+            return;
+        }
+    }
+
+    showUndoSnackbar(`✅ ロット「${group.kizai || group.hinban}」全 ${totalRolls} 巻きの印刷が完了しました`);
 }
 
 // -----------------------------------------------------
@@ -689,9 +886,16 @@ function renderScheduleList(items, startTimeStr) {
             let statusBadgeHTML = '';
             let actionButtonsHTML = '';
 
+            const printedCount = Array.isArray(lifecycle.printHistory)
+                ? new Set(lifecycle.printHistory.map(p => Number(p.rollIndex))).size
+                : 0;
+            const isAllPrinted = printedCount >= group.items.length && group.items.length > 0;
+            const printAllBtnHTML = `<button type="button" class="btn-batch-action btn-batch-print ${isAllPrinted ? 'is-all-printed' : ''}" onclick="printBatchGroup(${gIdx}, event)" title="${isAllPrinted ? '全巻き印刷済み - 再印刷' : 'このロットの全巻きラベルを一括印刷'}">${isAllPrinted ? `✓ 印刷済 (${printedCount}/${group.items.length})` : '🖨️ 一括印刷'}</button>`;
+
             if (lifecycle.status === 'in-progress' || lifecycle.status === 'running') {
                 statusBadgeHTML = `<span class="batch-status-badge status-in-progress">🟣 生産中 (${lifecycle.actualStartTime || ''}〜)</span>`;
                 actionButtonsHTML = `
+                    ${printAllBtnHTML}
                     <button type="button" class="btn-batch-action btn-batch-preview" onclick="previewBatchGroup(${gIdx}, event)" title="詳細確認">ℹ️ 詳細</button>
                     <button type="button" class="btn-batch-action btn-batch-done" onclick="showDoneConfirmation(${gIdx}, event)" title="生産完了">⏹ 完了</button>
                     <button type="button" class="btn-batch-action btn-batch-cancel" onclick="cancelBatchGroup(${gIdx}, event)" title="中断・取消">✕ 取消</button>
@@ -699,6 +903,7 @@ function renderScheduleList(items, startTimeStr) {
             } else if (lifecycle.status === 'completed') {
                 statusBadgeHTML = `<span class="batch-status-badge status-completed">✅ 完了 (${lifecycle.actualStartTime} - ${lifecycle.actualEndTime} • ${lifecycle.actualDurationMins}分)</span>`;
                 actionButtonsHTML = `
+                    ${printAllBtnHTML}
                     <button type="button" class="btn-batch-action btn-batch-preview" onclick="previewBatchGroup(${gIdx}, event)" title="詳細確認">ℹ️ 詳細</button>
                     <button type="button" class="btn-batch-action btn-batch-reopen" onclick="showReopenModal(${gIdx}, event)" title="再開・リセット">🔄 再開</button>
                 `;
@@ -706,6 +911,7 @@ function renderScheduleList(items, startTimeStr) {
                 // Pending
                 statusBadgeHTML = `<span class="batch-status-badge status-pending">待機中</span>`;
                 actionButtonsHTML = `
+                    ${printAllBtnHTML}
                     <button type="button" class="btn-batch-action btn-batch-preview" onclick="previewBatchGroup(${gIdx}, event)" title="詳細確認 (モニター非表示)">ℹ️ 詳細</button>
                     <button type="button" class="btn-batch-action btn-batch-start" onclick="startBatchGroup(${gIdx}, event)" title="生産開始 (モニター表示)">▶ 開始</button>
                 `;
@@ -748,25 +954,34 @@ function renderScheduleList(items, startTimeStr) {
                     <!-- Batch Roll Sub-Rows -->
                     <div class="batch-rolls-list">
                         ${group.items.map((rollItem, rIdx) => {
-                            const isRunning = (lifecycle.status === 'in-progress' || lifecycle.status === 'running');
-                            const isCompleted = lifecycle.status === 'completed';
-                            return `
+                const isRunning = (lifecycle.status === 'in-progress' || lifecycle.status === 'running');
+                const isCompleted = (lifecycle.status === 'completed');
+                const actualRollIndex = rollItem.rollIndex || (rIdx + 1);
+                const isRollPrinted = Array.isArray(lifecycle.printHistory) && lifecycle.printHistory.some(p => Number(p.rollIndex) === Number(actualRollIndex));
+                const lastPrintEntry = isRollPrinted ? lifecycle.printHistory.filter(p => Number(p.rollIndex) === Number(actualRollIndex)).slice(-1)[0] : null;
+
+                return `
                                 <div class="batch-roll-row ${isRunning ? 'active-roll' : ''}" 
                                      onclick="previewBatchGroup(${gIdx}, event)">
                                     <div class="roll-row-left">
                                         <span class="roll-sub-badge">#${rollItem.orderIndex}</span>
                                         <span class="roll-time">${rollItem.startTime} - ${rollItem.endTime}</span>
-                                        <span class="roll-count-pill">${rollItem.rollIndex || (rIdx + 1)} / ${rollItem.totalRolls || group.items.length} 巻き</span>
+                                        <span class="roll-count-pill">${actualRollIndex} / ${rollItem.totalRolls || group.items.length} 巻き</span>
                                         <span class="roll-meter-pill">${rollItem.meters || 100} m</span>
                                     </div>
-                                    <div class="roll-row-right">
+                                    <div class="roll-row-right" style="display: flex; align-items: center; gap: 8px;" onclick="event.stopPropagation()">
+                                        <button type="button" class="btn-roll-print ${isRollPrinted ? 'is-printed' : ''}" 
+                                                onclick="printSingleRoll(${gIdx}, ${rIdx}, event)" 
+                                                title="${isRollPrinted ? `印刷済み (${lastPrintEntry?.timeStr || ''}) - 再印刷` : `この巻き（#${rollItem.orderIndex}）のラベルを印刷`}">
+                                            ${isRollPrinted ? `✓ 済 (${lastPrintEntry?.timeStr || ''})` : '🖨️ 印刷'}
+                                        </button>
                                         <span class="roll-status-pill ${isRunning ? 'current-active' : ''}">
                                             ${isCompleted ? '完了' : (isRunning ? '生産中' : '待機')}
                                         </span>
                                     </div>
                                 </div>
                             `;
-                        }).join('')}
+            }).join('')}
                     </div>
                 </div>
             `;
@@ -1195,12 +1410,12 @@ function selectScheduleItem(index) {
 
     // Jump to Info tab (tab index 2) and load full details
     switchMainTab(2);
-    
+
     // Broadcast to pdfDisplayer monitor
     if (item.zuban) {
         notifyPdfDisplayer(item, item.zuban);
     }
-    
+
     loadItemDetail(item);
 }
 
@@ -1350,9 +1565,9 @@ async function renderInfoTab(data, item) {
         { label: '速度 (Speed)', val: productMaster['速度'] },
         { label: 'ライン形態 (Line Form)', val: productMaster['ライン形態'] },
         { label: '繰出機 (Unwinder)', val: productMaster['繰出機'] },
-        { 
-            label: '接着剤有無 (Adhesive)', 
-            val: productMaster['接着剤有無'] === 1 ? '有 (Yes)' : productMaster['接着剤有無'] === 2 ? '無 (No)' : productMaster['接着剤有無'] 
+        {
+            label: '接着剤有無 (Adhesive)',
+            val: productMaster['接着剤有無'] === 1 ? '有 (Yes)' : productMaster['接着剤有無'] === 2 ? '無 (No)' : productMaster['接着剤有無']
         },
         { label: 'クリーン度 (Cleanliness)', val: productMaster['クリーン度'] },
         { label: '乾燥温度 (Dry Temp)', val: productMaster['乾燥温度'] },
@@ -1401,9 +1616,9 @@ async function renderInfoTab(data, item) {
             { label: '出荷先名 (Shipping Dest)', val: ingMaster['出荷先名'] },
             { label: '仕様 (Specs)', val: ingMaster['仕様'] },
             { label: '型番 (Model)', val: ingMaster['型番'] },
-            { 
-                label: '接着剤有無 (Adhesive)', 
-                val: ingMaster['接着剤有無'] === 1 ? '有 (Yes)' : ingMaster['接着剤有無'] === 2 ? '無 (No)' : ingMaster['接着剤有無'] 
+            {
+                label: '接着剤有無 (Adhesive)',
+                val: ingMaster['接着剤有無'] === 1 ? '有 (Yes)' : ingMaster['接着剤有無'] === 2 ? '無 (No)' : ingMaster['接着剤有無']
             },
             { label: '基材厚 (Base Thick)', val: ingMaster['基材厚'] },
             { label: '基材幅 (Base Width)', val: ingMaster['基材幅'] },

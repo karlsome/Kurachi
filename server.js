@@ -34153,6 +34153,7 @@ app.get('/api/production/schedule/daily', async (req, res) => {
           }
 
           const shippingDest = doc['品目マスタ']?.['出荷先名'] || doc['品目マスタ']?.['入出荷先名'] || doc['品目マスタ']?.['得意先名'] || '';
+          const labelHinban = doc['品目マスタ']?.['ラベル品番'] || '';
 
           masterMap[doc['品番']] = {
             hinmei: doc['品目マスタ']?.['品名'] || '',
@@ -34161,6 +34162,7 @@ app.get('/api/production/schedule/daily', async (req, res) => {
             shori,
             habanaga,
             shippingDest,
+            labelHinban,
             zuban: doc['品目マスタ']?.['図番'] || ''
           };
         });
@@ -34175,6 +34177,7 @@ app.get('/api/production/schedule/daily', async (req, res) => {
               shori: info.shori || '',
               habanaga: info.habanaga || '',
               shippingDest: info.shippingDest || '',
+              labelHinban: info.labelHinban || '',
               hinmei: info.hinmei || '',
               zuban: info.zuban || ''
             };
@@ -34344,6 +34347,71 @@ app.post('/api/production/status', async (req, res) => {
   } catch (error) {
     console.error('❌ Error in POST /api/production/status:', error);
     res.status(500).json({ error: 'Failed to update production status' });
+  }
+});
+
+app.post('/api/production/print-log', async (req, res) => {
+  try {
+    const {
+      scheduleId,
+      groupId,
+      date,
+      machine,
+      worker,
+      hinban,
+      rollIndex,
+      totalRolls,
+      lotNo,
+      barcode,
+      timestamp,
+      timeStr
+    } = req.body;
+
+    if (!groupId || !date) {
+      return res.status(400).json({ error: 'groupId and date are required' });
+    }
+
+    const submittedDb = client.db('submittedDB');
+    const productionCollection = submittedDb.collection('firstFactoryProduction');
+
+    const printEntry = {
+      rollIndex: Number(rollIndex) || 1,
+      totalRolls: Number(totalRolls) || 1,
+      lotNo: lotNo || '',
+      barcode: barcode || '',
+      worker: worker || '',
+      machine: machine || 'PSA2',
+      timestamp: timestamp || new Date().toISOString(),
+      timeStr: timeStr || new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+      createdAt: new Date()
+    };
+
+    const filter = { date, groupId };
+    await productionCollection.updateOne(
+      filter,
+      {
+        $push: { printHistory: printEntry },
+        $set: {
+          scheduleId: scheduleId || null,
+          groupId,
+          date,
+          machine: machine || 'PSA2',
+          hinban: hinban || '',
+          updatedAt: new Date()
+        },
+        $setOnInsert: {
+          status: 'pending',
+          createdAt: new Date()
+        }
+      },
+      { upsert: true }
+    );
+
+    console.log(`🖨️ Logged print event to firstFactoryProduction: [${hinban || groupId}] Roll #${rollIndex}/${totalRolls} (${lotNo})`);
+    res.json({ success: true, printEntry });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/print-log:', error);
+    res.status(500).json({ error: 'Failed to record print log' });
   }
 });
 
