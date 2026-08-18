@@ -831,6 +831,9 @@ async function renderInfoTab(data, item) {
         `;
     }
 
+    // Calculate duration in minutes if not already present on item
+    const durationMins = item.duration || (process2010 && process2010['作業時間'] ? Math.round((Number(process2010['作業時間']) * (Number(item.meters) || 100) * 100) / 60) : 0);
+
     container.innerHTML = `
         <!-- PART 1: Top Part - Product Info -->
         <div class="info-card">
@@ -840,10 +843,11 @@ async function renderInfoTab(data, item) {
                     <div class="info-main-title">${item.hinban}</div>
                     <div class="info-sub-title">${productMaster['品名'] || item.hinmei || ''} ${productMaster['仕様'] ? `— ${productMaster['仕様']}` : ''}</div>
                 </div>
-                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
                     <span class="tag-pill roll-tag" style="font-size: 0.9rem; padding: 6px 12px;">Roll ${item.rollIndex || 1} / ${item.totalRolls || 1}</span>
                     <span class="tag-pill meter-tag" style="font-size: 0.9rem; padding: 6px 12px;">${item.meters || 0} m</span>
-                    <span class="tag-pill" style="font-size: 0.9rem; padding: 6px 12px; font-weight: 800;">${item.startTime} - ${item.endTime}</span>
+                    <span class="tag-pill" style="font-size: 0.9rem; padding: 6px 12px; font-weight: 800;">${item.startTime || '--:--'} - ${item.endTime || '--:--'}</span>
+                    <span class="tag-pill" style="font-size: 0.9rem; padding: 6px 12px; font-weight: 800; background: #ECFDF5; color: #059669; border-color: rgba(5, 150, 105, 0.3);">⏱️ ${durationMins} 分</span>
                 </div>
             </div>
 
@@ -871,6 +875,10 @@ async function renderInfoTab(data, item) {
                         <div class="process-stat-card">
                             <span class="process-stat-label">型番 (Model)</span>
                             <span class="process-stat-val">${process2010['型番'] ?? 'N/A'}</span>
+                        </div>
+                        <div class="process-stat-card" style="background: #ECFDF5; border-color: rgba(5, 150, 105, 0.25);">
+                            <span class="process-stat-label" style="color: #059669;">所要時間 (Duration)</span>
+                            <span class="process-stat-val" style="color: #047857;">${durationMins} 分</span>
                         </div>
                     </div>
                 </div>
