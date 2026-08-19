@@ -761,6 +761,139 @@
             color: var(--brand);
         }
 
+        /* View Mode Switcher (Card vs Table) */
+        .view-mode-switcher {
+            display: inline-flex;
+            background: var(--bg-inset);
+            border: 1.5px solid var(--border-strong);
+            border-radius: var(--btn-radius);
+            padding: 2px;
+            gap: 2px;
+            margin-left: auto;
+        }
+
+        .view-mode-btn {
+            height: 38px;
+            padding: 0 14px;
+            background: transparent;
+            border: none;
+            border-radius: calc(var(--btn-radius) - 2px);
+            font-family: inherit;
+            font-size: 0.85rem;
+            font-weight: 800;
+            color: var(--text-muted);
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: all var(--transition-smooth);
+            white-space: nowrap;
+        }
+
+        .view-mode-btn:hover {
+            color: var(--text-main);
+        }
+
+        .view-mode-btn.active {
+            background: var(--bg-surface);
+            color: var(--brand);
+            font-weight: 900;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Plain Table / List View Layout */
+        .schedule-table-wrap {
+            background: var(--bg-surface);
+            border: 1.5px solid var(--border-strong);
+            border-radius: var(--card-radius);
+            overflow: auto;
+            max-height: calc(100vh - 215px);
+            box-shadow: var(--shadow-card);
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .schedule-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            font-size: 0.875rem;
+            text-align: left;
+            white-space: nowrap;
+        }
+
+        .schedule-table thead {
+            position: sticky;
+            top: 0;
+            z-index: 20;
+        }
+
+        .schedule-table th {
+            position: sticky;
+            top: 0;
+            z-index: 20;
+            background: #F8FAFC;
+            color: #334155;
+            font-weight: 900;
+            padding: 11px 12px;
+            border-bottom: 2px solid #CBD5E1;
+            border-right: 1px solid var(--border);
+            font-size: 0.8rem;
+            letter-spacing: 0.02em;
+            box-shadow: 0 2px 3px rgba(0, 0, 0, 0.06);
+        }
+
+        .schedule-table th:last-child {
+            border-right: none;
+        }
+
+        .schedule-table td {
+            padding: 9px 12px;
+            border-bottom: 1px solid var(--border);
+            border-right: 1px solid var(--border);
+            color: #0F172A;
+            vertical-align: middle;
+        }
+
+        .schedule-table td:last-child {
+            border-right: none;
+        }
+
+        .schedule-table tbody tr:hover {
+            background-color: #F1F5F9;
+        }
+
+        .schedule-table tr.table-setup-row {
+            background-color: #FFFBEB;
+        }
+
+        .schedule-table tr.table-setup-row td {
+            color: #92400E;
+            font-weight: 700;
+        }
+
+        .schedule-table tr.table-group-header {
+            background-color: #FFFFFF;
+            font-weight: 800;
+            border-top: 2px solid #CBD5E1;
+        }
+
+        .schedule-table tr.table-row-selected {
+            background-color: #F0FDF4 !important;
+        }
+
+        .schedule-table tr.table-row-in-progress {
+            background-color: #FAF5FF;
+        }
+
+        .schedule-table tr.table-row-completed {
+            background-color: #FFFFFF;
+            opacity: 0.85;
+        }
+
+        .schedule-table tr.table-roll-row {
+            background-color: #F8FAFC;
+        }
+
         .schedule-list-container {
             display: flex;
             flex-direction: column;
@@ -1876,9 +2009,19 @@
                             <input type="date" id="scheduleDateInput" class="date-input" title="日付選択 (Select Date)">
                             <button type="button" class="date-nav-btn" id="btnNextDay" title="翌日 (Next Day)">›</button>
                         </div>
-                        <div style="display: flex; gap: 8px;">
+                        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
                             <button type="button" class="date-nav-btn today-btn" id="btnToday">今日 (Today)</button>
                             <button type="button" class="date-nav-btn" id="btnRefreshSchedule" title="再読み込み (Refresh)">↻</button>
+
+                            <!-- View Mode Switcher (Card vs Table) -->
+                            <div class="view-mode-switcher" id="viewModeSwitcher">
+                                <button type="button" class="view-mode-btn active" id="btnViewCard" onclick="switchListViewMode('card')" title="カード表示 (Card View)">
+                                    📇 カード
+                                </button>
+                                <button type="button" class="view-mode-btn" id="btnViewTable" onclick="switchListViewMode('table')" title="リスト・テーブル表示 (Table / List View)">
+                                    📋 リスト
+                                </button>
+                            </div>
                         </div>
                     </div>
 

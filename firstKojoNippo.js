@@ -33,6 +33,7 @@ const state = {
         }
     })(),
     isLoadingSchedule: false,
+    listViewMode: localStorage.getItem('firstkojo_list_view_mode') || 'card',
 };
 
 // -----------------------------------------------------
@@ -805,7 +806,7 @@ function printBatchGroup(groupIndex, event) {
     // If some or all items are already printed, prompt modal with choices
     if (alreadyPrintedList.length > 0) {
         const printedRollsText = alreadyPrintedList.map(r => `#${r.item.orderIndex} (${r.actualRollIndex}/${group.items.length}巻き)`).join(', ');
-        
+
         const bodyHTML = `
             <div style="background: #F0FDF4; border: 1.5px solid #86EFAC; border-radius: var(--btn-radius); padding: 14px; margin-bottom: 16px;">
                 <div style="font-size: 0.85rem; font-weight: 800; color: #15803D; margin-bottom: 4px;">🖨️ 既に印刷済みの巻きがあります</div>
@@ -935,10 +936,8 @@ function setGroupLifecycle(groupId, patch) {
 }
 
 // -----------------------------------------------------
-// Modal & Undo Helpers
+// Modal & Batch Action Popup Helpers
 // -----------------------------------------------------
-let undoTimer = null;
-
 function showBatchModal(title, bodyHTML, actionsHTML) {
     console.log('📢 Opening batch modal:', title);
     const modal = document.getElementById('batchActionModal');
@@ -967,12 +966,158 @@ function closeBatchModal() {
     }
 }
 
-function showUndoSnackbar(text) {
-    console.log('ℹ️ Notification:', text);
+function switchListViewMode(mode) {
+    state.listViewMode = mode;
+    localStorage.setItem('firstkojo_list_view_mode', mode);
+    updateViewModeButtons();
+    renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
 }
 
-function hideUndoSnackbar() {
-    // No-op
+function updateViewModeButtons() {
+    const btnCard = document.getElementById('btnViewCard');
+    const btnTable = document.getElementById('btnViewTable');
+    if (btnCard) btnCard.classList.toggle('active', state.listViewMode === 'card');
+    if (btnTable) btnTable.classList.toggle('active', state.listViewMode === 'table');
+}
+
+function renderScheduleTableView(groups, items) {
+    if (!groups || groups.length === 0) {
+        return `
+            <div class="schedule-empty-state">
+                <div class="empty-icon">📅</div>
+                <h3>この日の生産予定はありません</h3>
+                <p>上部の日付選択から他の日付を選択するか、更新ボタンを押してください。</p>
+            </div>
+        `;
+    }
+
+    let rowsHTML = '';
+
+    groups.forEach((group, gIdx) => {
+        const lifecycle = getGroupLifecycle(group.groupId);
+        const isGroupSelected = (lifecycle.status !== 'completed') && state.selectedItem && group.items.some(it => it.id === state.selectedItem.id);
+
+        if (group.type === 'setup') {
+            const setupItem = group.items[0];
+            rowsHTML += `
+                <tr class="table-setup-row" data-id="${setupItem.id}">
+                    <td style="text-align: center; font-weight: 800;">#${setupItem.orderIndex}</td>
+                    <td style="font-weight: 700;">${setupItem.startTime} - ${setupItem.endTime}</td>
+                    <td colspan="6" style="font-weight: 800;">⚙️ ${setupItem.name || '段取り / 段替'} (${setupItem.duration} 分)</td>
+                    <td style="text-align: center;"><span style="color: #B45309; font-weight: 700; font-size: 0.8rem;">段替</span></td>
+                    <td colspan="2" style="text-align: center; color: var(--text-muted); font-size: 0.8rem;">—</td>
+                </tr>
+            `;
+            return;
+        }
+
+        const firstItem = group.items[0];
+        const lastItem = group.items[group.items.length - 1];
+        const orderRangeText = group.items.length > 1 ? `#${firstItem.orderIndex}〜#${lastItem.orderIndex}` : `#${firstItem.orderIndex}`;
+        const mainTitle = group.kizai || group.hinban;
+
+        let statusBadge = '<span style="color: #64748B; font-weight: 700;">待機中</span>';
+        let statusClass = '';
+        if (lifecycle.status === 'in-progress' || lifecycle.status === 'running') {
+            statusBadge = `<span style="color: #7E22CE; font-weight: 800;">🟣 生産中 (${lifecycle.actualStartTime || ''}〜)</span>`;
+            statusClass = 'table-row-in-progress';
+        } else if (lifecycle.status === 'completed') {
+            statusBadge = `<span style="color: #15803D; font-weight: 800;">✅ 完了 (${lifecycle.actualDurationMins || ''}分)</span>`;
+            statusClass = 'table-row-completed';
+        }
+
+        const printedCount = Array.isArray(lifecycle.printHistory)
+            ? new Set(lifecycle.printHistory.map(p => Number(p.rollIndex))).size
+            : 0;
+        const isAllPrinted = printedCount >= group.items.length && group.items.length > 0;
+
+        rowsHTML += `
+            <tr class="table-group-header ${statusClass} ${isGroupSelected ? 'table-row-selected' : ''}" onclick="previewBatchGroup(${gIdx}, event)">
+                <td style="text-align: center; font-weight: 900; color: var(--brand); font-size: 0.95rem;">${orderRangeText}</td>
+                <td style="font-weight: 800; font-variant-numeric: tabular-nums;">${group.startTime} - ${group.endTime}</td>
+                <td style="font-weight: 900; font-size: 0.95rem; color: #0F172A; cursor: pointer;">
+                    <div>${mainTitle}</div>
+                    ${group.hinban && group.kizai ? `<div style="font-size: 0.75rem; color: #64748B; font-weight: 600;">${group.hinban}</div>` : ''}
+                </td>
+                <td style="font-weight: 700;">${group.shippingDest || '—'}</td>
+                <td style="font-weight: 700;">${group.color || '—'}</td>
+                <td style="font-weight: 700;">${group.shori || '—'}</td>
+                <td style="font-weight: 700;">${group.habanaga || '—'}</td>
+                <td style="font-weight: 800;">全 ${group.items.length} 巻き (${group.totalMeters}m)</td>
+                <td>${statusBadge}</td>
+                <td onclick="event.stopPropagation()" style="text-align: center;">
+                    <button type="button" class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.75rem; font-weight: 800; white-space: nowrap; ${isAllPrinted ? 'background: #DCFCE7; color: #15803D; border-color: #86EFAC;' : ''}" onclick="printBatchGroup(${gIdx}, event)">
+                        ${isAllPrinted ? `✓ 印刷済 (${printedCount}/${group.items.length})` : '🖨️ 一括印刷'}
+                    </button>
+                </td>
+                <td onclick="event.stopPropagation()" style="text-align: center;">
+                    <div style="display: flex; gap: 4px; justify-content: center; align-items: center;">
+                        <button type="button" class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.75rem; font-weight: 800;" onclick="previewBatchGroup(${gIdx}, event)" title="詳細">ℹ️ 詳細</button>
+                        ${(lifecycle.status === 'in-progress' || lifecycle.status === 'running') ? `
+                            <button type="button" class="btn btn-primary" style="padding: 4px 8px; font-size: 0.75rem; font-weight: 800; background: #059669;" onclick="showDoneConfirmation(${gIdx}, event)">⏹ 完了</button>
+                        ` : lifecycle.status === 'completed' ? `
+                            <button type="button" class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.75rem; font-weight: 800; color: #D97706;" onclick="showReopenModal(${gIdx}, event)">🔄 再開</button>
+                        ` : `
+                            <button type="button" class="btn btn-primary" style="padding: 4px 8px; font-size: 0.75rem; font-weight: 800;" onclick="startBatchGroup(${gIdx}, event)">▶ 開始</button>
+                        `}
+                    </div>
+                </td>
+            </tr>
+        `;
+
+        group.items.forEach((rollItem, rIdx) => {
+            const actualRollIndex = rollItem.rollIndex || (rIdx + 1);
+            const isRollPrinted = Array.isArray(lifecycle.printHistory) && lifecycle.printHistory.some(p => Number(p.rollIndex) === Number(actualRollIndex));
+            const lastPrint = isRollPrinted ? lifecycle.printHistory.filter(p => Number(p.rollIndex) === Number(actualRollIndex)).slice(-1)[0] : null;
+
+            rowsHTML += `
+                <tr class="table-roll-row ${statusClass}" onclick="previewBatchGroup(${gIdx}, event)">
+                    <td style="text-align: center; color: #64748B; font-weight: 700; padding-left: 20px;">#${rollItem.orderIndex}</td>
+                    <td style="color: #64748B; font-variant-numeric: tabular-nums;">${rollItem.startTime || '—'} - ${rollItem.endTime || '—'}</td>
+                    <td style="color: #475569; padding-left: 18px; font-weight: 700;">↳ ${actualRollIndex} / ${group.items.length} 巻き目</td>
+                    <td style="color: #64748B;">—</td>
+                    <td style="color: #64748B;">—</td>
+                    <td style="color: #64748B;">—</td>
+                    <td style="color: #64748B;">—</td>
+                    <td style="color: #334155; font-weight: 700;">${rollItem.meters || '—'} m (${rollItem.duration || '—'}分)</td>
+                    <td>
+                        ${isRollPrinted ? `<span style="color: #16A34A; font-weight: 800; font-size: 0.75rem;">✓ 印刷済 (${lastPrint?.timeStr || ''})</span>` : `<span style="color: #94A3B8; font-size: 0.75rem;">未印刷</span>`}
+                    </td>
+                    <td onclick="event.stopPropagation()" style="text-align: center;">
+                        <button type="button" class="btn btn-secondary" style="padding: 2px 8px; font-size: 0.75rem; font-weight: 700; ${isRollPrinted ? 'background: #DCFCE7; color: #15803D; border-color: #86EFAC;' : ''}" onclick="printSingleRoll(${gIdx}, ${rIdx}, event)">
+                            ${isRollPrinted ? '✓ 再印刷' : '🖨️ 印刷'}
+                        </button>
+                    </td>
+                    <td style="text-align: center; color: #CBD5E1;">—</td>
+                </tr>
+            `;
+        });
+    });
+
+    return `
+        <div class="schedule-table-wrap">
+            <table class="schedule-table">
+                <thead>
+                    <tr>
+                        <th style="width: 75px; text-align: center;">順 (No)</th>
+                        <th style="width: 120px;">時間 (Time)</th>
+                        <th>基材・品番 (Material / Hinban)</th>
+                        <th style="width: 100px;">出荷先</th>
+                        <th style="width: 60px;">色</th>
+                        <th style="width: 70px;">処理</th>
+                        <th style="width: 70px;">幅長</th>
+                        <th style="width: 130px;">巻数・数量</th>
+                        <th style="width: 130px;">状態</th>
+                        <th style="width: 110px; text-align: center;">ラベル印刷</th>
+                        <th style="width: 130px; text-align: center;">操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rowsHTML}
+                </tbody>
+            </table>
+        </div>
+    `;
 }
 
 function renderScheduleList(items, startTimeStr) {
@@ -980,16 +1125,21 @@ function renderScheduleList(items, startTimeStr) {
     if (!container) return;
 
     updateScheduleStats(items, startTimeStr);
+    updateViewModeButtons();
 
     const groups = groupScheduledItems(items);
     state.currentGroups = groups;
+
+    if (state.listViewMode === 'table') {
+        container.innerHTML = renderScheduleTableView(groups, items);
+        return;
+    }
 
     let html = '';
 
     groups.forEach((group, gIdx) => {
         const isGroupTinted = (gIdx % 2 === 0);
         const lifecycle = getGroupLifecycle(group.groupId);
-        // Completed groups are never active/selected
         const isGroupSelected = (lifecycle.status !== 'completed') && state.selectedItem && group.items.some(it => it.id === state.selectedItem.id);
 
         if (group.type === 'setup') {
@@ -1004,18 +1154,15 @@ function renderScheduleList(items, startTimeStr) {
                 </div>
             `;
         } else {
-            // Unified Hinban Batch Group Card
             const firstItem = group.items[0];
             const lastItem = group.items[group.items.length - 1];
             const orderRangeText = group.items.length > 1 ? `#${firstItem.orderIndex} — #${lastItem.orderIndex}` : `#${firstItem.orderIndex}`;
 
-            // Segment Badges: Shipping Dest, Color, Shori, Habanaga
             const destBadge = group.shippingDest ? `<span class="tag-pill dest-tag" title="出荷先名: ${group.shippingDest}">出荷先: ${group.shippingDest}</span>` : '';
             const colorBadge = group.color ? `<span class="tag-pill color-tag" title="色コード: ${group.color}">色: ${group.color}</span>` : '';
             const shoriBadge = group.shori ? `<span class="tag-pill shori-tag" title="処理コード: ${group.shori}">処理: ${group.shori}</span>` : '';
             const habanagaBadge = group.habanaga ? `<span class="tag-pill habanaga-tag" title="幅長コード: ${group.habanaga}">幅長: ${group.habanaga}</span>` : '';
 
-            // Status Badge & Action Buttons according to Lifecycle
             let statusBadgeHTML = '';
             let actionButtonsHTML = '';
 
@@ -1041,7 +1188,6 @@ function renderScheduleList(items, startTimeStr) {
                     <button type="button" class="btn-batch-action btn-batch-reopen" onclick="showReopenModal(${gIdx}, event)" title="再開・リセット">🔄 再開</button>
                 `;
             } else {
-                // Pending
                 statusBadgeHTML = `<span class="batch-status-badge status-pending">待機中</span>`;
                 actionButtonsHTML = `
                     ${printAllBtnHTML}
@@ -1050,16 +1196,13 @@ function renderScheduleList(items, startTimeStr) {
                 `;
             }
 
-            // Big Bold Title uses 基材 (or falls back to 品番)
             const mainTitle = group.kizai || group.hinban;
 
             html += `
                 <div class="batch-group-card state-${lifecycle.status} ${isGroupTinted ? 'group-tinted' : ''}" 
                      data-group-id="${group.groupId}">
                     
-                    <!-- Batch Header -->
                     <div class="batch-header" onclick="previewBatchGroup(${gIdx}, event)">
-                        <!-- Row 1: Order Range Badge + Big Title + Status Badge -->
                         <div class="batch-header-top-row">
                             <div class="batch-order-and-title">
                                 <div class="batch-order-range">${orderRangeText}</div>
@@ -1070,7 +1213,6 @@ function renderScheduleList(items, startTimeStr) {
                             </div>
                         </div>
 
-                        <!-- Row 2: Info Badges & Meta Chips -->
                         <div class="batch-chips-row">
                             ${destBadge}
                             ${colorBadge}
@@ -1080,7 +1222,6 @@ function renderScheduleList(items, startTimeStr) {
                             <span class="batch-summary-pill">🕒 予定: ${group.startTime} - ${group.endTime} (計 ${group.totalDuration} 分)</span>
                         </div>
 
-                        <!-- Row 3: Action Buttons -->
                         <div class="batch-actions-row" onclick="event.stopPropagation()">
                             <div class="batch-btn-group">
                                 ${actionButtonsHTML}
@@ -1088,7 +1229,6 @@ function renderScheduleList(items, startTimeStr) {
                         </div>
                     </div>
 
-                    <!-- Batch Roll Sub-Rows -->
                     <div class="batch-rolls-list">
                         ${group.items.map((rollItem, rIdx) => {
                 const isRunning = (lifecycle.status === 'in-progress' || lifecycle.status === 'running');
@@ -1098,26 +1238,26 @@ function renderScheduleList(items, startTimeStr) {
                 const lastPrintEntry = isRollPrinted ? lifecycle.printHistory.filter(p => Number(p.rollIndex) === Number(actualRollIndex)).slice(-1)[0] : null;
 
                 return `
-                                <div class="batch-roll-row ${isRunning ? 'active-roll' : ''}" 
-                                     onclick="previewBatchGroup(${gIdx}, event)">
-                                    <div class="roll-row-left">
-                                        <span class="roll-sub-badge">#${rollItem.orderIndex}</span>
-                                        <span class="roll-time">${rollItem.startTime} - ${rollItem.endTime}</span>
-                                        <span class="roll-count-pill">${actualRollIndex} / ${rollItem.totalRolls || group.items.length} 巻き</span>
-                                        <span class="roll-meter-pill">${rollItem.meters || 100} m</span>
-                                    </div>
-                                    <div class="roll-row-right" style="display: flex; align-items: center; gap: 8px;" onclick="event.stopPropagation()">
-                                        <button type="button" class="btn-roll-print ${isRollPrinted ? 'is-printed' : ''}" 
-                                                onclick="printSingleRoll(${gIdx}, ${rIdx}, event)" 
-                                                title="${isRollPrinted ? `印刷済み (${lastPrintEntry?.timeStr || ''}) - 再印刷` : `この巻き（#${rollItem.orderIndex}）のラベルを印刷`}">
-                                            ${isRollPrinted ? `✓ 済 (${lastPrintEntry?.timeStr || ''})` : '🖨️ 印刷'}
-                                        </button>
-                                        <span class="roll-status-pill ${isRunning ? 'current-active' : ''}">
-                                            ${isCompleted ? '完了' : (isRunning ? '生産中' : '待機')}
-                                        </span>
-                                    </div>
-                                </div>
-                            `;
+                    <div class="batch-roll-row ${isRunning ? 'active-roll' : ''}" 
+                         onclick="previewBatchGroup(${gIdx}, event)">
+                        <div class="roll-row-left">
+                            <span class="roll-sub-badge">#${rollItem.orderIndex}</span>
+                            <span class="roll-time">${rollItem.startTime} - ${rollItem.endTime}</span>
+                            <span class="roll-count-pill">${actualRollIndex} / ${rollItem.totalRolls || group.items.length} 巻き</span>
+                            <span class="roll-meter-pill">${rollItem.meters || 100} m</span>
+                        </div>
+                        <div class="roll-row-right" style="display: flex; align-items: center; gap: 8px;" onclick="event.stopPropagation()">
+                            <button type="button" class="btn-roll-print ${isRollPrinted ? 'is-printed' : ''}" 
+                                    onclick="printSingleRoll(${gIdx}, ${rIdx}, event)" 
+                                    title="${isRollPrinted ? `印刷済み (${lastPrintEntry?.timeStr || ''}) - 再印刷` : `この巻き（#${rollItem.orderIndex}）のラベルを印刷`}">
+                                ${isRollPrinted ? `✓ 済 (${lastPrintEntry?.timeStr || ''})` : '🖨️ 印刷'}
+                            </button>
+                            <span class="roll-status-pill ${isRunning ? 'current-active' : ''}">
+                                ${isCompleted ? '完了' : (isRunning ? '生産中' : '待機')}
+                            </span>
+                        </div>
+                    </div>
+                `;
             }).join('')}
                     </div>
                 </div>
