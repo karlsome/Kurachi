@@ -34253,6 +34253,51 @@ app.get('/api/production/material-detail', async (req, res) => {
 // ---------------------------------------------------------------------------
 // First Factory Production Status Tracking API (submittedDB.firstFactoryProduction)
 // ---------------------------------------------------------------------------
+
+// Active SSE clients for instant realtime updates
+const productionSseClients = new Set();
+
+function broadcastProductionEvent(eventData) {
+  const payload = `data: ${JSON.stringify(eventData)}\n\n`;
+  productionSseClients.forEach(client => {
+    try {
+      if (!client.date || client.date === eventData.date) {
+        client.res.write(payload);
+      }
+    } catch (e) {
+      productionSseClients.delete(client);
+    }
+  });
+}
+
+app.get('/api/production/events', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  if (res.flushHeaders) res.flushHeaders();
+
+  const clientObj = { res, date: req.query.date };
+  productionSseClients.add(clientObj);
+
+  res.write(`data: ${JSON.stringify({ type: 'connected', time: new Date().toISOString() })}\n\n`);
+
+  // Heartbeat every 20s to keep connection alive through proxies
+  const keepAlive = setInterval(() => {
+    try {
+      res.write(': keep-alive\n\n');
+    } catch (e) {
+      clearInterval(keepAlive);
+      productionSseClients.delete(clientObj);
+    }
+  }, 20000);
+
+  req.on('close', () => {
+    clearInterval(keepAlive);
+    productionSseClients.delete(clientObj);
+  });
+});
+
 app.get('/api/production/status', async (req, res) => {
   try {
     const { date, machine } = req.query;
@@ -34343,6 +34388,17 @@ app.post('/api/production/status', async (req, res) => {
     );
 
     console.log(`📝 Updated firstFactoryProduction for [${hinban || groupId}] -> status: ${status}, worker: ${worker}`);
+    
+    // Broadcast live event to all connected admin dashboards
+    broadcastProductionEvent({
+      type: 'status_update',
+      date,
+      groupId,
+      status: status || 'pending',
+      record: updateDoc.$set,
+      timestamp: new Date().toISOString()
+    });
+
     res.json({ success: true, record: result.value || result });
   } catch (error) {
     console.error('❌ Error in POST /api/production/status:', error);
@@ -34408,6 +34464,17 @@ app.post('/api/production/print-log', async (req, res) => {
     );
 
     console.log(`🖨️ Logged print event to firstFactoryProduction: [${hinban || groupId}] Roll #${rollIndex}/${totalRolls} (${lotNo})`);
+    
+    // Broadcast print event in realtime
+    broadcastProductionEvent({
+      type: 'print_log',
+      date,
+      groupId,
+      hinban,
+      printEntry,
+      timestamp: new Date().toISOString()
+    });
+
     res.json({ success: true, printEntry });
   } catch (error) {
     console.error('❌ Error in POST /api/production/print-log:', error);
