@@ -34154,6 +34154,8 @@ app.get('/api/production/schedule/daily', async (req, res) => {
 
           const shippingDest = doc['品目マスタ']?.['出荷先名'] || doc['品目マスタ']?.['入出荷先名'] || doc['品目マスタ']?.['得意先名'] || '';
           const labelHinban = doc['品目マスタ']?.['ラベル品番'] || '';
+          const okyakuHinban = doc['品目マスタ']?.['お客様品番'] || doc['お客様品番'] || '';
+          const imageURL = doc['品目マスタ']?.['imageURL'] || doc['imageURL'] || '';
 
           masterMap[doc['品番']] = {
             hinmei: doc['品目マスタ']?.['品名'] || '',
@@ -34163,6 +34165,8 @@ app.get('/api/production/schedule/daily', async (req, res) => {
             habanaga,
             shippingDest,
             labelHinban,
+            okyakuHinban,
+            imageURL,
             zuban: doc['品目マスタ']?.['図番'] || ''
           };
         });
@@ -34178,6 +34182,8 @@ app.get('/api/production/schedule/daily', async (req, res) => {
               habanaga: info.habanaga || '',
               shippingDest: info.shippingDest || '',
               labelHinban: info.labelHinban || '',
+              okyakuHinban: info.okyakuHinban || '',
+              imageURL: info.imageURL || '',
               hinmei: info.hinmei || '',
               zuban: info.zuban || ''
             };
@@ -34576,6 +34582,8 @@ app.get('/api/production/schedule', async (req, res) => {
           habanaga,
           shippingDest: doc['品目マスタ']?.['出荷先名'] || doc['品目マスタ']?.['入出荷先名'] || doc['品目マスタ']?.['得意先名'] || '',
           labelHinban: doc['品目マスタ']?.['ラベル品番'] || '',
+          okyakuHinban: doc['品目マスタ']?.['お客様品番'] || doc['お客様品番'] || '',
+          imageURL: doc['品目マスタ']?.['imageURL'] || doc['imageURL'] || '',
           zuban: doc['品目マスタ']?.['図番'] || ''
         };
       });
@@ -34593,6 +34601,8 @@ app.get('/api/production/schedule', async (req, res) => {
                 habanaga: info.habanaga || item.habanaga || '',
                 shippingDest: info.shippingDest || item.shippingDest || '',
                 labelHinban: info.labelHinban || item.labelHinban || '',
+                okyakuHinban: info.okyakuHinban || item.okyakuHinban || '',
+                imageURL: info.imageURL || item.imageURL || '',
                 hinmei: info.hinmei || item.hinmei || '',
                 zuban: info.zuban || item.zuban || ''
               };

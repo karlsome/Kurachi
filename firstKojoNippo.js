@@ -4,8 +4,8 @@
  */
 
 // const serverURL = "https://kurachi.onrender.com";
-//const serverURL = "http://localhost:3000";
-const serverURL = "http://192.168.0.48:3000";
+const serverURL = "http://localhost:3000";
+//const serverURL = "http://192.168.0.48:3000";
 
 function getTodayDateString() {
     const now = new Date();
@@ -553,6 +553,7 @@ function groupScheduledItems(items) {
                 habanaga: item.habanaga || '',
                 shippingDest: item.shippingDest || '',
                 labelHinban: item.labelHinban || '',
+                okyakuHinban: item.okyakuHinban || '',
                 zuban: item.zuban || '',
                 items: [item],
                 itemIndexStart: idx,
@@ -566,6 +567,28 @@ function groupScheduledItems(items) {
     });
 
     return groups;
+}
+
+// -----------------------------------------------------
+// Special Kinuura (衣浦) Hinban Patterns
+// -----------------------------------------------------
+const SPECIAL_KINUURA_PATTERNS = [
+    "CNU/C2E2SB*/D/***WA8",
+    "CNU/C2Z1YG*/D/***WA8",
+    "CNU/CMX70B*GD/***W48",
+    "CNU/CMH70G*GD/***W48",
+    "CNU/BLZ02B*GD/***W48",
+    "CNU/85ULBB*GD/***W48",
+    "CNU/B0474B*GD/***W*6"
+];
+
+function isSpecialKinuuraHinban(hinban) {
+    if (!hinban) return false;
+    return SPECIAL_KINUURA_PATTERNS.some(pattern => {
+        let escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
+        escaped = escaped.replace(/\*/g, '.');
+        return new RegExp(`^${escaped}$`).test(hinban);
+    });
 }
 
 // -----------------------------------------------------
@@ -587,24 +610,45 @@ function buildBrotherPrintFields(group, rollItem, rollIndex, totalRolls) {
 
     const lotNo = `${yymmdd}-${rollIndex}`;
     const hinban = group.hinban || rollItem.hinban || '';
-
-    // text_背番号 MUST strictly be the value of 品目マスタ.ラベル品番 (e.g. "Z1Z9"). If null, blank, or missing, leave empty string ''
-    const rawLabel = group.labelHinban ?? rollItem.labelHinban ?? group.materialInfo?.rawMaster?.['品目マスタ']?.['ラベル品番'] ?? rollItem.materialInfo?.rawMaster?.['品目マスタ']?.['ラベル品番'] ?? '';
-    const labelHinban = (rawLabel && String(rawLabel).trim() !== '' && rawLabel !== 'null' && rawLabel !== 'undefined') ? String(rawLabel).trim() : '';
-
+    const okyakuHinban = group.okyakuHinban || rollItem.okyakuHinban || group.materialInfo?.rawMaster?.['品目マスタ']?.['お客様品番'] || rollItem.materialInfo?.rawMaster?.['品目マスタ']?.['お客様品番'] || '';
     const color = group.color || rollItem.color || '';
     const hinmei = group.hinmei || rollItem.hinmei || '';
     const shippingDest = group.shippingDest || rollItem.shippingDest || '';
     const meters = rollItem.meters || 100;
-    const barcode = `${labelHinban || hinban},${lotNo},${meters}`;
+
+    const isSpecial = isSpecialKinuuraHinban(hinban);
+
+    let filename = 'firstkojo4.lbx';
+    let textHinban = hinban;
+    let textSebangou = '';
+    let barcode = '';
+
+    if (isSpecial) {
+        // Special Kinuura Label Mapping
+        filename = 'kinuuraLabel.lbx';
+        textHinban = okyakuHinban || hinban;
+        textSebangou = hinmei || '';
+        barcode = okyakuHinban || hinban;
+    } else {
+        // Standard Printing Mapping
+        const rawLabel = group.labelHinban ?? rollItem.labelHinban ?? group.materialInfo?.rawMaster?.['品目マスタ']?.['ラベル品番'] ?? rollItem.materialInfo?.rawMaster?.['品目マスタ']?.['ラベル品番'] ?? '';
+        const labelHinban = (rawLabel && String(rawLabel).trim() !== '' && rawLabel !== 'null' && rawLabel !== 'undefined') ? String(rawLabel).trim() : '';
+
+        if (labelHinban === 'NC2') {
+            filename = 'NC21.lbx';
+        }
+        textHinban = hinban;
+        textSebangou = labelHinban;
+        barcode = `${labelHinban || hinban},${lotNo},${meters}`;
+    }
 
     return {
-        filename: 'firstkojo4.lbx',
+        filename: filename,
         size: 'RollW62',
         copies: 1,
-        text_品番: hinban,
+        text_品番: textHinban,
         text_収容数: String(rollItem.orderIndex !== undefined ? rollItem.orderIndex : (rollIndex || 1)),
-        text_背番号: labelHinban,
+        text_背番号: textSebangou,
         text_color: color,
         text_品名: hinmei,
         text_location: shippingDest ? `${shippingDest}へ` : '',
