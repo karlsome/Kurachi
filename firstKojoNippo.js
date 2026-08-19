@@ -587,7 +587,11 @@ function buildBrotherPrintFields(group, rollItem, rollIndex, totalRolls) {
 
     const lotNo = `${yymmdd}-${rollIndex}`;
     const hinban = group.hinban || rollItem.hinban || '';
-    const labelHinban = group.labelHinban || rollItem.labelHinban || hinban;
+
+    // text_背番号 MUST strictly be the value of 品目マスタ.ラベル品番 (e.g. "Z1Z9"). If null, blank, or missing, leave empty string ''
+    const rawLabel = group.labelHinban ?? rollItem.labelHinban ?? group.materialInfo?.rawMaster?.['品目マスタ']?.['ラベル品番'] ?? rollItem.materialInfo?.rawMaster?.['品目マスタ']?.['ラベル品番'] ?? '';
+    const labelHinban = (rawLabel && String(rawLabel).trim() !== '' && rawLabel !== 'null' && rawLabel !== 'undefined') ? String(rawLabel).trim() : '';
+
     const color = group.color || rollItem.color || '';
     const hinmei = group.hinmei || rollItem.hinmei || '';
     const shippingDest = group.shippingDest || rollItem.shippingDest || '';

@@ -34548,6 +34548,61 @@ app.get('/api/production/schedule', async (req, res) => {
     // Fetch user's saved daily schedules for the month
     const savedSchedules = await scheduleCollection.find({ type: 'dailySchedule', month }).toArray();
     
+    // Enrich saved schedules with master material attributes (especially 品目マスタ.ラベル品番)
+    const allScheduledHinbans = [...new Set(savedSchedules.flatMap(s => (s.scheduleOrder || []).map(i => i.hinban)).filter(Boolean))];
+    if (allScheduledHinbans.length > 0) {
+      const schedMasterDocs = await masterCollection.find({ "品番": { $in: allScheduledHinbans } }).toArray();
+      const schedMasterMap = {};
+      schedMasterDocs.forEach(doc => {
+        let kizai = '';
+        let color = '';
+        let shori = '';
+        let habanaga = '';
+        if (doc['品番構造'] && Array.isArray(doc['品番構造'].segments)) {
+          const kizaiSeg = doc['品番構造'].segments.find(s => s.segment === '基材コード');
+          if (kizaiSeg) kizai = kizaiSeg.name || kizaiSeg['得意先'] || kizaiSeg['入出荷先'] || '';
+          const colorSeg = doc['品番構造'].segments.find(s => s.segment === '色コード');
+          if (colorSeg) color = colorSeg.name || colorSeg['得意先'] || colorSeg['入出荷先'] || '';
+          const shoriSeg = doc['品番構造'].segments.find(s => s.segment === '処理コード');
+          if (shoriSeg) shori = shoriSeg.name || shoriSeg['得意先'] || shoriSeg['入出荷先'] || '';
+          const habanagaSeg = doc['品番構造'].segments.find(s => s.segment === '幅長コード');
+          if (habanagaSeg) habanaga = habanagaSeg.name || habanagaSeg['得意先'] || habanagaSeg['入出荷先'] || '';
+        }
+        schedMasterMap[doc['品番']] = {
+          hinmei: doc['品目マスタ']?.['品名'] || '',
+          kizai,
+          color,
+          shori,
+          habanaga,
+          shippingDest: doc['品目マスタ']?.['出荷先名'] || doc['品目マスタ']?.['入出荷先名'] || doc['品目マスタ']?.['得意先名'] || '',
+          labelHinban: doc['品目マスタ']?.['ラベル品番'] || '',
+          zuban: doc['品目マスタ']?.['図番'] || ''
+        };
+      });
+
+      savedSchedules.forEach(sched => {
+        if (Array.isArray(sched.scheduleOrder)) {
+          sched.scheduleOrder = sched.scheduleOrder.map(item => {
+            if (item.type === 'hinban' && item.hinban) {
+              const info = schedMasterMap[item.hinban] || {};
+              return {
+                ...item,
+                kizai: info.kizai || item.kizai || '',
+                color: info.color || item.color || '',
+                shori: info.shori || item.shori || '',
+                habanaga: info.habanaga || item.habanaga || '',
+                shippingDest: info.shippingDest || item.shippingDest || '',
+                labelHinban: info.labelHinban || item.labelHinban || '',
+                hinmei: info.hinmei || item.hinmei || '',
+                zuban: info.zuban || item.zuban || ''
+              };
+            }
+            return item;
+          });
+        }
+      });
+    }
+    
     res.json({ success: true, data: enrichedData, schedules: savedSchedules });
   } catch (error) {
     console.error('Error fetching schedule:', error);
