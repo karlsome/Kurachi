@@ -34527,27 +34527,73 @@ app.get('/api/production/schedule', async (req, res) => {
     // Fetch live parsed data for the month
     const liveData = await collection.find({ month }).toArray();
 
-    // Enrich with material master data
+    // Enrich with material master data and BOM master data
     const hinbans = liveData.map(item => item.hinban);
     const masterCollection = db.collection('materialMasterDB3');
-    const masterData = await masterCollection.find({ "品番": { $in: hinbans } }).toArray();
+    const bomCollection = db.collection('bomMasterDB');
+
+    const [masterData, bomDataList] = await Promise.all([
+      masterCollection.find({ "品番": { $in: hinbans } }).toArray(),
+      bomCollection.find({ "品番": { $in: hinbans } }).toArray()
+    ]);
+
+    const bomMap = {};
+    bomDataList.forEach(b => {
+      if (b['品番'] && Array.isArray(b['BOM'])) {
+        bomMap[b['品番']] = b['BOM'];
+      }
+    });
     
     const masterMap = {};
     masterData.forEach(master => {
+       const hinbanKey = master['品番'];
        const packCount = master['品目マスタ']?.['梱包数'] || 0;
        let workTime = 0;
        
-       const bomItems = master['BOM'] || [];
-       const process2010 = bomItems.find(b => b['工程コード'] === 2010);
+       const bomItems = (Array.isArray(master['BOM']) && master['BOM'].length > 0)
+         ? master['BOM']
+         : (bomMap[hinbanKey] || []);
+
+       const process2010 = bomItems.find(b => 
+         Number(b['工程コード']) === 2010 || 
+         String(b['工程コード'] || '').startsWith('2010') || 
+         b['工程名'] === '粘着工程' || 
+         b['工程略名'] === '粘着'
+       );
+
+       const hasProcess2010 = Boolean(
+         process2010 ||
+         String(master['品目マスタ']?.['工程コード'] || '').startsWith('2010') ||
+         Number(master['resolved']?.['工程コード']?.code) === 2010 ||
+         master['resolved']?.['工程コード']?.name === '粘着工程'
+       );
+
        if (process2010) {
-          workTime = process2010['作業時間'] || 0;
+          workTime = Number(process2010['作業時間']) || 0;
        }
        
-       masterMap[master['品番']] = { packCount, workTime, rawMaster: master };
+       masterMap[hinbanKey] = { packCount, workTime, hasProcess2010, rawMaster: { ...master, BOM: bomItems } };
+    });
+
+    // Also enrich any hinbans that exist in bomMasterDB but not in materialMasterDB3
+    bomDataList.forEach(b => {
+       const hinbanKey = b['品番'];
+       if (!masterMap[hinbanKey]) {
+         const bomItems = Array.isArray(b['BOM']) ? b['BOM'] : [];
+         const process2010 = bomItems.find(p => 
+           Number(p['工程コード']) === 2010 || 
+           String(p['工程コード'] || '').startsWith('2010') || 
+           p['工程名'] === '粘着工程' || 
+           p['工程略名'] === '粘着'
+         );
+         const hasProcess2010 = Boolean(process2010);
+         const workTime = process2010 ? (Number(process2010['作業時間']) || 0) : 0;
+         masterMap[hinbanKey] = { packCount: 0, workTime, hasProcess2010, rawMaster: { 品番: hinbanKey, BOM: bomItems } };
+       }
     });
     
     const enrichedData = liveData.map(item => {
-       const masterInfo = masterMap[item.hinban] || { packCount: 0, workTime: 0 };
+       const masterInfo = masterMap[item.hinban] || { packCount: 0, workTime: 0, hasProcess2010: false };
        return { ...item, materialInfo: masterInfo };
     });
 
