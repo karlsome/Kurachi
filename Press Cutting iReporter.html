@@ -1747,28 +1747,28 @@
             <div class="counter-box" style="margin-bottom: 15px; justify-content: space-between; border: none; box-shadow: none; padding: 0;">  
                 <label for="hidasen-cat-1" style="flex: 1; text-align: left; color: #333;">初回生産品</label>
                 <button class="plus-btn" type="button" onclick="incrementHidasenCat('初回生産品')" >+</button>  
-                <input id="hidasen-cat-1" value="0" type="number" readonly style="width: 80px; text-align: center; margin: 0 10px;">  
+                <input id="hidasen-cat-1" value="0" type="number" readonly onclick="openDirectNumericKeypad('hidasen-cat-1')" oninput="updateHidasenTotal()" style="width: 80px; text-align: center; margin: 0 10px; cursor: pointer;">  
                 <button class="minus-btn" type="button" onclick="decrementHidasenCat('初回生産品')" >-</button>
             </div>
             
             <div class="counter-box" style="margin-bottom: 15px; justify-content: space-between; border: none; box-shadow: none; padding: 0;">  
-                <label for="hidasen-cat-2" style="flex: 1; text-align: left; color: #333;">割れ・ひび割れ品</label>
-                <button class="plus-btn" type="button" onclick="incrementHidasenCat('割れ・ひび割れ品')" >+</button>  
-                <input id="hidasen-cat-2" value="0" type="number" readonly style="width: 80px; text-align: center; margin: 0 10px;">  
-                <button class="minus-btn" type="button" onclick="decrementHidasenCat('割れ・ひび割れ品')" >-</button>
+                <label for="hidasen-cat-2" style="flex: 1; text-align: left; color: #333;">終物</label>
+                <button class="plus-btn" type="button" onclick="incrementHidasenCat('終物')" >+</button>  
+                <input id="hidasen-cat-2" value="0" type="number" readonly onclick="openDirectNumericKeypad('hidasen-cat-2')" oninput="updateHidasenTotal()" style="width: 80px; text-align: center; margin: 0 10px; cursor: pointer;">  
+                <button class="minus-btn" type="button" onclick="decrementHidasenCat('終物')" >-</button>
             </div>
             
             <div class="counter-box" style="margin-bottom: 15px; justify-content: space-between; border: none; box-shadow: none; padding: 0;">  
                 <label for="hidasen-cat-3" style="flex: 1; text-align: left; color: #333;">サンプル</label>
                 <button class="plus-btn" type="button" onclick="incrementHidasenCat('サンプル')" >+</button>  
-                <input id="hidasen-cat-3" value="0" type="number" readonly style="width: 80px; text-align: center; margin: 0 10px;">  
+                <input id="hidasen-cat-3" value="0" type="number" readonly onclick="openDirectNumericKeypad('hidasen-cat-3')" oninput="updateHidasenTotal()" style="width: 80px; text-align: center; margin: 0 10px; cursor: pointer;">  
                 <button class="minus-btn" type="button" onclick="decrementHidasenCat('サンプル')" >-</button>
             </div>
             
             <div class="counter-box" style="margin-bottom: 20px; justify-content: space-between; border: none; box-shadow: none; padding: 0;">  
                 <label for="hidasen-cat-4" style="flex: 1; text-align: left; color: #333;">調整用</label>
                 <button class="plus-btn" type="button" onclick="incrementHidasenCat('調整用')" >+</button>  
-                <input id="hidasen-cat-4" value="0" type="number" readonly style="width: 80px; text-align: center; margin: 0 10px;">  
+                <input id="hidasen-cat-4" value="0" type="number" readonly onclick="openDirectNumericKeypad('hidasen-cat-4')" oninput="updateHidasenTotal()" style="width: 80px; text-align: center; margin: 0 10px; cursor: pointer;">  
                 <button class="minus-btn" type="button" onclick="decrementHidasenCat('調整用')" >-</button>
             </div>
 
