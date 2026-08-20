@@ -16,7 +16,7 @@ function getQueryParam(param) {
   return urlParams.get(param);
 }
 const selectedFactory = getQueryParam('filter');
-if (selectedFactory){
+if (selectedFactory) {
   document.getElementById('selected工場').value = selectedFactory;
   console.log("kojo changed to: " + selectedFactory);
 }
@@ -240,21 +240,21 @@ function showDateChoiceModal(enteredDate, currentDate) {
 
 // Save the value of each input to localStorage on change
 inputs.forEach(input => {
-    input.addEventListener('input', () => {
-        const key = `${uniquePrefix}${input.id || input.name}`; // Prefix key with pageName and selected工場
-        if (key) {
-            localStorage.setItem(key, input.value);
-        }
-    });
-
-    if (input.type === 'checkbox' || input.type === 'radio') {
-        input.addEventListener('change', () => {
-            const key = `${uniquePrefix}${input.id || input.name}`;
-            if (key) {
-                localStorage.setItem(key, input.checked); // Save checkbox/radio state
-            }
-        });
+  input.addEventListener('input', () => {
+    const key = `${uniquePrefix}${input.id || input.name}`; // Prefix key with pageName and selected工場
+    if (key) {
+      localStorage.setItem(key, input.value);
     }
+  });
+
+  if (input.type === 'checkbox' || input.type === 'radio') {
+    input.addEventListener('change', () => {
+      const key = `${uniquePrefix}${input.id || input.name}`;
+      if (key) {
+        localStorage.setItem(key, input.checked); // Save checkbox/radio state
+      }
+    });
+  }
 });
 
 
@@ -266,53 +266,53 @@ document.addEventListener('DOMContentLoaded', () => {
   const processElement = document.getElementById("process");
 
   if (!selected工場) {
-      console.error("Selected 工場 is not set or found.");
-      return;
+    console.error("Selected 工場 is not set or found.");
+    return;
   }
 
   // Loop through all keys in localStorage
   Object.keys(localStorage).forEach(key => {
-      // Check if the key belongs to the current HTML file and selected工場
-      if (key.startsWith(`${uniquePrefix}`)) {
-          const savedValue = localStorage.getItem(key);
+    // Check if the key belongs to the current HTML file and selected工場
+    if (key.startsWith(`${uniquePrefix}`)) {
+      const savedValue = localStorage.getItem(key);
 
-          if (savedValue !== null) {
-              // Match each input with its respective localStorage key
-              inputs.forEach(input => {
-                  const inputKey = `${uniquePrefix}${input.id || input.name}`;
-                  if (inputKey === key) {
-                      if (input.type === 'checkbox' || input.type === 'radio') {
-                          input.checked = savedValue === 'true'; // Restore checkbox/radio state
-                      } else if (input.id === 'sub-dropdown-input') {
-                          // Special handling for sebanggo input field
-                          input.value = savedValue;
-                          console.log(`Restored ${input.id || input.name}:`, savedValue);
-                          fetchProductDetails(); // for info
-                          updateTotal(); // for total value
-                      } else if (input.tagName === 'SELECT') {
-                          // For select elements, wait for options to populate
-                          setTimeout(() => {
-                              if ([...input.options].some(option => option.value === savedValue)) {
-                                  input.value = savedValue; // Restore select value
-                                  console.log(`Restored ${input.id || input.name}:`, savedValue);
-                                  fetchProductDetails(); // for info
-                                  updateTotal(); // for total value
-                              } else {
-                                  console.error(`Option '${savedValue}' not found in select '${input.id || input.name}'.`);
-                              }
-                          }, 1000); // Adjust delay if options are populated dynamically
-                      } else {
-                          input.value = savedValue; // Restore value for text, hidden, and other inputs
-                      }
-                  }
-              });
+      if (savedValue !== null) {
+        // Match each input with its respective localStorage key
+        inputs.forEach(input => {
+          const inputKey = `${uniquePrefix}${input.id || input.name}`;
+          if (inputKey === key) {
+            if (input.type === 'checkbox' || input.type === 'radio') {
+              input.checked = savedValue === 'true'; // Restore checkbox/radio state
+            } else if (input.id === 'sub-dropdown-input') {
+              // Special handling for sebanggo input field
+              input.value = savedValue;
+              console.log(`Restored ${input.id || input.name}:`, savedValue);
+              fetchProductDetails(); // for info
+              updateTotal(); // for total value
+            } else if (input.tagName === 'SELECT') {
+              // For select elements, wait for options to populate
+              setTimeout(() => {
+                if ([...input.options].some(option => option.value === savedValue)) {
+                  input.value = savedValue; // Restore select value
+                  console.log(`Restored ${input.id || input.name}:`, savedValue);
+                  fetchProductDetails(); // for info
+                  updateTotal(); // for total value
+                } else {
+                  console.error(`Option '${savedValue}' not found in select '${input.id || input.name}'.`);
+                }
+              }, 1000); // Adjust delay if options are populated dynamically
+            } else {
+              input.value = savedValue; // Restore value for text, hidden, and other inputs
+            }
           }
+        });
       }
+    }
   });
 
   // Log the restored value for debugging (Optional)
   if (processElement) {
-      console.log('Process value after restoration:', processElement.value); // Debugging the restored process value
+    console.log('Process value after restoration:', processElement.value); // Debugging the restored process value
   }
 
   // Set up processing time inputs with edit buttons
@@ -334,11 +334,11 @@ document.addEventListener('DOMContentLoaded', () => {
       editBtn.id = 'edit-start-time';
       editBtn.textContent = 'Edit';
       editBtn.style.display = 'none';
-      editBtn.onclick = function() { unlockProcessingTime('start'); };
+      editBtn.onclick = function () { unlockProcessingTime('start'); };
       wrapper.appendChild(editBtn);
 
       // Update focus handler to use custom handler
-      startTimeInput.onfocus = function() { handleProcessingTimeFocus(this); };
+      startTimeInput.onfocus = function () { handleProcessingTimeFocus(this); };
 
       // Update lock status based on current value
       updateProcessingTimeLockStatus('start');
@@ -360,11 +360,11 @@ document.addEventListener('DOMContentLoaded', () => {
       editBtn.id = 'edit-end-time';
       editBtn.textContent = 'Edit';
       editBtn.style.display = 'none';
-      editBtn.onclick = function() { unlockProcessingTime('end'); };
+      editBtn.onclick = function () { unlockProcessingTime('end'); };
       wrapper.appendChild(editBtn);
 
       // Update focus handler to use custom handler
-      endTimeInput.onfocus = function() { handleProcessingTimeFocus(this); };
+      endTimeInput.onfocus = function () { handleProcessingTimeFocus(this); };
 
       // Update lock status based on current value
       updateProcessingTimeLockStatus('end');
@@ -437,29 +437,29 @@ async function fetchSebanggoAndHinban() {
     const combinedList = [...sebanggoList, ...hinbanList];
     sebanggoData = combinedList;
 
-    console.log("Sebanggo data loaded for modal (ALL factories):", { 
-      sebanggoCount: sebanggoList.length, 
-      hinbanCount: hinbanList.length, 
-      totalCount: combinedList.length 
+    console.log("Sebanggo data loaded for modal (ALL factories):", {
+      sebanggoCount: sebanggoList.length,
+      hinbanCount: hinbanList.length,
+      totalCount: combinedList.length
     });
-    
+
     if (combinedList.length === 0) {
       console.warn(`⚠️ No sebanggo or hinban data found in database`);
     }
-    
+
     // Always initialize modal functionality (with safety check)
     if (typeof initializeSebanggoModal === 'function') {
-        initializeSebanggoModal();
+      initializeSebanggoModal();
     } else {
-        console.warn('initializeSebanggoModal function not yet available, will retry later');
-        // Retry after a short delay to allow functions to be defined
-        setTimeout(() => {
-            if (typeof initializeSebanggoModal === 'function') {
-                initializeSebanggoModal();
-            } else {
-                console.error('initializeSebanggoModal still not available after delay');
-            }
-        }, 100);
+      console.warn('initializeSebanggoModal function not yet available, will retry later');
+      // Retry after a short delay to allow functions to be defined
+      setTimeout(() => {
+        if (typeof initializeSebanggoModal === 'function') {
+          initializeSebanggoModal();
+        } else {
+          console.error('initializeSebanggoModal still not available after delay');
+        }
+      }, 100);
     }
 
   } catch (error) {
@@ -747,7 +747,7 @@ function updateImageSrc(link) {
 // when time is pressed
 // Set current time as default when time is pressed
 function setDefaultTime(input) {
-  
+
 
   const now = new Date();
   const hours = String(now.getHours()).padStart(2, '0');
@@ -863,14 +863,14 @@ function setDefaultDate(input) {
 }
 
 // Set current date as default on page load
-document.addEventListener("DOMContentLoaded", function() {
+document.addEventListener("DOMContentLoaded", function () {
   const dateInput = document.getElementById("Lot No.");
   setDefaultDate(dateInput);
 });
 
 
 //Get worker list
-document.addEventListener("DOMContentLoaded", async function() {
+document.addEventListener("DOMContentLoaded", async function () {
   const selectedFactory = document.getElementById("selected工場").value;
 
   if (selectedFactory) {
@@ -879,7 +879,7 @@ document.addEventListener("DOMContentLoaded", async function() {
       if (!response.ok) throw new Error("Failed to fetch worker names");
 
       const workerNames = await response.json();
-      
+
       // Store worker names for modal
       workerNamesData = workerNames;
     } catch (error) {
@@ -938,7 +938,7 @@ function updateTotal() {
   const counter12 = parseInt(document.getElementById('counter-12').value, 10) || 0;
 
   // Calculate Total_NG
-  const totalNG = counter1+counter2+counter3+counter4+counter5+counter6+counter7+counter8+counter9+counter10+counter11+counter12;
+  const totalNG = counter1 + counter2 + counter3 + counter4 + counter5 + counter6 + counter7 + counter8 + counter9 + counter10 + counter11 + counter12;
 
   // Update the Total_NG field
   document.getElementById('Total_NG').value = totalNG;
@@ -1034,7 +1034,7 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
         alertSound.play().catch(error => console.error('Failed to play alert sound:', error));
       }
       document.body.classList.add('flash-red');
-      document.getElementById('closeScanModalButton').onclick = function() {
+      document.getElementById('closeScanModalButton').onclick = function () {
         scanAlertModal.style.display = 'none';
         alertSound.pause();
         alertSound.currentTime = 0;
@@ -1054,7 +1054,7 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
         alertSound.play().catch(error => console.error('Failed to play alert sound:', error));
       }
       document.body.classList.add('flash-red');
-      document.getElementById('closeScanModalButton').onclick = function() {
+      document.getElementById('closeScanModalButton').onclick = function () {
         scanAlertModal.style.display = 'none';
         alertSound.pause();
         alertSound.currentTime = 0;
@@ -1074,7 +1074,7 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
         alertSound.play().catch(error => console.error('Failed to play alert sound:', error));
       }
       document.body.classList.add('flash-red');
-      document.getElementById('closeScanModalButton').onclick = function() {
+      document.getElementById('closeScanModalButton').onclick = function () {
         scanAlertModal.style.display = 'none';
         alertSound.pause();
         alertSound.currentTime = 0;
@@ -1094,7 +1094,7 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
         alertSound.play().catch(error => console.error('Failed to play alert sound:', error));
       }
       document.body.classList.add('flash-red');
-      document.getElementById('closeScanModalButton').onclick = function() {
+      document.getElementById('closeScanModalButton').onclick = function () {
         scanAlertModal.style.display = 'none';
         alertSound.pause();
         alertSound.currentTime = 0;
@@ -1114,7 +1114,7 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
         alertSound.play().catch(error => console.error('Failed to play alert sound:', error));
       }
       document.body.classList.add('flash-red');
-      document.getElementById('closeScanModalButton').onclick = function() {
+      document.getElementById('closeScanModalButton').onclick = function () {
         scanAlertModal.style.display = 'none';
         alertSound.pause();
         alertSound.currentTime = 0;
@@ -1134,7 +1134,7 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
         alertSound.play().catch(error => console.error('Failed to play alert sound:', error));
       }
       document.body.classList.add('flash-red');
-      document.getElementById('closeScanModalButton').onclick = function() {
+      document.getElementById('closeScanModalButton').onclick = function () {
         scanAlertModal.style.display = 'none';
         alertSound.pause();
         alertSound.currentTime = 0;
@@ -1171,7 +1171,7 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
         alertSound.play().catch(error => console.error('Failed to play alert sound:', error));
       }
       document.body.classList.add('flash-red');
-      document.getElementById('closeScanModalButton').onclick = function() {
+      document.getElementById('closeScanModalButton').onclick = function () {
         scanAlertModal.style.display = 'none';
         alertSound.pause();
         alertSound.currentTime = 0;
@@ -1192,7 +1192,7 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
         alertSound.play().catch(error => console.error('Failed to play alert sound:', error));
       }
       document.body.classList.add('flash-red');
-      document.getElementById('closeScanModalButton').onclick = function() {
+      document.getElementById('closeScanModalButton').onclick = function () {
         scanAlertModal.style.display = 'none';
         alertSound.pause();
         alertSound.currentTime = 0;
@@ -1212,7 +1212,7 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
         alertSound.play().catch(error => console.error('Failed to play alert sound:', error));
       }
       document.body.classList.add('flash-red');
-      document.getElementById('closeScanModalButton').onclick = function() {
+      document.getElementById('closeScanModalButton').onclick = function () {
         scanAlertModal.style.display = 'none';
         alertSound.pause();
         alertSound.currentTime = 0;
@@ -1236,7 +1236,7 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
         alertSound.play().catch(error => console.error('Failed to play alert sound:', error));
       }
       document.body.classList.add('flash-red');
-      document.getElementById('closeScanModalButton').onclick = function() {
+      document.getElementById('closeScanModalButton').onclick = function () {
         scanAlertModal.style.display = 'none';
         alertSound.pause();
         alertSound.currentTime = 0;
@@ -1256,7 +1256,7 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
         alertSound.play().catch(error => console.error('Failed to play alert sound:', error));
       }
       document.body.classList.add('flash-red');
-      document.getElementById('closeScanModalButton').onclick = function() {
+      document.getElementById('closeScanModalButton').onclick = function () {
         scanAlertModal.style.display = 'none';
         alertSound.pause();
         alertSound.currentTime = 0;
@@ -1558,7 +1558,7 @@ document.addEventListener('keydown', (event) => {
 
 // Handles QR scan for both methods
 function handleQRScan(qrCodeMessage) {
-  
+
   const subDropdownInput = document.getElementById("sub-dropdown-input");
   // Check against sebanggoData array instead of dropdown options
   const options = sebanggoData || [];
@@ -1567,7 +1567,7 @@ function handleQRScan(qrCodeMessage) {
   const alertSound = document.getElementById("alert-sound");
   // Hide Bluetooth waiting modal if it's open
   document.getElementById("bluetoothWaitModal").style.display = "none";
-  
+
 
   if (!options.includes(qrCodeMessage)) {
     scanAlertText.innerText = "背番号が存在しません。 / Sebanggo does not exist.";
@@ -1657,21 +1657,21 @@ function resetForm() {
   // Clear all form inputs with unique prefix except excluded ones
   const inputs = document.querySelectorAll('input, select, textarea');
   inputs.forEach(input => {
-      const key = `${uniquePrefix}${input.id || input.name}`;
-      if (!excludedInputs.includes(input.id) && !excludedInputs.includes(input.name)) {
-          localStorage.removeItem(key);
-          input.value = ''; // Reset input value
-      }
+    const key = `${uniquePrefix}${input.id || input.name}`;
+    if (!excludedInputs.includes(input.id) && !excludedInputs.includes(input.name)) {
+      localStorage.removeItem(key);
+      input.value = ''; // Reset input value
+    }
   });
 
   // Clear counters with unique prefix
   for (let i = 18; i <= 20; i++) {
-      const key = `${uniquePrefix}counter-${i}`;
-      localStorage.removeItem(key);
-      const counterElement = document.getElementById(`counter-${i}`);
-      if (counterElement) {
-          counterElement.value = '0'; // Reset counter display
-      }
+    const key = `${uniquePrefix}counter-${i}`;
+    localStorage.removeItem(key);
+    const counterElement = document.getElementById(`counter-${i}`);
+    if (counterElement) {
+      counterElement.value = '0'; // Reset counter display
+    }
   }
 
   // Reload the page
@@ -1692,24 +1692,24 @@ async function redirectHidaseRotary(selected収容数, labelMarking, product) {
   const Date2 = document.getElementById('Lot No.')?.value || "";
   const Worker_Name = document.getElementById('Machine Operator')?.value || "";
   console.log(Worker_Name);
-  
+
   // Strip all leading letters from 背番号 to get numeric value only
   // Example: "DR103" -> "103", "ABC123" -> "123", "AA1C32" -> "1C32"
   const 背番号Numeric = 背番号Raw.replace(/^[A-Za-z]+/, '');
-  
+
   const Date = extension ? `${Date2} - ${extension}` : Date2;
   const 品番収容数 = `${品番},${selected収容数}`;
-  
+
   // Use hidaseRotary.lbx for special 品番
   const filename = "hidaseRotary2.lbx";
   const size = "RollW62";
   const copies = 1;
-  
+
   // Determine base URL depending on platform
   const baseURL = isIOS()
     ? "brotherwebprint://print"
     : "http://localhost:8088/print";
-  
+
   const url =
     `${baseURL}?filename=${encodeURIComponent(filename)}&size=${encodeURIComponent(size)}&copies=${encodeURIComponent(copies)}` +
     `&text_品番=${encodeURIComponent(品番)}` +
@@ -1729,7 +1729,7 @@ async function redirectHidaseRotary(selected収容数, labelMarking, product) {
   console.log('Label Marking:', labelMarking);
   console.log('Selected 収容数:', selected収容数);
   console.log('Worker Name:', Worker_Name);
-  
+
   // On iOS, use location.href to launch brotherwebprint
   if (isIOS()) {
     window.location.href = url;
@@ -1738,7 +1738,7 @@ async function redirectHidaseRotary(selected収容数, labelMarking, product) {
 
   // Android or desktop: use fetch to send request with printing modal
   showPrintingModal();
-  
+
   try {
     const response = await Promise.race([
       fetch(url).then(res => res.text()),
@@ -1807,7 +1807,7 @@ function printLabel() {
   const hidaseRotary品番List = [
     "116671-1030", "116671-1040", "116671-0990", "116671-1000",
     "116671-0930", "116671-0940", "116671-0920", "116671-0910",
-    "116671-0800", "116671-0810","116671-1050","116671-1070"
+    "116671-0800", "116671-0810", "116671-1050", "116671-1070"
   ];
 
   // Check if current 品番 is in the hidase rotary special list
@@ -1822,46 +1822,46 @@ function printLabel() {
         query: { 品番: 品番 }
       }),
     })
-    .then(response => response.json())
-    .then(data => {
-      if (!data || data.length === 0) {
-        console.error("No product data found for hidase rotary 品番");
-        return;
-      }
+      .then(response => response.json())
+      .then(data => {
+        if (!data || data.length === 0) {
+          console.error("No product data found for hidase rotary 品番");
+          return;
+        }
 
-      const product = data[0];
-      const labelMarking = product.labelMarking || "";
-      const 収容数String = product.収容数 || "";
-      
-      // Parse 収容数 - split by comma and trim whitespace
-      const 収容数Options = 収容数String.split(',').map(v => v.trim()).filter(v => v);
+        const product = data[0];
+        const labelMarking = product.labelMarking || "";
+        const 収容数String = product.収容数 || "";
 
-      if (収容数Options.length === 0) {
-        console.error("No 収容数 values found");
-        return;
-      }
+        // Parse 収容数 - split by comma and trim whitespace
+        const 収容数Options = 収容数String.split(',').map(v => v.trim()).filter(v => v);
 
-      // Create modal for 収容数 selection
-      const modal = document.createElement('div');
-      modal.classList.add('modal');
-      modal.style.display = 'flex';
-      modal.style.position = 'fixed';
-      modal.style.top = '50%';
-      modal.style.left = '50%';
-      modal.style.transform = 'translate(-50%, -50%)';
-      modal.style.flexDirection = 'column';
-      modal.style.justifyContent = 'center';
-      modal.style.alignItems = 'center';
-      modal.style.padding = '30px';
-      modal.style.backgroundColor = 'white';
-      modal.style.boxShadow = '0 0 15px rgba(0, 0, 0, 0.5)';
-      modal.style.borderRadius = '10px';
-      modal.style.zIndex = '10001';
+        if (収容数Options.length === 0) {
+          console.error("No 収容数 values found");
+          return;
+        }
 
-      // Add close button (X) at top right
-      const closeBtn = document.createElement('span');
-      closeBtn.innerHTML = '&times;';
-      closeBtn.style.cssText = `
+        // Create modal for 収容数 selection
+        const modal = document.createElement('div');
+        modal.classList.add('modal');
+        modal.style.display = 'flex';
+        modal.style.position = 'fixed';
+        modal.style.top = '50%';
+        modal.style.left = '50%';
+        modal.style.transform = 'translate(-50%, -50%)';
+        modal.style.flexDirection = 'column';
+        modal.style.justifyContent = 'center';
+        modal.style.alignItems = 'center';
+        modal.style.padding = '30px';
+        modal.style.backgroundColor = 'white';
+        modal.style.boxShadow = '0 0 15px rgba(0, 0, 0, 0.5)';
+        modal.style.borderRadius = '10px';
+        modal.style.zIndex = '10001';
+
+        // Add close button (X) at top right
+        const closeBtn = document.createElement('span');
+        closeBtn.innerHTML = '&times;';
+        closeBtn.style.cssText = `
         position: absolute;
         top: 10px;
         right: 20px;
@@ -1871,43 +1871,43 @@ function printLabel() {
         cursor: pointer;
         transition: color 0.2s;
       `;
-      closeBtn.onmouseover = () => closeBtn.style.color = '#000';
-      closeBtn.onmouseout = () => closeBtn.style.color = '#aaa';
-      closeBtn.onclick = () => document.body.removeChild(modal);
-      modal.appendChild(closeBtn);
+        closeBtn.onmouseover = () => closeBtn.style.color = '#000';
+        closeBtn.onmouseout = () => closeBtn.style.color = '#aaa';
+        closeBtn.onclick = () => document.body.removeChild(modal);
+        modal.appendChild(closeBtn);
 
-      const message = document.createElement('p');
-      message.innerText = '収容数を選んでください / Please choose the value for Quantity';
-      message.style.fontSize = '24px';
-      message.style.textAlign = 'center';
-      message.style.marginBottom = '20px';
-      message.style.color = '#333';
-      modal.appendChild(message);
+        const message = document.createElement('p');
+        message.innerText = '収容数を選んでください / Please choose the value for Quantity';
+        message.style.fontSize = '24px';
+        message.style.textAlign = 'center';
+        message.style.marginBottom = '20px';
+        message.style.color = '#333';
+        modal.appendChild(message);
 
-      // Create button for each 収容数 option
-      収容数Options.forEach(option => {
-        const button = document.createElement('button');
-        button.innerText = option;
-        button.style.margin = '10px';
-        button.style.padding = '15px 30px';
-        button.style.fontSize = '20px';
-        button.style.cursor = 'pointer';
-        button.style.borderRadius = '5px';
-        button.style.border = '2px solid #007bff';
-        button.style.backgroundColor = '#007bff';
-        button.style.color = 'white';
-        button.onclick = () => {
-          document.body.removeChild(modal);
-          redirectHidaseRotary(option, labelMarking, product);
-        };
-        modal.appendChild(button);
+        // Create button for each 収容数 option
+        収容数Options.forEach(option => {
+          const button = document.createElement('button');
+          button.innerText = option;
+          button.style.margin = '10px';
+          button.style.padding = '15px 30px';
+          button.style.fontSize = '20px';
+          button.style.cursor = 'pointer';
+          button.style.borderRadius = '5px';
+          button.style.border = '2px solid #007bff';
+          button.style.backgroundColor = '#007bff';
+          button.style.color = 'white';
+          button.onclick = () => {
+            document.body.removeChild(modal);
+            redirectHidaseRotary(option, labelMarking, product);
+          };
+          modal.appendChild(button);
+        });
+
+        document.body.appendChild(modal);
+      })
+      .catch(error => {
+        console.error('Error fetching hidase rotary product data:', error);
       });
-
-      document.body.appendChild(modal);
-    })
-    .catch(error => {
-      console.error('Error fetching hidase rotary product data:', error);
-    });
 
     return; // Stop here and wait for user selection
   }
@@ -1999,12 +1999,12 @@ function printLabel() {
 
       // Smooth Print URL scheme
       if (specialHidaseLabel6品番.includes(品番)) {
-          filename = "hidaselabel6.lbx";
-          Date = lotNumberValue; // use 製造ロット instead of the date
-      } else if (SRS === "有り"){
-          filename = "SRS3.lbx";
-      } else if (背番号 === "NC2"){
-          filename = "NC21.lbx"
+        filename = "hidaselabel6.lbx";
+        Date = lotNumberValue; // use 製造ロット instead of the date
+      } else if (SRS === "有り") {
+        filename = "SRS3.lbx";
+      } else if (背番号 === "NC2") {
+        filename = "NC21.lbx"
       } else {
         filename = "sample6.lbx";
       }
@@ -2053,16 +2053,16 @@ function printLabel() {
     const lotNumberValue = document.getElementById('製造ロット')?.value || "";
 
     if (specialHidaseLabel6品番.includes(品番)) {
-        filename = "hidaselabel6.lbx";
-        Date = lotNumberValue; // use 製造ロット instead of the date
-    } else if (SRS === "有り"){
+      filename = "hidaselabel6-kensa.lbx";
+      Date = lotNumberValue; // use 製造ロット instead of the date
+    } else if (SRS === "有り") {
       filename = "SRS3.lbx";
-    } else if (背番号 === "NC2"){
-        filename = "NC21.lbx"
+    } else if (背番号 === "NC2") {
+      filename = "NC21.lbx"
     } else {
       filename = "sample6.lbx";
     }
-    
+
     const size = "RollW62";
     const copies = 1;
     let url =
@@ -2088,7 +2088,7 @@ function printLabel() {
 
   if (raw収容数.includes(',')) {
     const 収容数Options = raw収容数.split(',').map(v => v.trim()).filter(v => v);
-    
+
     const modal = document.createElement('div');
     modal.classList.add('modal');
     modal.style.display = 'flex';
@@ -2141,7 +2141,7 @@ function printLabel() {
 // ===== NUMERIC KEYPAD FUNCTIONALITY =====
 
 // Define direct keypad functions in the global scope
-window.openDirectNumericKeypad = function(inputId) {
+window.openDirectNumericKeypad = function (inputId) {
   window.currentDirectInputId = inputId;
   const modal = document.getElementById('numericKeypadModalDirect');
   const display = document.getElementById('numericDisplayDirect');
@@ -2173,7 +2173,7 @@ window.openDirectNumericKeypad = function(inputId) {
     }
 
     // Setup keyboard event handling for the keypad
-    window.directKeypadKeydownHandler = function(event) {
+    window.directKeypadKeydownHandler = function (event) {
       if (modal.style.display === 'block') {
         event.preventDefault(); // Prevent default keyboard behavior
 
@@ -2200,7 +2200,7 @@ window.openDirectNumericKeypad = function(inputId) {
   }
 };
 
-window.closeDirectNumericKeypad = function() {
+window.closeDirectNumericKeypad = function () {
   const modal = document.getElementById('numericKeypadModalDirect');
   if (modal) {
     modal.style.display = 'none';
@@ -2215,28 +2215,28 @@ window.closeDirectNumericKeypad = function() {
   }
 };
 
-window.addToDirectNumericDisplay = function(digit) {
+window.addToDirectNumericDisplay = function (digit) {
   const display = document.getElementById('numericDisplayDirect');
   if (display) {
     display.value += digit;
   }
 };
 
-window.backspaceDirectNumericDisplay = function() {
+window.backspaceDirectNumericDisplay = function () {
   const display = document.getElementById('numericDisplayDirect');
   if (display && display.value.length > 0) {
     display.value = display.value.slice(0, -1);
   }
 };
 
-window.clearDirectNumericDisplay = function() {
+window.clearDirectNumericDisplay = function () {
   const display = document.getElementById('numericDisplayDirect');
   if (display) {
     display.value = '';
   }
 };
 
-window.confirmDirectNumericInput = function() {
+window.confirmDirectNumericInput = function () {
   if (!window.currentDirectInputId) return;
 
   const display = document.getElementById('numericDisplayDirect');
@@ -2284,7 +2284,7 @@ window.confirmDirectNumericInput = function() {
 };
 
 // Run initialization after page is fully loaded
-window.addEventListener('load', function() {
+window.addEventListener('load', function () {
   // Create the keypad modal HTML
   const modalHTML = `
     <div id="numericKeypadModalDirect" style="
@@ -2363,7 +2363,7 @@ window.addEventListener('load', function() {
       const btn = document.createElement('button');
       btn.textContent = i.toString();
       const digit = i.toString(); // Capture the current value in a closure
-      btn.onclick = function() { window.addToDirectNumericDisplay(digit); };
+      btn.onclick = function () { window.addToDirectNumericDisplay(digit); };
       btn.style.cssText = `
         padding: 20px;
         font-size: 24px;
@@ -2373,16 +2373,16 @@ window.addEventListener('load', function() {
         cursor: pointer;
         transition: background-color 0.2s;
       `;
-      btn.addEventListener('mouseover', function() {
+      btn.addEventListener('mouseover', function () {
         this.style.backgroundColor = '#d0d0d0';
       });
-      btn.addEventListener('mouseout', function() {
+      btn.addEventListener('mouseout', function () {
         this.style.backgroundColor = '#f1f1f1';
       });
-      btn.addEventListener('touchstart', function() {
+      btn.addEventListener('touchstart', function () {
         this.style.backgroundColor = '#d0d0d0';
       });
-      btn.addEventListener('touchend', function() {
+      btn.addEventListener('touchend', function () {
         this.style.backgroundColor = '#f1f1f1';
       });
       keypadContainer.appendChild(btn);
@@ -2391,7 +2391,7 @@ window.addEventListener('load', function() {
     // Add C, 0, and backspace buttons
     const clearBtn = document.createElement('button');
     clearBtn.textContent = 'C';
-    clearBtn.onclick = function() { window.clearDirectNumericDisplay(); };
+    clearBtn.onclick = function () { window.clearDirectNumericDisplay(); };
     clearBtn.style.cssText = `
       padding: 20px;
       font-size: 24px;
@@ -2403,22 +2403,22 @@ window.addEventListener('load', function() {
       transition: background-color 0.2s;
       font-weight: bold;
     `;
-    clearBtn.addEventListener('mouseover', function() {
+    clearBtn.addEventListener('mouseover', function () {
       this.style.backgroundColor = '#ff5252';
     });
-    clearBtn.addEventListener('mouseout', function() {
+    clearBtn.addEventListener('mouseout', function () {
       this.style.backgroundColor = '#ff6b6b';
     });
-    clearBtn.addEventListener('touchstart', function() {
+    clearBtn.addEventListener('touchstart', function () {
       this.style.backgroundColor = '#ff5252';
     });
-    clearBtn.addEventListener('touchend', function() {
+    clearBtn.addEventListener('touchend', function () {
       this.style.backgroundColor = '#ff6b6b';
     });
 
     const zeroBtn = document.createElement('button');
     zeroBtn.textContent = '0';
-    zeroBtn.onclick = function() { window.addToDirectNumericDisplay('0'); };
+    zeroBtn.onclick = function () { window.addToDirectNumericDisplay('0'); };
     zeroBtn.style.cssText = `
       padding: 20px;
       font-size: 24px;
@@ -2428,22 +2428,22 @@ window.addEventListener('load', function() {
       cursor: pointer;
       transition: background-color 0.2s;
     `;
-    zeroBtn.addEventListener('mouseover', function() {
+    zeroBtn.addEventListener('mouseover', function () {
       this.style.backgroundColor = '#d0d0d0';
     });
-    zeroBtn.addEventListener('mouseout', function() {
+    zeroBtn.addEventListener('mouseout', function () {
       this.style.backgroundColor = '#f1f1f1';
     });
-    zeroBtn.addEventListener('touchstart', function() {
+    zeroBtn.addEventListener('touchstart', function () {
       this.style.backgroundColor = '#d0d0d0';
     });
-    zeroBtn.addEventListener('touchend', function() {
+    zeroBtn.addEventListener('touchend', function () {
       this.style.backgroundColor = '#f1f1f1';
     });
 
     const backBtn = document.createElement('button');
     backBtn.innerHTML = '&larr;';
-    backBtn.onclick = function() { window.backspaceDirectNumericDisplay(); };
+    backBtn.onclick = function () { window.backspaceDirectNumericDisplay(); };
     backBtn.style.cssText = `
       padding: 20px;
       font-size: 24px;
@@ -2455,16 +2455,16 @@ window.addEventListener('load', function() {
       transition: background-color 0.2s;
       font-weight: bold;
     `;
-    backBtn.addEventListener('mouseover', function() {
+    backBtn.addEventListener('mouseover', function () {
       this.style.backgroundColor = '#ffb300';
     });
-    backBtn.addEventListener('mouseout', function() {
+    backBtn.addEventListener('mouseout', function () {
       this.style.backgroundColor = '#ffc107';
     });
-    backBtn.addEventListener('touchstart', function() {
+    backBtn.addEventListener('touchstart', function () {
       this.style.backgroundColor = '#ffb300';
     });
-    backBtn.addEventListener('touchend', function() {
+    backBtn.addEventListener('touchend', function () {
       this.style.backgroundColor = '#ffc107';
     });
 
@@ -2472,7 +2472,7 @@ window.addEventListener('load', function() {
     const hyphenBtn = document.createElement('button');
     hyphenBtn.id = 'hyphenButton';
     hyphenBtn.textContent = '-';
-    hyphenBtn.onclick = function() { window.addToDirectNumericDisplay('-'); };
+    hyphenBtn.onclick = function () { window.addToDirectNumericDisplay('-'); };
     hyphenBtn.style.cssText = `
       padding: 20px;
       font-size: 24px;
@@ -2485,23 +2485,23 @@ window.addEventListener('load', function() {
       font-weight: bold;
       display: none;
     `;
-    hyphenBtn.addEventListener('mouseover', function() {
+    hyphenBtn.addEventListener('mouseover', function () {
       this.style.backgroundColor = '#138496';
     });
-    hyphenBtn.addEventListener('mouseout', function() {
+    hyphenBtn.addEventListener('mouseout', function () {
       this.style.backgroundColor = '#17a2b8';
     });
-    hyphenBtn.addEventListener('touchstart', function() {
+    hyphenBtn.addEventListener('touchstart', function () {
       this.style.backgroundColor = '#138496';
     });
-    hyphenBtn.addEventListener('touchend', function() {
+    hyphenBtn.addEventListener('touchend', function () {
       this.style.backgroundColor = '#17a2b8';
     });
 
     // Add space button
     const spaceBtn = document.createElement('button');
     spaceBtn.textContent = '␣';
-    spaceBtn.onclick = function() { window.addToDirectNumericDisplay(' '); };
+    spaceBtn.onclick = function () { window.addToDirectNumericDisplay(' '); };
     spaceBtn.style.cssText = `
       padding: 20px;
       font-size: 24px;
@@ -2514,16 +2514,16 @@ window.addEventListener('load', function() {
       font-weight: bold;
       grid-column: span 2;
     `;
-    spaceBtn.addEventListener('mouseover', function() {
+    spaceBtn.addEventListener('mouseover', function () {
       this.style.backgroundColor = '#5a6268';
     });
-    spaceBtn.addEventListener('mouseout', function() {
+    spaceBtn.addEventListener('mouseout', function () {
       this.style.backgroundColor = '#6c757d';
     });
-    spaceBtn.addEventListener('touchstart', function() {
+    spaceBtn.addEventListener('touchstart', function () {
       this.style.backgroundColor = '#5a6268';
     });
-    spaceBtn.addEventListener('touchend', function() {
+    spaceBtn.addEventListener('touchend', function () {
       this.style.backgroundColor = '#6c757d';
     });
 
@@ -2542,12 +2542,12 @@ window.addEventListener('load', function() {
 
     // Use a more robust event attachment
     if (processQuantityInput.addEventListener) {
-      processQuantityInput.addEventListener('click', function() {
+      processQuantityInput.addEventListener('click', function () {
         window.openDirectNumericKeypad('ProcessQuantity');
       });
     } else {
       // Fallback for older browsers
-      processQuantityInput.onclick = function() {
+      processQuantityInput.onclick = function () {
         window.openDirectNumericKeypad('ProcessQuantity');
       };
     }
@@ -2578,12 +2578,12 @@ window.addEventListener('load', function() {
 
     // Use a more robust event attachment
     if (manufacturingLotInput.addEventListener) {
-      manufacturingLotInput.addEventListener('click', function() {
+      manufacturingLotInput.addEventListener('click', function () {
         window.openDirectNumericKeypad('製造ロット');
       });
     } else {
       // Fallback for older browsers
-      manufacturingLotInput.onclick = function() {
+      manufacturingLotInput.onclick = function () {
         window.openDirectNumericKeypad('製造ロット');
       };
     }
@@ -2672,10 +2672,10 @@ function showPrintingModal() {
       cursor: pointer;
       margin-top: 10px;
     `;
-    closeButton.onmouseover = function() {
+    closeButton.onmouseover = function () {
       this.style.backgroundColor = '#0056b3';
     };
-    closeButton.onmouseout = function() {
+    closeButton.onmouseout = function () {
       this.style.backgroundColor = '#007bff';
     };
     closeButton.onclick = closePrintingModal;
@@ -2746,18 +2746,18 @@ function getRecentWorkers() {
 // Add worker to recent list
 function addToRecentWorkers(name) {
   if (!name || name.trim() === '') return; // Don't add empty names
-  
+
   let recent = getRecentWorkers();
-  
+
   // Remove if already exists
   recent = recent.filter(w => w !== name);
-  
+
   // Add to beginning
   recent.unshift(name);
-  
+
   // Keep only max recent
   recent = recent.slice(0, MAX_RECENT_WORKERS);
-  
+
   localStorage.setItem(RECENT_WORKERS_KEY, JSON.stringify(recent));
 }
 
@@ -2772,11 +2772,11 @@ function removeFromRecentWorkers(name) {
 // Group names alphabetically
 function groupNamesByLetter(names) {
   const grouped = {};
-  
+
   names.forEach(name => {
     // Get first character (handle Japanese, English, etc.)
     let firstChar = name.charAt(0).toUpperCase();
-    
+
     // For Japanese characters, try to group by first character
     if (firstChar.match(/[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/)) {
       // Japanese character - use as is
@@ -2788,18 +2788,18 @@ function groupNamesByLetter(names) {
       // Other characters - group under '#'
       firstChar = '#';
     }
-    
+
     if (!grouped[firstChar]) {
       grouped[firstChar] = [];
     }
     grouped[firstChar].push(name);
   });
-  
+
   // Sort each group
   Object.keys(grouped).forEach(key => {
     grouped[key].sort();
   });
-  
+
   return grouped;
 }
 
@@ -2807,33 +2807,33 @@ function groupNamesByLetter(names) {
 function renderWorkerNames() {
   const container = document.getElementById('workerNamesContainer');
   container.innerHTML = '';
-  
+
   // Get recent workers
   const recentWorkers = getRecentWorkers();
-  
+
   // Add recent section if there are recent workers
   if (recentWorkers.length > 0) {
     const recentSection = document.createElement('div');
     recentSection.className = 'worker-section recent-section';
-    
+
     const header = document.createElement('div');
     header.className = 'worker-section-header';
     header.textContent = '⭐ 最近使用 / Recent';
     recentSection.appendChild(header);
-    
+
     const grid = document.createElement('div');
     grid.className = 'worker-names-grid';
-    
+
     recentWorkers.forEach(name => {
       const wrapper = document.createElement('div');
       wrapper.style.position = 'relative';
-      
+
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'worker-name-btn';
       btn.textContent = name;
       btn.onclick = () => selectWorkerName(name);
-      
+
       const deleteBtn = document.createElement('button');
       deleteBtn.type = 'button';
       deleteBtn.className = 'delete-recent-btn';
@@ -2842,33 +2842,33 @@ function renderWorkerNames() {
         e.stopPropagation(); // Prevent selecting the worker
         removeFromRecentWorkers(name);
       };
-      
+
       wrapper.appendChild(btn);
       wrapper.appendChild(deleteBtn);
       grid.appendChild(wrapper);
     });
-    
+
     recentSection.appendChild(grid);
     container.appendChild(recentSection);
   }
-  
+
   // Group all names alphabetically
   const grouped = groupNamesByLetter(workerNamesData);
   const sortedKeys = Object.keys(grouped).sort();
-  
+
   // Render each alphabetical group
   sortedKeys.forEach(letter => {
     const section = document.createElement('div');
     section.className = 'worker-section';
-    
+
     const header = document.createElement('div');
     header.className = 'worker-section-header';
     header.textContent = letter;
     section.appendChild(header);
-    
+
     const grid = document.createElement('div');
     grid.className = 'worker-names-grid';
-    
+
     grouped[letter].forEach(name => {
       const btn = document.createElement('button');
       btn.type = 'button';
@@ -2877,7 +2877,7 @@ function renderWorkerNames() {
       btn.onclick = () => selectWorkerName(name);
       grid.appendChild(btn);
     });
-    
+
     section.appendChild(grid);
     container.appendChild(section);
   });
@@ -2887,10 +2887,10 @@ function renderWorkerNames() {
 function selectWorkerName(name) {
   const input = document.getElementById('Machine Operator');
   input.value = name;
-  
+
   // Add to recent workers
   addToRecentWorkers(name);
-  
+
   // Save to localStorage (programmatic changes don't trigger 'input' event)
   const pageName = location.pathname.split('/').pop();
   const selected工場 = document.getElementById('selected工場')?.value;
@@ -2898,10 +2898,10 @@ function selectWorkerName(name) {
     const key = `${pageName}_${selected工場}_${input.id || input.name}`;
     localStorage.setItem(key, name);
   }
-  
+
   // Close modal
   closeWorkerModal();
-  
+
   // Trigger change event
   input.dispatchEvent(new Event('change'));
 }
@@ -2920,33 +2920,33 @@ function closeWorkerModal() {
 }
 
 // Initialize worker name modal (runs after DOMContentLoaded)
-setTimeout(function() {
+setTimeout(function () {
   const workerInput = document.getElementById('Machine Operator');
   const closeModalBtn = document.getElementById('closeWorkerModal');
   const manualEntryBtn = document.getElementById('manualEntryBtn');
-  
+
   // Open modal when clicking on worker input (only if readonly)
   if (workerInput) {
     // Prevent default keyboard from showing on mobile
-    workerInput.addEventListener('click', function(e) {
+    workerInput.addEventListener('click', function (e) {
       // Only open modal if input is readonly (not in manual entry mode)
       if (workerInput.readOnly && workerNamesData.length > 0) {
         e.preventDefault();
         openWorkerModal();
       }
     });
-    
+
     // Also open on focus
-    workerInput.addEventListener('focus', function(e) {
+    workerInput.addEventListener('focus', function (e) {
       // Only open modal if input is readonly (not in manual entry mode)
       if (workerInput.readOnly && workerNamesData.length > 0) {
         e.preventDefault();
         openWorkerModal();
       }
     });
-    
+
     // Prevent keyboard from showing on touch devices
-    workerInput.addEventListener('touchstart', function(e) {
+    workerInput.addEventListener('touchstart', function (e) {
       // Only prevent and open modal if input is readonly
       if (workerInput.readOnly && workerNamesData.length > 0) {
         e.preventDefault();
@@ -2954,61 +2954,61 @@ setTimeout(function() {
       }
     });
   }
-  
+
   // Close modal button
   if (closeModalBtn) {
     closeModalBtn.addEventListener('click', closeWorkerModal);
   }
-  
+
   // Manual entry button - close modal and let user type
   if (manualEntryBtn) {
-    manualEntryBtn.addEventListener('click', function() {
+    manualEntryBtn.addEventListener('click', function () {
       const targetInput = document.getElementById('Machine Operator');
-      
+
       // Close the modal
       closeWorkerModal();
-      
+
       if (targetInput) {
         // Remove readonly to allow free typing
         targetInput.removeAttribute('readonly');
         targetInput.readOnly = false;
         targetInput.style.cursor = 'text';
         targetInput.placeholder = 'Type worker name manually...';
-        
+
         // Clear current value and focus after modal closes
-        setTimeout(function() {
+        setTimeout(function () {
           targetInput.value = '';
           targetInput.focus();
-          
+
           // Trigger click to ensure keyboard shows on mobile
           targetInput.click();
         }, 100);
       }
     });
   }
-  
+
   // Close modal when clicking outside
   const modal = document.getElementById('workerNameModal');
   if (modal) {
-    modal.addEventListener('click', function(e) {
+    modal.addEventListener('click', function (e) {
       if (e.target === modal) {
         closeWorkerModal();
       }
     });
   }
-  
+
   // Save manually entered worker name to recents when user finishes typing
   if (workerInput) {
-    workerInput.addEventListener('blur', function() {
+    workerInput.addEventListener('blur', function () {
       const enteredName = workerInput.value.trim();
       if (enteredName && !workerInput.readOnly) {
         // Only save if user manually typed (not readonly)
         addToRecentWorkers(enteredName);
       }
     });
-    
+
     // Also save on Enter key
-    workerInput.addEventListener('keypress', function(e) {
+    workerInput.addEventListener('keypress', function (e) {
       if (e.key === 'Enter') {
         const enteredName = workerInput.value.trim();
         if (enteredName && !workerInput.readOnly) {
@@ -3020,7 +3020,7 @@ setTimeout(function() {
 }, 1000);
 
 // Fetch worker names from server
-document.addEventListener("DOMContentLoaded", async function() {
+document.addEventListener("DOMContentLoaded", async function () {
   const selectedFactory = document.getElementById("selected工場")?.value;
 
   if (selectedFactory) {
@@ -3029,10 +3029,10 @@ document.addEventListener("DOMContentLoaded", async function() {
       if (!response.ok) throw new Error("Failed to fetch worker names");
 
       const workerNames = await response.json();
-      
+
       // Store worker names for modal
       workerNamesData = workerNames;
-      
+
     } catch (error) {
       console.error("Error fetching worker names:", error);
     }
@@ -3050,7 +3050,7 @@ function initializeSebanggoModal() {
   const closeBtn = document.getElementById('close-sebanggo-modal');
   const searchInput = document.getElementById('sebanggo-search');
   const clearRecentBtn = document.getElementById('clear-recent-sebanggo');
-  
+
   // Check if all required elements exist
   if (!input || !modal || !closeBtn || !searchInput || !clearRecentBtn) {
     console.error('Sebanggo modal elements not found:', {
@@ -3062,32 +3062,32 @@ function initializeSebanggoModal() {
     });
     return;
   }
-  
+
   // Prevent duplicate event listeners
   if (input.hasEventListener) {
     console.log('Sebanggo modal already initialized');
     return;
   }
-  
+
   console.log('Initializing sebanggo modal...');
-  
+
   // Mark that event listener has been added
   input.hasEventListener = true;
-  
+
   // Open modal when input is clicked
   input.addEventListener('click', (e) => {
     e.preventDefault();
     console.log('Input field clicked');
     openSebanggoModal();
   });
-  
+
   // Close modal
   closeBtn.addEventListener('click', (e) => {
     e.preventDefault();
     console.log('Close button clicked');
     closeSebanggoModal();
   });
-  
+
   // Close modal when clicking outside
   modal.addEventListener('click', (e) => {
     if (e.target === modal) {
@@ -3095,20 +3095,20 @@ function initializeSebanggoModal() {
       closeSebanggoModal();
     }
   });
-  
+
   // Search functionality
   searchInput.addEventListener('input', (e) => {
     console.log('Search input changed:', e.target.value);
     filterSebanggoList();
   });
-  
+
   // Clear recent selections
   clearRecentBtn.addEventListener('click', (e) => {
     e.preventDefault();
     console.log('Clear recent button clicked');
     clearRecentSebanggo();
   });
-  
+
   console.log('All event listeners attached successfully');
 }
 
@@ -3116,18 +3116,18 @@ function initializeSebanggoModal() {
 function openSebanggoModal() {
   console.log('Opening sebanggo modal...');
   const modal = document.getElementById('sebanggoModal');
-  
+
   if (!modal) {
     console.error('Sebanggo modal not found');
     return;
   }
-  
+
   if (sebanggoData.length === 0) {
     console.error('Sebanggo data is empty');
     alert(`データがありません。\nNo data available.`);
     return;
   }
-  
+
   modal.style.display = 'block';
   console.log('Modal display set to block, rendering list...');
   renderSebanggoList();
@@ -3137,7 +3137,7 @@ function openSebanggoModal() {
 function closeSebanggoModal() {
   const modal = document.getElementById('sebanggoModal');
   modal.style.display = 'none';
-  
+
   // Clear search
   document.getElementById('sebanggo-search').value = '';
 }
@@ -3148,7 +3148,7 @@ function renderSebanggoList() {
   const recentSection = document.getElementById('recent-sebanggo-section');
   const recentGrid = document.getElementById('recent-sebanggo-grid');
   const allGrid = document.getElementById('all-sebanggo-grid');
-  
+
   if (!recentSection || !recentGrid || !allGrid) {
     console.error('Sebanggo grid elements not found:', {
       recentSection: !!recentSection,
@@ -3157,17 +3157,17 @@ function renderSebanggoList() {
     });
     return;
   }
-  
+
   // Load recent selections
   const recentSebanggo = getRecentSebanggo();
   console.log('Recent sebanggo:', recentSebanggo);
   console.log('Total sebanggo data:', sebanggoData.length);
-  
+
   // Show/hide recent section
   if (recentSebanggo.length > 0) {
     recentSection.style.display = 'block';
     recentGrid.innerHTML = '';
-    
+
     recentSebanggo.forEach(item => {
       const button = createSebanggoButton(item, true);
       recentGrid.appendChild(button);
@@ -3175,7 +3175,7 @@ function renderSebanggoList() {
   } else {
     recentSection.style.display = 'none';
   }
-  
+
   // Render all items
   allGrid.innerHTML = '';
   sebanggoData.forEach(item => {
@@ -3188,11 +3188,11 @@ function renderSebanggoList() {
 function createSebanggoButton(item, isRecent = false) {
   const div = document.createElement('div');
   const button = document.createElement('button');
-  
+
   button.className = 'sebanggo-btn';
   button.textContent = item;
   button.onclick = () => selectSebanggo(item);
-  
+
   div.appendChild(button);
   return div;
 }
@@ -3201,13 +3201,13 @@ function createSebanggoButton(item, isRecent = false) {
 function selectSebanggo(value) {
   const input = document.getElementById('sub-dropdown-input');
   input.value = value;
-  
+
   // Add to recent selections
   addToRecentSebanggo(value);
-  
+
   // Close modal
   closeSebanggoModal();
-  
+
   // Save to localStorage
   const pageName = location.pathname.split('/').pop();
   const selected工場 = document.getElementById('selected工場').value;
@@ -3215,7 +3215,7 @@ function selectSebanggo(value) {
     const key = `${pageName}_${selected工場}_${input.id || input.name}`;
     localStorage.setItem(key, value);
   }
-  
+
   // Trigger change event to fetch product details
   input.dispatchEvent(new Event('change'));
 }
@@ -3224,12 +3224,12 @@ function selectSebanggo(value) {
 function filterSebanggoList() {
   const searchInput = document.getElementById('sebanggo-search');
   const searchTerm = searchInput.value.toLowerCase();
-  
+
   const allGrid = document.getElementById('all-sebanggo-grid');
   const noResults = document.getElementById('no-results');
-  
+
   let visibleCount = 0;
-  
+
   // Filter all items
   const items = allGrid.querySelectorAll('.sebanggo-btn');
   items.forEach(btn => {
@@ -3241,7 +3241,7 @@ function filterSebanggoList() {
       btn.parentElement.style.display = 'none';
     }
   });
-  
+
   // Show no results message if needed
   if (visibleCount === 0 && searchTerm.length > 0) {
     noResults.style.display = 'block';
@@ -3265,18 +3265,18 @@ function getRecentSebanggo() {
 function addToRecentSebanggo(value) {
   try {
     let recent = getRecentSebanggo();
-    
+
     // Remove if already exists
     recent = recent.filter(item => item !== value);
-    
+
     // Add to beginning
     recent.unshift(value);
-    
+
     // Limit to MAX_RECENT_SEBANGGO items
     if (recent.length > MAX_RECENT_SEBANGGO) {
       recent = recent.slice(0, MAX_RECENT_SEBANGGO);
     }
-    
+
     localStorage.setItem(RECENT_SEBANGGO_KEY, JSON.stringify(recent));
   } catch (error) {
     console.error('Error saving recent sebanggo:', error);
@@ -3292,7 +3292,7 @@ function clearRecentSebanggo() {
 }
 
 // Initialize sebanggo modal on page load
-setTimeout(function() {
+setTimeout(function () {
   if (typeof initializeSebanggoModal === 'function') {
     initializeSebanggoModal();
   } else {
