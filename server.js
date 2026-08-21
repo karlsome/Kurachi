@@ -34549,7 +34549,11 @@ app.get('/api/production/schedule', async (req, res) => {
        const hinbanKey = master['品番'];
        const packCount = master['品目マスタ']?.['梱包数'] || 0;
        let workTime = 0;
-       
+       let kataban = '';
+       let timeOption = '';
+       let unit = 'm';
+       let rawUnit = null;
+
        const bomItems = (Array.isArray(master['BOM']) && master['BOM'].length > 0)
          ? master['BOM']
          : (bomMap[hinbanKey] || []);
@@ -34570,9 +34574,27 @@ app.get('/api/production/schedule', async (req, res) => {
 
        if (process2010) {
           workTime = Number(process2010['作業時間']) || 0;
+          kataban = process2010['型番'] || '';
+          timeOption = process2010['時間オプション'] || '';
+          rawUnit = process2010['生産単位'] || null;
+          const unitName = typeof rawUnit === 'object' ? rawUnit?.name : String(rawUnit || '');
+          if (unitName === '枚') {
+            unit = '枚';
+          } else {
+            unit = 'm';
+          }
        }
        
-       masterMap[hinbanKey] = { packCount, workTime, hasProcess2010, rawMaster: { ...master, BOM: bomItems } };
+       masterMap[hinbanKey] = { 
+         packCount, 
+         workTime, 
+         hasProcess2010, 
+         kataban, 
+         timeOption, 
+         unit, 
+         rawUnit, 
+         rawMaster: { ...master, BOM: bomItems } 
+       };
     });
 
     // Also enrich any hinbans that exist in bomMasterDB but not in materialMasterDB3
@@ -34588,7 +34610,22 @@ app.get('/api/production/schedule', async (req, res) => {
          );
          const hasProcess2010 = Boolean(process2010);
          const workTime = process2010 ? (Number(process2010['作業時間']) || 0) : 0;
-         masterMap[hinbanKey] = { packCount: 0, workTime, hasProcess2010, rawMaster: { 品番: hinbanKey, BOM: bomItems } };
+         const kataban = process2010?.['型番'] || '';
+         const timeOption = process2010?.['時間オプション'] || '';
+         const rawUnit = process2010?.['生産単位'] || null;
+         const unitName = typeof rawUnit === 'object' ? rawUnit?.name : String(rawUnit || '');
+         const unit = unitName === '枚' ? '枚' : 'm';
+
+         masterMap[hinbanKey] = { 
+           packCount: 0, 
+           workTime, 
+           hasProcess2010, 
+           kataban, 
+           timeOption, 
+           unit, 
+           rawUnit, 
+           rawMaster: { 品番: hinbanKey, BOM: bomItems } 
+         };
        }
     });
     
