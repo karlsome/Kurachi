@@ -12419,6 +12419,13 @@ function matchesFactoryStatusSingleFilter(row = {}, filter = {}) {
 
   const rawValue = row?.[field];
 
+  if (operator === "exists") {
+    return rawValue != null && rawValue !== "";
+  }
+  if (operator === "not_exists") {
+    return rawValue == null || rawValue === "";
+  }
+
   if (type === "number") {
     const rowValue = getFactoryStatusNumericValue(rawValue);
     const filterValue = getFactoryStatusNumericValue(filter?.value);
@@ -12427,6 +12434,7 @@ function matchesFactoryStatusSingleFilter(row = {}, filter = {}) {
 
     if (rowValue == null) return false;
     if (operator === "equals") return rowValue === filterValue;
+    if (operator === "not_equals") return rowValue !== filterValue;
     if (operator === "greater") return filterValue != null && rowValue > filterValue;
     if (operator === "less") return filterValue != null && rowValue < filterValue;
     if (operator === "range") return fromValue != null && toValue != null && rowValue >= fromValue && rowValue <= toValue;
@@ -12448,6 +12456,7 @@ function matchesFactoryStatusSingleFilter(row = {}, filter = {}) {
 
   const filterText = normalizeFactoryStatusTextLower(filter?.value);
   if (operator === "equals") return rowText === filterText;
+  if (operator === "not_equals") return rowText !== filterText;
   if (operator === "contains") return rowText.includes(filterText);
   return true;
 }
@@ -23221,6 +23230,13 @@ function matchesInventoryAdvancedFilters(item = {}, filters = []) {
 
       if (!field || !operator) return true;
 
+      if (operator === 'exists') {
+        return rawValue != null && rawValue !== '';
+      }
+      if (operator === 'not_exists') {
+        return rawValue == null || rawValue === '';
+      }
+
       if (type === 'number') {
         const itemValue = Number(rawValue) || 0;
         const nextValue = Number(filter?.value);
@@ -23228,6 +23244,7 @@ function matchesInventoryAdvancedFilters(item = {}, filters = []) {
         const nextTo = Number(filter?.valueTo);
 
         if (operator === 'equals') return itemValue === nextValue;
+        if (operator === 'not_equals') return itemValue !== nextValue;
         if (operator === 'greater') return itemValue > nextValue;
         if (operator === 'less') return itemValue < nextValue;
         if (operator === 'range') return itemValue >= nextFrom && itemValue <= nextTo;
@@ -23239,6 +23256,7 @@ function matchesInventoryAdvancedFilters(item = {}, filters = []) {
         if (!itemDate) return false;
 
         if (operator === 'equals') return itemDate === filter?.value;
+        if (operator === 'not_equals') return itemDate !== filter?.value;
         if (operator === 'greater') return itemDate > filter?.value;
         if (operator === 'less') return itemDate < filter?.value;
         if (operator === 'range') {
@@ -23262,6 +23280,7 @@ function matchesInventoryAdvancedFilters(item = {}, filters = []) {
 
       const compareValue = String(filter?.value || '').trim().toLowerCase();
       if (operator === 'equals') return itemValue === compareValue;
+      if (operator === 'not_equals') return itemValue !== compareValue;
       if (operator === 'contains') return itemValue.includes(compareValue);
       return true;
     });
