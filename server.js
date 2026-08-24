@@ -7015,7 +7015,7 @@ app.get('/api/setsubi-history', async (req, res) => {
 app.post('/queries', async (req, res) => {
   console.log("🟢 Received POST request to /queries");
   // Destructure query from req.body to modify it if needed
-  let { dbName, collectionName, query, aggregation, insertData, update, delete: deleteFlag, username } = req.body;
+  let { dbName, collectionName, query, aggregation, insertData, update, delete: deleteFlag, username, sort, limit, projection, skip, options } = req.body;
 
   try {
     // Log the initial request for debugging
@@ -7146,7 +7146,18 @@ app.post('/queries', async (req, res) => {
     
     // Default to find if no other operation specified
     console.log("🔵 Running Find Query with query:", query);
-    const results = await collection.find(query).toArray();
+    let cursor = collection.find(query || {});
+    const effProj = projection || options?.projection;
+    const effSort = sort || options?.sort;
+    const effLimit = limit || options?.limit;
+    const effSkip = skip || options?.skip;
+
+    if (effProj) cursor = cursor.project(effProj);
+    if (effSort) cursor = cursor.sort(effSort);
+    if (effSkip) cursor = cursor.skip(Number(effSkip));
+    if (effLimit) cursor = cursor.limit(Number(effLimit));
+
+    const results = await cursor.toArray();
     console.log(`✅ Find Query Results Count: ${results.length}`);
     // console.log("✅ Query Results (Find):", JSON.stringify(results, null, 2)); // Can be verbose
     res.json(results);
