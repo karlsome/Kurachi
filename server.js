@@ -1721,6 +1721,34 @@ app.post("/api/upload-pdf-image", async (req, res) => {
   }
 });
 
+// Proxy file/image download to avoid client-side CORS issues and ensure attachment download
+app.get("/api/download-proxy", async (req, res) => {
+  try {
+    const fileUrl = req.query.url;
+    const filename = req.query.filename || "download";
+
+    if (!fileUrl) {
+      return res.status(400).send("Missing url query param");
+    }
+
+    const fetchRes = await fetch(fileUrl);
+    if (!fetchRes.ok) {
+      return res.status(fetchRes.status).send(`Failed to fetch file: ${fetchRes.statusText}`);
+    }
+
+    const contentType = fetchRes.headers.get("content-type") || "application/octet-stream";
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(filename)}"`);
+    res.setHeader("Access-Control-Allow-Origin", "*");
+
+    const arrayBuffer = await fetchRes.arrayBuffer();
+    return res.send(Buffer.from(arrayBuffer));
+  } catch (err) {
+    console.error("❌ Download proxy error:", err);
+    return res.status(500).send("Error downloading file");
+  }
+});
+
 // Get PDFs by 背番号
 app.get("/api/product-pdfs/:sebanggo", async (req, res) => {
   try {
