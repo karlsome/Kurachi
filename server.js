@@ -32763,41 +32763,11 @@ app.post('/api/check-forms/tickets/resolve', async (req, res) => {
     );
     
     // Update Chatwork message if exists
-    if (ticket.chatworkMessageId) {
-      const roomId = '440654635';
-      const apiKey = process.env.CHATWORK_API_KEY;
-      const url = `https://api.chatwork.com/v2/rooms/${roomId}/messages/${ticket.chatworkMessageId}`;
-      
-      const resolvedAtStr = now.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
-      
-      let infoBlock = `\n[info][title]解決済み (Closed)[/title]`;
-      infoBlock += `\n対応者: ${workerName}`;
-      infoBlock += `\n対応日時: ${resolvedAtStr}`;
-      infoBlock += `\n対応内容: ${fixReason}`;
-      if (imageURLs.length > 0) {
-        infoBlock += `\n画像: ${imageURLs.join('\n')}`;
-      }
-      infoBlock += `\n[/info]`;
-      
-      const getMsgUrl = `https://api.chatwork.com/v2/rooms/${roomId}/messages/${ticket.chatworkMessageId}`;
-      const getResponse = await fetch(getMsgUrl, {
-        method: 'GET',
-        headers: { 'X-ChatWorkToken': apiKey }
+    const updatedTicket = await ngReportsCollection.findOne({ _id: new ObjectId(ticketId) });
+    if (updatedTicket && updatedTicket.chatworkMessageId) {
+      await updateNgTicketChatworkMessage(updatedTicket).catch(e => {
+        console.error('Failed to trigger Chatwork message update from resolve:', e);
       });
-      if (getResponse.ok) {
-        const msgData = await getResponse.json();
-        const originalBody = msgData.body;
-        const newBody = originalBody + infoBlock;
-        
-        await fetch(url, {
-          method: 'PUT',
-          headers: {
-            'X-ChatWorkToken': apiKey,
-            'Content-Type': 'application/x-www-form-urlencoded'
-          },
-          body: new URLSearchParams({ body: newBody })
-        });
-      }
     }
     
     return res.json({ success: true });
@@ -33326,6 +33296,90 @@ app.post('/api/check-forms/ng-tickets/export', async (req, res) => {
   }
 });
 
+async function updateNgTicketChatworkMessage(report) {
+  if (!report || !report.chatworkMessageId) return;
+  const roomId = '440654635';
+  const apiKey = process.env.CHATWORK_API_KEY;
+  if (!apiKey) return;
+
+  const url = `https://api.chatwork.com/v2/rooms/${roomId}/messages/${report.chatworkMessageId}`;
+
+  const createdAtDate = report.createdAt ? new Date(report.createdAt) : new Date();
+  const timestamp = createdAtDate.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+  
+  const formatter = new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' });
+  const parts = formatter.formatToParts(createdAtDate);
+  const year = parts.find(p => p.type === 'year').value;
+  const month = parts.find(p => p.type === 'month').value;
+  const day = parts.find(p => p.type === 'day').value;
+  const dateStr = `${year}-${month}-${day}`;
+  
+  const adminLink = `https://karlsome.github.io/freyaAdmin2/maintenance/submissions/tickets?startDate=${dateStr}&endDate=${dateStr}`;
+  const isClosed = report.status === 'closed';
+
+  let titleHeader = isClosed
+    ? '✅✅✅ 【DEFECT TICKET (対応済) / 不適合報告 (解決)】 ✅✅✅'
+    : '⚠️ 【DEFECT TICKET / 不適合報告】';
+
+  let statusLabel = isClosed ? '済 (Closed)' : 'NG';
+
+  let body = `${titleHeader}\nチケット番号: #${report.ticketNo || ''}\n工場: ${report.factory || ''}\n設備: ${report['加工設備'] || report.machine || ''}\nステータス: ${statusLabel}\n日時: ${timestamp}`;
+
+  if (report.fieldType === 'number' && typeof report.min === 'number' && typeof report.max === 'number') {
+    body += `\n期待値: ${report.min} - ${report.max} ${report.unit || ''}`;
+  }
+
+  if (report.answerValue !== undefined && report.answerValue !== null && report.answerValue !== '') {
+    let ans = report.answerValue;
+    if (Array.isArray(ans)) ans = ans.join(', ');
+    body += `\n入力値: ${ans}`;
+  }
+
+  body += `\n理由: ${report.reason || ''}`;
+  if (Array.isArray(report.imageURLs) && report.imageURLs.length > 0) {
+    body += `\n画像: ${report.imageURLs[0]}`;
+  }
+  body += `\n管理リンク: ${adminLink}`;
+
+  if (isClosed) {
+    const closedAtDate = report.closedAt ? new Date(report.closedAt) : new Date();
+    const closedAtStr = closedAtDate.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+    const closedBy = report.closedBy || report.closedByUsername || '管理者';
+    const fixReason = report.fixReason || '点検・修正完了';
+    const fixImages = Array.isArray(report.fixImageURLs) ? report.fixImageURLs : (Array.isArray(report.fixImagesData) ? report.fixImagesData : []);
+
+    body += `\n\n[info][title]✅ 解決済み (Closed)[/title]対応者: ${closedBy}\n対応日時: ${closedAtStr}\n対応内容: ${fixReason}`;
+    if (fixImages.length > 0) {
+      body += `\n修正画像: ${fixImages.join('\n')}`;
+    }
+    body += `[/info]`;
+  } else if (Array.isArray(report.statusHistory) && report.statusHistory.some(h => h.action === 'Ticket Reopened')) {
+    const latestReopen = [...report.statusHistory].reverse().find(h => h.action === 'Ticket Reopened');
+    const reopenUser = latestReopen?.user || latestReopen?.username || '管理者';
+    const reopenTime = latestReopen?.timestamp ? new Date(latestReopen.timestamp).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }) : '';
+    body += `\n\n[info][title]⚠️ 再オープン (Reopened)[/title]再オープン者: ${reopenUser}${reopenTime ? `\n日時: ${reopenTime}` : ''}[/info]`;
+  }
+
+  try {
+    const res = await fetch(url, {
+      method: 'PUT',
+      headers: {
+        'X-ChatWorkToken': apiKey,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: new URLSearchParams({ body })
+    });
+    if (!res.ok) {
+      const errTxt = await res.text();
+      console.error(`⚠️ Failed to update Chatwork message ${report.chatworkMessageId}: ${res.status} ${errTxt}`);
+    } else {
+      console.log(`✅ Successfully updated Chatwork message ${report.chatworkMessageId} for ticket #${report.ticketNo} (status: ${report.status})`);
+    }
+  } catch (err) {
+    console.error(`❌ Error updating Chatwork message ${report.chatworkMessageId}:`, err);
+  }
+}
+
 app.post('/api/check-forms/ng-tickets/update-status', async (req, res) => {
   try {
     const { ticketId, update, username, role } = req.body || {};
@@ -33342,6 +33396,14 @@ app.post('/api/check-forms/ng-tickets/update-status', async (req, res) => {
 
     if (result.matchedCount === 0) {
       return res.status(404).json({ error: 'Ticket not found' });
+    }
+
+    // Trigger Chatwork update if chatworkMessageId exists
+    const updatedTicket = await collection.findOne(filter);
+    if (updatedTicket && updatedTicket.chatworkMessageId) {
+      updateNgTicketChatworkMessage(updatedTicket).catch(e => {
+        console.error('Failed to trigger Chatwork message update:', e);
+      });
     }
 
     res.json({ success: true, matchedCount: result.matchedCount, modifiedCount: result.modifiedCount });
