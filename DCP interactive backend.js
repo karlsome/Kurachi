@@ -15092,14 +15092,24 @@ if (manualSendModal) {
         if (res.ok) {
           if (overlay) overlay.style.display = 'none';
           window.checklistState.isPreComplete = true;
-          const bar = document.querySelector('.tab-bar');
-          if (bar) bar.classList.remove('locked-checklist');
+          if (typeof window.saveChecklistDraftToStorage === 'function') {
+            await window.saveChecklistDraftToStorage();
+          }
+
+          if (typeof window.updateTabLock === 'function') {
+            window.updateTabLock();
+          } else {
+            const bar = document.querySelector('.tab-bar');
+            if (bar) bar.classList.remove('locked-checklist');
+          }
 
           if (typeof showAppToast === 'function') {
             showAppToast('✓ All Checklists Completed Successfully!');
           }
 
-          if (typeof window.goToTab === 'function') window.goToTab(0);
+          if (typeof window.goToTab === 'function') {
+            window.goToTab(1);
+          }
         } else {
           let errText = 'Server error during checklist submission';
           try {

@@ -33202,7 +33202,8 @@ app.post('/api/check-forms/submit', async (req, res) => {
           
           const adminLink = `https://karlsome.github.io/freyaAdmin2/maintenance/submissions/tickets?startDate=${dateStr}&endDate=${dateStr}`;
           
-          let editedBody = `チケット番号: #${report.ticketNo}\n工場: ${report.factory}\n設備: ${report.加工設備}\nステータス: NG\n日時: ${timestamp}`;
+          const titleHeader = '⚠️ 【DEFECT TICKET / 不適合報告】';
+          let editedBody = `${titleHeader}\nチケット番号: #${report.ticketNo}\n工場: ${report.factory}\n設備: ${report.加工設備}\nステータス: NG\n日時: ${timestamp}`;
           if (report.fieldType === 'number' && typeof report.min === 'number' && typeof report.max === 'number') {
             editedBody += `\n期待値: ${report.min} - ${report.max} ${report.unit || ''}`;
           }

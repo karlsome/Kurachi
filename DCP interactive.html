@@ -3551,10 +3551,13 @@
             const bar = document.querySelector('.tab-bar');
             if (bar) {
                 checkParamsLockState();
+                const checklistLocked = !!(window.checklistState && window.checklistState.queue && window.checklistState.queue.length > 0 && !window.checklistState.isPreComplete && !window.checklistState.isBypassed);
                 const scanIncomplete = !isScanComplete();
                 const paramsLocked = window.paramsLocked === true;
-                bar.classList.toggle('locked-scan', scanIncomplete);
-                bar.classList.toggle('locked-params', !scanIncomplete && paramsLocked);
+
+                bar.classList.toggle('locked-checklist', checklistLocked);
+                bar.classList.toggle('locked-scan', !checklistLocked && scanIncomplete);
+                bar.classList.toggle('locked-params', !checklistLocked && !scanIncomplete && paramsLocked);
             }
         }
         window.isScanComplete = isScanComplete;
