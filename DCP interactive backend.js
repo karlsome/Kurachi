@@ -13776,24 +13776,208 @@ if (manualSendModal) {
     return true;
   };
 
+  window.renderChecklistHeaderAndSelector = function () {
+    const { queue, queueIndex } = window.checklistState;
+    if (!queue || queue.length === 0) return;
+
+    const tpl = queue[queueIndex] || queue[0];
+    const isPreMode = !window.checklistState.isPreComplete;
+
+    const tierBadge = document.getElementById('checklistTierBadge');
+    const counterBadge = document.getElementById('checklistCounterBadge');
+    const selectorBtn = document.getElementById('checklistSelectorBtn');
+    const selectorTitle = document.getElementById('checklistSelectorTitle');
+    const selectorStatus = document.getElementById('checklistSelectorStatus');
+    const dropdownHint = document.getElementById('checklistSelectorDropdownHint');
+
+    // 1. Tier Badge (e.g. DAILY CHECK)
+    if (tierBadge) {
+      const scheduleName = (tpl.schedule || 'daily').toLowerCase();
+      tierBadge.textContent = (typeof _t === 'function') ? _t(`${scheduleName}_check`) : `${scheduleName.toUpperCase()} CHECK`;
+      tierBadge.className = `checklist-tier-badge ${scheduleName}`;
+    }
+
+    // 2. Count completed templates
+    let completedCount = 0;
+    queue.forEach(t => {
+      const tFields = Array.isArray(t.fields) ? t.fields : [];
+      const tTargetFields = isPreMode
+        ? tFields.filter(f => f.timing !== 'post')
+        : (tFields.some(f => f.timing === 'post') ? tFields.filter(f => f.timing === 'post' && f.type !== 'name') : tFields);
+      const isFieldsDone = tTargetFields.length > 0 && tTargetFields.every(f => isChecklistFieldCompleted(f));
+      const isRecorded = !!(window.checklistState.recordIds && (window.checklistState.recordIds[t._id] || window.checklistState.recordIds[t.name]));
+      if (isRecorded || (window.checklistState.isPreComplete && isPreMode) || isFieldsDone) {
+        completedCount += 1;
+      }
+    });
+
+    // 3. Overall Counter Pill: e.g. "2 Checklists (0/2 Done)" or "1 Checklist"
+    if (counterBadge) {
+      if (queue.length > 1) {
+        counterBadge.textContent = `${queue.length} Checklists (${completedCount}/${queue.length} Done)`;
+      } else {
+        counterBadge.textContent = completedCount >= 1 ? '1 Checklist (Done)' : '1 Checklist';
+      }
+      if (completedCount === queue.length && queue.length > 0) {
+        counterBadge.style.background = '#dcfce7';
+        counterBadge.style.color = '#166534';
+      } else {
+        counterBadge.style.background = 'var(--bg-muted, #f3f4f6)';
+        counterBadge.style.color = 'var(--text-muted, #6b7280)';
+      }
+    }
+
+    // 4. Current Template Details
+    const tplFields = Array.isArray(tpl.fields) ? tpl.fields : [];
+    const targetFields = isPreMode
+      ? tplFields.filter(f => f.timing !== 'post')
+      : (tplFields.some(f => f.timing === 'post') ? tplFields.filter(f => f.timing === 'post' && f.type !== 'name') : tplFields);
+    const filledFields = targetFields.filter(f => isChecklistFieldCompleted(f)).length;
+    const isFieldsDone = targetFields.length > 0 && filledFields === targetFields.length;
+    const isRecordedToday = !!(window.checklistState.recordIds && (window.checklistState.recordIds[tpl._id] || window.checklistState.recordIds[tpl.name]));
+    const isCurrentDone = isRecordedToday || (window.checklistState.isPreComplete && isPreMode) || isFieldsDone;
+
+    const localizedTplName = (typeof getLocalizedText === 'function') ? getLocalizedText(tpl, 'name') : (tpl.name || 'Checklist');
+
+    if (selectorTitle) {
+      selectorTitle.textContent = localizedTplName; // Clean title, NO sun icons!
+    }
+
+    if (selectorStatus) {
+      if (isCurrentDone) {
+        selectorStatus.textContent = '✓ Done';
+        selectorStatus.className = 'chip-status-tag done';
+      } else if (filledFields > 0) {
+        selectorStatus.textContent = `${filledFields}/${targetFields.length}`;
+        selectorStatus.className = 'chip-status-tag prog';
+      } else {
+        selectorStatus.textContent = `0/${targetFields.length}`;
+        selectorStatus.className = 'chip-status-tag prog';
+      }
+    }
+
+    if (selectorBtn) {
+      if (isCurrentDone) {
+        selectorBtn.classList.add('is-completed');
+      } else {
+        selectorBtn.classList.remove('is-completed');
+      }
+      selectorBtn.style.cursor = queue.length > 1 ? 'pointer' : 'default';
+    }
+
+    // 5. Dropdown Hint / Switch button
+    if (dropdownHint) {
+      if (queue.length > 1) {
+        dropdownHint.style.display = 'inline-flex';
+        dropdownHint.innerHTML = `<span class="checklist-dropdown-hint-text">▼ Switch (${queue.length})</span>`;
+      } else {
+        dropdownHint.style.display = 'none';
+      }
+    }
+  };
+
+  window.openChecklistSwitcherModal = function () {
+    const { queue } = window.checklistState;
+    if (!queue || queue.length <= 1) return;
+
+    window.renderChecklistSwitcherModal();
+    const modal = document.getElementById('checklistSwitcherModal');
+    if (modal) modal.style.display = 'flex';
+  };
+
+  window.closeChecklistSwitcherModal = function () {
+    const modal = document.getElementById('checklistSwitcherModal');
+    if (modal) modal.style.display = 'none';
+  };
+
+  window.renderChecklistSwitcherModal = function () {
+    const container = document.getElementById('checklistModalListContainer');
+    const headerTitle = document.getElementById('checklistModalHeaderTitle');
+    if (!container) return;
+
+    const { queue, queueIndex } = window.checklistState;
+    if (!queue || queue.length === 0) {
+      container.innerHTML = '<p style="color:#6b7280; font-size:0.9rem;">No checklists available.</p>';
+      return;
+    }
+
+    if (headerTitle) {
+      headerTitle.textContent = `Available Checklists (${queue.length})`;
+    }
+
+    const isPreMode = !window.checklistState.isPreComplete;
+
+    const listHtml = queue.map((tpl, idx) => {
+      const schedule = (tpl.schedule || 'daily').toLowerCase();
+      const scheduleName = (typeof _t === 'function') ? _t(`${schedule}_check`) : schedule.toUpperCase();
+      const localizedTplName = (typeof getLocalizedText === 'function') ? getLocalizedText(tpl, 'name') : (tpl.name || scheduleName);
+
+      const tplFields = Array.isArray(tpl.fields) ? tpl.fields : [];
+      const targetFields = isPreMode
+        ? tplFields.filter(f => f.timing !== 'post')
+        : (tplFields.some(f => f.timing === 'post') ? tplFields.filter(f => f.timing === 'post' && f.type !== 'name') : tplFields);
+
+      const filledFields = targetFields.filter(f => isChecklistFieldCompleted(f)).length;
+      const isFieldsDone = targetFields.length > 0 && filledFields === targetFields.length;
+      const isRecordedToday = !!(window.checklistState.recordIds && (window.checklistState.recordIds[tpl._id] || window.checklistState.recordIds[tpl.name]));
+      const isDone = isRecordedToday || (window.checklistState.isPreComplete && isPreMode) || isFieldsDone;
+      const isSelected = idx === queueIndex;
+
+      let statusBadge = '';
+      if (isDone) {
+        statusBadge = `<span class="chip-status-tag done">✓ Done</span>`;
+      } else if (filledFields > 0) {
+        statusBadge = `<span class="chip-status-tag prog">${filledFields}/${targetFields.length}</span>`;
+      } else {
+        statusBadge = `<span class="chip-status-tag pending">0/${targetFields.length}</span>`;
+      }
+
+      return `
+        <div class="checklist-modal-item ${isSelected ? 'is-selected' : ''} ${isDone ? 'is-completed' : ''}" onclick="selectChecklistTemplateIndex(${idx}); closeChecklistSwitcherModal();">
+          <div style="display:flex; flex-direction:column; gap:4px; overflow:hidden;">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="font-weight:800; font-size:0.95rem; color:${isSelected ? '#1d4ed8' : '#1f2937'};">${localizedTplName}</span>
+              ${isSelected ? '<span style="font-size:0.7rem; font-weight:800; color:#2563eb; background:#dbeafe; padding:1px 6px; border-radius:6px;">Current</span>' : ''}
+            </div>
+            <div style="display:flex; align-items:center; gap:6px;">
+              <span style="font-size:0.75rem; font-weight:700; color:#6b7280; text-transform:uppercase;">${scheduleName}</span>
+            </div>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
+            ${statusBadge}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    container.innerHTML = listHtml;
+  };
+
+  window.selectChecklistTemplateIndex = function (index) {
+    if (!window.checklistState || !window.checklistState.queue) return;
+    if (index < 0 || index >= window.checklistState.queue.length) return;
+    window.checklistState.queueIndex = index;
+    renderCurrentChecklistTemplate();
+  };
+
   window.renderCurrentChecklistTemplate = function () {
     const { queue, queueIndex } = window.checklistState;
     if (!queue || !queue[queueIndex]) return;
 
     const tpl = queue[queueIndex];
     const tierBadge = document.getElementById('checklistTierBadge');
-    const counterBadge = document.getElementById('checklistCounterBadge');
     const container = document.getElementById('checklistCardsContainer');
     const nextBtn = document.getElementById('checklistNextBtn');
 
     if (tierBadge) {
       const scheduleName = (tpl.schedule || 'daily').toLowerCase();
-      tierBadge.textContent = (typeof _t === 'function') ? _t(`${scheduleName}_check`) : scheduleName.toUpperCase();
+      tierBadge.textContent = (typeof _t === 'function') ? _t(`${scheduleName}_check`) : `${scheduleName.toUpperCase()} CHECK`;
       tierBadge.className = `checklist-tier-badge ${scheduleName}`;
     }
 
-    if (counterBadge) {
-      counterBadge.textContent = `${queueIndex + 1} / ${queue.length}`;
+    // Render single selected checklist selector and header status
+    if (typeof window.renderChecklistHeaderAndSelector === 'function') {
+      window.renderChecklistHeaderAndSelector();
     }
 
     const tplFields = Array.isArray(tpl.fields) ? tpl.fields : [];
@@ -13805,7 +13989,8 @@ if (manualSendModal) {
     const allFieldsCompleted = targetFields.every(field => isChecklistFieldCompleted(field));
 
     const superBypassBtn = document.getElementById('superBypassBtn');
-    const resetAllBtn = document.querySelector('.checklist-header-card .btn-alert');
+    const resetAllBtn = document.getElementById('resetAllBtn');
+    const actionsCard = document.getElementById('checklistActionsCard');
     const isPreComplete = window.checklistState.isPreComplete;
 
     if (superBypassBtn) {
@@ -13814,6 +13999,14 @@ if (manualSendModal) {
     if (resetAllBtn) {
       resetAllBtn.style.display = isPreComplete ? 'none' : 'inline-block';
     }
+    if (actionsCard) {
+      actionsCard.style.display = isPreComplete ? 'none' : 'flex';
+    }
+
+    const localizedTitle = (typeof getLocalizedText === 'function') ? getLocalizedText(tpl, 'name') : (tpl.name || 'Checklist');
+    const isCurrentRecorded = !!(window.checklistState.recordIds && (window.checklistState.recordIds[tpl._id] || window.checklistState.recordIds[tpl.name]));
+    const uncompletedTemplates = queue.filter(t => !(window.checklistState.recordIds && (window.checklistState.recordIds[t._id] || window.checklistState.recordIds[t.name])));
+    const isLastRemaining = uncompletedTemplates.length <= 1;
 
     if (nextBtn) {
       if (isPreComplete) {
@@ -13854,17 +14047,38 @@ if (manualSendModal) {
             };
           }
         }
+      } else if (isCurrentRecorded) {
+        nextBtn.innerHTML = `<span>✓ Completed (${localizedTitle})</span> →`;
+        nextBtn.disabled = false;
+        nextBtn.style.opacity = '1';
+        nextBtn.style.cursor = 'pointer';
+        nextBtn.style.pointerEvents = 'auto';
+        nextBtn.style.background = '#10b981';
+        nextBtn.style.boxShadow = '0 4px 14px rgba(16,185,129,0.3)';
+        nextBtn.classList.add('checklist-next-pulse');
+        nextBtn.onclick = function () {
+          const nextIncompleteIdx = queue.findIndex((t, i) => i !== queueIndex && !(window.checklistState.recordIds && (window.checklistState.recordIds[t._id] || window.checklistState.recordIds[t.name])));
+          if (nextIncompleteIdx !== -1) {
+            window.selectChecklistTemplateIndex(nextIncompleteIdx);
+          } else {
+            if (typeof window.goToTab === 'function') window.goToTab(1);
+          }
+        };
       } else {
-        const isLast = queueIndex === queue.length - 1;
-        let label = isLast
-          ? ((typeof _t === 'function') ? _t('complete_all_checklists') : 'Checklist Completed')
-          : ((typeof _t === 'function') ? _t('next_checklist') : 'Next Checklist');
-
-        if (postFields.length > 0) {
-          label = (typeof _t === 'function') ? _t('submit_pre_production_check') : 'Submit Pre-Production Check';
+        let label = '';
+        if (queue.length > 1) {
+          label = isLastRemaining
+            ? ((typeof _t === 'function') ? _t('complete_all_checklists') : 'Complete & Proceed to Production')
+            : `Submit ${localizedTitle} (${uncompletedTemplates.length} checks remaining)`;
+        } else {
+          label = (typeof _t === 'function') ? _t('complete_all_checklists') : 'Complete Checklist & Proceed';
         }
 
-        nextBtn.innerHTML = `<span>${label}</span> ${isLast ? '✓' : '→'}`;
+        if (postFields.length > 0) {
+          label = (typeof _t === 'function') ? _t('submit_pre_production_check') : `Submit ${localizedTitle} (Pre-Check)`;
+        }
+
+        nextBtn.innerHTML = `<span>${label}</span> ${isLastRemaining ? '✓' : '→'}`;
         nextBtn.onclick = window.handleChecklistSubmitOrNext;
 
         if (!allFieldsCompleted) {
@@ -13894,7 +14108,6 @@ if (manualSendModal) {
 
     const titleEl = document.createElement('div');
     titleEl.style.cssText = 'margin-bottom: 8px;';
-    const localizedTitle = getLocalizedText(tpl, 'name');
     const localizedDesc = getLocalizedText(tpl, 'description');
     titleEl.innerHTML = `<h3 style="font-size:1.15rem; font-weight:800; color:#1f2733;">${localizedTitle}</h3>${localizedDesc ? `<p style="font-size:0.85rem; color:#6b7280; margin-top:2px;">${localizedDesc}</p>` : ''}`;
     container.appendChild(titleEl);
@@ -15540,122 +15753,126 @@ if (manualSendModal) {
       return;
     }
 
-    if (queueIndex < queue.length - 1) {
-      const banner = document.getElementById('checklistTransitionBanner');
-      const text = document.getElementById('checklistTransitionText');
-      if (banner && text) {
-        const nextTpl = queue[queueIndex + 1];
-        text.textContent = `${tpl.name} completed! Transitioning to ${nextTpl.name}...`;
-        banner.style.display = 'flex';
-        setTimeout(() => { banner.style.display = 'none'; }, 2200);
+    const overlay = document.getElementById('checklistSubmittingOverlay');
+    if (overlay) overlay.style.display = 'flex';
+
+    try {
+      let workerName = (document.getElementById('step0CurrentWorkerName')?.textContent || '').trim();
+      if (!workerName && Array.isArray(window.selectedWorkerNames) && window.selectedWorkerNames.length > 0) {
+        workerName = window.selectedWorkerNames.filter(Boolean).join(', ');
+      }
+      if (!workerName && window.checklistState.answers) {
+        for (const t of queue) {
+          const nameField = (t.fields || []).find(f => f.type === 'name');
+          if (nameField && window.checklistState.answers[nameField.id]) {
+            const val = window.checklistState.answers[nameField.id];
+            if (Array.isArray(val)) workerName = val.filter(Boolean).join(', ');
+            else if (typeof val === 'string' && val.trim()) workerName = val.trim();
+            if (workerName) break;
+          }
+        }
+      }
+      if (!workerName) {
+        workerName = (document.getElementById('Machine Operator')?.value || '').trim() || 'Operator';
       }
 
-      window.checklistState.queueIndex += 1;
-      renderCurrentChecklistTemplate();
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    } else {
-      const overlay = document.getElementById('checklistSubmittingOverlay');
-      if (overlay) overlay.style.display = 'flex';
+      // Gather templates to submit: current template + any other completed templates not yet submitted
+      const templatesToSubmit = queue.filter(t => {
+        if (t._id === tpl._id || t.name === tpl.name) return true;
+        const tFields = Array.isArray(t.fields) ? t.fields : [];
+        const tTargetFields = isSubmittingPre
+          ? tFields.filter(f => f.timing !== 'post')
+          : (tFields.some(f => f.timing === 'post') ? tFields.filter(f => f.timing === 'post' && f.type !== 'name') : tFields);
+        const isDone = tTargetFields.length > 0 && tTargetFields.every(f => isChecklistFieldCompleted(f));
+        const isAlreadySubmitted = !!(window.checklistState.recordIds && (window.checklistState.recordIds[t._id] || window.checklistState.recordIds[t.name]));
+        return isDone && !isAlreadySubmitted;
+      });
 
-      try {
-        let workerName = (document.getElementById('step0CurrentWorkerName')?.textContent || '').trim();
-        if (!workerName && Array.isArray(window.selectedWorkerNames) && window.selectedWorkerNames.length > 0) {
-          workerName = window.selectedWorkerNames.filter(Boolean).join(', ');
+      const payload = {
+        factory: window.checklistState.factory,
+        machine: window.checklistState.machine,
+        equipmentId: window.checklistState.equipmentId || null,
+        workerName,
+        templates: templatesToSubmit.map(t => {
+          const tFields = Array.isArray(t.fields) ? t.fields : [];
+          const fieldsToSubmit = isSubmittingPre
+            ? tFields.filter(f => f.timing !== 'post')
+            : (tFields.some(f => f.timing === 'post') ? tFields.filter(f => f.timing === 'post' && f.type !== 'name') : tFields);
+
+          return {
+            templateId: t._id,
+            recordId: (window.checklistState.recordIds && window.checklistState.recordIds[t._id]) ? window.checklistState.recordIds[t._id] : null,
+            templateName: t.name,
+            schedule: t.schedule,
+            workerName,
+            equipmentId: window.checklistState.equipmentId || t.equipmentId || (Array.isArray(t.equipmentIds) ? t.equipmentIds[0] : null),
+            answers: fieldsToSubmit.map(f => {
+              const itemLabel = f.label || f.label_ja || f.label_en || (f.type === 'name' ? '作業者名' : '項目');
+              return {
+                id: f.id,
+                fieldId: f.id,
+                label: itemLabel,
+                label_ja: f.label_ja || itemLabel,
+                label_en: f.label_en || itemLabel,
+                type: f.type,
+                required: !!f.required,
+                photoRequired: !!f.photoRequired,
+                min: f.min !== undefined ? f.min : null,
+                max: f.max !== undefined ? f.max : null,
+                options: f.options || [],
+                unit: f.unit || '',
+                value: window.checklistState.answers[f.id],
+                fieldPhotoBase64: window.checklistState.fieldPhotos[f.id] || null,
+                fieldPhotoData: window.checklistState.fieldPhotos[f.id] || null,
+                ticket: window.checklistState.tickets[f.id] ? {
+                  reason: window.checklistState.tickets[f.id].reason,
+                  imagesData: window.checklistState.tickets[f.id].images,
+                  chatworkMessageId: window.checklistState.tickets[f.id].chatworkMessageId || null,
+                  saved: true
+                } : null
+              };
+            }),
+            tickets: Object.keys(window.checklistState.tickets || {})
+              .filter(fId => fieldsToSubmit.some(tf => tf.id === fId))
+              .map(fId => ({
+                fieldId: fId,
+                reason: window.checklistState.tickets[fId].reason,
+                imagesData: window.checklistState.tickets[fId].images,
+                chatworkMessageId: window.checklistState.tickets[fId].chatworkMessageId || null,
+              }))
+          };
+        })
+      };
+
+      console.log('🚀 Sending checklist submission payload:', {
+        factory: payload.factory,
+        machine: payload.machine,
+        workerName: payload.workerName,
+        templateCount: payload.templates ? payload.templates.length : 0,
+        templates: payload.templates
+      });
+
+      const res = await fetch(`${serverURL}/api/check-forms/submit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (res.ok) {
+        const resData = await res.json().catch(() => ({}));
+        console.log('✅ Checklist submitted successfully! Response:', resData);
+        if (resData.recordIds) {
+          window.checklistState.recordIds = { ...(window.checklistState.recordIds || {}), ...resData.recordIds };
         }
-        if (!workerName && window.checklistState.answers) {
-          for (const t of queue) {
-            const nameField = (t.fields || []).find(f => f.type === 'name');
-            if (nameField && window.checklistState.answers[nameField.id]) {
-              const val = window.checklistState.answers[nameField.id];
-              if (Array.isArray(val)) workerName = val.filter(Boolean).join(', ');
-              else if (typeof val === 'string' && val.trim()) workerName = val.trim();
-              if (workerName) break;
-            }
-          }
-        }
-        if (!workerName) {
-          workerName = (document.getElementById('Machine Operator')?.value || '').trim() || 'Operator';
-        }
+        if (overlay) overlay.style.display = 'none';
 
-        const payload = {
-          factory: window.checklistState.factory,
-          machine: window.checklistState.machine,
-          equipmentId: window.checklistState.equipmentId || null,
-          workerName,
-          templates: queue.map(t => {
-            const tFields = Array.isArray(t.fields) ? t.fields : [];
-            const fieldsToSubmit = isSubmittingPre
-              ? tFields.filter(f => f.timing !== 'post')
-              : (tFields.some(f => f.timing === 'post') ? tFields.filter(f => f.timing === 'post' && f.type !== 'name') : tFields);
-
-            return {
-              templateId: t._id,
-              recordId: (window.checklistState.recordIds && window.checklistState.recordIds[t._id]) ? window.checklistState.recordIds[t._id] : null,
-              templateName: t.name,
-              schedule: t.schedule,
-              workerName,
-              equipmentId: window.checklistState.equipmentId || t.equipmentId || (Array.isArray(t.equipmentIds) ? t.equipmentIds[0] : null),
-              answers: fieldsToSubmit.map(f => {
-                const itemLabel = f.label || f.label_ja || f.label_en || (f.type === 'name' ? '作業者名' : '項目');
-                return {
-                  id: f.id,
-                  fieldId: f.id,
-                  label: itemLabel,
-                  label_ja: f.label_ja || itemLabel,
-                  label_en: f.label_en || itemLabel,
-                  type: f.type,
-                  required: !!f.required,
-                  photoRequired: !!f.photoRequired,
-                  min: f.min !== undefined ? f.min : null,
-                  max: f.max !== undefined ? f.max : null,
-                  options: f.options || [],
-                  unit: f.unit || '',
-                  value: window.checklistState.answers[f.id],
-                  fieldPhotoBase64: window.checklistState.fieldPhotos[f.id] || null,
-                  fieldPhotoData: window.checklistState.fieldPhotos[f.id] || null,
-                  ticket: window.checklistState.tickets[f.id] ? {
-                    reason: window.checklistState.tickets[f.id].reason,
-                    imagesData: window.checklistState.tickets[f.id].images,
-                    chatworkMessageId: window.checklistState.tickets[f.id].chatworkMessageId || null,
-                    saved: true
-                  } : null
-                };
-              }),
-              tickets: Object.keys(window.checklistState.tickets || {})
-                .filter(fId => fieldsToSubmit.some(tf => tf.id === fId))
-                .map(fId => ({
-                  fieldId: fId,
-                  reason: window.checklistState.tickets[fId].reason,
-                  imagesData: window.checklistState.tickets[fId].images,
-                  chatworkMessageId: window.checklistState.tickets[fId].chatworkMessageId || null,
-                }))
-            };
-          })
-        };
-
-        console.log('🚀 Sending checklist submission payload:', {
-          factory: payload.factory,
-          machine: payload.machine,
-          workerName: payload.workerName,
-          templateCount: payload.templates ? payload.templates.length : 0,
-          templates: payload.templates
+        // Check if all templates in queue are now submitted
+        const allTemplatesFinished = queue.every(t => {
+          return !!(window.checklistState.recordIds && (window.checklistState.recordIds[t._id] || window.checklistState.recordIds[t.name]));
         });
 
-        const res = await fetch(`${serverURL}/api/check-forms/submit`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-
-        if (res.ok) {
-          const resData = await res.json().catch(() => ({}));
-          console.log('✅ Checklist submitted successfully! Response:', resData);
-          if (resData.recordIds) {
-            window.checklistState.recordIds = { ...(window.checklistState.recordIds || {}), ...resData.recordIds };
-          }
-          if (overlay) overlay.style.display = 'none';
-
-          if (isSubmittingPre) {
+        if (isSubmittingPre) {
+          if (allTemplatesFinished) {
             window.checklistState.isPreComplete = true;
             const hasPostFields = queue.some(t => Array.isArray(t.fields) && t.fields.some(f => f.timing === 'post'));
             if (!hasPostFields) {
@@ -15673,43 +15890,62 @@ if (manualSendModal) {
             }
 
             if (typeof showAppToast === 'function') {
-              showAppToast('✓ Pre-Production Check Completed!');
+              showAppToast('🎉 All Pre-Production Checklists Completed!');
             }
 
             if (typeof window.goToTab === 'function') {
               window.goToTab(1);
             }
           } else {
-            window.checklistState.isPostComplete = true;
+            // Some templates still pending: find next pending template and jump to it
             if (typeof window.saveChecklistDraftToStorage === 'function') {
               await window.saveChecklistDraftToStorage();
+            }
+
+            const nextIncompleteIdx = queue.findIndex(t => !(window.checklistState.recordIds && (window.checklistState.recordIds[t._id] || window.checklistState.recordIds[t.name])));
+            if (nextIncompleteIdx !== -1) {
+              window.checklistState.queueIndex = nextIncompleteIdx;
+            }
+
+            if (typeof showAppToast === 'function') {
+              showAppToast(`✓ ${tpl.name} completed!`);
             }
 
             if (typeof renderCurrentChecklistTemplate === 'function') {
               renderCurrentChecklistTemplate();
             }
-
-            if (typeof showAppToast === 'function') {
-              showAppToast('✓ Post-Production Check Completed!');
-            }
+            window.scrollTo({ top: 0, behavior: 'smooth' });
           }
         } else {
-          let errText = 'Server error during checklist submission';
-          try {
-            const errJson = await res.json();
-            errText = errJson.error || errJson.message || errText;
-          } catch (_) {
-            try { errText = await res.text(); } catch (__) { }
+          window.checklistState.isPostComplete = true;
+          if (typeof window.saveChecklistDraftToStorage === 'function') {
+            await window.saveChecklistDraftToStorage();
           }
-          console.error('❌ Checklist submission rejected by server (HTTP ' + res.status + '):', errText);
-          if (overlay) overlay.style.display = 'none';
-          window.showChecklistSubmitErrorModal(errText);
+
+          if (typeof renderCurrentChecklistTemplate === 'function') {
+            renderCurrentChecklistTemplate();
+          }
+
+          if (typeof showAppToast === 'function') {
+            showAppToast('✓ Post-Production Check Completed!');
+          }
         }
-      } catch (e) {
-        console.error('Error submitting checklist:', e);
+      } else {
+        let errText = 'Server error during checklist submission';
+        try {
+          const errJson = await res.json();
+          errText = errJson.error || errJson.message || errText;
+        } catch (_) {
+          try { errText = await res.text(); } catch (__) { }
+        }
+        console.error('❌ Checklist submission rejected by server (HTTP ' + res.status + '):', errText);
         if (overlay) overlay.style.display = 'none';
-        window.showChecklistSubmitErrorModal(e.message || 'Network error: Unable to connect to server');
+        window.showChecklistSubmitErrorModal(errText);
       }
+    } catch (e) {
+      console.error('Error submitting checklist:', e);
+      if (overlay) overlay.style.display = 'none';
+      window.showChecklistSubmitErrorModal(e.message || 'Network error: Unable to connect to server');
     }
   };
 
