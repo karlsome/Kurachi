@@ -14096,6 +14096,15 @@ if (manualSendModal) {
     }, 650);
   };
 
+  function updateAutoReasonValue(existingReason, newAutoReason) {
+    if (!existingReason) return newAutoReason;
+    const regex = /Value\s+[\d\.\-]+\s+is out of bounds\s*\([^\)]*\)/i;
+    if (regex.test(existingReason)) {
+      return existingReason.replace(regex, newAutoReason);
+    }
+    return existingReason;
+  }
+
   window.openChecklistTicketModal = function (fieldId, autoReason = '') {
     triggerNgFlashAnimation();
     window.checklistState.activeTicketField = fieldId;
@@ -14103,11 +14112,20 @@ if (manualSendModal) {
     const info = document.getElementById('checklistTicketFieldInfo');
     const reasonInput = document.getElementById('checklistTicketReason');
 
-    const existing = window.checklistState.tickets[fieldId] || { reason: autoReason, images: [] };
+    const existing = window.checklistState.tickets[fieldId] || { reason: '', images: [] };
+
+    if (autoReason) {
+      if (existing.reason) {
+        existing.reason = updateAutoReasonValue(existing.reason, autoReason);
+      } else {
+        existing.reason = autoReason;
+      }
+    }
+
     window.checklistState.tickets[fieldId] = existing;
 
     if (info) info.textContent = `Reporting issue for item`;
-    if (reasonInput) reasonInput.value = existing.reason || autoReason;
+    if (reasonInput) reasonInput.value = existing.reason || '';
 
     renderTicketThumbnails();
     if (modal) modal.style.display = 'flex';
@@ -14304,7 +14322,7 @@ if (manualSendModal) {
         let userInputStr = Array.isArray(fieldAns) ? fieldAns.join(', ') : String(fieldAns ?? '');
         let expectedStr = '';
         if (fieldObj && fieldObj.type === 'number' && (fieldObj.min !== null || fieldObj.max !== null)) {
-          expectedStr = `${fieldObj.min ?? '—'} - ${fieldObj.max ?? '—'} ${fieldObj.unit || ''}`;
+          expectedStr = `${fieldObj.min ?? '—'} ~ ${fieldObj.max ?? '—'} ${fieldObj.unit || ''}`;
         }
 
         const notifyRes = await fetch(`${serverURL}/api/check-forms/notify-ng-ticket`, {
@@ -14328,6 +14346,33 @@ if (manualSendModal) {
         }
       } catch (err) {
         console.error('Failed to notify NG ticket to Chatwork:', err);
+      }
+    } else {
+      // Message already exists in Chatwork -> update message with new input value & reason!
+      try {
+        const fieldAns = window.checklistState.answers[fieldId];
+        const fieldObj = (window.checklistState.queue?.[window.checklistState.queueIndex]?.fields || []).find(f => f.id === fieldId);
+        let userInputStr = Array.isArray(fieldAns) ? fieldAns.join(', ') : String(fieldAns ?? '');
+        let expectedStr = '';
+        if (fieldObj && fieldObj.type === 'number' && (fieldObj.min !== null || fieldObj.max !== null)) {
+          expectedStr = `${fieldObj.min ?? '—'} ~ ${fieldObj.max ?? '—'} ${fieldObj.unit || ''}`;
+        }
+
+        await fetch(`${serverURL}/api/check-forms/update-ng-ticket`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messageId: ticket.chatworkMessageId,
+            factory: window.checklistState.factory,
+            machine: window.checklistState.machine,
+            status: 'NG',
+            reason: reason,
+            userInput: userInputStr,
+            expectedInput: expectedStr
+          })
+        }).catch(err => console.warn('Failed to update Chatwork ticket message:', err));
+      } catch (err) {
+        console.error('Failed to update NG ticket in Chatwork:', err);
       }
     }
 

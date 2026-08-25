@@ -32766,6 +32766,45 @@ app.post('/api/check-forms/cancel-ng-ticket', async (req, res) => {
   res.json({ success: true, results });
 });
 
+app.post('/api/check-forms/update-ng-ticket', async (req, res) => {
+  const { messageId, factory, machine, status, reason, userInput, expectedInput } = req.body || {};
+  if (!messageId) {
+    return res.status(400).json({ error: 'messageId is required' });
+  }
+
+  const roomId = '440654635';
+  const apiKey = process.env.CHATWORK_API_KEY;
+  const url = `https://api.chatwork.com/v2/rooms/${roomId}/messages/${messageId}`;
+
+  try {
+    const now = new Date();
+    const timestamp = now.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+    let messageBody = `工場: ${factory}\n設備: ${machine}\nステータス: ${status}\n日時: ${timestamp}`;
+    if (expectedInput) messageBody += `\n期待値: ${expectedInput}`;
+    if (userInput !== undefined && userInput !== '') messageBody += `\n入力値: ${userInput}`;
+    messageBody += `\n理由: ${reason}`;
+    messageBody += `\n(編集済み / Updated)`;
+
+    const response = await fetch(url, {
+      method: 'PUT',
+      headers: {
+        'X-ChatWorkToken': apiKey,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: new URLSearchParams({ body: messageBody })
+    });
+
+    if (response.ok) {
+      res.status(200).json({ success: true, messageId });
+    } else {
+      const errorText = await response.text();
+      res.status(response.status).json({ error: errorText });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.post('/api/check-forms/submit', async (req, res) => {
   const payload = req.body || {};
   const factory = normalizeCheckFormText(payload.factory);
