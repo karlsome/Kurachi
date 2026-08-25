@@ -250,12 +250,12 @@
             color: var(--brand);
         }
 
-        /* Locked: until the 3-step scan is done, only the Scan tab is usable */
-        .tab-bar.locked-scan .tab-btn:not(:first-child) {
+        /* Locked: until the 3-step scan is done, Scan tab is usable, tabs after Scan are locked */
+        .tab-bar.locked-scan .tab-btn:not(:first-child):not(:nth-child(2)) {
             opacity: 0.4;
         }
 
-        .tab-bar.locked-scan .tab-btn:not(:first-child) .tab-icon::after {
+        .tab-bar.locked-scan .tab-btn:not(:first-child):not(:nth-child(2)) .tab-icon::after {
             content: '🔒';
             font-size: 9px;
             position: absolute;
@@ -265,11 +265,11 @@
         }
 
         /* Locked: during params verification, Scan and Params tabs are usable, others are locked */
-        .tab-bar.locked-params .tab-btn:not(:first-child):not(:nth-child(2)) {
+        .tab-bar.locked-params .tab-btn:not(:first-child):not(:nth-child(2)):not(:nth-child(3)) {
             opacity: 0.4;
         }
 
-        .tab-bar.locked-params .tab-btn:not(:first-child):not(:nth-child(2)) .tab-icon::after {
+        .tab-bar.locked-params .tab-btn:not(:first-child):not(:nth-child(2)):not(:nth-child(3)) .tab-icon::after {
             content: '🔒';
             font-size: 9px;
             position: absolute;
@@ -315,18 +315,22 @@
 
         .tab-panels-container {
             display: flex;
-            width: 700%;
-            /* 7 tabs (Scan, Params, Production, Kensa, Images, Maintenance, Submit) */
+            width: 800%;
+            /* 8 tabs (Checklist, Scan, Params, Production, Kensa, Images, Maintenance, Submit) */
             height: 100%;
             transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
             transform: translate3d(0, 0, 0);
             -webkit-transform-style: flat;
             backface-visibility: hidden;
             -webkit-backface-visibility: hidden;
+            overflow: hidden;
         }
 
         .tab-panel {
-            width: 14.2857%;
+            width: 12.5%;
+            /* 100% / 8 = 12.5% */
+            flex: 0 0 12.5%;
+            box-sizing: border-box;
             height: 100%;
             overflow-y: auto;
             -webkit-overflow-scrolling: touch;
@@ -336,6 +340,55 @@
             transform: translateZ(0);
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
+        }
+
+        /* Collapsible accordion for completed pre-production steps */
+        .completed-pre-steps-accordion {
+            background: #f0fdf4;
+            border: 1px solid #bbf7d0;
+            border-radius: 16px;
+            margin-bottom: 16px;
+            overflow: hidden;
+            transition: all 0.2s ease;
+        }
+
+        .completed-pre-steps-accordion summary {
+            padding: 14px 18px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            user-select: none;
+            outline: none;
+            background: #dcfce7;
+            list-style: none;
+        }
+
+        .completed-pre-steps-accordion summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .completed-pre-steps-content {
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            background: #f0fdf4;
+        }
+
+        .post-steps-header {
+            margin-top: 16px;
+            margin-bottom: 12px;
+            padding: 10px 14px;
+            background: #fef3c7;
+            border: 1px solid #fde68a;
+            border-radius: 12px;
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: #92400e;
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
 
         .tab-panel::-webkit-scrollbar {
@@ -1245,6 +1298,18 @@
             transform: scale(0.97);
         }
 
+        #workerNameModal .worker-name-btn:disabled,
+        #workerNameModal .worker-name-btn.is-disabled-selected {
+            opacity: 0.42 !important;
+            cursor: not-allowed !important;
+            background: #f1f5f9 !important;
+            border-color: #cbd5e1 !important;
+            color: #94a3b8 !important;
+            box-shadow: none !important;
+            transform: none !important;
+            pointer-events: none !important;
+        }
+
         #workerNameModal .recent-section [style*="position: relative"],
         #workerNameModal .recent-section .worker-name-btn {
             position: relative;
@@ -1565,6 +1630,626 @@
             border-color: rgba(229, 72, 77, 0.8);
             background-color: rgba(229, 72, 77, 0.12);
         }
+
+        /* ---------------- Checklist Tab & Cards ---------------- */
+        .tab-bar.locked-checklist .tab-btn:not(#checklistTabBtn) {
+            opacity: 0.35;
+            pointer-events: none;
+        }
+        .tab-bar.locked-checklist .tab-btn:not(#checklistTabBtn) .tab-icon::after {
+            content: '🔒';
+            font-size: 9px;
+            position: absolute;
+            top: 2px;
+            right: 50%;
+            transform: translateX(14px);
+        }
+
+        .checklist-panel-container {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            max-width: 900px;
+            margin: 0 auto;
+            padding-bottom: 24px;
+        }
+        .checklist-nav-card {
+            background: var(--bg-surface, #ffffff);
+            border: 1px solid var(--border, #e6e8ef);
+            border-radius: 18px;
+            padding: 16px 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            box-shadow: 0 3px 12px rgba(0,0,0,0.03);
+        }
+        .checklist-nav-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .checklist-title-box {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .checklist-title-icon {
+            font-size: 1.35rem;
+            line-height: 1;
+        }
+        .checklist-main-title {
+            font-size: 1.15rem;
+            font-weight: 800;
+            color: var(--text-main, #1f2733);
+            margin: 0;
+        }
+        .checklist-overall-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .checklist-tier-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            background: rgba(31, 157, 107, 0.12);
+            color: #1f9d6b;
+        }
+        .checklist-tier-badge.weekly { background: rgba(59, 130, 246, 0.12); color: #2563eb; }
+        .checklist-tier-badge.monthly { background: rgba(139, 92, 246, 0.12); color: #7c3aed; }
+        
+        .checklist-counter-badge {
+            font-size: 0.8rem;
+            font-weight: 700;
+            color: var(--text-muted, #6b7280);
+            background: var(--bg-muted, #f3f4f6);
+            padding: 5px 12px;
+            border-radius: 12px;
+            transition: all 0.2s ease;
+        }
+
+        /* Interactive Checklist Template Chips / Selector Bar */
+        /* Single Active Checklist Selector & Modal Trigger */
+        .checklist-selected-container {
+            width: 100%;
+        }
+        .checklist-selector-btn {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            width: 100%;
+            padding: 10px 14px;
+            border-radius: 12px;
+            border: 1.5px solid #93c5fd;
+            background: #eff6ff;
+            color: #1e40af;
+            font-weight: 700;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 1px 4px rgba(37, 99, 235, 0.08);
+            box-sizing: border-box;
+        }
+        .checklist-selector-btn:hover {
+            background: #dbeafe;
+            border-color: #3b82f6;
+            transform: translateY(-1px);
+        }
+        .checklist-selector-btn.is-completed {
+            border-color: #86efac;
+            background: #f0fdf4;
+            color: #15803d;
+        }
+        .checklist-selector-left {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .checklist-selector-title {
+            font-weight: 800;
+            color: #1e3a8a;
+            font-size: 0.92rem;
+        }
+        .checklist-selector-btn.is-completed .checklist-selector-title {
+            color: #166534;
+        }
+        .checklist-selector-right {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+        .checklist-dropdown-hint-text {
+            font-size: 0.78rem;
+            font-weight: 800;
+            color: #2563eb;
+            background: rgba(37, 99, 235, 0.12);
+            padding: 3px 9px;
+            border-radius: 8px;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .checklist-selector-btn.is-completed .checklist-dropdown-hint-text {
+            color: #16a34a;
+            background: rgba(22, 163, 74, 0.12);
+        }
+
+        .chip-status-tag {
+            font-size: 0.72rem;
+            padding: 2px 8px;
+            border-radius: 8px;
+            font-weight: 800;
+        }
+        .chip-status-tag.done {
+            background: #dcfce7;
+            color: #166534;
+        }
+        .chip-status-tag.prog {
+            background: #fef3c7;
+            color: #b45309;
+        }
+        .chip-status-tag.pending {
+            background: #f1f5f9;
+            color: #64748b;
+        }
+
+        /* Checklist Switcher Modal */
+        .checklist-modal-backdrop {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(4px);
+            z-index: 99999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+            box-sizing: border-box;
+        }
+        .checklist-modal-card {
+            background: var(--bg-surface, #ffffff);
+            border-radius: 20px;
+            max-width: 500px;
+            width: 100%;
+            max-height: 85vh;
+            display: flex;
+            flex-direction: column;
+            padding: 22px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.25);
+            gap: 14px;
+            box-sizing: border-box;
+        }
+        .checklist-modal-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            border-radius: 14px;
+            border: 1.5px solid #e5e7eb;
+            background: #f9fafb;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            text-align: left;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        .checklist-modal-item:hover {
+            background: #f3f4f6;
+            border-color: #cbd5e1;
+            transform: translateY(-1px);
+        }
+        .checklist-modal-item.is-selected {
+            border-color: #3b82f6 !important;
+            background: #eff6ff !important;
+            box-shadow: 0 3px 10px rgba(59, 130, 246, 0.15);
+        }
+        .checklist-modal-item.is-completed {
+            border-color: #86efac;
+            background: #f0fdf4;
+        }
+
+        /* Distinct Actions Toolbar Card */
+        .checklist-actions-card {
+            background: var(--bg-surface, #ffffff);
+            border: 1px solid var(--border, #e6e8ef);
+            border-radius: 14px;
+            padding: 10px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.02);
+        }
+        .checklist-actions-left,
+        .checklist-actions-right {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .checklist-bypass-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 7px 13px;
+            border-radius: 10px;
+            border: 1px solid rgba(229, 72, 77, 0.3);
+            background: rgba(229, 72, 77, 0.08);
+            color: #e5484d;
+            font-size: 0.75rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .checklist-bypass-btn:hover {
+            background: rgba(229, 72, 77, 0.18);
+        }
+        .checklist-reset-btn {
+            font-size: 0.78rem !important;
+            padding: 7px 14px !important;
+            font-weight: 800 !important;
+            border-radius: 10px !important;
+            background: #ef4444 !important;
+            color: #ffffff !important;
+            border: none !important;
+            cursor: pointer !important;
+            box-shadow: 0 2px 6px rgba(239, 68, 68, 0.25) !important;
+            transition: all 0.15s ease !important;
+        }
+        .checklist-reset-btn:hover {
+            background: #dc2626 !important;
+            transform: translateY(-1px);
+        }
+
+        /* Dynamic Checklist Field Cards & Sequential Lock System */
+        .checklist-card {
+            background: var(--bg-surface, #ffffff);
+            border: 1px solid var(--border, #e6e8ef);
+            border-radius: 14px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            transition: all 0.25s ease;
+        }
+        .checklist-card.locked-card {
+            opacity: 0.42;
+            pointer-events: none;
+            filter: grayscale(0.6);
+            user-select: none;
+            background: #f8f9fa !important;
+            border-color: #e6e8ef !important;
+        }
+        .checklist-card.active-card {
+            border: 2px solid #2563eb !important;
+            box-shadow: 0 4px 16px rgba(37, 99, 235, 0.12);
+        }
+        .checklist-card.completed-card {
+            border-color: rgba(31, 157, 107, 0.4) !important;
+            background: rgba(31, 157, 107, 0.02);
+        }
+        .checklist-card.completed-card.completed-locked .checklist-toggle-group,
+        .checklist-card.completed-card.completed-locked input,
+        .checklist-card.completed-card.completed-locked button:not(.checklist-card-lock-btn),
+        .checklist-card.completed-card.completed-locked .checklist-card-media {
+            pointer-events: none !important;
+            opacity: 0.88 !important;
+            user-select: none !important;
+        }
+        .checklist-card-lock-btn {
+            pointer-events: auto !important;
+            transition: all 0.15s ease;
+        }
+        .checklist-card-lock-btn:active {
+            transform: scale(0.95);
+        }
+        /* Fullscreen NG Red Flash Overlay Animation */
+        .ng-flash-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(239, 68, 68, 0.42);
+            z-index: 100000;
+            pointer-events: none;
+            opacity: 0;
+            backdrop-filter: blur(2px);
+        }
+        .ng-flash-overlay.active {
+            animation: ngFlashPulse 0.65s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+        @keyframes ngFlashPulse {
+            0% { opacity: 0; transform: scale(1.02); }
+            25% { opacity: 1; transform: scale(1); }
+            65% { opacity: 0.85; }
+            100% { opacity: 0; transform: scale(1); }
+        }
+        .checklist-step-pill {
+            font-size: 0.7rem;
+            font-weight: 800;
+            padding: 3px 8px;
+            border-radius: 6px;
+            letter-spacing: 0.5px;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            text-transform: uppercase;
+        }
+        .checklist-step-pill.done {
+            background: rgba(31, 157, 107, 0.12);
+            color: #1f9d6b;
+        }
+        .checklist-step-pill.current {
+            background: rgba(37, 99, 235, 0.12);
+            color: #2563eb;
+        }
+        .checklist-step-pill.locked {
+            background: #e6e8ef;
+            color: #9ca3af;
+        }
+        .checklist-card.invalid-highlight {
+            border-color: #e5484d !important;
+            box-shadow: 0 0 0 3px rgba(229, 72, 77, 0.2);
+            animation: card-shake 0.3s ease-in-out;
+        }
+        @keyframes card-shake {
+            0%, 100% { transform: translateX(0); }
+            20%, 60% { transform: translateX(-4px); }
+            40%, 80% { transform: translateX(4px); }
+        }
+
+        .checklist-card-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+        }
+        .checklist-card-title {
+            font-size: 1rem;
+            font-weight: 700;
+            color: var(--text-main, #1f2733);
+        }
+        .checklist-card-desc {
+            font-size: 0.8rem;
+            color: var(--text-muted, #6b7280);
+            margin-top: 2px;
+        }
+        .checklist-card-media {
+            width: 100%;
+            max-height: 180px;
+            object-fit: cover;
+            border-radius: 10px;
+            border: 1px solid var(--border, #e6e8ef);
+        }
+
+        /* Toggle Buttons */
+        .checklist-toggle-group {
+            display: flex;
+            gap: 12px;
+        }
+        .checklist-toggle-btn {
+            flex: 1;
+            padding: 12px;
+            border-radius: 10px;
+            border: 1px solid var(--border, #e6e8ef);
+            background: var(--bg-muted, #f8f9fa);
+            font-size: 0.95rem;
+            font-weight: 800;
+            color: var(--text-main, #1f2733);
+            cursor: pointer;
+            transition: all 0.15s ease;
+            text-align: center;
+        }
+        .checklist-toggle-btn.ok-btn.active {
+            background: #1f9d6b;
+            border-color: #1f9d6b;
+            color: #ffffff;
+        }
+        .checklist-toggle-btn.ng-btn.active {
+            background: #e5484d;
+            border-color: #e5484d;
+            color: #ffffff;
+        }
+
+        /* Ticket Button inside card */
+        .checklist-ticket-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 8px;
+            border: 1px solid var(--border, #e6e8ef);
+            background: var(--bg-muted, #f8f9fa);
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: var(--text-muted, #6b7280);
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .checklist-ticket-btn.required-pulse {
+            border-color: #e5484d;
+            color: #e5484d;
+            background: rgba(229, 72, 77, 0.1);
+            animation: ticket-pulse 1.2s infinite;
+        }
+        .checklist-ticket-btn.saved {
+            border-color: #1f9d6b;
+            color: #1f9d6b;
+            background: rgba(31, 157, 107, 0.1);
+        }
+        @keyframes ticket-pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+
+        @keyframes photoAttentionPulse {
+            0% {
+                transform: scale(1);
+                box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.6);
+                border-color: #2563eb;
+            }
+            50% {
+                transform: scale(1.05);
+                box-shadow: 0 0 16px 4px rgba(37, 99, 235, 0.4);
+                border-color: #3b82f6;
+            }
+            100% {
+                transform: scale(1);
+                box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.6);
+                border-color: #2563eb;
+            }
+        }
+        .photo-pulse-attention {
+            animation: photoAttentionPulse 1.4s infinite ease-in-out !important;
+            background: linear-gradient(135deg, #eff6ff, #dbeafe) !important;
+            color: #1e40af !important;
+            border: 2px solid #2563eb !important;
+            font-weight: 800 !important;
+        }
+
+        @keyframes btnNextPulse {
+            0% {
+                transform: scale(1);
+                box-shadow: 0 0 0 0 rgba(31, 157, 107, 0.7);
+            }
+            50% {
+                transform: scale(1.05);
+                box-shadow: 0 0 20px 6px rgba(31, 157, 107, 0.45);
+            }
+            100% {
+                transform: scale(1);
+                box-shadow: 0 0 0 0 rgba(31, 157, 107, 0.7);
+            }
+        }
+        .checklist-next-pulse {
+            animation: btnNextPulse 1.5s infinite ease-in-out !important;
+        }
+
+        /* Photo Annotator Overlay & Markup Tools */
+        #annotator-overlay {
+            position: fixed !important;
+            inset: 0 !important;
+            z-index: 200000 !important;
+            background: #000000 !important;
+            display: flex;
+            flex-direction: column;
+        }
+        #annotator-overlay.hidden { display: none !important; }
+        .annotator-stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+        .annotator-canvas-stack { position: relative; flex-shrink: 0; }
+        .annotator-canvas-stack canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: block; }
+        .annotator-draw-canvas { touch-action: none; cursor: crosshair; }
+        .annotator-toolbar { flex-shrink: 0; background: #111111; display: flex; align-items: center; gap: 0.75rem; padding: 0.875rem 1.25rem calc(0.875rem + env(safe-area-inset-bottom, 0px)); }
+        .annotator-colors { display: flex; gap: 0.625rem; flex: 1; overflow-x: auto; }
+        .annotator-color-btn { width: 2.5rem; height: 2.5rem; border-radius: 50%; border: 2.5px solid rgba(255,255,255,0.15); cursor: pointer; flex-shrink: 0; transition: transform 0.1s, border-color 0.1s; }
+        .annotator-color-btn.active { border-color: #ffffff; transform: scale(1.2); }
+        .annotator-clear-btn { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; color: rgba(255,255,255,0.7); background: none; border: 1px solid rgba(255,255,255,0.3); border-radius: 0.5rem; padding: 0.5rem 0.85rem; cursor: pointer; flex-shrink: 0; }
+        .annotator-clear-btn:active { color: #ffffff; border-color: rgba(255,255,255,0.7); }
+        .annotator-cancel-btn { width: 2.75rem; height: 2.75rem; border-radius: 50%; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: #ffffff; cursor: pointer; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 1.4rem; }
+        .annotator-confirm-btn { width: 3.25rem; height: 3.25rem; border-radius: 50%; background: rgba(6,78,59,0.8); border: 1.5px solid rgba(16,185,129,0.8); color: #34d399; cursor: pointer; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+        .annotator-confirm-btn svg, .annotator-cancel-btn svg { width: 1.4rem; height: 1.4rem; fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+
+        /* Keypad & Ticket Modals (Auto-Escaping Keyboard & Strict Viewport Bounding) */
+        .checklist-modal-overlay,
+        .modal {
+            position: fixed !important;
+            inset: 0 !important;
+            box-sizing: border-box !important;
+            overflow-y: auto !important;
+            transition: align-items 0.25s cubic-bezier(0.2, 0.8, 0.2, 1), padding-top 0.25s cubic-bezier(0.2, 0.8, 0.2, 1) !important;
+        }
+
+        .checklist-modal-overlay.keyboard-active,
+        .modal.keyboard-active {
+            align-items: flex-start !important;
+            padding-top: max(16px, 2vh) !important;
+            padding-bottom: 16px !important;
+        }
+
+        .checklist-modal-overlay {
+            z-index: 100005;
+            background: rgba(0, 0, 0, 0.65);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+            backdrop-filter: blur(4px);
+        }
+        .checklist-modal-card {
+            background: #ffffff;
+            border-radius: 20px;
+            padding: 24px;
+            width: 100%;
+            max-width: 420px;
+            max-height: calc(100vh - 32px) !important;
+            overflow-y: auto !important;
+            box-sizing: border-box !important;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.25);
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            transition: transform 0.25s ease;
+        }
+
+        .checklist-modal-overlay.keyboard-active .checklist-modal-card,
+        .modal.keyboard-active .modal-content,
+        .modal.keyboard-active #workerNameModal > div {
+            margin-top: 0 !important;
+            margin-bottom: 0 !important;
+            max-height: calc(100vh - max(32px, 4vh)) !important;
+        }
+        .checklist-keypad-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+        }
+        .checklist-keypad-btn {
+            padding: 16px;
+            border-radius: 12px;
+            border: 1px solid #e6e8ef;
+            background: #f8f9fa;
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: #1f2733;
+            cursor: pointer;
+            text-align: center;
+            user-select: none;
+            transition: background 0.1s ease;
+        }
+        .checklist-keypad-btn:active {
+            background: #e6e8ef;
+        }
+
+        /* Transition Banner for Queueing */
+        .checklist-transition-banner {
+            background: linear-gradient(135deg, #1f9d6b 0%, #10b981 100%);
+            color: #ffffff;
+            border-radius: 14px;
+            padding: 16px 20px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-weight: 700;
+            font-size: 1rem;
+            box-shadow: 0 4px 12px rgba(31, 157, 107, 0.3);
+            animation: slideInDown 0.4s ease-out;
+        }
+        @keyframes slideInDown {
+            from { opacity: 0; transform: translateY(-12px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
     </style>
 </head>
 
@@ -1600,6 +2285,13 @@
 
     <!-- Tab Bar -->
     <div class="tab-bar">
+        <button type="button" class="tab-btn" id="checklistTabBtn" data-tab="checklist" style="display:none;">
+            <span class="tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M9 11l3 3L22 4" />
+                    <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+                </svg></span>
+            <span class="tab-label" data-i18n="checklist_tab">Checklist</span>
+        </button>
         <button type="button" class="tab-btn active" data-tab="0">
             <span class="tab-icon"><svg viewBox="0 0 24 24">
                     <path
@@ -1705,6 +2397,67 @@
         <div class="tab-content-viewport">
             <div class="tab-panels-container">
 
+                <!-- CHECKLIST TAB PANEL -->
+                <div class="tab-panel" id="panel-checklist">
+                    <div class="checklist-panel-container">
+                        <!-- Card 1: Checklist Title & Selected Checklist Bar -->
+                        <div class="checklist-nav-card">
+                            <div class="checklist-nav-header">
+                                <div class="checklist-title-box">
+                                    <span class="checklist-title-icon">📋</span>
+                                    <h2 class="checklist-main-title" data-i18n="checklist_title">設備点検チェックシート</h2>
+                                    <span class="checklist-tier-badge" id="checklistTierBadge">DAILY CHECK</span>
+                                </div>
+                                <div class="checklist-overall-status">
+                                    <span class="checklist-counter-badge" id="checklistCounterBadge">1 Checklist</span>
+                                </div>
+                            </div>
+                            <!-- Single Active Checklist Display & Modal Trigger -->
+                            <div id="checklistSelectedContainer" class="checklist-selected-container">
+                                <button type="button" id="checklistSelectorBtn" class="checklist-selector-btn" onclick="openChecklistSwitcherModal()">
+                                    <div class="checklist-selector-left">
+                                        <span class="checklist-selector-title" id="checklistSelectorTitle">Checklist</span>
+                                        <span class="chip-status-tag prog" id="checklistSelectorStatus">0/0</span>
+                                    </div>
+                                    <div class="checklist-selector-right" id="checklistSelectorDropdownHint">
+                                        <span class="checklist-dropdown-hint-text">▼ Switch</span>
+                                    </div>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Card 2: Quick Actions Toolbar Card -->
+                        <div class="checklist-actions-card" id="checklistActionsCard">
+                            <div class="checklist-actions-left">
+                                <button type="button" class="checklist-bypass-btn" id="superBypassBtn" onclick="openSuperBypassModal()">
+                                    ⚡ <span data-i18n="super_bypass">Super Bypass (Skip)</span>
+                                </button>
+                            </div>
+                            <div class="checklist-actions-right">
+                                <button type="button" class="checklist-reset-btn" id="resetAllBtn" onclick="resetAllChecklistData()">
+                                    🔄 <span data-i18n="reset_all">Reset All</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Queue Transition Banner -->
+                        <div id="checklistTransitionBanner" class="checklist-transition-banner" style="display:none;">
+                            <span>✓</span>
+                            <span id="checklistTransitionText">Daily Check completed! Moving to Weekly Check...</span>
+                        </div>
+
+                        <!-- Dynamic Field Cards Container -->
+                        <div id="checklistCardsContainer" style="display:flex; flex-direction:column; gap:16px;"></div>
+
+                        <!-- Footer Actions -->
+                        <div style="display:flex; justify-content:center; margin-top:24px; margin-bottom:12px; width:100%;">
+                            <button type="button" id="checklistNextBtn" class="btn btn-primary" style="padding:14px 36px; font-size:1.1rem; font-weight:800; border-radius:12px; transition:all 0.3s ease;" onclick="handleChecklistSubmitOrNext()">
+                                <span data-i18n="next_checklist">Next Checklist</span> →
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- TAB 1: SCAN -->
                 <div class="tab-panel" id="panel-0">
                     <!-- Step 0 Card: Worker Name Selection -->
@@ -1731,17 +2484,20 @@
                         </div>
 
                         <!-- State A: Select New Worker -->
-                        <div id="step0SelectState" style="display: none; flex-direction: column; align-items: center; gap: 15px;">
+                        <div id="step0SelectState" style="display: none; flex-direction: column; align-items: center; gap: 15px; width: 100%;">
                             <p style="font-size: 1rem; color: var(--text-main); margin: 0; text-align: center;" data-i18n="select_worker_prompt">
-                                作業者を選択してください
+                                作業者を選択してください / Select Worker(s)
                             </p>
 
-                            <div class="form-group" style="width: 100%;">
-                                <input list="machine-operator-suggestions" class="tap-field"
-                                    id="Machine Operator" name="Machine Operator"
-                                    data-i18n="worker_name_placeholder" placeholder="" required readonly>
-                                <datalist id="machine-operator-suggestions"></datalist>
+                            <div id="workerListContainer" style="width: 100%; display: flex; flex-direction: column; gap: 10px;">
+                                <!-- Dynamic multi-worker rows -->
                             </div>
+
+                            <button type="button" class="btn btn-secondary btn-full" onclick="addWorkerSlot()" style="display:flex; align-items:center; justify-content:center; gap:8px; font-weight:700;">
+                                <span style="font-size:1.2rem; font-weight:800;">+</span> <span data-i18n="add_worker">作業者を追加 (Add Worker)</span>
+                            </button>
+
+                            <input type="hidden" id="Machine Operator" name="Machine Operator" required>
 
                             <button type="button" class="btn btn-primary btn-full" onclick="proceedFromStep0()" style="margin-top: 10px;" data-i18n="proceed_btn">
                                 次へ
@@ -2690,6 +3446,235 @@
         </div>
     </div>
 
+    <!-- Checklist Numeric Keypad Modal -->
+    <div id="checklistKeypadModal" class="checklist-modal-overlay" style="display:none;">
+        <div class="checklist-modal-card">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <h3 id="checklistKeypadTitle" style="font-size:1rem; font-weight:800;">Numeric Input</h3>
+                <span id="checklistKeypadRange" style="font-size:0.75rem; color:#6b7280; font-weight:700;"></span>
+            </div>
+            <div style="background:#f8f9fa; border:1px solid #e6e8ef; border-radius:12px; padding:14px; text-align:right; font-size:1.6rem; font-weight:800; font-family:monospace; min-height:56px;" id="checklistKeypadValue"></div>
+            <div class="checklist-keypad-grid">
+                <button type="button" class="checklist-keypad-btn" onclick="checklistKeypadPress('7')">7</button>
+                <button type="button" class="checklist-keypad-btn" onclick="checklistKeypadPress('8')">8</button>
+                <button type="button" class="checklist-keypad-btn" onclick="checklistKeypadPress('9')">9</button>
+                <button type="button" class="checklist-keypad-btn" onclick="checklistKeypadPress('4')">4</button>
+                <button type="button" class="checklist-keypad-btn" onclick="checklistKeypadPress('5')">5</button>
+                <button type="button" class="checklist-keypad-btn" onclick="checklistKeypadPress('6')">6</button>
+                <button type="button" class="checklist-keypad-btn" onclick="checklistKeypadPress('1')">1</button>
+                <button type="button" class="checklist-keypad-btn" onclick="checklistKeypadPress('2')">2</button>
+                <button type="button" class="checklist-keypad-btn" onclick="checklistKeypadPress('3')">3</button>
+                <button type="button" class="checklist-keypad-btn" onclick="checklistKeypadPress('-')">-</button>
+                <button type="button" class="checklist-keypad-btn" onclick="checklistKeypadPress('0')">0</button>
+                <button type="button" class="checklist-keypad-btn" onclick="checklistKeypadPress('.')">.</button>
+            </div>
+            <div style="display:flex; gap:10px;">
+                <button type="button" class="checklist-keypad-btn" style="flex:1; background:#ef4444; color:#fff;" onclick="checklistKeypadClear()">C</button>
+                <button type="button" class="checklist-keypad-btn" style="flex:1; background:#6b7280; color:#fff;" onclick="checklistKeypadBackspace()">⌫</button>
+                <button type="button" class="checklist-keypad-btn" style="flex:2; background:#1f9d6b; color:#fff;" onclick="checklistKeypadConfirm()">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Checklist Ticket Modal (Abnormal Report) -->
+    <div id="checklistTicketModal" class="checklist-modal-overlay" style="display:none;">
+        <div class="checklist-modal-card" style="max-width:500px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+                <h3 id="checklistTicketHeaderTitle" style="font-size:1.1rem; font-weight:800; color:#e5484d;" data-i18n="ticket_required">Abnormal Report (Ticket) Required</h3>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <button type="button" id="checklistTicketResetBtn" onclick="resetCurrentChecklistTicket()" style="display:none; border:1px solid #ef4444; background:rgba(239,68,68,0.08); color:#ef4444; font-size:0.75rem; font-weight:700; padding:4px 10px; border-radius:8px; cursor:pointer; align-items:center; gap:4px;">
+                        🔄 Reset Ticket
+                    </button>
+                    <button type="button" onclick="closeChecklistTicketModal()" style="border:none; background:none; font-size:1.4rem; cursor:pointer; padding:0 4px;">✕</button>
+                </div>
+            </div>
+            <p id="checklistTicketFieldInfo" style="font-size:0.85rem; color:#6b7280; font-weight:600;"></p>
+            <div>
+                <label style="font-size:0.75rem; font-weight:800; color:#6b7280; text-transform:uppercase;">Reason / Details *</label>
+                <textarea id="checklistTicketReason" rows="3" style="width:100%; margin-top:6px; border-radius:10px; border:1px solid #e6e8ef; padding:10px; font-size:0.9rem;" placeholder="Explain why the value is abnormal..."></textarea>
+            </div>
+            <div>
+                <label id="checklistTicketPhotoLabel" style="font-size:0.75rem; font-weight:800; color:#6b7280; text-transform:uppercase;">Attach Photos (At least 1 required) *</label>
+                <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:8px;" id="checklistTicketThumbsContainer"></div>
+                <input type="file" id="checklistTicketFileInput" accept="image/*" capture="environment" style="display:none;" onchange="handleChecklistTicketPhotoCaptured(event)">
+                <button type="button" id="checklistTicketPhotoBtn" class="btn btn-secondary" style="margin-top:8px; width:100%; display:flex; align-items:center; justify-content:center; gap:6px;" onclick="document.getElementById('checklistTicketFileInput').click()">
+                    📷 <span data-i18n="take_photo">Take Photo</span>
+                </button>
+            </div>
+            <div style="display:flex; gap:10px; margin-top:10px;">
+                <button type="button" class="btn btn-secondary" style="flex:1;" onclick="closeChecklistTicketModal()" data-i18n="cancel">Cancel</button>
+                <button type="button" class="btn btn-primary" style="flex:2;" onclick="saveChecklistTicket()" data-i18n="save">Save Ticket</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Super Bypass Leader QR Modal -->
+    <div id="checklistBypassModal" class="checklist-modal-overlay" style="display:none;">
+        <div class="checklist-modal-card" style="max-width:440px;">
+            <h3 style="font-size:1.1rem; font-weight:800; color:#e5484d; text-align:center;" data-i18n="super_bypass">Super Bypass (Skip Checklist)</h3>
+            <p style="font-size:0.8rem; color:#6b7280; text-align:center;" data-i18n="scan_leader_qr_to_bypass">Scan Leader QR Code to Bypass</p>
+            <div id="checklistBypassQrReader" style="width:100%; aspect-ratio:1; border-radius:12px; background:#000; overflow:hidden;"></div>
+            <p id="checklistBypassStatus" style="font-size:0.85rem; font-weight:700; text-align:center; min-height:20px; color:#6b7280;"></p>
+            <input type="text" id="checklistBypassReason" style="width:100%; padding:10px; border-radius:10px; border:1px solid #e6e8ef; font-size:0.85rem;" data-i18n-placeholder="bypass_reason_placeholder" placeholder="Enter reason for super bypass...">
+            <div style="display:flex; gap:10px; margin-top:10px;">
+                <button type="button" class="btn btn-secondary" style="flex:1;" onclick="closeSuperBypassModal()" data-i18n="cancel">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Per-Step Leader QR Skip Modal -->
+    <div id="stepSkipQrModal" class="checklist-modal-overlay" style="display:none;">
+        <div class="checklist-modal-card" style="max-width:440px; text-align:center;">
+            <div style="width:52px; height:52px; border-radius:50%; background:rgba(37,99,235,0.1); color:#2563eb; display:flex; align-items:center; justify-content:center; margin:0 auto 10px auto; font-size:1.5rem;">
+                🔑
+            </div>
+            <h3 style="font-size:1.1rem; font-weight:800; color:var(--text-main,#1f2733); margin-bottom:4px;">
+                Leader QR Required
+            </h3>
+            <p style="font-size:0.85rem; color:#6b7280; margin-bottom:12px; line-height:1.4;">
+                This step is required. Scan Leader QR Code to authorize skipping.
+            </p>
+            <div id="stepSkipQrReader" style="width:100%; aspect-ratio:1; border-radius:12px; background:#000; overflow:hidden;"></div>
+            <p id="stepSkipQrStatus" style="font-size:0.85rem; font-weight:700; text-align:center; min-height:20px; color:#6b7280; margin-top:8px;"></p>
+            <div style="display:flex; gap:10px; margin-top:10px;">
+                <button type="button" class="btn btn-secondary" style="flex:1;" onclick="closeStepSkipLeaderQrModal()" data-i18n="cancel">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Ticket Deletion Confirmation Modal with Ticket Preview -->
+    <div id="ticketDeletionConfirmModal" class="checklist-modal-overlay" style="display:none;">
+        <div class="checklist-modal-card" style="max-width:460px; text-align:left;">
+            <div style="margin-bottom:12px;">
+                <h3 style="font-size:1.1rem; font-weight:800; color:var(--text-main,#1f2733); margin:0;">
+                    Delete Defect Ticket?
+                </h3>
+                <p style="font-size:0.8rem; color:#6b7280; margin:2px 0 0 0;">
+                    This item was marked NG. Changing to OK will delete this ticket.
+                </p>
+            </div>
+
+            <!-- Ticket Preview Box -->
+            <div style="background:rgba(243,244,246,0.7); border:1px solid #e5e7eb; border-radius:12px; padding:12px; margin-bottom:14px;">
+                <div style="font-size:0.75rem; font-weight:800; color:#6b7280; text-transform:uppercase; margin-bottom:4px;">
+                    Ticket Preview
+                </div>
+                <div id="ticketDeletionReasonPreview" style="font-size:0.85rem; font-weight:600; color:#1f2733; word-break:break-word; margin-bottom:8px;"></div>
+                <div id="ticketDeletionThumbsPreview" style="display:flex; gap:8px; flex-wrap:wrap;"></div>
+            </div>
+
+            <p style="font-size:0.8rem; color:#ef4444; font-weight:700; margin-bottom:14px; text-align:center;">
+                ⚠️ Deleting this ticket will purge attached photos and ticket data.
+            </p>
+
+            <div style="display:flex; gap:10px;">
+                <button type="button" class="btn btn-secondary" style="flex:1; font-weight:700;" onclick="closeTicketDeletionConfirmModal(false)">
+                    Cancel (Keep NG)
+                </button>
+                <button type="button" class="btn btn-primary" style="flex:1.3; font-weight:700; background:#ef4444; border-color:#ef4444;" onclick="closeTicketDeletionConfirmModal(true)">
+                    Delete Ticket & Set OK
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Checklist Submitting In-Progress Overlay -->
+    <div id="checklistSubmittingOverlay" class="checklist-modal-overlay" style="display:none; z-index:250000; backdrop-filter:blur(4px);">
+        <div class="checklist-modal-card" style="max-width:400px; text-align:center; padding:32px 24px;">
+            <div class="submit-spinner" style="width:54px; height:54px; border:5px solid #e5e7eb; border-top-color:#2563eb; border-radius:50%; margin:0 auto 16px auto; animation:spin 1s linear infinite;"></div>
+            <h3 style="font-size:1.15rem; font-weight:800; color:#1f2733; margin-bottom:8px;">
+                Submitting Checklist...
+            </h3>
+            <p id="checklistSubmittingText" style="font-size:0.85rem; color:#6b7280; margin:0; line-height:1.4;">
+                Uploading photos & syncing records to server. Please wait...
+            </p>
+        </div>
+    </div>
+
+    <!-- Checklist Submission Error Modal -->
+    <div id="checklistSubmitErrorModal" class="checklist-modal-overlay" style="display:none; z-index:250001;">
+        <div class="checklist-modal-card" style="max-width:440px; text-align:center; padding:28px 24px;">
+            <div style="width:60px; height:60px; border-radius:50%; background:rgba(239,68,68,0.1); color:#ef4444; display:flex; align-items:center; justify-content:center; margin:0 auto 14px auto; font-size:1.8rem; font-weight:900;">
+                ✕
+            </div>
+            <h3 style="font-size:1.2rem; font-weight:800; color:#ef4444; margin-bottom:6px;">
+                Submission Failed
+            </h3>
+            <p id="checklistSubmitErrorMessage" style="font-size:0.88rem; color:#374151; background:#fef2f2; border:1px solid #fecaca; border-radius:10px; padding:12px; margin:12px 0 18px 0; word-break:break-word; font-weight:600; text-align:left; max-height:160px; overflow-y:auto;">
+                An unexpected error occurred while submitting the checklist.
+            </p>
+            <div style="display:flex; gap:10px;">
+                <button type="button" class="btn btn-secondary" style="flex:1; font-weight:700;" onclick="closeChecklistSubmitErrorModal()">
+                    Close
+                </button>
+                <button type="button" class="btn btn-primary" style="flex:1.4; font-weight:700; background:#2563eb; border-color:#2563eb;" onclick="retryChecklistSubmission()">
+                    🔄 Retry Submission
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Checklist Switcher Pop-up Modal -->
+    <div id="checklistSwitcherModal" class="checklist-modal-overlay" style="display:none; z-index:220000;" onclick="if(event.target===this) closeChecklistSwitcherModal()">
+        <div class="checklist-modal-card" style="max-width:480px; width:90%; padding:22px; gap:14px;">
+            <div style="display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid #e5e7eb; padding-bottom:12px;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span style="font-size:1.3rem;">📋</span>
+                    <h3 style="font-size:1.15rem; font-weight:800; color:#1f2937; margin:0;" id="checklistModalHeaderTitle">Available Checklists</h3>
+                </div>
+                <button type="button" onclick="closeChecklistSwitcherModal()" style="background:none; border:none; font-size:1.4rem; cursor:pointer; color:#6b7280; line-height:1; padding:4px 8px;">✕</button>
+            </div>
+            <p style="font-size:0.85rem; color:#6b7280; margin:0;" id="checklistModalSubTitle">Tap any checklist to switch and complete in any order:</p>
+            <div id="checklistModalListContainer" style="display:flex; flex-direction:column; gap:10px; overflow-y:auto; max-height:55vh; padding-right:4px;">
+                <!-- Rendered dynamically -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Post-Production Checklist Reminder Modal -->
+    <div id="postChecklistReminderModal" class="checklist-modal-overlay" style="display:none;">
+        <div class="checklist-modal-card" style="max-width:460px;">
+            <div style="text-align:center; margin-bottom:6px;">
+                <span style="font-size:2.2rem;">📋</span>
+                <h3 style="font-size:1.15rem; font-weight:800; color:#1f2733; margin-top:8px;" data-i18n="post_checklist_reminder_title">Post-Production Checklist Notice</h3>
+                <p style="font-size:0.85rem; color:#6b7280; margin-top:6px; line-height:1.4;" data-i18n="post_checklist_reminder_msg">A post-production checklist exists for this machine. Do you want to complete it now?</p>
+            </div>
+            <div style="display:flex; flex-direction:column; gap:10px; margin-top:10px;">
+                <button type="button" class="btn btn-primary" style="padding:14px; font-weight:800;" onclick="confirmDoPostChecklist()" data-i18n="do_post_checklist">
+                    Complete Checklist Now
+                </button>
+                <button type="button" class="btn btn-secondary" style="padding:12px; font-weight:700;" onclick="confirmSkipPostChecklist()" data-i18n="skip_post_checklist">
+                    Skip & Submit Production
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Worker Confirmation Modal (Consistent UI matching Scan tab) -->
+    <div id="workerConfirmationModal" class="checklist-modal-overlay" style="display:none;">
+        <div class="checklist-modal-card" style="max-width:440px; text-align:center; padding:28px 24px;">
+            <h2 style="font-size: 1.15rem; font-weight: 700; text-align: center; margin-bottom: 20px;">
+                <span style="color: var(--accent-green);" data-i18n="worker_setup_title">作業者確認</span>
+            </h2>
+            <p style="font-size: 1.1rem; color: var(--text-main); margin: 0; text-align: center; line-height: 1.5;">
+                <span data-i18n="confirm_worker_pre">作業を続ける作業者は</span><br>
+                <strong id="workerConfirmModalName" style="color: var(--brand); font-size: 1.4rem; display: block; margin: 8px 0; word-break: break-word;"></strong>
+                <span data-i18n="confirm_worker_post"> ですか？</span>
+            </p>
+            <div style="display: flex; gap: 10px; width: 100%; margin-top: 20px;">
+                <button type="button" class="btn btn-secondary" style="flex: 1; padding:12px; font-weight:700;" onclick="handleWorkerConfirmResponse(false)" data-i18n="change_btn">
+                    変更
+                </button>
+                <button type="button" class="btn btn-primary" style="flex: 2; padding:12px; font-weight:800;" onclick="handleWorkerConfirmResponse(true)" data-i18n="yes">
+                    はい
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Image Photo Annotator Overlay -->
+    <div id="annotator-overlay" class="hidden"></div>
+
     <!-- Sending to Machine Floating Indicator -->
     <div id="sendingToMachineIndicator" style="
       display: none;
@@ -2839,12 +3824,45 @@
         const tabs = document.querySelectorAll('.tab-btn');
         let currentTabIndex = 0;
 
+        function getActiveTabStorageKey() {
+            if (typeof uniquePrefix !== 'undefined' && uniquePrefix) {
+                return `${uniquePrefix}activeTabIndex`;
+            }
+            const factory = (typeof currentSelectedFactory !== 'undefined' && currentSelectedFactory) || (typeof selectedFactory !== 'undefined' && selectedFactory) || '';
+            const machine = (typeof selectedMachine !== 'undefined' && selectedMachine) || '';
+            const page = (typeof pageName !== 'undefined' && pageName) || 'DCP';
+            if (factory && machine) {
+                return `${page}_${factory}_${machine}_activeTabIndex`;
+            }
+            return 'activeTabIndex';
+        }
+
+        function getSavedTabIndex() {
+            const key = getActiveTabStorageKey();
+            let val = localStorage.getItem(key);
+            if (val === null && key !== 'activeTabIndex') {
+                val = localStorage.getItem('activeTabIndex');
+            }
+            if (val !== null) {
+                const parsed = parseInt(val, 10);
+                if (!isNaN(parsed) && parsed >= 0 && parsed < tabs.length) {
+                    return parsed;
+                }
+            }
+            return null;
+        }
+        window.getActiveTabStorageKey = getActiveTabStorageKey;
+        window.getSavedTabIndex = getSavedTabIndex;
+
         // Scan must be completed (3-step done) before leaving the Scan tab
         function isScanComplete() {
             const sd = document.getElementById('sub-dropdown');
-            if (!sd || !sd.value) return false;
-            // Complete only after Step 3 (send to machine / OZMANAS board scan)
-            return !!(window.isScanWorkflowComplete && window.isScanWorkflowComplete());
+            if (sd && sd.value) {
+                return !!(window.isScanWorkflowComplete && window.isScanWorkflowComplete());
+            }
+            const prefix = (typeof uniquePrefix !== 'undefined' && uniquePrefix) ? uniquePrefix : '';
+            const isDone = localStorage.getItem(`${prefix}scanComplete`) === 'true' || localStorage.getItem('DCP_scanComplete') === 'true';
+            return isDone;
         }
         function getParamsConfirmedKey() {
             const prefix = typeof uniquePrefix !== 'undefined' ? uniquePrefix : '';
@@ -2871,10 +3889,13 @@
             const bar = document.querySelector('.tab-bar');
             if (bar) {
                 checkParamsLockState();
+                const checklistLocked = !!(window.checklistState && window.checklistState.queue && window.checklistState.queue.length > 0 && !window.checklistState.isPreComplete && !window.checklistState.isBypassed);
                 const scanIncomplete = !isScanComplete();
                 const paramsLocked = window.paramsLocked === true;
-                bar.classList.toggle('locked-scan', scanIncomplete);
-                bar.classList.toggle('locked-params', !scanIncomplete && paramsLocked);
+
+                bar.classList.toggle('locked-checklist', checklistLocked);
+                bar.classList.toggle('locked-scan', !checklistLocked && scanIncomplete);
+                bar.classList.toggle('locked-params', !checklistLocked && !scanIncomplete && paramsLocked);
             }
         }
         window.isScanComplete = isScanComplete;
@@ -2885,14 +3906,27 @@
         window.paramsLocked = false;
         window.paramsVisited = false;
 
-        window.goToTab = function (index) {
+        window.goToTab = function (index, isRestore = false) {
             if (index < 0 || index >= tabs.length) return;
-            // Kensa (index 3) only exists when its tab is revealed; otherwise go to Production
-            if (index === 3 && document.getElementById('kensaTabBtn')?.style.display === 'none') {
-                index = 2;
+            // If Checklist (index 0) is hidden, default to Scan (index 1)
+            const checklistBtn = document.getElementById('checklistTabBtn');
+            if (index === 0 && (!checklistBtn || checklistBtn.style.display === 'none')) {
+                index = 1;
             }
-            // Lock: cannot leave the Scan tab until the 3-step scan is complete
-            if (index !== 0 && !isScanComplete()) {
+            // Kensa (index 4 in 8-tab system) only exists when its tab is revealed; otherwise go to Production (index 3)
+            if (index === 4 && document.getElementById('kensaTabBtn')?.style.display === 'none') {
+                index = 3;
+            }
+            // Lock: cannot leave Checklist tab (0) if pre-production checklist is incomplete
+            if (index !== 0 && window.checklistState && window.checklistState.queue && window.checklistState.queue.length > 0 && !window.checklistState.isPreComplete && !window.checklistState.isBypassed) {
+                if (!isRestore && typeof window.showAppToast === 'function') {
+                    window.showAppToast((typeof _t === 'function' ? _t('toast_complete_checklist_first') : null) || 'Please complete pre-production checklist first');
+                }
+                updateTabLock();
+                return;
+            }
+            // Lock: cannot leave the Scan tab (index 1) until the 3-step scan is complete
+            if (index > 1 && !isScanComplete() && !isRestore) {
                 if (typeof window.showAppToast === 'function') {
                     window.showAppToast(_t('toast_complete_3steps'));
                 }
@@ -2900,8 +3934,8 @@
                 return;
             }
             checkParamsLockState();
-            // Lock: cannot visit pages beyond Scan (0) and Params (1) until "Values changed" is pressed
-            if (index > 1 && window.paramsLocked) {
+            // Lock: cannot visit pages beyond Scan (1) and Params (2) until "Values changed" is pressed
+            if (index > 2 && window.paramsLocked && !isRestore) {
                 if (typeof window.showAppToast === 'function') {
                     window.showAppToast(_t('toast_press_values_changed'));
                 }
@@ -2911,11 +3945,15 @@
             currentTabIndex = index;
             
             // Save active tab index so it persists after refresh
-            const prefix = typeof uniquePrefix !== 'undefined' ? uniquePrefix : '';
-            localStorage.setItem(`${prefix}activeTabIndex`, index);
+            const key = getActiveTabStorageKey();
+            localStorage.setItem(key, index);
+            if (key !== 'activeTabIndex') {
+                localStorage.setItem('activeTabIndex', index);
+            }
 
-            // Slide tabs viewport (count-aware so the 7th Kensa tab works)
-            panelsContainer.style.transform = `translateX(-${index * (100 / tabs.length)}%)`;
+            // Slide tabs viewport (count-aware for total DOM panels: 8 panels)
+            const totalPanels = document.querySelectorAll('.tab-panel').length || 8;
+            panelsContainer.style.transform = `translateX(-${index * (100 / totalPanels)}%)`;
 
             // Highlight active button
             tabs.forEach((tab, idx) => {
@@ -2928,14 +3966,14 @@
 
             updateTabIndicator(index);
 
-            // If on Submit tab (now index 6), compile summary
-            if (index === 6) {
+            // If on Submit tab (now index 7), compile summary
+            if (index === 7) {
                 updateSubmitSummary();
             }
-            // Params guide (index 1): show the live 送りピッチ as the rolldist value
-            if (index === 1 && typeof updateParamsGuide === 'function') updateParamsGuide();
+            // Params guide (index 2): show the live 送りピッチ as the rolldist value
+            if (index === 2 && typeof updateParamsGuide === 'function') updateParamsGuide();
 
-            // Floating "New Scan" button only on the Scan tab
+            // Floating "New Scan" button only on the Scan tab (index 1)
             if (typeof updateFloatingNewScan === 'function') updateFloatingNewScan();
         };
 
@@ -2979,7 +4017,7 @@
                         if (typeof window.showAppToast === 'function') {
                             window.showAppToast(_t('toast_settings_confirmed'));
                         }
-                        if (typeof window.goToTab === 'function') window.goToTab(2);
+                        if (typeof window.goToTab === 'function') window.goToTab(3);
                     };
                 }
             }
@@ -3013,7 +4051,7 @@
                         if (typeof window.showAppToast === 'function') {
                             window.showAppToast(_t('toast_settings_confirmed'));
                         }
-                        if (typeof window.goToTab === 'function') window.goToTab(2);
+                        if (typeof window.goToTab === 'function') window.goToTab(3);
                     };
                 }
             }
@@ -3021,6 +4059,10 @@
         window.updateParamsGuide = updateParamsGuide;
 
         function updateTabIndicator(index) {
+            const checklistBtn = document.getElementById('checklistTabBtn');
+            if (index === 0 && (!checklistBtn || checklistBtn.style.display === 'none')) {
+                index = 1;
+            }
             const activeTab = tabs[index];
             const indicator = document.querySelector('.tab-indicator');
             if (activeTab && indicator) {
@@ -3036,11 +4078,19 @@
             });
         });
 
-        // Initialize active highlight tab underline indicator position
+        // Initialize active highlight tab underline indicator position and restore saved tab
         window.addEventListener('load', () => {
             setTimeout(() => {
-                updateTabIndicator(currentTabIndex);
-            }, 500);
+                const checklistBtn = document.getElementById('checklistTabBtn');
+                let targetIdx = getSavedTabIndex();
+                if (targetIdx === null) {
+                    targetIdx = (checklistBtn && checklistBtn.style.display !== 'none') ? 0 : 1;
+                }
+                if (targetIdx === 0 && (!checklistBtn || checklistBtn.style.display === 'none')) {
+                    targetIdx = 1;
+                }
+                goToTab(targetIdx, true);
+            }, 300);
         });
 
         // Swipe-to-change-tab was removed: users accidentally changed tabs while
@@ -3178,7 +4228,7 @@
 
             const values = {
                 sebanggo: document.getElementById('sub-dropdown')?.value || '',
-                hinban: (typeof currentProductDetails !== 'undefined' && currentProductDetails.hinban) ? currentProductDetails.hinban : (document.getElementById('product-number')?.value || ''),
+                hinban: (typeof window.currentProductDetails !== 'undefined' && window.currentProductDetails && window.currentProductDetails.hinban) ? window.currentProductDetails.hinban : (document.getElementById('product-number')?.value || ''),
                 workerName: document.getElementById('Machine Operator')?.value || '',
                 date: document.getElementById('Lot No.')?.value || '',
                 startTime: document.getElementById('Start Time')?.value || '',
@@ -3199,39 +4249,39 @@
             const issues = [];
 
             if (!values.sebanggo) {
-                issues.push({ text: _t('submit_err_no_sebanggo'), tab: 0, fieldId: 'startStep1Scan' });
+                issues.push({ text: _t('submit_err_no_sebanggo'), tab: 1, fieldId: 'startStep1Scan' });
             }
             if (!values.workerName) {
-                issues.push({ text: _t('submit_err_no_worker'), tab: 2, fieldId: 'Machine Operator' });
+                issues.push({ text: _t('submit_err_no_worker'), tab: 3, fieldId: 'Machine Operator' });
             }
             if (!values.date) {
-                issues.push({ text: _t('submit_err_no_date'), tab: 2, fieldId: 'Lot No.' });
+                issues.push({ text: _t('submit_err_no_date'), tab: 3, fieldId: 'Lot No.' });
             }
             if (!values.startTime) {
-                issues.push({ text: _t('submit_err_no_start'), tab: 2, fieldId: 'Start Time' });
+                issues.push({ text: _t('submit_err_no_start'), tab: 3, fieldId: 'Start Time' });
             }
             if (!values.endTime) {
-                issues.push({ text: _t('submit_err_no_end'), tab: 2, fieldId: 'End Time' });
+                issues.push({ text: _t('submit_err_no_end'), tab: 3, fieldId: 'End Time' });
             }
             if (values.startTime && values.endTime && values.startTime === values.endTime) {
-                issues.push({ text: _t('submit_err_same_time'), tab: 2, fieldId: 'End Time' });
+                issues.push({ text: _t('submit_err_same_time'), tab: 3, fieldId: 'End Time' });
             }
             if (values.processQty <= 0) {
-                issues.push({ text: _t('submit_err_qty_zero'), tab: 2, fieldId: 'ProcessQuantity' });
+                issues.push({ text: _t('submit_err_qty_zero'), tab: 3, fieldId: 'ProcessQuantity' });
             }
             if (values.shotCount < 1) {
-                issues.push({ text: _t('submit_err_no_shots'), tab: 2, fieldId: 'shot' });
+                issues.push({ text: _t('submit_err_no_shots'), tab: 3, fieldId: 'shot' });
             }
             if (!values.materialLot) {
-                issues.push({ text: _t('submit_err_no_lot'), tab: 2, fieldId: '材料ロット' });
+                issues.push({ text: _t('submit_err_no_lot'), tab: 3, fieldId: '材料ロット' });
             }
 
             if (values.photosHatsumono !== 'TRUE') {
-                issues.push({ text: _t('submit_err_no_hatsumono'), tab: 3, fieldId: 'hatsumonoButton' });
+                issues.push({ text: _t('submit_err_no_hatsumono'), tab: 4, fieldId: 'hatsumonoButton' });
             }
 
             if (values.photosAtomono !== 'TRUE') {
-                issues.push({ text: _t('submit_err_no_atomono'), tab: 3, fieldId: 'atomonoButton' });
+                issues.push({ text: _t('submit_err_no_atomono'), tab: 4, fieldId: 'atomonoButton' });
             }
 
             const lotCount = values.materialLot ? values.materialLot.split(',').map(l => l.trim()).filter(l => l).length : 0;
@@ -3239,22 +4289,22 @@
                 const msg = _t('submit_insufficient_photos')
                     .replace('{needed}', lotCount)
                     .replace('{taken}', values.photosMaterial);
-                issues.push({ text: msg, tab: 2, fieldId: '材料ロット' });
+                issues.push({ text: msg, tab: 3, fieldId: '材料ロット' });
             }
 
             // Kensa (inspection) fields are required only when the kensa toggle is ON
             if (document.getElementById('enable-inputs')?.checked) {
                 if (!document.getElementById('Kensa Name')?.value) {
-                    issues.push({ text: _t('submit_err_no_inspector'), tab: 2, fieldId: 'Kensa Name' });
+                    issues.push({ text: _t('submit_err_no_inspector'), tab: 3, fieldId: 'Kensa Name' });
                 }
                 if (!document.getElementById('KDate')?.value) {
-                    issues.push({ text: _t('submit_err_no_kdate'), tab: 2, fieldId: 'KDate' });
+                    issues.push({ text: _t('submit_err_no_kdate'), tab: 3, fieldId: 'KDate' });
                 }
                 if (!document.getElementById('KStart Time')?.value) {
-                    issues.push({ text: _t('submit_err_no_kstart'), tab: 2, fieldId: 'KStart Time' });
+                    issues.push({ text: _t('submit_err_no_kstart'), tab: 3, fieldId: 'KStart Time' });
                 }
                 if (!document.getElementById('KEnd Time')?.value) {
-                    issues.push({ text: _t('submit_err_no_kend'), tab: 2, fieldId: 'KEnd Time' });
+                    issues.push({ text: _t('submit_err_no_kend'), tab: 3, fieldId: 'KEnd Time' });
                 }
             }
 
@@ -3289,15 +4339,15 @@
             html += row(_t('submit_lbl_sebanggo'), (values.sebanggo || '---'));
             html += row(_t('submit_lbl_hinban'), (values.hinban || '---'));
             html += row(_t('submit_lbl_worker'), (values.workerName || '---'), `<button type="button" class="row-edit-btn" onclick="openWorkerModal()">${_t('submit_edit_btn')}</button>`);
-            html += row(_t('submit_lbl_date'), (values.date || '---'), edit(2, 'Lot No.'));
-            html += row(_t('submit_lbl_time'), (values.startTime || '--:--') + ' ~ ' + (values.endTime || '--:--'), edit(2, 'Start Time'));
+            html += row(_t('submit_lbl_date'), (values.date || '---'), edit(3, 'Lot No.'));
+            html += row(_t('submit_lbl_time'), (values.startTime || '--:--') + ' ~ ' + (values.endTime || '--:--'), edit(3, 'Start Time'));
             const machines = (typeof groupedMachines !== 'undefined' && groupedMachines.length > 0) ? groupedMachines : [document.getElementById('machine-selector')?.value || 'UNKNOWN'];
             const missingPc = typeof resolveFeed === 'function' ? machines.some(m => resolveFeed(m).pcPerCycle == null) : false;
             
-            html += row(_t('submit_lbl_qty'), values.processQty, missingPc ? edit(2, 'ProcessQuantity') : '');
+            html += row(_t('submit_lbl_qty'), values.processQty, missingPc ? edit(3, 'ProcessQuantity') : '');
             html += row(_t('submit_lbl_shots'), values.shotCount, `<button type="button" class="row-edit-btn" onclick="if(window.openShotEditModal) window.openShotEditModal();">${_t('submit_edit_btn')}</button>`);
-            html += row(_t('submit_lbl_material_lot'), (values.materialLot || '---'), edit(2, '材料ロット'));
-            html += row(_t('submit_lbl_defects'), _t('submit_lbl_defect_pull') + ': ' + values.defectsPull + ' | ' + _t('submit_lbl_defect_process') + ': ' + values.defectsProcess + ' | ' + _t('submit_lbl_defect_other') + ': ' + values.defectsOther + ' (NG: ' + values.totalNG + ')', edit(2, 'counter-box-18'));
+            html += row(_t('submit_lbl_material_lot'), (values.materialLot || '---'), edit(3, '材料ロット'));
+            html += row(_t('submit_lbl_defects'), _t('submit_lbl_defect_pull') + ': ' + values.defectsPull + ' | ' + _t('submit_lbl_defect_process') + ': ' + values.defectsProcess + ' | ' + _t('submit_lbl_defect_other') + ': ' + values.defectsOther + ' (NG: ' + values.totalNG + ')', edit(3, 'counter-box-18'));
             html += row(_t('submit_lbl_good_total'), '<span style="font-weight: bold; color: var(--accent-green);">' + values.totalGood + '</span>');
             html += row(_t('submit_lbl_cycle_check'), _t('submit_lbl_first_check') + ': ' + values.photosHatsumono + ' | ' + _t('submit_lbl_last_check') + ': ' + values.photosAtomono);
             html += row(_t('submit_lbl_label_photos'), values.photosMaterial + _t('submit_lbl_photos_unit'));
@@ -4105,42 +5155,48 @@
             transform: translateY(1px);
         }
 
-        /* Image preview modal */
+        /* Image preview modal (Strict Viewport Bounding) */
         .img-preview-modal {
-            position: fixed;
-            inset: 0;
-            z-index: 100150;
+            position: fixed !important;
+            inset: 0 !important;
+            z-index: 100150 !important;
             display: none;
+            flex-direction: column;
             align-items: center;
             justify-content: center;
-            background: rgba(16, 24, 40, 0.82);
-            padding: 20px;
+            background: rgba(16, 24, 40, 0.88) !important;
+            padding: 20px !important;
+            box-sizing: border-box !important;
+            overflow: hidden !important;
         }
 
         .img-preview-modal.open {
-            display: flex;
+            display: flex !important;
         }
 
         .img-preview-modal img {
-            max-width: 96vw;
-            max-height: 82vh;
-            border-radius: var(--card-radius);
-            box-shadow: var(--shadow-pop);
+            max-width: 90vw !important;
+            max-height: 72vh !important;
+            object-fit: contain !important;
+            box-sizing: border-box !important;
+            border-radius: var(--card-radius, 14px);
+            box-shadow: var(--shadow-pop, 0 20px 40px rgba(0,0,0,0.3));
         }
 
         .img-preview-modal .img-preview-close {
-            position: absolute;
-            top: 18px;
-            right: 20px;
-            width: 44px;
-            height: 44px;
-            border-radius: 50%;
-            border: none;
-            background: rgba(255, 255, 255, 0.16);
-            color: #fff;
-            font-size: 1.6rem;
-            cursor: pointer;
-            line-height: 1;
+            position: absolute !important;
+            top: 18px !important;
+            right: 20px !important;
+            width: 44px !important;
+            height: 44px !important;
+            border-radius: 50% !important;
+            border: none !important;
+            background: rgba(255, 255, 255, 0.2) !important;
+            color: #fff !important;
+            font-size: 1.6rem !important;
+            cursor: pointer !important;
+            line-height: 1 !important;
+            z-index: 100160 !important;
         }
     </style>
 
@@ -4816,7 +5872,7 @@
                 if (!titleEl) {
                     titleEl = document.createElement('div');
                     titleEl.id = 'imgPreviewTitle';
-                    titleEl.style.cssText = 'position:absolute; top:15%; left:50%; transform:translateX(-50%); color:#fff; font-size:3rem; font-weight:900; text-shadow: 2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 0 4px 12px rgba(0,0,0,0.9); background: rgba(0,0,0,0.5); padding: 12px 32px; border-radius: 16px; pointer-events:none; z-index: 100010; white-space:nowrap; letter-spacing:3px; border: 3px solid rgba(255,255,255,0.3);';
+                    titleEl.style.cssText = 'position:absolute; top:20px; left:50%; transform:translateX(-50%); color:#ffffff; font-size:1.1rem; font-weight:800; text-align:center; max-width:82vw; word-break:break-word; white-space:normal; background:rgba(0,0,0,0.72); padding:8px 20px; border-radius:12px; pointer-events:none; z-index:100160; border:1px solid rgba(255,255,255,0.2); box-shadow:0 4px 16px rgba(0,0,0,0.4);';
                     m.appendChild(titleEl);
                 }
                 

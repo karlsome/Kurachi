@@ -237,6 +237,31 @@ const state = {
   pendingTicketsByStep: {}, // optional tickets saved before a step result is committed
 };
 
+function getAppLanguage() {
+  if (typeof getCurrentLanguage === 'function') {
+    return getCurrentLanguage();
+  }
+  return localStorage.getItem('appLanguage') || 'ja';
+}
+
+function S() {
+  const lang = getAppLanguage();
+  return STRINGS[lang] || STRINGS.ja;
+}
+
+function tx(text, obj, propBase) {
+  if (obj && propBase) {
+    const lang = getAppLanguage();
+    if (lang === 'en' && obj[`${propBase}_en`]) return obj[`${propBase}_en`];
+    if (lang === 'ja' && obj[`${propBase}_ja`]) return obj[`${propBase}_ja`];
+  }
+  if (typeof _t === 'function' && typeof text === 'string') {
+    const translated = _t(text);
+    if (translated !== text) return translated;
+  }
+  return text || '';
+}
+
 const dom = {};
 let indexedDbPromise = null;
 
@@ -280,21 +305,11 @@ function detectDefaultLang() {
   return 'en';
 }
 
-function S() { return STRINGS[state.lang]; }
-
-function tx(text) {
-  if (!text) return text;
-  const cache = state.translationCache[state.lang];
-  return (cache && cache[text]) ? cache[text] : text;
-}
-
 function applyLang(lang) {
-  const s = STRINGS[lang];
-  // Update switcher active state
+  const s = STRINGS[lang] || STRINGS.ja;
   document.querySelectorAll('.lang-btn').forEach(b =>
     b.classList.toggle('active', b.dataset.lang === lang)
   );
-  // Static text elements
   const set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
   set('name-eyebrow', s.eyebrow);
   set('inspection-eyebrow', s.eyebrow);
@@ -303,27 +318,13 @@ function applyLang(lang) {
   set('begin-btn-text', s.beginBtn);
   set('ng-sub', s.ngSub);
   set('ok-sub', s.okSub);
-  set('summary-eyebrow', s.complete);
-  set('submit-btn-text', s.submitBtn);
-  set('submit-success-title', s.submitSuccessTitle);
-  set('submit-success-sub', s.submitSuccessSub);
-  set('back-btn-text', s.backBtn);
-  set('reset-all-btn-text', s.resetAllBtn);
-  set('start-over-btn-text', s.startOver);
-  if (dom.btnSkip) dom.btnSkip.textContent = s.skipBtn;
-  const nameInput = document.getElementById('worker-name-input');
-  if (nameInput) nameInput.placeholder = s.namePlaceholder;
 }
 
-async function setLang(lang) {
+async function setLanguage(lang) {
   state.lang = lang;
   applyLang(lang);
-  if (state.steps.length > 0 && !state.translationCache[lang]) {
-    await translateSteps(lang);
-  }
   if (state.phase === 'inspection') renderStep();
   if (state.phase === 'name') {
-    // Update dynamic name-screen title if template already loaded
     const el = document.getElementById('name-screen-title');
     if (el) el.textContent = tx(state.pageTitle);
   }
@@ -2364,7 +2365,9 @@ async function saveTicketModal() {
             status: 'NG',
             reason,
             userInput: userInputStr,
-            expectedInput: expectedStr
+            expectedInput: expectedStr,
+            schedule: state.schedule || state.formSchedule || state.activeForm?.schedule || 'daily',
+            itemLabel: step ? (step.title || step.label || step.label_ja || step.label_en || '') : ''
           })
         });
       if (response && response.message_id) {

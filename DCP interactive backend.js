@@ -41,7 +41,7 @@ const dbURL = 'https://script.google.com/macros/s/AKfycbx0qBw0_wF5X-hA2t1yY-d5h5
 
 const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
-//const serverURL = "http://192.168.0.105:3000";
+//const serverURL = "http://192.168.3.9:3000";
 
 // Global variable to track if sendtoNC button has been pressed
 let sendtoNCButtonisPressed = false;
@@ -595,6 +595,8 @@ document.addEventListener('DOMContentLoaded', () => {
                   console.error(`Option '${savedValue}' not found in select '${input.id || input.name}'.`);
                 }
               }, 2000); // Adjust delay if options are populated dynamically
+            } else if (input.type === 'file') {
+              // Ignore file input elements (browsers forbid setting non-empty strings)
             } else {
               input.value = savedValue; // Restore value for text, hidden, and other inputs
             }
@@ -3108,13 +3110,15 @@ document.addEventListener("DOMContentLoaded", async function () {
       workerNamesData = workerNames;
 
       const dataList = document.getElementById("machine-operator-suggestions");
-      dataList.innerHTML = ""; // Clear any existing options
+      if (dataList) {
+        dataList.innerHTML = ""; // Clear any existing options
 
-      workerNames.forEach(name => {
-        const option = document.createElement("option");
-        option.value = name;
-        dataList.appendChild(option);
-      });
+        workerNames.forEach(name => {
+          const option = document.createElement("option");
+          option.value = name;
+          dataList.appendChild(option);
+        });
+      }
     } catch (error) {
       console.error("Error fetching worker names:", error);
     }
@@ -3363,7 +3367,40 @@ function groupNamesByLetter(names) {
 // Render worker names in modal
 function renderWorkerNames() {
   const container = document.getElementById('workerNamesContainer');
+  if (!container) return;
   container.innerHTML = '';
+
+  const currentSlotIdx = Number.isInteger(window.activeWorkerSlotIndex) ? window.activeWorkerSlotIndex : 0;
+  const otherSelectedNames = (window.selectedWorkerNames || [])
+    .filter((n, idx) => idx !== currentSlotIdx && typeof n === 'string' && n.trim().length > 0)
+    .map(n => n.trim().toLowerCase());
+
+  // Helper to build a worker button with duplicate prevention
+  function createWorkerBtn(name) {
+    const isAlreadySelectedElsewhere = otherSelectedNames.includes(name.trim().toLowerCase());
+    const btn = document.createElement('button');
+    btn.type = 'button';
+
+    if (isAlreadySelectedElsewhere) {
+      btn.className = 'worker-name-btn is-disabled-selected';
+      btn.disabled = true;
+      btn.title = '既に他の枠で選択されています / Already selected';
+      btn.style.opacity = '0.4';
+      btn.style.cursor = 'not-allowed';
+      btn.style.filter = 'grayscale(1)';
+      btn.style.borderStyle = 'dashed';
+      btn.innerHTML = `${name} <span style="font-size:0.75rem; margin-left:4px; opacity:0.8; font-weight:normal;">(選択中)</span>`;
+      btn.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      };
+    } else {
+      btn.className = 'worker-name-btn';
+      btn.textContent = name;
+      btn.onclick = () => selectWorkerName(name);
+    }
+    return btn;
+  }
 
   // Get recent workers
   const recentWorkers = getRecentWorkers();
@@ -3385,11 +3422,7 @@ function renderWorkerNames() {
       const wrapper = document.createElement('div');
       wrapper.style.position = 'relative';
 
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'worker-name-btn';
-      btn.textContent = name;
-      btn.onclick = () => selectWorkerName(name);
+      const btn = createWorkerBtn(name);
 
       const deleteBtn = document.createElement('button');
       deleteBtn.type = 'button';
@@ -3427,11 +3460,7 @@ function renderWorkerNames() {
     grid.className = 'worker-names-grid';
 
     grouped[letter].forEach(name => {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'worker-name-btn';
-      btn.textContent = name;
-      btn.onclick = () => selectWorkerName(name);
+      const btn = createWorkerBtn(name);
       grid.appendChild(btn);
     });
 
@@ -3440,53 +3469,476 @@ function renderWorkerNames() {
   });
 }
 
-// Select worker name
-function selectWorkerName(name) {
-  const input = document.getElementById('Machine Operator');
-  input.value = name;
+// Multi-Worker Selection & Persistence System
+window.selectedWorkerNames = window.selectedWorkerNames || [];
+window.activeWorkerSlotIndex = 0;
 
-  // Add to recent workers
-  addToRecentWorkers(name);
+window.saveWorkerNamesToStorage = function () {
+  const seen = new Set();
+  const activeNames = (window.selectedWorkerNames || [])
+    .map(n => (n || '').trim())
+    .filter(n => {
+      if (!n) return false;
+      const lower = n.toLowerCase();
+      if (seen.has(lower)) return false;
+      seen.add(lower);
+      return true;
+    });
+  const prefix = typeof uniquePrefix !== 'undefined' ? uniquePrefix : '';
+  localStorage.setItem(`${prefix}selectedWorkerNames`, JSON.stringify(activeNames));
 
-  // Save to localStorage (programmatic changes don't trigger 'input' event)
   const pageName = location.pathname.split('/').pop();
   const currentSelectedFactory = document.getElementById('selected工場')?.value;
   const currentSelectedMachine = getQueryParam('machine');
-  if (pageName && currentSelectedFactory && currentSelectedMachine) {
+  const input = document.getElementById('Machine Operator');
+  if (pageName && currentSelectedFactory && currentSelectedMachine && input) {
     const key = `${pageName}_${currentSelectedFactory}_${currentSelectedMachine}_${input.id || input.name}`;
-    localStorage.setItem(key, name);
-    console.log('Worker name saved to localStorage:', key, '=', name);
+    localStorage.setItem(key, JSON.stringify(activeNames));
+  }
+};
+
+window.loadWorkerNamesFromStorage = function () {
+  const prefix = typeof uniquePrefix !== 'undefined' ? uniquePrefix : '';
+  let stored = localStorage.getItem(`${prefix}selectedWorkerNames`);
+  if (!stored) {
+    const pageName = location.pathname.split('/').pop();
+    const currentSelectedFactory = document.getElementById('selected工場')?.value;
+    const currentSelectedMachine = getQueryParam('machine');
+    if (pageName && currentSelectedFactory && currentSelectedMachine) {
+      const key = `${pageName}_${currentSelectedFactory}_${currentSelectedMachine}_Machine Operator`;
+      stored = localStorage.getItem(key);
+    }
   }
 
-  // Log worker name selection
-  logTabletAction('Worker name selected', 'in-progress', {
-    workerName: name
+  if (stored) {
+    try {
+      let rawList = [];
+      if (stored.startsWith('[')) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          rawList = parsed;
+        }
+      } else if (stored.trim()) {
+        rawList = stored.split(',').map(s => s.trim()).filter(Boolean);
+      }
+
+      const seen = new Set();
+      const unique = [];
+      rawList.forEach(item => {
+        const clean = (item || '').trim();
+        if (clean) {
+          const lower = clean.toLowerCase();
+          if (!seen.has(lower)) {
+            seen.add(lower);
+            unique.push(clean);
+          }
+        }
+      });
+
+      if (unique.length > 0) {
+        window.selectedWorkerNames = unique;
+      }
+    } catch (e) {
+      console.warn('Could not parse stored worker names:', e);
+    }
+  }
+
+  const activeNames = (window.selectedWorkerNames || []).map(n => (n || '').trim()).filter(Boolean);
+  const input = document.getElementById('Machine Operator');
+  if (input && activeNames.length > 0) {
+    input.value = activeNames.join(', ');
+  }
+};
+
+// IndexedDB Helper for Checklist Draft Photos (keeps image bytes out of localStorage)
+const DB_NAME_CHECKLIST = typeof uniquePrefix !== 'undefined' ? `${uniquePrefix}checklistPhotosDB` : 'DCP_checklistPhotosDB';
+const DB_VERSION_CHECKLIST = 1;
+const STORE_NAME_CHECKLIST = 'checklistPhotos';
+
+function openChecklistPhotosDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME_CHECKLIST, DB_VERSION_CHECKLIST);
+    req.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains(STORE_NAME_CHECKLIST)) {
+        db.createObjectStore(STORE_NAME_CHECKLIST, { keyPath: 'id' });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
   });
+}
 
-  // Close modal
-  closeWorkerModal();
-
-  // Trigger change event
-  input.dispatchEvent(new Event('change'));
-
-  // Update submit summary if it exists (so edits in submit tab reflect immediately)
-  if (typeof updateSubmitSummary === 'function') {
-    updateSubmitSummary();
+async function saveChecklistPhotoToIDB(id, dataUrl) {
+  if (!id || !dataUrl) return;
+  try {
+    const db = await openChecklistPhotosDB();
+    const tx = db.transaction(STORE_NAME_CHECKLIST, 'readwrite');
+    const store = tx.objectStore(STORE_NAME_CHECKLIST);
+    store.put({ id, dataUrl, updatedAt: Date.now() });
+    return new Promise((res, rej) => {
+      tx.oncomplete = () => res();
+      tx.onerror = () => rej(tx.error);
+    });
+  } catch (e) {
+    console.warn('Failed to save checklist photo to IndexedDB:', e);
   }
 }
 
-// Open worker modal
-function openWorkerModal() {
-  currentModalInputField = 'worker'; // Track which field opened the modal
+async function getChecklistPhotoFromIDB(id) {
+  if (!id) return null;
+  try {
+    const db = await openChecklistPhotosDB();
+    const tx = db.transaction(STORE_NAME_CHECKLIST, 'readonly');
+    const store = tx.objectStore(STORE_NAME_CHECKLIST);
+    const req = store.get(id);
+    return new Promise((res, rej) => {
+      req.onsuccess = () => res(req.result ? req.result.dataUrl : null);
+      req.onerror = () => rej(req.error);
+    });
+  } catch (e) {
+    console.warn('Failed to read checklist photo from IndexedDB:', e);
+    return null;
+  }
+}
+
+async function clearChecklistPhotosFromIDB() {
+  try {
+    const db = await openChecklistPhotosDB();
+    const tx = db.transaction(STORE_NAME_CHECKLIST, 'readwrite');
+    const store = tx.objectStore(STORE_NAME_CHECKLIST);
+    store.clear();
+    return new Promise((res, rej) => {
+      tx.oncomplete = () => res();
+      tx.onerror = () => rej(tx.error);
+    });
+  } catch (e) {
+    console.warn('Failed to clear checklist photos from IndexedDB:', e);
+  }
+}
+
+async function deleteChecklistPhotoFromIDB(id) {
+  if (!id) return;
+  try {
+    const db = await openChecklistPhotosDB();
+    const tx = db.transaction(STORE_NAME_CHECKLIST, 'readwrite');
+    const store = tx.objectStore(STORE_NAME_CHECKLIST);
+    store.delete(id);
+    return new Promise((res, rej) => {
+      tx.oncomplete = () => res();
+      tx.onerror = () => rej(tx.error);
+    });
+  } catch (e) {
+    console.warn('Failed to delete photo from IndexedDB:', e);
+  }
+}
+
+async function deleteTicketPhotosFromIDB(fieldId) {
+  const factory = window.checklistState?.factory;
+  const machine = window.checklistState?.machine;
+  if (!factory || !machine || !fieldId) return;
+
+  for (let i = 0; i < 10; i++) {
+    const idbKey = `tp_${factory}_${machine}_${fieldId}_${i}`;
+    await deleteChecklistPhotoFromIDB(idbKey);
+  }
+}
+
+window.saveChecklistDraftToStorage = async function () {
+  if (!window.checklistState || !window.checklistState.factory || !window.checklistState.machine) return;
+  const prefix = typeof uniquePrefix !== 'undefined' ? uniquePrefix : '';
+  const factory = window.checklistState.factory;
+  const machine = window.checklistState.machine;
+  const key = `${prefix}checklistDraft_${factory}_${machine}`;
+
+  // Process field photos: save base64 to IndexedDB, save reference keys in draft
+  const fieldPhotoRefs = {};
+  if (window.checklistState.fieldPhotos) {
+    for (const fId of Object.keys(window.checklistState.fieldPhotos)) {
+      const base64 = window.checklistState.fieldPhotos[fId];
+      if (base64) {
+        const idbKey = `fp_${factory}_${machine}_${fId}`;
+        if (base64.startsWith('data:image')) {
+          await saveChecklistPhotoToIDB(idbKey, base64);
+        }
+        fieldPhotoRefs[fId] = idbKey;
+      }
+    }
+  }
+
+  // Process ticket photos: save base64 to IndexedDB, save reference keys in draft
+  const ticketsClean = {};
+  if (window.checklistState.tickets) {
+    for (const fId of Object.keys(window.checklistState.tickets)) {
+      const ticket = window.checklistState.tickets[fId];
+      if (ticket) {
+        const imgRefs = [];
+        if (Array.isArray(ticket.images)) {
+          for (let i = 0; i < ticket.images.length; i++) {
+            const imgVal = ticket.images[i];
+            if (imgVal) {
+              const idbKey = `tp_${factory}_${machine}_${fId}_${i}`;
+              if (imgVal.startsWith('data:image')) {
+                await saveChecklistPhotoToIDB(idbKey, imgVal);
+              }
+              imgRefs.push(idbKey);
+            }
+          }
+        }
+        ticketsClean[fId] = {
+          reason: ticket.reason || '',
+          saved: ticket.saved || false,
+          chatworkMessageId: ticket.chatworkMessageId || '',
+          images: imgRefs
+        };
+      }
+    }
+  }
+
+  const draftData = {
+    answers: window.checklistState.answers || {},
+    tickets: ticketsClean,
+    fieldPhotos: fieldPhotoRefs,
+    recordIds: window.checklistState.recordIds || {},
+    queueIndex: window.checklistState.queueIndex || 0,
+    isPreComplete: window.checklistState.isPreComplete || false,
+    isPostComplete: window.checklistState.isPostComplete || false,
+    isBypassed: window.checklistState.isBypassed || false,
+    dateStr: new Date().toISOString().split('T')[0],
+    timestamp: Date.now()
+  };
+
+  localStorage.setItem(key, JSON.stringify(draftData));
+};
+
+window.loadChecklistDraftFromStorage = async function () {
+  if (!window.checklistState || !window.checklistState.factory || !window.checklistState.machine) return;
+  const prefix = typeof uniquePrefix !== 'undefined' ? uniquePrefix : '';
+  const factory = window.checklistState.factory;
+  const machine = window.checklistState.machine;
+  const key = `${prefix}checklistDraft_${factory}_${machine}`;
+  const raw = localStorage.getItem(key);
+  if (!raw) return;
+
+  try {
+    const draft = JSON.parse(raw);
+    const todayIso = new Date().toISOString().split('T')[0];
+    if ((draft.dateStr && draft.dateStr !== todayIso) || (draft.timestamp && (Date.now() - draft.timestamp > 86400000))) {
+      console.log(`🧹 Clearing previous day's draft data (draft date: ${draft.dateStr}, today: ${todayIso})`);
+      localStorage.removeItem(key);
+      await clearChecklistPhotosFromIDB();
+      return;
+    }
+
+    if (draft.answers) window.checklistState.answers = { ...window.checklistState.answers, ...draft.answers };
+    if (draft.recordIds) window.checklistState.recordIds = { ...(window.checklistState.recordIds || {}), ...draft.recordIds };
+    if (typeof draft.queueIndex === 'number' && draft.queueIndex < (window.checklistState.queue?.length || 1)) {
+      window.checklistState.queueIndex = draft.queueIndex;
+    }
+    if (draft.isPreComplete) window.checklistState.isPreComplete = true;
+    if (typeof draft.isPostComplete === 'boolean') window.checklistState.isPostComplete = draft.isPostComplete;
+    if (draft.isBypassed) window.checklistState.isBypassed = true;
+
+    // Hydrate field photos from IndexedDB
+    if (draft.fieldPhotos) {
+      window.checklistState.fieldPhotos = window.checklistState.fieldPhotos || {};
+      for (const fId of Object.keys(draft.fieldPhotos)) {
+        const val = draft.fieldPhotos[fId];
+        if (val && val.startsWith('data:image')) {
+          window.checklistState.fieldPhotos[fId] = val;
+        } else if (val) {
+          const base64 = await getChecklistPhotoFromIDB(val);
+          if (base64) window.checklistState.fieldPhotos[fId] = base64;
+        }
+      }
+    }
+
+    // Hydrate ticket photos from IndexedDB
+    if (draft.tickets) {
+      window.checklistState.tickets = window.checklistState.tickets || {};
+      for (const fId of Object.keys(draft.tickets)) {
+        const t = draft.tickets[fId];
+        if (t) {
+          const hydratedImages = [];
+          if (Array.isArray(t.images)) {
+            for (const imgRef of t.images) {
+              if (imgRef && imgRef.startsWith('data:image')) {
+                hydratedImages.push(imgRef);
+              } else if (imgRef) {
+                const base64 = await getChecklistPhotoFromIDB(imgRef);
+                if (base64) hydratedImages.push(base64);
+              }
+            }
+          }
+          window.checklistState.tickets[fId] = {
+            reason: t.reason || '',
+            saved: t.saved || false,
+            chatworkMessageId: t.chatworkMessageId || '',
+            images: hydratedImages
+          };
+        }
+      }
+    }
+
+    if (typeof window.renderCurrentChecklistTemplate === 'function') {
+      window.renderCurrentChecklistTemplate();
+    }
+  } catch (e) {
+    console.warn('Error loading checklist draft:', e);
+  }
+};
+
+window.clearChecklistDraftFromStorage = async function () {
+  if (!window.checklistState || !window.checklistState.factory || !window.checklistState.machine) return;
+  const prefix = typeof uniquePrefix !== 'undefined' ? uniquePrefix : '';
+  const key = `${prefix}checklistDraft_${window.checklistState.factory}_${window.checklistState.machine}`;
+  localStorage.removeItem(key);
+  await clearChecklistPhotosFromIDB();
+};
+
+window.renderWorkerListUI = function () {
+  const container = document.getElementById('workerListContainer');
+  if (!container) return;
+  container.innerHTML = '';
+
+  if (!window.selectedWorkerNames || window.selectedWorkerNames.length === 0) {
+    window.selectedWorkerNames = [''];
+  }
+
+  window.selectedWorkerNames.forEach((name, idx) => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display: flex; gap: 8px; align-items: center; width: 100%;';
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.readOnly = true;
+    input.className = 'tap-field';
+    input.style.cssText = 'flex: 1; margin: 0; background: #f8f9fa; cursor: pointer; font-weight: 700; border: 1px solid #e6e8ef; border-radius: 10px; padding: 12px; font-size: 1rem;';
+    input.value = name || '';
+    input.placeholder = `👤 Select Worker ${idx + 1}...`;
+    input.onclick = () => openWorkerModal(idx);
+
+    row.appendChild(input);
+
+    if (window.selectedWorkerNames.length > 1) {
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'btn btn-alert';
+      removeBtn.style.cssText = 'padding: 8px 14px; font-weight: 800; font-size: 1.1rem; border-radius: 10px; min-width: 44px;';
+      removeBtn.textContent = '✕';
+      removeBtn.onclick = () => removeWorkerSlot(idx);
+      row.appendChild(removeBtn);
+    }
+
+    container.appendChild(row);
+  });
+
+  const hiddenInput = document.getElementById('Machine Operator');
+  if (hiddenInput) {
+    const activeNames = window.selectedWorkerNames.map(n => (n || '').trim()).filter(Boolean);
+    hiddenInput.value = activeNames.join(', ');
+  }
+};
+
+window.addWorkerSlot = function () {
+  if (!window.selectedWorkerNames) window.selectedWorkerNames = [];
+  window.selectedWorkerNames = window.selectedWorkerNames.filter(n => (n || '').trim().length > 0);
+  window.selectedWorkerNames.push('');
+  renderWorkerListUI();
+  saveWorkerNamesToStorage();
+  saveChecklistDraftToStorage();
+  if (typeof window.renderCurrentChecklistTemplate === 'function') window.renderCurrentChecklistTemplate();
+  openWorkerModal(window.selectedWorkerNames.length - 1);
+};
+
+window.removeWorkerSlot = function (index) {
+  if (!window.selectedWorkerNames || window.selectedWorkerNames.length <= 1) return;
+  window.selectedWorkerNames.splice(index, 1);
+  if (window.selectedWorkerNames.length === 0) {
+    window.selectedWorkerNames = [''];
+  }
+  renderWorkerListUI();
+  saveWorkerNamesToStorage();
+  saveChecklistDraftToStorage();
+  if (typeof window.renderCurrentChecklistTemplate === 'function') window.renderCurrentChecklistTemplate();
+};
+
+function selectWorkerName(name) {
+  if (!name || !name.trim()) return;
+  const trimmedName = name.trim();
+  if (!window.selectedWorkerNames) window.selectedWorkerNames = [];
+  const idx = Number.isInteger(window.activeWorkerSlotIndex) ? window.activeWorkerSlotIndex : 0;
+
+  // Prevent duplicate worker names across slots
+  const isAlreadyChosen = window.selectedWorkerNames.some((n, i) => i !== idx && n && n.trim().toLowerCase() === trimmedName.toLowerCase());
+  if (isAlreadyChosen) {
+    if (typeof window.showToast === 'function') {
+      window.showToast(`⚠️ ${trimmedName} は既に選択されています / Already selected`, 'warning');
+    } else {
+      alert(`⚠️ ${trimmedName} は既に選択されています / ${trimmedName} is already selected in another slot.`);
+    }
+    return;
+  }
+
+  window.selectedWorkerNames[idx] = trimmedName;
+
+  const seen = new Set();
+  const activeNames = window.selectedWorkerNames
+    .map(n => (n || '').trim())
+    .filter(n => {
+      if (!n) return false;
+      const lower = n.toLowerCase();
+      if (seen.has(lower)) return false;
+      seen.add(lower);
+      return true;
+    });
+
+  const input = document.getElementById('Machine Operator');
+  if (input) input.value = activeNames.join(', ');
+
+  if (window.checklistState && window.checklistState.answers) {
+    const queue = window.checklistState.queue;
+    const queueIndex = window.checklistState.queueIndex;
+    if (queue && queue[queueIndex] && Array.isArray(queue[queueIndex].fields)) {
+      queue[queueIndex].fields.forEach(field => {
+        if (field.type === 'name') {
+          window.checklistState.answers[field.id] = activeNames.length > 0 ? activeNames : [trimmedName];
+        }
+      });
+    }
+  }
+
+  renderWorkerListUI();
+  saveWorkerNamesToStorage();
+  saveChecklistDraftToStorage();
+
+  if (typeof window.renderCurrentChecklistTemplate === 'function') {
+    window.renderCurrentChecklistTemplate();
+  }
+
+  addToRecentWorkers(trimmedName);
+
+  logTabletAction('Worker name selected', 'in-progress', {
+    workerNames: window.selectedWorkerNames
+  });
+
+  closeWorkerModal();
+
+  if (input) input.dispatchEvent(new Event('change'));
+  if (typeof updateSubmitSummary === 'function') updateSubmitSummary();
+}
+
+function openWorkerModal(slotIndex = 0) {
+  currentModalInputField = 'worker';
+  window.activeWorkerSlotIndex = slotIndex;
   const modal = document.getElementById('workerNameModal');
-  modal.style.display = 'flex'; // flex so the .modal centering applies
+  if (modal) modal.style.display = 'flex';
   renderWorkerNames();
 }
 
-// Close worker modal
 function closeWorkerModal() {
   const modal = document.getElementById('workerNameModal');
-  modal.style.display = 'none';
+  if (modal) modal.style.display = 'none';
 }
 
 // Initialize worker name modal (runs after DOMContentLoaded)
@@ -7847,6 +8299,10 @@ function closeSendingToMachineIndicator() {
     clearTimeout(_sendingIndicatorTimer);
     _sendingIndicatorTimer = null;
   }
+  // Jump to Params tab (index 2) when sending to machine indicator closes
+  if (typeof window.goToTab === 'function') {
+    window.goToTab(2);
+  }
 }
 
 //this function sends request to nc cutter's pC (supports single or multiple machines)
@@ -10683,29 +11139,22 @@ window.showStep0Modal = function () {
   const workerInput = document.getElementById('Machine Operator');
   const currentWorkerLabel = document.getElementById('step0CurrentWorkerName');
 
-  // Make sure to hide Step 1, 2, 3 Modals
   ['step1Modal', 'step2Modal', 'step3Modal'].forEach(id => {
     const m = document.getElementById(id);
     if (m) m.style.display = 'none';
   });
 
-  // Check if we have an existing worker name
-  const workerValue = workerInput ? workerInput.value.trim() : '';
-  const isPlaceholderValue = workerValue === '作業者名' ||
-    workerValue === "Worker's Name" ||
-    workerValue === 'Nome do Trabalhador';
+  const activeNames = window.selectedWorkerNames ? window.selectedWorkerNames.map(n => (n || '').trim()).filter(Boolean) : [];
+  const workerValue = activeNames.length > 0 ? activeNames.join(', ') : (workerInput ? workerInput.value.trim() : '');
 
-  if (workerValue !== '' && !isPlaceholderValue) {
+  if (workerValue !== '') {
     currentWorkerLabel.textContent = workerValue;
     confirmState.style.display = 'flex';
     selectState.style.display = 'none';
   } else {
-    // If it was a placeholder value (e.g. from old localStorage), clear it out
-    if (isPlaceholderValue && workerInput) {
-      workerInput.value = '';
-    }
     confirmState.style.display = 'none';
     selectState.style.display = 'flex';
+    if (typeof window.renderWorkerListUI === 'function') window.renderWorkerListUI();
   }
 
   modal.style.display = 'block';
@@ -10719,7 +11168,6 @@ window.proceedFromStep0 = function () {
     return;
   }
 
-  // Make sure it gets cached to localStorage
   if (typeof saveInputs === 'function') saveInputs();
 
   document.getElementById('step0Modal').style.display = 'none';
@@ -10734,7 +11182,7 @@ window.confirmWorkerName = function () {
 window.changeWorkerName = function () {
   document.getElementById('step0ConfirmState').style.display = 'none';
   document.getElementById('step0SelectState').style.display = 'flex';
-  document.getElementById('Machine Operator').value = '';
+  if (typeof window.renderWorkerListUI === 'function') window.renderWorkerListUI();
 };
 
 // Function to show Step 1 Modal
@@ -12085,13 +12533,12 @@ window.addEventListener('load', function () {
       if (typeof window.syncScanTabState === 'function') window.syncScanTabState();
 
       // Restore active tab if we have a valid workflow state
-      const savedTabIndexStr = localStorage.getItem(`${uniquePrefix}activeTabIndex`);
-      if (savedTabIndexStr !== null) {
-        const savedTabIndex = parseInt(savedTabIndexStr, 10);
-        if (!isNaN(savedTabIndex) && typeof window.goToTab === 'function') {
-          // Add a small delay so goToTab runs after all UI state settles
-          setTimeout(() => window.goToTab(savedTabIndex), 50);
-        }
+      const savedTabIndex = (typeof window.getSavedTabIndex === 'function')
+        ? window.getSavedTabIndex()
+        : parseInt(localStorage.getItem(`${uniquePrefix}activeTabIndex`) || localStorage.getItem('activeTabIndex'), 10);
+      if (savedTabIndex !== null && !isNaN(savedTabIndex) && typeof window.goToTab === 'function') {
+        // Add a small delay so goToTab runs after all UI state settles
+        setTimeout(() => window.goToTab(savedTabIndex, true), 50);
       }
     } else {
       // Scanned but Step 3 not done — restart from Step 1
@@ -13057,4 +13504,2640 @@ if (manualSendModal) {
       });
     });
   };
+})();
+
+// ============================================================================
+// CHECKLIST INTEGRATION MODULE (DCP INTERACTIVE)
+// ============================================================================
+(function () {
+  window.checklistState = {
+    factory: '',
+    machine: '',
+    preChecklists: [],
+    postChecklists: [],
+    queue: [],
+    queueIndex: 0,
+    answers: {},
+    tickets: {},
+    fieldPhotos: {},
+    isPreComplete: false,
+    isBypassed: false,
+    isPostComplete: false,
+    isPostSkipped: false,
+    activeKeypadField: null,
+    activeTicketField: null,
+    bypassQrScanner: null,
+  };
+
+  function getLocalizedText(obj, propBase) {
+    if (!obj) return '';
+    const lang = (typeof getCurrentLanguage === 'function') ? getCurrentLanguage() : 'ja';
+    if (lang === 'en' && obj[`${propBase}_en`]) return obj[`${propBase}_en`];
+    if (lang === 'ja' && obj[`${propBase}_ja`]) return obj[`${propBase}_ja`];
+    return obj[propBase] || obj[`${propBase}_ja`] || obj[`${propBase}_en`] || '';
+  }
+
+  window.goToChecklistTab = function () {
+    const hasQueue = !!(window.checklistState && Array.isArray(window.checklistState.queue) && window.checklistState.queue.length > 0);
+    const btn = document.getElementById('checklistTabBtn');
+    if (!hasQueue) {
+      if (btn) btn.style.display = 'none';
+      return;
+    }
+
+    if (btn) btn.style.display = 'inline-flex';
+
+    if (typeof window.goToTab === 'function') {
+      window.goToTab(0);
+    }
+  };
+
+  window.initChecklistsForMachine = async function (factory, machine) {
+    if (!factory || !machine) return;
+    try {
+      const url = `${serverURL}/api/check-forms/templates?factory=${encodeURIComponent(factory)}&machine=${encodeURIComponent(machine)}`;
+      const res = await fetch(url);
+      if (!res.ok) return;
+      const data = await res.json();
+      const templates = Array.isArray(data.templates) ? data.templates : [];
+
+      const preChecklists = templates.filter(t => (t.timing || 'pre').toLowerCase() === 'pre');
+      const postChecklists = templates.filter(t => (t.timing || 'pre').toLowerCase() === 'post');
+
+      window.checklistState.factory = factory;
+      window.checklistState.machine = machine;
+      window.checklistState.dateStr = new Date().toISOString().split('T')[0];
+      window.checklistState.preChecklists = preChecklists;
+      window.checklistState.postChecklists = postChecklists;
+
+      const scheduleOrder = { daily: 1, weekly: 2, monthly: 3 };
+      preChecklists.sort((a, b) => (scheduleOrder[a.schedule] || 99) - (scheduleOrder[b.schedule] || 99));
+      postChecklists.sort((a, b) => (scheduleOrder[a.schedule] || 99) - (scheduleOrder[b.schedule] || 99));
+
+      const btn = document.getElementById('checklistTabBtn');
+      const bar = document.querySelector('.tab-bar');
+
+      if (preChecklists.length > 0) {
+        if (btn) btn.style.display = 'inline-flex';
+
+        window.checklistState.queue = preChecklists;
+        window.checklistState.queueIndex = 0;
+        window.checklistState.isPreComplete = false;
+        window.checklistState.isBypassed = false;
+        window.checklistState.answers = {};
+        window.checklistState.tickets = {};
+        window.checklistState.fieldPhotos = {};
+
+        if (typeof window.loadWorkerNamesFromStorage === 'function') window.loadWorkerNamesFromStorage();
+        if (typeof window.loadChecklistDraftFromStorage === 'function') await window.loadChecklistDraftFromStorage();
+
+        if (window.checklistState.isPreComplete || window.checklistState.isBypassed) {
+          if (bar) bar.classList.remove('locked-checklist');
+        } else {
+          if (bar) bar.classList.add('locked-checklist');
+        }
+
+        window.renderCurrentChecklistTemplate();
+        if (!window.checklistState.isPreComplete && !window.checklistState.isBypassed) {
+          window.goToChecklistTab();
+        }
+
+        // MongoDB SWR Background Sync: Verify today's MongoDB status and sync to localStorage & UI
+        verifyChecklistStatusWithMongoDB(factory, machine);
+      } else {
+        window.checklistState.queue = [];
+        window.checklistState.queueIndex = 0;
+        window.checklistState.isPreComplete = true;
+        if (btn) btn.style.display = 'none';
+        if (bar) bar.classList.remove('locked-checklist');
+
+        // Switch to Scan tab (tab index 1)
+        if (typeof window.goToTab === 'function') {
+          const currentTab = typeof currentTabIndex !== 'undefined' ? currentTabIndex : 0;
+          if (currentTab === 0) {
+            window.goToTab(1);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Error initializing checklists:', err);
+    }
+  };
+
+  async function verifyChecklistStatusWithMongoDB(factory, machine) {
+    if (!factory || !machine) return;
+    if (!window.checklistState || !window.checklistState.queue || window.checklistState.queue.length === 0) return;
+    try {
+      const res = await fetch(`${serverURL}/api/check-forms/today-status?factory=${encodeURIComponent(factory)}&machine=${encodeURIComponent(machine)}`);
+      if (!res.ok) return;
+      const data = await res.json();
+
+      if (data) {
+        if (data.recordIds) {
+          window.checklistState.recordIds = { ...(window.checklistState.recordIds || {}), ...data.recordIds };
+        }
+
+        const allPreDone = window.checklistState.queue && window.checklistState.queue.length > 0 && window.checklistState.queue.every(t => {
+          return !!(window.checklistState.recordIds && (window.checklistState.recordIds[t._id] || window.checklistState.recordIds[t.name]));
+        });
+
+        // Only wipe local state if local state claimed completion (isPreComplete: true) BUT MongoDB has no submitted record today (e.g. record deleted from MongoDB)
+        if (!allPreDone && !data.hasSubmittedToday) {
+          if (window.checklistState.isPreComplete) {
+            console.log('🧹 Local state claimed checklist completed, but MongoDB has no record for today - Resetting stale local checklist state.');
+            window.checklistState.isPreComplete = false;
+            window.checklistState.isPostComplete = false;
+            window.checklistState.isBypassed = false;
+            window.checklistState.answers = {};
+            window.checklistState.tickets = {};
+            window.checklistState.fieldPhotos = {};
+            window.checklistState.recordIds = {};
+
+            if (typeof window.clearChecklistDraftFromStorage === 'function') {
+              await window.clearChecklistDraftFromStorage();
+            }
+
+            const bar = document.querySelector('.tab-bar');
+            if (bar) bar.classList.add('locked-checklist');
+
+            if (typeof window.renderCurrentChecklistTemplate === 'function') {
+              window.renderCurrentChecklistTemplate();
+            }
+
+            if (typeof window.goToChecklistTab === 'function') {
+              window.goToChecklistTab();
+            }
+          }
+          return;
+        }
+
+        const prevPre = window.checklistState.isPreComplete;
+        const prevPost = window.checklistState.isPostComplete;
+        const prevTickets = window.checklistState.hasOpenTickets;
+        const prevRecordIdsCount = Object.keys(window.checklistState.recordIds || {}).length;
+        const newRecordIdsCount = Object.keys(data.recordIds || {}).length;
+
+        const hasStateChanged = prevPre !== allPreDone || prevPost !== !!data.isPostComplete || prevTickets !== !!data.hasOpenTickets || prevRecordIdsCount !== newRecordIdsCount;
+
+        window.checklistState.isPreComplete = allPreDone;
+        window.checklistState.isPostComplete = !!data.isPostComplete;
+        window.checklistState.hasOpenTickets = !!data.hasOpenTickets;
+
+        if (typeof window.saveChecklistDraftToStorage === 'function') {
+          await window.saveChecklistDraftToStorage();
+        }
+
+        const bar = document.querySelector('.tab-bar');
+        const canProceed = (allPreDone || window.checklistState.isBypassed) && !window.checklistState.hasOpenTickets;
+        if (canProceed) {
+          if (bar) bar.classList.remove('locked-checklist');
+        } else {
+          if (bar) bar.classList.add('locked-checklist');
+        }
+
+        if (hasStateChanged && typeof window.renderCurrentChecklistTemplate === 'function') {
+          window.renderCurrentChecklistTemplate();
+        }
+
+        if (!allPreDone && !window.checklistState.isBypassed && window.checklistState.queue && window.checklistState.queue.length > 0 && typeof window.goToChecklistTab === 'function') {
+          window.goToChecklistTab();
+        }
+      }
+    } catch (e) {
+      console.warn('MongoDB checklist status sync background check failed:', e);
+    }
+  }
+
+  // Heartbeat check every 30 seconds for overnight day-changes and MongoDB record updates
+  if (!window._checklistDayCheckInterval) {
+    window._checklistDayCheckInterval = setInterval(function () {
+      if (!window.checklistState || !window.checklistState.factory || !window.checklistState.machine) return;
+      if (!window.checklistState.queue || window.checklistState.queue.length === 0) return;
+      const todayIso = new Date().toISOString().split('T')[0];
+      if (window.checklistState.dateStr && window.checklistState.dateStr !== todayIso) {
+        console.log(`🌅 Date changed from ${window.checklistState.dateStr} to ${todayIso} - Auto-resetting checklist for new day.`);
+        window.checklistState.dateStr = todayIso;
+        window.checklistState.isPreComplete = false;
+        window.checklistState.isPostComplete = false;
+        window.checklistState.isBypassed = false;
+        window.checklistState.answers = {};
+        window.checklistState.tickets = {};
+        window.checklistState.fieldPhotos = {};
+
+        if (typeof window.clearChecklistDraftFromStorage === 'function') {
+          window.clearChecklistDraftFromStorage();
+        }
+
+        const bar = document.querySelector('.tab-bar');
+        if (bar) bar.classList.add('locked-checklist');
+
+        if (typeof window.renderCurrentChecklistTemplate === 'function') {
+          window.renderCurrentChecklistTemplate();
+        }
+
+        if (typeof window.goToChecklistTab === 'function') {
+          window.goToChecklistTab();
+        }
+      }
+
+      // Continuously poll MongoDB status every 5s so that as soon as maintenance resolves/closes an NG ticket, the tablet unlocks and displays the green Proceed button
+      verifyChecklistStatusWithMongoDB(window.checklistState.factory, window.checklistState.machine);
+    }, 5000);
+  }
+
+  window.isChecklistFieldCompleted = function (field) {
+    if (!field) return false;
+
+    if (field.type === 'name') {
+      const activeNames = window.selectedWorkerNames ? window.selectedWorkerNames.map(n => (n || '').trim()).filter(Boolean) : [];
+      return activeNames.length > 0;
+    }
+
+    const ansVal = window.checklistState.answers[field.id];
+    if (ansVal === undefined || ansVal === null || ansVal === '') {
+      return false;
+    }
+
+    if (typeof ansVal === 'string' && ansVal.startsWith('SKIPPED')) {
+      return true;
+    }
+
+    const isNg = ansVal === 'NG';
+    const numVal = typeof ansVal === 'number' ? ansVal : parseFloat(ansVal);
+    const isOutOfRange = field.type === 'number' && !isNaN(numVal) && (
+      (field.min !== null && field.min !== undefined && numVal < field.min) ||
+      (field.max !== null && field.max !== undefined && numVal > field.max)
+    );
+
+    const hasTicket = window.checklistState.tickets[field.id];
+
+    if (isNg || isOutOfRange) {
+      if (!hasTicket || !hasTicket.saved) {
+        return false;
+      }
+    }
+
+    if (field.photoRequired && !isNg && !isOutOfRange) {
+      if (!window.checklistState.fieldPhotos[field.id]) {
+        return false;
+      }
+    }
+
+    return true;
+  };
+
+  window.renderChecklistHeaderAndSelector = function () {
+    const { queue, queueIndex } = window.checklistState;
+    if (!queue || queue.length === 0) return;
+
+    const tpl = queue[queueIndex] || queue[0];
+    const isPreMode = !window.checklistState.isPreComplete;
+
+    const tierBadge = document.getElementById('checklistTierBadge');
+    const counterBadge = document.getElementById('checklistCounterBadge');
+    const selectorBtn = document.getElementById('checklistSelectorBtn');
+    const selectorTitle = document.getElementById('checklistSelectorTitle');
+    const selectorStatus = document.getElementById('checklistSelectorStatus');
+    const dropdownHint = document.getElementById('checklistSelectorDropdownHint');
+
+    // 1. Tier Badge (e.g. DAILY CHECK)
+    if (tierBadge) {
+      const scheduleName = (tpl.schedule || 'daily').toLowerCase();
+      tierBadge.textContent = (typeof _t === 'function') ? _t(`${scheduleName}_check`) : `${scheduleName.toUpperCase()} CHECK`;
+      tierBadge.className = `checklist-tier-badge ${scheduleName}`;
+    }
+
+    // 2. Count completed templates
+    let completedCount = 0;
+    queue.forEach(t => {
+      const tFields = Array.isArray(t.fields) ? t.fields : [];
+      const tTargetFields = isPreMode
+        ? tFields.filter(f => f.timing !== 'post')
+        : (tFields.some(f => f.timing === 'post') ? tFields.filter(f => f.timing === 'post' && f.type !== 'name') : tFields);
+      const isFieldsDone = tTargetFields.length > 0 && tTargetFields.every(f => isChecklistFieldCompleted(f));
+      const isRecorded = !!(window.checklistState.recordIds && (window.checklistState.recordIds[t._id] || window.checklistState.recordIds[t.name]));
+      if (isRecorded || (window.checklistState.isPreComplete && isPreMode) || isFieldsDone) {
+        completedCount += 1;
+      }
+    });
+
+    // 3. Overall Counter Pill: e.g. "2 Checklists (0/2 Done)" or "1 Checklist"
+    if (counterBadge) {
+      if (queue.length > 1) {
+        counterBadge.textContent = `${queue.length} Checklists (${completedCount}/${queue.length} Done)`;
+      } else {
+        counterBadge.textContent = completedCount >= 1 ? '1 Checklist (Done)' : '1 Checklist';
+      }
+      if (completedCount === queue.length && queue.length > 0) {
+        counterBadge.style.background = '#dcfce7';
+        counterBadge.style.color = '#166534';
+      } else {
+        counterBadge.style.background = 'var(--bg-muted, #f3f4f6)';
+        counterBadge.style.color = 'var(--text-muted, #6b7280)';
+      }
+    }
+
+    // 4. Current Template Details
+    const tplFields = Array.isArray(tpl.fields) ? tpl.fields : [];
+    const targetFields = isPreMode
+      ? tplFields.filter(f => f.timing !== 'post')
+      : (tplFields.some(f => f.timing === 'post') ? tplFields.filter(f => f.timing === 'post' && f.type !== 'name') : tplFields);
+    const filledFields = targetFields.filter(f => isChecklistFieldCompleted(f)).length;
+    const isFieldsDone = targetFields.length > 0 && filledFields === targetFields.length;
+    const isRecordedToday = !!(window.checklistState.recordIds && (window.checklistState.recordIds[tpl._id] || window.checklistState.recordIds[tpl.name]));
+    const isCurrentDone = isRecordedToday || (window.checklistState.isPreComplete && isPreMode) || isFieldsDone;
+
+    const localizedTplName = (typeof getLocalizedText === 'function') ? getLocalizedText(tpl, 'name') : (tpl.name || 'Checklist');
+
+    if (selectorTitle) {
+      selectorTitle.textContent = localizedTplName; // Clean title, NO sun icons!
+    }
+
+    if (selectorStatus) {
+      if (isCurrentDone) {
+        selectorStatus.textContent = '✓ Done';
+        selectorStatus.className = 'chip-status-tag done';
+      } else if (filledFields > 0) {
+        selectorStatus.textContent = `${filledFields}/${targetFields.length}`;
+        selectorStatus.className = 'chip-status-tag prog';
+      } else {
+        selectorStatus.textContent = `0/${targetFields.length}`;
+        selectorStatus.className = 'chip-status-tag prog';
+      }
+    }
+
+    if (selectorBtn) {
+      if (isCurrentDone) {
+        selectorBtn.classList.add('is-completed');
+      } else {
+        selectorBtn.classList.remove('is-completed');
+      }
+      selectorBtn.style.cursor = queue.length > 1 ? 'pointer' : 'default';
+    }
+
+    // 5. Dropdown Hint / Switch button
+    if (dropdownHint) {
+      if (queue.length > 1) {
+        dropdownHint.style.display = 'inline-flex';
+        dropdownHint.innerHTML = `<span class="checklist-dropdown-hint-text">▼ Switch (${queue.length})</span>`;
+      } else {
+        dropdownHint.style.display = 'none';
+      }
+    }
+  };
+
+  window.openChecklistSwitcherModal = function () {
+    const { queue } = window.checklistState;
+    if (!queue || queue.length <= 1) return;
+
+    window.renderChecklistSwitcherModal();
+    const modal = document.getElementById('checklistSwitcherModal');
+    if (modal) modal.style.display = 'flex';
+  };
+
+  window.closeChecklistSwitcherModal = function () {
+    const modal = document.getElementById('checklistSwitcherModal');
+    if (modal) modal.style.display = 'none';
+  };
+
+  window.renderChecklistSwitcherModal = function () {
+    const container = document.getElementById('checklistModalListContainer');
+    const headerTitle = document.getElementById('checklistModalHeaderTitle');
+    if (!container) return;
+
+    const { queue, queueIndex } = window.checklistState;
+    if (!queue || queue.length === 0) {
+      container.innerHTML = '<p style="color:#6b7280; font-size:0.9rem;">No checklists available.</p>';
+      return;
+    }
+
+    if (headerTitle) {
+      headerTitle.textContent = `Available Checklists (${queue.length})`;
+    }
+
+    const isPreMode = !window.checklistState.isPreComplete;
+
+    const listHtml = queue.map((tpl, idx) => {
+      const schedule = (tpl.schedule || 'daily').toLowerCase();
+      const scheduleName = (typeof _t === 'function') ? _t(`${schedule}_check`) : schedule.toUpperCase();
+      const localizedTplName = (typeof getLocalizedText === 'function') ? getLocalizedText(tpl, 'name') : (tpl.name || scheduleName);
+
+      const tplFields = Array.isArray(tpl.fields) ? tpl.fields : [];
+      const targetFields = isPreMode
+        ? tplFields.filter(f => f.timing !== 'post')
+        : (tplFields.some(f => f.timing === 'post') ? tplFields.filter(f => f.timing === 'post' && f.type !== 'name') : tplFields);
+
+      const filledFields = targetFields.filter(f => isChecklistFieldCompleted(f)).length;
+      const isFieldsDone = targetFields.length > 0 && filledFields === targetFields.length;
+      const isRecordedToday = !!(window.checklistState.recordIds && (window.checklistState.recordIds[tpl._id] || window.checklistState.recordIds[tpl.name]));
+      const isDone = isRecordedToday || (window.checklistState.isPreComplete && isPreMode) || isFieldsDone;
+      const isSelected = idx === queueIndex;
+
+      let statusBadge = '';
+      if (isDone) {
+        statusBadge = `<span class="chip-status-tag done">✓ Done</span>`;
+      } else if (filledFields > 0) {
+        statusBadge = `<span class="chip-status-tag prog">${filledFields}/${targetFields.length}</span>`;
+      } else {
+        statusBadge = `<span class="chip-status-tag pending">0/${targetFields.length}</span>`;
+      }
+
+      return `
+        <div class="checklist-modal-item ${isSelected ? 'is-selected' : ''} ${isDone ? 'is-completed' : ''}" onclick="selectChecklistTemplateIndex(${idx}); closeChecklistSwitcherModal();">
+          <div style="display:flex; flex-direction:column; gap:4px; overflow:hidden;">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="font-weight:800; font-size:0.95rem; color:${isSelected ? '#1d4ed8' : '#1f2937'};">${localizedTplName}</span>
+              ${isSelected ? '<span style="font-size:0.7rem; font-weight:800; color:#2563eb; background:#dbeafe; padding:1px 6px; border-radius:6px;">Current</span>' : ''}
+            </div>
+            <div style="display:flex; align-items:center; gap:6px;">
+              <span style="font-size:0.75rem; font-weight:700; color:#6b7280; text-transform:uppercase;">${scheduleName}</span>
+            </div>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
+            ${statusBadge}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    container.innerHTML = listHtml;
+  };
+
+  window.selectChecklistTemplateIndex = function (index) {
+    if (!window.checklistState || !window.checklistState.queue) return;
+    if (index < 0 || index >= window.checklistState.queue.length) return;
+    window.checklistState.queueIndex = index;
+    renderCurrentChecklistTemplate();
+  };
+
+  window.renderCurrentChecklistTemplate = function () {
+    const { queue, queueIndex } = window.checklistState;
+    if (!queue || !queue[queueIndex]) return;
+
+    const tpl = queue[queueIndex];
+    const tierBadge = document.getElementById('checklistTierBadge');
+    const container = document.getElementById('checklistCardsContainer');
+    const nextBtn = document.getElementById('checklistNextBtn');
+
+    if (tierBadge) {
+      const scheduleName = (tpl.schedule || 'daily').toLowerCase();
+      tierBadge.textContent = (typeof _t === 'function') ? _t(`${scheduleName}_check`) : `${scheduleName.toUpperCase()} CHECK`;
+      tierBadge.className = `checklist-tier-badge ${scheduleName}`;
+    }
+
+    // Render single selected checklist selector and header status
+    if (typeof window.renderChecklistHeaderAndSelector === 'function') {
+      window.renderChecklistHeaderAndSelector();
+    }
+
+    const tplFields = Array.isArray(tpl.fields) ? tpl.fields : [];
+    const preFields = tplFields.filter(f => f.timing !== 'post');
+    const postFields = tplFields.filter(f => f.timing === 'post' && f.type !== 'name');
+
+    const isPreMode = !window.checklistState.isPreComplete;
+    const targetFields = isPreMode ? preFields : (postFields.length > 0 ? postFields : tplFields);
+    const allFieldsCompleted = targetFields.every(field => isChecklistFieldCompleted(field));
+
+    const superBypassBtn = document.getElementById('superBypassBtn');
+    const resetAllBtn = document.getElementById('resetAllBtn');
+    const actionsCard = document.getElementById('checklistActionsCard');
+    const isPreComplete = window.checklistState.isPreComplete;
+
+    if (superBypassBtn) {
+      superBypassBtn.style.display = isPreComplete ? 'none' : 'inline-flex';
+    }
+    if (resetAllBtn) {
+      resetAllBtn.style.display = isPreComplete ? 'none' : 'inline-block';
+    }
+    if (actionsCard) {
+      actionsCard.style.display = isPreComplete ? 'none' : 'flex';
+    }
+
+    const localizedTitle = (typeof getLocalizedText === 'function') ? getLocalizedText(tpl, 'name') : (tpl.name || 'Checklist');
+    const isCurrentRecorded = !!(window.checklistState.recordIds && (window.checklistState.recordIds[tpl._id] || window.checklistState.recordIds[tpl.name]));
+    const uncompletedTemplates = queue.filter(t => !(window.checklistState.recordIds && (window.checklistState.recordIds[t._id] || window.checklistState.recordIds[t.name])));
+    const isLastRemaining = uncompletedTemplates.length <= 1;
+
+    if (nextBtn) {
+      if (isPreComplete) {
+        if (postFields.length > 0 && !window.checklistState.isPostComplete) {
+          const isPostDone = postFields.every(field => isChecklistFieldCompleted(field));
+          const label = (typeof _t === 'function') ? _t('complete_post_production_check') : 'Complete Post-Production Check';
+          nextBtn.innerHTML = `<span>${label}</span> ✓`;
+          nextBtn.disabled = !isPostDone;
+          nextBtn.style.opacity = isPostDone ? '1' : '0.45';
+          nextBtn.style.pointerEvents = isPostDone ? 'auto' : 'none';
+          nextBtn.onclick = window.handleChecklistSubmitOrNext;
+        } else {
+          if (window.checklistState.hasOpenTickets) {
+            const label = (typeof _t === 'function') ? _t('please_wait_for_maintenance') : 'Please wait for maintenance team';
+            nextBtn.innerHTML = `<span>⚠️ ${label}</span>`;
+            nextBtn.disabled = true;
+            nextBtn.style.opacity = '1';
+            nextBtn.style.cursor = 'not-allowed';
+            nextBtn.style.pointerEvents = 'none';
+            nextBtn.style.filter = 'none';
+            nextBtn.style.background = '#f59e0b';
+            nextBtn.style.boxShadow = '0 4px 14px rgba(245,158,11,0.3)';
+            nextBtn.classList.remove('checklist-next-pulse');
+            nextBtn.onclick = null;
+          } else {
+            const label = (typeof _t === 'function') ? _t('proceed_with_production') : 'Proceed with Production';
+            nextBtn.innerHTML = `<span>${label}</span> →`;
+            nextBtn.disabled = false;
+            nextBtn.style.opacity = '1';
+            nextBtn.style.cursor = 'pointer';
+            nextBtn.style.pointerEvents = 'auto';
+            nextBtn.style.filter = 'none';
+            nextBtn.style.background = '#10b981';
+            nextBtn.style.boxShadow = '0 4px 14px rgba(16,185,129,0.3)';
+            nextBtn.classList.add('checklist-next-pulse');
+            nextBtn.onclick = function () {
+              if (typeof window.goToTab === 'function') window.goToTab(1);
+            };
+          }
+        }
+      } else if (isCurrentRecorded) {
+        if (uncompletedTemplates.length > 0) {
+          nextBtn.innerHTML = `<span>Switch to Next Checklist (${uncompletedTemplates.length} remaining)</span> →`;
+          nextBtn.disabled = false;
+          nextBtn.style.opacity = '1';
+          nextBtn.style.cursor = 'pointer';
+          nextBtn.style.pointerEvents = 'auto';
+          nextBtn.style.background = '#2563eb';
+          nextBtn.style.boxShadow = '0 4px 14px rgba(37,99,235,0.3)';
+          nextBtn.classList.add('checklist-next-pulse');
+          nextBtn.onclick = function () {
+            const nextIncompleteIdx = queue.findIndex((t, i) => i !== queueIndex && !(window.checklistState.recordIds && (window.checklistState.recordIds[t._id] || window.checklistState.recordIds[t.name])));
+            if (nextIncompleteIdx !== -1) {
+              window.selectChecklistTemplateIndex(nextIncompleteIdx);
+            }
+          };
+        } else {
+          if (window.checklistState.hasOpenTickets) {
+            const label = (typeof _t === 'function') ? _t('please_wait_for_maintenance') : 'Please wait for maintenance team';
+            nextBtn.innerHTML = `<span>⚠️ ${label}</span>`;
+            nextBtn.disabled = true;
+            nextBtn.style.opacity = '1';
+            nextBtn.style.cursor = 'not-allowed';
+            nextBtn.style.pointerEvents = 'none';
+            nextBtn.style.background = '#f59e0b';
+            nextBtn.style.boxShadow = '0 4px 14px rgba(245,158,11,0.3)';
+            nextBtn.classList.remove('checklist-next-pulse');
+            nextBtn.onclick = null;
+          } else {
+            nextBtn.innerHTML = `<span>Proceed to Production</span> →`;
+            nextBtn.disabled = false;
+            nextBtn.style.opacity = '1';
+            nextBtn.style.cursor = 'pointer';
+            nextBtn.style.pointerEvents = 'auto';
+            nextBtn.style.background = '#10b981';
+            nextBtn.style.boxShadow = '0 4px 14px rgba(16,185,129,0.3)';
+            nextBtn.classList.add('checklist-next-pulse');
+            nextBtn.onclick = function () {
+              if (typeof window.goToTab === 'function') window.goToTab(1);
+            };
+          }
+        }
+      } else {
+        let label = `Submit ${localizedTitle} ✓`;
+        if (postFields.length > 0 && isPreMode) {
+          label = `Submit ${localizedTitle} (Pre-Check) ✓`;
+        }
+
+        nextBtn.innerHTML = `<span>${label}</span>`;
+        nextBtn.onclick = window.handleChecklistSubmitOrNext;
+
+        if (!allFieldsCompleted) {
+          nextBtn.disabled = true;
+          nextBtn.classList.remove('checklist-next-pulse');
+          nextBtn.style.opacity = '0.45';
+          nextBtn.style.cursor = 'not-allowed';
+          nextBtn.style.filter = 'grayscale(1)';
+          nextBtn.style.pointerEvents = 'none';
+          nextBtn.style.background = '#9ca3af';
+          nextBtn.style.boxShadow = 'none';
+        } else {
+          nextBtn.disabled = false;
+          nextBtn.classList.add('checklist-next-pulse');
+          nextBtn.style.opacity = '1';
+          nextBtn.style.cursor = 'pointer';
+          nextBtn.style.filter = 'none';
+          nextBtn.style.pointerEvents = 'auto';
+          nextBtn.style.background = '';
+          nextBtn.style.boxShadow = '';
+        }
+      }
+    }
+
+    if (!container) return;
+    container.innerHTML = '';
+
+    const titleEl = document.createElement('div');
+    titleEl.style.cssText = 'margin-bottom: 8px;';
+    const localizedDesc = getLocalizedText(tpl, 'description');
+    titleEl.innerHTML = `<h3 style="font-size:1.15rem; font-weight:800; color:#1f2733;">${localizedTitle}</h3>${localizedDesc ? `<p style="font-size:0.85rem; color:#6b7280; margin-top:2px;">${localizedDesc}</p>` : ''}`;
+    container.appendChild(titleEl);
+
+    const isPostComplete = window.checklistState.isPostComplete === true;
+
+    console.log('📋 [Checklist Render Debug]', {
+      templateName: tpl.name || tpl.templateName,
+      totalFields: tplFields.length,
+      preFieldsCount: preFields.length,
+      postFieldsCount: postFields.length,
+      isPreComplete: window.checklistState.isPreComplete,
+      isPostCompleteState: window.checklistState.isPostComplete,
+      computedIsPostComplete: isPostComplete,
+      preFields: preFields.map(f => f.label || f.id),
+      postFields: postFields.map(f => f.label || f.id)
+    });
+
+    // Render per-template content
+    if (isCurrentRecorded) {
+      // 1. Render completed pre-steps in a collapsed accordion with THIS template's name
+      const accordion = document.createElement('details');
+      accordion.className = 'completed-pre-steps-accordion';
+      if (window.checklistState && window.checklistState._isAccordionOpen) {
+        accordion.open = true;
+      }
+      accordion.addEventListener('toggle', function () {
+        if (window.checklistState) {
+          window.checklistState._isAccordionOpen = accordion.open;
+        }
+      });
+
+      const todayIso = new Date().toISOString().split('T')[0];
+      const stepsText = (typeof _t === 'function') ? _t('steps_count') : 'steps';
+      const tapToggleText = (typeof _t === 'function') ? _t('tap_to_expand_collapse') : 'Tap to expand / collapse';
+      const tapCollapseText = (typeof _t === 'function') ? _t('tap_to_collapse_checklist') : '▲ Tap to collapse completed checklist';
+      const completedSteps = preFields.length > 0 ? preFields : tplFields;
+
+      accordion.innerHTML = `
+        <summary style="padding:14px 18px; cursor:pointer; display:flex; align-items:center; justify-content:space-between; background:#dcfce7; border-radius:16px; user-select:none;">
+          <span style="font-size: 0.95rem; font-weight: 700; color: #166534; display: flex; align-items: center; gap: 8px;">
+            ✓ ${todayIso} ${localizedTitle} Completed (${completedSteps.length} ${stepsText})
+          </span>
+          <span style="font-size: 0.8rem; color: #15803d; font-weight: 600; background:rgba(22,101,52,0.1); padding:4px 10px; border-radius:10px;">${tapToggleText}</span>
+        </summary>
+        <div class="completed-pre-steps-content" id="completedPreStepsContent" style="padding:12px; display:flex; flex-direction:column; gap:12px;"></div>
+      `;
+      container.appendChild(accordion);
+
+      // Attach click-outside collapsing handler
+      if (!window._accordionClickOutsideAttached) {
+        window._accordionClickOutsideAttached = true;
+        document.addEventListener('click', function (e) {
+          const acc = document.querySelector('.completed-pre-steps-accordion');
+          if (acc && acc.open && !acc.contains(e.target)) {
+            acc.open = false;
+            if (window.checklistState) {
+              window.checklistState._isAccordionOpen = false;
+            }
+          }
+        });
+      }
+
+      const accordionContent = accordion.querySelector('#completedPreStepsContent');
+      completedSteps.forEach((field) => {
+        const globalIdx = tplFields.indexOf(field);
+        const stepNum = globalIdx !== -1 ? globalIdx : completedSteps.indexOf(field);
+        const cardEl = renderSingleFieldCard(field, stepNum, true, true);
+        if (accordionContent) accordionContent.appendChild(cardEl);
+      });
+
+      const collapseFooterBtn = document.createElement('button');
+      collapseFooterBtn.type = 'button';
+      collapseFooterBtn.style.cssText = 'width:100%; margin-top:8px; padding:12px; border-radius:12px; background:#dcfce7; color:#166534; font-weight:800; border:1px solid #bbf7d0; cursor:pointer; font-size:0.9rem; display:flex; align-items:center; justify-content:center; gap:6px; box-shadow:0 2px 4px rgba(22,101,52,0.08);';
+      collapseFooterBtn.innerHTML = tapCollapseText;
+      collapseFooterBtn.onclick = function () {
+        accordion.open = false;
+        if (window.checklistState) window.checklistState._isAccordionOpen = false;
+        accordion.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      };
+      if (accordionContent) accordionContent.appendChild(collapseFooterBtn);
+
+      // 2. Render read-only locked status banner
+      const lockedBanner = document.createElement('div');
+      lockedBanner.style.cssText = 'background: #dcfce7; border: 1.5px solid #86efac; border-radius: 14px; padding: 12px 16px; margin-top: 12px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;';
+      lockedBanner.innerHTML = `
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="font-size:1.2rem;">🔒</span>
+          <span style="font-size:0.9rem; font-weight:800; color:#166534;">${localizedTitle} has been submitted and is locked (Read-only).</span>
+        </div>
+        ${uncompletedTemplates.length > 0 ? `<button type="button" onclick="openChecklistSwitcherModal()" class="btn btn-secondary" style="font-size:0.8rem; padding:5px 12px; border-radius:8px; font-weight:700;">Switch Checklist ▾</button>` : ''}
+      `;
+      container.appendChild(lockedBanner);
+
+      // 3. Post-production checks: ONLY show if ALL pre-checklists are completed AND post-mode is active
+      const isPostModeActive = window.checklistState.isPostMode === true || (window.checklistState.isPreComplete && window.checklistState.hasSubmittedProductionToday);
+      if (isPostModeActive && postFields.length > 0 && !isPostComplete) {
+        const postHeaderTitle = (typeof _t === 'function') ? _t('post_production_checks_title') : '📋 Post-Production Checks';
+        const postHeader = document.createElement('div');
+        postHeader.className = 'post-steps-header';
+        postHeader.innerHTML = `${postHeaderTitle} (${postFields.length} ${stepsText})`;
+        container.appendChild(postHeader);
+
+        let isPrevPostDone = true;
+        postFields.forEach((field) => {
+          const globalIdx = tplFields.indexOf(field);
+          const stepNum = globalIdx !== -1 ? globalIdx : postFields.indexOf(field);
+          const cardEl = renderSingleFieldCard(field, stepNum, isPrevPostDone, false);
+          container.appendChild(cardEl);
+          if (!isChecklistFieldCompleted(field)) {
+            isPrevPostDone = false;
+          }
+        });
+      }
+    } else {
+      // Template is NOT submitted: Render pre-production steps directly for input (no accordion, NO post-production steps)
+      const fieldsToRender = preFields.length > 0 ? preFields : tplFields;
+      let isPreviousCompleted = true;
+
+      fieldsToRender.forEach((field) => {
+        const globalIdx = tplFields.indexOf(field);
+        const stepNum = globalIdx !== -1 ? globalIdx : fieldsToRender.indexOf(field);
+        const cardEl = renderSingleFieldCard(field, stepNum, isPreviousCompleted, false);
+        container.appendChild(cardEl);
+        if (!isChecklistFieldCompleted(field)) {
+          isPreviousCompleted = false;
+        }
+      });
+    }
+  };
+
+  function renderSingleFieldCard(field, idx, isPreviousCompleted = true, forceLocked = false) {
+    const card = document.createElement('div');
+    card.id = `checklist-card-${field.id}`;
+
+    let cardClass = 'checklist-card';
+    let stepPill = '';
+
+    const fTitle = getLocalizedText(field, 'label');
+    const fDesc = getLocalizedText(field, 'description');
+    const ansVal = window.checklistState.answers[field.id];
+    const hasTicket = window.checklistState.tickets[field.id];
+    const isNg = ansVal === 'NG';
+    const numVal = typeof ansVal === 'number' ? ansVal : parseFloat(ansVal);
+    const isOutOfRange = field.type === 'number' && !isNaN(numVal) && (
+      (field.min !== null && field.min !== undefined && numVal < field.min) ||
+      (field.max !== null && field.max !== undefined && numVal > field.max)
+    );
+
+    const isCompleted = isChecklistFieldCompleted(field);
+    const isUnlocked = !forceLocked && (isPreviousCompleted || window.checklistState.isBypassed || window.checklistState.isPreComplete);
+
+    window.checklistState.unlockedCompletedCards = window.checklistState.unlockedCompletedCards || {};
+    const isCardUnlockedByOperator = !!window.checklistState.unlockedCompletedCards[field.id];
+
+    const isSkipped = typeof ansVal === 'string' && ansVal.startsWith('SKIPPED');
+    const timingLabel = field.timing === 'post' ? 'POST-PROD' : 'PRE-PROD';
+
+    let lockBtnHtml = '';
+    if (!isUnlocked || forceLocked) {
+      cardClass += ' locked-card';
+      stepPill = `<span class="checklist-step-pill locked">🔒 Step ${idx + 1} (${timingLabel})</span>`;
+    } else if (isCompleted) {
+      cardClass += ' completed-card';
+      stepPill = `<span class="checklist-step-pill done">${isSkipped ? '⏭️ Step ' + (idx + 1) + ' (Skipped)' : '✓ Step ' + (idx + 1) + ' (' + timingLabel + ')'}</span>`;
+      if (!isCardUnlockedByOperator) {
+        cardClass += ' completed-locked';
+        lockBtnHtml = `
+          <button type="button" class="checklist-card-lock-btn" onclick="unlockChecklistCard('${field.id}')" title="Locked - Tap to Edit" style="background:rgba(31,157,107,0.12); color:#1f9d6b; border:1px solid rgba(31,157,107,0.3); border-radius:8px; width:36px; height:36px; font-size:1.1rem; display:inline-flex; align-items:center; justify-content:center; cursor:pointer;">
+            🔒
+          </button>`;
+      } else {
+        lockBtnHtml = `
+          <button type="button" class="checklist-card-lock-btn" onclick="lockChecklistCard('${field.id}')" title="Unlocked - Tap to Lock" style="background:#2563eb; color:#ffffff; border:none; border-radius:8px; width:36px; height:36px; font-size:1.1rem; display:inline-flex; align-items:center; justify-content:center; cursor:pointer;">
+            🔓
+          </button>`;
+      }
+    } else {
+      cardClass += ' active-card';
+      stepPill = `<span class="checklist-step-pill current">Step ${idx + 1} (${timingLabel})</span>`;
+    }
+
+    card.className = cardClass;
+
+    if (!isCompleted) {
+      isPreviousCompleted = false;
+    }
+
+    let mediaHtml = '';
+    if (field.imageURL) {
+      mediaHtml = `<img src="${field.imageURL}" class="checklist-card-media" alt="Reference" style="cursor:pointer;" onclick="if(typeof window.openPreview === 'function') window.openPreview(this.src, '${fTitle.replace(/'/g, "\\'")}');">`;
+    }
+
+    let controlHtml = '';
+    if (forceLocked) {
+      if (field.type === 'name') {
+        const val = window.checklistState.answers[field.id];
+        const valDisplay = Array.isArray(val) ? val.filter(Boolean).join(', ') : (val || '—');
+        controlHtml = `<div style="background:#f3f4f6; padding:10px 14px; border-radius:8px; font-weight:700; color:#374151; font-size:0.95rem; border:1px solid #e5e7eb;">👤 ${valDisplay}</div>`;
+      } else if (field.type === 'checkbox' || field.type === 'toggle') {
+        const isOk = ansVal === 'OK';
+        const isNg = ansVal === 'NG';
+        controlHtml = `
+            <div class="checklist-toggle-group" style="pointer-events:none; opacity:0.85;">
+              <button type="button" class="checklist-toggle-btn ok-btn ${isOk ? 'active' : ''}" disabled>OK</button>
+              <button type="button" class="checklist-toggle-btn ng-btn ${isNg ? 'active' : ''}" disabled>NG</button>
+            </div>
+          `;
+      } else if (field.type === 'number') {
+        controlHtml = `
+            <div style="display:flex; align-items:center; gap:8px;">
+              <input type="text" readonly disabled value="${ansVal !== undefined ? ansVal : ''}" 
+                style="flex:1; padding:12px; border-radius:10px; border:1px solid #e5e7eb; background:#f3f4f6; font-weight:700; font-size:1rem; cursor:not-allowed;">
+              ${field.unit ? `<span style="font-weight:700; color:#6b7280;">${field.unit}</span>` : ''}
+            </div>
+          `;
+      } else if (field.type === 'select') {
+        controlHtml = `<div style="background:#f3f4f6; padding:10px 14px; border-radius:8px; font-weight:700; color:#374151; font-size:0.95rem; border:1px solid #e5e7eb;">${ansVal || '—'}</div>`;
+      } else {
+        controlHtml = `<input type="text" disabled readonly value="${ansVal || ''}" style="width:100%; padding:12px; border-radius:10px; border:1px solid #e5e7eb; background:#f3f4f6; cursor:not-allowed;">`;
+      }
+    } else if (field.type === 'name') {
+      const activeSlots = (window.selectedWorkerNames && window.selectedWorkerNames.length > 0)
+        ? window.selectedWorkerNames
+        : [''];
+      const activeNames = activeSlots.map(n => (n || '').trim()).filter(Boolean);
+      window.checklistState.answers[field.id] = activeNames.length > 0 ? activeNames : (document.getElementById('step0CurrentWorkerName')?.textContent || '');
+
+      controlHtml = `
+          <div style="width:100%; display:flex; flex-direction:column; gap:8px;">
+            <div style="display:flex; flex-direction:column; gap:6px;">
+              ${activeSlots.map((name, i) => `
+                <div style="display:flex; gap:6px; align-items:center;">
+                  <div onclick="openWorkerModal(${i})" style="flex:1; background:#f8f9fa; padding:10px 14px; border-radius:8px; font-weight:700; color:#1f2733; font-size:0.95rem; border:1px solid #e6e8ef; cursor:pointer;">
+                    👤 ${name || 'Tap to select worker...'}
+                  </div>
+                  ${activeSlots.length > 1 ? `<button type="button" class="btn btn-alert" style="padding:6px 10px; font-size:0.9rem;" onclick="removeWorkerSlot(${i})">✕</button>` : ''}
+                </div>
+              `).join('')}
+            </div>
+            <button type="button" class="btn btn-secondary" style="font-size:0.85rem; padding:8px; display:flex; align-items:center; justify-content:center; gap:6px; font-weight:700;" onclick="addWorkerSlot()">
+              <span style="font-weight:800; font-size:1.1rem;">+</span> Add Worker
+            </button>
+          </div>
+        `;
+    } else if (field.type === 'checkbox' || field.type === 'toggle') {
+      const isOk = ansVal === 'OK';
+      const isNg = ansVal === 'NG';
+      controlHtml = `
+          <div class="checklist-toggle-group">
+            <button type="button" class="checklist-toggle-btn ok-btn ${isOk ? 'active' : ''}" onclick="handleChecklistToggle('${field.id}', 'OK')">OK</button>
+            <button type="button" class="checklist-toggle-btn ng-btn ${isNg ? 'active' : ''}" onclick="handleChecklistToggle('${field.id}', 'NG')">NG</button>
+          </div>
+        `;
+    } else if (field.type === 'number') {
+      const rangeText = (field.min !== null || field.max !== null) ? `(${field.min ?? '—'} ~ ${field.max ?? '—'} ${field.unit || ''})` : '';
+      controlHtml = `
+          <div style="display:flex; align-items:center; gap:8px;">
+            <input type="text" readonly value="${ansVal !== undefined ? ansVal : ''}" placeholder="Tap to enter number ${rangeText}" 
+              style="flex:1; padding:12px; border-radius:10px; border:1px solid #e6e8ef; background:#f8f9fa; font-weight:700; font-size:1rem; cursor:pointer;"
+              onclick="openChecklistKeypad('${field.id}', '${fTitle.replace(/'/g, "\\'")}', ${field.min ?? 'null'}, ${field.max ?? 'null'}, '${field.unit || ''}')">
+            ${field.unit ? `<span style="font-weight:700; color:#6b7280;">${field.unit}</span>` : ''}
+          </div>
+        `;
+    } else if (field.type === 'select') {
+      const options = Array.isArray(field.options) ? field.options : [];
+      controlHtml = `
+          <div style="display:flex; flex-wrap:wrap; gap:8px;">
+            ${options.map(opt => `
+              <button type="button" class="checklist-toggle-btn ${ansVal === opt ? 'active ok-btn' : ''}" style="flex:none; padding:8px 16px; font-size:0.85rem;" onclick="handleChecklistSelect('${field.id}', '${opt.replace(/'/g, "\\'")}')">${opt}</button>
+            `).join('')}
+          </div>
+        `;
+    } else {
+      controlHtml = `<input type="text" value="${ansVal || ''}" placeholder="Enter details..." style="width:100%; padding:12px; border-radius:10px; border:1px solid #e6e8ef;" oninput="handleChecklistTextInput('${field.id}', this.value)">`;
+    }
+
+    let ticketBtnHtml = '';
+    if (field.type !== 'name') {
+      const isTicketRequired = isNg || isOutOfRange;
+      const isRequiredUnsaved = isTicketRequired && (!hasTicket || !hasTicket.saved);
+      const isSaved = hasTicket && hasTicket.saved;
+      const cls = isSaved ? 'saved' : (isRequiredUnsaved ? 'required-pulse' : '');
+      const lbl = isSaved ? '✓ Ticket Saved' : (isRequiredUnsaved ? '⚠️ Ticket Required' : '➕ Ticket');
+      ticketBtnHtml = forceLocked
+        ? (isSaved ? `<span style="font-size:0.75rem; font-weight:800; color:#15803d; background:#dcfce7; padding:4px 8px; border-radius:8px;">✓ Ticket Recorded</span>` : '')
+        : `<button type="button" class="checklist-ticket-btn ${cls}" onclick="openChecklistTicketModal('${field.id}')">${lbl}</button>`;
+    }
+
+    let photoHtml = '';
+    if (field.photoRequired && !isNg && !isOutOfRange) {
+      const photoBase64 = window.checklistState.fieldPhotos[field.id];
+      let isPhotoAttentionNeeded = false;
+      if (!photoBase64) {
+        if (ansVal === 'OK') {
+          isPhotoAttentionNeeded = true;
+        } else if (field.type === 'number' && typeof ansVal === 'number' && !isOutOfRange) {
+          isPhotoAttentionNeeded = true;
+        } else if (typeof ansVal === 'string' && ansVal.trim() !== '' && ansVal !== 'NG' && !ansVal.startsWith('SKIPPED')) {
+          isPhotoAttentionNeeded = true;
+        }
+      }
+      const pulseClass = isPhotoAttentionNeeded ? 'photo-pulse-attention' : '';
+      photoHtml = forceLocked
+        ? (photoBase64 ? `<img src="${photoBase64}" style="width:60px; height:60px; object-fit:cover; border-radius:8px; margin-top:6px; display:block; cursor:pointer;" onclick="if(typeof window.openPreview === 'function') window.openPreview(this.src, '${fTitle.replace(/'/g, "\\'")}');">` : '')
+        : `
+          <div style="margin-top:8px;">
+            <input type="file" id="checklist-field-photo-${field.id}" accept="image/*" capture="environment" style="display:none;" onchange="handleChecklistFieldPhotoCaptured('${field.id}', event)">
+            <button type="button" class="btn btn-secondary ${pulseClass}" style="font-size:0.8rem; padding:6px 12px;" onclick="document.getElementById('checklist-field-photo-${field.id}').click()">
+              📷 ${photoBase64 ? '✓ Photo Taken (Retake)' : 'Take Photo *'}
+            </button>
+            ${photoBase64 ? `<img src="${photoBase64}" style="width:60px; height:60px; object-fit:cover; border-radius:8px; margin-top:6px; display:block; cursor:pointer;" onclick="if(typeof window.openPreview === 'function') window.openPreview(this.src, '${fTitle.replace(/'/g, "\\'")}');">` : ''}
+          </div>
+        `;
+    }
+
+    let skipBtnHtml = '';
+    if (field.type !== 'name') {
+      const isValidDataCompleted = isCompleted && !isSkipped;
+      if (!isValidDataCompleted) {
+        skipBtnHtml = `
+            <div style="display:flex; justify-content:flex-end; margin-top:10px;">
+              <button type="button" class="btn btn-secondary" style="font-size:0.8rem; padding:6px 14px; font-weight:700; border-radius:8px; display:inline-flex; align-items:center; gap:4px; ${isSkipped ? 'border-color:#2563eb; color:#2563eb; background:rgba(37,99,235,0.06);' : ''}" onclick="handleStepSkip('${field.id}', ${field.required ? 'true' : 'false'})">
+                ⏭️ <span>${isSkipped ? 'Skipped (Tap to undo)' : (typeof _t === 'function' ? _t('skip_step') : 'Skip Step')}</span>
+              </button>
+            </div>
+          `;
+      }
+    }
+
+    card.innerHTML = `
+        <div class="checklist-card-header" style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
+          <div style="flex:1; min-width:0;">
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px; flex-wrap:wrap;">
+              ${stepPill}
+              <div class="checklist-card-title">${fTitle} ${field.required ? '<span style="color:#e5484d;">*</span>' : ''}</div>
+            </div>
+            ${fDesc ? `<div class="checklist-card-desc">${fDesc}</div>` : ''}
+          </div>
+          <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
+            ${lockBtnHtml}
+            ${ticketBtnHtml}
+          </div>
+        </div>
+        ${mediaHtml}
+        ${controlHtml}
+        ${photoHtml}
+        ${skipBtnHtml}
+      `;
+
+    return card;
+  }
+
+  window.promptPostStepWarningModal = function (fieldId) {
+    return new Promise((resolve) => {
+      // If pre-production is already complete, or no fieldId passed, proceed without warning
+      if (!window.checklistState || window.checklistState.isPreComplete || !fieldId) {
+        resolve(true);
+        return;
+      }
+
+      // Find target field in queue
+      let targetField = null;
+      if (Array.isArray(window.checklistState.queue)) {
+        for (const tpl of window.checklistState.queue) {
+          if (Array.isArray(tpl.fields)) {
+            targetField = tpl.fields.find(f => f.id === fieldId);
+            if (targetField) break;
+          }
+        }
+      }
+
+      // If field not found or timing is NOT post, proceed without warning
+      if (!targetField || targetField.timing !== 'post') {
+        resolve(true);
+        return;
+      }
+
+      window._postStepWarningResolve = resolve;
+
+      let modal = document.getElementById('postStepWarningModal');
+      if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'postStepWarningModal';
+        modal.style.cssText = 'position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.6); backdrop-filter:blur(4px); z-index:99999; display:flex; align-items:center; justify-content:center; padding:16px; box-sizing:border-box;';
+        modal.innerHTML = `
+          <div style="background:#ffffff; border-radius:24px; max-width:460px; width:100%; padding:24px; box-shadow:0 25px 50px -12px rgba(0,0,0,0.25); text-align:center; display:flex; flex-direction:column; gap:16px;">
+            <div style="width:64px; height:64px; border-radius:50%; background:#fef3c7; border:2px solid #f59e0b; color:#d97706; display:flex; align-items:center; justify-content:center; font-size:2rem; margin:0 auto;">
+              ⚠️
+            </div>
+            <div>
+              <h3 id="postStepWarningTitle" style="font-size:1.2rem; font-weight:800; color:#1f2733; margin:0 0 6px 0;">Post-Production Step Warning</h3>
+              <p id="postStepWarningDesc" style="font-size:0.9rem; color:#4b5563; margin:0; line-height:1.4;"></p>
+            </div>
+            <div id="postStepFieldBadge" style="background:#fffbeb; border:1px solid #fde68a; border-radius:12px; padding:12px; font-weight:700; color:#b45309; font-size:0.9rem; text-align:left;">
+            </div>
+            <div style="display:flex; gap:10px; margin-top:8px;">
+              <button type="button" onclick="closePostStepWarningModal(false)" style="flex:1; padding:14px; border-radius:14px; border:1px solid #d1d5db; background:#f3f4f6; color:#374151; font-weight:700; font-size:0.95rem; cursor:pointer;">
+                Cancel / キャンセル
+              </button>
+              <button type="button" onclick="closePostStepWarningModal(true)" style="flex:1; padding:14px; border-radius:14px; border:none; background:#f59e0b; color:#ffffff; font-weight:800; font-size:0.95rem; cursor:pointer; box-shadow:0 4px 12px rgba(245,158,11,0.35);">
+                Proceed / 進行する
+              </button>
+            </div>
+          </div>
+        `;
+        document.body.appendChild(modal);
+      }
+
+      const descEl = modal.querySelector('#postStepWarningDesc');
+      const badgeEl = modal.querySelector('#postStepFieldBadge');
+      const lang = typeof window.currentLang !== 'undefined' ? window.currentLang : 'en';
+
+      if (descEl) {
+        if (lang === 'ja') {
+          descEl.textContent = 'この項目は【生産後点検（Post-Production Check）】の項目です。生産開始前にこの点検を実施してもよろしいですか？';
+        } else if (lang === 'pt') {
+          descEl.textContent = 'Esta etapa é destinada para APÓS a produção (Post-Production Check). Tem certeza de que deseja realizar esta verificação agora antes da produção?';
+        } else {
+          descEl.textContent = 'This step is intended for AFTER production (Post-Production Check). Are you sure you want to perform this step before starting production?';
+        }
+      }
+
+      if (badgeEl) {
+        const localizedLabel = (typeof getLocalizedText === 'function') ? getLocalizedText(targetField, 'label') : (targetField.label || '');
+        badgeEl.textContent = `📋 STEP (POST-PROD): ${localizedLabel}`;
+      }
+
+      modal.style.display = 'flex';
+    });
+  };
+
+  window.closePostStepWarningModal = function (confirmed) {
+    const modal = document.getElementById('postStepWarningModal');
+    if (modal) modal.style.display = 'none';
+
+    const resolve = window._postStepWarningResolve;
+    window._postStepWarningResolve = null;
+    if (typeof resolve === 'function') {
+      resolve(confirmed);
+    }
+  };
+
+  window.promptTicketDeletionModal = function (fieldId) {
+    return new Promise((resolve) => {
+      const ticket = window.checklistState.tickets[fieldId];
+      if (!ticket || !ticket.saved) {
+        resolve(true);
+        return;
+      }
+
+      window._ticketDeletionResolve = resolve;
+      window._ticketDeletionFieldId = fieldId;
+
+      const modal = document.getElementById('ticketDeletionConfirmModal');
+      const reasonPreview = document.getElementById('ticketDeletionReasonPreview');
+      const thumbsPreview = document.getElementById('ticketDeletionThumbsPreview');
+
+      if (reasonPreview) {
+        reasonPreview.textContent = ticket.reason || 'Defect ticket reported';
+      }
+
+      if (thumbsPreview) {
+        thumbsPreview.innerHTML = '';
+        if (Array.isArray(ticket.images) && ticket.images.length > 0) {
+          ticket.images.forEach(imgUrl => {
+            const img = document.createElement('img');
+            img.src = imgUrl;
+            img.style.cssText = 'width:56px; height:56px; object-fit:cover; border-radius:8px; border:1px solid #d1d5db; cursor:pointer;';
+            img.onclick = function () {
+              if (typeof window.openPreview === 'function') window.openPreview(this.src, 'Ticket Photo Preview');
+            };
+            thumbsPreview.appendChild(img);
+          });
+        } else {
+          thumbsPreview.innerHTML = '<span style="font-size:0.75rem; color:#9ca3af;">(No photos attached)</span>';
+        }
+      }
+
+      if (modal) modal.style.display = 'flex';
+    });
+  };
+
+  window.closeTicketDeletionConfirmModal = async function (confirmed) {
+    const modal = document.getElementById('ticketDeletionConfirmModal');
+    if (modal) modal.style.display = 'none';
+
+    const fieldId = window._ticketDeletionFieldId;
+    const resolve = window._ticketDeletionResolve;
+
+    window._ticketDeletionFieldId = null;
+    window._ticketDeletionResolve = null;
+
+    if (confirmed && fieldId) {
+      const ticket = window.checklistState.tickets[fieldId];
+      if (ticket) {
+        if (ticket.chatworkMessageId) {
+          try {
+            fetch(`${serverURL}/api/check-forms/cancel-ng-ticket`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ messageIds: [ticket.chatworkMessageId] })
+            }).catch(err => console.warn('Failed to delete Chatwork message on OK change:', err));
+          } catch (e) {
+            console.warn('Error sending Chatwork ticket cancellation request:', e);
+          }
+        }
+
+        if (typeof deleteTicketPhotosFromIDB === 'function') {
+          await deleteTicketPhotosFromIDB(fieldId);
+        }
+
+        delete window.checklistState.tickets[fieldId];
+        if (typeof window.saveChecklistDraftToStorage === 'function') {
+          await window.saveChecklistDraftToStorage();
+        }
+      }
+      if (resolve) resolve(true);
+    } else {
+      if (resolve) resolve(false);
+    }
+  };
+
+  window.autoLockOtherCards = function (currentFieldId) {
+    if (!window.checklistState.unlockedCompletedCards) return;
+    if (currentFieldId) {
+      for (const fId of Object.keys(window.checklistState.unlockedCompletedCards)) {
+        if (fId !== currentFieldId) {
+          delete window.checklistState.unlockedCompletedCards[fId];
+        }
+      }
+    }
+  };
+
+  window.unlockChecklistCard = function (fieldId) {
+    window.checklistState.unlockedCompletedCards = window.checklistState.unlockedCompletedCards || {};
+    window.checklistState.unlockedCompletedCards[fieldId] = true;
+    if (typeof window.renderCurrentChecklistTemplate === 'function') {
+      window.renderCurrentChecklistTemplate();
+    }
+  };
+
+  window.lockChecklistCard = function (fieldId) {
+    if (window.checklistState.unlockedCompletedCards) {
+      delete window.checklistState.unlockedCompletedCards[fieldId];
+    }
+    if (typeof window.renderCurrentChecklistTemplate === 'function') {
+      window.renderCurrentChecklistTemplate();
+    }
+  };
+
+  window.handleChecklistToggle = async function (fieldId, val) {
+    window.autoLockOtherCards(fieldId);
+
+    const isConfirmed = await promptPostStepWarningModal(fieldId);
+    if (!isConfirmed) return;
+
+    const currentVal = window.checklistState.answers[fieldId];
+
+    // Tapping OK when already OK releases/deselects the OK button
+    if (val === 'OK' && currentVal === 'OK') {
+      delete window.checklistState.answers[fieldId];
+      if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
+      renderCurrentChecklistTemplate();
+      return;
+    }
+
+    if (val === 'OK') {
+      const confirmed = await promptTicketDeletionModal(fieldId);
+      if (!confirmed) return;
+    }
+
+    window.checklistState.answers[fieldId] = val;
+    if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
+    renderCurrentChecklistTemplate();
+    if (val === 'NG') {
+      openChecklistTicketModal(fieldId);
+    }
+  };
+
+  window.handleChecklistSelect = async function (fieldId, val) {
+    window.autoLockOtherCards(fieldId);
+    const isConfirmed = await promptPostStepWarningModal(fieldId);
+    if (!isConfirmed) return;
+
+    window.checklistState.answers[fieldId] = val;
+    if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
+    renderCurrentChecklistTemplate();
+  };
+
+  window.handleChecklistTextInput = async function (fieldId, val) {
+    window.autoLockOtherCards(fieldId);
+    const isConfirmed = await promptPostStepWarningModal(fieldId);
+    if (!isConfirmed) return;
+
+    window.checklistState.answers[fieldId] = val;
+    if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
+  };
+
+  // Photo Annotator Drawing Engine
+  const ANNOTATOR_COLORS = ['#e5484d', '#f59e0b', '#1f9d6b', '#2563eb', '#ffffff', '#000000'];
+  const ANNOTATOR_BRUSH_SIZE = 14;
+
+  const annotatorState = {
+    open: false,
+    sourceImage: null,
+    activeColor: '#e5484d',
+    strokes: [],
+    currentStroke: null,
+    drawing: false,
+    pointerId: null,
+    resolve: null
+  };
+
+  window.openAnnotator = function (dataUrl) {
+    return new Promise((resolve) => {
+      const overlay = document.getElementById('annotator-overlay');
+      if (!overlay) return resolve(dataUrl);
+
+      annotatorState.open = true;
+      annotatorState.strokes = [];
+      annotatorState.currentStroke = null;
+      annotatorState.drawing = false;
+
+      const img = new Image();
+      img.onload = () => {
+        annotatorState.sourceImage = img;
+        annotatorState.resolve = resolve;
+        renderAnnotatorUI();
+      };
+      img.onerror = () => resolve(dataUrl);
+      img.src = dataUrl;
+    });
+  };
+
+  function renderAnnotatorUI() {
+    const overlay = document.getElementById('annotator-overlay');
+    if (!overlay || !annotatorState.sourceImage) return;
+
+    const img = annotatorState.sourceImage;
+    overlay.innerHTML = `
+      <div class="annotator-stage">
+        <div class="annotator-canvas-stack">
+          <canvas class="annotator-base-canvas" width="${img.width}" height="${img.height}"></canvas>
+          <canvas class="annotator-draw-canvas" width="${img.width}" height="${img.height}"></canvas>
+        </div>
+      </div>
+      <div class="annotator-toolbar">
+        <div class="annotator-colors">
+          ${ANNOTATOR_COLORS.map(c => `<button class="annotator-color-btn${c === annotatorState.activeColor ? ' active' : ''}" data-color="${c}" style="background:${c}" type="button"></button>`).join('')}
+        </div>
+        <button class="annotator-clear-btn" data-action="annotator-clear" type="button">Clear</button>
+        <button class="annotator-cancel-btn" data-action="annotator-cancel" type="button">
+          <svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+        <button class="annotator-confirm-btn" data-action="annotator-confirm" type="button">
+          <svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>
+        </button>
+      </div>`;
+    overlay.classList.remove('hidden');
+
+    const stage = overlay.querySelector('.annotator-stage');
+    const stack = overlay.querySelector('.annotator-canvas-stack');
+    const sw = stage.clientWidth || window.innerWidth;
+    const sh = stage.clientHeight || (window.innerHeight - 80);
+    const ratio = img.width / img.height;
+    const w = (sw / sh > ratio) ? Math.round(sh * ratio) : sw;
+    const h = (sw / sh > ratio) ? sh : Math.round(sw / ratio);
+    stack.style.width = w + 'px';
+    stack.style.height = h + 'px';
+
+    const baseCanvas = overlay.querySelector('.annotator-base-canvas');
+    baseCanvas.getContext('2d').drawImage(img, 0, 0, img.width, img.height);
+  }
+
+  function redrawAnnotatorStrokes() {
+    const overlay = document.getElementById('annotator-overlay');
+    const canvas = overlay?.querySelector('.annotator-draw-canvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    annotatorState.strokes.forEach(s => paintAnnotatorStroke(ctx, s));
+  }
+
+  function paintAnnotatorStroke(ctx, stroke) {
+    if (!stroke || !stroke.points || !stroke.points.length) return;
+    ctx.save();
+    ctx.strokeStyle = stroke.color;
+    ctx.fillStyle = stroke.color;
+    ctx.lineWidth = stroke.width;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    if (stroke.points.length === 1) {
+      ctx.beginPath();
+      ctx.arc(stroke.points[0].x, stroke.points[0].y, stroke.width / 2, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.beginPath();
+      ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
+      for (let i = 1; i < stroke.points.length; i++) ctx.lineTo(stroke.points[i].x, stroke.points[i].y);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function getAnnotatorCanvasPoint(canvas, e) {
+    const r = canvas.getBoundingClientRect();
+    return {
+      x: (e.clientX - r.left) * (canvas.width / r.width),
+      y: (e.clientY - r.top) * (canvas.height / r.height),
+    };
+  }
+
+  function flattenAnnotatedImage() {
+    const out = document.createElement('canvas');
+    out.width = annotatorState.sourceImage.width;
+    out.height = annotatorState.sourceImage.height;
+    const ctx = out.getContext('2d');
+    ctx.drawImage(annotatorState.sourceImage, 0, 0);
+    annotatorState.strokes.forEach(s => paintAnnotatorStroke(ctx, s));
+    return out.toDataURL('image/jpeg', 0.85);
+  }
+
+  function closeAnnotatorOverlay(result) {
+    const overlay = document.getElementById('annotator-overlay');
+    annotatorState.open = false;
+    if (overlay) {
+      overlay.classList.add('hidden');
+      overlay.innerHTML = '';
+    }
+    const res = annotatorState.resolve;
+    annotatorState.resolve = null;
+    if (res) res(result);
+  }
+
+  // Attach event listeners to annotator-overlay
+  document.addEventListener('DOMContentLoaded', function () {
+    const overlay = document.getElementById('annotator-overlay');
+    if (!overlay) return;
+
+    overlay.addEventListener('click', function (e) {
+      const colorBtn = e.target.closest('[data-color]');
+      if (colorBtn) {
+        annotatorState.activeColor = colorBtn.dataset.color;
+        overlay.querySelectorAll('.annotator-color-btn').forEach(b =>
+          b.classList.toggle('active', b.dataset.color === annotatorState.activeColor)
+        );
+        return;
+      }
+      const btn = e.target.closest('[data-action]');
+      if (!btn) return;
+      switch (btn.dataset.action) {
+        case 'annotator-confirm': closeAnnotatorOverlay(flattenAnnotatedImage()); break;
+        case 'annotator-cancel': closeAnnotatorOverlay(null); break;
+        case 'annotator-clear':
+          annotatorState.strokes = [];
+          redrawAnnotatorStrokes();
+          break;
+      }
+    });
+
+    overlay.addEventListener('pointerdown', function (e) {
+      const canvas = e.target.closest('.annotator-draw-canvas');
+      if (!canvas) return;
+      e.preventDefault();
+      const pt = getAnnotatorCanvasPoint(canvas, e);
+      const stroke = { color: annotatorState.activeColor, width: ANNOTATOR_BRUSH_SIZE, points: [pt] };
+      annotatorState.strokes.push(stroke);
+      annotatorState.currentStroke = stroke;
+      annotatorState.drawing = true;
+      annotatorState.pointerId = e.pointerId;
+      canvas.setPointerCapture?.(e.pointerId);
+      paintAnnotatorStroke(canvas.getContext('2d'), stroke);
+    });
+
+    overlay.addEventListener('pointermove', function (e) {
+      if (!annotatorState.drawing || e.pointerId !== annotatorState.pointerId) return;
+      const canvas = overlay.querySelector('.annotator-draw-canvas');
+      if (!canvas || !annotatorState.currentStroke) return;
+      e.preventDefault();
+      const pt = getAnnotatorCanvasPoint(canvas, e);
+      const pts = annotatorState.currentStroke.points;
+      const last = pts[pts.length - 1];
+      if (last && Math.hypot(last.x - pt.x, last.y - pt.y) < 2) return;
+      pts.push(pt);
+
+      const ctx = canvas.getContext('2d');
+      ctx.save();
+      ctx.strokeStyle = annotatorState.currentStroke.color;
+      ctx.lineWidth = annotatorState.currentStroke.width;
+      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(pts[pts.length - 2].x, pts[pts.length - 2].y);
+      ctx.lineTo(pt.x, pt.y);
+      ctx.stroke();
+      ctx.restore();
+    });
+
+    const endPointer = function () {
+      annotatorState.drawing = false;
+      annotatorState.currentStroke = null;
+      annotatorState.pointerId = null;
+    };
+    overlay.addEventListener('pointerup', endPointer);
+    overlay.addEventListener('pointercancel', endPointer);
+  });
+
+  window.handleChecklistFieldPhotoCaptured = function (fieldId, event) {
+    window.autoLockOtherCards(fieldId);
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async function (e) {
+      const rawDataUrl = e.target.result;
+      const annotatedDataUrl = await window.openAnnotator(rawDataUrl);
+      if (!annotatedDataUrl) return;
+
+      window.checklistState.fieldPhotos[fieldId] = annotatedDataUrl;
+      if (typeof window.saveChecklistDraftToStorage === 'function') await window.saveChecklistDraftToStorage();
+      renderCurrentChecklistTemplate();
+    };
+    reader.readAsDataURL(file);
+  };
+
+  window.openChecklistKeypad = async function (fieldId, label, min, max, unit) {
+    window.autoLockOtherCards(fieldId);
+    const isConfirmed = await promptPostStepWarningModal(fieldId);
+    if (!isConfirmed) return;
+
+    window.checklistState.activeKeypadField = { fieldId, label, min, max, unit };
+    const modal = document.getElementById('checklistKeypadModal');
+    const title = document.getElementById('checklistKeypadTitle');
+    const range = document.getElementById('checklistKeypadRange');
+    const display = document.getElementById('checklistKeypadValue');
+
+    if (title) title.textContent = label;
+    if (range) range.textContent = (min !== null || max !== null) ? `Bounds: ${min ?? '—'} ~ ${max ?? '—'} ${unit}` : '';
+    if (display) display.textContent = window.checklistState.answers[fieldId] !== undefined ? String(window.checklistState.answers[fieldId]) : '';
+    if (modal) modal.style.display = 'flex';
+  };
+
+  window.checklistKeypadPress = function (char) {
+    const display = document.getElementById('checklistKeypadValue');
+    if (!display) return;
+    let curr = display.textContent;
+    if (char === '.' && curr.includes('.')) return;
+    if (char === '-' && curr.length > 0) return;
+    display.textContent = curr + char;
+  };
+
+  window.checklistKeypadClear = function () {
+    const display = document.getElementById('checklistKeypadValue');
+    if (display) display.textContent = '';
+  };
+
+  window.checklistKeypadBackspace = function () {
+    const display = document.getElementById('checklistKeypadValue');
+    if (display) display.textContent = display.textContent.slice(0, -1);
+  };
+
+  window.checklistKeypadConfirm = async function () {
+    const display = document.getElementById('checklistKeypadValue');
+    const modal = document.getElementById('checklistKeypadModal');
+    const active = window.checklistState.activeKeypadField;
+    if (!active || !display) return;
+
+    const valStr = display.textContent.trim();
+    if (valStr !== '') {
+      const numVal = parseFloat(valStr);
+
+      let outOfRange = false;
+      if (active.min !== null && numVal < active.min) outOfRange = true;
+      if (active.max !== null && numVal > active.max) outOfRange = true;
+
+      if (!outOfRange) {
+        const confirmed = await promptTicketDeletionModal(active.fieldId);
+        if (!confirmed) return;
+      }
+
+      window.checklistState.answers[active.fieldId] = numVal;
+
+      if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
+      if (modal) modal.style.display = 'none';
+      renderCurrentChecklistTemplate();
+
+      if (outOfRange) {
+        openChecklistTicketModal(active.fieldId, `Value ${numVal} is out of bounds (${active.min ?? '—'} ~ ${active.max ?? '—'})`);
+      }
+    } else {
+      delete window.checklistState.answers[active.fieldId];
+      if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
+      if (modal) modal.style.display = 'none';
+      renderCurrentChecklistTemplate();
+    }
+  };
+
+  window.triggerNgFlashAnimation = function () {
+    let flash = document.getElementById('ngFlashOverlay');
+    if (!flash) {
+      flash = document.createElement('div');
+      flash.id = 'ngFlashOverlay';
+      flash.className = 'ng-flash-overlay';
+      document.body.appendChild(flash);
+    }
+
+    flash.classList.remove('active');
+    void flash.offsetWidth;
+    flash.classList.add('active');
+
+    setTimeout(() => {
+      flash.classList.remove('active');
+    }, 650);
+  };
+
+  function updateAutoReasonValue(existingReason, newAutoReason) {
+    if (!existingReason) return newAutoReason;
+    const regex = /Value\s+[\d\.\-]+\s+is out of bounds\s*\([^\)]*\)/i;
+    if (regex.test(existingReason)) {
+      return existingReason.replace(regex, newAutoReason);
+    }
+    return existingReason;
+  }
+
+  window.isDefectTicket = function (fieldId) {
+    if (!window.checklistState || !window.checklistState.queue || !fieldId) return false;
+    const queue = window.checklistState.queue;
+    let targetField = null;
+    for (const tpl of queue) {
+      if (Array.isArray(tpl.fields)) {
+        targetField = tpl.fields.find(f => f.id === fieldId);
+        if (targetField) break;
+      }
+    }
+    if (!targetField) return false;
+
+    const ansVal = window.checklistState.answers[fieldId];
+    const isNg = ansVal === 'NG';
+    const numVal = typeof ansVal === 'number' ? ansVal : parseFloat(ansVal);
+    const isOutOfRange = targetField.type === 'number' && !isNaN(numVal) && (
+      (targetField.min !== null && targetField.min !== undefined && numVal < targetField.min) ||
+      (targetField.max !== null && targetField.max !== undefined && numVal > targetField.max)
+    );
+
+    return isNg || isOutOfRange;
+  };
+
+  function updateTicketResetButtonVisibility() {
+    const fieldId = window.checklistState.activeTicketField;
+    const resetBtn = document.getElementById('checklistTicketResetBtn');
+    const photoBtn = document.getElementById('checklistTicketPhotoBtn');
+
+    if (!fieldId) {
+      if (resetBtn) resetBtn.style.display = 'none';
+      if (photoBtn) photoBtn.classList.remove('photo-pulse-attention');
+      return;
+    }
+
+    const ticket = window.checklistState.tickets[fieldId];
+    const reasonInput = document.getElementById('checklistTicketReason');
+    const reasonText = (reasonInput?.value || '').trim();
+    const hasPhotos = ticket && Array.isArray(ticket.images) && ticket.images.length > 0;
+    const isSaved = ticket && ticket.saved;
+
+    const hasData = isSaved || hasPhotos || (reasonText && reasonText.length > 0);
+    if (resetBtn) resetBtn.style.display = hasData ? 'inline-flex' : 'none';
+
+    if (photoBtn) {
+      const isTicketRequired = window.isDefectTicket(fieldId);
+      const isPhotoNeeded = isTicketRequired && !hasPhotos;
+      if (isPhotoNeeded) {
+        photoBtn.classList.add('photo-pulse-attention');
+      } else {
+        photoBtn.classList.remove('photo-pulse-attention');
+      }
+    }
+  }
+
+  window.resetCurrentChecklistTicket = async function () {
+    const fieldId = window.checklistState.activeTicketField;
+    if (!fieldId) return;
+
+    const ticket = window.checklistState.tickets[fieldId];
+    if (ticket && ticket.chatworkMessageId) {
+      try {
+        fetch(`${serverURL}/api/check-forms/cancel-ng-ticket`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messageIds: [ticket.chatworkMessageId] })
+        }).catch(err => console.warn('Failed to delete Chatwork message on ticket reset:', err));
+      } catch (e) {
+        console.warn('Error sending Chatwork ticket cancellation request:', e);
+      }
+    }
+
+    if (typeof deleteTicketPhotosFromIDB === 'function') {
+      await deleteTicketPhotosFromIDB(fieldId);
+    }
+
+    delete window.checklistState.tickets[fieldId];
+
+    const reasonInput = document.getElementById('checklistTicketReason');
+    if (reasonInput) reasonInput.value = '';
+
+    renderTicketThumbnails();
+    updateTicketResetButtonVisibility();
+
+    if (typeof window.saveChecklistDraftToStorage === 'function') {
+      await window.saveChecklistDraftToStorage();
+    }
+
+    if (typeof showAppToast === 'function') {
+      showAppToast('🔄 Ticket data reset');
+    }
+  };
+
+  window.openChecklistTicketModal = async function (fieldId, autoReason = '') {
+    const isConfirmed = await promptPostStepWarningModal(fieldId);
+    if (!isConfirmed) return;
+
+    triggerNgFlashAnimation();
+    window.checklistState.activeTicketField = fieldId;
+    const modal = document.getElementById('checklistTicketModal');
+    const info = document.getElementById('checklistTicketFieldInfo');
+    const reasonInput = document.getElementById('checklistTicketReason');
+    const headerTitle = document.getElementById('checklistTicketHeaderTitle');
+    const photoLabel = document.getElementById('checklistTicketPhotoLabel');
+
+    const isTicketRequired = window.isDefectTicket(fieldId);
+
+    if (headerTitle) {
+      if (isTicketRequired) {
+        headerTitle.textContent = typeof _t === 'function' ? _t('ticket_required') : 'Abnormal Report (Ticket) Required';
+        headerTitle.style.color = '#e5484d';
+      } else {
+        headerTitle.textContent = 'Issue Report (Ticket)';
+        headerTitle.style.color = '#1f2733';
+      }
+    }
+
+    if (photoLabel) {
+      if (isTicketRequired) {
+        photoLabel.textContent = 'Attach Photos (At least 1 required) *';
+      } else {
+        photoLabel.textContent = 'Attach Photos (Optional)';
+      }
+    }
+
+    const existing = window.checklistState.tickets[fieldId] || { reason: '', images: [] };
+
+    if (autoReason) {
+      if (existing.reason) {
+        existing.reason = updateAutoReasonValue(existing.reason, autoReason);
+      } else {
+        existing.reason = autoReason;
+      }
+    }
+
+    window.checklistState.tickets[fieldId] = existing;
+
+    if (info) info.textContent = `Reporting issue for item`;
+    if (reasonInput) {
+      reasonInput.value = existing.reason || '';
+      if (!reasonInput._resetBtnBound) {
+        reasonInput._resetBtnBound = true;
+        reasonInput.addEventListener('input', updateTicketResetButtonVisibility);
+      }
+    }
+
+    renderTicketThumbnails();
+    updateTicketResetButtonVisibility();
+    if (modal) modal.style.display = 'flex';
+  };
+
+  window.closeChecklistTicketModal = function () {
+    const modal = document.getElementById('checklistTicketModal');
+    if (modal) modal.style.display = 'none';
+  };
+
+  function renderTicketThumbnails() {
+    const fieldId = window.checklistState.activeTicketField;
+    const container = document.getElementById('checklistTicketThumbsContainer');
+    if (!container || !fieldId) return;
+
+    const ticket = window.checklistState.tickets[fieldId] || { images: [] };
+    container.innerHTML = ticket.images.map((img, i) => `
+      <div style="position:relative; width:64px; height:64px;">
+        <img src="${img}" style="width:100%; height:100%; object-fit:cover; border-radius:8px; border:1px solid #e6e8ef; cursor:pointer;" onclick="if(typeof window.openPreview === 'function') window.openPreview(this.src, 'Ticket Photo ${i + 1}');">
+        <button type="button" onclick="removeChecklistTicketImage(${i})" style="position:absolute; top:-6px; right:-6px; background:#ef4444; color:#fff; border:none; width:20px; height:20px; border-radius:50%; font-size:12px; font-weight:800; cursor:pointer;">✕</button>
+      </div>
+    `).join('');
+    updateTicketResetButtonVisibility();
+  }
+
+  window.handleChecklistSubmitOrNext = async function () {
+    const { queue, queueIndex } = window.checklistState;
+    if (!queue || !queue[queueIndex]) return;
+
+    const tpl = queue[queueIndex];
+    const fields = Array.isArray(tpl.fields) ? tpl.fields : [];
+
+    let firstIncompleteCard = null;
+    fields.forEach((field) => {
+      if (field.type === 'name') return;
+      const ans = window.checklistState.answers[field.id];
+      const ticket = window.checklistState.tickets[field.id];
+      const card = document.getElementById(`checklist-card-${field.id}`);
+
+      const isNg = ans === 'NG';
+      const numVal = typeof ans === 'number' ? ans : parseFloat(ans);
+      const isOutOfRange = field.type === 'number' && !isNaN(numVal) && (
+        (field.min !== null && field.min !== undefined && numVal < field.min) ||
+        (field.max !== null && field.max !== undefined && numVal > field.max)
+      );
+
+      let isFieldValid = true;
+
+      if (field.required && (ans === undefined || ans === '' || ans === null)) isFieldValid = false;
+      if ((isNg || isOutOfRange) && (!ticket || !ticket.saved)) isFieldValid = false;
+      if (field.photoRequired && !isNg && !isOutOfRange && !window.checklistState.fieldPhotos[field.id]) isFieldValid = false;
+
+      if (!isFieldValid) {
+        if (card) card.classList.add('invalid-highlight');
+        if (!firstIncompleteCard) firstIncompleteCard = card;
+      } else {
+        if (card) card.classList.remove('invalid-highlight');
+      }
+    });
+
+    if (firstIncompleteCard) {
+      firstIncompleteCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      if (typeof showAppToast === 'function') showAppToast(_t('checklist_incomplete'));
+      return;
+    }
+
+    if (queueIndex < queue.length - 1) {
+      const banner = document.getElementById('checklistTransitionBanner');
+      const text = document.getElementById('checklistTransitionText');
+      if (banner && text) {
+        const nextTpl = queue[queueIndex + 1];
+        text.textContent = `${tpl.name} completed! Transitioning to ${nextTpl.name}...`;
+        banner.style.display = 'flex';
+        setTimeout(() => { banner.style.display = 'none'; }, 2200);
+      }
+
+      window.checklistState.queueIndex += 1;
+      if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
+      if (typeof window.renderCurrentChecklistTemplate === 'function') window.renderCurrentChecklistTemplate();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } else {
+      try {
+        let workerName = (document.getElementById('step0CurrentWorkerName')?.textContent || '').trim();
+        if (!workerName && Array.isArray(window.selectedWorkerNames) && window.selectedWorkerNames.length > 0) {
+          workerName = window.selectedWorkerNames.filter(Boolean).join(', ');
+        }
+        if (!workerName && window.checklistState.answers) {
+          for (const t of queue) {
+            const nameField = (t.fields || []).find(f => f.type === 'name');
+            if (nameField && window.checklistState.answers[nameField.id]) {
+              const val = window.checklistState.answers[nameField.id];
+              if (Array.isArray(val)) workerName = val.filter(Boolean).join(', ');
+              else if (typeof val === 'string' && val.trim()) workerName = val.trim();
+              if (workerName) break;
+            }
+          }
+        }
+        if (!workerName) {
+          workerName = (document.getElementById('Machine Operator')?.value || '').trim() || 'Operator';
+        }
+
+        const payload = {
+          factory: window.checklistState.factory,
+          machine: window.checklistState.machine,
+          workerName,
+          templates: queue.map(t => {
+            const tFields = Array.isArray(t.fields) ? t.fields : [];
+            return {
+              templateId: t._id,
+              templateName: t.name,
+              schedule: t.schedule,
+              workerName,
+              answers: tFields.map(f => ({
+                fieldId: f.id,
+                label: f.label || f.label_ja || f.label_en || (f.type === 'name' ? '作業者名' : '項目'),
+                type: f.type,
+                value: window.checklistState.answers[f.id],
+                fieldPhotoBase64: window.checklistState.fieldPhotos[f.id] || null,
+              })),
+              tickets: Object.keys(window.checklistState.tickets || {})
+                .filter(fId => tFields.some(tf => tf.id === fId))
+                .map(fId => ({
+                  fieldId: fId,
+                  reason: window.checklistState.tickets[fId].reason,
+                  imageOverlayBase64s: window.checklistState.tickets[fId].images,
+                  chatworkMessageId: window.checklistState.tickets[fId].chatworkMessageId || null,
+                }))
+            };
+          })
+        };
+
+        const res = await fetch(`${serverURL}/api/check-forms/submit`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (res.ok) {
+          const resData = await res.json().catch(() => ({}));
+          if (resData.recordIds) {
+            window.checklistState.recordIds = { ...(window.checklistState.recordIds || {}), ...resData.recordIds };
+          }
+          window.checklistState.isPreComplete = true;
+          if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
+
+          const bar = document.querySelector('.tab-bar');
+          if (bar) bar.classList.remove('locked-checklist');
+
+          if (typeof showAppToast === 'function') {
+            showAppToast('✓ Pre-Production Checklist Completed Successfully!');
+          }
+
+          if (typeof window.goToTab === 'function') window.goToTab(0);
+        } else {
+          const errData = await res.json().catch(() => ({}));
+          if (typeof showAppToast === 'function') {
+            showAppToast(`❌ Submission Error: ${errData.error || 'Failed to submit'}`);
+          }
+        }
+      } catch (err) {
+        console.error('Error submitting checklist:', err);
+      }
+    }
+  };
+
+  window.removeChecklistTicketImage = async function (index) {
+    const fieldId = window.checklistState.activeTicketField;
+    if (!fieldId || !window.checklistState.tickets[fieldId]) return;
+    window.checklistState.tickets[fieldId].images.splice(index, 1);
+    renderTicketThumbnails();
+    if (typeof window.saveChecklistDraftToStorage === 'function') {
+      await window.saveChecklistDraftToStorage();
+    }
+  };
+
+  window.handleChecklistTicketPhotoCaptured = function (event) {
+    const fieldId = window.checklistState.activeTicketField;
+    const file = event.target.files && event.target.files[0];
+    if (!file || !fieldId) return;
+
+    const reader = new FileReader();
+    reader.onload = async function (e) {
+      const ticket = window.checklistState.tickets[fieldId] || { reason: '', images: [] };
+      if (ticket.images.length >= 5) {
+        if (typeof showAlert === 'function') showAlert('Maximum 5 images allowed for ticket');
+        return;
+      }
+      const rawDataUrl = e.target.result;
+      const annotatedDataUrl = await window.openAnnotator(rawDataUrl);
+      if (!annotatedDataUrl) return; // User cancelled
+
+      ticket.images.push(annotatedDataUrl);
+      window.checklistState.tickets[fieldId] = ticket;
+      renderTicketThumbnails();
+      if (typeof window.saveChecklistDraftToStorage === 'function') {
+        await window.saveChecklistDraftToStorage();
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  window.saveChecklistTicket = async function () {
+    const fieldId = window.checklistState.activeTicketField;
+    const reasonInput = document.getElementById('checklistTicketReason');
+    if (!fieldId) return;
+
+    const reason = (reasonInput?.value || '').trim();
+    const ticket = window.checklistState.tickets[fieldId] || { images: [] };
+
+    const isTicketRequired = window.isDefectTicket(fieldId);
+
+    if (!reason) {
+      if (typeof showAlert === 'function') showAlert('Please enter ticket reason/details');
+      return;
+    }
+    if (isTicketRequired && (!ticket.images || ticket.images.length === 0)) {
+      if (typeof showAlert === 'function') showAlert('At least 1 photo is required for the ticket');
+      return;
+    }
+
+    if (!ticket.chatworkMessageId) {
+      try {
+        const fieldAns = window.checklistState.answers[fieldId];
+        const currentQueueItem = window.checklistState.queue?.[window.checklistState.queueIndex];
+        const fieldObj = (currentQueueItem?.fields || []).find(f => f.id === fieldId);
+        let userInputStr = Array.isArray(fieldAns) ? fieldAns.join(', ') : String(fieldAns ?? '');
+        let expectedStr = '';
+        if (fieldObj && fieldObj.type === 'number' && (fieldObj.min !== null || fieldObj.max !== null)) {
+          expectedStr = `${fieldObj.min ?? '—'} ~ ${fieldObj.max ?? '—'} ${fieldObj.unit || ''}`;
+        }
+
+        const itemLabel = fieldObj ? (fieldObj.label || fieldObj.label_ja || fieldObj.label_en || '') : '';
+        const schedule = currentQueueItem?.schedule || 'daily';
+        const isOptionalTicket = !isTicketRequired;
+        const statusStr = isOptionalTicket ? 'OPTIONAL TICKET' : 'NG';
+
+        const notifyRes = await fetch(`${serverURL}/api/check-forms/notify-ng-ticket`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            factory: window.checklistState.factory,
+            machine: window.checklistState.machine,
+            status: statusStr,
+            reason: reason,
+            userInput: userInputStr,
+            expectedInput: expectedStr,
+            isOptional: isOptionalTicket,
+            schedule: schedule,
+            itemLabel: itemLabel
+          })
+        });
+
+        if (notifyRes.ok) {
+          const notifyData = await notifyRes.json();
+          if (notifyData && notifyData.message_id) {
+            ticket.chatworkMessageId = notifyData.message_id;
+          }
+        }
+      } catch (err) {
+        console.error('Failed to notify ticket to Chatwork:', err);
+      }
+    } else {
+      // Message already exists in Chatwork -> update message with new input value & reason!
+      try {
+        const fieldAns = window.checklistState.answers[fieldId];
+        const currentQueueItem = window.checklistState.queue?.[window.checklistState.queueIndex];
+        const fieldObj = (currentQueueItem?.fields || []).find(f => f.id === fieldId);
+        let userInputStr = Array.isArray(fieldAns) ? fieldAns.join(', ') : String(fieldAns ?? '');
+        let expectedStr = '';
+        if (fieldObj && fieldObj.type === 'number' && (fieldObj.min !== null || fieldObj.max !== null)) {
+          expectedStr = `${fieldObj.min ?? '—'} ~ ${fieldObj.max ?? '—'} ${fieldObj.unit || ''}`;
+        }
+
+        const itemLabel = fieldObj ? (fieldObj.label || fieldObj.label_ja || fieldObj.label_en || '') : '';
+        const schedule = currentQueueItem?.schedule || 'daily';
+        const isOptionalTicket = !isTicketRequired;
+        const statusStr = isOptionalTicket ? 'OPTIONAL TICKET' : 'NG';
+
+        await fetch(`${serverURL}/api/check-forms/update-ng-ticket`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messageId: ticket.chatworkMessageId,
+            factory: window.checklistState.factory,
+            machine: window.checklistState.machine,
+            status: statusStr,
+            reason: reason,
+            userInput: userInputStr,
+            expectedInput: expectedStr,
+            isOptional: isOptionalTicket,
+            schedule: schedule,
+            itemLabel: itemLabel
+          })
+        }).catch(err => console.warn('Failed to update Chatwork ticket message:', err));
+      } catch (err) {
+        console.error('Failed to update ticket in Chatwork:', err);
+      }
+    }
+
+    ticket.reason = reason;
+    ticket.saved = true;
+    window.checklistState.tickets[fieldId] = ticket;
+    if (typeof window.saveChecklistDraftToStorage === 'function') {
+      await window.saveChecklistDraftToStorage();
+    }
+
+    closeChecklistTicketModal();
+    renderCurrentChecklistTemplate();
+  };
+
+  window.promptWorkerConfirmation = function () {
+    return new Promise((resolve) => {
+      const activeNames = window.selectedWorkerNames ? window.selectedWorkerNames.map(n => (n || '').trim()).filter(Boolean) : [];
+      if (activeNames.length === 0) {
+        resolve(false);
+        return;
+      }
+
+      const modal = document.getElementById('workerConfirmationModal');
+      const nameEl = document.getElementById('workerConfirmModalName');
+      if (!modal || !nameEl) {
+        resolve(true);
+        return;
+      }
+
+      nameEl.textContent = activeNames.join(', ');
+      modal.style.display = 'flex';
+      window._workerConfirmResolve = resolve;
+    });
+  };
+
+  window.handleWorkerConfirmResponse = function (isConfirmed) {
+    const modal = document.getElementById('workerConfirmationModal');
+    if (modal) modal.style.display = 'none';
+
+    if (window._workerConfirmResolve) {
+      window._workerConfirmResolve(isConfirmed);
+      window._workerConfirmResolve = null;
+    }
+
+    if (!isConfirmed) {
+      if (typeof openWorkerModal === 'function') {
+        openWorkerModal(0);
+      }
+    }
+  };
+
+  window.resetAllChecklistData = async function () {
+    const activeNames = window.selectedWorkerNames ? window.selectedWorkerNames.map(n => (n || '').trim()).filter(Boolean) : [];
+    const namesText = activeNames.length > 0 ? activeNames.join(', ') : 'Operator';
+
+    const confirmMsg = `Reset all checklist progress & photos?\n\n(Worker name "${namesText}" will be preserved)`;
+    if (!confirm(confirmMsg)) return;
+
+    // Harvest Chatwork message IDs to cancel stale notifications
+    const messageIds = [];
+    if (window.checklistState.tickets) {
+      for (const fId of Object.keys(window.checklistState.tickets)) {
+        const ticket = window.checklistState.tickets[fId];
+        if (ticket && ticket.chatworkMessageId) {
+          messageIds.push(ticket.chatworkMessageId);
+        }
+      }
+    }
+
+    if (messageIds.length > 0) {
+      try {
+        fetch(`${serverURL}/api/check-forms/cancel-ng-ticket`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messageIds })
+        }).catch(err => console.warn('Error calling cancel-ng-ticket API:', err));
+      } catch (err) {
+        console.warn('Error initiating Chatwork cancellation:', err);
+      }
+    }
+
+    // Reset state object
+    window.checklistState.answers = {};
+    window.checklistState.tickets = {};
+    window.checklistState.fieldPhotos = {};
+    window.checklistState.queueIndex = 0;
+    window.checklistState.isPreComplete = false;
+    window.checklistState.isBypassed = false;
+    window.checklistState.unlockedCompletedCards = {};
+
+    // Clear IndexedDB and draft in storage
+    if (typeof window.clearChecklistDraftFromStorage === 'function') {
+      await window.clearChecklistDraftFromStorage();
+    }
+
+    // Lock checklist tab bar
+    const bar = document.querySelector('.tab-bar');
+    if (bar) bar.classList.add('locked-checklist');
+
+    // Re-render template cards
+    if (typeof window.renderCurrentChecklistTemplate === 'function') {
+      window.renderCurrentChecklistTemplate();
+    }
+
+    if (typeof showAppToast === 'function') {
+      showAppToast(`🔄 Checklist reset! Preserved worker: ${namesText}`);
+    }
+
+    // Prompt user confirmation with consistent UI modal matching Scan tab
+    if (activeNames.length > 0) {
+      setTimeout(() => {
+        window.promptWorkerConfirmation();
+      }, 250);
+    }
+  };
+
+  window.openSuperBypassModal = function () {
+    const modal = document.getElementById('checklistBypassModal');
+    const status = document.getElementById('checklistBypassStatus');
+    if (status) status.textContent = 'Scanning Leader QR...';
+    if (modal) modal.style.display = 'flex';
+
+    if (typeof Html5Qrcode !== 'undefined') {
+      if (window.checklistState.bypassQrScanner) {
+        try { window.checklistState.bypassQrScanner.stop(); } catch (e) { }
+      }
+      const scanner = new Html5Qrcode('checklistBypassQrReader');
+      window.checklistState.bypassQrScanner = scanner;
+
+      scanner.start(
+        { facingMode: 'environment' },
+        { fps: 10, qrbox: { width: 220, height: 220 } },
+        async function (decodedText) {
+          try {
+            const res = await fetch(`${serverURL}/api/check-forms/verify-qr?code=${encodeURIComponent(decodedText)}`);
+            if (res.ok) {
+              const userData = await res.json();
+              scanner.stop();
+              window.checklistState.bypassLeader = userData;
+              if (status) {
+                status.style.color = '#1f9d6b';
+                status.textContent = `✓ Leader Verified: ${userData.firstName || userData.username}`;
+              }
+              submitSuperBypass(userData);
+            } else {
+              if (status) {
+                status.style.color = '#ef4444';
+                status.textContent = '❌ Invalid Leader QR Code';
+              }
+            }
+          } catch (e) {
+            console.error(e);
+          }
+        },
+        function () { }
+      ).catch(err => {
+        if (status) status.textContent = 'Could not access camera for QR scan';
+      });
+    }
+  };
+
+  window.closeSuperBypassModal = function () {
+    if (window.checklistState.bypassQrScanner) {
+      try { window.checklistState.bypassQrScanner.stop(); } catch (e) { }
+    }
+    const modal = document.getElementById('checklistBypassModal');
+    if (modal) modal.style.display = 'none';
+  };
+
+  window.handleStepSkip = async function (fieldId, isRequired) {
+    const isConfirmed = await promptPostStepWarningModal(fieldId);
+    if (!isConfirmed) return;
+
+    const ansVal = window.checklistState.answers[fieldId];
+    const isSkipped = typeof ansVal === 'string' && ansVal.startsWith('SKIPPED');
+
+    if (isSkipped) {
+      delete window.checklistState.answers[fieldId];
+      delete window.checklistState.tickets[fieldId];
+      if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
+      if (typeof showAppToast === 'function') showAppToast('↩️ Skip undone');
+      renderCurrentChecklistTemplate();
+      return;
+    }
+
+    if (isRequired) {
+      openStepSkipLeaderQrModal(fieldId);
+    } else {
+      executeStepSkip(fieldId, null);
+    }
+  };
+
+  window.openStepSkipLeaderQrModal = function (fieldId) {
+    window.checklistState.pendingSkipFieldId = fieldId;
+    const modal = document.getElementById('stepSkipQrModal');
+    const status = document.getElementById('stepSkipQrStatus');
+    if (status) {
+      status.style.color = '#6b7280';
+      status.textContent = 'Scanning Leader QR Code...';
+    }
+    if (modal) modal.style.display = 'flex';
+
+    if (typeof Html5Qrcode !== 'undefined') {
+      if (window.checklistState.stepSkipQrScanner) {
+        try { window.checklistState.stepSkipQrScanner.stop(); } catch (e) { }
+      }
+      const scanner = new Html5Qrcode('stepSkipQrReader');
+      window.checklistState.stepSkipQrScanner = scanner;
+
+      scanner.start(
+        { facingMode: 'environment' },
+        { fps: 10, qrbox: { width: 220, height: 220 } },
+        async function (decodedText) {
+          try {
+            const res = await fetch(`${serverURL}/api/check-forms/verify-qr?code=${encodeURIComponent(decodedText)}`);
+            if (res.ok) {
+              const userData = await res.json();
+              scanner.stop();
+              closeStepSkipLeaderQrModal();
+              executeStepSkip(fieldId, userData);
+            } else {
+              if (status) {
+                status.style.color = '#ef4444';
+                status.textContent = '❌ Invalid Leader QR Code';
+              }
+            }
+          } catch (e) {
+            console.error(e);
+          }
+        },
+        function () { }
+      ).catch(err => {
+        if (status) status.textContent = 'Could not access camera for QR scan';
+      });
+    }
+  };
+
+  window.closeStepSkipLeaderQrModal = function () {
+    if (window.checklistState.stepSkipQrScanner) {
+      try { window.checklistState.stepSkipQrScanner.stop(); } catch (e) { }
+    }
+    const modal = document.getElementById('stepSkipQrModal');
+    if (modal) modal.style.display = 'none';
+    window.checklistState.pendingSkipFieldId = null;
+  };
+
+  function executeStepSkip(fieldId, leaderUser) {
+    const skipText = leaderUser
+      ? `SKIPPED (Leader: ${leaderUser.firstName || leaderUser.username || 'Verified'})`
+      : 'SKIPPED';
+
+    window.checklistState.answers[fieldId] = skipText;
+
+    if (leaderUser) {
+      window.checklistState.tickets[fieldId] = {
+        saved: true,
+        reason: `Step skipped with Leader approval (${leaderUser.firstName || leaderUser.username})`,
+        skipped: true,
+        leader: leaderUser
+      };
+    }
+
+    if (typeof window.saveChecklistDraftToStorage === 'function') {
+      window.saveChecklistDraftToStorage();
+    }
+
+    if (typeof showAppToast === 'function') {
+      showAppToast(leaderUser ? `⏭️ Step skipped with Leader approval!` : `⏭️ Step skipped`);
+    }
+
+    renderCurrentChecklistTemplate();
+  }
+
+  async function submitSuperBypass(leaderUser) {
+    const reasonInput = document.getElementById('checklistBypassReason');
+    const reason = (reasonInput?.value || '').trim() || 'Leader emergency bypass';
+
+    try {
+      await fetch(`${serverURL}/api/check-forms/bypass`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          factory: window.checklistState.factory,
+          machine: window.checklistState.machine,
+          workerName: document.getElementById('step0CurrentWorkerName')?.textContent || '',
+          leaderName: `${leaderUser.firstName || ''} ${leaderUser.lastName || ''}`.trim() || leaderUser.username,
+          leaderUsername: leaderUser.username,
+          reason,
+          timing: 'pre',
+          templates: window.checklistState.queue.map(t => t.name)
+        })
+      });
+
+      window.checklistState.isBypassed = true;
+      window.checklistState.isPreComplete = true;
+
+      const bar = document.querySelector('.tab-bar');
+      if (bar) bar.classList.remove('locked-checklist');
+
+      closeSuperBypassModal();
+
+      if (typeof showAppToast === 'function') {
+        showAppToast(`⚡ Checklist Super-Bypassed by ${leaderUser.firstName || leaderUser.username}`);
+      }
+
+      if (typeof window.goToTab === 'function') window.goToTab(0);
+    } catch (e) {
+      console.error('Error recording bypass:', e);
+    }
+  }
+
+  window.handleChecklistSubmitOrNext = async function () {
+    const { queue, queueIndex } = window.checklistState;
+    if (!queue || !queue[queueIndex]) return;
+
+    const tpl = queue[queueIndex];
+    const fields = Array.isArray(tpl.fields) ? tpl.fields : [];
+
+    const isSubmittingPre = !window.checklistState.isPreComplete;
+    const targetFields = isSubmittingPre
+      ? fields.filter(f => f.timing !== 'post')
+      : fields.filter(f => f.timing === 'post' && f.type !== 'name');
+
+    let firstIncompleteCard = null;
+    targetFields.forEach((field) => {
+      if (field.type === 'name') return;
+      const ans = window.checklistState.answers[field.id];
+      const ticket = window.checklistState.tickets[field.id];
+      const card = document.getElementById(`checklist-card-${field.id}`);
+
+      const isNg = ans === 'NG';
+      const numVal = typeof ans === 'number' ? ans : parseFloat(ans);
+      const isOutOfRange = field.type === 'number' && !isNaN(numVal) && (
+        (field.min !== null && field.min !== undefined && numVal < field.min) ||
+        (field.max !== null && field.max !== undefined && numVal > field.max)
+      );
+
+      let isFieldValid = true;
+
+      if (field.required && (ans === undefined || ans === '' || ans === null)) isFieldValid = false;
+      if ((isNg || isOutOfRange) && (!ticket || !ticket.saved)) isFieldValid = false;
+      if (field.photoRequired && !isNg && !isOutOfRange && !window.checklistState.fieldPhotos[field.id]) isFieldValid = false;
+
+      if (!isFieldValid) {
+        if (card) card.classList.add('invalid-highlight');
+        if (!firstIncompleteCard) firstIncompleteCard = card;
+      } else {
+        if (card) card.classList.remove('invalid-highlight');
+      }
+    });
+
+    if (firstIncompleteCard) {
+      firstIncompleteCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      if (typeof showAppToast === 'function') showAppToast(_t('checklist_incomplete'));
+      return;
+    }
+
+    const overlay = document.getElementById('checklistSubmittingOverlay');
+    if (overlay) overlay.style.display = 'flex';
+
+    try {
+      let workerName = (document.getElementById('step0CurrentWorkerName')?.textContent || '').trim();
+      if (!workerName && Array.isArray(window.selectedWorkerNames) && window.selectedWorkerNames.length > 0) {
+        workerName = window.selectedWorkerNames.filter(Boolean).join(', ');
+      }
+      if (!workerName && window.checklistState.answers) {
+        for (const t of queue) {
+          const nameField = (t.fields || []).find(f => f.type === 'name');
+          if (nameField && window.checklistState.answers[nameField.id]) {
+            const val = window.checklistState.answers[nameField.id];
+            if (Array.isArray(val)) workerName = val.filter(Boolean).join(', ');
+            else if (typeof val === 'string' && val.trim()) workerName = val.trim();
+            if (workerName) break;
+          }
+        }
+      }
+      if (!workerName) {
+        workerName = (document.getElementById('Machine Operator')?.value || '').trim() || 'Operator';
+      }
+
+      // Submit ONLY the current template!
+      const templatesToSubmit = [tpl];
+
+      const payload = {
+        factory: window.checklistState.factory,
+        machine: window.checklistState.machine,
+        equipmentId: window.checklistState.equipmentId || null,
+        workerName,
+        templates: templatesToSubmit.map(t => {
+          const tFields = Array.isArray(t.fields) ? t.fields : [];
+          const fieldsToSubmit = isSubmittingPre
+            ? tFields.filter(f => f.timing !== 'post')
+            : (tFields.some(f => f.timing === 'post') ? tFields.filter(f => f.timing === 'post' && f.type !== 'name') : tFields);
+
+          return {
+            templateId: t._id,
+            recordId: (window.checklistState.recordIds && window.checklistState.recordIds[t._id]) ? window.checklistState.recordIds[t._id] : null,
+            templateName: t.name,
+            schedule: t.schedule,
+            workerName,
+            equipmentId: window.checklistState.equipmentId || t.equipmentId || (Array.isArray(t.equipmentIds) ? t.equipmentIds[0] : null),
+            answers: fieldsToSubmit.map(f => {
+              const itemLabel = f.label || f.label_ja || f.label_en || (f.type === 'name' ? '作業者名' : '項目');
+              return {
+                id: f.id,
+                fieldId: f.id,
+                label: itemLabel,
+                label_ja: f.label_ja || itemLabel,
+                label_en: f.label_en || itemLabel,
+                type: f.type,
+                required: !!f.required,
+                photoRequired: !!f.photoRequired,
+                min: f.min !== undefined ? f.min : null,
+                max: f.max !== undefined ? f.max : null,
+                options: f.options || [],
+                unit: f.unit || '',
+                value: window.checklistState.answers[f.id],
+                fieldPhotoBase64: window.checklistState.fieldPhotos[f.id] || null,
+                fieldPhotoData: window.checklistState.fieldPhotos[f.id] || null,
+                ticket: window.checklistState.tickets[f.id] ? {
+                  reason: window.checklistState.tickets[f.id].reason,
+                  imagesData: window.checklistState.tickets[f.id].images,
+                  chatworkMessageId: window.checklistState.tickets[f.id].chatworkMessageId || null,
+                  saved: true
+                } : null
+              };
+            }),
+            tickets: Object.keys(window.checklistState.tickets || {})
+              .filter(fId => fieldsToSubmit.some(tf => tf.id === fId))
+              .map(fId => ({
+                fieldId: fId,
+                reason: window.checklistState.tickets[fId].reason,
+                imagesData: window.checklistState.tickets[fId].images,
+                chatworkMessageId: window.checklistState.tickets[fId].chatworkMessageId || null,
+              }))
+          };
+        })
+      };
+
+      console.log('🚀 Sending single checklist submission payload:', {
+        factory: payload.factory,
+        machine: payload.machine,
+        workerName: payload.workerName,
+        templateName: tpl.name,
+        templates: payload.templates
+      });
+
+      const res = await fetch(`${serverURL}/api/check-forms/submit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (res.ok) {
+        const resData = await res.json().catch(() => ({}));
+        console.log('✅ Checklist submitted successfully! Response:', resData);
+        window.checklistState.recordIds = window.checklistState.recordIds || {};
+        if (resData.recordIds) {
+          window.checklistState.recordIds = { ...window.checklistState.recordIds, ...resData.recordIds };
+        } else {
+          window.checklistState.recordIds[tpl._id] = true;
+          window.checklistState.recordIds[tpl.name] = true;
+        }
+        if (overlay) overlay.style.display = 'none';
+
+        // Check if all templates in queue are now submitted
+        const allTemplatesFinished = queue.every(t => {
+          return !!(window.checklistState.recordIds && (window.checklistState.recordIds[t._id] || window.checklistState.recordIds[t.name]));
+        });
+
+        if (isSubmittingPre) {
+          if (allTemplatesFinished) {
+            window.checklistState.isPreComplete = true;
+            const hasPostFields = queue.some(t => Array.isArray(t.fields) && t.fields.some(f => f.timing === 'post'));
+            if (!hasPostFields) {
+              window.checklistState.isPostComplete = true;
+            }
+            if (typeof window.saveChecklistDraftToStorage === 'function') {
+              await window.saveChecklistDraftToStorage();
+            }
+
+            // Check if any open defect tickets exist across all completed checks
+            if (window.checklistState.hasOpenTickets) {
+              if (typeof showAppToast === 'function') {
+                showAppToast('⚠️ All checklists submitted. Please wait for maintenance approval.');
+              }
+              if (typeof renderCurrentChecklistTemplate === 'function') {
+                renderCurrentChecklistTemplate();
+              }
+            } else {
+              if (typeof window.updateTabLock === 'function') {
+                window.updateTabLock();
+              } else {
+                const bar = document.querySelector('.tab-bar');
+                if (bar) bar.classList.remove('locked-checklist');
+              }
+
+              if (typeof showAppToast === 'function') {
+                showAppToast('🎉 All Pre-Production Checklists Completed!');
+              }
+
+              if (typeof window.goToTab === 'function') {
+                window.goToTab(1);
+              }
+            }
+          } else {
+            // Some templates still pending: find next pending template and jump to it
+            if (typeof window.saveChecklistDraftToStorage === 'function') {
+              await window.saveChecklistDraftToStorage();
+            }
+
+            const nextIncompleteIdx = queue.findIndex(t => !(window.checklistState.recordIds && (window.checklistState.recordIds[t._id] || window.checklistState.recordIds[t.name])));
+            if (nextIncompleteIdx !== -1) {
+              window.checklistState.queueIndex = nextIncompleteIdx;
+            }
+
+            const localizedTplName = (typeof getLocalizedText === 'function') ? getLocalizedText(tpl, 'name') : (tpl.name || 'Checklist');
+            if (typeof showAppToast === 'function') {
+              showAppToast(`✓ ${localizedTplName} submitted! Moving to next checklist.`);
+            }
+
+            if (typeof renderCurrentChecklistTemplate === 'function') {
+              renderCurrentChecklistTemplate();
+            }
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }
+        } else {
+          window.checklistState.isPostComplete = true;
+          if (typeof window.saveChecklistDraftToStorage === 'function') {
+            await window.saveChecklistDraftToStorage();
+          }
+
+          if (typeof renderCurrentChecklistTemplate === 'function') {
+            renderCurrentChecklistTemplate();
+          }
+
+          if (typeof showAppToast === 'function') {
+            showAppToast('✓ Post-Production Check Completed!');
+          }
+        }
+      } else {
+        let errText = 'Server error during checklist submission';
+        try {
+          const errJson = await res.json();
+          errText = errJson.error || errJson.message || errText;
+        } catch (_) {
+          try { errText = await res.text(); } catch (__) { }
+        }
+        console.error('❌ Checklist submission rejected by server (HTTP ' + res.status + '):', errText);
+        if (overlay) overlay.style.display = 'none';
+        window.showChecklistSubmitErrorModal(errText);
+      }
+    } catch (e) {
+      console.error('Error submitting checklist:', e);
+      if (overlay) overlay.style.display = 'none';
+      window.showChecklistSubmitErrorModal(e.message || 'Network error: Unable to connect to server');
+    }
+  };
+
+  window.showChecklistSubmitErrorModal = function (errorMsg) {
+    const overlay = document.getElementById('checklistSubmittingOverlay');
+    if (overlay) overlay.style.display = 'none';
+    const modal = document.getElementById('checklistSubmitErrorModal');
+    const msgEl = document.getElementById('checklistSubmitErrorMessage');
+    if (msgEl) msgEl.textContent = errorMsg || 'Submission failed. Please check network connection and try again.';
+    if (modal) modal.style.display = 'flex';
+    if (typeof showAppToast === 'function') {
+      showAppToast(`❌ ${errorMsg || 'Submission failed'}`);
+    }
+  };
+
+  window.closeChecklistSubmitErrorModal = function () {
+    const modal = document.getElementById('checklistSubmitErrorModal');
+    if (modal) modal.style.display = 'none';
+  };
+
+  window.retryChecklistSubmission = function () {
+    window.closeChecklistSubmitErrorModal();
+    window.handleChecklistSubmitOrNext();
+  };
+
+  window.confirmDoPostChecklist = function () {
+    const modal = document.getElementById('postChecklistReminderModal');
+    if (modal) modal.style.display = 'none';
+
+    window.checklistState.queue = window.checklistState.postChecklists;
+    window.checklistState.queueIndex = 0;
+
+    const btn = document.getElementById('checklistTabBtn');
+    if (btn) btn.style.display = 'inline-flex';
+
+    renderCurrentChecklistTemplate();
+    window.goToChecklistTab();
+  };
+
+  window.confirmSkipPostChecklist = function () {
+    window.checklistState.isPostSkipped = true;
+    const modal = document.getElementById('postChecklistReminderModal');
+    if (modal) modal.style.display = 'none';
+
+    if (window.pendingDcpSubmitAction) {
+      window.pendingDcpSubmitAction();
+      window.pendingDcpSubmitAction = null;
+    }
+  };
+
+  // Auto-Escaping Modal Listener for Tablet Virtual Keyboard
+  document.addEventListener('focusin', function (e) {
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') && e.target.type !== 'file' && e.target.type !== 'button' && e.target.type !== 'submit') {
+      const modalOverlay = e.target.closest('.checklist-modal-overlay, .modal, .modal-overlay');
+      if (modalOverlay) {
+        modalOverlay.classList.add('keyboard-active');
+        setTimeout(() => {
+          try {
+            e.target.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+          } catch (err) { }
+        }, 150);
+      }
+    }
+  });
+
+  document.addEventListener('focusout', function (e) {
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) {
+      const modalOverlay = e.target.closest('.checklist-modal-overlay, .modal, .modal-overlay');
+      if (modalOverlay) {
+        setTimeout(() => {
+          if (!modalOverlay.contains(document.activeElement)) {
+            modalOverlay.classList.remove('keyboard-active');
+          }
+        }, 100);
+      }
+    }
+  });
+
+  document.addEventListener('DOMContentLoaded', function () {
+    setTimeout(function () {
+      if (typeof selectedFactory !== 'undefined' && typeof selectedMachine !== 'undefined') {
+        window.initChecklistsForMachine(selectedFactory, selectedMachine);
+      }
+    }, 500);
+  });
 })();

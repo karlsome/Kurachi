@@ -334,6 +334,37 @@ const translations = {
         'submit_photos_needed': '必要',
         'submit_photos_taken': '撮影',
         'submit_insufficient_photos': '材料ラベル写真が不足しています（必要: {needed}枚以上、撮影: {taken}枚）',
+
+        // Checklist integration
+        'checklist_tab': '点検',
+        'checklist_title': '設備点検チェックシート',
+        'reset_all': 'すべてリセット',
+        'skip_step': 'スキップ',
+        'daily_check': '日常点検',
+        'weekly_check': '週間点検',
+        'monthly_check': '月次点検',
+        'pre_production_check': '生産前点検',
+        'post_production_check': '生産後点検',
+        'super_bypass': 'スーパーバイパス (スキップ)',
+        'scan_leader_qr_to_bypass': 'リーダーQRコードをスキャンしてスキップ',
+        'post_checklist_reminder_title': '生産後点検のお知らせ',
+        'post_checklist_reminder_msg': 'この設備の生産後点検があります。今すぐ実施しますか？',
+        'do_post_checklist': '点検を実施する',
+        'skip_post_checklist': 'スキップして送信',
+        'checklist_incomplete': '未回答の点検項目があります',
+        'next_checklist': '次の点検へ',
+        'complete_all_checklists': '点検完了',
+        'ticket_required': '異常報告（チケット）が必要です',
+        'bypass_reason_placeholder': 'バイパス理由を入力してください',
+        'proceed_with_production': '看板をスキャン / 生産に進む',
+        'submit_pre_production_check': '生産前点検を送信',
+        'complete_post_production_check': '生産後点検を完了',
+        'tap_to_expand_collapse': 'タップで展開 / 折りたたみ',
+        'tap_to_collapse_checklist': '▲ タップして完了した点検項目を折りたたむ',
+        'post_production_checks_title': '📋 生産後点検',
+        'checklist_completed_banner': '点検完了',
+        'steps_count': '項目',
+        'please_wait_for_maintenance': '保全チームの対応をお待ちください',
     },
 
     en: {
@@ -668,6 +699,37 @@ const translations = {
         'submit_photos_needed': 'needed',
         'submit_photos_taken': 'taken',
         'submit_insufficient_photos': 'Insufficient material label photos (needed: {needed}+, taken: {taken})',
+
+        // Checklist integration
+        'checklist_tab': 'Checklist',
+        'checklist_title': 'Equipment Checklist',
+        'reset_all': 'Reset All',
+        'skip_step': 'Skip Step',
+        'daily_check': 'Daily Check',
+        'weekly_check': 'Weekly Check',
+        'monthly_check': 'Monthly Check',
+        'pre_production_check': 'Pre-Production Check',
+        'post_production_check': 'Post-Production Check',
+        'super_bypass': 'Super Bypass (Skip)',
+        'scan_leader_qr_to_bypass': 'Scan Leader QR Code to Skip',
+        'post_checklist_reminder_title': 'Post-Production Checklist Reminder',
+        'post_checklist_reminder_msg': 'A post-production checklist exists for this machine. Would you like to complete it now?',
+        'do_post_checklist': 'Perform Checklist',
+        'skip_post_checklist': 'Skip and Submit',
+        'checklist_incomplete': 'Some checklist items are unanswered',
+        'next_checklist': 'Next Checklist',
+        'complete_all_checklists': 'Checklist Completed',
+        'ticket_required': 'Issue report (Ticket) required',
+        'bypass_reason_placeholder': 'Enter bypass reason',
+        'proceed_with_production': 'Proceed with Production',
+        'submit_pre_production_check': 'Submit Pre-Production Check',
+        'complete_post_production_check': 'Complete Post-Production Check',
+        'tap_to_expand_collapse': 'Tap to expand / collapse',
+        'tap_to_collapse_checklist': '▲ Tap to collapse completed checklist',
+        'post_production_checks_title': '📋 Post-Production Checks',
+        'checklist_completed_banner': 'Checklist Completed',
+        'steps_count': 'steps',
+        'please_wait_for_maintenance': 'Please wait for maintenance team',
     },
 
     pt: {
@@ -1002,6 +1064,37 @@ const translations = {
         'submit_photos_needed': 'necessário',
         'submit_photos_taken': 'tirado',
         'submit_insufficient_photos': 'Fotos de etiqueta insuficientes (necessário: {needed}+, tirado: {taken})',
+
+        // Checklist integration
+        'checklist_tab': 'Checklist',
+        'checklist_title': 'Lista de Verificação de Equipamentos',
+        'reset_all': 'Redefinir Tudo',
+        'skip_step': 'Pular Etapa',
+        'daily_check': 'Verificação Diária',
+        'weekly_check': 'Inspeção Semanal',
+        'monthly_check': 'Inspeção Mensal',
+        'pre_production_check': 'Verificação Pré-Produção',
+        'post_production_check': 'Verificação Pós-Produção',
+        'super_bypass': 'Super Bypass (Ignorar)',
+        'scan_leader_qr_to_bypass': 'Escanear QR Code do Líder para Ignorar',
+        'post_checklist_reminder_title': 'Lembrete de Lista de Verificação Pós-Produção',
+        'post_checklist_reminder_msg': 'Existe uma lista de verificação pós-produção para esta máquina. Deseja realizá-la agora?',
+        'do_post_checklist': 'Realizar Verificação',
+        'skip_post_checklist': 'Ignorar e Enviar',
+        'checklist_incomplete': 'Alguns itens da lista de verificação não foram respondidos',
+        'next_checklist': 'Próxima Verificação',
+        'complete_all_checklists': 'Verificação Concluída',
+        'ticket_required': 'Relatório de problema (Ticket) é necessário',
+        'bypass_reason_placeholder': 'Insira o motivo do bypass',
+        'proceed_with_production': 'Prosseguir para a Produção',
+        'submit_pre_production_check': 'Enviar Verificação Pré-Produção',
+        'complete_post_production_check': 'Concluir Verificação Pós-Produção',
+        'tap_to_expand_collapse': 'Toque para expandir / recolher',
+        'tap_to_collapse_checklist': '▲ Toque para recolher o checklist concluído',
+        'post_production_checks_title': '📋 Verificações Pós-Produção',
+        'checklist_completed_banner': 'Checklist Concluído',
+        'steps_count': 'etapas',
+        'please_wait_for_maintenance': 'Aguarde a equipe de manutenção',
     }
 };
 
@@ -1065,6 +1158,10 @@ function applyTranslations(lang) {
         if (t[key]) {
             titleElement.textContent = t[key];
         }
+    }
+
+    if (typeof window.renderCurrentChecklistTemplate === 'function') {
+        window.renderCurrentChecklistTemplate();
     }
 
     console.log(`Language changed to: ${lang}`);

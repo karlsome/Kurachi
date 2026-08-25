@@ -32030,14 +32030,21 @@ function buildCheckFormFieldImageFolderKey(field = {}) {
 
 function sanitizeCheckFormField(field = {}) {
   const imageURL = normalizeCheckFormText(field.imageURL);
+  const type = normalizeCheckFormText(field.type).toLowerCase();
+  const labelFallback = type === 'name' ? '作業者名' : '項目';
+  const label = normalizeCheckFormText(field.label || field.label_ja || field.label_en) || labelFallback;
 
   return {
-    id: normalizeCheckFormText(field.id),
-    label: normalizeCheckFormText(field.label),
+    id: normalizeCheckFormText(field.id || field.fieldId),
+    label,
+    label_ja: normalizeCheckFormText(field.label_ja || field.label) || label,
+    label_en: normalizeCheckFormText(field.label_en || field.label) || (type === 'name' ? 'Worker Name' : label),
     description: normalizeCheckFormText(field.description),
+    description_ja: normalizeCheckFormText(field.description_ja || field.description),
+    description_en: normalizeCheckFormText(field.description_en || field.description),
     imageURL,
     imageFolderKey: buildCheckFormFieldImageFolderKey({ ...field, imageURL }),
-    type: normalizeCheckFormText(field.type).toLowerCase(),
+    type,
     required: !!field.required,
     locked: !!field.locked,
     photoRequired: !!field.photoRequired,
@@ -32045,6 +32052,7 @@ function sanitizeCheckFormField(field = {}) {
     min: normalizeCheckFormMaybeNumber(field.min),
     max: normalizeCheckFormMaybeNumber(field.max),
     unit: normalizeCheckFormText(field.unit),
+    timing: normalizeCheckFormText(field.timing || 'pre').toLowerCase() === 'post' ? 'post' : 'pre',
   };
 }
 
@@ -32066,9 +32074,14 @@ function sanitizeCheckFormTemplate(template = {}, equipmentMap = new Map()) {
   return {
     _id: toCheckFormIdString(template._id),
     name: normalizeCheckFormText(template.name),
+    name_ja: normalizeCheckFormText(template.name_ja || template.name),
+    name_en: normalizeCheckFormText(template.name_en || template.name),
     description: normalizeCheckFormText(template.description),
+    description_ja: normalizeCheckFormText(template.description_ja || template.description),
+    description_en: normalizeCheckFormText(template.description_en || template.description),
     工場: normalizeCheckFormText(template['工場']),
     schedule: normalizeCheckFormSchedule(template.schedule),
+    timing: normalizeCheckFormText(template.timing || 'pre').toLowerCase() === 'post' ? 'post' : 'pre',
     startDate: normalizeCheckFormText(template.startDate),
     status: normalizeCheckFormText(template.status || 'active'),
     equipmentIds,
@@ -32130,9 +32143,14 @@ function doesCheckFormAnswerRequireTicket(field = {}, value = null) {
 
 function buildCheckFormAnswerStatus(field = {}, value = null, ticketRequired = false) {
   const fieldType = normalizeCheckFormText(field.type).toLowerCase();
+  const valStr = normalizeCheckFormText(value).toUpperCase();
 
-  if (fieldType === 'checkbox') {
-    return normalizeCheckFormText(value).toUpperCase() === 'NG' ? 'ng' : 'ok';
+  if (valStr === 'NG') {
+    return 'ng';
+  }
+
+  if (fieldType === 'checkbox' || fieldType === 'toggle') {
+    return valStr === 'NG' ? 'ng' : 'ok';
   }
 
   if ((fieldType === 'number' || fieldType === 'select') && ticketRequired) {
@@ -32185,6 +32203,184 @@ app.get('/checkList2.html', (req, res) => {
 
 app.get('/checkList2.js', (req, res) => {
   res.sendFile(path.join(__dirname, 'checkList2.js'));
+});
+
+function getScheduleHeaderInfo(schedule, templateName = '') {
+  const norm = String(schedule || '').toLowerCase();
+  const tNorm = String(templateName || '').toLowerCase();
+  if (norm.includes('daily') || norm.includes('日') || tNorm.includes('日')) {
+    return { en: ' - DAILY', ja: ' - 日次' };
+  }
+  if (norm.includes('weekly') || norm.includes('週') || tNorm.includes('週')) {
+    return { en: ' - WEEKLY', ja: ' - 週次' };
+  }
+  if (norm.includes('monthly') || norm.includes('月') || tNorm.includes('月')) {
+    return { en: ' - MONTHLY', ja: ' - 月次' };
+  }
+  return { en: '', ja: '' };
+}
+
+async function getBilingualText(text) {
+  if (!text || typeof text !== 'string' || !text.trim()) {
+    return { ja: '', en: '', combined: '' };
+  }
+  const cleanText = text.trim();
+  const lang = detectTextLang(cleanText);
+  const targetLang = lang === 'ja' ? 'en' : 'ja';
+  
+  let translatedText = cleanText;
+  try {
+    const db = client.db(DB_NAME);
+    const coll = db.collection('translationCacheDB');
+    const cached = await coll.findOne({ text: cleanText, targetLang });
+    if (cached && cached.translated) {
+      translatedText = cached.translated;
+    } else {
+      const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(cleanText)}&langpair=${lang}|${targetLang}`;
+      const apiRes = await fetch(url);
+      const data = await apiRes.json();
+      if (data?.responseData?.translatedText) {
+        translatedText = data.responseData.translatedText;
+      }
+      await coll.insertOne({ text: cleanText, targetLang, translated: translatedText, createdAt: new Date() }).catch(() => {});
+    }
+  } catch (err) {
+    console.error(`[getBilingualText] Error translating "${cleanText}":`, err.message);
+  }
+
+  let ja = lang === 'ja' ? cleanText : translatedText;
+  let en = lang === 'en' ? cleanText : translatedText;
+
+  if (!ja) ja = en;
+  if (!en) en = ja;
+
+  const combined = (ja && en && ja !== en) ? `${ja} / ${en}` : cleanText;
+  return { ja, en, combined };
+}
+
+app.post('/api/check-forms/notify-ng-ticket', async (req, res) => {
+  const { factory, machine, status, reason, userInput, expectedInput, isOptional, schedule, itemLabel, fieldLabel } = req.body || {};
+  const roomId = '440654635';
+  const apiKey = process.env.CHATWORK_API_KEY;
+  const url = `https://api.chatwork.com/v2/rooms/${roomId}/messages`;
+  
+  const now = new Date();
+  const timestamp = now.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+  const schedInfo = getScheduleHeaderInfo(schedule);
+  const titleHeader = isOptional
+    ? '📝 【OPTIONAL TICKET / 任意報告】'
+    : `⚠️ 【DEFECT TICKET${schedInfo.en} / 不適合報告${schedInfo.ja}】`;
+  const statusLabel = isOptional ? 'OPTIONAL TICKET (任意報告)' : (status || 'NG');
+  const labelText = itemLabel || fieldLabel || '';
+  const bilingualReason = await getBilingualText(reason);
+
+  let messageBody = `${titleHeader}\n工場: ${factory}\n設備: ${machine}\nステータス: ${statusLabel}\n日時: ${timestamp}`;
+  if (labelText) messageBody += `\n点検項目: ${labelText}`;
+  if (expectedInput) messageBody += `\n期待値: ${expectedInput}`;
+  if (userInput !== undefined && userInput !== '') messageBody += `\n入力値: ${userInput}`;
+  messageBody += `\n理由: ${bilingualReason.combined}`;
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'X-ChatWorkToken': apiKey,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: new URLSearchParams({ body: messageBody })
+    });
+
+    if (response.ok) {
+      const result = await response.json();
+      res.status(200).json({ message_id: result.message_id });
+    } else {
+      const errorText = await response.text();
+      res.status(response.status).json({ error: errorText });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/check-forms/cancel-ng-ticket', async (req, res) => {
+  const { messageIds } = req.body || {};
+  if (!Array.isArray(messageIds) || messageIds.length === 0) {
+    return res.json({ success: true, cancelled: [] });
+  }
+
+  const roomId = '440654635';
+  const apiKey = process.env.CHATWORK_API_KEY;
+  const results = [];
+
+  for (const messageId of messageIds) {
+    if (!messageId) continue;
+    try {
+      const deleteUrl = `https://api.chatwork.com/v2/rooms/${roomId}/messages/${messageId}`;
+      const delResponse = await fetch(deleteUrl, {
+        method: 'DELETE',
+        headers: { 'X-ChatWorkToken': apiKey }
+      });
+
+      if (delResponse.ok) {
+        results.push({ messageId, success: true });
+      } else {
+        results.push({ messageId, success: false });
+      }
+    } catch (e) {
+      results.push({ messageId, success: false, error: e.message });
+    }
+  }
+
+  res.json({ success: true, results });
+});
+
+app.post('/api/check-forms/update-ng-ticket', async (req, res) => {
+  const { messageId, factory, machine, status, reason, userInput, expectedInput, isOptional, schedule, itemLabel, fieldLabel } = req.body || {};
+  if (!messageId) {
+    return res.status(400).json({ error: 'messageId is required' });
+  }
+
+  const roomId = '440654635';
+  const apiKey = process.env.CHATWORK_API_KEY;
+  const url = `https://api.chatwork.com/v2/rooms/${roomId}/messages/${messageId}`;
+
+  try {
+    const now = new Date();
+    const timestamp = now.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+    const schedInfo = getScheduleHeaderInfo(schedule);
+    const titleHeader = isOptional
+      ? '📝 【OPTIONAL TICKET / 任意報告】'
+      : `⚠️ 【DEFECT TICKET${schedInfo.en} / 不適合報告${schedInfo.ja}】`;
+    const statusLabel = isOptional ? 'OPTIONAL TICKET (任意報告)' : (status || 'NG');
+    const labelText = itemLabel || fieldLabel || '';
+    const bilingualReason = await getBilingualText(reason);
+
+    let messageBody = `${titleHeader}\n工場: ${factory}\n設備: ${machine}\nステータス: ${statusLabel}\n日時: ${timestamp}`;
+    if (labelText) messageBody += `\n点検項目: ${labelText}`;
+    if (expectedInput) messageBody += `\n期待値: ${expectedInput}`;
+    if (userInput !== undefined && userInput !== '') messageBody += `\n入力値: ${userInput}`;
+    messageBody += `\n理由: ${bilingualReason.combined}`;
+    messageBody += `\n(編集済み / Updated)`;
+
+    const response = await fetch(url, {
+      method: 'PUT',
+      headers: {
+        'X-ChatWorkToken': apiKey,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: new URLSearchParams({ body: messageBody })
+    });
+
+    if (response.ok) {
+      const result = await response.json();
+      res.status(200).json({ message_id: result.message_id });
+    } else {
+      const errorText = await response.text();
+      res.status(response.status).json({ error: errorText });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 app.get('/api/check-forms/reference-images', async (req, res) => {
@@ -32543,6 +32739,39 @@ app.get('/api/check-forms/maintenance-workers', async (req, res) => {
   }
 });
 
+app.post('/api/check-forms/bypass', async (req, res) => {
+  const { factory, machine, workerName, leaderName, leaderUsername, reason, timing, templates } = req.body || {};
+
+  if (!factory || !machine) {
+    return res.status(400).json({ error: 'factory and machine are required' });
+  }
+
+  try {
+    await client.connect();
+    const db = client.db('submittedDB');
+    const bypassCollection = db.collection('checklistBypassDB');
+
+    const doc = {
+      factory: String(factory).trim(),
+      machine: String(machine).trim(),
+      workerName: String(workerName || '').trim(),
+      leaderName: String(leaderName || '').trim(),
+      leaderUsername: String(leaderUsername || '').trim(),
+      reason: String(reason || '').trim(),
+      timing: String(timing || 'pre').trim(),
+      templates: Array.isArray(templates) ? templates : [],
+      bypassedAt: new Date().toISOString(),
+      createdAt: new Date(),
+    };
+
+    const result = await bypassCollection.insertOne(doc);
+    return res.json({ success: true, bypassId: result.insertedId.toHexString() });
+  } catch (error) {
+    console.error('Error logging checklist bypass:', error);
+    return res.status(500).json({ error: 'Failed to record checklist bypass' });
+  }
+});
+
 app.post('/api/check-forms/tickets/resolve', async (req, res) => {
   try {
     const { ticketId, workerName, workerUsername, fixReason, fixImageBase64s } = req.body;
@@ -32572,6 +32801,7 @@ app.post('/api/check-forms/tickets/resolve', async (req, res) => {
     }
     
     const now = new Date();
+    const bilingualFix = await getBilingualText(fixReason);
     
     await ngReportsCollection.updateOne(
       { _id: new ObjectId(ticketId) },
@@ -32581,7 +32811,10 @@ app.post('/api/check-forms/tickets/resolve', async (req, res) => {
           closedAt: now.toISOString(),
           closedBy: workerName,
           closedByUsername: workerUsername,
-          fixReason: fixReason
+          fixReason: fixReason,
+          fixReason_ja: bilingualFix.ja,
+          fixReason_en: bilingualFix.en,
+          fixReason_bilingual: bilingualFix.combined
         },
         $push: {
           statusHistory: {
@@ -32592,6 +32825,9 @@ app.post('/api/check-forms/tickets/resolve', async (req, res) => {
             user: workerName,
             username: workerUsername,
             fixReason: fixReason,
+            fixReason_ja: bilingualFix.ja,
+            fixReason_en: bilingualFix.en,
+            fixReason_bilingual: bilingualFix.combined,
             imageURLs: imageURLs
           }
         }
@@ -32599,41 +32835,11 @@ app.post('/api/check-forms/tickets/resolve', async (req, res) => {
     );
     
     // Update Chatwork message if exists
-    if (ticket.chatworkMessageId) {
-      const roomId = '440654635';
-      const apiKey = process.env.CHATWORK_API_KEY;
-      const url = `https://api.chatwork.com/v2/rooms/${roomId}/messages/${ticket.chatworkMessageId}`;
-      
-      const resolvedAtStr = now.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
-      
-      let infoBlock = `\n[info][title]解決済み (Closed)[/title]`;
-      infoBlock += `\n対応者: ${workerName}`;
-      infoBlock += `\n対応日時: ${resolvedAtStr}`;
-      infoBlock += `\n対応内容: ${fixReason}`;
-      if (imageURLs.length > 0) {
-        infoBlock += `\n画像: ${imageURLs.join('\n')}`;
-      }
-      infoBlock += `\n[/info]`;
-      
-      const getMsgUrl = `https://api.chatwork.com/v2/rooms/${roomId}/messages/${ticket.chatworkMessageId}`;
-      const getResponse = await fetch(getMsgUrl, {
-        method: 'GET',
-        headers: { 'X-ChatWorkToken': apiKey }
+    const updatedTicket = await ngReportsCollection.findOne({ _id: new ObjectId(ticketId) });
+    if (updatedTicket && updatedTicket.chatworkMessageId) {
+      await updateNgTicketChatworkMessage(updatedTicket).catch(e => {
+        console.error('Failed to trigger Chatwork message update from resolve:', e);
       });
-      if (getResponse.ok) {
-        const msgData = await getResponse.json();
-        const originalBody = msgData.body;
-        const newBody = originalBody + infoBlock;
-        
-        await fetch(url, {
-          method: 'PUT',
-          headers: {
-            'X-ChatWorkToken': apiKey,
-            'Content-Type': 'application/x-www-form-urlencoded'
-          },
-          body: new URLSearchParams({ body: newBody })
-        });
-      }
     }
     
     return res.json({ success: true });
@@ -32678,6 +32884,656 @@ app.post('/api/check-forms/notify-ng-ticket', async (req, res) => {
   }
 });
 
+app.post('/api/check-forms/cancel-ng-ticket', async (req, res) => {
+  const { messageIds } = req.body || {};
+  if (!Array.isArray(messageIds) || messageIds.length === 0) {
+    return res.json({ success: true, cancelled: [] });
+  }
+
+  const roomId = '440654635';
+  const apiKey = process.env.CHATWORK_API_KEY;
+  const results = [];
+
+  for (const messageId of messageIds) {
+    if (!messageId) continue;
+    try {
+      const deleteUrl = `https://api.chatwork.com/v2/rooms/${roomId}/messages/${messageId}`;
+      const delResponse = await fetch(deleteUrl, {
+        method: 'DELETE',
+        headers: { 'X-ChatWorkToken': apiKey }
+      });
+
+      if (delResponse.ok) {
+        results.push({ messageId, status: 'deleted' });
+      } else {
+        // Fallback: Edit message to indicate [Cancelled / Reset]
+        const editUrl = `https://api.chatwork.com/v2/rooms/${roomId}/messages/${messageId}`;
+        const now = new Date();
+        const timestamp = now.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+        const cancelText = `[info][title]❌ 【点検リセット / Cancelled】[/title]点検がリセットされたため、このNGチケットは取り消されました。\n日時: ${timestamp}[/info]`;
+        
+        await fetch(editUrl, {
+          method: 'PUT',
+          headers: {
+            'X-ChatWorkToken': apiKey,
+            'Content-Type': 'application/x-www-form-urlencoded'
+          },
+          body: new URLSearchParams({ body: cancelText })
+        });
+        results.push({ messageId, status: 'cancelled_edit' });
+      }
+    } catch (err) {
+      console.error(`Failed to cancel Chatwork message ${messageId}:`, err);
+    }
+  }
+
+  res.json({ success: true, results });
+});
+
+app.post('/api/check-forms/update-ng-ticket', async (req, res) => {
+  const { messageId, factory, machine, status, reason, userInput, expectedInput } = req.body || {};
+  if (!messageId) {
+    return res.status(400).json({ error: 'messageId is required' });
+  }
+
+  const roomId = '440654635';
+  const apiKey = process.env.CHATWORK_API_KEY;
+  const url = `https://api.chatwork.com/v2/rooms/${roomId}/messages/${messageId}`;
+
+  try {
+    const now = new Date();
+    const timestamp = now.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+    let messageBody = `工場: ${factory}\n設備: ${machine}\nステータス: ${status}\n日時: ${timestamp}`;
+    if (expectedInput) messageBody += `\n期待値: ${expectedInput}`;
+    if (userInput !== undefined && userInput !== '') messageBody += `\n入力値: ${userInput}`;
+    messageBody += `\n理由: ${reason}`;
+    messageBody += `\n(編集済み / Updated)`;
+
+    const response = await fetch(url, {
+      method: 'PUT',
+      headers: {
+        'X-ChatWorkToken': apiKey,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: new URLSearchParams({ body: messageBody })
+    });
+
+    if (response.ok) {
+      res.status(200).json({ success: true, messageId });
+    } else {
+      const errorText = await response.text();
+      res.status(response.status).json({ error: errorText });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/check-forms/today-status', async (req, res) => {
+  const factory = normalizeCheckFormText(req.query.factory);
+  const machine = normalizeCheckFormText(req.query.machine);
+
+  if (!factory || !machine) {
+    return res.status(400).json({ error: 'factory and machine are required' });
+  }
+
+  try {
+    await client.connect();
+    const submittedDb = client.db('submittedDB');
+    const recordsCollection = submittedDb.collection(CHECK_FORM_RECORDS_COLLECTION);
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+
+    const docs = await recordsCollection.find({
+      factory,
+      $or: [
+        { 加工設備: machine },
+        { machine },
+        { selectedMachine: machine }
+      ],
+      createdAt: { $gte: startOfDay }
+    }).sort({ createdAt: -1 }).toArray();
+
+    if (!docs || docs.length === 0) {
+      return res.status(200).json({
+        hasSubmittedToday: false,
+        isPreComplete: false,
+        isPostComplete: false,
+        recordIds: {}
+      });
+    }
+
+    const recordIds = {};
+    let isPreComplete = false;
+    let isPostComplete = false;
+
+    docs.forEach(doc => {
+      const recId = doc._id.toString();
+      if (doc.templateId) {
+        recordIds[doc.templateId] = recId;
+      }
+      if (doc.templateName) {
+        recordIds[doc.templateName] = recId;
+      }
+      if (doc.isPreComplete !== false) isPreComplete = true;
+      if (doc.isPostComplete === true) isPostComplete = true;
+    });
+
+    const reportsCollection = submittedDb.collection(CHECK_FORM_NG_REPORTS_COLLECTION);
+    const openTickets = await reportsCollection.find({
+      factory,
+      $or: [
+        { 加工設備: machine },
+        { machine },
+        { selectedMachine: machine }
+      ],
+      createdAt: { $gte: startOfDay },
+      status: { $regex: /^open$/i }
+    }).toArray();
+
+    const hasOpenTickets = openTickets.length > 0;
+
+    return res.status(200).json({
+      hasSubmittedToday: true,
+      isPreComplete,
+      isPostComplete,
+      hasOpenTickets,
+      openTicketCount: openTickets.length,
+      recordIds,
+      lastSubmittedAt: docs[0].createdAt
+    });
+  } catch (error) {
+    console.error('Error fetching today checklist status:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// ─── DEDICATED FREYA ADMIN NG TICKETS ENDPOINTS ──────────────────────────────────────
+let _checkFormTemplatesCache = null;
+let _checkFormTemplatesCacheTime = 0;
+
+async function getCheckFormTemplatesMap() {
+  const now = Date.now();
+  if (_checkFormTemplatesCache && (now - _checkFormTemplatesCacheTime < 60000)) {
+    return _checkFormTemplatesCache;
+  }
+  try {
+    await client.connect();
+    const db = client.db(DB_NAME);
+    const templates = await db.collection(CHECK_FORM_TEMPLATES_COLLECTION).find({}).toArray();
+    console.log(`📋 [NG Tickets] Loaded ${templates.length} check form templates for bilingual resolution.`);
+    const map = new Map();
+    templates.forEach(t => {
+      const tid = t._id.toString();
+      const fieldsMap = new Map();
+      const fieldsByLabelMap = new Map();
+      if (Array.isArray(t.fields)) {
+        t.fields.forEach(f => {
+          const fieldObj = {
+            id: f.id ? String(f.id) : '',
+            label_ja: f.label_ja || f.label || '',
+            label_en: f.label_en || f.label || '',
+            description_ja: f.description_ja || f.description || '',
+            description_en: f.description_en || f.description || ''
+          };
+          if (f.id) {
+            fieldsMap.set(String(f.id), fieldObj);
+          }
+          if (f.label) {
+            fieldsByLabelMap.set(String(f.label).trim(), fieldObj);
+          }
+          if (f.label_ja) {
+            fieldsByLabelMap.set(String(f.label_ja).trim(), fieldObj);
+          }
+        });
+      }
+      map.set(tid, {
+        name_ja: t.name_ja || t.name || '',
+        name_en: t.name_en || t.name || '',
+        fields: fieldsMap,
+        fieldsByLabel: fieldsByLabelMap
+      });
+    });
+    _checkFormTemplatesCache = map;
+    _checkFormTemplatesCacheTime = now;
+    return map;
+  } catch (err) {
+    console.error('Error loading checkFormTemplatesMap:', err);
+    return new Map();
+  }
+}
+
+function normalizeNgTicketDoc(doc, templateMap) {
+  if (!doc) return null;
+  const workerStr = Array.isArray(doc.workerName) 
+    ? doc.workerName.join(', ') 
+    : (doc.workerName || doc.completedBy || '');
+  const machineStr = doc.加工設備 || doc.machine || doc.selectedMachine || doc.machineName || doc.machineId || '';
+  const formStr = doc.templateName || doc.formName || doc.checkFormName || '';
+  const imgUrls = Array.isArray(doc.imageURLs) ? doc.imageURLs.filter(Boolean) : [];
+  const createdAtIso = doc.createdAt ? (doc.createdAt instanceof Date ? doc.createdAt.toISOString() : String(doc.createdAt)) : new Date().toISOString();
+  
+  const templateIdStr = doc.templateId ? doc.templateId.toString() : '';
+  const tmpl = templateMap ? templateMap.get(templateIdStr) : null;
+  let fieldInfo = (tmpl && doc.fieldId) ? tmpl.fields.get(String(doc.fieldId)) : null;
+  if (!fieldInfo && tmpl && doc.fieldLabel) {
+    fieldInfo = tmpl.fieldsByLabel.get(String(doc.fieldLabel).trim());
+  }
+
+  const formName_ja = tmpl?.name_ja || doc.formName_ja || formStr;
+  const formName_en = tmpl?.name_en || doc.formName_en || formStr;
+  const fieldLabel_ja = fieldInfo?.label_ja || doc.fieldLabel_ja || doc.fieldLabel || '';
+  const fieldLabel_en = fieldInfo?.label_en || doc.fieldLabel_en || doc.fieldLabel || '';
+  const rawTiming = fieldInfo?.timing || doc.timing || 'pre';
+  const isPost = String(rawTiming).toLowerCase().includes('post') || String(rawTiming).includes('後');
+  const timing_ja = isPost ? '作業後点検' : '作業前点検';
+  const timing_en = isPost ? 'Post-Production Check' : 'Pre-Production Check';
+
+  return {
+    _id: doc._id.toString(),
+    ticketId: doc._id.toString(),
+    ticketNo: doc.ticketNo ?? null,
+    source: doc.source || 'checkForm',
+    factory: doc.factory || '',
+    machineName: machineStr,
+    加工設備: machineStr,
+    equipmentId: doc.equipmentId || null,
+    templateId: templateIdStr,
+    formName: formStr,
+    templateName: formStr,
+    formName_ja,
+    formName_en,
+    timing: rawTiming,
+    timing_ja,
+    timing_en,
+    recordId: doc.checkFormRecordId ? doc.checkFormRecordId.toString() : (doc.recordId || null),
+    checkFormRecordId: doc.checkFormRecordId ? doc.checkFormRecordId.toString() : null,
+    completedBy: workerStr,
+    workerName: workerStr,
+    fieldId: doc.fieldId || '',
+    fieldLabel: doc.fieldLabel || '',
+    fieldLabel_ja,
+    fieldLabel_en,
+    fieldType: doc.fieldType || '',
+    answerValue: doc.answerValue || '',
+    min: doc.min ?? null,
+    max: doc.max ?? null,
+    unit: doc.unit || '',
+    reason: doc.reason || '',
+    reason_ja: doc.reason_ja || doc.reason || '',
+    reason_en: doc.reason_en || doc.reason || '',
+    reason_bilingual: doc.reason_bilingual || (doc.reason_ja && doc.reason_en && doc.reason_ja !== doc.reason_en ? `${doc.reason_ja} / ${doc.reason_en}` : (doc.reason || '')),
+    imageURLs: imgUrls,
+    imageCount: imgUrls.length,
+    hasImages: imgUrls.length > 0,
+    chatworkMessageId: doc.chatworkMessageId || null,
+    status: String(doc.status || 'open').trim().toLowerCase(),
+    createdAt: createdAtIso,
+    closedAt: doc.closedAt ? (doc.closedAt instanceof Date ? doc.closedAt.toISOString() : String(doc.closedAt)) : null,
+    closedBy: doc.closedBy || null,
+    closedByUsername: doc.closedByUsername || null,
+    fixReason: doc.fixReason || null,
+    fixReason_ja: doc.fixReason_ja || doc.fixReason || null,
+    fixReason_en: doc.fixReason_en || doc.fixReason || null,
+    fixReason_bilingual: doc.fixReason_bilingual || (doc.fixReason_ja && doc.fixReason_en && doc.fixReason_ja !== doc.fixReason_en ? `${doc.fixReason_ja} / ${doc.fixReason || ''}` : null),
+    fixImageURLs: Array.isArray(doc.fixImageURLs) ? doc.fixImageURLs.filter(Boolean) : [],
+    statusHistory: Array.isArray(doc.statusHistory) ? doc.statusHistory : []
+  };
+}
+
+app.post('/api/check-forms/ng-tickets/page', async (req, res) => {
+  try {
+    const { filters = {}, page = 1, limit = 10, sort = {} } = req.body || {};
+    const safePage = Math.max(1, Number(page) || 1);
+    const safeLimit = Math.max(1, Number(limit) || 10);
+    const skip = (safePage - 1) * safeLimit;
+
+    await client.connect();
+    const db = client.db('submittedDB');
+    const collection = db.collection(CHECK_FORM_NG_REPORTS_COLLECTION);
+    const templateMap = await getCheckFormTemplatesMap();
+
+    const queryFilter = {};
+
+    if (filters.factory && filters.factory !== 'all') {
+      queryFilter.factory = filters.factory;
+    }
+
+    if (filters.status && filters.status !== 'all') {
+      queryFilter.status = { $regex: new RegExp(`^${filters.status}$`, 'i') };
+    }
+
+    if (filters.startDate || filters.endDate) {
+      queryFilter.createdAt = {};
+      if (filters.startDate) {
+        queryFilter.createdAt.$gte = new Date(filters.startDate);
+      }
+      if (filters.endDate) {
+        const endD = new Date(filters.endDate);
+        endD.setHours(23, 59, 59, 999);
+        queryFilter.createdAt.$lte = endD;
+      }
+    }
+
+    if (filters.keyword && String(filters.keyword).trim()) {
+      const kw = String(filters.keyword).trim();
+      const regex = { $regex: kw, $options: 'i' };
+      queryFilter.$or = [
+        { factory: regex },
+        { 加工設備: regex },
+        { machineName: regex },
+        { templateName: regex },
+        { formName: regex },
+        { fieldLabel: regex },
+        { reason: regex },
+        { fixReason: regex },
+        { workerName: regex },
+        { completedBy: regex }
+      ];
+    }
+
+    let sortObj = { createdAt: -1, _id: -1 };
+    if (sort.column) {
+      const dir = Number(sort.direction) === 1 ? 1 : -1;
+      if (sort.column === 'createdAt') sortObj = { createdAt: dir, _id: -1 };
+      else if (sort.column === 'factory') sortObj = { factory: dir, _id: -1 };
+      else if (sort.column === 'status') sortObj = { status: dir, _id: -1 };
+      else if (sort.column === 'fieldLabel') sortObj = { fieldLabel: dir, _id: -1 };
+    }
+
+    const totalItems = await collection.countDocuments(queryFilter);
+    const docs = await collection.find(queryFilter).sort(sortObj).skip(skip).limit(safeLimit).toArray();
+    const normalizedDocs = docs.map(d => normalizeNgTicketDoc(d, templateMap));
+
+    const allDocs = await collection.find(queryFilter, { projection: { imageURLs: 1, checkFormRecordId: 1, 加工設備: 1, machineName: 1, workerName: 1, completedBy: 1 } }).toArray();
+    let imageTickets = 0;
+    const recordIdsSet = new Set();
+    const machineKeysSet = new Set();
+    const operatorNamesSet = new Set();
+
+    allDocs.forEach(d => {
+      if (Array.isArray(d.imageURLs) && d.imageURLs.filter(Boolean).length > 0) imageTickets++;
+      if (d.checkFormRecordId) recordIdsSet.add(d.checkFormRecordId.toString());
+      const m = d.加工設備 || d.machineName || d.machine || '';
+      if (m) machineKeysSet.add(m);
+      const w = Array.isArray(d.workerName) ? d.workerName.join(', ') : (d.workerName || d.completedBy || '');
+      if (w) operatorNamesSet.add(w);
+    });
+
+    const totalPages = totalItems > 0 ? Math.ceil(totalItems / safeLimit) : 0;
+
+    res.json({
+      data: normalizedDocs,
+      summary: {
+        totalTickets: totalItems,
+        imageTickets,
+        recordCount: recordIdsSet.size,
+        machineCount: machineKeysSet.size,
+        operatorCount: operatorNamesSet.size
+      },
+      pagination: {
+        currentPage: totalPages > 0 ? Math.min(safePage, totalPages) : 1,
+        totalPages,
+        totalItems,
+        itemsPerPage: safeLimit
+      }
+    });
+  } catch (err) {
+    console.error('❌ Error in /api/check-forms/ng-tickets/page:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/check-forms/ng-tickets/filter-options', async (req, res) => {
+  try {
+    await client.connect();
+    const db = client.db('submittedDB');
+    const collection = db.collection(CHECK_FORM_NG_REPORTS_COLLECTION);
+    const templateMap = await getCheckFormTemplatesMap();
+
+    const docs = await collection.find({}, { projection: { factory: 1, 加工設備: 1, machineName: 1, templateName: 1, formName: 1, templateId: 1, fieldId: 1, workerName: 1, completedBy: 1, status: 1, fieldLabel: 1, fieldType: 1 } }).toArray();
+
+    const factoriesSet = new Set();
+    const machineNamesSet = new Set();
+    const formNamesSet = new Set();
+    const completedBySet = new Set();
+    const statusesSet = new Set(['open', 'closed']);
+    const fieldLabelsSet = new Set();
+    const fieldTypesSet = new Set();
+
+    docs.forEach(rawDoc => {
+      const d = normalizeNgTicketDoc(rawDoc, templateMap);
+      if (d.factory) factoriesSet.add(d.factory);
+      if (d.machineName) machineNamesSet.add(d.machineName);
+      if (d.formName_en) formNamesSet.add(d.formName_en);
+      if (d.formName_ja) formNamesSet.add(d.formName_ja);
+      if (d.completedBy) completedBySet.add(d.completedBy);
+      if (d.status) statusesSet.add(String(d.status).toLowerCase());
+      if (d.fieldLabel_en) fieldLabelsSet.add(d.fieldLabel_en);
+      if (d.fieldLabel_ja) fieldLabelsSet.add(d.fieldLabel_ja);
+      if (d.fieldType) fieldTypesSet.add(d.fieldType);
+    });
+
+    res.json({
+      factories: Array.from(factoriesSet).sort(),
+      machineNames: Array.from(machineNamesSet).sort(),
+      formNames: Array.from(formNamesSet).sort(),
+      completedBy: Array.from(completedBySet).sort(),
+      statuses: Array.from(statusesSet).sort(),
+      fieldLabels: Array.from(fieldLabelsSet).sort(),
+      fieldTypes: Array.from(fieldTypesSet).sort()
+    });
+  } catch (err) {
+    console.error('❌ Error in /api/check-forms/ng-tickets/filter-options:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/check-forms/ng-tickets/export', async (req, res) => {
+  try {
+    const { filters = {}, sort = {} } = req.body || {};
+
+    await client.connect();
+    const db = client.db('submittedDB');
+    const collection = db.collection(CHECK_FORM_NG_REPORTS_COLLECTION);
+    const templateMap = await getCheckFormTemplatesMap();
+
+    const queryFilter = {};
+    if (filters.factory && filters.factory !== 'all') queryFilter.factory = filters.factory;
+    if (filters.status && filters.status !== 'all') queryFilter.status = { $regex: new RegExp(`^${filters.status}$`, 'i') };
+    if (filters.startDate || filters.endDate) {
+      queryFilter.createdAt = {};
+      if (filters.startDate) queryFilter.createdAt.$gte = new Date(filters.startDate);
+      if (filters.endDate) {
+        const endD = new Date(filters.endDate);
+        endD.setHours(23, 59, 59, 999);
+        queryFilter.createdAt.$lte = endD;
+      }
+    }
+    if (filters.keyword && String(filters.keyword).trim()) {
+      const kw = String(filters.keyword).trim();
+      const regex = { $regex: kw, $options: 'i' };
+      queryFilter.$or = [
+        { factory: regex }, { 加工設備: regex }, { machineName: regex },
+        { templateName: regex }, { formName: regex }, { fieldLabel: regex },
+        { reason: regex }, { fixReason: regex }, { workerName: regex }, { completedBy: regex }
+      ];
+    }
+
+    let sortObj = { createdAt: -1, _id: -1 };
+    if (sort.column) {
+      const dir = Number(sort.direction) === 1 ? 1 : -1;
+      if (sort.column === 'createdAt') sortObj = { createdAt: dir, _id: -1 };
+      else if (sort.column === 'factory') sortObj = { factory: dir, _id: -1 };
+      else if (sort.column === 'status') sortObj = { status: dir, _id: -1 };
+    }
+
+    const docs = await collection.find(queryFilter).sort(sortObj).toArray();
+    res.json(docs.map(d => normalizeNgTicketDoc(d, templateMap)));
+  } catch (err) {
+    console.error('❌ Error in /api/check-forms/ng-tickets/export:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+async function updateNgTicketChatworkMessage(report) {
+  if (!report || !report.chatworkMessageId) return;
+  const roomId = '440654635';
+  const apiKey = process.env.CHATWORK_API_KEY;
+  if (!apiKey) return;
+
+  const url = `https://api.chatwork.com/v2/rooms/${roomId}/messages/${report.chatworkMessageId}`;
+
+  const createdAtDate = report.createdAt ? new Date(report.createdAt) : new Date();
+  const timestamp = createdAtDate.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+  
+  const formatter = new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' });
+  const parts = formatter.formatToParts(createdAtDate);
+  const year = parts.find(p => p.type === 'year').value;
+  const month = parts.find(p => p.type === 'month').value;
+  const day = parts.find(p => p.type === 'day').value;
+  const dateStr = `${year}-${month}-${day}`;
+  
+  const adminLink = `https://karlsome.github.io/freyaAdmin2/maintenance/submissions/tickets?startDate=${dateStr}&endDate=${dateStr}`;
+  const isClosed = report.status === 'closed';
+  const schedInfo = getScheduleHeaderInfo(report.schedule, report.templateName);
+
+  let titleHeader = isClosed
+    ? `✅✅✅ 【DEFECT TICKET${schedInfo.en} (対応済) / 不適合報告${schedInfo.ja} (解決)】 ✅✅✅`
+    : `⚠️ 【DEFECT TICKET${schedInfo.en} / 不適合報告${schedInfo.ja}】`;
+
+  let statusLabel = isClosed ? '済 (Closed)' : 'NG';
+  const labelText = report.fieldLabel_ja || report.fieldLabel || report.fieldLabel_en || '';
+
+  let body = `${titleHeader}\nチケット番号: #${report.ticketNo || ''}\n工場: ${report.factory || ''}\n設備: ${report['加工設備'] || report.machine || ''}\nステータス: ${statusLabel}\n日時: ${timestamp}`;
+
+  if (labelText) {
+    body += `\n点検項目: ${labelText}`;
+  }
+
+  if (report.fieldType === 'number' && typeof report.min === 'number' && typeof report.max === 'number') {
+    body += `\n期待値: ${report.min} - ${report.max} ${report.unit || ''}`;
+  }
+
+  if (report.answerValue !== undefined && report.answerValue !== null && report.answerValue !== '') {
+    let ans = report.answerValue;
+    if (Array.isArray(ans)) ans = ans.join(', ');
+    body += `\n入力値: ${ans}`;
+  }
+
+  let reasonStr = report.reason || '';
+  if (report.reason_ja && report.reason_en && report.reason_ja !== report.reason_en) {
+    reasonStr = `${report.reason_ja} / ${report.reason_en}`;
+  } else if (report.reason_bilingual) {
+    reasonStr = report.reason_bilingual;
+  } else if (report.reason) {
+    const bReason = await getBilingualText(report.reason);
+    reasonStr = bReason.combined;
+  }
+
+  body += `\n理由: ${reasonStr}`;
+  if (Array.isArray(report.imageURLs) && report.imageURLs.length > 0) {
+    body += `\n画像: ${report.imageURLs[0]}`;
+  }
+  body += `\n管理リンク: ${adminLink}`;
+
+  if (isClosed) {
+    const closedAtDate = report.closedAt ? new Date(report.closedAt) : new Date();
+    const closedAtStr = closedAtDate.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+    const closedBy = report.closedBy || report.closedByUsername || '管理者';
+
+    let fixReasonStr = report.fixReason || '点検・修正完了';
+    if (report.fixReason_ja && report.fixReason_en && report.fixReason_ja !== report.fixReason_en) {
+      fixReasonStr = `${report.fixReason_ja} / ${report.fixReason_en}`;
+    } else if (report.fixReason_bilingual) {
+      fixReasonStr = report.fixReason_bilingual;
+    } else if (report.fixReason) {
+      const bFix = await getBilingualText(report.fixReason);
+      fixReasonStr = bFix.combined;
+    }
+
+    const fixImages = Array.isArray(report.fixImageURLs) ? report.fixImageURLs : (Array.isArray(report.fixImagesData) ? report.fixImagesData : []);
+
+    body += `\n\n[info][title]✅ 解決済み (Closed)[/title]対応者: ${closedBy}\n対応日時: ${closedAtStr}\n対応内容: ${fixReasonStr}`;
+    if (fixImages.length > 0) {
+      body += `\n修正画像: ${fixImages.join('\n')}`;
+    }
+    body += `[/info]`;
+  } else if (Array.isArray(report.statusHistory) && report.statusHistory.some(h => h.action === 'Ticket Reopened')) {
+    const latestReopen = [...report.statusHistory].reverse().find(h => h.action === 'Ticket Reopened');
+    const reopenUser = latestReopen?.user || latestReopen?.username || '管理者';
+    const reopenTime = latestReopen?.timestamp ? new Date(latestReopen.timestamp).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }) : '';
+    body += `\n\n[info][title]⚠️ 再オープン (Reopened)[/title]再オープン者: ${reopenUser}${reopenTime ? `\n日時: ${reopenTime}` : ''}[/info]`;
+  }
+
+  try {
+    const res = await fetch(url, {
+      method: 'PUT',
+      headers: {
+        'X-ChatWorkToken': apiKey,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: new URLSearchParams({ body })
+    });
+    if (!res.ok) {
+      const errTxt = await res.text();
+      console.error(`⚠️ Failed to update Chatwork message ${report.chatworkMessageId}: ${res.status} ${errTxt}`);
+    } else {
+      console.log(`✅ Successfully updated Chatwork message ${report.chatworkMessageId} for ticket #${report.ticketNo} (status: ${report.status})`);
+    }
+  } catch (err) {
+    console.error(`❌ Error updating Chatwork message ${report.chatworkMessageId}:`, err);
+  }
+}
+
+app.post('/api/check-forms/ng-tickets/update-status', async (req, res) => {
+  try {
+    const { ticketId, update, username, role } = req.body || {};
+    if (!ticketId || !update) {
+      return res.status(400).json({ error: 'ticketId and update object are required' });
+    }
+
+    await client.connect();
+    const db = client.db('submittedDB');
+    const collection = db.collection(CHECK_FORM_NG_REPORTS_COLLECTION);
+
+    if (update && update.$set) {
+      if (update.$set.fixReason) {
+        const bilingualFix = await getBilingualText(update.$set.fixReason);
+        update.$set.fixReason_ja = bilingualFix.ja;
+        update.$set.fixReason_en = bilingualFix.en;
+        update.$set.fixReason_bilingual = bilingualFix.combined;
+      }
+      if (update.$set.reason) {
+        const bilingualReason = await getBilingualText(update.$set.reason);
+        update.$set.reason_ja = bilingualReason.ja;
+        update.$set.reason_en = bilingualReason.en;
+        update.$set.reason_bilingual = bilingualReason.combined;
+      }
+    }
+
+    const filter = { _id: new ObjectId(ticketId) };
+    const result = await collection.updateOne(filter, update);
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ error: 'Ticket not found' });
+    }
+
+    // Trigger Chatwork update if chatworkMessageId exists
+    const updatedTicket = await collection.findOne(filter);
+    if (updatedTicket && updatedTicket.chatworkMessageId) {
+      updateNgTicketChatworkMessage(updatedTicket).catch(e => {
+        console.error('Failed to trigger Chatwork message update:', e);
+      });
+    }
+
+    res.json({ success: true, matchedCount: result.matchedCount, modifiedCount: result.modifiedCount });
+  } catch (err) {
+    console.error('❌ Error in /api/check-forms/ng-tickets/update-status:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/check-forms/submit', async (req, res) => {
   const payload = req.body || {};
   const factory = normalizeCheckFormText(payload.factory);
@@ -32693,7 +33549,32 @@ app.post('/api/check-forms/submit', async (req, res) => {
     return res.status(400).json({ error: 'machine is required' });
   }
 
+  console.log('📋 [/api/check-forms/submit] Received payload:', JSON.stringify({
+    factory: payload.factory,
+    machine: payload.machine,
+    workerName: payload.workerName,
+    templateCount: submittedTemplates.length,
+    templates: submittedTemplates.map(t => ({
+      templateId: t.templateId || t._id,
+      templateName: t.templateName || t.name,
+      workerName: t.workerName,
+      answersCount: Array.isArray(t.answers) ? t.answers.length : 0,
+      answers: Array.isArray(t.answers) ? t.answers.map(a => ({ fieldId: a.fieldId || a.id, type: a.type, value: a.value })) : []
+    }))
+  }, null, 2));
+
+  if (!factory) {
+    console.error('❌ [/api/check-forms/submit] Error: factory is required');
+    return res.status(400).json({ error: 'factory is required' });
+  }
+
+  if (!machine) {
+    console.error('❌ [/api/check-forms/submit] Error: machine is required');
+    return res.status(400).json({ error: 'machine is required' });
+  }
+
   if (submittedTemplates.length === 0) {
+    console.error('❌ [/api/check-forms/submit] Error: at least one template submission is required');
     return res.status(400).json({ error: 'at least one template submission is required' });
   }
 
@@ -32706,48 +33587,110 @@ app.post('/api/check-forms/submit', async (req, res) => {
     const now = new Date();
     const nowIso = now.toISOString();
     const recordDocs = [];
+    const updateOps = [];
+    const recordIdMap = {};
     const ngReportDocs = [];
 
     for (let templateIndex = 0; templateIndex < submittedTemplates.length; templateIndex += 1) {
       const templatePayload = submittedTemplates[templateIndex] || {};
       const answersPayload = Array.isArray(templatePayload.answers) ? templatePayload.answers : [];
-      const templateId = normalizeCheckFormText(templatePayload.templateId);
-      const templateName = normalizeCheckFormText(templatePayload.templateName);
+      const templateId = normalizeCheckFormText(templatePayload.templateId || templatePayload._id);
+      const templateName = normalizeCheckFormText(templatePayload.templateName || templatePayload.name);
       const description = normalizeCheckFormText(templatePayload.description);
       const schedule = normalizeCheckFormSchedule(templatePayload.schedule);
       const startDate = normalizeCheckFormText(templatePayload.startDate);
       const fallbackEquipmentIds = normalizeCheckFormStringArray(templatePayload.equipmentIds);
       const fallbackEquipmentNames = normalizeCheckFormStringArray(templatePayload.equipmentNames);
-      const equipmentId = normalizeCheckFormText(
-        templatePayload.equipmentId || templatePayload.selectedMachineId || fallbackEquipmentIds[0]
+      let equipmentId = normalizeCheckFormText(
+        templatePayload.equipmentId || templatePayload.selectedMachineId
+      );
+      const selectedMachine = normalizeCheckFormText(
+        templatePayload.selectedMachine || machine || fallbackEquipmentNames[0]
       );
       const processingEquipment = normalizeCheckFormText(
-        templatePayload['加工設備'] || templatePayload.selectedMachine || machine || fallbackEquipmentNames[0]
+        templatePayload['加工設備'] || selectedMachine
       );
-      const selectedMachine = normalizeCheckFormText(templatePayload.selectedMachine || machine);
-      const workerName = normalizeCheckFormText(templatePayload.workerName);
+
+      if (processingEquipment) {
+        try {
+          const setsubiCollection = db.collection('setsubiDB');
+          const equipDoc = await setsubiCollection.findOne({
+            $or: [
+              { name: processingEquipment },
+              { 設備名: processingEquipment },
+              { name_ja: processingEquipment }
+            ]
+          });
+          if (equipDoc && equipDoc._id) {
+            equipmentId = equipDoc._id.toString();
+          }
+        } catch (_) {}
+      }
+
+      if (!equipmentId && fallbackEquipmentIds.length > 0) {
+        equipmentId = fallbackEquipmentIds[0];
+      }
+      let rawWorkerName = templatePayload.workerName || payload.workerName || templatePayload.Worker_Name || payload.Worker_Name;
+      if (!rawWorkerName && Array.isArray(answersPayload)) {
+        const nameAns = answersPayload.find(a => a && (a.type === 'name' || (a.fieldId && a.fieldId.includes('名前'))) && a.value);
+        if (nameAns) rawWorkerName = nameAns.value;
+      }
+      let workerNameArray = [];
+      if (Array.isArray(rawWorkerName)) {
+        workerNameArray = rawWorkerName.map(w => normalizeCheckFormText(w)).filter(Boolean);
+      } else if (typeof rawWorkerName === 'string') {
+        const trimmed = rawWorkerName.trim();
+        if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+          try { workerNameArray = JSON.parse(trimmed); } catch (e) { workerNameArray = [trimmed]; }
+        } else if (trimmed) {
+          workerNameArray = trimmed.split(',').map(s => s.trim()).filter(Boolean);
+        }
+      }
+      const workerName = workerNameArray.length > 0 ? (workerNameArray.length === 1 ? workerNameArray[0] : workerNameArray) : '';
 
       if (!templateId || !templateName) {
+        console.error(`❌ [/api/check-forms/submit] Error: templateId and templateName are required for template index ${templateIndex}`);
         return res.status(400).json({ error: `templateId and templateName are required for template index ${templateIndex}` });
       }
 
-      if (!workerName) {
+      if (!workerName || workerNameArray.length === 0) {
+        console.error(`❌ [/api/check-forms/submit] Error: workerName is required for template ${templateName}`);
         return res.status(400).json({ error: `workerName is required for template ${templateName}` });
       }
 
       if (!selectedMachine) {
+        console.error(`❌ [/api/check-forms/submit] Error: selectedMachine is required for template ${templateName}`);
         return res.status(400).json({ error: `selectedMachine is required for template ${templateName}` });
       }
 
       if (!processingEquipment) {
+        console.error(`❌ [/api/check-forms/submit] Error: 加工設備 is required for template ${templateName}`);
         return res.status(400).json({ error: `加工設備 is required for template ${templateName}` });
       }
 
       if (answersPayload.length === 0) {
+        console.error(`❌ [/api/check-forms/submit] Error: answers are required for template ${templateName}`);
         return res.status(400).json({ error: `answers are required for template ${templateName}` });
       }
 
-      const recordId = new ObjectId();
+      let existingObjId = null;
+      if (templatePayload.recordId && ObjectId.isValid(templatePayload.recordId)) {
+        existingObjId = new ObjectId(templatePayload.recordId);
+      } else {
+        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const existingDoc = await recordsCollection.findOne({
+          factory,
+          $or: [{ machine: processingEquipment }, { 加工設備: processingEquipment }],
+          templateId,
+          createdAt: { $gte: todayStart }
+        });
+        if (existingDoc) {
+          existingObjId = existingDoc._id;
+        }
+      }
+
+      const recordId = existingObjId || new ObjectId();
+      recordIdMap[templateId] = recordId.toHexString();
       const normalizedAnswers = [];
       const recordTicketSummaries = [];
 
@@ -32766,8 +33709,9 @@ app.post('/api/check-forms/submit', async (req, res) => {
           return res.status(400).json({ error: `field ${field.label} is missing an answer in template ${templateName}` });
         }
 
+        const ticketRequired = doesCheckFormAnswerRequireTicket(field, normalizedValue);
         const fieldPhotoData = normalizeCheckFormText(answerPayload.fieldPhotoData);
-        if (field.photoRequired && !fieldPhotoData) {
+        if (field.photoRequired && !ticketRequired && !fieldPhotoData) {
           return res.status(400).json({ error: `field ${field.label} requires a photo in template ${templateName}` });
         }
 
@@ -32791,7 +33735,6 @@ app.post('/api/check-forms/submit', async (req, res) => {
         const ticketImagesData = Array.isArray(ticketPayload?.imagesData)
           ? ticketPayload.imagesData.filter(Boolean).slice(0, 5)
           : [];
-        const ticketRequired = doesCheckFormAnswerRequireTicket(field, normalizedValue);
         const shouldCreateTicket = ticketRequired || !!ticketPayload?.saved;
         let ticketSummary = null;
 
@@ -32822,6 +33765,7 @@ app.post('/api/check-forms/submit', async (req, res) => {
             equipmentId: equipmentId || null,
             templateId,
             templateName,
+            schedule: templatePayload.schedule || 'daily',
             checkFormRecordId: recordId,
             workerName,
             fieldId: field.id,
@@ -32877,24 +33821,43 @@ app.post('/api/check-forms/submit', async (req, res) => {
         });
       }
 
-      recordDocs.push({
-        _id: recordId,
-        source: 'checkForm',
-        templateId,
-        templateName,
-        description,
-        schedule,
-        startDate,
-        factory,
-        加工設備: processingEquipment,
-        equipmentId: equipmentId || null,
-        workerName,
-        answers: normalizedAnswers,
-        tickets: recordTicketSummaries,
-        submittedAtClient: normalizeCheckFormText(payload.submittedAtClient),
-        createdAt: now,
-        updatedAt: now,
-      });
+      if (existingObjId) {
+        updateOps.push({
+          filter: { _id: existingObjId },
+          update: {
+            $push: {
+              answers: { $each: normalizedAnswers },
+              tickets: { $each: recordTicketSummaries }
+            },
+            $set: {
+              isPostComplete: true,
+              updatedAt: now
+            }
+          }
+        });
+      } else {
+        recordDocs.push({
+          _id: recordId,
+          source: 'checkForm',
+          templateId,
+          templateName,
+          description,
+          schedule,
+          startDate,
+          factory,
+          加工設備: processingEquipment,
+          equipmentId: equipmentId || null,
+          workerName: Array.isArray(workerName) ? workerName.join(', ') : workerName,
+          Worker_Name: workerNameArray,
+          answers: normalizedAnswers,
+          tickets: recordTicketSummaries,
+          isPreComplete: true,
+          isPostComplete: false,
+          submittedAtClient: normalizeCheckFormText(payload.submittedAtClient),
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
     }
 
     const session = client.startSession();
@@ -32919,6 +33882,10 @@ app.post('/api/check-forms/submit', async (req, res) => {
 
         if (recordDocs.length > 0) {
           await recordsCollection.insertMany(recordDocs, { session });
+        }
+
+        for (const op of updateOps) {
+          await recordsCollection.updateOne(op.filter, op.update, { session });
         }
 
         if (ngReportDocs.length > 0) {
@@ -32947,7 +33914,8 @@ app.post('/api/check-forms/submit', async (req, res) => {
           
           const adminLink = `https://karlsome.github.io/freyaAdmin2/maintenance/submissions/tickets?startDate=${dateStr}&endDate=${dateStr}`;
           
-          let editedBody = `チケット番号: #${report.ticketNo}\n工場: ${report.factory}\n設備: ${report.加工設備}\nステータス: NG\n日時: ${timestamp}`;
+          const titleHeader = '⚠️ 【DEFECT TICKET / 不適合報告】';
+          let editedBody = `${titleHeader}\nチケット番号: #${report.ticketNo}\n工場: ${report.factory}\n設備: ${report.加工設備}\nステータス: NG\n日時: ${timestamp}`;
           if (report.fieldType === 'number' && typeof report.min === 'number' && typeof report.max === 'number') {
             editedBody += `\n期待値: ${report.min} - ${report.max} ${report.unit || ''}`;
           }
@@ -32975,8 +33943,9 @@ app.post('/api/check-forms/submit', async (req, res) => {
     return res.status(201).json({
       success: true,
       insertedRecordCount: recordDocs.length,
+      updatedRecordCount: updateOps.length,
       insertedTicketCount: ngReportDocs.length,
-      recordIds: recordDocs.map((record) => record._id.toHexString()),
+      recordIds: recordIdMap,
     });
   } catch (error) {
     console.error('Error submitting check forms:', error);
