@@ -32032,7 +32032,7 @@ function sanitizeCheckFormField(field = {}) {
   const imageURL = normalizeCheckFormText(field.imageURL);
 
   return {
-    id: normalizeCheckFormText(field.id),
+    id: normalizeCheckFormText(field.id || field.fieldId),
     label: normalizeCheckFormText(field.label),
     label_ja: normalizeCheckFormText(field.label_ja || field.label),
     label_en: normalizeCheckFormText(field.label_en || field.label),
@@ -32961,8 +32961,11 @@ app.post('/api/check-forms/submit', async (req, res) => {
       const equipmentId = normalizeCheckFormText(
         templatePayload.equipmentId || templatePayload.selectedMachineId || fallbackEquipmentIds[0]
       );
+      const selectedMachine = normalizeCheckFormText(
+        templatePayload.selectedMachine || machine || fallbackEquipmentNames[0]
+      );
       const processingEquipment = normalizeCheckFormText(
-        templatePayload['加工設備'] || templatePayload.selectedMachine || machine || fallbackEquipmentNames[0]
+        templatePayload['加工設備'] || selectedMachine
       );
       let rawWorkerName = payload.workerName || templatePayload.workerName || payload.Worker_Name || templatePayload.Worker_Name;
       let workerNameArray = [];
@@ -33017,8 +33020,9 @@ app.post('/api/check-forms/submit', async (req, res) => {
           return res.status(400).json({ error: `field ${field.label} is missing an answer in template ${templateName}` });
         }
 
+        const ticketRequired = doesCheckFormAnswerRequireTicket(field, normalizedValue);
         const fieldPhotoData = normalizeCheckFormText(answerPayload.fieldPhotoData);
-        if (field.photoRequired && !fieldPhotoData) {
+        if (field.photoRequired && !ticketRequired && !fieldPhotoData) {
           return res.status(400).json({ error: `field ${field.label} requires a photo in template ${templateName}` });
         }
 
@@ -33042,7 +33046,6 @@ app.post('/api/check-forms/submit', async (req, res) => {
         const ticketImagesData = Array.isArray(ticketPayload?.imagesData)
           ? ticketPayload.imagesData.filter(Boolean).slice(0, 5)
           : [];
-        const ticketRequired = doesCheckFormAnswerRequireTicket(field, normalizedValue);
         const shouldCreateTicket = ticketRequired || !!ticketPayload?.saved;
         let ticketSummary = null;
 

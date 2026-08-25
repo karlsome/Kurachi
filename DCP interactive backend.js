@@ -13533,12 +13533,35 @@ if (manualSendModal) {
       counterBadge.textContent = `${queueIndex + 1} / ${queue.length}`;
     }
 
+    const tplFields = Array.isArray(tpl.fields) ? tpl.fields : [];
+    const allFieldsCompleted = tplFields.every(field => isChecklistFieldCompleted(field));
+
     if (nextBtn) {
       const isLast = queueIndex === queue.length - 1;
       const label = isLast
-        ? ((typeof _t === 'function') ? _t('complete_all_checklists') : 'Complete All Checklists')
+        ? ((typeof _t === 'function') ? _t('complete_all_checklists') : 'Checklist Completed')
         : ((typeof _t === 'function') ? _t('next_checklist') : 'Next Checklist');
-      nextBtn.innerHTML = `<span>${label}</span> →`;
+      nextBtn.innerHTML = `<span>${label}</span> ${isLast ? '✓' : '→'}`;
+
+      if (!allFieldsCompleted) {
+        nextBtn.disabled = true;
+        nextBtn.classList.remove('checklist-next-pulse');
+        nextBtn.style.opacity = '0.45';
+        nextBtn.style.cursor = 'not-allowed';
+        nextBtn.style.filter = 'grayscale(1)';
+        nextBtn.style.pointerEvents = 'none';
+        nextBtn.style.background = '#9ca3af';
+        nextBtn.style.boxShadow = 'none';
+      } else {
+        nextBtn.disabled = false;
+        nextBtn.classList.add('checklist-next-pulse');
+        nextBtn.style.opacity = '1';
+        nextBtn.style.cursor = 'pointer';
+        nextBtn.style.filter = 'none';
+        nextBtn.style.pointerEvents = 'auto';
+        nextBtn.style.background = '';
+        nextBtn.style.boxShadow = '';
+      }
     }
 
     if (!container) return;
@@ -15010,29 +15033,54 @@ if (manualSendModal) {
       renderCurrentChecklistTemplate();
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } else {
+      const overlay = document.getElementById('checklistSubmittingOverlay');
+      if (overlay) overlay.style.display = 'flex';
+
       try {
         const workerName = document.getElementById('step0CurrentWorkerName')?.textContent || '';
         const payload = {
           factory: window.checklistState.factory,
           machine: window.checklistState.machine,
           workerName,
-          templates: queue.map(t => ({
-            templateId: t._id,
-            templateName: t.name,
-            schedule: t.schedule,
-            answers: fields.map(f => ({
-              fieldId: f.id,
-              label: f.label,
-              type: f.type,
-              value: window.checklistState.answers[f.id],
-              fieldPhotoBase64: window.checklistState.fieldPhotos[f.id] || null,
-            })),
-            tickets: Object.keys(window.checklistState.tickets).map(fId => ({
-              fieldId: fId,
-              reason: window.checklistState.tickets[fId].reason,
-              imageOverlayBase64s: window.checklistState.tickets[fId].images,
-            }))
-          }))
+          templates: queue.map(t => {
+            const tFields = Array.isArray(t.fields) ? t.fields : [];
+            return {
+              templateId: t._id,
+              templateName: t.name,
+              schedule: t.schedule,
+              answers: tFields.map(f => ({
+                id: f.id,
+                fieldId: f.id,
+                label: f.label,
+                label_ja: f.label_ja || f.label,
+                label_en: f.label_en || f.label,
+                type: f.type,
+                required: !!f.required,
+                photoRequired: !!f.photoRequired,
+                min: f.min !== undefined ? f.min : null,
+                max: f.max !== undefined ? f.max : null,
+                options: f.options || [],
+                unit: f.unit || '',
+                value: window.checklistState.answers[f.id],
+                fieldPhotoBase64: window.checklistState.fieldPhotos[f.id] || null,
+                fieldPhotoData: window.checklistState.fieldPhotos[f.id] || null,
+                ticket: window.checklistState.tickets[f.id] ? {
+                  reason: window.checklistState.tickets[f.id].reason,
+                  imagesData: window.checklistState.tickets[f.id].images,
+                  chatworkMessageId: window.checklistState.tickets[f.id].chatworkMessageId || null,
+                  saved: true
+                } : null
+              })),
+              tickets: Object.keys(window.checklistState.tickets || {})
+                .filter(fId => tFields.some(tf => tf.id === fId))
+                .map(fId => ({
+                  fieldId: fId,
+                  reason: window.checklistState.tickets[fId].reason,
+                  imagesData: window.checklistState.tickets[fId].images,
+                  chatworkMessageId: window.checklistState.tickets[fId].chatworkMessageId || null,
+                }))
+            };
+          })
         };
 
         const res = await fetch(`${serverURL}/api/check-forms/submit`, {
@@ -15042,6 +15090,7 @@ if (manualSendModal) {
         });
 
         if (res.ok) {
+          if (overlay) overlay.style.display = 'none';
           window.checklistState.isPreComplete = true;
           const bar = document.querySelector('.tab-bar');
           if (bar) bar.classList.remove('locked-checklist');
@@ -15051,11 +15100,45 @@ if (manualSendModal) {
           }
 
           if (typeof window.goToTab === 'function') window.goToTab(0);
+        } else {
+          let errText = 'Server error during checklist submission';
+          try {
+            const errJson = await res.json();
+            errText = errJson.error || errJson.message || errText;
+          } catch (_) {
+            try { errText = await res.text(); } catch (__) {}
+          }
+          if (overlay) overlay.style.display = 'none';
+          window.showChecklistSubmitErrorModal(errText);
         }
       } catch (e) {
         console.error('Error submitting checklist:', e);
+        if (overlay) overlay.style.display = 'none';
+        window.showChecklistSubmitErrorModal(e.message || 'Network error: Unable to connect to server');
       }
     }
+  };
+
+  window.showChecklistSubmitErrorModal = function (errorMsg) {
+    const overlay = document.getElementById('checklistSubmittingOverlay');
+    if (overlay) overlay.style.display = 'none';
+    const modal = document.getElementById('checklistSubmitErrorModal');
+    const msgEl = document.getElementById('checklistSubmitErrorMessage');
+    if (msgEl) msgEl.textContent = errorMsg || 'Submission failed. Please check network connection and try again.';
+    if (modal) modal.style.display = 'flex';
+    if (typeof showAppToast === 'function') {
+      showAppToast(`❌ ${errorMsg || 'Submission failed'}`);
+    }
+  };
+
+  window.closeChecklistSubmitErrorModal = function () {
+    const modal = document.getElementById('checklistSubmitErrorModal');
+    if (modal) modal.style.display = 'none';
+  };
+
+  window.retryChecklistSubmission = function () {
+    window.closeChecklistSubmitErrorModal();
+    window.handleChecklistSubmitOrNext();
   };
 
   window.confirmDoPostChecklist = function () {
