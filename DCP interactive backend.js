@@ -13555,13 +13555,25 @@ if (manualSendModal) {
       return false;
     }
 
+    const isNg = ansVal === 'NG';
+    const numVal = typeof ansVal === 'number' ? ansVal : parseFloat(ansVal);
+    const isOutOfRange = field.type === 'number' && !isNaN(numVal) && (
+      (field.min !== null && field.min !== undefined && numVal < field.min) ||
+      (field.max !== null && field.max !== undefined && numVal > field.max)
+    );
+
     const hasTicket = window.checklistState.tickets[field.id];
-    if (ansVal === 'NG' && (!hasTicket || !hasTicket.saved)) {
-      return false;
+
+    if (isNg || isOutOfRange) {
+      if (!hasTicket || !hasTicket.saved) {
+        return false;
+      }
     }
 
-    if (field.photoRequired && !window.checklistState.fieldPhotos[field.id]) {
-      return false;
+    if (field.photoRequired && !isNg && !isOutOfRange) {
+      if (!window.checklistState.fieldPhotos[field.id]) {
+        return false;
+      }
     }
 
     return true;
@@ -13581,6 +13593,12 @@ if (manualSendModal) {
       const fDesc = getLocalizedText(field, 'description');
       const ansVal = window.checklistState.answers[field.id];
       const hasTicket = window.checklistState.tickets[field.id];
+      const isNg = ansVal === 'NG';
+      const numVal = typeof ansVal === 'number' ? ansVal : parseFloat(ansVal);
+      const isOutOfRange = field.type === 'number' && !isNaN(numVal) && (
+        (field.min !== null && field.min !== undefined && numVal < field.min) ||
+        (field.max !== null && field.max !== undefined && numVal > field.max)
+      );
 
       const isCompleted = isChecklistFieldCompleted(field);
       const isUnlocked = isPreviousCompleted || window.checklistState.isBypassed || window.checklistState.isPreComplete;
@@ -13679,7 +13697,7 @@ if (manualSendModal) {
 
       let ticketBtnHtml = '';
       if (field.type !== 'name') {
-        const isRequired = (ansVal === 'NG') || (hasTicket && !hasTicket.saved);
+        const isRequired = isNg || isOutOfRange || (hasTicket && !hasTicket.saved);
         const isSaved = hasTicket && hasTicket.saved;
         const cls = isSaved ? 'saved' : (isRequired ? 'required-pulse' : '');
         const lbl = isSaved ? '✓ Ticket Saved' : (isRequired ? '⚠️ Ticket Required' : '➕ Ticket');
@@ -13687,7 +13705,7 @@ if (manualSendModal) {
       }
 
       let photoHtml = '';
-      if (field.photoRequired) {
+      if (field.photoRequired && !isNg && !isOutOfRange) {
         const photoBase64 = window.checklistState.fieldPhotos[field.id];
         photoHtml = `
           <div style="margin-top:8px;">
@@ -14078,11 +14096,18 @@ if (manualSendModal) {
       const ticket = window.checklistState.tickets[field.id];
       const card = document.getElementById(`checklist-card-${field.id}`);
 
+      const isNg = ans === 'NG';
+      const numVal = typeof ans === 'number' ? ans : parseFloat(ans);
+      const isOutOfRange = field.type === 'number' && !isNaN(numVal) && (
+        (field.min !== null && field.min !== undefined && numVal < field.min) ||
+        (field.max !== null && field.max !== undefined && numVal > field.max)
+      );
+
       let isFieldValid = true;
 
-      if (field.required && (ans === undefined || ans === '')) isFieldValid = false;
-      if (ans === 'NG' && (!ticket || !ticket.saved)) isFieldValid = false;
-      if (field.photoRequired && !window.checklistState.fieldPhotos[field.id]) isFieldValid = false;
+      if (field.required && (ans === undefined || ans === '' || ans === null)) isFieldValid = false;
+      if ((isNg || isOutOfRange) && (!ticket || !ticket.saved)) isFieldValid = false;
+      if (field.photoRequired && !isNg && !isOutOfRange && !window.checklistState.fieldPhotos[field.id]) isFieldValid = false;
 
       if (!isFieldValid) {
         if (card) card.classList.add('invalid-highlight');
@@ -14450,11 +14475,18 @@ if (manualSendModal) {
       const ticket = window.checklistState.tickets[field.id];
       const card = document.getElementById(`checklist-card-${field.id}`);
 
+      const isNg = ans === 'NG';
+      const numVal = typeof ans === 'number' ? ans : parseFloat(ans);
+      const isOutOfRange = field.type === 'number' && !isNaN(numVal) && (
+        (field.min !== null && field.min !== undefined && numVal < field.min) ||
+        (field.max !== null && field.max !== undefined && numVal > field.max)
+      );
+
       let isFieldValid = true;
 
-      if (field.required && (ans === undefined || ans === '')) isFieldValid = false;
-      if (ans === 'NG' && (!ticket || !ticket.saved)) isFieldValid = false;
-      if (field.photoRequired && !window.checklistState.fieldPhotos[field.id]) isFieldValid = false;
+      if (field.required && (ans === undefined || ans === '' || ans === null)) isFieldValid = false;
+      if ((isNg || isOutOfRange) && (!ticket || !ticket.saved)) isFieldValid = false;
+      if (field.photoRequired && !isNg && !isOutOfRange && !window.checklistState.fieldPhotos[field.id]) isFieldValid = false;
 
       if (!isFieldValid) {
         if (card) card.classList.add('invalid-highlight');
