@@ -33075,8 +33075,10 @@ function normalizeNgTicketDoc(doc, templateMap) {
   const formName_en = tmpl?.name_en || doc.formName_en || formStr;
   const fieldLabel_ja = fieldInfo?.label_ja || doc.fieldLabel_ja || doc.fieldLabel || '';
   const fieldLabel_en = fieldInfo?.label_en || doc.fieldLabel_en || doc.fieldLabel || '';
-
-  console.log(`🎫 [NG Ticket #${doc.ticketNo || doc._id}] templateId=${templateIdStr} | formName_en="${formName_en}" | fieldLabel_en="${fieldLabel_en}"`);
+  const rawTiming = fieldInfo?.timing || doc.timing || 'pre';
+  const isPost = String(rawTiming).toLowerCase().includes('post') || String(rawTiming).includes('後');
+  const timing_ja = isPost ? '作業後点検' : '作業前点検';
+  const timing_en = isPost ? 'Post-Production Check' : 'Pre-Production Check';
 
   return {
     _id: doc._id.toString(),
@@ -33092,6 +33094,9 @@ function normalizeNgTicketDoc(doc, templateMap) {
     templateName: formStr,
     formName_ja,
     formName_en,
+    timing: rawTiming,
+    timing_ja,
+    timing_en,
     recordId: doc.checkFormRecordId ? doc.checkFormRecordId.toString() : (doc.recordId || null),
     checkFormRecordId: doc.checkFormRecordId ? doc.checkFormRecordId.toString() : null,
     completedBy: workerStr,
