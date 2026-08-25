@@ -32140,9 +32140,14 @@ function doesCheckFormAnswerRequireTicket(field = {}, value = null) {
 
 function buildCheckFormAnswerStatus(field = {}, value = null, ticketRequired = false) {
   const fieldType = normalizeCheckFormText(field.type).toLowerCase();
+  const valStr = normalizeCheckFormText(value).toUpperCase();
 
-  if (fieldType === 'checkbox') {
-    return normalizeCheckFormText(value).toUpperCase() === 'NG' ? 'ng' : 'ok';
+  if (valStr === 'NG') {
+    return 'ng';
+  }
+
+  if (fieldType === 'checkbox' || fieldType === 'toggle') {
+    return valStr === 'NG' ? 'ng' : 'ok';
   }
 
   if ((fieldType === 'number' || fieldType === 'select') && ticketRequired) {
