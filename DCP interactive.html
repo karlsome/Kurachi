@@ -1565,6 +1565,262 @@
             border-color: rgba(229, 72, 77, 0.8);
             background-color: rgba(229, 72, 77, 0.12);
         }
+
+        /* ---------------- Checklist Tab & Cards ---------------- */
+        .tab-bar.locked-checklist .tab-btn:not(#checklistTabBtn) {
+            opacity: 0.35;
+            pointer-events: none;
+        }
+        .tab-bar.locked-checklist .tab-btn:not(#checklistTabBtn) .tab-icon::after {
+            content: '🔒';
+            font-size: 9px;
+            position: absolute;
+            top: 2px;
+            right: 50%;
+            transform: translateX(14px);
+        }
+
+        .checklist-panel-container {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            max-width: 900px;
+            margin: 0 auto;
+            padding-bottom: 24px;
+        }
+        .checklist-header-card {
+            background: var(--bg-surface, #ffffff);
+            border: 1px solid var(--border, #e6e8ef);
+            border-radius: 16px;
+            padding: 16px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+        }
+        .checklist-title-meta {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .checklist-tier-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            background: rgba(31, 157, 107, 0.12);
+            color: #1f9d6b;
+        }
+        .checklist-tier-badge.weekly { background: rgba(59, 130, 246, 0.12); color: #2563eb; }
+        .checklist-tier-badge.monthly { background: rgba(139, 92, 246, 0.12); color: #7c3aed; }
+        
+        .checklist-counter-badge {
+            font-size: 0.8rem;
+            font-weight: 700;
+            color: var(--text-muted, #6b7280);
+            background: var(--bg-muted, #f3f4f6);
+            padding: 4px 10px;
+            border-radius: 12px;
+        }
+        .checklist-bypass-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 14px;
+            border-radius: 10px;
+            border: 1px solid rgba(229, 72, 77, 0.3);
+            background: rgba(229, 72, 77, 0.08);
+            color: #e5484d;
+            font-size: 0.75rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .checklist-bypass-btn:hover {
+            background: rgba(229, 72, 77, 0.18);
+        }
+
+        /* Dynamic Checklist Field Cards */
+        .checklist-card {
+            background: var(--bg-surface, #ffffff);
+            border: 1px solid var(--border, #e6e8ef);
+            border-radius: 14px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+        .checklist-card.completed {
+            border-color: rgba(31, 157, 107, 0.4);
+            background: rgba(31, 157, 107, 0.02);
+        }
+        .checklist-card.invalid-highlight {
+            border-color: #e5484d !important;
+            box-shadow: 0 0 0 3px rgba(229, 72, 77, 0.2);
+            animation: card-shake 0.3s ease-in-out;
+        }
+        @keyframes card-shake {
+            0%, 100% { transform: translateX(0); }
+            20%, 60% { transform: translateX(-4px); }
+            40%, 80% { transform: translateX(4px); }
+        }
+
+        .checklist-card-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+        }
+        .checklist-card-title {
+            font-size: 1rem;
+            font-weight: 700;
+            color: var(--text-main, #1f2733);
+        }
+        .checklist-card-desc {
+            font-size: 0.8rem;
+            color: var(--text-muted, #6b7280);
+            margin-top: 2px;
+        }
+        .checklist-card-media {
+            width: 100%;
+            max-height: 180px;
+            object-fit: cover;
+            border-radius: 10px;
+            border: 1px solid var(--border, #e6e8ef);
+        }
+
+        /* Toggle Buttons */
+        .checklist-toggle-group {
+            display: flex;
+            gap: 12px;
+        }
+        .checklist-toggle-btn {
+            flex: 1;
+            padding: 12px;
+            border-radius: 10px;
+            border: 1px solid var(--border, #e6e8ef);
+            background: var(--bg-muted, #f8f9fa);
+            font-size: 0.95rem;
+            font-weight: 800;
+            color: var(--text-main, #1f2733);
+            cursor: pointer;
+            transition: all 0.15s ease;
+            text-align: center;
+        }
+        .checklist-toggle-btn.ok-btn.active {
+            background: #1f9d6b;
+            border-color: #1f9d6b;
+            color: #ffffff;
+        }
+        .checklist-toggle-btn.ng-btn.active {
+            background: #e5484d;
+            border-color: #e5484d;
+            color: #ffffff;
+        }
+
+        /* Ticket Button inside card */
+        .checklist-ticket-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 8px;
+            border: 1px solid var(--border, #e6e8ef);
+            background: var(--bg-muted, #f8f9fa);
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: var(--text-muted, #6b7280);
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .checklist-ticket-btn.required-pulse {
+            border-color: #e5484d;
+            color: #e5484d;
+            background: rgba(229, 72, 77, 0.1);
+            animation: ticket-pulse 1.2s infinite;
+        }
+        .checklist-ticket-btn.saved {
+            border-color: #1f9d6b;
+            color: #1f9d6b;
+            background: rgba(31, 157, 107, 0.1);
+        }
+        @keyframes ticket-pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+
+        /* Keypad & Ticket Modals */
+        .checklist-modal-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 100005;
+            background: rgba(0, 0, 0, 0.65);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+            backdrop-filter: blur(4px);
+        }
+        .checklist-modal-card {
+            background: #ffffff;
+            border-radius: 20px;
+            padding: 24px;
+            width: 100%;
+            max-width: 420px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.25);
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        .checklist-keypad-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+        }
+        .checklist-keypad-btn {
+            padding: 16px;
+            border-radius: 12px;
+            border: 1px solid #e6e8ef;
+            background: #f8f9fa;
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: #1f2733;
+            cursor: pointer;
+            text-align: center;
+            user-select: none;
+            transition: background 0.1s ease;
+        }
+        .checklist-keypad-btn:active {
+            background: #e6e8ef;
+        }
+
+        /* Transition Banner for Queueing */
+        .checklist-transition-banner {
+            background: linear-gradient(135deg, #1f9d6b 0%, #10b981 100%);
+            color: #ffffff;
+            border-radius: 14px;
+            padding: 16px 20px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-weight: 700;
+            font-size: 1rem;
+            box-shadow: 0 4px 12px rgba(31, 157, 107, 0.3);
+            animation: slideInDown 0.4s ease-out;
+        }
+        @keyframes slideInDown {
+            from { opacity: 0; transform: translateY(-12px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
     </style>
 </head>
 
@@ -1600,6 +1856,13 @@
 
     <!-- Tab Bar -->
     <div class="tab-bar">
+        <button type="button" class="tab-btn" id="checklistTabBtn" data-tab="checklist" style="display:none;">
+            <span class="tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M9 11l3 3L22 4" />
+                    <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+                </svg></span>
+            <span class="tab-label" data-i18n="checklist_tab">Checklist</span>
+        </button>
         <button type="button" class="tab-btn active" data-tab="0">
             <span class="tab-icon"><svg viewBox="0 0 24 24">
                     <path
@@ -1705,6 +1968,39 @@
         <div class="tab-content-viewport">
             <div class="tab-panels-container">
 
+                <!-- CHECKLIST TAB PANEL -->
+                <div class="tab-panel" id="panel-checklist" style="display:none;">
+                    <div class="checklist-panel-container">
+                        <!-- Checklist Header Card -->
+                        <div class="checklist-header-card">
+                            <div class="checklist-title-meta">
+                                <h2 style="font-size: 1.1rem; font-weight: 800; color: var(--text-main);" data-i18n="checklist_title">設備点検チェックシート</h2>
+                                <span class="checklist-tier-badge" id="checklistTierBadge">Daily</span>
+                                <span class="checklist-counter-badge" id="checklistCounterBadge">1 / 1</span>
+                            </div>
+                            <button type="button" class="checklist-bypass-btn" id="superBypassBtn" onclick="openSuperBypassModal()">
+                                ⚡ <span data-i18n="super_bypass">Super Bypass</span>
+                            </button>
+                        </div>
+
+                        <!-- Queue Transition Banner -->
+                        <div id="checklistTransitionBanner" class="checklist-transition-banner" style="display:none;">
+                            <span>✓</span>
+                            <span id="checklistTransitionText">Daily Check completed! Moving to Weekly Check...</span>
+                        </div>
+
+                        <!-- Dynamic Field Cards Container -->
+                        <div id="checklistCardsContainer" style="display:flex; flex-direction:column; gap:16px;"></div>
+
+                        <!-- Footer Actions -->
+                        <div style="display:flex; justify-content:flex-end; margin-top:16px;">
+                            <button type="button" id="checklistNextBtn" class="btn btn-primary" style="padding:14px 28px; font-size:1.05rem; font-weight:800;" onclick="handleChecklistSubmitOrNext()">
+                                <span data-i18n="next_checklist">Next Checklist</span> →
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- TAB 1: SCAN -->
                 <div class="tab-panel" id="panel-0">
                     <!-- Step 0 Card: Worker Name Selection -->
@@ -1731,17 +2027,20 @@
                         </div>
 
                         <!-- State A: Select New Worker -->
-                        <div id="step0SelectState" style="display: none; flex-direction: column; align-items: center; gap: 15px;">
+                        <div id="step0SelectState" style="display: none; flex-direction: column; align-items: center; gap: 15px; width: 100%;">
                             <p style="font-size: 1rem; color: var(--text-main); margin: 0; text-align: center;" data-i18n="select_worker_prompt">
-                                作業者を選択してください
+                                作業者を選択してください / Select Worker(s)
                             </p>
 
-                            <div class="form-group" style="width: 100%;">
-                                <input list="machine-operator-suggestions" class="tap-field"
-                                    id="Machine Operator" name="Machine Operator"
-                                    data-i18n="worker_name_placeholder" placeholder="" required readonly>
-                                <datalist id="machine-operator-suggestions"></datalist>
+                            <div id="workerListContainer" style="width: 100%; display: flex; flex-direction: column; gap: 10px;">
+                                <!-- Dynamic multi-worker rows -->
                             </div>
+
+                            <button type="button" class="btn btn-secondary btn-full" onclick="addWorkerSlot()" style="display:flex; align-items:center; justify-content:center; gap:8px; font-weight:700;">
+                                <span style="font-size:1.2rem; font-weight:800;">+</span> <span data-i18n="add_worker">作業者を追加 (Add Worker)</span>
+                            </button>
+
+                            <input type="hidden" id="Machine Operator" name="Machine Operator" required>
 
                             <button type="button" class="btn btn-primary btn-full" onclick="proceedFromStep0()" style="margin-top: 10px;" data-i18n="proceed_btn">
                                 次へ
@@ -2687,6 +2986,96 @@
             </p>
             <button type="button" class="btn btn-alert btn-full" id="closeLeaderVerificationModal"
                 data-i18n="cancel">Cancel</button>
+        </div>
+    </div>
+
+    <!-- Checklist Numeric Keypad Modal -->
+    <div id="checklistKeypadModal" class="checklist-modal-overlay" style="display:none;">
+        <div class="checklist-modal-card">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <h3 id="checklistKeypadTitle" style="font-size:1rem; font-weight:800;">Numeric Input</h3>
+                <span id="checklistKeypadRange" style="font-size:0.75rem; color:#6b7280; font-weight:700;"></span>
+            </div>
+            <div style="background:#f8f9fa; border:1px solid #e6e8ef; border-radius:12px; padding:14px; text-align:right; font-size:1.6rem; font-weight:800; font-family:monospace; min-height:56px;" id="checklistKeypadValue"></div>
+            <div class="checklist-keypad-grid">
+                <button type="button" class="checklist-keypad-btn" onclick="checklistKeypadPress('7')">7</button>
+                <button type="button" class="checklist-keypad-btn" onclick="checklistKeypadPress('8')">8</button>
+                <button type="button" class="checklist-keypad-btn" onclick="checklistKeypadPress('9')">9</button>
+                <button type="button" class="checklist-keypad-btn" onclick="checklistKeypadPress('4')">4</button>
+                <button type="button" class="checklist-keypad-btn" onclick="checklistKeypadPress('5')">5</button>
+                <button type="button" class="checklist-keypad-btn" onclick="checklistKeypadPress('6')">6</button>
+                <button type="button" class="checklist-keypad-btn" onclick="checklistKeypadPress('1')">1</button>
+                <button type="button" class="checklist-keypad-btn" onclick="checklistKeypadPress('2')">2</button>
+                <button type="button" class="checklist-keypad-btn" onclick="checklistKeypadPress('3')">3</button>
+                <button type="button" class="checklist-keypad-btn" onclick="checklistKeypadPress('-')">-</button>
+                <button type="button" class="checklist-keypad-btn" onclick="checklistKeypadPress('0')">0</button>
+                <button type="button" class="checklist-keypad-btn" onclick="checklistKeypadPress('.')">.</button>
+            </div>
+            <div style="display:flex; gap:10px;">
+                <button type="button" class="checklist-keypad-btn" style="flex:1; background:#ef4444; color:#fff;" onclick="checklistKeypadClear()">C</button>
+                <button type="button" class="checklist-keypad-btn" style="flex:1; background:#6b7280; color:#fff;" onclick="checklistKeypadBackspace()">⌫</button>
+                <button type="button" class="checklist-keypad-btn" style="flex:2; background:#1f9d6b; color:#fff;" onclick="checklistKeypadConfirm()">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Checklist Ticket Modal (Abnormal Report) -->
+    <div id="checklistTicketModal" class="checklist-modal-overlay" style="display:none;">
+        <div class="checklist-modal-card" style="max-width:500px;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <h3 style="font-size:1.1rem; font-weight:800; color:#e5484d;" data-i18n="ticket_required">Abnormal Report (Ticket) Required</h3>
+                <button type="button" onclick="closeChecklistTicketModal()" style="border:none; background:none; font-size:1.4rem; cursor:pointer;">✕</button>
+            </div>
+            <p id="checklistTicketFieldInfo" style="font-size:0.85rem; color:#6b7280; font-weight:600;"></p>
+            <div>
+                <label style="font-size:0.75rem; font-weight:800; color:#6b7280; text-transform:uppercase;">Reason / Details *</label>
+                <textarea id="checklistTicketReason" rows="3" style="width:100%; margin-top:6px; border-radius:10px; border:1px solid #e6e8ef; padding:10px; font-size:0.9rem;" placeholder="Explain why the value is abnormal..."></textarea>
+            </div>
+            <div>
+                <label style="font-size:0.75rem; font-weight:800; color:#6b7280; text-transform:uppercase;">Attach Photos (At least 1 required) *</label>
+                <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:8px;" id="checklistTicketThumbsContainer"></div>
+                <input type="file" id="checklistTicketFileInput" accept="image/*" capture="environment" style="display:none;" onchange="handleChecklistTicketPhotoCaptured(event)">
+                <button type="button" class="btn btn-secondary" style="margin-top:8px; width:100%; display:flex; align-items:center; justify-content:center; gap:6px;" onclick="document.getElementById('checklistTicketFileInput').click()">
+                    📷 <span data-i18n="take_photo">Take Photo</span>
+                </button>
+            </div>
+            <div style="display:flex; gap:10px; margin-top:10px;">
+                <button type="button" class="btn btn-secondary" style="flex:1;" onclick="closeChecklistTicketModal()" data-i18n="cancel">Cancel</button>
+                <button type="button" class="btn btn-primary" style="flex:2;" onclick="saveChecklistTicket()" data-i18n="save">Save Ticket</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Super Bypass Leader QR Modal -->
+    <div id="checklistBypassModal" class="checklist-modal-overlay" style="display:none;">
+        <div class="checklist-modal-card" style="max-width:440px;">
+            <h3 style="font-size:1.1rem; font-weight:800; color:#e5484d; text-align:center;" data-i18n="super_bypass">Super Bypass (Skip Checklist)</h3>
+            <p style="font-size:0.8rem; color:#6b7280; text-align:center;" data-i18n="scan_leader_qr_to_bypass">Scan Leader QR Code to Bypass</p>
+            <div id="checklistBypassQrReader" style="width:100%; aspect-ratio:1; border-radius:12px; background:#000; overflow:hidden;"></div>
+            <p id="checklistBypassStatus" style="font-size:0.85rem; font-weight:700; text-align:center; min-height:20px; color:#6b7280;"></p>
+            <input type="text" id="checklistBypassReason" style="width:100%; padding:10px; border-radius:10px; border:1px solid #e6e8ef; font-size:0.85rem;" data-i18n-placeholder="bypass_reason_placeholder" placeholder="Enter reason for super bypass...">
+            <div style="display:flex; gap:10px; margin-top:10px;">
+                <button type="button" class="btn btn-secondary" style="flex:1;" onclick="closeSuperBypassModal()" data-i18n="cancel">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Post-Production Checklist Reminder Modal -->
+    <div id="postChecklistReminderModal" class="checklist-modal-overlay" style="display:none;">
+        <div class="checklist-modal-card" style="max-width:460px;">
+            <div style="text-align:center; margin-bottom:6px;">
+                <span style="font-size:2.2rem;">📋</span>
+                <h3 style="font-size:1.15rem; font-weight:800; color:#1f2733; margin-top:8px;" data-i18n="post_checklist_reminder_title">Post-Production Checklist Notice</h3>
+                <p style="font-size:0.85rem; color:#6b7280; margin-top:6px; line-height:1.4;" data-i18n="post_checklist_reminder_msg">A post-production checklist exists for this machine. Do you want to complete it now?</p>
+            </div>
+            <div style="display:flex; flex-direction:column; gap:10px; margin-top:10px;">
+                <button type="button" class="btn btn-primary" style="padding:14px; font-weight:800;" onclick="confirmDoPostChecklist()" data-i18n="do_post_checklist">
+                    Complete Checklist Now
+                </button>
+                <button type="button" class="btn btn-secondary" style="padding:12px; font-weight:700;" onclick="confirmSkipPostChecklist()" data-i18n="skip_post_checklist">
+                    Skip & Submit Production
+                </button>
+            </div>
         </div>
     </div>
 

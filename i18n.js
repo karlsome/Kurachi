@@ -334,6 +334,26 @@ const translations = {
         'submit_photos_needed': '必要',
         'submit_photos_taken': '撮影',
         'submit_insufficient_photos': '材料ラベル写真が不足しています（必要: {needed}枚以上、撮影: {taken}枚）',
+
+        // Checklist integration
+        'checklist_tab': '点検',
+        'checklist_title': '設備点検チェックシート',
+        'daily_check': '日常点検',
+        'weekly_check': '週間点検',
+        'monthly_check': '月次点検',
+        'pre_production_check': '生産前点検',
+        'post_production_check': '生産後点検',
+        'super_bypass': 'スーパーバイパス (スキップ)',
+        'scan_leader_qr_to_bypass': 'リーダーQRコードをスキャンしてスキップ',
+        'post_checklist_reminder_title': '生産後点検のお知らせ',
+        'post_checklist_reminder_msg': 'この設備の生産後点検があります。今すぐ実施しますか？',
+        'do_post_checklist': '点検を実施する',
+        'skip_post_checklist': 'スキップして送信',
+        'checklist_incomplete': '未回答の点検項目があります',
+        'next_checklist': '次の点検へ',
+        'complete_all_checklists': 'すべての点検を完了',
+        'ticket_required': '異常報告（チケット）が必要です',
+        'bypass_reason_placeholder': 'バイパス理由を入力してください',
     },
 
     en: {

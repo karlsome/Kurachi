@@ -32034,7 +32034,11 @@ function sanitizeCheckFormField(field = {}) {
   return {
     id: normalizeCheckFormText(field.id),
     label: normalizeCheckFormText(field.label),
+    label_ja: normalizeCheckFormText(field.label_ja || field.label),
+    label_en: normalizeCheckFormText(field.label_en || field.label),
     description: normalizeCheckFormText(field.description),
+    description_ja: normalizeCheckFormText(field.description_ja || field.description),
+    description_en: normalizeCheckFormText(field.description_en || field.description),
     imageURL,
     imageFolderKey: buildCheckFormFieldImageFolderKey({ ...field, imageURL }),
     type: normalizeCheckFormText(field.type).toLowerCase(),
@@ -32066,9 +32070,14 @@ function sanitizeCheckFormTemplate(template = {}, equipmentMap = new Map()) {
   return {
     _id: toCheckFormIdString(template._id),
     name: normalizeCheckFormText(template.name),
+    name_ja: normalizeCheckFormText(template.name_ja || template.name),
+    name_en: normalizeCheckFormText(template.name_en || template.name),
     description: normalizeCheckFormText(template.description),
+    description_ja: normalizeCheckFormText(template.description_ja || template.description),
+    description_en: normalizeCheckFormText(template.description_en || template.description),
     工場: normalizeCheckFormText(template['工場']),
     schedule: normalizeCheckFormSchedule(template.schedule),
+    timing: normalizeCheckFormText(template.timing || 'pre').toLowerCase() === 'post' ? 'post' : 'pre',
     startDate: normalizeCheckFormText(template.startDate),
     status: normalizeCheckFormText(template.status || 'active'),
     equipmentIds,
@@ -32543,6 +32552,39 @@ app.get('/api/check-forms/maintenance-workers', async (req, res) => {
   }
 });
 
+app.post('/api/check-forms/bypass', async (req, res) => {
+  const { factory, machine, workerName, leaderName, leaderUsername, reason, timing, templates } = req.body || {};
+
+  if (!factory || !machine) {
+    return res.status(400).json({ error: 'factory and machine are required' });
+  }
+
+  try {
+    await client.connect();
+    const db = client.db('submittedDB');
+    const bypassCollection = db.collection('checklistBypassDB');
+
+    const doc = {
+      factory: String(factory).trim(),
+      machine: String(machine).trim(),
+      workerName: String(workerName || '').trim(),
+      leaderName: String(leaderName || '').trim(),
+      leaderUsername: String(leaderUsername || '').trim(),
+      reason: String(reason || '').trim(),
+      timing: String(timing || 'pre').trim(),
+      templates: Array.isArray(templates) ? templates : [],
+      bypassedAt: new Date().toISOString(),
+      createdAt: new Date(),
+    };
+
+    const result = await bypassCollection.insertOne(doc);
+    return res.json({ success: true, bypassId: result.insertedId.toHexString() });
+  } catch (error) {
+    console.error('Error logging checklist bypass:', error);
+    return res.status(500).json({ error: 'Failed to record checklist bypass' });
+  }
+});
+
 app.post('/api/check-forms/tickets/resolve', async (req, res) => {
   try {
     const { ticketId, workerName, workerUsername, fixReason, fixImageBase64s } = req.body;
@@ -32724,14 +32766,25 @@ app.post('/api/check-forms/submit', async (req, res) => {
       const processingEquipment = normalizeCheckFormText(
         templatePayload['加工設備'] || templatePayload.selectedMachine || machine || fallbackEquipmentNames[0]
       );
-      const selectedMachine = normalizeCheckFormText(templatePayload.selectedMachine || machine);
-      const workerName = normalizeCheckFormText(templatePayload.workerName);
+      let rawWorkerName = payload.workerName || templatePayload.workerName || payload.Worker_Name || templatePayload.Worker_Name;
+      let workerNameArray = [];
+      if (Array.isArray(rawWorkerName)) {
+        workerNameArray = rawWorkerName.map(w => normalizeCheckFormText(w)).filter(Boolean);
+      } else if (typeof rawWorkerName === 'string') {
+        const trimmed = rawWorkerName.trim();
+        if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+          try { workerNameArray = JSON.parse(trimmed); } catch (e) { workerNameArray = [trimmed]; }
+        } else if (trimmed) {
+          workerNameArray = trimmed.split(',').map(s => s.trim()).filter(Boolean);
+        }
+      }
+      const workerName = workerNameArray.length > 0 ? (workerNameArray.length === 1 ? workerNameArray[0] : workerNameArray) : '';
 
       if (!templateId || !templateName) {
         return res.status(400).json({ error: `templateId and templateName are required for template index ${templateIndex}` });
       }
 
-      if (!workerName) {
+      if (!workerName || workerNameArray.length === 0) {
         return res.status(400).json({ error: `workerName is required for template ${templateName}` });
       }
 
@@ -32888,7 +32941,8 @@ app.post('/api/check-forms/submit', async (req, res) => {
         factory,
         加工設備: processingEquipment,
         equipmentId: equipmentId || null,
-        workerName,
+        workerName: Array.isArray(workerName) ? workerName.join(', ') : workerName,
+        Worker_Name: workerNameArray,
         answers: normalizedAnswers,
         tickets: recordTicketSummaries,
         submittedAtClient: normalizeCheckFormText(payload.submittedAtClient),
