@@ -15335,8 +15335,13 @@ if (manualSendModal) {
     const tpl = queue[queueIndex];
     const fields = Array.isArray(tpl.fields) ? tpl.fields : [];
 
+    const isSubmittingPre = !window.checklistState.isPreComplete;
+    const targetFields = isSubmittingPre
+      ? fields.filter(f => f.timing !== 'post')
+      : fields.filter(f => f.timing === 'post' && f.type !== 'name');
+
     let firstIncompleteCard = null;
-    fields.forEach((field) => {
+    targetFields.forEach((field) => {
       if (field.type === 'name') return;
       const ans = window.checklistState.answers[field.id];
       const ticket = window.checklistState.tickets[field.id];
@@ -15395,13 +15400,17 @@ if (manualSendModal) {
           workerName,
           templates: queue.map(t => {
             const tFields = Array.isArray(t.fields) ? t.fields : [];
+            const fieldsToSubmit = isSubmittingPre
+              ? tFields.filter(f => f.timing !== 'post')
+              : (tFields.some(f => f.timing === 'post') ? tFields.filter(f => f.timing === 'post' && f.type !== 'name') : tFields);
+
             return {
               templateId: t._id,
               recordId: (window.checklistState.recordIds && window.checklistState.recordIds[t._id]) ? window.checklistState.recordIds[t._id] : null,
               templateName: t.name,
               schedule: t.schedule,
               equipmentId: window.checklistState.equipmentId || t.equipmentId || (Array.isArray(t.equipmentIds) ? t.equipmentIds[0] : null),
-              answers: tFields.map(f => ({
+              answers: fieldsToSubmit.map(f => ({
                 id: f.id,
                 fieldId: f.id,
                 label: f.label,
@@ -15425,7 +15434,7 @@ if (manualSendModal) {
                 } : null
               })),
               tickets: Object.keys(window.checklistState.tickets || {})
-                .filter(fId => tFields.some(tf => tf.id === fId))
+                .filter(fId => fieldsToSubmit.some(tf => tf.id === fId))
                 .map(fId => ({
                   fieldId: fId,
                   reason: window.checklistState.tickets[fId].reason,
@@ -15448,25 +15457,44 @@ if (manualSendModal) {
             window.checklistState.recordIds = { ...(window.checklistState.recordIds || {}), ...resData.recordIds };
           }
           if (overlay) overlay.style.display = 'none';
-          window.checklistState.isPreComplete = true;
-          window.checklistState.isPostComplete = true;
-          if (typeof window.saveChecklistDraftToStorage === 'function') {
-            await window.saveChecklistDraftToStorage();
-          }
 
-          if (typeof window.updateTabLock === 'function') {
-            window.updateTabLock();
+          if (isSubmittingPre) {
+            window.checklistState.isPreComplete = true;
+            const hasPostFields = queue.some(t => Array.isArray(t.fields) && t.fields.some(f => f.timing === 'post'));
+            if (!hasPostFields) {
+              window.checklistState.isPostComplete = true;
+            }
+            if (typeof window.saveChecklistDraftToStorage === 'function') {
+              await window.saveChecklistDraftToStorage();
+            }
+
+            if (typeof window.updateTabLock === 'function') {
+              window.updateTabLock();
+            } else {
+              const bar = document.querySelector('.tab-bar');
+              if (bar) bar.classList.remove('locked-checklist');
+            }
+
+            if (typeof showAppToast === 'function') {
+              showAppToast('✓ Pre-Production Check Completed!');
+            }
+
+            if (typeof window.goToTab === 'function') {
+              window.goToTab(1);
+            }
           } else {
-            const bar = document.querySelector('.tab-bar');
-            if (bar) bar.classList.remove('locked-checklist');
-          }
+            window.checklistState.isPostComplete = true;
+            if (typeof window.saveChecklistDraftToStorage === 'function') {
+              await window.saveChecklistDraftToStorage();
+            }
 
-          if (typeof showAppToast === 'function') {
-            showAppToast('✓ All Checklists Completed Successfully!');
-          }
+            if (typeof renderCurrentChecklistTemplate === 'function') {
+              renderCurrentChecklistTemplate();
+            }
 
-          if (typeof window.goToTab === 'function') {
-            window.goToTab(1);
+            if (typeof showAppToast === 'function') {
+              showAppToast('✓ Post-Production Check Completed!');
+            }
           }
         } else {
           let errText = 'Server error during checklist submission';
