@@ -13361,16 +13361,60 @@ if (manualSendModal) {
     titleEl.innerHTML = `<h3 style="font-size:1.15rem; font-weight:800; color:#1f2733;">${localizedTitle}</h3>${localizedDesc ? `<p style="font-size:0.85rem; color:#6b7280; margin-top:2px;">${localizedDesc}</p>` : ''}`;
     container.appendChild(titleEl);
 
+    function isChecklistFieldCompleted(field) {
+      const ansVal = window.checklistState.answers[field.id];
+      const hasTicket = window.checklistState.tickets[field.id];
+
+      if (field.type === 'name') {
+        const activeNames = window.selectedWorkerNames ? window.selectedWorkerNames.map(n => (n || '').trim()).filter(Boolean) : [];
+        return activeNames.length > 0;
+      }
+
+      if (field.required || ansVal !== undefined) {
+        if (ansVal === undefined || ansVal === '' || ansVal === null) return false;
+      }
+
+      if (ansVal === 'NG' && (!hasTicket || !hasTicket.saved)) return false;
+
+      if (field.photoRequired && !window.checklistState.fieldPhotos[field.id]) return false;
+
+      return true;
+    }
+
     const fields = Array.isArray(tpl.fields) ? tpl.fields : [];
-    fields.forEach((field) => {
+    let isPreviousCompleted = true;
+
+    fields.forEach((field, idx) => {
       const card = document.createElement('div');
-      card.className = 'checklist-card';
       card.id = `checklist-card-${field.id}`;
 
       const fTitle = getLocalizedText(field, 'label');
       const fDesc = getLocalizedText(field, 'description');
       const ansVal = window.checklistState.answers[field.id];
       const hasTicket = window.checklistState.tickets[field.id];
+
+      const isCompleted = isChecklistFieldCompleted(field);
+      const isUnlocked = isPreviousCompleted || window.checklistState.isBypassed || window.checklistState.isPreComplete;
+
+      let cardClass = 'checklist-card';
+      let stepPill = '';
+
+      if (!isUnlocked) {
+        cardClass += ' locked-card';
+        stepPill = `<span class="checklist-step-pill locked">🔒 Step ${idx + 1}</span>`;
+      } else if (isCompleted) {
+        cardClass += ' completed-card';
+        stepPill = `<span class="checklist-step-pill done">✓ Step ${idx + 1}</span>`;
+      } else {
+        cardClass += ' active-card';
+        stepPill = `<span class="checklist-step-pill current">Step ${idx + 1}</span>`;
+      }
+
+      card.className = cardClass;
+
+      if (!isCompleted) {
+        isPreviousCompleted = false;
+      }
 
       let mediaHtml = '';
       if (field.imageURL) {
@@ -13457,7 +13501,10 @@ if (manualSendModal) {
       card.innerHTML = `
         <div class="checklist-card-header">
           <div>
-            <div class="checklist-card-title">${fTitle} ${field.required ? '<span style="color:#e5484d;">*</span>' : ''}</div>
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+              ${stepPill}
+              <div class="checklist-card-title">${fTitle} ${field.required ? '<span style="color:#e5484d;">*</span>' : ''}</div>
+            </div>
             ${fDesc ? `<div class="checklist-card-desc">${fDesc}</div>` : ''}
           </div>
           ${ticketBtnHtml}

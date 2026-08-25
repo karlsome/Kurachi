@@ -1652,7 +1652,7 @@
             background: rgba(229, 72, 77, 0.18);
         }
 
-        /* Dynamic Checklist Field Cards */
+        /* Dynamic Checklist Field Cards & Sequential Lock System */
         .checklist-card {
             background: var(--bg-surface, #ffffff);
             border: 1px solid var(--border, #e6e8ef);
@@ -1661,11 +1661,46 @@
             display: flex;
             flex-direction: column;
             gap: 12px;
-            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+            transition: all 0.25s ease;
         }
-        .checklist-card.completed {
-            border-color: rgba(31, 157, 107, 0.4);
+        .checklist-card.locked-card {
+            opacity: 0.42;
+            pointer-events: none;
+            filter: grayscale(0.6);
+            user-select: none;
+            background: #f8f9fa !important;
+            border-color: #e6e8ef !important;
+        }
+        .checklist-card.active-card {
+            border: 2px solid #2563eb !important;
+            box-shadow: 0 4px 16px rgba(37, 99, 235, 0.12);
+        }
+        .checklist-card.completed-card {
+            border-color: rgba(31, 157, 107, 0.4) !important;
             background: rgba(31, 157, 107, 0.02);
+        }
+        .checklist-step-pill {
+            font-size: 0.7rem;
+            font-weight: 800;
+            padding: 3px 8px;
+            border-radius: 6px;
+            letter-spacing: 0.5px;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            text-transform: uppercase;
+        }
+        .checklist-step-pill.done {
+            background: rgba(31, 157, 107, 0.12);
+            color: #1f9d6b;
+        }
+        .checklist-step-pill.current {
+            background: rgba(37, 99, 235, 0.12);
+            color: #2563eb;
+        }
+        .checklist-step-pill.locked {
+            background: #e6e8ef;
+            color: #9ca3af;
         }
         .checklist-card.invalid-highlight {
             border-color: #e5484d !important;
