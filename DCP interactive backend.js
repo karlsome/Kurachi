@@ -3643,6 +3643,7 @@ window.saveChecklistDraftToStorage = async function () {
     answers: window.checklistState.answers || {},
     tickets: ticketsClean,
     fieldPhotos: fieldPhotoRefs,
+    recordIds: window.checklistState.recordIds || {},
     queueIndex: window.checklistState.queueIndex || 0,
     isPreComplete: window.checklistState.isPreComplete || false,
     isBypassed: window.checklistState.isBypassed || false,
@@ -3673,6 +3674,7 @@ window.loadChecklistDraftFromStorage = async function () {
     }
 
     if (draft.answers) window.checklistState.answers = { ...window.checklistState.answers, ...draft.answers };
+    if (draft.recordIds) window.checklistState.recordIds = { ...(window.checklistState.recordIds || {}), ...draft.recordIds };
     if (typeof draft.queueIndex === 'number' && draft.queueIndex < (window.checklistState.queue?.length || 1)) {
       window.checklistState.queueIndex = draft.queueIndex;
     }
@@ -14632,14 +14634,18 @@ if (manualSendModal) {
         });
 
         if (res.ok) {
+          const resData = await res.json().catch(() => ({}));
+          if (resData.recordIds) {
+            window.checklistState.recordIds = { ...(window.checklistState.recordIds || {}), ...resData.recordIds };
+          }
           window.checklistState.isPreComplete = true;
-          if (typeof window.clearChecklistDraftFromStorage === 'function') window.clearChecklistDraftFromStorage();
+          if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
 
           const bar = document.querySelector('.tab-bar');
           if (bar) bar.classList.remove('locked-checklist');
 
           if (typeof showAppToast === 'function') {
-            showAppToast('✓ All Checklists Completed Successfully!');
+            showAppToast('✓ Pre-Production Checklist Completed Successfully!');
           }
 
           if (typeof window.goToTab === 'function') window.goToTab(0);
@@ -15153,6 +15159,7 @@ if (manualSendModal) {
             const tFields = Array.isArray(t.fields) ? t.fields : [];
             return {
               templateId: t._id,
+              recordId: (window.checklistState.recordIds && window.checklistState.recordIds[t._id]) ? window.checklistState.recordIds[t._id] : null,
               templateName: t.name,
               schedule: t.schedule,
               equipmentId: window.checklistState.equipmentId || t.equipmentId || (Array.isArray(t.equipmentIds) ? t.equipmentIds[0] : null),
@@ -15198,8 +15205,13 @@ if (manualSendModal) {
         });
 
         if (res.ok) {
+          const resData = await res.json().catch(() => ({}));
+          if (resData.recordIds) {
+            window.checklistState.recordIds = { ...(window.checklistState.recordIds || {}), ...resData.recordIds };
+          }
           if (overlay) overlay.style.display = 'none';
           window.checklistState.isPreComplete = true;
+          window.checklistState.isPostComplete = true;
           if (typeof window.saveChecklistDraftToStorage === 'function') {
             await window.saveChecklistDraftToStorage();
           }
