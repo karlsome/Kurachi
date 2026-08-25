@@ -32049,6 +32049,7 @@ function sanitizeCheckFormField(field = {}) {
     min: normalizeCheckFormMaybeNumber(field.min),
     max: normalizeCheckFormMaybeNumber(field.max),
     unit: normalizeCheckFormText(field.unit),
+    timing: normalizeCheckFormText(field.timing || 'pre').toLowerCase() === 'post' ? 'post' : 'pre',
   };
 }
 

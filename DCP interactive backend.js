@@ -13513,116 +13513,7 @@ if (manualSendModal) {
     }
   };
 
-  window.renderCurrentChecklistTemplate = function () {
-    const { queue, queueIndex } = window.checklistState;
-    if (!queue || !queue[queueIndex]) return;
-
-    const tpl = queue[queueIndex];
-    const tierBadge = document.getElementById('checklistTierBadge');
-    const counterBadge = document.getElementById('checklistCounterBadge');
-    const container = document.getElementById('checklistCardsContainer');
-    const nextBtn = document.getElementById('checklistNextBtn');
-
-    if (tierBadge) {
-      const scheduleName = (tpl.schedule || 'daily').toLowerCase();
-      tierBadge.textContent = (typeof _t === 'function') ? _t(`${scheduleName}_check`) : scheduleName.toUpperCase();
-      tierBadge.className = `checklist-tier-badge ${scheduleName}`;
-    }
-
-    if (counterBadge) {
-      counterBadge.textContent = `${queueIndex + 1} / ${queue.length}`;
-    }
-
-    const tplFields = Array.isArray(tpl.fields) ? tpl.fields : [];
-    const allFieldsCompleted = tplFields.every(field => isChecklistFieldCompleted(field));
-
-    if (nextBtn) {
-      const isLast = queueIndex === queue.length - 1;
-      const label = isLast
-        ? ((typeof _t === 'function') ? _t('complete_all_checklists') : 'Checklist Completed')
-        : ((typeof _t === 'function') ? _t('next_checklist') : 'Next Checklist');
-      nextBtn.innerHTML = `<span>${label}</span> ${isLast ? '✓' : '→'}`;
-
-      if (!allFieldsCompleted) {
-        nextBtn.disabled = true;
-        nextBtn.classList.remove('checklist-next-pulse');
-        nextBtn.style.opacity = '0.45';
-        nextBtn.style.cursor = 'not-allowed';
-        nextBtn.style.filter = 'grayscale(1)';
-        nextBtn.style.pointerEvents = 'none';
-        nextBtn.style.background = '#9ca3af';
-        nextBtn.style.boxShadow = 'none';
-      } else {
-        nextBtn.disabled = false;
-        nextBtn.classList.add('checklist-next-pulse');
-        nextBtn.style.opacity = '1';
-        nextBtn.style.cursor = 'pointer';
-        nextBtn.style.filter = 'none';
-        nextBtn.style.pointerEvents = 'auto';
-        nextBtn.style.background = '';
-        nextBtn.style.boxShadow = '';
-      }
-    }
-
-    if (!container) return;
-    container.innerHTML = '';
-
-    const titleEl = document.createElement('div');
-    titleEl.style.cssText = 'margin-bottom: 8px;';
-    const localizedTitle = getLocalizedText(tpl, 'name');
-    const localizedDesc = getLocalizedText(tpl, 'description');
-    titleEl.innerHTML = `<h3 style="font-size:1.15rem; font-weight:800; color:#1f2733;">${localizedTitle}</h3>${localizedDesc ? `<p style="font-size:0.85rem; color:#6b7280; margin-top:2px;">${localizedDesc}</p>` : ''}`;
-    container.appendChild(titleEl);
-
-  window.isDefectTicket = function (fieldId) {
-    if (!fieldId || !window.checklistState) return false;
-    const fieldAns = window.checklistState.answers[fieldId];
-    if (fieldAns === 'NG') return true;
-
-    const fields = window.checklistState.queue?.[window.checklistState.queueIndex]?.fields || [];
-    const fieldObj = fields.find(f => f.id === fieldId);
-    if (fieldObj && fieldObj.type === 'number') {
-      const numVal = typeof fieldAns === 'number' ? fieldAns : parseFloat(fieldAns);
-      if (!isNaN(numVal)) {
-        if (fieldObj.min !== null && fieldObj.min !== undefined && numVal < fieldObj.min) return true;
-        if (fieldObj.max !== null && fieldObj.max !== undefined && numVal > fieldObj.max) return true;
-      }
-    }
-    return false;
-  };
-
-  window.autoLockOtherCards = function (activeFieldId) {
-    if (!window.checklistState || !window.checklistState.unlockedCompletedCards) return false;
-    let lockChanged = false;
-    for (const fId of Object.keys(window.checklistState.unlockedCompletedCards)) {
-      if (fId !== activeFieldId) {
-        delete window.checklistState.unlockedCompletedCards[fId];
-        lockChanged = true;
-      }
-    }
-    return lockChanged;
-  };
-
-  window.unlockChecklistCard = function (fieldId) {
-    window.autoLockOtherCards(fieldId);
-    window.checklistState.unlockedCompletedCards = window.checklistState.unlockedCompletedCards || {};
-    window.checklistState.unlockedCompletedCards[fieldId] = true;
-    if (typeof showAppToast === 'function') {
-      showAppToast('🔓 Card unlocked for editing');
-    }
-    if (typeof renderCurrentChecklistTemplate === 'function') renderCurrentChecklistTemplate();
-  };
-
-  window.lockChecklistCard = function (fieldId) {
-    window.checklistState.unlockedCompletedCards = window.checklistState.unlockedCompletedCards || {};
-    delete window.checklistState.unlockedCompletedCards[fieldId];
-    if (typeof showAppToast === 'function') {
-      showAppToast('🔒 Card locked');
-    }
-    if (typeof renderCurrentChecklistTemplate === 'function') renderCurrentChecklistTemplate();
-  };
-
-  function isChecklistFieldCompleted(field) {
+  window.isChecklistFieldCompleted = function (field) {
     if (!field) return false;
 
     if (field.type === 'name') {
@@ -13661,62 +13552,233 @@ if (manualSendModal) {
     }
 
     return true;
-  }
+  };
 
-  const fields = Array.isArray(tpl.fields) ? tpl.fields : [];
-    let isPreviousCompleted = true;
+  window.renderCurrentChecklistTemplate = function () {
+    const { queue, queueIndex } = window.checklistState;
+    if (!queue || !queue[queueIndex]) return;
 
-    fields.forEach((field, idx) => {
-      const card = document.createElement('div');
-      card.id = `checklist-card-${field.id}`;
+    const tpl = queue[queueIndex];
+    const tierBadge = document.getElementById('checklistTierBadge');
+    const counterBadge = document.getElementById('checklistCounterBadge');
+    const container = document.getElementById('checklistCardsContainer');
+    const nextBtn = document.getElementById('checklistNextBtn');
 
-      let cardClass = 'checklist-card';
-      let stepPill = '';
+    if (tierBadge) {
+      const scheduleName = (tpl.schedule || 'daily').toLowerCase();
+      tierBadge.textContent = (typeof _t === 'function') ? _t(`${scheduleName}_check`) : scheduleName.toUpperCase();
+      tierBadge.className = `checklist-tier-badge ${scheduleName}`;
+    }
 
-      const fTitle = getLocalizedText(field, 'label');
-      const fDesc = getLocalizedText(field, 'description');
-      const ansVal = window.checklistState.answers[field.id];
-      const hasTicket = window.checklistState.tickets[field.id];
-      const isNg = ansVal === 'NG';
-      const numVal = typeof ansVal === 'number' ? ansVal : parseFloat(ansVal);
-      const isOutOfRange = field.type === 'number' && !isNaN(numVal) && (
-        (field.min !== null && field.min !== undefined && numVal < field.min) ||
-        (field.max !== null && field.max !== undefined && numVal > field.max)
-      );
+    if (counterBadge) {
+      counterBadge.textContent = `${queueIndex + 1} / ${queue.length}`;
+    }
 
-      const isCompleted = isChecklistFieldCompleted(field);
-      const isUnlocked = isPreviousCompleted || window.checklistState.isBypassed || window.checklistState.isPreComplete;
+    const tplFields = Array.isArray(tpl.fields) ? tpl.fields : [];
+    const preFields = tplFields.filter(f => f.timing !== 'post');
+    const postFields = tplFields.filter(f => f.timing === 'post' && f.type !== 'name');
 
-      window.checklistState.unlockedCompletedCards = window.checklistState.unlockedCompletedCards || {};
-      const isCardUnlockedByOperator = !!window.checklistState.unlockedCompletedCards[field.id];
+    const isPreMode = !window.checklistState.isPreComplete;
+    const targetFields = isPreMode ? preFields : (postFields.length > 0 ? postFields : tplFields);
+    const allFieldsCompleted = targetFields.every(field => isChecklistFieldCompleted(field));
 
-      const isSkipped = typeof ansVal === 'string' && ansVal.startsWith('SKIPPED');
+    const superBypassBtn = document.getElementById('superBypassBtn');
+    const resetAllBtn = document.querySelector('.checklist-header-card .btn-alert');
+    const isPreComplete = window.checklistState.isPreComplete;
 
-      let lockBtnHtml = '';
-      if (!isUnlocked) {
-        cardClass += ' locked-card';
-        stepPill = `<span class="checklist-step-pill locked">🔒 Step ${idx + 1}</span>`;
-      } else if (isCompleted) {
-        cardClass += ' completed-card';
-        stepPill = `<span class="checklist-step-pill done">${isSkipped ? '⏭️ Step ' + (idx + 1) + ' (Skipped)' : '✓ Step ' + (idx + 1)}</span>`;
-        if (!isCardUnlockedByOperator) {
-          cardClass += ' completed-locked';
-          lockBtnHtml = `
-            <button type="button" class="checklist-card-lock-btn" onclick="unlockChecklistCard('${field.id}')" title="Locked - Tap to Edit" style="background:rgba(31,157,107,0.12); color:#1f9d6b; border:1px solid rgba(31,157,107,0.3); border-radius:8px; width:36px; height:36px; font-size:1.1rem; display:inline-flex; align-items:center; justify-content:center; cursor:pointer;">
-              🔒
-            </button>`;
+    if (superBypassBtn) {
+      superBypassBtn.style.display = isPreComplete ? 'none' : 'inline-flex';
+    }
+    if (resetAllBtn) {
+      resetAllBtn.style.display = isPreComplete ? 'none' : 'inline-block';
+    }
+
+    if (nextBtn) {
+      if (isPreComplete) {
+        if (postFields.length > 0 && !window.checklistState.isPostComplete) {
+          const isPostDone = postFields.every(field => isChecklistFieldCompleted(field));
+          const label = (typeof _t === 'function') ? _t('complete_post_production_check') : 'Complete Post-Production Check';
+          nextBtn.innerHTML = `<span>${label}</span> ✓`;
+          nextBtn.disabled = !isPostDone;
+          nextBtn.style.opacity = isPostDone ? '1' : '0.45';
+          nextBtn.style.pointerEvents = isPostDone ? 'auto' : 'none';
+          nextBtn.onclick = window.handleChecklistSubmitOrNext;
         } else {
-          lockBtnHtml = `
-            <button type="button" class="checklist-card-lock-btn" onclick="lockChecklistCard('${field.id}')" title="Unlocked - Tap to Lock" style="background:#2563eb; color:#ffffff; border:none; border-radius:8px; width:36px; height:36px; font-size:1.1rem; display:inline-flex; align-items:center; justify-content:center; cursor:pointer;">
-              🔓
-            </button>`;
+          const label = (typeof _t === 'function') ? _t('proceed_with_production') : 'Proceed with Production';
+          nextBtn.innerHTML = `<span>${label}</span> →`;
+          nextBtn.disabled = false;
+          nextBtn.style.opacity = '1';
+          nextBtn.style.cursor = 'pointer';
+          nextBtn.style.pointerEvents = 'auto';
+          nextBtn.style.filter = 'none';
+          nextBtn.style.background = '#10b981';
+          nextBtn.style.boxShadow = '0 4px 14px rgba(16,185,129,0.3)';
+          nextBtn.classList.add('checklist-next-pulse');
+          nextBtn.onclick = function () {
+            if (typeof window.goToTab === 'function') window.goToTab(1);
+          };
         }
       } else {
-        cardClass += ' active-card';
-        stepPill = `<span class="checklist-step-pill current">Step ${idx + 1}</span>`;
-      }
+        const isLast = queueIndex === queue.length - 1;
+        let label = isLast
+          ? ((typeof _t === 'function') ? _t('complete_all_checklists') : 'Checklist Completed')
+          : ((typeof _t === 'function') ? _t('next_checklist') : 'Next Checklist');
 
-      card.className = cardClass;
+        if (postFields.length > 0) {
+          label = (typeof _t === 'function') ? _t('submit_pre_production_check') : 'Submit Pre-Production Check';
+        }
+
+        nextBtn.innerHTML = `<span>${label}</span> ${isLast ? '✓' : '→'}`;
+        nextBtn.onclick = window.handleChecklistSubmitOrNext;
+
+        if (!allFieldsCompleted) {
+          nextBtn.disabled = true;
+          nextBtn.classList.remove('checklist-next-pulse');
+          nextBtn.style.opacity = '0.45';
+          nextBtn.style.cursor = 'not-allowed';
+          nextBtn.style.filter = 'grayscale(1)';
+          nextBtn.style.pointerEvents = 'none';
+          nextBtn.style.background = '#9ca3af';
+          nextBtn.style.boxShadow = 'none';
+        } else {
+          nextBtn.disabled = false;
+          nextBtn.classList.add('checklist-next-pulse');
+          nextBtn.style.opacity = '1';
+          nextBtn.style.cursor = 'pointer';
+          nextBtn.style.filter = 'none';
+          nextBtn.style.pointerEvents = 'auto';
+          nextBtn.style.background = '';
+          nextBtn.style.boxShadow = '';
+        }
+      }
+    }
+
+    if (!container) return;
+    container.innerHTML = '';
+
+    const titleEl = document.createElement('div');
+    titleEl.style.cssText = 'margin-bottom: 8px;';
+    const localizedTitle = getLocalizedText(tpl, 'name');
+    const localizedDesc = getLocalizedText(tpl, 'description');
+    titleEl.innerHTML = `<h3 style="font-size:1.15rem; font-weight:800; color:#1f2733;">${localizedTitle}</h3>${localizedDesc ? `<p style="font-size:0.85rem; color:#6b7280; margin-top:2px;">${localizedDesc}</p>` : ''}`;
+    container.appendChild(titleEl);
+
+    // If pre-production is completed, render pre-production steps in a collapsed accordion
+    if (window.checklistState.isPreComplete && preFields.length > 0) {
+      const accordion = document.createElement('details');
+      accordion.className = 'completed-pre-steps-accordion';
+      const todayIso = new Date().toISOString().split('T')[0];
+      const bannerText = (typeof _t === 'function') ? _t('checklist_completed_banner') : 'Checklist Completed';
+      const stepsText = (typeof _t === 'function') ? _t('steps_count') : 'steps';
+      const tapToggleText = (typeof _t === 'function') ? _t('tap_to_expand_collapse') : 'Tap to expand / collapse';
+      const tapCollapseText = (typeof _t === 'function') ? _t('tap_to_collapse_checklist') : '▲ Tap to collapse completed checklist';
+      const postHeaderTitle = (typeof _t === 'function') ? _t('post_production_checks_title') : '📋 Post-Production Checks';
+
+      accordion.innerHTML = `
+        <summary style="padding:14px 18px; cursor:pointer; display:flex; align-items:center; justify-content:space-between; background:#dcfce7; border-radius:16px; user-select:none;">
+          <span style="font-size: 0.95rem; font-weight: 700; color: #166534; display: flex; align-items: center; gap: 8px;">
+            ✓ ${todayIso} ${bannerText} (${preFields.length} ${stepsText})
+          </span>
+          <span style="font-size: 0.8rem; color: #15803d; font-weight: 600; background:rgba(22,101,52,0.1); padding:4px 10px; border-radius:10px;">${tapToggleText}</span>
+        </summary>
+        <div class="completed-pre-steps-content" id="completedPreStepsContent" style="padding:12px; display:flex; flex-direction:column; gap:12px;"></div>
+      `;
+      container.appendChild(accordion);
+
+      const accordionContent = accordion.querySelector('#completedPreStepsContent');
+      preFields.forEach((field) => {
+        const globalIdx = tplFields.indexOf(field);
+        const stepNum = globalIdx !== -1 ? globalIdx : preFields.indexOf(field);
+        const cardEl = renderSingleFieldCard(field, stepNum, true, true);
+        if (accordionContent) accordionContent.appendChild(cardEl);
+      });
+
+      const collapseFooterBtn = document.createElement('button');
+      collapseFooterBtn.type = 'button';
+      collapseFooterBtn.style.cssText = 'width:100%; margin-top:8px; padding:12px; border-radius:12px; background:#dcfce7; color:#166534; font-weight:800; border:1px solid #bbf7d0; cursor:pointer; font-size:0.9rem; display:flex; align-items:center; justify-content:center; gap:6px; box-shadow:0 2px 4px rgba(22,101,52,0.08);';
+      collapseFooterBtn.innerHTML = tapCollapseText;
+      collapseFooterBtn.onclick = function () {
+        accordion.open = false;
+        accordion.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      };
+      if (accordionContent) accordionContent.appendChild(collapseFooterBtn);
+
+      if (postFields.length > 0) {
+        const postHeader = document.createElement('div');
+        postHeader.className = 'post-steps-header';
+        postHeader.innerHTML = `
+          ${postHeaderTitle} (${postFields.length} ${stepsText})
+        `;
+        container.appendChild(postHeader);
+      }
+    }
+
+    const fieldsToRender = window.checklistState.isPreComplete ? postFields : tplFields;
+    let isPreviousCompleted = true;
+
+    fieldsToRender.forEach((field) => {
+      const globalIdx = tplFields.indexOf(field);
+      const stepNum = globalIdx !== -1 ? globalIdx : fieldsToRender.indexOf(field);
+      const cardEl = renderSingleFieldCard(field, stepNum, isPreviousCompleted);
+      container.appendChild(cardEl);
+      if (!isChecklistFieldCompleted(field)) {
+        isPreviousCompleted = false;
+      }
+    });
+  };
+
+  function renderSingleFieldCard(field, idx, isPreviousCompleted = true, forceLocked = false) {
+    const card = document.createElement('div');
+    card.id = `checklist-card-${field.id}`;
+
+    let cardClass = 'checklist-card';
+    let stepPill = '';
+
+    const fTitle = getLocalizedText(field, 'label');
+    const fDesc = getLocalizedText(field, 'description');
+    const ansVal = window.checklistState.answers[field.id];
+    const hasTicket = window.checklistState.tickets[field.id];
+    const isNg = ansVal === 'NG';
+    const numVal = typeof ansVal === 'number' ? ansVal : parseFloat(ansVal);
+    const isOutOfRange = field.type === 'number' && !isNaN(numVal) && (
+      (field.min !== null && field.min !== undefined && numVal < field.min) ||
+      (field.max !== null && field.max !== undefined && numVal > field.max)
+    );
+
+    const isCompleted = isChecklistFieldCompleted(field);
+    const isUnlocked = !forceLocked && (isPreviousCompleted || window.checklistState.isBypassed || window.checklistState.isPreComplete);
+
+    window.checklistState.unlockedCompletedCards = window.checklistState.unlockedCompletedCards || {};
+    const isCardUnlockedByOperator = !!window.checklistState.unlockedCompletedCards[field.id];
+
+    const isSkipped = typeof ansVal === 'string' && ansVal.startsWith('SKIPPED');
+    const timingLabel = field.timing === 'post' ? 'POST-PROD' : 'PRE-PROD';
+
+    let lockBtnHtml = '';
+    if (!isUnlocked || forceLocked) {
+      cardClass += ' locked-card';
+      stepPill = `<span class="checklist-step-pill locked">🔒 Step ${idx + 1} (${timingLabel})</span>`;
+    } else if (isCompleted) {
+      cardClass += ' completed-card';
+      stepPill = `<span class="checklist-step-pill done">${isSkipped ? '⏭️ Step ' + (idx + 1) + ' (Skipped)' : '✓ Step ' + (idx + 1) + ' (' + timingLabel + ')'}</span>`;
+      if (!isCardUnlockedByOperator) {
+        cardClass += ' completed-locked';
+        lockBtnHtml = `
+          <button type="button" class="checklist-card-lock-btn" onclick="unlockChecklistCard('${field.id}')" title="Locked - Tap to Edit" style="background:rgba(31,157,107,0.12); color:#1f9d6b; border:1px solid rgba(31,157,107,0.3); border-radius:8px; width:36px; height:36px; font-size:1.1rem; display:inline-flex; align-items:center; justify-content:center; cursor:pointer;">
+            🔒
+          </button>`;
+      } else {
+        lockBtnHtml = `
+          <button type="button" class="checklist-card-lock-btn" onclick="lockChecklistCard('${field.id}')" title="Unlocked - Tap to Lock" style="background:#2563eb; color:#ffffff; border:none; border-radius:8px; width:36px; height:36px; font-size:1.1rem; display:inline-flex; align-items:center; justify-content:center; cursor:pointer;">
+            🔓
+          </button>`;
+      }
+    } else {
+      cardClass += ' active-card';
+      stepPill = `<span class="checklist-step-pill current">Step ${idx + 1} (${timingLabel})</span>`;
+    }
+
+    card.className = cardClass;
 
       if (!isCompleted) {
         isPreviousCompleted = false;
@@ -13850,8 +13912,7 @@ if (manualSendModal) {
         ${skipBtnHtml}
       `;
 
-      container.appendChild(card);
-    });
+      return card;
   }
 
   window.promptTicketDeletionModal = function (fieldId) {
