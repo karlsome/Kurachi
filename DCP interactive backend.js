@@ -13551,7 +13551,20 @@ if (manualSendModal) {
     titleEl.innerHTML = `<h3 style="font-size:1.15rem; font-weight:800; color:#1f2733;">${localizedTitle}</h3>${localizedDesc ? `<p style="font-size:0.85rem; color:#6b7280; margin-top:2px;">${localizedDesc}</p>` : ''}`;
     container.appendChild(titleEl);
 
+  window.autoLockOtherCards = function (activeFieldId) {
+    if (!window.checklistState || !window.checklistState.unlockedCompletedCards) return false;
+    let lockChanged = false;
+    for (const fId of Object.keys(window.checklistState.unlockedCompletedCards)) {
+      if (fId !== activeFieldId) {
+        delete window.checklistState.unlockedCompletedCards[fId];
+        lockChanged = true;
+      }
+    }
+    return lockChanged;
+  };
+
   window.unlockChecklistCard = function (fieldId) {
+    window.autoLockOtherCards(fieldId);
     window.checklistState.unlockedCompletedCards = window.checklistState.unlockedCompletedCards || {};
     window.checklistState.unlockedCompletedCards[fieldId] = true;
     if (typeof showAppToast === 'function') {
@@ -13870,6 +13883,7 @@ if (manualSendModal) {
   };
 
   window.handleChecklistToggle = async function (fieldId, val) {
+    window.autoLockOtherCards(fieldId);
     const currentVal = window.checklistState.answers[fieldId];
 
     // Tapping OK when already OK releases/deselects the OK button
@@ -13894,12 +13908,14 @@ if (manualSendModal) {
   };
 
   window.handleChecklistSelect = function (fieldId, val) {
+    window.autoLockOtherCards(fieldId);
     window.checklistState.answers[fieldId] = val;
     if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
     renderCurrentChecklistTemplate();
   };
 
   window.handleChecklistTextInput = function (fieldId, val) {
+    window.autoLockOtherCards(fieldId);
     window.checklistState.answers[fieldId] = val;
     if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
   };
@@ -14113,6 +14129,7 @@ if (manualSendModal) {
   });
 
   window.handleChecklistFieldPhotoCaptured = function (fieldId, event) {
+    window.autoLockOtherCards(fieldId);
     const file = event.target.files && event.target.files[0];
     if (!file) return;
     const reader = new FileReader();
@@ -14129,6 +14146,7 @@ if (manualSendModal) {
   };
 
   window.openChecklistKeypad = function (fieldId, label, min, max, unit) {
+    window.autoLockOtherCards(fieldId);
     window.checklistState.activeKeypadField = { fieldId, label, min, max, unit };
     const modal = document.getElementById('checklistKeypadModal');
     const title = document.getElementById('checklistKeypadTitle');
