@@ -33006,6 +33006,8 @@ app.post('/api/check-forms/submit', async (req, res) => {
     const now = new Date();
     const nowIso = now.toISOString();
     const recordDocs = [];
+    const updateOps = [];
+    const recordIdMap = {};
     const ngReportDocs = [];
 
     for (let templateIndex = 0; templateIndex < submittedTemplates.length; templateIndex += 1) {
@@ -33081,7 +33083,24 @@ app.post('/api/check-forms/submit', async (req, res) => {
         return res.status(400).json({ error: `answers are required for template ${templateName}` });
       }
 
-      const recordId = new ObjectId();
+      let existingObjId = null;
+      if (templatePayload.recordId && ObjectId.isValid(templatePayload.recordId)) {
+        existingObjId = new ObjectId(templatePayload.recordId);
+      } else {
+        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const existingDoc = await recordsCollection.findOne({
+          factory,
+          $or: [{ machine: processingEquipment }, { 加工設備: processingEquipment }],
+          templateId,
+          createdAt: { $gte: todayStart }
+        });
+        if (existingDoc) {
+          existingObjId = existingDoc._id;
+        }
+      }
+
+      const recordId = existingObjId || new ObjectId();
+      recordIdMap[templateId] = recordId.toHexString();
       const normalizedAnswers = [];
       const recordTicketSummaries = [];
 
@@ -33211,25 +33230,43 @@ app.post('/api/check-forms/submit', async (req, res) => {
         });
       }
 
-      recordDocs.push({
-        _id: recordId,
-        source: 'checkForm',
-        templateId,
-        templateName,
-        description,
-        schedule,
-        startDate,
-        factory,
-        加工設備: processingEquipment,
-        equipmentId: equipmentId || null,
-        workerName: Array.isArray(workerName) ? workerName.join(', ') : workerName,
-        Worker_Name: workerNameArray,
-        answers: normalizedAnswers,
-        tickets: recordTicketSummaries,
-        submittedAtClient: normalizeCheckFormText(payload.submittedAtClient),
-        createdAt: now,
-        updatedAt: now,
-      });
+      if (existingObjId) {
+        updateOps.push({
+          filter: { _id: existingObjId },
+          update: {
+            $push: {
+              answers: { $each: normalizedAnswers },
+              tickets: { $each: recordTicketSummaries }
+            },
+            $set: {
+              isPostComplete: true,
+              updatedAt: now
+            }
+          }
+        });
+      } else {
+        recordDocs.push({
+          _id: recordId,
+          source: 'checkForm',
+          templateId,
+          templateName,
+          description,
+          schedule,
+          startDate,
+          factory,
+          加工設備: processingEquipment,
+          equipmentId: equipmentId || null,
+          workerName: Array.isArray(workerName) ? workerName.join(', ') : workerName,
+          Worker_Name: workerNameArray,
+          answers: normalizedAnswers,
+          tickets: recordTicketSummaries,
+          isPreComplete: true,
+          isPostComplete: false,
+          submittedAtClient: normalizeCheckFormText(payload.submittedAtClient),
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
     }
 
     const session = client.startSession();
@@ -33254,6 +33291,10 @@ app.post('/api/check-forms/submit', async (req, res) => {
 
         if (recordDocs.length > 0) {
           await recordsCollection.insertMany(recordDocs, { session });
+        }
+
+        for (const op of updateOps) {
+          await recordsCollection.updateOne(op.filter, op.update, { session });
         }
 
         if (ngReportDocs.length > 0) {
@@ -33311,8 +33352,9 @@ app.post('/api/check-forms/submit', async (req, res) => {
     return res.status(201).json({
       success: true,
       insertedRecordCount: recordDocs.length,
+      updatedRecordCount: updateOps.length,
       insertedTicketCount: ngReportDocs.length,
-      recordIds: recordDocs.map((record) => record._id.toHexString()),
+      recordIds: recordIdMap,
     });
   } catch (error) {
     console.error('Error submitting check forms:', error);

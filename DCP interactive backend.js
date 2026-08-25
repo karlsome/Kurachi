@@ -595,6 +595,8 @@ document.addEventListener('DOMContentLoaded', () => {
                   console.error(`Option '${savedValue}' not found in select '${input.id || input.name}'.`);
                 }
               }, 2000); // Adjust delay if options are populated dynamically
+            } else if (input.type === 'file') {
+              // Ignore file input elements (browsers forbid setting non-empty strings)
             } else {
               input.value = savedValue; // Restore value for text, hidden, and other inputs
             }
@@ -3108,13 +3110,15 @@ document.addEventListener("DOMContentLoaded", async function () {
       workerNamesData = workerNames;
 
       const dataList = document.getElementById("machine-operator-suggestions");
-      dataList.innerHTML = ""; // Clear any existing options
+      if (dataList) {
+        dataList.innerHTML = ""; // Clear any existing options
 
-      workerNames.forEach(name => {
-        const option = document.createElement("option");
-        option.value = name;
-        dataList.appendChild(option);
-      });
+        workerNames.forEach(name => {
+          const option = document.createElement("option");
+          option.value = name;
+          dataList.appendChild(option);
+        });
+      }
     } catch (error) {
       console.error("Error fetching worker names:", error);
     }
@@ -3646,6 +3650,7 @@ window.saveChecklistDraftToStorage = async function () {
     recordIds: window.checklistState.recordIds || {},
     queueIndex: window.checklistState.queueIndex || 0,
     isPreComplete: window.checklistState.isPreComplete || false,
+    isPostComplete: window.checklistState.isPostComplete || false,
     isBypassed: window.checklistState.isBypassed || false,
     dateStr: new Date().toISOString().split('T')[0],
     timestamp: Date.now()
@@ -3679,6 +3684,7 @@ window.loadChecklistDraftFromStorage = async function () {
       window.checklistState.queueIndex = draft.queueIndex;
     }
     if (draft.isPreComplete) window.checklistState.isPreComplete = true;
+    if (typeof draft.isPostComplete === 'boolean') window.checklistState.isPostComplete = draft.isPostComplete;
     if (draft.isBypassed) window.checklistState.isBypassed = true;
 
     // Hydrate field photos from IndexedDB
@@ -13568,7 +13574,7 @@ if (manualSendModal) {
         }
 
         window.checklistState.isPreComplete = isPreDone;
-        if (data.isPostComplete) window.checklistState.isPostComplete = true;
+        window.checklistState.isPostComplete = !!data.isPostComplete;
         if (data.recordIds) {
           window.checklistState.recordIds = { ...(window.checklistState.recordIds || {}), ...data.recordIds };
         }
@@ -13782,7 +13788,19 @@ if (manualSendModal) {
     titleEl.innerHTML = `<h3 style="font-size:1.15rem; font-weight:800; color:#1f2733;">${localizedTitle}</h3>${localizedDesc ? `<p style="font-size:0.85rem; color:#6b7280; margin-top:2px;">${localizedDesc}</p>` : ''}`;
     container.appendChild(titleEl);
 
-    const isPostComplete = window.checklistState.isPostComplete || (postFields.length > 0 && postFields.every(f => isChecklistFieldCompleted(f)));
+    const isPostComplete = window.checklistState.isPostComplete === true;
+
+    console.log('📋 [Checklist Render Debug]', {
+      templateName: tpl.name || tpl.templateName,
+      totalFields: tplFields.length,
+      preFieldsCount: preFields.length,
+      postFieldsCount: postFields.length,
+      isPreComplete: window.checklistState.isPreComplete,
+      isPostCompleteState: window.checklistState.isPostComplete,
+      computedIsPostComplete: isPostComplete,
+      preFields: preFields.map(f => f.label || f.id),
+      postFields: postFields.map(f => f.label || f.id)
+    });
 
     // If pre-production is completed, render completed steps in a collapsed accordion
     if (window.checklistState.isPreComplete && preFields.length > 0) {
@@ -13795,7 +13813,7 @@ if (manualSendModal) {
       const tapCollapseText = (typeof _t === 'function') ? _t('tap_to_collapse_checklist') : '▲ Tap to collapse completed checklist';
       const postHeaderTitle = (typeof _t === 'function') ? _t('post_production_checks_title') : '📋 Post-Production Checks';
 
-      const completedAccordionFields = isPostComplete ? tplFields : preFields;
+      const completedAccordionFields = (isPostComplete && postFields.length > 0) ? tplFields : (postFields.length > 0 ? preFields : tplFields);
 
       accordion.innerHTML = `
         <summary style="padding:14px 18px; cursor:pointer; display:flex; align-items:center; justify-content:space-between; background:#dcfce7; border-radius:16px; user-select:none;">
