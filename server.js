@@ -32220,6 +32220,44 @@ function getScheduleHeaderInfo(schedule, templateName = '') {
   return { en: '', ja: '' };
 }
 
+async function getBilingualText(text) {
+  if (!text || typeof text !== 'string' || !text.trim()) {
+    return { ja: '', en: '', combined: '' };
+  }
+  const cleanText = text.trim();
+  const lang = detectTextLang(cleanText);
+  const targetLang = lang === 'ja' ? 'en' : 'ja';
+  
+  let translatedText = cleanText;
+  try {
+    const db = client.db(DB_NAME);
+    const coll = db.collection('translationCacheDB');
+    const cached = await coll.findOne({ text: cleanText, targetLang });
+    if (cached && cached.translated) {
+      translatedText = cached.translated;
+    } else {
+      const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(cleanText)}&langpair=${lang}|${targetLang}`;
+      const apiRes = await fetch(url);
+      const data = await apiRes.json();
+      if (data?.responseData?.translatedText) {
+        translatedText = data.responseData.translatedText;
+      }
+      await coll.insertOne({ text: cleanText, targetLang, translated: translatedText, createdAt: new Date() }).catch(() => {});
+    }
+  } catch (err) {
+    console.error(`[getBilingualText] Error translating "${cleanText}":`, err.message);
+  }
+
+  let ja = lang === 'ja' ? cleanText : translatedText;
+  let en = lang === 'en' ? cleanText : translatedText;
+
+  if (!ja) ja = en;
+  if (!en) en = ja;
+
+  const combined = (ja && en && ja !== en) ? `${ja} / ${en}` : cleanText;
+  return { ja, en, combined };
+}
+
 app.post('/api/check-forms/notify-ng-ticket', async (req, res) => {
   const { factory, machine, status, reason, userInput, expectedInput, isOptional, schedule, itemLabel, fieldLabel } = req.body || {};
   const roomId = '440654635';
@@ -32234,12 +32272,13 @@ app.post('/api/check-forms/notify-ng-ticket', async (req, res) => {
     : `⚠️ 【DEFECT TICKET${schedInfo.en} / 不適合報告${schedInfo.ja}】`;
   const statusLabel = isOptional ? 'OPTIONAL TICKET (任意報告)' : (status || 'NG');
   const labelText = itemLabel || fieldLabel || '';
+  const bilingualReason = await getBilingualText(reason);
 
   let messageBody = `${titleHeader}\n工場: ${factory}\n設備: ${machine}\nステータス: ${statusLabel}\n日時: ${timestamp}`;
   if (labelText) messageBody += `\n点検項目: ${labelText}`;
   if (expectedInput) messageBody += `\n期待値: ${expectedInput}`;
   if (userInput !== undefined && userInput !== '') messageBody += `\n入力値: ${userInput}`;
-  messageBody += `\n理由: ${reason}`;
+  messageBody += `\n理由: ${bilingualReason.combined}`;
 
   try {
     const response = await fetch(url, {
@@ -32314,12 +32353,13 @@ app.post('/api/check-forms/update-ng-ticket', async (req, res) => {
       : `⚠️ 【DEFECT TICKET${schedInfo.en} / 不適合報告${schedInfo.ja}】`;
     const statusLabel = isOptional ? 'OPTIONAL TICKET (任意報告)' : (status || 'NG');
     const labelText = itemLabel || fieldLabel || '';
+    const bilingualReason = await getBilingualText(reason);
 
     let messageBody = `${titleHeader}\n工場: ${factory}\n設備: ${machine}\nステータス: ${statusLabel}\n日時: ${timestamp}`;
     if (labelText) messageBody += `\n点検項目: ${labelText}`;
     if (expectedInput) messageBody += `\n期待値: ${expectedInput}`;
     if (userInput !== undefined && userInput !== '') messageBody += `\n入力値: ${userInput}`;
-    messageBody += `\n理由: ${reason}`;
+    messageBody += `\n理由: ${bilingualReason.combined}`;
     messageBody += `\n(編集済み / Updated)`;
 
     const response = await fetch(url, {
@@ -32761,6 +32801,7 @@ app.post('/api/check-forms/tickets/resolve', async (req, res) => {
     }
     
     const now = new Date();
+    const bilingualFix = await getBilingualText(fixReason);
     
     await ngReportsCollection.updateOne(
       { _id: new ObjectId(ticketId) },
@@ -32770,7 +32811,10 @@ app.post('/api/check-forms/tickets/resolve', async (req, res) => {
           closedAt: now.toISOString(),
           closedBy: workerName,
           closedByUsername: workerUsername,
-          fixReason: fixReason
+          fixReason: fixReason,
+          fixReason_ja: bilingualFix.ja,
+          fixReason_en: bilingualFix.en,
+          fixReason_bilingual: bilingualFix.combined
         },
         $push: {
           statusHistory: {
@@ -32781,6 +32825,9 @@ app.post('/api/check-forms/tickets/resolve', async (req, res) => {
             user: workerName,
             username: workerUsername,
             fixReason: fixReason,
+            fixReason_ja: bilingualFix.ja,
+            fixReason_en: bilingualFix.en,
+            fixReason_bilingual: bilingualFix.combined,
             imageURLs: imageURLs
           }
         }
@@ -33109,6 +33156,9 @@ function normalizeNgTicketDoc(doc, templateMap) {
     max: doc.max ?? null,
     unit: doc.unit || '',
     reason: doc.reason || '',
+    reason_ja: doc.reason_ja || doc.reason || '',
+    reason_en: doc.reason_en || doc.reason || '',
+    reason_bilingual: doc.reason_bilingual || (doc.reason_ja && doc.reason_en && doc.reason_ja !== doc.reason_en ? `${doc.reason_ja} / ${doc.reason_en}` : (doc.reason || '')),
     imageURLs: imgUrls,
     imageCount: imgUrls.length,
     hasImages: imgUrls.length > 0,
@@ -33121,6 +33171,7 @@ function normalizeNgTicketDoc(doc, templateMap) {
     fixReason: doc.fixReason || null,
     fixReason_ja: doc.fixReason_ja || doc.fixReason || null,
     fixReason_en: doc.fixReason_en || doc.fixReason || null,
+    fixReason_bilingual: doc.fixReason_bilingual || (doc.fixReason_ja && doc.fixReason_en && doc.fixReason_ja !== doc.fixReason_en ? `${doc.fixReason_ja} / ${doc.fixReason || ''}` : null),
     fixImageURLs: Array.isArray(doc.fixImageURLs) ? doc.fixImageURLs.filter(Boolean) : [],
     statusHistory: Array.isArray(doc.statusHistory) ? doc.statusHistory : []
   };
@@ -33341,14 +33392,20 @@ async function updateNgTicketChatworkMessage(report) {
   
   const adminLink = `https://karlsome.github.io/freyaAdmin2/maintenance/submissions/tickets?startDate=${dateStr}&endDate=${dateStr}`;
   const isClosed = report.status === 'closed';
+  const schedInfo = getScheduleHeaderInfo(report.schedule, report.templateName);
 
   let titleHeader = isClosed
-    ? '✅✅✅ 【DEFECT TICKET (対応済) / 不適合報告 (解決)】 ✅✅✅'
-    : '⚠️ 【DEFECT TICKET / 不適合報告】';
+    ? `✅✅✅ 【DEFECT TICKET${schedInfo.en} (対応済) / 不適合報告${schedInfo.ja} (解決)】 ✅✅✅`
+    : `⚠️ 【DEFECT TICKET${schedInfo.en} / 不適合報告${schedInfo.ja}】`;
 
   let statusLabel = isClosed ? '済 (Closed)' : 'NG';
+  const labelText = report.fieldLabel_ja || report.fieldLabel || report.fieldLabel_en || '';
 
   let body = `${titleHeader}\nチケット番号: #${report.ticketNo || ''}\n工場: ${report.factory || ''}\n設備: ${report['加工設備'] || report.machine || ''}\nステータス: ${statusLabel}\n日時: ${timestamp}`;
+
+  if (labelText) {
+    body += `\n点検項目: ${labelText}`;
+  }
 
   if (report.fieldType === 'number' && typeof report.min === 'number' && typeof report.max === 'number') {
     body += `\n期待値: ${report.min} - ${report.max} ${report.unit || ''}`;
@@ -33360,7 +33417,17 @@ async function updateNgTicketChatworkMessage(report) {
     body += `\n入力値: ${ans}`;
   }
 
-  body += `\n理由: ${report.reason || ''}`;
+  let reasonStr = report.reason || '';
+  if (report.reason_ja && report.reason_en && report.reason_ja !== report.reason_en) {
+    reasonStr = `${report.reason_ja} / ${report.reason_en}`;
+  } else if (report.reason_bilingual) {
+    reasonStr = report.reason_bilingual;
+  } else if (report.reason) {
+    const bReason = await getBilingualText(report.reason);
+    reasonStr = bReason.combined;
+  }
+
+  body += `\n理由: ${reasonStr}`;
   if (Array.isArray(report.imageURLs) && report.imageURLs.length > 0) {
     body += `\n画像: ${report.imageURLs[0]}`;
   }
@@ -33370,10 +33437,20 @@ async function updateNgTicketChatworkMessage(report) {
     const closedAtDate = report.closedAt ? new Date(report.closedAt) : new Date();
     const closedAtStr = closedAtDate.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
     const closedBy = report.closedBy || report.closedByUsername || '管理者';
-    const fixReason = report.fixReason || '点検・修正完了';
+
+    let fixReasonStr = report.fixReason || '点検・修正完了';
+    if (report.fixReason_ja && report.fixReason_en && report.fixReason_ja !== report.fixReason_en) {
+      fixReasonStr = `${report.fixReason_ja} / ${report.fixReason_en}`;
+    } else if (report.fixReason_bilingual) {
+      fixReasonStr = report.fixReason_bilingual;
+    } else if (report.fixReason) {
+      const bFix = await getBilingualText(report.fixReason);
+      fixReasonStr = bFix.combined;
+    }
+
     const fixImages = Array.isArray(report.fixImageURLs) ? report.fixImageURLs : (Array.isArray(report.fixImagesData) ? report.fixImagesData : []);
 
-    body += `\n\n[info][title]✅ 解決済み (Closed)[/title]対応者: ${closedBy}\n対応日時: ${closedAtStr}\n対応内容: ${fixReason}`;
+    body += `\n\n[info][title]✅ 解決済み (Closed)[/title]対応者: ${closedBy}\n対応日時: ${closedAtStr}\n対応内容: ${fixReasonStr}`;
     if (fixImages.length > 0) {
       body += `\n修正画像: ${fixImages.join('\n')}`;
     }
@@ -33415,6 +33492,21 @@ app.post('/api/check-forms/ng-tickets/update-status', async (req, res) => {
     await client.connect();
     const db = client.db('submittedDB');
     const collection = db.collection(CHECK_FORM_NG_REPORTS_COLLECTION);
+
+    if (update && update.$set) {
+      if (update.$set.fixReason) {
+        const bilingualFix = await getBilingualText(update.$set.fixReason);
+        update.$set.fixReason_ja = bilingualFix.ja;
+        update.$set.fixReason_en = bilingualFix.en;
+        update.$set.fixReason_bilingual = bilingualFix.combined;
+      }
+      if (update.$set.reason) {
+        const bilingualReason = await getBilingualText(update.$set.reason);
+        update.$set.reason_ja = bilingualReason.ja;
+        update.$set.reason_en = bilingualReason.en;
+        update.$set.reason_bilingual = bilingualReason.combined;
+      }
+    }
 
     const filter = { _id: new ObjectId(ticketId) };
     const result = await collection.updateOne(filter, update);
