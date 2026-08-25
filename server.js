@@ -32720,6 +32720,52 @@ app.post('/api/check-forms/notify-ng-ticket', async (req, res) => {
   }
 });
 
+app.post('/api/check-forms/cancel-ng-ticket', async (req, res) => {
+  const { messageIds } = req.body || {};
+  if (!Array.isArray(messageIds) || messageIds.length === 0) {
+    return res.json({ success: true, cancelled: [] });
+  }
+
+  const roomId = '440654635';
+  const apiKey = process.env.CHATWORK_API_KEY;
+  const results = [];
+
+  for (const messageId of messageIds) {
+    if (!messageId) continue;
+    try {
+      const deleteUrl = `https://api.chatwork.com/v2/rooms/${roomId}/messages/${messageId}`;
+      const delResponse = await fetch(deleteUrl, {
+        method: 'DELETE',
+        headers: { 'X-ChatWorkToken': apiKey }
+      });
+
+      if (delResponse.ok) {
+        results.push({ messageId, status: 'deleted' });
+      } else {
+        // Fallback: Edit message to indicate [Cancelled / Reset]
+        const editUrl = `https://api.chatwork.com/v2/rooms/${roomId}/messages/${messageId}`;
+        const now = new Date();
+        const timestamp = now.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+        const cancelText = `[info][title]❌ 【点検リセット / Cancelled】[/title]点検がリセットされたため、このNGチケットは取り消されました。\n日時: ${timestamp}[/info]`;
+        
+        await fetch(editUrl, {
+          method: 'PUT',
+          headers: {
+            'X-ChatWorkToken': apiKey,
+            'Content-Type': 'application/x-www-form-urlencoded'
+          },
+          body: new URLSearchParams({ body: cancelText })
+        });
+        results.push({ messageId, status: 'cancelled_edit' });
+      }
+    } catch (err) {
+      console.error(`Failed to cancel Chatwork message ${messageId}:`, err);
+    }
+  }
+
+  res.json({ success: true, results });
+});
+
 app.post('/api/check-forms/submit', async (req, res) => {
   const payload = req.body || {};
   const factory = normalizeCheckFormText(payload.factory);

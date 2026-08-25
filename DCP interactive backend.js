@@ -14336,6 +14336,29 @@ if (manualSendModal) {
     const confirmMsg = `Reset all checklist progress & photos?\n\n(Worker name "${namesText}" will be preserved)`;
     if (!confirm(confirmMsg)) return;
 
+    // Harvest Chatwork message IDs to cancel stale notifications
+    const messageIds = [];
+    if (window.checklistState.tickets) {
+      for (const fId of Object.keys(window.checklistState.tickets)) {
+        const ticket = window.checklistState.tickets[fId];
+        if (ticket && ticket.chatworkMessageId) {
+          messageIds.push(ticket.chatworkMessageId);
+        }
+      }
+    }
+
+    if (messageIds.length > 0) {
+      try {
+        fetch(`${serverURL}/api/check-forms/cancel-ng-ticket`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messageIds })
+        }).catch(err => console.warn('Error calling cancel-ng-ticket API:', err));
+      } catch (err) {
+        console.warn('Error initiating Chatwork cancellation:', err);
+      }
+    }
+
     // Reset state object
     window.checklistState.answers = {};
     window.checklistState.tickets = {};
@@ -14343,6 +14366,7 @@ if (manualSendModal) {
     window.checklistState.queueIndex = 0;
     window.checklistState.isPreComplete = false;
     window.checklistState.isBypassed = false;
+    window.checklistState.unlockedCompletedCards = {};
 
     // Clear IndexedDB and draft in storage
     if (typeof window.clearChecklistDraftFromStorage === 'function') {
