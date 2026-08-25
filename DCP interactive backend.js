@@ -13632,12 +13632,17 @@ if (manualSendModal) {
       if (!res.ok) return;
       const data = await res.json();
 
-      if (data && typeof data.isPreComplete === 'boolean') {
-        const isPreDone = data.isPreComplete;
+      if (data) {
+        if (data.recordIds) {
+          window.checklistState.recordIds = { ...(window.checklistState.recordIds || {}), ...data.recordIds };
+        }
+
+        const allPreDone = window.checklistState.queue && window.checklistState.queue.length > 0 && window.checklistState.queue.every(t => {
+          return !!(window.checklistState.recordIds && (window.checklistState.recordIds[t._id] || window.checklistState.recordIds[t.name]));
+        });
 
         // Only wipe local state if local state claimed completion (isPreComplete: true) BUT MongoDB has no submitted record today (e.g. record deleted from MongoDB)
-        // If operator is in-progress filling out a draft (isPreComplete: false), preserve their in-progress draft on refresh!
-        if (!isPreDone && !data.hasSubmittedToday) {
+        if (!allPreDone && !data.hasSubmittedToday) {
           if (window.checklistState.isPreComplete) {
             console.log('🧹 Local state claimed checklist completed, but MongoDB has no record for today - Resetting stale local checklist state.');
             window.checklistState.isPreComplete = false;
@@ -13666,19 +13671,16 @@ if (manualSendModal) {
           return;
         }
 
-        window.checklistState.isPreComplete = isPreDone;
+        window.checklistState.isPreComplete = allPreDone;
         window.checklistState.isPostComplete = !!data.isPostComplete;
         window.checklistState.hasOpenTickets = !!data.hasOpenTickets;
-        if (data.recordIds) {
-          window.checklistState.recordIds = { ...(window.checklistState.recordIds || {}), ...data.recordIds };
-        }
 
         if (typeof window.saveChecklistDraftToStorage === 'function') {
           await window.saveChecklistDraftToStorage();
         }
 
         const bar = document.querySelector('.tab-bar');
-        const canProceed = (isPreDone || window.checklistState.isBypassed) && !window.checklistState.hasOpenTickets;
+        const canProceed = (allPreDone || window.checklistState.isBypassed) && !window.checklistState.hasOpenTickets;
         if (canProceed) {
           if (bar) bar.classList.remove('locked-checklist');
         } else {
@@ -13689,7 +13691,7 @@ if (manualSendModal) {
           window.renderCurrentChecklistTemplate();
         }
 
-        if (!isPreDone && !window.checklistState.isBypassed && window.checklistState.queue && window.checklistState.queue.length > 0 && typeof window.goToChecklistTab === 'function') {
+        if (!allPreDone && !window.checklistState.isBypassed && window.checklistState.queue && window.checklistState.queue.length > 0 && typeof window.goToChecklistTab === 'function') {
           window.goToChecklistTab();
         }
       }
@@ -14048,37 +14050,54 @@ if (manualSendModal) {
           }
         }
       } else if (isCurrentRecorded) {
-        nextBtn.innerHTML = `<span>✓ Completed (${localizedTitle})</span> →`;
-        nextBtn.disabled = false;
-        nextBtn.style.opacity = '1';
-        nextBtn.style.cursor = 'pointer';
-        nextBtn.style.pointerEvents = 'auto';
-        nextBtn.style.background = '#10b981';
-        nextBtn.style.boxShadow = '0 4px 14px rgba(16,185,129,0.3)';
-        nextBtn.classList.add('checklist-next-pulse');
-        nextBtn.onclick = function () {
-          const nextIncompleteIdx = queue.findIndex((t, i) => i !== queueIndex && !(window.checklistState.recordIds && (window.checklistState.recordIds[t._id] || window.checklistState.recordIds[t.name])));
-          if (nextIncompleteIdx !== -1) {
-            window.selectChecklistTemplateIndex(nextIncompleteIdx);
-          } else {
-            if (typeof window.goToTab === 'function') window.goToTab(1);
-          }
-        };
-      } else {
-        let label = '';
-        if (queue.length > 1) {
-          label = isLastRemaining
-            ? ((typeof _t === 'function') ? _t('complete_all_checklists') : 'Complete & Proceed to Production')
-            : `Submit ${localizedTitle} (${uncompletedTemplates.length} checks remaining)`;
+        if (uncompletedTemplates.length > 0) {
+          nextBtn.innerHTML = `<span>Switch to Next Checklist (${uncompletedTemplates.length} remaining)</span> →`;
+          nextBtn.disabled = false;
+          nextBtn.style.opacity = '1';
+          nextBtn.style.cursor = 'pointer';
+          nextBtn.style.pointerEvents = 'auto';
+          nextBtn.style.background = '#2563eb';
+          nextBtn.style.boxShadow = '0 4px 14px rgba(37,99,235,0.3)';
+          nextBtn.classList.add('checklist-next-pulse');
+          nextBtn.onclick = function () {
+            const nextIncompleteIdx = queue.findIndex((t, i) => i !== queueIndex && !(window.checklistState.recordIds && (window.checklistState.recordIds[t._id] || window.checklistState.recordIds[t.name])));
+            if (nextIncompleteIdx !== -1) {
+              window.selectChecklistTemplateIndex(nextIncompleteIdx);
+            }
+          };
         } else {
-          label = (typeof _t === 'function') ? _t('complete_all_checklists') : 'Complete Checklist & Proceed';
+          if (window.checklistState.hasOpenTickets) {
+            const label = (typeof _t === 'function') ? _t('please_wait_for_maintenance') : 'Please wait for maintenance team';
+            nextBtn.innerHTML = `<span>⚠️ ${label}</span>`;
+            nextBtn.disabled = true;
+            nextBtn.style.opacity = '1';
+            nextBtn.style.cursor = 'not-allowed';
+            nextBtn.style.pointerEvents = 'none';
+            nextBtn.style.background = '#f59e0b';
+            nextBtn.style.boxShadow = '0 4px 14px rgba(245,158,11,0.3)';
+            nextBtn.classList.remove('checklist-next-pulse');
+            nextBtn.onclick = null;
+          } else {
+            nextBtn.innerHTML = `<span>Proceed to Production</span> →`;
+            nextBtn.disabled = false;
+            nextBtn.style.opacity = '1';
+            nextBtn.style.cursor = 'pointer';
+            nextBtn.style.pointerEvents = 'auto';
+            nextBtn.style.background = '#10b981';
+            nextBtn.style.boxShadow = '0 4px 14px rgba(16,185,129,0.3)';
+            nextBtn.classList.add('checklist-next-pulse');
+            nextBtn.onclick = function () {
+              if (typeof window.goToTab === 'function') window.goToTab(1);
+            };
+          }
+        }
+      } else {
+        let label = `Submit ${localizedTitle} ✓`;
+        if (postFields.length > 0 && isPreMode) {
+          label = `Submit ${localizedTitle} (Pre-Check) ✓`;
         }
 
-        if (postFields.length > 0) {
-          label = (typeof _t === 'function') ? _t('submit_pre_production_check') : `Submit ${localizedTitle} (Pre-Check)`;
-        }
-
-        nextBtn.innerHTML = `<span>${label}</span> ${isLastRemaining ? '✓' : '→'}`;
+        nextBtn.innerHTML = `<span>${label}</span>`;
         nextBtn.onclick = window.handleChecklistSubmitOrNext;
 
         if (!allFieldsCompleted) {
@@ -14126,23 +14145,21 @@ if (manualSendModal) {
       postFields: postFields.map(f => f.label || f.id)
     });
 
-    // If pre-production is completed, render completed steps in a collapsed accordion
-    if (window.checklistState.isPreComplete && preFields.length > 0) {
+    // Render per-template content
+    if (isCurrentRecorded) {
+      // 1. Render completed pre-steps in a collapsed accordion with THIS template's name
       const accordion = document.createElement('details');
       accordion.className = 'completed-pre-steps-accordion';
       const todayIso = new Date().toISOString().split('T')[0];
-      const bannerText = (typeof _t === 'function') ? _t('checklist_completed_banner') : 'Checklist Completed';
       const stepsText = (typeof _t === 'function') ? _t('steps_count') : 'steps';
       const tapToggleText = (typeof _t === 'function') ? _t('tap_to_expand_collapse') : 'Tap to expand / collapse';
       const tapCollapseText = (typeof _t === 'function') ? _t('tap_to_collapse_checklist') : '▲ Tap to collapse completed checklist';
-      const postHeaderTitle = (typeof _t === 'function') ? _t('post_production_checks_title') : '📋 Post-Production Checks';
-
-      const completedAccordionFields = (isPostComplete && postFields.length > 0) ? tplFields : (postFields.length > 0 ? preFields : tplFields);
+      const completedSteps = preFields.length > 0 ? preFields : tplFields;
 
       accordion.innerHTML = `
         <summary style="padding:14px 18px; cursor:pointer; display:flex; align-items:center; justify-content:space-between; background:#dcfce7; border-radius:16px; user-select:none;">
           <span style="font-size: 0.95rem; font-weight: 700; color: #166534; display: flex; align-items: center; gap: 8px;">
-            ✓ ${todayIso} ${bannerText} (${completedAccordionFields.length} ${stepsText})
+            ✓ ${todayIso} ${localizedTitle} Completed (${completedSteps.length} ${stepsText})
           </span>
           <span style="font-size: 0.8rem; color: #15803d; font-weight: 600; background:rgba(22,101,52,0.1); padding:4px 10px; border-radius:10px;">${tapToggleText}</span>
         </summary>
@@ -14151,9 +14168,9 @@ if (manualSendModal) {
       container.appendChild(accordion);
 
       const accordionContent = accordion.querySelector('#completedPreStepsContent');
-      completedAccordionFields.forEach((field) => {
+      completedSteps.forEach((field) => {
         const globalIdx = tplFields.indexOf(field);
-        const stepNum = globalIdx !== -1 ? globalIdx : completedAccordionFields.indexOf(field);
+        const stepNum = globalIdx !== -1 ? globalIdx : completedSteps.indexOf(field);
         const cardEl = renderSingleFieldCard(field, stepNum, true, true);
         if (accordionContent) accordionContent.appendChild(cardEl);
       });
@@ -14168,30 +14185,53 @@ if (manualSendModal) {
       };
       if (accordionContent) accordionContent.appendChild(collapseFooterBtn);
 
-      if (postFields.length > 0 && !isPostComplete) {
+      // 2. Render read-only locked status banner
+      const lockedBanner = document.createElement('div');
+      lockedBanner.style.cssText = 'background: #dcfce7; border: 1.5px solid #86efac; border-radius: 14px; padding: 12px 16px; margin-top: 12px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;';
+      lockedBanner.innerHTML = `
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="font-size:1.2rem;">🔒</span>
+          <span style="font-size:0.9rem; font-weight:800; color:#166534;">${localizedTitle} has been submitted and is locked (Read-only).</span>
+        </div>
+        ${uncompletedTemplates.length > 0 ? `<button type="button" onclick="openChecklistSwitcherModal()" class="btn btn-secondary" style="font-size:0.8rem; padding:5px 12px; border-radius:8px; font-weight:700;">Switch Checklist ▾</button>` : ''}
+      `;
+      container.appendChild(lockedBanner);
+
+      // 3. Post-production checks: ONLY show if ALL pre-checklists are completed AND post-mode is active
+      const isPostModeActive = window.checklistState.isPostMode === true || (window.checklistState.isPreComplete && window.checklistState.hasSubmittedProductionToday);
+      if (isPostModeActive && postFields.length > 0 && !isPostComplete) {
+        const postHeaderTitle = (typeof _t === 'function') ? _t('post_production_checks_title') : '📋 Post-Production Checks';
         const postHeader = document.createElement('div');
         postHeader.className = 'post-steps-header';
-        postHeader.innerHTML = `
-          ${postHeaderTitle} (${postFields.length} ${stepsText})
-        `;
+        postHeader.innerHTML = `${postHeaderTitle} (${postFields.length} ${stepsText})`;
         container.appendChild(postHeader);
+
+        let isPrevPostDone = true;
+        postFields.forEach((field) => {
+          const globalIdx = tplFields.indexOf(field);
+          const stepNum = globalIdx !== -1 ? globalIdx : postFields.indexOf(field);
+          const cardEl = renderSingleFieldCard(field, stepNum, isPrevPostDone, false);
+          container.appendChild(cardEl);
+          if (!isChecklistFieldCompleted(field)) {
+            isPrevPostDone = false;
+          }
+        });
       }
+    } else {
+      // Template is NOT submitted: Render pre-production steps directly for input (no accordion, NO post-production steps)
+      const fieldsToRender = preFields.length > 0 ? preFields : tplFields;
+      let isPreviousCompleted = true;
+
+      fieldsToRender.forEach((field) => {
+        const globalIdx = tplFields.indexOf(field);
+        const stepNum = globalIdx !== -1 ? globalIdx : fieldsToRender.indexOf(field);
+        const cardEl = renderSingleFieldCard(field, stepNum, isPreviousCompleted, false);
+        container.appendChild(cardEl);
+        if (!isChecklistFieldCompleted(field)) {
+          isPreviousCompleted = false;
+        }
+      });
     }
-
-    const fieldsToRender = window.checklistState.isPreComplete
-      ? (isPostComplete ? [] : postFields)
-      : (preFields.length > 0 ? preFields : tplFields);
-    let isPreviousCompleted = true;
-
-    fieldsToRender.forEach((field) => {
-      const globalIdx = tplFields.indexOf(field);
-      const stepNum = globalIdx !== -1 ? globalIdx : fieldsToRender.indexOf(field);
-      const cardEl = renderSingleFieldCard(field, stepNum, isPreviousCompleted);
-      container.appendChild(cardEl);
-      if (!isChecklistFieldCompleted(field)) {
-        isPreviousCompleted = false;
-      }
-    });
   };
 
   function renderSingleFieldCard(field, idx, isPreviousCompleted = true, forceLocked = false) {
@@ -14257,7 +14297,34 @@ if (manualSendModal) {
     }
 
     let controlHtml = '';
-    if (field.type === 'name') {
+    if (forceLocked) {
+      if (field.type === 'name') {
+        const val = window.checklistState.answers[field.id];
+        const valDisplay = Array.isArray(val) ? val.filter(Boolean).join(', ') : (val || '—');
+        controlHtml = `<div style="background:#f3f4f6; padding:10px 14px; border-radius:8px; font-weight:700; color:#374151; font-size:0.95rem; border:1px solid #e5e7eb;">👤 ${valDisplay}</div>`;
+      } else if (field.type === 'checkbox' || field.type === 'toggle') {
+        const isOk = ansVal === 'OK';
+        const isNg = ansVal === 'NG';
+        controlHtml = `
+            <div class="checklist-toggle-group" style="pointer-events:none; opacity:0.85;">
+              <button type="button" class="checklist-toggle-btn ok-btn ${isOk ? 'active' : ''}" disabled>OK</button>
+              <button type="button" class="checklist-toggle-btn ng-btn ${isNg ? 'active' : ''}" disabled>NG</button>
+            </div>
+          `;
+      } else if (field.type === 'number') {
+        controlHtml = `
+            <div style="display:flex; align-items:center; gap:8px;">
+              <input type="text" readonly disabled value="${ansVal !== undefined ? ansVal : ''}" 
+                style="flex:1; padding:12px; border-radius:10px; border:1px solid #e5e7eb; background:#f3f4f6; font-weight:700; font-size:1rem; cursor:not-allowed;">
+              ${field.unit ? `<span style="font-weight:700; color:#6b7280;">${field.unit}</span>` : ''}
+            </div>
+          `;
+      } else if (field.type === 'select') {
+        controlHtml = `<div style="background:#f3f4f6; padding:10px 14px; border-radius:8px; font-weight:700; color:#374151; font-size:0.95rem; border:1px solid #e5e7eb;">${ansVal || '—'}</div>`;
+      } else {
+        controlHtml = `<input type="text" disabled readonly value="${ansVal || ''}" style="width:100%; padding:12px; border-radius:10px; border:1px solid #e5e7eb; background:#f3f4f6; cursor:not-allowed;">`;
+      }
+    } else if (field.type === 'name') {
       const activeSlots = (window.selectedWorkerNames && window.selectedWorkerNames.length > 0)
         ? window.selectedWorkerNames
         : [''];
@@ -14320,7 +14387,9 @@ if (manualSendModal) {
       const isSaved = hasTicket && hasTicket.saved;
       const cls = isSaved ? 'saved' : (isRequiredUnsaved ? 'required-pulse' : '');
       const lbl = isSaved ? '✓ Ticket Saved' : (isRequiredUnsaved ? '⚠️ Ticket Required' : '➕ Ticket');
-      ticketBtnHtml = `<button type="button" class="checklist-ticket-btn ${cls}" onclick="openChecklistTicketModal('${field.id}')">${lbl}</button>`;
+      ticketBtnHtml = forceLocked
+        ? (isSaved ? `<span style="font-size:0.75rem; font-weight:800; color:#15803d; background:#dcfce7; padding:4px 8px; border-radius:8px;">✓ Ticket Recorded</span>` : '')
+        : `<button type="button" class="checklist-ticket-btn ${cls}" onclick="openChecklistTicketModal('${field.id}')">${lbl}</button>`;
     }
 
     let photoHtml = '';
@@ -14337,7 +14406,9 @@ if (manualSendModal) {
         }
       }
       const pulseClass = isPhotoAttentionNeeded ? 'photo-pulse-attention' : '';
-      photoHtml = `
+      photoHtml = forceLocked
+        ? (photoBase64 ? `<img src="${photoBase64}" style="width:60px; height:60px; object-fit:cover; border-radius:8px; margin-top:6px; display:block; cursor:pointer;" onclick="if(typeof window.openPreview === 'function') window.openPreview(this.src, '${fTitle.replace(/'/g, "\\'")}');">` : '')
+        : `
           <div style="margin-top:8px;">
             <input type="file" id="checklist-field-photo-${field.id}" accept="image/*" capture="environment" style="display:none;" onchange="handleChecklistFieldPhotoCaptured('${field.id}', event)">
             <button type="button" class="btn btn-secondary ${pulseClass}" style="font-size:0.8rem; padding:6px 12px;" onclick="document.getElementById('checklist-field-photo-${field.id}').click()">
@@ -15776,17 +15847,8 @@ if (manualSendModal) {
         workerName = (document.getElementById('Machine Operator')?.value || '').trim() || 'Operator';
       }
 
-      // Gather templates to submit: current template + any other completed templates not yet submitted
-      const templatesToSubmit = queue.filter(t => {
-        if (t._id === tpl._id || t.name === tpl.name) return true;
-        const tFields = Array.isArray(t.fields) ? t.fields : [];
-        const tTargetFields = isSubmittingPre
-          ? tFields.filter(f => f.timing !== 'post')
-          : (tFields.some(f => f.timing === 'post') ? tFields.filter(f => f.timing === 'post' && f.type !== 'name') : tFields);
-        const isDone = tTargetFields.length > 0 && tTargetFields.every(f => isChecklistFieldCompleted(f));
-        const isAlreadySubmitted = !!(window.checklistState.recordIds && (window.checklistState.recordIds[t._id] || window.checklistState.recordIds[t.name]));
-        return isDone && !isAlreadySubmitted;
-      });
+      // Submit ONLY the current template!
+      const templatesToSubmit = [tpl];
 
       const payload = {
         factory: window.checklistState.factory,
@@ -15844,11 +15906,11 @@ if (manualSendModal) {
         })
       };
 
-      console.log('🚀 Sending checklist submission payload:', {
+      console.log('🚀 Sending single checklist submission payload:', {
         factory: payload.factory,
         machine: payload.machine,
         workerName: payload.workerName,
-        templateCount: payload.templates ? payload.templates.length : 0,
+        templateName: tpl.name,
         templates: payload.templates
       });
 
@@ -15861,8 +15923,12 @@ if (manualSendModal) {
       if (res.ok) {
         const resData = await res.json().catch(() => ({}));
         console.log('✅ Checklist submitted successfully! Response:', resData);
+        window.checklistState.recordIds = window.checklistState.recordIds || {};
         if (resData.recordIds) {
-          window.checklistState.recordIds = { ...(window.checklistState.recordIds || {}), ...resData.recordIds };
+          window.checklistState.recordIds = { ...window.checklistState.recordIds, ...resData.recordIds };
+        } else {
+          window.checklistState.recordIds[tpl._id] = true;
+          window.checklistState.recordIds[tpl.name] = true;
         }
         if (overlay) overlay.style.display = 'none';
 
@@ -15882,19 +15948,29 @@ if (manualSendModal) {
               await window.saveChecklistDraftToStorage();
             }
 
-            if (typeof window.updateTabLock === 'function') {
-              window.updateTabLock();
+            // Check if any open defect tickets exist across all completed checks
+            if (window.checklistState.hasOpenTickets) {
+              if (typeof showAppToast === 'function') {
+                showAppToast('⚠️ All checklists submitted. Please wait for maintenance approval.');
+              }
+              if (typeof renderCurrentChecklistTemplate === 'function') {
+                renderCurrentChecklistTemplate();
+              }
             } else {
-              const bar = document.querySelector('.tab-bar');
-              if (bar) bar.classList.remove('locked-checklist');
-            }
+              if (typeof window.updateTabLock === 'function') {
+                window.updateTabLock();
+              } else {
+                const bar = document.querySelector('.tab-bar');
+                if (bar) bar.classList.remove('locked-checklist');
+              }
 
-            if (typeof showAppToast === 'function') {
-              showAppToast('🎉 All Pre-Production Checklists Completed!');
-            }
+              if (typeof showAppToast === 'function') {
+                showAppToast('🎉 All Pre-Production Checklists Completed!');
+              }
 
-            if (typeof window.goToTab === 'function') {
-              window.goToTab(1);
+              if (typeof window.goToTab === 'function') {
+                window.goToTab(1);
+              }
             }
           } else {
             // Some templates still pending: find next pending template and jump to it
@@ -15907,8 +15983,9 @@ if (manualSendModal) {
               window.checklistState.queueIndex = nextIncompleteIdx;
             }
 
+            const localizedTplName = (typeof getLocalizedText === 'function') ? getLocalizedText(tpl, 'name') : (tpl.name || 'Checklist');
             if (typeof showAppToast === 'function') {
-              showAppToast(`✓ ${tpl.name} completed!`);
+              showAppToast(`✓ ${localizedTplName} submitted! Moving to next checklist.`);
             }
 
             if (typeof renderCurrentChecklistTemplate === 'function') {
