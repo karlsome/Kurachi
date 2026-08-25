@@ -33000,7 +33000,61 @@ app.get('/api/check-forms/today-status', async (req, res) => {
 });
 
 // ─── DEDICATED FREYA ADMIN NG TICKETS ENDPOINTS ──────────────────────────────────────
-function normalizeNgTicketDoc(doc) {
+let _checkFormTemplatesCache = null;
+let _checkFormTemplatesCacheTime = 0;
+
+async function getCheckFormTemplatesMap() {
+  const now = Date.now();
+  if (_checkFormTemplatesCache && (now - _checkFormTemplatesCacheTime < 60000)) {
+    return _checkFormTemplatesCache;
+  }
+  try {
+    await client.connect();
+    const db = client.db(DB_NAME);
+    const templates = await db.collection(CHECK_FORM_TEMPLATES_COLLECTION).find({}).toArray();
+    console.log(`📋 [NG Tickets] Loaded ${templates.length} check form templates for bilingual resolution.`);
+    const map = new Map();
+    templates.forEach(t => {
+      const tid = t._id.toString();
+      const fieldsMap = new Map();
+      const fieldsByLabelMap = new Map();
+      if (Array.isArray(t.fields)) {
+        t.fields.forEach(f => {
+          const fieldObj = {
+            id: f.id ? String(f.id) : '',
+            label_ja: f.label_ja || f.label || '',
+            label_en: f.label_en || f.label || '',
+            description_ja: f.description_ja || f.description || '',
+            description_en: f.description_en || f.description || ''
+          };
+          if (f.id) {
+            fieldsMap.set(String(f.id), fieldObj);
+          }
+          if (f.label) {
+            fieldsByLabelMap.set(String(f.label).trim(), fieldObj);
+          }
+          if (f.label_ja) {
+            fieldsByLabelMap.set(String(f.label_ja).trim(), fieldObj);
+          }
+        });
+      }
+      map.set(tid, {
+        name_ja: t.name_ja || t.name || '',
+        name_en: t.name_en || t.name || '',
+        fields: fieldsMap,
+        fieldsByLabel: fieldsByLabelMap
+      });
+    });
+    _checkFormTemplatesCache = map;
+    _checkFormTemplatesCacheTime = now;
+    return map;
+  } catch (err) {
+    console.error('Error loading checkFormTemplatesMap:', err);
+    return new Map();
+  }
+}
+
+function normalizeNgTicketDoc(doc, templateMap) {
   if (!doc) return null;
   const workerStr = Array.isArray(doc.workerName) 
     ? doc.workerName.join(', ') 
@@ -33010,6 +33064,20 @@ function normalizeNgTicketDoc(doc) {
   const imgUrls = Array.isArray(doc.imageURLs) ? doc.imageURLs.filter(Boolean) : [];
   const createdAtIso = doc.createdAt ? (doc.createdAt instanceof Date ? doc.createdAt.toISOString() : String(doc.createdAt)) : new Date().toISOString();
   
+  const templateIdStr = doc.templateId ? doc.templateId.toString() : '';
+  const tmpl = templateMap ? templateMap.get(templateIdStr) : null;
+  let fieldInfo = (tmpl && doc.fieldId) ? tmpl.fields.get(String(doc.fieldId)) : null;
+  if (!fieldInfo && tmpl && doc.fieldLabel) {
+    fieldInfo = tmpl.fieldsByLabel.get(String(doc.fieldLabel).trim());
+  }
+
+  const formName_ja = tmpl?.name_ja || doc.formName_ja || formStr;
+  const formName_en = tmpl?.name_en || doc.formName_en || formStr;
+  const fieldLabel_ja = fieldInfo?.label_ja || doc.fieldLabel_ja || doc.fieldLabel || '';
+  const fieldLabel_en = fieldInfo?.label_en || doc.fieldLabel_en || doc.fieldLabel || '';
+
+  console.log(`🎫 [NG Ticket #${doc.ticketNo || doc._id}] templateId=${templateIdStr} | formName_en="${formName_en}" | fieldLabel_en="${fieldLabel_en}"`);
+
   return {
     _id: doc._id.toString(),
     ticketId: doc._id.toString(),
@@ -33019,15 +33087,19 @@ function normalizeNgTicketDoc(doc) {
     machineName: machineStr,
     加工設備: machineStr,
     equipmentId: doc.equipmentId || null,
-    templateId: doc.templateId || null,
+    templateId: templateIdStr,
     formName: formStr,
     templateName: formStr,
+    formName_ja,
+    formName_en,
     recordId: doc.checkFormRecordId ? doc.checkFormRecordId.toString() : (doc.recordId || null),
     checkFormRecordId: doc.checkFormRecordId ? doc.checkFormRecordId.toString() : null,
     completedBy: workerStr,
     workerName: workerStr,
     fieldId: doc.fieldId || '',
     fieldLabel: doc.fieldLabel || '',
+    fieldLabel_ja,
+    fieldLabel_en,
     fieldType: doc.fieldType || '',
     answerValue: doc.answerValue || '',
     min: doc.min ?? null,
@@ -33044,6 +33116,8 @@ function normalizeNgTicketDoc(doc) {
     closedBy: doc.closedBy || null,
     closedByUsername: doc.closedByUsername || null,
     fixReason: doc.fixReason || null,
+    fixReason_ja: doc.fixReason_ja || doc.fixReason || null,
+    fixReason_en: doc.fixReason_en || doc.fixReason || null,
     fixImageURLs: Array.isArray(doc.fixImageURLs) ? doc.fixImageURLs.filter(Boolean) : [],
     statusHistory: Array.isArray(doc.statusHistory) ? doc.statusHistory : []
   };
@@ -33059,6 +33133,7 @@ app.post('/api/check-forms/ng-tickets/page', async (req, res) => {
     await client.connect();
     const db = client.db('submittedDB');
     const collection = db.collection(CHECK_FORM_NG_REPORTS_COLLECTION);
+    const templateMap = await getCheckFormTemplatesMap();
 
     const queryFilter = {};
 
@@ -33110,7 +33185,7 @@ app.post('/api/check-forms/ng-tickets/page', async (req, res) => {
 
     const totalItems = await collection.countDocuments(queryFilter);
     const docs = await collection.find(queryFilter).sort(sortObj).skip(skip).limit(safeLimit).toArray();
-    const normalizedDocs = docs.map(normalizeNgTicketDoc);
+    const normalizedDocs = docs.map(d => normalizeNgTicketDoc(d, templateMap));
 
     const allDocs = await collection.find(queryFilter, { projection: { imageURLs: 1, checkFormRecordId: 1, 加工設備: 1, machineName: 1, workerName: 1, completedBy: 1 } }).toArray();
     let imageTickets = 0;
@@ -33156,8 +33231,9 @@ app.get('/api/check-forms/ng-tickets/filter-options', async (req, res) => {
     await client.connect();
     const db = client.db('submittedDB');
     const collection = db.collection(CHECK_FORM_NG_REPORTS_COLLECTION);
+    const templateMap = await getCheckFormTemplatesMap();
 
-    const docs = await collection.find({}, { projection: { factory: 1, 加工設備: 1, machineName: 1, templateName: 1, formName: 1, workerName: 1, completedBy: 1, status: 1, fieldLabel: 1, fieldType: 1 } }).toArray();
+    const docs = await collection.find({}, { projection: { factory: 1, 加工設備: 1, machineName: 1, templateName: 1, formName: 1, templateId: 1, fieldId: 1, workerName: 1, completedBy: 1, status: 1, fieldLabel: 1, fieldType: 1 } }).toArray();
 
     const factoriesSet = new Set();
     const machineNamesSet = new Set();
@@ -33167,16 +33243,16 @@ app.get('/api/check-forms/ng-tickets/filter-options', async (req, res) => {
     const fieldLabelsSet = new Set();
     const fieldTypesSet = new Set();
 
-    docs.forEach(d => {
+    docs.forEach(rawDoc => {
+      const d = normalizeNgTicketDoc(rawDoc, templateMap);
       if (d.factory) factoriesSet.add(d.factory);
-      const m = d.加工設備 || d.machineName || d.machine || '';
-      if (m) machineNamesSet.add(m);
-      const f = d.templateName || d.formName || '';
-      if (f) formNamesSet.add(f);
-      const w = Array.isArray(d.workerName) ? d.workerName.join(', ') : (d.workerName || d.completedBy || '');
-      if (w) completedBySet.add(w);
+      if (d.machineName) machineNamesSet.add(d.machineName);
+      if (d.formName_en) formNamesSet.add(d.formName_en);
+      if (d.formName_ja) formNamesSet.add(d.formName_ja);
+      if (d.completedBy) completedBySet.add(d.completedBy);
       if (d.status) statusesSet.add(String(d.status).toLowerCase());
-      if (d.fieldLabel) fieldLabelsSet.add(d.fieldLabel);
+      if (d.fieldLabel_en) fieldLabelsSet.add(d.fieldLabel_en);
+      if (d.fieldLabel_ja) fieldLabelsSet.add(d.fieldLabel_ja);
       if (d.fieldType) fieldTypesSet.add(d.fieldType);
     });
 
@@ -33202,6 +33278,7 @@ app.post('/api/check-forms/ng-tickets/export', async (req, res) => {
     await client.connect();
     const db = client.db('submittedDB');
     const collection = db.collection(CHECK_FORM_NG_REPORTS_COLLECTION);
+    const templateMap = await getCheckFormTemplatesMap();
 
     const queryFilter = {};
     if (filters.factory && filters.factory !== 'all') queryFilter.factory = filters.factory;
@@ -33234,7 +33311,7 @@ app.post('/api/check-forms/ng-tickets/export', async (req, res) => {
     }
 
     const docs = await collection.find(queryFilter).sort(sortObj).toArray();
-    res.json(docs.map(normalizeNgTicketDoc));
+    res.json(docs.map(d => normalizeNgTicketDoc(d, templateMap)));
   } catch (err) {
     console.error('❌ Error in /api/check-forms/ng-tickets/export:', err);
     res.status(500).json({ error: err.message });
