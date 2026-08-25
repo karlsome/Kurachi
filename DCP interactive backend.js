@@ -13838,7 +13838,7 @@ if (manualSendModal) {
 
     const fieldsToRender = window.checklistState.isPreComplete
       ? (isPostComplete ? [] : postFields)
-      : tplFields;
+      : (preFields.length > 0 ? preFields : tplFields);
     let isPreviousCompleted = true;
 
     fieldsToRender.forEach((field) => {
@@ -14040,6 +14040,96 @@ if (manualSendModal) {
       return card;
   }
 
+  window.promptPostStepWarningModal = function (fieldId) {
+    return new Promise((resolve) => {
+      // If pre-production is already complete, or no fieldId passed, proceed without warning
+      if (!window.checklistState || window.checklistState.isPreComplete || !fieldId) {
+        resolve(true);
+        return;
+      }
+
+      // Find target field in queue
+      let targetField = null;
+      if (Array.isArray(window.checklistState.queue)) {
+        for (const tpl of window.checklistState.queue) {
+          if (Array.isArray(tpl.fields)) {
+            targetField = tpl.fields.find(f => f.id === fieldId);
+            if (targetField) break;
+          }
+        }
+      }
+
+      // If field not found or timing is NOT post, proceed without warning
+      if (!targetField || targetField.timing !== 'post') {
+        resolve(true);
+        return;
+      }
+
+      window._postStepWarningResolve = resolve;
+
+      let modal = document.getElementById('postStepWarningModal');
+      if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'postStepWarningModal';
+        modal.style.cssText = 'position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.6); backdrop-filter:blur(4px); z-index:99999; display:flex; align-items:center; justify-content:center; padding:16px; box-sizing:border-box;';
+        modal.innerHTML = `
+          <div style="background:#ffffff; border-radius:24px; max-width:460px; width:100%; padding:24px; box-shadow:0 25px 50px -12px rgba(0,0,0,0.25); text-align:center; display:flex; flex-direction:column; gap:16px;">
+            <div style="width:64px; height:64px; border-radius:50%; background:#fef3c7; border:2px solid #f59e0b; color:#d97706; display:flex; align-items:center; justify-content:center; font-size:2rem; margin:0 auto;">
+              ⚠️
+            </div>
+            <div>
+              <h3 id="postStepWarningTitle" style="font-size:1.2rem; font-weight:800; color:#1f2733; margin:0 0 6px 0;">Post-Production Step Warning</h3>
+              <p id="postStepWarningDesc" style="font-size:0.9rem; color:#4b5563; margin:0; line-height:1.4;"></p>
+            </div>
+            <div id="postStepFieldBadge" style="background:#fffbeb; border:1px solid #fde68a; border-radius:12px; padding:12px; font-weight:700; color:#b45309; font-size:0.9rem; text-align:left;">
+            </div>
+            <div style="display:flex; gap:10px; margin-top:8px;">
+              <button type="button" onclick="closePostStepWarningModal(false)" style="flex:1; padding:14px; border-radius:14px; border:1px solid #d1d5db; background:#f3f4f6; color:#374151; font-weight:700; font-size:0.95rem; cursor:pointer;">
+                Cancel / キャンセル
+              </button>
+              <button type="button" onclick="closePostStepWarningModal(true)" style="flex:1; padding:14px; border-radius:14px; border:none; background:#f59e0b; color:#ffffff; font-weight:800; font-size:0.95rem; cursor:pointer; box-shadow:0 4px 12px rgba(245,158,11,0.35);">
+                Proceed / 進行する
+              </button>
+            </div>
+          </div>
+        `;
+        document.body.appendChild(modal);
+      }
+
+      const descEl = modal.querySelector('#postStepWarningDesc');
+      const badgeEl = modal.querySelector('#postStepFieldBadge');
+      const lang = typeof window.currentLang !== 'undefined' ? window.currentLang : 'en';
+
+      if (descEl) {
+        if (lang === 'ja') {
+          descEl.textContent = 'この項目は【生産後点検（Post-Production Check）】の項目です。生産開始前にこの点検を実施してもよろしいですか？';
+        } else if (lang === 'pt') {
+          descEl.textContent = 'Esta etapa é destinada para APÓS a produção (Post-Production Check). Tem certeza de que deseja realizar esta verificação agora antes da produção?';
+        } else {
+          descEl.textContent = 'This step is intended for AFTER production (Post-Production Check). Are you sure you want to perform this step before starting production?';
+        }
+      }
+
+      if (badgeEl) {
+        const localizedLabel = (typeof getLocalizedText === 'function') ? getLocalizedText(targetField, 'label') : (targetField.label || '');
+        badgeEl.textContent = `📋 STEP (POST-PROD): ${localizedLabel}`;
+      }
+
+      modal.style.display = 'flex';
+    });
+  };
+
+  window.closePostStepWarningModal = function (confirmed) {
+    const modal = document.getElementById('postStepWarningModal');
+    if (modal) modal.style.display = 'none';
+
+    const resolve = window._postStepWarningResolve;
+    window._postStepWarningResolve = null;
+    if (typeof resolve === 'function') {
+      resolve(confirmed);
+    }
+  };
+
   window.promptTicketDeletionModal = function (fieldId) {
     return new Promise((resolve) => {
       const ticket = window.checklistState.tickets[fieldId];
@@ -14150,6 +14240,10 @@ if (manualSendModal) {
 
   window.handleChecklistToggle = async function (fieldId, val) {
     window.autoLockOtherCards(fieldId);
+
+    const isConfirmed = await promptPostStepWarningModal(fieldId);
+    if (!isConfirmed) return;
+
     const currentVal = window.checklistState.answers[fieldId];
 
     // Tapping OK when already OK releases/deselects the OK button
@@ -14173,15 +14267,21 @@ if (manualSendModal) {
     }
   };
 
-  window.handleChecklistSelect = function (fieldId, val) {
+  window.handleChecklistSelect = async function (fieldId, val) {
     window.autoLockOtherCards(fieldId);
+    const isConfirmed = await promptPostStepWarningModal(fieldId);
+    if (!isConfirmed) return;
+
     window.checklistState.answers[fieldId] = val;
     if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
     renderCurrentChecklistTemplate();
   };
 
-  window.handleChecklistTextInput = function (fieldId, val) {
+  window.handleChecklistTextInput = async function (fieldId, val) {
     window.autoLockOtherCards(fieldId);
+    const isConfirmed = await promptPostStepWarningModal(fieldId);
+    if (!isConfirmed) return;
+
     window.checklistState.answers[fieldId] = val;
     if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
   };
@@ -14411,8 +14511,11 @@ if (manualSendModal) {
     reader.readAsDataURL(file);
   };
 
-  window.openChecklistKeypad = function (fieldId, label, min, max, unit) {
+  window.openChecklistKeypad = async function (fieldId, label, min, max, unit) {
     window.autoLockOtherCards(fieldId);
+    const isConfirmed = await promptPostStepWarningModal(fieldId);
+    if (!isConfirmed) return;
+
     window.checklistState.activeKeypadField = { fieldId, label, min, max, unit };
     const modal = document.getElementById('checklistKeypadModal');
     const title = document.getElementById('checklistKeypadTitle');
@@ -14599,7 +14702,10 @@ if (manualSendModal) {
     }
   };
 
-  window.openChecklistTicketModal = function (fieldId, autoReason = '') {
+  window.openChecklistTicketModal = async function (fieldId, autoReason = '') {
+    const isConfirmed = await promptPostStepWarningModal(fieldId);
+    if (!isConfirmed) return;
+
     triggerNgFlashAnimation();
     window.checklistState.activeTicketField = fieldId;
     const modal = document.getElementById('checklistTicketModal');
@@ -15080,7 +15186,10 @@ if (manualSendModal) {
     if (modal) modal.style.display = 'none';
   };
 
-  window.handleStepSkip = function (fieldId, isRequired) {
+  window.handleStepSkip = async function (fieldId, isRequired) {
+    const isConfirmed = await promptPostStepWarningModal(fieldId);
+    if (!isConfirmed) return;
+
     const ansVal = window.checklistState.answers[fieldId];
     const isSkipped = typeof ansVal === 'string' && ansVal.startsWith('SKIPPED');
 
