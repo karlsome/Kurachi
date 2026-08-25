@@ -13535,6 +13535,38 @@ if (manualSendModal) {
 
       if (data && typeof data.isPreComplete === 'boolean') {
         const isPreDone = data.isPreComplete;
+
+        // Only wipe local state if local state claimed completion (isPreComplete: true) BUT MongoDB has no submitted record today (e.g. record deleted from MongoDB)
+        // If operator is in-progress filling out a draft (isPreComplete: false), preserve their in-progress draft on refresh!
+        if (!isPreDone && !data.hasSubmittedToday) {
+          if (window.checklistState.isPreComplete) {
+            console.log('🧹 Local state claimed checklist completed, but MongoDB has no record for today - Resetting stale local checklist state.');
+            window.checklistState.isPreComplete = false;
+            window.checklistState.isPostComplete = false;
+            window.checklistState.isBypassed = false;
+            window.checklistState.answers = {};
+            window.checklistState.tickets = {};
+            window.checklistState.fieldPhotos = {};
+            window.checklistState.recordIds = {};
+
+            if (typeof window.clearChecklistDraftFromStorage === 'function') {
+              await window.clearChecklistDraftFromStorage();
+            }
+
+            const bar = document.querySelector('.tab-bar');
+            if (bar) bar.classList.add('locked-checklist');
+
+            if (typeof window.renderCurrentChecklistTemplate === 'function') {
+              window.renderCurrentChecklistTemplate();
+            }
+
+            if (typeof window.goToChecklistTab === 'function') {
+              window.goToChecklistTab();
+            }
+          }
+          return;
+        }
+
         window.checklistState.isPreComplete = isPreDone;
         if (data.isPostComplete) window.checklistState.isPostComplete = true;
         if (data.recordIds) {
@@ -13565,12 +13597,12 @@ if (manualSendModal) {
     }
   }
 
-  // Heartbeat check every 30 seconds for overnight day-changes
+  // Heartbeat check every 30 seconds for overnight day-changes and MongoDB record updates
   if (!window._checklistDayCheckInterval) {
     window._checklistDayCheckInterval = setInterval(function () {
-      if (!window.checklistState || !window.checklistState.dateStr) return;
+      if (!window.checklistState || !window.checklistState.factory || !window.checklistState.machine) return;
       const todayIso = new Date().toISOString().split('T')[0];
-      if (window.checklistState.dateStr !== todayIso) {
+      if (window.checklistState.dateStr && window.checklistState.dateStr !== todayIso) {
         console.log(`🌅 Date changed from ${window.checklistState.dateStr} to ${todayIso} - Auto-resetting checklist for new day.`);
         window.checklistState.dateStr = todayIso;
         window.checklistState.isPreComplete = false;
@@ -13587,17 +13619,15 @@ if (manualSendModal) {
         const bar = document.querySelector('.tab-bar');
         if (bar) bar.classList.add('locked-checklist');
 
-        if (typeof window.initChecklistsForMachine === 'function' && window.checklistState.factory && window.checklistState.machine) {
-          window.initChecklistsForMachine(window.checklistState.factory, window.checklistState.machine);
+        if (typeof window.renderCurrentChecklistTemplate === 'function') {
+          window.renderCurrentChecklistTemplate();
         }
 
-        if (typeof window.goToTab === 'function') {
-          window.goToTab(0);
+        if (typeof window.goToChecklistTab === 'function') {
+          window.goToChecklistTab();
         }
-
-        if (typeof showAppToast === 'function') {
-          showAppToast('🌅 New day detected! Please complete today\'s daily checklist.');
-        }
+        // Also sync status with MongoDB periodically
+        verifyChecklistStatusWithMongoDB(window.checklistState.factory, window.checklistState.machine);
       }
     }, 30000);
   }
