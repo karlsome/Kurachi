@@ -14225,6 +14225,84 @@ if (manualSendModal) {
     renderCurrentChecklistTemplate();
   };
 
+  window.promptWorkerConfirmation = function () {
+    return new Promise((resolve) => {
+      const activeNames = window.selectedWorkerNames ? window.selectedWorkerNames.map(n => (n || '').trim()).filter(Boolean) : [];
+      if (activeNames.length === 0) {
+        resolve(false);
+        return;
+      }
+
+      const modal = document.getElementById('workerConfirmationModal');
+      const nameEl = document.getElementById('workerConfirmModalName');
+      if (!modal || !nameEl) {
+        resolve(true);
+        return;
+      }
+
+      nameEl.textContent = activeNames.join(', ');
+      modal.style.display = 'flex';
+      window._workerConfirmResolve = resolve;
+    });
+  };
+
+  window.handleWorkerConfirmResponse = function (isConfirmed) {
+    const modal = document.getElementById('workerConfirmationModal');
+    if (modal) modal.style.display = 'none';
+
+    if (window._workerConfirmResolve) {
+      window._workerConfirmResolve(isConfirmed);
+      window._workerConfirmResolve = null;
+    }
+
+    if (!isConfirmed) {
+      if (typeof openWorkerModal === 'function') {
+        openWorkerModal(0);
+      }
+    }
+  };
+
+  window.resetAllChecklistData = async function () {
+    const activeNames = window.selectedWorkerNames ? window.selectedWorkerNames.map(n => (n || '').trim()).filter(Boolean) : [];
+    const namesText = activeNames.length > 0 ? activeNames.join(', ') : 'Operator';
+
+    const confirmMsg = `Reset all checklist progress & photos?\n\n(Worker name "${namesText}" will be preserved)`;
+    if (!confirm(confirmMsg)) return;
+
+    // Reset state object
+    window.checklistState.answers = {};
+    window.checklistState.tickets = {};
+    window.checklistState.fieldPhotos = {};
+    window.checklistState.queueIndex = 0;
+    window.checklistState.isPreComplete = false;
+    window.checklistState.isBypassed = false;
+
+    // Clear IndexedDB and draft in storage
+    if (typeof window.clearChecklistDraftFromStorage === 'function') {
+      await window.clearChecklistDraftFromStorage();
+    }
+
+    // Lock checklist tab bar
+    const bar = document.querySelector('.tab-bar');
+    if (bar) bar.classList.add('locked-checklist');
+
+    // Re-render template cards
+    if (typeof window.renderCurrentChecklistTemplate === 'function') {
+      window.renderCurrentChecklistTemplate();
+    }
+
+    if (typeof showAppToast === 'function') {
+      showAppToast(`🔄 Checklist reset! Preserved worker: ${namesText}`);
+    }
+
+    // Prompt user confirmation with consistent UI modal matching Scan tab
+    if (activeNames.length > 0) {
+      setTimeout(() => {
+        window.promptWorkerConfirmation();
+      }, 250);
+    }
+  };
+
   window.openSuperBypassModal = function () {
     const modal = document.getElementById('checklistBypassModal');
     const status = document.getElementById('checklistBypassStatus');

@@ -338,6 +338,7 @@ const translations = {
         // Checklist integration
         'checklist_tab': '点検',
         'checklist_title': '設備点検チェックシート',
+        'reset_all': 'すべてリセット',
         'daily_check': '日常点検',
         'weekly_check': '週間点検',
         'monthly_check': '月次点検',
@@ -692,6 +693,7 @@ const translations = {
         // Checklist integration
         'checklist_tab': 'Checklist',
         'checklist_title': 'Equipment Checklist',
+        'reset_all': 'Reset All',
         'daily_check': 'Daily Check',
         'weekly_check': 'Weekly Check',
         'monthly_check': 'Monthly Check',
@@ -1046,6 +1048,7 @@ const translations = {
         // Checklist integration
         'checklist_tab': 'Checklist',
         'checklist_title': 'Lista de Verificação de Equipamentos',
+        'reset_all': 'Redefinir Tudo',
         'daily_check': 'Inspeção Diária',
         'weekly_check': 'Inspeção Semanal',
         'monthly_check': 'Inspeção Mensal',

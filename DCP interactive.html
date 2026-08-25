@@ -2061,14 +2061,17 @@
                 <div class="tab-panel" id="panel-checklist" style="display:none;">
                     <div class="checklist-panel-container">
                         <!-- Checklist Header Card -->
-                        <div class="checklist-header-card">
-                            <div class="checklist-title-meta">
+                        <div class="checklist-header-card" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;">
+                            <div class="checklist-title-meta" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
                                 <h2 style="font-size: 1.1rem; font-weight: 800; color: var(--text-main);" data-i18n="checklist_title">設備点検チェックシート</h2>
                                 <span class="checklist-tier-badge" id="checklistTierBadge">Daily</span>
                                 <span class="checklist-counter-badge" id="checklistCounterBadge">1 / 1</span>
+                                <button type="button" class="checklist-bypass-btn" id="superBypassBtn" onclick="openSuperBypassModal()" style="margin-left:4px;">
+                                    ⚡ <span data-i18n="super_bypass">Super Bypass</span>
+                                </button>
                             </div>
-                            <button type="button" class="checklist-bypass-btn" id="superBypassBtn" onclick="openSuperBypassModal()">
-                                ⚡ <span data-i18n="super_bypass">Super Bypass</span>
+                            <button type="button" class="btn btn-alert" style="margin-left:auto; font-size:0.8rem; padding:8px 14px; font-weight:800; border-radius:10px; background:#ef4444; color:#ffffff; border:none; cursor:pointer; box-shadow:0 2px 6px rgba(239, 68, 68, 0.25);" onclick="resetAllChecklistData()">
+                                🔄 <span data-i18n="reset_all">Reset All</span>
                             </button>
                         </div>
 
@@ -3163,6 +3166,28 @@
                 </button>
                 <button type="button" class="btn btn-secondary" style="padding:12px; font-weight:700;" onclick="confirmSkipPostChecklist()" data-i18n="skip_post_checklist">
                     Skip & Submit Production
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Worker Confirmation Modal (Consistent UI matching Scan tab) -->
+    <div id="workerConfirmationModal" class="checklist-modal-overlay" style="display:none;">
+        <div class="checklist-modal-card" style="max-width:440px; text-align:center; padding:28px 24px;">
+            <h2 style="font-size: 1.15rem; font-weight: 700; text-align: center; margin-bottom: 20px;">
+                <span style="color: var(--accent-green);" data-i18n="worker_setup_title">作業者確認</span>
+            </h2>
+            <p style="font-size: 1.1rem; color: var(--text-main); margin: 0; text-align: center; line-height: 1.5;">
+                <span data-i18n="confirm_worker_pre">作業を続ける作業者は</span><br>
+                <strong id="workerConfirmModalName" style="color: var(--brand); font-size: 1.4rem; display: block; margin: 8px 0; word-break: break-word;"></strong>
+                <span data-i18n="confirm_worker_post"> ですか？</span>
+            </p>
+            <div style="display: flex; gap: 10px; width: 100%; margin-top: 20px;">
+                <button type="button" class="btn btn-secondary" style="flex: 1; padding:12px; font-weight:700;" onclick="handleWorkerConfirmResponse(false)" data-i18n="change_btn">
+                    変更
+                </button>
+                <button type="button" class="btn btn-primary" style="flex: 2; padding:12px; font-weight:800;" onclick="handleWorkerConfirmResponse(true)" data-i18n="yes">
+                    はい
                 </button>
             </div>
         </div>
