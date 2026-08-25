@@ -1679,6 +1679,21 @@
             border-color: rgba(31, 157, 107, 0.4) !important;
             background: rgba(31, 157, 107, 0.02);
         }
+        .checklist-card.completed-card.completed-locked .checklist-toggle-group,
+        .checklist-card.completed-card.completed-locked input,
+        .checklist-card.completed-card.completed-locked button:not(.checklist-card-lock-btn),
+        .checklist-card.completed-card.completed-locked .checklist-card-media {
+            pointer-events: none !important;
+            opacity: 0.88 !important;
+            user-select: none !important;
+        }
+        .checklist-card-lock-btn {
+            pointer-events: auto !important;
+            transition: all 0.15s ease;
+        }
+        .checklist-card-lock-btn:active {
+            transform: scale(0.95);
+        }
         .checklist-step-pill {
             font-size: 0.7rem;
             font-weight: 800;

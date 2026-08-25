@@ -13524,32 +13524,58 @@ if (manualSendModal) {
     titleEl.innerHTML = `<h3 style="font-size:1.15rem; font-weight:800; color:#1f2733;">${localizedTitle}</h3>${localizedDesc ? `<p style="font-size:0.85rem; color:#6b7280; margin-top:2px;">${localizedDesc}</p>` : ''}`;
     container.appendChild(titleEl);
 
-    function isChecklistFieldCompleted(field) {
-      const ansVal = window.checklistState.answers[field.id];
-      const hasTicket = window.checklistState.tickets[field.id];
+  window.unlockChecklistCard = function (fieldId) {
+    window.checklistState.unlockedCompletedCards = window.checklistState.unlockedCompletedCards || {};
+    window.checklistState.unlockedCompletedCards[fieldId] = true;
+    if (typeof showAppToast === 'function') {
+      showAppToast('🔓 Card unlocked for editing');
+    }
+    if (typeof renderCurrentChecklistTemplate === 'function') renderCurrentChecklistTemplate();
+  };
 
-      if (field.type === 'name') {
-        const activeNames = window.selectedWorkerNames ? window.selectedWorkerNames.map(n => (n || '').trim()).filter(Boolean) : [];
-        return activeNames.length > 0;
-      }
+  window.lockChecklistCard = function (fieldId) {
+    window.checklistState.unlockedCompletedCards = window.checklistState.unlockedCompletedCards || {};
+    delete window.checklistState.unlockedCompletedCards[fieldId];
+    if (typeof showAppToast === 'function') {
+      showAppToast('🔒 Card locked');
+    }
+    if (typeof renderCurrentChecklistTemplate === 'function') renderCurrentChecklistTemplate();
+  };
 
-      if (field.required || ansVal !== undefined) {
-        if (ansVal === undefined || ansVal === '' || ansVal === null) return false;
-      }
+  function isChecklistFieldCompleted(field) {
+    if (!field) return false;
 
-      if (ansVal === 'NG' && (!hasTicket || !hasTicket.saved)) return false;
-
-      if (field.photoRequired && !window.checklistState.fieldPhotos[field.id]) return false;
-
-      return true;
+    if (field.type === 'name') {
+      const activeNames = window.selectedWorkerNames ? window.selectedWorkerNames.map(n => (n || '').trim()).filter(Boolean) : [];
+      return activeNames.length > 0;
     }
 
-    const fields = Array.isArray(tpl.fields) ? tpl.fields : [];
+    const ansVal = window.checklistState.answers[field.id];
+    if (ansVal === undefined || ansVal === null || ansVal === '') {
+      return false;
+    }
+
+    const hasTicket = window.checklistState.tickets[field.id];
+    if (ansVal === 'NG' && (!hasTicket || !hasTicket.saved)) {
+      return false;
+    }
+
+    if (field.photoRequired && !window.checklistState.fieldPhotos[field.id]) {
+      return false;
+    }
+
+    return true;
+  }
+
+  const fields = Array.isArray(tpl.fields) ? tpl.fields : [];
     let isPreviousCompleted = true;
 
     fields.forEach((field, idx) => {
       const card = document.createElement('div');
       card.id = `checklist-card-${field.id}`;
+
+      let cardClass = 'checklist-card';
+      let stepPill = '';
 
       const fTitle = getLocalizedText(field, 'label');
       const fDesc = getLocalizedText(field, 'description');
@@ -13559,15 +13585,28 @@ if (manualSendModal) {
       const isCompleted = isChecklistFieldCompleted(field);
       const isUnlocked = isPreviousCompleted || window.checklistState.isBypassed || window.checklistState.isPreComplete;
 
-      let cardClass = 'checklist-card';
-      let stepPill = '';
+      window.checklistState.unlockedCompletedCards = window.checklistState.unlockedCompletedCards || {};
+      const isCardUnlockedByOperator = !!window.checklistState.unlockedCompletedCards[field.id];
 
+      let lockBtnHtml = '';
       if (!isUnlocked) {
         cardClass += ' locked-card';
         stepPill = `<span class="checklist-step-pill locked">🔒 Step ${idx + 1}</span>`;
       } else if (isCompleted) {
         cardClass += ' completed-card';
         stepPill = `<span class="checklist-step-pill done">✓ Step ${idx + 1}</span>`;
+        if (!isCardUnlockedByOperator) {
+          cardClass += ' completed-locked';
+          lockBtnHtml = `
+            <button type="button" class="checklist-card-lock-btn" onclick="unlockChecklistCard('${field.id}')" title="Locked - Tap to Edit" style="background:rgba(31,157,107,0.12); color:#1f9d6b; border:1px solid rgba(31,157,107,0.3); border-radius:8px; width:36px; height:36px; font-size:1.1rem; display:inline-flex; align-items:center; justify-content:center; cursor:pointer;">
+              🔒
+            </button>`;
+        } else {
+          lockBtnHtml = `
+            <button type="button" class="checklist-card-lock-btn" onclick="lockChecklistCard('${field.id}')" title="Unlocked - Tap to Lock" style="background:#2563eb; color:#ffffff; border:none; border-radius:8px; width:36px; height:36px; font-size:1.1rem; display:inline-flex; align-items:center; justify-content:center; cursor:pointer;">
+              🔓
+            </button>`;
+        }
       } else {
         cardClass += ' active-card';
         stepPill = `<span class="checklist-step-pill current">Step ${idx + 1}</span>`;
@@ -13662,15 +13701,18 @@ if (manualSendModal) {
       }
 
       card.innerHTML = `
-        <div class="checklist-card-header">
-          <div>
-            <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+        <div class="checklist-card-header" style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
+          <div style="flex:1; min-width:0;">
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px; flex-wrap:wrap;">
               ${stepPill}
               <div class="checklist-card-title">${fTitle} ${field.required ? '<span style="color:#e5484d;">*</span>' : ''}</div>
             </div>
             ${fDesc ? `<div class="checklist-card-desc">${fDesc}</div>` : ''}
           </div>
-          ${ticketBtnHtml}
+          <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
+            ${lockBtnHtml}
+            ${ticketBtnHtml}
+          </div>
         </div>
         ${mediaHtml}
         ${controlHtml}
