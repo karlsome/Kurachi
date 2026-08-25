@@ -32030,18 +32030,21 @@ function buildCheckFormFieldImageFolderKey(field = {}) {
 
 function sanitizeCheckFormField(field = {}) {
   const imageURL = normalizeCheckFormText(field.imageURL);
+  const type = normalizeCheckFormText(field.type).toLowerCase();
+  const labelFallback = type === 'name' ? '作業者名' : '項目';
+  const label = normalizeCheckFormText(field.label || field.label_ja || field.label_en) || labelFallback;
 
   return {
     id: normalizeCheckFormText(field.id || field.fieldId),
-    label: normalizeCheckFormText(field.label),
-    label_ja: normalizeCheckFormText(field.label_ja || field.label),
-    label_en: normalizeCheckFormText(field.label_en || field.label),
+    label,
+    label_ja: normalizeCheckFormText(field.label_ja || field.label) || label,
+    label_en: normalizeCheckFormText(field.label_en || field.label) || (type === 'name' ? 'Worker Name' : label),
     description: normalizeCheckFormText(field.description),
     description_ja: normalizeCheckFormText(field.description_ja || field.description),
     description_en: normalizeCheckFormText(field.description_en || field.description),
     imageURL,
     imageFolderKey: buildCheckFormFieldImageFolderKey({ ...field, imageURL }),
-    type: normalizeCheckFormText(field.type).toLowerCase(),
+    type,
     required: !!field.required,
     locked: !!field.locked,
     photoRequired: !!field.photoRequired,
@@ -33363,7 +33366,32 @@ app.post('/api/check-forms/submit', async (req, res) => {
     return res.status(400).json({ error: 'machine is required' });
   }
 
+  console.log('📋 [/api/check-forms/submit] Received payload:', JSON.stringify({
+    factory: payload.factory,
+    machine: payload.machine,
+    workerName: payload.workerName,
+    templateCount: submittedTemplates.length,
+    templates: submittedTemplates.map(t => ({
+      templateId: t.templateId || t._id,
+      templateName: t.templateName || t.name,
+      workerName: t.workerName,
+      answersCount: Array.isArray(t.answers) ? t.answers.length : 0,
+      answers: Array.isArray(t.answers) ? t.answers.map(a => ({ fieldId: a.fieldId || a.id, type: a.type, value: a.value })) : []
+    }))
+  }, null, 2));
+
+  if (!factory) {
+    console.error('❌ [/api/check-forms/submit] Error: factory is required');
+    return res.status(400).json({ error: 'factory is required' });
+  }
+
+  if (!machine) {
+    console.error('❌ [/api/check-forms/submit] Error: machine is required');
+    return res.status(400).json({ error: 'machine is required' });
+  }
+
   if (submittedTemplates.length === 0) {
+    console.error('❌ [/api/check-forms/submit] Error: at least one template submission is required');
     return res.status(400).json({ error: 'at least one template submission is required' });
   }
 
@@ -33383,8 +33411,8 @@ app.post('/api/check-forms/submit', async (req, res) => {
     for (let templateIndex = 0; templateIndex < submittedTemplates.length; templateIndex += 1) {
       const templatePayload = submittedTemplates[templateIndex] || {};
       const answersPayload = Array.isArray(templatePayload.answers) ? templatePayload.answers : [];
-      const templateId = normalizeCheckFormText(templatePayload.templateId);
-      const templateName = normalizeCheckFormText(templatePayload.templateName);
+      const templateId = normalizeCheckFormText(templatePayload.templateId || templatePayload._id);
+      const templateName = normalizeCheckFormText(templatePayload.templateName || templatePayload.name);
       const description = normalizeCheckFormText(templatePayload.description);
       const schedule = normalizeCheckFormSchedule(templatePayload.schedule);
       const startDate = normalizeCheckFormText(templatePayload.startDate);
@@ -33419,7 +33447,11 @@ app.post('/api/check-forms/submit', async (req, res) => {
       if (!equipmentId && fallbackEquipmentIds.length > 0) {
         equipmentId = fallbackEquipmentIds[0];
       }
-      let rawWorkerName = payload.workerName || templatePayload.workerName || payload.Worker_Name || templatePayload.Worker_Name;
+      let rawWorkerName = templatePayload.workerName || payload.workerName || templatePayload.Worker_Name || payload.Worker_Name;
+      if (!rawWorkerName && Array.isArray(answersPayload)) {
+        const nameAns = answersPayload.find(a => a && (a.type === 'name' || (a.fieldId && a.fieldId.includes('名前'))) && a.value);
+        if (nameAns) rawWorkerName = nameAns.value;
+      }
       let workerNameArray = [];
       if (Array.isArray(rawWorkerName)) {
         workerNameArray = rawWorkerName.map(w => normalizeCheckFormText(w)).filter(Boolean);
@@ -33434,22 +33466,27 @@ app.post('/api/check-forms/submit', async (req, res) => {
       const workerName = workerNameArray.length > 0 ? (workerNameArray.length === 1 ? workerNameArray[0] : workerNameArray) : '';
 
       if (!templateId || !templateName) {
+        console.error(`❌ [/api/check-forms/submit] Error: templateId and templateName are required for template index ${templateIndex}`);
         return res.status(400).json({ error: `templateId and templateName are required for template index ${templateIndex}` });
       }
 
       if (!workerName || workerNameArray.length === 0) {
+        console.error(`❌ [/api/check-forms/submit] Error: workerName is required for template ${templateName}`);
         return res.status(400).json({ error: `workerName is required for template ${templateName}` });
       }
 
       if (!selectedMachine) {
+        console.error(`❌ [/api/check-forms/submit] Error: selectedMachine is required for template ${templateName}`);
         return res.status(400).json({ error: `selectedMachine is required for template ${templateName}` });
       }
 
       if (!processingEquipment) {
+        console.error(`❌ [/api/check-forms/submit] Error: 加工設備 is required for template ${templateName}`);
         return res.status(400).json({ error: `加工設備 is required for template ${templateName}` });
       }
 
       if (answersPayload.length === 0) {
+        console.error(`❌ [/api/check-forms/submit] Error: answers are required for template ${templateName}`);
         return res.status(400).json({ error: `answers are required for template ${templateName}` });
       }
 

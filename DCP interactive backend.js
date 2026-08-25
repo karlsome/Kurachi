@@ -41,7 +41,7 @@ const dbURL = 'https://script.google.com/macros/s/AKfycbx0qBw0_wF5X-hA2t1yY-d5h5
 
 //const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
-const serverURL = "http://192.168.0.39:3000";
+const serverURL = "http://192.168.3.9:3000";
 
 // Global variable to track if sendtoNC button has been pressed
 let sendtoNCButtonisPressed = false;
@@ -13940,21 +13940,21 @@ if (manualSendModal) {
 
     card.className = cardClass;
 
-      if (!isCompleted) {
-        isPreviousCompleted = false;
-      }
+    if (!isCompleted) {
+      isPreviousCompleted = false;
+    }
 
-      let mediaHtml = '';
-      if (field.imageURL) {
-        mediaHtml = `<img src="${field.imageURL}" class="checklist-card-media" alt="Reference" style="cursor:pointer;" onclick="if(typeof window.openPreview === 'function') window.openPreview(this.src, '${fTitle.replace(/'/g, "\\'")}');">`;
-      }
+    let mediaHtml = '';
+    if (field.imageURL) {
+      mediaHtml = `<img src="${field.imageURL}" class="checklist-card-media" alt="Reference" style="cursor:pointer;" onclick="if(typeof window.openPreview === 'function') window.openPreview(this.src, '${fTitle.replace(/'/g, "\\'")}');">`;
+    }
 
-      let controlHtml = '';
-      if (field.type === 'name') {
-        const activeNames = window.selectedWorkerNames ? window.selectedWorkerNames.map(n => (n || '').trim()).filter(Boolean) : [];
-        window.checklistState.answers[field.id] = activeNames.length > 0 ? activeNames : (document.getElementById('step0CurrentWorkerName')?.textContent || '');
+    let controlHtml = '';
+    if (field.type === 'name') {
+      const activeNames = window.selectedWorkerNames ? window.selectedWorkerNames.map(n => (n || '').trim()).filter(Boolean) : [];
+      window.checklistState.answers[field.id] = activeNames.length > 0 ? activeNames : (document.getElementById('step0CurrentWorkerName')?.textContent || '');
 
-        controlHtml = `
+      controlHtml = `
           <div style="width:100%; display:flex; flex-direction:column; gap:8px;">
             <div style="display:flex; flex-direction:column; gap:6px;">
               ${(activeNames.length > 0 ? activeNames : ['']).map((name, i) => `
@@ -13971,18 +13971,18 @@ if (manualSendModal) {
             </button>
           </div>
         `;
-      } else if (field.type === 'checkbox' || field.type === 'toggle') {
-        const isOk = ansVal === 'OK';
-        const isNg = ansVal === 'NG';
-        controlHtml = `
+    } else if (field.type === 'checkbox' || field.type === 'toggle') {
+      const isOk = ansVal === 'OK';
+      const isNg = ansVal === 'NG';
+      controlHtml = `
           <div class="checklist-toggle-group">
             <button type="button" class="checklist-toggle-btn ok-btn ${isOk ? 'active' : ''}" onclick="handleChecklistToggle('${field.id}', 'OK')">OK</button>
             <button type="button" class="checklist-toggle-btn ng-btn ${isNg ? 'active' : ''}" onclick="handleChecklistToggle('${field.id}', 'NG')">NG</button>
           </div>
         `;
-      } else if (field.type === 'number') {
-        const rangeText = (field.min !== null || field.max !== null) ? `(${field.min ?? '—'} ~ ${field.max ?? '—'} ${field.unit || ''})` : '';
-        controlHtml = `
+    } else if (field.type === 'number') {
+      const rangeText = (field.min !== null || field.max !== null) ? `(${field.min ?? '—'} ~ ${field.max ?? '—'} ${field.unit || ''})` : '';
+      controlHtml = `
           <div style="display:flex; align-items:center; gap:8px;">
             <input type="text" readonly value="${ansVal !== undefined ? ansVal : ''}" placeholder="Tap to enter number ${rangeText}" 
               style="flex:1; padding:12px; border-radius:10px; border:1px solid #e6e8ef; background:#f8f9fa; font-weight:700; font-size:1rem; cursor:pointer;"
@@ -13990,44 +13990,44 @@ if (manualSendModal) {
             ${field.unit ? `<span style="font-weight:700; color:#6b7280;">${field.unit}</span>` : ''}
           </div>
         `;
-      } else if (field.type === 'select') {
-        const options = Array.isArray(field.options) ? field.options : [];
-        controlHtml = `
+    } else if (field.type === 'select') {
+      const options = Array.isArray(field.options) ? field.options : [];
+      controlHtml = `
           <div style="display:flex; flex-wrap:wrap; gap:8px;">
             ${options.map(opt => `
               <button type="button" class="checklist-toggle-btn ${ansVal === opt ? 'active ok-btn' : ''}" style="flex:none; padding:8px 16px; font-size:0.85rem;" onclick="handleChecklistSelect('${field.id}', '${opt.replace(/'/g, "\\'")}')">${opt}</button>
             `).join('')}
           </div>
         `;
-      } else {
-        controlHtml = `<input type="text" value="${ansVal || ''}" placeholder="Enter details..." style="width:100%; padding:12px; border-radius:10px; border:1px solid #e6e8ef;" oninput="handleChecklistTextInput('${field.id}', this.value)">`;
-      }
+    } else {
+      controlHtml = `<input type="text" value="${ansVal || ''}" placeholder="Enter details..." style="width:100%; padding:12px; border-radius:10px; border:1px solid #e6e8ef;" oninput="handleChecklistTextInput('${field.id}', this.value)">`;
+    }
 
-      let ticketBtnHtml = '';
-      if (field.type !== 'name') {
-        const isTicketRequired = isNg || isOutOfRange;
-        const isRequiredUnsaved = isTicketRequired && (!hasTicket || !hasTicket.saved);
-        const isSaved = hasTicket && hasTicket.saved;
-        const cls = isSaved ? 'saved' : (isRequiredUnsaved ? 'required-pulse' : '');
-        const lbl = isSaved ? '✓ Ticket Saved' : (isRequiredUnsaved ? '⚠️ Ticket Required' : '➕ Ticket');
-        ticketBtnHtml = `<button type="button" class="checklist-ticket-btn ${cls}" onclick="openChecklistTicketModal('${field.id}')">${lbl}</button>`;
-      }
+    let ticketBtnHtml = '';
+    if (field.type !== 'name') {
+      const isTicketRequired = isNg || isOutOfRange;
+      const isRequiredUnsaved = isTicketRequired && (!hasTicket || !hasTicket.saved);
+      const isSaved = hasTicket && hasTicket.saved;
+      const cls = isSaved ? 'saved' : (isRequiredUnsaved ? 'required-pulse' : '');
+      const lbl = isSaved ? '✓ Ticket Saved' : (isRequiredUnsaved ? '⚠️ Ticket Required' : '➕ Ticket');
+      ticketBtnHtml = `<button type="button" class="checklist-ticket-btn ${cls}" onclick="openChecklistTicketModal('${field.id}')">${lbl}</button>`;
+    }
 
-      let photoHtml = '';
-      if (field.photoRequired && !isNg && !isOutOfRange) {
-        const photoBase64 = window.checklistState.fieldPhotos[field.id];
-        let isPhotoAttentionNeeded = false;
-        if (!photoBase64) {
-          if (ansVal === 'OK') {
-            isPhotoAttentionNeeded = true;
-          } else if (field.type === 'number' && typeof ansVal === 'number' && !isOutOfRange) {
-            isPhotoAttentionNeeded = true;
-          } else if (typeof ansVal === 'string' && ansVal.trim() !== '' && ansVal !== 'NG' && !ansVal.startsWith('SKIPPED')) {
-            isPhotoAttentionNeeded = true;
-          }
+    let photoHtml = '';
+    if (field.photoRequired && !isNg && !isOutOfRange) {
+      const photoBase64 = window.checklistState.fieldPhotos[field.id];
+      let isPhotoAttentionNeeded = false;
+      if (!photoBase64) {
+        if (ansVal === 'OK') {
+          isPhotoAttentionNeeded = true;
+        } else if (field.type === 'number' && typeof ansVal === 'number' && !isOutOfRange) {
+          isPhotoAttentionNeeded = true;
+        } else if (typeof ansVal === 'string' && ansVal.trim() !== '' && ansVal !== 'NG' && !ansVal.startsWith('SKIPPED')) {
+          isPhotoAttentionNeeded = true;
         }
-        const pulseClass = isPhotoAttentionNeeded ? 'photo-pulse-attention' : '';
-        photoHtml = `
+      }
+      const pulseClass = isPhotoAttentionNeeded ? 'photo-pulse-attention' : '';
+      photoHtml = `
           <div style="margin-top:8px;">
             <input type="file" id="checklist-field-photo-${field.id}" accept="image/*" capture="environment" style="display:none;" onchange="handleChecklistFieldPhotoCaptured('${field.id}', event)">
             <button type="button" class="btn btn-secondary ${pulseClass}" style="font-size:0.8rem; padding:6px 12px;" onclick="document.getElementById('checklist-field-photo-${field.id}').click()">
@@ -14036,23 +14036,23 @@ if (manualSendModal) {
             ${photoBase64 ? `<img src="${photoBase64}" style="width:60px; height:60px; object-fit:cover; border-radius:8px; margin-top:6px; display:block; cursor:pointer;" onclick="if(typeof window.openPreview === 'function') window.openPreview(this.src, '${fTitle.replace(/'/g, "\\'")}');">` : ''}
           </div>
         `;
-      }
+    }
 
-      let skipBtnHtml = '';
-      if (field.type !== 'name') {
-        const isValidDataCompleted = isCompleted && !isSkipped;
-        if (!isValidDataCompleted) {
-          skipBtnHtml = `
+    let skipBtnHtml = '';
+    if (field.type !== 'name') {
+      const isValidDataCompleted = isCompleted && !isSkipped;
+      if (!isValidDataCompleted) {
+        skipBtnHtml = `
             <div style="display:flex; justify-content:flex-end; margin-top:10px;">
               <button type="button" class="btn btn-secondary" style="font-size:0.8rem; padding:6px 14px; font-weight:700; border-radius:8px; display:inline-flex; align-items:center; gap:4px; ${isSkipped ? 'border-color:#2563eb; color:#2563eb; background:rgba(37,99,235,0.06);' : ''}" onclick="handleStepSkip('${field.id}', ${field.required ? 'true' : 'false'})">
                 ⏭️ <span>${isSkipped ? 'Skipped (Tap to undo)' : (typeof _t === 'function' ? _t('skip_step') : 'Skip Step')}</span>
               </button>
             </div>
           `;
-        }
       }
+    }
 
-      card.innerHTML = `
+    card.innerHTML = `
         <div class="checklist-card-header" style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
           <div style="flex:1; min-width:0;">
             <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px; flex-wrap:wrap;">
@@ -14072,7 +14072,7 @@ if (manualSendModal) {
         ${skipBtnHtml}
       `;
 
-      return card;
+    return card;
   }
 
   window.promptPostStepWarningModal = function (fieldId) {
@@ -14872,29 +14872,53 @@ if (manualSendModal) {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } else {
       try {
-        const workerName = document.getElementById('step0CurrentWorkerName')?.textContent || '';
+        let workerName = (document.getElementById('step0CurrentWorkerName')?.textContent || '').trim();
+        if (!workerName && Array.isArray(window.selectedWorkerNames) && window.selectedWorkerNames.length > 0) {
+          workerName = window.selectedWorkerNames.filter(Boolean).join(', ');
+        }
+        if (!workerName && window.checklistState.answers) {
+          for (const t of queue) {
+            const nameField = (t.fields || []).find(f => f.type === 'name');
+            if (nameField && window.checklistState.answers[nameField.id]) {
+              const val = window.checklistState.answers[nameField.id];
+              if (Array.isArray(val)) workerName = val.filter(Boolean).join(', ');
+              else if (typeof val === 'string' && val.trim()) workerName = val.trim();
+              if (workerName) break;
+            }
+          }
+        }
+        if (!workerName) {
+          workerName = (document.getElementById('Machine Operator')?.value || '').trim() || 'Operator';
+        }
+
         const payload = {
           factory: window.checklistState.factory,
           machine: window.checklistState.machine,
           workerName,
-          templates: queue.map(t => ({
-            templateId: t._id,
-            templateName: t.name,
-            schedule: t.schedule,
-            answers: fields.map(f => ({
-              fieldId: f.id,
-              label: f.label,
-              type: f.type,
-              value: window.checklistState.answers[f.id],
-              fieldPhotoBase64: window.checklistState.fieldPhotos[f.id] || null,
-            })),
-            tickets: Object.keys(window.checklistState.tickets).map(fId => ({
-              fieldId: fId,
-              reason: window.checklistState.tickets[fId].reason,
-              imageOverlayBase64s: window.checklistState.tickets[fId].images,
-              chatworkMessageId: window.checklistState.tickets[fId].chatworkMessageId || null,
-            }))
-          }))
+          templates: queue.map(t => {
+            const tFields = Array.isArray(t.fields) ? t.fields : [];
+            return {
+              templateId: t._id,
+              templateName: t.name,
+              schedule: t.schedule,
+              workerName,
+              answers: tFields.map(f => ({
+                fieldId: f.id,
+                label: f.label || f.label_ja || f.label_en || (f.type === 'name' ? '作業者名' : '項目'),
+                type: f.type,
+                value: window.checklistState.answers[f.id],
+                fieldPhotoBase64: window.checklistState.fieldPhotos[f.id] || null,
+              })),
+              tickets: Object.keys(window.checklistState.tickets || {})
+                .filter(fId => tFields.some(tf => tf.id === fId))
+                .map(fId => ({
+                  fieldId: fId,
+                  reason: window.checklistState.tickets[fId].reason,
+                  imageOverlayBase64s: window.checklistState.tickets[fId].images,
+                  chatworkMessageId: window.checklistState.tickets[fId].chatworkMessageId || null,
+                }))
+            };
+          })
         };
 
         const res = await fetch(`${serverURL}/api/check-forms/submit`, {
@@ -15427,7 +15451,25 @@ if (manualSendModal) {
       if (overlay) overlay.style.display = 'flex';
 
       try {
-        const workerName = document.getElementById('step0CurrentWorkerName')?.textContent || '';
+        let workerName = (document.getElementById('step0CurrentWorkerName')?.textContent || '').trim();
+        if (!workerName && Array.isArray(window.selectedWorkerNames) && window.selectedWorkerNames.length > 0) {
+          workerName = window.selectedWorkerNames.filter(Boolean).join(', ');
+        }
+        if (!workerName && window.checklistState.answers) {
+          for (const t of queue) {
+            const nameField = (t.fields || []).find(f => f.type === 'name');
+            if (nameField && window.checklistState.answers[nameField.id]) {
+              const val = window.checklistState.answers[nameField.id];
+              if (Array.isArray(val)) workerName = val.filter(Boolean).join(', ');
+              else if (typeof val === 'string' && val.trim()) workerName = val.trim();
+              if (workerName) break;
+            }
+          }
+        }
+        if (!workerName) {
+          workerName = (document.getElementById('Machine Operator')?.value || '').trim() || 'Operator';
+        }
+
         const payload = {
           factory: window.checklistState.factory,
           machine: window.checklistState.machine,
@@ -15444,30 +15486,34 @@ if (manualSendModal) {
               recordId: (window.checklistState.recordIds && window.checklistState.recordIds[t._id]) ? window.checklistState.recordIds[t._id] : null,
               templateName: t.name,
               schedule: t.schedule,
+              workerName,
               equipmentId: window.checklistState.equipmentId || t.equipmentId || (Array.isArray(t.equipmentIds) ? t.equipmentIds[0] : null),
-              answers: fieldsToSubmit.map(f => ({
-                id: f.id,
-                fieldId: f.id,
-                label: f.label,
-                label_ja: f.label_ja || f.label,
-                label_en: f.label_en || f.label,
-                type: f.type,
-                required: !!f.required,
-                photoRequired: !!f.photoRequired,
-                min: f.min !== undefined ? f.min : null,
-                max: f.max !== undefined ? f.max : null,
-                options: f.options || [],
-                unit: f.unit || '',
-                value: window.checklistState.answers[f.id],
-                fieldPhotoBase64: window.checklistState.fieldPhotos[f.id] || null,
-                fieldPhotoData: window.checklistState.fieldPhotos[f.id] || null,
-                ticket: window.checklistState.tickets[f.id] ? {
-                  reason: window.checklistState.tickets[f.id].reason,
-                  imagesData: window.checklistState.tickets[f.id].images,
-                  chatworkMessageId: window.checklistState.tickets[f.id].chatworkMessageId || null,
-                  saved: true
-                } : null
-              })),
+              answers: fieldsToSubmit.map(f => {
+                const itemLabel = f.label || f.label_ja || f.label_en || (f.type === 'name' ? '作業者名' : '項目');
+                return {
+                  id: f.id,
+                  fieldId: f.id,
+                  label: itemLabel,
+                  label_ja: f.label_ja || itemLabel,
+                  label_en: f.label_en || itemLabel,
+                  type: f.type,
+                  required: !!f.required,
+                  photoRequired: !!f.photoRequired,
+                  min: f.min !== undefined ? f.min : null,
+                  max: f.max !== undefined ? f.max : null,
+                  options: f.options || [],
+                  unit: f.unit || '',
+                  value: window.checklistState.answers[f.id],
+                  fieldPhotoBase64: window.checklistState.fieldPhotos[f.id] || null,
+                  fieldPhotoData: window.checklistState.fieldPhotos[f.id] || null,
+                  ticket: window.checklistState.tickets[f.id] ? {
+                    reason: window.checklistState.tickets[f.id].reason,
+                    imagesData: window.checklistState.tickets[f.id].images,
+                    chatworkMessageId: window.checklistState.tickets[f.id].chatworkMessageId || null,
+                    saved: true
+                  } : null
+                };
+              }),
               tickets: Object.keys(window.checklistState.tickets || {})
                 .filter(fId => fieldsToSubmit.some(tf => tf.id === fId))
                 .map(fId => ({
@@ -15480,6 +15526,14 @@ if (manualSendModal) {
           })
         };
 
+        console.log('🚀 Sending checklist submission payload:', {
+          factory: payload.factory,
+          machine: payload.machine,
+          workerName: payload.workerName,
+          templateCount: payload.templates ? payload.templates.length : 0,
+          templates: payload.templates
+        });
+
         const res = await fetch(`${serverURL}/api/check-forms/submit`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -15488,6 +15542,7 @@ if (manualSendModal) {
 
         if (res.ok) {
           const resData = await res.json().catch(() => ({}));
+          console.log('✅ Checklist submitted successfully! Response:', resData);
           if (resData.recordIds) {
             window.checklistState.recordIds = { ...(window.checklistState.recordIds || {}), ...resData.recordIds };
           }
@@ -15537,8 +15592,9 @@ if (manualSendModal) {
             const errJson = await res.json();
             errText = errJson.error || errJson.message || errText;
           } catch (_) {
-            try { errText = await res.text(); } catch (__) {}
+            try { errText = await res.text(); } catch (__) { }
           }
+          console.error('❌ Checklist submission rejected by server (HTTP ' + res.status + '):', errText);
           if (overlay) overlay.style.display = 'none';
           window.showChecklistSubmitErrorModal(errText);
         }
