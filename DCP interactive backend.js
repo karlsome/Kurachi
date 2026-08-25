@@ -13671,6 +13671,14 @@ if (manualSendModal) {
           return;
         }
 
+        const prevPre = window.checklistState.isPreComplete;
+        const prevPost = window.checklistState.isPostComplete;
+        const prevTickets = window.checklistState.hasOpenTickets;
+        const prevRecordIdsCount = Object.keys(window.checklistState.recordIds || {}).length;
+        const newRecordIdsCount = Object.keys(data.recordIds || {}).length;
+
+        const hasStateChanged = prevPre !== allPreDone || prevPost !== !!data.isPostComplete || prevTickets !== !!data.hasOpenTickets || prevRecordIdsCount !== newRecordIdsCount;
+
         window.checklistState.isPreComplete = allPreDone;
         window.checklistState.isPostComplete = !!data.isPostComplete;
         window.checklistState.hasOpenTickets = !!data.hasOpenTickets;
@@ -13687,7 +13695,7 @@ if (manualSendModal) {
           if (bar) bar.classList.add('locked-checklist');
         }
 
-        if (typeof window.renderCurrentChecklistTemplate === 'function') {
+        if (hasStateChanged && typeof window.renderCurrentChecklistTemplate === 'function') {
           window.renderCurrentChecklistTemplate();
         }
 
@@ -14150,6 +14158,15 @@ if (manualSendModal) {
       // 1. Render completed pre-steps in a collapsed accordion with THIS template's name
       const accordion = document.createElement('details');
       accordion.className = 'completed-pre-steps-accordion';
+      if (window.checklistState && window.checklistState._isAccordionOpen) {
+        accordion.open = true;
+      }
+      accordion.addEventListener('toggle', function () {
+        if (window.checklistState) {
+          window.checklistState._isAccordionOpen = accordion.open;
+        }
+      });
+
       const todayIso = new Date().toISOString().split('T')[0];
       const stepsText = (typeof _t === 'function') ? _t('steps_count') : 'steps';
       const tapToggleText = (typeof _t === 'function') ? _t('tap_to_expand_collapse') : 'Tap to expand / collapse';
@@ -14167,6 +14184,20 @@ if (manualSendModal) {
       `;
       container.appendChild(accordion);
 
+      // Attach click-outside collapsing handler
+      if (!window._accordionClickOutsideAttached) {
+        window._accordionClickOutsideAttached = true;
+        document.addEventListener('click', function (e) {
+          const acc = document.querySelector('.completed-pre-steps-accordion');
+          if (acc && acc.open && !acc.contains(e.target)) {
+            acc.open = false;
+            if (window.checklistState) {
+              window.checklistState._isAccordionOpen = false;
+            }
+          }
+        });
+      }
+
       const accordionContent = accordion.querySelector('#completedPreStepsContent');
       completedSteps.forEach((field) => {
         const globalIdx = tplFields.indexOf(field);
@@ -14181,6 +14212,7 @@ if (manualSendModal) {
       collapseFooterBtn.innerHTML = tapCollapseText;
       collapseFooterBtn.onclick = function () {
         accordion.open = false;
+        if (window.checklistState) window.checklistState._isAccordionOpen = false;
         accordion.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       };
       if (accordionContent) accordionContent.appendChild(collapseFooterBtn);
