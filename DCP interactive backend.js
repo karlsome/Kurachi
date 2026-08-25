@@ -3367,7 +3367,40 @@ function groupNamesByLetter(names) {
 // Render worker names in modal
 function renderWorkerNames() {
   const container = document.getElementById('workerNamesContainer');
+  if (!container) return;
   container.innerHTML = '';
+
+  const currentSlotIdx = Number.isInteger(window.activeWorkerSlotIndex) ? window.activeWorkerSlotIndex : 0;
+  const otherSelectedNames = (window.selectedWorkerNames || [])
+    .filter((n, idx) => idx !== currentSlotIdx && typeof n === 'string' && n.trim().length > 0)
+    .map(n => n.trim().toLowerCase());
+
+  // Helper to build a worker button with duplicate prevention
+  function createWorkerBtn(name) {
+    const isAlreadySelectedElsewhere = otherSelectedNames.includes(name.trim().toLowerCase());
+    const btn = document.createElement('button');
+    btn.type = 'button';
+
+    if (isAlreadySelectedElsewhere) {
+      btn.className = 'worker-name-btn is-disabled-selected';
+      btn.disabled = true;
+      btn.title = '既に他の枠で選択されています / Already selected';
+      btn.style.opacity = '0.4';
+      btn.style.cursor = 'not-allowed';
+      btn.style.filter = 'grayscale(1)';
+      btn.style.borderStyle = 'dashed';
+      btn.innerHTML = `${name} <span style="font-size:0.75rem; margin-left:4px; opacity:0.8; font-weight:normal;">(選択中)</span>`;
+      btn.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      };
+    } else {
+      btn.className = 'worker-name-btn';
+      btn.textContent = name;
+      btn.onclick = () => selectWorkerName(name);
+    }
+    return btn;
+  }
 
   // Get recent workers
   const recentWorkers = getRecentWorkers();
@@ -3389,11 +3422,7 @@ function renderWorkerNames() {
       const wrapper = document.createElement('div');
       wrapper.style.position = 'relative';
 
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'worker-name-btn';
-      btn.textContent = name;
-      btn.onclick = () => selectWorkerName(name);
+      const btn = createWorkerBtn(name);
 
       const deleteBtn = document.createElement('button');
       deleteBtn.type = 'button';
@@ -3431,11 +3460,7 @@ function renderWorkerNames() {
     grid.className = 'worker-names-grid';
 
     grouped[letter].forEach(name => {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'worker-name-btn';
-      btn.textContent = name;
-      btn.onclick = () => selectWorkerName(name);
+      const btn = createWorkerBtn(name);
       grid.appendChild(btn);
     });
 
@@ -3449,7 +3474,16 @@ window.selectedWorkerNames = window.selectedWorkerNames || [];
 window.activeWorkerSlotIndex = 0;
 
 window.saveWorkerNamesToStorage = function () {
-  const activeNames = (window.selectedWorkerNames || []).map(n => (n || '').trim()).filter(Boolean);
+  const seen = new Set();
+  const activeNames = (window.selectedWorkerNames || [])
+    .map(n => (n || '').trim())
+    .filter(n => {
+      if (!n) return false;
+      const lower = n.toLowerCase();
+      if (seen.has(lower)) return false;
+      seen.add(lower);
+      return true;
+    });
   const prefix = typeof uniquePrefix !== 'undefined' ? uniquePrefix : '';
   localStorage.setItem(`${prefix}selectedWorkerNames`, JSON.stringify(activeNames));
 
@@ -3478,13 +3512,31 @@ window.loadWorkerNamesFromStorage = function () {
 
   if (stored) {
     try {
+      let rawList = [];
       if (stored.startsWith('[')) {
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          window.selectedWorkerNames = parsed;
+          rawList = parsed;
         }
       } else if (stored.trim()) {
-        window.selectedWorkerNames = stored.split(',').map(s => s.trim()).filter(Boolean);
+        rawList = stored.split(',').map(s => s.trim()).filter(Boolean);
+      }
+
+      const seen = new Set();
+      const unique = [];
+      rawList.forEach(item => {
+        const clean = (item || '').trim();
+        if (clean) {
+          const lower = clean.toLowerCase();
+          if (!seen.has(lower)) {
+            seen.add(lower);
+            unique.push(clean);
+          }
+        }
+      });
+
+      if (unique.length > 0) {
+        window.selectedWorkerNames = unique;
       }
     } catch (e) {
       console.warn('Could not parse stored worker names:', e);
@@ -3790,6 +3842,7 @@ window.renderWorkerListUI = function () {
 
 window.addWorkerSlot = function () {
   if (!window.selectedWorkerNames) window.selectedWorkerNames = [];
+  window.selectedWorkerNames = window.selectedWorkerNames.filter(n => (n || '').trim().length > 0);
   window.selectedWorkerNames.push('');
   renderWorkerListUI();
   saveWorkerNamesToStorage();
@@ -3801,6 +3854,9 @@ window.addWorkerSlot = function () {
 window.removeWorkerSlot = function (index) {
   if (!window.selectedWorkerNames || window.selectedWorkerNames.length <= 1) return;
   window.selectedWorkerNames.splice(index, 1);
+  if (window.selectedWorkerNames.length === 0) {
+    window.selectedWorkerNames = [''];
+  }
   renderWorkerListUI();
   saveWorkerNamesToStorage();
   saveChecklistDraftToStorage();
@@ -3808,11 +3864,35 @@ window.removeWorkerSlot = function (index) {
 };
 
 function selectWorkerName(name) {
+  if (!name || !name.trim()) return;
+  const trimmedName = name.trim();
   if (!window.selectedWorkerNames) window.selectedWorkerNames = [];
-  const idx = window.activeWorkerSlotIndex || 0;
-  window.selectedWorkerNames[idx] = name;
+  const idx = Number.isInteger(window.activeWorkerSlotIndex) ? window.activeWorkerSlotIndex : 0;
 
-  const activeNames = window.selectedWorkerNames.map(n => (n || '').trim()).filter(Boolean);
+  // Prevent duplicate worker names across slots
+  const isAlreadyChosen = window.selectedWorkerNames.some((n, i) => i !== idx && n && n.trim().toLowerCase() === trimmedName.toLowerCase());
+  if (isAlreadyChosen) {
+    if (typeof window.showToast === 'function') {
+      window.showToast(`⚠️ ${trimmedName} は既に選択されています / Already selected`, 'warning');
+    } else {
+      alert(`⚠️ ${trimmedName} は既に選択されています / ${trimmedName} is already selected in another slot.`);
+    }
+    return;
+  }
+
+  window.selectedWorkerNames[idx] = trimmedName;
+
+  const seen = new Set();
+  const activeNames = window.selectedWorkerNames
+    .map(n => (n || '').trim())
+    .filter(n => {
+      if (!n) return false;
+      const lower = n.toLowerCase();
+      if (seen.has(lower)) return false;
+      seen.add(lower);
+      return true;
+    });
+
   const input = document.getElementById('Machine Operator');
   if (input) input.value = activeNames.join(', ');
 
@@ -3822,7 +3902,7 @@ function selectWorkerName(name) {
     if (queue && queue[queueIndex] && Array.isArray(queue[queueIndex].fields)) {
       queue[queueIndex].fields.forEach(field => {
         if (field.type === 'name') {
-          window.checklistState.answers[field.id] = activeNames.length > 0 ? activeNames : name;
+          window.checklistState.answers[field.id] = activeNames.length > 0 ? activeNames : [trimmedName];
         }
       });
     }
@@ -3836,7 +3916,7 @@ function selectWorkerName(name) {
     window.renderCurrentChecklistTemplate();
   }
 
-  addToRecentWorkers(name);
+  addToRecentWorkers(trimmedName);
 
   logTabletAction('Worker name selected', 'in-progress', {
     workerNames: window.selectedWorkerNames
@@ -12453,13 +12533,12 @@ window.addEventListener('load', function () {
       if (typeof window.syncScanTabState === 'function') window.syncScanTabState();
 
       // Restore active tab if we have a valid workflow state
-      const savedTabIndexStr = localStorage.getItem(`${uniquePrefix}activeTabIndex`);
-      if (savedTabIndexStr !== null) {
-        const savedTabIndex = parseInt(savedTabIndexStr, 10);
-        if (!isNaN(savedTabIndex) && typeof window.goToTab === 'function') {
-          // Add a small delay so goToTab runs after all UI state settles
-          setTimeout(() => window.goToTab(savedTabIndex), 50);
-        }
+      const savedTabIndex = (typeof window.getSavedTabIndex === 'function')
+        ? window.getSavedTabIndex()
+        : parseInt(localStorage.getItem(`${uniquePrefix}activeTabIndex`) || localStorage.getItem('activeTabIndex'), 10);
+      if (savedTabIndex !== null && !isNaN(savedTabIndex) && typeof window.goToTab === 'function') {
+        // Add a small delay so goToTab runs after all UI state settles
+        setTimeout(() => window.goToTab(savedTabIndex, true), 50);
       }
     } else {
       // Scanned but Step 3 not done — restart from Step 1
@@ -13459,7 +13538,13 @@ if (manualSendModal) {
   }
 
   window.goToChecklistTab = function () {
+    const hasQueue = !!(window.checklistState && Array.isArray(window.checklistState.queue) && window.checklistState.queue.length > 0);
     const btn = document.getElementById('checklistTabBtn');
+    if (!hasQueue) {
+      if (btn) btn.style.display = 'none';
+      return;
+    }
+
     if (btn) btn.style.display = 'inline-flex';
 
     if (typeof window.goToTab === 'function') {
@@ -13490,12 +13575,10 @@ if (manualSendModal) {
       postChecklists.sort((a, b) => (scheduleOrder[a.schedule] || 99) - (scheduleOrder[b.schedule] || 99));
 
       const btn = document.getElementById('checklistTabBtn');
-      const panel = document.getElementById('panel-checklist');
       const bar = document.querySelector('.tab-bar');
 
       if (preChecklists.length > 0) {
         if (btn) btn.style.display = 'inline-flex';
-        if (panel) panel.style.display = 'block';
 
         window.checklistState.queue = preChecklists;
         window.checklistState.queueIndex = 0;
@@ -13522,10 +13605,19 @@ if (manualSendModal) {
         // MongoDB SWR Background Sync: Verify today's MongoDB status and sync to localStorage & UI
         verifyChecklistStatusWithMongoDB(factory, machine);
       } else {
-        if (btn) btn.style.display = 'none';
-        if (panel) panel.style.display = 'none';
-        if (bar) bar.classList.remove('locked-checklist');
+        window.checklistState.queue = [];
+        window.checklistState.queueIndex = 0;
         window.checklistState.isPreComplete = true;
+        if (btn) btn.style.display = 'none';
+        if (bar) bar.classList.remove('locked-checklist');
+
+        // Switch to Scan tab (tab index 1)
+        if (typeof window.goToTab === 'function') {
+          const currentTab = typeof currentTabIndex !== 'undefined' ? currentTabIndex : 0;
+          if (currentTab === 0) {
+            window.goToTab(1);
+          }
+        }
       }
     } catch (err) {
       console.error('Error initializing checklists:', err);
@@ -13534,6 +13626,7 @@ if (manualSendModal) {
 
   async function verifyChecklistStatusWithMongoDB(factory, machine) {
     if (!factory || !machine) return;
+    if (!window.checklistState || !window.checklistState.queue || window.checklistState.queue.length === 0) return;
     try {
       const res = await fetch(`${serverURL}/api/check-forms/today-status?factory=${encodeURIComponent(factory)}&machine=${encodeURIComponent(machine)}`);
       if (!res.ok) return;
@@ -13596,7 +13689,7 @@ if (manualSendModal) {
           window.renderCurrentChecklistTemplate();
         }
 
-        if (!isPreDone && !window.checklistState.isBypassed && typeof window.goToChecklistTab === 'function') {
+        if (!isPreDone && !window.checklistState.isBypassed && window.checklistState.queue && window.checklistState.queue.length > 0 && typeof window.goToChecklistTab === 'function') {
           window.goToChecklistTab();
         }
       }
@@ -13609,6 +13702,7 @@ if (manualSendModal) {
   if (!window._checklistDayCheckInterval) {
     window._checklistDayCheckInterval = setInterval(function () {
       if (!window.checklistState || !window.checklistState.factory || !window.checklistState.machine) return;
+      if (!window.checklistState.queue || window.checklistState.queue.length === 0) return;
       const todayIso = new Date().toISOString().split('T')[0];
       if (window.checklistState.dateStr && window.checklistState.dateStr !== todayIso) {
         console.log(`🌅 Date changed from ${window.checklistState.dateStr} to ${todayIso} - Auto-resetting checklist for new day.`);
@@ -13951,18 +14045,21 @@ if (manualSendModal) {
 
     let controlHtml = '';
     if (field.type === 'name') {
-      const activeNames = window.selectedWorkerNames ? window.selectedWorkerNames.map(n => (n || '').trim()).filter(Boolean) : [];
+      const activeSlots = (window.selectedWorkerNames && window.selectedWorkerNames.length > 0)
+        ? window.selectedWorkerNames
+        : [''];
+      const activeNames = activeSlots.map(n => (n || '').trim()).filter(Boolean);
       window.checklistState.answers[field.id] = activeNames.length > 0 ? activeNames : (document.getElementById('step0CurrentWorkerName')?.textContent || '');
 
       controlHtml = `
           <div style="width:100%; display:flex; flex-direction:column; gap:8px;">
             <div style="display:flex; flex-direction:column; gap:6px;">
-              ${(activeNames.length > 0 ? activeNames : ['']).map((name, i) => `
+              ${activeSlots.map((name, i) => `
                 <div style="display:flex; gap:6px; align-items:center;">
                   <div onclick="openWorkerModal(${i})" style="flex:1; background:#f8f9fa; padding:10px 14px; border-radius:8px; font-weight:700; color:#1f2733; font-size:0.95rem; border:1px solid #e6e8ef; cursor:pointer;">
                     👤 ${name || 'Tap to select worker...'}
                   </div>
-                  ${activeNames.length > 1 ? `<button type="button" class="btn btn-alert" style="padding:6px 10px; font-size:0.9rem;" onclick="removeWorkerSlot(${i})">✕</button>` : ''}
+                  ${activeSlots.length > 1 ? `<button type="button" class="btn btn-alert" style="padding:6px 10px; font-size:0.9rem;" onclick="removeWorkerSlot(${i})">✕</button>` : ''}
                 </div>
               `).join('')}
             </div>
@@ -15646,9 +15743,7 @@ if (manualSendModal) {
     window.checklistState.queueIndex = 0;
 
     const btn = document.getElementById('checklistTabBtn');
-    const panel = document.getElementById('panel-checklist');
     if (btn) btn.style.display = 'inline-flex';
-    if (panel) panel.style.display = 'block';
 
     renderCurrentChecklistTemplate();
     window.goToChecklistTab();
