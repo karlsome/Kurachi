@@ -8211,6 +8211,10 @@ function closeSendingToMachineIndicator() {
     clearTimeout(_sendingIndicatorTimer);
     _sendingIndicatorTimer = null;
   }
+  // Jump to Params tab (index 2) when sending to machine indicator closes
+  if (typeof window.goToTab === 'function') {
+    window.goToTab(2);
+  }
 }
 
 //this function sends request to nc cutter's pC (supports single or multiple machines)

@@ -3654,8 +3654,9 @@
             const prefix = typeof uniquePrefix !== 'undefined' ? uniquePrefix : '';
             localStorage.setItem(`${prefix}activeTabIndex`, index);
 
-            // Slide tabs viewport (count-aware for all 8 tabs)
-            panelsContainer.style.transform = `translateX(-${index * (100 / tabs.length)}%)`;
+            // Slide tabs viewport (count-aware for total DOM panels: 8 panels)
+            const totalPanels = document.querySelectorAll('.tab-panel').length || 8;
+            panelsContainer.style.transform = `translateX(-${index * (100 / totalPanels)}%)`;
 
             // Highlight active button
             tabs.forEach((tab, idx) => {
@@ -3719,7 +3720,7 @@
                         if (typeof window.showAppToast === 'function') {
                             window.showAppToast(_t('toast_settings_confirmed'));
                         }
-                        if (typeof window.goToTab === 'function') window.goToTab(2);
+                        if (typeof window.goToTab === 'function') window.goToTab(3);
                     };
                 }
             }
@@ -3753,7 +3754,7 @@
                         if (typeof window.showAppToast === 'function') {
                             window.showAppToast(_t('toast_settings_confirmed'));
                         }
-                        if (typeof window.goToTab === 'function') window.goToTab(2);
+                        if (typeof window.goToTab === 'function') window.goToTab(3);
                     };
                 }
             }
@@ -3939,39 +3940,39 @@
             const issues = [];
 
             if (!values.sebanggo) {
-                issues.push({ text: _t('submit_err_no_sebanggo'), tab: 0, fieldId: 'startStep1Scan' });
+                issues.push({ text: _t('submit_err_no_sebanggo'), tab: 1, fieldId: 'startStep1Scan' });
             }
             if (!values.workerName) {
-                issues.push({ text: _t('submit_err_no_worker'), tab: 2, fieldId: 'Machine Operator' });
+                issues.push({ text: _t('submit_err_no_worker'), tab: 3, fieldId: 'Machine Operator' });
             }
             if (!values.date) {
-                issues.push({ text: _t('submit_err_no_date'), tab: 2, fieldId: 'Lot No.' });
+                issues.push({ text: _t('submit_err_no_date'), tab: 3, fieldId: 'Lot No.' });
             }
             if (!values.startTime) {
-                issues.push({ text: _t('submit_err_no_start'), tab: 2, fieldId: 'Start Time' });
+                issues.push({ text: _t('submit_err_no_start'), tab: 3, fieldId: 'Start Time' });
             }
             if (!values.endTime) {
-                issues.push({ text: _t('submit_err_no_end'), tab: 2, fieldId: 'End Time' });
+                issues.push({ text: _t('submit_err_no_end'), tab: 3, fieldId: 'End Time' });
             }
             if (values.startTime && values.endTime && values.startTime === values.endTime) {
-                issues.push({ text: _t('submit_err_same_time'), tab: 2, fieldId: 'End Time' });
+                issues.push({ text: _t('submit_err_same_time'), tab: 3, fieldId: 'End Time' });
             }
             if (values.processQty <= 0) {
-                issues.push({ text: _t('submit_err_qty_zero'), tab: 2, fieldId: 'ProcessQuantity' });
+                issues.push({ text: _t('submit_err_qty_zero'), tab: 3, fieldId: 'ProcessQuantity' });
             }
             if (values.shotCount < 1) {
-                issues.push({ text: _t('submit_err_no_shots'), tab: 2, fieldId: 'shot' });
+                issues.push({ text: _t('submit_err_no_shots'), tab: 3, fieldId: 'shot' });
             }
             if (!values.materialLot) {
-                issues.push({ text: _t('submit_err_no_lot'), tab: 2, fieldId: '材料ロット' });
+                issues.push({ text: _t('submit_err_no_lot'), tab: 3, fieldId: '材料ロット' });
             }
 
             if (values.photosHatsumono !== 'TRUE') {
-                issues.push({ text: _t('submit_err_no_hatsumono'), tab: 3, fieldId: 'hatsumonoButton' });
+                issues.push({ text: _t('submit_err_no_hatsumono'), tab: 4, fieldId: 'hatsumonoButton' });
             }
 
             if (values.photosAtomono !== 'TRUE') {
-                issues.push({ text: _t('submit_err_no_atomono'), tab: 3, fieldId: 'atomonoButton' });
+                issues.push({ text: _t('submit_err_no_atomono'), tab: 4, fieldId: 'atomonoButton' });
             }
 
             const lotCount = values.materialLot ? values.materialLot.split(',').map(l => l.trim()).filter(l => l).length : 0;
@@ -3979,22 +3980,22 @@
                 const msg = _t('submit_insufficient_photos')
                     .replace('{needed}', lotCount)
                     .replace('{taken}', values.photosMaterial);
-                issues.push({ text: msg, tab: 2, fieldId: '材料ロット' });
+                issues.push({ text: msg, tab: 3, fieldId: '材料ロット' });
             }
 
             // Kensa (inspection) fields are required only when the kensa toggle is ON
             if (document.getElementById('enable-inputs')?.checked) {
                 if (!document.getElementById('Kensa Name')?.value) {
-                    issues.push({ text: _t('submit_err_no_inspector'), tab: 2, fieldId: 'Kensa Name' });
+                    issues.push({ text: _t('submit_err_no_inspector'), tab: 3, fieldId: 'Kensa Name' });
                 }
                 if (!document.getElementById('KDate')?.value) {
-                    issues.push({ text: _t('submit_err_no_kdate'), tab: 2, fieldId: 'KDate' });
+                    issues.push({ text: _t('submit_err_no_kdate'), tab: 3, fieldId: 'KDate' });
                 }
                 if (!document.getElementById('KStart Time')?.value) {
-                    issues.push({ text: _t('submit_err_no_kstart'), tab: 2, fieldId: 'KStart Time' });
+                    issues.push({ text: _t('submit_err_no_kstart'), tab: 3, fieldId: 'KStart Time' });
                 }
                 if (!document.getElementById('KEnd Time')?.value) {
-                    issues.push({ text: _t('submit_err_no_kend'), tab: 2, fieldId: 'KEnd Time' });
+                    issues.push({ text: _t('submit_err_no_kend'), tab: 3, fieldId: 'KEnd Time' });
                 }
             }
 
@@ -4029,15 +4030,15 @@
             html += row(_t('submit_lbl_sebanggo'), (values.sebanggo || '---'));
             html += row(_t('submit_lbl_hinban'), (values.hinban || '---'));
             html += row(_t('submit_lbl_worker'), (values.workerName || '---'), `<button type="button" class="row-edit-btn" onclick="openWorkerModal()">${_t('submit_edit_btn')}</button>`);
-            html += row(_t('submit_lbl_date'), (values.date || '---'), edit(2, 'Lot No.'));
-            html += row(_t('submit_lbl_time'), (values.startTime || '--:--') + ' ~ ' + (values.endTime || '--:--'), edit(2, 'Start Time'));
+            html += row(_t('submit_lbl_date'), (values.date || '---'), edit(3, 'Lot No.'));
+            html += row(_t('submit_lbl_time'), (values.startTime || '--:--') + ' ~ ' + (values.endTime || '--:--'), edit(3, 'Start Time'));
             const machines = (typeof groupedMachines !== 'undefined' && groupedMachines.length > 0) ? groupedMachines : [document.getElementById('machine-selector')?.value || 'UNKNOWN'];
             const missingPc = typeof resolveFeed === 'function' ? machines.some(m => resolveFeed(m).pcPerCycle == null) : false;
             
-            html += row(_t('submit_lbl_qty'), values.processQty, missingPc ? edit(2, 'ProcessQuantity') : '');
+            html += row(_t('submit_lbl_qty'), values.processQty, missingPc ? edit(3, 'ProcessQuantity') : '');
             html += row(_t('submit_lbl_shots'), values.shotCount, `<button type="button" class="row-edit-btn" onclick="if(window.openShotEditModal) window.openShotEditModal();">${_t('submit_edit_btn')}</button>`);
-            html += row(_t('submit_lbl_material_lot'), (values.materialLot || '---'), edit(2, '材料ロット'));
-            html += row(_t('submit_lbl_defects'), _t('submit_lbl_defect_pull') + ': ' + values.defectsPull + ' | ' + _t('submit_lbl_defect_process') + ': ' + values.defectsProcess + ' | ' + _t('submit_lbl_defect_other') + ': ' + values.defectsOther + ' (NG: ' + values.totalNG + ')', edit(2, 'counter-box-18'));
+            html += row(_t('submit_lbl_material_lot'), (values.materialLot || '---'), edit(3, '材料ロット'));
+            html += row(_t('submit_lbl_defects'), _t('submit_lbl_defect_pull') + ': ' + values.defectsPull + ' | ' + _t('submit_lbl_defect_process') + ': ' + values.defectsProcess + ' | ' + _t('submit_lbl_defect_other') + ': ' + values.defectsOther + ' (NG: ' + values.totalNG + ')', edit(3, 'counter-box-18'));
             html += row(_t('submit_lbl_good_total'), '<span style="font-weight: bold; color: var(--accent-green);">' + values.totalGood + '</span>');
             html += row(_t('submit_lbl_cycle_check'), _t('submit_lbl_first_check') + ': ' + values.photosHatsumono + ' | ' + _t('submit_lbl_last_check') + ': ' + values.photosAtomono);
             html += row(_t('submit_lbl_label_photos'), values.photosMaterial + _t('submit_lbl_photos_unit'));
