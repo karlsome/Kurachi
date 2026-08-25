@@ -13762,6 +13762,31 @@ if (manualSendModal) {
     });
   }
 
+  function confirmTicketDeletionOnOk(fieldId) {
+    const ticket = window.checklistState.tickets[fieldId];
+    if (ticket && ticket.saved) {
+      const confirmText = "A defect ticket was previously saved for NG. Since this item is now OK, delete this ticket and remove its Chatwork notification?";
+      if (!confirm(confirmText)) {
+        return false;
+      }
+
+      if (ticket.chatworkMessageId) {
+        try {
+          fetch(`${serverURL}/api/check-forms/cancel-ng-ticket`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ messageIds: [ticket.chatworkMessageId] })
+          }).catch(err => console.warn('Failed to delete Chatwork message on OK change:', err));
+        } catch (e) {
+          console.warn('Error sending Chatwork ticket cancellation request:', e);
+        }
+      }
+
+      delete window.checklistState.tickets[fieldId];
+    }
+    return true;
+  }
+
   window.handleChecklistToggle = function (fieldId, val) {
     const currentVal = window.checklistState.answers[fieldId];
 
@@ -13771,6 +13796,12 @@ if (manualSendModal) {
       if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
       renderCurrentChecklistTemplate();
       return;
+    }
+
+    if (val === 'OK') {
+      if (!confirmTicketDeletionOnOk(fieldId)) {
+        return;
+      }
     }
 
     window.checklistState.answers[fieldId] = val;
@@ -14057,11 +14088,18 @@ if (manualSendModal) {
     const valStr = display.textContent.trim();
     if (valStr !== '') {
       const numVal = parseFloat(valStr);
-      window.checklistState.answers[active.fieldId] = numVal;
 
       let outOfRange = false;
       if (active.min !== null && numVal < active.min) outOfRange = true;
       if (active.max !== null && numVal > active.max) outOfRange = true;
+
+      if (!outOfRange) {
+        if (!confirmTicketDeletionOnOk(active.fieldId)) {
+          return;
+        }
+      }
+
+      window.checklistState.answers[active.fieldId] = numVal;
 
       if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
       if (modal) modal.style.display = 'none';
