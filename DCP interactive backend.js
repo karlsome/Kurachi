@@ -39,9 +39,9 @@ const googleSheetLiveStatusURL = 'https://script.google.com/macros/s/AKfycbwbL30
 // Link for Rikeshi (up/down color info) - This was missing in the original, adding it here.
 const dbURL = 'https://script.google.com/macros/s/AKfycbx0qBw0_wF5X-hA2t1yY-d5h5M7Z_a8z_V9R5D6k/exec'; // Placeholder, replace with your actual URL if different.
 
-const serverURL = "https://kurachi.onrender.com";
+//const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
-//const serverURL = "http://192.168.0.105:3000";
+const serverURL = "http://192.168.0.39:3000";
 
 // Global variable to track if sendtoNC button has been pressed
 let sendtoNCButtonisPressed = false;
@@ -13254,20 +13254,11 @@ if (manualSendModal) {
   }
 
   window.goToChecklistTab = function () {
-    const tabs = document.querySelectorAll('.tab-btn');
-    tabs.forEach(t => t.classList.remove('active'));
     const btn = document.getElementById('checklistTabBtn');
-    if (btn) btn.classList.add('active');
+    if (btn) btn.style.display = 'inline-flex';
 
-    const panels = document.querySelectorAll('.tab-panel');
-    panels.forEach(p => {
-      p.classList.remove('active');
-      if (p.id === 'panel-checklist') p.style.display = 'block';
-    });
-
-    const panelsContainer = document.querySelector('.tab-panels-container');
-    if (panelsContainer) {
-      panelsContainer.style.transform = 'translateX(0%)';
+    if (typeof window.goToTab === 'function') {
+      window.goToTab(0);
     }
   };
 
@@ -13603,7 +13594,7 @@ if (manualSendModal) {
     const ticket = window.checklistState.tickets[fieldId] || { images: [] };
     container.innerHTML = ticket.images.map((img, i) => `
       <div style="position:relative; width:64px; height:64px;">
-        <img src="${img}" style="width:100%; height:100%; object-fit:cover; border-radius:8px; border:1px solid #e6e8ef; cursor:pointer;" onclick="if(typeof window.openPreview === 'function') window.openPreview(this.src, 'Ticket Photo ${i+1}');">
+        <img src="${img}" style="width:100%; height:100%; object-fit:cover; border-radius:8px; border:1px solid #e6e8ef; cursor:pointer;" onclick="if(typeof window.openPreview === 'function') window.openPreview(this.src, 'Ticket Photo ${i + 1}');">
         <button type="button" onclick="removeChecklistTicketImage(${i})" style="position:absolute; top:-6px; right:-6px; background:#ef4444; color:#fff; border:none; width:20px; height:20px; border-radius:50%; font-size:12px; font-weight:800; cursor:pointer;">✕</button>
       </div>
     `).join('');
