@@ -13383,7 +13383,7 @@ if (manualSendModal) {
 
       let mediaHtml = '';
       if (field.imageURL) {
-        mediaHtml = `<img src="${field.imageURL}" class="checklist-card-media" alt="Reference">`;
+        mediaHtml = `<img src="${field.imageURL}" class="checklist-card-media" alt="Reference" style="cursor:pointer;" onclick="if(typeof window.openPreview === 'function') window.openPreview(this.src, '${fTitle.replace(/'/g, "\\'")}');">`;
       }
 
       let controlHtml = '';
@@ -13458,7 +13458,7 @@ if (manualSendModal) {
             <button type="button" class="btn btn-secondary" style="font-size:0.8rem; padding:6px 12px;" onclick="document.getElementById('checklist-field-photo-${field.id}').click()">
               📷 ${photoBase64 ? '✓ Photo Taken (Retake)' : 'Take Photo *'}
             </button>
-            ${photoBase64 ? `<img src="${photoBase64}" style="width:60px; height:60px; object-fit:cover; border-radius:8px; margin-top:6px; display:block;">` : ''}
+            ${photoBase64 ? `<img src="${photoBase64}" style="width:60px; height:60px; object-fit:cover; border-radius:8px; margin-top:6px; display:block; cursor:pointer;" onclick="if(typeof window.openPreview === 'function') window.openPreview(this.src, '${fTitle.replace(/'/g, "\\'")}');">` : ''}
           </div>
         `;
       }
@@ -13573,6 +13573,41 @@ if (manualSendModal) {
       renderCurrentChecklistTemplate();
     }
   };
+
+  window.openChecklistTicketModal = function (fieldId, autoReason = '') {
+    window.checklistState.activeTicketField = fieldId;
+    const modal = document.getElementById('checklistTicketModal');
+    const info = document.getElementById('checklistTicketFieldInfo');
+    const reasonInput = document.getElementById('checklistTicketReason');
+
+    const existing = window.checklistState.tickets[fieldId] || { reason: autoReason, images: [] };
+    window.checklistState.tickets[fieldId] = existing;
+
+    if (info) info.textContent = `Reporting issue for item`;
+    if (reasonInput) reasonInput.value = existing.reason || autoReason;
+
+    renderTicketThumbnails();
+    if (modal) modal.style.display = 'flex';
+  };
+
+  window.closeChecklistTicketModal = function () {
+    const modal = document.getElementById('checklistTicketModal');
+    if (modal) modal.style.display = 'none';
+  };
+
+  function renderTicketThumbnails() {
+    const fieldId = window.checklistState.activeTicketField;
+    const container = document.getElementById('checklistTicketThumbsContainer');
+    if (!container || !fieldId) return;
+
+    const ticket = window.checklistState.tickets[fieldId] || { images: [] };
+    container.innerHTML = ticket.images.map((img, i) => `
+      <div style="position:relative; width:64px; height:64px;">
+        <img src="${img}" style="width:100%; height:100%; object-fit:cover; border-radius:8px; border:1px solid #e6e8ef; cursor:pointer;" onclick="if(typeof window.openPreview === 'function') window.openPreview(this.src, 'Ticket Photo ${i+1}');">
+        <button type="button" onclick="removeChecklistTicketImage(${i})" style="position:absolute; top:-6px; right:-6px; background:#ef4444; color:#fff; border:none; width:20px; height:20px; border-radius:50%; font-size:12px; font-weight:800; cursor:pointer;">✕</button>
+      </div>
+    `).join('');
+  }
 
   window.handleChecklistSubmitOrNext = async function () {
     const { queue, queueIndex } = window.checklistState;
