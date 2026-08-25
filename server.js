@@ -33004,6 +33004,7 @@ app.get('/api/check-forms/today-status', async (req, res) => {
     }
 
     const recordIds = {};
+    let isPreComplete = false;
     let isPostComplete = false;
 
     docs.forEach(doc => {
@@ -33014,6 +33015,7 @@ app.get('/api/check-forms/today-status', async (req, res) => {
       if (doc.templateName) {
         recordIds[doc.templateName] = recId;
       }
+      if (doc.isPreComplete !== false) isPreComplete = true;
       if (doc.isPostComplete === true) isPostComplete = true;
     });
 
