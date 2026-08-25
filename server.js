@@ -33058,14 +33058,25 @@ async function camFetchMediaPlaylist(masterUrl) {
 }
 
 const CAM_STREAMS = new Set(['tapo_cam', 'tapo_cam2', 'tapo_cam3']);
+const CAM_STREAMS2 = new Set(['kurachi_cam', 'kurachi_cam2']);
 
 app.get('/api/cam', requireCamAuth, async (req, res) => {
-  const base = process.env.CAM_HLS_URL;
-  if (!base) return res.status(404).json({ error: 'CAM_HLS_URL not configured' });
   const stream = req.query.stream || 'tapo_cam';
-  if (!CAM_STREAMS.has(stream)) return res.status(400).json({ error: 'Unknown stream' });
+  let base, defaultStream, envName;
+  if (CAM_STREAMS.has(stream)) {
+    base = process.env.CAM_HLS_URL;
+    defaultStream = 'tapo_cam';
+    envName = 'CAM_HLS_URL';
+  } else if (CAM_STREAMS2.has(stream)) {
+    base = process.env.CAM_HLS_URL2;
+    defaultStream = 'kurachi_cam';
+    envName = 'CAM_HLS_URL2';
+  } else {
+    return res.status(400).json({ error: 'Unknown stream' });
+  }
+  if (!base) return res.status(404).json({ error: `${envName} not configured` });
   // Swap the stream name in the base URL (e.g. tapo_cam → tapo_cam2)
-  const masterUrl = base.replace('tapo_cam', stream);
+  const masterUrl = base.replace(defaultStream, stream);
   try {
     const { url: mediaUrl, body } = await camFetchMediaPlaylist(masterUrl);
     const playlist = body.split('\n').map(line => {
