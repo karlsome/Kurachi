@@ -13743,10 +13743,11 @@ if (manualSendModal) {
 
       let ticketBtnHtml = '';
       if (field.type !== 'name') {
-        const isRequired = isNg || isOutOfRange || (hasTicket && !hasTicket.saved);
+        const isTicketRequired = isNg || isOutOfRange;
+        const isRequiredUnsaved = isTicketRequired && (!hasTicket || !hasTicket.saved);
         const isSaved = hasTicket && hasTicket.saved;
-        const cls = isSaved ? 'saved' : (isRequired ? 'required-pulse' : '');
-        const lbl = isSaved ? '✓ Ticket Saved' : (isRequired ? '⚠️ Ticket Required' : '➕ Ticket');
+        const cls = isSaved ? 'saved' : (isRequiredUnsaved ? 'required-pulse' : '');
+        const lbl = isSaved ? '✓ Ticket Saved' : (isRequiredUnsaved ? '⚠️ Ticket Required' : '➕ Ticket');
         ticketBtnHtml = `<button type="button" class="checklist-ticket-btn ${cls}" onclick="openChecklistTicketModal('${field.id}')">${lbl}</button>`;
       }
 
@@ -14255,10 +14256,11 @@ if (manualSendModal) {
   function updateTicketResetButtonVisibility() {
     const fieldId = window.checklistState.activeTicketField;
     const resetBtn = document.getElementById('checklistTicketResetBtn');
-    if (!resetBtn) return;
+    const photoBtn = document.getElementById('checklistTicketPhotoBtn');
 
     if (!fieldId) {
-      resetBtn.style.display = 'none';
+      if (resetBtn) resetBtn.style.display = 'none';
+      if (photoBtn) photoBtn.classList.remove('photo-pulse-attention');
       return;
     }
 
@@ -14269,8 +14271,25 @@ if (manualSendModal) {
     const isSaved = ticket && ticket.saved;
 
     const hasData = isSaved || hasPhotos || (reasonText && reasonText.length > 0);
+    if (resetBtn) resetBtn.style.display = hasData ? 'inline-flex' : 'none';
 
-    resetBtn.style.display = hasData ? 'inline-flex' : 'none';
+    if (photoBtn) {
+      const fieldAns = window.checklistState.answers[fieldId];
+      const fieldObj = (window.checklistState.queue?.[window.checklistState.queueIndex]?.fields || []).find(f => f.id === fieldId);
+      let isOutOfRange = false;
+      if (fieldObj && fieldObj.type === 'number' && typeof fieldAns === 'number') {
+        if (fieldObj.min !== null && fieldAns < fieldObj.min) isOutOfRange = true;
+        if (fieldObj.max !== null && fieldAns > fieldObj.max) isOutOfRange = true;
+      }
+      const isTicketRequired = fieldAns === 'NG' || isOutOfRange;
+
+      const isPhotoNeeded = isTicketRequired && reasonText.length > 0 && !hasPhotos;
+      if (isPhotoNeeded) {
+        photoBtn.classList.add('photo-pulse-attention');
+      } else {
+        photoBtn.classList.remove('photo-pulse-attention');
+      }
+    }
   }
 
   window.resetCurrentChecklistTicket = async function () {
@@ -14317,6 +14336,35 @@ if (manualSendModal) {
     const modal = document.getElementById('checklistTicketModal');
     const info = document.getElementById('checklistTicketFieldInfo');
     const reasonInput = document.getElementById('checklistTicketReason');
+    const headerTitle = document.getElementById('checklistTicketHeaderTitle');
+    const photoLabel = document.getElementById('checklistTicketPhotoLabel');
+
+    const fieldAns = window.checklistState.answers[fieldId];
+    const fieldObj = (window.checklistState.queue?.[window.checklistState.queueIndex]?.fields || []).find(f => f.id === fieldId);
+    let isOutOfRange = false;
+    if (fieldObj && fieldObj.type === 'number' && typeof fieldAns === 'number') {
+      if (fieldObj.min !== null && fieldAns < fieldObj.min) isOutOfRange = true;
+      if (fieldObj.max !== null && fieldAns > fieldObj.max) isOutOfRange = true;
+    }
+    const isTicketRequired = fieldAns === 'NG' || isOutOfRange;
+
+    if (headerTitle) {
+      if (isTicketRequired) {
+        headerTitle.textContent = typeof _t === 'function' ? _t('ticket_required') : 'Abnormal Report (Ticket) Required';
+        headerTitle.style.color = '#e5484d';
+      } else {
+        headerTitle.textContent = 'Issue Report (Ticket)';
+        headerTitle.style.color = '#1f2733';
+      }
+    }
+
+    if (photoLabel) {
+      if (isTicketRequired) {
+        photoLabel.textContent = 'Attach Photos (At least 1 required) *';
+      } else {
+        photoLabel.textContent = 'Attach Photos (Optional)';
+      }
+    }
 
     const existing = window.checklistState.tickets[fieldId] || { reason: '', images: [] };
 
@@ -14520,11 +14568,20 @@ if (manualSendModal) {
     const reason = (reasonInput?.value || '').trim();
     const ticket = window.checklistState.tickets[fieldId] || { images: [] };
 
+    const fieldAns = window.checklistState.answers[fieldId];
+    const fieldObj = (window.checklistState.queue?.[window.checklistState.queueIndex]?.fields || []).find(f => f.id === fieldId);
+    let isOutOfRange = false;
+    if (fieldObj && fieldObj.type === 'number' && typeof fieldAns === 'number') {
+      if (fieldObj.min !== null && fieldAns < fieldObj.min) isOutOfRange = true;
+      if (fieldObj.max !== null && fieldAns > fieldObj.max) isOutOfRange = true;
+    }
+    const isTicketRequired = fieldAns === 'NG' || isOutOfRange;
+
     if (!reason) {
       if (typeof showAlert === 'function') showAlert('Please enter ticket reason/details');
       return;
     }
-    if (!ticket.images || ticket.images.length === 0) {
+    if (isTicketRequired && (!ticket.images || ticket.images.length === 0)) {
       if (typeof showAlert === 'function') showAlert('At least 1 photo is required for the ticket');
       return;
     }
@@ -14539,16 +14596,20 @@ if (manualSendModal) {
           expectedStr = `${fieldObj.min ?? '—'} ~ ${fieldObj.max ?? '—'} ${fieldObj.unit || ''}`;
         }
 
+        const isOptionalTicket = !isTicketRequired;
+        const statusStr = isOptionalTicket ? 'OPTIONAL TICKET' : 'NG';
+
         const notifyRes = await fetch(`${serverURL}/api/check-forms/notify-ng-ticket`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             factory: window.checklistState.factory,
             machine: window.checklistState.machine,
-            status: 'NG',
+            status: statusStr,
             reason: reason,
             userInput: userInputStr,
-            expectedInput: expectedStr
+            expectedInput: expectedStr,
+            isOptional: isOptionalTicket
           })
         });
 
@@ -14559,7 +14620,7 @@ if (manualSendModal) {
           }
         }
       } catch (err) {
-        console.error('Failed to notify NG ticket to Chatwork:', err);
+        console.error('Failed to notify ticket to Chatwork:', err);
       }
     } else {
       // Message already exists in Chatwork -> update message with new input value & reason!
@@ -14572,6 +14633,9 @@ if (manualSendModal) {
           expectedStr = `${fieldObj.min ?? '—'} ~ ${fieldObj.max ?? '—'} ${fieldObj.unit || ''}`;
         }
 
+        const isOptionalTicket = !isTicketRequired;
+        const statusStr = isOptionalTicket ? 'OPTIONAL TICKET' : 'NG';
+
         await fetch(`${serverURL}/api/check-forms/update-ng-ticket`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -14579,14 +14643,15 @@ if (manualSendModal) {
             messageId: ticket.chatworkMessageId,
             factory: window.checklistState.factory,
             machine: window.checklistState.machine,
-            status: 'NG',
+            status: statusStr,
             reason: reason,
             userInput: userInputStr,
-            expectedInput: expectedStr
+            expectedInput: expectedStr,
+            isOptional: isOptionalTicket
           })
         }).catch(err => console.warn('Failed to update Chatwork ticket message:', err));
       } catch (err) {
-        console.error('Failed to update NG ticket in Chatwork:', err);
+        console.error('Failed to update ticket in Chatwork:', err);
       }
     }
 

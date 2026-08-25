@@ -32196,6 +32196,119 @@ app.get('/checkList2.js', (req, res) => {
   res.sendFile(path.join(__dirname, 'checkList2.js'));
 });
 
+app.post('/api/check-forms/notify-ng-ticket', async (req, res) => {
+  const { factory, machine, status, reason, userInput, expectedInput, isOptional } = req.body;
+  const roomId = '440654635';
+  const apiKey = process.env.CHATWORK_API_KEY;
+  const url = `https://api.chatwork.com/v2/rooms/${roomId}/messages`;
+  
+  const now = new Date();
+  const timestamp = now.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+  const titleHeader = isOptional ? '📝 【OPTIONAL TICKET / 任意報告】' : '⚠️ 【DEFECT TICKET / 不適合報告】';
+  const statusLabel = isOptional ? 'OPTIONAL TICKET (任意報告)' : (status || 'NG');
+
+  let messageBody = `${titleHeader}\n工場: ${factory}\n設備: ${machine}\nステータス: ${statusLabel}\n日時: ${timestamp}`;
+  if (expectedInput) messageBody += `\n期待値: ${expectedInput}`;
+  if (userInput !== undefined && userInput !== '') messageBody += `\n入力値: ${userInput}`;
+  messageBody += `\n理由: ${reason}`;
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'X-ChatWorkToken': apiKey,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: new URLSearchParams({ body: messageBody })
+    });
+
+    if (response.ok) {
+      const result = await response.json();
+      res.status(200).json({ message_id: result.message_id });
+    } else {
+      const errorText = await response.text();
+      res.status(response.status).json({ error: errorText });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/check-forms/cancel-ng-ticket', async (req, res) => {
+  const { messageIds } = req.body || {};
+  if (!Array.isArray(messageIds) || messageIds.length === 0) {
+    return res.json({ success: true, cancelled: [] });
+  }
+
+  const roomId = '440654635';
+  const apiKey = process.env.CHATWORK_API_KEY;
+  const results = [];
+
+  for (const messageId of messageIds) {
+    if (!messageId) continue;
+    try {
+      const deleteUrl = `https://api.chatwork.com/v2/rooms/${roomId}/messages/${messageId}`;
+      const delResponse = await fetch(deleteUrl, {
+        method: 'DELETE',
+        headers: { 'X-ChatWorkToken': apiKey }
+      });
+
+      if (delResponse.ok) {
+        results.push({ messageId, success: true });
+      } else {
+        results.push({ messageId, success: false });
+      }
+    } catch (e) {
+      results.push({ messageId, success: false, error: e.message });
+    }
+  }
+
+  res.json({ success: true, results });
+});
+
+app.post('/api/check-forms/update-ng-ticket', async (req, res) => {
+  const { messageId, factory, machine, status, reason, userInput, expectedInput, isOptional } = req.body || {};
+  if (!messageId) {
+    return res.status(400).json({ error: 'messageId is required' });
+  }
+
+  const roomId = '440654635';
+  const apiKey = process.env.CHATWORK_API_KEY;
+  const url = `https://api.chatwork.com/v2/rooms/${roomId}/messages/${messageId}`;
+
+  try {
+    const now = new Date();
+    const timestamp = now.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+    const titleHeader = isOptional ? '📝 【OPTIONAL TICKET / 任意報告】' : '⚠️ 【DEFECT TICKET / 不適合報告】';
+    const statusLabel = isOptional ? 'OPTIONAL TICKET (任意報告)' : (status || 'NG');
+
+    let messageBody = `${titleHeader}\n工場: ${factory}\n設備: ${machine}\nステータス: ${statusLabel}\n日時: ${timestamp}`;
+    if (expectedInput) messageBody += `\n期待値: ${expectedInput}`;
+    if (userInput !== undefined && userInput !== '') messageBody += `\n入力値: ${userInput}`;
+    messageBody += `\n理由: ${reason}`;
+    messageBody += `\n(編集済み / Updated)`;
+
+    const response = await fetch(url, {
+      method: 'PUT',
+      headers: {
+        'X-ChatWorkToken': apiKey,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: new URLSearchParams({ body: messageBody })
+    });
+
+    if (response.ok) {
+      const result = await response.json();
+      res.status(200).json({ message_id: result.message_id });
+    } else {
+      const errorText = await response.text();
+      res.status(response.status).json({ error: errorText });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.get('/api/check-forms/reference-images', async (req, res) => {
   const requestedFolderKey = normalizeCheckFormText(req.query.folderKey);
 
