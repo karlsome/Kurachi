@@ -364,6 +364,7 @@ const translations = {
         'post_production_checks_title': '📋 生産後点検',
         'checklist_completed_banner': '点検完了',
         'steps_count': '項目',
+        'please_wait_for_maintenance': '保全チームの対応をお待ちください',
     },
 
     en: {
@@ -728,6 +729,7 @@ const translations = {
         'post_production_checks_title': '📋 Post-Production Checks',
         'checklist_completed_banner': 'Checklist Completed',
         'steps_count': 'steps',
+        'please_wait_for_maintenance': 'Please wait for maintenance team',
     },
 
     pt: {
@@ -1092,6 +1094,7 @@ const translations = {
         'post_production_checks_title': '📋 Verificações Pós-Produção',
         'checklist_completed_banner': 'Checklist Concluído',
         'steps_count': 'etapas',
+        'please_wait_for_maintenance': 'Aguarde a equipe de manutenção',
     }
 };
 

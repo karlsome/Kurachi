@@ -32970,10 +32970,26 @@ app.get('/api/check-forms/today-status', async (req, res) => {
       if (doc.isPostComplete === true) isPostComplete = true;
     });
 
+    const reportsCollection = submittedDb.collection(CHECK_FORM_NG_REPORTS_COLLECTION);
+    const openTickets = await reportsCollection.find({
+      factory,
+      $or: [
+        { 加工設備: machine },
+        { machine },
+        { selectedMachine: machine }
+      ],
+      createdAt: { $gte: startOfDay },
+      status: { $regex: /^open$/i }
+    }).toArray();
+
+    const hasOpenTickets = openTickets.length > 0;
+
     return res.status(200).json({
       hasSubmittedToday: true,
       isPreComplete,
       isPostComplete,
+      hasOpenTickets,
+      openTicketCount: openTickets.length,
       recordIds,
       lastSubmittedAt: docs[0].createdAt
     });

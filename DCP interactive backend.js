@@ -13575,6 +13575,7 @@ if (manualSendModal) {
 
         window.checklistState.isPreComplete = isPreDone;
         window.checklistState.isPostComplete = !!data.isPostComplete;
+        window.checklistState.hasOpenTickets = !!data.hasOpenTickets;
         if (data.recordIds) {
           window.checklistState.recordIds = { ...(window.checklistState.recordIds || {}), ...data.recordIds };
         }
@@ -13584,7 +13585,8 @@ if (manualSendModal) {
         }
 
         const bar = document.querySelector('.tab-bar');
-        if (isPreDone || window.checklistState.isBypassed) {
+        const canProceed = (isPreDone || window.checklistState.isBypassed) && !window.checklistState.hasOpenTickets;
+        if (canProceed) {
           if (bar) bar.classList.remove('locked-checklist');
         } else {
           if (bar) bar.classList.add('locked-checklist');
@@ -13632,10 +13634,11 @@ if (manualSendModal) {
         if (typeof window.goToChecklistTab === 'function') {
           window.goToChecklistTab();
         }
-        // Also sync status with MongoDB periodically
-        verifyChecklistStatusWithMongoDB(window.checklistState.factory, window.checklistState.machine);
       }
-    }, 30000);
+
+      // Continuously poll MongoDB status every 5s so that as soon as maintenance resolves/closes an NG ticket, the tablet unlocks and displays the green Proceed button
+      verifyChecklistStatusWithMongoDB(window.checklistState.factory, window.checklistState.machine);
+    }, 5000);
   }
 
   window.isChecklistFieldCompleted = function (field) {
@@ -13729,19 +13732,33 @@ if (manualSendModal) {
           nextBtn.style.pointerEvents = isPostDone ? 'auto' : 'none';
           nextBtn.onclick = window.handleChecklistSubmitOrNext;
         } else {
-          const label = (typeof _t === 'function') ? _t('proceed_with_production') : 'Proceed with Production';
-          nextBtn.innerHTML = `<span>${label}</span> →`;
-          nextBtn.disabled = false;
-          nextBtn.style.opacity = '1';
-          nextBtn.style.cursor = 'pointer';
-          nextBtn.style.pointerEvents = 'auto';
-          nextBtn.style.filter = 'none';
-          nextBtn.style.background = '#10b981';
-          nextBtn.style.boxShadow = '0 4px 14px rgba(16,185,129,0.3)';
-          nextBtn.classList.add('checklist-next-pulse');
-          nextBtn.onclick = function () {
-            if (typeof window.goToTab === 'function') window.goToTab(1);
-          };
+          if (window.checklistState.hasOpenTickets) {
+            const label = (typeof _t === 'function') ? _t('please_wait_for_maintenance') : 'Please wait for maintenance team';
+            nextBtn.innerHTML = `<span>⚠️ ${label}</span>`;
+            nextBtn.disabled = true;
+            nextBtn.style.opacity = '1';
+            nextBtn.style.cursor = 'not-allowed';
+            nextBtn.style.pointerEvents = 'none';
+            nextBtn.style.filter = 'none';
+            nextBtn.style.background = '#f59e0b';
+            nextBtn.style.boxShadow = '0 4px 14px rgba(245,158,11,0.3)';
+            nextBtn.classList.remove('checklist-next-pulse');
+            nextBtn.onclick = null;
+          } else {
+            const label = (typeof _t === 'function') ? _t('proceed_with_production') : 'Proceed with Production';
+            nextBtn.innerHTML = `<span>${label}</span> →`;
+            nextBtn.disabled = false;
+            nextBtn.style.opacity = '1';
+            nextBtn.style.cursor = 'pointer';
+            nextBtn.style.pointerEvents = 'auto';
+            nextBtn.style.filter = 'none';
+            nextBtn.style.background = '#10b981';
+            nextBtn.style.boxShadow = '0 4px 14px rgba(16,185,129,0.3)';
+            nextBtn.classList.add('checklist-next-pulse');
+            nextBtn.onclick = function () {
+              if (typeof window.goToTab === 'function') window.goToTab(1);
+            };
+          }
         }
       } else {
         const isLast = queueIndex === queue.length - 1;
