@@ -13551,6 +13551,23 @@ if (manualSendModal) {
     titleEl.innerHTML = `<h3 style="font-size:1.15rem; font-weight:800; color:#1f2733;">${localizedTitle}</h3>${localizedDesc ? `<p style="font-size:0.85rem; color:#6b7280; margin-top:2px;">${localizedDesc}</p>` : ''}`;
     container.appendChild(titleEl);
 
+  window.isDefectTicket = function (fieldId) {
+    if (!fieldId || !window.checklistState) return false;
+    const fieldAns = window.checklistState.answers[fieldId];
+    if (fieldAns === 'NG') return true;
+
+    const fields = window.checklistState.queue?.[window.checklistState.queueIndex]?.fields || [];
+    const fieldObj = fields.find(f => f.id === fieldId);
+    if (fieldObj && fieldObj.type === 'number') {
+      const numVal = typeof fieldAns === 'number' ? fieldAns : parseFloat(fieldAns);
+      if (!isNaN(numVal)) {
+        if (fieldObj.min !== null && fieldObj.min !== undefined && numVal < fieldObj.min) return true;
+        if (fieldObj.max !== null && fieldObj.max !== undefined && numVal > fieldObj.max) return true;
+      }
+    }
+    return false;
+  };
+
   window.autoLockOtherCards = function (activeFieldId) {
     if (!window.checklistState || !window.checklistState.unlockedCompletedCards) return false;
     let lockChanged = false;
@@ -14274,16 +14291,8 @@ if (manualSendModal) {
     if (resetBtn) resetBtn.style.display = hasData ? 'inline-flex' : 'none';
 
     if (photoBtn) {
-      const fieldAns = window.checklistState.answers[fieldId];
-      const fieldObj = (window.checklistState.queue?.[window.checklistState.queueIndex]?.fields || []).find(f => f.id === fieldId);
-      let isOutOfRange = false;
-      if (fieldObj && fieldObj.type === 'number' && typeof fieldAns === 'number') {
-        if (fieldObj.min !== null && fieldAns < fieldObj.min) isOutOfRange = true;
-        if (fieldObj.max !== null && fieldAns > fieldObj.max) isOutOfRange = true;
-      }
-      const isTicketRequired = fieldAns === 'NG' || isOutOfRange;
-
-      const isPhotoNeeded = isTicketRequired && reasonText.length > 0 && !hasPhotos;
+      const isTicketRequired = window.isDefectTicket(fieldId);
+      const isPhotoNeeded = isTicketRequired && !hasPhotos;
       if (isPhotoNeeded) {
         photoBtn.classList.add('photo-pulse-attention');
       } else {
@@ -14339,14 +14348,7 @@ if (manualSendModal) {
     const headerTitle = document.getElementById('checklistTicketHeaderTitle');
     const photoLabel = document.getElementById('checklistTicketPhotoLabel');
 
-    const fieldAns = window.checklistState.answers[fieldId];
-    const fieldObj = (window.checklistState.queue?.[window.checklistState.queueIndex]?.fields || []).find(f => f.id === fieldId);
-    let isOutOfRange = false;
-    if (fieldObj && fieldObj.type === 'number' && typeof fieldAns === 'number') {
-      if (fieldObj.min !== null && fieldAns < fieldObj.min) isOutOfRange = true;
-      if (fieldObj.max !== null && fieldAns > fieldObj.max) isOutOfRange = true;
-    }
-    const isTicketRequired = fieldAns === 'NG' || isOutOfRange;
+    const isTicketRequired = window.isDefectTicket(fieldId);
 
     if (headerTitle) {
       if (isTicketRequired) {
@@ -14568,14 +14570,7 @@ if (manualSendModal) {
     const reason = (reasonInput?.value || '').trim();
     const ticket = window.checklistState.tickets[fieldId] || { images: [] };
 
-    const fieldAns = window.checklistState.answers[fieldId];
-    const fieldObj = (window.checklistState.queue?.[window.checklistState.queueIndex]?.fields || []).find(f => f.id === fieldId);
-    let isOutOfRange = false;
-    if (fieldObj && fieldObj.type === 'number' && typeof fieldAns === 'number') {
-      if (fieldObj.min !== null && fieldAns < fieldObj.min) isOutOfRange = true;
-      if (fieldObj.max !== null && fieldAns > fieldObj.max) isOutOfRange = true;
-    }
-    const isTicketRequired = fieldAns === 'NG' || isOutOfRange;
+    const isTicketRequired = window.isDefectTicket(fieldId);
 
     if (!reason) {
       if (typeof showAlert === 'function') showAlert('Please enter ticket reason/details');
