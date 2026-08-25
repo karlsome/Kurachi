@@ -3605,6 +3605,7 @@ window.saveChecklistDraftToStorage = async function () {
         ticketsClean[fId] = {
           reason: ticket.reason || '',
           saved: ticket.saved || false,
+          chatworkMessageId: ticket.chatworkMessageId || '',
           images: imgRefs
         };
       }
@@ -3682,6 +3683,7 @@ window.loadChecklistDraftFromStorage = async function () {
           window.checklistState.tickets[fId] = {
             reason: t.reason || '',
             saved: t.saved || false,
+            chatworkMessageId: t.chatworkMessageId || '',
             images: hydratedImages
           };
         }
@@ -14090,6 +14092,7 @@ if (manualSendModal) {
               fieldId: fId,
               reason: window.checklistState.tickets[fId].reason,
               imageOverlayBase64s: window.checklistState.tickets[fId].images,
+              chatworkMessageId: window.checklistState.tickets[fId].chatworkMessageId || null,
             }))
           }))
         };
@@ -14160,7 +14163,7 @@ if (manualSendModal) {
     reader.readAsDataURL(file);
   };
 
-  window.saveChecklistTicket = function () {
+  window.saveChecklistTicket = async function () {
     const fieldId = window.checklistState.activeTicketField;
     const reasonInput = document.getElementById('checklistTicketReason');
     if (!fieldId) return;
@@ -14177,10 +14180,46 @@ if (manualSendModal) {
       return;
     }
 
+    if (!ticket.chatworkMessageId) {
+      try {
+        const fieldAns = window.checklistState.answers[fieldId];
+        const fieldObj = (window.checklistState.queue?.[window.checklistState.queueIndex]?.fields || []).find(f => f.id === fieldId);
+        let userInputStr = Array.isArray(fieldAns) ? fieldAns.join(', ') : String(fieldAns ?? '');
+        let expectedStr = '';
+        if (fieldObj && fieldObj.type === 'number' && (fieldObj.min !== null || fieldObj.max !== null)) {
+          expectedStr = `${fieldObj.min ?? '—'} - ${fieldObj.max ?? '—'} ${fieldObj.unit || ''}`;
+        }
+
+        const notifyRes = await fetch(`${serverURL}/api/check-forms/notify-ng-ticket`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            factory: window.checklistState.factory,
+            machine: window.checklistState.machine,
+            status: 'NG',
+            reason: reason,
+            userInput: userInputStr,
+            expectedInput: expectedStr
+          })
+        });
+
+        if (notifyRes.ok) {
+          const notifyData = await notifyRes.json();
+          if (notifyData && notifyData.message_id) {
+            ticket.chatworkMessageId = notifyData.message_id;
+          }
+        }
+      } catch (err) {
+        console.error('Failed to notify NG ticket to Chatwork:', err);
+      }
+    }
+
     ticket.reason = reason;
     ticket.saved = true;
     window.checklistState.tickets[fieldId] = ticket;
-    if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
+    if (typeof window.saveChecklistDraftToStorage === 'function') {
+      await window.saveChecklistDraftToStorage();
+    }
 
     closeChecklistTicketModal();
     renderCurrentChecklistTemplate();
