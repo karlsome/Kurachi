@@ -250,12 +250,12 @@
             color: var(--brand);
         }
 
-        /* Locked: until the 3-step scan is done, only the Scan tab is usable */
-        .tab-bar.locked-scan .tab-btn:not(:first-child) {
+        /* Locked: until the 3-step scan is done, Scan tab is usable, tabs after Scan are locked */
+        .tab-bar.locked-scan .tab-btn:not(:first-child):not(:nth-child(2)) {
             opacity: 0.4;
         }
 
-        .tab-bar.locked-scan .tab-btn:not(:first-child) .tab-icon::after {
+        .tab-bar.locked-scan .tab-btn:not(:first-child):not(:nth-child(2)) .tab-icon::after {
             content: '🔒';
             font-size: 9px;
             position: absolute;
@@ -265,11 +265,11 @@
         }
 
         /* Locked: during params verification, Scan and Params tabs are usable, others are locked */
-        .tab-bar.locked-params .tab-btn:not(:first-child):not(:nth-child(2)) {
+        .tab-bar.locked-params .tab-btn:not(:first-child):not(:nth-child(2)):not(:nth-child(3)) {
             opacity: 0.4;
         }
 
-        .tab-bar.locked-params .tab-btn:not(:first-child):not(:nth-child(2)) .tab-icon::after {
+        .tab-bar.locked-params .tab-btn:not(:first-child):not(:nth-child(2)):not(:nth-child(3)) .tab-icon::after {
             content: '🔒';
             font-size: 9px;
             position: absolute;

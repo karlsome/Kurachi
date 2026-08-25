@@ -32958,7 +32958,7 @@ app.post('/api/check-forms/submit', async (req, res) => {
       const startDate = normalizeCheckFormText(templatePayload.startDate);
       const fallbackEquipmentIds = normalizeCheckFormStringArray(templatePayload.equipmentIds);
       const fallbackEquipmentNames = normalizeCheckFormStringArray(templatePayload.equipmentNames);
-      const equipmentId = normalizeCheckFormText(
+      let equipmentId = normalizeCheckFormText(
         templatePayload.equipmentId || templatePayload.selectedMachineId || fallbackEquipmentIds[0]
       );
       const selectedMachine = normalizeCheckFormText(
@@ -32967,6 +32967,22 @@ app.post('/api/check-forms/submit', async (req, res) => {
       const processingEquipment = normalizeCheckFormText(
         templatePayload['加工設備'] || selectedMachine
       );
+
+      if (!equipmentId && processingEquipment) {
+        try {
+          const setsubiCollection = db.collection('setsubiDB');
+          const equipDoc = await setsubiCollection.findOne({
+            $or: [
+              { name: processingEquipment },
+              { 設備名: processingEquipment },
+              { name_ja: processingEquipment }
+            ]
+          });
+          if (equipDoc && equipDoc._id) {
+            equipmentId = equipDoc._id.toString();
+          }
+        } catch (_) {}
+      }
       let rawWorkerName = payload.workerName || templatePayload.workerName || payload.Worker_Name || templatePayload.Worker_Name;
       let workerNameArray = [];
       if (Array.isArray(rawWorkerName)) {

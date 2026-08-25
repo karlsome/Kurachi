@@ -15041,6 +15041,7 @@ if (manualSendModal) {
         const payload = {
           factory: window.checklistState.factory,
           machine: window.checklistState.machine,
+          equipmentId: window.checklistState.equipmentId || null,
           workerName,
           templates: queue.map(t => {
             const tFields = Array.isArray(t.fields) ? t.fields : [];
@@ -15048,6 +15049,7 @@ if (manualSendModal) {
               templateId: t._id,
               templateName: t.name,
               schedule: t.schedule,
+              equipmentId: window.checklistState.equipmentId || t.equipmentId || (Array.isArray(t.equipmentIds) ? t.equipmentIds[0] : null),
               answers: tFields.map(f => ({
                 id: f.id,
                 fieldId: f.id,
