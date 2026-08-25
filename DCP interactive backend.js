@@ -13753,10 +13753,21 @@ if (manualSendModal) {
       let photoHtml = '';
       if (field.photoRequired && !isNg && !isOutOfRange) {
         const photoBase64 = window.checklistState.fieldPhotos[field.id];
+        let isPhotoAttentionNeeded = false;
+        if (!photoBase64) {
+          if (ansVal === 'OK') {
+            isPhotoAttentionNeeded = true;
+          } else if (field.type === 'number' && typeof ansVal === 'number' && !isOutOfRange) {
+            isPhotoAttentionNeeded = true;
+          } else if (typeof ansVal === 'string' && ansVal.trim() !== '' && ansVal !== 'NG' && !ansVal.startsWith('SKIPPED')) {
+            isPhotoAttentionNeeded = true;
+          }
+        }
+        const pulseClass = isPhotoAttentionNeeded ? 'photo-pulse-attention' : '';
         photoHtml = `
           <div style="margin-top:8px;">
             <input type="file" id="checklist-field-photo-${field.id}" accept="image/*" capture="environment" style="display:none;" onchange="handleChecklistFieldPhotoCaptured('${field.id}', event)">
-            <button type="button" class="btn btn-secondary" style="font-size:0.8rem; padding:6px 12px;" onclick="document.getElementById('checklist-field-photo-${field.id}').click()">
+            <button type="button" class="btn btn-secondary ${pulseClass}" style="font-size:0.8rem; padding:6px 12px;" onclick="document.getElementById('checklist-field-photo-${field.id}').click()">
               📷 ${photoBase64 ? '✓ Photo Taken (Retake)' : 'Take Photo *'}
             </button>
             ${photoBase64 ? `<img src="${photoBase64}" style="width:60px; height:60px; object-fit:cover; border-radius:8px; margin-top:6px; display:block; cursor:pointer;" onclick="if(typeof window.openPreview === 'function') window.openPreview(this.src, '${fTitle.replace(/'/g, "\\'")}');">` : ''}

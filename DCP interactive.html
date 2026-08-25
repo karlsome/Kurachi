@@ -1831,6 +1831,31 @@
             50% { transform: scale(1.05); }
         }
 
+        @keyframes photoAttentionPulse {
+            0% {
+                transform: scale(1);
+                box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.6);
+                border-color: #2563eb;
+            }
+            50% {
+                transform: scale(1.05);
+                box-shadow: 0 0 16px 4px rgba(37, 99, 235, 0.4);
+                border-color: #3b82f6;
+            }
+            100% {
+                transform: scale(1);
+                box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.6);
+                border-color: #2563eb;
+            }
+        }
+        .photo-pulse-attention {
+            animation: photoAttentionPulse 1.4s infinite ease-in-out !important;
+            background: linear-gradient(135deg, #eff6ff, #dbeafe) !important;
+            color: #1e40af !important;
+            border: 2px solid #2563eb !important;
+            font-weight: 800 !important;
+        }
+
         /* Photo Annotator Overlay & Markup Tools */
         #annotator-overlay {
             position: fixed !important;
