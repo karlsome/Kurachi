@@ -3561,6 +3561,33 @@ async function clearChecklistPhotosFromIDB() {
   }
 }
 
+async function deleteChecklistPhotoFromIDB(id) {
+  if (!id) return;
+  try {
+    const db = await openChecklistPhotosDB();
+    const tx = db.transaction(STORE_NAME_CHECKLIST, 'readwrite');
+    const store = tx.objectStore(STORE_NAME_CHECKLIST);
+    store.delete(id);
+    return new Promise((res, rej) => {
+      tx.oncomplete = () => res();
+      tx.onerror = () => rej(tx.error);
+    });
+  } catch (e) {
+    console.warn('Failed to delete photo from IndexedDB:', e);
+  }
+}
+
+async function deleteTicketPhotosFromIDB(fieldId) {
+  const factory = window.checklistState?.factory;
+  const machine = window.checklistState?.machine;
+  if (!factory || !machine || !fieldId) return;
+
+  for (let i = 0; i < 10; i++) {
+    const idbKey = `tp_${factory}_${machine}_${fieldId}_${i}`;
+    await deleteChecklistPhotoFromIDB(idbKey);
+  }
+}
+
 window.saveChecklistDraftToStorage = async function () {
   if (!window.checklistState || !window.checklistState.factory || !window.checklistState.machine) return;
   const prefix = typeof uniquePrefix !== 'undefined' ? uniquePrefix : '';
@@ -13762,32 +13789,87 @@ if (manualSendModal) {
     });
   }
 
-  function confirmTicketDeletionOnOk(fieldId) {
-    const ticket = window.checklistState.tickets[fieldId];
-    if (ticket && ticket.saved) {
-      const confirmText = "A defect ticket was previously saved for NG. Since this item is now OK, delete this ticket and remove its Chatwork notification?";
-      if (!confirm(confirmText)) {
-        return false;
+  window.promptTicketDeletionModal = function (fieldId) {
+    return new Promise((resolve) => {
+      const ticket = window.checklistState.tickets[fieldId];
+      if (!ticket || !ticket.saved) {
+        resolve(true);
+        return;
       }
 
-      if (ticket.chatworkMessageId) {
-        try {
-          fetch(`${serverURL}/api/check-forms/cancel-ng-ticket`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ messageIds: [ticket.chatworkMessageId] })
-          }).catch(err => console.warn('Failed to delete Chatwork message on OK change:', err));
-        } catch (e) {
-          console.warn('Error sending Chatwork ticket cancellation request:', e);
+      window._ticketDeletionResolve = resolve;
+      window._ticketDeletionFieldId = fieldId;
+
+      const modal = document.getElementById('ticketDeletionConfirmModal');
+      const reasonPreview = document.getElementById('ticketDeletionReasonPreview');
+      const thumbsPreview = document.getElementById('ticketDeletionThumbsPreview');
+
+      if (reasonPreview) {
+        reasonPreview.textContent = ticket.reason || 'Defect ticket reported';
+      }
+
+      if (thumbsPreview) {
+        thumbsPreview.innerHTML = '';
+        if (Array.isArray(ticket.images) && ticket.images.length > 0) {
+          ticket.images.forEach(imgUrl => {
+            const img = document.createElement('img');
+            img.src = imgUrl;
+            img.style.cssText = 'width:56px; height:56px; object-fit:cover; border-radius:8px; border:1px solid #d1d5db; cursor:pointer;';
+            img.onclick = function () {
+              if (typeof window.openPreview === 'function') window.openPreview(this.src, 'Ticket Photo Preview');
+            };
+            thumbsPreview.appendChild(img);
+          });
+        } else {
+          thumbsPreview.innerHTML = '<span style="font-size:0.75rem; color:#9ca3af;">(No photos attached)</span>';
         }
       }
 
-      delete window.checklistState.tickets[fieldId];
-    }
-    return true;
-  }
+      if (modal) modal.style.display = 'flex';
+    });
+  };
 
-  window.handleChecklistToggle = function (fieldId, val) {
+  window.closeTicketDeletionConfirmModal = async function (confirmed) {
+    const modal = document.getElementById('ticketDeletionConfirmModal');
+    if (modal) modal.style.display = 'none';
+
+    const fieldId = window._ticketDeletionFieldId;
+    const resolve = window._ticketDeletionResolve;
+
+    window._ticketDeletionFieldId = null;
+    window._ticketDeletionResolve = null;
+
+    if (confirmed && fieldId) {
+      const ticket = window.checklistState.tickets[fieldId];
+      if (ticket) {
+        if (ticket.chatworkMessageId) {
+          try {
+            fetch(`${serverURL}/api/check-forms/cancel-ng-ticket`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ messageIds: [ticket.chatworkMessageId] })
+            }).catch(err => console.warn('Failed to delete Chatwork message on OK change:', err));
+          } catch (e) {
+            console.warn('Error sending Chatwork ticket cancellation request:', e);
+          }
+        }
+
+        if (typeof deleteTicketPhotosFromIDB === 'function') {
+          await deleteTicketPhotosFromIDB(fieldId);
+        }
+
+        delete window.checklistState.tickets[fieldId];
+        if (typeof window.saveChecklistDraftToStorage === 'function') {
+          await window.saveChecklistDraftToStorage();
+        }
+      }
+      if (resolve) resolve(true);
+    } else {
+      if (resolve) resolve(false);
+    }
+  };
+
+  window.handleChecklistToggle = async function (fieldId, val) {
     const currentVal = window.checklistState.answers[fieldId];
 
     // Tapping OK when already OK releases/deselects the OK button
@@ -13799,9 +13881,8 @@ if (manualSendModal) {
     }
 
     if (val === 'OK') {
-      if (!confirmTicketDeletionOnOk(fieldId)) {
-        return;
-      }
+      const confirmed = await promptTicketDeletionModal(fieldId);
+      if (!confirmed) return;
     }
 
     window.checklistState.answers[fieldId] = val;
@@ -14079,7 +14160,7 @@ if (manualSendModal) {
     if (display) display.textContent = display.textContent.slice(0, -1);
   };
 
-  window.checklistKeypadConfirm = function () {
+  window.checklistKeypadConfirm = async function () {
     const display = document.getElementById('checklistKeypadValue');
     const modal = document.getElementById('checklistKeypadModal');
     const active = window.checklistState.activeKeypadField;
@@ -14094,9 +14175,8 @@ if (manualSendModal) {
       if (active.max !== null && numVal > active.max) outOfRange = true;
 
       if (!outOfRange) {
-        if (!confirmTicketDeletionOnOk(active.fieldId)) {
-          return;
-        }
+        const confirmed = await promptTicketDeletionModal(active.fieldId);
+        if (!confirmed) return;
       }
 
       window.checklistState.answers[active.fieldId] = numVal;

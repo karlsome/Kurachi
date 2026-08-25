@@ -3206,6 +3206,42 @@
         </div>
     </div>
 
+    <!-- Ticket Deletion Confirmation Modal with Ticket Preview -->
+    <div id="ticketDeletionConfirmModal" class="checklist-modal-overlay" style="display:none;">
+        <div class="checklist-modal-card" style="max-width:460px; text-align:left;">
+            <div style="margin-bottom:12px;">
+                <h3 style="font-size:1.1rem; font-weight:800; color:var(--text-main,#1f2733); margin:0;">
+                    Delete Defect Ticket?
+                </h3>
+                <p style="font-size:0.8rem; color:#6b7280; margin:2px 0 0 0;">
+                    This item was marked NG. Changing to OK will delete this ticket.
+                </p>
+            </div>
+
+            <!-- Ticket Preview Box -->
+            <div style="background:rgba(243,244,246,0.7); border:1px solid #e5e7eb; border-radius:12px; padding:12px; margin-bottom:14px;">
+                <div style="font-size:0.75rem; font-weight:800; color:#6b7280; text-transform:uppercase; margin-bottom:4px;">
+                    Ticket Preview
+                </div>
+                <div id="ticketDeletionReasonPreview" style="font-size:0.85rem; font-weight:600; color:#1f2733; word-break:break-word; margin-bottom:8px;"></div>
+                <div id="ticketDeletionThumbsPreview" style="display:flex; gap:8px; flex-wrap:wrap;"></div>
+            </div>
+
+            <p style="font-size:0.8rem; color:#ef4444; font-weight:700; margin-bottom:14px; text-align:center;">
+                ⚠️ Deleting this ticket will purge attached photos and ticket data.
+            </p>
+
+            <div style="display:flex; gap:10px;">
+                <button type="button" class="btn btn-secondary" style="flex:1; font-weight:700;" onclick="closeTicketDeletionConfirmModal(false)">
+                    Cancel (Keep NG)
+                </button>
+                <button type="button" class="btn btn-primary" style="flex:1.3; font-weight:700; background:#ef4444; border-color:#ef4444;" onclick="closeTicketDeletionConfirmModal(true)">
+                    Delete Ticket & Set OK
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Post-Production Checklist Reminder Modal -->
     <div id="postChecklistReminderModal" class="checklist-modal-overlay" style="display:none;">
         <div class="checklist-modal-card" style="max-width:460px;">
