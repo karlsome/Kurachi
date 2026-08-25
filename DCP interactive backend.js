@@ -3440,9 +3440,108 @@ function renderWorkerNames() {
   });
 }
 
-// Multi-Worker Selection System
+// Multi-Worker Selection & Persistence System
 window.selectedWorkerNames = window.selectedWorkerNames || [];
 window.activeWorkerSlotIndex = 0;
+
+window.saveWorkerNamesToStorage = function () {
+  const activeNames = (window.selectedWorkerNames || []).map(n => (n || '').trim()).filter(Boolean);
+  const prefix = typeof uniquePrefix !== 'undefined' ? uniquePrefix : '';
+  localStorage.setItem(`${prefix}selectedWorkerNames`, JSON.stringify(activeNames));
+
+  const pageName = location.pathname.split('/').pop();
+  const currentSelectedFactory = document.getElementById('selected工場')?.value;
+  const currentSelectedMachine = getQueryParam('machine');
+  const input = document.getElementById('Machine Operator');
+  if (pageName && currentSelectedFactory && currentSelectedMachine && input) {
+    const key = `${pageName}_${currentSelectedFactory}_${currentSelectedMachine}_${input.id || input.name}`;
+    localStorage.setItem(key, JSON.stringify(activeNames));
+  }
+};
+
+window.loadWorkerNamesFromStorage = function () {
+  const prefix = typeof uniquePrefix !== 'undefined' ? uniquePrefix : '';
+  let stored = localStorage.getItem(`${prefix}selectedWorkerNames`);
+  if (!stored) {
+    const pageName = location.pathname.split('/').pop();
+    const currentSelectedFactory = document.getElementById('selected工場')?.value;
+    const currentSelectedMachine = getQueryParam('machine');
+    if (pageName && currentSelectedFactory && currentSelectedMachine) {
+      const key = `${pageName}_${currentSelectedFactory}_${currentSelectedMachine}_Machine Operator`;
+      stored = localStorage.getItem(key);
+    }
+  }
+
+  if (stored) {
+    try {
+      if (stored.startsWith('[')) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          window.selectedWorkerNames = parsed;
+        }
+      } else if (stored.trim()) {
+        window.selectedWorkerNames = stored.split(',').map(s => s.trim()).filter(Boolean);
+      }
+    } catch (e) {
+      console.warn('Could not parse stored worker names:', e);
+    }
+  }
+
+  const activeNames = (window.selectedWorkerNames || []).map(n => (n || '').trim()).filter(Boolean);
+  const input = document.getElementById('Machine Operator');
+  if (input && activeNames.length > 0) {
+    input.value = activeNames.join(', ');
+  }
+};
+
+window.saveChecklistDraftToStorage = function () {
+  if (!window.checklistState || !window.checklistState.factory || !window.checklistState.machine) return;
+  const prefix = typeof uniquePrefix !== 'undefined' ? uniquePrefix : '';
+  const key = `${prefix}checklistDraft_${window.checklistState.factory}_${window.checklistState.machine}`;
+  const draftData = {
+    answers: window.checklistState.answers || {},
+    tickets: window.checklistState.tickets || {},
+    fieldPhotos: window.checklistState.fieldPhotos || {},
+    queueIndex: window.checklistState.queueIndex || 0,
+    isPreComplete: window.checklistState.isPreComplete || false,
+    isBypassed: window.checklistState.isBypassed || false,
+    timestamp: Date.now()
+  };
+  localStorage.setItem(key, JSON.stringify(draftData));
+};
+
+window.loadChecklistDraftFromStorage = function () {
+  if (!window.checklistState || !window.checklistState.factory || !window.checklistState.machine) return;
+  const prefix = typeof uniquePrefix !== 'undefined' ? uniquePrefix : '';
+  const key = `${prefix}checklistDraft_${window.checklistState.factory}_${window.checklistState.machine}`;
+  const raw = localStorage.getItem(key);
+  if (!raw) return;
+
+  try {
+    const draft = JSON.parse(raw);
+    if (draft.timestamp && (Date.now() - draft.timestamp > 86400000)) {
+      localStorage.removeItem(key);
+      return;
+    }
+    if (draft.answers) window.checklistState.answers = { ...window.checklistState.answers, ...draft.answers };
+    if (draft.tickets) window.checklistState.tickets = { ...window.checklistState.tickets, ...draft.tickets };
+    if (draft.fieldPhotos) window.checklistState.fieldPhotos = { ...window.checklistState.fieldPhotos, ...draft.fieldPhotos };
+    if (typeof draft.queueIndex === 'number' && draft.queueIndex < (window.checklistState.queue?.length || 1)) {
+      window.checklistState.queueIndex = draft.queueIndex;
+    }
+    if (draft.isPreComplete) window.checklistState.isPreComplete = true;
+    if (draft.isBypassed) window.checklistState.isBypassed = true;
+  } catch (e) {
+    console.warn('Error loading checklist draft:', e);
+  }
+};
+
+window.clearChecklistDraftFromStorage = function () {
+  if (!window.checklistState || !window.checklistState.factory || !window.checklistState.machine) return;
+  const prefix = typeof uniquePrefix !== 'undefined' ? uniquePrefix : '';
+  const key = `${prefix}checklistDraft_${window.checklistState.factory}_${window.checklistState.machine}`;
+  localStorage.removeItem(key);
+};
 
 window.renderWorkerListUI = function () {
   const container = document.getElementById('workerListContainer');
@@ -3492,6 +3591,8 @@ window.addWorkerSlot = function () {
   if (!window.selectedWorkerNames) window.selectedWorkerNames = [];
   window.selectedWorkerNames.push('');
   renderWorkerListUI();
+  saveWorkerNamesToStorage();
+  saveChecklistDraftToStorage();
   if (typeof window.renderCurrentChecklistTemplate === 'function') window.renderCurrentChecklistTemplate();
   openWorkerModal(window.selectedWorkerNames.length - 1);
 };
@@ -3500,6 +3601,8 @@ window.removeWorkerSlot = function (index) {
   if (!window.selectedWorkerNames || window.selectedWorkerNames.length <= 1) return;
   window.selectedWorkerNames.splice(index, 1);
   renderWorkerListUI();
+  saveWorkerNamesToStorage();
+  saveChecklistDraftToStorage();
   if (typeof window.renderCurrentChecklistTemplate === 'function') window.renderCurrentChecklistTemplate();
 };
 
@@ -3525,19 +3628,14 @@ function selectWorkerName(name) {
   }
 
   renderWorkerListUI();
+  saveWorkerNamesToStorage();
+  saveChecklistDraftToStorage();
+
   if (typeof window.renderCurrentChecklistTemplate === 'function') {
     window.renderCurrentChecklistTemplate();
   }
 
   addToRecentWorkers(name);
-
-  const pageName = location.pathname.split('/').pop();
-  const currentSelectedFactory = document.getElementById('selected工場')?.value;
-  const currentSelectedMachine = getQueryParam('machine');
-  if (pageName && currentSelectedFactory && currentSelectedMachine && input) {
-    const key = `${pageName}_${currentSelectedFactory}_${currentSelectedMachine}_${input.id || input.name}`;
-    localStorage.setItem(key, JSON.stringify(window.selectedWorkerNames));
-  }
 
   logTabletAction('Worker name selected', 'in-progress', {
     workerNames: window.selectedWorkerNames
@@ -13201,7 +13299,6 @@ if (manualSendModal) {
       if (preChecklists.length > 0) {
         if (btn) btn.style.display = 'inline-flex';
         if (panel) panel.style.display = 'block';
-        if (bar) bar.classList.add('locked-checklist');
 
         window.checklistState.queue = preChecklists;
         window.checklistState.queueIndex = 0;
@@ -13211,8 +13308,19 @@ if (manualSendModal) {
         window.checklistState.tickets = {};
         window.checklistState.fieldPhotos = {};
 
-        renderCurrentChecklistTemplate();
-        window.goToChecklistTab();
+        if (typeof window.loadWorkerNamesFromStorage === 'function') window.loadWorkerNamesFromStorage();
+        if (typeof window.loadChecklistDraftFromStorage === 'function') window.loadChecklistDraftFromStorage();
+
+        if (window.checklistState.isPreComplete || window.checklistState.isBypassed) {
+          if (bar) bar.classList.remove('locked-checklist');
+        } else {
+          if (bar) bar.classList.add('locked-checklist');
+        }
+
+        window.renderCurrentChecklistTemplate();
+        if (!window.checklistState.isPreComplete && !window.checklistState.isBypassed) {
+          window.goToChecklistTab();
+        }
       } else {
         if (btn) btn.style.display = 'none';
         if (panel) panel.style.display = 'none';
@@ -13374,6 +13482,7 @@ if (manualSendModal) {
 
   window.handleChecklistToggle = function (fieldId, val) {
     window.checklistState.answers[fieldId] = val;
+    if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
     renderCurrentChecklistTemplate();
     if (val === 'NG') {
       openChecklistTicketModal(fieldId);
@@ -13382,11 +13491,13 @@ if (manualSendModal) {
 
   window.handleChecklistSelect = function (fieldId, val) {
     window.checklistState.answers[fieldId] = val;
+    if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
     renderCurrentChecklistTemplate();
   };
 
   window.handleChecklistTextInput = function (fieldId, val) {
     window.checklistState.answers[fieldId] = val;
+    if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
   };
 
   window.handleChecklistFieldPhotoCaptured = function (fieldId, event) {
@@ -13395,6 +13506,7 @@ if (manualSendModal) {
     const reader = new FileReader();
     reader.onload = function (e) {
       window.checklistState.fieldPhotos[fieldId] = e.target.result;
+      if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
       renderCurrentChecklistTemplate();
     };
     reader.readAsDataURL(file);
@@ -13447,6 +13559,7 @@ if (manualSendModal) {
       if (active.min !== null && numVal < active.min) outOfRange = true;
       if (active.max !== null && numVal > active.max) outOfRange = true;
 
+      if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
       if (modal) modal.style.display = 'none';
       renderCurrentChecklistTemplate();
 
@@ -13455,45 +13568,115 @@ if (manualSendModal) {
       }
     } else {
       delete window.checklistState.answers[active.fieldId];
+      if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
       if (modal) modal.style.display = 'none';
       renderCurrentChecklistTemplate();
     }
   };
 
-  window.openChecklistTicketModal = function (fieldId, autoReason = '') {
-    window.checklistState.activeTicketField = fieldId;
-    const modal = document.getElementById('checklistTicketModal');
-    const info = document.getElementById('checklistTicketFieldInfo');
-    const reasonInput = document.getElementById('checklistTicketReason');
+  window.handleChecklistSubmitOrNext = async function () {
+    const { queue, queueIndex } = window.checklistState;
+    if (!queue || !queue[queueIndex]) return;
 
-    const existing = window.checklistState.tickets[fieldId] || { reason: autoReason, images: [] };
-    window.checklistState.tickets[fieldId] = existing;
+    const tpl = queue[queueIndex];
+    const fields = Array.isArray(tpl.fields) ? tpl.fields : [];
 
-    if (info) info.textContent = `Reporting issue for item`;
-    if (reasonInput) reasonInput.value = existing.reason || autoReason;
+    let firstIncompleteCard = null;
+    fields.forEach((field) => {
+      if (field.type === 'name') return;
+      const ans = window.checklistState.answers[field.id];
+      const ticket = window.checklistState.tickets[field.id];
+      const card = document.getElementById(`checklist-card-${field.id}`);
 
-    renderTicketThumbnails();
-    if (modal) modal.style.display = 'flex';
+      let isFieldValid = true;
+
+      if (field.required && (ans === undefined || ans === '')) isFieldValid = false;
+      if (ans === 'NG' && (!ticket || !ticket.saved)) isFieldValid = false;
+      if (field.photoRequired && !window.checklistState.fieldPhotos[field.id]) isFieldValid = false;
+
+      if (!isFieldValid) {
+        if (card) card.classList.add('invalid-highlight');
+        if (!firstIncompleteCard) firstIncompleteCard = card;
+      } else {
+        if (card) card.classList.remove('invalid-highlight');
+      }
+    });
+
+    if (firstIncompleteCard) {
+      firstIncompleteCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      if (typeof showAppToast === 'function') showAppToast(_t('checklist_incomplete'));
+      return;
+    }
+
+    if (queueIndex < queue.length - 1) {
+      const banner = document.getElementById('checklistTransitionBanner');
+      const text = document.getElementById('checklistTransitionText');
+      if (banner && text) {
+        const nextTpl = queue[queueIndex + 1];
+        text.textContent = `${tpl.name} completed! Transitioning to ${nextTpl.name}...`;
+        banner.style.display = 'flex';
+        setTimeout(() => { banner.style.display = 'none'; }, 2200);
+      }
+
+      window.checklistState.queueIndex += 1;
+      if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
+      if (typeof window.renderCurrentChecklistTemplate === 'function') window.renderCurrentChecklistTemplate();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } else {
+      try {
+        const workerName = document.getElementById('step0CurrentWorkerName')?.textContent || '';
+        const payload = {
+          factory: window.checklistState.factory,
+          machine: window.checklistState.machine,
+          workerName,
+          templates: queue.map(t => ({
+            templateId: t._id,
+            templateName: t.name,
+            schedule: t.schedule,
+            answers: fields.map(f => ({
+              fieldId: f.id,
+              label: f.label,
+              type: f.type,
+              value: window.checklistState.answers[f.id],
+              fieldPhotoBase64: window.checklistState.fieldPhotos[f.id] || null,
+            })),
+            tickets: Object.keys(window.checklistState.tickets).map(fId => ({
+              fieldId: fId,
+              reason: window.checklistState.tickets[fId].reason,
+              imageOverlayBase64s: window.checklistState.tickets[fId].images,
+            }))
+          }))
+        };
+
+        const res = await fetch(`${serverURL}/api/check-forms/submit`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (res.ok) {
+          window.checklistState.isPreComplete = true;
+          if (typeof window.clearChecklistDraftFromStorage === 'function') window.clearChecklistDraftFromStorage();
+
+          const bar = document.querySelector('.tab-bar');
+          if (bar) bar.classList.remove('locked-checklist');
+
+          if (typeof showAppToast === 'function') {
+            showAppToast('✓ All Checklists Completed Successfully!');
+          }
+
+          if (typeof window.goToTab === 'function') window.goToTab(0);
+        } else {
+          const errData = await res.json().catch(() => ({}));
+          if (typeof showAppToast === 'function') {
+            showAppToast(`❌ Submission Error: ${errData.error || 'Failed to submit'}`);
+          }
+        }
+      } catch (err) {
+        console.error('Error submitting checklist:', err);
+      }
+    }
   };
-
-  window.closeChecklistTicketModal = function () {
-    const modal = document.getElementById('checklistTicketModal');
-    if (modal) modal.style.display = 'none';
-  };
-
-  function renderTicketThumbnails() {
-    const fieldId = window.checklistState.activeTicketField;
-    const container = document.getElementById('checklistTicketThumbsContainer');
-    if (!container || !fieldId) return;
-
-    const ticket = window.checklistState.tickets[fieldId] || { images: [] };
-    container.innerHTML = ticket.images.map((img, i) => `
-      <div style="position:relative; width:64px; height:64px;">
-        <img src="${img}" style="width:100%; height:100%; object-fit:cover; border-radius:8px; border:1px solid #e6e8ef;">
-        <button type="button" onclick="removeChecklistTicketImage(${i})" style="position:absolute; top:-6px; right:-6px; background:#ef4444; color:#fff; border:none; width:20px; height:20px; border-radius:50%; font-size:12px; font-weight:800; cursor:pointer;">✕</button>
-      </div>
-    `).join('');
-  }
 
   window.removeChecklistTicketImage = function (index) {
     const fieldId = window.checklistState.activeTicketField;
@@ -13541,6 +13724,7 @@ if (manualSendModal) {
     ticket.reason = reason;
     ticket.saved = true;
     window.checklistState.tickets[fieldId] = ticket;
+    if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
 
     closeChecklistTicketModal();
     renderCurrentChecklistTemplate();
