@@ -3167,6 +3167,26 @@
         </div>
     </div>
 
+    <!-- Per-Step Leader QR Skip Modal -->
+    <div id="stepSkipQrModal" class="checklist-modal-overlay" style="display:none;">
+        <div class="checklist-modal-card" style="max-width:440px; text-align:center;">
+            <div style="width:52px; height:52px; border-radius:50%; background:rgba(37,99,235,0.1); color:#2563eb; display:flex; align-items:center; justify-content:center; margin:0 auto 10px auto; font-size:1.5rem;">
+                🔑
+            </div>
+            <h3 style="font-size:1.1rem; font-weight:800; color:var(--text-main,#1f2733); margin-bottom:4px;">
+                Leader QR Required
+            </h3>
+            <p style="font-size:0.85rem; color:#6b7280; margin-bottom:12px; line-height:1.4;">
+                This step is required. Scan Leader QR Code to authorize skipping.
+            </p>
+            <div id="stepSkipQrReader" style="width:100%; aspect-ratio:1; border-radius:12px; background:#000; overflow:hidden;"></div>
+            <p id="stepSkipQrStatus" style="font-size:0.85rem; font-weight:700; text-align:center; min-height:20px; color:#6b7280; margin-top:8px;"></p>
+            <div style="display:flex; gap:10px; margin-top:10px;">
+                <button type="button" class="btn btn-secondary" style="flex:1;" onclick="closeStepSkipLeaderQrModal()" data-i18n="cancel">Cancel</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Post-Production Checklist Reminder Modal -->
     <div id="postChecklistReminderModal" class="checklist-modal-overlay" style="display:none;">
         <div class="checklist-modal-card" style="max-width:460px;">

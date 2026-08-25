@@ -13555,6 +13555,10 @@ if (manualSendModal) {
       return false;
     }
 
+    if (typeof ansVal === 'string' && ansVal.startsWith('SKIPPED')) {
+      return true;
+    }
+
     const isNg = ansVal === 'NG';
     const numVal = typeof ansVal === 'number' ? ansVal : parseFloat(ansVal);
     const isOutOfRange = field.type === 'number' && !isNaN(numVal) && (
@@ -13606,13 +13610,15 @@ if (manualSendModal) {
       window.checklistState.unlockedCompletedCards = window.checklistState.unlockedCompletedCards || {};
       const isCardUnlockedByOperator = !!window.checklistState.unlockedCompletedCards[field.id];
 
+      const isSkipped = typeof ansVal === 'string' && ansVal.startsWith('SKIPPED');
+
       let lockBtnHtml = '';
       if (!isUnlocked) {
         cardClass += ' locked-card';
         stepPill = `<span class="checklist-step-pill locked">🔒 Step ${idx + 1}</span>`;
       } else if (isCompleted) {
         cardClass += ' completed-card';
-        stepPill = `<span class="checklist-step-pill done">✓ Step ${idx + 1}</span>`;
+        stepPill = `<span class="checklist-step-pill done">${isSkipped ? '⏭️ Step ' + (idx + 1) + ' (Skipped)' : '✓ Step ' + (idx + 1)}</span>`;
         if (!isCardUnlockedByOperator) {
           cardClass += ' completed-locked';
           lockBtnHtml = `
@@ -13718,6 +13724,17 @@ if (manualSendModal) {
         `;
       }
 
+      let skipBtnHtml = '';
+      if (field.type !== 'name') {
+        skipBtnHtml = `
+          <div style="display:flex; justify-content:flex-end; margin-top:10px;">
+            <button type="button" class="btn btn-secondary" style="font-size:0.8rem; padding:6px 14px; font-weight:700; border-radius:8px; display:inline-flex; align-items:center; gap:4px; ${isSkipped ? 'border-color:#2563eb; color:#2563eb; background:rgba(37,99,235,0.06);' : ''}" onclick="handleStepSkip('${field.id}', ${field.required ? 'true' : 'false'})">
+              ⏭️ <span>${isSkipped ? 'Skipped (Tap to undo)' : (typeof _t === 'function' ? _t('skip_step') : 'Skip Step')}</span>
+            </button>
+          </div>
+        `;
+      }
+
       card.innerHTML = `
         <div class="checklist-card-header" style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
           <div style="flex:1; min-width:0;">
@@ -13735,6 +13752,7 @@ if (manualSendModal) {
         ${mediaHtml}
         ${controlHtml}
         ${photoHtml}
+        ${skipBtnHtml}
       `;
 
       container.appendChild(card);
@@ -13742,6 +13760,16 @@ if (manualSendModal) {
   }
 
   window.handleChecklistToggle = function (fieldId, val) {
+    const currentVal = window.checklistState.answers[fieldId];
+
+    // Tapping OK when already OK releases/deselects the OK button
+    if (val === 'OK' && currentVal === 'OK') {
+      delete window.checklistState.answers[fieldId];
+      if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
+      renderCurrentChecklistTemplate();
+      return;
+    }
+
     window.checklistState.answers[fieldId] = val;
     if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
     renderCurrentChecklistTemplate();
@@ -14446,6 +14474,107 @@ if (manualSendModal) {
     const modal = document.getElementById('checklistBypassModal');
     if (modal) modal.style.display = 'none';
   };
+
+  window.handleStepSkip = function (fieldId, isRequired) {
+    const ansVal = window.checklistState.answers[fieldId];
+    const isSkipped = typeof ansVal === 'string' && ansVal.startsWith('SKIPPED');
+
+    if (isSkipped) {
+      delete window.checklistState.answers[fieldId];
+      delete window.checklistState.tickets[fieldId];
+      if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
+      if (typeof showAppToast === 'function') showAppToast('↩️ Skip undone');
+      renderCurrentChecklistTemplate();
+      return;
+    }
+
+    if (isRequired) {
+      openStepSkipLeaderQrModal(fieldId);
+    } else {
+      executeStepSkip(fieldId, null);
+    }
+  };
+
+  window.openStepSkipLeaderQrModal = function (fieldId) {
+    window.checklistState.pendingSkipFieldId = fieldId;
+    const modal = document.getElementById('stepSkipQrModal');
+    const status = document.getElementById('stepSkipQrStatus');
+    if (status) {
+      status.style.color = '#6b7280';
+      status.textContent = 'Scanning Leader QR Code...';
+    }
+    if (modal) modal.style.display = 'flex';
+
+    if (typeof Html5Qrcode !== 'undefined') {
+      if (window.checklistState.stepSkipQrScanner) {
+        try { window.checklistState.stepSkipQrScanner.stop(); } catch (e) { }
+      }
+      const scanner = new Html5Qrcode('stepSkipQrReader');
+      window.checklistState.stepSkipQrScanner = scanner;
+
+      scanner.start(
+        { facingMode: 'environment' },
+        { fps: 10, qrbox: { width: 220, height: 220 } },
+        async function (decodedText) {
+          try {
+            const res = await fetch(`${serverURL}/api/check-forms/verify-qr?code=${encodeURIComponent(decodedText)}`);
+            if (res.ok) {
+              const userData = await res.json();
+              scanner.stop();
+              closeStepSkipLeaderQrModal();
+              executeStepSkip(fieldId, userData);
+            } else {
+              if (status) {
+                status.style.color = '#ef4444';
+                status.textContent = '❌ Invalid Leader QR Code';
+              }
+            }
+          } catch (e) {
+            console.error(e);
+          }
+        },
+        function () { }
+      ).catch(err => {
+        if (status) status.textContent = 'Could not access camera for QR scan';
+      });
+    }
+  };
+
+  window.closeStepSkipLeaderQrModal = function () {
+    if (window.checklistState.stepSkipQrScanner) {
+      try { window.checklistState.stepSkipQrScanner.stop(); } catch (e) { }
+    }
+    const modal = document.getElementById('stepSkipQrModal');
+    if (modal) modal.style.display = 'none';
+    window.checklistState.pendingSkipFieldId = null;
+  };
+
+  function executeStepSkip(fieldId, leaderUser) {
+    const skipText = leaderUser
+      ? `SKIPPED (Leader: ${leaderUser.firstName || leaderUser.username || 'Verified'})`
+      : 'SKIPPED';
+
+    window.checklistState.answers[fieldId] = skipText;
+
+    if (leaderUser) {
+      window.checklistState.tickets[fieldId] = {
+        saved: true,
+        reason: `Step skipped with Leader approval (${leaderUser.firstName || leaderUser.username})`,
+        skipped: true,
+        leader: leaderUser
+      };
+    }
+
+    if (typeof window.saveChecklistDraftToStorage === 'function') {
+      window.saveChecklistDraftToStorage();
+    }
+
+    if (typeof showAppToast === 'function') {
+      showAppToast(leaderUser ? `⏭️ Step skipped with Leader approval!` : `⏭️ Step skipped`);
+    }
+
+    renderCurrentChecklistTemplate();
+  }
 
   async function submitSuperBypass(leaderUser) {
     const reasonInput = document.getElementById('checklistBypassReason');
