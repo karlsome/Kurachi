@@ -32919,6 +32919,65 @@ app.post('/api/check-forms/update-ng-ticket', async (req, res) => {
   }
 });
 
+app.get('/api/check-forms/today-status', async (req, res) => {
+  const factory = normalizeCheckFormText(req.query.factory);
+  const machine = normalizeCheckFormText(req.query.machine);
+
+  if (!factory || !machine) {
+    return res.status(400).json({ error: 'factory and machine are required' });
+  }
+
+  try {
+    await client.connect();
+    const submittedDb = client.db('submittedDB');
+    const recordsCollection = submittedDb.collection(CHECK_FORM_RECORDS_COLLECTION);
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+
+    const docs = await recordsCollection.find({
+      factory,
+      $or: [
+        { 加工設備: machine },
+        { machine },
+        { selectedMachine: machine }
+      ],
+      createdAt: { $gte: startOfDay }
+    }).sort({ createdAt: -1 }).toArray();
+
+    if (!docs || docs.length === 0) {
+      return res.status(200).json({
+        hasSubmittedToday: false,
+        isPreComplete: false,
+        isPostComplete: false,
+        recordIds: {}
+      });
+    }
+
+    const recordIds = {};
+    let isPreComplete = false;
+    let isPostComplete = false;
+
+    docs.forEach(doc => {
+      if (doc.templateId && doc._id) {
+        recordIds[doc.templateId] = doc._id.toString();
+      }
+      if (doc.isPreComplete !== false) isPreComplete = true;
+      if (doc.isPostComplete === true) isPostComplete = true;
+    });
+
+    return res.status(200).json({
+      hasSubmittedToday: true,
+      isPreComplete,
+      isPostComplete,
+      recordIds,
+      lastSubmittedAt: docs[0].createdAt
+    });
+  } catch (error) {
+    console.error('Error fetching today checklist status:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
 app.post('/api/check-forms/submit', async (req, res) => {
   const payload = req.body || {};
   const factory = normalizeCheckFormText(payload.factory);

@@ -13512,6 +13512,9 @@ if (manualSendModal) {
         if (!window.checklistState.isPreComplete && !window.checklistState.isBypassed) {
           window.goToChecklistTab();
         }
+
+        // MongoDB SWR Background Sync: Verify today's MongoDB status and sync to localStorage & UI
+        verifyChecklistStatusWithMongoDB(factory, machine);
       } else {
         if (btn) btn.style.display = 'none';
         if (panel) panel.style.display = 'none';
@@ -13522,6 +13525,45 @@ if (manualSendModal) {
       console.error('Error initializing checklists:', err);
     }
   };
+
+  async function verifyChecklistStatusWithMongoDB(factory, machine) {
+    if (!factory || !machine) return;
+    try {
+      const res = await fetch(`${serverURL}/api/check-forms/today-status?factory=${encodeURIComponent(factory)}&machine=${encodeURIComponent(machine)}`);
+      if (!res.ok) return;
+      const data = await res.json();
+
+      if (data && typeof data.isPreComplete === 'boolean') {
+        const isPreDone = data.isPreComplete;
+        window.checklistState.isPreComplete = isPreDone;
+        if (data.isPostComplete) window.checklistState.isPostComplete = true;
+        if (data.recordIds) {
+          window.checklistState.recordIds = { ...(window.checklistState.recordIds || {}), ...data.recordIds };
+        }
+
+        if (typeof window.saveChecklistDraftToStorage === 'function') {
+          await window.saveChecklistDraftToStorage();
+        }
+
+        const bar = document.querySelector('.tab-bar');
+        if (isPreDone || window.checklistState.isBypassed) {
+          if (bar) bar.classList.remove('locked-checklist');
+        } else {
+          if (bar) bar.classList.add('locked-checklist');
+        }
+
+        if (typeof window.renderCurrentChecklistTemplate === 'function') {
+          window.renderCurrentChecklistTemplate();
+        }
+
+        if (!isPreDone && !window.checklistState.isBypassed && typeof window.goToChecklistTab === 'function') {
+          window.goToChecklistTab();
+        }
+      }
+    } catch (e) {
+      console.warn('MongoDB checklist status sync background check failed:', e);
+    }
+  }
 
   // Heartbeat check every 30 seconds for overnight day-changes
   if (!window._checklistDayCheckInterval) {
@@ -14039,6 +14081,34 @@ if (manualSendModal) {
       if (resolve) resolve(true);
     } else {
       if (resolve) resolve(false);
+    }
+  };
+
+  window.autoLockOtherCards = function (currentFieldId) {
+    if (!window.checklistState.unlockedCompletedCards) return;
+    if (currentFieldId) {
+      for (const fId of Object.keys(window.checklistState.unlockedCompletedCards)) {
+        if (fId !== currentFieldId) {
+          delete window.checklistState.unlockedCompletedCards[fId];
+        }
+      }
+    }
+  };
+
+  window.unlockChecklistCard = function (fieldId) {
+    window.checklistState.unlockedCompletedCards = window.checklistState.unlockedCompletedCards || {};
+    window.checklistState.unlockedCompletedCards[fieldId] = true;
+    if (typeof window.renderCurrentChecklistTemplate === 'function') {
+      window.renderCurrentChecklistTemplate();
+    }
+  };
+
+  window.lockChecklistCard = function (fieldId) {
+    if (window.checklistState.unlockedCompletedCards) {
+      delete window.checklistState.unlockedCompletedCards[fieldId];
+    }
+    if (typeof window.renderCurrentChecklistTemplate === 'function') {
+      window.renderCurrentChecklistTemplate();
     }
   };
 

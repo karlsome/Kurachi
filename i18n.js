@@ -356,6 +356,14 @@ const translations = {
         'complete_all_checklists': '点検完了',
         'ticket_required': '異常報告（チケット）が必要です',
         'bypass_reason_placeholder': 'バイパス理由を入力してください',
+        'proceed_with_production': '看板をスキャン / 生産に進む',
+        'submit_pre_production_check': '生産前点検を送信',
+        'complete_post_production_check': '生産後点検を完了',
+        'tap_to_expand_collapse': 'タップで展開 / 折りたたみ',
+        'tap_to_collapse_checklist': '▲ タップして完了した点検項目を折りたたむ',
+        'post_production_checks_title': '📋 生産後点検',
+        'checklist_completed_banner': '点検完了',
+        'steps_count': '項目',
     },
 
     en: {
@@ -710,8 +718,16 @@ const translations = {
         'checklist_incomplete': 'Some checklist items are unanswered',
         'next_checklist': 'Next Checklist',
         'complete_all_checklists': 'Checklist Completed',
-        'ticket_required': 'Issue report (Ticket) is required',
-        'bypass_reason_placeholder': 'Enter reason for bypass',
+        'ticket_required': 'Issue report (Ticket) required',
+        'bypass_reason_placeholder': 'Enter bypass reason',
+        'proceed_with_production': 'Proceed with Production',
+        'submit_pre_production_check': 'Submit Pre-Production Check',
+        'complete_post_production_check': 'Complete Post-Production Check',
+        'tap_to_expand_collapse': 'Tap to expand / collapse',
+        'tap_to_collapse_checklist': '▲ Tap to collapse completed checklist',
+        'post_production_checks_title': '📋 Post-Production Checks',
+        'checklist_completed_banner': 'Checklist Completed',
+        'steps_count': 'steps',
     },
 
     pt: {
@@ -1068,6 +1084,14 @@ const translations = {
         'complete_all_checklists': 'Verificação Concluída',
         'ticket_required': 'Relatório de problema (Ticket) é necessário',
         'bypass_reason_placeholder': 'Insira o motivo do bypass',
+        'proceed_with_production': 'Prosseguir para a Produção',
+        'submit_pre_production_check': 'Enviar Verificação Pré-Produção',
+        'complete_post_production_check': 'Concluir Verificação Pós-Produção',
+        'tap_to_expand_collapse': 'Toque para expandir / recolher',
+        'tap_to_collapse_checklist': '▲ Toque para recolher o checklist concluído',
+        'post_production_checks_title': '📋 Verificações Pós-Produção',
+        'checklist_completed_banner': 'Checklist Concluído',
+        'steps_count': 'etapas',
     }
 };
 
