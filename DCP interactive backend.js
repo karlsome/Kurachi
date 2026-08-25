@@ -3646,6 +3646,7 @@ window.saveChecklistDraftToStorage = async function () {
     queueIndex: window.checklistState.queueIndex || 0,
     isPreComplete: window.checklistState.isPreComplete || false,
     isBypassed: window.checklistState.isBypassed || false,
+    dateStr: new Date().toISOString().split('T')[0],
     timestamp: Date.now()
   };
 
@@ -3663,7 +3664,9 @@ window.loadChecklistDraftFromStorage = async function () {
 
   try {
     const draft = JSON.parse(raw);
-    if (draft.timestamp && (Date.now() - draft.timestamp > 86400000)) {
+    const todayIso = new Date().toISOString().split('T')[0];
+    if ((draft.dateStr && draft.dateStr !== todayIso) || (draft.timestamp && (Date.now() - draft.timestamp > 86400000))) {
+      console.log(`🧹 Clearing previous day's draft data (draft date: ${draft.dateStr}, today: ${todayIso})`);
       localStorage.removeItem(key);
       await clearChecklistPhotosFromIDB();
       return;
@@ -13466,6 +13469,7 @@ if (manualSendModal) {
 
       window.checklistState.factory = factory;
       window.checklistState.machine = machine;
+      window.checklistState.dateStr = new Date().toISOString().split('T')[0];
       window.checklistState.preChecklists = preChecklists;
       window.checklistState.postChecklists = postChecklists;
 
@@ -13512,6 +13516,43 @@ if (manualSendModal) {
       console.error('Error initializing checklists:', err);
     }
   };
+
+  // Heartbeat check every 30 seconds for overnight day-changes
+  if (!window._checklistDayCheckInterval) {
+    window._checklistDayCheckInterval = setInterval(function () {
+      if (!window.checklistState || !window.checklistState.dateStr) return;
+      const todayIso = new Date().toISOString().split('T')[0];
+      if (window.checklistState.dateStr !== todayIso) {
+        console.log(`🌅 Date changed from ${window.checklistState.dateStr} to ${todayIso} - Auto-resetting checklist for new day.`);
+        window.checklistState.dateStr = todayIso;
+        window.checklistState.isPreComplete = false;
+        window.checklistState.isPostComplete = false;
+        window.checklistState.isBypassed = false;
+        window.checklistState.answers = {};
+        window.checklistState.tickets = {};
+        window.checklistState.fieldPhotos = {};
+
+        if (typeof window.clearChecklistDraftFromStorage === 'function') {
+          window.clearChecklistDraftFromStorage();
+        }
+
+        const bar = document.querySelector('.tab-bar');
+        if (bar) bar.classList.add('locked-checklist');
+
+        if (typeof window.initChecklistsForMachine === 'function' && window.checklistState.factory && window.checklistState.machine) {
+          window.initChecklistsForMachine(window.checklistState.factory, window.checklistState.machine);
+        }
+
+        if (typeof window.goToTab === 'function') {
+          window.goToTab(0);
+        }
+
+        if (typeof showAppToast === 'function') {
+          showAppToast('🌅 New day detected! Please complete today\'s daily checklist.');
+        }
+      }
+    }, 30000);
+  }
 
   window.isChecklistFieldCompleted = function (field) {
     if (!field) return false;
