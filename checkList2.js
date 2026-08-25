@@ -2365,7 +2365,9 @@ async function saveTicketModal() {
             status: 'NG',
             reason,
             userInput: userInputStr,
-            expectedInput: expectedStr
+            expectedInput: expectedStr,
+            schedule: state.schedule || state.formSchedule || state.activeForm?.schedule || 'daily',
+            itemLabel: step ? (step.title || step.label || step.label_ja || step.label_en || '') : ''
           })
         });
       if (response && response.message_id) {

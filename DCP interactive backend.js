@@ -15013,13 +15013,16 @@ if (manualSendModal) {
     if (!ticket.chatworkMessageId) {
       try {
         const fieldAns = window.checklistState.answers[fieldId];
-        const fieldObj = (window.checklistState.queue?.[window.checklistState.queueIndex]?.fields || []).find(f => f.id === fieldId);
+        const currentQueueItem = window.checklistState.queue?.[window.checklistState.queueIndex];
+        const fieldObj = (currentQueueItem?.fields || []).find(f => f.id === fieldId);
         let userInputStr = Array.isArray(fieldAns) ? fieldAns.join(', ') : String(fieldAns ?? '');
         let expectedStr = '';
         if (fieldObj && fieldObj.type === 'number' && (fieldObj.min !== null || fieldObj.max !== null)) {
           expectedStr = `${fieldObj.min ?? '—'} ~ ${fieldObj.max ?? '—'} ${fieldObj.unit || ''}`;
         }
 
+        const itemLabel = fieldObj ? (fieldObj.label || fieldObj.label_ja || fieldObj.label_en || '') : '';
+        const schedule = currentQueueItem?.schedule || 'daily';
         const isOptionalTicket = !isTicketRequired;
         const statusStr = isOptionalTicket ? 'OPTIONAL TICKET' : 'NG';
 
@@ -15033,7 +15036,9 @@ if (manualSendModal) {
             reason: reason,
             userInput: userInputStr,
             expectedInput: expectedStr,
-            isOptional: isOptionalTicket
+            isOptional: isOptionalTicket,
+            schedule: schedule,
+            itemLabel: itemLabel
           })
         });
 
@@ -15050,13 +15055,16 @@ if (manualSendModal) {
       // Message already exists in Chatwork -> update message with new input value & reason!
       try {
         const fieldAns = window.checklistState.answers[fieldId];
-        const fieldObj = (window.checklistState.queue?.[window.checklistState.queueIndex]?.fields || []).find(f => f.id === fieldId);
+        const currentQueueItem = window.checklistState.queue?.[window.checklistState.queueIndex];
+        const fieldObj = (currentQueueItem?.fields || []).find(f => f.id === fieldId);
         let userInputStr = Array.isArray(fieldAns) ? fieldAns.join(', ') : String(fieldAns ?? '');
         let expectedStr = '';
         if (fieldObj && fieldObj.type === 'number' && (fieldObj.min !== null || fieldObj.max !== null)) {
           expectedStr = `${fieldObj.min ?? '—'} ~ ${fieldObj.max ?? '—'} ${fieldObj.unit || ''}`;
         }
 
+        const itemLabel = fieldObj ? (fieldObj.label || fieldObj.label_ja || fieldObj.label_en || '') : '';
+        const schedule = currentQueueItem?.schedule || 'daily';
         const isOptionalTicket = !isTicketRequired;
         const statusStr = isOptionalTicket ? 'OPTIONAL TICKET' : 'NG';
 
@@ -15071,7 +15079,9 @@ if (manualSendModal) {
             reason: reason,
             userInput: userInputStr,
             expectedInput: expectedStr,
-            isOptional: isOptionalTicket
+            isOptional: isOptionalTicket,
+            schedule: schedule,
+            itemLabel: itemLabel
           })
         }).catch(err => console.warn('Failed to update Chatwork ticket message:', err));
       } catch (err) {

@@ -32205,18 +32205,38 @@ app.get('/checkList2.js', (req, res) => {
   res.sendFile(path.join(__dirname, 'checkList2.js'));
 });
 
+function getScheduleHeaderInfo(schedule, templateName = '') {
+  const norm = String(schedule || '').toLowerCase();
+  const tNorm = String(templateName || '').toLowerCase();
+  if (norm.includes('daily') || norm.includes('日') || tNorm.includes('日')) {
+    return { en: ' - DAILY', ja: ' - 日次' };
+  }
+  if (norm.includes('weekly') || norm.includes('週') || tNorm.includes('週')) {
+    return { en: ' - WEEKLY', ja: ' - 週次' };
+  }
+  if (norm.includes('monthly') || norm.includes('月') || tNorm.includes('月')) {
+    return { en: ' - MONTHLY', ja: ' - 月次' };
+  }
+  return { en: '', ja: '' };
+}
+
 app.post('/api/check-forms/notify-ng-ticket', async (req, res) => {
-  const { factory, machine, status, reason, userInput, expectedInput, isOptional } = req.body;
+  const { factory, machine, status, reason, userInput, expectedInput, isOptional, schedule, itemLabel, fieldLabel } = req.body || {};
   const roomId = '440654635';
   const apiKey = process.env.CHATWORK_API_KEY;
   const url = `https://api.chatwork.com/v2/rooms/${roomId}/messages`;
   
   const now = new Date();
   const timestamp = now.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
-  const titleHeader = isOptional ? '📝 【OPTIONAL TICKET / 任意報告】' : '⚠️ 【DEFECT TICKET / 不適合報告】';
+  const schedInfo = getScheduleHeaderInfo(schedule);
+  const titleHeader = isOptional
+    ? '📝 【OPTIONAL TICKET / 任意報告】'
+    : `⚠️ 【DEFECT TICKET${schedInfo.en} / 不適合報告${schedInfo.ja}】`;
   const statusLabel = isOptional ? 'OPTIONAL TICKET (任意報告)' : (status || 'NG');
+  const labelText = itemLabel || fieldLabel || '';
 
   let messageBody = `${titleHeader}\n工場: ${factory}\n設備: ${machine}\nステータス: ${statusLabel}\n日時: ${timestamp}`;
+  if (labelText) messageBody += `\n点検項目: ${labelText}`;
   if (expectedInput) messageBody += `\n期待値: ${expectedInput}`;
   if (userInput !== undefined && userInput !== '') messageBody += `\n入力値: ${userInput}`;
   messageBody += `\n理由: ${reason}`;
@@ -32276,7 +32296,7 @@ app.post('/api/check-forms/cancel-ng-ticket', async (req, res) => {
 });
 
 app.post('/api/check-forms/update-ng-ticket', async (req, res) => {
-  const { messageId, factory, machine, status, reason, userInput, expectedInput, isOptional } = req.body || {};
+  const { messageId, factory, machine, status, reason, userInput, expectedInput, isOptional, schedule, itemLabel, fieldLabel } = req.body || {};
   if (!messageId) {
     return res.status(400).json({ error: 'messageId is required' });
   }
@@ -32288,10 +32308,15 @@ app.post('/api/check-forms/update-ng-ticket', async (req, res) => {
   try {
     const now = new Date();
     const timestamp = now.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
-    const titleHeader = isOptional ? '📝 【OPTIONAL TICKET / 任意報告】' : '⚠️ 【DEFECT TICKET / 不適合報告】';
+    const schedInfo = getScheduleHeaderInfo(schedule);
+    const titleHeader = isOptional
+      ? '📝 【OPTIONAL TICKET / 任意報告】'
+      : `⚠️ 【DEFECT TICKET${schedInfo.en} / 不適合報告${schedInfo.ja}】`;
     const statusLabel = isOptional ? 'OPTIONAL TICKET (任意報告)' : (status || 'NG');
+    const labelText = itemLabel || fieldLabel || '';
 
     let messageBody = `${titleHeader}\n工場: ${factory}\n設備: ${machine}\nステータス: ${statusLabel}\n日時: ${timestamp}`;
+    if (labelText) messageBody += `\n点検項目: ${labelText}`;
     if (expectedInput) messageBody += `\n期待値: ${expectedInput}`;
     if (userInput !== undefined && userInput !== '') messageBody += `\n入力値: ${userInput}`;
     messageBody += `\n理由: ${reason}`;
@@ -33644,6 +33669,7 @@ app.post('/api/check-forms/submit', async (req, res) => {
             equipmentId: equipmentId || null,
             templateId,
             templateName,
+            schedule: templatePayload.schedule || 'daily',
             checkFormRecordId: recordId,
             workerName,
             fieldId: field.id,
