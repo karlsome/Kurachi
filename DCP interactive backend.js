@@ -3494,26 +3494,142 @@ window.loadWorkerNamesFromStorage = function () {
   }
 };
 
-window.saveChecklistDraftToStorage = function () {
+// IndexedDB Helper for Checklist Draft Photos (keeps image bytes out of localStorage)
+const DB_NAME_CHECKLIST = typeof uniquePrefix !== 'undefined' ? `${uniquePrefix}checklistPhotosDB` : 'DCP_checklistPhotosDB';
+const DB_VERSION_CHECKLIST = 1;
+const STORE_NAME_CHECKLIST = 'checklistPhotos';
+
+function openChecklistPhotosDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME_CHECKLIST, DB_VERSION_CHECKLIST);
+    req.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains(STORE_NAME_CHECKLIST)) {
+        db.createObjectStore(STORE_NAME_CHECKLIST, { keyPath: 'id' });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function saveChecklistPhotoToIDB(id, dataUrl) {
+  if (!id || !dataUrl) return;
+  try {
+    const db = await openChecklistPhotosDB();
+    const tx = db.transaction(STORE_NAME_CHECKLIST, 'readwrite');
+    const store = tx.objectStore(STORE_NAME_CHECKLIST);
+    store.put({ id, dataUrl, updatedAt: Date.now() });
+    return new Promise((res, rej) => {
+      tx.oncomplete = () => res();
+      tx.onerror = () => rej(tx.error);
+    });
+  } catch (e) {
+    console.warn('Failed to save checklist photo to IndexedDB:', e);
+  }
+}
+
+async function getChecklistPhotoFromIDB(id) {
+  if (!id) return null;
+  try {
+    const db = await openChecklistPhotosDB();
+    const tx = db.transaction(STORE_NAME_CHECKLIST, 'readonly');
+    const store = tx.objectStore(STORE_NAME_CHECKLIST);
+    const req = store.get(id);
+    return new Promise((res, rej) => {
+      req.onsuccess = () => res(req.result ? req.result.dataUrl : null);
+      req.onerror = () => rej(req.error);
+    });
+  } catch (e) {
+    console.warn('Failed to read checklist photo from IndexedDB:', e);
+    return null;
+  }
+}
+
+async function clearChecklistPhotosFromIDB() {
+  try {
+    const db = await openChecklistPhotosDB();
+    const tx = db.transaction(STORE_NAME_CHECKLIST, 'readwrite');
+    const store = tx.objectStore(STORE_NAME_CHECKLIST);
+    store.clear();
+    return new Promise((res, rej) => {
+      tx.oncomplete = () => res();
+      tx.onerror = () => rej(tx.error);
+    });
+  } catch (e) {
+    console.warn('Failed to clear checklist photos from IndexedDB:', e);
+  }
+}
+
+window.saveChecklistDraftToStorage = async function () {
   if (!window.checklistState || !window.checklistState.factory || !window.checklistState.machine) return;
   const prefix = typeof uniquePrefix !== 'undefined' ? uniquePrefix : '';
-  const key = `${prefix}checklistDraft_${window.checklistState.factory}_${window.checklistState.machine}`;
+  const factory = window.checklistState.factory;
+  const machine = window.checklistState.machine;
+  const key = `${prefix}checklistDraft_${factory}_${machine}`;
+
+  // Process field photos: save base64 to IndexedDB, save reference keys in draft
+  const fieldPhotoRefs = {};
+  if (window.checklistState.fieldPhotos) {
+    for (const fId of Object.keys(window.checklistState.fieldPhotos)) {
+      const base64 = window.checklistState.fieldPhotos[fId];
+      if (base64) {
+        const idbKey = `fp_${factory}_${machine}_${fId}`;
+        if (base64.startsWith('data:image')) {
+          await saveChecklistPhotoToIDB(idbKey, base64);
+        }
+        fieldPhotoRefs[fId] = idbKey;
+      }
+    }
+  }
+
+  // Process ticket photos: save base64 to IndexedDB, save reference keys in draft
+  const ticketsClean = {};
+  if (window.checklistState.tickets) {
+    for (const fId of Object.keys(window.checklistState.tickets)) {
+      const ticket = window.checklistState.tickets[fId];
+      if (ticket) {
+        const imgRefs = [];
+        if (Array.isArray(ticket.images)) {
+          for (let i = 0; i < ticket.images.length; i++) {
+            const imgVal = ticket.images[i];
+            if (imgVal) {
+              const idbKey = `tp_${factory}_${machine}_${fId}_${i}`;
+              if (imgVal.startsWith('data:image')) {
+                await saveChecklistPhotoToIDB(idbKey, imgVal);
+              }
+              imgRefs.push(idbKey);
+            }
+          }
+        }
+        ticketsClean[fId] = {
+          reason: ticket.reason || '',
+          saved: ticket.saved || false,
+          images: imgRefs
+        };
+      }
+    }
+  }
+
   const draftData = {
     answers: window.checklistState.answers || {},
-    tickets: window.checklistState.tickets || {},
-    fieldPhotos: window.checklistState.fieldPhotos || {},
+    tickets: ticketsClean,
+    fieldPhotos: fieldPhotoRefs,
     queueIndex: window.checklistState.queueIndex || 0,
     isPreComplete: window.checklistState.isPreComplete || false,
     isBypassed: window.checklistState.isBypassed || false,
     timestamp: Date.now()
   };
+
   localStorage.setItem(key, JSON.stringify(draftData));
 };
 
-window.loadChecklistDraftFromStorage = function () {
+window.loadChecklistDraftFromStorage = async function () {
   if (!window.checklistState || !window.checklistState.factory || !window.checklistState.machine) return;
   const prefix = typeof uniquePrefix !== 'undefined' ? uniquePrefix : '';
-  const key = `${prefix}checklistDraft_${window.checklistState.factory}_${window.checklistState.machine}`;
+  const factory = window.checklistState.factory;
+  const machine = window.checklistState.machine;
+  const key = `${prefix}checklistDraft_${factory}_${machine}`;
   const raw = localStorage.getItem(key);
   if (!raw) return;
 
@@ -3521,26 +3637,71 @@ window.loadChecklistDraftFromStorage = function () {
     const draft = JSON.parse(raw);
     if (draft.timestamp && (Date.now() - draft.timestamp > 86400000)) {
       localStorage.removeItem(key);
+      await clearChecklistPhotosFromIDB();
       return;
     }
+
     if (draft.answers) window.checklistState.answers = { ...window.checklistState.answers, ...draft.answers };
-    if (draft.tickets) window.checklistState.tickets = { ...window.checklistState.tickets, ...draft.tickets };
-    if (draft.fieldPhotos) window.checklistState.fieldPhotos = { ...window.checklistState.fieldPhotos, ...draft.fieldPhotos };
     if (typeof draft.queueIndex === 'number' && draft.queueIndex < (window.checklistState.queue?.length || 1)) {
       window.checklistState.queueIndex = draft.queueIndex;
     }
     if (draft.isPreComplete) window.checklistState.isPreComplete = true;
     if (draft.isBypassed) window.checklistState.isBypassed = true;
+
+    // Hydrate field photos from IndexedDB
+    if (draft.fieldPhotos) {
+      window.checklistState.fieldPhotos = window.checklistState.fieldPhotos || {};
+      for (const fId of Object.keys(draft.fieldPhotos)) {
+        const val = draft.fieldPhotos[fId];
+        if (val && val.startsWith('data:image')) {
+          window.checklistState.fieldPhotos[fId] = val;
+        } else if (val) {
+          const base64 = await getChecklistPhotoFromIDB(val);
+          if (base64) window.checklistState.fieldPhotos[fId] = base64;
+        }
+      }
+    }
+
+    // Hydrate ticket photos from IndexedDB
+    if (draft.tickets) {
+      window.checklistState.tickets = window.checklistState.tickets || {};
+      for (const fId of Object.keys(draft.tickets)) {
+        const t = draft.tickets[fId];
+        if (t) {
+          const hydratedImages = [];
+          if (Array.isArray(t.images)) {
+            for (const imgRef of t.images) {
+              if (imgRef && imgRef.startsWith('data:image')) {
+                hydratedImages.push(imgRef);
+              } else if (imgRef) {
+                const base64 = await getChecklistPhotoFromIDB(imgRef);
+                if (base64) hydratedImages.push(base64);
+              }
+            }
+          }
+          window.checklistState.tickets[fId] = {
+            reason: t.reason || '',
+            saved: t.saved || false,
+            images: hydratedImages
+          };
+        }
+      }
+    }
+
+    if (typeof window.renderCurrentChecklistTemplate === 'function') {
+      window.renderCurrentChecklistTemplate();
+    }
   } catch (e) {
     console.warn('Error loading checklist draft:', e);
   }
 };
 
-window.clearChecklistDraftFromStorage = function () {
+window.clearChecklistDraftFromStorage = async function () {
   if (!window.checklistState || !window.checklistState.factory || !window.checklistState.machine) return;
   const prefix = typeof uniquePrefix !== 'undefined' ? uniquePrefix : '';
   const key = `${prefix}checklistDraft_${window.checklistState.factory}_${window.checklistState.machine}`;
   localStorage.removeItem(key);
+  await clearChecklistPhotosFromIDB();
 };
 
 window.renderWorkerListUI = function () {
@@ -13300,7 +13461,7 @@ if (manualSendModal) {
         window.checklistState.fieldPhotos = {};
 
         if (typeof window.loadWorkerNamesFromStorage === 'function') window.loadWorkerNamesFromStorage();
-        if (typeof window.loadChecklistDraftFromStorage === 'function') window.loadChecklistDraftFromStorage();
+        if (typeof window.loadChecklistDraftFromStorage === 'function') await window.loadChecklistDraftFromStorage();
 
         if (window.checklistState.isPreComplete || window.checklistState.isBypassed) {
           if (bar) bar.classList.remove('locked-checklist');
@@ -13751,11 +13912,14 @@ if (manualSendModal) {
     }
   };
 
-  window.removeChecklistTicketImage = function (index) {
+  window.removeChecklistTicketImage = async function (index) {
     const fieldId = window.checklistState.activeTicketField;
     if (!fieldId || !window.checklistState.tickets[fieldId]) return;
     window.checklistState.tickets[fieldId].images.splice(index, 1);
     renderTicketThumbnails();
+    if (typeof window.saveChecklistDraftToStorage === 'function') {
+      await window.saveChecklistDraftToStorage();
+    }
   };
 
   window.handleChecklistTicketPhotoCaptured = function (event) {
@@ -13764,7 +13928,7 @@ if (manualSendModal) {
     if (!file || !fieldId) return;
 
     const reader = new FileReader();
-    reader.onload = function (e) {
+    reader.onload = async function (e) {
       const ticket = window.checklistState.tickets[fieldId] || { reason: '', images: [] };
       if (ticket.images.length >= 5) {
         if (typeof showAlert === 'function') showAlert('Maximum 5 images allowed for ticket');
@@ -13773,6 +13937,9 @@ if (manualSendModal) {
       ticket.images.push(e.target.result);
       window.checklistState.tickets[fieldId] = ticket;
       renderTicketThumbnails();
+      if (typeof window.saveChecklistDraftToStorage === 'function') {
+        await window.saveChecklistDraftToStorage();
+      }
     };
     reader.readAsDataURL(file);
   };
