@@ -13726,13 +13726,16 @@ if (manualSendModal) {
 
       let skipBtnHtml = '';
       if (field.type !== 'name') {
-        skipBtnHtml = `
-          <div style="display:flex; justify-content:flex-end; margin-top:10px;">
-            <button type="button" class="btn btn-secondary" style="font-size:0.8rem; padding:6px 14px; font-weight:700; border-radius:8px; display:inline-flex; align-items:center; gap:4px; ${isSkipped ? 'border-color:#2563eb; color:#2563eb; background:rgba(37,99,235,0.06);' : ''}" onclick="handleStepSkip('${field.id}', ${field.required ? 'true' : 'false'})">
-              ⏭️ <span>${isSkipped ? 'Skipped (Tap to undo)' : (typeof _t === 'function' ? _t('skip_step') : 'Skip Step')}</span>
-            </button>
-          </div>
-        `;
+        const isValidDataCompleted = isCompleted && !isSkipped;
+        if (!isValidDataCompleted) {
+          skipBtnHtml = `
+            <div style="display:flex; justify-content:flex-end; margin-top:10px;">
+              <button type="button" class="btn btn-secondary" style="font-size:0.8rem; padding:6px 14px; font-weight:700; border-radius:8px; display:inline-flex; align-items:center; gap:4px; ${isSkipped ? 'border-color:#2563eb; color:#2563eb; background:rgba(37,99,235,0.06);' : ''}" onclick="handleStepSkip('${field.id}', ${field.required ? 'true' : 'false'})">
+                ⏭️ <span>${isSkipped ? 'Skipped (Tap to undo)' : (typeof _t === 'function' ? _t('skip_step') : 'Skip Step')}</span>
+              </button>
+            </div>
+          `;
+        }
       }
 
       card.innerHTML = `
@@ -14075,7 +14078,26 @@ if (manualSendModal) {
     }
   };
 
+  window.triggerNgFlashAnimation = function () {
+    let flash = document.getElementById('ngFlashOverlay');
+    if (!flash) {
+      flash = document.createElement('div');
+      flash.id = 'ngFlashOverlay';
+      flash.className = 'ng-flash-overlay';
+      document.body.appendChild(flash);
+    }
+
+    flash.classList.remove('active');
+    void flash.offsetWidth;
+    flash.classList.add('active');
+
+    setTimeout(() => {
+      flash.classList.remove('active');
+    }, 650);
+  };
+
   window.openChecklistTicketModal = function (fieldId, autoReason = '') {
+    triggerNgFlashAnimation();
     window.checklistState.activeTicketField = fieldId;
     const modal = document.getElementById('checklistTicketModal');
     const info = document.getElementById('checklistTicketFieldInfo');

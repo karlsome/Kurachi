@@ -1694,6 +1694,25 @@
         .checklist-card-lock-btn:active {
             transform: scale(0.95);
         }
+        /* Fullscreen NG Red Flash Overlay Animation */
+        .ng-flash-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(239, 68, 68, 0.42);
+            z-index: 100000;
+            pointer-events: none;
+            opacity: 0;
+            backdrop-filter: blur(2px);
+        }
+        .ng-flash-overlay.active {
+            animation: ngFlashPulse 0.65s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+        @keyframes ngFlashPulse {
+            0% { opacity: 0; transform: scale(1.02); }
+            25% { opacity: 1; transform: scale(1); }
+            65% { opacity: 0.85; }
+            100% { opacity: 0; transform: scale(1); }
+        }
         .checklist-step-pill {
             font-size: 0.7rem;
             font-weight: 800;
