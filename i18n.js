@@ -688,6 +688,26 @@ const translations = {
         'submit_photos_needed': 'needed',
         'submit_photos_taken': 'taken',
         'submit_insufficient_photos': 'Insufficient material label photos (needed: {needed}+, taken: {taken})',
+
+        // Checklist integration
+        'checklist_tab': 'Checklist',
+        'checklist_title': 'Equipment Checklist',
+        'daily_check': 'Daily Check',
+        'weekly_check': 'Weekly Check',
+        'monthly_check': 'Monthly Check',
+        'pre_production_check': 'Pre-Production Check',
+        'post_production_check': 'Post-Production Check',
+        'super_bypass': 'Super Bypass (Skip)',
+        'scan_leader_qr_to_bypass': 'Scan Leader QR Code to Skip',
+        'post_checklist_reminder_title': 'Post-Production Checklist Reminder',
+        'post_checklist_reminder_msg': 'A post-production checklist exists for this machine. Would you like to complete it now?',
+        'do_post_checklist': 'Perform Checklist',
+        'skip_post_checklist': 'Skip and Submit',
+        'checklist_incomplete': 'Some checklist items are unanswered',
+        'next_checklist': 'Next Checklist',
+        'complete_all_checklists': 'Complete All Checklists',
+        'ticket_required': 'Issue report (Ticket) is required',
+        'bypass_reason_placeholder': 'Enter reason for bypass',
     },
 
     pt: {
@@ -1022,6 +1042,26 @@ const translations = {
         'submit_photos_needed': 'necessário',
         'submit_photos_taken': 'tirado',
         'submit_insufficient_photos': 'Fotos de etiqueta insuficientes (necessário: {needed}+, tirado: {taken})',
+
+        // Checklist integration
+        'checklist_tab': 'Checklist',
+        'checklist_title': 'Lista de Verificação de Equipamentos',
+        'daily_check': 'Inspeção Diária',
+        'weekly_check': 'Inspeção Semanal',
+        'monthly_check': 'Inspeção Mensal',
+        'pre_production_check': 'Verificação Pré-Produção',
+        'post_production_check': 'Verificação Pós-Produção',
+        'super_bypass': 'Super Bypass (Ignorar)',
+        'scan_leader_qr_to_bypass': 'Escanear QR Code do Líder para Ignorar',
+        'post_checklist_reminder_title': 'Lembrete de Lista de Verificação Pós-Produção',
+        'post_checklist_reminder_msg': 'Existe uma lista de verificação pós-produção para esta máquina. Deseja realizá-la agora?',
+        'do_post_checklist': 'Realizar Verificação',
+        'skip_post_checklist': 'Ignorar e Enviar',
+        'checklist_incomplete': 'Alguns itens da lista de verificação não foram respondidos',
+        'next_checklist': 'Próxima Verificação',
+        'complete_all_checklists': 'Concluir Todas as Verificações',
+        'ticket_required': 'Relatório de problema (Ticket) é necessário',
+        'bypass_reason_placeholder': 'Insira o motivo do bypass',
     }
 };
 
@@ -1085,6 +1125,10 @@ function applyTranslations(lang) {
         if (t[key]) {
             titleElement.textContent = t[key];
         }
+    }
+
+    if (typeof window.renderCurrentChecklistTemplate === 'function') {
+        window.renderCurrentChecklistTemplate();
     }
 
     console.log(`Language changed to: ${lang}`);

@@ -315,18 +315,22 @@
 
         .tab-panels-container {
             display: flex;
-            width: 700%;
-            /* 7 tabs (Scan, Params, Production, Kensa, Images, Maintenance, Submit) */
+            width: 800%;
+            /* 8 tabs (Checklist, Scan, Params, Production, Kensa, Images, Maintenance, Submit) */
             height: 100%;
             transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
             transform: translate3d(0, 0, 0);
             -webkit-transform-style: flat;
             backface-visibility: hidden;
             -webkit-backface-visibility: hidden;
+            overflow: hidden;
         }
 
         .tab-panel {
-            width: 14.2857%;
+            width: 12.5%;
+            /* 100% / 8 = 12.5% */
+            flex: 0 0 12.5%;
+            box-sizing: border-box;
             height: 100%;
             overflow-y: auto;
             -webkit-overflow-scrolling: touch;
@@ -3276,12 +3280,20 @@
 
         window.goToTab = function (index) {
             if (index < 0 || index >= tabs.length) return;
-            // Kensa (index 3) only exists when its tab is revealed; otherwise go to Production
-            if (index === 3 && document.getElementById('kensaTabBtn')?.style.display === 'none') {
-                index = 2;
+            // Kensa (index 4 in 8-tab system) only exists when its tab is revealed; otherwise go to Production (index 3)
+            if (index === 4 && document.getElementById('kensaTabBtn')?.style.display === 'none') {
+                index = 3;
             }
-            // Lock: cannot leave the Scan tab until the 3-step scan is complete
-            if (index !== 0 && !isScanComplete()) {
+            // Lock: cannot leave Checklist tab (0) if pre-production checklist is incomplete
+            if (index !== 0 && window.checklistState && window.checklistState.queue && window.checklistState.queue.length > 0 && !window.checklistState.isPreComplete && !window.checklistState.isBypassed) {
+                if (typeof window.showAppToast === 'function') {
+                    window.showAppToast((typeof _t === 'function' ? _t('toast_complete_checklist_first') : null) || 'Please complete pre-production checklist first');
+                }
+                updateTabLock();
+                return;
+            }
+            // Lock: cannot leave the Scan tab (index 1) until the 3-step scan is complete
+            if (index > 1 && !isScanComplete()) {
                 if (typeof window.showAppToast === 'function') {
                     window.showAppToast(_t('toast_complete_3steps'));
                 }
@@ -3289,8 +3301,8 @@
                 return;
             }
             checkParamsLockState();
-            // Lock: cannot visit pages beyond Scan (0) and Params (1) until "Values changed" is pressed
-            if (index > 1 && window.paramsLocked) {
+            // Lock: cannot visit pages beyond Scan (1) and Params (2) until "Values changed" is pressed
+            if (index > 2 && window.paramsLocked) {
                 if (typeof window.showAppToast === 'function') {
                     window.showAppToast(_t('toast_press_values_changed'));
                 }
@@ -3303,7 +3315,7 @@
             const prefix = typeof uniquePrefix !== 'undefined' ? uniquePrefix : '';
             localStorage.setItem(`${prefix}activeTabIndex`, index);
 
-            // Slide tabs viewport (count-aware so the 7th Kensa tab works)
+            // Slide tabs viewport (count-aware for all 8 tabs)
             panelsContainer.style.transform = `translateX(-${index * (100 / tabs.length)}%)`;
 
             // Highlight active button
@@ -3317,14 +3329,14 @@
 
             updateTabIndicator(index);
 
-            // If on Submit tab (now index 6), compile summary
-            if (index === 6) {
+            // If on Submit tab (now index 7), compile summary
+            if (index === 7) {
                 updateSubmitSummary();
             }
-            // Params guide (index 1): show the live 送りピッチ as the rolldist value
-            if (index === 1 && typeof updateParamsGuide === 'function') updateParamsGuide();
+            // Params guide (index 2): show the live 送りピッチ as the rolldist value
+            if (index === 2 && typeof updateParamsGuide === 'function') updateParamsGuide();
 
-            // Floating "New Scan" button only on the Scan tab
+            // Floating "New Scan" button only on the Scan tab (index 1)
             if (typeof updateFloatingNewScan === 'function') updateFloatingNewScan();
         };
 
