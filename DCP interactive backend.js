@@ -13752,7 +13752,9 @@ if (manualSendModal) {
     titleEl.innerHTML = `<h3 style="font-size:1.15rem; font-weight:800; color:#1f2733;">${localizedTitle}</h3>${localizedDesc ? `<p style="font-size:0.85rem; color:#6b7280; margin-top:2px;">${localizedDesc}</p>` : ''}`;
     container.appendChild(titleEl);
 
-    // If pre-production is completed, render pre-production steps in a collapsed accordion
+    const isPostComplete = window.checklistState.isPostComplete || (postFields.length > 0 && postFields.every(f => isChecklistFieldCompleted(f)));
+
+    // If pre-production is completed, render completed steps in a collapsed accordion
     if (window.checklistState.isPreComplete && preFields.length > 0) {
       const accordion = document.createElement('details');
       accordion.className = 'completed-pre-steps-accordion';
@@ -13763,10 +13765,12 @@ if (manualSendModal) {
       const tapCollapseText = (typeof _t === 'function') ? _t('tap_to_collapse_checklist') : '▲ Tap to collapse completed checklist';
       const postHeaderTitle = (typeof _t === 'function') ? _t('post_production_checks_title') : '📋 Post-Production Checks';
 
+      const completedAccordionFields = isPostComplete ? tplFields : preFields;
+
       accordion.innerHTML = `
         <summary style="padding:14px 18px; cursor:pointer; display:flex; align-items:center; justify-content:space-between; background:#dcfce7; border-radius:16px; user-select:none;">
           <span style="font-size: 0.95rem; font-weight: 700; color: #166534; display: flex; align-items: center; gap: 8px;">
-            ✓ ${todayIso} ${bannerText} (${preFields.length} ${stepsText})
+            ✓ ${todayIso} ${bannerText} (${completedAccordionFields.length} ${stepsText})
           </span>
           <span style="font-size: 0.8rem; color: #15803d; font-weight: 600; background:rgba(22,101,52,0.1); padding:4px 10px; border-radius:10px;">${tapToggleText}</span>
         </summary>
@@ -13775,9 +13779,9 @@ if (manualSendModal) {
       container.appendChild(accordion);
 
       const accordionContent = accordion.querySelector('#completedPreStepsContent');
-      preFields.forEach((field) => {
+      completedAccordionFields.forEach((field) => {
         const globalIdx = tplFields.indexOf(field);
-        const stepNum = globalIdx !== -1 ? globalIdx : preFields.indexOf(field);
+        const stepNum = globalIdx !== -1 ? globalIdx : completedAccordionFields.indexOf(field);
         const cardEl = renderSingleFieldCard(field, stepNum, true, true);
         if (accordionContent) accordionContent.appendChild(cardEl);
       });
@@ -13792,7 +13796,7 @@ if (manualSendModal) {
       };
       if (accordionContent) accordionContent.appendChild(collapseFooterBtn);
 
-      if (postFields.length > 0) {
+      if (postFields.length > 0 && !isPostComplete) {
         const postHeader = document.createElement('div');
         postHeader.className = 'post-steps-header';
         postHeader.innerHTML = `
@@ -13802,7 +13806,9 @@ if (manualSendModal) {
       }
     }
 
-    const fieldsToRender = window.checklistState.isPreComplete ? postFields : tplFields;
+    const fieldsToRender = window.checklistState.isPreComplete
+      ? (isPostComplete ? [] : postFields)
+      : tplFields;
     let isPreviousCompleted = true;
 
     fieldsToRender.forEach((field) => {
