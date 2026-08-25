@@ -1762,10 +1762,24 @@
             50% { transform: scale(1.05); }
         }
 
-        /* Keypad & Ticket Modals */
+        /* Keypad & Ticket Modals (Auto-Escaping Keyboard & Strict Viewport Bounding) */
+        .checklist-modal-overlay,
+        .modal {
+            position: fixed !important;
+            inset: 0 !important;
+            box-sizing: border-box !important;
+            overflow-y: auto !important;
+            transition: align-items 0.25s cubic-bezier(0.2, 0.8, 0.2, 1), padding-top 0.25s cubic-bezier(0.2, 0.8, 0.2, 1) !important;
+        }
+
+        .checklist-modal-overlay.keyboard-active,
+        .modal.keyboard-active {
+            align-items: flex-start !important;
+            padding-top: max(16px, 2vh) !important;
+            padding-bottom: 16px !important;
+        }
+
         .checklist-modal-overlay {
-            position: fixed;
-            inset: 0;
             z-index: 100005;
             background: rgba(0, 0, 0, 0.65);
             display: flex;
@@ -1780,10 +1794,22 @@
             padding: 24px;
             width: 100%;
             max-width: 420px;
+            max-height: calc(100vh - 32px) !important;
+            overflow-y: auto !important;
+            box-sizing: border-box !important;
             box-shadow: 0 20px 40px rgba(0,0,0,0.25);
             display: flex;
             flex-direction: column;
             gap: 16px;
+            transition: transform 0.25s ease;
+        }
+
+        .checklist-modal-overlay.keyboard-active .checklist-modal-card,
+        .modal.keyboard-active .modal-content,
+        .modal.keyboard-active #workerNameModal > div {
+            margin-top: 0 !important;
+            margin-bottom: 0 !important;
+            max-height: calc(100vh - max(32px, 4vh)) !important;
         }
         .checklist-keypad-grid {
             display: grid;

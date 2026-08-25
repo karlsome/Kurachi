@@ -13970,6 +13970,34 @@ if (manualSendModal) {
     }
   };
 
+  // Auto-Escaping Modal Listener for Tablet Virtual Keyboard
+  document.addEventListener('focusin', function (e) {
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') && e.target.type !== 'file' && e.target.type !== 'button' && e.target.type !== 'submit') {
+      const modalOverlay = e.target.closest('.checklist-modal-overlay, .modal, .modal-overlay');
+      if (modalOverlay) {
+        modalOverlay.classList.add('keyboard-active');
+        setTimeout(() => {
+          try {
+            e.target.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+          } catch (err) { }
+        }, 150);
+      }
+    }
+  });
+
+  document.addEventListener('focusout', function (e) {
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) {
+      const modalOverlay = e.target.closest('.checklist-modal-overlay, .modal, .modal-overlay');
+      if (modalOverlay) {
+        setTimeout(() => {
+          if (!modalOverlay.contains(document.activeElement)) {
+            modalOverlay.classList.remove('keyboard-active');
+          }
+        }, 100);
+      }
+    }
+  });
+
   document.addEventListener('DOMContentLoaded', function () {
     setTimeout(function () {
       if (typeof selectedFactory !== 'undefined' && typeof selectedMachine !== 'undefined') {
