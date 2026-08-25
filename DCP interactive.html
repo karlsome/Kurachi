@@ -1797,6 +1797,30 @@
             50% { transform: scale(1.05); }
         }
 
+        /* Photo Annotator Overlay & Markup Tools */
+        #annotator-overlay {
+            position: fixed !important;
+            inset: 0 !important;
+            z-index: 200000 !important;
+            background: #000000 !important;
+            display: flex;
+            flex-direction: column;
+        }
+        #annotator-overlay.hidden { display: none !important; }
+        .annotator-stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+        .annotator-canvas-stack { position: relative; flex-shrink: 0; }
+        .annotator-canvas-stack canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: block; }
+        .annotator-draw-canvas { touch-action: none; cursor: crosshair; }
+        .annotator-toolbar { flex-shrink: 0; background: #111111; display: flex; align-items: center; gap: 0.75rem; padding: 0.875rem 1.25rem calc(0.875rem + env(safe-area-inset-bottom, 0px)); }
+        .annotator-colors { display: flex; gap: 0.625rem; flex: 1; overflow-x: auto; }
+        .annotator-color-btn { width: 2.5rem; height: 2.5rem; border-radius: 50%; border: 2.5px solid rgba(255,255,255,0.15); cursor: pointer; flex-shrink: 0; transition: transform 0.1s, border-color 0.1s; }
+        .annotator-color-btn.active { border-color: #ffffff; transform: scale(1.2); }
+        .annotator-clear-btn { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; color: rgba(255,255,255,0.7); background: none; border: 1px solid rgba(255,255,255,0.3); border-radius: 0.5rem; padding: 0.5rem 0.85rem; cursor: pointer; flex-shrink: 0; }
+        .annotator-clear-btn:active { color: #ffffff; border-color: rgba(255,255,255,0.7); }
+        .annotator-cancel-btn { width: 2.75rem; height: 2.75rem; border-radius: 50%; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: #ffffff; cursor: pointer; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 1.4rem; }
+        .annotator-confirm-btn { width: 3.25rem; height: 3.25rem; border-radius: 50%; background: rgba(6,78,59,0.8); border: 1.5px solid rgba(16,185,129,0.8); color: #34d399; cursor: pointer; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+        .annotator-confirm-btn svg, .annotator-cancel-btn svg { width: 1.4rem; height: 1.4rem; fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+
         /* Keypad & Ticket Modals (Auto-Escaping Keyboard & Strict Viewport Bounding) */
         .checklist-modal-overlay,
         .modal {
@@ -3143,6 +3167,9 @@
             </div>
         </div>
     </div>
+
+    <!-- Image Photo Annotator Overlay -->
+    <div id="annotator-overlay" class="hidden"></div>
 
     <!-- Sending to Machine Floating Indicator -->
     <div id="sendingToMachineIndicator" style="
@@ -4567,42 +4594,48 @@
             transform: translateY(1px);
         }
 
-        /* Image preview modal */
+        /* Image preview modal (Strict Viewport Bounding) */
         .img-preview-modal {
-            position: fixed;
-            inset: 0;
-            z-index: 100150;
+            position: fixed !important;
+            inset: 0 !important;
+            z-index: 100150 !important;
             display: none;
+            flex-direction: column;
             align-items: center;
             justify-content: center;
-            background: rgba(16, 24, 40, 0.82);
-            padding: 20px;
+            background: rgba(16, 24, 40, 0.88) !important;
+            padding: 20px !important;
+            box-sizing: border-box !important;
+            overflow: hidden !important;
         }
 
         .img-preview-modal.open {
-            display: flex;
+            display: flex !important;
         }
 
         .img-preview-modal img {
-            max-width: 96vw;
-            max-height: 82vh;
-            border-radius: var(--card-radius);
-            box-shadow: var(--shadow-pop);
+            max-width: 90vw !important;
+            max-height: 72vh !important;
+            object-fit: contain !important;
+            box-sizing: border-box !important;
+            border-radius: var(--card-radius, 14px);
+            box-shadow: var(--shadow-pop, 0 20px 40px rgba(0,0,0,0.3));
         }
 
         .img-preview-modal .img-preview-close {
-            position: absolute;
-            top: 18px;
-            right: 20px;
-            width: 44px;
-            height: 44px;
-            border-radius: 50%;
-            border: none;
-            background: rgba(255, 255, 255, 0.16);
-            color: #fff;
-            font-size: 1.6rem;
-            cursor: pointer;
-            line-height: 1;
+            position: absolute !important;
+            top: 18px !important;
+            right: 20px !important;
+            width: 44px !important;
+            height: 44px !important;
+            border-radius: 50% !important;
+            border: none !important;
+            background: rgba(255, 255, 255, 0.2) !important;
+            color: #fff !important;
+            font-size: 1.6rem !important;
+            cursor: pointer !important;
+            line-height: 1 !important;
+            z-index: 100160 !important;
         }
     </style>
 
@@ -5278,7 +5311,7 @@
                 if (!titleEl) {
                     titleEl = document.createElement('div');
                     titleEl.id = 'imgPreviewTitle';
-                    titleEl.style.cssText = 'position:absolute; top:15%; left:50%; transform:translateX(-50%); color:#fff; font-size:3rem; font-weight:900; text-shadow: 2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 0 4px 12px rgba(0,0,0,0.9); background: rgba(0,0,0,0.5); padding: 12px 32px; border-radius: 16px; pointer-events:none; z-index: 100010; white-space:nowrap; letter-spacing:3px; border: 3px solid rgba(255,255,255,0.3);';
+                    titleEl.style.cssText = 'position:absolute; top:20px; left:50%; transform:translateX(-50%); color:#ffffff; font-size:1.1rem; font-weight:800; text-align:center; max-width:82vw; word-break:break-word; white-space:normal; background:rgba(0,0,0,0.72); padding:8px 20px; border-radius:12px; pointer-events:none; z-index:100160; border:1px solid rgba(255,255,255,0.2); box-shadow:0 4px 16px rgba(0,0,0,0.4);';
                     m.appendChild(titleEl);
                 }
                 

@@ -13699,13 +13699,225 @@ if (manualSendModal) {
     if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
   };
 
+  // Photo Annotator Drawing Engine
+  const ANNOTATOR_COLORS = ['#e5484d', '#f59e0b', '#1f9d6b', '#2563eb', '#ffffff', '#000000'];
+  const ANNOTATOR_BRUSH_SIZE = 14;
+
+  const annotatorState = {
+    open: false,
+    sourceImage: null,
+    activeColor: '#e5484d',
+    strokes: [],
+    currentStroke: null,
+    drawing: false,
+    pointerId: null,
+    resolve: null
+  };
+
+  window.openAnnotator = function (dataUrl) {
+    return new Promise((resolve) => {
+      const overlay = document.getElementById('annotator-overlay');
+      if (!overlay) return resolve(dataUrl);
+
+      annotatorState.open = true;
+      annotatorState.strokes = [];
+      annotatorState.currentStroke = null;
+      annotatorState.drawing = false;
+
+      const img = new Image();
+      img.onload = () => {
+        annotatorState.sourceImage = img;
+        annotatorState.resolve = resolve;
+        renderAnnotatorUI();
+      };
+      img.onerror = () => resolve(dataUrl);
+      img.src = dataUrl;
+    });
+  };
+
+  function renderAnnotatorUI() {
+    const overlay = document.getElementById('annotator-overlay');
+    if (!overlay || !annotatorState.sourceImage) return;
+
+    const img = annotatorState.sourceImage;
+    overlay.innerHTML = `
+      <div class="annotator-stage">
+        <div class="annotator-canvas-stack">
+          <canvas class="annotator-base-canvas" width="${img.width}" height="${img.height}"></canvas>
+          <canvas class="annotator-draw-canvas" width="${img.width}" height="${img.height}"></canvas>
+        </div>
+      </div>
+      <div class="annotator-toolbar">
+        <div class="annotator-colors">
+          ${ANNOTATOR_COLORS.map(c => `<button class="annotator-color-btn${c === annotatorState.activeColor ? ' active' : ''}" data-color="${c}" style="background:${c}" type="button"></button>`).join('')}
+        </div>
+        <button class="annotator-clear-btn" data-action="annotator-clear" type="button">Clear</button>
+        <button class="annotator-cancel-btn" data-action="annotator-cancel" type="button">
+          <svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+        <button class="annotator-confirm-btn" data-action="annotator-confirm" type="button">
+          <svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>
+        </button>
+      </div>`;
+    overlay.classList.remove('hidden');
+
+    const stage = overlay.querySelector('.annotator-stage');
+    const stack = overlay.querySelector('.annotator-canvas-stack');
+    const sw = stage.clientWidth || window.innerWidth;
+    const sh = stage.clientHeight || (window.innerHeight - 80);
+    const ratio = img.width / img.height;
+    const w = (sw / sh > ratio) ? Math.round(sh * ratio) : sw;
+    const h = (sw / sh > ratio) ? sh : Math.round(sw / ratio);
+    stack.style.width = w + 'px';
+    stack.style.height = h + 'px';
+
+    const baseCanvas = overlay.querySelector('.annotator-base-canvas');
+    baseCanvas.getContext('2d').drawImage(img, 0, 0, img.width, img.height);
+  }
+
+  function redrawAnnotatorStrokes() {
+    const overlay = document.getElementById('annotator-overlay');
+    const canvas = overlay?.querySelector('.annotator-draw-canvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    annotatorState.strokes.forEach(s => paintAnnotatorStroke(ctx, s));
+  }
+
+  function paintAnnotatorStroke(ctx, stroke) {
+    if (!stroke || !stroke.points || !stroke.points.length) return;
+    ctx.save();
+    ctx.strokeStyle = stroke.color;
+    ctx.fillStyle = stroke.color;
+    ctx.lineWidth = stroke.width;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    if (stroke.points.length === 1) {
+      ctx.beginPath();
+      ctx.arc(stroke.points[0].x, stroke.points[0].y, stroke.width / 2, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.beginPath();
+      ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
+      for (let i = 1; i < stroke.points.length; i++) ctx.lineTo(stroke.points[i].x, stroke.points[i].y);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function getAnnotatorCanvasPoint(canvas, e) {
+    const r = canvas.getBoundingClientRect();
+    return {
+      x: (e.clientX - r.left) * (canvas.width / r.width),
+      y: (e.clientY - r.top) * (canvas.height / r.height),
+    };
+  }
+
+  function flattenAnnotatedImage() {
+    const out = document.createElement('canvas');
+    out.width = annotatorState.sourceImage.width;
+    out.height = annotatorState.sourceImage.height;
+    const ctx = out.getContext('2d');
+    ctx.drawImage(annotatorState.sourceImage, 0, 0);
+    annotatorState.strokes.forEach(s => paintAnnotatorStroke(ctx, s));
+    return out.toDataURL('image/jpeg', 0.85);
+  }
+
+  function closeAnnotatorOverlay(result) {
+    const overlay = document.getElementById('annotator-overlay');
+    annotatorState.open = false;
+    if (overlay) {
+      overlay.classList.add('hidden');
+      overlay.innerHTML = '';
+    }
+    const res = annotatorState.resolve;
+    annotatorState.resolve = null;
+    if (res) res(result);
+  }
+
+  // Attach event listeners to annotator-overlay
+  document.addEventListener('DOMContentLoaded', function () {
+    const overlay = document.getElementById('annotator-overlay');
+    if (!overlay) return;
+
+    overlay.addEventListener('click', function (e) {
+      const colorBtn = e.target.closest('[data-color]');
+      if (colorBtn) {
+        annotatorState.activeColor = colorBtn.dataset.color;
+        overlay.querySelectorAll('.annotator-color-btn').forEach(b =>
+          b.classList.toggle('active', b.dataset.color === annotatorState.activeColor)
+        );
+        return;
+      }
+      const btn = e.target.closest('[data-action]');
+      if (!btn) return;
+      switch (btn.dataset.action) {
+        case 'annotator-confirm': closeAnnotatorOverlay(flattenAnnotatedImage()); break;
+        case 'annotator-cancel': closeAnnotatorOverlay(null); break;
+        case 'annotator-clear':
+          annotatorState.strokes = [];
+          redrawAnnotatorStrokes();
+          break;
+      }
+    });
+
+    overlay.addEventListener('pointerdown', function (e) {
+      const canvas = e.target.closest('.annotator-draw-canvas');
+      if (!canvas) return;
+      e.preventDefault();
+      const pt = getAnnotatorCanvasPoint(canvas, e);
+      const stroke = { color: annotatorState.activeColor, width: ANNOTATOR_BRUSH_SIZE, points: [pt] };
+      annotatorState.strokes.push(stroke);
+      annotatorState.currentStroke = stroke;
+      annotatorState.drawing = true;
+      annotatorState.pointerId = e.pointerId;
+      canvas.setPointerCapture?.(e.pointerId);
+      paintAnnotatorStroke(canvas.getContext('2d'), stroke);
+    });
+
+    overlay.addEventListener('pointermove', function (e) {
+      if (!annotatorState.drawing || e.pointerId !== annotatorState.pointerId) return;
+      const canvas = overlay.querySelector('.annotator-draw-canvas');
+      if (!canvas || !annotatorState.currentStroke) return;
+      e.preventDefault();
+      const pt = getAnnotatorCanvasPoint(canvas, e);
+      const pts = annotatorState.currentStroke.points;
+      const last = pts[pts.length - 1];
+      if (last && Math.hypot(last.x - pt.x, last.y - pt.y) < 2) return;
+      pts.push(pt);
+
+      const ctx = canvas.getContext('2d');
+      ctx.save();
+      ctx.strokeStyle = annotatorState.currentStroke.color;
+      ctx.lineWidth = annotatorState.currentStroke.width;
+      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(pts[pts.length - 2].x, pts[pts.length - 2].y);
+      ctx.lineTo(pt.x, pt.y);
+      ctx.stroke();
+      ctx.restore();
+    });
+
+    const endPointer = function () {
+      annotatorState.drawing = false;
+      annotatorState.currentStroke = null;
+      annotatorState.pointerId = null;
+    };
+    overlay.addEventListener('pointerup', endPointer);
+    overlay.addEventListener('pointercancel', endPointer);
+  });
+
   window.handleChecklistFieldPhotoCaptured = function (fieldId, event) {
     const file = event.target.files && event.target.files[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = function (e) {
-      window.checklistState.fieldPhotos[fieldId] = e.target.result;
-      if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
+    reader.onload = async function (e) {
+      const rawDataUrl = e.target.result;
+      const annotatedDataUrl = await window.openAnnotator(rawDataUrl);
+      if (!annotatedDataUrl) return;
+
+      window.checklistState.fieldPhotos[fieldId] = annotatedDataUrl;
+      if (typeof window.saveChecklistDraftToStorage === 'function') await window.saveChecklistDraftToStorage();
       renderCurrentChecklistTemplate();
     };
     reader.readAsDataURL(file);
@@ -13934,7 +14146,11 @@ if (manualSendModal) {
         if (typeof showAlert === 'function') showAlert('Maximum 5 images allowed for ticket');
         return;
       }
-      ticket.images.push(e.target.result);
+      const rawDataUrl = e.target.result;
+      const annotatedDataUrl = await window.openAnnotator(rawDataUrl);
+      if (!annotatedDataUrl) return; // User cancelled
+
+      ticket.images.push(annotatedDataUrl);
       window.checklistState.tickets[fieldId] = ticket;
       renderTicketThumbnails();
       if (typeof window.saveChecklistDraftToStorage === 'function') {
