@@ -14507,6 +14507,29 @@ if (manualSendModal) {
     return existingReason;
   }
 
+  window.isDefectTicket = function (fieldId) {
+    if (!window.checklistState || !window.checklistState.queue || !fieldId) return false;
+    const queue = window.checklistState.queue;
+    let targetField = null;
+    for (const tpl of queue) {
+      if (Array.isArray(tpl.fields)) {
+        targetField = tpl.fields.find(f => f.id === fieldId);
+        if (targetField) break;
+      }
+    }
+    if (!targetField) return false;
+
+    const ansVal = window.checklistState.answers[fieldId];
+    const isNg = ansVal === 'NG';
+    const numVal = typeof ansVal === 'number' ? ansVal : parseFloat(ansVal);
+    const isOutOfRange = targetField.type === 'number' && !isNaN(numVal) && (
+      (targetField.min !== null && targetField.min !== undefined && numVal < targetField.min) ||
+      (targetField.max !== null && targetField.max !== undefined && numVal > targetField.max)
+    );
+
+    return isNg || isOutOfRange;
+  };
+
   function updateTicketResetButtonVisibility() {
     const fieldId = window.checklistState.activeTicketField;
     const resetBtn = document.getElementById('checklistTicketResetBtn');
