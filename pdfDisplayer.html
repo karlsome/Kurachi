@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="ja">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -30,11 +31,14 @@
 
         /* Icon float animation */
         @keyframes float {
-            0%, 100% { 
-                transform: translateY(0px); 
+
+            0%,
+            100% {
+                transform: translateY(0px);
             }
-            50% { 
-                transform: translateY(-20px); 
+
+            50% {
+                transform: translateY(-20px);
             }
         }
 
@@ -42,7 +46,7 @@
         .glass {
             background: rgba(0, 0, 0, 0.05);
             border: 1px solid rgba(0, 0, 0, 0.1);
-            box-shadow: 
+            box-shadow:
                 0 8px 32px 0 rgba(0, 0, 0, 0.08),
                 inset 0 1px 1px 0 rgba(255, 255, 255, 0.5);
         }
@@ -110,11 +114,14 @@
         }
 
         @keyframes pulse {
-            0%, 100% { 
+
+            0%,
+            100% {
                 transform: scale(1);
                 opacity: 1;
             }
-            50% { 
+
+            50% {
                 transform: scale(1.3);
                 opacity: 0;
             }
@@ -135,7 +142,7 @@
             margin-bottom: 0;
             flex-shrink: 0;
             /* padding: 10px 10px 0 10px; */
-            padding:0;
+            padding: 0;
         }
 
         .info-section.has-data {
@@ -165,7 +172,7 @@
             margin-bottom: 0;
             flex-shrink: 0;
             /* padding: 10px 10px 10px 10px; */
-            padding:0;
+            padding: 0;
             transition: grid-template-columns 0.5s ease;
         }
 
@@ -182,10 +189,12 @@
                 transform: scale(0);
                 opacity: 0;
             }
+
             50% {
                 transform: scale(1.1);
                 opacity: 0.8;
             }
+
             100% {
                 transform: scale(1);
                 opacity: 1;
@@ -264,11 +273,14 @@
         }
 
         @keyframes pulse {
-            0%, 100% { 
+
+            0%,
+            100% {
                 transform: scale(1);
                 opacity: 1;
             }
-            50% { 
+
+            50% {
                 transform: scale(1.3);
                 opacity: 0;
             }
@@ -379,15 +391,13 @@
             content: '';
             position: absolute;
             inset: 0;
-            background: linear-gradient(
-                180deg,
-                rgba(2, 6, 23, 0.1) 0%,
-                rgba(2, 6, 23, 0.02) 12%,
-                rgba(2, 6, 23, 0) 24%,
-                rgba(2, 6, 23, 0) 76%,
-                rgba(2, 6, 23, 0.06) 88%,
-                rgba(2, 6, 23, 0.16) 100%
-            );
+            background: linear-gradient(180deg,
+                    rgba(2, 6, 23, 0.1) 0%,
+                    rgba(2, 6, 23, 0.02) 12%,
+                    rgba(2, 6, 23, 0) 24%,
+                    rgba(2, 6, 23, 0) 76%,
+                    rgba(2, 6, 23, 0.06) 88%,
+                    rgba(2, 6, 23, 0.16) 100%);
             pointer-events: none;
             z-index: 1;
         }
@@ -678,11 +688,14 @@
         }
 
         @keyframes scanPulse {
-            0%, 100% { 
+
+            0%,
+            100% {
                 transform: scale(1);
                 opacity: 1;
             }
-            50% { 
+
+            50% {
                 transform: scale(1.03);
                 opacity: 0.9;
             }
@@ -728,6 +741,7 @@
         }
     </style>
 </head>
+
 <body>
     <div class="main-content">
         <div class="error-message" id="errorMessage" style="display: none;">
@@ -748,7 +762,8 @@
                 <img src="src/pdfBG.png" alt="Sasaki Coating" style="height: 60px; opacity: 0.3;" />
             </div>
             <div class="icon">
-                <img src="https://cdn3d.iconscout.com/3d/premium/thumb/tapping-on-tablet-screen-3d-icon-png-download-6666067.png" alt="Tablet tapping icon" />
+                <img src="https://cdn3d.iconscout.com/3d/premium/thumb/tapping-on-tablet-screen-3d-icon-png-download-6666067.png"
+                    alt="Tablet tapping icon" />
             </div>
             <div>QRコードのスキャンを待っています...</div>
             <div style="font-size: 0.7em; margin-top: 15px; opacity: 0.8;">Waiting for QR code scan...</div>
@@ -767,12 +782,14 @@
                     <div class="manual-blank" id="manualBlankState">
                         <div class="manual-blank-icon">🎬</div>
                         <div class="manual-blank-title">Waiting for a deployed video manual</div>
-                        <div class="manual-blank-body">The monitor will switch here when the tablet selects a deployed project for this scanned product.</div>
+                        <div class="manual-blank-body">The monitor will switch here when the tablet selects a deployed
+                            project for this scanned product.</div>
                     </div>
                     <div class="manual-media-stage" id="manualMediaStage">
                         <div class="manual-project-viewport" id="manualProjectViewport">
                             <div class="manual-project-stage" id="manualProjectStage">
-                                <video id="manualVideo" class="manual-video display-mode-hidden" playsinline muted preload="auto"></video>
+                                <video id="manualVideo" class="manual-video display-mode-hidden" playsinline muted
+                                    preload="auto"></video>
                                 <div id="manualMediaCache" class="manual-media-cache"></div>
                                 <div id="manualElements" class="manual-elements"></div>
                             </div>
@@ -789,7 +806,8 @@
                         <div class="manual-bottombar">
                             <div class="manual-description-card" id="manualDescriptionCard">
                                 <div class="manual-description-label">Step Description</div>
-                                <div class="manual-description-text" id="manualStepDescription">Waiting for project selection…</div>
+                                <div class="manual-description-text" id="manualStepDescription">Waiting for project
+                                    selection…</div>
                             </div>
                             <div class="manual-status-row">
                                 <div class="manual-status-card" id="manualStatusCard">
@@ -798,7 +816,8 @@
                                 </div>
                                 <div class="manual-step-card">
                                     <div class="manual-card-label">Current Step</div>
-                                    <div class="manual-card-value" id="manualStepText">Waiting for project selection…</div>
+                                    <div class="manual-card-value" id="manualStepText">Waiting for project selection…
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -813,17 +832,17 @@
         function getMachineIdFromURL() {
             const urlParams = new URLSearchParams(window.location.search);
             const machineParam = urlParams.get('machine');
-            
+
             if (!machineParam) {
                 return null;
             }
-            
+
             return machineParam.toUpperCase();
         }
 
         const MACHINE_ID = getMachineIdFromURL();
-        const SERVER_URL = 'https://kurachi.onrender.com';
-        //const SERVER_URL = 'http://localhost:3000';
+        //const SERVER_URL = 'https://kurachi.onrender.com';
+        const SERVER_URL = 'http://localhost:3000';
         //const SERVER_URL = 'http://192.168.1.176:3000';
 
         // localStorage key for persisting scan data
@@ -1326,17 +1345,17 @@
             showError('❌ Machine parameter is missing!<br><br>Please use: <code>?machine=OZNC01</code>');
         } else {
             document.title = `${MACHINE_ID} - Machine Display`;
-            
+
             // Initialize with 2 cards (machine name + connection status)
             initializeWaitingCards();
-            
+
             // Try to restore last scan from localStorage
             const lastScan = loadScanFromStorage();
             if (lastScan) {
                 console.log('🔄 Restoring last scan from localStorage');
                 updateDisplay(lastScan);
             }
-            
+
             // Start SSE connection
             connectSSE();
         }
@@ -2280,10 +2299,10 @@
         // Connect to SSE endpoint
         function connectSSE() {
             console.log(`🔌 Connecting to SSE for ${MACHINE_ID}...`);
-            
+
             eventSource = new EventSource(`${SERVER_URL}/sse/machine/${MACHINE_ID}`);
 
-            eventSource.onopen = function() {
+            eventSource.onopen = function () {
                 console.log('✅ SSE Connection opened');
                 const statusDot = document.getElementById('statusDot');
                 if (statusDot) {
@@ -2292,14 +2311,14 @@
                 }
             };
 
-            eventSource.onerror = function(error) {
+            eventSource.onerror = function (error) {
                 console.error('❌ SSE Connection error:', error);
                 const statusDot = document.getElementById('statusDot');
                 if (statusDot) {
                     statusDot.classList.remove('connected');
                     statusDot.classList.add('disconnected');
                 }
-                
+
                 // Attempt to reconnect after 5 seconds
                 setTimeout(() => {
                     console.log('🔄 Attempting to reconnect...');
@@ -2308,9 +2327,9 @@
                 }, 5000);
             };
 
-            eventSource.onmessage = function(event) {
+            eventSource.onmessage = function (event) {
                 console.log('📨 Received message:', event.data);
-                
+
                 try {
                     const data = JSON.parse(event.data);
                     handleMessage(data);
@@ -2329,12 +2348,14 @@
                 return;
             }
 
-            if (data.type === 'scan') {
+            if (data.type === 'scan' || data.type === 'clear') {
                 if (data.machineId) {
                     manualState.sessionKey = data.machineId;
                 }
-                // Check if this is a clear action
-                if (data.additionalData && data.additionalData.action === 'clear') {
+
+                // Check if this is a clear command
+                if (data.type === 'clear' || data.action === 'clear' || (data.additionalData && data.additionalData.action === 'clear') || (!data.sebanggo && !data.zuban)) {
+                    console.log('🧹 Received clear broadcast -> resetting display to waiting state');
                     clearDisplay();
                     resetManualPlayer({ restorePdf: false });
                     manualSection.style.display = 'none';
@@ -2377,17 +2398,17 @@
         // Clear the display and return to waiting state
         function clearDisplay() {
             console.log('🧹 Clearing display - reset triggered');
-            
+
             // Clear localStorage
             clearScanFromStorage();
-            
+
             // Hide PDF section
             pdfSection.style.display = 'none';
             manualSection.style.display = 'none';
-            
+
             // Show waiting message
             waitingMessage.style.display = 'block';
-            
+
             // Reset cards to 2-column state
             productInfo.classList.remove('expanded');
             initializeWaitingCards();
@@ -2396,6 +2417,7 @@
         // Update the display with scan data
         async function updateDisplay(data) {
             window.currentSebanggo = data.sebanggo; // Added for data integrity check
+            window.currentZuban = data.zuban || null;
             resetManualPlayer({ restorePdf: false });
 
             // Save to localStorage for persistence
@@ -2415,7 +2437,7 @@
                 minute: '2-digit',
                 second: '2-digit'
             });
-            
+
             productInfo.innerHTML = `
                 <div class="info-card burst">
                     <div class="info-label">Machine / マシン</div>
@@ -2438,7 +2460,7 @@
                     <div class="info-value">${formattedTime}</div>
                 </div>
             `;
-            
+
             // Trigger expansion animation after burst
             setTimeout(() => {
                 productInfo.classList.add('expanded');
@@ -2457,37 +2479,127 @@
         // PDF Display System
         let pdfPages = []; // Array of {type, imageURL, name}
         let currentPDFIndex = 0;
+        const trimmedImageCache = new Map();
+
+        // -----------------------------------------------------
+        // Auto-Trim Dynamic Whitespace for Material PDF Images
+        // -----------------------------------------------------
+        async function autoTrimDocumentImage(srcUrl) {
+            if (!srcUrl) return srcUrl;
+            if (trimmedImageCache.has(srcUrl)) {
+                return trimmedImageCache.get(srcUrl);
+            }
+
+            return new Promise((resolve) => {
+                const img = new Image();
+                img.crossOrigin = "anonymous";
+                img.onload = () => {
+                    try {
+                        const canvas = document.createElement('canvas');
+                        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+                        const w = img.naturalWidth;
+                        const h = img.naturalHeight;
+                        canvas.width = w;
+                        canvas.height = h;
+                        ctx.drawImage(img, 0, 0);
+
+                        const imgData = ctx.getImageData(0, 0, w, h);
+                        const data = imgData.data;
+
+                        let minX = w, minY = h, maxX = 0, maxY = 0;
+                        let foundContent = false;
+
+                        // Sample every 2nd pixel for blazing fast performance
+                        for (let y = 0; y < h; y += 2) {
+                            for (let x = 0; x < w; x += 2) {
+                                const idx = (y * w + x) * 4;
+                                const r = data[idx];
+                                const g = data[idx + 1];
+                                const b = data[idx + 2];
+                                const a = data[idx + 3];
+
+                                // Darker than threshold RGB 242 means actual document content
+                                if (a > 30 && (r < 242 || g < 242 || b < 242)) {
+                                    if (x < minX) minX = x;
+                                    if (x > maxX) maxX = x;
+                                    if (y < minY) minY = y;
+                                    if (y > maxY) maxY = y;
+                                    foundContent = true;
+                                }
+                            }
+                        }
+
+                        if (foundContent && (maxX - minX > 50) && (maxY - minY > 50)) {
+                            // Check if side whitespace is significant (> 5% of width)
+                            const totalSideMargin = minX + (w - maxX);
+                            if (totalSideMargin > w * 0.05) {
+                                const pad = 12;
+                                minX = Math.max(0, minX - pad);
+                                minY = Math.max(0, minY - pad);
+                                maxX = Math.min(w, maxX + pad);
+                                maxY = Math.min(h, maxY + pad);
+                                const cropW = maxX - minX;
+                                const cropH = maxY - minY;
+
+                                const cropCanvas = document.createElement('canvas');
+                                cropCanvas.width = cropW;
+                                cropCanvas.height = cropH;
+                                const cropCtx = cropCanvas.getContext('2d');
+                                cropCtx.drawImage(canvas, minX, minY, cropW, cropH, 0, 0, cropW, cropH);
+
+                                const trimmedUrl = cropCanvas.toDataURL('image/jpeg', 0.95);
+                                trimmedImageCache.set(srcUrl, trimmedUrl);
+                                console.log(`✂️ Auto-trimmed document image from ${w}x${h} to ${cropW}x${cropH}`);
+                                resolve(trimmedUrl);
+                                return;
+                            }
+                        }
+
+                        trimmedImageCache.set(srcUrl, srcUrl);
+                        resolve(srcUrl);
+                    } catch (err) {
+                        console.warn('⚠️ Auto-trim skipped (using original):', err);
+                        trimmedImageCache.set(srcUrl, srcUrl);
+                        resolve(srcUrl);
+                    }
+                };
+                img.onerror = () => {
+                    resolve(srcUrl);
+                };
+                img.src = srcUrl;
+            });
+        }
 
         async function fetchAndDisplayPDFs(sebanggo, zuban) {
             try {
                 let apiUrl, pdfTypes;
-                
+
                 if (zuban) {
                     console.log(`📄 Fetching Material PDFs for 図番: ${zuban}`);
                     apiUrl = `${SERVER_URL}/api/material-pdfs/${zuban}`;
                     pdfTypes = [
                         { key: '作業条件表', name: '作業条件表 (Operation Standards)' },
-                        { key: 'その他1',    name: 'その他1' },
-                        { key: 'その他2',    name: 'その他2' }
+                        { key: 'その他1', name: 'その他1' },
+                        { key: 'その他2', name: 'その他2' }
                     ];
                 } else {
                     console.log(`📄 Fetching Product PDFs for 背番号: ${sebanggo}`);
                     apiUrl = `${SERVER_URL}/api/product-pdfs/${sebanggo}`;
                     pdfTypes = [
-                        { key: '梱包',           name: '梱包 (Packing)' },
-                        { key: '検査基準',        name: '検査基準 (Inspection Standards)' },
-                        { key: '3点総合',         name: '3点総合 (3-Point Comprehensive)' },
+                        { key: '梱包', name: '梱包 (Packing)' },
+                        { key: '検査基準', name: '検査基準 (Inspection Standards)' },
+                        { key: '3点総合', name: '3点総合 (3-Point Comprehensive)' },
                         { key: 'ワンポイント確認票', name: 'ワンポイント確認票' },
-                        { key: '作業要領書',       name: '作業要領書' },
-                        { key: 'その他1',          name: 'その他1' },
-                        { key: 'その他2',          name: 'その他2' },
-                        { key: 'その他3',          name: 'その他3' }
+                        { key: '作業要領書', name: '作業要領書' },
+                        { key: 'その他1', name: 'その他1' },
+                        { key: 'その他2', name: 'その他2' },
+                        { key: 'その他3', name: 'その他3' }
                     ];
                 }
-                
+
                 const response = await fetch(apiUrl);
                 const pdfs = await response.json();
-                
+
                 // Build pages array
                 pdfPages = [];
 
@@ -2498,20 +2610,20 @@
                         name: t.name
                     });
                 }
-                
+
                 console.log(`✅ Loaded ${pdfPages.length} PDF pages`, pdfPages);
-                
+
                 // Show first page
                 currentPDFIndex = 0;
-                displayCurrentPDF();
-                
+                await displayCurrentPDF();
+
             } catch (error) {
                 console.error('❌ Error fetching PDFs:', error);
                 pdfSection.style.display = 'none';
             }
         }
 
-        function displayCurrentPDF() {
+        async function displayCurrentPDF() {
             if (pdfPages.length === 0) {
                 pdfSection.style.display = 'none';
                 return;
@@ -2520,20 +2632,28 @@
             if (manualState.mode === 'manual') {
                 return;
             }
-            
+
             pdfSection.style.display = 'block';
             const currentPage = pdfPages[currentPDFIndex];
-            
             const pdfGrid = document.getElementById('pdfGrid');
-            
+
             if (currentPage.imageURL) {
-                // Display PDF image with overlay title, constrained to viewport
+                const displaySrc = currentPage.imageURL;
+                const isMaterialPdf = Boolean(window.currentZuban || currentPage.type === '作業条件表');
+
+                console.log(`📄 Displaying PDF: "${currentPage.name}", isMaterialPdf: ${isMaterialPdf}, mode: ${isMaterialPdf ? 'cover (fills screen)' : 'contain'}`);
+
+                // For Material PDFs (作業条件表 with white side margins), use object-fit: cover
+                // to fill the full height/width in portrait mode without showing empty space.
+                // Standard product PDFs (背番号 / DCP) remain object-fit: contain.
+                const objectFitStyle = isMaterialPdf ? 'cover' : 'contain';
+
                 pdfGrid.innerHTML = `
-                    <div style="position: relative; width: 100%; height: calc(100vh - 60px); display: flex; align-items: center; justify-content: center;">
+                    <div style="position: relative; width: 100%; height: calc(100vh - 60px); display: flex; align-items: center; justify-content: center; overflow: hidden; background: #FFFFFF;">
                         <div style="position: absolute; top: 10px; left: 10px; background: rgba(0, 0, 0, 0.8); color: white; font-size: 0.9em; font-weight: 600; padding: 8px 16px; border-radius: 6px; z-index: 10;">
                             ${currentPage.name}
                         </div>
-                        <img src="${currentPage.imageURL}" alt="${currentPage.name}" style="width: 100%; height: 100%; object-fit: contain; display: block;" />
+                        <img src="${displaySrc}" alt="${currentPage.name}" style="width: 100%; height: 100%; object-fit: ${objectFitStyle}; object-position: center; display: block;" />
                     </div>
                 `;
             } else {
@@ -2627,4 +2747,5 @@
         });
     </script>
 </body>
+
 </html>

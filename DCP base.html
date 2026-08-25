@@ -7,14 +7,29 @@
     <title>DCP Base UI Library</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Nunito+Sans:ital,opsz,wght@0,6..12,400;0,6..12,600;0,6..12,700;0,6..12,800;0,6..12,900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700;800;900&family=Nunito+Sans:ital,opsz,wght@0,6..12,400;0,6..12,600;0,6..12,700;0,6..12,800;0,6..12,900&display=swap" rel="stylesheet">
     
     <style>
         /* ============================================================
            DESIGN SYSTEM  ·  Flat / Dashboard-UI-Kit inspired
-           Nunito Sans · light-gray canvas · flat white surfaces
-           No gradients · no glass · 1px borders · consistent scale
+           Noto Sans JP + Nunito Sans · light-gray canvas · flat white surfaces
            Optimized for 10" tablets (portrait + landscape)
+
+           ⚠️ TABLET SHARPNESS & ANTI-BLUR GUIDELINES (シャープネス必須要件):
+           1. FONT IMPORT: Always import 'Noto Sans JP' (wght 400..900) alongside 'Nunito Sans'.
+              Without Noto Sans JP, Japanese glyphs fall back to unhinted generic system fonts
+              which look fuzzy on high-DPI tablets.
+           2. FONT STACK: Use `'Nunito Sans', 'Noto Sans JP', -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", Meiryo, sans-serif;`
+           3. FONT SMOOTHING: Always declare on body and text containers:
+              `-webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: optimizeLegibility;`
+           4. GPU TEXTURE AVOIDANCE: NEVER use `will-change: transform` on multi-tab/large
+              containers (e.g. .tab-panels-container). It forces mobile WebKit/Blink
+              to rasterize offscreen GPU textures, causing severe subpixel text smearing.
+              Use `transform: translate3d(0, 0, 0); -webkit-transform-style: flat;` and
+              `transform: translateZ(0);` on tab panels instead.
+           5. TEXT CONTRAST: Use high-contrast slate colors:
+              --text-main: #0F172A (900/800 bold), --text-muted: #475569 (700 bold),
+              --text-soft: #64748B. Avoid washed-out light grays for readable factory UI.
            ============================================================ */
         :root {
             /* Surfaces */
@@ -32,9 +47,9 @@
             --border-strong: #D6DAE3;
 
             /* Text */
-            --text-main: #1F2733;
-            --text-muted: #6B7280;
-            --text-soft: #9AA1AC;
+            --text-main: #0F172A;
+            --text-muted: #475569;
+            --text-soft: #64748B;
 
             /* Brand + semantic (flat solids) */
             --brand: #1F9D6B;
@@ -66,7 +81,7 @@
             --r-pill: 6px;
 
             /* Elevation — intentionally minimal (flat) */
-            --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04);
+            --shadow-card: 0 1px 3px rgba(16, 24, 40, 0.06);
             --shadow-pop: 0 12px 32px rgba(16, 24, 40, 0.14);
 
             --transition-smooth: 0.18s ease;
@@ -83,7 +98,7 @@
         }
 
         body {
-            font-family: 'Nunito Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-family: 'Nunito Sans', 'Noto Sans JP', -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", Meiryo, sans-serif;
             background-color: var(--bg-app);
             color: var(--text-main);
             height: 100vh;
@@ -96,6 +111,7 @@
             user-select: none;
             -webkit-user-select: none;
             -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
             text-rendering: optimizeLegibility;
         }
 
@@ -317,7 +333,10 @@
             /* 7 tabs (Scan, Params, Production, Kensa, Images, Maintenance, Submit) */
             height: 100%;
             transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
-            will-change: transform;
+            transform: translate3d(0, 0, 0);
+            -webkit-transform-style: flat;
+            backface-visibility: hidden;
+            -webkit-backface-visibility: hidden;
         }
 
         .tab-panel {
@@ -328,6 +347,9 @@
             /* extra bottom clearance so the last card isn't hidden behind the
                Android nav bar / iOS home indicator */
             padding: 20px 20px calc(64px + env(safe-area-inset-bottom, 0px));
+            transform: translateZ(0);
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
         }
 
         .tab-panel::-webkit-scrollbar {
@@ -1759,6 +1781,21 @@
                             <input class="tap-count" value="0" type="number" readonly style="font-size: 1.5rem; width: 100%;">
                             <label>Defect Example</label>
                         </div>
+                    </div>
+                </div>
+
+                <div class="component-box">
+                    <div class="component-desc">
+                        <strong>Tablet Sharpness & Typography Standards (シャープネス基準)</strong><br>
+                        - <strong>Font Stack:</strong> <code>'Nunito Sans', 'Noto Sans JP', sans-serif</code> (wght 400..900)<br>
+                        - <strong>Anti-Aliasing:</strong> <code>-webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;</code><br>
+                        - <strong>GPU Stability:</strong> Do not use <code>will-change: transform</code> on multi-tab viewports; use <code>translate3d</code> & <code>translateZ(0)</code>.<br>
+                        - <strong>High Contrast:</strong> Titles in <code>#0F172A</code>, labels in <code>#475569</code>.
+                    </div>
+                    <div style="background: #FFFFFF; border: 1.5px solid #CBD5E1; border-radius: var(--card-radius); padding: 16px; display: flex; flex-direction: column; gap: 8px;">
+                        <div style="font-size: 0.75rem; font-weight: 800; color: #1D4ED8; text-transform: uppercase; letter-spacing: 0.05em;">シャープネス検証サンプル (Sample Text)</div>
+                        <div style="font-size: 1.15rem; font-weight: 900; color: #0F172A;">C13/3D4K1BG3D/***W12 (基材: 6CMC0-4K1Y2-K8)</div>
+                        <div style="font-size: 0.85rem; font-weight: 700; color: #475569;">出荷先: 小瀬工場 • 色: ベージュ • 処理: 3層品 • 幅長: 1200W</div>
                     </div>
                 </div>
             </div>

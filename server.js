@@ -857,7 +857,7 @@ app.post("/api/broadcast-scan", async (req, res) => {
   const { machineId, sebanggo, hinban, zuban, timestamp, additionalData } = req.body;
   
   // Allow empty sebanggo/zuban only if action is 'clear'
-  const isClearAction = additionalData?.action === 'clear';
+  const isClearAction = additionalData?.action === 'clear' || req.body.action === 'clear';
   
   if (!machineId || (!sebanggo && !zuban && !isClearAction)) {
     return res.status(400).json({ error: "machineId and sebanggo/zuban are required (unless action is 'clear')" });
@@ -873,19 +873,20 @@ app.post("/api/broadcast-scan", async (req, res) => {
     return res.status(400).json({ error: "Invalid machineId format" });
   }
   
-  console.log(`📡 Broadcasting to machine(s): ${machineIds.join(', ')}`);
+  console.log(`📡 Broadcasting to machine(s): ${machineIds.join(', ')} (clear: ${isClearAction})`);
   
   // For each machine, create and store scan data
   machineIds.forEach(normalizedMachineId => {
     const normalizedSessionKey = machineIds.join(',');
     const scanData = {
-      type: 'scan',
+      type: isClearAction ? 'clear' : 'scan',
+      action: isClearAction ? 'clear' : 'scan',
       machineId: normalizedSessionKey,
       sebanggo,
       zuban,
       hinban: hinban || '',
       timestamp: timestamp || new Date().toISOString(),
-      additionalData: additionalData || {}
+      additionalData: additionalData || (isClearAction ? { action: 'clear' } : {})
     };
     
     // Store last scan for persistence (or clear it if action is 'clear')
@@ -1717,6 +1718,34 @@ app.post("/api/upload-pdf-image", async (req, res) => {
   } catch (error) {
     console.error("❌ Error uploading PDF image:", error);
     res.status(500).json({ error: "Error uploading image", details: error.message });
+  }
+});
+
+// Proxy file/image download to avoid client-side CORS issues and ensure attachment download
+app.get("/api/download-proxy", async (req, res) => {
+  try {
+    const fileUrl = req.query.url;
+    const filename = req.query.filename || "download";
+
+    if (!fileUrl) {
+      return res.status(400).send("Missing url query param");
+    }
+
+    const fetchRes = await fetch(fileUrl);
+    if (!fetchRes.ok) {
+      return res.status(fetchRes.status).send(`Failed to fetch file: ${fetchRes.statusText}`);
+    }
+
+    const contentType = fetchRes.headers.get("content-type") || "application/octet-stream";
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(filename)}"`);
+    res.setHeader("Access-Control-Allow-Origin", "*");
+
+    const arrayBuffer = await fetchRes.arrayBuffer();
+    return res.send(Buffer.from(arrayBuffer));
+  } catch (err) {
+    console.error("❌ Download proxy error:", err);
+    return res.status(500).send("Error downloading file");
   }
 });
 
@@ -6986,7 +7015,7 @@ app.get('/api/setsubi-history', async (req, res) => {
 app.post('/queries', async (req, res) => {
   console.log("🟢 Received POST request to /queries");
   // Destructure query from req.body to modify it if needed
-  let { dbName, collectionName, query, aggregation, insertData, update, delete: deleteFlag, username } = req.body;
+  let { dbName, collectionName, query, aggregation, insertData, update, delete: deleteFlag, username, sort, limit, projection, skip, options } = req.body;
 
   try {
     // Log the initial request for debugging
@@ -7117,7 +7146,18 @@ app.post('/queries', async (req, res) => {
     
     // Default to find if no other operation specified
     console.log("🔵 Running Find Query with query:", query);
-    const results = await collection.find(query).toArray();
+    let cursor = collection.find(query || {});
+    const effProj = projection || options?.projection;
+    const effSort = sort || options?.sort;
+    const effLimit = limit || options?.limit;
+    const effSkip = skip || options?.skip;
+
+    if (effProj) cursor = cursor.project(effProj);
+    if (effSort) cursor = cursor.sort(effSort);
+    if (effSkip) cursor = cursor.skip(Number(effSkip));
+    if (effLimit) cursor = cursor.limit(Number(effLimit));
+
+    const results = await cursor.toArray();
     console.log(`✅ Find Query Results Count: ${results.length}`);
     // console.log("✅ Query Results (Find):", JSON.stringify(results, null, 2)); // Can be verbose
     res.json(results);
@@ -12379,6 +12419,13 @@ function matchesFactoryStatusSingleFilter(row = {}, filter = {}) {
 
   const rawValue = row?.[field];
 
+  if (operator === "exists") {
+    return rawValue != null && rawValue !== "";
+  }
+  if (operator === "not_exists") {
+    return rawValue == null || rawValue === "";
+  }
+
   if (type === "number") {
     const rowValue = getFactoryStatusNumericValue(rawValue);
     const filterValue = getFactoryStatusNumericValue(filter?.value);
@@ -12387,6 +12434,7 @@ function matchesFactoryStatusSingleFilter(row = {}, filter = {}) {
 
     if (rowValue == null) return false;
     if (operator === "equals") return rowValue === filterValue;
+    if (operator === "not_equals") return rowValue !== filterValue;
     if (operator === "greater") return filterValue != null && rowValue > filterValue;
     if (operator === "less") return filterValue != null && rowValue < filterValue;
     if (operator === "range") return fromValue != null && toValue != null && rowValue >= fromValue && rowValue <= toValue;
@@ -12408,6 +12456,7 @@ function matchesFactoryStatusSingleFilter(row = {}, filter = {}) {
 
   const filterText = normalizeFactoryStatusTextLower(filter?.value);
   if (operator === "equals") return rowText === filterText;
+  if (operator === "not_equals") return rowText !== filterText;
   if (operator === "contains") return rowText.includes(filterText);
   return true;
 }
@@ -23181,6 +23230,13 @@ function matchesInventoryAdvancedFilters(item = {}, filters = []) {
 
       if (!field || !operator) return true;
 
+      if (operator === 'exists') {
+        return rawValue != null && rawValue !== '';
+      }
+      if (operator === 'not_exists') {
+        return rawValue == null || rawValue === '';
+      }
+
       if (type === 'number') {
         const itemValue = Number(rawValue) || 0;
         const nextValue = Number(filter?.value);
@@ -23188,6 +23244,7 @@ function matchesInventoryAdvancedFilters(item = {}, filters = []) {
         const nextTo = Number(filter?.valueTo);
 
         if (operator === 'equals') return itemValue === nextValue;
+        if (operator === 'not_equals') return itemValue !== nextValue;
         if (operator === 'greater') return itemValue > nextValue;
         if (operator === 'less') return itemValue < nextValue;
         if (operator === 'range') return itemValue >= nextFrom && itemValue <= nextTo;
@@ -23199,6 +23256,7 @@ function matchesInventoryAdvancedFilters(item = {}, filters = []) {
         if (!itemDate) return false;
 
         if (operator === 'equals') return itemDate === filter?.value;
+        if (operator === 'not_equals') return itemDate !== filter?.value;
         if (operator === 'greater') return itemDate > filter?.value;
         if (operator === 'less') return itemDate < filter?.value;
         if (operator === 'range') {
@@ -23222,6 +23280,7 @@ function matchesInventoryAdvancedFilters(item = {}, filters = []) {
 
       const compareValue = String(filter?.value || '').trim().toLowerCase();
       if (operator === 'equals') return itemValue === compareValue;
+      if (operator === 'not_equals') return itemValue !== compareValue;
       if (operator === 'contains') return itemValue.includes(compareValue);
       return true;
     });
@@ -34111,7 +34170,704 @@ app.post("/api/analytics/stop-calls", async (req, res) => {
   }
 });
 
-require('./firstFactoryRoutes')(app, client);
+// ---------------------------------------------------------------------------
+// First Factory Daily Schedule API (for firstKojoNippo Tablet & Nippo)
+// ---------------------------------------------------------------------------
+app.get('/api/production/schedule/daily', async (req, res) => {
+  try {
+    const { month, date } = req.query;
+    if (!month || date === undefined) {
+      return res.status(400).json({ error: 'month and date are required' });
+    }
+    const submittedDb = client.db('submittedDB');
+    const scheduleCollection = submittedDb.collection('firstFactorySchedule');
+    const schedule = await scheduleCollection.findOne({ type: 'dailySchedule', month, date: Number(date) });
+
+    if (schedule && Array.isArray(schedule.scheduleOrder) && schedule.scheduleOrder.length > 0) {
+      const hinbans = [...new Set(schedule.scheduleOrder.map(i => i.hinban).filter(Boolean))];
+      if (hinbans.length > 0) {
+        const masterDb = client.db('Sasaki_Coating_MasterDB');
+        const masterCollection = masterDb.collection('materialMasterDB3');
+        const masterDocs = await masterCollection.find({ "品番": { $in: hinbans } }).toArray();
+
+        const masterMap = {};
+        masterDocs.forEach(doc => {
+          let kizai = '';
+          let color = '';
+          let shori = '';
+          let habanaga = '';
+          if (doc['品番構造'] && Array.isArray(doc['品番構造'].segments)) {
+            const kizaiSeg = doc['品番構造'].segments.find(s => s.segment === '基材コード');
+            if (kizaiSeg) kizai = kizaiSeg.name || kizaiSeg['得意先'] || kizaiSeg['入出荷先'] || '';
+
+            const colorSeg = doc['品番構造'].segments.find(s => s.segment === '色コード');
+            if (colorSeg) color = colorSeg.name || colorSeg['得意先'] || colorSeg['入出荷先'] || '';
+
+            const shoriSeg = doc['品番構造'].segments.find(s => s.segment === '処理コード');
+            if (shoriSeg) shori = shoriSeg.name || shoriSeg['得意先'] || shoriSeg['入出荷先'] || '';
+
+            const habanagaSeg = doc['品番構造'].segments.find(s => s.segment === '幅長コード');
+            if (habanagaSeg) habanaga = habanagaSeg.name || habanagaSeg['得意先'] || habanagaSeg['入出荷先'] || '';
+          }
+
+          const shippingDest = doc['品目マスタ']?.['出荷先名'] || doc['品目マスタ']?.['入出荷先名'] || doc['品目マスタ']?.['得意先名'] || '';
+          const labelHinban = doc['品目マスタ']?.['ラベル品番'] || '';
+          const okyakuHinban = doc['品目マスタ']?.['お客様品番'] || doc['お客様品番'] || '';
+          const imageURL = doc['品目マスタ']?.['imageURL'] || doc['imageURL'] || '';
+
+          masterMap[doc['品番']] = {
+            hinmei: doc['品目マスタ']?.['品名'] || '',
+            kizai,
+            color,
+            shori,
+            habanaga,
+            shippingDest,
+            labelHinban,
+            okyakuHinban,
+            imageURL,
+            zuban: doc['品目マスタ']?.['図番'] || ''
+          };
+        });
+
+        schedule.scheduleOrder = schedule.scheduleOrder.map(item => {
+          if (item.type === 'hinban' && item.hinban) {
+            const info = masterMap[item.hinban] || {};
+            return {
+              ...item,
+              kizai: info.kizai || '',
+              color: info.color || '',
+              shori: info.shori || '',
+              habanaga: info.habanaga || '',
+              shippingDest: info.shippingDest || '',
+              labelHinban: info.labelHinban || '',
+              okyakuHinban: info.okyakuHinban || '',
+              imageURL: info.imageURL || '',
+              hinmei: info.hinmei || '',
+              zuban: info.zuban || ''
+            };
+          }
+          return item;
+        });
+      }
+    }
+
+    res.json({ success: true, schedule: schedule || null });
+  } catch (error) {
+    console.error('❌ Error in /api/production/schedule/daily:', error);
+    res.status(500).json({ error: 'Failed to fetch daily schedule' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// First Factory Material & Ingredient Detail API
+// ---------------------------------------------------------------------------
+app.get('/api/production/material-detail', async (req, res) => {
+  try {
+    const { hinban } = req.query;
+    if (!hinban) {
+      return res.status(400).json({ error: 'hinban is required' });
+    }
+    const masterDb = client.db('Sasaki_Coating_MasterDB');
+    const masterCollection = masterDb.collection('materialMasterDB3');
+    const bomCollection = masterDb.collection('bomMasterDB');
+
+    // 1. Fetch product master
+    const productDoc = await masterCollection.findOne({ "品番": hinban });
+
+    // 2. Fetch BOM data
+    let bomData = productDoc?.BOM || null;
+    if (!bomData) {
+      const bomDoc = await bomCollection.findOne({ "品番": hinban });
+      if (bomDoc && bomDoc.BOM) {
+        bomData = bomDoc.BOM;
+      }
+    }
+
+    // 3. Fetch Ingredient / Material Master (e.g. process 1010 or first 構成品番)
+    let ingredientDoc = null;
+    let ingredientHinban = null;
+
+    if (Array.isArray(bomData)) {
+      const bom1010 = bomData.find(b => b['工程コード'] === 1010 && b['構成品番']);
+      if (bom1010) {
+        ingredientHinban = bom1010['構成品番'];
+      } else {
+        const anyBom = bomData.find(b => b['構成品番'] && b['構成品番'] !== hinban);
+        if (anyBom) ingredientHinban = anyBom['構成品番'];
+      }
+    }
+
+    if (ingredientHinban) {
+      ingredientDoc = await masterCollection.findOne({ "品番": ingredientHinban });
+    }
+
+    res.json({
+      success: true,
+      product: productDoc,
+      bom: bomData,
+      ingredient: ingredientDoc,
+      ingredientHinban: ingredientHinban || null
+    });
+  } catch (error) {
+    console.error('❌ Error in /api/production/material-detail:', error);
+    res.status(500).json({ error: 'Failed to fetch material detail' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// First Factory Production Status Tracking API (submittedDB.firstFactoryProduction)
+// ---------------------------------------------------------------------------
+
+// Active SSE clients for instant realtime updates
+const productionSseClients = new Set();
+
+function broadcastProductionEvent(eventData) {
+  const payload = `data: ${JSON.stringify(eventData)}\n\n`;
+  productionSseClients.forEach(client => {
+    try {
+      if (!client.date || client.date === eventData.date) {
+        client.res.write(payload);
+      }
+    } catch (e) {
+      productionSseClients.delete(client);
+    }
+  });
+}
+
+app.get('/api/production/events', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  if (res.flushHeaders) res.flushHeaders();
+
+  const clientObj = { res, date: req.query.date };
+  productionSseClients.add(clientObj);
+
+  res.write(`data: ${JSON.stringify({ type: 'connected', time: new Date().toISOString() })}\n\n`);
+
+  // Heartbeat every 20s to keep connection alive through proxies
+  const keepAlive = setInterval(() => {
+    try {
+      res.write(': keep-alive\n\n');
+    } catch (e) {
+      clearInterval(keepAlive);
+      productionSseClients.delete(clientObj);
+    }
+  }, 20000);
+
+  req.on('close', () => {
+    clearInterval(keepAlive);
+    productionSseClients.delete(clientObj);
+  });
+});
+
+app.get('/api/production/status', async (req, res) => {
+  try {
+    const { date, machine } = req.query;
+    if (!date) {
+      return res.status(400).json({ error: 'date is required (YYYY-MM-DD)' });
+    }
+
+    const submittedDb = client.db('submittedDB');
+    const productionCollection = submittedDb.collection('firstFactoryProduction');
+
+    const query = { date };
+    if (machine) {
+      query.machine = machine;
+    }
+
+    const records = await productionCollection.find(query).toArray();
+    res.json({ success: true, records });
+  } catch (error) {
+    console.error('❌ Error in GET /api/production/status:', error);
+    res.status(500).json({ error: 'Failed to fetch production status' });
+  }
+});
+
+app.post('/api/production/status', async (req, res) => {
+  try {
+    const {
+      scheduleId,
+      groupId,
+      date,
+      machine,
+      worker,
+      hinban,
+      hinmei,
+      kizai,
+      color,
+      zuban,
+      totalRolls,
+      totalMeters,
+      status,
+      actualStartTime,
+      startEpoch,
+      actualEndTime,
+      endEpoch,
+      actualDurationMins,
+      items
+    } = req.body;
+
+    if (!groupId || !date) {
+      return res.status(400).json({ error: 'groupId and date are required' });
+    }
+
+    const submittedDb = client.db('submittedDB');
+    const productionCollection = submittedDb.collection('firstFactoryProduction');
+
+    const filter = { date, groupId };
+    const updateDoc = {
+      $set: {
+        scheduleId: scheduleId || null,
+        groupId,
+        date,
+        machine: machine || 'PSA2',
+        worker: worker || '',
+        hinban: hinban || '',
+        hinmei: hinmei || '',
+        kizai: kizai || '',
+        color: color || '',
+        zuban: zuban || '',
+        totalRolls: Number(totalRolls) || 0,
+        totalMeters: Number(totalMeters) || 0,
+        status: status || 'pending',
+        actualStartTime: actualStartTime || null,
+        startEpoch: startEpoch || null,
+        actualEndTime: actualEndTime || null,
+        endEpoch: endEpoch || null,
+        actualDurationMins: actualDurationMins !== undefined ? Number(actualDurationMins) : null,
+        items: Array.isArray(items) ? items : [],
+        updatedAt: new Date()
+      },
+      $setOnInsert: {
+        createdAt: new Date()
+      }
+    };
+
+    const result = await productionCollection.findOneAndUpdate(
+      filter,
+      updateDoc,
+      { upsert: true, returnDocument: 'after' }
+    );
+
+    console.log(`📝 Updated firstFactoryProduction for [${hinban || groupId}] -> status: ${status}, worker: ${worker}`);
+    
+    // Broadcast live event to all connected admin dashboards
+    broadcastProductionEvent({
+      type: 'status_update',
+      date,
+      groupId,
+      status: status || 'pending',
+      record: updateDoc.$set,
+      timestamp: new Date().toISOString()
+    });
+
+    res.json({ success: true, record: result.value || result });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/status:', error);
+    res.status(500).json({ error: 'Failed to update production status' });
+  }
+});
+
+app.post('/api/production/print-log', async (req, res) => {
+  try {
+    const {
+      scheduleId,
+      groupId,
+      date,
+      machine,
+      worker,
+      hinban,
+      rollIndex,
+      totalRolls,
+      lotNo,
+      barcode,
+      timestamp,
+      timeStr
+    } = req.body;
+
+    if (!groupId || !date) {
+      return res.status(400).json({ error: 'groupId and date are required' });
+    }
+
+    const submittedDb = client.db('submittedDB');
+    const productionCollection = submittedDb.collection('firstFactoryProduction');
+
+    const printEntry = {
+      rollIndex: Number(rollIndex) || 1,
+      totalRolls: Number(totalRolls) || 1,
+      lotNo: lotNo || '',
+      barcode: barcode || '',
+      worker: worker || '',
+      machine: machine || 'PSA2',
+      timestamp: timestamp || new Date().toISOString(),
+      timeStr: timeStr || new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+      createdAt: new Date()
+    };
+
+    const filter = { date, groupId };
+    await productionCollection.updateOne(
+      filter,
+      {
+        $push: { printHistory: printEntry },
+        $set: {
+          scheduleId: scheduleId || null,
+          groupId,
+          date,
+          machine: machine || 'PSA2',
+          hinban: hinban || '',
+          updatedAt: new Date()
+        },
+        $setOnInsert: {
+          status: 'pending',
+          createdAt: new Date()
+        }
+      },
+      { upsert: true }
+    );
+
+    console.log(`🖨️ Logged print event to firstFactoryProduction: [${hinban || groupId}] Roll #${rollIndex}/${totalRolls} (${lotNo})`);
+    
+    // Broadcast print event in realtime
+    broadcastProductionEvent({
+      type: 'print_log',
+      date,
+      groupId,
+      hinban,
+      printEntry,
+      timestamp: new Date().toISOString()
+    });
+
+    res.json({ success: true, printEntry });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/print-log:', error);
+    res.status(500).json({ error: 'Failed to record print log' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// First Factory Production Scheduling & Excel Sync Routes
+// ---------------------------------------------------------------------------
+
+function getFirstFactoryDriveAuth() {
+  const clientEmail = process.env.HABA_EXTRACTOR_CLIENT_EMAIL;
+  let privateKey = process.env.HABA_EXTRACTOR_PRIVATE_KEY;
+  
+  if (!clientEmail || !privateKey) {
+    throw new Error('Missing HABA_EXTRACTOR_CLIENT_EMAIL or HABA_EXTRACTOR_PRIVATE_KEY in .env');
+  }
+
+  if (privateKey.includes('\\n')) {
+    privateKey = privateKey.replace(/\\n/g, '\n');
+  }
+
+  const auth = new google.auth.GoogleAuth({
+    credentials: {
+      client_email: clientEmail,
+      private_key: privateKey
+    },
+    scopes: ['https://www.googleapis.com/auth/drive.readonly']
+  });
+
+  return google.drive({ version: 'v3', auth });
+}
+
+app.get('/api/production/schedule', async (req, res) => {
+  try {
+    const month = req.query.month || '2026-07';
+    const db = client.db('Sasaki_Coating_MasterDB');
+    const collection = db.collection('firstFactoryProduction');
+    
+    const submittedDb = client.db('submittedDB');
+    const scheduleCollection = submittedDb.collection('firstFactorySchedule');
+
+    // Fetch live parsed data for the month
+    const liveData = await collection.find({ month }).toArray();
+
+    // Enrich with material master data and BOM master data
+    const hinbans = liveData.map(item => item.hinban);
+    const masterCollection = db.collection('materialMasterDB3');
+    const bomCollection = db.collection('bomMasterDB');
+
+    const [masterData, bomDataList] = await Promise.all([
+      masterCollection.find({ "品番": { $in: hinbans } }).toArray(),
+      bomCollection.find({ "品番": { $in: hinbans } }).toArray()
+    ]);
+
+    const bomMap = {};
+    bomDataList.forEach(b => {
+      if (b['品番'] && Array.isArray(b['BOM'])) {
+        bomMap[b['品番']] = b['BOM'];
+      }
+    });
+    
+    const masterMap = {};
+    masterData.forEach(master => {
+       const hinbanKey = master['品番'];
+       const packCount = master['品目マスタ']?.['梱包数'] || 0;
+       let workTime = 0;
+       let kataban = '';
+       let timeOption = '';
+       let unit = 'm';
+       let rawUnit = null;
+
+       const bomItems = (Array.isArray(master['BOM']) && master['BOM'].length > 0)
+         ? master['BOM']
+         : (bomMap[hinbanKey] || []);
+
+       const process2010 = bomItems.find(b => 
+         Number(b['工程コード']) === 2010 || 
+         String(b['工程コード'] || '').startsWith('2010') || 
+         b['工程名'] === '粘着工程' || 
+         b['工程略名'] === '粘着'
+       );
+
+       const hasProcess2010 = Boolean(
+         process2010 ||
+         String(master['品目マスタ']?.['工程コード'] || '').startsWith('2010') ||
+         Number(master['resolved']?.['工程コード']?.code) === 2010 ||
+         master['resolved']?.['工程コード']?.name === '粘着工程'
+       );
+
+       if (process2010) {
+          workTime = Number(process2010['作業時間']) || 0;
+          kataban = process2010['型番'] || '';
+          timeOption = process2010['時間オプション'] || '';
+          rawUnit = process2010['生産単位'] || null;
+          const unitName = typeof rawUnit === 'object' ? rawUnit?.name : String(rawUnit || '');
+          if (unitName === '枚') {
+            unit = '枚';
+          } else {
+            unit = 'm';
+          }
+       }
+       
+       masterMap[hinbanKey] = { 
+         packCount, 
+         workTime, 
+         hasProcess2010, 
+         kataban, 
+         timeOption, 
+         unit, 
+         rawUnit, 
+         rawMaster: { ...master, BOM: bomItems } 
+       };
+    });
+
+    // Also enrich any hinbans that exist in bomMasterDB but not in materialMasterDB3
+    bomDataList.forEach(b => {
+       const hinbanKey = b['品番'];
+       if (!masterMap[hinbanKey]) {
+         const bomItems = Array.isArray(b['BOM']) ? b['BOM'] : [];
+         const process2010 = bomItems.find(p => 
+           Number(p['工程コード']) === 2010 || 
+           String(p['工程コード'] || '').startsWith('2010') || 
+           p['工程名'] === '粘着工程' || 
+           p['工程略名'] === '粘着'
+         );
+         const hasProcess2010 = Boolean(process2010);
+         const workTime = process2010 ? (Number(process2010['作業時間']) || 0) : 0;
+         const kataban = process2010?.['型番'] || '';
+         const timeOption = process2010?.['時間オプション'] || '';
+         const rawUnit = process2010?.['生産単位'] || null;
+         const unitName = typeof rawUnit === 'object' ? rawUnit?.name : String(rawUnit || '');
+         const unit = unitName === '枚' ? '枚' : 'm';
+
+         masterMap[hinbanKey] = { 
+           packCount: 0, 
+           workTime, 
+           hasProcess2010, 
+           kataban, 
+           timeOption, 
+           unit, 
+           rawUnit, 
+           rawMaster: { 品番: hinbanKey, BOM: bomItems } 
+         };
+       }
+    });
+    
+    const enrichedData = liveData.map(item => {
+       const masterInfo = masterMap[item.hinban] || { packCount: 0, workTime: 0, hasProcess2010: false };
+       return { ...item, materialInfo: masterInfo };
+    });
+
+    // Fetch user's saved daily schedules for the month
+    const savedSchedules = await scheduleCollection.find({ type: 'dailySchedule', month }).toArray();
+    
+    // Enrich saved schedules with master material attributes (especially 品目マスタ.ラベル品番)
+    const allScheduledHinbans = [...new Set(savedSchedules.flatMap(s => (s.scheduleOrder || []).map(i => i.hinban)).filter(Boolean))];
+    if (allScheduledHinbans.length > 0) {
+      const schedMasterDocs = await masterCollection.find({ "品番": { $in: allScheduledHinbans } }).toArray();
+      const schedMasterMap = {};
+      schedMasterDocs.forEach(doc => {
+        let kizai = '';
+        let color = '';
+        let shori = '';
+        let habanaga = '';
+        if (doc['品番構造'] && Array.isArray(doc['品番構造'].segments)) {
+          const kizaiSeg = doc['品番構造'].segments.find(s => s.segment === '基材コード');
+          if (kizaiSeg) kizai = kizaiSeg.name || kizaiSeg['得意先'] || kizaiSeg['入出荷先'] || '';
+          const colorSeg = doc['品番構造'].segments.find(s => s.segment === '色コード');
+          if (colorSeg) color = colorSeg.name || colorSeg['得意先'] || colorSeg['入出荷先'] || '';
+          const shoriSeg = doc['品番構造'].segments.find(s => s.segment === '処理コード');
+          if (shoriSeg) shori = shoriSeg.name || shoriSeg['得意先'] || shoriSeg['入出荷先'] || '';
+          const habanagaSeg = doc['品番構造'].segments.find(s => s.segment === '幅長コード');
+          if (habanagaSeg) habanaga = habanagaSeg.name || habanagaSeg['得意先'] || habanagaSeg['入出荷先'] || '';
+        }
+        schedMasterMap[doc['品番']] = {
+          hinmei: doc['品目マスタ']?.['品名'] || '',
+          kizai,
+          color,
+          shori,
+          habanaga,
+          shippingDest: doc['品目マスタ']?.['出荷先名'] || doc['品目マスタ']?.['入出荷先名'] || doc['品目マスタ']?.['得意先名'] || '',
+          labelHinban: doc['品目マスタ']?.['ラベル品番'] || '',
+          okyakuHinban: doc['品目マスタ']?.['お客様品番'] || doc['お客様品番'] || '',
+          imageURL: doc['品目マスタ']?.['imageURL'] || doc['imageURL'] || '',
+          zuban: doc['品目マスタ']?.['図番'] || ''
+        };
+      });
+
+      savedSchedules.forEach(sched => {
+        if (Array.isArray(sched.scheduleOrder)) {
+          sched.scheduleOrder = sched.scheduleOrder.map(item => {
+            if (item.type === 'hinban' && item.hinban) {
+              const info = schedMasterMap[item.hinban] || {};
+              return {
+                ...item,
+                kizai: info.kizai || item.kizai || '',
+                color: info.color || item.color || '',
+                shori: info.shori || item.shori || '',
+                habanaga: info.habanaga || item.habanaga || '',
+                shippingDest: info.shippingDest || item.shippingDest || '',
+                labelHinban: info.labelHinban || item.labelHinban || '',
+                okyakuHinban: info.okyakuHinban || item.okyakuHinban || '',
+                imageURL: info.imageURL || item.imageURL || '',
+                hinmei: info.hinmei || item.hinmei || '',
+                zuban: info.zuban || item.zuban || ''
+              };
+            }
+            return item;
+          });
+        }
+      });
+    }
+    
+    res.json({ success: true, data: enrichedData, schedules: savedSchedules });
+  } catch (error) {
+    console.error('Error fetching schedule:', error);
+    res.status(500).json({ error: 'Failed to fetch schedule' });
+  }
+});
+
+app.post('/api/production/schedule', async (req, res) => {
+  try {
+    const { scheduleOrder, startTime, month, date, scheduledBy } = req.body;
+    if (!month || date === undefined) {
+      return res.status(400).json({ success: false, message: 'month and date are required' });
+    }
+
+    const submittedDb = client.db('submittedDB');
+    const scheduleCollection = submittedDb.collection('firstFactorySchedule');
+
+    const updateFields = {
+      type: 'dailySchedule',
+      month,
+      date: Number(date),
+      scheduleOrder,
+      startTime,
+      updatedAt: new Date()
+    };
+
+    if (scheduledBy) {
+      updateFields.scheduledBy = scheduledBy;
+    }
+
+    await scheduleCollection.updateOne(
+      { type: 'dailySchedule', month, date: Number(date) },
+      { $set: updateFields },
+      { upsert: true }
+    );
+
+    res.json({ success: true, message: 'Schedule saved successfully' });
+  } catch (error) {
+    console.error('Error saving schedule:', error);
+    res.status(500).json({ error: 'Failed to save schedule' });
+  }
+});
+
+app.post('/api/production/sync-excel', async (req, res) => {
+  try {
+    const FILE_ID = req.body.fileId || process.env.GOOGLE_DRIVE_EXCEL_FILE_ID;
+    
+    if (!FILE_ID) {
+      return res.status(400).json({ success: false, message: 'Please provide the fileId of the Excel file.' });
+    }
+
+    const drive = getFirstFactoryDriveAuth();
+    console.log(`Downloading file ${FILE_ID} from Google Drive to stream to client...`);
+    let response;
+    try {
+      response = await drive.files.export(
+        { fileId: FILE_ID, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+        { responseType: 'stream' }
+      );
+    } catch (err) {
+      if (err.message && err.message.includes('fileNotExportable')) {
+        response = await drive.files.get(
+          { fileId: FILE_ID, alt: 'media' },
+          { responseType: 'stream' }
+        );
+      } else {
+        throw err;
+      }
+    }
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="sync.xlsx"');
+    
+    response.data
+      .on('error', err => {
+        console.error('Error streaming to client:', err);
+        if (!res.headersSent) {
+          res.status(500).json({ error: 'Failed to stream Excel' });
+        }
+      })
+      .pipe(res);
+
+  } catch (error) {
+    console.error('Error initiating Excel stream:', error);
+    if (!res.headersSent) res.status(500).json({ error: 'Failed to initiate stream', details: error.message });
+  }
+});
+
+app.post('/api/production/sync-excel-save', async (req, res) => {
+  try {
+    const { month, data } = req.body;
+    if (!month || !data || !Array.isArray(data)) {
+      return res.status(400).json({ success: false, message: 'Invalid payload.' });
+    }
+
+    const db = client.db('Sasaki_Coating_MasterDB');
+    const collection = db.collection('firstFactoryProduction');
+    
+    await collection.deleteMany({ month });
+    if (data.length > 0) {
+      const formattedData = data.map(item => ({
+        ...item,
+        id: item.id || new ObjectId().toString(),
+        syncedAt: new Date()
+      }));
+      await collection.insertMany(formattedData);
+    }
+    
+    res.json({ success: true, message: `Successfully synced ${data.length} hinbans`, data });
+  } catch (error) {
+    console.error('Error saving Excel data:', error);
+    res.status(500).json({ error: 'Failed to save Excel data', details: error.message });
+  }
+});
 
 app.listen(port, () => {
   console.log(`✅ Combined server is running at http://localhost:${port}`);
