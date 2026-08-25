@@ -3148,9 +3148,14 @@
     <!-- Checklist Ticket Modal (Abnormal Report) -->
     <div id="checklistTicketModal" class="checklist-modal-overlay" style="display:none;">
         <div class="checklist-modal-card" style="max-width:500px;">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
                 <h3 style="font-size:1.1rem; font-weight:800; color:#e5484d;" data-i18n="ticket_required">Abnormal Report (Ticket) Required</h3>
-                <button type="button" onclick="closeChecklistTicketModal()" style="border:none; background:none; font-size:1.4rem; cursor:pointer;">✕</button>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <button type="button" id="checklistTicketResetBtn" onclick="resetCurrentChecklistTicket()" style="display:none; border:1px solid #ef4444; background:rgba(239,68,68,0.08); color:#ef4444; font-size:0.75rem; font-weight:700; padding:4px 10px; border-radius:8px; cursor:pointer; align-items:center; gap:4px;">
+                        🔄 Reset Ticket
+                    </button>
+                    <button type="button" onclick="closeChecklistTicketModal()" style="border:none; background:none; font-size:1.4rem; cursor:pointer; padding:0 4px;">✕</button>
+                </div>
             </div>
             <p id="checklistTicketFieldInfo" style="font-size:0.85rem; color:#6b7280; font-weight:600;"></p>
             <div>

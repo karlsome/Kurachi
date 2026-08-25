@@ -14223,6 +14223,65 @@ if (manualSendModal) {
     return existingReason;
   }
 
+  function updateTicketResetButtonVisibility() {
+    const fieldId = window.checklistState.activeTicketField;
+    const resetBtn = document.getElementById('checklistTicketResetBtn');
+    if (!resetBtn) return;
+
+    if (!fieldId) {
+      resetBtn.style.display = 'none';
+      return;
+    }
+
+    const ticket = window.checklistState.tickets[fieldId];
+    const reasonInput = document.getElementById('checklistTicketReason');
+    const reasonText = (reasonInput?.value || '').trim();
+    const hasPhotos = ticket && Array.isArray(ticket.images) && ticket.images.length > 0;
+    const isSaved = ticket && ticket.saved;
+
+    const hasData = isSaved || hasPhotos || (reasonText && reasonText.length > 0);
+
+    resetBtn.style.display = hasData ? 'inline-flex' : 'none';
+  }
+
+  window.resetCurrentChecklistTicket = async function () {
+    const fieldId = window.checklistState.activeTicketField;
+    if (!fieldId) return;
+
+    const ticket = window.checklistState.tickets[fieldId];
+    if (ticket && ticket.chatworkMessageId) {
+      try {
+        fetch(`${serverURL}/api/check-forms/cancel-ng-ticket`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messageIds: [ticket.chatworkMessageId] })
+        }).catch(err => console.warn('Failed to delete Chatwork message on ticket reset:', err));
+      } catch (e) {
+        console.warn('Error sending Chatwork ticket cancellation request:', e);
+      }
+    }
+
+    if (typeof deleteTicketPhotosFromIDB === 'function') {
+      await deleteTicketPhotosFromIDB(fieldId);
+    }
+
+    delete window.checklistState.tickets[fieldId];
+
+    const reasonInput = document.getElementById('checklistTicketReason');
+    if (reasonInput) reasonInput.value = '';
+
+    renderTicketThumbnails();
+    updateTicketResetButtonVisibility();
+
+    if (typeof window.saveChecklistDraftToStorage === 'function') {
+      await window.saveChecklistDraftToStorage();
+    }
+
+    if (typeof showAppToast === 'function') {
+      showAppToast('🔄 Ticket data reset');
+    }
+  };
+
   window.openChecklistTicketModal = function (fieldId, autoReason = '') {
     triggerNgFlashAnimation();
     window.checklistState.activeTicketField = fieldId;
@@ -14243,9 +14302,16 @@ if (manualSendModal) {
     window.checklistState.tickets[fieldId] = existing;
 
     if (info) info.textContent = `Reporting issue for item`;
-    if (reasonInput) reasonInput.value = existing.reason || '';
+    if (reasonInput) {
+      reasonInput.value = existing.reason || '';
+      if (!reasonInput._resetBtnBound) {
+        reasonInput._resetBtnBound = true;
+        reasonInput.addEventListener('input', updateTicketResetButtonVisibility);
+      }
+    }
 
     renderTicketThumbnails();
+    updateTicketResetButtonVisibility();
     if (modal) modal.style.display = 'flex';
   };
 
@@ -14266,6 +14332,7 @@ if (manualSendModal) {
         <button type="button" onclick="removeChecklistTicketImage(${i})" style="position:absolute; top:-6px; right:-6px; background:#ef4444; color:#fff; border:none; width:20px; height:20px; border-radius:50%; font-size:12px; font-weight:800; cursor:pointer;">✕</button>
       </div>
     `).join('');
+    updateTicketResetButtonVisibility();
   }
 
   window.handleChecklistSubmitOrNext = async function () {
