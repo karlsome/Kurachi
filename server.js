@@ -33031,14 +33031,27 @@ app.get('/api/check-forms/today-status', async (req, res) => {
       status: { $regex: /^open$/i }
     }).toArray();
 
-    const hasOpenTickets = openTickets.length > 0;
+    const openDefectTickets = openTickets.filter(t => {
+      if (t.ticketType === 'defect' || t.required === true) return true;
+      if (t.ticketType === 'optional' || t.required === false) return false;
+      // Fallback for historical records without ticketType: check answerValue & bounds
+      const ans = String(t.answerValue || '').toUpperCase();
+      if (ans === 'NG') return true;
+      if (t.min !== null && t.min !== undefined && Number(t.answerValue) < t.min) return true;
+      if (t.max !== null && t.max !== undefined && Number(t.answerValue) > t.max) return true;
+      return false;
+    });
+
+    const hasOpenTickets = openDefectTickets.length > 0;
 
     return res.status(200).json({
       hasSubmittedToday: true,
       isPreComplete,
       isPostComplete,
       hasOpenTickets,
-      openTicketCount: openTickets.length,
+      openTicketCount: openDefectTickets.length,
+      openDefectTicketCount: openDefectTickets.length,
+      openOptionalTicketCount: openTickets.length - openDefectTickets.length,
       recordIds,
       lastSubmittedAt: docs[0].createdAt
     });
@@ -33775,6 +33788,8 @@ app.post('/api/check-forms/submit', async (req, res) => {
             min: field.min,
             max: field.max,
             unit: field.unit,
+            ticketType: ticketRequired ? 'defect' : 'optional',
+            required: ticketRequired,
             reason: ticketReason,
             imageURLs: ticketImageURLs,
             chatworkMessageId,
@@ -33786,6 +33801,7 @@ app.post('/api/check-forms/submit', async (req, res) => {
           ngReportDocs.push(reportDoc);
           ticketSummary = {
             ticketKey,
+            ticketType: ticketRequired ? 'defect' : 'optional',
             required: ticketRequired,
             reason: ticketReason,
             imageURLs: ticketImageURLs,
@@ -33945,6 +33961,7 @@ app.post('/api/check-forms/submit', async (req, res) => {
       insertedRecordCount: recordDocs.length,
       updatedRecordCount: updateOps.length,
       insertedTicketCount: ngReportDocs.length,
+      hasOpenTickets: ngReportDocs.some(r => r.ticketType === 'defect' || r.required === true),
       recordIds: recordIdMap,
     });
   } catch (error) {

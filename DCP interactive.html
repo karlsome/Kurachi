@@ -3885,11 +3885,19 @@
             }
         }
 
+        function isChecklistLocked() {
+            if (!window.checklistState || !window.checklistState.queue || window.checklistState.queue.length === 0) return false;
+            if (window.checklistState.isBypassed) return false;
+            if (window.checklistState.hasOpenTickets) return true;
+            return !window.checklistState.isPreComplete;
+        }
+        window.isChecklistLocked = isChecklistLocked;
+
         function updateTabLock() {
             const bar = document.querySelector('.tab-bar');
             if (bar) {
                 checkParamsLockState();
-                const checklistLocked = !!(window.checklistState && window.checklistState.queue && window.checklistState.queue.length > 0 && !window.checklistState.isPreComplete && !window.checklistState.isBypassed);
+                const checklistLocked = isChecklistLocked();
                 const scanIncomplete = !isScanComplete();
                 const paramsLocked = window.paramsLocked === true;
 
@@ -3917,10 +3925,13 @@
             if (index === 4 && document.getElementById('kensaTabBtn')?.style.display === 'none') {
                 index = 3;
             }
-            // Lock: cannot leave Checklist tab (0) if pre-production checklist is incomplete
-            if (index !== 0 && window.checklistState && window.checklistState.queue && window.checklistState.queue.length > 0 && !window.checklistState.isPreComplete && !window.checklistState.isBypassed) {
+            // Lock: cannot leave Checklist tab (0) if pre-production checklist is incomplete or has open tickets
+            if (index !== 0 && isChecklistLocked()) {
                 if (!isRestore && typeof window.showAppToast === 'function') {
-                    window.showAppToast((typeof _t === 'function' ? _t('toast_complete_checklist_first') : null) || 'Please complete pre-production checklist first');
+                    const toastMsg = window.checklistState?.hasOpenTickets
+                        ? ((typeof _t === 'function' ? _t('please_wait_for_maintenance') : null) || 'Please wait for maintenance team approval')
+                        : ((typeof _t === 'function' ? _t('toast_complete_checklist_first') : null) || 'Please complete pre-production checklist first');
+                    window.showAppToast(toastMsg);
                 }
                 updateTabLock();
                 return;

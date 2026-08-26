@@ -41,7 +41,7 @@ const dbURL = 'https://script.google.com/macros/s/AKfycbx0qBw0_wF5X-hA2t1yY-d5h5
 
 const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
-//const serverURL = "http://192.168.3.9:3000";
+//const serverURL = "http://192.168.1.176:3000";
 
 // Global variable to track if sendtoNC button has been pressed
 let sendtoNCButtonisPressed = false;
@@ -13687,12 +13687,16 @@ if (manualSendModal) {
           await window.saveChecklistDraftToStorage();
         }
 
-        const bar = document.querySelector('.tab-bar');
-        const canProceed = (allPreDone || window.checklistState.isBypassed) && !window.checklistState.hasOpenTickets;
-        if (canProceed) {
-          if (bar) bar.classList.remove('locked-checklist');
+        if (typeof window.updateTabLock === 'function') {
+          window.updateTabLock();
         } else {
-          if (bar) bar.classList.add('locked-checklist');
+          const bar = document.querySelector('.tab-bar');
+          const canProceed = (allPreDone || window.checklistState.isBypassed) && !window.checklistState.hasOpenTickets;
+          if (canProceed) {
+            if (bar) bar.classList.remove('locked-checklist');
+          } else {
+            if (bar) bar.classList.add('locked-checklist');
+          }
         }
 
         if (hasStateChanged && typeof window.renderCurrentChecklistTemplate === 'function') {
@@ -13707,6 +13711,7 @@ if (manualSendModal) {
       console.warn('MongoDB checklist status sync background check failed:', e);
     }
   }
+  window.verifyChecklistStatusWithMongoDB = verifyChecklistStatusWithMongoDB;
 
   // Heartbeat check every 30 seconds for overnight day-changes and MongoDB record updates
   if (!window._checklistDayCheckInterval) {
@@ -14004,13 +14009,13 @@ if (manualSendModal) {
     const isPreComplete = window.checklistState.isPreComplete;
 
     if (superBypassBtn) {
-      superBypassBtn.style.display = isPreComplete ? 'none' : 'inline-flex';
+      superBypassBtn.style.display = (isPreComplete && !window.checklistState.hasOpenTickets) ? 'none' : 'inline-flex';
     }
     if (resetAllBtn) {
       resetAllBtn.style.display = isPreComplete ? 'none' : 'inline-block';
     }
     if (actionsCard) {
-      actionsCard.style.display = isPreComplete ? 'none' : 'flex';
+      actionsCard.style.display = (isPreComplete && !window.checklistState.hasOpenTickets) ? 'none' : 'flex';
     }
 
     const localizedTitle = (typeof getLocalizedText === 'function') ? getLocalizedText(tpl, 'name') : (tpl.name || 'Checklist');
@@ -15228,146 +15233,6 @@ if (manualSendModal) {
     updateTicketResetButtonVisibility();
   }
 
-  window.handleChecklistSubmitOrNext = async function () {
-    const { queue, queueIndex } = window.checklistState;
-    if (!queue || !queue[queueIndex]) return;
-
-    const tpl = queue[queueIndex];
-    const fields = Array.isArray(tpl.fields) ? tpl.fields : [];
-
-    let firstIncompleteCard = null;
-    fields.forEach((field) => {
-      if (field.type === 'name') return;
-      const ans = window.checklistState.answers[field.id];
-      const ticket = window.checklistState.tickets[field.id];
-      const card = document.getElementById(`checklist-card-${field.id}`);
-
-      const isNg = ans === 'NG';
-      const numVal = typeof ans === 'number' ? ans : parseFloat(ans);
-      const isOutOfRange = field.type === 'number' && !isNaN(numVal) && (
-        (field.min !== null && field.min !== undefined && numVal < field.min) ||
-        (field.max !== null && field.max !== undefined && numVal > field.max)
-      );
-
-      let isFieldValid = true;
-
-      if (field.required && (ans === undefined || ans === '' || ans === null)) isFieldValid = false;
-      if ((isNg || isOutOfRange) && (!ticket || !ticket.saved)) isFieldValid = false;
-      if (field.photoRequired && !isNg && !isOutOfRange && !window.checklistState.fieldPhotos[field.id]) isFieldValid = false;
-
-      if (!isFieldValid) {
-        if (card) card.classList.add('invalid-highlight');
-        if (!firstIncompleteCard) firstIncompleteCard = card;
-      } else {
-        if (card) card.classList.remove('invalid-highlight');
-      }
-    });
-
-    if (firstIncompleteCard) {
-      firstIncompleteCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      if (typeof showAppToast === 'function') showAppToast(_t('checklist_incomplete'));
-      return;
-    }
-
-    if (queueIndex < queue.length - 1) {
-      const banner = document.getElementById('checklistTransitionBanner');
-      const text = document.getElementById('checklistTransitionText');
-      if (banner && text) {
-        const nextTpl = queue[queueIndex + 1];
-        text.textContent = `${tpl.name} completed! Transitioning to ${nextTpl.name}...`;
-        banner.style.display = 'flex';
-        setTimeout(() => { banner.style.display = 'none'; }, 2200);
-      }
-
-      window.checklistState.queueIndex += 1;
-      if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
-      if (typeof window.renderCurrentChecklistTemplate === 'function') window.renderCurrentChecklistTemplate();
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    } else {
-      try {
-        let workerName = (document.getElementById('step0CurrentWorkerName')?.textContent || '').trim();
-        if (!workerName && Array.isArray(window.selectedWorkerNames) && window.selectedWorkerNames.length > 0) {
-          workerName = window.selectedWorkerNames.filter(Boolean).join(', ');
-        }
-        if (!workerName && window.checklistState.answers) {
-          for (const t of queue) {
-            const nameField = (t.fields || []).find(f => f.type === 'name');
-            if (nameField && window.checklistState.answers[nameField.id]) {
-              const val = window.checklistState.answers[nameField.id];
-              if (Array.isArray(val)) workerName = val.filter(Boolean).join(', ');
-              else if (typeof val === 'string' && val.trim()) workerName = val.trim();
-              if (workerName) break;
-            }
-          }
-        }
-        if (!workerName) {
-          workerName = (document.getElementById('Machine Operator')?.value || '').trim() || 'Operator';
-        }
-
-        const payload = {
-          factory: window.checklistState.factory,
-          machine: window.checklistState.machine,
-          workerName,
-          templates: queue.map(t => {
-            const tFields = Array.isArray(t.fields) ? t.fields : [];
-            return {
-              templateId: t._id,
-              templateName: t.name,
-              schedule: t.schedule,
-              workerName,
-              answers: tFields.map(f => ({
-                fieldId: f.id,
-                label: f.label || f.label_ja || f.label_en || (f.type === 'name' ? '作業者名' : '項目'),
-                type: f.type,
-                value: window.checklistState.answers[f.id],
-                fieldPhotoBase64: window.checklistState.fieldPhotos[f.id] || null,
-              })),
-              tickets: Object.keys(window.checklistState.tickets || {})
-                .filter(fId => tFields.some(tf => tf.id === fId))
-                .map(fId => ({
-                  fieldId: fId,
-                  reason: window.checklistState.tickets[fId].reason,
-                  imageOverlayBase64s: window.checklistState.tickets[fId].images,
-                  chatworkMessageId: window.checklistState.tickets[fId].chatworkMessageId || null,
-                }))
-            };
-          })
-        };
-
-        const res = await fetch(`${serverURL}/api/check-forms/submit`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-
-        if (res.ok) {
-          const resData = await res.json().catch(() => ({}));
-          if (resData.recordIds) {
-            window.checklistState.recordIds = { ...(window.checklistState.recordIds || {}), ...resData.recordIds };
-          }
-          window.checklistState.isPreComplete = true;
-          if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
-
-          const bar = document.querySelector('.tab-bar');
-          if (bar) bar.classList.remove('locked-checklist');
-
-          if (typeof showAppToast === 'function') {
-            showAppToast('✓ Pre-Production Checklist Completed Successfully!');
-          }
-
-          if (typeof window.goToTab === 'function') window.goToTab(0);
-        } else {
-          const errData = await res.json().catch(() => ({}));
-          if (typeof showAppToast === 'function') {
-            showAppToast(`❌ Submission Error: ${errData.error || 'Failed to submit'}`);
-          }
-        }
-      } catch (err) {
-        console.error('Error submitting checklist:', err);
-      }
-    }
-  };
-
   window.removeChecklistTicketImage = async function (index) {
     const fieldId = window.checklistState.activeTicketField;
     if (!fieldId || !window.checklistState.tickets[fieldId]) return;
@@ -15504,6 +15369,8 @@ if (manualSendModal) {
 
     ticket.reason = reason;
     ticket.saved = true;
+    ticket.ticketType = isTicketRequired ? 'defect' : 'optional';
+    ticket.required = isTicketRequired;
     window.checklistState.tickets[fieldId] = ticket;
     if (typeof window.saveChecklistDraftToStorage === 'function') {
       await window.saveChecklistDraftToStorage();
@@ -15962,6 +15829,21 @@ if (manualSendModal) {
           window.checklistState.recordIds[tpl._id] = true;
           window.checklistState.recordIds[tpl.name] = true;
         }
+
+        const submittedHasDefectTicket = !!(
+          resData.hasOpenTickets !== undefined
+            ? resData.hasOpenTickets
+            : (payload.templates && payload.templates.some(t =>
+              Array.isArray(t.tickets) && t.tickets.some(tk => window.isDefectTicket(tk.fieldId))
+            ))
+        );
+
+        if (submittedHasDefectTicket) {
+          window.checklistState.hasOpenTickets = true;
+        } else {
+          window.checklistState.hasOpenTickets = false;
+        }
+
         if (overlay) overlay.style.display = 'none';
 
         // Check if all templates in queue are now submitted
@@ -15980,15 +15862,24 @@ if (manualSendModal) {
               await window.saveChecklistDraftToStorage();
             }
 
+            // Sync with backend immediately
+            if (typeof verifyChecklistStatusWithMongoDB === 'function') {
+              verifyChecklistStatusWithMongoDB(window.checklistState.factory, window.checklistState.machine);
+            }
+
             // Check if any open defect tickets exist across all completed checks
-            if (window.checklistState.hasOpenTickets) {
+            if (window.checklistState.hasOpenTickets && !window.checklistState.isBypassed) {
+              if (typeof window.updateTabLock === 'function') {
+                window.updateTabLock();
+              }
               if (typeof showAppToast === 'function') {
-                showAppToast('⚠️ All checklists submitted. Please wait for maintenance approval.');
+                showAppToast('⚠️ Checklist submitted. Please wait for maintenance approval.');
               }
               if (typeof renderCurrentChecklistTemplate === 'function') {
                 renderCurrentChecklistTemplate();
               }
             } else {
+              window.checklistState.hasOpenTickets = false;
               if (typeof window.updateTabLock === 'function') {
                 window.updateTabLock();
               } else {
