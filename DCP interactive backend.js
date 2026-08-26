@@ -13647,19 +13647,16 @@ if (manualSendModal) {
 
       if (data) {
         if (!data.hasSubmittedToday) {
-          // MongoDB has NO record for today (in JST) - reset any stale local completed state
+          // MongoDB has NO record for today (in JST) - clear recordIds and ensure tabs are locked if not completed
           window.checklistState.recordIds = {};
-          if (window.checklistState.isPreComplete || Object.keys(window.checklistState.answers || {}).length > 0) {
-            console.log('🧹 MongoDB has no record for today - Resetting stale local checklist state.');
+          if (window.checklistState.isPreComplete) {
+            console.log('🧹 MongoDB has no record for today - Resetting stale local completed status.');
             window.checklistState.isPreComplete = false;
             window.checklistState.isPostComplete = false;
             window.checklistState.isBypassed = false;
-            window.checklistState.answers = {};
-            window.checklistState.tickets = {};
-            window.checklistState.fieldPhotos = {};
 
-            if (typeof window.clearChecklistDraftFromStorage === 'function') {
-              await window.clearChecklistDraftFromStorage();
+            if (typeof window.saveChecklistDraftToStorage === 'function') {
+              await window.saveChecklistDraftToStorage();
             }
 
             if (typeof window.updateTabLock === 'function') {
