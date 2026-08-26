@@ -32125,17 +32125,15 @@ function isCheckFormAnswered(fieldType = '', value = null) {
 }
 
 function doesCheckFormAnswerRequireTicket(field = {}, value = null) {
-  const fieldType = normalizeCheckFormText(field.type).toLowerCase();
-
-  if (fieldType === 'checkbox') {
-    return normalizeCheckFormText(value).toUpperCase() === 'NG';
+  const strVal = String(value || '').trim().toUpperCase();
+  if (strVal === 'NG') {
+    return true;
   }
 
-  if (fieldType === 'number' || fieldType === 'select') {
-    const numericValue = normalizeCheckFormMaybeNumber(value);
-    if (numericValue === null) return false;
-    if (field.min !== null && numericValue < field.min) return true;
-    if (field.max !== null && numericValue > field.max) return true;
+  const numericValue = normalizeCheckFormMaybeNumber(value);
+  if (numericValue !== null) {
+    if (field.min !== null && field.min !== undefined && numericValue < field.min) return true;
+    if (field.max !== null && field.max !== undefined && numericValue > field.max) return true;
   }
 
   return false;
@@ -33032,13 +33030,16 @@ app.get('/api/check-forms/today-status', async (req, res) => {
     }).toArray();
 
     const openDefectTickets = openTickets.filter(t => {
-      if (t.ticketType === 'defect' || t.required === true) return true;
-      if (t.ticketType === 'optional' || t.required === false) return false;
-      // Fallback for historical records without ticketType: check answerValue & bounds
-      const ans = String(t.answerValue || '').toUpperCase();
-      if (ans === 'NG') return true;
-      if (t.min !== null && t.min !== undefined && Number(t.answerValue) < t.min) return true;
-      if (t.max !== null && t.max !== undefined && Number(t.answerValue) > t.max) return true;
+      const ans = String(t.answerValue || '').trim().toUpperCase();
+      const num = Number(t.answerValue);
+      const isOutOfBounds = !isNaN(num) && (
+        (t.min !== null && t.min !== undefined && num < t.min) ||
+        (t.max !== null && t.max !== undefined && num > t.max)
+      );
+
+      if (ans === 'NG' || isOutOfBounds || t.ticketType === 'defect' || t.required === true) {
+        return true;
+      }
       return false;
     });
 
@@ -33789,8 +33790,8 @@ app.post('/api/check-forms/submit', async (req, res) => {
             min: field.min,
             max: field.max,
             unit: field.unit,
-            ticketType: ticketRequired ? 'defect' : 'optional',
-            required: ticketRequired,
+            ticketType: (ticketRequired || ticketPayload?.ticketType === 'defect' || String(normalizedValue || '').toUpperCase() === 'NG') ? 'defect' : 'optional',
+            required: (ticketRequired || ticketPayload?.ticketType === 'defect' || String(normalizedValue || '').toUpperCase() === 'NG'),
             reason: ticketReason,
             imageURLs: ticketImageURLs,
             chatworkMessageId,
@@ -33802,8 +33803,8 @@ app.post('/api/check-forms/submit', async (req, res) => {
           ngReportDocs.push(reportDoc);
           ticketSummary = {
             ticketKey,
-            ticketType: ticketRequired ? 'defect' : 'optional',
-            required: ticketRequired,
+            ticketType: reportDoc.ticketType,
+            required: reportDoc.required,
             reason: ticketReason,
             imageURLs: ticketImageURLs,
             chatworkMessageId,
@@ -33962,7 +33963,7 @@ app.post('/api/check-forms/submit', async (req, res) => {
       insertedRecordCount: recordDocs.length,
       updatedRecordCount: updateOps.length,
       insertedTicketCount: ngReportDocs.length,
-      hasOpenTickets: ngReportDocs.some(r => r.ticketType === 'defect' || r.required === true),
+      hasOpenTickets: ngReportDocs.some(r => r.ticketType === 'defect' || r.required === true || String(r.answerValue || '').trim().toUpperCase() === 'NG'),
       recordIds: recordIdMap,
     });
   } catch (error) {

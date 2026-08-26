@@ -39,9 +39,9 @@ const googleSheetLiveStatusURL = 'https://script.google.com/macros/s/AKfycbwbL30
 // Link for Rikeshi (up/down color info) - This was missing in the original, adding it here.
 const dbURL = 'https://script.google.com/macros/s/AKfycbx0qBw0_wF5X-hA2t1yY-d5h5M7Z_a8z_V9R5D6k/exec'; // Placeholder, replace with your actual URL if different.
 
-const serverURL = "https://kurachi.onrender.com";
+//const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
-//const serverURL = "http://192.168.1.176:3000";
+const serverURL = "http://192.168.1.176:3000";
 
 // Global variable to track if sendtoNC button has been pressed
 let sendtoNCButtonisPressed = false;
@@ -13539,7 +13539,7 @@ if (manualSendModal) {
   };
 
   function getJSTDateString() {
-    return new Date().toLocaleString("sv-SE", {timeZone: "Asia/Tokyo"}).split(" ")[0];
+    return new Date().toLocaleString("sv-SE", { timeZone: "Asia/Tokyo" }).split(" ")[0];
   }
 
   function getLocalizedText(obj, propBase) {
@@ -14081,14 +14081,8 @@ if (manualSendModal) {
     const resetAllBtn = document.getElementById('resetAllBtn');
     const actionsCard = document.getElementById('checklistActionsCard');
 
-    if (superBypassBtn) {
-      superBypassBtn.style.display = (isPreComplete && !window.checklistState.hasOpenTickets) ? 'none' : 'inline-flex';
-    }
-    if (resetAllBtn) {
-      resetAllBtn.style.display = isPreComplete ? 'none' : 'inline-block';
-    }
     if (actionsCard) {
-      actionsCard.style.display = (isPreComplete && !window.checklistState.hasOpenTickets && (!isPostModeActive || allPostFields.length === 0 || isPostComplete)) ? 'none' : 'flex';
+      actionsCard.style.display = 'flex';
     }
 
     const localizedTitle = (typeof getLocalizedText === 'function') ? getLocalizedText(tpl, 'name') : (tpl.name || 'Checklist');
@@ -14214,12 +14208,6 @@ if (manualSendModal) {
     if (!container) return;
     container.innerHTML = '';
 
-    const titleEl = document.createElement('div');
-    titleEl.style.cssText = 'margin-bottom: 8px;';
-    const localizedDesc = getLocalizedText(tpl, 'description');
-    titleEl.innerHTML = `<h3 style="font-size:1.15rem; font-weight:800; color:#1f2733;">${localizedTitle}</h3>${localizedDesc ? `<p style="font-size:0.85rem; color:#6b7280; margin-top:2px;">${localizedDesc}</p>` : ''}`;
-    container.appendChild(titleEl);
-
     const stepsText = (typeof _t === 'function') ? _t('steps_count') : 'steps';
     const tapToggleText = (typeof _t === 'function') ? _t('tap_to_expand_collapse') : 'Tap to expand / collapse';
     const tapCollapseText = (typeof _t === 'function') ? _t('tap_to_collapse_checklist') : '▲ Tap to collapse completed checklist';
@@ -14227,9 +14215,34 @@ if (manualSendModal) {
 
     // Render per-template content
     if (isCurrentRecorded) {
-      // 1. Render completed pre-steps in a collapsed accordion with THIS template's name
+      const completedSteps = preFields.length > 0 ? preFields : tplFields;
+
+      // 1. Sleek, cohesive Completed Checklist Card
+      const completedCard = document.createElement('div');
+      completedCard.className = 'checklist-completed-card';
+      completedCard.style.cssText = 'background: var(--bg-surface, #ffffff); border: 1px solid var(--border, #e2e8f0); border-radius: 16px; padding: 18px 20px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.03);';
+      completedCard.innerHTML = `
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+          <div style="display: flex; align-items: center; gap: 14px;">
+            <div style="width: 42px; height: 42px; border-radius: 12px; background: #ecfdf5; color: #10b981; display: flex; align-items: center; justify-content: center; font-size: 1.3rem; font-weight: 800; flex-shrink: 0; border: 1px solid #a7f3d0;">✓</div>
+            <div>
+              <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                <span style="font-size: 1.05rem; font-weight: 800; color: #1e293b;">${localizedTitle}</span>
+                <span class="chip-status-tag done" style="font-size: 0.75rem;">✓ Completed</span>
+              </div>
+              <p style="font-size: 0.8rem; color: #64748b; margin: 4px 0 0 0;">
+                Submitted for ${todayIso} • ${completedSteps.length} verified steps (Locked / Read-only)
+              </p>
+            </div>
+          </div>
+          ${uncompletedTemplates.length > 0 ? `<button type="button" onclick="openChecklistSwitcherModal()" class="btn btn-secondary" style="font-size: 0.8rem; padding: 6px 14px; border-radius: 8px; font-weight: 700;">Switch Checklist ▾</button>` : ''}
+        </div>
+      `;
+
+      // Accordion inside completedCard
       const accordion = document.createElement('details');
       accordion.className = 'completed-pre-steps-accordion';
+      accordion.style.cssText = 'margin-top: 14px; border: 1px solid #e2e8f0; border-radius: 12px; background: #f8fafc; overflow: hidden;';
       if (window.checklistState && window.checklistState._isAccordionOpen) {
         accordion.open = true;
       }
@@ -14239,18 +14252,15 @@ if (manualSendModal) {
         }
       });
 
-      const completedSteps = preFields.length > 0 ? preFields : tplFields;
-
       accordion.innerHTML = `
-        <summary style="padding:14px 18px; cursor:pointer; display:flex; align-items:center; justify-content:space-between; background:#dcfce7; border-radius:16px; user-select:none;">
-          <span style="font-size: 0.95rem; font-weight: 700; color: #166534; display: flex; align-items: center; gap: 8px;">
-            ✓ ${todayIso} ${localizedTitle} Completed (${completedSteps.length} ${stepsText})
-          </span>
-          <span style="font-size: 0.8rem; color: #15803d; font-weight: 600; background:rgba(22,101,52,0.1); padding:4px 10px; border-radius:10px;">${tapToggleText}</span>
+        <summary style="padding: 12px 16px; cursor: pointer; display: flex; align-items: center; justify-content: space-between; font-size: 0.85rem; font-weight: 700; color: #334155; background: #f1f5f9; user-select: none;">
+          <span style="display: flex; align-items: center; gap: 8px;">📋 View Completed Inspection Steps (${completedSteps.length})</span>
+          <span style="font-size: 0.75rem; color: #2563eb; font-weight: 700;">${tapToggleText}</span>
         </summary>
-        <div class="completed-pre-steps-content" id="completedPreStepsContent" style="padding:12px; display:flex; flex-direction:column; gap:12px;"></div>
+        <div class="completed-pre-steps-content" id="completedPreStepsContent" style="padding: 12px; display: flex; flex-direction: column; gap: 12px; background: #ffffff;"></div>
       `;
-      container.appendChild(accordion);
+      completedCard.appendChild(accordion);
+      container.appendChild(completedCard);
 
       // Attach click-outside collapsing handler
       if (!window._accordionClickOutsideAttached) {
@@ -14276,7 +14286,7 @@ if (manualSendModal) {
 
       const collapseFooterBtn = document.createElement('button');
       collapseFooterBtn.type = 'button';
-      collapseFooterBtn.style.cssText = 'width:100%; margin-top:8px; padding:12px; border-radius:12px; background:#dcfce7; color:#166534; font-weight:800; border:1px solid #bbf7d0; cursor:pointer; font-size:0.9rem; display:flex; align-items:center; justify-content:center; gap:6px; box-shadow:0 2px 4px rgba(22,101,52,0.08);';
+      collapseFooterBtn.style.cssText = 'width:100%; margin-top:8px; padding:10px; border-radius:10px; background:#f1f5f9; color:#475569; font-weight:700; border:1px solid #e2e8f0; cursor:pointer; font-size:0.85rem; display:flex; align-items:center; justify-content:center; gap:6px;';
       collapseFooterBtn.innerHTML = tapCollapseText;
       collapseFooterBtn.onclick = function () {
         accordion.open = false;
@@ -14285,19 +14295,7 @@ if (manualSendModal) {
       };
       if (accordionContent) accordionContent.appendChild(collapseFooterBtn);
 
-      // 2. Render read-only locked status banner
-      const lockedBanner = document.createElement('div');
-      lockedBanner.style.cssText = 'background: #dcfce7; border: 1.5px solid #86efac; border-radius: 14px; padding: 12px 16px; margin-top: 12px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;';
-      lockedBanner.innerHTML = `
-        <div style="display:flex; align-items:center; gap:8px;">
-          <span style="font-size:1.2rem;">🔒</span>
-          <span style="font-size:0.9rem; font-weight:800; color:#166534;">${localizedTitle} has been submitted and is locked (Read-only).</span>
-        </div>
-        ${uncompletedTemplates.length > 0 ? `<button type="button" onclick="openChecklistSwitcherModal()" class="btn btn-secondary" style="font-size:0.8rem; padding:5px 12px; border-radius:8px; font-weight:700;">Switch Checklist ▾</button>` : ''}
-      `;
-      container.appendChild(lockedBanner);
-
-      // 3. Unified Post-production checks across ALL templates
+      // 2. Unified Post-production checks across ALL templates
       if (isPostModeActive && allPostFields.length > 0 && !isPostComplete) {
         const postHeaderTitle = (typeof _t === 'function') ? _t('post_production_checks_title') : '📋 Post-Production Checks (Unified View)';
         const postHeader = document.createElement('div');
@@ -14335,6 +14333,12 @@ if (manualSendModal) {
       }
     } else {
       // Template is NOT submitted: Render pre-production steps directly for input (no accordion, NO post-production steps)
+      const titleEl = document.createElement('div');
+      titleEl.style.cssText = 'margin-bottom: 8px;';
+      const localizedDesc = getLocalizedText(tpl, 'description');
+      titleEl.innerHTML = `<h3 style="font-size:1.15rem; font-weight:800; color:#1f2733;">${localizedTitle}</h3>${localizedDesc ? `<p style="font-size:0.85rem; color:#6b7280; margin-top:2px;">${localizedDesc}</p>` : ''}`;
+      container.appendChild(titleEl);
+
       const fieldsToRender = preFields.length > 0 ? preFields : tplFields;
       let isPreviousCompleted = true;
 
@@ -14792,6 +14796,10 @@ if (manualSendModal) {
     }
 
     window.checklistState.answers[fieldId] = val;
+    if (val === 'NG' && window.checklistState.tickets[fieldId]) {
+      window.checklistState.tickets[fieldId].ticketType = 'defect';
+      window.checklistState.tickets[fieldId].required = true;
+    }
     if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
     renderCurrentChecklistTemplate();
     if (val === 'NG') {
@@ -15877,7 +15885,7 @@ if (manualSendModal) {
                   reason: (window.checklistState.tickets[f.id].reason || '').trim(),
                   imagesData: window.checklistState.tickets[f.id].images || [],
                   chatworkMessageId: window.checklistState.tickets[f.id].chatworkMessageId || null,
-                  ticketType: window.checklistState.tickets[f.id].ticketType || (window.isDefectTicket(f.id) ? 'defect' : 'optional'),
+                  ticketType: (window.isDefectTicket(f.id) || window.checklistState.answers[f.id] === 'NG') ? 'defect' : (window.checklistState.tickets[f.id].ticketType || 'optional'),
                   saved: true
                 } : null
               };
@@ -15890,12 +15898,13 @@ if (manualSendModal) {
               })
               .map(fId => {
                 const tkt = window.checklistState.tickets[fId];
+                const isDefect = window.isDefectTicket(fId) || window.checklistState.answers[fId] === 'NG';
                 return {
                   fieldId: fId,
                   reason: (tkt.reason || '').trim(),
                   imagesData: tkt.images || [],
                   chatworkMessageId: tkt.chatworkMessageId || null,
-                  ticketType: tkt.ticketType || (window.isDefectTicket(fId) ? 'defect' : 'optional'),
+                  ticketType: isDefect ? 'defect' : (tkt.ticketType || 'optional'),
                 };
               })
           };
@@ -15931,7 +15940,7 @@ if (manualSendModal) {
           resData.hasOpenTickets !== undefined
             ? resData.hasOpenTickets
             : (payload.templates && payload.templates.some(t =>
-              Array.isArray(t.tickets) && t.tickets.some(tk => window.isDefectTicket(tk.fieldId))
+              Array.isArray(t.tickets) && t.tickets.some(tk => tk.ticketType === 'defect' || window.isDefectTicket(tk.fieldId) || window.checklistState.answers[tk.fieldId] === 'NG')
             ))
         );
 
@@ -15986,6 +15995,10 @@ if (manualSendModal) {
 
               if (typeof showAppToast === 'function') {
                 showAppToast('🎉 All Pre-Production Checklists Completed!');
+              }
+
+              if (typeof renderCurrentChecklistTemplate === 'function') {
+                renderCurrentChecklistTemplate();
               }
 
               if (typeof window.goToTab === 'function') {

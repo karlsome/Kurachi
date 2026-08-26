@@ -3977,6 +3977,11 @@
 
             updateTabIndicator(index);
 
+            // Refresh checklist UI when navigating to Checklist tab (index 0)
+            if (index === 0 && typeof window.renderCurrentChecklistTemplate === 'function') {
+                window.renderCurrentChecklistTemplate();
+            }
+
             // If on Submit tab (now index 7), compile summary
             if (index === 7) {
                 updateSubmitSummary();
