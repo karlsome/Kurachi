@@ -32981,8 +32981,8 @@ app.get('/api/check-forms/today-status', async (req, res) => {
     await client.connect();
     const submittedDb = client.db('submittedDB');
     const recordsCollection = submittedDb.collection(CHECK_FORM_RECORDS_COLLECTION);
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
+    const jstDateStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+    const startOfDay = new Date(`${jstDateStr}T00:00:00+09:00`);
 
     const docs = await recordsCollection.find({
       factory,

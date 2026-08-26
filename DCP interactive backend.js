@@ -3644,6 +3644,15 @@ async function deleteTicketPhotosFromIDB(fieldId) {
   }
 }
 
+function getJSTDateString(date = new Date()) {
+  try {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
+  } catch (_) {
+    return new Date().toISOString().split('T')[0];
+  }
+}
+window.getJSTDateString = getJSTDateString;
+
 window.saveChecklistDraftToStorage = async function () {
   if (!window.checklistState || !window.checklistState.factory || !window.checklistState.machine) return;
   const prefix = typeof uniquePrefix !== 'undefined' ? uniquePrefix : '';
@@ -3704,7 +3713,7 @@ window.saveChecklistDraftToStorage = async function () {
     isPreComplete: window.checklistState.isPreComplete || false,
     isPostComplete: window.checklistState.isPostComplete || false,
     isBypassed: window.checklistState.isBypassed || false,
-    dateStr: new Date().toISOString().split('T')[0],
+    dateStr: getJSTDateString(),
     timestamp: Date.now()
   };
 
@@ -3722,7 +3731,7 @@ window.loadChecklistDraftFromStorage = async function () {
 
   try {
     const draft = JSON.parse(raw);
-    const todayIso = new Date().toISOString().split('T')[0];
+    const todayIso = getJSTDateString();
     if ((draft.dateStr && draft.dateStr !== todayIso) || (draft.timestamp && (Date.now() - draft.timestamp > 86400000))) {
       console.log(`🧹 Clearing previous day's draft data (draft date: ${draft.dateStr}, today: ${todayIso})`);
       localStorage.removeItem(key);
@@ -13529,6 +13538,10 @@ if (manualSendModal) {
     bypassQrScanner: null,
   };
 
+  function getJSTDateString() {
+    return new Date().toLocaleString("sv-SE", {timeZone: "Asia/Tokyo"}).split(" ")[0];
+  }
+
   function getLocalizedText(obj, propBase) {
     if (!obj) return '';
     const lang = (typeof getCurrentLanguage === 'function') ? getCurrentLanguage() : 'ja';
@@ -13566,7 +13579,7 @@ if (manualSendModal) {
 
       window.checklistState.factory = factory;
       window.checklistState.machine = machine;
-      window.checklistState.dateStr = new Date().toISOString().split('T')[0];
+      window.checklistState.dateStr = getJSTDateString();
       window.checklistState.preChecklists = preChecklists;
       window.checklistState.postChecklists = postChecklists;
 
@@ -13633,32 +13646,28 @@ if (manualSendModal) {
       const data = await res.json();
 
       if (data) {
-        if (data.recordIds) {
-          window.checklistState.recordIds = { ...(window.checklistState.recordIds || {}), ...data.recordIds };
-        }
-
-        const allPreDone = window.checklistState.queue && window.checklistState.queue.length > 0 && window.checklistState.queue.every(t => {
-          return !!(window.checklistState.recordIds && (window.checklistState.recordIds[t._id] || window.checklistState.recordIds[t.name]));
-        });
-
-        // Only wipe local state if local state claimed completion (isPreComplete: true) BUT MongoDB has no submitted record today (e.g. record deleted from MongoDB)
-        if (!allPreDone && !data.hasSubmittedToday) {
-          if (window.checklistState.isPreComplete) {
-            console.log('🧹 Local state claimed checklist completed, but MongoDB has no record for today - Resetting stale local checklist state.');
+        if (!data.hasSubmittedToday) {
+          // MongoDB has NO record for today (in JST) - reset any stale local completed state
+          window.checklistState.recordIds = {};
+          if (window.checklistState.isPreComplete || Object.keys(window.checklistState.answers || {}).length > 0) {
+            console.log('🧹 MongoDB has no record for today - Resetting stale local checklist state.');
             window.checklistState.isPreComplete = false;
             window.checklistState.isPostComplete = false;
             window.checklistState.isBypassed = false;
             window.checklistState.answers = {};
             window.checklistState.tickets = {};
             window.checklistState.fieldPhotos = {};
-            window.checklistState.recordIds = {};
 
             if (typeof window.clearChecklistDraftFromStorage === 'function') {
               await window.clearChecklistDraftFromStorage();
             }
 
-            const bar = document.querySelector('.tab-bar');
-            if (bar) bar.classList.add('locked-checklist');
+            if (typeof window.updateTabLock === 'function') {
+              window.updateTabLock();
+            } else {
+              const bar = document.querySelector('.tab-bar');
+              if (bar) bar.classList.add('locked-checklist');
+            }
 
             if (typeof window.renderCurrentChecklistTemplate === 'function') {
               window.renderCurrentChecklistTemplate();
@@ -13670,6 +13679,12 @@ if (manualSendModal) {
           }
           return;
         }
+
+        window.checklistState.recordIds = data.recordIds || {};
+
+        const allPreDone = window.checklistState.queue && window.checklistState.queue.length > 0 && window.checklistState.queue.every(t => {
+          return !!(window.checklistState.recordIds && (window.checklistState.recordIds[t._id] || window.checklistState.recordIds[t.name]));
+        });
 
         const prevPre = window.checklistState.isPreComplete;
         const prevPost = window.checklistState.isPostComplete;
@@ -13718,7 +13733,7 @@ if (manualSendModal) {
     window._checklistDayCheckInterval = setInterval(function () {
       if (!window.checklistState || !window.checklistState.factory || !window.checklistState.machine) return;
       if (!window.checklistState.queue || window.checklistState.queue.length === 0) return;
-      const todayIso = new Date().toISOString().split('T')[0];
+      const todayIso = getJSTDateString();
       if (window.checklistState.dateStr && window.checklistState.dateStr !== todayIso) {
         console.log(`🌅 Date changed from ${window.checklistState.dateStr} to ${todayIso} - Auto-resetting checklist for new day.`);
         window.checklistState.dateStr = todayIso;
@@ -13728,6 +13743,7 @@ if (manualSendModal) {
         window.checklistState.answers = {};
         window.checklistState.tickets = {};
         window.checklistState.fieldPhotos = {};
+        window.checklistState.recordIds = {};
 
         if (typeof window.clearChecklistDraftFromStorage === 'function') {
           window.clearChecklistDraftFromStorage();
@@ -13745,7 +13761,7 @@ if (manualSendModal) {
         }
       }
 
-      // Continuously poll MongoDB status every 5s so that as soon as maintenance resolves/closes an NG ticket, the tablet unlocks and displays the green Proceed button
+      // SWR polling every 5s
       verifyChecklistStatusWithMongoDB(window.checklistState.factory, window.checklistState.machine);
     }, 5000);
   }
@@ -14172,7 +14188,7 @@ if (manualSendModal) {
         }
       });
 
-      const todayIso = new Date().toISOString().split('T')[0];
+      const todayIso = typeof getJSTDateString === 'function' ? getJSTDateString() : new Date().toISOString().split('T')[0];
       const stepsText = (typeof _t === 'function') ? _t('steps_count') : 'steps';
       const tapToggleText = (typeof _t === 'function') ? _t('tap_to_expand_collapse') : 'Tap to expand / collapse';
       const tapCollapseText = (typeof _t === 'function') ? _t('tap_to_collapse_checklist') : '▲ Tap to collapse completed checklist';
