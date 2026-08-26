@@ -15189,15 +15189,13 @@ if (manualSendModal) {
 
     const existing = window.checklistState.tickets[fieldId] || { reason: '', images: [] };
 
-    if (autoReason) {
+    if (autoReason && isTicketRequired) {
       if (existing.reason) {
         existing.reason = updateAutoReasonValue(existing.reason, autoReason);
       } else {
         existing.reason = autoReason;
       }
     }
-
-    window.checklistState.tickets[fieldId] = existing;
 
     if (info) info.textContent = `Reporting issue for item`;
     if (reasonInput) {
@@ -15216,6 +15214,15 @@ if (manualSendModal) {
   window.closeChecklistTicketModal = function () {
     const modal = document.getElementById('checklistTicketModal');
     if (modal) modal.style.display = 'none';
+
+    const fieldId = window.checklistState?.activeTicketField;
+    if (fieldId && window.checklistState?.tickets?.[fieldId]) {
+      const ticket = window.checklistState.tickets[fieldId];
+      if (!ticket.saved || !ticket.reason || !ticket.reason.trim()) {
+        delete window.checklistState.tickets[fieldId];
+        if (typeof renderCurrentChecklistTemplate === 'function') renderCurrentChecklistTemplate();
+      }
+    }
   };
 
   function renderTicketThumbnails() {
@@ -15785,22 +15792,31 @@ if (manualSendModal) {
                 value: window.checklistState.answers[f.id],
                 fieldPhotoBase64: window.checklistState.fieldPhotos[f.id] || null,
                 fieldPhotoData: window.checklistState.fieldPhotos[f.id] || null,
-                ticket: window.checklistState.tickets[f.id] ? {
-                  reason: window.checklistState.tickets[f.id].reason,
-                  imagesData: window.checklistState.tickets[f.id].images,
+                ticket: (window.checklistState.tickets[f.id] && window.checklistState.tickets[f.id].saved && (window.checklistState.tickets[f.id].reason || '').trim()) ? {
+                  reason: (window.checklistState.tickets[f.id].reason || '').trim(),
+                  imagesData: window.checklistState.tickets[f.id].images || [],
                   chatworkMessageId: window.checklistState.tickets[f.id].chatworkMessageId || null,
+                  ticketType: window.checklistState.tickets[f.id].ticketType || (window.isDefectTicket(f.id) ? 'defect' : 'optional'),
                   saved: true
                 } : null
               };
             }),
             tickets: Object.keys(window.checklistState.tickets || {})
               .filter(fId => fieldsToSubmit.some(tf => tf.id === fId))
-              .map(fId => ({
-                fieldId: fId,
-                reason: window.checklistState.tickets[fId].reason,
-                imagesData: window.checklistState.tickets[fId].images,
-                chatworkMessageId: window.checklistState.tickets[fId].chatworkMessageId || null,
-              }))
+              .filter(fId => {
+                const tkt = window.checklistState.tickets[fId];
+                return !!(tkt && tkt.saved && (tkt.reason || '').trim());
+              })
+              .map(fId => {
+                const tkt = window.checklistState.tickets[fId];
+                return {
+                  fieldId: fId,
+                  reason: (tkt.reason || '').trim(),
+                  imagesData: tkt.images || [],
+                  chatworkMessageId: tkt.chatworkMessageId || null,
+                  ticketType: tkt.ticketType || (window.isDefectTicket(fId) ? 'defect' : 'optional'),
+                };
+              })
           };
         })
       };

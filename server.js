@@ -33748,13 +33748,14 @@ app.post('/api/check-forms/submit', async (req, res) => {
         const ticketImagesData = Array.isArray(ticketPayload?.imagesData)
           ? ticketPayload.imagesData.filter(Boolean).slice(0, 5)
           : [];
-        const shouldCreateTicket = ticketRequired || !!ticketPayload?.saved;
+        const shouldCreateTicket = ticketRequired || (!!ticketPayload?.saved && !!ticketReason);
         let ticketSummary = null;
 
-        if (shouldCreateTicket) {
-          if (!ticketReason) {
-            return res.status(400).json({ error: `ticket reason is required for field ${field.label} in template ${templateName}` });
-          }
+        if (ticketRequired && !ticketReason) {
+          return res.status(400).json({ error: `ticket reason is required for field ${field.label} in template ${templateName}` });
+        }
+
+        if (shouldCreateTicket && ticketReason) {
 
           const ticketImageURLs = [];
           for (let imageIndex = 0; imageIndex < ticketImagesData.length; imageIndex += 1) {
