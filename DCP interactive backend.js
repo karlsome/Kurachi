@@ -13813,6 +13813,7 @@ if (manualSendModal) {
 
     const tpl = queue[queueIndex] || queue[0];
     const isPreMode = !window.checklistState.isPreComplete;
+    const isPostModeActive = window.checklistState.isPostMode === true || (window.checklistState.isPreComplete && window.checklistState.hasSubmittedProductionToday);
 
     const tierBadge = document.getElementById('checklistTierBadge');
     const counterBadge = document.getElementById('checklistCounterBadge');
@@ -13820,6 +13821,54 @@ if (manualSendModal) {
     const selectorTitle = document.getElementById('checklistSelectorTitle');
     const selectorStatus = document.getElementById('checklistSelectorStatus');
     const dropdownHint = document.getElementById('checklistSelectorDropdownHint');
+
+    if (!isPreMode && isPostModeActive) {
+      // Unified Post-Checklist Header
+      const postTemplates = queue.filter(t => Array.isArray(t.fields) && t.fields.some(f => f.timing === 'post' && f.type !== 'name'));
+      const allPostFields = [];
+      postTemplates.forEach(t => (t.fields || []).filter(f => f.timing === 'post' && f.type !== 'name').forEach(f => allPostFields.push(f)));
+      const completedPostCount = allPostFields.filter(f => isChecklistFieldCompleted(f)).length;
+      const isAllPostDone = allPostFields.length > 0 && completedPostCount === allPostFields.length;
+
+      if (tierBadge) {
+        tierBadge.textContent = (typeof _t === 'function') ? _t('post_production_check') : 'POST-PRODUCTION CHECK';
+        tierBadge.className = 'checklist-tier-badge post-check';
+      }
+
+      if (counterBadge) {
+        counterBadge.textContent = `${allPostFields.length} Post Steps (${completedPostCount}/${allPostFields.length} Done)`;
+        counterBadge.style.background = isAllPostDone ? '#dcfce7' : 'var(--bg-muted, #f3f4f6)';
+        counterBadge.style.color = isAllPostDone ? '#166534' : 'var(--text-muted, #6b7280)';
+      }
+
+      if (selectorTitle) {
+        selectorTitle.textContent = (typeof _t === 'function') ? _t('all_post_production_checks') : 'Unified Post-Production Checks';
+      }
+
+      if (selectorStatus) {
+        if (window.checklistState.isPostComplete || isAllPostDone) {
+          selectorStatus.textContent = '✓ Done';
+          selectorStatus.className = 'chip-status-tag done';
+        } else {
+          selectorStatus.textContent = `${completedPostCount}/${allPostFields.length}`;
+          selectorStatus.className = 'chip-status-tag prog';
+        }
+      }
+
+      if (selectorBtn) {
+        if (window.checklistState.isPostComplete || isAllPostDone) {
+          selectorBtn.classList.add('is-completed');
+        } else {
+          selectorBtn.classList.remove('is-completed');
+        }
+        selectorBtn.style.cursor = 'default';
+      }
+
+      if (dropdownHint) {
+        dropdownHint.style.display = 'none';
+      }
+      return;
+    }
 
     // 1. Tier Badge (e.g. DAILY CHECK)
     if (tierBadge) {
@@ -14015,14 +14064,25 @@ if (manualSendModal) {
     const preFields = tplFields.filter(f => f.timing !== 'post');
     const postFields = tplFields.filter(f => f.timing === 'post' && f.type !== 'name');
 
-    const isPreMode = !window.checklistState.isPreComplete;
-    const targetFields = isPreMode ? preFields : (postFields.length > 0 ? postFields : tplFields);
+    const isPreComplete = window.checklistState.isPreComplete;
+    const isPostComplete = window.checklistState.isPostComplete === true;
+    const isPostModeActive = window.checklistState.isPostMode === true || (isPreComplete && window.checklistState.hasSubmittedProductionToday);
+
+    const postTemplates = queue.filter(t => Array.isArray(t.fields) && t.fields.some(f => f.timing === 'post' && f.type !== 'name'));
+    const allPostFields = [];
+    postTemplates.forEach(t => {
+      (t.fields || []).filter(f => f.timing === 'post' && f.type !== 'name').forEach(f => {
+        allPostFields.push({ ...f, _template: t });
+      });
+    });
+
+    const isPreMode = !isPreComplete;
+    const targetFields = isPreMode ? preFields : (allPostFields.length > 0 ? allPostFields : tplFields);
     const allFieldsCompleted = targetFields.every(field => isChecklistFieldCompleted(field));
 
     const superBypassBtn = document.getElementById('superBypassBtn');
     const resetAllBtn = document.getElementById('resetAllBtn');
     const actionsCard = document.getElementById('checklistActionsCard');
-    const isPreComplete = window.checklistState.isPreComplete;
 
     if (superBypassBtn) {
       superBypassBtn.style.display = (isPreComplete && !window.checklistState.hasOpenTickets) ? 'none' : 'inline-flex';
@@ -14031,7 +14091,7 @@ if (manualSendModal) {
       resetAllBtn.style.display = isPreComplete ? 'none' : 'inline-block';
     }
     if (actionsCard) {
-      actionsCard.style.display = (isPreComplete && !window.checklistState.hasOpenTickets) ? 'none' : 'flex';
+      actionsCard.style.display = (isPreComplete && !window.checklistState.hasOpenTickets && (!isPostModeActive || allPostFields.length === 0 || isPostComplete)) ? 'none' : 'flex';
     }
 
     const localizedTitle = (typeof getLocalizedText === 'function') ? getLocalizedText(tpl, 'name') : (tpl.name || 'Checklist');
@@ -14041,13 +14101,16 @@ if (manualSendModal) {
 
     if (nextBtn) {
       if (isPreComplete) {
-        if (postFields.length > 0 && !window.checklistState.isPostComplete) {
-          const isPostDone = postFields.every(field => isChecklistFieldCompleted(field));
+        if (allPostFields.length > 0 && !window.checklistState.isPostComplete && isPostModeActive) {
+          const isPostDone = allPostFields.every(field => isChecklistFieldCompleted(field));
           const label = (typeof _t === 'function') ? _t('complete_post_production_check') : 'Complete Post-Production Check';
-          nextBtn.innerHTML = `<span>${label}</span> ✓`;
+          nextBtn.innerHTML = `<span>${label} (${allPostFields.length} steps)</span> ✓`;
           nextBtn.disabled = !isPostDone;
           nextBtn.style.opacity = isPostDone ? '1' : '0.45';
           nextBtn.style.pointerEvents = isPostDone ? 'auto' : 'none';
+          nextBtn.style.filter = 'none';
+          nextBtn.style.background = isPostDone ? '#10b981' : '#9ca3af';
+          nextBtn.style.boxShadow = isPostDone ? '0 4px 14px rgba(16,185,129,0.3)' : 'none';
           nextBtn.onclick = window.handleChecklistSubmitOrNext;
         } else {
           if (window.checklistState.hasOpenTickets) {
@@ -14160,19 +14223,10 @@ if (manualSendModal) {
     titleEl.innerHTML = `<h3 style="font-size:1.15rem; font-weight:800; color:#1f2733;">${localizedTitle}</h3>${localizedDesc ? `<p style="font-size:0.85rem; color:#6b7280; margin-top:2px;">${localizedDesc}</p>` : ''}`;
     container.appendChild(titleEl);
 
-    const isPostComplete = window.checklistState.isPostComplete === true;
-
-    console.log('📋 [Checklist Render Debug]', {
-      templateName: tpl.name || tpl.templateName,
-      totalFields: tplFields.length,
-      preFieldsCount: preFields.length,
-      postFieldsCount: postFields.length,
-      isPreComplete: window.checklistState.isPreComplete,
-      isPostCompleteState: window.checklistState.isPostComplete,
-      computedIsPostComplete: isPostComplete,
-      preFields: preFields.map(f => f.label || f.id),
-      postFields: postFields.map(f => f.label || f.id)
-    });
+    const stepsText = (typeof _t === 'function') ? _t('steps_count') : 'steps';
+    const tapToggleText = (typeof _t === 'function') ? _t('tap_to_expand_collapse') : 'Tap to expand / collapse';
+    const tapCollapseText = (typeof _t === 'function') ? _t('tap_to_collapse_checklist') : '▲ Tap to collapse completed checklist';
+    const todayIso = typeof getJSTDateString === 'function' ? getJSTDateString() : new Date().toISOString().split('T')[0];
 
     // Render per-template content
     if (isCurrentRecorded) {
@@ -14188,10 +14242,6 @@ if (manualSendModal) {
         }
       });
 
-      const todayIso = typeof getJSTDateString === 'function' ? getJSTDateString() : new Date().toISOString().split('T')[0];
-      const stepsText = (typeof _t === 'function') ? _t('steps_count') : 'steps';
-      const tapToggleText = (typeof _t === 'function') ? _t('tap_to_expand_collapse') : 'Tap to expand / collapse';
-      const tapCollapseText = (typeof _t === 'function') ? _t('tap_to_collapse_checklist') : '▲ Tap to collapse completed checklist';
       const completedSteps = preFields.length > 0 ? preFields : tplFields;
 
       accordion.innerHTML = `
@@ -14250,24 +14300,40 @@ if (manualSendModal) {
       `;
       container.appendChild(lockedBanner);
 
-      // 3. Post-production checks: ONLY show if ALL pre-checklists are completed AND post-mode is active
-      const isPostModeActive = window.checklistState.isPostMode === true || (window.checklistState.isPreComplete && window.checklistState.hasSubmittedProductionToday);
-      if (isPostModeActive && postFields.length > 0 && !isPostComplete) {
-        const postHeaderTitle = (typeof _t === 'function') ? _t('post_production_checks_title') : '📋 Post-Production Checks';
+      // 3. Unified Post-production checks across ALL templates
+      if (isPostModeActive && allPostFields.length > 0 && !isPostComplete) {
+        const postHeaderTitle = (typeof _t === 'function') ? _t('post_production_checks_title') : '📋 Post-Production Checks (Unified View)';
         const postHeader = document.createElement('div');
         postHeader.className = 'post-steps-header';
-        postHeader.innerHTML = `${postHeaderTitle} (${postFields.length} ${stepsText})`;
+        postHeader.style.cssText = 'background: #eff6ff; border: 1.5px solid #bfdbfe; border-radius: 14px; padding: 14px 18px; margin-top: 18px; margin-bottom: 16px; font-weight: 800; font-size: 1.05rem; color: #1e40af; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;';
+        postHeader.innerHTML = `<span>${postHeaderTitle} (${allPostFields.length} ${stepsText})</span><span style="font-size:0.8rem; font-weight:700; background:#dbeafe; padding:4px 10px; border-radius:10px; color:#1d4ed8;">All Checklists</span>`;
         container.appendChild(postHeader);
 
         let isPrevPostDone = true;
-        postFields.forEach((field) => {
-          const globalIdx = tplFields.indexOf(field);
-          const stepNum = globalIdx !== -1 ? globalIdx : postFields.indexOf(field);
-          const cardEl = renderSingleFieldCard(field, stepNum, isPrevPostDone, false);
-          container.appendChild(cardEl);
-          if (!isChecklistFieldCompleted(field)) {
-            isPrevPostDone = false;
-          }
+        postTemplates.forEach((pt) => {
+          const ptFields = (pt.fields || []).filter(f => f.timing === 'post' && f.type !== 'name');
+          if (ptFields.length === 0) return;
+
+          const ptTitle = (typeof getLocalizedText === 'function') ? getLocalizedText(pt, 'name') : (pt.name || 'Checklist');
+          const ptSchedule = (pt.schedule || 'daily').toUpperCase();
+
+          const groupHeader = document.createElement('div');
+          groupHeader.style.cssText = 'margin-top: 14px; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;';
+          groupHeader.innerHTML = `
+            <span style="font-size: 0.95rem; font-weight: 800; color: #1e293b;">${ptTitle}</span>
+            <span class="checklist-tier-badge ${(pt.schedule || 'daily').toLowerCase()}" style="font-size:0.7rem; padding:2px 8px;">${ptSchedule}</span>
+          `;
+          container.appendChild(groupHeader);
+
+          ptFields.forEach((field) => {
+            const globalIdx = (pt.fields || []).indexOf(field);
+            const stepNum = globalIdx !== -1 ? globalIdx : ptFields.indexOf(field);
+            const cardEl = renderSingleFieldCard(field, stepNum, isPrevPostDone, false);
+            container.appendChild(cardEl);
+            if (!isChecklistFieldCompleted(field)) {
+              isPrevPostDone = false;
+            }
+          });
         });
       }
     } else {
@@ -15710,7 +15776,7 @@ if (manualSendModal) {
     const isSubmittingPre = !window.checklistState.isPreComplete;
     const targetFields = isSubmittingPre
       ? fields.filter(f => f.timing !== 'post')
-      : fields.filter(f => f.timing === 'post' && f.type !== 'name');
+      : queue.flatMap(t => (t.fields || []).filter(f => f.timing === 'post' && f.type !== 'name'));
 
     let firstIncompleteCard = null;
     targetFields.forEach((field) => {
@@ -15769,8 +15835,10 @@ if (manualSendModal) {
         workerName = (document.getElementById('Machine Operator')?.value || '').trim() || 'Operator';
       }
 
-      // Submit ONLY the current template!
-      const templatesToSubmit = [tpl];
+      // Pre-check submits the active template; Post-check submits all templates with post fields
+      const templatesToSubmit = isSubmittingPre
+        ? [tpl]
+        : queue.filter(t => Array.isArray(t.fields) && t.fields.some(f => f.timing === 'post' && f.type !== 'name'));
 
       const payload = {
         factory: window.checklistState.factory,
@@ -15781,7 +15849,7 @@ if (manualSendModal) {
           const tFields = Array.isArray(t.fields) ? t.fields : [];
           const fieldsToSubmit = isSubmittingPre
             ? tFields.filter(f => f.timing !== 'post')
-            : (tFields.some(f => f.timing === 'post') ? tFields.filter(f => f.timing === 'post' && f.type !== 'name') : tFields);
+            : tFields.filter(f => f.timing === 'post' && f.type !== 'name');
 
           return {
             templateId: t._id,
@@ -15954,12 +16022,16 @@ if (manualSendModal) {
             await window.saveChecklistDraftToStorage();
           }
 
+          if (typeof verifyChecklistStatusWithMongoDB === 'function') {
+            verifyChecklistStatusWithMongoDB(window.checklistState.factory, window.checklistState.machine);
+          }
+
           if (typeof renderCurrentChecklistTemplate === 'function') {
             renderCurrentChecklistTemplate();
           }
 
           if (typeof showAppToast === 'function') {
-            showAppToast('✓ Post-Production Check Completed!');
+            showAppToast('🎉 All Post-Production Checks Completed!');
           }
         }
       } else {
