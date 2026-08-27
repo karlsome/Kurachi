@@ -32059,8 +32059,8 @@ function sanitizeCheckFormField(field = {}) {
 function sanitizeCheckFormEquipment(equipment = {}) {
   return {
     _id: toCheckFormIdString(equipment._id),
-    name: normalizeCheckFormText(equipment.name),
-    工場: normalizeCheckFormText(equipment['工場']),
+    name: normalizeCheckFormText(equipment.name || equipment['設備名'] || equipment.equipmentName),
+    工場: normalizeCheckFormText(equipment['工場'] || equipment.factory),
     imageURL: normalizeCheckFormText(equipment.imageURL),
   };
 }
@@ -33059,6 +33059,261 @@ app.get('/api/check-forms/today-status', async (req, res) => {
   } catch (error) {
     console.error('Error fetching today checklist status:', error);
     return res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/check-forms/today-overview', async (req, res) => {
+  const filterFactory = normalizeCheckFormText(req.query.factory);
+  const targetDateStr = normalizeCheckFormText(req.query.date);
+
+  try {
+    await client.connect();
+    const masterDb = client.db(DB_NAME);
+    const submittedDb = client.db('submittedDB');
+
+    // Determine target day in JST
+    const jstDateStr = targetDateStr || new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+    const startOfDay = new Date(`${jstDateStr}T00:00:00+09:00`);
+    const endOfDay = new Date(`${jstDateStr}T23:59:59.999+09:00`);
+
+    // 1. Fetch active templates
+    const templateQuery = { status: { $ne: 'inactive' } };
+    if (filterFactory) {
+      templateQuery.工場 = filterFactory;
+    }
+    const templates = await masterDb.collection('checkFormTemplatesDB').find(templateQuery).toArray();
+
+    // 2. Collect equipment IDs & names
+    const equipmentIdStrings = [];
+    const equipmentObjIds = [];
+    const templateEquipmentMap = new Map();
+
+    templates.forEach((template) => {
+      const templateId = template._id.toString();
+      const rawEqIds = Array.isArray(template.equipmentIds)
+        ? template.equipmentIds
+        : (template.equipmentId ? [template.equipmentId] : (Array.isArray(template.machines) ? template.machines : []));
+      templateEquipmentMap.set(templateId, rawEqIds);
+
+      rawEqIds.forEach((id) => {
+        const strId = String(id?._id || id?.id || id).trim();
+        if (strId && !equipmentIdStrings.includes(strId)) {
+          equipmentIdStrings.push(strId);
+          if (ObjectId.isValid(strId)) {
+            equipmentObjIds.push(new ObjectId(strId));
+          }
+        }
+      });
+    });
+
+    // 3. Fetch equipment info
+    const equipmentDocs = await masterDb.collection('setsubiDB').find({}).toArray();
+
+    const equipmentMap = new Map();
+    equipmentDocs.forEach((eq) => {
+      const idStr = eq._id.toString();
+      const name = normalizeCheckFormText(eq['設備名'] || eq.name || eq.equipmentName || idStr);
+      const factory = normalizeCheckFormText(eq['工場'] || eq.factory || '—');
+      equipmentMap.set(idStr, { id: idStr, name, factory });
+      if (eq.id) equipmentMap.set(String(eq.id), { id: idStr, name, factory });
+      if (name) equipmentMap.set(name.toLowerCase(), { id: idStr, name, factory });
+    });
+
+    // Build unique machine list from active templates
+    const machinesMap = new Map();
+    templates.forEach((template) => {
+      const formId = template._id.toString();
+      const formName = normalizeCheckFormText(template.name || template.name_ja || template.name_en || '点検フォーム');
+      const formSchedule = normalizeCheckFormSchedule(template.schedule || 'daily');
+      const formTiming = normalizeCheckFormText(template.timing || 'pre');
+      const checkCount = Array.isArray(template.fields) ? template.fields.length : 0;
+      const templateFactory = normalizeCheckFormText(template.工場 || '—');
+
+      const rawEqIds = templateEquipmentMap.get(formId) || [];
+      rawEqIds.forEach((eqId) => {
+        const idStr = String(eqId).trim();
+        const eqInfo = equipmentMap.get(idStr) || { id: idStr, name: idStr, factory: templateFactory };
+        
+        if (filterFactory && eqInfo.factory && eqInfo.factory !== '—' && eqInfo.factory !== filterFactory) {
+          return;
+        }
+
+        const machineKey = `${eqInfo.factory}:${eqInfo.name}`;
+        if (!machinesMap.has(machineKey)) {
+          machinesMap.set(machineKey, {
+            id: idStr,
+            name: eqInfo.name,
+            factory: eqInfo.factory,
+            assignedTemplates: [],
+            todaySubmissions: [],
+          });
+        }
+
+        const machineObj = machinesMap.get(machineKey);
+        if (!machineObj.assignedTemplates.some((t) => t.formId === formId)) {
+          machineObj.assignedTemplates.push({
+            formId,
+            formName,
+            schedule: formSchedule,
+            timing: formTiming,
+            checkCount,
+          });
+        }
+      });
+    });
+
+    // 4. Query records submitted for this day
+    const formIds = templates.map((t) => t._id.toString());
+    const formObjIds = templates.map((t) => t._id);
+
+    const recordQuery = {
+      $or: [
+        { formId: { $in: [...formIds, ...formObjIds] } },
+        { templateId: { $in: [...formIds, ...formObjIds] } },
+      ],
+      $and: [
+        {
+          $or: [
+            { completedAt: { $gte: startOfDay.toISOString(), $lte: endOfDay.toISOString() } },
+            { createdAt: { $gte: startOfDay, $lte: endOfDay } },
+            { submittedAt: { $gte: startOfDay.toISOString(), $lte: endOfDay.toISOString() } },
+          ]
+        }
+      ]
+    };
+
+    const records = await submittedDb.collection(CHECK_FORM_RECORDS_COLLECTION)
+      .find(recordQuery)
+      .sort({ completedAt: -1, createdAt: -1 })
+      .toArray();
+
+    // 5. Query NG reports for this day or open
+    const ngReports = await submittedDb.collection(CHECK_FORM_NG_REPORTS_COLLECTION)
+      .find({
+        $or: [
+          { createdAt: { $gte: startOfDay, $lte: endOfDay } },
+          { submittedAt: { $gte: startOfDay.toISOString(), $lte: endOfDay.toISOString() } },
+          { status: 'open' }
+        ]
+      })
+      .toArray();
+
+    const ngReportsByRecordId = new Map();
+    ngReports.forEach((report) => {
+      const recId = report.checkFormRecordId || report.recordId;
+      if (recId) {
+        const key = String(recId).trim();
+        if (!ngReportsByRecordId.has(key)) ngReportsByRecordId.set(key, []);
+        ngReportsByRecordId.get(key).push(report);
+      }
+    });
+
+    // 6. Map records to machines
+    records.forEach((record) => {
+      const machineName = normalizeCheckFormText(record['加工設備'] || record.machine || record.machineName || record.selectedMachine);
+      const recId = record._id.toString();
+      const linkedNg = ngReportsByRecordId.get(recId) || [];
+
+      // Check if record has NG
+      const hasNG = Boolean(record.hasNG || linkedNg.length > 0 || (Array.isArray(record.answers) && record.answers.some((a) => a.hasNG)));
+
+      // Extract NG reasons
+      let ngReason = '';
+      if (hasNG) {
+        if (linkedNg.length > 0) {
+          ngReason = linkedNg.map((r) => r.reason || r.defectDetails || r.fieldLabel).filter(Boolean).join('; ');
+        } else if (Array.isArray(record.answers)) {
+          const ngAnswers = record.answers.filter((a) => a.hasNG && a.reason);
+          ngReason = ngAnswers.map((a) => a.reason).join('; ');
+        }
+        if (!ngReason) ngReason = record.ngReason || 'NG判定項目あり';
+      }
+
+      // Find matching machine
+      for (const [key, machineObj] of machinesMap.entries()) {
+        if (checkFormMachineNamesMatch(machineObj.name, machineName)) {
+          machineObj.todaySubmissions.push({
+            recordId: recId,
+            formId: record.formId || record.templateId || '',
+            formName: record.formName || record.templateName || '',
+            completedBy: record.completedBy || record.inspector || '作業者',
+            completedAt: record.completedAt || record.createdAt || record.submittedAt,
+            hasNG,
+            ngReason,
+            answersCount: Array.isArray(record.answers) ? record.answers.length : 0,
+            answers: record.answers || [],
+            linkedNgTickets: linkedNg,
+          });
+        }
+      }
+    });
+
+    // 7. Aggregate machine status and KPIs
+    let completedCount = 0;
+    let defectCount = 0;
+    let pendingCount = 0;
+
+    const machineList = Array.from(machinesMap.values()).map((m) => {
+      const hasSubmissions = m.todaySubmissions.length > 0;
+      const hasNG = m.todaySubmissions.some((s) => s.hasNG);
+
+      let status = 'pending';
+      if (hasNG) {
+        status = 'defect';
+        defectCount += 1;
+      } else if (hasSubmissions) {
+        status = 'completed';
+        completedCount += 1;
+      } else {
+        status = 'pending';
+        pendingCount += 1;
+      }
+
+      // Sort submissions (NG first, then latest)
+      const sortedSubmissions = [...m.todaySubmissions].sort((a, b) => {
+        if (a.hasNG && !b.hasNG) return -1;
+        if (!a.hasNG && b.hasNG) return 1;
+        return new Date(b.completedAt || 0) - new Date(a.completedAt || 0);
+      });
+
+      const primary = sortedSubmissions[0] || null;
+
+      return {
+        id: m.id,
+        name: m.name,
+        factory: m.factory,
+        status,
+        hasNG,
+        submissionCount: m.todaySubmissions.length,
+        primarySubmission: primary,
+        submissions: sortedSubmissions,
+        assignedTemplates: m.assignedTemplates,
+      };
+    });
+
+    // Sort machine list: Defect (NG) first, then Pending, then Completed
+    const statusPriority = { defect: 0, pending: 1, completed: 2 };
+    machineList.sort((a, b) => {
+      const pDiff = statusPriority[a.status] - statusPriority[b.status];
+      if (pDiff !== 0) return pDiff;
+      if (a.factory !== b.factory) return a.factory.localeCompare(b.factory, 'ja');
+      return a.name.localeCompare(b.name, 'ja');
+    });
+
+    return res.json({
+      date: jstDateStr,
+      formattedDate: startOfDay.toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' }),
+      summary: {
+        totalMachines: machineList.length,
+        completedCount,
+        defectCount,
+        pendingCount,
+      },
+      machines: machineList,
+    });
+  } catch (error) {
+    console.error('Error loading today check form overview:', error);
+    return res.status(500).json({ error: 'Failed to load today overview', details: error.message });
   }
 });
 
