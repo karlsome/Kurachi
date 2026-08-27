@@ -33143,10 +33143,25 @@ function normalizeNgTicketDoc(doc, templateMap) {
   const timing_ja = isPost ? '作業後点検' : '作業前点検';
   const timing_en = isPost ? 'Post-Production Check' : 'Pre-Production Check';
 
+  const rawTicketType = String(doc.ticketType || doc.type || doc.ticket_type || '').trim().toLowerCase();
+  const isOpt = rawTicketType === 'optional'
+    || doc.isOptional === true
+    || doc.optional === true
+    || doc.required === false
+    || String(doc.answerValue || '').trim().toUpperCase() === 'OK'
+    || String(doc.answerValue || '').trim() === '合格'
+    || String(doc.answerValue || '').trim() === '正常'
+    || String(doc.answerValue || '').trim() === 'なし';
+  const ticketType = isOpt ? 'optional' : 'defect';
+
   return {
     _id: doc._id.toString(),
     ticketId: doc._id.toString(),
     ticketNo: doc.ticketNo ?? null,
+    ticketType,
+    isOptional: isOpt,
+    isDefect: !isOpt,
+    required: doc.required ?? !isOpt,
     source: doc.source || 'checkForm',
     factory: doc.factory || '',
     machineName: machineStr,
@@ -33246,17 +33261,54 @@ app.post('/api/check-forms/ng-tickets/page', async (req, res) => {
       ];
     }
 
-    let sortObj = { createdAt: -1, _id: -1 };
-    if (sort.column) {
-      const dir = Number(sort.direction) === 1 ? 1 : -1;
-      if (sort.column === 'createdAt') sortObj = { createdAt: dir, _id: -1 };
-      else if (sort.column === 'factory') sortObj = { factory: dir, _id: -1 };
-      else if (sort.column === 'status') sortObj = { status: dir, _id: -1 };
-      else if (sort.column === 'fieldLabel') sortObj = { fieldLabel: dir, _id: -1 };
-    }
-
     const totalItems = await collection.countDocuments(queryFilter);
-    const docs = await collection.find(queryFilter).sort(sortObj).skip(skip).limit(safeLimit).toArray();
+    const dir = Number(sort.direction) === 1 ? 1 : -1;
+    let docs;
+
+    if (sort.column === 'type') {
+      const typeExpr = {
+        $cond: [
+          {
+            $or: [
+              { $eq: [{ $toLower: { $ifNull: ['$ticketType', ''] } }, 'optional'] },
+              { $eq: [{ $toLower: { $ifNull: ['$type', ''] } }, 'optional'] },
+              { $eq: ['$isOptional', true] },
+              { $eq: ['$optional', true] },
+              { $eq: ['$required', false] },
+              { $eq: [{ $toUpper: { $ifNull: ['$answerValue', ''] } }, 'OK'] },
+              { $eq: [{ $ifNull: ['$answerValue', ''] }, '合格'] },
+              { $eq: [{ $ifNull: ['$answerValue', ''] }, '正常'] },
+              { $eq: [{ $ifNull: ['$answerValue', ''] }, 'なし'] }
+            ]
+          },
+          'optional',
+          'defect'
+        ]
+      };
+
+      const pipeline = [
+        { $match: queryFilter },
+        { $addFields: { computedType: typeExpr } },
+        { $sort: { computedType: dir, createdAt: -1, _id: -1 } },
+        { $skip: skip },
+        { $limit: safeLimit }
+      ];
+      docs = await collection.aggregate(pipeline).toArray();
+    } else {
+      let sortObj = { createdAt: -1, _id: -1 };
+      if (sort.column === 'createdAt') sortObj = { createdAt: dir, _id: -1 };
+      else if (sort.column === 'ticketNo') sortObj = { ticketNo: dir, createdAt: -1, _id: -1 };
+      else if (sort.column === 'factory') sortObj = { factory: dir, createdAt: -1, _id: -1 };
+      else if (sort.column === 'location') sortObj = { factory: dir, 加工設備: dir, machineName: dir, createdAt: -1, _id: -1 };
+      else if (sort.column === 'status') sortObj = { status: dir, createdAt: -1, _id: -1 };
+      else if (sort.column === 'fieldLabel') sortObj = { fieldLabel: dir, createdAt: -1, _id: -1 };
+      else if (sort.column === 'formName') sortObj = { templateName: dir, formName: dir, createdAt: -1, _id: -1 };
+      else if (sort.column === 'answerValue') sortObj = { answerValue: dir, createdAt: -1, _id: -1 };
+      else if (sort.column === 'completedBy') sortObj = { completedBy: dir, workerName: dir, createdAt: -1, _id: -1 };
+      else if (sort.column === 'imageCount') sortObj = { imageCount: dir, createdAt: -1, _id: -1 };
+
+      docs = await collection.find(queryFilter).sort(sortObj).skip(skip).limit(safeLimit).toArray();
+    }
     const normalizedDocs = docs.map(d => normalizeNgTicketDoc(d, templateMap));
 
     const allDocs = await collection.find(queryFilter, { projection: { imageURLs: 1, checkFormRecordId: 1, 加工設備: 1, machineName: 1, workerName: 1, completedBy: 1 } }).toArray();
