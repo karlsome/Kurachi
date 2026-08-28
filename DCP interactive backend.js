@@ -3706,6 +3706,7 @@ window.saveChecklistDraftToStorage = async function () {
 
   const draftData = {
     answers: window.checklistState.answers || {},
+    answeredAt: window.checklistState.answeredAt || {},
     tickets: ticketsClean,
     fieldPhotos: fieldPhotoRefs,
     recordIds: window.checklistState.recordIds || {},
@@ -3740,6 +3741,7 @@ window.loadChecklistDraftFromStorage = async function () {
     }
 
     if (draft.answers) window.checklistState.answers = { ...window.checklistState.answers, ...draft.answers };
+    if (draft.answeredAt) window.checklistState.answeredAt = { ...(window.checklistState.answeredAt || {}), ...draft.answeredAt };
     if (draft.recordIds) window.checklistState.recordIds = { ...(window.checklistState.recordIds || {}), ...draft.recordIds };
     if (typeof draft.queueIndex === 'number' && draft.queueIndex < (window.checklistState.queue?.length || 1)) {
       window.checklistState.queueIndex = draft.queueIndex;
@@ -13527,6 +13529,7 @@ if (manualSendModal) {
     queue: [],
     queueIndex: 0,
     answers: {},
+    answeredAt: {},
     tickets: {},
     fieldPhotos: {},
     isPreComplete: false,
@@ -13598,6 +13601,7 @@ if (manualSendModal) {
         window.checklistState.isPreComplete = false;
         window.checklistState.isBypassed = false;
         window.checklistState.answers = {};
+        window.checklistState.answeredAt = {};
         window.checklistState.tickets = {};
         window.checklistState.fieldPhotos = {};
 
@@ -13738,6 +13742,7 @@ if (manualSendModal) {
         window.checklistState.isPostComplete = false;
         window.checklistState.isBypassed = false;
         window.checklistState.answers = {};
+        window.checklistState.answeredAt = {};
         window.checklistState.tickets = {};
         window.checklistState.fieldPhotos = {};
         window.checklistState.recordIds = {};
@@ -14785,6 +14790,7 @@ if (manualSendModal) {
     // Tapping OK when already OK releases/deselects the OK button
     if (val === 'OK' && currentVal === 'OK') {
       delete window.checklistState.answers[fieldId];
+      if (window.checklistState.answeredAt) delete window.checklistState.answeredAt[fieldId];
       if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
       renderCurrentChecklistTemplate();
       return;
@@ -14796,6 +14802,9 @@ if (manualSendModal) {
     }
 
     window.checklistState.answers[fieldId] = val;
+    window.checklistState.answeredAt = window.checklistState.answeredAt || {};
+    window.checklistState.answeredAt[fieldId] = new Date().toISOString();
+
     if (val === 'NG' && window.checklistState.tickets[fieldId]) {
       window.checklistState.tickets[fieldId].ticketType = 'defect';
       window.checklistState.tickets[fieldId].required = true;
@@ -14813,6 +14822,9 @@ if (manualSendModal) {
     if (!isConfirmed) return;
 
     window.checklistState.answers[fieldId] = val;
+    window.checklistState.answeredAt = window.checklistState.answeredAt || {};
+    window.checklistState.answeredAt[fieldId] = new Date().toISOString();
+
     if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
     renderCurrentChecklistTemplate();
   };
@@ -14823,6 +14835,9 @@ if (manualSendModal) {
     if (!isConfirmed) return;
 
     window.checklistState.answers[fieldId] = val;
+    window.checklistState.answeredAt = window.checklistState.answeredAt || {};
+    window.checklistState.answeredAt[fieldId] = new Date().toISOString();
+
     if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
   };
 
@@ -15107,6 +15122,8 @@ if (manualSendModal) {
       }
 
       window.checklistState.answers[active.fieldId] = numVal;
+      window.checklistState.answeredAt = window.checklistState.answeredAt || {};
+      window.checklistState.answeredAt[active.fieldId] = new Date().toISOString();
 
       if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
       if (modal) modal.style.display = 'none';
@@ -15117,6 +15134,7 @@ if (manualSendModal) {
       }
     } else {
       delete window.checklistState.answers[active.fieldId];
+      if (window.checklistState.answeredAt) delete window.checklistState.answeredAt[active.fieldId];
       if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
       if (modal) modal.style.display = 'none';
       renderCurrentChecklistTemplate();
@@ -15543,6 +15561,7 @@ if (manualSendModal) {
 
     // Reset state object
     window.checklistState.answers = {};
+    window.checklistState.answeredAt = {};
     window.checklistState.tickets = {};
     window.checklistState.fieldPhotos = {};
     window.checklistState.queueIndex = 0;
@@ -15638,6 +15657,7 @@ if (manualSendModal) {
 
     if (isSkipped) {
       delete window.checklistState.answers[fieldId];
+      if (window.checklistState.answeredAt) delete window.checklistState.answeredAt[fieldId];
       delete window.checklistState.tickets[fieldId];
       if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
       if (typeof showAppToast === 'function') showAppToast('↩️ Skip undone');
@@ -15712,6 +15732,8 @@ if (manualSendModal) {
       : 'SKIPPED';
 
     window.checklistState.answers[fieldId] = skipText;
+    window.checklistState.answeredAt = window.checklistState.answeredAt || {};
+    window.checklistState.answeredAt[fieldId] = new Date().toISOString();
 
     if (leaderUser) {
       window.checklistState.tickets[fieldId] = {
@@ -15879,6 +15901,7 @@ if (manualSendModal) {
                 options: f.options || [],
                 unit: f.unit || '',
                 value: window.checklistState.answers[f.id],
+                answeredAt: (window.checklistState.answeredAt && window.checklistState.answeredAt[f.id]) || new Date().toISOString(),
                 fieldPhotoBase64: window.checklistState.fieldPhotos[f.id] || null,
                 fieldPhotoData: window.checklistState.fieldPhotos[f.id] || null,
                 ticket: (window.checklistState.tickets[f.id] && window.checklistState.tickets[f.id].saved && (window.checklistState.tickets[f.id].reason || '').trim()) ? {
