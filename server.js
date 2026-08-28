@@ -36175,6 +36175,366 @@ app.post('/api/production/sync-excel-save', async (req, res) => {
   }
 });
 
+// ==========================================
+// Analytics: Material Lots (材料ロット) Usage, Meters, Shots & Traceability
+// ==========================================
+async function handleMaterialLotAnalytics(req, res) {
+  try {
+    const params = req.method === 'POST' ? req.body : req.query;
+    const {
+      startDate,
+      endDate,
+      factory,
+      machine,
+      lotNumber,
+      materialSeiban,
+      materialHinban,
+      hinban,
+      seiban,
+      worker,
+      search
+    } = params;
+
+    const db = client.db('submittedDB');
+    const collection = db.collection('pressDB');
+    const masterCollection = client.db('Sasaki_Coating_MasterDB').collection('masterDB');
+
+    // 1. Fetch MasterDB items for material linking (材料背番号, 材料品番, 材料, 品名, etc.)
+    const masterItems = await masterCollection.find({}, {
+      projection: {
+        "品番": 1,
+        "背番号": 1,
+        "品名": 1,
+        "材料背番号": 1,
+        "材料品番": 1,
+        "材料": 1,
+        "色": 1,
+        "imageURL": 1
+      }
+    }).toArray();
+
+    const masterByHinban = new Map();
+    const masterBySeiban = new Map();
+    for (const item of masterItems) {
+      if (item['品番']) masterByHinban.set(String(item['品番']).trim(), item);
+      if (item['背番号']) masterBySeiban.set(String(item['背番号']).trim(), item);
+    }
+
+    // 2. Build PressDB Query - Only process documents that have Lot_Details
+    const query = {
+      "Lot_Details": { $exists: true, $type: 'array', $ne: [] }
+    };
+
+    // Date range filter on "Date" string field (YYYY-MM-DD)
+    if (startDate && endDate) {
+      query.Date = { $gte: String(startDate), $lte: String(endDate) };
+    } else if (startDate) {
+      query.Date = { $gte: String(startDate) };
+    } else if (endDate) {
+      query.Date = { $lte: String(endDate) };
+    }
+
+    if (factory) {
+      query['工場'] = factory;
+    }
+    if (machine) {
+      query.$or = [
+        { '設備': { $regex: machine, $options: 'i' } },
+        { 'Lot_Details.machine': { $regex: machine, $options: 'i' } }
+      ];
+    }
+    if (hinban) {
+      query['品番'] = { $regex: hinban, $options: 'i' };
+    }
+    if (seiban) {
+      query['背番号'] = { $regex: seiban, $options: 'i' };
+    }
+    if (worker) {
+      query['Worker_Name'] = { $regex: worker, $options: 'i' };
+    }
+    if (lotNumber) {
+      const lotRegex = { $regex: lotNumber, $options: 'i' };
+      query.$or = [
+        { '材料ロット': lotRegex },
+        { 'Lot_Details.lotNumber': lotRegex }
+      ];
+    }
+
+    if (search && String(search).trim()) {
+      const s = String(search).trim();
+      const sRegex = { $regex: s, $options: 'i' };
+      const searchClauses = [
+        { '材料ロット': sRegex },
+        { 'Lot_Details.lotNumber': sRegex },
+        { '品番': sRegex },
+        { '背番号': sRegex },
+        { '設備': sRegex },
+        { '工場': sRegex },
+        { 'Worker_Name': sRegex },
+        { 'Comment': sRegex }
+      ];
+      if (query.$or) {
+        query.$and = query.$and || [];
+        query.$and.push({ $or: query.$or });
+        query.$and.push({ $or: searchClauses });
+        delete query.$or;
+      } else {
+        query.$or = searchClauses;
+      }
+    }
+
+    const records = await collection.find(query).sort({ Date: -1, createdAt: -1, _id: -1 }).limit(3000).toArray();
+
+    // Aggregations
+    const lotMap = new Map();
+    const flatRuns = [];
+    const allFactories = new Set();
+    const allMachines = new Set();
+    const allHinbans = new Set();
+    const allSeibans = new Set();
+    const allWorkers = new Set();
+    const allLotNumbers = new Set();
+    const allMaterialSeibans = new Set();
+    const allMaterialHinbans = new Set();
+    const allMaterialNames = new Set();
+
+    let totalMetersOverall = 0;
+    let totalShotsOverall = 0;
+    let totalPiecesOverall = 0;
+    let totalImagesCountOverall = 0;
+
+    for (const doc of records) {
+      const docId = doc._id ? doc._id.toString() : '';
+      const docFactory = doc['工場'] || '—';
+      const docHinban = String(doc['品番'] || '').trim();
+      const docSeiban = String(doc['背番号'] || '').trim();
+      const docWorker = doc['Worker_Name'] || '—';
+      const docDate = doc['Date'] || '';
+      const docTimeStart = doc['Time_start'] || '';
+      const docTimeEnd = doc['Time_end'] || '';
+      const docEquipment = doc['設備'] || '—';
+      const docTotalNg = Number(doc['Total_NG']) || 0;
+      const docComment = doc['Comment'] || '';
+      const docCreatedAt = doc.createdAt || '';
+
+      // Lookup Material & Product Info from MasterDB
+      const masterInfo = (docHinban ? masterByHinban.get(docHinban) : null)
+        || (docSeiban ? masterBySeiban.get(docSeiban) : null)
+        || {};
+
+      const matSeiban = masterInfo['材料背番号'] || '—';
+      const matHinban = masterInfo['材料品番'] || '—';
+      const matName = masterInfo['材料'] || '—';
+      const prodName = masterInfo['品名'] || '—';
+      const prodImage = masterInfo.imageURL || '';
+      const prodColor = masterInfo['色'] || '';
+
+      if (matSeiban && matSeiban !== '—') allMaterialSeibans.add(matSeiban);
+      if (matHinban && matHinban !== '—') allMaterialHinbans.add(matHinban);
+      if (matName && matName !== '—') allMaterialNames.add(matName);
+
+      // Filter by materialSeiban or materialHinban if requested
+      if (materialSeiban && matSeiban.toLowerCase() !== String(materialSeiban).toLowerCase()) {
+        continue;
+      }
+      if (materialHinban && matHinban.toLowerCase() !== String(materialHinban).toLowerCase()) {
+        continue;
+      }
+
+      // Collect material label images
+      let images = [];
+      if (Array.isArray(doc.materialLabelImages) && doc.materialLabelImages.length > 0) {
+        images = doc.materialLabelImages.filter(Boolean);
+      } else if (doc['材料ラベル画像']) {
+        images = [doc['材料ラベル画像']];
+      }
+      const firstCheckImg = doc['初物チェック画像'] || null;
+      const lastCheckImg = doc['終物チェック画像'] || null;
+
+      totalImagesCountOverall += images.length;
+      if (docFactory && docFactory !== '—') allFactories.add(docFactory);
+      if (docHinban) allHinbans.add(docHinban);
+      if (docSeiban) allSeibans.add(docSeiban);
+      if (docWorker && docWorker !== '—') allWorkers.add(docWorker);
+      if (docEquipment && docEquipment !== '—') {
+        docEquipment.split(',').map(m => m.trim()).filter(Boolean).forEach(m => allMachines.add(m));
+      }
+
+      const lotDetails = Array.isArray(doc.Lot_Details) ? doc.Lot_Details : [];
+
+      for (const item of lotDetails) {
+        const rawLotNum = String(item.lotNumber || '').trim();
+        if (!rawLotNum) continue;
+
+        allLotNumbers.add(rawLotNum);
+        const itemMachine = item.machine || docEquipment || '—';
+        if (itemMachine && itemMachine !== '—') {
+          itemMachine.split(',').map(m => m.trim()).filter(Boolean).forEach(m => allMachines.add(m));
+        }
+
+        const itemShots = Number(item.shots) || 0;
+        const itemMeters = Number(item.meters) || 0;
+        const itemPieces = Number(item.pieces) || 0;
+        const itemFeedPitch = item.feedPitch !== undefined && item.feedPitch !== null ? Number(item.feedPitch) : null;
+        const itemPcPerCycle = item.pcPerCycle !== undefined && item.pcPerCycle !== null ? Number(item.pcPerCycle) : null;
+
+        totalMetersOverall += itemMeters;
+        totalShotsOverall += itemShots;
+        totalPiecesOverall += itemPieces;
+
+        const runItem = {
+          pressId: docId,
+          lotNumber: rawLotNum,
+          factory: docFactory,
+          machine: itemMachine,
+          hinban: docHinban,
+          seiban: docSeiban,
+          productName: prodName,
+          productImage: prodImage,
+          productColor: prodColor,
+          materialSeiban: matSeiban,
+          materialHinban: matHinban,
+          materialName: matName,
+          worker: docWorker,
+          date: docDate,
+          timeStart: docTimeStart,
+          timeEnd: docTimeEnd,
+          shots: itemShots,
+          feedPitch: itemFeedPitch,
+          pcPerCycle: itemPcPerCycle,
+          meters: itemMeters,
+          pieces: itemPieces,
+          totalNg: docTotalNg,
+          comment: docComment,
+          materialLabelImages: images,
+          firstCheckImage: firstCheckImg,
+          lastCheckImage: lastCheckImg,
+          createdAt: docCreatedAt
+        };
+
+        flatRuns.push(runItem);
+
+        const lotKey = `${matSeiban || 'UNKNOWN'}__${rawLotNum}`;
+
+        if (!lotMap.has(lotKey)) {
+          lotMap.set(lotKey, {
+            key: lotKey,
+            lotNumber: rawLotNum,
+            materialSeiban: matSeiban,
+            materialHinban: matHinban,
+            materialName: matName,
+            totalMeters: 0,
+            totalShots: 0,
+            totalPieces: 0,
+            products: new Map(), // key: seiban+hinban -> { seiban, hinban, productName, productImage, shots, meters, pieces }
+            machines: new Set(),
+            factories: new Set(),
+            workers: new Set(),
+            dates: new Set(),
+            images: new Set(),
+            runs: []
+          });
+        }
+
+        const lotAgg = lotMap.get(lotKey);
+        lotAgg.totalMeters += itemMeters;
+        lotAgg.totalShots += itemShots;
+        lotAgg.totalPieces += itemPieces;
+
+        // In case earlier record didn't have material name but this one does
+        if (matSeiban && matSeiban !== '—' && (!lotAgg.materialSeiban || lotAgg.materialSeiban === '—')) lotAgg.materialSeiban = matSeiban;
+        if (matHinban && matHinban !== '—' && (!lotAgg.materialHinban || lotAgg.materialHinban === '—')) lotAgg.materialHinban = matHinban;
+        if (matName && matName !== '—' && (!lotAgg.materialName || lotAgg.materialName === '—')) lotAgg.materialName = matName;
+
+        const prodKey = `${docSeiban}::${docHinban}`;
+        if (!lotAgg.products.has(prodKey)) {
+          lotAgg.products.set(prodKey, {
+            seiban: docSeiban,
+            hinban: docHinban,
+            productName: prodName,
+            productImage: prodImage,
+            productColor: prodColor,
+            totalShots: 0,
+            totalMeters: 0,
+            totalPieces: 0,
+            machines: new Set()
+          });
+        }
+        const prodSummary = lotAgg.products.get(prodKey);
+        prodSummary.totalShots += itemShots;
+        prodSummary.totalMeters += itemMeters;
+        prodSummary.totalPieces += itemPieces;
+        if (itemMachine && itemMachine !== '—') prodSummary.machines.add(itemMachine);
+
+        if (itemMachine && itemMachine !== '—') {
+          itemMachine.split(',').map(m => m.trim()).filter(Boolean).forEach(m => lotAgg.machines.add(m));
+        }
+        if (docFactory && docFactory !== '—') lotAgg.factories.add(docFactory);
+        if (docWorker && docWorker !== '—') lotAgg.workers.add(docWorker);
+        if (docDate) lotAgg.dates.add(docDate);
+        images.forEach(img => lotAgg.images.add(img));
+        lotAgg.runs.push(runItem);
+      }
+    }
+
+    // Convert lotMap to sorted array (highest meters first)
+    const lots = Array.from(lotMap.values()).map(lot => ({
+      key: lot.key,
+      lotNumber: lot.lotNumber,
+      materialSeiban: lot.materialSeiban || '—',
+      materialHinban: lot.materialHinban || '—',
+      materialName: lot.materialName || '—',
+      displayTitle: lot.materialSeiban && lot.materialSeiban !== '—' ? `${lot.materialSeiban} - ${lot.lotNumber}` : lot.lotNumber,
+      totalMeters: Number(lot.totalMeters.toFixed(2)),
+      totalShots: lot.totalShots,
+      totalPieces: lot.totalPieces,
+      products: Array.from(lot.products.values()).map(p => ({
+        ...p,
+        totalMeters: Number(p.totalMeters.toFixed(2)),
+        machines: Array.from(p.machines)
+      })),
+      machines: Array.from(lot.machines),
+      factories: Array.from(lot.factories),
+      workers: Array.from(lot.workers),
+      dates: Array.from(lot.dates).sort().reverse(),
+      runsCount: lot.runs.length,
+      images: Array.from(lot.images),
+      runs: lot.runs.sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.timeStart || '').localeCompare(a.timeStart || ''))
+    })).sort((a, b) => b.totalMeters - a.totalMeters || b.totalShots - a.totalShots);
+
+    res.json({
+      success: true,
+      summary: {
+        totalDistinctLots: lots.length,
+        totalMeters: Number(totalMetersOverall.toFixed(2)),
+        totalShots: totalShotsOverall,
+        totalPieces: totalPiecesOverall,
+        totalPressRuns: records.length,
+        totalImagesCount: totalImagesCountOverall
+      },
+      lots,
+      runs: flatRuns.sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.timeStart || '').localeCompare(a.timeStart || '')),
+      filterOptions: {
+        materialSeibans: Array.from(allMaterialSeibans).sort(),
+        materialHinbans: Array.from(allMaterialHinbans).sort(),
+        materialNames: Array.from(allMaterialNames).sort(),
+        factories: Array.from(allFactories).sort(),
+        machines: Array.from(allMachines).sort(),
+        hinbanList: Array.from(allHinbans).sort(),
+        seibanList: Array.from(allSeibans).sort(),
+        workers: Array.from(allWorkers).sort(),
+        lotNumbers: Array.from(allLotNumbers).sort()
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error in /api/analytics/material-lots:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch material lots analytics', details: error.message });
+  }
+}
+
+app.get('/api/analytics/material-lots', handleMaterialLotAnalytics);
+app.post('/api/analytics/material-lots', handleMaterialLotAnalytics);
+
 app.listen(port, () => {
   console.log(`✅ Combined server is running at http://localhost:${port}`);
   console.log(`🌐 GEN CSV Download available at: http://localhost:${port}/gen-automated`);
