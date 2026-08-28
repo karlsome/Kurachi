@@ -3615,7 +3615,8 @@ app.post("/submitTopressDBiReporter", async (req, res) => {
         if (!img.base64) continue;
 
         const buffer = Buffer.from(img.base64, 'base64');
-        const fileName = `${formData.背番号}_${formData.Date}_${formData.Worker_Name}_${formData.工場}_${formData.設備}_materialLabel_${img.timestamp || Date.now()}.jpg`;
+        const cleanLot = img.lotNumber ? `lot-${String(img.lotNumber).trim().replace(/[^a-zA-Z0-9_-]/g, '_')}` : (img.id ? String(img.id).trim().replace(/[^a-zA-Z0-9_-]/g, '_') : `materialLabel_${img.timestamp || Date.now()}`);
+        const fileName = `${formData.背番号}_${formData.Date}_${formData.Worker_Name}_${formData.工場}_${formData.設備}_${cleanLot}_materialLabelImage.jpg`;
         const filePath = `materialLabel/${formData.工場}/${formData.設備}/${fileName}`;
         const file = admin.storage().bucket().file(filePath);
 
@@ -4020,8 +4021,11 @@ app.post('/submitToDCP', async (req, res) => {
                     const buffer = Buffer.from(imgData.base64, 'base64');
                     console.log(`🔍 Processing material label image ${imgData.id}: buffer size = ${buffer.length} bytes`);
 
-                    // Create unique filename
-                    const fileName = `${formData.背番号}_${formData.Date}_${imgData.timestamp}_${imgData.id}_materialLabelImage.jpg`;
+                    // Create unique filename with lot number
+                    const cleanLot = imgData.lotNumber
+                        ? `lot-${String(imgData.lotNumber).trim().replace(/[^a-zA-Z0-9_-]/g, '_')}`
+                        : (imgData.id ? String(imgData.id).trim().replace(/[^a-zA-Z0-9_-]/g, '_') : `photo-${Date.now()}`);
+                    const fileName = `${formData.背番号}_${formData.Date}_${imgData.timestamp}_${cleanLot}_materialLabelImage.jpg`;
                     const filePath = `materialLabel/${formData.工場}/${formData.設備}/${fileName}`;
                     const file = bucket.file(filePath);
                     const downloadToken = "masterDBToken69";
@@ -4078,6 +4082,30 @@ app.post('/submitToDCP', async (req, res) => {
             Maintenance_Data: processedMaintenanceData, // Add maintenance data with photo URLs
             createdAt: new Date().toISOString() // Add server timestamp
         };
+
+        // Link materialImageURL to matching Lot_Details
+        if (Array.isArray(pressDBData.Lot_Details) && pressDBData.Lot_Details.length > 0) {
+            const lotImageMap = new Map();
+            materialLabelImages.forEach((img, idx) => {
+                const targetLotNum = img.lotNumber ? String(img.lotNumber).trim() : '';
+                if (targetLotNum && materialLabelImageURLs[idx]) {
+                    lotImageMap.set(targetLotNum, materialLabelImageURLs[idx]);
+                }
+            });
+
+            pressDBData.Lot_Details = pressDBData.Lot_Details.map(lot => {
+                const targetLotNum = lot.lotNumber ? String(lot.lotNumber).trim() : '';
+                const matchedUrl = lotImageMap.get(targetLotNum);
+                if (matchedUrl) {
+                    return { ...lot, materialImageURL: matchedUrl };
+                }
+                // Fallback: If only 1 material image exists overall, associate with all lots
+                if (materialLabelImageURLs.length === 1) {
+                    return { ...lot, materialImageURL: materialLabelImageURLs[0] };
+                }
+                return lot;
+            });
+        }
 
         console.log(`🔍 pressDBData before cleanup contains these image fields:`, {
             "初物チェック画像": pressDBData["初物チェック画像"],
