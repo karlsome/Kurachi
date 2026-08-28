@@ -39,9 +39,9 @@ const googleSheetLiveStatusURL = 'https://script.google.com/macros/s/AKfycbwbL30
 // Link for Rikeshi (up/down color info) - This was missing in the original, adding it here.
 const dbURL = 'https://script.google.com/macros/s/AKfycbx0qBw0_wF5X-hA2t1yY-d5h5M7Z_a8z_V9R5D6k/exec'; // Placeholder, replace with your actual URL if different.
 
-const serverURL = "https://kurachi.onrender.com";
+//const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
-//const serverURL = "http://192.168.1.176:3000";
+const serverURL = "http://192.168.0.39:3000";
 
 // Global variable to track if sendtoNC button has been pressed
 let sendtoNCButtonisPressed = false;
@@ -2491,7 +2491,8 @@ async function addMaterialLabelPhoto(photoDataURL, lotTarget = undefined) {
   const blob = await compressBlobToLimit(displayURL, 1024 * 1024);
   console.log(`Compressed to: ${(blob.size / 1024).toFixed(1)} KB`);
 
-  const id = `material-label-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  const cleanLot = lotNumber ? String(lotNumber).trim().replace(/[^a-zA-Z0-9_-]/g, '_') : '';
+  const id = cleanLot ? `lot-${cleanLot}` : `material-label-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
   const timestamp = new Date().toISOString();
 
   // Retaking a photo for a lot that already has one: replace it (keep the link)
@@ -7756,8 +7757,9 @@ document.getElementById('submit').addEventListener('click', async (event) => {
       materialLabelImages.push({
         base64: base64Only,
         id: photo.id,
+        lotNumber: photo.lotNumber || record?.lotNumber || null,
         timestamp: photo.timestamp,
-        description: `材料ラベル ${i + 1}/${materialLabelPhotos.length}`
+        description: photo.lotNumber ? `材料ラベル (Lot: ${photo.lotNumber})` : `材料ラベル ${i + 1}/${materialLabelPhotos.length}`
       });
       processedPhotos++;
       updateUploadProgress(5 + (processedPhotos / Math.max(1, totalPhotos)) * 65, `Processing photo ${processedPhotos}/${totalPhotos}...`);
@@ -12795,10 +12797,12 @@ if (manualSendModal) {
     const list = lotsByMachine[machine] || (lotsByMachine[machine] = []);
     const prevOpen = openRecordFor(machine);
     const feed = resolveFeed(machine);
+    const scanIsoTimestamp = new Date().toISOString();
     list.push({
       lotNumber: lotNumber, machine: machine, shots: null,
       feedPitch: feed.feedPitch, pcPerCycle: feed.pcPerCycle,
-      meters: null, pieces: null, source: source || 'scanned', open: true, ts: Date.now()
+      meters: null, pieces: null, source: source || 'scanned', open: true,
+      timestamp: scanIsoTimestamp, ts: Date.now()
     });
     save();
 
@@ -12833,9 +12837,14 @@ if (manualSendModal) {
   function buildPayload() {
     const recs = allRecords().filter(r => r.shots != null);
     const Lot_Details = recs.map(r => {
+      const matchingPhoto = (typeof materialLabelPhotos !== 'undefined' && Array.isArray(materialLabelPhotos))
+        ? materialLabelPhotos.find(p => p && p.lotNumber === r.lotNumber)
+        : null;
+
       const o = {
         lotNumber: r.lotNumber, machine: r.machine, shots: r.shots,
-        feedPitch: r.feedPitch, pcPerCycle: r.pcPerCycle, meters: r.meters
+        feedPitch: r.feedPitch, pcPerCycle: r.pcPerCycle, meters: r.meters,
+        timestamp: r.timestamp || (matchingPhoto ? matchingPhoto.timestamp : (r.ts ? new Date(r.ts).toISOString() : new Date().toISOString()))
       };
       if (r.pieces != null) o.pieces = r.pieces;
       return o;
