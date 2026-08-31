@@ -2453,7 +2453,7 @@ function clearMaterialLabelPhotos() {
   updateMaterialPhotoCount();
 }
 
-async function addMaterialLabelPhoto(photoDataURL, lotTarget = undefined) {
+async function addMaterialLabelPhoto(photoDataURL, lotTarget = undefined, options = {}) {
   // Resolve which lot this photo links to. An explicitly supplied value — including
   // null, which means "no lot" (e.g. a general gallery capture or an extra defect
   // photo) — is always respected. We only fall back to the global capture target
@@ -2468,6 +2468,8 @@ async function addMaterialLabelPhoto(photoDataURL, lotTarget = undefined) {
   } else {
     lotNumber = null;
   }
+
+  const isDefect = !!(options && options.isDefect);
 
   if (materialLabelPhotos.length >= MAX_MATERIAL_PHOTOS) {
     const _mpLang = (typeof getCurrentLanguage === 'function') ? getCurrentLanguage() : 'ja';
@@ -2492,12 +2494,15 @@ async function addMaterialLabelPhoto(photoDataURL, lotTarget = undefined) {
   console.log(`Compressed to: ${(blob.size / 1024).toFixed(1)} KB`);
 
   const cleanLot = lotNumber ? String(lotNumber).trim().replace(/[^a-zA-Z0-9_-]/g, '_') : '';
-  const id = cleanLot ? `lot-${cleanLot}` : `material-label-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  const id = cleanLot 
+    ? (isDefect ? `lot-${cleanLot}-defect-${Date.now()}` : `lot-${cleanLot}`) 
+    : `material-label-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
   const timestamp = new Date().toISOString();
 
   // Retaking a photo for a lot that already has one: replace it (keep the link)
-  if (lotNumber && typeof materialLabelPhotos !== 'undefined') {
-    const existingIdx = materialLabelPhotos.findIndex(p => p.lotNumber === lotNumber);
+  // Note: Defect photos do NOT replace regular label photos
+  if (!isDefect && lotNumber && typeof materialLabelPhotos !== 'undefined') {
+    const existingIdx = materialLabelPhotos.findIndex(p => !p.isDefect && p.lotNumber === lotNumber);
     if (existingIdx >= 0) {
       const old = materialLabelPhotos[existingIdx];
       try { URL.revokeObjectURL(old.blobUrl); } catch (e) { }
@@ -2507,11 +2512,11 @@ async function addMaterialLabelPhoto(photoDataURL, lotTarget = undefined) {
   }
 
   // Persist raw blob in IndexedDB (no base64 at rest)
-  await materialLabelDB.put({ id, blob, timestamp, lotNumber });
+  await materialLabelDB.put({ id, blob, timestamp, lotNumber, isDefect });
 
   // Object URL is used only for display in this session
   const blobUrl = URL.createObjectURL(blob);
-  materialLabelPhotos.push({ id, timestamp, blobUrl, lotNumber });
+  materialLabelPhotos.push({ id, timestamp, blobUrl, lotNumber, isDefect });
 
   console.log(`Added material label photo #${materialLabelPhotos.length}`);
 
@@ -2753,7 +2758,8 @@ async function loadMaterialLabelPhotos() {
       id: r.id,
       timestamp: r.timestamp,
       blobUrl: URL.createObjectURL(r.blob),
-      lotNumber: r.lotNumber || null
+      lotNumber: r.lotNumber || null,
+      isDefect: !!r.isDefect
     }));
     console.log(`Loaded ${materialLabelPhotos.length} material label photos from IndexedDB`);
     renderMaterialPhotoThumbnails();
@@ -7754,12 +7760,16 @@ document.getElementById('submit').addEventListener('click', async (event) => {
 
       console.log(`✅ Material label ${i + 1}/${materialLabelPhotos.length}: ${(base64Only.length / 1024).toFixed(1)} KB`);
 
+      const isDefect = !!(photo.isDefect || record?.isDefect);
       materialLabelImages.push({
         base64: base64Only,
         id: photo.id,
         lotNumber: photo.lotNumber || record?.lotNumber || null,
+        isDefect: isDefect,
         timestamp: photo.timestamp,
-        description: photo.lotNumber ? `材料ラベル (Lot: ${photo.lotNumber})` : `材料ラベル ${i + 1}/${materialLabelPhotos.length}`
+        description: isDefect
+          ? `疵引き写真 (Lot: ${photo.lotNumber || record?.lotNumber || '不明'})`
+          : (photo.lotNumber ? `材料ラベル (Lot: ${photo.lotNumber})` : `材料ラベル ${i + 1}/${materialLabelPhotos.length}`)
       });
       processedPhotos++;
       updateUploadProgress(5 + (processedPhotos / Math.max(1, totalPhotos)) * 65, `Processing photo ${processedPhotos}/${totalPhotos}...`);
@@ -13505,9 +13515,9 @@ if (manualSendModal) {
         });
 
         try {
-          // lotTarget intentionally null: this is an EXTRA photo in the group,
-          // it must NOT replace the material-label photo for the lot.
-          const ok = await addMaterialLabelPhoto(stamped, null);
+          // Pass the current lot with isDefect: true so it links to the lot
+          // without replacing the primary material-label photo for that lot.
+          const ok = await addMaterialLabelPhoto(stamped, lot, { isDefect: true });
           if (ok) {
             if (typeof showSuccessModal === 'function') showSuccessModal('疵引き写真を保存しました / Defect photo saved');
             if (typeof logTabletAction === 'function') {
