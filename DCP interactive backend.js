@@ -41,7 +41,7 @@ const dbURL = 'https://script.google.com/macros/s/AKfycbx0qBw0_wF5X-hA2t1yY-d5h5
 
 //const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
-const serverURL = "http://192.168.0.84:3000";
+const serverURL = "http://192.168.0.88:3000";
 
 // Global variable to track if sendtoNC button has been pressed
 let sendtoNCButtonisPressed = false;
@@ -16427,7 +16427,7 @@ if (manualSendModal) {
           const state = await res.json();
           syncGatekeeperState(state);
         }
-      } catch (_) {}
+      } catch (_) { }
     }
   }
 
