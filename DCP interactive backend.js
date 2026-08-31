@@ -16169,3 +16169,343 @@ if (manualSendModal) {
     }, 500);
   });
 })();
+
+// ============================================================================
+// CNC GATEKEEPER SSE CLIENT, FLOATING CANCEL BUTTON & PREEMPTIVE BREAK HANDLER
+// Add this to DCP interactive backend.js (or include as a script in DCP interactive.html)
+// ============================================================================
+(function initCNCGatekeeperClient() {
+  let cncEventSource = null;
+  let isBreakScheduledPending = false;
+  let isCycleStopPending = false;
+
+  function getCNCMiniPCIP() {
+    if (typeof groupedMachineIPs !== 'undefined' && typeof primaryMachineName !== 'undefined' && groupedMachineIPs[primaryMachineName]) {
+      return groupedMachineIPs[primaryMachineName];
+    }
+    const ipInput = document.getElementById('ipInfo');
+    if (ipInput && ipInput.value) {
+      const first = ipInput.value.split(',')[0].replace(/"/g, '').trim();
+      if (first) return first;
+    }
+    return null;
+  }
+
+  // Inject Styles for the 4th Floating Cancel Button and Full-Screen Wait Modal
+  const style = document.createElement('style');
+  style.textContent = `
+    .cnc-cycle-stop-btn {
+      transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease !important;
+    }
+    .cnc-cycle-stop-btn:active {
+      transform: scale(0.92) !important;
+    }
+    .cnc-cycle-stop-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.85);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      z-index: 100200;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      animation: cncFadeIn 0.25s ease-out;
+    }
+    .cnc-cycle-stop-overlay.open {
+      display: flex;
+    }
+    @keyframes cncFadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    .cnc-stop-modal {
+      background: linear-gradient(145deg, #1e293b, #0f172a);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 24px;
+      padding: 40px 36px;
+      max-width: 460px;
+      width: 90%;
+      box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.7);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+    }
+    .cnc-stop-icon-pulse {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      background: rgba(239, 68, 68, 0.15);
+      border: 2px solid rgba(239, 68, 68, 0.4);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2.2rem;
+      margin-bottom: 20px;
+      animation: cncPulse 1.8s ease-in-out infinite;
+    }
+    @keyframes cncPulse {
+      0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+      50% { transform: scale(1.08); box-shadow: 0 0 0 16px rgba(239, 68, 68, 0); }
+    }
+    .cnc-stop-modal h2 {
+      margin: 0 0 10px 0;
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: #f8fafc;
+      letter-spacing: -0.02em;
+    }
+    .cnc-stop-modal .cnc-stop-sub {
+      margin: 0 0 24px 0;
+      font-size: 0.95rem;
+      color: #94a3b8;
+      line-height: 1.5;
+    }
+    .cnc-stop-spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid rgba(255, 255, 255, 0.15);
+      border-top-color: #ef4444;
+      border-radius: 50%;
+      animation: cncSpin 0.9s linear infinite;
+      margin-bottom: 24px;
+    }
+    @keyframes cncSpin {
+      to { transform: rotate(360deg); }
+    }
+    .btn-cancel-cycle-stop {
+      background: rgba(255, 255, 255, 0.08);
+      color: #cbd5e1;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 12px;
+      padding: 12px 28px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .btn-cancel-cycle-stop:hover {
+      background: rgba(255, 255, 255, 0.16);
+      color: #fff;
+    }
+  `;
+  document.head.appendChild(style);
+
+  // Create Full-Screen Waiting Overlay
+  const overlay = document.createElement('div');
+  overlay.id = 'cncCycleStopOverlay';
+  overlay.className = 'cnc-cycle-stop-overlay';
+  overlay.innerHTML = `
+    <div class="cnc-stop-modal">
+      <div class="cnc-stop-icon-pulse">🛑</div>
+      <h2>サイクル完了待ち</h2>
+      <p class="cnc-stop-sub">
+        現在の加工が完了し、材料送りが終わった時点で自動停止します。<br>
+        <span style="font-size: 0.85rem; color: #64748b;">(Stopping after current cut & material feed...)</span>
+      </p>
+      <div class="cnc-stop-spinner"></div>
+      <button type="button" class="btn-cancel-cycle-stop" id="btnCancelCycleStop">
+        停止を取り消す / Resume
+      </button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  // Create 4th Floating CANCEL Button (🛑)
+  const stopBtn = document.createElement('button');
+  stopBtn.id = 'cncCycleStopBtn';
+  stopBtn.type = 'button';
+  stopBtn.className = 'video-manual-launcher pdf-page-btn cnc-cycle-stop-btn';
+  stopBtn.style.bottom = 'calc(max(12px, env(safe-area-inset-bottom)) + 180px)';
+  stopBtn.innerHTML = '<span class="video-manual-launcher__icon">🛑</span>';
+  stopBtn.setAttribute('title', 'サイクル完了後に停止 / Stop after cycle');
+  document.body.appendChild(stopBtn);
+
+  function openCycleStopOverlay() {
+    overlay.classList.add('open');
+  }
+
+  function closeCycleStopOverlay() {
+    overlay.classList.remove('open');
+    isCycleStopPending = false;
+  }
+
+  // Handle Cancel Button on Overlay (User changes mind)
+  document.getElementById('btnCancelCycleStop')?.addEventListener('click', async () => {
+    const ip = getCNCMiniPCIP();
+    if (ip) {
+      try {
+        await fetch(`http://${ip}:5000/cancel_scheduled_break`, { method: 'POST' });
+      } catch (_) {
+        try { await fetch(`http://${ip}:8766/cancel_scheduled_break`, { method: 'POST' }); } catch (_) {}
+      }
+    }
+    closeCycleStopOverlay();
+    if (typeof showToast === 'function') {
+      showToast("停止リクエストを取り消しました / Resumed normal operation");
+    }
+  });
+
+  // Handle Floating 🛑 Button Click
+  stopBtn.addEventListener('click', async () => {
+    const ip = getCNCMiniPCIP();
+    isCycleStopPending = true;
+    openCycleStopOverlay();
+
+    if (ip) {
+      try {
+        const res = await fetch(`http://${ip}:5000/schedule_break_stop`, { method: 'POST' });
+        const data = await res.json();
+        console.log("🛑 Scheduled cycle stop response:", data);
+      } catch (err) {
+        try {
+          const res = await fetch(`http://${ip}:8766/schedule_break_stop`, { method: 'POST' });
+          const data = await res.json();
+          console.log("🛑 Scheduled cycle stop response (:8766):", data);
+        } catch (e) {
+          console.warn("Mini-PC offline:", e);
+        }
+      }
+    }
+  });
+
+  // Connect to SSE
+  function connectCNCGatekeeperSSE() {
+    const ip = getCNCMiniPCIP();
+    if (!ip) {
+      setTimeout(connectCNCGatekeeperSSE, 3000);
+      return;
+    }
+    if (cncEventSource) {
+      try { cncEventSource.close(); } catch (_) {}
+    }
+
+    try {
+      console.log(`🔌 [CNC GATEKEEPER] Connecting to SSE at http://${ip}:5000/events...`);
+      cncEventSource = new EventSource(`http://${ip}:5000/events`);
+
+      // 1. Emergency cancel detected during cutting/drag -> Trigger RED screen
+      cncEventSource.addEventListener('cancel_detected', (e) => {
+        try {
+          const data = JSON.parse(e.data || '{}');
+          console.log("🚨 [CNC GATEKEEPER] Cancel detected:", data);
+          closeCycleStopOverlay();
+          const breakActive = (typeof breakPrefix !== 'undefined') && localStorage.getItem(breakPrefix + 'activeBreakStart');
+          if (!breakActive && typeof startStopCall === 'function') {
+            startStopCall();
+          }
+        } catch (err) {
+          console.error("Error parsing cancel_detected event:", err);
+        }
+      });
+
+      // 2. Preemptive break/stop drag phase (feeding material)
+      cncEventSource.addEventListener('break_drag_phase', (e) => {
+        console.log("⏳ [CNC GATEKEEPER] Current cycle finished, feeding material before stop...");
+        if (typeof showToast === 'function') {
+          showToast("⏳ サイクル完了。材料送り後に停止します...");
+        }
+      });
+
+      // 3. Preemptive break/stop completed -> Close waiting overlay!
+      cncEventSource.addEventListener('break_stop_completed', (e) => {
+        console.log("🛑 [CNC GATEKEEPER] Cycle stop executed cleanly.");
+        
+        // If triggered by the 4th Floating CANCEL button:
+        if (isCycleStopPending) {
+          closeCycleStopOverlay();
+          if (typeof showToast === 'function') {
+            showToast("✅ サイクル完了停止しました (材料送り完了) / Machine stopped cleanly");
+          }
+          return;
+        }
+
+        // If triggered by the Breaktime button:
+        isBreakScheduledPending = false;
+        resetBreakStartButtonUI();
+        const breakActive = (typeof breakPrefix !== 'undefined') && localStorage.getItem(breakPrefix + 'activeBreakStart');
+        if (!breakActive && typeof startBreak === 'function') {
+          startBreak();
+          if (typeof showToast === 'function') {
+            showToast("☕ 休憩を開始しました / Break started");
+          }
+        }
+      });
+
+      // 4. Gatekeeper unlocked
+      cncEventSource.addEventListener('unlocked', (e) => {
+        console.log("🔓 [CNC GATEKEEPER] Unlocked:", e.data);
+        closeCycleStopOverlay();
+        isBreakScheduledPending = false;
+        resetBreakStartButtonUI();
+      });
+
+      cncEventSource.onerror = () => {
+        if (cncEventSource) {
+          try { cncEventSource.close(); } catch (_) {}
+          cncEventSource = null;
+        }
+        setTimeout(connectCNCGatekeeperSSE, 5000);
+      };
+    } catch (err) {
+      console.error("Failed to establish CNC Gatekeeper SSE connection:", err);
+      setTimeout(connectCNCGatekeeperSSE, 5000);
+    }
+  }
+
+  function resetBreakStartButtonUI() {
+    const startBtn = document.getElementById('breakStartButton');
+    if (startBtn) {
+      startBtn.innerHTML = '<span data-i18n="break_start_btn">休憩を開始</span>';
+      startBtn.style.background = '';
+    }
+  }
+
+  async function handleBreakStartButtonClick(e) {
+    const ip = getCNCMiniPCIP();
+    if (ip && !isBreakScheduledPending) {
+      try {
+        const res = await fetch(`http://${ip}:5000/schedule_break_stop`, { method: 'POST' });
+        const data = await res.json();
+        if (data.scheduled) {
+          isBreakScheduledPending = true;
+          const startBtn = document.getElementById('breakStartButton');
+          if (startBtn) {
+            startBtn.innerHTML = '<span>⏳ サイクル完了後に休憩停止します...</span>';
+            startBtn.style.background = '#F59E0B';
+          }
+          if (typeof showToast === 'function') {
+            showToast("⏳ このサイクル完了後に自動停止して休憩に入ります / Stopping after cycle...");
+          }
+          if (e && e.stopImmediatePropagation) e.stopImmediatePropagation();
+          return;
+        }
+      } catch (err) {
+        console.warn("Gatekeeper offline, proceeding with local break:", err);
+      }
+    }
+  }
+
+  window.unlockCNCGatekeeper = function() {
+    const ip = getCNCMiniPCIP();
+    if (ip) {
+      fetch(`http://${ip}:5000/unlock`, { method: 'POST' })
+        .then(r => r.json())
+        .then(d => console.log("✅ CNC Gatekeeper unlocked response:", d))
+        .catch(() => {
+          fetch(`http://${ip}:8766/unlock`, { method: 'POST' }).catch(() => {});
+        });
+    }
+  };
+
+  document.addEventListener('DOMContentLoaded', () => {
+    connectCNCGatekeeperSSE();
+    const startBtn = document.getElementById('breakStartButton');
+    if (startBtn) {
+      startBtn.addEventListener('click', handleBreakStartButtonClick, true);
+    }
+  });
+})();
