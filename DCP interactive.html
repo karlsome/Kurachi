@@ -6055,6 +6055,9 @@
                 if (ov) ov.classList.remove('open');
                 localStorage.removeItem(breakPrefix + 'activeBreakStart');
                 if (typeof logTabletAction === 'function') logTabletAction('Break ended', 'Completed', {});
+                if (typeof window.unlockCNCGatekeeper === 'function') {
+                    window.unlockCNCGatekeeper();
+                }
                 if (!raw) return;
                 const start = new Date(parseInt(raw, 10));
                 const end = new Date();
@@ -6446,6 +6449,10 @@
                 
                 const resumeBtn = document.getElementById('stopCallResumeCNCButton');
                 if (resumeBtn) resumeBtn.style.display = '';
+                // Auto-finalize immediately on successful leader scan
+                setTimeout(() => {
+                    finalizeStopCall();
+                }, 400);
             }
 
             function finalizeStopCall() {
@@ -6470,6 +6477,9 @@
                 localStorage.removeItem(breakPrefix + 'activeStopCallStart');
                 closeStopCallOverlay();
                 notifyStopCall('clear', 'leader', pickedMachine || null);
+                if (typeof window.unlockCNCGatekeeper === 'function') {
+                    window.unlockCNCGatekeeper();
+                }
                 showToast(_t('toast_leader_recorded'));
             }
             function resumeStopCallIfActive() {
@@ -7245,17 +7255,22 @@
 
                     const machines = (typeof groupedMachines !== 'undefined' && groupedMachines.length > 1) ? groupedMachines : null;
 
-                    // Helper: send to a single machine IP with fallback
+                    // Helper: send to a single machine IP with instant close (no duplicate popup fallback)
                     async function fireSendToMachine(ip, seb, machineName) {
                         const url = 'http://' + ip + ':5000/request?filename=' + seb + '.pce' + (machineName ? '&mode=mass&machine=' + machineName : '');
                         try {
-                            await fetch(url, { method: 'GET', mode: 'no-cors' });
-                        } catch (_) {
-                            try {
-                                const tab = window.open(url, '_blank', 'width=100,height=100,left=-1000,top=-1000');
-                                if (tab) setTimeout(() => { try { tab.close(); } catch (__) {} }, 4000);
-                            } catch (__) {}
+                            const res = await fetch(url);
+                            const data = await res.json().catch(() => ({}));
+                            console.log('fireSendToMachine response:', data);
+                        } catch (err) {
+                            console.warn('fireSendToMachine fetch notice:', err);
+                        } finally {
+                            if (typeof closeSendingToMachineIndicator === 'function') closeSendingToMachineIndicator();
+                            if (typeof hideSendToMachineProgress === 'function') hideSendToMachineProgress();
+                            if (typeof sendToMachineCooldownEndTime !== 'undefined') sendToMachineCooldownEndTime = 0;
+                            if (typeof updateSendToMachineCooldownUI === 'function') updateSendToMachineCooldownUI();
                         }
+                        return true;
                     }
 
                     if (!machines) {

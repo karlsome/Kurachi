@@ -39,9 +39,9 @@ const googleSheetLiveStatusURL = 'https://script.google.com/macros/s/AKfycbwbL30
 // Link for Rikeshi (up/down color info) - This was missing in the original, adding it here.
 const dbURL = 'https://script.google.com/macros/s/AKfycbx0qBw0_wF5X-hA2t1yY-d5h5M7Z_a8z_V9R5D6k/exec'; // Placeholder, replace with your actual URL if different.
 
-const serverURL = "https://kurachi.onrender.com";
+//const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
-//const serverURL = "http://192.168.1.176:3000";
+const serverURL = "http://192.168.0.84:3000";
 
 // Global variable to track if sendtoNC button has been pressed
 let sendtoNCButtonisPressed = false;
@@ -8478,25 +8478,22 @@ async function sendtoNC(selectedValue) {
 
     try {
       console.log(`Sending command to mini PC: ${url}`);
-
-      const response = await fetch(url, {
-        method: 'GET',
-        mode: 'no-cors'
-      });
-
-      console.log('Command sent successfully to mini PC');
-
-    } catch (error) {
-      console.error('Failed to send command to mini PC:', error);
-
-      // Fallback: Try opening in new tab if fetch fails
-      console.log('Fetch failed, trying fallback method...');
-      const newTab = window.open(url, '_blank');
-      if (newTab) {
-        setTimeout(() => {
-          newTab.close();
-        }, 5000);
+      const response = await fetch(url);
+      const data = await response.json().catch(() => ({}));
+      console.log('Command response from mini PC:', data);
+      closeSendingToMachineIndicator();
+      hideSendToMachineProgress();
+      sendToMachineCooldownEndTime = 0;
+      updateSendToMachineCooldownUI();
+      if (typeof showToast === 'function') {
+        showToast('✅ 送信完了 / Send to machine completed');
       }
+    } catch (error) {
+      console.warn('Notice from send to mini PC:', error);
+      closeSendingToMachineIndicator();
+      hideSendToMachineProgress();
+      sendToMachineCooldownEndTime = 0;
+      updateSendToMachineCooldownUI();
     }
   }
 }
@@ -16171,13 +16168,13 @@ if (manualSendModal) {
 })();
 
 // ============================================================================
-// CNC GATEKEEPER SSE CLIENT, FLOATING CANCEL BUTTON & PREEMPTIVE BREAK HANDLER
-// Add this to DCP interactive backend.js (or include as a script in DCP interactive.html)
+// CNC GATEKEEPER SSE CLIENT, FLOATING CANCEL BUTTON, SLEEP/WAKE WATCHDOG & RECONCILER
 // ============================================================================
 (function initCNCGatekeeperClient() {
   let cncEventSource = null;
   let isBreakScheduledPending = false;
   let isCycleStopPending = false;
+  let lastHeartbeatTime = Date.now();
 
   function getCNCMiniPCIP() {
     if (typeof groupedMachineIPs !== 'undefined' && typeof primaryMachineName !== 'undefined' && groupedMachineIPs[primaryMachineName]) {
@@ -16340,7 +16337,7 @@ if (manualSendModal) {
       try {
         await fetch(`http://${ip}:5000/cancel_scheduled_break`, { method: 'POST' });
       } catch (_) {
-        try { await fetch(`http://${ip}:8766/cancel_scheduled_break`, { method: 'POST' }); } catch (_) {}
+        try { await fetch(`http://${ip}:8766/cancel_scheduled_break`, { method: 'POST' }); } catch (_) { }
       }
     }
     closeCycleStopOverlay();
@@ -16372,7 +16369,59 @@ if (manualSendModal) {
     }
   });
 
-  // Connect to SSE
+  // ==========================================================================
+  // STATE RECONCILER (Guarantees RED Screen Persists on Reload, Wake, or Stale SSE)
+  // ==========================================================================
+  function syncGatekeeperState(state) {
+    if (!state) return;
+    lastHeartbeatTime = Date.now();
+
+    // 1. Emergency cancel detected / Machine in hold -> Enforce RED Screen
+    if (state.holding && state.hold_reason === 'MANUAL_CANCEL') {
+      const breakActive = (typeof breakPrefix !== 'undefined') && localStorage.getItem(breakPrefix + 'activeBreakStart');
+      const stopCallActive = (typeof breakPrefix !== 'undefined') && localStorage.getItem(breakPrefix + 'activeStopCallStart');
+      if (!breakActive && !stopCallActive && typeof startStopCall === 'function') {
+        console.warn("🚨 [CNC GATEKEEPER] Machine is locked in MANUAL_CANCEL -> Asserting RED Leader Screen!");
+        startStopCall();
+      }
+    }
+
+    // 2. Preemptive break scheduled status
+    if (state.scheduled_break_stop) {
+      const startBtn = document.getElementById('breakStartButton');
+      if (startBtn && !isBreakScheduledPending) {
+        isBreakScheduledPending = true;
+        startBtn.innerHTML = '<span>⏳ サイクル完了後に休憩停止します...</span>';
+        startBtn.style.background = '#F59E0B';
+      }
+    }
+  }
+
+  // REST State Fetcher (Active Polling & On-Wake Sync)
+  async function pollGatekeeperState() {
+    const ip = getCNCMiniPCIP();
+    if (!ip) return;
+    try {
+      const res = await fetch(`http://${ip}:5000/state`, { cache: 'no-store' });
+      if (res.ok) {
+        const state = await res.json();
+        syncGatekeeperState(state);
+        return;
+      }
+    } catch (_) {
+      try {
+        const res = await fetch(`http://${ip}:8766/state`, { cache: 'no-store' });
+        if (res.ok) {
+          const state = await res.json();
+          syncGatekeeperState(state);
+        }
+      } catch (_) {}
+    }
+  }
+
+  // ==========================================================================
+  // SSE CONNECTION & EVENT HANDLERS
+  // ==========================================================================
   function connectCNCGatekeeperSSE() {
     const ip = getCNCMiniPCIP();
     if (!ip) {
@@ -16380,12 +16429,25 @@ if (manualSendModal) {
       return;
     }
     if (cncEventSource) {
-      try { cncEventSource.close(); } catch (_) {}
+      try { cncEventSource.close(); } catch (_) { }
     }
+
+    // Immediately query state upon initiating connection
+    pollGatekeeperState();
 
     try {
       console.log(`🔌 [CNC GATEKEEPER] Connecting to SSE at http://${ip}:5000/events...`);
       cncEventSource = new EventSource(`http://${ip}:5000/events`);
+
+      // Initial / Periodic status broadcast
+      cncEventSource.addEventListener('status', (e) => {
+        try {
+          const data = JSON.parse(e.data || '{}');
+          syncGatekeeperState(data);
+        } catch (err) {
+          console.error("Error parsing status event:", err);
+        }
+      });
 
       // 0. Unauthorized resume attempt blocked while gatekeeper is locked
       cncEventSource.addEventListener('restart_blocked', (e) => {
@@ -16433,7 +16495,7 @@ if (manualSendModal) {
       // 3. Preemptive break/stop completed -> Close waiting overlay!
       cncEventSource.addEventListener('break_stop_completed', (e) => {
         console.log("🛑 [CNC GATEKEEPER] Cycle stop executed cleanly.");
-        
+
         // If triggered by the 4th Floating CANCEL button:
         if (isCycleStopPending) {
           closeCycleStopOverlay();
@@ -16461,14 +16523,20 @@ if (manualSendModal) {
         closeCycleStopOverlay();
         isBreakScheduledPending = false;
         resetBreakStartButtonUI();
+        const raw = (typeof breakPrefix !== 'undefined') && localStorage.getItem(breakPrefix + 'activeStopCallStart');
+        if (raw && typeof finalizeStopCall === 'function') {
+          finalizeStopCall();
+        } else if (typeof closeStopCallOverlay === 'function') {
+          closeStopCallOverlay();
+        }
       });
 
       cncEventSource.onerror = () => {
         if (cncEventSource) {
-          try { cncEventSource.close(); } catch (_) {}
+          try { cncEventSource.close(); } catch (_) { }
           cncEventSource = null;
         }
-        setTimeout(connectCNCGatekeeperSSE, 5000);
+        setTimeout(connectCNCGatekeeperSSE, 4000);
       };
     } catch (err) {
       console.error("Failed to establish CNC Gatekeeper SSE connection:", err);
@@ -16509,17 +16577,37 @@ if (manualSendModal) {
     }
   }
 
-  window.unlockCNCGatekeeper = function() {
+  window.unlockCNCGatekeeper = function () {
     const ip = getCNCMiniPCIP();
     if (ip) {
       fetch(`http://${ip}:5000/unlock`, { method: 'POST' })
         .then(r => r.json())
         .then(d => console.log("✅ CNC Gatekeeper unlocked response:", d))
         .catch(() => {
-          fetch(`http://${ip}:8766/unlock`, { method: 'POST' }).catch(() => {});
+          fetch(`http://${ip}:8766/unlock`, { method: 'POST' }).catch(() => { });
         });
     }
   };
+
+  // ==========================================================================
+  // FAIL-SAFE LISTENERS: SLEEP / WAKE / TAB SWITCH & WATCHDOG
+  // ==========================================================================
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      console.log("📱 [CNC GATEKEEPER] Tablet woke up / became visible. Re-checking state...");
+      pollGatekeeperState();
+      if (!cncEventSource || cncEventSource.readyState === EventSource.CLOSED) {
+        connectCNCGatekeeperSSE();
+      }
+    }
+  });
+
+  window.addEventListener('focus', () => {
+    pollGatekeeperState();
+  });
+
+  // Watchdog: Polls /state every 5 seconds to ensure tablet stays 100% in sync
+  setInterval(pollGatekeeperState, 5000);
 
   document.addEventListener('DOMContentLoaded', () => {
     connectCNCGatekeeperSSE();
