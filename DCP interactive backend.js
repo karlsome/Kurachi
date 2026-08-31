@@ -16168,7 +16168,7 @@ if (manualSendModal) {
 })();
 
 // ============================================================================
-// CNC GATEKEEPER SSE CLIENT, FLOATING CANCEL BUTTON, SLEEP/WAKE WATCHDOG & RECONCILER
+// CNC GATEKEEPER SSE CLIENT: DEDICATED PREEMPTIVE BREAK & DEDICATED CYCLE STOP
 // ============================================================================
 (function initCNCGatekeeperClient() {
   let cncEventSource = null;
@@ -16188,7 +16188,7 @@ if (manualSendModal) {
     return null;
   }
 
-  // Inject Styles for the 4th Floating Cancel Button and Full-Screen Wait Modal
+  // Inject Styles for Floating Cancel Button and Modal
   const style = document.createElement('style');
   style.textContent = `
     .cnc-cycle-stop-btn {
@@ -16291,7 +16291,7 @@ if (manualSendModal) {
   `;
   document.head.appendChild(style);
 
-  // Create Full-Screen Waiting Overlay
+  // Create Full-Screen Waiting Overlay for 🛑 Floating Button
   const overlay = document.createElement('div');
   overlay.id = 'cncCycleStopOverlay';
   overlay.className = 'cnc-cycle-stop-overlay';
@@ -16330,14 +16330,14 @@ if (manualSendModal) {
     isCycleStopPending = false;
   }
 
-  // Handle Cancel Button on Overlay (User changes mind)
+  // Handle Cancel Button on Overlay (User changes mind on 🛑)
   document.getElementById('btnCancelCycleStop')?.addEventListener('click', async () => {
     const ip = getCNCMiniPCIP();
     if (ip) {
       try {
-        await fetch(`http://${ip}:5000/cancel_scheduled_break`, { method: 'POST' });
+        await fetch(`http://${ip}:5000/cancel_scheduled_cycle_stop`, { method: 'POST' });
       } catch (_) {
-        try { await fetch(`http://${ip}:8766/cancel_scheduled_break`, { method: 'POST' }); } catch (_) { }
+        try { await fetch(`http://${ip}:8766/cancel_scheduled_cycle_stop`, { method: 'POST' }); } catch (_) { }
       }
     }
     closeCycleStopOverlay();
@@ -16346,7 +16346,7 @@ if (manualSendModal) {
     }
   });
 
-  // Handle Floating 🛑 Button Click
+  // Handle Floating 🛑 Button Click -> Dedicated /schedule_cycle_stop
   stopBtn.addEventListener('click', async () => {
     const ip = getCNCMiniPCIP();
     isCycleStopPending = true;
@@ -16354,12 +16354,12 @@ if (manualSendModal) {
 
     if (ip) {
       try {
-        const res = await fetch(`http://${ip}:5000/schedule_break_stop`, { method: 'POST' });
+        const res = await fetch(`http://${ip}:5000/schedule_cycle_stop`, { method: 'POST' });
         const data = await res.json();
         console.log("🛑 Scheduled cycle stop response:", data);
       } catch (err) {
         try {
-          const res = await fetch(`http://${ip}:8766/schedule_break_stop`, { method: 'POST' });
+          const res = await fetch(`http://${ip}:8766/schedule_cycle_stop`, { method: 'POST' });
           const data = await res.json();
           console.log("🛑 Scheduled cycle stop response (:8766):", data);
         } catch (e) {
@@ -16370,7 +16370,7 @@ if (manualSendModal) {
   });
 
   // ==========================================================================
-  // STATE RECONCILER (Guarantees RED Screen Persists on Reload, Wake, or Stale SSE)
+  // STATE RECONCILER (Guarantees Sync on Reload, Wake, or Stale SSE)
   // ==========================================================================
   function syncGatekeeperState(state) {
     if (!state) return;
@@ -16386,7 +16386,7 @@ if (manualSendModal) {
       }
     }
 
-    // 2. Preemptive break scheduled status
+    // 2. Preemptive break scheduled status for Breaktime Button
     if (state.scheduled_break_stop) {
       const startBtn = document.getElementById('breakStartButton');
       if (startBtn && !isBreakScheduledPending) {
@@ -16394,10 +16394,22 @@ if (manualSendModal) {
         startBtn.innerHTML = '<span>⏳ サイクル完了後に休憩停止します...</span>';
         startBtn.style.background = '#F59E0B';
       }
+    } else if (!isBreakScheduledPending) {
+      resetBreakStartButtonUI();
+    }
+
+    // 3. Preemptive cycle stop scheduled status for 🛑 Button
+    if (state.scheduled_cycle_stop) {
+      if (!isCycleStopPending) {
+        isCycleStopPending = true;
+        openCycleStopOverlay();
+      }
+    } else if (isCycleStopPending && !state.scheduled_cycle_stop) {
+      closeCycleStopOverlay();
     }
   }
 
-  // REST State Fetcher (Active Polling & On-Wake Sync)
+  // REST State Fetcher
   async function pollGatekeeperState() {
     const ip = getCNCMiniPCIP();
     if (!ip) return;
@@ -16432,14 +16444,12 @@ if (manualSendModal) {
       try { cncEventSource.close(); } catch (_) { }
     }
 
-    // Immediately query state upon initiating connection
     pollGatekeeperState();
 
     try {
       console.log(`🔌 [CNC GATEKEEPER] Connecting to SSE at http://${ip}:5000/events...`);
       cncEventSource = new EventSource(`http://${ip}:5000/events`);
 
-      // Initial / Periodic status broadcast
       cncEventSource.addEventListener('status', (e) => {
         try {
           const data = JSON.parse(e.data || '{}');
@@ -16449,20 +16459,26 @@ if (manualSendModal) {
         }
       });
 
-      // 0. Unauthorized resume attempt blocked while gatekeeper is locked
+      // 0. Restart blocked while locked (Break or Emergency Cancel)
       cncEventSource.addEventListener('restart_blocked', (e) => {
         try {
           const data = JSON.parse(e.data || '{}');
-          console.warn('⛔ [CNC GATEKEEPER] Unauthorized restart attempt blocked:', data);
-          if (typeof logTabletAction === 'function') {
-            logTabletAction('CNC Resume Attempt Blocked (Unauthorized restart)', 'Blocked', {
-              attemptNumber: data.repause_count,
-              warning: 'Operator attempted to restart machine while gatekeeper was locked',
-              holdReason: data.hold_reason || 'MANUAL_CANCEL'
-            });
-          }
-          if (typeof showToast === 'function') {
-            showToast(`⛔ 再開不可 / Restart blocked (Attempt #${data.repause_count}) - Leader required`);
+          console.warn('⛔ [CNC GATEKEEPER] Restart blocked:', data);
+          if (data.hold_reason === 'BREAK') {
+            if (typeof showToast === 'function') {
+              showToast("☕ 休憩中です。タブレットで「休憩を終了」を押してください / On Break - Finish break on tablet to resume");
+            }
+          } else {
+            if (typeof logTabletAction === 'function') {
+              logTabletAction('CNC Resume Attempt Blocked (Unauthorized restart)', 'Blocked', {
+                attemptNumber: data.repause_count,
+                warning: 'Operator attempted to restart machine while gatekeeper was locked',
+                holdReason: data.hold_reason || 'MANUAL_CANCEL'
+              });
+            }
+            if (typeof showToast === 'function') {
+              showToast(`⛔ 再開不可 / Restart blocked (Attempt #${data.repause_count}) - Leader required`);
+            }
           }
         } catch (err) {
           console.error('Error logging restart_blocked:', err);
@@ -16484,40 +16500,46 @@ if (manualSendModal) {
         }
       });
 
-      // 2. Preemptive break/stop drag phase (feeding material)
+      // 2. Preemptive Drag Phase for Break
       cncEventSource.addEventListener('break_drag_phase', (e) => {
+        console.log("⏳ [CNC GATEKEEPER] Current cycle finished, feeding material before break...");
+        if (typeof showToast === 'function') {
+          showToast("⏳ サイクル完了。材料送り後に休憩に入ります...");
+        }
+      });
+
+      // 3. Preemptive Drag Phase for Cycle Stop (🛑)
+      cncEventSource.addEventListener('cycle_stop_drag_phase', (e) => {
         console.log("⏳ [CNC GATEKEEPER] Current cycle finished, feeding material before stop...");
         if (typeof showToast === 'function') {
           showToast("⏳ サイクル完了。材料送り後に停止します...");
         }
       });
 
-      // 3. Preemptive break/stop completed -> Close waiting overlay!
+      // 4. Preemptive Break Stop Completed -> Start Break Screen!
       cncEventSource.addEventListener('break_stop_completed', (e) => {
-        console.log("🛑 [CNC GATEKEEPER] Cycle stop executed cleanly.");
-
-        // If triggered by the 4th Floating CANCEL button:
-        if (isCycleStopPending) {
-          closeCycleStopOverlay();
-          if (typeof showToast === 'function') {
-            showToast("✅ サイクル完了停止しました (材料送り完了) / Machine stopped cleanly");
-          }
-          return;
-        }
-
-        // If triggered by the Breaktime button:
+        console.log("☕ [CNC GATEKEEPER] Break stop executed cleanly.");
         isBreakScheduledPending = false;
         resetBreakStartButtonUI();
         const breakActive = (typeof breakPrefix !== 'undefined') && localStorage.getItem(breakPrefix + 'activeBreakStart');
         if (!breakActive && typeof startBreak === 'function') {
           startBreak();
           if (typeof showToast === 'function') {
-            showToast("☕ 休憩を開始しました / Break started");
+            showToast("☕ 休憩を開始しました (機械停止中) / Break started");
           }
         }
       });
 
-      // 4. Gatekeeper unlocked
+      // 5. Preemptive Cycle Stop Completed -> Close Modal!
+      cncEventSource.addEventListener('cycle_stop_completed', (e) => {
+        console.log("🛑 [CNC GATEKEEPER] Cycle stop executed cleanly.");
+        closeCycleStopOverlay();
+        if (typeof showToast === 'function') {
+          showToast("✅ サイクル完了停止しました (材料送り完了) / Machine stopped cleanly");
+        }
+      });
+
+      // 6. Gatekeeper Unlocked
       cncEventSource.addEventListener('unlocked', (e) => {
         console.log("🔓 [CNC GATEKEEPER] Unlocked:", e.data);
         closeCycleStopOverlay();
@@ -16552,6 +16574,7 @@ if (manualSendModal) {
     }
   }
 
+  // Handle Main Break Button Click -> Dedicated /schedule_break_stop
   async function handleBreakStartButtonClick(e) {
     const ip = getCNCMiniPCIP();
     if (ip && !isBreakScheduledPending) {
@@ -16589,9 +16612,7 @@ if (manualSendModal) {
     }
   };
 
-  // ==========================================================================
-  // FAIL-SAFE LISTENERS: SLEEP / WAKE / TAB SWITCH & WATCHDOG
-  // ==========================================================================
+  // Watchdog & Wake Listeners
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
       console.log("📱 [CNC GATEKEEPER] Tablet woke up / became visible. Re-checking state...");
@@ -16606,7 +16627,6 @@ if (manualSendModal) {
     pollGatekeeperState();
   });
 
-  // Watchdog: Polls /state every 5 seconds to ensure tablet stays 100% in sync
   setInterval(pollGatekeeperState, 5000);
 
   document.addEventListener('DOMContentLoaded', () => {
