@@ -16387,6 +16387,26 @@ if (manualSendModal) {
       console.log(`🔌 [CNC GATEKEEPER] Connecting to SSE at http://${ip}:5000/events...`);
       cncEventSource = new EventSource(`http://${ip}:5000/events`);
 
+      // 0. Unauthorized resume attempt blocked while gatekeeper is locked
+      cncEventSource.addEventListener('restart_blocked', (e) => {
+        try {
+          const data = JSON.parse(e.data || '{}');
+          console.warn('⛔ [CNC GATEKEEPER] Unauthorized restart attempt blocked:', data);
+          if (typeof logTabletAction === 'function') {
+            logTabletAction('CNC Resume Attempt Blocked (Unauthorized restart)', 'Blocked', {
+              attemptNumber: data.repause_count,
+              warning: 'Operator attempted to restart machine while gatekeeper was locked',
+              holdReason: data.hold_reason || 'MANUAL_CANCEL'
+            });
+          }
+          if (typeof showToast === 'function') {
+            showToast(`⛔ 再開不可 / Restart blocked (Attempt #${data.repause_count}) - Leader required`);
+          }
+        } catch (err) {
+          console.error('Error logging restart_blocked:', err);
+        }
+      });
+
       // 1. Emergency cancel detected during cutting/drag -> Trigger RED screen
       cncEventSource.addEventListener('cancel_detected', (e) => {
         try {

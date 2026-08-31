@@ -6341,6 +6341,9 @@
                 localStorage.setItem(breakPrefix + 'activeStopCallStart', String(startEpoch));
                 openStopCallOverlay(startEpoch);
                 notifyStopCall('activate', 'leader', pickedMachine || null);
+                if (typeof logTabletAction === 'function') {
+                    logTabletAction('Stop call activated (Leader called)', 'in-progress', { machine: pickedMachine || 'primary' });
+                }
                 // Stop only the picked machine (or all if not grouped)
                 const pickedIP = pickedMachine ? (groupedMachineIPs[pickedMachine] || null) : null;
                 sendCNCCallStop(1, pickedIP);
@@ -6354,6 +6357,9 @@
                 localStorage.removeItem(breakPrefix + 'activeStopCallStart');
                 closeStopCallOverlay();
                 notifyStopCall('clear', 'leader', pickedMachine || null);
+                if (typeof logTabletAction === 'function') {
+                    logTabletAction('Stop call canceled within grace period', 'Reset', { machine: pickedMachine || 'primary' });
+                }
                 showToast(_t('toast_call_canceled'));
                 sendCNCCallStop(0, pickedIP);
                 stopCallPickedMachine = null;
@@ -6455,6 +6461,9 @@
                 data.totalWaitSeconds = data.records.reduce((s, r) => s + (r.waitSeconds || 0), 0);
                 data.totalWaitMinutes = Math.round(data.totalWaitSeconds / 60);
                 saveStopCallData(data);
+                if (typeof logTabletAction === 'function') {
+                    logTabletAction('Stop call unlocked by Leader', 'Completed', { ...pendingStopCallRecord });
+                }
                 
                 pendingStopCallRecord = null;
                 stopCallPickedMachine = null;
