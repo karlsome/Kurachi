@@ -16384,6 +16384,16 @@ if (manualSendModal) {
         console.warn("🚨 [CNC GATEKEEPER] Machine is locked in MANUAL_CANCEL -> Asserting Dedicated Cancel Screen!");
         openCncCancelOverlay();
       }
+    } else {
+      // FAILSAFE: If Mini-PC is UNLOCKED or restarted (e.g. 'U' key pressed in terminal or service restarted)
+      const cncCancelActive = (typeof breakPrefix !== 'undefined') && localStorage.getItem(breakPrefix + 'activeCncCancelStart');
+      const cancelOverlay = document.getElementById('cncCancelOverlay');
+      if (cncCancelActive || (cancelOverlay && cancelOverlay.classList.contains('open'))) {
+        console.log("🔓 [CNC GATEKEEPER] Source of truth (Mini-PC) is unlocked -> Auto-dismissing Cancel Screen!");
+        if (typeof closeCncCancelOverlay === 'function') {
+          closeCncCancelOverlay();
+        }
+      }
     }
 
     // 2. Preemptive break scheduled status for Breaktime Button
