@@ -42,6 +42,7 @@ const dbURL = 'https://script.google.com/macros/s/AKfycbx0qBw0_wF5X-hA2t1yY-d5h5
 //const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
 const serverURL = "http://192.168.0.84:3000";
+window.serverURL = serverURL;
 
 // Global variable to track if sendtoNC button has been pressed
 let sendtoNCButtonisPressed = false;
@@ -16413,15 +16414,21 @@ if (manualSendModal) {
 
     // 1. Emergency cancel detected / Machine in hold -> Enforce Dedicated CNC Cancel Screen
     if (state.holding && state.hold_reason === 'MANUAL_CANCEL') {
-      const breakActive = (typeof breakPrefix !== 'undefined') && localStorage.getItem(breakPrefix + 'activeBreakStart');
-      const cncCancelActive = (typeof breakPrefix !== 'undefined') && localStorage.getItem(breakPrefix + 'activeCncCancelStart');
-      if (!breakActive && !cncCancelActive && typeof openCncCancelOverlay === 'function') {
+      const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+      const cancelOverlay = document.getElementById('cncCancelOverlay');
+      const isAlreadyOpen = cancelOverlay && cancelOverlay.classList.contains('open');
+      const breakActive = localStorage.getItem(pfx + 'activeBreakStart');
+      const cncCancelActive = localStorage.getItem(pfx + 'activeCncCancelStart');
+      
+      if (!breakActive && !isAlreadyOpen && typeof openCncCancelOverlay === 'function') {
         console.warn("🚨 [CNC GATEKEEPER] Machine is locked in MANUAL_CANCEL -> Asserting Dedicated Cancel Screen!");
-        openCncCancelOverlay();
+        const startEpoch = cncCancelActive ? parseInt(cncCancelActive, 10) : Date.now();
+        openCncCancelOverlay(startEpoch);
       }
     } else {
       // FAILSAFE: If Mini-PC is UNLOCKED or restarted (e.g. 'U' key pressed in terminal or service restarted)
-      const cncCancelActive = (typeof breakPrefix !== 'undefined') && localStorage.getItem(breakPrefix + 'activeCncCancelStart');
+      const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+      const cncCancelActive = localStorage.getItem(pfx + 'activeCncCancelStart');
       const cancelOverlay = document.getElementById('cncCancelOverlay');
       if (cncCancelActive || (cancelOverlay && cancelOverlay.classList.contains('open'))) {
         console.log("🔓 [CNC GATEKEEPER] Source of truth (Mini-PC) is unlocked -> Auto-dismissing Cancel Screen!");

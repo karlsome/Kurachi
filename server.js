@@ -13826,7 +13826,7 @@ app.post("/resetUserPassword", async (req, res) => {
 
 
 // Verify leader by username and role for QR authentication
-app.post("/verifyLeader", async (req, res) => {
+const verifyLeaderHandler = async (req, res) => {
   const { username } = req.body;
 
   if (!username) {
@@ -13869,7 +13869,9 @@ app.post("/verifyLeader", async (req, res) => {
     console.error("Error verifying leader:", err);
     res.status(500).json({ error: "Internal server error during leader verification." });
   }
-});
+};
+app.post("/verifyLeader", verifyLeaderHandler);
+app.post("/verify-leader", verifyLeaderHandler);
 
 
 // Create new worker

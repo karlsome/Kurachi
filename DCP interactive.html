@@ -5900,6 +5900,7 @@
             // uniquePrefix may be in the temporal dead zone if backend.js halted early
             // (missing filter/machine guard), so guard the access with try/catch.
             try { if (uniquePrefix) breakPrefix = uniquePrefix; } catch (e) { }
+            window.breakPrefix = breakPrefix;
 
             // ---------- Defect tap counters (18/19/20) ----------
             function syncDefectDisplays() {
@@ -6571,12 +6572,27 @@
             let cncCancelScanner = null;
 
             function openCncCancelOverlay(startEpoch) {
-                if (!startEpoch) startEpoch = Date.now();
-                localStorage.setItem(breakPrefix + 'activeCncCancelStart', String(startEpoch));
                 const ov = document.getElementById('cncCancelOverlay');
+                const alreadyOpen = ov && ov.classList.contains('open');
+
+                const stored = localStorage.getItem(breakPrefix + 'activeCncCancelStart');
+                if (!startEpoch && stored) {
+                    startEpoch = parseInt(stored, 10);
+                }
+                if (!startEpoch || isNaN(startEpoch)) {
+                    startEpoch = Date.now();
+                }
+                localStorage.setItem(breakPrefix + 'activeCncCancelStart', String(startEpoch));
+
                 if (ov) ov.classList.add('open');
                 const menuWrap = document.getElementById('callMenuWrapper');
                 if (menuWrap) menuWrap.style.display = 'none';
+
+                // If already open and ticking, do not reset UI elements or timer
+                if (alreadyOpen && cncCancelInterval) {
+                    return;
+                }
+
                 const unlockBtn = document.getElementById('cncCancelUnlockButton');
                 if (unlockBtn) unlockBtn.style.display = '';
                 const qrWrap = document.getElementById('cncCancelQrWrap');
@@ -6637,7 +6653,8 @@
                             if (sc.__busy) return;
                             sc.__busy = true;
                             try {
-                                const verifyUrl = (typeof serverURL !== 'undefined' ? serverURL : '') + '/verify-leader';
+                                const srv = (typeof serverURL !== 'undefined' && serverURL) ? serverURL : (window.serverURL || (window.location.protocol + '//' + window.location.hostname + ':3000'));
+                                const verifyUrl = srv + '/verifyLeader';
                                 const resp = await fetch(verifyUrl, {
                                     method: 'POST', headers: { 'Content-Type': 'application/json' },
                                     body: JSON.stringify({ username: decodedText })
