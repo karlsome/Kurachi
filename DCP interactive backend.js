@@ -16376,13 +16376,13 @@ if (manualSendModal) {
     if (!state) return;
     lastHeartbeatTime = Date.now();
 
-    // 1. Emergency cancel detected / Machine in hold -> Enforce RED Screen
+    // 1. Emergency cancel detected / Machine in hold -> Enforce Dedicated CNC Cancel Screen
     if (state.holding && state.hold_reason === 'MANUAL_CANCEL') {
       const breakActive = (typeof breakPrefix !== 'undefined') && localStorage.getItem(breakPrefix + 'activeBreakStart');
-      const stopCallActive = (typeof breakPrefix !== 'undefined') && localStorage.getItem(breakPrefix + 'activeStopCallStart');
-      if (!breakActive && !stopCallActive && typeof startStopCall === 'function') {
-        console.warn("🚨 [CNC GATEKEEPER] Machine is locked in MANUAL_CANCEL -> Asserting RED Leader Screen!");
-        startStopCall();
+      const cncCancelActive = (typeof breakPrefix !== 'undefined') && localStorage.getItem(breakPrefix + 'activeCncCancelStart');
+      if (!breakActive && !cncCancelActive && typeof openCncCancelOverlay === 'function') {
+        console.warn("🚨 [CNC GATEKEEPER] Machine is locked in MANUAL_CANCEL -> Asserting Dedicated Cancel Screen!");
+        openCncCancelOverlay();
       }
     }
 
@@ -16485,15 +16485,21 @@ if (manualSendModal) {
         }
       });
 
-      // 1. Emergency cancel detected during cutting/drag -> Trigger RED screen
+      // 1. Emergency cancel detected during cutting/drag -> Trigger Dedicated CNC Cancel screen
       cncEventSource.addEventListener('cancel_detected', (e) => {
         try {
           const data = JSON.parse(e.data || '{}');
           console.log("🚨 [CNC GATEKEEPER] Cancel detected:", data);
           closeCycleStopOverlay();
           const breakActive = (typeof breakPrefix !== 'undefined') && localStorage.getItem(breakPrefix + 'activeBreakStart');
-          if (!breakActive && typeof startStopCall === 'function') {
-            startStopCall();
+          if (!breakActive && typeof openCncCancelOverlay === 'function') {
+            openCncCancelOverlay();
+            if (typeof logTabletAction === 'function') {
+              logTabletAction('CNC Cancel Button Detected (Mid-cut abort)', 'Alert', {
+                warning: 'Emergency physical cancel button pressed during machining',
+                holdReason: 'MANUAL_CANCEL'
+              });
+            }
           }
         } catch (err) {
           console.error("Error parsing cancel_detected event:", err);
@@ -16545,6 +16551,9 @@ if (manualSendModal) {
         closeCycleStopOverlay();
         isBreakScheduledPending = false;
         resetBreakStartButtonUI();
+        if (typeof closeCncCancelOverlay === 'function') {
+          closeCncCancelOverlay();
+        }
         const raw = (typeof breakPrefix !== 'undefined') && localStorage.getItem(breakPrefix + 'activeStopCallStart');
         if (raw && typeof finalizeStopCall === 'function') {
           finalizeStopCall();

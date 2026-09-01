@@ -5560,6 +5560,31 @@
             background: linear-gradient(160deg, #5A1014, #380A0C);
         }
 
+        .cnc-cancel-detected-overlay {
+            background: linear-gradient(160deg, #4c0519, #1c0309) !important;
+        }
+
+        .cnc-cancel-detected-overlay .cnc-cancel-pulse {
+            background: rgba(244, 63, 94, 0.22);
+            border: 2px solid #F43F5E;
+            animation: cncCancelPulse 1.2s ease-in-out infinite;
+        }
+
+        .cnc-cancel-detected-overlay .cnc-cancel-pulse svg {
+            stroke: #FDA4AF;
+            width: 40px;
+            height: 40px;
+        }
+
+        @keyframes cncCancelPulse {
+            0%, 100% {
+                box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.65);
+            }
+            50% {
+                box-shadow: 0 0 0 24px rgba(244, 63, 94, 0);
+            }
+        }
+
         .stopcall-overlay .stopcall-pulse {
             background: rgba(225, 29, 42, 0.18);
             border-color: #E11D2A;
@@ -5759,6 +5784,38 @@
             <div id="stopCallQrReader"></div>
             <p id="stopCallStatus"
                 style="text-align:center; margin-top:12px; font-size:0.92rem; font-weight:700; color:#E8A9AD; min-height:20px;">
+            </p>
+        </div>
+    </div>
+
+    <!-- CNC Hardware Cancel Detected Overlay (Locked until Leader QR Scan) -->
+    <div id="cncCancelOverlay" class="break-overlay stopcall-overlay cnc-cancel-detected-overlay">
+        <div class="freya-top-wordmark">
+            <div class="wm-line"></div>
+            <span class="wm-text">Freya System v4</span>
+            <div class="wm-line right"></div>
+        </div>
+        <div class="break-pulse cnc-cancel-pulse">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2"></polygon>
+                <line x1="12" y1="8" x2="12" y2="12"></line>
+                <line x1="12" y1="16" x2="12.01" y2="16"></line>
+            </svg>
+        </div>
+        <h2>機械の取消ボタンが検出されました</h2>
+        <p class="break-sub" style="color: #FDA4AF; font-size: 1.02rem; margin-top: 4px;">
+            Cancel Button Detected — Leader Required
+        </p>
+        <div style="background: rgba(0,0,0,0.35); border: 1px solid rgba(244,63,94,0.35); border-radius: 14px; padding: 12px 20px; margin: 16px 0; font-size: 0.9rem; color: #F1F5F9; max-width: 440px; text-align: center; line-height: 1.45;">
+            ⚠️ 途中加工は中断されました。リーダー確認後に最初から再加工してください。<br>
+            <span style="font-size: 0.8rem; color: #94A3B8;">(Job cancelled mid-cut. Restart from beginning after unlock.)</span>
+        </div>
+        <div class="break-timer" id="cncCancelTimerDisplay">00:00</div>
+        <button type="button" class="btn-finish-break" id="cncCancelUnlockButton" style="background: #fff; color: #4c0519; font-weight: 700;">リーダーQRで解除 / Unlock</button>
+        <div class="stopcall-qr-wrap" id="cncCancelQrWrap">
+            <div id="cncCancelQrReader"></div>
+            <p id="cncCancelStatus"
+                style="text-align:center; margin-top:12px; font-size:0.92rem; font-weight:700; color:#FDA4AF; min-height:20px;">
             </p>
         </div>
     </div>
@@ -6502,7 +6559,149 @@
                     notifyStopCall('activate', 'box');
                     if (menuWrap) menuWrap.classList.add('open');
                 }
+                const rawCancel = localStorage.getItem(breakPrefix + 'activeCncCancelStart');
+                if (rawCancel) {
+                    openCncCancelOverlay(parseInt(rawCancel, 10));
+                }
             }
+            // =========================================================================
+            // DEDICATED CNC CANCEL OVERLAY LOGIC (Hardware Cancel Detected)
+            // =========================================================================
+            let cncCancelInterval = null;
+            let cncCancelScanner = null;
+
+            function openCncCancelOverlay(startEpoch) {
+                if (!startEpoch) startEpoch = Date.now();
+                localStorage.setItem(breakPrefix + 'activeCncCancelStart', String(startEpoch));
+                const ov = document.getElementById('cncCancelOverlay');
+                if (ov) ov.classList.add('open');
+                const menuWrap = document.getElementById('callMenuWrapper');
+                if (menuWrap) menuWrap.style.display = 'none';
+                const unlockBtn = document.getElementById('cncCancelUnlockButton');
+                if (unlockBtn) unlockBtn.style.display = '';
+                const qrWrap = document.getElementById('cncCancelQrWrap');
+                if (qrWrap) qrWrap.classList.remove('show');
+                
+                tickCncCancel(startEpoch);
+                clearInterval(cncCancelInterval);
+                cncCancelInterval = setInterval(() => tickCncCancel(startEpoch), 1000);
+            }
+
+            function closeCncCancelOverlay() {
+                clearInterval(cncCancelInterval);
+                stopCncCancelScanner();
+                const ov = document.getElementById('cncCancelOverlay');
+                if (ov) ov.classList.remove('open');
+                const menuWrap = document.getElementById('callMenuWrapper');
+                if (menuWrap) {
+                    menuWrap.style.display = '';
+                    menuWrap.classList.remove('open');
+                }
+                localStorage.removeItem(breakPrefix + 'activeCncCancelStart');
+            }
+
+            function tickCncCancel(startEpoch) {
+                const el = document.getElementById('cncCancelTimerDisplay');
+                if (!el) return;
+                const elapsedSeconds = Math.max(0, Math.floor((Date.now() - startEpoch) / 1000));
+                const mm = String(Math.floor(elapsedSeconds / 60)).padStart(2, '0');
+                const ss = String(elapsedSeconds % 60).padStart(2, '0');
+                el.textContent = ;
+            }
+
+            function stopCncCancelScanner() {
+                if (cncCancelScanner) {
+                    try { cncCancelScanner.stop().catch(() => {}); } catch (_) {}
+                    cncCancelScanner = null;
+                }
+            }
+
+            function beginCncCancelUnlock() {
+                const qrWrap = document.getElementById('cncCancelQrWrap');
+                const statusEl = document.getElementById('cncCancelStatus');
+                const unlockBtn = document.getElementById('cncCancelUnlockButton');
+                if (!qrWrap || qrWrap.classList.contains('show')) return;
+                qrWrap.classList.add('show');
+                if (unlockBtn) unlockBtn.style.display = 'none';
+                if (statusEl) {
+                    statusEl.textContent = 'リーダーのQRコードをスキャン / Scan leader QR code';
+                    statusEl.style.color = '#FDA4AF';
+                }
+                try {
+                    cncCancelScanner = new Html5Qrcode('cncCancelQrReader');
+                    const sc = cncCancelScanner;
+                    sc.start(
+                        { facingMode: 'environment' },
+                        { fps: 30, qrbox: { width: 800, height: 800 }, aspectRatio: 1.0, disableFlip: false },
+                        async (decodedText) => {
+                            if (sc.__busy) return;
+                            sc.__busy = true;
+                            try {
+                                const resp = await fetch(, {
+                                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ username: decodedText })
+                                });
+                                const result = await resp.json();
+                                if (result.authorized) {
+                                    const leaderName = .trim();
+                                    if (statusEl) {
+                                        statusEl.textContent = ;
+                                        statusEl.style.color = '#9DEAB0';
+                                    }
+                                    const raw = localStorage.getItem(breakPrefix + 'activeCncCancelStart');
+                                    const startEpoch = raw ? parseInt(raw, 10) : Date.now();
+                                    const waitSeconds = Math.max(0, Math.round((Date.now() - startEpoch) / 1000));
+                                    
+                                    if (typeof logTabletAction === 'function') {
+                                        logTabletAction('CNC Cancel Unlocked by Leader', 'Completed', {
+                                            leaderName: leaderName,
+                                            leaderUsername: result.username || decodedText,
+                                            leaderRole: result.role || '',
+                                            waitSeconds: waitSeconds,
+                                            waitMinutes: Math.round(waitSeconds / 60)
+                                        });
+                                    }
+                                    if (typeof window.unlockCNCGatekeeper === 'function') {
+                                        window.unlockCNCGatekeeper();
+                                    }
+                                    setTimeout(() => {
+                                        closeCncCancelOverlay();
+                                        if (typeof showToast === 'function') {
+                                            showToast('✅ 機械ロックを解除しました / Machine lock released');
+                                        }
+                                    }, 400);
+                                } else {
+                                    if (statusEl) {
+                                        statusEl.textContent = '❌ リーダー権限がありません / Not a leader';
+                                        statusEl.style.color = '#FFB3B8';
+                                    }
+                                    sc.__busy = false;
+                                }
+                            } catch (e) {
+                                if (statusEl) {
+                                    statusEl.textContent = '❌ 認証エラー / Verification error';
+                                    statusEl.style.color = '#FFB3B8';
+                                }
+                                sc.__busy = false;
+                            }
+                        },
+                        () => {}
+                    ).catch(() => {
+                        if (statusEl) {
+                            statusEl.textContent = '❌ カメラを起動できません / Cannot start camera';
+                            statusEl.style.color = '#FFB3B8';
+                        }
+                    });
+                } catch (e) {
+                    if (statusEl) {
+                        statusEl.textContent = '❌ スキャナーエラー / Scanner error';
+                        statusEl.style.color = '#FFB3B8';
+                    }
+                }
+            }
+
+            window.openCncCancelOverlay = openCncCancelOverlay;
+            window.closeCncCancelOverlay = closeCncCancelOverlay;
             window.startStopCall = startStopCall;
             
             /**
@@ -7074,6 +7273,8 @@
                 const stopCancelBtn = document.getElementById('stopCallCancelButton');
                 const stopResumeBtn = document.getElementById('stopCallResumeCNCButton');
                 if (stopUnlockBtn) stopUnlockBtn.addEventListener('click', beginStopCallUnlock);
+                const cncCancelUnlockBtn = document.getElementById('cncCancelUnlockButton');
+                if (cncCancelUnlockBtn) cncCancelUnlockBtn.addEventListener('click', beginCncCancelUnlock);
                 if (stopCancelBtn) stopCancelBtn.addEventListener('click', cancelStopCall);
                 if (stopResumeBtn) stopResumeBtn.addEventListener('click', finalizeStopCall);
 
