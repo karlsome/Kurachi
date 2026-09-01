@@ -16485,6 +16485,21 @@ if (manualSendModal) {
         }
       });
 
+      // 0.5. Safe start abort within 4-second grace window (no leader required)
+      cncEventSource.addEventListener('start_aborted', (e) => {
+        try {
+          const data = JSON.parse(e.data || '{}');
+          console.log("⚠️ [CNC GATEKEEPER] Start aborted within grace window:", data);
+          closeCycleStopOverlay();
+          if (typeof closeCncCancelOverlay === 'function') closeCncCancelOverlay();
+          if (typeof showToast === 'function') {
+            showToast("⚠️ 開始直後の取消 (セットやり直し可) / Start cancelled before cut - Ready to restart");
+          }
+        } catch (err) {
+          console.error("Error parsing start_aborted event:", err);
+        }
+      });
+
       // 1. Emergency cancel detected during cutting/drag -> Trigger Dedicated CNC Cancel screen
       cncEventSource.addEventListener('cancel_detected', (e) => {
         try {
