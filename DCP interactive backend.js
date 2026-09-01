@@ -41,7 +41,7 @@ const dbURL = 'https://script.google.com/macros/s/AKfycbx0qBw0_wF5X-hA2t1yY-d5h5
 
 //const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
-const serverURL = "http://192.168.0.88:3000";
+const serverURL = "http://192.168.0.84:3000";
 
 // Global variable to track if sendtoNC button has been pressed
 let sendtoNCButtonisPressed = false;
@@ -8485,8 +8485,17 @@ async function sendtoNC(selectedValue) {
       hideSendToMachineProgress();
       sendToMachineCooldownEndTime = 0;
       updateSendToMachineCooldownUI();
-      if (typeof showToast === 'function') {
-        showToast('✅ 送信完了 / Send to machine completed');
+      if (response && response.ok) {
+        if (typeof showToast === 'function') {
+          showToast('✅ 送信完了 / Send to machine completed');
+        }
+        return true;
+      } else {
+        const errMsg = (data && data.error) ? data.error : 'Mini-PC returned error ' + (response ? response.status : 'unknown');
+        if (typeof showToast === 'function') {
+          showToast("❌ 送信失敗: " + errMsg, 5000);
+        }
+        throw new Error(errMsg);
       }
     } catch (error) {
       console.warn('Notice from send to mini PC:', error);
@@ -8494,6 +8503,7 @@ async function sendtoNC(selectedValue) {
       hideSendToMachineProgress();
       sendToMachineCooldownEndTime = 0;
       updateSendToMachineCooldownUI();
+      throw error;
     }
   }
 }
@@ -11290,7 +11300,9 @@ function showStep3Modal() {
     }
     if (instruction) instruction.textContent = 'Press this button / このボタンを押して';
     if (actionButton) {
-      actionButton.textContent = 'Send to machine';
+      actionButton.disabled = false;
+      actionButton.style.opacity = '1';
+      actionButton.textContent = 'マシンに送信 / Send to machine';
       actionButton.style.background = 'linear-gradient(135deg, #4CAF50, #45a049)';
       actionButton.style.boxShadow = '0 4px 15px rgba(76, 175, 80, 0.4)';
     }
@@ -12255,37 +12267,60 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
       return;
     }
 
-    // Close Step 3 modal immediately (sending in background)
-    document.getElementById('step3Modal').style.display = 'none';
-
     // Log send to machine action (Step 3)
     logTabletAction('Send to machine pressed (Step 3)', 'in-progress', {
       背番号: currentSebanggo,
       source: 'Step 3 Modal'
     }).catch(error => console.error('Failed to log Step 3 send to machine action:', error));
 
-    // Do NOT clear cached product details here so they survive page reloads
-    // while the product is still active on the production page.
-    // Mark workflow as complete (Step 3 send to machine pressed)
-    saveCurrentStep(0);
-    markScanWorkflowComplete();
-    if (typeof assertMachineState === 'function') assertMachineState();
     autoFillProductionStartTime();
 
-    // Navigate to params page immediately, send in background
-    if (typeof window.goToTab === 'function') window.goToTab(1);
+    const actionButton = document.getElementById('startStep3Send');
+    if (actionButton) {
+      actionButton.disabled = true;
+      actionButton.innerHTML = '<span>⏳ 送信中... / Sending to machine...</span>';
+      actionButton.style.opacity = '0.75';
+    }
 
-    // Call the sendtoNC function (sends in background with progress bar)
-    sendtoNC(currentSebanggo);
+    try {
+      // Send to NC (Mini-PC)
+      await sendtoNC(currentSebanggo);
 
-    // Lot cycle done: clear the chosen machine + cycle set so the next lot change
-    // re-prompts from scratch (grouped).
+      // Keep Step 3 button visible and show Resend button
+      if (actionButton) {
+        actionButton.disabled = false;
+        actionButton.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:6px;"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg><span>マシンに再送信 / Resend to Machine</span>';
+        actionButton.style.opacity = '1';
+        actionButton.style.background = 'linear-gradient(135deg, #2E6FF2, #1b4bb8)';
+      }
+
+      // Mark workflow as complete but KEEP Step 3 modal visible so user can resend anytime
+      markScanWorkflowComplete();
+      saveCurrentStep(3);
+      if (typeof assertMachineState === 'function') assertMachineState();
+
+    } catch (sendErr) {
+      console.error("Send to machine failed:", sendErr);
+      if (actionButton) {
+        actionButton.disabled = false;
+        actionButton.innerHTML = '<span>⚠️ 送信失敗 (再送信) / Retry Send to Machine</span>';
+        actionButton.style.opacity = '1';
+        actionButton.style.background = 'linear-gradient(135deg, #e74c3c, #c0392b)';
+      }
+      if (typeof showAlert === 'function') showAlert('送信失敗 / Send failed: ' + (sendErr.message || sendErr));
+    }
+
+    // Keep step3Modal visible
+    const s3Modal = document.getElementById('step3Modal');
+    if (s3Modal) s3Modal.style.display = 'block';
+
+    // Lot cycle done: clear chosen machine
     window.__lotScanMachine = null;
     window.__lotCycleMachinesDone = [];
 
   } catch (error) {
-    console.error("Error sending to machine:", error);
-    showAlert('送信エラー / Send error');
+    console.error("Error in Step 3 handler:", error);
+    showAlert('エラー / Error');
   }
 });
 
