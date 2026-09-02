@@ -39,9 +39,9 @@ const googleSheetLiveStatusURL = 'https://script.google.com/macros/s/AKfycbwbL30
 // Link for Rikeshi (up/down color info) - This was missing in the original, adding it here.
 const dbURL = 'https://script.google.com/macros/s/AKfycbx0qBw0_wF5X-hA2t1yY-d5h5M7Z_a8z_V9R5D6k/exec'; // Placeholder, replace with your actual URL if different.
 
-const serverURL = "https://kurachi.onrender.com";
+//const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
-//const serverURL = "http://192.168.0.162:3000";
+const serverURL = "http://192.168.0.39:3000";
 window.serverURL = serverURL;
 
 // Global variable to track if sendtoNC button has been pressed
@@ -1349,6 +1349,11 @@ function setDefaultTime(input) {
     logTabletAction('End time set', 'in-progress', {
       endTime: timeValue
     });
+    setTimeout(() => {
+      if (typeof window.promptFinalLots === 'function') {
+        window.promptFinalLots();
+      }
+    }, 150);
   } else if (input.id.includes('break')) {
     logTabletAction(`Break time ${input.id} set`, 'in-progress', {
       breakTimeField: input.id,
@@ -11284,6 +11289,8 @@ function showStep3Modal() {
   if (instruction) instruction.style.display = '';
   if (arrow) arrow.style.display = '';
   if (actionButton) actionButton.style.display = '';
+  const skipBtn = document.getElementById('btnSkipStep3Send');
+  if (skipBtn) skipBtn.style.display = 'none';
 
   if (isOZMANASMachine()) {
     if (title) {
@@ -12300,6 +12307,9 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
       saveCurrentStep(3);
       if (typeof assertMachineState === 'function') assertMachineState();
 
+      const skipBtn = document.getElementById('btnSkipStep3Send');
+      if (skipBtn) skipBtn.style.display = 'none';
+
     } catch (sendErr) {
       console.error("Send to machine failed:", sendErr);
       if (actionButton) {
@@ -12307,6 +12317,10 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
         actionButton.innerHTML = '<span>⚠️ 送信失敗 (再送信) / Retry Send to Machine</span>';
         actionButton.style.opacity = '1';
         actionButton.style.background = 'linear-gradient(135deg, #e74c3c, #c0392b)';
+      }
+      const skipBtn = document.getElementById('btnSkipStep3Send');
+      if (skipBtn) {
+        skipBtn.style.display = 'block';
       }
       if (typeof showAlert === 'function') showAlert('送信失敗 / Send failed: ' + (sendErr.message || sendErr));
     }
@@ -12324,6 +12338,64 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
     showAlert('エラー / Error');
   }
 });
+
+// Step 3: Skip Send with Leader Authorization
+const btnSkipStep3Send = document.getElementById('btnSkipStep3Send');
+if (btnSkipStep3Send) {
+  btnSkipStep3Send.addEventListener('click', function (e) {
+    e.preventDefault();
+    if (typeof window.verifyLeaderUI === 'function') {
+      window.verifyLeaderUI(
+        (leaderInfo) => {
+          const leaderName = leaderInfo?.leaderName || leaderInfo?.username || 'Leader';
+          console.log(`✅ [Step 3 Skip] Authorized by ${leaderName}`);
+
+          const currentSebanggo = document.getElementById('sub-dropdown')?.value || '';
+          if (typeof logTabletAction === 'function') {
+            logTabletAction('Send to machine skipped (Step 3)', 'Completed', {
+              背番号: currentSebanggo,
+              authorizedBy: leaderName,
+              source: 'Step 3 Modal Skip Button'
+            }).catch(() => { });
+          }
+
+          // Mark workflow as complete and unlock navigation tabs
+          sendtoNCButtonisPressed = true;
+          try {
+            localStorage.setItem(`${uniquePrefix}sendtoNCButtonisPressed`, 'true');
+          } catch (_) { }
+          markScanWorkflowComplete();
+          saveCurrentStep(3);
+          if (typeof assertMachineState === 'function') assertMachineState();
+          if (typeof updateTabLock === 'function') updateTabLock();
+          if (typeof window.updateTabLock === 'function') window.updateTabLock();
+
+          // Update action button UI
+          const actionButton = document.getElementById('startStep3Send');
+          if (actionButton) {
+            actionButton.disabled = false;
+            actionButton.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:6px;"><path d="M5 12h14M12 5l7 7-7 7"/></svg><span>⏭️ スキップ済み (${leaderName} 承認) / Skipped (Resend Available)</span>`;
+            actionButton.style.opacity = '1';
+            actionButton.style.background = 'linear-gradient(135deg, #10b981, #059669)';
+          }
+
+          // Hide skip button
+          btnSkipStep3Send.style.display = 'none';
+
+          if (typeof showToast === 'function') {
+            showToast(`✅ ${leaderName} の承認によりスキップしました / Skipped with leader approval`);
+          } else if (typeof showAlert === 'function') {
+            showAlert(`✅ ${leaderName} の承認によりスキップしました / Skipped with leader approval`);
+          }
+        },
+        'リーダー承認 (送信スキップ) / Leader Skip Approval',
+        'マシンへのデータ送信をスキップして作業を続行するにはリーダーQRをスキャンしてください<br>Scan leader QR to skip send to machine and proceed'
+      );
+    } else {
+      console.warn("verifyLeaderUI not available");
+    }
+  });
+}
 
 // Reset buttons
 // Shared confirmation for destructive reset / new-scan actions: these clear
@@ -12749,7 +12821,13 @@ if (manualSendModal) {
   const LOTS_KEY = PFX + 'lotsByMachine';
 
   let lotsByMachine = {};
-  try { lotsByMachine = JSON.parse(localStorage.getItem(LOTS_KEY) || '{}') || {}; } catch (e) { lotsByMachine = {}; }
+  function refreshLots() {
+    try {
+      const stored = JSON.parse(localStorage.getItem(LOTS_KEY) || '{}');
+      if (stored && typeof stored === 'object') lotsByMachine = stored;
+    } catch (e) { }
+  }
+  refreshLots();
   function save() { try { localStorage.setItem(LOTS_KEY, JSON.stringify(lotsByMachine)); } catch (e) { } }
 
   const round1 = n => Math.round(n * 10) / 10;
@@ -12796,7 +12874,7 @@ if (manualSendModal) {
     for (let i = list.length - 1; i >= 0; i--) if (list[i].open) return list[i];
     return null;
   }
-  function allRecords() { return Object.keys(lotsByMachine).reduce((a, k) => a.concat(lotsByMachine[k]), []); }
+  function allRecords() { refreshLots(); return Object.keys(lotsByMachine).reduce((a, k) => a.concat(lotsByMachine[k]), []); }
   function totalShots() { return allRecords().reduce((s, r) => s + (parseInt(r.shots, 10) || 0), 0); }
 
   function updateShotTotalField() {
@@ -12980,7 +13058,36 @@ if (manualSendModal) {
 
   // Collect ショット数 for each still-open lot or lot with missing shots.
   function promptFinalLots() {
-    const open = allRecords().filter(r => r.open || r.shots == null || r.shots === '');
+    if (document.getElementById('lpModal')) return; // Already showing prompt
+    refreshLots();
+    let open = allRecords().filter(r => r.open || r.shots == null || r.shots === '');
+
+    if (!open.length) {
+      const currentShotVal = document.getElementById('shot')?.value || '';
+      const mName = (typeof getMachineName === 'function' ? getMachineName() : '')
+        || (document.getElementById('process') ? document.getElementById('process').value : '')
+        || 'UNKNOWN';
+      const mLots = (typeof materialLots !== 'undefined' && Array.isArray(materialLots) && materialLots.length > 0)
+        ? materialLots.map(l => (typeof l === 'object' ? l.lotNumber : l)).filter(Boolean)
+        : [];
+
+      if (allRecords().length === 0) {
+        if (mLots.length > 0) {
+          mLots.forEach(l => recordLotScan(l, mName, 'auto'));
+        } else {
+          const defLot = document.getElementById('lot-number')?.value || '---';
+          recordLotScan(defLot, mName, 'auto');
+        }
+        open = allRecords().filter(r => r.open || r.shots == null || r.shots === '');
+      } else if (!currentShotVal || currentShotVal === '0') {
+        const all = allRecords();
+        if (all.length > 0) {
+          all[all.length - 1].open = true;
+          open = [all[all.length - 1]];
+        }
+      }
+    }
+
     if (!open.length) return;
     let i = 0;
     const next = () => {
@@ -13030,14 +13137,14 @@ if (manualSendModal) {
   });
 
   /* ---------- Public hooks ---------- */
-  window.verifyLeaderUI = function (onVerified) {
-    const srvURL = () => (typeof serverURL !== 'undefined' && serverURL) ? serverURL : '';
+  window.verifyLeaderUI = function (onVerified, customTitle, customSubtitle) {
+    const srvURL = () => (typeof serverURL !== 'undefined' && serverURL) ? serverURL : (window.serverURL || (window.location.protocol + '//' + window.location.hostname + ':3000'));
     const modal = document.createElement('div');
     modal.style.cssText = 'display:flex; position:fixed; inset:0; background:rgba(0,0,0,0.85); z-index:100300; justify-content:center; align-items:center;';
     modal.innerHTML =
       '<div style="background:#fff; padding:24px; border-radius:14px; max-width:360px; width:92%; text-align:center;">' +
-      '<h3 style="margin:0 0 6px;">リーダー認証 / Leader Verification</h3>' +
-      '<p style="margin:0 0 12px; font-size:0.85rem; color:#666;">ショット数を編集するにはリーダーQRをスキャン<br>Scan leader QR to edit shots</p>' +
+      `<h3 style="margin:0 0 6px;">${customTitle || 'リーダー認証 / Leader Verification'}</h3>` +
+      `<p style="margin:0 0 12px; font-size:0.85rem; color:#666;">${customSubtitle || 'ショット数を編集するにはリーダーQRをスキャン<br>Scan leader QR to edit shots'}</p>` +
       '<div id="shotLeaderQr" style="width:100%; aspect-ratio:1; max-width:280px; margin:0 auto; border-radius:10px; overflow:hidden; background:#000;"></div>' +
       '<p id="shotLeaderStatus" style="margin:12px 0; font-size:0.85rem; color:#2d5f4f; min-height:18px;">リーダーのQRコードをスキャンしてください</p>' +
       '<button id="shotLeaderCancel" style="width:100%; padding:12px; font-size:15px; background:#f44336; color:#fff; border:none; border-radius:8px; cursor:pointer;">キャンセル / Cancel</button>' +
@@ -13072,9 +13179,11 @@ if (manualSendModal) {
           });
           const result = await resp.json();
           if (result.authorized) {
+            const leaderName = (((result.lastName || '') + ' ' + (result.firstName || '')) || result.username || decodedText).trim();
+            result.leaderName = leaderName;
             statusEl.style.color = '#006400';
-            statusEl.innerHTML = `✅ 認証成功！ / Verified!`;
-            closeScanner(() => { removeModal(); if (onVerified) onVerified(); });
+            statusEl.innerHTML = `✅ 認証成功！ / Verified: ${leaderName}`;
+            closeScanner(() => { removeModal(); if (onVerified) onVerified(result); });
           } else {
             processing = false;
             statusEl.style.color = '#cc0000';
@@ -13251,7 +13360,10 @@ if (manualSendModal) {
 
   // Final/open lot capture when End Time is entered.
   const endTimeEl = document.getElementById('End Time');
-  if (endTimeEl) endTimeEl.addEventListener('change', function () { if (endTimeEl.value) promptFinalLots(); });
+  if (endTimeEl) {
+    endTimeEl.addEventListener('change', function () { if (endTimeEl.value) promptFinalLots(); });
+    endTimeEl.addEventListener('input', function () { if (endTimeEl.value) promptFinalLots(); });
+  }
 
   // Reflect any persisted lots into the (hidden) #shot total on load.
   updateShotTotalField();
