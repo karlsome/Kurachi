@@ -320,6 +320,7 @@
             height: 100%;
             transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
             transform: translate3d(0, 0, 0);
+            transform-style: flat;
             -webkit-transform-style: flat;
             backface-visibility: hidden;
             -webkit-backface-visibility: hidden;
@@ -2616,6 +2617,9 @@
                                     </svg></div>
                                 <button type="button" id="startStep3Send" class="btn btn-primary btn-full" data-i18n="send_machine_btn">
                                     マシンに送信
+                                </button>
+                                <button type="button" id="btnSkipStep3Send" class="btn btn-full" style="display: none; margin-top: 10px; background: linear-gradient(135deg, #f59e0b, #d97706); color: #ffffff; font-weight: 600; padding: 12px 16px; border-radius: 8px; border: none; cursor: pointer; width: 100%; box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3); font-size: 0.95rem;">
+                                    ⏭️ スキップ (リーダー認証) / Skip (Leader QR)
                                 </button>
                             </div>
                             <div
@@ -5560,6 +5564,31 @@
             background: linear-gradient(160deg, #5A1014, #380A0C);
         }
 
+        .cnc-cancel-detected-overlay {
+            background: linear-gradient(160deg, #4c0519, #1c0309) !important;
+        }
+
+        .cnc-cancel-detected-overlay .cnc-cancel-pulse {
+            background: rgba(244, 63, 94, 0.22);
+            border: 2px solid #F43F5E;
+            animation: cncCancelPulse 1.2s ease-in-out infinite;
+        }
+
+        .cnc-cancel-detected-overlay .cnc-cancel-pulse svg {
+            stroke: #FDA4AF;
+            width: 40px;
+            height: 40px;
+        }
+
+        @keyframes cncCancelPulse {
+            0%, 100% {
+                box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.65);
+            }
+            50% {
+                box-shadow: 0 0 0 24px rgba(244, 63, 94, 0);
+            }
+        }
+
         .stopcall-overlay .stopcall-pulse {
             background: rgba(225, 29, 42, 0.18);
             border-color: #E11D2A;
@@ -5763,6 +5792,38 @@
         </div>
     </div>
 
+    <!-- CNC Hardware Cancel Detected Overlay (Locked until Leader QR Scan) -->
+    <div id="cncCancelOverlay" class="break-overlay stopcall-overlay cnc-cancel-detected-overlay">
+        <div class="freya-top-wordmark">
+            <div class="wm-line"></div>
+            <span class="wm-text">Freya System v4</span>
+            <div class="wm-line right"></div>
+        </div>
+        <div class="break-pulse cnc-cancel-pulse">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2"></polygon>
+                <line x1="12" y1="8" x2="12" y2="12"></line>
+                <line x1="12" y1="16" x2="12.01" y2="16"></line>
+            </svg>
+        </div>
+        <h2>機械の取消ボタンが検出されました</h2>
+        <p class="break-sub" style="color: #FDA4AF; font-size: 1.02rem; margin-top: 4px;">
+            Cancel Button Detected — Leader Required
+        </p>
+        <div style="background: rgba(0,0,0,0.35); border: 1px solid rgba(244,63,94,0.35); border-radius: 14px; padding: 12px 20px; margin: 16px 0; font-size: 0.9rem; color: #F1F5F9; max-width: 440px; text-align: center; line-height: 1.45;">
+            ⚠️ 途中加工は中断されました。リーダー確認後に最初から再加工してください。<br>
+            <span style="font-size: 0.8rem; color: #94A3B8;">(Job cancelled mid-cut. Restart from beginning after unlock.)</span>
+        </div>
+        <div class="break-timer" id="cncCancelTimerDisplay">00:00</div>
+        <button type="button" class="btn-finish-break" id="cncCancelUnlockButton" style="background: #fff; color: #4c0519; font-weight: 700;">リーダーQRで解除 / Unlock</button>
+        <div class="stopcall-qr-wrap" id="cncCancelQrWrap">
+            <div id="cncCancelQrReader"></div>
+            <p id="cncCancelStatus"
+                style="text-align:center; margin-top:12px; font-size:0.92rem; font-weight:700; color:#FDA4AF; min-height:20px;">
+            </p>
+        </div>
+    </div>
+
     <!-- Floating "New Scan" / reset (shown on the Scan tab when a scan is active) -->
     <button type="button" id="floatingNewScan" onclick="if (confirmReset('新規スキャンを開始しますか？\n現在のデータはすべて消去されます。\n\nStart a new scan? All current data will be cleared.')) resetAllSteps()">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"
@@ -5843,6 +5904,7 @@
             // uniquePrefix may be in the temporal dead zone if backend.js halted early
             // (missing filter/machine guard), so guard the access with try/catch.
             try { if (uniquePrefix) breakPrefix = uniquePrefix; } catch (e) { }
+            window.breakPrefix = breakPrefix;
 
             // ---------- Defect tap counters (18/19/20) ----------
             function syncDefectDisplays() {
@@ -6048,6 +6110,7 @@
                 openBreakOverlay(startEpoch);
                 if (typeof logTabletAction === 'function') logTabletAction('Break started', 'in-progress', {});
             }
+            window.startBreak = startBreak;
             function finishBreak() {
                 const raw = localStorage.getItem(breakPrefix + 'activeBreakStart');
                 clearInterval(breakInterval);
@@ -6055,6 +6118,9 @@
                 if (ov) ov.classList.remove('open');
                 localStorage.removeItem(breakPrefix + 'activeBreakStart');
                 if (typeof logTabletAction === 'function') logTabletAction('Break ended', 'Completed', {});
+                if (typeof window.unlockCNCGatekeeper === 'function') {
+                    window.unlockCNCGatekeeper();
+                }
                 if (!raw) return;
                 const start = new Date(parseInt(raw, 10));
                 const end = new Date();
@@ -6248,6 +6314,7 @@
                     }).catch(() => { });
                 } catch (e) { }
             }
+            window.notifyStopCall = notifyStopCall;
 
             function tickStopCall(startEpoch) {
                 const disp = document.getElementById('stopCallTimerDisplay');
@@ -6341,6 +6408,9 @@
                 localStorage.setItem(breakPrefix + 'activeStopCallStart', String(startEpoch));
                 openStopCallOverlay(startEpoch);
                 notifyStopCall('activate', 'leader', pickedMachine || null);
+                if (typeof logTabletAction === 'function') {
+                    logTabletAction('Stop call activated (Leader called)', 'in-progress', { machine: pickedMachine || 'primary' });
+                }
                 // Stop only the picked machine (or all if not grouped)
                 const pickedIP = pickedMachine ? (groupedMachineIPs[pickedMachine] || null) : null;
                 sendCNCCallStop(1, pickedIP);
@@ -6354,6 +6424,9 @@
                 localStorage.removeItem(breakPrefix + 'activeStopCallStart');
                 closeStopCallOverlay();
                 notifyStopCall('clear', 'leader', pickedMachine || null);
+                if (typeof logTabletAction === 'function') {
+                    logTabletAction('Stop call canceled within grace period', 'Reset', { machine: pickedMachine || 'primary' });
+                }
                 showToast(_t('toast_call_canceled'));
                 sendCNCCallStop(0, pickedIP);
                 stopCallPickedMachine = null;
@@ -6440,6 +6513,10 @@
                 
                 const resumeBtn = document.getElementById('stopCallResumeCNCButton');
                 if (resumeBtn) resumeBtn.style.display = '';
+                // Auto-finalize immediately on successful leader scan
+                setTimeout(() => {
+                    finalizeStopCall();
+                }, 400);
             }
 
             function finalizeStopCall() {
@@ -6455,12 +6532,18 @@
                 data.totalWaitSeconds = data.records.reduce((s, r) => s + (r.waitSeconds || 0), 0);
                 data.totalWaitMinutes = Math.round(data.totalWaitSeconds / 60);
                 saveStopCallData(data);
+                if (typeof logTabletAction === 'function') {
+                    logTabletAction('Stop call unlocked by Leader', 'Completed', { ...pendingStopCallRecord });
+                }
                 
                 pendingStopCallRecord = null;
                 stopCallPickedMachine = null;
                 localStorage.removeItem(breakPrefix + 'activeStopCallStart');
                 closeStopCallOverlay();
                 notifyStopCall('clear', 'leader', pickedMachine || null);
+                if (typeof window.unlockCNCGatekeeper === 'function') {
+                    window.unlockCNCGatekeeper();
+                }
                 showToast(_t('toast_leader_recorded'));
             }
             function resumeStopCallIfActive() {
@@ -6483,7 +6566,169 @@
                     notifyStopCall('activate', 'box');
                     if (menuWrap) menuWrap.classList.add('open');
                 }
+                const rawCancel = localStorage.getItem(breakPrefix + 'activeCncCancelStart');
+                if (rawCancel) {
+                    openCncCancelOverlay(parseInt(rawCancel, 10));
+                }
             }
+            // =========================================================================
+            // DEDICATED CNC CANCEL OVERLAY LOGIC (Hardware Cancel Detected)
+            // =========================================================================
+            let cncCancelInterval = null;
+            let cncCancelScanner = null;
+
+            function openCncCancelOverlay(startEpoch) {
+                const ov = document.getElementById('cncCancelOverlay');
+                const alreadyOpen = ov && ov.classList.contains('open');
+
+                const stored = localStorage.getItem(breakPrefix + 'activeCncCancelStart');
+                if (!startEpoch && stored) {
+                    startEpoch = parseInt(stored, 10);
+                }
+                if (!startEpoch || isNaN(startEpoch)) {
+                    startEpoch = Date.now();
+                }
+                localStorage.setItem(breakPrefix + 'activeCncCancelStart', String(startEpoch));
+
+                if (ov) ov.classList.add('open');
+                const menuWrap = document.getElementById('callMenuWrapper');
+                if (menuWrap) menuWrap.style.display = 'none';
+
+                // If already open and ticking, do not reset UI elements or timer
+                if (alreadyOpen && cncCancelInterval) {
+                    return;
+                }
+
+                const unlockBtn = document.getElementById('cncCancelUnlockButton');
+                if (unlockBtn) unlockBtn.style.display = '';
+                const qrWrap = document.getElementById('cncCancelQrWrap');
+                if (qrWrap) qrWrap.classList.remove('show');
+                
+                tickCncCancel(startEpoch);
+                clearInterval(cncCancelInterval);
+                cncCancelInterval = setInterval(() => tickCncCancel(startEpoch), 1000);
+            }
+
+            function closeCncCancelOverlay() {
+                clearInterval(cncCancelInterval);
+                stopCncCancelScanner();
+                const ov = document.getElementById('cncCancelOverlay');
+                if (ov) ov.classList.remove('open');
+                const menuWrap = document.getElementById('callMenuWrapper');
+                if (menuWrap) {
+                    menuWrap.style.display = '';
+                    menuWrap.classList.remove('open');
+                }
+                localStorage.removeItem(breakPrefix + 'activeCncCancelStart');
+                if (typeof notifyStopCall === 'function') {
+                    notifyStopCall('clear', 'leader');
+                }
+            }
+
+            function tickCncCancel(startEpoch) {
+                const el = document.getElementById('cncCancelTimerDisplay');
+                if (!el) return;
+                const elapsedSeconds = Math.max(0, Math.floor((Date.now() - startEpoch) / 1000));
+                const mm = String(Math.floor(elapsedSeconds / 60)).padStart(2, '0');
+                const ss = String(elapsedSeconds % 60).padStart(2, '0');
+                el.textContent = mm + ':' + ss;
+            }
+
+            function stopCncCancelScanner() {
+                if (cncCancelScanner) {
+                    try { cncCancelScanner.stop().catch(() => {}); } catch (_) {}
+                    cncCancelScanner = null;
+                }
+            }
+
+            function beginCncCancelUnlock() {
+                const qrWrap = document.getElementById('cncCancelQrWrap');
+                const statusEl = document.getElementById('cncCancelStatus');
+                const unlockBtn = document.getElementById('cncCancelUnlockButton');
+                if (!qrWrap || qrWrap.classList.contains('show')) return;
+                qrWrap.classList.add('show');
+                if (unlockBtn) unlockBtn.style.display = 'none';
+                if (statusEl) {
+                    statusEl.textContent = 'リーダーのQRコードをスキャン / Scan leader QR code';
+                    statusEl.style.color = '#FDA4AF';
+                }
+                try {
+                    cncCancelScanner = new Html5Qrcode('cncCancelQrReader');
+                    const sc = cncCancelScanner;
+                    sc.start(
+                        { facingMode: 'environment' },
+                        { fps: 30, qrbox: { width: 800, height: 800 }, aspectRatio: 1.0, disableFlip: false },
+                        async (decodedText) => {
+                            if (sc.__busy) return;
+                            sc.__busy = true;
+                            try {
+                                const srv = (typeof serverURL !== 'undefined' && serverURL) ? serverURL : (window.serverURL || (window.location.protocol + '//' + window.location.hostname + ':3000'));
+                                const verifyUrl = srv + '/verifyLeader';
+                                const resp = await fetch(verifyUrl, {
+                                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ username: decodedText })
+                                });
+                                const result = await resp.json();
+                                if (result.authorized) {
+                                    const leaderName = (((result.lastName || '') + ' ' + (result.firstName || '')) || result.username || decodedText).trim();
+                                    if (statusEl) {
+                                        statusEl.textContent = '✅ ' + leaderName + ' - 解除完了 / Unlocked';
+                                        statusEl.style.color = '#9DEAB0';
+                                    }
+                                    const raw = localStorage.getItem(breakPrefix + 'activeCncCancelStart');
+                                    const startEpoch = raw ? parseInt(raw, 10) : Date.now();
+                                    const waitSeconds = Math.max(0, Math.round((Date.now() - startEpoch) / 1000));
+                                    
+                                    if (typeof logTabletAction === 'function') {
+                                        logTabletAction('CNC Cancel Unlocked by Leader', 'Completed', {
+                                            leaderName: leaderName,
+                                            leaderUsername: result.username || decodedText,
+                                            leaderRole: result.role || '',
+                                            waitSeconds: waitSeconds,
+                                            waitMinutes: Math.round(waitSeconds / 60)
+                                        });
+                                    }
+                                    if (typeof window.unlockCNCGatekeeper === 'function') {
+                                        window.unlockCNCGatekeeper();
+                                    }
+                                    setTimeout(() => {
+                                        closeCncCancelOverlay();
+                                        if (typeof showToast === 'function') {
+                                            showToast('✅ 機械ロックを解除しました / Machine lock released');
+                                        }
+                                    }, 400);
+                                } else {
+                                    if (statusEl) {
+                                        statusEl.textContent = '❌ リーダー権限がありません / Not a leader';
+                                        statusEl.style.color = '#FFB3B8';
+                                    }
+                                    sc.__busy = false;
+                                }
+                            } catch (e) {
+                                if (statusEl) {
+                                    statusEl.textContent = '❌ 認証エラー / Verification error';
+                                    statusEl.style.color = '#FFB3B8';
+                                }
+                                sc.__busy = false;
+                            }
+                        },
+                        () => {}
+                    ).catch(() => {
+                        if (statusEl) {
+                            statusEl.textContent = '❌ カメラを起動できません / Cannot start camera';
+                            statusEl.style.color = '#FFB3B8';
+                        }
+                    });
+                } catch (e) {
+                    if (statusEl) {
+                        statusEl.textContent = '❌ スキャナーエラー / Scanner error';
+                        statusEl.style.color = '#FFB3B8';
+                    }
+                }
+            }
+
+            window.openCncCancelOverlay = openCncCancelOverlay;
+            window.closeCncCancelOverlay = closeCncCancelOverlay;
             window.startStopCall = startStopCall;
             
             /**
@@ -7037,7 +7282,15 @@
                 // Break timer
                 const startBtn = document.getElementById('breakStartButton');
                 const finishBtn = document.getElementById('finishBreakButton');
-                if (startBtn) startBtn.addEventListener('click', startBreak);
+                if (startBtn) {
+                    startBtn.addEventListener('click', (e) => {
+                        if (typeof window.handleBreakStartButtonClick === 'function') {
+                            window.handleBreakStartButtonClick(e);
+                        } else {
+                            startBreak();
+                        }
+                    });
+                }
                 if (finishBtn) finishBtn.addEventListener('click', finishBreak);
                 updateBreakCount();
                 renderBreakList();
@@ -7055,6 +7308,8 @@
                 const stopCancelBtn = document.getElementById('stopCallCancelButton');
                 const stopResumeBtn = document.getElementById('stopCallResumeCNCButton');
                 if (stopUnlockBtn) stopUnlockBtn.addEventListener('click', beginStopCallUnlock);
+                const cncCancelUnlockBtn = document.getElementById('cncCancelUnlockButton');
+                if (cncCancelUnlockBtn) cncCancelUnlockBtn.addEventListener('click', beginCncCancelUnlock);
                 if (stopCancelBtn) stopCancelBtn.addEventListener('click', cancelStopCall);
                 if (stopResumeBtn) stopResumeBtn.addEventListener('click', finalizeStopCall);
 
@@ -7236,17 +7491,22 @@
 
                     const machines = (typeof groupedMachines !== 'undefined' && groupedMachines.length > 1) ? groupedMachines : null;
 
-                    // Helper: send to a single machine IP with fallback
+                    // Helper: send to a single machine IP with instant close (no duplicate popup fallback)
                     async function fireSendToMachine(ip, seb, machineName) {
                         const url = 'http://' + ip + ':5000/request?filename=' + seb + '.pce' + (machineName ? '&mode=mass&machine=' + machineName : '');
                         try {
-                            await fetch(url, { method: 'GET', mode: 'no-cors' });
-                        } catch (_) {
-                            try {
-                                const tab = window.open(url, '_blank', 'width=100,height=100,left=-1000,top=-1000');
-                                if (tab) setTimeout(() => { try { tab.close(); } catch (__) {} }, 4000);
-                            } catch (__) {}
+                            const res = await fetch(url);
+                            const data = await res.json().catch(() => ({}));
+                            console.log('fireSendToMachine response:', data);
+                        } catch (err) {
+                            console.warn('fireSendToMachine fetch notice:', err);
+                        } finally {
+                            if (typeof closeSendingToMachineIndicator === 'function') closeSendingToMachineIndicator();
+                            if (typeof hideSendToMachineProgress === 'function') hideSendToMachineProgress();
+                            if (typeof sendToMachineCooldownEndTime !== 'undefined') sendToMachineCooldownEndTime = 0;
+                            if (typeof updateSendToMachineCooldownUI === 'function') updateSendToMachineCooldownUI();
                         }
+                        return true;
                     }
 
                     if (!machines) {
