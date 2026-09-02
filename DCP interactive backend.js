@@ -16443,15 +16443,21 @@ if (manualSendModal) {
     if (ip) {
       try {
         const res = await fetch(`http://${ip}:5000/schedule_cycle_stop`, { method: 'POST' });
+        if (!res.ok) throw new Error("HTTP " + res.status);
         const data = await res.json();
         console.log("🛑 Scheduled cycle stop response:", data);
       } catch (err) {
         try {
           const res = await fetch(`http://${ip}:8766/schedule_cycle_stop`, { method: 'POST' });
+          if (!res.ok) throw new Error("HTTP " + res.status);
           const data = await res.json();
           console.log("🛑 Scheduled cycle stop response (:8766):", data);
         } catch (e) {
-          console.warn("Mini-PC offline:", e);
+          console.warn("Legacy Mini-PC or offline:", e);
+          closeCycleStopOverlay();
+          if (typeof showToast === 'function') {
+            showToast("⚠️ マシンがサイクル停止機能に対応していません / Mini-PC does not support cycle stop");
+          }
         }
       }
     }
@@ -16736,15 +16742,19 @@ if (manualSendModal) {
 
     try {
       const res = await fetch(`http://${ip}:5000/schedule_break_stop`, { method: 'POST' });
+      if (!res.ok) throw new Error("HTTP " + res.status);
       const data = await res.json();
+      if (!data.scheduled) throw new Error("Not scheduled");
       console.log("☕ Scheduled break stop response:", data);
     } catch (err) {
       try {
         const res = await fetch(`http://${ip}:8766/schedule_break_stop`, { method: 'POST' });
+        if (!res.ok) throw new Error("HTTP " + res.status);
         const data = await res.json();
+        if (!data.scheduled) throw new Error("Not scheduled");
         console.log("☕ Scheduled break stop response (:8766):", data);
       } catch (e) {
-        console.warn("Mini-PC offline, proceeding with local break immediately:", e);
+        console.warn("Legacy Mini-PC (no schedule_break_stop) or offline. Starting local break immediately:", e);
         closeBreakWaitOverlay();
         if (typeof startBreak === 'function') startBreak();
       }
