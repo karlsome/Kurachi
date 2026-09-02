@@ -6925,10 +6925,65 @@
                     const stopCallStart = parseInt(localStorage.getItem(breakPrefix + 'activeStopCallStart') || '0', 10);
                     const cncCancelStart = parseInt(localStorage.getItem(breakPrefix + 'activeCncCancelStart') || '0', 10);
 
+                    const activeWorker = (typeof window.selectedWorkerNames !== 'undefined' && window.selectedWorkerNames && window.selectedWorkerNames.length > 0)
+                        ? window.selectedWorkerNames.map(n => (n || '').trim()).filter(Boolean).join(', ')
+                        : (document.getElementById('Machine Operator')?.value?.trim() || '');
+                    const hasWorker = !!activeWorker;
+
+                    const step0El = document.getElementById('step0Modal');
+                    const isStep0Open = step0El && step0El.style.display && step0El.style.display !== 'none';
+                    const workerConfirmModalEl = document.getElementById('workerConfirmationModal');
+                    const isWorkerConfirmModalOpen = workerConfirmModalEl && workerConfirmModalEl.style.display && workerConfirmModalEl.style.display !== 'none';
+                    const isWorkerPromptOpen = !!(isStep0Open || isWorkerConfirmModalOpen);
+
+                    const isCheckLocked = (typeof window.isChecklistLocked === 'function' && window.isChecklistLocked()) ||
+                                          (typeof isChecklistLocked === 'function' && isChecklistLocked()) ||
+                                          !!document.querySelector('.tab-bar')?.classList.contains('locked-checklist') ||
+                                          (window.checklistState && !window.checklistState.isPreComplete && window.checklistState.queue && window.checklistState.queue.length > 0);
+
+                    // Check specifically if Step 2 (or any inspection step beyond Step 1 worker name) has an answer
+                    const checklistAnswers = (window.checklistState && window.checklistState.answers) ? window.checklistState.answers : {};
+                    const queue = (window.checklistState && window.checklistState.queue) ? window.checklistState.queue : [];
+                    
+                    const nameFieldIds = new Set();
+                    queue.forEach(tpl => {
+                        if (Array.isArray(tpl.fields)) {
+                            tpl.fields.forEach(f => {
+                                if (f.type === 'name') nameFieldIds.add(f.id);
+                            });
+                        }
+                    });
+
+                    // Has answer in Step 2 or later (excluding Step 1 name)
+                    let hasStep2Answer = false;
+                    for (const [fId, val] of Object.entries(checklistAnswers)) {
+                        if (nameFieldIds.has(fId)) continue;
+                        if (Array.isArray(val)) continue; // Worker name slot array
+                        if (val !== undefined && val !== null && val !== '') {
+                            hasStep2Answer = true;
+                            break;
+                        }
+                    }
+
+                    let checkStart = parseInt(localStorage.getItem(breakPrefix + 'activeChecklistStart') || '0', 10);
+                    // Focus on Step 2: Only show CHECK if Step 2/later has an answer and checklist is still locked/incomplete
+                    const isDoingChecklist = isCheckLocked && hasStep2Answer;
+
+                    if (isDoingChecklist) {
+                        if (!checkStart) {
+                            checkStart = Date.now();
+                            try { localStorage.setItem(breakPrefix + 'activeChecklistStart', String(checkStart)); } catch (e) { }
+                        }
+                    } else if (checkStart) {
+                        try { localStorage.removeItem(breakPrefix + 'activeChecklistStart'); } catch (e) { }
+                        checkStart = 0;
+                    }
+
                     let mode = 'idle', modeStartedAt = 0;
                     if (maintStart) { mode = 'maintenance'; modeStartedAt = maintStart; }
                     else if (breakStart) { mode = 'break'; modeStartedAt = breakStart; }
                     else if (stopCallStart || cncCancelStart) { mode = 'stopcall'; modeStartedAt = stopCallStart || cncCancelStart; }
+                    else if (isDoingChecklist) { mode = 'check'; modeStartedAt = checkStart || Date.now(); }
                     else if (背番号) { mode = 'running'; }
 
                     // If a leader stop-call is active, keep it asserted so cloud TV never drops until leader QR scan
@@ -6936,6 +6991,15 @@
                         notifyStopCall('activate', 'leader', stopCallPickedMachine || null);
                     } else if (cncCancelStart) {
                         notifyStopCall('activate', 'leader');
+                    }
+
+                    const cycleStopOverlay = document.getElementById('cncCycleStopOverlay');
+                    const isCycleStopOpen = !!(cycleStopOverlay && cycleStopOverlay.classList.contains('open'));
+                    if (isCycleStopOpen) {
+                        notifyStopCall('activate', 'stop');
+                    } else {
+                        // Tablet reload protection: ensure no ghost STOP lingers on cloud TV
+                        notifyStopCall('clear', 'stop');
                     }
 
                     // Use actual Start Time if available so TV monitor accurately matches elapsed time
@@ -6982,10 +7046,13 @@
                     fetch(`${base}/api/machine-assert`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ 工場, 設備, 背番号, 品番, mode, modeStartedAt, runStartedAt: prodStart, totalNG, pageInstanceId })
+                        body: JSON.stringify({ 工場, 設備, 背番号, 品番, mode, modeStartedAt, runStartedAt: prodStart, totalNG, pageInstanceId, cycleStopActive: isCycleStopOpen, worker: activeWorker })
                     }).catch(() => { });
-                } catch (e) { }
+                } catch (e) {
+                    console.error('[assertMachineState ERROR]', e);
+                }
             }
+            window.assertMachineState = assertMachineState;
             setTimeout(assertMachineState, 3000);          // shortly after load
             setInterval(assertMachineState, 30000);        // every 30s
             window.addEventListener('online', assertMachineState);

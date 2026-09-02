@@ -198,6 +198,7 @@ function buildStopCallPayload(factoryId) {
   machines.forEach((info, machine) => {
     let earliest = Infinity;
     if (info.leader && info.leader.since < earliest) earliest = info.leader.since;
+    if (info.stop && info.stop.since < earliest) earliest = info.stop.since;
     if (info.box && info.box.since < earliest) earliest = info.box.since;
     if (info.material && info.material.since < earliest) earliest = info.material.since;
     
@@ -206,6 +207,7 @@ function buildStopCallPayload(factoryId) {
         machine,
         since: earliest,
         leader: !!info.leader,
+        stop: !!info.stop,
         box: !!info.box,
         material: !!info.material,
         zairyoSebanggo: info.material ? info.material.zairyoSebanggo : undefined
@@ -320,7 +322,8 @@ function machineStateView(id, st) {
   if (!st) return { equipment: id, sebanggo: '', hinban: '', worker: '', mode: 'idle', prodAccumMs: 0, runSince: 0, modeSince: 0, totalNG: 0 };
   const mode = st.maintActive ? 'maintenance'
     : st.breakActive ? 'break'
-      : (st.sebanggo ? 'running' : 'idle');
+      : st.checkActive ? 'check'
+        : (st.sebanggo ? 'running' : 'idle');
   return {
     equipment: id,
     sebanggo: st.sebanggo || '',
@@ -330,8 +333,8 @@ function machineStateView(id, st) {
     // Production elapsed = prodAccumMs + (now - runSince) while running.
     prodAccumMs: st.prodAccumMs || 0,
     runSince: (mode === 'running') ? (st.runSince || 0) : 0,
-    // Break/maintenance elapsed = now - modeSince.
-    modeSince: (mode === 'break' || mode === 'maintenance') ? (st.modeSince || 0) : 0,
+    // Break/maintenance/check elapsed = now - modeSince.
+    modeSince: (mode === 'break' || mode === 'maintenance' || mode === 'check') ? (st.modeSince || 0) : 0,
     totalNG: st.totalNG || 0,
     deviceCount: st.activeDevices ? st.activeDevices.size : 0
   };
@@ -683,6 +686,7 @@ const handleStopCall = (req, res) => {
 
   // A tablet machine id may be grouped, e.g. "OZNC04,OZNC06" — apply to each.
   const ids = machine.split(',').map(m => m.trim()).filter(Boolean);
+  let changed = false;
   ids.forEach(id => {
     let info = machines.get(id) || {};
     
@@ -692,10 +696,14 @@ const handleStopCall = (req, res) => {
         if (callType === 'material' && req.body?.zairyoSebanggo) {
           info[callType].zairyoSebanggo = String(req.body.zairyoSebanggo).trim();
         }
+        changed = true;
       }
       machines.set(id, info);
     } else {
-      if (info[callType]) delete info[callType];
+      if (info[callType]) {
+        delete info[callType];
+        changed = true;
+      }
       
       if (Object.keys(info).length === 0) {
         machines.delete(id);
@@ -706,8 +714,10 @@ const handleStopCall = (req, res) => {
   });
 
   const payload = buildStopCallPayload(factory);
-  broadcastToFactory(factory, payload);
-  console.log(`🟥 stop-call ${action} (${callType}) for ${factory}/${ids.join(',')} → ${payload.active.length} active`);
+  if (changed) {
+    broadcastToFactory(factory, payload);
+    console.log(`🟥 stop-call ${action} (${callType}) for ${factory}/${ids.join(',')} → ${payload.active.length} active`);
+  }
   res.json({ ok: true, active: payload.active });
 };
 app.post("/api/stop-call", handleStopCall);
@@ -743,11 +753,14 @@ app.post("/api/machine-assert", (req, res) => {
       // tablet's snapshot as the source of truth.
       st = {
         sebanggo: '', hinban: '', worker: '',
-        breakActive: false, maintActive: false,
+        breakActive: false, maintActive: false, checkActive: false,
         runSince: 0, modeSince: 0, prodAccumMs: 0, updatedAt: now, lastSeen: now,
         activeDevices: new Map()
       };
-      if (mode !== 'idle' && seb) {
+      if (mode === 'check') {
+        st.checkActive = true;
+        st.modeSince = modeStartedAt || now;
+      } else if (mode !== 'idle' && seb) {
         st.sebanggo = seb; st.hinban = hinban;
         if (mode === 'break') { st.breakActive = true; st.modeSince = modeStartedAt || now; }
         else if (mode === 'maintenance') { st.maintActive = true; st.modeSince = modeStartedAt || now; }
@@ -764,10 +777,42 @@ app.post("/api/machine-assert", (req, res) => {
         st.hinban = hinban;
         st.breakActive = false;
         st.maintActive = false;
+        st.checkActive = false;
         if (mode === 'break') { st.breakActive = true; st.modeSince = modeStartedAt || now; }
         else if (mode === 'maintenance') { st.maintActive = true; st.modeSince = modeStartedAt || now; }
+        else if (mode === 'check') { st.checkActive = true; st.modeSince = modeStartedAt || now; }
         else { st.runSince = runStartedAt || now; }
         if (!updated.includes(id)) updated.push(id);
+      }
+
+      // Check mode transition
+      if (mode === 'check') {
+        if (!st.checkActive || st.modeSince !== (modeStartedAt || now)) {
+          st.checkActive = true;
+          st.breakActive = false;
+          st.maintActive = false;
+          st.modeSince = modeStartedAt || now;
+          if (!updated.includes(id)) updated.push(id);
+        }
+      } else if (st.checkActive) {
+        st.checkActive = false;
+        st.modeSince = (mode === 'break' || mode === 'maintenance') ? (modeStartedAt || now) : 0;
+        if (!updated.includes(id)) updated.push(id);
+      }
+
+      // Tablet Reload Protection: Clear ghost STOP if tablet asserts cycleStopActive is false
+      if (req.body?.cycleStopActive === false) {
+        const calls = factoryStopCalls.get(factory);
+        if (calls && calls.has(id)) {
+          const info = calls.get(id);
+          if (info && info.stop) {
+            delete info.stop;
+            if (Object.keys(info).length === 0) calls.delete(id);
+            const payload = buildStopCallPayload(factory);
+            broadcastToFactory(factory, payload);
+            console.log(`🧹 Cleared ghost STOP status for ${factory}/${id} (tablet verified cycleStopActive=false)`);
+          }
+        }
       }
 
       // Enforce the tablet's authoritative time!

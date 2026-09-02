@@ -39,9 +39,9 @@ const googleSheetLiveStatusURL = 'https://script.google.com/macros/s/AKfycbwbL30
 // Link for Rikeshi (up/down color info) - This was missing in the original, adding it here.
 const dbURL = 'https://script.google.com/macros/s/AKfycbx0qBw0_wF5X-hA2t1yY-d5h5M7Z_a8z_V9R5D6k/exec'; // Placeholder, replace with your actual URL if different.
 
-const serverURL = "https://kurachi.onrender.com";
+//const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
-//const serverURL = "http://192.168.0.39:3000";
+const serverURL = "http://192.168.0.39:3000";
 window.serverURL = serverURL;
 
 // Global variable to track if sendtoNC button has been pressed
@@ -3725,6 +3725,9 @@ window.saveChecklistDraftToStorage = async function () {
   };
 
   localStorage.setItem(key, JSON.stringify(draftData));
+  if (typeof window.assertMachineState === 'function') {
+    window.assertMachineState();
+  }
 };
 
 window.loadChecklistDraftFromStorage = async function () {
@@ -11198,11 +11201,29 @@ window.proceedFromStep0 = function () {
   if (typeof saveInputs === 'function') saveInputs();
 
   document.getElementById('step0Modal').style.display = 'none';
+  if (typeof isChecklistLocked === 'function' && isChecklistLocked()) {
+    const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+    localStorage.setItem(pfx + 'activeChecklistStart', String(Date.now()));
+    if (typeof assertMachineState === 'function') assertMachineState();
+    if (typeof window.goToChecklistTab === 'function') {
+      window.goToChecklistTab();
+      return;
+    }
+  }
   showStep1Modal();
 };
 
 window.confirmWorkerName = function () {
   document.getElementById('step0Modal').style.display = 'none';
+  if (typeof isChecklistLocked === 'function' && isChecklistLocked()) {
+    const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+    localStorage.setItem(pfx + 'activeChecklistStart', String(Date.now()));
+    if (typeof assertMachineState === 'function') assertMachineState();
+    if (typeof window.goToChecklistTab === 'function') {
+      window.goToChecklistTab();
+      return;
+    }
+  }
   showStep1Modal();
 };
 
@@ -13825,6 +13846,12 @@ if (manualSendModal) {
           return !!(window.checklistState.recordIds && (window.checklistState.recordIds[t._id] || window.checklistState.recordIds[t.name]));
         });
 
+        if (allPreDone) {
+          const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+          localStorage.removeItem(pfx + 'activeChecklistStart');
+          if (typeof assertMachineState === 'function') assertMachineState();
+        }
+
         const prevPre = window.checklistState.isPreComplete;
         const prevPost = window.checklistState.isPostComplete;
         const prevTickets = window.checklistState.hasOpenTickets;
@@ -15660,7 +15687,13 @@ if (manualSendModal) {
       window._workerConfirmResolve = null;
     }
 
-    if (!isConfirmed) {
+    if (isConfirmed) {
+      if (typeof isChecklistLocked === 'function' && isChecklistLocked()) {
+        const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+        localStorage.setItem(pfx + 'activeChecklistStart', String(Date.now()));
+        if (typeof assertMachineState === 'function') assertMachineState();
+      }
+    } else {
       if (typeof openWorkerModal === 'function') {
         openWorkerModal(0);
       }
@@ -15710,6 +15743,14 @@ if (manualSendModal) {
     // Clear IndexedDB and draft in storage
     if (typeof window.clearChecklistDraftFromStorage === 'function') {
       await window.clearChecklistDraftFromStorage();
+    }
+
+    const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+    try { localStorage.removeItem(pfx + 'activeChecklistStart'); } catch (e) { }
+
+    // Immediately release CHECK card on factory TV
+    if (typeof window.assertMachineState === 'function') {
+      window.assertMachineState();
     }
 
     // Lock checklist tab bar
@@ -15916,6 +15957,10 @@ if (manualSendModal) {
       window.checklistState.isBypassed = true;
       window.checklistState.isPreComplete = true;
 
+      const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+      localStorage.removeItem(pfx + 'activeChecklistStart');
+      if (typeof assertMachineState === 'function') assertMachineState();
+
       const bar = document.querySelector('.tab-bar');
       if (bar) bar.classList.remove('locked-checklist');
 
@@ -16121,6 +16166,9 @@ if (manualSendModal) {
         if (isSubmittingPre) {
           if (allTemplatesFinished) {
             window.checklistState.isPreComplete = true;
+            const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+            localStorage.removeItem(pfx + 'activeChecklistStart');
+            if (typeof assertMachineState === 'function') assertMachineState();
             const hasPostFields = queue.some(t => Array.isArray(t.fields) && t.fields.some(f => f.timing === 'post'));
             if (!hasPostFields) {
               window.checklistState.isPostComplete = true;
@@ -16463,12 +16511,28 @@ if (manualSendModal) {
   document.body.appendChild(stopBtn);
 
   function openCycleStopOverlay() {
+    const wasOpen = overlay.classList.contains('open');
     overlay.classList.add('open');
+    if (!wasOpen) {
+      if (typeof notifyStopCall === 'function') {
+        notifyStopCall('activate', 'stop');
+      } else if (typeof window.notifyStopCall === 'function') {
+        window.notifyStopCall('activate', 'stop');
+      }
+    }
   }
 
   function closeCycleStopOverlay() {
+    const wasOpen = overlay.classList.contains('open');
     overlay.classList.remove('open');
     isCycleStopPending = false;
+    if (wasOpen) {
+      if (typeof notifyStopCall === 'function') {
+        notifyStopCall('clear', 'stop');
+      } else if (typeof window.notifyStopCall === 'function') {
+        window.notifyStopCall('clear', 'stop');
+      }
+    }
   }
 
   // Create Full-Screen Waiting Overlay for ☕ Break Button
@@ -16630,8 +16694,17 @@ if (manualSendModal) {
         isCycleStopPending = true;
         openCycleStopOverlay();
       }
-    } else if (isCycleStopPending && !state.scheduled_cycle_stop) {
-      closeCycleStopOverlay();
+    } else {
+      if (isCycleStopPending) {
+        closeCycleStopOverlay();
+      } else {
+        // Tablet Reload Protection: Clear any ghost STOP on cloud TV if machine is not in cycle stop
+        if (typeof notifyStopCall === 'function') {
+          notifyStopCall('clear', 'stop');
+        } else if (typeof window.notifyStopCall === 'function') {
+          window.notifyStopCall('clear', 'stop');
+        }
+      }
     }
   }
 
