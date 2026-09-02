@@ -41,7 +41,7 @@ const dbURL = 'https://script.google.com/macros/s/AKfycbx0qBw0_wF5X-hA2t1yY-d5h5
 
 const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
-//const serverURL = "http://192.168.0.84:3000";
+//const serverURL = "http://192.168.0.162:3000";
 window.serverURL = serverURL;
 
 // Global variable to track if sendtoNC button has been pressed
@@ -16489,9 +16489,14 @@ if (manualSendModal) {
       const cncCancelActive = localStorage.getItem(pfx + 'activeCncCancelStart');
       const cancelOverlay = document.getElementById('cncCancelOverlay');
       if (cncCancelActive || (cancelOverlay && cancelOverlay.classList.contains('open'))) {
-        console.log("🔓 [CNC GATEKEEPER] Source of truth (Mini-PC) is unlocked -> Auto-dismissing Cancel Screen!");
+        console.log("🔓 [CNC GATEKEEPER] Source of truth (Mini-PC) is unlocked -> Auto-dismissing Cancel Screen & releasing cloud stop-call!");
         if (typeof closeCncCancelOverlay === 'function') {
           closeCncCancelOverlay();
+        }
+        if (typeof notifyStopCall === 'function') {
+          notifyStopCall('clear', 'leader');
+        } else if (typeof window.notifyStopCall === 'function') {
+          window.notifyStopCall('clear', 'leader');
         }
       }
     }
@@ -16625,6 +16630,11 @@ if (manualSendModal) {
           const breakActive = (typeof breakPrefix !== 'undefined') && localStorage.getItem(breakPrefix + 'activeBreakStart');
           if (!breakActive && typeof openCncCancelOverlay === 'function') {
             openCncCancelOverlay();
+            if (typeof notifyStopCall === 'function') {
+              notifyStopCall('activate', 'leader');
+            } else if (typeof window.notifyStopCall === 'function') {
+              window.notifyStopCall('activate', 'leader');
+            }
             if (typeof logTabletAction === 'function') {
               logTabletAction('CNC Cancel Button Detected (Mid-cut abort)', 'Alert', {
                 warning: 'Emergency physical cancel button pressed during machining',
@@ -16688,6 +16698,11 @@ if (manualSendModal) {
         closeBreakWaitOverlay();
         if (typeof closeCncCancelOverlay === 'function') {
           closeCncCancelOverlay();
+        }
+        if (typeof notifyStopCall === 'function') {
+          notifyStopCall('clear', 'leader');
+        } else if (typeof window.notifyStopCall === 'function') {
+          window.notifyStopCall('clear', 'leader');
         }
         const raw = (typeof breakPrefix !== 'undefined') && localStorage.getItem(breakPrefix + 'activeStopCallStart');
         if (raw && typeof finalizeStopCall === 'function') {

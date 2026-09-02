@@ -6310,6 +6310,7 @@
                     }).catch(() => { });
                 } catch (e) { }
             }
+            window.notifyStopCall = notifyStopCall;
 
             function tickStopCall(startEpoch) {
                 const disp = document.getElementById('stopCallTimerDisplay');
@@ -6615,6 +6616,9 @@
                     menuWrap.classList.remove('open');
                 }
                 localStorage.removeItem(breakPrefix + 'activeCncCancelStart');
+                if (typeof notifyStopCall === 'function') {
+                    notifyStopCall('clear', 'leader');
+                }
             }
 
             function tickCncCancel(startEpoch) {

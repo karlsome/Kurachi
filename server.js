@@ -656,11 +656,20 @@ app.get("/sse/factory/:factoryId", (req, res) => {
 
 // Tablet → server: a machine started or cleared a call-leader (stop) request.
 // Broadcasts the full active set to the factory TV(s) so they can rank/blink.
-app.post("/api/stop-call", (req, res) => {
-  const factory = String(req.body?.factory || '').trim();
-  const machine = String(req.body?.machine || '').trim().toUpperCase();
-  const action = String(req.body?.action || '').trim();
-  const callType = String(req.body?.callType || 'leader').trim(); // 'leader', 'box', 'material'
+const handleStopCall = (req, res) => {
+  let body = req.body;
+  if (typeof body === 'string') {
+    try { body = JSON.parse(body); } catch (_) { }
+  } else if (body && typeof body === 'object') {
+    const keys = Object.keys(body);
+    if (keys.length === 1 && keys[0].startsWith('{') && keys[0].endsWith('}')) {
+      try { body = JSON.parse(keys[0]); } catch (_) { }
+    }
+  }
+  const factory = String(body?.factory || '').trim();
+  const machine = String(body?.machine || '').trim().toUpperCase();
+  const action = String(body?.action || '').trim();
+  const callType = String(body?.callType || 'leader').trim();
 
   if (!factory || !machine) {
     return res.status(400).json({ error: "factory and machine are required" });
@@ -700,7 +709,9 @@ app.post("/api/stop-call", (req, res) => {
   broadcastToFactory(factory, payload);
   console.log(`🟥 stop-call ${action} (${callType}) for ${factory}/${ids.join(',')} → ${payload.active.length} active`);
   res.json({ ok: true, active: payload.active });
-});
+};
+app.post("/api/stop-call", handleStopCall);
+app.post("/notifyStopCall", handleStopCall);
 
 // Tablet → server: periodic state re-assert. Keeps the live machine state
 // alive (idle sweep below) and, after a server restart when memory is empty,
@@ -757,6 +768,21 @@ app.post("/api/machine-assert", (req, res) => {
         else if (mode === 'maintenance') { st.maintActive = true; st.modeSince = modeStartedAt || now; }
         else { st.runSince = runStartedAt || now; }
         if (!updated.includes(id)) updated.push(id);
+      }
+
+      // Auto-clear any stale leader call if machine is RUNNING
+      if (mode === 'running') {
+        const calls = factoryStopCalls.get(factory);
+        if (calls && calls.has(id)) {
+          const info = calls.get(id);
+          if (info && info.leader) {
+            delete info.leader;
+            if (Object.keys(info).length === 0) calls.delete(id);
+            const payload = buildStopCallPayload(factory);
+            broadcastToFactory(factory, payload);
+            console.log(`Auto-cleared stale leader stop-call for ${factory}/${id} because machine is RUNNING`);
+          }
+        }
       }
 
       // Enforce the tablet's authoritative time!
