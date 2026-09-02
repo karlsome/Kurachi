@@ -41,7 +41,7 @@ const dbURL = 'https://script.google.com/macros/s/AKfycbx0qBw0_wF5X-hA2t1yY-d5h5
 
 //const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
-const serverURL = "http://192.168.0.39:3000";
+const serverURL = "http://192.168.0.35:3000";
 window.serverURL = serverURL;
 
 // Global variable to track if sendtoNC button has been pressed
@@ -2500,8 +2500,8 @@ async function addMaterialLabelPhoto(photoDataURL, lotTarget = undefined, option
   console.log(`Compressed to: ${(blob.size / 1024).toFixed(1)} KB`);
 
   const cleanLot = lotNumber ? String(lotNumber).trim().replace(/[^a-zA-Z0-9_-]/g, '_') : '';
-  const id = cleanLot 
-    ? (isDefect ? `lot-${cleanLot}-defect-${Date.now()}` : `lot-${cleanLot}`) 
+  const id = cleanLot
+    ? (isDefect ? `lot-${cleanLot}-defect-${Date.now()}` : `lot-${cleanLot}`)
     : `material-label-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
   const timestamp = new Date().toISOString();
 
