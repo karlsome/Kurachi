@@ -42,6 +42,7 @@ const dbURL = 'https://script.google.com/macros/s/AKfycbx0qBw0_wF5X-hA2t1yY-d5h5
 //const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
 const serverURL = "http://192.168.0.39:3000";
+window.serverURL = serverURL;
 
 // Global variable to track if sendtoNC button has been pressed
 let sendtoNCButtonisPressed = false;
@@ -1348,6 +1349,11 @@ function setDefaultTime(input) {
     logTabletAction('End time set', 'in-progress', {
       endTime: timeValue
     });
+    setTimeout(() => {
+      if (typeof window.promptFinalLots === 'function') {
+        window.promptFinalLots();
+      }
+    }, 150);
   } else if (input.id.includes('break')) {
     logTabletAction(`Break time ${input.id} set`, 'in-progress', {
       breakTimeField: input.id,
@@ -8490,25 +8496,32 @@ async function sendtoNC(selectedValue) {
 
     try {
       console.log(`Sending command to mini PC: ${url}`);
-
-      const response = await fetch(url, {
-        method: 'GET',
-        mode: 'no-cors'
-      });
-
-      console.log('Command sent successfully to mini PC');
-
-    } catch (error) {
-      console.error('Failed to send command to mini PC:', error);
-
-      // Fallback: Try opening in new tab if fetch fails
-      console.log('Fetch failed, trying fallback method...');
-      const newTab = window.open(url, '_blank');
-      if (newTab) {
-        setTimeout(() => {
-          newTab.close();
-        }, 5000);
+      const response = await fetch(url);
+      const data = await response.json().catch(() => ({}));
+      console.log('Command response from mini PC:', data);
+      closeSendingToMachineIndicator();
+      hideSendToMachineProgress();
+      sendToMachineCooldownEndTime = 0;
+      updateSendToMachineCooldownUI();
+      if (response && response.ok) {
+        if (typeof showToast === 'function') {
+          showToast('✅ 送信完了 / Send to machine completed');
+        }
+        return true;
+      } else {
+        const errMsg = (data && data.error) ? data.error : 'Mini-PC returned error ' + (response ? response.status : 'unknown');
+        if (typeof showToast === 'function') {
+          showToast("❌ 送信失敗: " + errMsg, 5000);
+        }
+        throw new Error(errMsg);
       }
+    } catch (error) {
+      console.warn('Notice from send to mini PC:', error);
+      closeSendingToMachineIndicator();
+      hideSendToMachineProgress();
+      sendToMachineCooldownEndTime = 0;
+      updateSendToMachineCooldownUI();
+      throw error;
     }
   }
 }
@@ -11288,6 +11301,8 @@ function showStep3Modal() {
   if (instruction) instruction.style.display = '';
   if (arrow) arrow.style.display = '';
   if (actionButton) actionButton.style.display = '';
+  const skipBtn = document.getElementById('btnSkipStep3Send');
+  if (skipBtn) skipBtn.style.display = 'none';
 
   if (isOZMANASMachine()) {
     if (title) {
@@ -11305,7 +11320,9 @@ function showStep3Modal() {
     }
     if (instruction) instruction.textContent = 'Press this button / このボタンを押して';
     if (actionButton) {
-      actionButton.textContent = 'Send to machine';
+      actionButton.disabled = false;
+      actionButton.style.opacity = '1';
+      actionButton.textContent = 'マシンに送信 / Send to machine';
       actionButton.style.background = 'linear-gradient(135deg, #4CAF50, #45a049)';
       actionButton.style.boxShadow = '0 4px 15px rgba(76, 175, 80, 0.4)';
     }
@@ -12270,39 +12287,127 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
       return;
     }
 
-    // Close Step 3 modal immediately (sending in background)
-    document.getElementById('step3Modal').style.display = 'none';
-
     // Log send to machine action (Step 3)
     logTabletAction('Send to machine pressed (Step 3)', 'in-progress', {
       背番号: currentSebanggo,
       source: 'Step 3 Modal'
     }).catch(error => console.error('Failed to log Step 3 send to machine action:', error));
 
-    // Do NOT clear cached product details here so they survive page reloads
-    // while the product is still active on the production page.
-    // Mark workflow as complete (Step 3 send to machine pressed)
-    saveCurrentStep(0);
-    markScanWorkflowComplete();
-    if (typeof assertMachineState === 'function') assertMachineState();
     autoFillProductionStartTime();
 
-    // Navigate to params page immediately, send in background
-    if (typeof window.goToTab === 'function') window.goToTab(1);
+    const actionButton = document.getElementById('startStep3Send');
+    if (actionButton) {
+      actionButton.disabled = true;
+      actionButton.innerHTML = '<span>⏳ 送信中... / Sending to machine...</span>';
+      actionButton.style.opacity = '0.75';
+    }
 
-    // Call the sendtoNC function (sends in background with progress bar)
-    sendtoNC(currentSebanggo);
+    try {
+      // Send to NC (Mini-PC)
+      await sendtoNC(currentSebanggo);
 
-    // Lot cycle done: clear the chosen machine + cycle set so the next lot change
-    // re-prompts from scratch (grouped).
+      // Keep Step 3 button visible and show Resend button
+      if (actionButton) {
+        actionButton.disabled = false;
+        actionButton.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:6px;"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg><span>マシンに再送信 / Resend to Machine</span>';
+        actionButton.style.opacity = '1';
+        actionButton.style.background = 'linear-gradient(135deg, #2E6FF2, #1b4bb8)';
+      }
+
+      // Mark workflow as complete but KEEP Step 3 modal visible so user can resend anytime
+      markScanWorkflowComplete();
+      saveCurrentStep(3);
+      if (typeof assertMachineState === 'function') assertMachineState();
+
+      const skipBtn = document.getElementById('btnSkipStep3Send');
+      if (skipBtn) skipBtn.style.display = 'none';
+
+    } catch (sendErr) {
+      console.error("Send to machine failed:", sendErr);
+      if (actionButton) {
+        actionButton.disabled = false;
+        actionButton.innerHTML = '<span>⚠️ 送信失敗 (再送信) / Retry Send to Machine</span>';
+        actionButton.style.opacity = '1';
+        actionButton.style.background = 'linear-gradient(135deg, #e74c3c, #c0392b)';
+      }
+      const skipBtn = document.getElementById('btnSkipStep3Send');
+      if (skipBtn) {
+        skipBtn.style.display = 'block';
+      }
+      if (typeof showAlert === 'function') showAlert('送信失敗 / Send failed: ' + (sendErr.message || sendErr));
+    }
+
+    // Keep step3Modal visible
+    const s3Modal = document.getElementById('step3Modal');
+    if (s3Modal) s3Modal.style.display = 'block';
+
+    // Lot cycle done: clear chosen machine
     window.__lotScanMachine = null;
     window.__lotCycleMachinesDone = [];
 
   } catch (error) {
-    console.error("Error sending to machine:", error);
-    showAlert('送信エラー / Send error');
+    console.error("Error in Step 3 handler:", error);
+    showAlert('エラー / Error');
   }
 });
+
+// Step 3: Skip Send with Leader Authorization
+const btnSkipStep3Send = document.getElementById('btnSkipStep3Send');
+if (btnSkipStep3Send) {
+  btnSkipStep3Send.addEventListener('click', function (e) {
+    e.preventDefault();
+    if (typeof window.verifyLeaderUI === 'function') {
+      window.verifyLeaderUI(
+        (leaderInfo) => {
+          const leaderName = leaderInfo?.leaderName || leaderInfo?.username || 'Leader';
+          console.log(`✅ [Step 3 Skip] Authorized by ${leaderName}`);
+
+          const currentSebanggo = document.getElementById('sub-dropdown')?.value || '';
+          if (typeof logTabletAction === 'function') {
+            logTabletAction('Send to machine skipped (Step 3)', 'Completed', {
+              背番号: currentSebanggo,
+              authorizedBy: leaderName,
+              source: 'Step 3 Modal Skip Button'
+            }).catch(() => { });
+          }
+
+          // Mark workflow as complete and unlock navigation tabs
+          sendtoNCButtonisPressed = true;
+          try {
+            localStorage.setItem(`${uniquePrefix}sendtoNCButtonisPressed`, 'true');
+          } catch (_) { }
+          markScanWorkflowComplete();
+          saveCurrentStep(3);
+          if (typeof assertMachineState === 'function') assertMachineState();
+          if (typeof updateTabLock === 'function') updateTabLock();
+          if (typeof window.updateTabLock === 'function') window.updateTabLock();
+
+          // Update action button UI
+          const actionButton = document.getElementById('startStep3Send');
+          if (actionButton) {
+            actionButton.disabled = false;
+            actionButton.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:6px;"><path d="M5 12h14M12 5l7 7-7 7"/></svg><span>⏭️ スキップ済み (${leaderName} 承認) / Skipped (Resend Available)</span>`;
+            actionButton.style.opacity = '1';
+            actionButton.style.background = 'linear-gradient(135deg, #10b981, #059669)';
+          }
+
+          // Hide skip button
+          btnSkipStep3Send.style.display = 'none';
+
+          if (typeof showToast === 'function') {
+            showToast(`✅ ${leaderName} の承認によりスキップしました / Skipped with leader approval`);
+          } else if (typeof showAlert === 'function') {
+            showAlert(`✅ ${leaderName} の承認によりスキップしました / Skipped with leader approval`);
+          }
+        },
+        'リーダー承認 (送信スキップ) / Leader Skip Approval',
+        'マシンへのデータ送信をスキップして作業を続行するにはリーダーQRをスキャンしてください<br>Scan leader QR to skip send to machine and proceed'
+      );
+    } else {
+      console.warn("verifyLeaderUI not available");
+    }
+  });
+}
 
 // Reset buttons
 // Shared confirmation for destructive reset / new-scan actions: these clear
@@ -12728,7 +12833,13 @@ if (manualSendModal) {
   const LOTS_KEY = PFX + 'lotsByMachine';
 
   let lotsByMachine = {};
-  try { lotsByMachine = JSON.parse(localStorage.getItem(LOTS_KEY) || '{}') || {}; } catch (e) { lotsByMachine = {}; }
+  function refreshLots() {
+    try {
+      const stored = JSON.parse(localStorage.getItem(LOTS_KEY) || '{}');
+      if (stored && typeof stored === 'object') lotsByMachine = stored;
+    } catch (e) { }
+  }
+  refreshLots();
   function save() { try { localStorage.setItem(LOTS_KEY, JSON.stringify(lotsByMachine)); } catch (e) { } }
 
   const round1 = n => Math.round(n * 10) / 10;
@@ -12775,7 +12886,7 @@ if (manualSendModal) {
     for (let i = list.length - 1; i >= 0; i--) if (list[i].open) return list[i];
     return null;
   }
-  function allRecords() { return Object.keys(lotsByMachine).reduce((a, k) => a.concat(lotsByMachine[k]), []); }
+  function allRecords() { refreshLots(); return Object.keys(lotsByMachine).reduce((a, k) => a.concat(lotsByMachine[k]), []); }
   function totalShots() { return allRecords().reduce((s, r) => s + (parseInt(r.shots, 10) || 0), 0); }
 
   function updateShotTotalField() {
@@ -12966,7 +13077,36 @@ if (manualSendModal) {
 
   // Collect ショット数 for each still-open lot or lot with missing shots.
   function promptFinalLots() {
-    const open = allRecords().filter(r => r.open || r.shots == null || r.shots === '');
+    if (document.getElementById('lpModal')) return; // Already showing prompt
+    refreshLots();
+    let open = allRecords().filter(r => r.open || r.shots == null || r.shots === '');
+
+    if (!open.length) {
+      const currentShotVal = document.getElementById('shot')?.value || '';
+      const mName = (typeof getMachineName === 'function' ? getMachineName() : '')
+        || (document.getElementById('process') ? document.getElementById('process').value : '')
+        || 'UNKNOWN';
+      const mLots = (typeof materialLots !== 'undefined' && Array.isArray(materialLots) && materialLots.length > 0)
+        ? materialLots.map(l => (typeof l === 'object' ? l.lotNumber : l)).filter(Boolean)
+        : [];
+
+      if (allRecords().length === 0) {
+        if (mLots.length > 0) {
+          mLots.forEach(l => recordLotScan(l, mName, 'auto'));
+        } else {
+          const defLot = document.getElementById('lot-number')?.value || '---';
+          recordLotScan(defLot, mName, 'auto');
+        }
+        open = allRecords().filter(r => r.open || r.shots == null || r.shots === '');
+      } else if (!currentShotVal || currentShotVal === '0') {
+        const all = allRecords();
+        if (all.length > 0) {
+          all[all.length - 1].open = true;
+          open = [all[all.length - 1]];
+        }
+      }
+    }
+
     if (!open.length) return;
     let i = 0;
     const next = () => {
@@ -13016,14 +13156,14 @@ if (manualSendModal) {
   });
 
   /* ---------- Public hooks ---------- */
-  window.verifyLeaderUI = function (onVerified) {
-    const srvURL = () => (typeof serverURL !== 'undefined' && serverURL) ? serverURL : '';
+  window.verifyLeaderUI = function (onVerified, customTitle, customSubtitle) {
+    const srvURL = () => (typeof serverURL !== 'undefined' && serverURL) ? serverURL : (window.serverURL || (window.location.protocol + '//' + window.location.hostname + ':3000'));
     const modal = document.createElement('div');
     modal.style.cssText = 'display:flex; position:fixed; inset:0; background:rgba(0,0,0,0.85); z-index:100300; justify-content:center; align-items:center;';
     modal.innerHTML =
       '<div style="background:#fff; padding:24px; border-radius:14px; max-width:360px; width:92%; text-align:center;">' +
-      '<h3 style="margin:0 0 6px;">リーダー認証 / Leader Verification</h3>' +
-      '<p style="margin:0 0 12px; font-size:0.85rem; color:#666;">ショット数を編集するにはリーダーQRをスキャン<br>Scan leader QR to edit shots</p>' +
+      `<h3 style="margin:0 0 6px;">${customTitle || 'リーダー認証 / Leader Verification'}</h3>` +
+      `<p style="margin:0 0 12px; font-size:0.85rem; color:#666;">${customSubtitle || 'ショット数を編集するにはリーダーQRをスキャン<br>Scan leader QR to edit shots'}</p>` +
       '<div id="shotLeaderQr" style="width:100%; aspect-ratio:1; max-width:280px; margin:0 auto; border-radius:10px; overflow:hidden; background:#000;"></div>' +
       '<p id="shotLeaderStatus" style="margin:12px 0; font-size:0.85rem; color:#2d5f4f; min-height:18px;">リーダーのQRコードをスキャンしてください</p>' +
       '<button id="shotLeaderCancel" style="width:100%; padding:12px; font-size:15px; background:#f44336; color:#fff; border:none; border-radius:8px; cursor:pointer;">キャンセル / Cancel</button>' +
@@ -13058,9 +13198,11 @@ if (manualSendModal) {
           });
           const result = await resp.json();
           if (result.authorized) {
+            const leaderName = (((result.lastName || '') + ' ' + (result.firstName || '')) || result.username || decodedText).trim();
+            result.leaderName = leaderName;
             statusEl.style.color = '#006400';
-            statusEl.innerHTML = `✅ 認証成功！ / Verified!`;
-            closeScanner(() => { removeModal(); if (onVerified) onVerified(); });
+            statusEl.innerHTML = `✅ 認証成功！ / Verified: ${leaderName}`;
+            closeScanner(() => { removeModal(); if (onVerified) onVerified(result); });
           } else {
             processing = false;
             statusEl.style.color = '#cc0000';
@@ -13237,7 +13379,10 @@ if (manualSendModal) {
 
   // Final/open lot capture when End Time is entered.
   const endTimeEl = document.getElementById('End Time');
-  if (endTimeEl) endTimeEl.addEventListener('change', function () { if (endTimeEl.value) promptFinalLots(); });
+  if (endTimeEl) {
+    endTimeEl.addEventListener('change', function () { if (endTimeEl.value) promptFinalLots(); });
+    endTimeEl.addEventListener('input', function () { if (endTimeEl.value) promptFinalLots(); });
+  }
 
   // Reflect any persisted lots into the (hidden) #shot total on load.
   updateShotTotalField();
@@ -16186,5 +16331,617 @@ if (manualSendModal) {
         window.initChecklistsForMachine(selectedFactory, selectedMachine);
       }
     }, 500);
+  });
+})();
+
+// ============================================================================
+// CNC GATEKEEPER SSE CLIENT: DEDICATED PREEMPTIVE BREAK & DEDICATED CYCLE STOP
+// ============================================================================
+(function initCNCGatekeeperClient() {
+  let cncEventSource = null;
+  let isBreakScheduledPending = false;
+  let isCycleStopPending = false;
+  let lastHeartbeatTime = Date.now();
+
+  function getCNCMiniPCIP() {
+    if (typeof groupedMachineIPs !== 'undefined' && typeof primaryMachineName !== 'undefined' && groupedMachineIPs[primaryMachineName]) {
+      return groupedMachineIPs[primaryMachineName];
+    }
+    const ipInput = document.getElementById('ipInfo');
+    if (ipInput && ipInput.value) {
+      const first = ipInput.value.split(',')[0].replace(/"/g, '').trim();
+      if (first) return first;
+    }
+    return null;
+  }
+
+  // Inject Styles for Floating Cancel Button and Modal
+  const style = document.createElement('style');
+  style.textContent = `
+    .cnc-cycle-stop-btn {
+      transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease !important;
+    }
+    .cnc-cycle-stop-btn:active {
+      transform: scale(0.92) !important;
+    }
+    .cnc-cycle-stop-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.85);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      z-index: 100200;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      animation: cncFadeIn 0.25s ease-out;
+    }
+    .cnc-cycle-stop-overlay.open {
+      display: flex;
+    }
+    @keyframes cncFadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    .cnc-stop-modal {
+      background: linear-gradient(145deg, #1e293b, #0f172a);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 24px;
+      padding: 40px 36px;
+      max-width: 460px;
+      width: 90%;
+      box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.7);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+    }
+    .cnc-stop-icon-pulse {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      background: rgba(239, 68, 68, 0.15);
+      border: 2px solid rgba(239, 68, 68, 0.4);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2.2rem;
+      margin-bottom: 20px;
+      animation: cncPulse 1.8s ease-in-out infinite;
+    }
+    @keyframes cncPulse {
+      0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+      50% { transform: scale(1.08); box-shadow: 0 0 0 16px rgba(239, 68, 68, 0); }
+    }
+    .cnc-stop-modal h2 {
+      margin: 0 0 10px 0;
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: #f8fafc;
+      letter-spacing: -0.02em;
+    }
+    .cnc-stop-modal .cnc-stop-sub {
+      margin: 0 0 24px 0;
+      font-size: 0.95rem;
+      color: #94a3b8;
+      line-height: 1.5;
+    }
+    .cnc-stop-spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid rgba(255, 255, 255, 0.15);
+      border-top-color: #ef4444;
+      border-radius: 50%;
+      animation: cncSpin 0.9s linear infinite;
+      margin-bottom: 24px;
+    }
+    @keyframes cncSpin {
+      to { transform: rotate(360deg); }
+    }
+    .btn-cancel-cycle-stop {
+      background: rgba(255, 255, 255, 0.08);
+      color: #cbd5e1;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 12px;
+      padding: 12px 28px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .btn-cancel-cycle-stop:hover {
+      background: rgba(255, 255, 255, 0.16);
+      color: #fff;
+    }
+  `;
+  document.head.appendChild(style);
+
+  // Create Full-Screen Waiting Overlay for 🛑 Floating Button
+  const overlay = document.createElement('div');
+  overlay.id = 'cncCycleStopOverlay';
+  overlay.className = 'cnc-cycle-stop-overlay';
+  overlay.innerHTML = `
+    <div class="cnc-stop-modal">
+      <div class="cnc-stop-icon-pulse">🛑</div>
+      <h2>サイクル完了待ち</h2>
+      <p class="cnc-stop-sub">
+        現在の加工が完了し、材料送りが終わった時点で自動停止します。<br>
+        <span style="font-size: 0.85rem; color: #64748b;">(Stopping after current cut & material feed...)</span>
+      </p>
+      <div class="cnc-stop-spinner"></div>
+      <button type="button" class="btn-cancel-cycle-stop" id="btnCancelCycleStop">
+        停止を取り消す / Resume
+      </button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  // Create 4th Floating CANCEL Button (🛑)
+  const stopBtn = document.createElement('button');
+  stopBtn.id = 'cncCycleStopBtn';
+  stopBtn.type = 'button';
+  stopBtn.className = 'video-manual-launcher pdf-page-btn cnc-cycle-stop-btn';
+  stopBtn.style.bottom = 'calc(max(12px, env(safe-area-inset-bottom)) + 180px)';
+  stopBtn.innerHTML = '<span class="video-manual-launcher__icon">🛑</span>';
+  stopBtn.setAttribute('title', 'サイクル完了後に停止 / Stop after cycle');
+  document.body.appendChild(stopBtn);
+
+  function openCycleStopOverlay() {
+    overlay.classList.add('open');
+  }
+
+  function closeCycleStopOverlay() {
+    overlay.classList.remove('open');
+    isCycleStopPending = false;
+  }
+
+  // Create Full-Screen Waiting Overlay for ☕ Break Button
+  const breakWaitOverlay = document.createElement('div');
+  breakWaitOverlay.id = 'cncBreakWaitOverlay';
+  breakWaitOverlay.className = 'cnc-cycle-stop-overlay';
+  breakWaitOverlay.innerHTML = `
+    <div class="cnc-stop-modal">
+      <div class="cnc-stop-icon-pulse" style="background: rgba(245, 158, 11, 0.15); border-color: rgba(245, 158, 11, 0.3);">☕</div>
+      <h2>休憩待ち (サイクル完了後)</h2>
+      <p class="cnc-stop-sub">
+        現在の加工と材料送りが完了した時点で、機械を自動停止して休憩を開始します。<br>
+        <span style="font-size: 0.85rem; color: #64748b;">(Stopping cleanly after cycle before break timer starts...)</span>
+      </p>
+      <div class="cnc-stop-spinner" style="border-top-color: #f59e0b;"></div>
+      <button type="button" class="btn-cancel-cycle-stop" id="btnCancelBreakWait">
+        休憩を取り消す / Cancel
+      </button>
+    </div>
+  `;
+  document.body.appendChild(breakWaitOverlay);
+
+  function openBreakWaitOverlay() {
+    breakWaitOverlay.classList.add('open');
+    isBreakScheduledPending = true;
+    const startBtn = document.getElementById('breakStartButton');
+    if (startBtn) {
+      startBtn.innerHTML = '<span>⏳ サイクル完了後に休憩停止します...</span>';
+      startBtn.style.background = '#F59E0B';
+    }
+  }
+
+  function closeBreakWaitOverlay() {
+    breakWaitOverlay.classList.remove('open');
+    isBreakScheduledPending = false;
+    resetBreakStartButtonUI();
+  }
+
+  // Handle Cancel Button on Break Wait Overlay (User changes mind)
+  document.getElementById('btnCancelBreakWait')?.addEventListener('click', async () => {
+    const ip = getCNCMiniPCIP();
+    if (ip) {
+      try {
+        await fetch(`http://${ip}:5000/cancel_scheduled_break`, { method: 'POST' });
+      } catch (_) {
+        try { await fetch(`http://${ip}:8766/cancel_scheduled_break`, { method: 'POST' }); } catch (_) { }
+      }
+    }
+    closeBreakWaitOverlay();
+    if (typeof showToast === 'function') {
+      showToast("休憩リクエストを取り消しました / Resumed normal operation");
+    }
+  });
+
+  // Handle Cancel Button on Overlay (User changes mind on 🛑)
+  document.getElementById('btnCancelCycleStop')?.addEventListener('click', async () => {
+    const ip = getCNCMiniPCIP();
+    if (ip) {
+      try {
+        await fetch(`http://${ip}:5000/cancel_scheduled_cycle_stop`, { method: 'POST' });
+      } catch (_) {
+        try { await fetch(`http://${ip}:8766/cancel_scheduled_cycle_stop`, { method: 'POST' }); } catch (_) { }
+      }
+    }
+    closeCycleStopOverlay();
+    if (typeof showToast === 'function') {
+      showToast("停止リクエストを取り消しました / Resumed normal operation");
+    }
+  });
+
+  // Handle Floating 🛑 Button Click -> Dedicated /schedule_cycle_stop
+  stopBtn.addEventListener('click', async () => {
+    const ip = getCNCMiniPCIP();
+    isCycleStopPending = true;
+    openCycleStopOverlay();
+
+    if (ip) {
+      try {
+        const res = await fetch(`http://${ip}:5000/schedule_cycle_stop`, { method: 'POST' });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const data = await res.json();
+        console.log("🛑 Scheduled cycle stop response:", data);
+      } catch (err) {
+        try {
+          const res = await fetch(`http://${ip}:8766/schedule_cycle_stop`, { method: 'POST' });
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          const data = await res.json();
+          console.log("🛑 Scheduled cycle stop response (:8766):", data);
+        } catch (e) {
+          console.warn("Legacy Mini-PC or offline:", e);
+          closeCycleStopOverlay();
+          if (typeof showToast === 'function') {
+            showToast("⚠️ マシンがサイクル停止機能に対応していません / Mini-PC does not support cycle stop");
+          }
+        }
+      }
+    }
+  });
+
+  // ==========================================================================
+  // STATE RECONCILER (Guarantees Sync on Reload, Wake, or Stale SSE)
+  // ==========================================================================
+  function syncGatekeeperState(state) {
+    if (!state) return;
+    lastHeartbeatTime = Date.now();
+
+    // 1. Emergency cancel detected / Machine in hold -> Enforce Dedicated CNC Cancel Screen
+    if (state.holding && state.hold_reason === 'MANUAL_CANCEL') {
+      const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+      const cancelOverlay = document.getElementById('cncCancelOverlay');
+      const isAlreadyOpen = cancelOverlay && cancelOverlay.classList.contains('open');
+      const breakActive = localStorage.getItem(pfx + 'activeBreakStart');
+      const cncCancelActive = localStorage.getItem(pfx + 'activeCncCancelStart');
+
+      if (!breakActive && !isAlreadyOpen && typeof openCncCancelOverlay === 'function') {
+        console.warn("🚨 [CNC GATEKEEPER] Machine is locked in MANUAL_CANCEL -> Asserting Dedicated Cancel Screen!");
+        const startEpoch = cncCancelActive ? parseInt(cncCancelActive, 10) : Date.now();
+        openCncCancelOverlay(startEpoch);
+      }
+    } else {
+      // FAILSAFE: If Mini-PC is UNLOCKED or restarted (e.g. 'U' key pressed in terminal or service restarted)
+      const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+      const cncCancelActive = localStorage.getItem(pfx + 'activeCncCancelStart');
+      const cancelOverlay = document.getElementById('cncCancelOverlay');
+      if (cncCancelActive || (cancelOverlay && cancelOverlay.classList.contains('open'))) {
+        console.log("🔓 [CNC GATEKEEPER] Source of truth (Mini-PC) is unlocked -> Auto-dismissing Cancel Screen & releasing cloud stop-call!");
+        if (typeof closeCncCancelOverlay === 'function') {
+          closeCncCancelOverlay();
+        }
+        if (typeof notifyStopCall === 'function') {
+          notifyStopCall('clear', 'leader');
+        } else if (typeof window.notifyStopCall === 'function') {
+          window.notifyStopCall('clear', 'leader');
+        }
+      }
+    }
+
+    // 2. Preemptive break scheduled status for Breaktime Button
+    if (state.scheduled_break_stop) {
+      if (!isBreakScheduledPending) {
+        openBreakWaitOverlay();
+      }
+    } else if (isBreakScheduledPending && !state.scheduled_break_stop) {
+      closeBreakWaitOverlay();
+    }
+
+    if (state.holding && state.hold_reason === 'BREAK') {
+      closeBreakWaitOverlay();
+      const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+      const breakActive = localStorage.getItem(pfx + 'activeBreakStart');
+      if (!breakActive && typeof startBreak === 'function') {
+        startBreak();
+      }
+    }
+
+    // 3. Preemptive cycle stop scheduled status for 🛑 Button
+    if (state.scheduled_cycle_stop) {
+      if (!isCycleStopPending) {
+        isCycleStopPending = true;
+        openCycleStopOverlay();
+      }
+    } else if (isCycleStopPending && !state.scheduled_cycle_stop) {
+      closeCycleStopOverlay();
+    }
+  }
+
+  // REST State Fetcher
+  async function pollGatekeeperState() {
+    const ip = getCNCMiniPCIP();
+    if (!ip) return;
+    try {
+      const res = await fetch(`http://${ip}:5000/state`, { cache: 'no-store' });
+      if (res.ok) {
+        const state = await res.json();
+        syncGatekeeperState(state);
+        return;
+      }
+    } catch (_) {
+      try {
+        const res = await fetch(`http://${ip}:8766/state`, { cache: 'no-store' });
+        if (res.ok) {
+          const state = await res.json();
+          syncGatekeeperState(state);
+        }
+      } catch (_) { }
+    }
+  }
+
+  // ==========================================================================
+  // SSE CONNECTION & EVENT HANDLERS
+  // ==========================================================================
+  function connectCNCGatekeeperSSE() {
+    const ip = getCNCMiniPCIP();
+    if (!ip) {
+      setTimeout(connectCNCGatekeeperSSE, 3000);
+      return;
+    }
+    if (cncEventSource) {
+      try { cncEventSource.close(); } catch (_) { }
+    }
+
+    pollGatekeeperState();
+
+    try {
+      console.log(`🔌 [CNC GATEKEEPER] Connecting to SSE at http://${ip}:5000/events...`);
+      cncEventSource = new EventSource(`http://${ip}:5000/events`);
+
+      cncEventSource.addEventListener('status', (e) => {
+        try {
+          const data = JSON.parse(e.data || '{}');
+          syncGatekeeperState(data);
+        } catch (err) {
+          console.error("Error parsing status event:", err);
+        }
+      });
+
+      // 0. Restart blocked while locked (Break or Emergency Cancel)
+      cncEventSource.addEventListener('restart_blocked', (e) => {
+        try {
+          const data = JSON.parse(e.data || '{}');
+          console.warn('⛔ [CNC GATEKEEPER] Restart blocked:', data);
+          if (data.hold_reason === 'BREAK') {
+            if (typeof showToast === 'function') {
+              showToast("☕ 休憩中です。タブレットで「休憩を終了」を押してください / On Break - Finish break on tablet to resume");
+            }
+          } else {
+            if (typeof logTabletAction === 'function') {
+              logTabletAction('CNC Resume Attempt Blocked (Unauthorized restart)', 'Blocked', {
+                attemptNumber: data.repause_count,
+                warning: 'Operator attempted to restart machine while gatekeeper was locked',
+                holdReason: data.hold_reason || 'MANUAL_CANCEL'
+              });
+            }
+            if (typeof showToast === 'function') {
+              showToast(`⛔ 再開不可 / Restart blocked (Attempt #${data.repause_count}) - Leader required`);
+            }
+          }
+        } catch (err) {
+          console.error('Error logging restart_blocked:', err);
+        }
+      });
+
+      // 0.5. Safe start abort within 4-second grace window (no leader required)
+      cncEventSource.addEventListener('start_aborted', (e) => {
+        try {
+          const data = JSON.parse(e.data || '{}');
+          console.log("⚠️ [CNC GATEKEEPER] Start aborted within grace window:", data);
+          closeCycleStopOverlay();
+          if (typeof closeCncCancelOverlay === 'function') closeCncCancelOverlay();
+          if (typeof showToast === 'function') {
+            showToast("⚠️ 開始直後の取消 (セットやり直し可) / Start cancelled before cut - Ready to restart");
+          }
+        } catch (err) {
+          console.error("Error parsing start_aborted event:", err);
+        }
+      });
+
+      // 1. Emergency cancel detected during cutting/drag -> Trigger Dedicated CNC Cancel screen
+      cncEventSource.addEventListener('cancel_detected', (e) => {
+        try {
+          const data = JSON.parse(e.data || '{}');
+          console.log("🚨 [CNC GATEKEEPER] Cancel detected:", data);
+          closeCycleStopOverlay();
+          const breakActive = (typeof breakPrefix !== 'undefined') && localStorage.getItem(breakPrefix + 'activeBreakStart');
+          if (!breakActive && typeof openCncCancelOverlay === 'function') {
+            openCncCancelOverlay();
+            if (typeof notifyStopCall === 'function') {
+              notifyStopCall('activate', 'leader');
+            } else if (typeof window.notifyStopCall === 'function') {
+              window.notifyStopCall('activate', 'leader');
+            }
+            if (typeof logTabletAction === 'function') {
+              logTabletAction('CNC Cancel Button Detected (Mid-cut abort)', 'Alert', {
+                warning: 'Emergency physical cancel button pressed during machining',
+                holdReason: 'MANUAL_CANCEL'
+              });
+            }
+          }
+        } catch (err) {
+          console.error("Error parsing cancel_detected event:", err);
+        }
+      });
+
+      // 2. Preemptive Drag Phase for Break
+      cncEventSource.addEventListener('break_drag_phase', (e) => {
+        console.log("⏳ [CNC GATEKEEPER] Current cycle finished, feeding material before break...");
+        if (typeof showToast === 'function') {
+          showToast("⏳ サイクル完了。材料送り後に休憩に入ります...");
+        }
+      });
+
+      // 3. Preemptive Drag Phase for Cycle Stop (🛑)
+      cncEventSource.addEventListener('cycle_stop_drag_phase', (e) => {
+        console.log("⏳ [CNC GATEKEEPER] Current cycle finished, feeding material before stop...");
+        if (typeof showToast === 'function') {
+          showToast("⏳ サイクル完了。材料送り後に停止します...");
+        }
+      });
+
+      // 4. Preemptive Break Stop Completed -> Start Break Screen!
+      cncEventSource.addEventListener('break_stop_completed', (e) => {
+        console.log("☕ [CNC GATEKEEPER] Break stop executed cleanly.");
+        closeBreakWaitOverlay();
+        const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+        const breakActive = localStorage.getItem(pfx + 'activeBreakStart');
+        if (!breakActive && typeof startBreak === 'function') {
+          startBreak();
+          if (typeof showToast === 'function') {
+            showToast("☕ 休憩を開始しました (機械停止中) / Break started");
+          }
+        }
+      });
+
+      cncEventSource.addEventListener('break_stop_cancelled', (e) => {
+        console.log("☕ [CNC GATEKEEPER] Break scheduled stop cancelled.");
+        closeBreakWaitOverlay();
+      });
+
+      // 5. Preemptive Cycle Stop Completed -> Close Modal!
+      cncEventSource.addEventListener('cycle_stop_completed', (e) => {
+        console.log("🛑 [CNC GATEKEEPER] Cycle stop executed cleanly.");
+        closeCycleStopOverlay();
+        if (typeof showToast === 'function') {
+          showToast("✅ サイクル完了停止しました (材料送り完了) / Machine stopped cleanly");
+        }
+      });
+
+      // 6. Gatekeeper Unlocked
+      cncEventSource.addEventListener('unlocked', (e) => {
+        console.log("🔓 [CNC GATEKEEPER] Unlocked:", e.data);
+        closeCycleStopOverlay();
+        closeBreakWaitOverlay();
+        if (typeof closeCncCancelOverlay === 'function') {
+          closeCncCancelOverlay();
+        }
+        if (typeof notifyStopCall === 'function') {
+          notifyStopCall('clear', 'leader');
+        } else if (typeof window.notifyStopCall === 'function') {
+          window.notifyStopCall('clear', 'leader');
+        }
+        const raw = (typeof breakPrefix !== 'undefined') && localStorage.getItem(breakPrefix + 'activeStopCallStart');
+        if (raw && typeof finalizeStopCall === 'function') {
+          finalizeStopCall();
+        } else if (typeof closeStopCallOverlay === 'function') {
+          closeStopCallOverlay();
+        }
+      });
+
+      cncEventSource.onerror = () => {
+        if (cncEventSource) {
+          try { cncEventSource.close(); } catch (_) { }
+          cncEventSource = null;
+        }
+        setTimeout(connectCNCGatekeeperSSE, 4000);
+      };
+    } catch (err) {
+      console.error("Failed to establish CNC Gatekeeper SSE connection:", err);
+      setTimeout(connectCNCGatekeeperSSE, 5000);
+    }
+  }
+
+  function resetBreakStartButtonUI() {
+    const startBtn = document.getElementById('breakStartButton');
+    if (startBtn) {
+      startBtn.innerHTML = '<span data-i18n="break_start_btn">休憩を開始</span>';
+      startBtn.style.background = '';
+    }
+  }
+
+  // Handle Main Break Button Click -> Dedicated /schedule_break_stop
+  async function handleBreakStartButtonClick(e) {
+    if (e) {
+      e.preventDefault();
+      if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+    }
+
+    const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+    const breakActive = localStorage.getItem(pfx + 'activeBreakStart');
+    if (breakActive) {
+      if (typeof openBreakOverlay === 'function') openBreakOverlay(parseInt(breakActive, 10));
+      return;
+    }
+
+    const ip = getCNCMiniPCIP();
+    if (!ip) {
+      if (typeof startBreak === 'function') startBreak();
+      return;
+    }
+
+    openBreakWaitOverlay();
+
+    try {
+      const res = await fetch(`http://${ip}:5000/schedule_break_stop`, { method: 'POST' });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const data = await res.json();
+      if (!data.scheduled) throw new Error("Not scheduled");
+      console.log("☕ Scheduled break stop response:", data);
+    } catch (err) {
+      try {
+        const res = await fetch(`http://${ip}:8766/schedule_break_stop`, { method: 'POST' });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const data = await res.json();
+        if (!data.scheduled) throw new Error("Not scheduled");
+        console.log("☕ Scheduled break stop response (:8766):", data);
+      } catch (e) {
+        console.warn("Legacy Mini-PC (no schedule_break_stop) or offline. Starting local break immediately:", e);
+        closeBreakWaitOverlay();
+        if (typeof startBreak === 'function') startBreak();
+      }
+    }
+  }
+  window.handleBreakStartButtonClick = handleBreakStartButtonClick;
+
+  window.unlockCNCGatekeeper = function () {
+    const ip = getCNCMiniPCIP();
+    if (ip) {
+      fetch(`http://${ip}:5000/unlock`, { method: 'POST' })
+        .then(r => r.json())
+        .then(d => console.log("✅ CNC Gatekeeper unlocked response:", d))
+        .catch(() => {
+          fetch(`http://${ip}:8766/unlock`, { method: 'POST' }).catch(() => { });
+        });
+    }
+  };
+
+  // Watchdog & Wake Listeners
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      console.log("📱 [CNC GATEKEEPER] Tablet woke up / became visible. Re-checking state...");
+      pollGatekeeperState();
+      if (!cncEventSource || cncEventSource.readyState === EventSource.CLOSED) {
+        connectCNCGatekeeperSSE();
+      }
+    }
+  });
+
+  window.addEventListener('focus', () => {
+    pollGatekeeperState();
+  });
+
+  setInterval(pollGatekeeperState, 5000);
+
+  document.addEventListener('DOMContentLoaded', () => {
+    connectCNCGatekeeperSSE();
+    const startBtn = document.getElementById('breakStartButton');
+    if (startBtn) {
+      startBtn.addEventListener('click', handleBreakStartButtonClick, true);
+    }
   });
 })();
