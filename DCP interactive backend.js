@@ -16366,6 +16366,58 @@ if (manualSendModal) {
     isCycleStopPending = false;
   }
 
+  // Create Full-Screen Waiting Overlay for ☕ Break Button
+  const breakWaitOverlay = document.createElement('div');
+  breakWaitOverlay.id = 'cncBreakWaitOverlay';
+  breakWaitOverlay.className = 'cnc-cycle-stop-overlay';
+  breakWaitOverlay.innerHTML = `
+    <div class="cnc-stop-modal">
+      <div class="cnc-stop-icon-pulse" style="background: rgba(245, 158, 11, 0.15); border-color: rgba(245, 158, 11, 0.3);">☕</div>
+      <h2>休憩待ち (サイクル完了後)</h2>
+      <p class="cnc-stop-sub">
+        現在の加工と材料送りが完了した時点で、機械を自動停止して休憩を開始します。<br>
+        <span style="font-size: 0.85rem; color: #64748b;">(Stopping cleanly after cycle before break timer starts...)</span>
+      </p>
+      <div class="cnc-stop-spinner" style="border-top-color: #f59e0b;"></div>
+      <button type="button" class="btn-cancel-cycle-stop" id="btnCancelBreakWait">
+        休憩を取り消す / Cancel
+      </button>
+    </div>
+  `;
+  document.body.appendChild(breakWaitOverlay);
+
+  function openBreakWaitOverlay() {
+    breakWaitOverlay.classList.add('open');
+    isBreakScheduledPending = true;
+    const startBtn = document.getElementById('breakStartButton');
+    if (startBtn) {
+      startBtn.innerHTML = '<span>⏳ サイクル完了後に休憩停止します...</span>';
+      startBtn.style.background = '#F59E0B';
+    }
+  }
+
+  function closeBreakWaitOverlay() {
+    breakWaitOverlay.classList.remove('open');
+    isBreakScheduledPending = false;
+    resetBreakStartButtonUI();
+  }
+
+  // Handle Cancel Button on Break Wait Overlay (User changes mind)
+  document.getElementById('btnCancelBreakWait')?.addEventListener('click', async () => {
+    const ip = getCNCMiniPCIP();
+    if (ip) {
+      try {
+        await fetch(`http://${ip}:5000/cancel_scheduled_break`, { method: 'POST' });
+      } catch (_) {
+        try { await fetch(`http://${ip}:8766/cancel_scheduled_break`, { method: 'POST' }); } catch (_) { }
+      }
+    }
+    closeBreakWaitOverlay();
+    if (typeof showToast === 'function') {
+      showToast("休憩リクエストを取り消しました / Resumed normal operation");
+    }
+  });
+
   // Handle Cancel Button on Overlay (User changes mind on 🛑)
   document.getElementById('btnCancelCycleStop')?.addEventListener('click', async () => {
     const ip = getCNCMiniPCIP();
@@ -16440,14 +16492,20 @@ if (manualSendModal) {
 
     // 2. Preemptive break scheduled status for Breaktime Button
     if (state.scheduled_break_stop) {
-      const startBtn = document.getElementById('breakStartButton');
-      if (startBtn && !isBreakScheduledPending) {
-        isBreakScheduledPending = true;
-        startBtn.innerHTML = '<span>⏳ サイクル完了後に休憩停止します...</span>';
-        startBtn.style.background = '#F59E0B';
+      if (!isBreakScheduledPending) {
+        openBreakWaitOverlay();
       }
-    } else if (!isBreakScheduledPending) {
-      resetBreakStartButtonUI();
+    } else if (isBreakScheduledPending && !state.scheduled_break_stop) {
+      closeBreakWaitOverlay();
+    }
+
+    if (state.holding && state.hold_reason === 'BREAK') {
+      closeBreakWaitOverlay();
+      const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+      const breakActive = localStorage.getItem(pfx + 'activeBreakStart');
+      if (!breakActive && typeof startBreak === 'function') {
+        startBreak();
+      }
     }
 
     // 3. Preemptive cycle stop scheduled status for 🛑 Button
@@ -16592,15 +16650,20 @@ if (manualSendModal) {
       // 4. Preemptive Break Stop Completed -> Start Break Screen!
       cncEventSource.addEventListener('break_stop_completed', (e) => {
         console.log("☕ [CNC GATEKEEPER] Break stop executed cleanly.");
-        isBreakScheduledPending = false;
-        resetBreakStartButtonUI();
-        const breakActive = (typeof breakPrefix !== 'undefined') && localStorage.getItem(breakPrefix + 'activeBreakStart');
+        closeBreakWaitOverlay();
+        const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+        const breakActive = localStorage.getItem(pfx + 'activeBreakStart');
         if (!breakActive && typeof startBreak === 'function') {
           startBreak();
           if (typeof showToast === 'function') {
             showToast("☕ 休憩を開始しました (機械停止中) / Break started");
           }
         }
+      });
+
+      cncEventSource.addEventListener('break_stop_cancelled', (e) => {
+        console.log("☕ [CNC GATEKEEPER] Break scheduled stop cancelled.");
+        closeBreakWaitOverlay();
       });
 
       // 5. Preemptive Cycle Stop Completed -> Close Modal!
@@ -16616,8 +16679,7 @@ if (manualSendModal) {
       cncEventSource.addEventListener('unlocked', (e) => {
         console.log("🔓 [CNC GATEKEEPER] Unlocked:", e.data);
         closeCycleStopOverlay();
-        isBreakScheduledPending = false;
-        resetBreakStartButtonUI();
+        closeBreakWaitOverlay();
         if (typeof closeCncCancelOverlay === 'function') {
           closeCncCancelOverlay();
         }
@@ -16652,29 +16714,43 @@ if (manualSendModal) {
 
   // Handle Main Break Button Click -> Dedicated /schedule_break_stop
   async function handleBreakStartButtonClick(e) {
+    if (e) {
+      e.preventDefault();
+      if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+    }
+
+    const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+    const breakActive = localStorage.getItem(pfx + 'activeBreakStart');
+    if (breakActive) {
+      if (typeof openBreakOverlay === 'function') openBreakOverlay(parseInt(breakActive, 10));
+      return;
+    }
+
     const ip = getCNCMiniPCIP();
-    if (ip && !isBreakScheduledPending) {
+    if (!ip) {
+      if (typeof startBreak === 'function') startBreak();
+      return;
+    }
+
+    openBreakWaitOverlay();
+
+    try {
+      const res = await fetch(`http://${ip}:5000/schedule_break_stop`, { method: 'POST' });
+      const data = await res.json();
+      console.log("☕ Scheduled break stop response:", data);
+    } catch (err) {
       try {
-        const res = await fetch(`http://${ip}:5000/schedule_break_stop`, { method: 'POST' });
+        const res = await fetch(`http://${ip}:8766/schedule_break_stop`, { method: 'POST' });
         const data = await res.json();
-        if (data.scheduled) {
-          isBreakScheduledPending = true;
-          const startBtn = document.getElementById('breakStartButton');
-          if (startBtn) {
-            startBtn.innerHTML = '<span>⏳ サイクル完了後に休憩停止します...</span>';
-            startBtn.style.background = '#F59E0B';
-          }
-          if (typeof showToast === 'function') {
-            showToast("⏳ このサイクル完了後に自動停止して休憩に入ります / Stopping after cycle...");
-          }
-          if (e && e.stopImmediatePropagation) e.stopImmediatePropagation();
-          return;
-        }
-      } catch (err) {
-        console.warn("Gatekeeper offline, proceeding with local break:", err);
+        console.log("☕ Scheduled break stop response (:8766):", data);
+      } catch (e) {
+        console.warn("Mini-PC offline, proceeding with local break immediately:", e);
+        closeBreakWaitOverlay();
+        if (typeof startBreak === 'function') startBreak();
       }
     }
   }
+  window.handleBreakStartButtonClick = handleBreakStartButtonClick;
 
   window.unlockCNCGatekeeper = function () {
     const ip = getCNCMiniPCIP();

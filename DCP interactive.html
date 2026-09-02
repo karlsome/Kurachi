@@ -6106,6 +6106,7 @@
                 openBreakOverlay(startEpoch);
                 if (typeof logTabletAction === 'function') logTabletAction('Break started', 'in-progress', {});
             }
+            window.startBreak = startBreak;
             function finishBreak() {
                 const raw = localStorage.getItem(breakPrefix + 'activeBreakStart');
                 clearInterval(breakInterval);
@@ -7273,7 +7274,15 @@
                 // Break timer
                 const startBtn = document.getElementById('breakStartButton');
                 const finishBtn = document.getElementById('finishBreakButton');
-                if (startBtn) startBtn.addEventListener('click', startBreak);
+                if (startBtn) {
+                    startBtn.addEventListener('click', (e) => {
+                        if (typeof window.handleBreakStartButtonClick === 'function') {
+                            window.handleBreakStartButtonClick(e);
+                        } else {
+                            startBreak();
+                        }
+                    });
+                }
                 if (finishBtn) finishBtn.addEventListener('click', finishBreak);
                 updateBreakCount();
                 renderBreakList();
