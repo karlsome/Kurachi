@@ -6922,11 +6922,21 @@
                     console.log(`[assertMachineState] workflowDone=${workflowDone} -> Final 背番号="${背番号}", 品番="${品番}"`);
                     const breakStart = parseInt(localStorage.getItem(breakPrefix + 'activeBreakStart') || '0', 10);
                     const maintStart = parseInt(localStorage.getItem(breakPrefix + 'activeMaintStart') || '0', 10);
+                    const stopCallStart = parseInt(localStorage.getItem(breakPrefix + 'activeStopCallStart') || '0', 10);
+                    const cncCancelStart = parseInt(localStorage.getItem(breakPrefix + 'activeCncCancelStart') || '0', 10);
 
                     let mode = 'idle', modeStartedAt = 0;
                     if (maintStart) { mode = 'maintenance'; modeStartedAt = maintStart; }
                     else if (breakStart) { mode = 'break'; modeStartedAt = breakStart; }
+                    else if (stopCallStart || cncCancelStart) { mode = 'stopcall'; modeStartedAt = stopCallStart || cncCancelStart; }
                     else if (背番号) { mode = 'running'; }
+
+                    // If a leader stop-call is active, keep it asserted so cloud TV never drops until leader QR scan
+                    if (stopCallStart) {
+                        notifyStopCall('activate', 'leader', stopCallPickedMachine || null);
+                    } else if (cncCancelStart) {
+                        notifyStopCall('activate', 'leader');
+                    }
 
                     // Use actual Start Time if available so TV monitor accurately matches elapsed time
                     let prodStart = 0;

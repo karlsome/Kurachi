@@ -770,21 +770,6 @@ app.post("/api/machine-assert", (req, res) => {
         if (!updated.includes(id)) updated.push(id);
       }
 
-      // Auto-clear any stale leader call if machine is RUNNING
-      if (mode === 'running') {
-        const calls = factoryStopCalls.get(factory);
-        if (calls && calls.has(id)) {
-          const info = calls.get(id);
-          if (info && info.leader) {
-            delete info.leader;
-            if (Object.keys(info).length === 0) calls.delete(id);
-            const payload = buildStopCallPayload(factory);
-            broadcastToFactory(factory, payload);
-            console.log(`Auto-cleared stale leader stop-call for ${factory}/${id} because machine is RUNNING`);
-          }
-        }
-      }
-
       // Enforce the tablet's authoritative time!
       // The tablet sends runStartedAt adjusted exactly for all breaks and maintenance.
       if (mode === 'running' && runStartedAt > 0) {
