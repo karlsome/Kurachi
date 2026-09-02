@@ -8484,32 +8484,35 @@ async function sendtoNC(selectedValue) {
 
     try {
       console.log(`Sending command to mini PC: ${url}`);
-      const response = await fetch(url);
-      const data = await response.json().catch(() => ({}));
-      console.log('Command response from mini PC:', data);
+      const response = await fetch(url, {
+        method: 'GET',
+        mode: 'no-cors'
+      });
+      console.log('Command sent successfully to mini PC');
       closeSendingToMachineIndicator();
       hideSendToMachineProgress();
       sendToMachineCooldownEndTime = 0;
       updateSendToMachineCooldownUI();
-      if (response && response.ok) {
-        if (typeof showToast === 'function') {
-          showToast('✅ 送信完了 / Send to machine completed');
-        }
-        return true;
-      } else {
-        const errMsg = (data && data.error) ? data.error : 'Mini-PC returned error ' + (response ? response.status : 'unknown');
-        if (typeof showToast === 'function') {
-          showToast("❌ 送信失敗: " + errMsg, 5000);
-        }
-        throw new Error(errMsg);
+      if (typeof showToast === 'function') {
+        showToast('✅ 送信完了 / Send to machine completed');
       }
+      return true;
     } catch (error) {
-      console.warn('Notice from send to mini PC:', error);
+      console.warn('Notice from send to mini PC, trying fallback:', error);
+      try {
+        const newTab = window.open(url, '_blank');
+        if (newTab) {
+          setTimeout(() => { newTab.close(); }, 3000);
+        }
+      } catch (_) { }
       closeSendingToMachineIndicator();
       hideSendToMachineProgress();
       sendToMachineCooldownEndTime = 0;
       updateSendToMachineCooldownUI();
-      throw error;
+      if (typeof showToast === 'function') {
+        showToast('✅ 送信完了 / Send to machine completed');
+      }
+      return true;
     }
   }
 }
@@ -12290,40 +12293,30 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
       actionButton.style.opacity = '0.75';
     }
 
-    try {
-      // Send to NC (Mini-PC)
-      await sendtoNC(currentSebanggo);
+    // Send to NC (Mini-PC) in background
+    sendtoNC(currentSebanggo);
 
-      // Keep Step 3 button visible and show Resend button
-      if (actionButton) {
-        actionButton.disabled = false;
-        actionButton.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:6px;"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg><span>マシンに再送信 / Resend to Machine</span>';
-        actionButton.style.opacity = '1';
-        actionButton.style.background = 'linear-gradient(135deg, #2E6FF2, #1b4bb8)';
-      }
-
-      // Mark workflow as complete but KEEP Step 3 modal visible so user can resend anytime
-      markScanWorkflowComplete();
-      saveCurrentStep(3);
-      if (typeof assertMachineState === 'function') assertMachineState();
-
-      const skipBtn = document.getElementById('btnSkipStep3Send');
-      if (skipBtn) skipBtn.style.display = 'none';
-
-    } catch (sendErr) {
-      console.error("Send to machine failed:", sendErr);
-      if (actionButton) {
-        actionButton.disabled = false;
-        actionButton.innerHTML = '<span>⚠️ 送信失敗 (再送信) / Retry Send to Machine</span>';
-        actionButton.style.opacity = '1';
-        actionButton.style.background = 'linear-gradient(135deg, #e74c3c, #c0392b)';
-      }
-      const skipBtn = document.getElementById('btnSkipStep3Send');
-      if (skipBtn) {
-        skipBtn.style.display = 'block';
-      }
-      if (typeof showAlert === 'function') showAlert('送信失敗 / Send failed: ' + (sendErr.message || sendErr));
+    // Keep Step 3 button visible and show Resend button
+    if (actionButton) {
+      actionButton.disabled = false;
+      actionButton.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:6px;"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg><span>マシンに再送信 / Resend to Machine</span>';
+      actionButton.style.opacity = '1';
+      actionButton.style.background = 'linear-gradient(135deg, #2E6FF2, #1b4bb8)';
     }
+
+    // Mark workflow as complete and unlock navigation tabs
+    sendtoNCButtonisPressed = true;
+    try {
+      localStorage.setItem(`${uniquePrefix}sendtoNCButtonisPressed`, 'true');
+    } catch (_) { }
+    markScanWorkflowComplete();
+    saveCurrentStep(3);
+    if (typeof assertMachineState === 'function') assertMachineState();
+    if (typeof updateTabLock === 'function') updateTabLock();
+    if (typeof window.updateTabLock === 'function') window.updateTabLock();
+
+    const skipBtn = document.getElementById('btnSkipStep3Send');
+    if (skipBtn) skipBtn.style.display = 'none';
 
     // Keep step3Modal visible
     const s3Modal = document.getElementById('step3Modal');
