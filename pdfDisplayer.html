@@ -1360,6 +1360,281 @@
         let isShowingAllEquipment = false;
         let isPlanLoading = false;
 
+        function getInitialLanguage() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const fromUrl = urlParams.get('lang');
+            if (fromUrl && ['ja', 'en', 'pt'].includes(fromUrl.toLowerCase())) {
+                return fromUrl.toLowerCase();
+            }
+            return localStorage.getItem('appLanguage') || 'ja';
+        }
+
+        const PLAN_I18N = {
+            ja: {
+                machineLabel: 'Machine / マシン',
+                statusLabel: 'Status / ステータス',
+                factoryLabel: 'Factory / 工場',
+                dateLabel: 'Date / 日付',
+                modeLabel: 'Display Mode / 表示モード',
+                modeWaiting: '📋 生産計画 (待機中)',
+                connecting: '接続中...',
+                connected: '接続済み',
+                disconnected: '切断',
+                drawingLabel: '図番 / Drawing Number',
+                serialLabel: '背番号 / Serial Number',
+                partLabel: '品番 / Part Number',
+                scanTimeLabel: 'スキャン時間 / Scan Time',
+                
+                // Badges
+                badgeActive: '🎯 現在作業中 (NOW ACTIVE)',
+                badgeCompleted: '✅ 完了',
+                badgeInProgress: '🔄 進行中',
+                badgeScheduled: '⏳ 予定',
+                badgePending: '⏳ 未着手',
+
+                // Pills & Units
+                targetEq: '対象設備:',
+                allEq: '全設備',
+                plannedItems: '予定品目:',
+                factoryTotal: '工場全体:',
+                totalBoxes: '総箱数:',
+                totalQty: '総数量:',
+                itemsUnit: '件',
+                boxesUnit: '箱',
+                pcsUnit: '個',
+                showAllEq: '全設備表示',
+                onlyThisEq: 'のみ表示',
+
+                totalLots: '総ロット:',
+                totalRolls: '総巻数:',
+                totalMeters: '総メーター:',
+                rollsUnit: '巻',
+                metersUnit: 'm',
+                completedCount: '完了:',
+                inProgressCount: '進行中:',
+                pendingCount: '未着手:',
+
+                // Headers
+                thStatus: '状態',
+                thStartTime: '予定開始',
+                thEquipment: '設備',
+                thSebanggo: '背番号',
+                thHinban: '品番',
+                thHinmei: '品名',
+                thQuantity: '計画数量',
+                thEstTime: '所要時間 (サイクル)',
+
+                thTime: '時間',
+                thZuban: '図番',
+                thHinmeiKizai: '品名・基材',
+                thColor: '色',
+                thRollsMeters: '巻数 / M数',
+                thWorker: '作業者',
+                thRollBreakdown: '巻内訳',
+
+                // Empty states
+                emptyOtherFactory: (id, date) => `本日 (${date}) の [${id}] の生産予定はありません`,
+                emptyOtherFactorySub: (count) => count > 0 ? `※ 工場全体では本日 ${count} 件の他設備計画があります。` : '本日はまだ生産計画が登録されていないか、休日です。',
+                btnShowAllPlans: (count) => `全設備の計画 (${count}件) を表示する`,
+                emptyFirstFactory: (id, date) => `本日 (${date}) の [${id}] の生産予定/実績はありません`,
+                emptyFirstFactorySub: 'タブレット日報からの登録をご確認ください。',
+
+                // Footer & Carousel
+                footerIdle: 'バーコードまたはQRコードをスキャンすると、作業指示書(PDF)が表示されます',
+                footerCarousel: (curr, total) => `📄 作業指示書(PDF)に戻るには「次へ」またはキーを押してください (ページ ${curr} / ${total})`,
+                planPageName: '📋 本日の生産計画 (Production Plan)',
+                planLoading: '生産計画を読み込み中...',
+                planLoadingSub: 'サーバーと通信しています'
+            },
+            en: {
+                machineLabel: 'Machine',
+                statusLabel: 'Status',
+                factoryLabel: 'Factory',
+                dateLabel: 'Date',
+                modeLabel: 'Display Mode',
+                modeWaiting: '📋 Production Plan (Idle)',
+                connecting: 'Connecting...',
+                connected: 'Connected',
+                disconnected: 'Disconnected',
+                drawingLabel: 'Drawing #',
+                serialLabel: 'Serial # (背番号)',
+                partLabel: 'Part Number (品番)',
+                scanTimeLabel: 'Scan Time',
+                
+                // Badges
+                badgeActive: '🎯 NOW ACTIVE',
+                badgeCompleted: '✅ Completed',
+                badgeInProgress: '🔄 In Progress',
+                badgeScheduled: '⏳ Scheduled',
+                badgePending: '⏳ Pending',
+
+                // Pills & Units
+                targetEq: 'Target Machine:',
+                allEq: 'All Machines',
+                plannedItems: 'Planned Items:',
+                factoryTotal: 'Factory Total:',
+                totalBoxes: 'Total Boxes:',
+                totalQty: 'Total Qty:',
+                itemsUnit: 'items',
+                boxesUnit: 'boxes',
+                pcsUnit: 'pcs',
+                showAllEq: 'Show All',
+                onlyThisEq: 'Only',
+
+                totalLots: 'Total Lots:',
+                totalRolls: 'Total Rolls:',
+                totalMeters: 'Total Meters:',
+                rollsUnit: 'rolls',
+                metersUnit: 'm',
+                completedCount: 'Completed:',
+                inProgressCount: 'In Progress:',
+                pendingCount: 'Pending:',
+
+                // Headers
+                thStatus: 'Status',
+                thStartTime: 'Scheduled Start',
+                thEquipment: 'Equipment',
+                thSebanggo: 'Serial #',
+                thHinban: 'Part #',
+                thHinmei: 'Part Name',
+                thQuantity: 'Planned Qty',
+                thEstTime: 'Est. Time (Cycle)',
+
+                thTime: 'Time',
+                thZuban: 'Drawing #',
+                thHinmeiKizai: 'Part Name / Material',
+                thColor: 'Color',
+                thRollsMeters: 'Rolls / Meters',
+                thWorker: 'Operator',
+                thRollBreakdown: 'Roll Breakdown',
+
+                // Empty states
+                emptyOtherFactory: (id, date) => `No production plan scheduled for [${id}] today (${date})`,
+                emptyOtherFactorySub: (count) => count > 0 ? `※ There are ${count} items scheduled for other machines in the factory today.` : 'No production plans registered today or holiday.',
+                btnShowAllPlans: (count) => `Show all factory plans (${count} items)`,
+                emptyFirstFactory: (id, date) => `No production records or plan for [${id}] today (${date})`,
+                emptyFirstFactorySub: 'Please register production from the tablet daily report.',
+
+                // Footer & Carousel
+                footerIdle: 'Scan a barcode or QR code to display work instruction PDFs',
+                footerCarousel: (curr, total) => `📄 Press "Next" or any key to return to PDFs (Page ${curr} / ${total})`,
+                planPageName: '📋 Today\'s Production Plan',
+                planLoading: 'Loading Production Plan...',
+                planLoadingSub: 'Communicating with server...'
+            },
+            pt: {
+                machineLabel: 'Máquina',
+                statusLabel: 'Status',
+                factoryLabel: 'Fábrica',
+                dateLabel: 'Data',
+                modeLabel: 'Modo de Exibição',
+                modeWaiting: '📋 Plano de Produção (Ocioso)',
+                connecting: 'Conectando...',
+                connected: 'Conectado',
+                disconnected: 'Desconectado',
+                drawingLabel: 'Nº do Desenho',
+                serialLabel: 'Nº de Série (背番号)',
+                partLabel: 'Nº da Peça (品番)',
+                scanTimeLabel: 'Hora do Scan',
+                
+                // Badges
+                badgeActive: '🎯 TRABALHANDO AGORA',
+                badgeCompleted: '✅ Concluído',
+                badgeInProgress: '🔄 Em Andamento',
+                badgeScheduled: '⏳ Agendado',
+                badgePending: '⏳ Pendente',
+
+                // Pills & Units
+                targetEq: 'Máquina Alvo:',
+                allEq: 'Todas as Máquinas',
+                plannedItems: 'Itens Planejados:',
+                factoryTotal: 'Total da Fábrica:',
+                totalBoxes: 'Total de Caixas:',
+                totalQty: 'Qtd Total:',
+                itemsUnit: 'itens',
+                boxesUnit: 'cx',
+                pcsUnit: 'un',
+                showAllEq: 'Mostrar Todas',
+                onlyThisEq: 'Apenas',
+
+                totalLots: 'Total de Lotes:',
+                totalRolls: 'Total de Rolos:',
+                totalMeters: 'Metros Totais:',
+                rollsUnit: 'rolos',
+                metersUnit: 'm',
+                completedCount: 'Concluído:',
+                inProgressCount: 'Em Andamento:',
+                pendingCount: 'Pendente:',
+
+                // Headers
+                thStatus: 'Status',
+                thStartTime: 'Início Previsto',
+                thEquipment: 'Equipamento',
+                thSebanggo: 'Nº de Série',
+                thHinban: 'Nº da Peça',
+                thHinmei: 'Nome da Peça',
+                thQuantity: 'Qtd Planejada',
+                thEstTime: 'Tempo Est. (Ciclo)',
+
+                thTime: 'Hora',
+                thZuban: 'Nº do Desenho',
+                thHinmeiKizai: 'Nome / Material',
+                thColor: 'Cor',
+                thRollsMeters: 'Rolos / Metros',
+                thWorker: 'Operador',
+                thRollBreakdown: 'Detalhes dos Rolos',
+
+                // Empty states
+                emptyOtherFactory: (id, date) => `Nenhum plano de produção para [${id}] hoje (${date})`,
+                emptyOtherFactorySub: (count) => count > 0 ? `※ Existem ${count} itens agendados para outras máquinas na fábrica hoje.` : 'Nenhum plano registrado para hoje ou feriado.',
+                btnShowAllPlans: (count) => `Mostrar todos os planos da fábrica (${count} itens)`,
+                emptyFirstFactory: (id, date) => `Nenhum registro de produção para [${id}] hoje (${date})`,
+                emptyFirstFactorySub: 'Por favor, registre a produção no relatório diário do tablet.',
+
+                // Footer & Carousel
+                footerIdle: 'Escaneie um código de barras ou QR code para exibir as instruções em PDF',
+                footerCarousel: (curr, total) => `📄 Pressione "Avançar" ou qualquer tecla para voltar aos PDFs (Página ${curr} / ${total})`,
+                planPageName: '📋 Plano de Produção de Hoje',
+                planLoading: 'Carregando Plano de Produção...',
+                planLoadingSub: 'Comunicando com o servidor...'
+            }
+        };
+
+        let currentLanguage = getInitialLanguage();
+
+        function t(key, ...args) {
+            const langObj = PLAN_I18N[currentLanguage] || PLAN_I18N.ja;
+            const val = langObj[key] !== undefined ? langObj[key] : (PLAN_I18N.ja[key] || key);
+            if (typeof val === 'function') {
+                return val(...args);
+            }
+            return val;
+        }
+
+        function setAppLanguage(newLang) {
+            if (!newLang || !PLAN_I18N[newLang]) return;
+            if (currentLanguage === newLang) return;
+            console.log(`🌐 Displayer language switched from "${currentLanguage}" to "${newLang}"`);
+            currentLanguage = newLang;
+            try {
+                localStorage.setItem('appLanguage', newLang);
+            } catch (_) {}
+
+            // Re-render UI elements
+            if (!window.currentSebanggo && !window.currentZuban) {
+                initializeWaitingCards();
+            } else {
+                renderActiveProductCards(false);
+            }
+            renderProductionPlanView();
+            if (Array.isArray(pdfPages)) {
+                const planPage = pdfPages.find(p => p.type === 'production_plan');
+                if (planPage) {
+                    planPage.name = t('planPageName');
+                }
+            }
+        }
+
         const manualMediaStage = document.getElementById('manualMediaStage');
         const manualProjectViewport = document.getElementById('manualProjectViewport');
         const manualProjectStage = document.getElementById('manualProjectStage');
@@ -1902,34 +2177,88 @@
             const todayStr = getTodayDateString();
             productInfo.innerHTML = `
                 <div class="info-card">
-                    <div class="info-label">Machine / マシン</div>
+                    <div class="info-label">${t('machineLabel')}</div>
                     <div class="info-value">${MACHINE_ID}</div>
                 </div>
                 <div class="info-card">
-                    <div class="info-label">Status / ステータス</div>
-                    <div class="info-value" id="statusValue"><span class="status-dot" id="statusDot"></span>接続中...</div>
+                    <div class="info-label">${t('statusLabel')}</div>
+                    <div class="info-value" id="statusValue"><span class="status-dot" id="statusDot"></span>${t('connecting')}</div>
                 </div>
                 <div class="info-card">
-                    <div class="info-label">Factory / 工場</div>
-                    <div class="info-value" id="factoryValue">${CURRENT_FACTORY || '取得中...'}</div>
+                    <div class="info-label">${t('factoryLabel')}</div>
+                    <div class="info-value" id="factoryValue">${CURRENT_FACTORY || '...'}</div>
                 </div>
                 <div class="info-card">
-                    <div class="info-label">Date / 日付</div>
+                    <div class="info-label">${t('dateLabel')}</div>
                     <div class="info-value" id="headerDateValue">${todayStr}</div>
                 </div>
                 <div class="info-card">
-                    <div class="info-label">Display Mode / 表示モード</div>
-                    <div class="info-value" id="displayModeValue" style="color: #1d4ed8;">📋 生産計画 (待機中)</div>
+                    <div class="info-label">${t('modeLabel')}</div>
+                    <div class="info-value" id="displayModeValue" style="color: #1d4ed8;">${t('modeWaiting')}</div>
                 </div>
             `;
             productInfo.classList.add('expanded');
         }
 
+        function renderActiveProductCards(isBurst = false) {
+            const formattedTime = window.lastScanTime ? new Date(window.lastScanTime).toLocaleString(
+                currentLanguage === 'ja' ? 'ja-JP' : (currentLanguage === 'pt' ? 'pt-BR' : 'en-US'), {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            }) : '-';
+
+            const burstClass = isBurst ? ' burst' : '';
+            if (isBurst) {
+                productInfo.classList.remove('expanded');
+            }
+
+            productInfo.innerHTML = `
+                <div class="info-card${burstClass}">
+                    <div class="info-label">${t('machineLabel')}</div>
+                    <div class="info-value">${MACHINE_ID || '-'}</div>
+                </div>
+                <div class="info-card${burstClass}">
+                    <div class="info-label">${t('statusLabel')}</div>
+                    <div class="info-value" id="statusValue"><span class="status-dot connected" id="statusDot"></span>${t('connected')}</div>
+                </div>
+                <div class="info-card${burstClass}">
+                    <div class="info-label">${window.currentZuban ? t('drawingLabel') : t('serialLabel')}</div>
+                    <div class="info-value">${window.currentZuban || window.currentSebanggo || '-'}</div>
+                </div>
+                <div class="info-card${burstClass}">
+                    <div class="info-label">${t('partLabel')}</div>
+                    <div class="info-value">${window.currentHinban || '-'}</div>
+                </div>
+                <div class="info-card${burstClass}">
+                    <div class="info-label">${t('scanTimeLabel')}</div>
+                    <div class="info-value">${formattedTime}</div>
+                </div>
+            `;
+
+            if (isBurst) {
+                setTimeout(() => {
+                    productInfo.classList.add('expanded');
+                    const statusDot = document.getElementById('statusDot');
+                    if (statusDot) {
+                        statusDot.classList.add('connected');
+                        statusDot.classList.remove('disconnected');
+                    }
+                }, 50);
+            } else {
+                productInfo.classList.add('expanded');
+            }
+        }
+
         function updateStatusCard(status) {
             const statusDot = document.getElementById('statusDot');
             const statusValue = document.getElementById('statusValue');
+            const isConnected = status === '接続済み' || status === t('connected') || status === 'Connected' || status === 'Conectado';
             if (statusDot) {
-                if (status === '接続済み') {
+                if (isConnected) {
                     statusDot.classList.add('connected');
                     statusDot.classList.remove('disconnected');
                 } else {
@@ -1940,10 +2269,9 @@
             if (statusValue) {
                 const dotHTML = statusDot ? '<span class="status-dot" id="statusDot"></span>' : '';
                 statusValue.innerHTML = dotHTML + status;
-                // Reapply classes if we just recreated the dot
                 if (statusDot) {
                     const newDot = document.getElementById('statusDot');
-                    if (status === '接続済み') {
+                    if (isConnected) {
                         newDot.classList.add('connected');
                     } else {
                         newDot.classList.add('disconnected');
@@ -2001,8 +2329,8 @@
                 planTableContainer.innerHTML = `
                     <div class="plan-empty-state">
                         <div class="plan-empty-icon">⏳</div>
-                        <div class="plan-empty-title">生産計画を読み込み中...</div>
-                        <div class="plan-empty-sub">サーバーと通信しています</div>
+                        <div class="plan-empty-title">${t('planLoading')}</div>
+                        <div class="plan-empty-sub">${t('planLoadingSub')}</div>
                     </div>
                 `;
             }
@@ -2122,9 +2450,9 @@
             // Update footer text depending on whether scan is active
             if (planFooterText) {
                 if (window.currentSebanggo || window.currentZuban) {
-                    planFooterText.innerHTML = `📄 作業指示書(PDF)に戻るには「次へ」またはキーを押してください (ページ ${currentPDFIndex + 1} / ${pdfPages.length})`;
+                    planFooterText.innerHTML = t('footerCarousel', currentPDFIndex + 1, pdfPages.length);
                 } else {
-                    planFooterText.innerHTML = `バーコードまたはQRコードをスキャンすると、作業指示書(PDF)が表示されます`;
+                    planFooterText.innerHTML = t('footerIdle');
                 }
             }
 
@@ -2155,12 +2483,12 @@
 
             if (planStatPills) {
                 planStatPills.innerHTML = `
-                    <span class="stat-pill">総ロット: <strong>${totalBatches}</strong> 件</span>
-                    <span class="stat-pill">総巻数: <strong>${totalRolls}</strong> 巻</span>
-                    <span class="stat-pill">総メーター: <strong>${totalMeters.toLocaleString()}</strong> m</span>
-                    <span class="stat-pill" style="color: #15803d; border-color: #bbf7d0;">完了: <strong>${completedCount}</strong></span>
-                    ${inProgressCount > 0 ? `<span class="stat-pill" style="color: #1d4ed8; border-color: #bfdbfe;">進行中: <strong>${inProgressCount}</strong></span>` : ''}
-                    <span class="stat-pill" style="color: #64748b;">未着手: <strong>${pendingCount}</strong></span>
+                    <span class="stat-pill">${t('totalLots')} <strong>${totalBatches}</strong></span>
+                    <span class="stat-pill">${t('totalRolls')} <strong>${totalRolls}</strong> ${t('rollsUnit')}</span>
+                    <span class="stat-pill">${t('totalMeters')} <strong>${totalMeters.toLocaleString()}</strong> ${t('metersUnit')}</span>
+                    <span class="stat-pill" style="color: #15803d; border-color: #bbf7d0;">${t('completedCount')} <strong>${completedCount}</strong></span>
+                    ${inProgressCount > 0 ? `<span class="stat-pill" style="color: #1d4ed8; border-color: #bfdbfe;">${t('inProgressCount')} <strong>${inProgressCount}</strong></span>` : ''}
+                    <span class="stat-pill" style="color: #64748b;">${t('pendingCount')} <strong>${pendingCount}</strong></span>
                 `;
             }
 
@@ -2168,8 +2496,8 @@
                 planTableContainer.innerHTML = `
                     <div class="plan-empty-state">
                         <div class="plan-empty-icon">📅</div>
-                        <div class="plan-empty-title">本日 (${date}) の [${escapeManualHtml(MACHINE_ID)}] の生産予定/実績はありません</div>
-                        <div class="plan-empty-sub">タブレット日報からの登録をご確認ください。</div>
+                        <div class="plan-empty-title">${t('emptyFirstFactory', escapeManualHtml(MACHINE_ID), date)}</div>
+                        <div class="plan-empty-sub">${t('emptyFirstFactorySub')}</div>
                     </div>
                 `;
                 return;
@@ -2184,13 +2512,13 @@
 
                 let statusBadge;
                 if (isCurrentScanned) {
-                    statusBadge = `<span class="badge-status-active">🎯 現在作業中 (NOW ACTIVE)</span>`;
+                    statusBadge = `<span class="badge-status-active">${t('badgeActive')}</span>`;
                 } else if (record.status === 'completed') {
-                    statusBadge = `<span class="badge-status-completed">✅ 完了</span>`;
+                    statusBadge = `<span class="badge-status-completed">${t('badgeCompleted')}</span>`;
                 } else if (record.status === 'in_progress') {
-                    statusBadge = `<span class="badge-status-inprogress">🔄 進行中</span>`;
+                    statusBadge = `<span class="badge-status-inprogress">${t('badgeInProgress')}</span>`;
                 } else {
-                    statusBadge = `<span class="badge-status-pending">⏳ 未着手</span>`;
+                    statusBadge = `<span class="badge-status-pending">${t('badgePending')}</span>`;
                 }
 
                 const startTime = record.actualStartTime || (record.items?.[0]?.startTime || '--:--');
@@ -2217,7 +2545,7 @@
                         </td>
                         <td><span class="badge-color">${escapeManualHtml(record.color || '-')}</span></td>
                         <td style="white-space: nowrap;">
-                            <strong>${record.totalRolls || 0}</strong> 巻 / <strong>${(record.totalMeters || 0).toLocaleString()}</strong> m
+                            <strong>${record.totalRolls || 0}</strong> ${t('rollsUnit')} / <strong>${(record.totalMeters || 0).toLocaleString()}</strong> ${t('metersUnit')}
                         </td>
                         <td><span style="font-weight: 600; color: #334155;">${escapeManualHtml(record.worker || '-')}</span></td>
                         <td><div style="display: flex; flex-wrap: wrap; max-width: 260px;">${rollChipsHtml}</div></td>
@@ -2230,15 +2558,15 @@
                     <thead>
                         <tr>
                             <th style="width: 40px; text-align: center;">#</th>
-                            <th style="width: 140px;">状態</th>
-                            <th style="width: 120px;">時間</th>
-                            <th style="width: 90px;">図番</th>
-                            <th style="width: 180px;">品番</th>
-                            <th>品名・基材</th>
-                            <th style="width: 80px;">色</th>
-                            <th style="width: 130px;">巻数 / M数</th>
-                            <th style="width: 90px;">作業者</th>
-                            <th style="width: 220px;">巻内訳</th>
+                            <th style="width: 140px;">${t('thStatus')}</th>
+                            <th style="width: 120px;">${t('thTime')}</th>
+                            <th style="width: 90px;">${t('thZuban')}</th>
+                            <th style="width: 180px;">${t('thHinban')}</th>
+                            <th>${t('thHinmeiKizai')}</th>
+                            <th style="width: 80px;">${t('thColor')}</th>
+                            <th style="width: 130px;">${t('thRollsMeters')}</th>
+                            <th style="width: 90px;">${t('thWorker')}</th>
+                            <th style="width: 220px;">${t('thRollBreakdown')}</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -2268,13 +2596,19 @@
             });
 
             if (planStatPills) {
+                const targetText = isShowingAllEquipment ? t('allEq') : escapeManualHtml(MACHINE_ID);
+                const toggleText = isShowingAllEquipment ? `[${escapeManualHtml(MACHINE_ID)}] ${t('onlyThisEq')}` : t('showAllEq');
+                const diffNotice = !isShowingAllEquipment && allProducts.length !== displayList.length 
+                    ? `(${t('factoryTotal')} ${allProducts.length}${t('itemsUnit')})` 
+                    : '';
+
                 planStatPills.innerHTML = `
-                    <span class="stat-pill">対象設備: <strong style="color: #0369a1;">${isShowingAllEquipment ? '全設備' : escapeManualHtml(MACHINE_ID)}</strong></span>
-                    <span class="stat-pill">予定品目: <strong>${displayList.length}</strong> 件 ${!isShowingAllEquipment && allProducts.length !== displayList.length ? `(工場全体: ${allProducts.length}件)` : ''}</span>
-                    <span class="stat-pill">総箱数: <strong>${totalBoxes.toLocaleString()}</strong> 箱</span>
-                    <span class="stat-pill">総数量: <strong>${totalQty.toLocaleString()}</strong> 個</span>
+                    <span class="stat-pill">${t('targetEq')} <strong style="color: #0369a1;">${targetText}</strong></span>
+                    <span class="stat-pill">${t('plannedItems')} <strong>${displayList.length}</strong> ${t('itemsUnit')} ${diffNotice}</span>
+                    <span class="stat-pill">${t('totalBoxes')} <strong>${totalBoxes.toLocaleString()}</strong> ${t('boxesUnit')}</span>
+                    <span class="stat-pill">${t('totalQty')} <strong>${totalQty.toLocaleString()}</strong> ${t('pcsUnit')}</span>
                     ${allProducts.length > 0 ? `
-                        <button class="plan-btn-small" style="background: #6366f1; padding: 3px 10px; font-size: 0.8em; margin-left: 8px; cursor: pointer;" onclick="toggleEquipmentFilter()">${isShowingAllEquipment ? `[${escapeManualHtml(MACHINE_ID)}] のみ表示` : '全設備表示'}</button>
+                        <button class="plan-btn-small" style="background: #6366f1; padding: 3px 10px; font-size: 0.8em; margin-left: 8px; cursor: pointer;" onclick="toggleEquipmentFilter()">${toggleText}</button>
                     ` : ''}
                 `;
             }
@@ -2283,10 +2617,10 @@
                 planTableContainer.innerHTML = `
                     <div class="plan-empty-state">
                         <div class="plan-empty-icon">📅</div>
-                        <div class="plan-empty-title">本日 (${date}) の [${escapeManualHtml(MACHINE_ID)}] の生産予定はありません</div>
-                        <div class="plan-empty-sub">${allProducts.length > 0 ? `※ 工場全体では本日 ${allProducts.length} 件の他設備計画があります。` : '本日はまだ生産計画が登録されていないか、休日です。'}</div>
+                        <div class="plan-empty-title">${t('emptyOtherFactory', escapeManualHtml(MACHINE_ID), date)}</div>
+                        <div class="plan-empty-sub">${t('emptyOtherFactorySub', allProducts.length)}</div>
                         ${allProducts.length > 0 ? `
-                            <button class="plan-btn-small" style="background: #6366f1; padding: 7px 16px; font-size: 0.9em; margin-top: 10px; cursor: pointer;" onclick="toggleEquipmentFilter(true)">全設備の計画 (${allProducts.length}件) を表示する</button>
+                            <button class="plan-btn-small" style="background: #6366f1; padding: 7px 16px; font-size: 0.9em; margin-top: 10px; cursor: pointer;" onclick="toggleEquipmentFilter(true)">${t('btnShowAllPlans', allProducts.length)}</button>
                         ` : ''}
                     </div>
                 `;
@@ -2302,12 +2636,12 @@
 
                 let statusBadge;
                 if (isCurrentScanned) {
-                    statusBadge = `<span class="badge-status-active">🎯 現在作業中 (NOW ACTIVE)</span>`;
+                    statusBadge = `<span class="badge-status-active">${t('badgeActive')}</span>`;
                 } else {
-                    statusBadge = `<span class="badge-status-pending">⏳ 予定</span>`;
+                    statusBadge = `<span class="badge-status-pending">${t('badgeScheduled')}</span>`;
                 }
 
-                const estTime = prod.estimatedTime?.formattedTime || (prod.estimatedTime?.totalMinutes ? `${prod.estimatedTime.totalMinutes}分` : '-');
+                const estTime = prod.estimatedTime?.formattedTime || (prod.estimatedTime?.totalMinutes ? `${prod.estimatedTime.totalMinutes} min` : '-');
                 const cycleSec = prod.estimatedTime?.cycleTimeSeconds || prod.estimatedTime?.secondsPerPiece || '-';
 
                 rowsHtml += `
@@ -2320,8 +2654,8 @@
                         <td><strong style="color: #0f172a;">${escapeManualHtml(prod.品番 || '-')}</strong></td>
                         <td style="font-weight: 600;">${escapeManualHtml(prod.品名 || '-')}</td>
                         <td style="white-space: nowrap;">
-                            <strong>${(Number(prod.boxes) || 0).toLocaleString()}</strong> 箱
-                            <span style="color: #64748b; font-size: 0.85em;">(${(Number(prod.quantity) || 0).toLocaleString()} 個)</span>
+                            <strong>${(Number(prod.boxes) || 0).toLocaleString()}</strong> ${t('boxesUnit')}
+                            <span style="color: #64748b; font-size: 0.85em;">(${(Number(prod.quantity) || 0).toLocaleString()} ${t('pcsUnit')})</span>
                         </td>
                         <td style="white-space: nowrap;">
                             <span style="font-weight: 600;">${estTime}</span>
@@ -2336,14 +2670,14 @@
                     <thead>
                         <tr>
                             <th style="width: 40px; text-align: center;">#</th>
-                            <th style="width: 150px;">状態</th>
-                            <th style="width: 90px;">予定開始</th>
-                            <th style="width: 110px;">設備</th>
-                            <th style="width: 80px;">背番号</th>
-                            <th style="width: 170px;">品番</th>
-                            <th>品名</th>
-                            <th style="width: 140px;">計画数量</th>
-                            <th style="width: 140px;">所要時間 (サイクル)</th>
+                            <th style="width: 150px;">${t('thStatus')}</th>
+                            <th style="width: 90px;">${t('thStartTime')}</th>
+                            <th style="width: 110px;">${t('thEquipment')}</th>
+                            <th style="width: 80px;">${t('thSebanggo')}</th>
+                            <th style="width: 170px;">${t('thHinban')}</th>
+                            <th>${t('thHinmei')}</th>
+                            <th style="width: 140px;">${t('thQuantity')}</th>
+                            <th style="width: 140px;">${t('thEstTime')}</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -3281,20 +3615,12 @@
 
             eventSource.onopen = function () {
                 console.log('✅ SSE Connection opened');
-                const statusDot = document.getElementById('statusDot');
-                if (statusDot) {
-                    statusDot.classList.add('connected');
-                    statusDot.classList.remove('disconnected');
-                }
+                updateStatusCard(t('connected'));
             };
 
             eventSource.onerror = function (error) {
                 console.error('❌ SSE Connection error:', error);
-                const statusDot = document.getElementById('statusDot');
-                if (statusDot) {
-                    statusDot.classList.remove('connected');
-                    statusDot.classList.add('disconnected');
-                }
+                updateStatusCard(t('disconnected'));
 
                 // Attempt to reconnect after 5 seconds
                 setTimeout(() => {
@@ -3320,8 +3646,20 @@
         function handleMessage(data) {
             console.log('📊 Processing message:', data);
 
+            // Synchronize language if received from backend or tablet broadcast
+            const incomingLang = data.language || (data.additionalData && data.additionalData.language);
+            if (incomingLang && ['ja', 'en', 'pt'].includes(String(incomingLang).toLowerCase())) {
+                setAppLanguage(String(incomingLang).toLowerCase());
+            }
+
             if (data.type === 'connected') {
                 console.log(`✅ Connected to ${data.machineId}`);
+                updateStatusCard(t('connected'));
+                return;
+            }
+
+            if (data.action === 'language_change' || data.type === 'language_change' || (data.additionalData && data.additionalData.action === 'language_change')) {
+                console.log(`🌐 Language change command processed: ${incomingLang}`);
                 return;
             }
 
@@ -3382,6 +3720,7 @@
             window.currentSebanggo = null;
             window.currentZuban = null;
             window.currentHinban = null;
+            window.lastScanTime = null;
             pdfPages = [];
             currentPDFIndex = 0;
 
@@ -3397,6 +3736,7 @@
             window.currentSebanggo = data.sebanggo || null;
             window.currentZuban = data.zuban || null;
             window.currentHinban = data.hinban || null;
+            window.lastScanTime = data.timestamp || Date.now();
             resetManualPlayer({ restorePdf: false });
 
             // If incoming data specifies factory, update CURRENT_FACTORY
@@ -3416,49 +3756,7 @@
             if (productSection) productSection.style.display = 'flex';
 
             // Create all 5 cards with burst animation
-            productInfo.classList.remove('expanded');
-            const formattedTime = new Date(data.timestamp).toLocaleString('ja-JP', {
-                year: 'numeric',
-                month: '2-digit',
-                day: '2-digit',
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit'
-            });
-
-            productInfo.innerHTML = `
-                <div class="info-card burst">
-                    <div class="info-label">Machine / マシン</div>
-                    <div class="info-value">${MACHINE_ID}</div>
-                </div>
-                <div class="info-card burst">
-                    <div class="info-label">Status / ステータス</div>
-                    <div class="info-value" id="statusValue"><span class="status-dot" id="statusDot"></span>接続済み</div>
-                </div>
-                <div class="info-card burst">
-                    <div class="info-label">${data.zuban ? '図番 / Drawing Number' : '背番号 / Serial Number'}</div>
-                    <div class="info-value">${data.zuban || data.sebanggo || '-'}</div>
-                </div>
-                <div class="info-card burst">
-                    <div class="info-label">品番 / Part Number</div>
-                    <div class="info-value">${data.hinban || '-'}</div>
-                </div>
-                <div class="info-card burst">
-                    <div class="info-label">スキャン時間 / Scan Time</div>
-                    <div class="info-value">${formattedTime}</div>
-                </div>
-            `;
-
-            // Trigger expansion animation after burst
-            setTimeout(() => {
-                productInfo.classList.add('expanded');
-                // Make sure status dot has correct class after burst animation
-                const statusDot = document.getElementById('statusDot');
-                if (statusDot) {
-                    statusDot.classList.add('connected');
-                    statusDot.classList.remove('disconnected');
-                }
-            }, 50);
+            renderActiveProductCards(true);
 
             // Fetch and display PDFs
             await fetchAndDisplayPDFs(data.sebanggo, data.zuban);
@@ -3532,8 +3830,7 @@
                                 const cropCanvas = document.createElement('canvas');
                                 cropCanvas.width = cropW;
                                 cropCanvas.height = cropH;
-                                const cropCtx = cropCanvas.getContext('2d');
-                                cropCtx.drawImage(canvas, minX, minY, cropW, cropH, 0, 0, cropW, cropH);
+                                cropCanvas.getContext('2d').drawImage(canvas, minX, minY, cropW, cropH, 0, 0, cropW, cropH);
 
                                 const trimmedUrl = cropCanvas.toDataURL('image/jpeg', 0.95);
                                 trimmedImageCache.set(srcUrl, trimmedUrl);
@@ -3603,7 +3900,7 @@
                 pdfPages.push({
                     type: 'production_plan',
                     imageURL: null,
-                    name: '📋 本日の生産計画 (Production Plan)'
+                    name: t('planPageName')
                 });
 
                 console.log(`✅ Loaded ${pdfPages.length} PDF/Plan pages`, pdfPages);
@@ -3618,7 +3915,7 @@
                 pdfPages = [{
                     type: 'production_plan',
                     imageURL: null,
-                    name: '📋 本日の生産計画 (Production Plan)'
+                    name: t('planPageName')
                 }];
                 currentPDFIndex = 0;
                 await displayCurrentPDF();

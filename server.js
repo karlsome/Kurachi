@@ -52,6 +52,9 @@ const factoryConnections = new Map();
 // Store last scan data for each machine (for persistence)
 const machineLastScan = new Map();
 
+// Store active language for each machine (for multilingual displays)
+const machineLanguage = new Map();
+
 // Store machine player state and active controller ownership for each machine session
 const machinePlayerState = new Map();
 const MACHINE_PLAYER_CONTROLLER_TTL_MS = 2 * 60 * 1000;
@@ -587,7 +590,8 @@ app.get("/sse/machine/:machineId", (req, res) => {
   console.log(`✅ New SSE connection established for ${machineId}. Total clients: ${machineConnections.get(machineId).length}`);
   
   // Send initial connection message
-  res.write(`data: ${JSON.stringify({ type: 'connected', machineId, timestamp: new Date().toISOString() })}\n\n`);
+  const currentMachineLang = machineLanguage.get(machineId) || machineLastScan.get(machineId)?.additionalData?.language || 'ja';
+  res.write(`data: ${JSON.stringify({ type: 'connected', machineId, language: currentMachineLang, timestamp: new Date().toISOString() })}\n\n`);
   
   // Send last scan data if available (for persistence on page reload)
   let lastScan = machineLastScan.get(machineId);
@@ -956,11 +960,12 @@ setInterval(() => {
 app.post("/api/broadcast-scan", async (req, res) => {
   const { machineId, sebanggo, hinban, zuban, timestamp, additionalData } = req.body;
   
-  // Allow empty sebanggo/zuban only if action is 'clear'
+  // Allow empty sebanggo/zuban only if action is 'clear' or 'language_change'
   const isClearAction = additionalData?.action === 'clear' || req.body.action === 'clear';
+  const isLanguageAction = additionalData?.action === 'language_change' || req.body.action === 'language_change';
   
-  if (!machineId || (!sebanggo && !zuban && !isClearAction)) {
-    return res.status(400).json({ error: "machineId and sebanggo/zuban are required (unless action is 'clear')" });
+  if (!machineId || (!sebanggo && !zuban && !isClearAction && !isLanguageAction)) {
+    return res.status(400).json({ error: "machineId and sebanggo/zuban are required (unless action is 'clear' or 'language_change')" });
   }
   
   // Parse machine IDs: handle both "OZNC09" and "OZNC04,OZNC06"
@@ -973,30 +978,48 @@ app.post("/api/broadcast-scan", async (req, res) => {
     return res.status(400).json({ error: "Invalid machineId format" });
   }
   
-  console.log(`📡 Broadcasting to machine(s): ${machineIds.join(', ')} (clear: ${isClearAction})`);
+  console.log(`📡 Broadcasting to machine(s): ${machineIds.join(', ')} (clear: ${isClearAction}, langChange: ${isLanguageAction})`);
   
   // For each machine, create and store scan data
   machineIds.forEach(normalizedMachineId => {
+    const incomingLang = additionalData?.language || req.body.language;
+    if (incomingLang) {
+      machineLanguage.set(normalizedMachineId, incomingLang);
+    }
+    const currentMachineLang = incomingLang || machineLanguage.get(normalizedMachineId) || 'ja';
+
     const normalizedSessionKey = machineIds.join(',');
     const scanData = {
-      type: isClearAction ? 'clear' : 'scan',
-      action: isClearAction ? 'clear' : 'scan',
+      type: isClearAction ? 'clear' : (isLanguageAction ? 'language_change' : 'scan'),
+      action: isClearAction ? 'clear' : (isLanguageAction ? 'language_change' : 'scan'),
       machineId: normalizedSessionKey,
       sebanggo,
       zuban,
       hinban: hinban || '',
+      language: currentMachineLang,
       timestamp: timestamp || new Date().toISOString(),
-      additionalData: additionalData || (isClearAction ? { action: 'clear' } : {})
+      additionalData: {
+        ...(additionalData || (isClearAction ? { action: 'clear' } : {})),
+        language: currentMachineLang
+      }
     };
     
     // Store last scan for persistence (or clear it if action is 'clear')
     if (isClearAction) {
       machineLastScan.delete(normalizedMachineId);
       console.log(`🗑️ Cleared last scan data for ${normalizedMachineId}`);
+    } else if (isLanguageAction) {
+      const existingScan = machineLastScan.get(normalizedMachineId);
+      if (existingScan) {
+        existingScan.language = currentMachineLang;
+        if (!existingScan.additionalData) existingScan.additionalData = {};
+        existingScan.additionalData.language = currentMachineLang;
+      }
+      console.log(`🌐 Language preference updated for ${normalizedMachineId}: ${currentMachineLang}`);
     } else if ((sebanggo || zuban) && hinban) {
       // Only store if we have valid sebanggo/zuban and hinban
       machineLastScan.set(normalizedMachineId, scanData);
-      console.log(`💾 Stored last scan for ${normalizedMachineId}:`, { sebanggo, zuban, hinban });
+      console.log(`💾 Stored last scan for ${normalizedMachineId}:`, { sebanggo, zuban, hinban, language: currentMachineLang });
     } else {
       console.log(`⚠️ Skipping storage for ${normalizedMachineId} - missing sebanggo/zuban or hinban`);
     }

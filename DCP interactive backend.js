@@ -39,9 +39,9 @@ const googleSheetLiveStatusURL = 'https://script.google.com/macros/s/AKfycbwbL30
 // Link for Rikeshi (up/down color info) - This was missing in the original, adding it here.
 const dbURL = 'https://script.google.com/macros/s/AKfycbx0qBw0_wF5X-hA2t1yY-d5h5M7Z_a8z_V9R5D6k/exec'; // Placeholder, replace with your actual URL if different.
 
-const serverURL = "https://kurachi.onrender.com";
+//const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
-//const serverURL = "http://192.168.0.35:3000";
+const serverURL = "http://192.168.0.35:3000";
 window.serverURL = serverURL;
 
 // Global variable to track if sendtoNC button has been pressed
@@ -11007,7 +11007,10 @@ function ensureVideoManualPickerUi() {
           sebanggo: currentProductDetails?.sebanggo || '',
           hinban: currentProductDetails?.hinban || '',
           timestamp: new Date().toISOString(),
-          additionalData: { action: action }
+          additionalData: {
+            action: action,
+            language: localStorage.getItem('appLanguage') || 'ja'
+          }
         })
       }).catch(e => console.error('Failed to broadcast PDF command:', e));
     }
@@ -11659,7 +11662,8 @@ document.getElementById('startStep1Scan').addEventListener('click', function (ev
               factory: currentFactory,
               工場: currentFactory,
               Worker_Name: document.getElementById('Machine Operator')?.value || '',
-              sessionID: newSessionID
+              sessionID: newSessionID,
+              language: localStorage.getItem('appLanguage') || 'ja'
             }
           })
         })
@@ -12700,7 +12704,8 @@ window.addEventListener('load', function () {
             hinban: '',
             timestamp: new Date().toISOString(),
             additionalData: {
-              action: 'clear'
+              action: 'clear',
+              language: localStorage.getItem('appLanguage') || 'ja'
             }
           })
         })
@@ -16854,9 +16859,34 @@ if (manualSendModal) {
     }
   }
 
+  function broadcastLanguagePreferenceToMachine(lang) {
+    const targetLang = lang || localStorage.getItem('appLanguage') || 'ja';
+    const machineNameForSSE = typeof getMachineName === 'function' ? getMachineName() : '';
+    if (machineNameForSSE && machineNameForSSE !== 'MACHINE') {
+      const sUrl = typeof serverURL !== 'undefined' ? serverURL : 'http://localhost:3000';
+      fetch(`${sUrl}/api/broadcast-scan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          machineId: machineNameForSSE,
+          action: 'language_change',
+          language: targetLang,
+          additionalData: {
+            action: 'language_change',
+            language: targetLang
+          }
+        })
+      }).catch(err => console.warn('Failed to broadcast language change:', err));
+    }
+  }
+
   // Initial translation apply and reactive listener for language switcher
   updateCncOverlayTranslations();
-  document.addEventListener('languageChanged', updateCncOverlayTranslations);
+  document.addEventListener('languageChanged', (e) => {
+    updateCncOverlayTranslations();
+    const lang = e.detail?.lang || localStorage.getItem('appLanguage') || 'ja';
+    broadcastLanguagePreferenceToMachine(lang);
+  });
 
   function openCycleStopOverlay(targetMachine) {
     activeCycleStopMachine = targetMachine || null;
