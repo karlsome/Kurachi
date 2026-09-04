@@ -16613,34 +16613,38 @@ if (manualSendModal) {
   }
 
   // Handle Cancel Button on Break Wait Overlay (User changes mind)
-  document.getElementById('btnCancelBreakWait')?.addEventListener('click', async () => {
-    const ip = getCNCMiniPCIP();
-    if (ip) {
-      try {
-        await fetch(`http://${ip}:5000/cancel_scheduled_break`, { method: 'POST' });
-      } catch (_) {
-        try { await fetch(`http://${ip}:8766/cancel_scheduled_break`, { method: 'POST' }); } catch (_) { }
-      }
-    }
+  document.getElementById('btnCancelBreakWait')?.addEventListener('click', () => {
     closeBreakWaitOverlay();
     if (typeof showToast === 'function') {
       showToast(_tr('toast_break_request_cancelled', "休憩リクエストを取り消しました"));
     }
+
+    const ip = getCNCMiniPCIP();
+    if (ip) {
+      const sig1 = (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2000) : undefined;
+      fetch(`http://${ip}:5000/cancel_scheduled_break`, { method: 'POST', signal: sig1 })
+        .catch(() => {
+          const sig2 = (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2000) : undefined;
+          fetch(`http://${ip}:8766/cancel_scheduled_break`, { method: 'POST', signal: sig2 }).catch(() => { });
+        });
+    }
   });
 
   // Handle Cancel Button on Overlay (User changes mind on 🛑)
-  document.getElementById('btnCancelCycleStop')?.addEventListener('click', async () => {
-    const ip = getCNCMiniPCIP();
-    if (ip) {
-      try {
-        await fetch(`http://${ip}:5000/cancel_scheduled_cycle_stop`, { method: 'POST' });
-      } catch (_) {
-        try { await fetch(`http://${ip}:8766/cancel_scheduled_cycle_stop`, { method: 'POST' }); } catch (_) { }
-      }
-    }
+  document.getElementById('btnCancelCycleStop')?.addEventListener('click', () => {
     closeCycleStopOverlay();
     if (typeof showToast === 'function') {
       showToast(_tr('toast_cycle_stop_cancelled', "停止リクエストを取り消しました"));
+    }
+
+    const ip = getCNCMiniPCIP();
+    if (ip) {
+      const sig1 = (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2000) : undefined;
+      fetch(`http://${ip}:5000/cancel_scheduled_cycle_stop`, { method: 'POST', signal: sig1 })
+        .catch(() => {
+          const sig2 = (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2000) : undefined;
+          fetch(`http://${ip}:8766/cancel_scheduled_cycle_stop`, { method: 'POST', signal: sig2 }).catch(() => { });
+        });
     }
   });
 
@@ -16651,23 +16655,42 @@ if (manualSendModal) {
     openCycleStopOverlay();
 
     if (ip) {
+      let scheduled = false;
       try {
-        const res = await fetch(`http://${ip}:5000/schedule_cycle_stop`, { method: 'POST' });
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        const data = await res.json();
-        console.log("🛑 Scheduled cycle stop response:", data);
-      } catch (err) {
-        try {
-          const res = await fetch(`http://${ip}:8766/schedule_cycle_stop`, { method: 'POST' });
-          if (!res.ok) throw new Error("HTTP " + res.status);
+        const res = await fetch(`http://${ip}:5000/schedule_cycle_stop`, {
+          method: 'POST',
+          signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2500) : undefined
+        });
+        if (res.ok) {
           const data = await res.json();
-          console.log("🛑 Scheduled cycle stop response (:8766):", data);
-        } catch (e) {
-          console.warn("Legacy Mini-PC or offline:", e);
-          closeCycleStopOverlay();
-          if (typeof showToast === 'function') {
-            showToast(_tr('toast_cycle_stop_not_supported', "⚠️ マシンがサイクル停止機能に対応していません"));
+          if (data && data.scheduled) {
+            scheduled = true;
+            console.log("🛑 Scheduled cycle stop response (:5000):", data);
           }
+        }
+      } catch (_) { }
+
+      if (!scheduled) {
+        try {
+          const res = await fetch(`http://${ip}:8766/schedule_cycle_stop`, {
+            method: 'POST',
+            signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2500) : undefined
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data && data.scheduled) {
+              scheduled = true;
+              console.log("🛑 Scheduled cycle stop response (:8766):", data);
+            }
+          }
+        } catch (_) { }
+      }
+
+      if (!scheduled) {
+        console.warn("Legacy Mini-PC (no schedule_cycle_stop response within 2.5s) or offline.");
+        closeCycleStopOverlay();
+        if (typeof showToast === 'function') {
+          showToast(_tr('toast_cycle_stop_not_supported', "⚠️ マシンがサイクル停止機能に対応していません"));
         }
       }
     }
