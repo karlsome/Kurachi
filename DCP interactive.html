@@ -6104,7 +6104,11 @@
                 clearInterval(breakInterval);
                 breakInterval = setInterval(() => tickBreak(startEpoch), 1000);
             }
-            function startBreak(explicitEpoch) {
+            function startBreak(explicitEpoch, force) {
+                if (!force && window.__breakFinishTimestamp && (Date.now() - window.__breakFinishTimestamp < 8000)) {
+                    console.warn("☕ [BREAK] startBreak blocked: Break was finished less than 8s ago.");
+                    return;
+                }
                 const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
                 const existing = localStorage.getItem(pfx + 'activeBreakStart');
                 const startEpoch = (typeof explicitEpoch === 'number' && explicitEpoch > 0)
@@ -6118,6 +6122,7 @@
             }
             window.startBreak = startBreak;
             function finishBreak() {
+                window.__breakFinishTimestamp = Date.now();
                 const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
                 const raw = localStorage.getItem(pfx + 'activeBreakStart');
                 clearInterval(breakInterval);

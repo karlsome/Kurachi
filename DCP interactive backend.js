@@ -17069,11 +17069,15 @@ if (manualSendModal) {
         openBreakWaitOverlay();
       }
     } else if (isBreakScheduledPending && !breakScheduled) {
-      closeBreakWaitOverlay();
+      const anyHolding = states.some(s => s && s.holding && s.hold_reason === 'BREAK');
+      if (!anyHolding) {
+        closeBreakWaitOverlay();
+      }
     }
 
     const breakHolding = states.some(s => s && s.holding && s.hold_reason === 'BREAK');
-    if (breakHolding) {
+    const isRecentlyFinished = (window.__breakFinishTimestamp && (Date.now() - window.__breakFinishTimestamp < 8000));
+    if (breakHolding && isBreakScheduledPending && !isRecentlyFinished) {
       closeBreakWaitOverlay();
       if (!breakActive && typeof startBreak === 'function') {
         startBreak();
@@ -17111,6 +17115,12 @@ if (manualSendModal) {
         const res = await fetch(`http://${ip}:5000/state`, { cache: 'no-store', signal: sig });
         if (res.ok) {
           const state = await res.json();
+          if (window.__breakFinishTimestamp && (Date.now() - window.__breakFinishTimestamp < 8000)) {
+            if (state && state.hold_reason === 'BREAK') {
+              state.holding = false;
+              state.hold_reason = null;
+            }
+          }
           syncGatekeeperState(state, ip);
           continue;
         }
@@ -17120,6 +17130,12 @@ if (manualSendModal) {
           const res = await fetch(`http://${ip}:8766/state`, { cache: 'no-store', signal: sig });
           if (res.ok) {
             const state = await res.json();
+            if (window.__breakFinishTimestamp && (Date.now() - window.__breakFinishTimestamp < 8000)) {
+              if (state && state.hold_reason === 'BREAK') {
+                state.holding = false;
+                state.hold_reason = null;
+              }
+            }
             syncGatekeeperState(state, ip);
           }
         } catch (_) { }
@@ -17231,7 +17247,8 @@ if (manualSendModal) {
       closeBreakWaitOverlay();
       const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
       const breakActive = localStorage.getItem(pfx + 'activeBreakStart');
-      if (!breakActive && typeof startBreak === 'function') {
+      const isRecentlyFinished = (window.__breakFinishTimestamp && (Date.now() - window.__breakFinishTimestamp < 8000));
+      if (!breakActive && !isRecentlyFinished && typeof startBreak === 'function') {
         startBreak();
         if (typeof showToast === 'function') {
           showToast(_tr('toast_break_started_cnc_stopped', "☕ 休憩を開始しました (機械停止中)"));
@@ -17256,12 +17273,16 @@ if (manualSendModal) {
     // 6. Gatekeeper Unlocked
     es.addEventListener('unlocked', (e) => {
       console.log(`🔓 [CNC GATEKEEPER] Unlocked (${ip}):`, e.data);
-      if (machineStates[ip]) {
-        machineStates[ip].holding = false;
-        machineStates[ip].hold_reason = null;
-        machineStates[ip].scheduled_break_stop = false;
-        machineStates[ip].scheduled_cycle_stop = false;
-      }
+      Object.keys(machineStates).forEach(k => {
+        if (machineStates[k]) {
+          machineStates[k].holding = false;
+          machineStates[k].hold_reason = null;
+          machineStates[k].scheduled_break_stop = false;
+          machineStates[k].scheduled_cycle_stop = false;
+        }
+      });
+      isBreakScheduledPending = false;
+      closeBreakWaitOverlay();
       reconcileGroupedGatekeeperStates();
 
       const anyStillHolding = Object.values(machineStates).some(s => s && s.holding);
@@ -17330,6 +17351,7 @@ if (manualSendModal) {
 
   // Handle Main Break Button Click -> Dedicated /schedule_break_stop for ALL machines
   async function handleBreakStartButtonClick(e) {
+    window.__breakFinishTimestamp = null;
     if (e) {
       e.preventDefault();
       if (e.stopImmediatePropagation) e.stopImmediatePropagation();
@@ -17395,11 +17417,16 @@ if (manualSendModal) {
   window.handleBreakStartButtonClick = handleBreakStartButtonClick;
 
   window.unlockCNCGatekeeper = function () {
+    window.__breakFinishTimestamp = Date.now();
+    isBreakScheduledPending = false;
+    closeBreakWaitOverlay();
     const allIps = getAllCNCMiniPCIPs();
     Object.keys(machineStates).forEach(k => {
       if (machineStates[k]) {
         machineStates[k].holding = false;
         machineStates[k].hold_reason = null;
+        machineStates[k].scheduled_break_stop = false;
+        machineStates[k].scheduled_cycle_stop = false;
       }
     });
     allIps.forEach(ip => {
