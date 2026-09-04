@@ -11823,6 +11823,12 @@ document.getElementById('startStep2Scan').addEventListener('click', async functi
         // This could be used later if needed for tracking which specific code was used
         const actualScannedCode = validation.matchedCode;
 
+        window.__scannedLotQRMap = window.__scannedLotQRMap || {};
+        window.__scannedLotQRMap[lotNumber] = {
+          materialSeiban: scannedMaterialCode,
+          scannedQR: qrCodeMessage
+        };
+
         // Which machine is this lot for (chosen in the grouped chooser, else the
         // single machine).
         const _scanMachine = window.__lotScanMachine
@@ -11836,7 +11842,10 @@ document.getElementById('startStep2Scan').addEventListener('click', async functi
         const _recordAndAdvance = () => {
           console.log('🟢 [_recordAndAdvance] called for machine:', _scanMachine, 'lot:', lotNumber);
           if (typeof window.recordLotScan === 'function') {
-            window.__pendingPrevLot = window.recordLotScan(lotNumber, _scanMachine, 'scanned');
+            window.__pendingPrevLot = window.recordLotScan(lotNumber, _scanMachine, 'scanned', {
+              materialSeiban: scannedMaterialCode,
+              scannedQR: qrCodeMessage
+            });
             console.log('🟢 [_recordAndAdvance] recordLotScan done, __pendingPrevLot:', !!window.__pendingPrevLot);
           }
           console.log('🟢 [_recordAndAdvance] Hiding step2Modal');
@@ -12926,7 +12935,7 @@ if (manualSendModal) {
 
   // Add a newly scanned lot to a machine's timeline; return the previously-open
   // record (whose shots should be collected now), or null for the first lot.
-  function recordLotScan(lotNumber, machine, source) {
+  function recordLotScan(lotNumber, machine, source, extra) {
     refreshLots();
     if (machine && machine.includes(',')) {
       machine = window.__lotScanMachine || machine.split(',')[0].trim();
@@ -12937,11 +12946,29 @@ if (manualSendModal) {
     const feed = resolveFeed(machine);
     let now = Date.now();
     while (list.some(r => r.ts === now)) { now++; }
-    list.push({
+
+    const seiban = (extra && (extra.materialSeiban || extra.材料背番号))
+      || (window.__scannedLotQRMap && (window.__scannedLotQRMap[lotNumber]?.materialSeiban || window.__scannedLotQRMap[lotNumber]?.材料背番号))
+      || (typeof currentProductDetails !== 'undefined' && currentProductDetails?.materialCode)
+      || (document.getElementById('背番号')?.value)
+      || null;
+
+    const fullQR = (extra && extra.scannedQR)
+      || (window.__scannedLotQRMap && window.__scannedLotQRMap[lotNumber]?.scannedQR)
+      || null;
+
+    const rec = {
       lotNumber: lotNumber, machine: machine, shots: null,
       feedPitch: feed.feedPitch, pcPerCycle: feed.pcPerCycle,
       meters: null, pieces: null, source: source || 'scanned', open: true, ts: now
-    });
+    };
+    if (seiban) {
+      rec.materialSeiban = seiban;
+    }
+    if (fullQR) {
+      rec.scannedQR = fullQR;
+    }
+    list.push(rec);
     save();
 
     // Auto-reset End Time if a new lot is scanned, so the user is forced to re-enter it at the real end of production.
@@ -13002,6 +13029,17 @@ if (manualSendModal) {
   function buildPayload() {
     const recs = allRecords().filter(r => r.shots != null);
     const Lot_Details = recs.map(r => {
+      const seiban = r.materialSeiban
+        || r.材料背番号
+        || (window.__scannedLotQRMap && (window.__scannedLotQRMap[r.lotNumber]?.materialSeiban || window.__scannedLotQRMap[r.lotNumber]?.材料背番号))
+        || (typeof currentProductDetails !== 'undefined' && currentProductDetails?.materialCode)
+        || (document.getElementById('背番号')?.value)
+        || null;
+
+      const fullQR = r.scannedQR
+        || (window.__scannedLotQRMap && window.__scannedLotQRMap[r.lotNumber]?.scannedQR)
+        || null;
+
       const o = {
         lotNumber: r.lotNumber,
         machine: r.machine,
@@ -13015,6 +13053,12 @@ if (manualSendModal) {
         o.timestamp = (typeof r.ts === 'number') ? new Date(r.ts).toISOString() : String(r.ts);
       } else {
         o.timestamp = new Date().toISOString();
+      }
+      if (seiban != null) {
+        o.materialSeiban = seiban;
+      }
+      if (fullQR != null) {
+        o.scannedQR = fullQR;
       }
       if (r.image != null) o.image = r.image;
       return o;
@@ -16896,32 +16940,42 @@ if (manualSendModal) {
   });
 
   // ==========================================================================
-  // STATE RECONCILER (Guarantees Sync on Reload, Wake, or Stale SSE)
+  // STATE RECONCILER (Per-Machine State Aggregator for Grouped/Single Setup)
   // ==========================================================================
-  function syncGatekeeperState(state) {
+  const machineStates = {};
+
+  function syncGatekeeperState(state, ip) {
     if (!state) return;
     lastHeartbeatTime = Date.now();
+    const key = ip || state.machine_id || 'default';
+    machineStates[key] = state;
+
+    reconcileGroupedGatekeeperStates();
+  }
+
+  function reconcileGroupedGatekeeperStates() {
+    const states = Object.values(machineStates);
+    if (states.length === 0) return;
 
     // 1. Emergency cancel detected / Machine in hold -> Enforce Dedicated CNC Cancel Screen
-    if (state.holding && state.hold_reason === 'MANUAL_CANCEL') {
-      const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
-      const cancelOverlay = document.getElementById('cncCancelOverlay');
-      const isAlreadyOpen = cancelOverlay && cancelOverlay.classList.contains('open');
-      const breakActive = localStorage.getItem(pfx + 'activeBreakStart');
-      const cncCancelActive = localStorage.getItem(pfx + 'activeCncCancelStart');
+    // If ANY machine is in MANUAL_CANCEL, the cancel screen MUST be shown and stay open!
+    const manualCancelState = states.find(s => s && s.holding && s.hold_reason === 'MANUAL_CANCEL');
+    const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+    const cancelOverlay = document.getElementById('cncCancelOverlay');
+    const isCancelAlreadyOpen = cancelOverlay && cancelOverlay.classList.contains('open');
+    const breakActive = localStorage.getItem(pfx + 'activeBreakStart');
+    const cncCancelActive = localStorage.getItem(pfx + 'activeCncCancelStart');
 
-      if (!breakActive && !isAlreadyOpen && typeof openCncCancelOverlay === 'function') {
-        console.warn("🚨 [CNC GATEKEEPER] Machine is locked in MANUAL_CANCEL -> Asserting Dedicated Cancel Screen!");
+    if (manualCancelState) {
+      if (!breakActive && !isCancelAlreadyOpen && typeof openCncCancelOverlay === 'function') {
+        console.warn(`🚨 [CNC GATEKEEPER] Machine is locked in MANUAL_CANCEL (${manualCancelState.machine_id || 'group'}) -> Asserting Dedicated Cancel Screen!`);
         const startEpoch = cncCancelActive ? parseInt(cncCancelActive, 10) : Date.now();
         openCncCancelOverlay(startEpoch);
       }
     } else {
-      // FAILSAFE: If Mini-PC is UNLOCKED or restarted (e.g. 'U' key pressed in terminal or service restarted)
-      const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
-      const cncCancelActive = localStorage.getItem(pfx + 'activeCncCancelStart');
-      const cancelOverlay = document.getElementById('cncCancelOverlay');
-      if (cncCancelActive || (cancelOverlay && cancelOverlay.classList.contains('open'))) {
-        console.log("🔓 [CNC GATEKEEPER] Source of truth (Mini-PC) is unlocked -> Auto-dismissing Cancel Screen & releasing cloud stop-call!");
+      // ONLY auto-dismiss if ALL known machines are UNLOCKED (no machine holding in MANUAL_CANCEL)
+      if (cncCancelActive || isCancelAlreadyOpen) {
+        console.log("🔓 [CNC GATEKEEPER] Source of truth (All Mini-PCs) is unlocked -> Auto-dismissing Cancel Screen & releasing cloud stop-call!");
         if (typeof closeCncCancelOverlay === 'function') {
           closeCncCancelOverlay();
         }
@@ -16934,25 +16988,26 @@ if (manualSendModal) {
     }
 
     // 2. Preemptive break scheduled status for Breaktime Button
-    if (state.scheduled_break_stop) {
+    const breakScheduled = states.some(s => s && s.scheduled_break_stop);
+    if (breakScheduled) {
       if (!isBreakScheduledPending) {
         openBreakWaitOverlay();
       }
-    } else if (isBreakScheduledPending && !state.scheduled_break_stop) {
+    } else if (isBreakScheduledPending && !breakScheduled) {
       closeBreakWaitOverlay();
     }
 
-    if (state.holding && state.hold_reason === 'BREAK') {
+    const breakHolding = states.some(s => s && s.holding && s.hold_reason === 'BREAK');
+    if (breakHolding) {
       closeBreakWaitOverlay();
-      const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
-      const breakActive = localStorage.getItem(pfx + 'activeBreakStart');
       if (!breakActive && typeof startBreak === 'function') {
         startBreak();
       }
     }
 
     // 3. Preemptive cycle stop scheduled status for 🛑 Button
-    if (state.scheduled_cycle_stop) {
+    const cycleStopScheduled = states.some(s => s && s.scheduled_cycle_stop);
+    if (cycleStopScheduled) {
       if (!isCycleStopPending) {
         isCycleStopPending = true;
         openCycleStopOverlay();
@@ -16961,7 +17016,7 @@ if (manualSendModal) {
       if (isCycleStopPending) {
         closeCycleStopOverlay();
       } else {
-        // Tablet Reload Protection: Clear any ghost STOP on cloud TV if machine is not in cycle stop
+        // Tablet Reload Protection: Clear any ghost STOP on cloud TV if no machine is in cycle stop
         if (typeof notifyStopCall === 'function') {
           notifyStopCall('clear', 'stop');
         } else if (typeof window.notifyStopCall === 'function') {
@@ -16981,7 +17036,7 @@ if (manualSendModal) {
         const res = await fetch(`http://${ip}:5000/state`, { cache: 'no-store', signal: sig });
         if (res.ok) {
           const state = await res.json();
-          syncGatekeeperState(state);
+          syncGatekeeperState(state, ip);
           continue;
         }
       } catch (_) {
@@ -16990,7 +17045,7 @@ if (manualSendModal) {
           const res = await fetch(`http://${ip}:8766/state`, { cache: 'no-store', signal: sig });
           if (res.ok) {
             const state = await res.json();
-            syncGatekeeperState(state);
+            syncGatekeeperState(state, ip);
           }
         } catch (_) { }
       }
@@ -17006,7 +17061,7 @@ if (manualSendModal) {
     es.addEventListener('status', (e) => {
       try {
         const data = JSON.parse(e.data || '{}');
-        syncGatekeeperState(data);
+        syncGatekeeperState(data, ip);
       } catch (err) {
         console.error("Error parsing status event:", err);
       }
@@ -17125,22 +17180,33 @@ if (manualSendModal) {
 
     // 6. Gatekeeper Unlocked
     es.addEventListener('unlocked', (e) => {
-      console.log("🔓 [CNC GATEKEEPER] Unlocked:", e.data);
-      closeCycleStopOverlay();
-      closeBreakWaitOverlay();
-      if (typeof closeCncCancelOverlay === 'function') {
-        closeCncCancelOverlay();
+      console.log(`🔓 [CNC GATEKEEPER] Unlocked (${ip}):`, e.data);
+      if (machineStates[ip]) {
+        machineStates[ip].holding = false;
+        machineStates[ip].hold_reason = null;
+        machineStates[ip].scheduled_break_stop = false;
+        machineStates[ip].scheduled_cycle_stop = false;
       }
-      if (typeof notifyStopCall === 'function') {
-        notifyStopCall('clear', 'leader');
-      } else if (typeof window.notifyStopCall === 'function') {
-        window.notifyStopCall('clear', 'leader');
-      }
-      const raw = (typeof breakPrefix !== 'undefined') && localStorage.getItem(breakPrefix + 'activeStopCallStart');
-      if (raw && typeof finalizeStopCall === 'function') {
-        finalizeStopCall();
-      } else if (typeof closeStopCallOverlay === 'function') {
-        closeStopCallOverlay();
+      reconcileGroupedGatekeeperStates();
+
+      const anyStillHolding = Object.values(machineStates).some(s => s && s.holding);
+      if (!anyStillHolding) {
+        closeCycleStopOverlay();
+        closeBreakWaitOverlay();
+        if (typeof closeCncCancelOverlay === 'function') {
+          closeCncCancelOverlay();
+        }
+        if (typeof notifyStopCall === 'function') {
+          notifyStopCall('clear', 'leader');
+        } else if (typeof window.notifyStopCall === 'function') {
+          window.notifyStopCall('clear', 'leader');
+        }
+        const raw = (typeof breakPrefix !== 'undefined') && localStorage.getItem(breakPrefix + 'activeStopCallStart');
+        if (raw && typeof finalizeStopCall === 'function') {
+          finalizeStopCall();
+        } else if (typeof closeStopCallOverlay === 'function') {
+          closeStopCallOverlay();
+        }
       }
     });
 
@@ -17255,6 +17321,12 @@ if (manualSendModal) {
 
   window.unlockCNCGatekeeper = function () {
     const allIps = getAllCNCMiniPCIPs();
+    Object.keys(machineStates).forEach(k => {
+      if (machineStates[k]) {
+        machineStates[k].holding = false;
+        machineStates[k].hold_reason = null;
+      }
+    });
     allIps.forEach(ip => {
       fetch(`http://${ip}:5000/unlock`, { method: 'POST' })
         .then(r => r.json())

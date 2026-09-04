@@ -3730,11 +3730,19 @@ app.post("/submitTopressDBiReporter", async (req, res) => {
           const allImgs = (lot.lotNumber && lotAllImagesMap[lot.lotNumber]) || (labelImg ? [labelImg] : []);
           const primaryImg = labelImg || defectImgs[0] || (materialLabelImageURLs.length > 0 ? materialLabelImageURLs[0] : null);
 
+          const seiban = lot.materialSeiban || lot.材料背番号 || formData.materialSeiban || formData.材料背番号 || formData.背番号 || null;
           const updatedLot = {
             ...lot,
             timestamp: formatIsoTimestamp(lot.timestamp),
             image: primaryImg
           };
+          delete updatedLot.材料背番号;
+          if (seiban) {
+            updatedLot.materialSeiban = seiban;
+          }
+          if (lot.scannedQR) {
+            updatedLot.scannedQR = lot.scannedQR;
+          }
           if (defectImgs.length > 0) {
             updatedLot.defectImage = defectImgs[0];
             updatedLot.defectImages = defectImgs;
@@ -4223,11 +4231,19 @@ app.post('/submitToDCP', async (req, res) => {
                 const allImgs = (lot.lotNumber && lotAllImagesMap[lot.lotNumber]) || (labelImg ? [labelImg] : []);
                 const primaryImg = labelImg || defectImgs[0] || (materialLabelImageURLs.length > 0 ? materialLabelImageURLs[0] : null);
 
+                const seiban = lot.materialSeiban || lot.材料背番号 || pressDBData.materialSeiban || pressDBData.材料背番号 || pressDBData.背番号 || null;
                 const updatedLot = {
                     ...lot,
                     timestamp: formatIsoTimestamp(lot.timestamp),
                     image: primaryImg
                 };
+                delete updatedLot.材料背番号;
+                if (seiban) {
+                    updatedLot.materialSeiban = seiban;
+                }
+                if (lot.scannedQR) {
+                    updatedLot.scannedQR = lot.scannedQR;
+                }
                 if (defectImgs.length > 0) {
                     updatedLot.defectImage = defectImgs[0];
                     updatedLot.defectImages = defectImgs;
