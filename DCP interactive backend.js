@@ -41,7 +41,7 @@ const dbURL = 'https://script.google.com/macros/s/AKfycbx0qBw0_wF5X-hA2t1yY-d5h5
 
 const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
-//const serverURL = "http://192.168.0.39:3000";
+//const serverURL = "http://192.168.0.35:3000";
 window.serverURL = serverURL;
 
 // Global variable to track if sendtoNC button has been pressed
@@ -288,7 +288,7 @@ async function logTabletAction(action, status = 'in-progress', additionalData = 
     }
 
     // For most actions, 背番号 is required (except setup actions like checkbox toggle)
-    const setupActions = ['Kensa mode checkbox toggled', 'Break time', 'Reset'];
+    const setupActions = ['Kensa mode checkbox toggled', 'Break', 'Reset'];
     const isSetupAction = setupActions.some(setupAction => action.includes(setupAction));
 
     if (!背番号 && !isSetupAction) {
@@ -598,6 +598,17 @@ document.addEventListener('DOMContentLoaded', () => {
               }, 2000); // Adjust delay if options are populated dynamically
             } else if (input.type === 'file') {
               // Ignore file input elements (browsers forbid setting non-empty strings)
+            } else if (input.id === 'Machine Operator' || input.name === 'Machine Operator') {
+              if (savedValue && savedValue.startsWith('[') && savedValue.endsWith(']')) {
+                try {
+                  const parsed = JSON.parse(savedValue);
+                  input.value = Array.isArray(parsed) ? parsed.filter(Boolean).map(s => String(s).trim()).join(',') : savedValue;
+                } catch (_) {
+                  input.value = savedValue;
+                }
+              } else {
+                input.value = savedValue || '';
+              }
             } else {
               input.value = savedValue; // Restore value for text, hidden, and other inputs
             }
@@ -1535,6 +1546,7 @@ function calculateTotalBreakTime() {
       if (startTime && endTime) {
         const start = new Date(`2000-01-01T${startTime}:00`);
         const end = new Date(`2000-01-01T${endTime}:00`);
+        if (end < start) end.setDate(end.getDate() + 1);
 
         if (end > start) {
           const diffMs = end - start;
@@ -2459,7 +2471,7 @@ function clearMaterialLabelPhotos() {
   updateMaterialPhotoCount();
 }
 
-async function addMaterialLabelPhoto(photoDataURL, lotTarget = undefined) {
+async function addMaterialLabelPhoto(photoDataURL, lotTarget = undefined, options = {}) {
   // Resolve which lot this photo links to. An explicitly supplied value — including
   // null, which means "no lot" (e.g. a general gallery capture or an extra defect
   // photo) — is always respected. We only fall back to the global capture target
@@ -2474,6 +2486,10 @@ async function addMaterialLabelPhoto(photoDataURL, lotTarget = undefined) {
   } else {
     lotNumber = null;
   }
+
+  const shouldReplace = options.replace !== false && !options.isExtra && options.photoType !== 'defect';
+  const photoType = options.photoType || 'label';
+  const machine = options.machine || null;
 
   if (materialLabelPhotos.length >= MAX_MATERIAL_PHOTOS) {
     const _mpLang = (typeof getCurrentLanguage === 'function') ? getCurrentLanguage() : 'ja';
@@ -2500,9 +2516,9 @@ async function addMaterialLabelPhoto(photoDataURL, lotTarget = undefined) {
   const id = `material-label-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
   const timestamp = new Date().toISOString();
 
-  // Retaking a photo for a lot that already has one: replace it (keep the link)
-  if (lotNumber && typeof materialLabelPhotos !== 'undefined') {
-    const existingIdx = materialLabelPhotos.findIndex(p => p.lotNumber === lotNumber);
+  // Retaking a photo for a lot that already has one: replace it (keep the link), unless shouldReplace is false
+  if (shouldReplace && lotNumber && typeof materialLabelPhotos !== 'undefined') {
+    const existingIdx = materialLabelPhotos.findIndex(p => p.lotNumber === lotNumber && p.photoType !== 'defect');
     if (existingIdx >= 0) {
       const old = materialLabelPhotos[existingIdx];
       try { URL.revokeObjectURL(old.blobUrl); } catch (e) { }
@@ -2512,11 +2528,11 @@ async function addMaterialLabelPhoto(photoDataURL, lotTarget = undefined) {
   }
 
   // Persist raw blob in IndexedDB (no base64 at rest)
-  await materialLabelDB.put({ id, blob, timestamp, lotNumber });
+  await materialLabelDB.put({ id, blob, timestamp, lotNumber, photoType, machine });
 
   // Object URL is used only for display in this session
   const blobUrl = URL.createObjectURL(blob);
-  materialLabelPhotos.push({ id, timestamp, blobUrl, lotNumber });
+  materialLabelPhotos.push({ id, timestamp, blobUrl, lotNumber, photoType, machine });
 
   console.log(`Added material label photo #${materialLabelPhotos.length}`);
 
@@ -2758,7 +2774,9 @@ async function loadMaterialLabelPhotos() {
       id: r.id,
       timestamp: r.timestamp,
       blobUrl: URL.createObjectURL(r.blob),
-      lotNumber: r.lotNumber || null
+      lotNumber: r.lotNumber || null,
+      photoType: r.photoType || 'label',
+      machine: r.machine || null
     }));
     console.log(`Loaded ${materialLabelPhotos.length} material label photos from IndexedDB`);
     renderMaterialPhotoThumbnails();
@@ -3475,9 +3493,30 @@ function renderWorkerNames() {
   });
 }
 
-// Multi-Worker Selection & Persistence System
 window.selectedWorkerNames = window.selectedWorkerNames || [];
 window.activeWorkerSlotIndex = 0;
+
+function formatWorkerDisplayLines(input) {
+  let list = [];
+  if (Array.isArray(input)) {
+    list = input;
+  } else if (typeof input === 'string') {
+    const trimmed = input.trim();
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) list = parsed;
+      } catch (_) { }
+    }
+    if (list.length === 0 && trimmed) {
+      list = trimmed.split(',').map(s => s.trim().replace(/^["']|["']$/g, ''));
+    }
+  }
+  const clean = list.map(n => (n || '').trim()).filter(Boolean);
+  if (clean.length === 0) return '';
+  return clean.map((n, i) => `${i + 1}. ${n}`).join('\n');
+}
+window.formatWorkerDisplayLines = formatWorkerDisplayLines;
 
 window.saveWorkerNamesToStorage = function () {
   const seen = new Set();
@@ -3499,7 +3538,7 @@ window.saveWorkerNamesToStorage = function () {
   const input = document.getElementById('Machine Operator');
   if (pageName && currentSelectedFactory && currentSelectedMachine && input) {
     const key = `${pageName}_${currentSelectedFactory}_${currentSelectedMachine}_${input.id || input.name}`;
-    localStorage.setItem(key, JSON.stringify(activeNames));
+    localStorage.setItem(key, activeNames.join(','));
   }
 };
 
@@ -3552,7 +3591,7 @@ window.loadWorkerNamesFromStorage = function () {
   const activeNames = (window.selectedWorkerNames || []).map(n => (n || '').trim()).filter(Boolean);
   const input = document.getElementById('Machine Operator');
   if (input && activeNames.length > 0) {
-    input.value = activeNames.join(', ');
+    input.value = activeNames.join(',');
   }
 };
 
@@ -3725,6 +3764,9 @@ window.saveChecklistDraftToStorage = async function () {
   };
 
   localStorage.setItem(key, JSON.stringify(draftData));
+  if (typeof window.assertMachineState === 'function') {
+    window.assertMachineState();
+  }
 };
 
 window.loadChecklistDraftFromStorage = async function () {
@@ -3853,7 +3895,7 @@ window.renderWorkerListUI = function () {
   const hiddenInput = document.getElementById('Machine Operator');
   if (hiddenInput) {
     const activeNames = window.selectedWorkerNames.map(n => (n || '').trim()).filter(Boolean);
-    hiddenInput.value = activeNames.join(', ');
+    hiddenInput.value = activeNames.join(',');
   }
 };
 
@@ -3911,7 +3953,7 @@ function selectWorkerName(name) {
     });
 
   const input = document.getElementById('Machine Operator');
-  if (input) input.value = activeNames.join(', ');
+  if (input) input.value = activeNames.join(',');
 
   if (window.checklistState && window.checklistState.answers) {
     const queue = window.checklistState.queue;
@@ -4728,7 +4770,8 @@ function showLotPhotoPopup(lotNumber, anchorEl) {
   closeLotPhotoPopup();
   _lotPopupAnchor = anchorEl;
   const photo = (typeof materialLabelPhotos !== 'undefined')
-    ? materialLabelPhotos.find(p => p.lotNumber === lotNumber) : null;
+    ? (materialLabelPhotos.find(p => p.lotNumber === lotNumber && p.photoType !== 'defect') ||
+      materialLabelPhotos.find(p => p.lotNumber === lotNumber)) : null;
 
   const pop = document.createElement('div');
   pop.id = 'lotPhotoPopup';
@@ -4927,6 +4970,7 @@ function addManualLot(lotNumber) {
       || (typeof groupedMachines !== 'undefined' && groupedMachines[0])
       || (document.getElementById('process') ? document.getElementById('process').value : '');
     window.__pendingPrevLot = window.recordLotScan(lotNumber, _m, 'manual');
+    if (typeof window.assertMachineState === 'function') window.assertMachineState();
   }
   saveMaterialLots();
   renderMaterialLotTags();
@@ -7396,7 +7440,22 @@ document.getElementById('submit').addEventListener('click', async (event) => {
     const その他 = parseInt(document.getElementById('counter-20').value, 10) || 0;
     const Total_NG = 疵引不良 + 加工不良 + その他;
     const Total_PressDB = Process_Quantity - Total_NG;
-    const Worker_Name = document.getElementById('Machine Operator').value;
+    const rawWorker = document.getElementById('Machine Operator')?.value || '';
+    const Worker_Name = (function (val) {
+      if (!val) return '';
+      if (Array.isArray(val)) return val.filter(Boolean).map(s => String(s).trim()).join(',');
+      if (typeof val === 'string') {
+        val = val.trim();
+        if (val.startsWith('[') && val.endsWith(']')) {
+          try {
+            const parsed = JSON.parse(val);
+            if (Array.isArray(parsed)) return parsed.filter(Boolean).map(s => String(s).trim()).join(',');
+          } catch (_) { }
+        }
+        return val.replace(/^[\["'\s]+|[\]"'\s]+$/g, '').split(',').map(s => s.trim().replace(/^["']|["']$/g, '')).filter(Boolean).join(',');
+      }
+      return String(val).trim();
+    })(rawWorker) || (Array.isArray(window.selectedWorkerNames) ? window.selectedWorkerNames.filter(Boolean).join(',') : '');
     let WorkDate = document.getElementById('Lot No.').value;
     const Time_start = document.getElementById('Start Time').value;
     const Time_end = document.getElementById('End Time').value;
@@ -7763,7 +7822,10 @@ document.getElementById('submit').addEventListener('click', async (event) => {
         base64: base64Only,
         id: photo.id,
         timestamp: photo.timestamp,
-        description: `材料ラベル ${i + 1}/${materialLabelPhotos.length}`
+        lotNumber: photo.lotNumber || '',
+        description: photo.photoType === 'defect'
+          ? `疵引き写真 (${photo.lotNumber || ''})`
+          : `材料ラベル ${i + 1}/${materialLabelPhotos.length}`
       });
       processedPhotos++;
       updateUploadProgress(5 + (processedPhotos / Math.max(1, totalPhotos)) * 65, `Processing photo ${processedPhotos}/${totalPhotos}...`);
@@ -10945,7 +11007,10 @@ function ensureVideoManualPickerUi() {
           sebanggo: currentProductDetails?.sebanggo || '',
           hinban: currentProductDetails?.hinban || '',
           timestamp: new Date().toISOString(),
-          additionalData: { action: action }
+          additionalData: {
+            action: action,
+            language: localStorage.getItem('appLanguage') || 'ja'
+          }
         })
       }).catch(e => console.error('Failed to broadcast PDF command:', e));
     }
@@ -11172,10 +11237,11 @@ window.showStep0Modal = function () {
   });
 
   const activeNames = window.selectedWorkerNames ? window.selectedWorkerNames.map(n => (n || '').trim()).filter(Boolean) : [];
-  const workerValue = activeNames.length > 0 ? activeNames.join(', ') : (workerInput ? workerInput.value.trim() : '');
+  const rawValue = activeNames.length > 0 ? activeNames : (workerInput ? workerInput.value.trim() : '');
+  const workerDisplay = formatWorkerDisplayLines(rawValue);
 
-  if (workerValue !== '') {
-    currentWorkerLabel.textContent = workerValue;
+  if (workerDisplay !== '') {
+    currentWorkerLabel.textContent = workerDisplay;
     confirmState.style.display = 'flex';
     selectState.style.display = 'none';
   } else {
@@ -11198,11 +11264,29 @@ window.proceedFromStep0 = function () {
   if (typeof saveInputs === 'function') saveInputs();
 
   document.getElementById('step0Modal').style.display = 'none';
+  if (typeof isChecklistLocked === 'function' && isChecklistLocked()) {
+    const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+    localStorage.setItem(pfx + 'activeChecklistStart', String(Date.now()));
+    if (typeof assertMachineState === 'function') assertMachineState();
+    if (typeof window.goToChecklistTab === 'function') {
+      window.goToChecklistTab();
+      return;
+    }
+  }
   showStep1Modal();
 };
 
 window.confirmWorkerName = function () {
   document.getElementById('step0Modal').style.display = 'none';
+  if (typeof isChecklistLocked === 'function' && isChecklistLocked()) {
+    const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+    localStorage.setItem(pfx + 'activeChecklistStart', String(Date.now()));
+    if (typeof assertMachineState === 'function') assertMachineState();
+    if (typeof window.goToChecklistTab === 'function') {
+      window.goToChecklistTab();
+      return;
+    }
+  }
   showStep1Modal();
 };
 
@@ -11578,7 +11662,8 @@ document.getElementById('startStep1Scan').addEventListener('click', function (ev
               factory: currentFactory,
               工場: currentFactory,
               Worker_Name: document.getElementById('Machine Operator')?.value || '',
-              sessionID: newSessionID
+              sessionID: newSessionID,
+              language: localStorage.getItem('appLanguage') || 'ja'
             }
           })
         })
@@ -11791,6 +11876,12 @@ document.getElementById('startStep2Scan').addEventListener('click', async functi
         // This could be used later if needed for tracking which specific code was used
         const actualScannedCode = validation.matchedCode;
 
+        window.__scannedLotQRMap = window.__scannedLotQRMap || {};
+        window.__scannedLotQRMap[lotNumber] = {
+          materialSeiban: scannedMaterialCode,
+          scannedQR: qrCodeMessage
+        };
+
         // Which machine is this lot for (chosen in the grouped chooser, else the
         // single machine).
         const _scanMachine = window.__lotScanMachine
@@ -11804,8 +11895,12 @@ document.getElementById('startStep2Scan').addEventListener('click', async functi
         const _recordAndAdvance = () => {
           console.log('🟢 [_recordAndAdvance] called for machine:', _scanMachine, 'lot:', lotNumber);
           if (typeof window.recordLotScan === 'function') {
-            window.__pendingPrevLot = window.recordLotScan(lotNumber, _scanMachine, 'scanned');
+            window.__pendingPrevLot = window.recordLotScan(lotNumber, _scanMachine, 'scanned', {
+              materialSeiban: scannedMaterialCode,
+              scannedQR: qrCodeMessage
+            });
             console.log('🟢 [_recordAndAdvance] recordLotScan done, __pendingPrevLot:', !!window.__pendingPrevLot);
+            if (typeof window.assertMachineState === 'function') window.assertMachineState();
           }
           console.log('🟢 [_recordAndAdvance] Hiding step2Modal');
           document.getElementById('step2Modal').style.display = 'none';
@@ -11880,6 +11975,7 @@ document.getElementById('startStep2Scan').addEventListener('click', async functi
         // Log material lot scan action
         await logTabletAction('Scanned material lot (Step 2)', 'in-progress', {
           lotNumber: lotNumber,
+          specificMachine: _scanMachine,
           materialCode: actualScannedCode,
           allMaterialLots: materialLots.map(l => l.lotNumber).join(', ')
         });
@@ -12608,7 +12704,8 @@ window.addEventListener('load', function () {
             hinban: '',
             timestamp: new Date().toISOString(),
             additionalData: {
-              action: 'clear'
+              action: 'clear',
+              language: localStorage.getItem('appLanguage') || 'ja'
             }
           })
         })
@@ -12894,16 +12991,40 @@ if (manualSendModal) {
 
   // Add a newly scanned lot to a machine's timeline; return the previously-open
   // record (whose shots should be collected now), or null for the first lot.
-  function recordLotScan(lotNumber, machine, source) {
+  function recordLotScan(lotNumber, machine, source, extra) {
+    refreshLots();
+    if (machine && machine.includes(',')) {
+      machine = window.__lotScanMachine || machine.split(',')[0].trim();
+    }
     machine = machine || 'UNKNOWN';
     const list = lotsByMachine[machine] || (lotsByMachine[machine] = []);
     const prevOpen = openRecordFor(machine);
     const feed = resolveFeed(machine);
-    list.push({
+    let now = Date.now();
+    while (list.some(r => r.ts === now)) { now++; }
+
+    const seiban = (extra && (extra.materialSeiban || extra.材料背番号))
+      || (window.__scannedLotQRMap && (window.__scannedLotQRMap[lotNumber]?.materialSeiban || window.__scannedLotQRMap[lotNumber]?.材料背番号))
+      || (typeof currentProductDetails !== 'undefined' && currentProductDetails?.materialCode)
+      || (document.getElementById('背番号')?.value)
+      || null;
+
+    const fullQR = (extra && extra.scannedQR)
+      || (window.__scannedLotQRMap && window.__scannedLotQRMap[lotNumber]?.scannedQR)
+      || null;
+
+    const rec = {
       lotNumber: lotNumber, machine: machine, shots: null,
       feedPitch: feed.feedPitch, pcPerCycle: feed.pcPerCycle,
-      meters: null, pieces: null, source: source || 'scanned', open: true, ts: Date.now()
-    });
+      meters: null, pieces: null, source: source || 'scanned', open: true, ts: now
+    };
+    if (seiban) {
+      rec.materialSeiban = seiban;
+    }
+    if (fullQR) {
+      rec.scannedQR = fullQR;
+    }
+    list.push(rec);
     save();
 
     // Auto-reset End Time if a new lot is scanned, so the user is forced to re-enter it at the real end of production.
@@ -12920,16 +13041,64 @@ if (manualSendModal) {
     // chooser can grey it out and we send to every assigned machine.
     if (!window.__lotCycleMachinesDone) window.__lotCycleMachinesDone = [];
     if (window.__lotCycleMachinesDone.indexOf(machine) < 0) window.__lotCycleMachinesDone.push(machine);
+    if (typeof window.assertMachineState === 'function') window.assertMachineState();
     return prevOpen;
   }
 
+  window.isMachineLotScanned = function (machineName) {
+    const m = String(machineName || '').trim().toUpperCase();
+    if (!m) return false;
+    try {
+      if (typeof refreshLots === 'function') refreshLots();
+    } catch (_) { }
+    if (typeof lotsByMachine !== 'undefined' && lotsByMachine && Array.isArray(lotsByMachine[m]) && lotsByMachine[m].length > 0) {
+      return true;
+    }
+    const pfx = typeof uniquePrefix !== 'undefined' ? uniquePrefix : '';
+    try {
+      const raw = localStorage.getItem(`${pfx}lotsByMachine`);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && Array.isArray(parsed[m]) && parsed[m].length > 0) return true;
+      }
+    } catch (_) { }
+    return false;
+  };
+
   function closeRecord(rec, shots) {
     if (!rec) return;
+    refreshLots();
     shots = parseInt(shots, 10) || 0;
-    rec.shots = shots;
-    rec.meters = (rec.feedPitch != null) ? round1(shots * rec.feedPitch / 1000) : null;
-    rec.pieces = (rec.pcPerCycle != null) ? shots * rec.pcPerCycle : null;
-    rec.open = false;
+
+    const machine = rec.machine || 'UNKNOWN';
+    const list = lotsByMachine[machine] || [];
+    let target = null;
+    if (rec.ts && rec.lotNumber) target = list.find(r => r.ts === rec.ts && r.lotNumber === rec.lotNumber);
+    if (!target && rec.lotNumber) target = list.find(r => r.lotNumber === rec.lotNumber && r.open);
+    if (!target && rec.ts) target = list.find(r => r.ts === rec.ts);
+    if (!target && rec.lotNumber && list.length > 0) target = list.find(r => r.lotNumber === rec.lotNumber);
+    if (!target) {
+      Object.keys(lotsByMachine).forEach(m => {
+        if (!target) {
+          const l = lotsByMachine[m] || [];
+          if (rec.ts && rec.lotNumber) target = l.find(r => r.ts === rec.ts && r.lotNumber === rec.lotNumber);
+          if (!target && rec.lotNumber) target = l.find(r => r.lotNumber === rec.lotNumber && r.open);
+          if (!target && rec.ts) target = l.find(r => r.ts === rec.ts);
+          if (!target && rec.lotNumber) target = l.find(r => r.lotNumber === rec.lotNumber);
+        }
+      });
+    }
+
+    const applyShots = (t) => {
+      t.shots = shots;
+      t.meters = (t.feedPitch != null) ? round1(shots * t.feedPitch / 1000) : null;
+      t.pieces = (t.pcPerCycle != null) ? shots * t.pcPerCycle : null;
+      t.open = false;
+    };
+
+    if (target) applyShots(target);
+    applyShots(rec);
+
     save();
     updateShotTotalField();
   }
@@ -12937,11 +13106,38 @@ if (manualSendModal) {
   function buildPayload() {
     const recs = allRecords().filter(r => r.shots != null);
     const Lot_Details = recs.map(r => {
+      const seiban = r.materialSeiban
+        || r.材料背番号
+        || (window.__scannedLotQRMap && (window.__scannedLotQRMap[r.lotNumber]?.materialSeiban || window.__scannedLotQRMap[r.lotNumber]?.材料背番号))
+        || (typeof currentProductDetails !== 'undefined' && currentProductDetails?.materialCode)
+        || (document.getElementById('背番号')?.value)
+        || null;
+
+      const fullQR = r.scannedQR
+        || (window.__scannedLotQRMap && window.__scannedLotQRMap[r.lotNumber]?.scannedQR)
+        || null;
+
       const o = {
-        lotNumber: r.lotNumber, machine: r.machine, shots: r.shots,
-        feedPitch: r.feedPitch, pcPerCycle: r.pcPerCycle, meters: r.meters
+        lotNumber: r.lotNumber,
+        machine: r.machine,
+        shots: r.shots,
+        feedPitch: r.feedPitch,
+        pcPerCycle: r.pcPerCycle,
+        meters: r.meters
       };
       if (r.pieces != null) o.pieces = r.pieces;
+      if (r.ts != null) {
+        o.timestamp = (typeof r.ts === 'number') ? new Date(r.ts).toISOString() : String(r.ts);
+      } else {
+        o.timestamp = new Date().toISOString();
+      }
+      if (seiban != null) {
+        o.materialSeiban = seiban;
+      }
+      if (fullQR != null) {
+        o.scannedQR = fullQR;
+      }
+      if (r.image != null) o.image = r.image;
       return o;
     });
     const Total_Meters = round1(recs.reduce((s, r) => s + (r.meters || 0), 0));
@@ -13007,12 +13203,28 @@ if (manualSendModal) {
     closeLP();
     const card = shell();
 
-    if (window.__materialScanMode === 'production') {
+    const btns = (machines || []).map(m => {
+      const isDone = done.indexOf(m) >= 0;
+      const label = opts.formatLabel ? opts.formatLabel(m) : (m + (isDone ? ' ✓ 済' : ''));
+      const style = isDone
+        ? 'width:100%;background:#E4E7EC;color:#98A2B3;border:none;border-radius:10px;padding:16px;font-size:1.1rem;font-weight:800;margin-bottom:10px;cursor:not-allowed;'
+        : 'width:100%;background:#16223A;color:#fff;border:none;border-radius:10px;padding:16px;font-size:1.1rem;font-weight:800;margin-bottom:10px;cursor:pointer;';
+      return '<button data-m="' + m + '" ' + (isDone ? 'disabled' : '') + ' style="' + style + '">' + label + '</button>';
+    }).join('');
+    const doneBtn = opts.allowDone
+      ? '<button id="lpDone" style="width:100%;background:#29C36A;color:#fff;border:none;border-radius:10px;padding:14px;font-size:1rem;font-weight:800;cursor:pointer;margin-top:6px;">完了して送信へ / Done → Send</button>'
+      : '';
+    card.innerHTML =
+      '<div style="font-size:1.05rem;font-weight:800;color:#101828;margin-bottom:4px;">' + (opts.title || '機械を選択 / Select machine') + '</div>' +
+      '<div style="font-size:.85rem;font-weight:600;color:#475467;margin-bottom:14px;">' + (opts.subtitle || 'このロットを処理する機械 / Machine for this lot') + '</div>' + btns + doneBtn;
+
+    if (opts.allowCancel || window.__materialScanMode === 'production') {
       const ov = document.getElementById('lpModal');
       if (ov) {
         ov.addEventListener('click', function (e) {
           if (e.target === ov) {
             closeLP();
+            if (opts.onCancel) opts.onCancel();
             window.__materialScanMode = null;
           }
         });
@@ -13026,24 +13238,12 @@ if (manualSendModal) {
       closeBtn.onclick = function (e) {
         e.stopPropagation();
         closeLP();
+        if (opts.onCancel) opts.onCancel();
         window.__materialScanMode = null;
       };
       card.appendChild(closeBtn);
     }
 
-    const btns = (machines || []).map(m => {
-      const isDone = done.indexOf(m) >= 0;
-      const style = isDone
-        ? 'width:100%;background:#E4E7EC;color:#98A2B3;border:none;border-radius:10px;padding:16px;font-size:1.1rem;font-weight:800;margin-bottom:10px;cursor:not-allowed;'
-        : 'width:100%;background:#16223A;color:#fff;border:none;border-radius:10px;padding:16px;font-size:1.1rem;font-weight:800;margin-bottom:10px;cursor:pointer;';
-      return '<button data-m="' + m + '" ' + (isDone ? 'disabled' : '') + ' style="' + style + '">' + m + (isDone ? ' ✓ 済' : '') + '</button>';
-    }).join('');
-    const doneBtn = opts.allowDone
-      ? '<button id="lpDone" style="width:100%;background:#29C36A;color:#fff;border:none;border-radius:10px;padding:14px;font-size:1rem;font-weight:800;cursor:pointer;margin-top:6px;">完了して送信へ / Done → Send</button>'
-      : '';
-    card.innerHTML =
-      '<div style="font-size:1.05rem;font-weight:800;color:#101828;margin-bottom:4px;">機械を選択 / Select machine</div>' +
-      '<div style="font-size:.85rem;font-weight:600;color:#475467;margin-bottom:14px;">このロットを処理する機械 / Machine for this lot</div>' + btns + doneBtn;
     card.querySelectorAll('[data-m]:not([disabled])').forEach(b => b.onclick = () => { const m = b.getAttribute('data-m'); closeLP(); if (onPick) onPick(m); });
     const db = card.querySelector('#lpDone');
     if (db) db.onclick = () => { closeLP(); if (opts.onDone) opts.onDone(); };
@@ -13060,16 +13260,23 @@ if (manualSendModal) {
       const mName = (typeof getMachineName === 'function' ? getMachineName() : '')
         || (document.getElementById('process') ? document.getElementById('process').value : '')
         || 'UNKNOWN';
+      const targetMachines = (mName && mName.includes(','))
+        ? mName.split(',').map(m => m.trim()).filter(Boolean)
+        : ((typeof groupedMachines !== 'undefined' && Array.isArray(groupedMachines) && groupedMachines.length > 0)
+          ? groupedMachines
+          : [mName]);
       const mLots = (typeof materialLots !== 'undefined' && Array.isArray(materialLots) && materialLots.length > 0)
         ? materialLots.map(l => (typeof l === 'object' ? l.lotNumber : l)).filter(Boolean)
         : [];
 
       if (allRecords().length === 0) {
         if (mLots.length > 0) {
-          mLots.forEach(l => recordLotScan(l, mName, 'auto'));
+          mLots.forEach(l => {
+            targetMachines.forEach(m => recordLotScan(l, m, 'auto'));
+          });
         } else {
           const defLot = document.getElementById('lot-number')?.value || '---';
-          recordLotScan(defLot, mName, 'auto');
+          targetMachines.forEach(m => recordLotScan(defLot, m, 'auto'));
         }
         open = allRecords().filter(r => r.open || r.shots == null || r.shots === '');
       } else if (!currentShotVal || currentShotVal === '0') {
@@ -13082,12 +13289,17 @@ if (manualSendModal) {
     }
 
     if (!open.length) return;
+    const targets = open.map(r => ({
+      machine: r.machine,
+      lotNumber: r.lotNumber,
+      ts: r.ts
+    }));
     let i = 0;
     const next = () => {
-      if (i >= open.length) return;
-      const r = open[i++];
-      promptShots(r.machine, r.lotNumber,
-        v => { closeRecord(r, v); next(); });
+      if (i >= targets.length) return;
+      const target = targets[i++];
+      promptShots(target.machine, target.lotNumber,
+        v => { closeRecord(target, v); next(); });
     };
     next();
   }
@@ -13095,14 +13307,19 @@ if (manualSendModal) {
   // Failsafe: if the user refreshes the page before entering shots for a previous lot,
   // we detect open lots that are NOT the current (last) lot, and prompt for their shots.
   window.checkMissingShots = function () {
+    refreshLots();
     const missing = [];
     Object.keys(lotsByMachine).forEach(machine => {
       const list = lotsByMachine[machine];
       if (!list || list.length <= 1) return;
       // All items except the last one should NOT be open.
       for (let i = 0; i < list.length - 1; i++) {
-        if (list[i].open) {
-          missing.push(list[i]);
+        if (list[i].open || list[i].shots == null || list[i].shots === '') {
+          missing.push({
+            machine: list[i].machine || machine,
+            lotNumber: list[i].lotNumber,
+            ts: list[i].ts
+          });
         }
       }
     });
@@ -13112,9 +13329,9 @@ if (manualSendModal) {
     let idx = 0;
     const promptNext = () => {
       if (idx >= missing.length) return;
-      const rec = missing[idx++];
-      promptShots(rec.machine, rec.lotNumber, v => {
-        closeRecord(rec, v);
+      const target = missing[idx++];
+      promptShots(target.machine, target.lotNumber, v => {
+        closeRecord(target, v);
         promptNext();
       });
     };
@@ -13298,6 +13515,7 @@ if (manualSendModal) {
     }
   };
 
+  window.chooseMachine = chooseMachine;
   window.chooseScanMachine = function (onPicked) {
     const done = window.__lotCycleMachinesDone || [];
     chooseMachine((typeof groupedMachines !== 'undefined') ? groupedMachines : [],
@@ -13335,13 +13553,15 @@ if (manualSendModal) {
       }
     }
     console.log('🟣 [proceedAfterMachineDone] All machines done (or not grouped) → showStep3Modal');
+    window.__lotScanMachine = null;
+    window.__lotCycleMachinesDone = [];
     if (typeof showStep3Modal === 'function') showStep3Modal();
   };
   window.afterLotPhotoProceed = function (onDone) {
     const prev = window.__pendingPrevLot;
     window.__pendingPrevLot = null;
     console.log('🟣 [afterLotPhotoProceed] called, prev:', prev ? (prev.machine + ' lot ' + prev.lotNumber + ' open=' + prev.open) : 'null');
-    if (prev && prev.open) {
+    if (prev && (prev.open || prev.shots == null || prev.shots === '')) {
       console.log('🟣 [afterLotPhotoProceed] Prompting shots for previous lot...');
       promptShots(prev.machine, prev.lotNumber,
         v => { closeRecord(prev, v); console.log('🟣 [afterLotPhotoProceed] Shots entered, calling onDone...'); if (onDone) onDone(); });
@@ -13381,24 +13601,34 @@ if (manualSendModal) {
 
   // Best-effort "current lot": the most recent OPEN lot in the per-machine
   // tracker, else the last entry in the material-lot list.
-  function getCurrentLot() {
+  function getCurrentLot(machine) {
     try {
       const PFX = (typeof uniquePrefix !== 'undefined' && uniquePrefix) ? uniquePrefix : 'dcp-';
       const lbm = JSON.parse(localStorage.getItem(PFX + 'lotsByMachine') || '{}') || {};
-      let best = null;
-      Object.keys(lbm).forEach(m => (lbm[m] || []).forEach(r => { if (r && r.open && r.lotNumber) best = r; }));
-      if (best) return best.lotNumber;
+      if (machine) {
+        const list = lbm[machine] || [];
+        for (let i = list.length - 1; i >= 0; i--) {
+          if (list[i] && list[i].open && list[i].lotNumber) return list[i].lotNumber;
+        }
+        if (list.length > 0 && list[list.length - 1] && list[list.length - 1].lotNumber) {
+          return list[list.length - 1].lotNumber;
+        }
+      } else {
+        let best = null;
+        Object.keys(lbm).forEach(m => (lbm[m] || []).forEach(r => { if (r && r.open && r.lotNumber) best = r; }));
+        if (best) return best.lotNumber;
+      }
     } catch (e) { }
     try {
       if (typeof materialLots !== 'undefined' && materialLots.length) {
         return materialLots[materialLots.length - 1].lotNumber;
       }
     } catch (e) { }
-    return '';
+    return document.getElementById('lot-number')?.value || '';
   }
 
   // Draw the captured image to a canvas and burn a translucent caption bar
-  // (lot / leader / timestamp) onto the bottom, then flatten to a JPEG.
+  // (machine / lot / leader / timestamp) onto the bottom, then flatten to a JPEG.
   function burnOverlay(srcImage, info) {
     return new Promise((resolve) => {
       const img = new Image();
@@ -13412,10 +13642,11 @@ if (manualSendModal) {
         ctx.drawImage(img, 0, 0, W, H);
 
         const lines = [
+          (info.machine ? ('機械 / Machine: ' + info.machine) : null),
           'ロット / Lot: ' + (info.lot || '—'),
           'リーダー / Leader: ' + (info.leader || '—'),
           info.time
-        ];
+        ].filter(Boolean);
         const pad = Math.max(14, Math.round(W * 0.022));
         const fontSize = Math.max(18, Math.round(W * 0.030));
         const lineH = Math.round(fontSize * 1.4);
@@ -13612,46 +13843,80 @@ if (manualSendModal) {
     if (isDefectPhotoFlowActive) return;
     isDefectPhotoFlowActive = true;
 
-    openLeaderScan(function (leaderName) {
-      if (!leaderName) {
-        isDefectPhotoFlowActive = false;
-        return; // cancelled
-      }
-      const lot = getCurrentLot();
+    const mSelector = document.getElementById('machine-selector')?.value
+      || (typeof getMachineName === 'function' ? getMachineName() : '')
+      || (document.getElementById('process') ? document.getElementById('process').value : '');
+    const machines = (typeof groupedMachines !== 'undefined' && Array.isArray(groupedMachines) && groupedMachines.length > 1)
+      ? groupedMachines
+      : (mSelector && mSelector.includes(',') ? mSelector.split(',').map(m => m.trim()).filter(Boolean) : []);
 
-      // The user explicitly requested the native camera app for taking photos.
-      const capture = captureViaFileInput;
+    const proceedWithMachine = (targetMachine) => {
+      const lot = getCurrentLot(targetMachine);
 
-      capture(async function (base64) {
-        isDefectPhotoFlowActive = false;
-        if (!base64) return; // cancelled / no image
+      openLeaderScan(function (leaderName) {
+        if (!leaderName) {
+          isDefectPhotoFlowActive = false;
+          return; // cancelled
+        }
 
-        // The flattening (burnOverlay) happens asynchronously before upload
-        const stamped = await burnOverlay(base64, {
-          lot: lot,
-          leader: leaderName,
-          time: new Date().toLocaleString('ja-JP')
-        });
+        // The user explicitly requested the native camera app for taking photos.
+        const capture = captureViaFileInput;
 
-        try {
-          // lotTarget intentionally null: this is an EXTRA photo in the group,
-          // it must NOT replace the material-label photo for the lot.
-          const ok = await addMaterialLabelPhoto(stamped, null);
-          if (ok) {
-            if (typeof showSuccessModal === 'function') showSuccessModal('疵引き写真を保存しました / Defect photo saved');
-            if (typeof logTabletAction === 'function') {
-              logTabletAction('Defect (疵引き) photo captured', 'in-progress', { lotNumber: lot, leader: leaderName });
+        capture(async function (base64) {
+          isDefectPhotoFlowActive = false;
+          if (!base64) return; // cancelled / no image
+
+          // The flattening (burnOverlay) happens asynchronously before upload
+          const stamped = await burnOverlay(base64, {
+            machine: targetMachine,
+            lot: lot,
+            leader: leaderName,
+            time: new Date().toLocaleString('ja-JP')
+          });
+
+          try {
+            // Save defect photo bound to this lot, without replacing primary label photo
+            const ok = await addMaterialLabelPhoto(stamped, lot || null, {
+              replace: false,
+              photoType: 'defect',
+              machine: targetMachine
+            });
+            if (ok) {
+              if (typeof showSuccessModal === 'function') showSuccessModal('疵引き写真を保存しました / Defect photo saved');
+              if (typeof logTabletAction === 'function') {
+                logTabletAction('Defect (疵引き) photo captured', 'in-progress', {
+                  machine: targetMachine,
+                  lotNumber: lot,
+                  leader: leaderName
+                });
+              }
+            } else if (typeof showAlert === 'function') {
+              const max = (typeof MAX_MATERIAL_PHOTOS !== 'undefined') ? MAX_MATERIAL_PHOTOS : '';
+              showAlert('最大' + max + '枚までです / Maximum photos reached');
             }
-          } else if (typeof showAlert === 'function') {
-            const max = (typeof MAX_MATERIAL_PHOTOS !== 'undefined') ? MAX_MATERIAL_PHOTOS : '';
-            showAlert('最大' + max + '枚までです / Maximum photos reached');
+          } catch (e) {
+            console.error('Defect photo save error:', e);
+            if (typeof showAlert === 'function') showAlert('写真の保存に失敗しました / Failed to save photo');
           }
-        } catch (e) {
-          console.error('Defect photo save error:', e);
-          if (typeof showAlert === 'function') showAlert('写真の保存に失敗しました / Failed to save photo');
+        });
+      });
+    };
+
+    if (machines && machines.length > 1 && typeof window.chooseMachine === 'function') {
+      window.chooseMachine(machines, (pickedMachine) => {
+        proceedWithMachine(pickedMachine);
+      }, {
+        title: '機械を選択 / Select machine',
+        subtitle: '疵引きが発生した機械 / Machine with defect',
+        allowCancel: true,
+        onCancel: () => {
+          isDefectPhotoFlowActive = false;
         }
       });
-    });
+    } else {
+      const singleM = (machines && machines[0]) || mSelector || null;
+      proceedWithMachine(singleM);
+    }
   };
 })();
 
@@ -13824,6 +14089,12 @@ if (manualSendModal) {
         const allPreDone = window.checklistState.queue && window.checklistState.queue.length > 0 && window.checklistState.queue.every(t => {
           return !!(window.checklistState.recordIds && (window.checklistState.recordIds[t._id] || window.checklistState.recordIds[t.name]));
         });
+
+        if (allPreDone) {
+          const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+          localStorage.removeItem(pfx + 'activeChecklistStart');
+          if (typeof assertMachineState === 'function') assertMachineState();
+        }
 
         const prevPre = window.checklistState.isPreComplete;
         const prevPost = window.checklistState.isPostComplete;
@@ -14563,8 +14834,10 @@ if (manualSendModal) {
     if (forceLocked) {
       if (field.type === 'name') {
         const val = window.checklistState.answers[field.id];
-        const valDisplay = Array.isArray(val) ? val.filter(Boolean).join(', ') : (val || '—');
-        controlHtml = `<div style="background:#f3f4f6; padding:10px 14px; border-radius:8px; font-weight:700; color:#374151; font-size:0.95rem; border:1px solid #e5e7eb;">👤 ${valDisplay}</div>`;
+        const valDisplay = Array.isArray(val)
+          ? val.filter(Boolean).map((n, i) => `${i + 1}. ${n}`).join('<br>')
+          : (val ? formatWorkerDisplayLines(val).replace(/\n/g, '<br>') : '—');
+        controlHtml = `<div style="background:#f3f4f6; padding:10px 14px; border-radius:8px; font-weight:700; color:#374151; font-size:0.95rem; border:1px solid #e5e7eb; line-height:1.5;">👤 ${valDisplay}</div>`;
       } else if (field.type === 'checkbox' || field.type === 'toggle') {
         const isOk = ansVal === 'OK';
         const isNg = ansVal === 'NG';
@@ -15645,7 +15918,7 @@ if (manualSendModal) {
         return;
       }
 
-      nameEl.textContent = activeNames.join(', ');
+      nameEl.textContent = formatWorkerDisplayLines(activeNames);
       modal.style.display = 'flex';
       window._workerConfirmResolve = resolve;
     });
@@ -15660,7 +15933,13 @@ if (manualSendModal) {
       window._workerConfirmResolve = null;
     }
 
-    if (!isConfirmed) {
+    if (isConfirmed) {
+      if (typeof isChecklistLocked === 'function' && isChecklistLocked()) {
+        const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+        localStorage.setItem(pfx + 'activeChecklistStart', String(Date.now()));
+        if (typeof assertMachineState === 'function') assertMachineState();
+      }
+    } else {
       if (typeof openWorkerModal === 'function') {
         openWorkerModal(0);
       }
@@ -15710,6 +15989,14 @@ if (manualSendModal) {
     // Clear IndexedDB and draft in storage
     if (typeof window.clearChecklistDraftFromStorage === 'function') {
       await window.clearChecklistDraftFromStorage();
+    }
+
+    const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+    try { localStorage.removeItem(pfx + 'activeChecklistStart'); } catch (e) { }
+
+    // Immediately release CHECK card on factory TV
+    if (typeof window.assertMachineState === 'function') {
+      window.assertMachineState();
     }
 
     // Lock checklist tab bar
@@ -15904,7 +16191,9 @@ if (manualSendModal) {
         body: JSON.stringify({
           factory: window.checklistState.factory,
           machine: window.checklistState.machine,
-          workerName: document.getElementById('step0CurrentWorkerName')?.textContent || '',
+          workerName: (window.selectedWorkerNames && window.selectedWorkerNames.length > 0)
+            ? window.selectedWorkerNames.filter(Boolean).join(',')
+            : (document.getElementById('Machine Operator')?.value || ''),
           leaderName: `${leaderUser.firstName || ''} ${leaderUser.lastName || ''}`.trim() || leaderUser.username,
           leaderUsername: leaderUser.username,
           reason,
@@ -15915,6 +16204,10 @@ if (manualSendModal) {
 
       window.checklistState.isBypassed = true;
       window.checklistState.isPreComplete = true;
+
+      const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+      localStorage.removeItem(pfx + 'activeChecklistStart');
+      if (typeof assertMachineState === 'function') assertMachineState();
 
       const bar = document.querySelector('.tab-bar');
       if (bar) bar.classList.remove('locked-checklist');
@@ -15981,10 +16274,9 @@ if (manualSendModal) {
     if (overlay) overlay.style.display = 'flex';
 
     try {
-      let workerName = (document.getElementById('step0CurrentWorkerName')?.textContent || '').trim();
-      if (!workerName && Array.isArray(window.selectedWorkerNames) && window.selectedWorkerNames.length > 0) {
-        workerName = window.selectedWorkerNames.filter(Boolean).join(', ');
-      }
+      let workerName = (window.selectedWorkerNames && window.selectedWorkerNames.length > 0)
+        ? window.selectedWorkerNames.filter(Boolean).join(',')
+        : (document.getElementById('Machine Operator')?.value?.trim() || '');
       if (!workerName && window.checklistState.answers) {
         for (const t of queue) {
           const nameField = (t.fields || []).find(f => f.type === 'name');
@@ -16121,6 +16413,9 @@ if (manualSendModal) {
         if (isSubmittingPre) {
           if (allTemplatesFinished) {
             window.checklistState.isPreComplete = true;
+            const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+            localStorage.removeItem(pfx + 'activeChecklistStart');
+            if (typeof assertMachineState === 'function') assertMachineState();
             const hasPostFields = queue.some(t => Array.isArray(t.fields) && t.fields.some(f => f.timing === 'post'));
             if (!hasPostFields) {
               window.checklistState.isPostComplete = true;
@@ -16317,7 +16612,36 @@ if (manualSendModal) {
   let isCycleStopPending = false;
   let lastHeartbeatTime = Date.now();
 
-  function getCNCMiniPCIP() {
+  let activeCycleStopMachine = null;
+
+  function getGroupedMachineList() {
+    if (typeof groupedMachines !== 'undefined' && Array.isArray(groupedMachines) && groupedMachines.length > 0) {
+      return groupedMachines;
+    }
+    if (typeof groupedMachineIPs !== 'undefined' && Object.keys(groupedMachineIPs).length > 0) {
+      return Object.keys(groupedMachineIPs);
+    }
+    const procEl = document.getElementById('process');
+    if (procEl && procEl.value && procEl.value.includes(',')) {
+      return procEl.value.split(',').map(m => m.trim()).filter(Boolean);
+    }
+    return [];
+  }
+
+  function getCNCMiniPCIP(specificMachine) {
+    if (specificMachine) {
+      if (typeof groupedMachineIPs !== 'undefined' && groupedMachineIPs[specificMachine]) {
+        return groupedMachineIPs[specificMachine];
+      }
+      const mEl = document.getElementById('process');
+      const ipInput = document.getElementById('ipInfo');
+      if (mEl && ipInput && ipInput.value) {
+        const ms = mEl.value.split(',').map(m => m.trim());
+        const ips = ipInput.value.split(',').map(i => i.replace(/"/g, '').trim());
+        const idx = ms.indexOf(specificMachine);
+        if (idx >= 0 && ips[idx]) return ips[idx];
+      }
+    }
     if (typeof groupedMachineIPs !== 'undefined' && typeof primaryMachineName !== 'undefined' && groupedMachineIPs[primaryMachineName]) {
       return groupedMachineIPs[primaryMachineName];
     }
@@ -16327,6 +16651,25 @@ if (manualSendModal) {
       if (first) return first;
     }
     return null;
+  }
+
+  function getAllCNCMiniPCIPs() {
+    const ips = new Set();
+    if (typeof groupedMachineIPs !== 'undefined' && Object.keys(groupedMachineIPs).length > 0) {
+      Object.values(groupedMachineIPs).forEach(ip => { if (ip) ips.add(ip); });
+    }
+    const ipInput = document.getElementById('ipInfo');
+    if (ipInput && ipInput.value) {
+      ipInput.value.split(',').forEach(part => {
+        const cleaned = part.replace(/"/g, '').trim();
+        if (cleaned) ips.add(cleaned);
+      });
+    }
+    if (ips.size === 0) {
+      const single = getCNCMiniPCIP();
+      if (single) ips.add(single);
+    }
+    return Array.from(ips);
   }
 
   // Inject Styles for Floating Cancel Button and Modal
@@ -16432,6 +16775,15 @@ if (manualSendModal) {
   `;
   document.head.appendChild(style);
 
+  // Helper for i18n translation lookup
+  function _tr(key, fallback) {
+    if (typeof _t === 'function') {
+      const res = _t(key);
+      if (res && res !== key) return res;
+    }
+    return fallback || key;
+  }
+
   // Create Full-Screen Waiting Overlay for 🛑 Floating Button
   const overlay = document.createElement('div');
   overlay.id = 'cncCycleStopOverlay';
@@ -16439,14 +16791,13 @@ if (manualSendModal) {
   overlay.innerHTML = `
     <div class="cnc-stop-modal">
       <div class="cnc-stop-icon-pulse">🛑</div>
-      <h2>サイクル完了待ち</h2>
-      <p class="cnc-stop-sub">
-        現在の加工が完了し、材料送りが終わった時点で自動停止します。<br>
-        <span style="font-size: 0.85rem; color: #64748b;">(Stopping after current cut & material feed...)</span>
+      <h2 data-i18n="cnc_cycle_stop_title">サイクル完了待ち</h2>
+      <p class="cnc-stop-sub" data-i18n="cnc_cycle_stop_desc">
+        現在の加工が完了し、材料送りが終わった時点で自動停止します。
       </p>
       <div class="cnc-stop-spinner"></div>
-      <button type="button" class="btn-cancel-cycle-stop" id="btnCancelCycleStop">
-        停止を取り消す / Resume
+      <button type="button" class="btn-cancel-cycle-stop" id="btnCancelCycleStop" data-i18n="cnc_cycle_stop_cancel_btn">
+        停止を取り消す (運転継続)
       </button>
     </div>
   `;
@@ -16459,17 +16810,8 @@ if (manualSendModal) {
   stopBtn.className = 'video-manual-launcher pdf-page-btn cnc-cycle-stop-btn';
   stopBtn.style.bottom = 'calc(max(12px, env(safe-area-inset-bottom)) + 180px)';
   stopBtn.innerHTML = '<span class="video-manual-launcher__icon">🛑</span>';
-  stopBtn.setAttribute('title', 'サイクル完了後に停止 / Stop after cycle');
+  stopBtn.setAttribute('data-i18n-title', 'cnc_cycle_stop_tooltip');
   document.body.appendChild(stopBtn);
-
-  function openCycleStopOverlay() {
-    overlay.classList.add('open');
-  }
-
-  function closeCycleStopOverlay() {
-    overlay.classList.remove('open');
-    isCycleStopPending = false;
-  }
 
   // Create Full-Screen Waiting Overlay for ☕ Break Button
   const breakWaitOverlay = document.createElement('div');
@@ -16478,25 +16820,115 @@ if (manualSendModal) {
   breakWaitOverlay.innerHTML = `
     <div class="cnc-stop-modal">
       <div class="cnc-stop-icon-pulse" style="background: rgba(245, 158, 11, 0.15); border-color: rgba(245, 158, 11, 0.3);">☕</div>
-      <h2>休憩待ち (サイクル完了後)</h2>
-      <p class="cnc-stop-sub">
-        現在の加工と材料送りが完了した時点で、機械を自動停止して休憩を開始します。<br>
-        <span style="font-size: 0.85rem; color: #64748b;">(Stopping cleanly after cycle before break timer starts...)</span>
+      <h2 data-i18n="cnc_break_wait_title">休憩待ち (サイクル完了後)</h2>
+      <p class="cnc-stop-sub" data-i18n="cnc_break_wait_desc">
+        現在の加工と材料送りが完了した時点で、機械を自動停止して休憩を開始します。
       </p>
       <div class="cnc-stop-spinner" style="border-top-color: #f59e0b;"></div>
-      <button type="button" class="btn-cancel-cycle-stop" id="btnCancelBreakWait">
-        休憩を取り消す / Cancel
+      <button type="button" class="btn-cancel-cycle-stop" id="btnCancelBreakWait" data-i18n="cnc_break_wait_cancel_btn">
+        休憩を取り消す
       </button>
     </div>
   `;
   document.body.appendChild(breakWaitOverlay);
 
+  function updateCncOverlayTranslations() {
+    const cycleTitle = overlay.querySelector('[data-i18n="cnc_cycle_stop_title"]');
+    if (cycleTitle) cycleTitle.textContent = _tr('cnc_cycle_stop_title', 'サイクル完了待ち');
+    const cycleDesc = overlay.querySelector('[data-i18n="cnc_cycle_stop_desc"]');
+    if (cycleDesc) cycleDesc.textContent = _tr('cnc_cycle_stop_desc', '現在の加工が完了し、材料送りが終わった時点で自動停止します。');
+    const cycleBtn = overlay.querySelector('#btnCancelCycleStop');
+    if (cycleBtn) cycleBtn.textContent = _tr('cnc_cycle_stop_cancel_btn', '停止を取り消す (運転継続)');
+
+    const breakTitle = breakWaitOverlay.querySelector('[data-i18n="cnc_break_wait_title"]');
+    if (breakTitle) breakTitle.textContent = _tr('cnc_break_wait_title', '休憩待ち (サイクル完了後)');
+    const breakDesc = breakWaitOverlay.querySelector('[data-i18n="cnc_break_wait_desc"]');
+    if (breakDesc) breakDesc.textContent = _tr('cnc_break_wait_desc', '現在の加工と材料送りが完了した時点で、機械を自動停止して休憩を開始します。');
+    const breakBtn = breakWaitOverlay.querySelector('#btnCancelBreakWait');
+    if (breakBtn) breakBtn.textContent = _tr('cnc_break_wait_cancel_btn', '休憩を取り消す');
+
+    if (stopBtn) {
+      stopBtn.setAttribute('title', _tr('cnc_cycle_stop_tooltip', 'サイクル完了後に停止'));
+    }
+
+    if (isBreakScheduledPending) {
+      const startBtn = document.getElementById('breakStartButton');
+      if (startBtn) {
+        startBtn.innerHTML = `<span>${_tr('cnc_break_btn_waiting', '⏳ サイクル完了後に休憩停止します...')}</span>`;
+      }
+    }
+  }
+
+  function broadcastLanguagePreferenceToMachine(lang) {
+    const targetLang = lang || localStorage.getItem('appLanguage') || 'ja';
+    const machineNameForSSE = typeof getMachineName === 'function' ? getMachineName() : '';
+    if (machineNameForSSE && machineNameForSSE !== 'MACHINE') {
+      const sUrl = typeof serverURL !== 'undefined' ? serverURL : 'http://localhost:3000';
+      fetch(`${sUrl}/api/broadcast-scan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          machineId: machineNameForSSE,
+          action: 'language_change',
+          language: targetLang,
+          additionalData: {
+            action: 'language_change',
+            language: targetLang
+          }
+        })
+      }).catch(err => console.warn('Failed to broadcast language change:', err));
+    }
+  }
+
+  // Initial translation apply and reactive listener for language switcher
+  updateCncOverlayTranslations();
+  document.addEventListener('languageChanged', (e) => {
+    updateCncOverlayTranslations();
+    const lang = e.detail?.lang || localStorage.getItem('appLanguage') || 'ja';
+    broadcastLanguagePreferenceToMachine(lang);
+  });
+
+  function openCycleStopOverlay(targetMachine) {
+    activeCycleStopMachine = targetMachine || null;
+    updateCncOverlayTranslations();
+    if (targetMachine) {
+      const cycleTitle = overlay.querySelector('[data-i18n="cnc_cycle_stop_title"]');
+      if (cycleTitle) {
+        cycleTitle.textContent = `【${targetMachine}】 ` + _tr('cnc_cycle_stop_title', 'サイクル完了待ち');
+      }
+    }
+    const wasOpen = overlay.classList.contains('open');
+    overlay.classList.add('open');
+    if (!wasOpen) {
+      if (typeof notifyStopCall === 'function') {
+        notifyStopCall('activate', 'stop');
+      } else if (typeof window.notifyStopCall === 'function') {
+        window.notifyStopCall('activate', 'stop');
+      }
+    }
+  }
+
+  function closeCycleStopOverlay() {
+    const wasOpen = overlay.classList.contains('open');
+    overlay.classList.remove('open');
+    isCycleStopPending = false;
+    activeCycleStopMachine = null;
+    if (wasOpen) {
+      if (typeof notifyStopCall === 'function') {
+        notifyStopCall('clear', 'stop');
+      } else if (typeof window.notifyStopCall === 'function') {
+        window.notifyStopCall('clear', 'stop');
+      }
+    }
+  }
+
   function openBreakWaitOverlay() {
+    updateCncOverlayTranslations();
     breakWaitOverlay.classList.add('open');
     isBreakScheduledPending = true;
     const startBtn = document.getElementById('breakStartButton');
     if (startBtn) {
-      startBtn.innerHTML = '<span>⏳ サイクル完了後に休憩停止します...</span>';
+      startBtn.innerHTML = `<span>${_tr('cnc_break_btn_waiting', '⏳ サイクル完了後に休憩停止します...')}</span>`;
       startBtn.style.background = '#F59E0B';
     }
   }
@@ -16507,94 +16939,148 @@ if (manualSendModal) {
     resetBreakStartButtonUI();
   }
 
-  // Handle Cancel Button on Break Wait Overlay (User changes mind)
-  document.getElementById('btnCancelBreakWait')?.addEventListener('click', async () => {
-    const ip = getCNCMiniPCIP();
-    if (ip) {
-      try {
-        await fetch(`http://${ip}:5000/cancel_scheduled_break`, { method: 'POST' });
-      } catch (_) {
-        try { await fetch(`http://${ip}:8766/cancel_scheduled_break`, { method: 'POST' }); } catch (_) { }
-      }
-    }
+  // Handle Cancel Button on Break Wait Overlay (Cancels for all machines)
+  document.getElementById('btnCancelBreakWait')?.addEventListener('click', () => {
     closeBreakWaitOverlay();
     if (typeof showToast === 'function') {
-      showToast("休憩リクエストを取り消しました / Resumed normal operation");
+      showToast(_tr('toast_break_request_cancelled', "休憩リクエストを取り消しました"));
     }
+
+    const allIps = getAllCNCMiniPCIPs();
+    allIps.forEach(ip => {
+      const sig1 = (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2000) : undefined;
+      fetch(`http://${ip}:5000/cancel_scheduled_break`, { method: 'POST', signal: sig1 })
+        .catch(() => {
+          const sig2 = (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2000) : undefined;
+          fetch(`http://${ip}:8766/cancel_scheduled_break`, { method: 'POST', signal: sig2 }).catch(() => { });
+        });
+    });
   });
 
-  // Handle Cancel Button on Overlay (User changes mind on 🛑)
-  document.getElementById('btnCancelCycleStop')?.addEventListener('click', async () => {
-    const ip = getCNCMiniPCIP();
-    if (ip) {
-      try {
-        await fetch(`http://${ip}:5000/cancel_scheduled_cycle_stop`, { method: 'POST' });
-      } catch (_) {
-        try { await fetch(`http://${ip}:8766/cancel_scheduled_cycle_stop`, { method: 'POST' }); } catch (_) { }
-      }
-    }
+  // Handle Cancel Button on Overlay (User changes mind on 🛑 for the specific machine)
+  document.getElementById('btnCancelCycleStop')?.addEventListener('click', () => {
+    const targetMachine = activeCycleStopMachine;
     closeCycleStopOverlay();
     if (typeof showToast === 'function') {
-      showToast("停止リクエストを取り消しました / Resumed normal operation");
+      showToast(_tr('toast_cycle_stop_cancelled', "停止リクエストを取り消しました"));
+    }
+
+    const ip = getCNCMiniPCIP(targetMachine);
+    if (ip) {
+      const sig1 = (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2000) : undefined;
+      fetch(`http://${ip}:5000/cancel_scheduled_cycle_stop`, { method: 'POST', signal: sig1 })
+        .catch(() => {
+          const sig2 = (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2000) : undefined;
+          fetch(`http://${ip}:8766/cancel_scheduled_cycle_stop`, { method: 'POST', signal: sig2 }).catch(() => { });
+        });
     }
   });
 
-  // Handle Floating 🛑 Button Click -> Dedicated /schedule_cycle_stop
-  stopBtn.addEventListener('click', async () => {
-    const ip = getCNCMiniPCIP();
+  async function proceedWithCycleStop(targetMachine) {
+    activeCycleStopMachine = targetMachine || null;
+    const ip = getCNCMiniPCIP(targetMachine);
     isCycleStopPending = true;
-    openCycleStopOverlay();
+    openCycleStopOverlay(targetMachine);
 
     if (ip) {
+      let scheduled = false;
       try {
-        const res = await fetch(`http://${ip}:5000/schedule_cycle_stop`, { method: 'POST' });
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        const data = await res.json();
-        console.log("🛑 Scheduled cycle stop response:", data);
-      } catch (err) {
-        try {
-          const res = await fetch(`http://${ip}:8766/schedule_cycle_stop`, { method: 'POST' });
-          if (!res.ok) throw new Error("HTTP " + res.status);
+        const res = await fetch(`http://${ip}:5000/schedule_cycle_stop`, {
+          method: 'POST',
+          signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2500) : undefined
+        });
+        if (res.ok) {
           const data = await res.json();
-          console.log("🛑 Scheduled cycle stop response (:8766):", data);
-        } catch (e) {
-          console.warn("Legacy Mini-PC or offline:", e);
-          closeCycleStopOverlay();
-          if (typeof showToast === 'function') {
-            showToast("⚠️ マシンがサイクル停止機能に対応していません / Mini-PC does not support cycle stop");
+          if (data && data.scheduled) {
+            scheduled = true;
+            console.log(`🛑 Scheduled cycle stop response for ${targetMachine || ip} (:5000):`, data);
           }
+        }
+      } catch (_) { }
+
+      if (!scheduled) {
+        try {
+          const res = await fetch(`http://${ip}:8766/schedule_cycle_stop`, {
+            method: 'POST',
+            signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2500) : undefined
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data && data.scheduled) {
+              scheduled = true;
+              console.log(`🛑 Scheduled cycle stop response for ${targetMachine || ip} (:8766):`, data);
+            }
+          }
+        } catch (_) { }
+      }
+
+      if (!scheduled) {
+        console.warn(`Legacy Mini-PC for ${targetMachine || ip} (no schedule_cycle_stop response within 2.5s) or offline.`);
+        closeCycleStopOverlay();
+        if (typeof showToast === 'function') {
+          showToast(_tr('toast_cycle_stop_not_supported', "⚠️ マシンがサイクル停止機能に対応していません"));
         }
       }
     }
+  }
+
+  // Handle Floating 🛑 Button Click -> Choose machine if grouped, otherwise direct
+  stopBtn.addEventListener('click', async () => {
+    const machines = getGroupedMachineList();
+    if (machines && machines.length > 1 && typeof window.chooseMachine === 'function') {
+      window.chooseMachine(machines, (pickedMachine) => {
+        proceedWithCycleStop(pickedMachine);
+      }, {
+        title: '機械を選択 / Select machine',
+        subtitle: '停止する機械を選択 / Machine to stop',
+        allowCancel: true,
+        onCancel: () => {
+          // cancelled by operator
+        }
+      });
+    } else {
+      const singleM = (machines && machines[0]) || (document.getElementById('process')?.value) || null;
+      proceedWithCycleStop(singleM);
+    }
   });
 
   // ==========================================================================
-  // STATE RECONCILER (Guarantees Sync on Reload, Wake, or Stale SSE)
+  // STATE RECONCILER (Per-Machine State Aggregator for Grouped/Single Setup)
   // ==========================================================================
-  function syncGatekeeperState(state) {
+  const machineStates = {};
+
+  function syncGatekeeperState(state, ip) {
     if (!state) return;
     lastHeartbeatTime = Date.now();
+    const key = ip || state.machine_id || 'default';
+    machineStates[key] = state;
+
+    reconcileGroupedGatekeeperStates();
+  }
+
+  function reconcileGroupedGatekeeperStates() {
+    const states = Object.values(machineStates);
+    if (states.length === 0) return;
 
     // 1. Emergency cancel detected / Machine in hold -> Enforce Dedicated CNC Cancel Screen
-    if (state.holding && state.hold_reason === 'MANUAL_CANCEL') {
-      const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
-      const cancelOverlay = document.getElementById('cncCancelOverlay');
-      const isAlreadyOpen = cancelOverlay && cancelOverlay.classList.contains('open');
-      const breakActive = localStorage.getItem(pfx + 'activeBreakStart');
-      const cncCancelActive = localStorage.getItem(pfx + 'activeCncCancelStart');
+    // If ANY machine is in MANUAL_CANCEL, the cancel screen MUST be shown and stay open!
+    const manualCancelState = states.find(s => s && s.holding && s.hold_reason === 'MANUAL_CANCEL');
+    const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+    const cancelOverlay = document.getElementById('cncCancelOverlay');
+    const isCancelAlreadyOpen = cancelOverlay && cancelOverlay.classList.contains('open');
+    const breakActive = localStorage.getItem(pfx + 'activeBreakStart');
+    const cncCancelActive = localStorage.getItem(pfx + 'activeCncCancelStart');
 
-      if (!breakActive && !isAlreadyOpen && typeof openCncCancelOverlay === 'function') {
-        console.warn("🚨 [CNC GATEKEEPER] Machine is locked in MANUAL_CANCEL -> Asserting Dedicated Cancel Screen!");
+    if (manualCancelState) {
+      if (!breakActive && !isCancelAlreadyOpen && typeof openCncCancelOverlay === 'function') {
+        console.warn(`🚨 [CNC GATEKEEPER] Machine is locked in MANUAL_CANCEL (${manualCancelState.machine_id || 'group'}) -> Asserting Dedicated Cancel Screen!`);
         const startEpoch = cncCancelActive ? parseInt(cncCancelActive, 10) : Date.now();
         openCncCancelOverlay(startEpoch);
       }
     } else {
-      // FAILSAFE: If Mini-PC is UNLOCKED or restarted (e.g. 'U' key pressed in terminal or service restarted)
-      const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
-      const cncCancelActive = localStorage.getItem(pfx + 'activeCncCancelStart');
-      const cancelOverlay = document.getElementById('cncCancelOverlay');
-      if (cncCancelActive || (cancelOverlay && cancelOverlay.classList.contains('open'))) {
-        console.log("🔓 [CNC GATEKEEPER] Source of truth (Mini-PC) is unlocked -> Auto-dismissing Cancel Screen & releasing cloud stop-call!");
+      // ONLY auto-dismiss if ALL known machines are UNLOCKED (no machine holding in MANUAL_CANCEL)
+      if (cncCancelActive || isCancelAlreadyOpen) {
+        console.log("🔓 [CNC GATEKEEPER] Source of truth (All Mini-PCs) is unlocked -> Auto-dismissing Cancel Screen & releasing cloud stop-call!");
         if (typeof closeCncCancelOverlay === 'function') {
           closeCncCancelOverlay();
         }
@@ -16607,198 +17093,230 @@ if (manualSendModal) {
     }
 
     // 2. Preemptive break scheduled status for Breaktime Button
-    if (state.scheduled_break_stop) {
+    const breakScheduled = states.some(s => s && s.scheduled_break_stop);
+    if (breakScheduled) {
       if (!isBreakScheduledPending) {
         openBreakWaitOverlay();
       }
-    } else if (isBreakScheduledPending && !state.scheduled_break_stop) {
-      closeBreakWaitOverlay();
+    } else if (isBreakScheduledPending && !breakScheduled) {
+      const anyHolding = states.some(s => s && s.holding && s.hold_reason === 'BREAK');
+      if (!anyHolding) {
+        closeBreakWaitOverlay();
+      }
     }
 
-    if (state.holding && state.hold_reason === 'BREAK') {
+    const breakHolding = states.some(s => s && s.holding && s.hold_reason === 'BREAK');
+    const isRecentlyFinished = (window.__breakFinishTimestamp && (Date.now() - window.__breakFinishTimestamp < 8000));
+    if (breakHolding && isBreakScheduledPending && !isRecentlyFinished) {
       closeBreakWaitOverlay();
-      const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
-      const breakActive = localStorage.getItem(pfx + 'activeBreakStart');
       if (!breakActive && typeof startBreak === 'function') {
         startBreak();
       }
     }
 
     // 3. Preemptive cycle stop scheduled status for 🛑 Button
-    if (state.scheduled_cycle_stop) {
+    const cycleStopScheduled = states.some(s => s && s.scheduled_cycle_stop);
+    if (cycleStopScheduled) {
       if (!isCycleStopPending) {
         isCycleStopPending = true;
         openCycleStopOverlay();
       }
-    } else if (isCycleStopPending && !state.scheduled_cycle_stop) {
-      closeCycleStopOverlay();
+    } else {
+      if (isCycleStopPending) {
+        closeCycleStopOverlay();
+      } else {
+        // Tablet Reload Protection: Clear any ghost STOP on cloud TV if no machine is in cycle stop
+        if (typeof notifyStopCall === 'function') {
+          notifyStopCall('clear', 'stop');
+        } else if (typeof window.notifyStopCall === 'function') {
+          window.notifyStopCall('clear', 'stop');
+        }
+      }
     }
   }
 
-  // REST State Fetcher
+  // REST State Fetcher (Polls all machines for grouped setup)
   async function pollGatekeeperState() {
-    const ip = getCNCMiniPCIP();
-    if (!ip) return;
-    try {
-      const res = await fetch(`http://${ip}:5000/state`, { cache: 'no-store' });
-      if (res.ok) {
-        const state = await res.json();
-        syncGatekeeperState(state);
-        return;
-      }
-    } catch (_) {
+    const allIps = getAllCNCMiniPCIPs();
+    if (allIps.length === 0) return;
+    for (const ip of allIps) {
       try {
-        const res = await fetch(`http://${ip}:8766/state`, { cache: 'no-store' });
+        const sig = (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2000) : undefined;
+        const res = await fetch(`http://${ip}:5000/state`, { cache: 'no-store', signal: sig });
         if (res.ok) {
           const state = await res.json();
-          syncGatekeeperState(state);
+          if (window.__breakFinishTimestamp && (Date.now() - window.__breakFinishTimestamp < 8000)) {
+            if (state && state.hold_reason === 'BREAK') {
+              state.holding = false;
+              state.hold_reason = null;
+            }
+          }
+          syncGatekeeperState(state, ip);
+          continue;
         }
-      } catch (_) { }
+      } catch (_) {
+        try {
+          const sig = (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2000) : undefined;
+          const res = await fetch(`http://${ip}:8766/state`, { cache: 'no-store', signal: sig });
+          if (res.ok) {
+            const state = await res.json();
+            if (window.__breakFinishTimestamp && (Date.now() - window.__breakFinishTimestamp < 8000)) {
+              if (state && state.hold_reason === 'BREAK') {
+                state.holding = false;
+                state.hold_reason = null;
+              }
+            }
+            syncGatekeeperState(state, ip);
+          }
+        } catch (_) { }
+      }
     }
   }
 
   // ==========================================================================
   // SSE CONNECTION & EVENT HANDLERS
   // ==========================================================================
-  function connectCNCGatekeeperSSE() {
-    const ip = getCNCMiniPCIP();
-    if (!ip) {
-      setTimeout(connectCNCGatekeeperSSE, 3000);
-      return;
-    }
-    if (cncEventSource) {
-      try { cncEventSource.close(); } catch (_) { }
-    }
+  let cncEventSources = [];
 
-    pollGatekeeperState();
+  function attachSSEListeners(es, ip) {
+    es.addEventListener('status', (e) => {
+      try {
+        const data = JSON.parse(e.data || '{}');
+        syncGatekeeperState(data, ip);
+      } catch (err) {
+        console.error("Error parsing status event:", err);
+      }
+    });
 
-    try {
-      console.log(`🔌 [CNC GATEKEEPER] Connecting to SSE at http://${ip}:5000/events...`);
-      cncEventSource = new EventSource(`http://${ip}:5000/events`);
-
-      cncEventSource.addEventListener('status', (e) => {
-        try {
-          const data = JSON.parse(e.data || '{}');
-          syncGatekeeperState(data);
-        } catch (err) {
-          console.error("Error parsing status event:", err);
-        }
-      });
-
-      // 0. Restart blocked while locked (Break or Emergency Cancel)
-      cncEventSource.addEventListener('restart_blocked', (e) => {
-        try {
-          const data = JSON.parse(e.data || '{}');
-          console.warn('⛔ [CNC GATEKEEPER] Restart blocked:', data);
-          if (data.hold_reason === 'BREAK') {
-            if (typeof showToast === 'function') {
-              showToast("☕ 休憩中です。タブレットで「休憩を終了」を押してください / On Break - Finish break on tablet to resume");
-            }
-          } else {
-            if (typeof logTabletAction === 'function') {
-              logTabletAction('CNC Resume Attempt Blocked (Unauthorized restart)', 'Blocked', {
-                attemptNumber: data.repause_count,
-                warning: 'Operator attempted to restart machine while gatekeeper was locked',
-                holdReason: data.hold_reason || 'MANUAL_CANCEL'
-              });
-            }
-            if (typeof showToast === 'function') {
-              showToast(`⛔ 再開不可 / Restart blocked (Attempt #${data.repause_count}) - Leader required`);
-            }
-          }
-        } catch (err) {
-          console.error('Error logging restart_blocked:', err);
-        }
-      });
-
-      // 0.5. Safe start abort within 4-second grace window (no leader required)
-      cncEventSource.addEventListener('start_aborted', (e) => {
-        try {
-          const data = JSON.parse(e.data || '{}');
-          console.log("⚠️ [CNC GATEKEEPER] Start aborted within grace window:", data);
-          closeCycleStopOverlay();
-          if (typeof closeCncCancelOverlay === 'function') closeCncCancelOverlay();
+    // 0. Restart blocked while locked (Break or Emergency Cancel)
+    es.addEventListener('restart_blocked', (e) => {
+      try {
+        const data = JSON.parse(e.data || '{}');
+        console.warn('⛔ [CNC GATEKEEPER] Restart blocked:', data);
+        if (data.hold_reason === 'BREAK') {
           if (typeof showToast === 'function') {
-            showToast("⚠️ 開始直後の取消 (セットやり直し可) / Start cancelled before cut - Ready to restart");
+            showToast(_tr('toast_on_break_press_finish', "☕ 休憩中です。タブレットで「休憩を終了」を押してください"));
           }
-        } catch (err) {
-          console.error("Error parsing start_aborted event:", err);
-        }
-      });
-
-      // 1. Emergency cancel detected during cutting/drag -> Trigger Dedicated CNC Cancel screen
-      cncEventSource.addEventListener('cancel_detected', (e) => {
-        try {
-          const data = JSON.parse(e.data || '{}');
-          console.log("🚨 [CNC GATEKEEPER] Cancel detected:", data);
-          closeCycleStopOverlay();
-          const breakActive = (typeof breakPrefix !== 'undefined') && localStorage.getItem(breakPrefix + 'activeBreakStart');
-          if (!breakActive && typeof openCncCancelOverlay === 'function') {
-            openCncCancelOverlay();
-            if (typeof notifyStopCall === 'function') {
-              notifyStopCall('activate', 'leader');
-            } else if (typeof window.notifyStopCall === 'function') {
-              window.notifyStopCall('activate', 'leader');
-            }
-            if (typeof logTabletAction === 'function') {
-              logTabletAction('CNC Cancel Button Detected (Mid-cut abort)', 'Alert', {
-                warning: 'Emergency physical cancel button pressed during machining',
-                holdReason: 'MANUAL_CANCEL'
-              });
-            }
+        } else {
+          if (typeof logTabletAction === 'function') {
+            logTabletAction('CNC Resume Attempt Blocked (Unauthorized restart)', 'Blocked', {
+              attemptNumber: data.repause_count,
+              warning: 'Operator attempted to restart machine while gatekeeper was locked',
+              holdReason: data.hold_reason || 'MANUAL_CANCEL'
+            });
           }
-        } catch (err) {
-          console.error("Error parsing cancel_detected event:", err);
-        }
-      });
-
-      // 2. Preemptive Drag Phase for Break
-      cncEventSource.addEventListener('break_drag_phase', (e) => {
-        console.log("⏳ [CNC GATEKEEPER] Current cycle finished, feeding material before break...");
-        if (typeof showToast === 'function') {
-          showToast("⏳ サイクル完了。材料送り後に休憩に入ります...");
-        }
-      });
-
-      // 3. Preemptive Drag Phase for Cycle Stop (🛑)
-      cncEventSource.addEventListener('cycle_stop_drag_phase', (e) => {
-        console.log("⏳ [CNC GATEKEEPER] Current cycle finished, feeding material before stop...");
-        if (typeof showToast === 'function') {
-          showToast("⏳ サイクル完了。材料送り後に停止します...");
-        }
-      });
-
-      // 4. Preemptive Break Stop Completed -> Start Break Screen!
-      cncEventSource.addEventListener('break_stop_completed', (e) => {
-        console.log("☕ [CNC GATEKEEPER] Break stop executed cleanly.");
-        closeBreakWaitOverlay();
-        const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
-        const breakActive = localStorage.getItem(pfx + 'activeBreakStart');
-        if (!breakActive && typeof startBreak === 'function') {
-          startBreak();
           if (typeof showToast === 'function') {
-            showToast("☕ 休憩を開始しました (機械停止中) / Break started");
+            showToast(`⛔ 再開不可 / Restart blocked (Attempt #${data.repause_count}) - Leader required`);
           }
         }
-      });
+      } catch (err) {
+        console.error('Error logging restart_blocked:', err);
+      }
+    });
 
-      cncEventSource.addEventListener('break_stop_cancelled', (e) => {
-        console.log("☕ [CNC GATEKEEPER] Break scheduled stop cancelled.");
-        closeBreakWaitOverlay();
-      });
-
-      // 5. Preemptive Cycle Stop Completed -> Close Modal!
-      cncEventSource.addEventListener('cycle_stop_completed', (e) => {
-        console.log("🛑 [CNC GATEKEEPER] Cycle stop executed cleanly.");
+    // 0.5. Safe start abort within 4-second grace window (no leader required)
+    es.addEventListener('start_aborted', (e) => {
+      try {
+        const data = JSON.parse(e.data || '{}');
+        console.log("⚠️ [CNC GATEKEEPER] Start aborted within grace window:", data);
         closeCycleStopOverlay();
+        if (typeof closeCncCancelOverlay === 'function') closeCncCancelOverlay();
         if (typeof showToast === 'function') {
-          showToast("✅ サイクル完了停止しました (材料送り完了) / Machine stopped cleanly");
+          showToast("⚠️ 開始直後の取消 (セットやり直し可) / Start cancelled before cut - Ready to restart");
+        }
+      } catch (err) {
+        console.error("Error parsing start_aborted event:", err);
+      }
+    });
+
+    // 1. Emergency cancel detected during cutting/drag -> Trigger Dedicated CNC Cancel screen
+    es.addEventListener('cancel_detected', (e) => {
+      try {
+        const data = JSON.parse(e.data || '{}');
+        console.log("🚨 [CNC GATEKEEPER] Cancel detected:", data);
+        closeCycleStopOverlay();
+        const breakActive = (typeof breakPrefix !== 'undefined') && localStorage.getItem(breakPrefix + 'activeBreakStart');
+        if (!breakActive && typeof openCncCancelOverlay === 'function') {
+          openCncCancelOverlay();
+          if (typeof notifyStopCall === 'function') {
+            notifyStopCall('activate', 'leader');
+          } else if (typeof window.notifyStopCall === 'function') {
+            window.notifyStopCall('activate', 'leader');
+          }
+          if (typeof logTabletAction === 'function') {
+            logTabletAction('CNC Cancel Button Detected (Mid-cut abort)', 'Alert', {
+              warning: 'Emergency physical cancel button pressed during machining',
+              holdReason: 'MANUAL_CANCEL'
+            });
+          }
+        }
+      } catch (err) {
+        console.error("Error parsing cancel_detected event:", err);
+      }
+    });
+
+    // 2. Preemptive Drag Phase for Break
+    es.addEventListener('break_drag_phase', (e) => {
+      console.log("⏳ [CNC GATEKEEPER] Current cycle finished, feeding material before break...");
+      if (typeof showToast === 'function') {
+        showToast(_tr('toast_break_drag_phase', "⏳ サイクル完了。材料送り後に休憩に入ります..."));
+      }
+    });
+
+    // 3. Preemptive Drag Phase for Cycle Stop (🛑)
+    es.addEventListener('cycle_stop_drag_phase', (e) => {
+      console.log("⏳ [CNC GATEKEEPER] Current cycle finished, feeding material before stop...");
+      if (typeof showToast === 'function') {
+        showToast(_tr('toast_cycle_drag_phase', "⏳ サイクル完了。材料送り後に停止します..."));
+      }
+    });
+
+    // 4. Preemptive Break Stop Completed -> Start Break Screen!
+    es.addEventListener('break_stop_completed', (e) => {
+      console.log("☕ [CNC GATEKEEPER] Break stop executed cleanly.");
+      closeBreakWaitOverlay();
+      const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+      const breakActive = localStorage.getItem(pfx + 'activeBreakStart');
+      const isRecentlyFinished = (window.__breakFinishTimestamp && (Date.now() - window.__breakFinishTimestamp < 8000));
+      if (!breakActive && !isRecentlyFinished && typeof startBreak === 'function') {
+        startBreak();
+        if (typeof showToast === 'function') {
+          showToast(_tr('toast_break_started_cnc_stopped', "☕ 休憩を開始しました (機械停止中)"));
+        }
+      }
+    });
+
+    es.addEventListener('break_stop_cancelled', (e) => {
+      console.log("☕ [CNC GATEKEEPER] Break scheduled stop cancelled.");
+      closeBreakWaitOverlay();
+    });
+
+    // 5. Preemptive Cycle Stop Completed -> Close Modal!
+    es.addEventListener('cycle_stop_completed', (e) => {
+      console.log("🛑 [CNC GATEKEEPER] Cycle stop executed cleanly.");
+      closeCycleStopOverlay();
+      if (typeof showToast === 'function') {
+        showToast(_tr('toast_cycle_stop_completed', "✅ サイクル完了停止しました (材料送り完了)"));
+      }
+    });
+
+    // 6. Gatekeeper Unlocked
+    es.addEventListener('unlocked', (e) => {
+      console.log(`🔓 [CNC GATEKEEPER] Unlocked (${ip}):`, e.data);
+      Object.keys(machineStates).forEach(k => {
+        if (machineStates[k]) {
+          machineStates[k].holding = false;
+          machineStates[k].hold_reason = null;
+          machineStates[k].scheduled_break_stop = false;
+          machineStates[k].scheduled_cycle_stop = false;
         }
       });
+      isBreakScheduledPending = false;
+      closeBreakWaitOverlay();
+      reconcileGroupedGatekeeperStates();
 
-      // 6. Gatekeeper Unlocked
-      cncEventSource.addEventListener('unlocked', (e) => {
-        console.log("🔓 [CNC GATEKEEPER] Unlocked:", e.data);
+      const anyStillHolding = Object.values(machineStates).some(s => s && s.holding);
+      if (!anyStillHolding) {
         closeCycleStopOverlay();
         closeBreakWaitOverlay();
         if (typeof closeCncCancelOverlay === 'function') {
@@ -16815,31 +17333,55 @@ if (manualSendModal) {
         } else if (typeof closeStopCallOverlay === 'function') {
           closeStopCallOverlay();
         }
-      });
+      }
+    });
 
-      cncEventSource.onerror = () => {
-        if (cncEventSource) {
-          try { cncEventSource.close(); } catch (_) { }
-          cncEventSource = null;
-        }
-        setTimeout(connectCNCGatekeeperSSE, 4000);
-      };
-    } catch (err) {
-      console.error("Failed to establish CNC Gatekeeper SSE connection:", err);
+    es.onerror = () => {
+      try { es.close(); } catch (_) { }
+      const idx = cncEventSources.indexOf(es);
+      if (idx >= 0) cncEventSources.splice(idx, 1);
       setTimeout(connectCNCGatekeeperSSE, 5000);
+    };
+  }
+
+  function connectCNCGatekeeperSSE() {
+    const allIps = getAllCNCMiniPCIPs();
+    if (allIps.length === 0) {
+      setTimeout(connectCNCGatekeeperSSE, 3000);
+      return;
     }
+
+    cncEventSources.forEach(s => {
+      try { s.close(); } catch (_) { }
+    });
+    cncEventSources = [];
+
+    pollGatekeeperState();
+
+    allIps.forEach(ip => {
+      try {
+        console.log(`🔌 [CNC GATEKEEPER] Connecting to SSE at http://${ip}:5000/events...`);
+        const es = new EventSource(`http://${ip}:5000/events`);
+        cncEventSources.push(es);
+        attachSSEListeners(es, ip);
+      } catch (err) {
+        console.error(`Failed to establish CNC Gatekeeper SSE connection to ${ip}:`, err);
+        setTimeout(connectCNCGatekeeperSSE, 5000);
+      }
+    });
   }
 
   function resetBreakStartButtonUI() {
     const startBtn = document.getElementById('breakStartButton');
     if (startBtn) {
-      startBtn.innerHTML = '<span data-i18n="break_start_btn">休憩を開始</span>';
+      startBtn.innerHTML = `<span data-i18n="break_start_btn">${_tr('break_start_btn', '休憩を開始')}</span>`;
       startBtn.style.background = '';
     }
   }
 
-  // Handle Main Break Button Click -> Dedicated /schedule_break_stop
+  // Handle Main Break Button Click -> Dedicated /schedule_break_stop for ALL machines
   async function handleBreakStartButtonClick(e) {
+    window.__breakFinishTimestamp = null;
     if (e) {
       e.preventDefault();
       if (e.stopImmediatePropagation) e.stopImmediatePropagation();
@@ -16852,46 +17394,79 @@ if (manualSendModal) {
       return;
     }
 
-    const ip = getCNCMiniPCIP();
-    if (!ip) {
+    const allIps = getAllCNCMiniPCIPs();
+    if (allIps.length === 0) {
       if (typeof startBreak === 'function') startBreak();
       return;
     }
 
     openBreakWaitOverlay();
 
-    try {
-      const res = await fetch(`http://${ip}:5000/schedule_break_stop`, { method: 'POST' });
-      if (!res.ok) throw new Error("HTTP " + res.status);
-      const data = await res.json();
-      if (!data.scheduled) throw new Error("Not scheduled");
-      console.log("☕ Scheduled break stop response:", data);
-    } catch (err) {
+    let anyScheduled = false;
+    await Promise.all(allIps.map(async (ip) => {
+      let scheduled = false;
       try {
-        const res = await fetch(`http://${ip}:8766/schedule_break_stop`, { method: 'POST' });
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        const data = await res.json();
-        if (!data.scheduled) throw new Error("Not scheduled");
-        console.log("☕ Scheduled break stop response (:8766):", data);
-      } catch (e) {
-        console.warn("Legacy Mini-PC (no schedule_break_stop) or offline. Starting local break immediately:", e);
-        closeBreakWaitOverlay();
-        if (typeof startBreak === 'function') startBreak();
+        const res = await fetch(`http://${ip}:5000/schedule_break_stop`, {
+          method: 'POST',
+          signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2500) : undefined
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.scheduled) {
+            scheduled = true;
+            anyScheduled = true;
+            console.log(`☕ Scheduled break stop response (${ip} :5000):`, data);
+          }
+        }
+      } catch (_) { }
+
+      if (!scheduled) {
+        try {
+          const res = await fetch(`http://${ip}:8766/schedule_break_stop`, {
+            method: 'POST',
+            signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2500) : undefined
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data && data.scheduled) {
+              scheduled = true;
+              anyScheduled = true;
+              console.log(`☕ Scheduled break stop response (${ip} :8766):`, data);
+            }
+          }
+        } catch (_) { }
       }
+    }));
+
+    if (!anyScheduled) {
+      console.warn("Legacy Mini-PC (no schedule_break_stop response within 2.5s) or offline. Starting local break immediately.");
+      closeBreakWaitOverlay();
+      if (typeof startBreak === 'function') startBreak();
     }
   }
   window.handleBreakStartButtonClick = handleBreakStartButtonClick;
 
   window.unlockCNCGatekeeper = function () {
-    const ip = getCNCMiniPCIP();
-    if (ip) {
+    window.__breakFinishTimestamp = Date.now();
+    isBreakScheduledPending = false;
+    closeBreakWaitOverlay();
+    const allIps = getAllCNCMiniPCIPs();
+    Object.keys(machineStates).forEach(k => {
+      if (machineStates[k]) {
+        machineStates[k].holding = false;
+        machineStates[k].hold_reason = null;
+        machineStates[k].scheduled_break_stop = false;
+        machineStates[k].scheduled_cycle_stop = false;
+      }
+    });
+    allIps.forEach(ip => {
       fetch(`http://${ip}:5000/unlock`, { method: 'POST' })
         .then(r => r.json())
-        .then(d => console.log("✅ CNC Gatekeeper unlocked response:", d))
+        .then(d => console.log(`✅ CNC Gatekeeper unlocked response (${ip}):`, d))
         .catch(() => {
           fetch(`http://${ip}:8766/unlock`, { method: 'POST' }).catch(() => { });
         });
-    }
+    });
   };
 
   // Watchdog & Wake Listeners

@@ -365,6 +365,24 @@ const translations = {
         'checklist_completed_banner': '点検完了',
         'steps_count': '項目',
         'please_wait_for_maintenance': '保全チームの対応をお待ちください',
+
+        // CNC Cycle Stop & Break Waiting Modal
+        'cnc_cycle_stop_title': 'サイクル完了待ち',
+        'cnc_cycle_stop_desc': '現在の加工が完了し、材料送りが終わった時点で自動停止します。',
+        'cnc_cycle_stop_cancel_btn': '停止を取り消す (運転継続)',
+        'cnc_cycle_stop_tooltip': 'サイクル完了後に停止',
+        'cnc_break_wait_title': '休憩待ち (サイクル完了後)',
+        'cnc_break_wait_desc': '現在の加工と材料送りが完了した時点で、機械を自動停止して休憩を開始します。',
+        'cnc_break_wait_cancel_btn': '休憩を取り消す',
+        'cnc_break_btn_waiting': '⏳ サイクル完了後に休憩停止します...',
+        'toast_cycle_drag_phase': '⏳ サイクル完了。材料送り後に停止します...',
+        'toast_break_drag_phase': '⏳ サイクル完了。材料送り後に休憩に入ります...',
+        'toast_cycle_stop_completed': '✅ サイクル完了停止しました (材料送り完了)',
+        'toast_cycle_stop_cancelled': '停止リクエストを取り消しました',
+        'toast_break_request_cancelled': '休憩リクエストを取り消しました',
+        'toast_break_started_cnc_stopped': '☕ 休憩を開始しました (機械停止中)',
+        'toast_cycle_stop_not_supported': '⚠️ マシンがサイクル停止機能に対応していません',
+        'toast_on_break_press_finish': '☕ 休憩中です。タブレットで「休憩を終了」を押してください',
     },
 
     en: {
@@ -730,6 +748,24 @@ const translations = {
         'checklist_completed_banner': 'Checklist Completed',
         'steps_count': 'steps',
         'please_wait_for_maintenance': 'Please wait for maintenance team',
+
+        // CNC Cycle Stop & Break Waiting Modal
+        'cnc_cycle_stop_title': 'Waiting for Cycle to Finish',
+        'cnc_cycle_stop_desc': 'The machine will automatically stop after the current cut and material feed are finished.',
+        'cnc_cycle_stop_cancel_btn': 'Cancel Stop / Resume',
+        'cnc_cycle_stop_tooltip': 'Stop after cycle completion',
+        'cnc_break_wait_title': 'Waiting for Break (After Cycle)',
+        'cnc_break_wait_desc': 'The machine will automatically stop after the current cut and material feed are finished, and then the break will start.',
+        'cnc_break_wait_cancel_btn': 'Cancel Break Request',
+        'cnc_break_btn_waiting': '⏳ Stopping after cycle for break...',
+        'toast_cycle_drag_phase': '⏳ Cycle finished. Feeding material before stopping...',
+        'toast_break_drag_phase': '⏳ Cycle finished. Feeding material before break...',
+        'toast_cycle_stop_completed': '✅ Stopped cleanly after cycle and material feed',
+        'toast_cycle_stop_cancelled': 'Stop request cancelled. Resumed normal operation',
+        'toast_break_request_cancelled': 'Break request cancelled. Resumed normal operation',
+        'toast_break_started_cnc_stopped': '☕ Break started (machine stopped)',
+        'toast_cycle_stop_not_supported': '⚠️ Machine does not support cycle stop',
+        'toast_on_break_press_finish': '☕ On break. Tap "End Break" on tablet to resume',
     },
 
     pt: {
@@ -1095,6 +1131,24 @@ const translations = {
         'checklist_completed_banner': 'Checklist Concluído',
         'steps_count': 'etapas',
         'please_wait_for_maintenance': 'Aguarde a equipe de manutenção',
+
+        // CNC Cycle Stop & Break Waiting Modal
+        'cnc_cycle_stop_title': 'Aguardando Fim do Ciclo',
+        'cnc_cycle_stop_desc': 'A máquina irá parar automaticamente após o corte atual e o avanço do material serem concluídos.',
+        'cnc_cycle_stop_cancel_btn': 'Cancelar Parada / Retomar',
+        'cnc_cycle_stop_tooltip': 'Parar após conclusão do ciclo',
+        'cnc_break_wait_title': 'Aguardando Intervalo (Após Ciclo)',
+        'cnc_break_wait_desc': 'A máquina irá parar automaticamente após o corte atual e o avanço do material serem concluídos, iniciando o intervalo.',
+        'cnc_break_wait_cancel_btn': 'Cancelar Pedido de Intervalo',
+        'cnc_break_btn_waiting': '⏳ Parando após ciclo para intervalo...',
+        'toast_cycle_drag_phase': '⏳ Ciclo finalizado. Avançando material antes de parar...',
+        'toast_break_drag_phase': '⏳ Ciclo finalizado. Avançando material antes do intervalo...',
+        'toast_cycle_stop_completed': '✅ Parada concluída após o ciclo e avanço do material',
+        'toast_cycle_stop_cancelled': 'Pedido de parada cancelado. Operação retomada',
+        'toast_break_request_cancelled': 'Pedido de intervalo cancelado. Operação retomada',
+        'toast_break_started_cnc_stopped': '☕ Intervalo iniciado (máquina parada)',
+        'toast_cycle_stop_not_supported': '⚠️ A máquina não suporta a parada de ciclo',
+        'toast_on_break_press_finish': '☕ Em intervalo. Toque em "Finalizar Intervalo" no tablet para retomar',
     }
 };
 

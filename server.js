@@ -52,6 +52,9 @@ const factoryConnections = new Map();
 // Store last scan data for each machine (for persistence)
 const machineLastScan = new Map();
 
+// Store active language for each machine (for multilingual displays)
+const machineLanguage = new Map();
+
 // Store machine player state and active controller ownership for each machine session
 const machinePlayerState = new Map();
 const MACHINE_PLAYER_CONTROLLER_TTL_MS = 2 * 60 * 1000;
@@ -198,6 +201,7 @@ function buildStopCallPayload(factoryId) {
   machines.forEach((info, machine) => {
     let earliest = Infinity;
     if (info.leader && info.leader.since < earliest) earliest = info.leader.since;
+    if (info.stop && info.stop.since < earliest) earliest = info.stop.since;
     if (info.box && info.box.since < earliest) earliest = info.box.since;
     if (info.material && info.material.since < earliest) earliest = info.material.since;
     
@@ -206,6 +210,7 @@ function buildStopCallPayload(factoryId) {
         machine,
         since: earliest,
         leader: !!info.leader,
+        stop: !!info.stop,
         box: !!info.box,
         material: !!info.material,
         zairyoSebanggo: info.material ? info.material.zairyoSebanggo : undefined
@@ -252,7 +257,7 @@ function applyTabletLogToMachineState(logEntry) {
   }
   
   const factory = logEntry.工場;
-  const equipmentRaw = logEntry.設備 || '';
+  const equipmentRaw = logEntry.SpecificMachine || logEntry.AdditionalData?.specificMachine || logEntry.設備 || '';
   if (!factory || !equipmentRaw) return [];
   const ids = equipmentRaw.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
   const ts = Date.parse(logEntry.Timestamp) || Date.now();
@@ -320,7 +325,8 @@ function machineStateView(id, st) {
   if (!st) return { equipment: id, sebanggo: '', hinban: '', worker: '', mode: 'idle', prodAccumMs: 0, runSince: 0, modeSince: 0, totalNG: 0 };
   const mode = st.maintActive ? 'maintenance'
     : st.breakActive ? 'break'
-      : (st.sebanggo ? 'running' : 'idle');
+      : st.checkActive ? 'check'
+        : (st.sebanggo ? 'running' : 'idle');
   return {
     equipment: id,
     sebanggo: st.sebanggo || '',
@@ -330,8 +336,8 @@ function machineStateView(id, st) {
     // Production elapsed = prodAccumMs + (now - runSince) while running.
     prodAccumMs: st.prodAccumMs || 0,
     runSince: (mode === 'running') ? (st.runSince || 0) : 0,
-    // Break/maintenance elapsed = now - modeSince.
-    modeSince: (mode === 'break' || mode === 'maintenance') ? (st.modeSince || 0) : 0,
+    // Break/maintenance/check elapsed = now - modeSince.
+    modeSince: (mode === 'break' || mode === 'maintenance' || mode === 'check') ? (st.modeSince || 0) : 0,
     totalNG: st.totalNG || 0,
     deviceCount: st.activeDevices ? st.activeDevices.size : 0
   };
@@ -363,30 +369,204 @@ app.get("/", (req, res) => {
 });
 
 // ============================================
-// SSE ROUTES - Machine Display Pages
+// SSE ROUTES - Machine Display Pages & Failsafe Group Sync
 // ============================================
 
-// Debug endpoint to check stored machine states
-app.get("/api/machine-state/:machineId", (req, res) => {
-  const machineId = normalizeMachineSessionKey(req.params.machineId);
-  let lastScan = machineLastScan.get(machineId);
+const machineGroupPairs = [
+  ['OZNC03', 'OZNC05'],
+  ['OZNC04', 'OZNC06'],
+  ['OZNC07', 'OZNC09'],
+  ['OZNC08', 'OZNC10']
+];
+
+async function getRelatedMachineIds(machineId = '') {
+  const normalized = normalizeMachineSessionKey(machineId);
+  const related = new Set();
   
-  if (!lastScan) {
-    for (const [factory, map] of factoryMachineState.entries()) {
-      const st = map.get(machineId);
-      if (st && st.sebanggo) {
-        lastScan = { type: 'scan', machineId, sebanggo: st.sebanggo, hinban: st.hinban || '' };
-        break;
+  if (!normalized) return [];
+
+  const tokens = normalized.split(',').map(m => m.trim().toUpperCase()).filter(Boolean);
+  tokens.forEach(t => related.add(t));
+  related.add(normalized);
+
+  // Check known hardcoded machine pairs
+  for (const pair of machineGroupPairs) {
+    const pairKey = pair.join(',');
+    const hasAny = tokens.some(t => pair.includes(t)) || normalized === pairKey;
+    if (hasAny) {
+      pair.forEach(m => related.add(m));
+      related.add(pairKey);
+    }
+  }
+
+  // Also query setsubiDB for any grouped machine definitions containing this machine
+  try {
+    const masterDb = client.db("Sasaki_Coating_MasterDB");
+    const docs = await masterDb.collection("setsubiDB").find({
+      name: { $regex: new RegExp(`(^|,)${tokens.join('|')}($|,)`, 'i') }
+    }).toArray();
+
+    docs.forEach(doc => {
+      if (doc.name && doc.name.includes(',')) {
+        const parts = doc.name.split(',').map(m => m.trim().toUpperCase()).filter(Boolean);
+        parts.forEach(p => related.add(p));
+        related.add(parts.join(','));
+      }
+    });
+  } catch (err) {
+    // Known pairs fallback
+  }
+
+  return Array.from(related);
+}
+
+async function getAuthoritativeMachineScan(machineId) {
+  const relatedIds = await getRelatedMachineIds(machineId);
+
+  // 1. Check in-memory machineLastScan for any related ID (prefer most recent timestamp)
+  let bestInMemoryScan = null;
+  for (const id of relatedIds) {
+    const scan = machineLastScan.get(id);
+    if (scan && (scan.sebanggo || scan.zuban)) {
+      if (!bestInMemoryScan || (new Date(scan.timestamp) > new Date(bestInMemoryScan.timestamp))) {
+        bestInMemoryScan = scan;
       }
     }
   }
 
+  // 2. Query MongoDB submittedDB.tabletLogDB for today (Primary Source of Truth)
+  try {
+    const todayStr = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    const submittedDb = client.db("submittedDB");
+    const tabletLogDB = submittedDb.collection("tabletLogDB");
+
+    const latestLogs = await tabletLogDB.find({
+      Date: todayStr,
+      $or: [
+        { 設備: { $in: relatedIds } },
+        { 設備_原形式: { $in: relatedIds } }
+      ]
+    }).sort({ _id: -1 }).limit(10).toArray();
+
+    if (latestLogs && latestLogs.length > 0) {
+      const topLog = latestLogs[0];
+      const action = String(topLog.Action || '');
+      const status = String(topLog.Status || '');
+
+      const isResetOrClear = action.includes('Reset') || 
+                             status === 'Reset' || 
+                             (action.includes('Submit') && status === 'Completed') ||
+                             action.includes('clear');
+
+      if (isResetOrClear) {
+        const logTime = new Date(topLog.Timestamp || (topLog.Date + 'T' + topLog.Time)).getTime();
+        const inMemTime = bestInMemoryScan ? new Date(bestInMemoryScan.timestamp).getTime() : 0;
+        
+        if (inMemTime > logTime + 5000) {
+          return { currentScan: bestInMemoryScan, isIdle: false, relatedIds };
+        } else {
+          relatedIds.forEach(id => machineLastScan.delete(id));
+          return { currentScan: null, isIdle: true, relatedIds };
+        }
+      }
+
+      // Find latest log with valid 背番号 or 図番
+      const activeLog = latestLogs.find(l => (l.背番号 || l.図番) && l.Status !== 'Reset');
+      if (activeLog) {
+        const logTime = new Date(activeLog.Timestamp || (activeLog.Date + 'T' + activeLog.Time)).getTime();
+        const inMemTime = bestInMemoryScan ? new Date(bestInMemoryScan.timestamp).getTime() : 0;
+
+        if (bestInMemoryScan && inMemTime > logTime) {
+          return { currentScan: bestInMemoryScan, isIdle: false, relatedIds };
+        }
+
+        const dbScanData = {
+          type: 'scan',
+          action: 'scan',
+          machineId: machineId,
+          sebanggo: activeLog.背番号 || '',
+          zuban: activeLog.図番 || '',
+          hinban: activeLog.品番 || '',
+          language: machineLanguage.get(machineId) || 'ja',
+          timestamp: activeLog.Timestamp || new Date().toISOString(),
+          additionalData: {
+            factory: activeLog.工場,
+            sessionID: activeLog.sessionID,
+            Worker_Name: activeLog.Worker_Name,
+            source: 'tabletLogDB'
+          }
+        };
+
+        // Cache in memory for all related IDs
+        relatedIds.forEach(id => machineLastScan.set(id, dbScanData));
+        return { currentScan: dbScanData, isIdle: false, relatedIds };
+      }
+    }
+  } catch (err) {
+    console.warn('⚠️ Error querying tabletLogDB for authoritative state:', err);
+  }
+
+  // 3. Fallback to in-memory scan if DB query produced nothing
+  if (bestInMemoryScan) {
+    return { currentScan: bestInMemoryScan, isIdle: false, relatedIds };
+  }
+
+  // 4. Fallback to factoryMachineState
+  for (const [factory, map] of factoryMachineState.entries()) {
+    for (const id of relatedIds) {
+      const st = map.get(id);
+      if (st && st.sebanggo) {
+        const stScan = {
+          type: 'scan',
+          action: 'scan',
+          machineId,
+          sebanggo: st.sebanggo,
+          zuban: '',
+          hinban: st.hinban || '',
+          timestamp: new Date().toISOString(),
+          additionalData: { factory, source: 'factoryMachineState' }
+        };
+        relatedIds.forEach(rid => machineLastScan.set(rid, stScan));
+        return { currentScan: stScan, isIdle: false, relatedIds };
+      }
+    }
+  }
+
+  return { currentScan: null, isIdle: true, relatedIds };
+}
+
+// Endpoint to get authoritative machine current scan state (with MongoDB failsafe)
+app.get("/api/machine-current-scan/:machineId", async (req, res) => {
+  try {
+    const rawMachine = req.params.machineId;
+    const result = await getAuthoritativeMachineScan(rawMachine);
+    res.json({
+      success: true,
+      machineId: rawMachine,
+      relatedMachines: result.relatedIds,
+      currentScan: result.currentScan,
+      isIdle: result.isIdle,
+      timestamp: new Date().toISOString()
+    });
+  } catch (err) {
+    console.error(`❌ Error in /api/machine-current-scan/${req.params.machineId}:`, err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Debug endpoint to check stored machine states
+app.get("/api/machine-state/:machineId", async (req, res) => {
+  const machineId = normalizeMachineSessionKey(req.params.machineId);
+  const authState = await getAuthoritativeMachineScan(machineId);
+  const lastScan = authState.currentScan;
   const playerState = sanitizeMachinePlayerState(getOrCreateMachinePlayerState(machineId));
   
   res.json({
     machineId,
+    relatedMachines: authState.relatedIds,
     hasStoredData: !!lastScan,
     lastScan: lastScan || null,
+    isIdle: authState.isIdle,
     connectedClients: (machineConnections.get(machineId) || []).length,
     playerState,
   });
@@ -566,7 +746,7 @@ app.post('/api/machine-player/state', (req, res) => {
 });
 
 // SSE endpoint - clients connect here to receive real-time updates
-app.get("/sse/machine/:machineId", (req, res) => {
+app.get("/sse/machine/:machineId", async (req, res) => {
   const machineId = normalizeMachineSessionKey(req.params.machineId);
   
   // Set headers for SSE
@@ -584,23 +764,21 @@ app.get("/sse/machine/:machineId", (req, res) => {
   console.log(`✅ New SSE connection established for ${machineId}. Total clients: ${machineConnections.get(machineId).length}`);
   
   // Send initial connection message
-  res.write(`data: ${JSON.stringify({ type: 'connected', machineId, timestamp: new Date().toISOString() })}\n\n`);
+  const currentMachineLang = machineLanguage.get(machineId) || machineLastScan.get(machineId)?.additionalData?.language || 'ja';
+  res.write(`data: ${JSON.stringify({ type: 'connected', machineId, language: currentMachineLang, timestamp: new Date().toISOString() })}\n\n`);
   
-  // Send last scan data if available (for persistence on page reload)
-  let lastScan = machineLastScan.get(machineId);
-  if (!lastScan) {
-    for (const [factory, map] of factoryMachineState.entries()) {
-      const st = map.get(machineId);
-      if (st && st.sebanggo) {
-        lastScan = { type: 'scan', machineId, sebanggo: st.sebanggo, hinban: st.hinban || '' };
-        break;
-      }
+  // Send authoritative last scan data if available (for persistence on page reload)
+  try {
+    const authState = await getAuthoritativeMachineScan(machineId);
+    if (authState.currentScan) {
+      console.log(`📤 Sending authoritative scan to new client for ${machineId}:`, authState.currentScan);
+      res.write(`data: ${JSON.stringify(authState.currentScan)}\n\n`);
+    } else if (authState.isIdle) {
+      console.log(`📤 Sending clear/idle state to new client for ${machineId}`);
+      res.write(`data: ${JSON.stringify({ type: 'clear', action: 'clear', machineId, timestamp: new Date().toISOString() })}\n\n`);
     }
-  }
-
-  if (lastScan) {
-    console.log(`📤 Sending last scan data to new client for ${machineId}:`, lastScan);
-    res.write(`data: ${JSON.stringify(lastScan)}\n\n`);
+  } catch (err) {
+    console.warn(`⚠️ Error sending initial scan data for ${machineId}:`, err);
   }
   
   // Handle client disconnect
@@ -683,6 +861,7 @@ const handleStopCall = (req, res) => {
 
   // A tablet machine id may be grouped, e.g. "OZNC04,OZNC06" — apply to each.
   const ids = machine.split(',').map(m => m.trim()).filter(Boolean);
+  let changed = false;
   ids.forEach(id => {
     let info = machines.get(id) || {};
     
@@ -692,10 +871,14 @@ const handleStopCall = (req, res) => {
         if (callType === 'material' && req.body?.zairyoSebanggo) {
           info[callType].zairyoSebanggo = String(req.body.zairyoSebanggo).trim();
         }
+        changed = true;
       }
       machines.set(id, info);
     } else {
-      if (info[callType]) delete info[callType];
+      if (info[callType]) {
+        delete info[callType];
+        changed = true;
+      }
       
       if (Object.keys(info).length === 0) {
         machines.delete(id);
@@ -706,8 +889,10 @@ const handleStopCall = (req, res) => {
   });
 
   const payload = buildStopCallPayload(factory);
-  broadcastToFactory(factory, payload);
-  console.log(`🟥 stop-call ${action} (${callType}) for ${factory}/${ids.join(',')} → ${payload.active.length} active`);
+  if (changed) {
+    broadcastToFactory(factory, payload);
+    console.log(`🟥 stop-call ${action} (${callType}) for ${factory}/${ids.join(',')} → ${payload.active.length} active`);
+  }
   res.json({ ok: true, active: payload.active });
 };
 app.post("/api/stop-call", handleStopCall);
@@ -743,11 +928,14 @@ app.post("/api/machine-assert", (req, res) => {
       // tablet's snapshot as the source of truth.
       st = {
         sebanggo: '', hinban: '', worker: '',
-        breakActive: false, maintActive: false,
+        breakActive: false, maintActive: false, checkActive: false,
         runSince: 0, modeSince: 0, prodAccumMs: 0, updatedAt: now, lastSeen: now,
         activeDevices: new Map()
       };
-      if (mode !== 'idle' && seb) {
+      if (mode === 'check') {
+        st.checkActive = true;
+        st.modeSince = modeStartedAt || now;
+      } else if (mode !== 'idle' && seb) {
         st.sebanggo = seb; st.hinban = hinban;
         if (mode === 'break') { st.breakActive = true; st.modeSince = modeStartedAt || now; }
         else if (mode === 'maintenance') { st.maintActive = true; st.modeSince = modeStartedAt || now; }
@@ -757,17 +945,93 @@ app.post("/api/machine-assert", (req, res) => {
       updated.push(id);
     } else {
       // The server already has a record.
-      // If the tablet asserts an active product and it differs from the server (e.g., server
-      // created an empty state from an early tablet log after a restart), trust the tablet.
-      if (seb && mode !== 'idle' && st.sebanggo !== seb) {
-        st.sebanggo = seb;
-        st.hinban = hinban;
-        st.breakActive = false;
-        st.maintActive = false;
-        if (mode === 'break') { st.breakActive = true; st.modeSince = modeStartedAt || now; }
-        else if (mode === 'maintenance') { st.maintActive = true; st.modeSince = modeStartedAt || now; }
-        else { st.runSince = runStartedAt || now; }
+      if (mode === 'idle') {
+        if (st.sebanggo || st.runSince > 0 || st.breakActive || st.maintActive || st.checkActive) {
+          st.sebanggo = '';
+          st.hinban = '';
+          st.breakActive = false;
+          st.maintActive = false;
+          st.checkActive = false;
+          st.runSince = 0;
+          st.modeSince = 0;
+          st.prodAccumMs = 0;
+          if (!updated.includes(id)) updated.push(id);
+        }
+      } else if (mode === 'running') {
+        let changed = false;
+        if (seb && st.sebanggo !== seb) {
+          st.sebanggo = seb;
+          st.hinban = hinban;
+          changed = true;
+        }
+        if (st.breakActive || st.maintActive || st.checkActive) {
+          st.breakActive = false;
+          st.maintActive = false;
+          st.checkActive = false;
+          changed = true;
+        }
+        if (st.runSince === 0) {
+          st.runSince = runStartedAt || now;
+          changed = true;
+        }
+        if (changed && !updated.includes(id)) updated.push(id);
+      } else if (mode === 'break') {
+        let changed = false;
+        if (!st.breakActive || st.modeSince !== (modeStartedAt || now)) {
+          st.breakActive = true;
+          st.maintActive = false;
+          st.checkActive = false;
+          st.modeSince = modeStartedAt || now;
+          changed = true;
+        }
+        if (seb && st.sebanggo !== seb) {
+          st.sebanggo = seb;
+          st.hinban = hinban;
+          changed = true;
+        }
+        if (changed && !updated.includes(id)) updated.push(id);
+      } else if (mode === 'maintenance') {
+        let changed = false;
+        if (!st.maintActive || st.modeSince !== (modeStartedAt || now)) {
+          st.maintActive = true;
+          st.breakActive = false;
+          st.checkActive = false;
+          st.modeSince = modeStartedAt || now;
+          changed = true;
+        }
+        if (seb && st.sebanggo !== seb) {
+          st.sebanggo = seb;
+          st.hinban = hinban;
+          changed = true;
+        }
+        if (changed && !updated.includes(id)) updated.push(id);
+      } else if (mode === 'check') {
+        if (!st.checkActive || st.modeSince !== (modeStartedAt || now)) {
+          st.checkActive = true;
+          st.breakActive = false;
+          st.maintActive = false;
+          st.modeSince = modeStartedAt || now;
+          if (!updated.includes(id)) updated.push(id);
+        }
+      } else if (st.checkActive) {
+        st.checkActive = false;
+        st.modeSince = 0;
         if (!updated.includes(id)) updated.push(id);
+      }
+
+      // Tablet Reload Protection: Clear ghost STOP if tablet asserts cycleStopActive is false
+      if (req.body?.cycleStopActive === false) {
+        const calls = factoryStopCalls.get(factory);
+        if (calls && calls.has(id)) {
+          const info = calls.get(id);
+          if (info && info.stop) {
+            delete info.stop;
+            if (Object.keys(info).length === 0) calls.delete(id);
+            const payload = buildStopCallPayload(factory);
+            broadcastToFactory(factory, payload);
+            console.log(`🧹 Cleared ghost STOP status for ${factory}/${id} (tablet verified cycleStopActive=false)`);
+          }
+        }
       }
 
       // Enforce the tablet's authoritative time!
@@ -867,11 +1131,12 @@ setInterval(() => {
 app.post("/api/broadcast-scan", async (req, res) => {
   const { machineId, sebanggo, hinban, zuban, timestamp, additionalData } = req.body;
   
-  // Allow empty sebanggo/zuban only if action is 'clear'
+  // Allow empty sebanggo/zuban only if action is 'clear' or 'language_change'
   const isClearAction = additionalData?.action === 'clear' || req.body.action === 'clear';
+  const isLanguageAction = additionalData?.action === 'language_change' || req.body.action === 'language_change';
   
-  if (!machineId || (!sebanggo && !zuban && !isClearAction)) {
-    return res.status(400).json({ error: "machineId and sebanggo/zuban are required (unless action is 'clear')" });
+  if (!machineId || (!sebanggo && !zuban && !isClearAction && !isLanguageAction)) {
+    return res.status(400).json({ error: "machineId and sebanggo/zuban are required (unless action is 'clear' or 'language_change')" });
   }
   
   // Parse machine IDs: handle both "OZNC09" and "OZNC04,OZNC06"
@@ -883,33 +1148,59 @@ app.post("/api/broadcast-scan", async (req, res) => {
   if (machineIds.length === 0) {
     return res.status(400).json({ error: "Invalid machineId format" });
   }
+
+  // Expand with any related group machine peers (e.g. OZNC04 <-> OZNC06)
+  const allTargetMachineIds = new Set();
+  for (const mid of machineIds) {
+    const peers = await getRelatedMachineIds(mid);
+    peers.forEach(p => allTargetMachineIds.add(p));
+  }
+  const expandedMachineIds = Array.from(allTargetMachineIds);
   
-  console.log(`📡 Broadcasting to machine(s): ${machineIds.join(', ')} (clear: ${isClearAction})`);
+  console.log(`📡 Broadcasting to machine(s) and group peers: ${expandedMachineIds.join(', ')} (clear: ${isClearAction}, langChange: ${isLanguageAction})`);
   
   // For each machine, create and store scan data
-  machineIds.forEach(normalizedMachineId => {
+  expandedMachineIds.forEach(normalizedMachineId => {
+    const incomingLang = additionalData?.language || req.body.language;
+    if (incomingLang) {
+      machineLanguage.set(normalizedMachineId, incomingLang);
+    }
+    const currentMachineLang = incomingLang || machineLanguage.get(normalizedMachineId) || 'ja';
+
     const normalizedSessionKey = machineIds.join(',');
     const scanData = {
-      type: isClearAction ? 'clear' : 'scan',
-      action: isClearAction ? 'clear' : 'scan',
+      type: isClearAction ? 'clear' : (isLanguageAction ? 'language_change' : 'scan'),
+      action: isClearAction ? 'clear' : (isLanguageAction ? 'language_change' : 'scan'),
       machineId: normalizedSessionKey,
       sebanggo,
       zuban,
       hinban: hinban || '',
+      language: currentMachineLang,
       timestamp: timestamp || new Date().toISOString(),
-      additionalData: additionalData || (isClearAction ? { action: 'clear' } : {})
+      additionalData: {
+        ...(additionalData || (isClearAction ? { action: 'clear' } : {})),
+        language: currentMachineLang
+      }
     };
     
     // Store last scan for persistence (or clear it if action is 'clear')
     if (isClearAction) {
       machineLastScan.delete(normalizedMachineId);
       console.log(`🗑️ Cleared last scan data for ${normalizedMachineId}`);
-    } else if ((sebanggo || zuban) && hinban) {
-      // Only store if we have valid sebanggo/zuban and hinban
+    } else if (isLanguageAction) {
+      const existingScan = machineLastScan.get(normalizedMachineId);
+      if (existingScan) {
+        existingScan.language = currentMachineLang;
+        if (!existingScan.additionalData) existingScan.additionalData = {};
+        existingScan.additionalData.language = currentMachineLang;
+      }
+      console.log(`🌐 Language preference updated for ${normalizedMachineId}: ${currentMachineLang}`);
+    } else if (sebanggo || zuban) {
+      // Store whenever valid sebanggo OR zuban exists
       machineLastScan.set(normalizedMachineId, scanData);
-      console.log(`💾 Stored last scan for ${normalizedMachineId}:`, { sebanggo, zuban, hinban });
+      console.log(`💾 Stored last scan for ${normalizedMachineId}:`, { sebanggo, zuban, hinban, language: currentMachineLang });
     } else {
-      console.log(`⚠️ Skipping storage for ${normalizedMachineId} - missing sebanggo/zuban or hinban`);
+      console.log(`⚠️ Skipping storage for ${normalizedMachineId} - missing sebanggo/zuban`);
     }
     
     // Broadcast to all clients listening to this specific machine
@@ -3565,6 +3856,22 @@ app.post("/searchSebanggo", async (req, res) => {
 //   }
 //});
 
+function normalizeWorkerName(val) {
+  if (!val) return '';
+  if (Array.isArray(val)) return val.filter(Boolean).map(s => String(s).trim()).join(',');
+  if (typeof val === 'string') {
+    val = val.trim();
+    if (val.startsWith('[') && val.endsWith(']')) {
+      try {
+        const parsed = JSON.parse(val);
+        if (Array.isArray(parsed)) return parsed.filter(Boolean).map(s => String(s).trim()).join(',');
+      } catch (_) { }
+    }
+    return val.replace(/^[\["'\s]+|[\]"'\s]+$/g, '').split(',').map(s => s.trim().replace(/^["']|["']$/g, '')).filter(Boolean).join(',');
+  }
+  return String(val).trim();
+}
+
 app.post("/submitTopressDBiReporter", async (req, res) => {
   try {
     await client.connect();
@@ -3572,6 +3879,7 @@ app.post("/submitTopressDBiReporter", async (req, res) => {
     const database = client.db("submittedDB");
     const pressDB = database.collection("pressDB");
     const formData = req.body;
+    formData.Worker_Name = normalizeWorkerName(formData.Worker_Name);
 
     // Extract image arrays and remove from formData
     const images = formData.images || [];
@@ -3621,14 +3929,18 @@ app.post("/submitTopressDBiReporter", async (req, res) => {
       console.log(`📸 Uploading ${materialLabelImages.length} material label images...`);
       
       const materialLabelImageURLs = [];
+      const lotImageMap = {};
+      const lotDefectImageMap = {};
+      const lotAllImagesMap = {};
+      const bucket = admin.storage().bucket();
       
       for (const img of materialLabelImages) {
-        if (!img.base64) continue;
+        if (!img.base64 || !img.id || !img.timestamp) continue;
 
         const buffer = Buffer.from(img.base64, 'base64');
-        const fileName = `${formData.背番号}_${formData.Date}_${formData.Worker_Name}_${formData.工場}_${formData.設備}_materialLabel_${img.timestamp || Date.now()}.jpg`;
+        const fileName = `${formData.背番号}_${formData.Date}_${img.timestamp}_${img.id}_materialLabelImage.jpg`;
         const filePath = `materialLabel/${formData.工場}/${formData.設備}/${fileName}`;
-        const file = admin.storage().bucket().file(filePath);
+        const file = bucket.file(filePath);
 
         try {
           await uploadToFirebaseWithRetry(file, buffer, {
@@ -3645,6 +3957,19 @@ app.post("/submitTopressDBiReporter", async (req, res) => {
 
         const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${file.bucket.name}/o/${encodeURIComponent(file.name)}?alt=media&token=${downloadToken}`;
         materialLabelImageURLs.push(publicUrl);
+        if (img.lotNumber) {
+          if (!lotAllImagesMap[img.lotNumber]) lotAllImagesMap[img.lotNumber] = [];
+          lotAllImagesMap[img.lotNumber].push(publicUrl);
+
+          const isDefect = img.description && img.description.includes('疵引き');
+          if (isDefect) {
+            if (!lotDefectImageMap[img.lotNumber]) lotDefectImageMap[img.lotNumber] = [];
+            lotDefectImageMap[img.lotNumber].push(publicUrl);
+          } else {
+            if (!lotImageMap[img.lotNumber]) lotImageMap[img.lotNumber] = [];
+            lotImageMap[img.lotNumber].push(publicUrl);
+          }
+        }
       }
 
       formData.materialLabelImages = materialLabelImageURLs;
@@ -3654,8 +3979,72 @@ app.post("/submitTopressDBiReporter", async (req, res) => {
       if (materialLabelImageURLs.length > 0) {
         formData.材料ラベル画像 = materialLabelImageURLs[0];
       }
+
+      const formatIsoTimestamp = (ts) => {
+        if (!ts) return new Date().toISOString();
+        if (typeof ts === 'string' && ts.includes('T')) return ts;
+        const d = (typeof ts === 'number') ? new Date(ts) : new Date(Number(ts) || ts);
+        return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+      };
+
+      if (Array.isArray(formData.Lot_Details)) {
+        formData.Lot_Details = formData.Lot_Details.map(lot => {
+          const lotLabelImgs = (lot.lotNumber && lotImageMap[lot.lotNumber])
+            || (lot.image ? (Array.isArray(lot.image) ? lot.image : [lot.image]) : []);
+          const finalLabelImgs = lotLabelImgs.length > 0 ? lotLabelImgs : (materialLabelImageURLs.length > 0 ? [materialLabelImageURLs[0]] : []);
+
+          const defectImgs = (lot.lotNumber && lotDefectImageMap[lot.lotNumber])
+            || (lot.defectImage ? (Array.isArray(lot.defectImage) ? lot.defectImage : [lot.defectImage]) : []);
+
+          const seiban = lot.materialSeiban || lot.材料背番号 || formData.materialSeiban || formData.材料背番号 || formData.背番号 || null;
+          const updatedLot = {
+            ...lot,
+            timestamp: formatIsoTimestamp(lot.timestamp)
+          };
+
+          if (finalLabelImgs.length === 1) {
+            updatedLot.image = finalLabelImgs[0];
+          } else if (finalLabelImgs.length > 1) {
+            updatedLot.image = finalLabelImgs;
+          } else {
+            updatedLot.image = null;
+          }
+
+          if (defectImgs.length === 1) {
+            updatedLot.defectImage = defectImgs[0];
+          } else if (defectImgs.length > 1) {
+            updatedLot.defectImage = defectImgs;
+          } else {
+            delete updatedLot.defectImage;
+          }
+
+          delete updatedLot.images;
+          delete updatedLot.defectImages;
+          delete updatedLot.材料背番号;
+
+          if (seiban) {
+            updatedLot.materialSeiban = seiban;
+          }
+          if (lot.scannedQR) {
+            updatedLot.scannedQR = lot.scannedQR;
+          }
+          return updatedLot;
+        });
+      }
       
       console.log(`✅ Uploaded ${materialLabelImageURLs.length} material label images`);
+    } else if (Array.isArray(formData.Lot_Details)) {
+      const formatIsoTimestamp = (ts) => {
+        if (!ts) return new Date().toISOString();
+        if (typeof ts === 'string' && ts.includes('T')) return ts;
+        const d = (typeof ts === 'number') ? new Date(ts) : new Date(Number(ts) || ts);
+        return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+      };
+      formData.Lot_Details = formData.Lot_Details.map(lot => ({
+        ...lot,
+        timestamp: formatIsoTimestamp(lot.timestamp),
+        image: lot.image || null
+      }));
     }
 
     // === PHASE 3: Upload maintenance images and build Maintenance_Data structure ===
@@ -3906,6 +4295,7 @@ app.post('/submitToDCP', async (req, res) => {
         
         // Extract form data and images
         const formData = req.body;
+        formData.Worker_Name = normalizeWorkerName(formData.Worker_Name);
         const maintenanceImages = formData.maintenanceImages || []; // Array of maintenance images with base64
         const cycleCheckImages = formData.images || []; // Existing cycle check images
         
@@ -4020,6 +4410,9 @@ app.post('/submitToDCP', async (req, res) => {
         // 2.5. Upload material label images and handle single vs multiple logic
         const materialLabelImages = formData.materialLabelImages || [];
         let materialLabelImageURLs = [];
+        const lotImageMap = {};
+        const lotDefectImageMap = {};
+        const lotAllImagesMap = {};
         
         if (materialLabelImages.length > 0) {
             console.log(`🖼️ Processing ${materialLabelImages.length} material label images...`);
@@ -4047,6 +4440,19 @@ app.post('/submitToDCP', async (req, res) => {
 
                     const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(filePath)}?alt=media&token=${downloadToken}`;
                     materialLabelImageURLs.push(publicUrl);
+                    if (imgData.lotNumber) {
+                        if (!lotAllImagesMap[imgData.lotNumber]) lotAllImagesMap[imgData.lotNumber] = [];
+                        lotAllImagesMap[imgData.lotNumber].push(publicUrl);
+
+                        const isDefect = imgData.description && imgData.description.includes('疵引き');
+                        if (isDefect) {
+                            if (!lotDefectImageMap[imgData.lotNumber]) lotDefectImageMap[imgData.lotNumber] = [];
+                            lotDefectImageMap[imgData.lotNumber].push(publicUrl);
+                        } else {
+                            if (!lotImageMap[imgData.lotNumber]) lotImageMap[imgData.lotNumber] = [];
+                            lotImageMap[imgData.lotNumber].push(publicUrl);
+                        }
+                    }
                     
                     console.log(`✅ Material label image uploaded: ${publicUrl}`);
                 } catch (uploadError) {
@@ -4086,9 +4492,63 @@ app.post('/submitToDCP', async (req, res) => {
         const pressDBData = {
             ...formData,
             ...uploadedImageURLs, // Add cycle check image URLs
+            Worker_Name: normalizeWorkerName(formData.Worker_Name),
             Maintenance_Data: processedMaintenanceData, // Add maintenance data with photo URLs
             createdAt: new Date().toISOString() // Add server timestamp
         };
+
+        // Associate per-lot image URL in Lot_Details
+        if (Array.isArray(pressDBData.Lot_Details)) {
+            const formatIsoTimestamp = (ts) => {
+                if (!ts) return new Date().toISOString();
+                if (typeof ts === 'string' && ts.includes('T')) return ts;
+                const d = (typeof ts === 'number') ? new Date(ts) : new Date(Number(ts) || ts);
+                return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+            };
+
+            pressDBData.Lot_Details = pressDBData.Lot_Details.map(lot => {
+                const lotLabelImgs = (lot.lotNumber && lotImageMap[lot.lotNumber])
+                    || (lot.image ? (Array.isArray(lot.image) ? lot.image : [lot.image]) : []);
+                const finalLabelImgs = lotLabelImgs.length > 0 ? lotLabelImgs : (materialLabelImageURLs.length > 0 ? [materialLabelImageURLs[0]] : []);
+
+                const defectImgs = (lot.lotNumber && lotDefectImageMap[lot.lotNumber])
+                    || (lot.defectImage ? (Array.isArray(lot.defectImage) ? lot.defectImage : [lot.defectImage]) : []);
+
+                const seiban = lot.materialSeiban || lot.材料背番号 || pressDBData.materialSeiban || pressDBData.材料背番号 || pressDBData.背番号 || null;
+                const updatedLot = {
+                    ...lot,
+                    timestamp: formatIsoTimestamp(lot.timestamp)
+                };
+
+                if (finalLabelImgs.length === 1) {
+                    updatedLot.image = finalLabelImgs[0];
+                } else if (finalLabelImgs.length > 1) {
+                    updatedLot.image = finalLabelImgs;
+                } else {
+                    updatedLot.image = null;
+                }
+
+                if (defectImgs.length === 1) {
+                    updatedLot.defectImage = defectImgs[0];
+                } else if (defectImgs.length > 1) {
+                    updatedLot.defectImage = defectImgs;
+                } else {
+                    delete updatedLot.defectImage;
+                }
+
+                delete updatedLot.images;
+                delete updatedLot.defectImages;
+                delete updatedLot.材料背番号;
+
+                if (seiban) {
+                    updatedLot.materialSeiban = seiban;
+                }
+                if (lot.scannedQR) {
+                    updatedLot.scannedQR = lot.scannedQR;
+                }
+                return updatedLot;
+            });
+        }
 
         console.log(`🔍 pressDBData before cleanup contains these image fields:`, {
             "初物チェック画像": pressDBData["初物チェック画像"],

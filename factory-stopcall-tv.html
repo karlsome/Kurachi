@@ -201,7 +201,8 @@
            machine name on the left, the state's headline value on the right. */
         .tile.running,
         .tile.brk,
-        .tile.maint {
+        .tile.maint,
+        .tile.check {
             display: grid;
             grid-template-columns: auto 1fr;
             grid-template-rows: auto auto;
@@ -219,7 +220,8 @@
 
         .tile.running .name,
         .tile.brk .name,
-        .tile.maint .name {
+        .tile.maint .name,
+        .tile.check .name {
             grid-column: 1;
             grid-row: 1 / -1;
             justify-self: start;
@@ -280,6 +282,28 @@
             display: none;
         }
 
+        .tile.check {
+            background: #0E292E;
+            border-color: #14B8A6;
+            animation: chillPulseCheck 3.4s ease-in-out infinite;
+        }
+
+        .tile.check .status {
+            display: none;
+        }
+
+        @keyframes chillPulseCheck {
+
+            0%,
+            100% {
+                box-shadow: inset 0 0 0 rgba(20, 184, 166, 0);
+            }
+
+            50% {
+                box-shadow: inset 0 0 70px rgba(20, 184, 166, 0.30), 0 0 26px rgba(20, 184, 166, 0.14);
+            }
+        }
+
         @keyframes chillPulseBlue {
 
             0%,
@@ -329,16 +353,27 @@
             color: #FCD980;
         }
 
+        .tile.check .seb-mini {
+            display: block;
+            color: #5EEAD4;
+        }
+
         .tile.brk .elapsed,
-        .tile.maint .elapsed {
+        .tile.maint .elapsed,
+        .tile.check .elapsed {
             left: 50%;
             transform: none;
             padding-left: 4px;
             text-align: left;
         }
 
+        .tile.check .elapsed {
+            color: #99F6E4;
+        }
+
         /* calling */
-        .tile.calling[data-primary-call="leader"] {
+        .tile.calling[data-primary-call="leader"],
+        .tile.calling[data-primary-call="stop"] {
             background: var(--red);
             border-color: #fff;
             animation: tileBlinkRed 0.9s steps(1) infinite;
@@ -541,6 +576,11 @@
             color: #FFD980;
         }
 
+        .tile.check .big-mode {
+            display: block;
+            color: #5EEAD4;
+        }
+
         /* ---------- Full-screen takeover ---------- */
         .takeover {
             position: fixed;
@@ -557,7 +597,8 @@
             display: flex;
         }
 
-        .takeover[data-type="leader"] {
+        .takeover[data-type="leader"],
+        .takeover[data-type="stop"] {
             background: radial-gradient(circle at 50% 40%, #C2151F, #5A0A0E 80%);
             animation: takeoverBlinkRed 0.7s steps(1) infinite;
         }
@@ -895,7 +936,7 @@
     <script>
         const serverURL = "https://kurachi.onrender.com";
         //const serverURL = "http://localhost:3000";
-        //const serverURL = "http://192.168.0.105:3000";
+        //const serverURL = "http://192.168.0.39:3000";
 
         const params = new URLSearchParams(location.search);
         const FACTORY = params.get('filter') || params.get('factory') || '';
@@ -1003,10 +1044,11 @@
         const audioLeader = new Audio('src/leader.mp3');
         const audioBox = new Audio('src/box.mp3');
         const audioRoll = new Audio('src/roll.mp3');
+        const audioStop = new Audio('src/STOP.mp3');
 
         // Optional: unlock audio on first interaction if autoplay is blocked
         function unlockMp3s() {
-            [audioLeader, audioBox, audioRoll].forEach(a => {
+            [audioLeader, audioBox, audioRoll, audioStop].forEach(a => {
                 a.muted = true;
                 a.play().then(() => {
                     a.pause();
@@ -1018,12 +1060,15 @@
             document.removeEventListener('touchstart', unlockMp3s);
         }
         document.addEventListener('click', unlockMp3s);
-        document.addEventListener('touchstart', unlockMp3s);        // Play the assigned MP3 files instead of synthesized tones
+        document.addEventListener('touchstart', unlockMp3s);
+
+        // Play the assigned MP3 files instead of synthesized tones
         function playAlert(type = 'leader') {
             if (!soundOn) return;
             try {
                 let a;
-                if (type === 'box') a = audioBox;
+                if (type === 'stop') a = audioStop;
+                else if (type === 'box') a = audioBox;
                 else if (type === 'material') a = audioRoll;
                 else a = audioLeader;
 
@@ -1059,9 +1104,9 @@
                     const elapsedMs = now - activeSince.get(machine);
                     text = fmtWait(elapsedMs);
 
-                    // Re-notify leader calls every 8 minutes (480,000 ms)
+                    // Re-notify leader / stop calls every 8 minutes (480,000 ms)
                     const types = lastMachineCallTypes.get(machine);
-                    if (types && types.leader) {
+                    if (types && (types.leader || types.stop)) {
                         const intervalIdx = Math.floor(elapsedMs / 480000);
                         if (intervalIdx >= 1) {
                             const lastIdx = reNotifiedIntervals.get(machine) || 0;
@@ -1069,7 +1114,10 @@
                             if (intervalIdx > lastIdx && (elapsedMs % 480000) < 10000) {
                                 reNotifiedIntervals.set(machine, intervalIdx);
                                 const mins = intervalIdx * 8;
-                                queueTakeover(machine, `呼び出し (${mins}分経過) / CALLING (${mins} MIN)`, 'leader');
+                                const title = types.stop
+                                    ? `停止待ち (${mins}分経過) / STOP QUEUED (${mins} MIN)`
+                                    : `呼び出し (${mins}分経過) / CALLING (${mins} MIN)`;
+                                queueTakeover(machine, title, types.stop ? 'stop' : 'leader');
                             } else if (intervalIdx > lastIdx) {
                                 // Missed the window (e.g. page just loaded), just catch up silently
                                 reNotifiedIntervals.set(machine, intervalIdx);
@@ -1083,7 +1131,7 @@
                         if (ms.mode === 'running') {
                             const prod = (ms.prodAccumMs || 0) + (ms.runSince ? (now - ms.runSince) : 0);
                             text = fmtWait(prod);
-                        } else if (ms.mode === 'break' || ms.mode === 'maintenance') {
+                        } else if (ms.mode === 'break' || ms.mode === 'maintenance' || ms.mode === 'check') {
                             text = ms.modeSince ? fmtWait(now - ms.modeSince) : '';
                         }
                     }
@@ -1121,7 +1169,7 @@
         // value (seb / big-mode) must fit the second column's actual width, not
         // the whole tile.
         function isSplitLayoutTile(tile) {
-            return tile.classList.contains('running') || tile.classList.contains('brk') || tile.classList.contains('maint');
+            return tile.classList.contains('running') || tile.classList.contains('brk') || tile.classList.contains('maint') || tile.classList.contains('check');
         }
         function valueColumnWidth(tile) {
             if (!isSplitLayoutTile(tile)) return tile.clientWidth || 300;
@@ -1147,23 +1195,26 @@
             const tile = tileByMachine.get(machine);
             if (!tile) return;
             const idx = activeList.findIndex(it => it.machine === machine);
-            tile.classList.remove('running', 'idle', 'brk', 'maint');
+            tile.classList.remove('running', 'idle', 'brk', 'maint', 'check');
             if (idx >= 0) {
                 const item = activeList[idx];
                 tile.classList.add('calling');
                 tile.querySelector('.big-rank').textContent = '#' + (idx + 1);
 
                 if (item.leader) tile.dataset.primaryCall = 'leader';
+                else if (item.stop) tile.dataset.primaryCall = 'stop';
                 else if (item.box) tile.dataset.primaryCall = 'box';
                 else tile.dataset.primaryCall = 'material';
 
                 let typeHtml = '';
                 if (item.leader) {
                     typeHtml += '<div>CALL</div>';
-                } else {
-                    if (item.box) typeHtml += '<div>BOX</div>';
-                    if (item.material) typeHtml += '<div>ROLL</div>';
                 }
+                if (item.stop) {
+                    typeHtml += '<div>STOP</div>';
+                }
+                if (item.box) typeHtml += '<div>BOX</div>';
+                if (item.material) typeHtml += '<div>ROLL</div>';
                 tile.querySelector('.type-display').innerHTML = typeHtml;
 
                 const matSebEl = tile.querySelector('.mat-seb');
@@ -1220,18 +1271,19 @@
                     devBadgeEl.remove();
                 }
 
-                tile.classList.add(mode === 'break' ? 'brk' : mode === 'maintenance' ? 'maint' : mode === 'running' ? 'running' : 'idle');
+                tile.classList.add(mode === 'break' ? 'brk' : mode === 'maintenance' ? 'maint' : mode === 'check' ? 'check' : mode === 'running' ? 'running' : 'idle');
                 // Running shows the 背番号 big & centered; idle shows nothing big.
                 const sebEl = tile.querySelector('.seb');
                 sebEl.textContent = (mode === 'running') ? (ms.sebanggo || '') : '';
                 if (mode === 'running' && ms.sebanggo) fitSeb(tile, ms.sebanggo);
                 tile.querySelector('.status').textContent =
-                    mode === 'running' ? '稼働 / RUNNING' : '停止 / IDLE';
-                // Break/maintenance: big mode word in the center, small 背番号 bottom-left
+                    mode === 'running' ? '稼働 / RUNNING' :
+                        mode === 'check' ? '点検 / CHECK' : '停止 / IDLE';
+                // Break/maintenance/check: big mode word in the center, small 背番号 bottom-left
                 const bigMode = tile.querySelector('.big-mode');
                 const sebMini = tile.querySelector('.seb-mini');
-                if (mode === 'break' || mode === 'maintenance') {
-                    const word = mode === 'break' ? '休憩中' : '整備中';
+                if (mode === 'break' || mode === 'maintenance' || mode === 'check') {
+                    const word = mode === 'break' ? '休憩中' : mode === 'maintenance' ? '整備中' : 'Check';
                     bigMode.textContent = word;
                     fitText(bigMode, word, valueColumnWidth(tile), valueColumnHeight(tile), 96);
                     sebMini.textContent = ms.sebanggo || '';
@@ -1303,6 +1355,9 @@
                 if (it.leader && !prevTypes.leader) {
                     newlyAddedEvents.push({ machine: it.machine, title: '呼び出し / CALLING LEADER', type: 'leader', since: it.since });
                 }
+                if (it.stop && !prevTypes.stop) {
+                    newlyAddedEvents.push({ machine: it.machine, title: '停止待ち / STOP QUEUED', type: 'stop', since: it.since });
+                }
                 if (it.box && !prevTypes.box) {
                     newlyAddedEvents.push({ machine: it.machine, title: '空箱リクエスト / BOX REQUEST', type: 'box', since: it.since });
                 }
@@ -1310,7 +1365,7 @@
                     newlyAddedEvents.push({ machine: it.machine, title: '部材リクエスト / MATERIAL REQUEST', type: 'material', since: it.since });
                 }
 
-                nextMachineCallTypes.set(it.machine, { leader: !!it.leader, box: !!it.box, material: !!it.material });
+                nextMachineCallTypes.set(it.machine, { leader: !!it.leader, stop: !!it.stop, box: !!it.box, material: !!it.material });
             });
 
             lastMachineCallTypes = nextMachineCallTypes;

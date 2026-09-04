@@ -2471,7 +2471,7 @@
                         <div id="step0ConfirmState" style="display: none; flex-direction: column; align-items: center; gap: 15px;">
                             <p style="font-size: 1.1rem; color: var(--text-main); margin: 0; text-align: center; line-height: 1.5;">
                                 <span data-i18n="confirm_worker_pre">作業を続ける作業者は</span><br>
-                                <strong id="step0CurrentWorkerName" style="color: var(--brand); font-size: 1.4rem; display: block; margin: 8px 0;"></strong>
+                                <strong id="step0CurrentWorkerName" style="color: var(--brand); font-size: 1.4rem; display: block; margin: 8px 0; white-space: pre-line; line-height: 1.6; text-align: center;"></strong>
                                 <span data-i18n="confirm_worker_post"> ですか？</span>
                             </p>
                             <div style="display: flex; gap: 10px; width: 100%; margin-top: 10px;">
@@ -3662,7 +3662,7 @@
             </h2>
             <p style="font-size: 1.1rem; color: var(--text-main); margin: 0; text-align: center; line-height: 1.5;">
                 <span data-i18n="confirm_worker_pre">作業を続ける作業者は</span><br>
-                <strong id="workerConfirmModalName" style="color: var(--brand); font-size: 1.4rem; display: block; margin: 8px 0; word-break: break-word;"></strong>
+                <strong id="workerConfirmModalName" style="color: var(--brand); font-size: 1.4rem; display: block; margin: 8px 0; word-break: break-word; white-space: pre-line; line-height: 1.6; text-align: center;"></strong>
                 <span data-i18n="confirm_worker_post"> ですか？</span>
             </p>
             <div style="display: flex; gap: 10px; width: 100%; margin-top: 20px;">
@@ -6104,20 +6104,34 @@
                 clearInterval(breakInterval);
                 breakInterval = setInterval(() => tickBreak(startEpoch), 1000);
             }
-            function startBreak() {
-                const startEpoch = Date.now();
-                localStorage.setItem(breakPrefix + 'activeBreakStart', String(startEpoch));
+            function startBreak(explicitEpoch, force) {
+                if (!force && window.__breakFinishTimestamp && (Date.now() - window.__breakFinishTimestamp < 8000)) {
+                    console.warn("☕ [BREAK] startBreak blocked: Break was finished less than 8s ago.");
+                    return;
+                }
+                const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+                const existing = localStorage.getItem(pfx + 'activeBreakStart');
+                const startEpoch = (typeof explicitEpoch === 'number' && explicitEpoch > 0)
+                    ? explicitEpoch
+                    : (existing ? parseInt(existing, 10) : Date.now());
+                localStorage.setItem(pfx + 'activeBreakStart', String(startEpoch));
+                localStorage.removeItem(pfx + 'pendingBreakStartEpoch');
                 openBreakOverlay(startEpoch);
                 if (typeof logTabletAction === 'function') logTabletAction('Break started', 'in-progress', {});
+                if (typeof assertMachineState === 'function') assertMachineState();
             }
             window.startBreak = startBreak;
             function finishBreak() {
-                const raw = localStorage.getItem(breakPrefix + 'activeBreakStart');
+                window.__breakFinishTimestamp = Date.now();
+                const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+                const raw = localStorage.getItem(pfx + 'activeBreakStart');
                 clearInterval(breakInterval);
                 const ov = document.getElementById('breakOverlay');
                 if (ov) ov.classList.remove('open');
-                localStorage.removeItem(breakPrefix + 'activeBreakStart');
+                localStorage.removeItem(pfx + 'activeBreakStart');
+                localStorage.removeItem(pfx + 'pendingBreakStartEpoch');
                 if (typeof logTabletAction === 'function') logTabletAction('Break ended', 'Completed', {});
+                if (typeof assertMachineState === 'function') assertMachineState();
                 if (typeof window.unlockCNCGatekeeper === 'function') {
                     window.unlockCNCGatekeeper();
                 }
@@ -6128,7 +6142,8 @@
                 let slot = 0;
                 for (let i = 1; i <= 4; i++) {
                     const si = document.getElementById('break' + i + '-start');
-                    if (si && !si.value) { slot = i; break; }
+                    const ei = document.getElementById('break' + i + '-end');
+                    if (si && (!si.value || !ei.value)) { slot = i; break; }
                 }
                 if (!slot) { showToast(_t('toast_max_breaks')); return; }
                 const si = document.getElementById('break' + slot + '-start');
@@ -6158,6 +6173,7 @@
             }
             function breakMinsOf(s, e) {
                 const a = new Date('2000-01-01T' + s + ':00'), b = new Date('2000-01-01T' + e + ':00');
+                if (b < a) b.setDate(b.getDate() + 1);
                 return b > a ? Math.floor((b - a) / 60000) : 0;
             }
             function renderBreakList() {
@@ -6233,6 +6249,7 @@
                 localStorage.setItem(breakPrefix + 'activeMaintStart', String(startEpoch));
                 openMaintOverlay(startEpoch);
                 if (typeof logTabletAction === 'function') logTabletAction('Maintenance started', 'in-progress', {});
+                if (typeof assertMachineState === 'function') assertMachineState();
             }
             function finishMaintenance() {
                 const raw = localStorage.getItem(breakPrefix + 'activeMaintStart');
@@ -6241,6 +6258,7 @@
                 if (ov) ov.classList.remove('open');
                 localStorage.removeItem(breakPrefix + 'activeMaintStart');
                 if (typeof logTabletAction === 'function') logTabletAction('Maintenance ended', 'Completed', {});
+                if (typeof assertMachineState === 'function') assertMachineState();
                 if (!raw) return;
                 const start = new Date(parseInt(raw, 10));
                 const end = new Date();
@@ -6910,26 +6928,59 @@
                         品番Raw = localStorage.getItem(breakPrefix + 'cached-hinban') || '';
                     }
                     
-                    // Only tell the factory TV this machine is running once Step 3 is done.
-                    // A mid-workflow refresh would otherwise leave a stale 背番号 on the display.
-                    const workflowDone = typeof window.isScanWorkflowComplete === 'function' && window.isScanWorkflowComplete();
-                    const 背番号 = workflowDone ? 背番号Raw : '';
-                    const 品番 = workflowDone ? 品番Raw : '';
-                    
-                    console.log(`[assertMachineState] 工場=${工場}, 設備=${設備}`);
-                    console.log(`[assertMachineState] breakPrefix=${typeof breakPrefix !== 'undefined' ? breakPrefix : 'UNDEFINED'}`);
-                    console.log(`[assertMachineState] 背番号Raw="${背番号Raw}", 品番Raw="${品番Raw}"`);
-                    console.log(`[assertMachineState] workflowDone=${workflowDone} -> Final 背番号="${背番号}", 品番="${品番}"`);
+                    const machines = 設備.split(',').map(m => m.trim().toUpperCase()).filter(Boolean);
+                    if (machines.length === 0) return;
+
                     const breakStart = parseInt(localStorage.getItem(breakPrefix + 'activeBreakStart') || '0', 10);
                     const maintStart = parseInt(localStorage.getItem(breakPrefix + 'activeMaintStart') || '0', 10);
                     const stopCallStart = parseInt(localStorage.getItem(breakPrefix + 'activeStopCallStart') || '0', 10);
                     const cncCancelStart = parseInt(localStorage.getItem(breakPrefix + 'activeCncCancelStart') || '0', 10);
 
-                    let mode = 'idle', modeStartedAt = 0;
-                    if (maintStart) { mode = 'maintenance'; modeStartedAt = maintStart; }
-                    else if (breakStart) { mode = 'break'; modeStartedAt = breakStart; }
-                    else if (stopCallStart || cncCancelStart) { mode = 'stopcall'; modeStartedAt = stopCallStart || cncCancelStart; }
-                    else if (背番号) { mode = 'running'; }
+                    const activeWorker = (typeof window.selectedWorkerNames !== 'undefined' && window.selectedWorkerNames && window.selectedWorkerNames.length > 0)
+                        ? window.selectedWorkerNames.map(n => (n || '').trim()).filter(Boolean).join(', ')
+                        : (document.getElementById('Machine Operator')?.value?.trim() || '');
+
+                    const isCheckLocked = (typeof window.isChecklistLocked === 'function' && window.isChecklistLocked()) ||
+                                          (typeof isChecklistLocked === 'function' && isChecklistLocked()) ||
+                                          !!document.querySelector('.tab-bar')?.classList.contains('locked-checklist') ||
+                                          (window.checklistState && !window.checklistState.isPreComplete && window.checklistState.queue && window.checklistState.queue.length > 0);
+
+                    // Check specifically if Step 2 (or any inspection step beyond Step 1 worker name) has an answer
+                    const checklistAnswers = (window.checklistState && window.checklistState.answers) ? window.checklistState.answers : {};
+                    const queue = (window.checklistState && window.checklistState.queue) ? window.checklistState.queue : [];
+                    
+                    const nameFieldIds = new Set();
+                    queue.forEach(tpl => {
+                        if (Array.isArray(tpl.fields)) {
+                            tpl.fields.forEach(f => {
+                                if (f.type === 'name') nameFieldIds.add(f.id);
+                            });
+                        }
+                    });
+
+                    // Has answer in Step 2 or later (excluding Step 1 name)
+                    let hasStep2Answer = false;
+                    for (const [fId, val] of Object.entries(checklistAnswers)) {
+                        if (nameFieldIds.has(fId)) continue;
+                        if (Array.isArray(val)) continue; // Worker name slot array
+                        if (val !== undefined && val !== null && val !== '') {
+                            hasStep2Answer = true;
+                            break;
+                        }
+                    }
+
+                    let checkStart = parseInt(localStorage.getItem(breakPrefix + 'activeChecklistStart') || '0', 10);
+                    const isDoingChecklist = isCheckLocked && hasStep2Answer;
+
+                    if (isDoingChecklist) {
+                        if (!checkStart) {
+                            checkStart = Date.now();
+                            try { localStorage.setItem(breakPrefix + 'activeChecklistStart', String(checkStart)); } catch (e) { }
+                        }
+                    } else if (checkStart) {
+                        try { localStorage.removeItem(breakPrefix + 'activeChecklistStart'); } catch (e) { }
+                        checkStart = 0;
+                    }
 
                     // If a leader stop-call is active, keep it asserted so cloud TV never drops until leader QR scan
                     if (stopCallStart) {
@@ -6938,9 +6989,18 @@
                         notifyStopCall('activate', 'leader');
                     }
 
+                    const cycleStopOverlay = document.getElementById('cncCycleStopOverlay');
+                    const isCycleStopOpen = !!(cycleStopOverlay && cycleStopOverlay.classList.contains('open'));
+                    if (isCycleStopOpen) {
+                        notifyStopCall('activate', 'stop');
+                    } else {
+                        // Tablet reload protection: ensure no ghost STOP lingers on cloud TV
+                        notifyStopCall('clear', 'stop');
+                    }
+
                     // Use actual Start Time if available so TV monitor accurately matches elapsed time
                     let prodStart = 0;
-                    if (mode === 'idle' || !背番号) {
+                    if (!背番号Raw) {
                         localStorage.removeItem(breakPrefix + 'prodStartEpoch');
                     } else {
                         const startTimeStr = document.getElementById('Start Time')?.value;
@@ -6979,13 +7039,67 @@
                     }
 
                     const base = (typeof serverURL !== 'undefined' && serverURL) ? serverURL : '';
-                    fetch(`${base}/api/machine-assert`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ 工場, 設備, 背番号, 品番, mode, modeStartedAt, runStartedAt: prodStart, totalNG, pageInstanceId })
-                    }).catch(() => { });
-                } catch (e) { }
+
+                    machines.forEach(m => {
+                        const isLotScanned = (typeof window.isMachineLotScanned === 'function')
+                            ? window.isMachineLotScanned(m)
+                            : false;
+
+                        let mMode = 'idle', mModeStartedAt = 0, mSebanggo = '', mHinban = '';
+
+                        if (maintStart) {
+                            mMode = 'maintenance';
+                            mModeStartedAt = maintStart;
+                            mSebanggo = isLotScanned ? 背番号Raw : '';
+                            mHinban = isLotScanned ? 品番Raw : '';
+                        } else if (breakStart) {
+                            mMode = 'break';
+                            mModeStartedAt = breakStart;
+                            mSebanggo = isLotScanned ? 背番号Raw : '';
+                            mHinban = isLotScanned ? 品番Raw : '';
+                        } else if (stopCallStart || cncCancelStart) {
+                            mMode = 'stopcall';
+                            mModeStartedAt = stopCallStart || cncCancelStart;
+                            mSebanggo = isLotScanned ? 背番号Raw : '';
+                            mHinban = isLotScanned ? 品番Raw : '';
+                        } else if (isDoingChecklist) {
+                            mMode = 'check';
+                            mModeStartedAt = checkStart || Date.now();
+                            mSebanggo = isLotScanned ? 背番号Raw : '';
+                            mHinban = isLotScanned ? 品番Raw : '';
+                        } else if (isLotScanned && 背番号Raw) {
+                            mMode = 'running';
+                            mSebanggo = 背番号Raw;
+                            mHinban = 品番Raw;
+                        } else {
+                            mMode = 'idle';
+                            mSebanggo = '';
+                            mHinban = '';
+                        }
+
+                        fetch(`${base}/api/machine-assert`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                工場,
+                                設備: m,
+                                背番号: mSebanggo,
+                                品番: mHinban,
+                                mode: mMode,
+                                modeStartedAt: mModeStartedAt,
+                                runStartedAt: (mMode === 'running' || mMode === 'break' || mMode === 'maintenance') ? prodStart : 0,
+                                totalNG,
+                                pageInstanceId,
+                                cycleStopActive: isCycleStopOpen,
+                                worker: activeWorker
+                            })
+                        }).catch(() => { });
+                    });
+                } catch (e) {
+                    console.error('[assertMachineState ERROR]', e);
+                }
             }
+            window.assertMachineState = assertMachineState;
             setTimeout(assertMachineState, 3000);          // shortly after load
             setInterval(assertMachineState, 30000);        // every 30s
             window.addEventListener('online', assertMachineState);
@@ -7206,6 +7320,8 @@
                 const origClose = window.closeAllStepModals;
                 window.closeAllStepModals = function () {
                     window.__materialScanMode = null;
+                    window.__lotScanMachine = null;
+                    window.__lotCycleMachinesDone = [];
                     const el = document.getElementById('step2Modal');
                     if (el) {
                         el.classList.remove('as-overlay');
@@ -7224,7 +7340,12 @@
             }
             if (typeof window.showStep1Modal === 'function') {
                 const origStep1 = window.showStep1Modal;
-                window.showStep1Modal = function () { window.__materialScanMode = null; return origStep1.apply(this, arguments); };
+                window.showStep1Modal = function () {
+                    window.__materialScanMode = null;
+                    window.__lotScanMachine = null;
+                    window.__lotCycleMachinesDone = [];
+                    return origStep1.apply(this, arguments);
+                };
             }
 
             // ---------- Kensa visibility ----------
