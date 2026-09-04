@@ -369,30 +369,204 @@ app.get("/", (req, res) => {
 });
 
 // ============================================
-// SSE ROUTES - Machine Display Pages
+// SSE ROUTES - Machine Display Pages & Failsafe Group Sync
 // ============================================
 
-// Debug endpoint to check stored machine states
-app.get("/api/machine-state/:machineId", (req, res) => {
-  const machineId = normalizeMachineSessionKey(req.params.machineId);
-  let lastScan = machineLastScan.get(machineId);
+const machineGroupPairs = [
+  ['OZNC03', 'OZNC05'],
+  ['OZNC04', 'OZNC06'],
+  ['OZNC07', 'OZNC09'],
+  ['OZNC08', 'OZNC10']
+];
+
+async function getRelatedMachineIds(machineId = '') {
+  const normalized = normalizeMachineSessionKey(machineId);
+  const related = new Set();
   
-  if (!lastScan) {
-    for (const [factory, map] of factoryMachineState.entries()) {
-      const st = map.get(machineId);
-      if (st && st.sebanggo) {
-        lastScan = { type: 'scan', machineId, sebanggo: st.sebanggo, hinban: st.hinban || '' };
-        break;
+  if (!normalized) return [];
+
+  const tokens = normalized.split(',').map(m => m.trim().toUpperCase()).filter(Boolean);
+  tokens.forEach(t => related.add(t));
+  related.add(normalized);
+
+  // Check known hardcoded machine pairs
+  for (const pair of machineGroupPairs) {
+    const pairKey = pair.join(',');
+    const hasAny = tokens.some(t => pair.includes(t)) || normalized === pairKey;
+    if (hasAny) {
+      pair.forEach(m => related.add(m));
+      related.add(pairKey);
+    }
+  }
+
+  // Also query setsubiDB for any grouped machine definitions containing this machine
+  try {
+    const masterDb = client.db("Sasaki_Coating_MasterDB");
+    const docs = await masterDb.collection("setsubiDB").find({
+      name: { $regex: new RegExp(`(^|,)${tokens.join('|')}($|,)`, 'i') }
+    }).toArray();
+
+    docs.forEach(doc => {
+      if (doc.name && doc.name.includes(',')) {
+        const parts = doc.name.split(',').map(m => m.trim().toUpperCase()).filter(Boolean);
+        parts.forEach(p => related.add(p));
+        related.add(parts.join(','));
+      }
+    });
+  } catch (err) {
+    // Known pairs fallback
+  }
+
+  return Array.from(related);
+}
+
+async function getAuthoritativeMachineScan(machineId) {
+  const relatedIds = await getRelatedMachineIds(machineId);
+
+  // 1. Check in-memory machineLastScan for any related ID (prefer most recent timestamp)
+  let bestInMemoryScan = null;
+  for (const id of relatedIds) {
+    const scan = machineLastScan.get(id);
+    if (scan && (scan.sebanggo || scan.zuban)) {
+      if (!bestInMemoryScan || (new Date(scan.timestamp) > new Date(bestInMemoryScan.timestamp))) {
+        bestInMemoryScan = scan;
       }
     }
   }
 
+  // 2. Query MongoDB submittedDB.tabletLogDB for today (Primary Source of Truth)
+  try {
+    const todayStr = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    const submittedDb = client.db("submittedDB");
+    const tabletLogDB = submittedDb.collection("tabletLogDB");
+
+    const latestLogs = await tabletLogDB.find({
+      Date: todayStr,
+      $or: [
+        { 設備: { $in: relatedIds } },
+        { 設備_原形式: { $in: relatedIds } }
+      ]
+    }).sort({ _id: -1 }).limit(10).toArray();
+
+    if (latestLogs && latestLogs.length > 0) {
+      const topLog = latestLogs[0];
+      const action = String(topLog.Action || '');
+      const status = String(topLog.Status || '');
+
+      const isResetOrClear = action.includes('Reset') || 
+                             status === 'Reset' || 
+                             (action.includes('Submit') && status === 'Completed') ||
+                             action.includes('clear');
+
+      if (isResetOrClear) {
+        const logTime = new Date(topLog.Timestamp || (topLog.Date + 'T' + topLog.Time)).getTime();
+        const inMemTime = bestInMemoryScan ? new Date(bestInMemoryScan.timestamp).getTime() : 0;
+        
+        if (inMemTime > logTime + 5000) {
+          return { currentScan: bestInMemoryScan, isIdle: false, relatedIds };
+        } else {
+          relatedIds.forEach(id => machineLastScan.delete(id));
+          return { currentScan: null, isIdle: true, relatedIds };
+        }
+      }
+
+      // Find latest log with valid 背番号 or 図番
+      const activeLog = latestLogs.find(l => (l.背番号 || l.図番) && l.Status !== 'Reset');
+      if (activeLog) {
+        const logTime = new Date(activeLog.Timestamp || (activeLog.Date + 'T' + activeLog.Time)).getTime();
+        const inMemTime = bestInMemoryScan ? new Date(bestInMemoryScan.timestamp).getTime() : 0;
+
+        if (bestInMemoryScan && inMemTime > logTime) {
+          return { currentScan: bestInMemoryScan, isIdle: false, relatedIds };
+        }
+
+        const dbScanData = {
+          type: 'scan',
+          action: 'scan',
+          machineId: machineId,
+          sebanggo: activeLog.背番号 || '',
+          zuban: activeLog.図番 || '',
+          hinban: activeLog.品番 || '',
+          language: machineLanguage.get(machineId) || 'ja',
+          timestamp: activeLog.Timestamp || new Date().toISOString(),
+          additionalData: {
+            factory: activeLog.工場,
+            sessionID: activeLog.sessionID,
+            Worker_Name: activeLog.Worker_Name,
+            source: 'tabletLogDB'
+          }
+        };
+
+        // Cache in memory for all related IDs
+        relatedIds.forEach(id => machineLastScan.set(id, dbScanData));
+        return { currentScan: dbScanData, isIdle: false, relatedIds };
+      }
+    }
+  } catch (err) {
+    console.warn('⚠️ Error querying tabletLogDB for authoritative state:', err);
+  }
+
+  // 3. Fallback to in-memory scan if DB query produced nothing
+  if (bestInMemoryScan) {
+    return { currentScan: bestInMemoryScan, isIdle: false, relatedIds };
+  }
+
+  // 4. Fallback to factoryMachineState
+  for (const [factory, map] of factoryMachineState.entries()) {
+    for (const id of relatedIds) {
+      const st = map.get(id);
+      if (st && st.sebanggo) {
+        const stScan = {
+          type: 'scan',
+          action: 'scan',
+          machineId,
+          sebanggo: st.sebanggo,
+          zuban: '',
+          hinban: st.hinban || '',
+          timestamp: new Date().toISOString(),
+          additionalData: { factory, source: 'factoryMachineState' }
+        };
+        relatedIds.forEach(rid => machineLastScan.set(rid, stScan));
+        return { currentScan: stScan, isIdle: false, relatedIds };
+      }
+    }
+  }
+
+  return { currentScan: null, isIdle: true, relatedIds };
+}
+
+// Endpoint to get authoritative machine current scan state (with MongoDB failsafe)
+app.get("/api/machine-current-scan/:machineId", async (req, res) => {
+  try {
+    const rawMachine = req.params.machineId;
+    const result = await getAuthoritativeMachineScan(rawMachine);
+    res.json({
+      success: true,
+      machineId: rawMachine,
+      relatedMachines: result.relatedIds,
+      currentScan: result.currentScan,
+      isIdle: result.isIdle,
+      timestamp: new Date().toISOString()
+    });
+  } catch (err) {
+    console.error(`❌ Error in /api/machine-current-scan/${req.params.machineId}:`, err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Debug endpoint to check stored machine states
+app.get("/api/machine-state/:machineId", async (req, res) => {
+  const machineId = normalizeMachineSessionKey(req.params.machineId);
+  const authState = await getAuthoritativeMachineScan(machineId);
+  const lastScan = authState.currentScan;
   const playerState = sanitizeMachinePlayerState(getOrCreateMachinePlayerState(machineId));
   
   res.json({
     machineId,
+    relatedMachines: authState.relatedIds,
     hasStoredData: !!lastScan,
     lastScan: lastScan || null,
+    isIdle: authState.isIdle,
     connectedClients: (machineConnections.get(machineId) || []).length,
     playerState,
   });
@@ -572,7 +746,7 @@ app.post('/api/machine-player/state', (req, res) => {
 });
 
 // SSE endpoint - clients connect here to receive real-time updates
-app.get("/sse/machine/:machineId", (req, res) => {
+app.get("/sse/machine/:machineId", async (req, res) => {
   const machineId = normalizeMachineSessionKey(req.params.machineId);
   
   // Set headers for SSE
@@ -593,21 +767,18 @@ app.get("/sse/machine/:machineId", (req, res) => {
   const currentMachineLang = machineLanguage.get(machineId) || machineLastScan.get(machineId)?.additionalData?.language || 'ja';
   res.write(`data: ${JSON.stringify({ type: 'connected', machineId, language: currentMachineLang, timestamp: new Date().toISOString() })}\n\n`);
   
-  // Send last scan data if available (for persistence on page reload)
-  let lastScan = machineLastScan.get(machineId);
-  if (!lastScan) {
-    for (const [factory, map] of factoryMachineState.entries()) {
-      const st = map.get(machineId);
-      if (st && st.sebanggo) {
-        lastScan = { type: 'scan', machineId, sebanggo: st.sebanggo, hinban: st.hinban || '' };
-        break;
-      }
+  // Send authoritative last scan data if available (for persistence on page reload)
+  try {
+    const authState = await getAuthoritativeMachineScan(machineId);
+    if (authState.currentScan) {
+      console.log(`📤 Sending authoritative scan to new client for ${machineId}:`, authState.currentScan);
+      res.write(`data: ${JSON.stringify(authState.currentScan)}\n\n`);
+    } else if (authState.isIdle) {
+      console.log(`📤 Sending clear/idle state to new client for ${machineId}`);
+      res.write(`data: ${JSON.stringify({ type: 'clear', action: 'clear', machineId, timestamp: new Date().toISOString() })}\n\n`);
     }
-  }
-
-  if (lastScan) {
-    console.log(`📤 Sending last scan data to new client for ${machineId}:`, lastScan);
-    res.write(`data: ${JSON.stringify(lastScan)}\n\n`);
+  } catch (err) {
+    console.warn(`⚠️ Error sending initial scan data for ${machineId}:`, err);
   }
   
   // Handle client disconnect
@@ -977,11 +1148,19 @@ app.post("/api/broadcast-scan", async (req, res) => {
   if (machineIds.length === 0) {
     return res.status(400).json({ error: "Invalid machineId format" });
   }
+
+  // Expand with any related group machine peers (e.g. OZNC04 <-> OZNC06)
+  const allTargetMachineIds = new Set();
+  for (const mid of machineIds) {
+    const peers = await getRelatedMachineIds(mid);
+    peers.forEach(p => allTargetMachineIds.add(p));
+  }
+  const expandedMachineIds = Array.from(allTargetMachineIds);
   
-  console.log(`📡 Broadcasting to machine(s): ${machineIds.join(', ')} (clear: ${isClearAction}, langChange: ${isLanguageAction})`);
+  console.log(`📡 Broadcasting to machine(s) and group peers: ${expandedMachineIds.join(', ')} (clear: ${isClearAction}, langChange: ${isLanguageAction})`);
   
   // For each machine, create and store scan data
-  machineIds.forEach(normalizedMachineId => {
+  expandedMachineIds.forEach(normalizedMachineId => {
     const incomingLang = additionalData?.language || req.body.language;
     if (incomingLang) {
       machineLanguage.set(normalizedMachineId, incomingLang);
@@ -1016,12 +1195,12 @@ app.post("/api/broadcast-scan", async (req, res) => {
         existingScan.additionalData.language = currentMachineLang;
       }
       console.log(`🌐 Language preference updated for ${normalizedMachineId}: ${currentMachineLang}`);
-    } else if ((sebanggo || zuban) && hinban) {
-      // Only store if we have valid sebanggo/zuban and hinban
+    } else if (sebanggo || zuban) {
+      // Store whenever valid sebanggo OR zuban exists
       machineLastScan.set(normalizedMachineId, scanData);
       console.log(`💾 Stored last scan for ${normalizedMachineId}:`, { sebanggo, zuban, hinban, language: currentMachineLang });
     } else {
-      console.log(`⚠️ Skipping storage for ${normalizedMachineId} - missing sebanggo/zuban or hinban`);
+      console.log(`⚠️ Skipping storage for ${normalizedMachineId} - missing sebanggo/zuban`);
     }
     
     // Broadcast to all clients listening to this specific machine

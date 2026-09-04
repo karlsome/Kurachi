@@ -1311,10 +1311,9 @@
         }
 
         const MACHINE_ID = getMachineIdFromURL();
-        // const SERVER_URL = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-        //     ? window.location.origin
-        //     : 'https://kurachi.onrender.com';
-        const SERVER_URL = 'http://localhost:3000';
+
+        const SERVER_URL = 'https://kurachi.onrender.com';
+        //const SERVER_URL = 'http://localhost:3000';
         //const SERVER_URL = 'http://192.168.1.176:3000';
 
         // localStorage key for persisting scan data
@@ -1384,7 +1383,7 @@
                 serialLabel: '背番号 / Serial Number',
                 partLabel: '品番 / Part Number',
                 scanTimeLabel: 'スキャン時間 / Scan Time',
-                
+
                 // Badges
                 badgeActive: '🎯 現在作業中 (NOW ACTIVE)',
                 badgeCompleted: '✅ 完了',
@@ -1460,7 +1459,7 @@
                 serialLabel: 'Serial # (背番号)',
                 partLabel: 'Part Number (品番)',
                 scanTimeLabel: 'Scan Time',
-                
+
                 // Badges
                 badgeActive: '🎯 NOW ACTIVE',
                 badgeCompleted: '✅ Completed',
@@ -1536,7 +1535,7 @@
                 serialLabel: 'Nº de Série (背番号)',
                 partLabel: 'Nº da Peça (品番)',
                 scanTimeLabel: 'Hora do Scan',
-                
+
                 // Badges
                 badgeActive: '🎯 TRABALHANDO AGORA',
                 badgeCompleted: '✅ Concluído',
@@ -1618,7 +1617,7 @@
             currentLanguage = newLang;
             try {
                 localStorage.setItem('appLanguage', newLang);
-            } catch (_) {}
+            } catch (_) { }
 
             // Re-render UI elements
             if (!window.currentSebanggo && !window.currentZuban) {
@@ -2153,7 +2152,7 @@
             // Load initial production plan data for the resolved factory and current date
             await loadProductionPlanData();
 
-            // Try to restore last scan from localStorage (only if scanned today)
+            // Try to restore last scan from localStorage (only if scanned today) as initial fast render
             const lastScan = loadScanFromStorage();
             if (lastScan) {
                 console.log('🔄 Restoring last scan from localStorage');
@@ -2163,6 +2162,9 @@
                 showIdleProductionPlan();
             }
 
+            // Immediately reconcile with authoritative server state (failsafe against stale localStorage)
+            await syncWithAuthoritativeState();
+
             // Start SSE connection
             connectSSE();
 
@@ -2171,6 +2173,22 @@
                 productionPlanDate = getTodayDateString();
                 loadProductionPlanData({ silent: true });
             }, 60000);
+
+            // Periodic failsafe sync with server state (every 1 minute)
+            // Guarantees grouped machines (e.g. OZNC04 <-> OZNC06) recover from any missed SSE broadcast
+            setInterval(() => {
+                syncWithAuthoritativeState();
+            }, 60000);
+
+            // Re-sync immediately on window focus or visibility change (e.g. monitor wake)
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible') {
+                    syncWithAuthoritativeState();
+                }
+            });
+            window.addEventListener('focus', () => {
+                syncWithAuthoritativeState();
+            });
         }
 
         function initializeWaitingCards() {
@@ -2598,8 +2616,8 @@
             if (planStatPills) {
                 const targetText = isShowingAllEquipment ? t('allEq') : escapeManualHtml(MACHINE_ID);
                 const toggleText = isShowingAllEquipment ? `[${escapeManualHtml(MACHINE_ID)}] ${t('onlyThisEq')}` : t('showAllEq');
-                const diffNotice = !isShowingAllEquipment && allProducts.length !== displayList.length 
-                    ? `(${t('factoryTotal')} ${allProducts.length}${t('itemsUnit')})` 
+                const diffNotice = !isShowingAllEquipment && allProducts.length !== displayList.length
+                    ? `(${t('factoryTotal')} ${allProducts.length}${t('itemsUnit')})`
                     : '';
 
                 planStatPills.innerHTML = `
@@ -3580,8 +3598,8 @@
                         const scanDate = new Date(data.timestamp);
                         const today = new Date();
                         const isSameDay = scanDate.getFullYear() === today.getFullYear() &&
-                                          scanDate.getMonth() === today.getMonth() &&
-                                          scanDate.getDate() === today.getDate();
+                            scanDate.getMonth() === today.getMonth() &&
+                            scanDate.getDate() === today.getDate();
                         if (!isSameDay) {
                             console.log('📂 Stored scan is from a previous day, clearing:', data);
                             clearScanFromStorage();
@@ -3607,6 +3625,47 @@
             }
         }
 
+        // Failsafe Source of Truth: query server and MongoDB for active product
+        let isSyncingState = false;
+
+        async function syncWithAuthoritativeState() {
+            if (!MACHINE_ID || isSyncingState) return;
+            isSyncingState = true;
+            try {
+                const res = await fetch(`${SERVER_URL}/api/machine-current-scan/${encodeURIComponent(MACHINE_ID)}`);
+                if (res.ok) {
+                    const data = await res.json();
+
+                    if (data.isIdle || !data.currentScan) {
+                        // Server reports machine is currently reset or idle
+                        if (window.currentSebanggo || window.currentZuban) {
+                            console.log('🧹 Authoritative state reports machine is idle -> resetting to production plan');
+                            clearDisplay();
+                        }
+                    } else if (data.currentScan) {
+                        const s = data.currentScan;
+                        const currSeb = window.currentSebanggo || '';
+                        const currZub = window.currentZuban || '';
+                        const currHin = window.currentHinban || '';
+
+                        const hasDiff = (s.sebanggo && s.sebanggo !== currSeb) ||
+                            (s.zuban && s.zuban !== currZub) ||
+                            (s.hinban && s.hinban !== currHin) ||
+                            (!currSeb && !currZub);
+
+                        if (hasDiff) {
+                            console.log('🔄 Authoritative state discrepancy detected -> updating to correct product:', s);
+                            updateDisplay(s);
+                        }
+                    }
+                }
+            } catch (err) {
+                console.warn('⚠️ Could not sync with authoritative machine state:', err);
+            } finally {
+                isSyncingState = false;
+            }
+        }
+
         // Connect to SSE endpoint
         function connectSSE() {
             console.log(`🔌 Connecting to SSE for ${MACHINE_ID}...`);
@@ -3616,6 +3675,7 @@
             eventSource.onopen = function () {
                 console.log('✅ SSE Connection opened');
                 updateStatusCard(t('connected'));
+                syncWithAuthoritativeState();
             };
 
             eventSource.onerror = function (error) {
