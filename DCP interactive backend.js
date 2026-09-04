@@ -16481,6 +16481,15 @@ if (manualSendModal) {
   `;
   document.head.appendChild(style);
 
+  // Helper for i18n translation lookup
+  function _tr(key, fallback) {
+    if (typeof _t === 'function') {
+      const res = _t(key);
+      if (res && res !== key) return res;
+    }
+    return fallback || key;
+  }
+
   // Create Full-Screen Waiting Overlay for 🛑 Floating Button
   const overlay = document.createElement('div');
   overlay.id = 'cncCycleStopOverlay';
@@ -16488,14 +16497,13 @@ if (manualSendModal) {
   overlay.innerHTML = `
     <div class="cnc-stop-modal">
       <div class="cnc-stop-icon-pulse">🛑</div>
-      <h2>サイクル完了待ち</h2>
-      <p class="cnc-stop-sub">
-        現在の加工が完了し、材料送りが終わった時点で自動停止します。<br>
-        <span style="font-size: 0.85rem; color: #64748b;">(Stopping after current cut & material feed...)</span>
+      <h2 data-i18n="cnc_cycle_stop_title">サイクル完了待ち</h2>
+      <p class="cnc-stop-sub" data-i18n="cnc_cycle_stop_desc">
+        現在の加工が完了し、材料送りが終わった時点で自動停止します。
       </p>
       <div class="cnc-stop-spinner"></div>
-      <button type="button" class="btn-cancel-cycle-stop" id="btnCancelCycleStop">
-        停止を取り消す / Resume
+      <button type="button" class="btn-cancel-cycle-stop" id="btnCancelCycleStop" data-i18n="cnc_cycle_stop_cancel_btn">
+        停止を取り消す (運転継続)
       </button>
     </div>
   `;
@@ -16508,10 +16516,61 @@ if (manualSendModal) {
   stopBtn.className = 'video-manual-launcher pdf-page-btn cnc-cycle-stop-btn';
   stopBtn.style.bottom = 'calc(max(12px, env(safe-area-inset-bottom)) + 180px)';
   stopBtn.innerHTML = '<span class="video-manual-launcher__icon">🛑</span>';
-  stopBtn.setAttribute('title', 'サイクル完了後に停止 / Stop after cycle');
+  stopBtn.setAttribute('data-i18n-title', 'cnc_cycle_stop_tooltip');
   document.body.appendChild(stopBtn);
 
+  // Create Full-Screen Waiting Overlay for ☕ Break Button
+  const breakWaitOverlay = document.createElement('div');
+  breakWaitOverlay.id = 'cncBreakWaitOverlay';
+  breakWaitOverlay.className = 'cnc-cycle-stop-overlay';
+  breakWaitOverlay.innerHTML = `
+    <div class="cnc-stop-modal">
+      <div class="cnc-stop-icon-pulse" style="background: rgba(245, 158, 11, 0.15); border-color: rgba(245, 158, 11, 0.3);">☕</div>
+      <h2 data-i18n="cnc_break_wait_title">休憩待ち (サイクル完了後)</h2>
+      <p class="cnc-stop-sub" data-i18n="cnc_break_wait_desc">
+        現在の加工と材料送りが完了した時点で、機械を自動停止して休憩を開始します。
+      </p>
+      <div class="cnc-stop-spinner" style="border-top-color: #f59e0b;"></div>
+      <button type="button" class="btn-cancel-cycle-stop" id="btnCancelBreakWait" data-i18n="cnc_break_wait_cancel_btn">
+        休憩を取り消す
+      </button>
+    </div>
+  `;
+  document.body.appendChild(breakWaitOverlay);
+
+  function updateCncOverlayTranslations() {
+    const cycleTitle = overlay.querySelector('[data-i18n="cnc_cycle_stop_title"]');
+    if (cycleTitle) cycleTitle.textContent = _tr('cnc_cycle_stop_title', 'サイクル完了待ち');
+    const cycleDesc = overlay.querySelector('[data-i18n="cnc_cycle_stop_desc"]');
+    if (cycleDesc) cycleDesc.textContent = _tr('cnc_cycle_stop_desc', '現在の加工が完了し、材料送りが終わった時点で自動停止します。');
+    const cycleBtn = overlay.querySelector('#btnCancelCycleStop');
+    if (cycleBtn) cycleBtn.textContent = _tr('cnc_cycle_stop_cancel_btn', '停止を取り消す (運転継続)');
+
+    const breakTitle = breakWaitOverlay.querySelector('[data-i18n="cnc_break_wait_title"]');
+    if (breakTitle) breakTitle.textContent = _tr('cnc_break_wait_title', '休憩待ち (サイクル完了後)');
+    const breakDesc = breakWaitOverlay.querySelector('[data-i18n="cnc_break_wait_desc"]');
+    if (breakDesc) breakDesc.textContent = _tr('cnc_break_wait_desc', '現在の加工と材料送りが完了した時点で、機械を自動停止して休憩を開始します。');
+    const breakBtn = breakWaitOverlay.querySelector('#btnCancelBreakWait');
+    if (breakBtn) breakBtn.textContent = _tr('cnc_break_wait_cancel_btn', '休憩を取り消す');
+
+    if (stopBtn) {
+      stopBtn.setAttribute('title', _tr('cnc_cycle_stop_tooltip', 'サイクル完了後に停止'));
+    }
+
+    if (isBreakScheduledPending) {
+      const startBtn = document.getElementById('breakStartButton');
+      if (startBtn) {
+        startBtn.innerHTML = `<span>${_tr('cnc_break_btn_waiting', '⏳ サイクル完了後に休憩停止します...')}</span>`;
+      }
+    }
+  }
+
+  // Initial translation apply and reactive listener for language switcher
+  updateCncOverlayTranslations();
+  document.addEventListener('languageChanged', updateCncOverlayTranslations);
+
   function openCycleStopOverlay() {
+    updateCncOverlayTranslations();
     const wasOpen = overlay.classList.contains('open');
     overlay.classList.add('open');
     if (!wasOpen) {
@@ -16536,32 +16595,13 @@ if (manualSendModal) {
     }
   }
 
-  // Create Full-Screen Waiting Overlay for ☕ Break Button
-  const breakWaitOverlay = document.createElement('div');
-  breakWaitOverlay.id = 'cncBreakWaitOverlay';
-  breakWaitOverlay.className = 'cnc-cycle-stop-overlay';
-  breakWaitOverlay.innerHTML = `
-    <div class="cnc-stop-modal">
-      <div class="cnc-stop-icon-pulse" style="background: rgba(245, 158, 11, 0.15); border-color: rgba(245, 158, 11, 0.3);">☕</div>
-      <h2>休憩待ち (サイクル完了後)</h2>
-      <p class="cnc-stop-sub">
-        現在の加工と材料送りが完了した時点で、機械を自動停止して休憩を開始します。<br>
-        <span style="font-size: 0.85rem; color: #64748b;">(Stopping cleanly after cycle before break timer starts...)</span>
-      </p>
-      <div class="cnc-stop-spinner" style="border-top-color: #f59e0b;"></div>
-      <button type="button" class="btn-cancel-cycle-stop" id="btnCancelBreakWait">
-        休憩を取り消す / Cancel
-      </button>
-    </div>
-  `;
-  document.body.appendChild(breakWaitOverlay);
-
   function openBreakWaitOverlay() {
+    updateCncOverlayTranslations();
     breakWaitOverlay.classList.add('open');
     isBreakScheduledPending = true;
     const startBtn = document.getElementById('breakStartButton');
     if (startBtn) {
-      startBtn.innerHTML = '<span>⏳ サイクル完了後に休憩停止します...</span>';
+      startBtn.innerHTML = `<span>${_tr('cnc_break_btn_waiting', '⏳ サイクル完了後に休憩停止します...')}</span>`;
       startBtn.style.background = '#F59E0B';
     }
   }
@@ -16584,7 +16624,7 @@ if (manualSendModal) {
     }
     closeBreakWaitOverlay();
     if (typeof showToast === 'function') {
-      showToast("休憩リクエストを取り消しました / Resumed normal operation");
+      showToast(_tr('toast_break_request_cancelled', "休憩リクエストを取り消しました"));
     }
   });
 
@@ -16600,7 +16640,7 @@ if (manualSendModal) {
     }
     closeCycleStopOverlay();
     if (typeof showToast === 'function') {
-      showToast("停止リクエストを取り消しました / Resumed normal operation");
+      showToast(_tr('toast_cycle_stop_cancelled', "停止リクエストを取り消しました"));
     }
   });
 
@@ -16626,7 +16666,7 @@ if (manualSendModal) {
           console.warn("Legacy Mini-PC or offline:", e);
           closeCycleStopOverlay();
           if (typeof showToast === 'function') {
-            showToast("⚠️ マシンがサイクル停止機能に対応していません / Mini-PC does not support cycle stop");
+            showToast(_tr('toast_cycle_stop_not_supported', "⚠️ マシンがサイクル停止機能に対応していません"));
           }
         }
       }
@@ -16766,7 +16806,7 @@ if (manualSendModal) {
           console.warn('⛔ [CNC GATEKEEPER] Restart blocked:', data);
           if (data.hold_reason === 'BREAK') {
             if (typeof showToast === 'function') {
-              showToast("☕ 休憩中です。タブレットで「休憩を終了」を押してください / On Break - Finish break on tablet to resume");
+              showToast(_tr('toast_on_break_press_finish', "☕ 休憩中です。タブレットで「休憩を終了」を押してください"));
             }
           } else {
             if (typeof logTabletAction === 'function') {
@@ -16830,7 +16870,7 @@ if (manualSendModal) {
       cncEventSource.addEventListener('break_drag_phase', (e) => {
         console.log("⏳ [CNC GATEKEEPER] Current cycle finished, feeding material before break...");
         if (typeof showToast === 'function') {
-          showToast("⏳ サイクル完了。材料送り後に休憩に入ります...");
+          showToast(_tr('toast_break_drag_phase', "⏳ サイクル完了。材料送り後に休憩に入ります..."));
         }
       });
 
@@ -16838,7 +16878,7 @@ if (manualSendModal) {
       cncEventSource.addEventListener('cycle_stop_drag_phase', (e) => {
         console.log("⏳ [CNC GATEKEEPER] Current cycle finished, feeding material before stop...");
         if (typeof showToast === 'function') {
-          showToast("⏳ サイクル完了。材料送り後に停止します...");
+          showToast(_tr('toast_cycle_drag_phase', "⏳ サイクル完了。材料送り後に停止します..."));
         }
       });
 
@@ -16851,7 +16891,7 @@ if (manualSendModal) {
         if (!breakActive && typeof startBreak === 'function') {
           startBreak();
           if (typeof showToast === 'function') {
-            showToast("☕ 休憩を開始しました (機械停止中) / Break started");
+            showToast(_tr('toast_break_started_cnc_stopped', "☕ 休憩を開始しました (機械停止中)"));
           }
         }
       });
@@ -16866,7 +16906,7 @@ if (manualSendModal) {
         console.log("🛑 [CNC GATEKEEPER] Cycle stop executed cleanly.");
         closeCycleStopOverlay();
         if (typeof showToast === 'function') {
-          showToast("✅ サイクル完了停止しました (材料送り完了) / Machine stopped cleanly");
+          showToast(_tr('toast_cycle_stop_completed', "✅ サイクル完了停止しました (材料送り完了)"));
         }
       });
 
@@ -16907,7 +16947,7 @@ if (manualSendModal) {
   function resetBreakStartButtonUI() {
     const startBtn = document.getElementById('breakStartButton');
     if (startBtn) {
-      startBtn.innerHTML = '<span data-i18n="break_start_btn">休憩を開始</span>';
+      startBtn.innerHTML = `<span data-i18n="break_start_btn">${_tr('break_start_btn', '休憩を開始')}</span>`;
       startBtn.style.background = '';
     }
   }
