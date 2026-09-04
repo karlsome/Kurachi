@@ -1044,10 +1044,11 @@
         const audioLeader = new Audio('src/leader.mp3');
         const audioBox = new Audio('src/box.mp3');
         const audioRoll = new Audio('src/roll.mp3');
+        const audioStop = new Audio('src/STOP.mp3');
 
         // Optional: unlock audio on first interaction if autoplay is blocked
         function unlockMp3s() {
-            [audioLeader, audioBox, audioRoll].forEach(a => {
+            [audioLeader, audioBox, audioRoll, audioStop].forEach(a => {
                 a.muted = true;
                 a.play().then(() => {
                     a.pause();
@@ -1059,12 +1060,15 @@
             document.removeEventListener('touchstart', unlockMp3s);
         }
         document.addEventListener('click', unlockMp3s);
-        document.addEventListener('touchstart', unlockMp3s);        // Play the assigned MP3 files instead of synthesized tones
+        document.addEventListener('touchstart', unlockMp3s);
+
+        // Play the assigned MP3 files instead of synthesized tones
         function playAlert(type = 'leader') {
             if (!soundOn) return;
             try {
                 let a;
-                if (type === 'box') a = audioBox;
+                if (type === 'stop') a = audioStop;
+                else if (type === 'box') a = audioBox;
                 else if (type === 'material') a = audioRoll;
                 else a = audioLeader;
 
