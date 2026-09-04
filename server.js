@@ -3610,6 +3610,22 @@ app.post("/searchSebanggo", async (req, res) => {
 //   }
 //});
 
+function normalizeWorkerName(val) {
+  if (!val) return '';
+  if (Array.isArray(val)) return val.filter(Boolean).map(s => String(s).trim()).join(',');
+  if (typeof val === 'string') {
+    val = val.trim();
+    if (val.startsWith('[') && val.endsWith(']')) {
+      try {
+        const parsed = JSON.parse(val);
+        if (Array.isArray(parsed)) return parsed.filter(Boolean).map(s => String(s).trim()).join(',');
+      } catch (_) { }
+    }
+    return val.replace(/^[\["'\s]+|[\]"'\s]+$/g, '').split(',').map(s => s.trim().replace(/^["']|["']$/g, '')).filter(Boolean).join(',');
+  }
+  return String(val).trim();
+}
+
 app.post("/submitTopressDBiReporter", async (req, res) => {
   try {
     await client.connect();
@@ -3617,6 +3633,7 @@ app.post("/submitTopressDBiReporter", async (req, res) => {
     const database = client.db("submittedDB");
     const pressDB = database.collection("pressDB");
     const formData = req.body;
+    formData.Worker_Name = normalizeWorkerName(formData.Worker_Name);
 
     // Extract image arrays and remove from formData
     const images = formData.images || [];
@@ -3703,7 +3720,8 @@ app.post("/submitTopressDBiReporter", async (req, res) => {
             if (!lotDefectImageMap[img.lotNumber]) lotDefectImageMap[img.lotNumber] = [];
             lotDefectImageMap[img.lotNumber].push(publicUrl);
           } else {
-            if (!lotImageMap[img.lotNumber]) lotImageMap[img.lotNumber] = publicUrl;
+            if (!lotImageMap[img.lotNumber]) lotImageMap[img.lotNumber] = [];
+            lotImageMap[img.lotNumber].push(publicUrl);
           }
         }
       }
@@ -3725,30 +3743,44 @@ app.post("/submitTopressDBiReporter", async (req, res) => {
 
       if (Array.isArray(formData.Lot_Details)) {
         formData.Lot_Details = formData.Lot_Details.map(lot => {
-          const labelImg = lot.image || (lot.lotNumber && lotImageMap[lot.lotNumber]) || null;
-          const defectImgs = (lot.lotNumber && lotDefectImageMap[lot.lotNumber]) || [];
-          const allImgs = (lot.lotNumber && lotAllImagesMap[lot.lotNumber]) || (labelImg ? [labelImg] : []);
-          const primaryImg = labelImg || defectImgs[0] || (materialLabelImageURLs.length > 0 ? materialLabelImageURLs[0] : null);
+          const lotLabelImgs = (lot.lotNumber && lotImageMap[lot.lotNumber])
+            || (lot.image ? (Array.isArray(lot.image) ? lot.image : [lot.image]) : []);
+          const finalLabelImgs = lotLabelImgs.length > 0 ? lotLabelImgs : (materialLabelImageURLs.length > 0 ? [materialLabelImageURLs[0]] : []);
+
+          const defectImgs = (lot.lotNumber && lotDefectImageMap[lot.lotNumber])
+            || (lot.defectImage ? (Array.isArray(lot.defectImage) ? lot.defectImage : [lot.defectImage]) : []);
 
           const seiban = lot.materialSeiban || lot.材料背番号 || formData.materialSeiban || formData.材料背番号 || formData.背番号 || null;
           const updatedLot = {
             ...lot,
-            timestamp: formatIsoTimestamp(lot.timestamp),
-            image: primaryImg
+            timestamp: formatIsoTimestamp(lot.timestamp)
           };
+
+          if (finalLabelImgs.length === 1) {
+            updatedLot.image = finalLabelImgs[0];
+          } else if (finalLabelImgs.length > 1) {
+            updatedLot.image = finalLabelImgs;
+          } else {
+            updatedLot.image = null;
+          }
+
+          if (defectImgs.length === 1) {
+            updatedLot.defectImage = defectImgs[0];
+          } else if (defectImgs.length > 1) {
+            updatedLot.defectImage = defectImgs;
+          } else {
+            delete updatedLot.defectImage;
+          }
+
+          delete updatedLot.images;
+          delete updatedLot.defectImages;
           delete updatedLot.材料背番号;
+
           if (seiban) {
             updatedLot.materialSeiban = seiban;
           }
           if (lot.scannedQR) {
             updatedLot.scannedQR = lot.scannedQR;
-          }
-          if (defectImgs.length > 0) {
-            updatedLot.defectImage = defectImgs[0];
-            updatedLot.defectImages = defectImgs;
-          }
-          if (allImgs.length > 0) {
-            updatedLot.images = allImgs;
           }
           return updatedLot;
         });
@@ -4017,6 +4049,7 @@ app.post('/submitToDCP', async (req, res) => {
         
         // Extract form data and images
         const formData = req.body;
+        formData.Worker_Name = normalizeWorkerName(formData.Worker_Name);
         const maintenanceImages = formData.maintenanceImages || []; // Array of maintenance images with base64
         const cycleCheckImages = formData.images || []; // Existing cycle check images
         
@@ -4170,7 +4203,8 @@ app.post('/submitToDCP', async (req, res) => {
                             if (!lotDefectImageMap[imgData.lotNumber]) lotDefectImageMap[imgData.lotNumber] = [];
                             lotDefectImageMap[imgData.lotNumber].push(publicUrl);
                         } else {
-                            if (!lotImageMap[imgData.lotNumber]) lotImageMap[imgData.lotNumber] = publicUrl;
+                            if (!lotImageMap[imgData.lotNumber]) lotImageMap[imgData.lotNumber] = [];
+                            lotImageMap[imgData.lotNumber].push(publicUrl);
                         }
                     }
                     
@@ -4212,6 +4246,7 @@ app.post('/submitToDCP', async (req, res) => {
         const pressDBData = {
             ...formData,
             ...uploadedImageURLs, // Add cycle check image URLs
+            Worker_Name: normalizeWorkerName(formData.Worker_Name),
             Maintenance_Data: processedMaintenanceData, // Add maintenance data with photo URLs
             createdAt: new Date().toISOString() // Add server timestamp
         };
@@ -4226,30 +4261,44 @@ app.post('/submitToDCP', async (req, res) => {
             };
 
             pressDBData.Lot_Details = pressDBData.Lot_Details.map(lot => {
-                const labelImg = lot.image || (lot.lotNumber && lotImageMap[lot.lotNumber]) || null;
-                const defectImgs = (lot.lotNumber && lotDefectImageMap[lot.lotNumber]) || [];
-                const allImgs = (lot.lotNumber && lotAllImagesMap[lot.lotNumber]) || (labelImg ? [labelImg] : []);
-                const primaryImg = labelImg || defectImgs[0] || (materialLabelImageURLs.length > 0 ? materialLabelImageURLs[0] : null);
+                const lotLabelImgs = (lot.lotNumber && lotImageMap[lot.lotNumber])
+                    || (lot.image ? (Array.isArray(lot.image) ? lot.image : [lot.image]) : []);
+                const finalLabelImgs = lotLabelImgs.length > 0 ? lotLabelImgs : (materialLabelImageURLs.length > 0 ? [materialLabelImageURLs[0]] : []);
+
+                const defectImgs = (lot.lotNumber && lotDefectImageMap[lot.lotNumber])
+                    || (lot.defectImage ? (Array.isArray(lot.defectImage) ? lot.defectImage : [lot.defectImage]) : []);
 
                 const seiban = lot.materialSeiban || lot.材料背番号 || pressDBData.materialSeiban || pressDBData.材料背番号 || pressDBData.背番号 || null;
                 const updatedLot = {
                     ...lot,
-                    timestamp: formatIsoTimestamp(lot.timestamp),
-                    image: primaryImg
+                    timestamp: formatIsoTimestamp(lot.timestamp)
                 };
+
+                if (finalLabelImgs.length === 1) {
+                    updatedLot.image = finalLabelImgs[0];
+                } else if (finalLabelImgs.length > 1) {
+                    updatedLot.image = finalLabelImgs;
+                } else {
+                    updatedLot.image = null;
+                }
+
+                if (defectImgs.length === 1) {
+                    updatedLot.defectImage = defectImgs[0];
+                } else if (defectImgs.length > 1) {
+                    updatedLot.defectImage = defectImgs;
+                } else {
+                    delete updatedLot.defectImage;
+                }
+
+                delete updatedLot.images;
+                delete updatedLot.defectImages;
                 delete updatedLot.材料背番号;
+
                 if (seiban) {
                     updatedLot.materialSeiban = seiban;
                 }
                 if (lot.scannedQR) {
                     updatedLot.scannedQR = lot.scannedQR;
-                }
-                if (defectImgs.length > 0) {
-                    updatedLot.defectImage = defectImgs[0];
-                    updatedLot.defectImages = defectImgs;
-                }
-                if (allImgs.length > 0) {
-                    updatedLot.images = allImgs;
                 }
                 return updatedLot;
             });

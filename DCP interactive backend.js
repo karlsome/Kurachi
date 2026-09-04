@@ -598,6 +598,17 @@ document.addEventListener('DOMContentLoaded', () => {
               }, 2000); // Adjust delay if options are populated dynamically
             } else if (input.type === 'file') {
               // Ignore file input elements (browsers forbid setting non-empty strings)
+            } else if (input.id === 'Machine Operator' || input.name === 'Machine Operator') {
+              if (savedValue && savedValue.startsWith('[') && savedValue.endsWith(']')) {
+                try {
+                  const parsed = JSON.parse(savedValue);
+                  input.value = Array.isArray(parsed) ? parsed.filter(Boolean).map(s => String(s).trim()).join(',') : savedValue;
+                } catch (_) {
+                  input.value = savedValue;
+                }
+              } else {
+                input.value = savedValue || '';
+              }
             } else {
               input.value = savedValue; // Restore value for text, hidden, and other inputs
             }
@@ -3482,9 +3493,30 @@ function renderWorkerNames() {
   });
 }
 
-// Multi-Worker Selection & Persistence System
 window.selectedWorkerNames = window.selectedWorkerNames || [];
 window.activeWorkerSlotIndex = 0;
+
+function formatWorkerDisplayLines(input) {
+  let list = [];
+  if (Array.isArray(input)) {
+    list = input;
+  } else if (typeof input === 'string') {
+    const trimmed = input.trim();
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) list = parsed;
+      } catch (_) { }
+    }
+    if (list.length === 0 && trimmed) {
+      list = trimmed.split(',').map(s => s.trim().replace(/^["']|["']$/g, ''));
+    }
+  }
+  const clean = list.map(n => (n || '').trim()).filter(Boolean);
+  if (clean.length === 0) return '';
+  return clean.map((n, i) => `${i + 1}. ${n}`).join('\n');
+}
+window.formatWorkerDisplayLines = formatWorkerDisplayLines;
 
 window.saveWorkerNamesToStorage = function () {
   const seen = new Set();
@@ -3506,7 +3538,7 @@ window.saveWorkerNamesToStorage = function () {
   const input = document.getElementById('Machine Operator');
   if (pageName && currentSelectedFactory && currentSelectedMachine && input) {
     const key = `${pageName}_${currentSelectedFactory}_${currentSelectedMachine}_${input.id || input.name}`;
-    localStorage.setItem(key, JSON.stringify(activeNames));
+    localStorage.setItem(key, activeNames.join(','));
   }
 };
 
@@ -3559,7 +3591,7 @@ window.loadWorkerNamesFromStorage = function () {
   const activeNames = (window.selectedWorkerNames || []).map(n => (n || '').trim()).filter(Boolean);
   const input = document.getElementById('Machine Operator');
   if (input && activeNames.length > 0) {
-    input.value = activeNames.join(', ');
+    input.value = activeNames.join(',');
   }
 };
 
@@ -3863,7 +3895,7 @@ window.renderWorkerListUI = function () {
   const hiddenInput = document.getElementById('Machine Operator');
   if (hiddenInput) {
     const activeNames = window.selectedWorkerNames.map(n => (n || '').trim()).filter(Boolean);
-    hiddenInput.value = activeNames.join(', ');
+    hiddenInput.value = activeNames.join(',');
   }
 };
 
@@ -3921,7 +3953,7 @@ function selectWorkerName(name) {
     });
 
   const input = document.getElementById('Machine Operator');
-  if (input) input.value = activeNames.join(', ');
+  if (input) input.value = activeNames.join(',');
 
   if (window.checklistState && window.checklistState.answers) {
     const queue = window.checklistState.queue;
@@ -7407,7 +7439,22 @@ document.getElementById('submit').addEventListener('click', async (event) => {
     const その他 = parseInt(document.getElementById('counter-20').value, 10) || 0;
     const Total_NG = 疵引不良 + 加工不良 + その他;
     const Total_PressDB = Process_Quantity - Total_NG;
-    const Worker_Name = document.getElementById('Machine Operator').value;
+    const rawWorker = document.getElementById('Machine Operator')?.value || '';
+    const Worker_Name = (function (val) {
+      if (!val) return '';
+      if (Array.isArray(val)) return val.filter(Boolean).map(s => String(s).trim()).join(',');
+      if (typeof val === 'string') {
+        val = val.trim();
+        if (val.startsWith('[') && val.endsWith(']')) {
+          try {
+            const parsed = JSON.parse(val);
+            if (Array.isArray(parsed)) return parsed.filter(Boolean).map(s => String(s).trim()).join(',');
+          } catch (_) { }
+        }
+        return val.replace(/^[\["'\s]+|[\]"'\s]+$/g, '').split(',').map(s => s.trim().replace(/^["']|["']$/g, '')).filter(Boolean).join(',');
+      }
+      return String(val).trim();
+    })(rawWorker) || (Array.isArray(window.selectedWorkerNames) ? window.selectedWorkerNames.filter(Boolean).join(',') : '');
     let WorkDate = document.getElementById('Lot No.').value;
     const Time_start = document.getElementById('Start Time').value;
     const Time_end = document.getElementById('End Time').value;
@@ -11186,10 +11233,11 @@ window.showStep0Modal = function () {
   });
 
   const activeNames = window.selectedWorkerNames ? window.selectedWorkerNames.map(n => (n || '').trim()).filter(Boolean) : [];
-  const workerValue = activeNames.length > 0 ? activeNames.join(', ') : (workerInput ? workerInput.value.trim() : '');
+  const rawValue = activeNames.length > 0 ? activeNames : (workerInput ? workerInput.value.trim() : '');
+  const workerDisplay = formatWorkerDisplayLines(rawValue);
 
-  if (workerValue !== '') {
-    currentWorkerLabel.textContent = workerValue;
+  if (workerDisplay !== '') {
+    currentWorkerLabel.textContent = workerDisplay;
     confirmState.style.display = 'flex';
     selectState.style.display = 'none';
   } else {
@@ -14757,8 +14805,10 @@ if (manualSendModal) {
     if (forceLocked) {
       if (field.type === 'name') {
         const val = window.checklistState.answers[field.id];
-        const valDisplay = Array.isArray(val) ? val.filter(Boolean).join(', ') : (val || '—');
-        controlHtml = `<div style="background:#f3f4f6; padding:10px 14px; border-radius:8px; font-weight:700; color:#374151; font-size:0.95rem; border:1px solid #e5e7eb;">👤 ${valDisplay}</div>`;
+        const valDisplay = Array.isArray(val)
+          ? val.filter(Boolean).map((n, i) => `${i + 1}. ${n}`).join('<br>')
+          : (val ? formatWorkerDisplayLines(val).replace(/\n/g, '<br>') : '—');
+        controlHtml = `<div style="background:#f3f4f6; padding:10px 14px; border-radius:8px; font-weight:700; color:#374151; font-size:0.95rem; border:1px solid #e5e7eb; line-height:1.5;">👤 ${valDisplay}</div>`;
       } else if (field.type === 'checkbox' || field.type === 'toggle') {
         const isOk = ansVal === 'OK';
         const isNg = ansVal === 'NG';
@@ -15839,7 +15889,7 @@ if (manualSendModal) {
         return;
       }
 
-      nameEl.textContent = activeNames.join(', ');
+      nameEl.textContent = formatWorkerDisplayLines(activeNames);
       modal.style.display = 'flex';
       window._workerConfirmResolve = resolve;
     });
@@ -16112,7 +16162,9 @@ if (manualSendModal) {
         body: JSON.stringify({
           factory: window.checklistState.factory,
           machine: window.checklistState.machine,
-          workerName: document.getElementById('step0CurrentWorkerName')?.textContent || '',
+          workerName: (window.selectedWorkerNames && window.selectedWorkerNames.length > 0)
+            ? window.selectedWorkerNames.filter(Boolean).join(',')
+            : (document.getElementById('Machine Operator')?.value || ''),
           leaderName: `${leaderUser.firstName || ''} ${leaderUser.lastName || ''}`.trim() || leaderUser.username,
           leaderUsername: leaderUser.username,
           reason,
@@ -16193,10 +16245,9 @@ if (manualSendModal) {
     if (overlay) overlay.style.display = 'flex';
 
     try {
-      let workerName = (document.getElementById('step0CurrentWorkerName')?.textContent || '').trim();
-      if (!workerName && Array.isArray(window.selectedWorkerNames) && window.selectedWorkerNames.length > 0) {
-        workerName = window.selectedWorkerNames.filter(Boolean).join(', ');
-      }
+      let workerName = (window.selectedWorkerNames && window.selectedWorkerNames.length > 0)
+        ? window.selectedWorkerNames.filter(Boolean).join(',')
+        : (document.getElementById('Machine Operator')?.value?.trim() || '');
       if (!workerName && window.checklistState.answers) {
         for (const t of queue) {
           const nameField = (t.fields || []).find(f => f.type === 'name');
