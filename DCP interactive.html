@@ -6104,19 +6104,26 @@
                 clearInterval(breakInterval);
                 breakInterval = setInterval(() => tickBreak(startEpoch), 1000);
             }
-            function startBreak() {
-                const startEpoch = Date.now();
-                localStorage.setItem(breakPrefix + 'activeBreakStart', String(startEpoch));
+            function startBreak(explicitEpoch) {
+                const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+                const existing = localStorage.getItem(pfx + 'activeBreakStart');
+                const startEpoch = (typeof explicitEpoch === 'number' && explicitEpoch > 0)
+                    ? explicitEpoch
+                    : (existing ? parseInt(existing, 10) : Date.now());
+                localStorage.setItem(pfx + 'activeBreakStart', String(startEpoch));
+                localStorage.removeItem(pfx + 'pendingBreakStartEpoch');
                 openBreakOverlay(startEpoch);
                 if (typeof logTabletAction === 'function') logTabletAction('Break started', 'in-progress', {});
             }
             window.startBreak = startBreak;
             function finishBreak() {
-                const raw = localStorage.getItem(breakPrefix + 'activeBreakStart');
+                const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+                const raw = localStorage.getItem(pfx + 'activeBreakStart');
                 clearInterval(breakInterval);
                 const ov = document.getElementById('breakOverlay');
                 if (ov) ov.classList.remove('open');
-                localStorage.removeItem(breakPrefix + 'activeBreakStart');
+                localStorage.removeItem(pfx + 'activeBreakStart');
+                localStorage.removeItem(pfx + 'pendingBreakStartEpoch');
                 if (typeof logTabletAction === 'function') logTabletAction('Break ended', 'Completed', {});
                 if (typeof window.unlockCNCGatekeeper === 'function') {
                     window.unlockCNCGatekeeper();
@@ -6128,7 +6135,8 @@
                 let slot = 0;
                 for (let i = 1; i <= 4; i++) {
                     const si = document.getElementById('break' + i + '-start');
-                    if (si && !si.value) { slot = i; break; }
+                    const ei = document.getElementById('break' + i + '-end');
+                    if (si && (!si.value || !ei.value)) { slot = i; break; }
                 }
                 if (!slot) { showToast(_t('toast_max_breaks')); return; }
                 const si = document.getElementById('break' + slot + '-start');
@@ -6158,6 +6166,7 @@
             }
             function breakMinsOf(s, e) {
                 const a = new Date('2000-01-01T' + s + ':00'), b = new Date('2000-01-01T' + e + ':00');
+                if (b < a) b.setDate(b.getDate() + 1);
                 return b > a ? Math.floor((b - a) / 60000) : 0;
             }
             function renderBreakList() {

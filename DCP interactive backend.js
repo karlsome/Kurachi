@@ -1535,6 +1535,7 @@ function calculateTotalBreakTime() {
       if (startTime && endTime) {
         const start = new Date(`2000-01-01T${startTime}:00`);
         const end = new Date(`2000-01-01T${endTime}:00`);
+        if (end < start) end.setDate(end.getDate() + 1);
 
         if (end > start) {
           const diffMs = end - start;
@@ -16933,24 +16934,41 @@ if (manualSendModal) {
 
     openBreakWaitOverlay();
 
+    let scheduled = false;
     try {
-      const res = await fetch(`http://${ip}:5000/schedule_break_stop`, { method: 'POST' });
-      if (!res.ok) throw new Error("HTTP " + res.status);
-      const data = await res.json();
-      if (!data.scheduled) throw new Error("Not scheduled");
-      console.log("☕ Scheduled break stop response:", data);
-    } catch (err) {
-      try {
-        const res = await fetch(`http://${ip}:8766/schedule_break_stop`, { method: 'POST' });
-        if (!res.ok) throw new Error("HTTP " + res.status);
+      const res = await fetch(`http://${ip}:5000/schedule_break_stop`, {
+        method: 'POST',
+        signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2500) : undefined
+      });
+      if (res.ok) {
         const data = await res.json();
-        if (!data.scheduled) throw new Error("Not scheduled");
-        console.log("☕ Scheduled break stop response (:8766):", data);
-      } catch (e) {
-        console.warn("Legacy Mini-PC (no schedule_break_stop) or offline. Starting local break immediately:", e);
-        closeBreakWaitOverlay();
-        if (typeof startBreak === 'function') startBreak();
+        if (data && data.scheduled) {
+          scheduled = true;
+          console.log("☕ Scheduled break stop response (:5000):", data);
+        }
       }
+    } catch (_) { }
+
+    if (!scheduled) {
+      try {
+        const res = await fetch(`http://${ip}:8766/schedule_break_stop`, {
+          method: 'POST',
+          signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2500) : undefined
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.scheduled) {
+            scheduled = true;
+            console.log("☕ Scheduled break stop response (:8766):", data);
+          }
+        }
+      } catch (_) { }
+    }
+
+    if (!scheduled) {
+      console.warn("Legacy Mini-PC (no schedule_break_stop response within 2.5s) or offline. Starting local break immediately.");
+      closeBreakWaitOverlay();
+      if (typeof startBreak === 'function') startBreak();
     }
   }
   window.handleBreakStartButtonClick = handleBreakStartButtonClick;
