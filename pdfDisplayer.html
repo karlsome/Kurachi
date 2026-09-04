@@ -2271,8 +2271,8 @@
                 planStatPills.innerHTML = `
                     <span class="stat-pill">対象設備: <strong style="color: #0369a1;">${isShowingAllEquipment ? '全設備' : escapeManualHtml(MACHINE_ID)}</strong></span>
                     <span class="stat-pill">予定品目: <strong>${displayList.length}</strong> 件 ${!isShowingAllEquipment && allProducts.length !== displayList.length ? `(工場全体: ${allProducts.length}件)` : ''}</span>
-                    <span class="stat-pill">総数量: <strong>${totalQty.toLocaleString()}</strong> 個</span>
                     <span class="stat-pill">総箱数: <strong>${totalBoxes.toLocaleString()}</strong> 箱</span>
+                    <span class="stat-pill">総数量: <strong>${totalQty.toLocaleString()}</strong> 個</span>
                     ${allProducts.length > 0 ? `
                         <button class="plan-btn-small" style="background: #6366f1; padding: 3px 10px; font-size: 0.8em; margin-left: 8px; cursor: pointer;" onclick="toggleEquipmentFilter()">${isShowingAllEquipment ? `[${escapeManualHtml(MACHINE_ID)}] のみ表示` : '全設備表示'}</button>
                     ` : ''}
@@ -2320,8 +2320,8 @@
                         <td><strong style="color: #0f172a;">${escapeManualHtml(prod.品番 || '-')}</strong></td>
                         <td style="font-weight: 600;">${escapeManualHtml(prod.品名 || '-')}</td>
                         <td style="white-space: nowrap;">
-                            <strong>${(Number(prod.quantity) || 0).toLocaleString()}</strong> 個
-                            <span style="color: #64748b; font-size: 0.85em;">(${(Number(prod.boxes) || 0)} 箱)</span>
+                            <strong>${(Number(prod.boxes) || 0).toLocaleString()}</strong> 箱
+                            <span style="color: #64748b; font-size: 0.85em;">(${(Number(prod.quantity) || 0).toLocaleString()} 個)</span>
                         </td>
                         <td style="white-space: nowrap;">
                             <span style="font-weight: 600;">${estTime}</span>
