@@ -254,7 +254,7 @@ function applyTabletLogToMachineState(logEntry) {
   }
   
   const factory = logEntry.工場;
-  const equipmentRaw = logEntry.設備 || '';
+  const equipmentRaw = logEntry.SpecificMachine || logEntry.AdditionalData?.specificMachine || logEntry.設備 || '';
   if (!factory || !equipmentRaw) return [];
   const ids = equipmentRaw.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
   const ts = Date.parse(logEntry.Timestamp) || Date.now();
@@ -770,23 +770,67 @@ app.post("/api/machine-assert", (req, res) => {
       updated.push(id);
     } else {
       // The server already has a record.
-      // If the tablet asserts an active product and it differs from the server (e.g., server
-      // created an empty state from an early tablet log after a restart), trust the tablet.
-      if (seb && mode !== 'idle' && st.sebanggo !== seb) {
-        st.sebanggo = seb;
-        st.hinban = hinban;
-        st.breakActive = false;
-        st.maintActive = false;
-        st.checkActive = false;
-        if (mode === 'break') { st.breakActive = true; st.modeSince = modeStartedAt || now; }
-        else if (mode === 'maintenance') { st.maintActive = true; st.modeSince = modeStartedAt || now; }
-        else if (mode === 'check') { st.checkActive = true; st.modeSince = modeStartedAt || now; }
-        else { st.runSince = runStartedAt || now; }
-        if (!updated.includes(id)) updated.push(id);
-      }
-
-      // Check mode transition
-      if (mode === 'check') {
+      if (mode === 'idle') {
+        if (st.sebanggo || st.runSince > 0 || st.breakActive || st.maintActive || st.checkActive) {
+          st.sebanggo = '';
+          st.hinban = '';
+          st.breakActive = false;
+          st.maintActive = false;
+          st.checkActive = false;
+          st.runSince = 0;
+          st.modeSince = 0;
+          st.prodAccumMs = 0;
+          if (!updated.includes(id)) updated.push(id);
+        }
+      } else if (mode === 'running') {
+        let changed = false;
+        if (seb && st.sebanggo !== seb) {
+          st.sebanggo = seb;
+          st.hinban = hinban;
+          changed = true;
+        }
+        if (st.breakActive || st.maintActive || st.checkActive) {
+          st.breakActive = false;
+          st.maintActive = false;
+          st.checkActive = false;
+          changed = true;
+        }
+        if (st.runSince === 0) {
+          st.runSince = runStartedAt || now;
+          changed = true;
+        }
+        if (changed && !updated.includes(id)) updated.push(id);
+      } else if (mode === 'break') {
+        let changed = false;
+        if (!st.breakActive || st.modeSince !== (modeStartedAt || now)) {
+          st.breakActive = true;
+          st.maintActive = false;
+          st.checkActive = false;
+          st.modeSince = modeStartedAt || now;
+          changed = true;
+        }
+        if (seb && st.sebanggo !== seb) {
+          st.sebanggo = seb;
+          st.hinban = hinban;
+          changed = true;
+        }
+        if (changed && !updated.includes(id)) updated.push(id);
+      } else if (mode === 'maintenance') {
+        let changed = false;
+        if (!st.maintActive || st.modeSince !== (modeStartedAt || now)) {
+          st.maintActive = true;
+          st.breakActive = false;
+          st.checkActive = false;
+          st.modeSince = modeStartedAt || now;
+          changed = true;
+        }
+        if (seb && st.sebanggo !== seb) {
+          st.sebanggo = seb;
+          st.hinban = hinban;
+          changed = true;
+        }
+        if (changed && !updated.includes(id)) updated.push(id);
+      } else if (mode === 'check') {
         if (!st.checkActive || st.modeSince !== (modeStartedAt || now)) {
           st.checkActive = true;
           st.breakActive = false;
@@ -796,7 +840,7 @@ app.post("/api/machine-assert", (req, res) => {
         }
       } else if (st.checkActive) {
         st.checkActive = false;
-        st.modeSince = (mode === 'break' || mode === 'maintenance') ? (modeStartedAt || now) : 0;
+        st.modeSince = 0;
         if (!updated.includes(id)) updated.push(id);
       }
 

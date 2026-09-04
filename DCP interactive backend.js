@@ -288,7 +288,7 @@ async function logTabletAction(action, status = 'in-progress', additionalData = 
     }
 
     // For most actions, 背番号 is required (except setup actions like checkbox toggle)
-    const setupActions = ['Kensa mode checkbox toggled', 'Break time', 'Reset'];
+    const setupActions = ['Kensa mode checkbox toggled', 'Break', 'Reset'];
     const isSetupAction = setupActions.some(setupAction => action.includes(setupAction));
 
     if (!背番号 && !isSetupAction) {
@@ -4970,6 +4970,7 @@ function addManualLot(lotNumber) {
       || (typeof groupedMachines !== 'undefined' && groupedMachines[0])
       || (document.getElementById('process') ? document.getElementById('process').value : '');
     window.__pendingPrevLot = window.recordLotScan(lotNumber, _m, 'manual');
+    if (typeof window.assertMachineState === 'function') window.assertMachineState();
   }
   saveMaterialLots();
   renderMaterialLotTags();
@@ -11895,6 +11896,7 @@ document.getElementById('startStep2Scan').addEventListener('click', async functi
               scannedQR: qrCodeMessage
             });
             console.log('🟢 [_recordAndAdvance] recordLotScan done, __pendingPrevLot:', !!window.__pendingPrevLot);
+            if (typeof window.assertMachineState === 'function') window.assertMachineState();
           }
           console.log('🟢 [_recordAndAdvance] Hiding step2Modal');
           document.getElementById('step2Modal').style.display = 'none';
@@ -11969,6 +11971,7 @@ document.getElementById('startStep2Scan').addEventListener('click', async functi
         // Log material lot scan action
         await logTabletAction('Scanned material lot (Step 2)', 'in-progress', {
           lotNumber: lotNumber,
+          specificMachine: _scanMachine,
           materialCode: actualScannedCode,
           allMaterialLots: materialLots.map(l => l.lotNumber).join(', ')
         });
@@ -13033,8 +13036,29 @@ if (manualSendModal) {
     // chooser can grey it out and we send to every assigned machine.
     if (!window.__lotCycleMachinesDone) window.__lotCycleMachinesDone = [];
     if (window.__lotCycleMachinesDone.indexOf(machine) < 0) window.__lotCycleMachinesDone.push(machine);
+    if (typeof window.assertMachineState === 'function') window.assertMachineState();
     return prevOpen;
   }
+
+  window.isMachineLotScanned = function (machineName) {
+    const m = String(machineName || '').trim().toUpperCase();
+    if (!m) return false;
+    try {
+      if (typeof refreshLots === 'function') refreshLots();
+    } catch (_) { }
+    if (typeof lotsByMachine !== 'undefined' && lotsByMachine && Array.isArray(lotsByMachine[m]) && lotsByMachine[m].length > 0) {
+      return true;
+    }
+    const pfx = typeof uniquePrefix !== 'undefined' ? uniquePrefix : '';
+    try {
+      const raw = localStorage.getItem(`${pfx}lotsByMachine`);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && Array.isArray(parsed[m]) && parsed[m].length > 0) return true;
+      }
+    } catch (_) { }
+    return false;
+  };
 
   function closeRecord(rec, shots) {
     if (!rec) return;
