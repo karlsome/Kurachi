@@ -7282,6 +7282,8 @@
                 const origClose = window.closeAllStepModals;
                 window.closeAllStepModals = function () {
                     window.__materialScanMode = null;
+                    window.__lotScanMachine = null;
+                    window.__lotCycleMachinesDone = [];
                     const el = document.getElementById('step2Modal');
                     if (el) {
                         el.classList.remove('as-overlay');
@@ -7300,7 +7302,12 @@
             }
             if (typeof window.showStep1Modal === 'function') {
                 const origStep1 = window.showStep1Modal;
-                window.showStep1Modal = function () { window.__materialScanMode = null; return origStep1.apply(this, arguments); };
+                window.showStep1Modal = function () {
+                    window.__materialScanMode = null;
+                    window.__lotScanMachine = null;
+                    window.__lotCycleMachinesDone = [];
+                    return origStep1.apply(this, arguments);
+                };
             }
 
             // ---------- Kensa visibility ----------

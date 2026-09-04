@@ -3666,14 +3666,18 @@ app.post("/submitTopressDBiReporter", async (req, res) => {
       console.log(`📸 Uploading ${materialLabelImages.length} material label images...`);
       
       const materialLabelImageURLs = [];
+      const lotImageMap = {};
+      const lotDefectImageMap = {};
+      const lotAllImagesMap = {};
+      const bucket = admin.storage().bucket();
       
       for (const img of materialLabelImages) {
-        if (!img.base64) continue;
+        if (!img.base64 || !img.id || !img.timestamp) continue;
 
         const buffer = Buffer.from(img.base64, 'base64');
-        const fileName = `${formData.背番号}_${formData.Date}_${formData.Worker_Name}_${formData.工場}_${formData.設備}_materialLabel_${img.timestamp || Date.now()}.jpg`;
+        const fileName = `${formData.背番号}_${formData.Date}_${img.timestamp}_${img.id}_materialLabelImage.jpg`;
         const filePath = `materialLabel/${formData.工場}/${formData.設備}/${fileName}`;
-        const file = admin.storage().bucket().file(filePath);
+        const file = bucket.file(filePath);
 
         try {
           await uploadToFirebaseWithRetry(file, buffer, {
@@ -3690,6 +3694,18 @@ app.post("/submitTopressDBiReporter", async (req, res) => {
 
         const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${file.bucket.name}/o/${encodeURIComponent(file.name)}?alt=media&token=${downloadToken}`;
         materialLabelImageURLs.push(publicUrl);
+        if (img.lotNumber) {
+          if (!lotAllImagesMap[img.lotNumber]) lotAllImagesMap[img.lotNumber] = [];
+          lotAllImagesMap[img.lotNumber].push(publicUrl);
+
+          const isDefect = img.description && img.description.includes('疵引き');
+          if (isDefect) {
+            if (!lotDefectImageMap[img.lotNumber]) lotDefectImageMap[img.lotNumber] = [];
+            lotDefectImageMap[img.lotNumber].push(publicUrl);
+          } else {
+            if (!lotImageMap[img.lotNumber]) lotImageMap[img.lotNumber] = publicUrl;
+          }
+        }
       }
 
       formData.materialLabelImages = materialLabelImageURLs;
@@ -3699,8 +3715,50 @@ app.post("/submitTopressDBiReporter", async (req, res) => {
       if (materialLabelImageURLs.length > 0) {
         formData.材料ラベル画像 = materialLabelImageURLs[0];
       }
+
+      const formatIsoTimestamp = (ts) => {
+        if (!ts) return new Date().toISOString();
+        if (typeof ts === 'string' && ts.includes('T')) return ts;
+        const d = (typeof ts === 'number') ? new Date(ts) : new Date(Number(ts) || ts);
+        return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+      };
+
+      if (Array.isArray(formData.Lot_Details)) {
+        formData.Lot_Details = formData.Lot_Details.map(lot => {
+          const labelImg = lot.image || (lot.lotNumber && lotImageMap[lot.lotNumber]) || null;
+          const defectImgs = (lot.lotNumber && lotDefectImageMap[lot.lotNumber]) || [];
+          const allImgs = (lot.lotNumber && lotAllImagesMap[lot.lotNumber]) || (labelImg ? [labelImg] : []);
+          const primaryImg = labelImg || defectImgs[0] || (materialLabelImageURLs.length > 0 ? materialLabelImageURLs[0] : null);
+
+          const updatedLot = {
+            ...lot,
+            timestamp: formatIsoTimestamp(lot.timestamp),
+            image: primaryImg
+          };
+          if (defectImgs.length > 0) {
+            updatedLot.defectImage = defectImgs[0];
+            updatedLot.defectImages = defectImgs;
+          }
+          if (allImgs.length > 0) {
+            updatedLot.images = allImgs;
+          }
+          return updatedLot;
+        });
+      }
       
       console.log(`✅ Uploaded ${materialLabelImageURLs.length} material label images`);
+    } else if (Array.isArray(formData.Lot_Details)) {
+      const formatIsoTimestamp = (ts) => {
+        if (!ts) return new Date().toISOString();
+        if (typeof ts === 'string' && ts.includes('T')) return ts;
+        const d = (typeof ts === 'number') ? new Date(ts) : new Date(Number(ts) || ts);
+        return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+      };
+      formData.Lot_Details = formData.Lot_Details.map(lot => ({
+        ...lot,
+        timestamp: formatIsoTimestamp(lot.timestamp),
+        image: lot.image || null
+      }));
     }
 
     // === PHASE 3: Upload maintenance images and build Maintenance_Data structure ===
@@ -4065,6 +4123,9 @@ app.post('/submitToDCP', async (req, res) => {
         // 2.5. Upload material label images and handle single vs multiple logic
         const materialLabelImages = formData.materialLabelImages || [];
         let materialLabelImageURLs = [];
+        const lotImageMap = {};
+        const lotDefectImageMap = {};
+        const lotAllImagesMap = {};
         
         if (materialLabelImages.length > 0) {
             console.log(`🖼️ Processing ${materialLabelImages.length} material label images...`);
@@ -4092,6 +4153,18 @@ app.post('/submitToDCP', async (req, res) => {
 
                     const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(filePath)}?alt=media&token=${downloadToken}`;
                     materialLabelImageURLs.push(publicUrl);
+                    if (imgData.lotNumber) {
+                        if (!lotAllImagesMap[imgData.lotNumber]) lotAllImagesMap[imgData.lotNumber] = [];
+                        lotAllImagesMap[imgData.lotNumber].push(publicUrl);
+
+                        const isDefect = imgData.description && imgData.description.includes('疵引き');
+                        if (isDefect) {
+                            if (!lotDefectImageMap[imgData.lotNumber]) lotDefectImageMap[imgData.lotNumber] = [];
+                            lotDefectImageMap[imgData.lotNumber].push(publicUrl);
+                        } else {
+                            if (!lotImageMap[imgData.lotNumber]) lotImageMap[imgData.lotNumber] = publicUrl;
+                        }
+                    }
                     
                     console.log(`✅ Material label image uploaded: ${publicUrl}`);
                 } catch (uploadError) {
@@ -4134,6 +4207,37 @@ app.post('/submitToDCP', async (req, res) => {
             Maintenance_Data: processedMaintenanceData, // Add maintenance data with photo URLs
             createdAt: new Date().toISOString() // Add server timestamp
         };
+
+        // Associate per-lot image URL in Lot_Details
+        if (Array.isArray(pressDBData.Lot_Details)) {
+            const formatIsoTimestamp = (ts) => {
+                if (!ts) return new Date().toISOString();
+                if (typeof ts === 'string' && ts.includes('T')) return ts;
+                const d = (typeof ts === 'number') ? new Date(ts) : new Date(Number(ts) || ts);
+                return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+            };
+
+            pressDBData.Lot_Details = pressDBData.Lot_Details.map(lot => {
+                const labelImg = lot.image || (lot.lotNumber && lotImageMap[lot.lotNumber]) || null;
+                const defectImgs = (lot.lotNumber && lotDefectImageMap[lot.lotNumber]) || [];
+                const allImgs = (lot.lotNumber && lotAllImagesMap[lot.lotNumber]) || (labelImg ? [labelImg] : []);
+                const primaryImg = labelImg || defectImgs[0] || (materialLabelImageURLs.length > 0 ? materialLabelImageURLs[0] : null);
+
+                const updatedLot = {
+                    ...lot,
+                    timestamp: formatIsoTimestamp(lot.timestamp),
+                    image: primaryImg
+                };
+                if (defectImgs.length > 0) {
+                    updatedLot.defectImage = defectImgs[0];
+                    updatedLot.defectImages = defectImgs;
+                }
+                if (allImgs.length > 0) {
+                    updatedLot.images = allImgs;
+                }
+                return updatedLot;
+            });
+        }
 
         console.log(`🔍 pressDBData before cleanup contains these image fields:`, {
             "初物チェック画像": pressDBData["初物チェック画像"],
