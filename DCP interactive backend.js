@@ -14053,7 +14053,14 @@ if (manualSendModal) {
       const data = await res.json();
 
       if (data) {
+        const isRecentlySubmitted = !!(window.checklistState.submittedAt && (Date.now() - window.checklistState.submittedAt < 60000));
+
         if (!data.hasSubmittedToday) {
+          if (isRecentlySubmitted) {
+            console.log('⏳ Submission made within last 60s - skipping MongoDB empty status reset.');
+            return;
+          }
+
           // MongoDB has NO record for today (in JST) - clear recordIds and ensure tabs are locked if not completed
           window.checklistState.recordIds = {};
           if (window.checklistState.isPreComplete) {
@@ -14077,14 +14084,15 @@ if (manualSendModal) {
               window.renderCurrentChecklistTemplate();
             }
 
-            if (typeof window.goToChecklistTab === 'function') {
+            const currentTab = typeof currentTabIndex !== 'undefined' ? currentTabIndex : 0;
+            if (currentTab === 0 && typeof window.goToChecklistTab === 'function') {
               window.goToChecklistTab();
             }
           }
           return;
         }
 
-        window.checklistState.recordIds = data.recordIds || {};
+        window.checklistState.recordIds = { ...(window.checklistState.recordIds || {}), ...(data.recordIds || {}) };
 
         const allPreDone = window.checklistState.queue && window.checklistState.queue.length > 0 && window.checklistState.queue.every(t => {
           return !!(window.checklistState.recordIds && (window.checklistState.recordIds[t._id] || window.checklistState.recordIds[t.name]));
@@ -14104,7 +14112,9 @@ if (manualSendModal) {
 
         const hasStateChanged = prevPre !== allPreDone || prevPost !== !!data.isPostComplete || prevTickets !== !!data.hasOpenTickets || prevRecordIdsCount !== newRecordIdsCount;
 
-        window.checklistState.isPreComplete = allPreDone;
+        if (allPreDone || !isRecentlySubmitted) {
+          window.checklistState.isPreComplete = allPreDone;
+        }
         window.checklistState.isPostComplete = !!data.isPostComplete;
         window.checklistState.hasOpenTickets = !!data.hasOpenTickets;
 
@@ -14116,7 +14126,7 @@ if (manualSendModal) {
           window.updateTabLock();
         } else {
           const bar = document.querySelector('.tab-bar');
-          const canProceed = (allPreDone || window.checklistState.isBypassed) && !window.checklistState.hasOpenTickets;
+          const canProceed = (window.checklistState.isPreComplete || window.checklistState.isBypassed) && !window.checklistState.hasOpenTickets;
           if (canProceed) {
             if (bar) bar.classList.remove('locked-checklist');
           } else {
@@ -14128,8 +14138,11 @@ if (manualSendModal) {
           window.renderCurrentChecklistTemplate();
         }
 
-        if (!allPreDone && !window.checklistState.isBypassed && window.checklistState.queue && window.checklistState.queue.length > 0 && typeof window.goToChecklistTab === 'function') {
-          window.goToChecklistTab();
+        if (!window.checklistState.isPreComplete && !window.checklistState.isBypassed && window.checklistState.queue && window.checklistState.queue.length > 0) {
+          const currentTab = typeof currentTabIndex !== 'undefined' ? currentTabIndex : 0;
+          if (currentTab === 0 && typeof window.goToChecklistTab === 'function') {
+            window.goToChecklistTab();
+          }
         }
       }
     } catch (e) {
@@ -16413,6 +16426,7 @@ if (manualSendModal) {
         if (isSubmittingPre) {
           if (allTemplatesFinished) {
             window.checklistState.isPreComplete = true;
+            window.checklistState.submittedAt = Date.now();
             const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
             localStorage.removeItem(pfx + 'activeChecklistStart');
             if (typeof assertMachineState === 'function') assertMachineState();

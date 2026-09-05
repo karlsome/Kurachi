@@ -32432,7 +32432,13 @@ function normalizeCheckFormMachineName(value = '') {
 function checkFormMachineNamesMatch(left = '', right = '') {
   const normalizedLeft = normalizeCheckFormMachineName(left);
   const normalizedRight = normalizeCheckFormMachineName(right);
-  return Boolean(normalizedLeft) && Boolean(normalizedRight) && normalizedLeft === normalizedRight;
+  if (!normalizedLeft || !normalizedRight) return false;
+  if (normalizedLeft === normalizedRight) return true;
+
+  const leftTokens = normalizedLeft.split(',').map(m => m.trim()).filter(Boolean);
+  const rightTokens = normalizedRight.split(',').map(m => m.trim()).filter(Boolean);
+
+  return leftTokens.some(lt => rightTokens.includes(lt));
 }
 
 function sanitizeCheckFormFileSegment(value = '', fallback = 'item') {
@@ -33455,13 +33461,34 @@ app.get('/api/check-forms/today-status', async (req, res) => {
     const jstDateStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
     const startOfDay = new Date(`${jstDateStr}T00:00:00+09:00`);
 
+    let relatedMachineIds = [];
+    try {
+      if (typeof getRelatedMachineIds === 'function') {
+        relatedMachineIds = await getRelatedMachineIds(machine);
+      }
+    } catch (_) {}
+
+    const machineTokens = Array.from(new Set([
+      ...machine.split(',').map(m => m.trim()).filter(Boolean),
+      ...relatedMachineIds
+    ]));
+    const machinePattern = machineTokens.map(m => escapeCheckFormRegex(m)).join('|');
+    const machineRegex = new RegExp(`(^|,)\\s*(${machinePattern})\\s*(,|$)`, 'i');
+
+    const machineMatchFilter = {
+      $or: [
+        { 加工設備: { $in: machineTokens } },
+        { machine: { $in: machineTokens } },
+        { selectedMachine: { $in: machineTokens } },
+        { 加工設備: machineRegex },
+        { machine: machineRegex },
+        { selectedMachine: machineRegex }
+      ]
+    };
+
     const docs = await recordsCollection.find({
       factory,
-      $or: [
-        { 加工設備: machine },
-        { machine },
-        { selectedMachine: machine }
-      ],
+      ...machineMatchFilter,
       createdAt: { $gte: startOfDay }
     }).sort({ createdAt: -1 }).toArray();
 
@@ -33493,11 +33520,7 @@ app.get('/api/check-forms/today-status', async (req, res) => {
     const reportsCollection = submittedDb.collection(CHECK_FORM_NG_REPORTS_COLLECTION);
     const openTickets = await reportsCollection.find({
       factory,
-      $or: [
-        { 加工設備: machine },
-        { machine },
-        { selectedMachine: machine }
-      ],
+      ...machineMatchFilter,
       createdAt: { $gte: startOfDay },
       status: { $regex: /^open$/i }
     }).toArray();
@@ -34471,12 +34494,34 @@ app.post('/api/check-forms/submit', async (req, res) => {
       if (templatePayload.recordId && ObjectId.isValid(templatePayload.recordId)) {
         existingObjId = new ObjectId(templatePayload.recordId);
       } else {
-        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const jstDateStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+        const startOfDay = new Date(`${jstDateStr}T00:00:00+09:00`);
+
+        let relatedEquipments = [];
+        try {
+          if (typeof getRelatedMachineIds === 'function') {
+            relatedEquipments = await getRelatedMachineIds(processingEquipment);
+          }
+        } catch (_) {}
+        const equipTokens = Array.from(new Set([
+          ...processingEquipment.split(',').map(m => m.trim()).filter(Boolean),
+          ...relatedEquipments
+        ]));
+        const equipPattern = equipTokens.map(m => escapeCheckFormRegex(m)).join('|');
+        const equipRegex = new RegExp(`(^|,)\\s*(${equipPattern})\\s*(,|$)`, 'i');
+
         const existingDoc = await recordsCollection.findOne({
           factory,
-          $or: [{ machine: processingEquipment }, { 加工設備: processingEquipment }],
+          $or: [
+            { machine: { $in: equipTokens } },
+            { 加工設備: { $in: equipTokens } },
+            { selectedMachine: { $in: equipTokens } },
+            { machine: equipRegex },
+            { 加工設備: equipRegex },
+            { selectedMachine: equipRegex }
+          ],
           templateId,
-          createdAt: { $gte: todayStart }
+          createdAt: { $gte: startOfDay }
         });
         if (existingDoc) {
           existingObjId = existingDoc._id;
