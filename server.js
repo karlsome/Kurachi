@@ -37057,6 +37057,34 @@ async function handleMaterialLotAnalytics(req, res) {
 app.get('/api/analytics/material-lots', handleMaterialLotAnalytics);
 app.post('/api/analytics/material-lots', handleMaterialLotAnalytics);
 
+// ── FREYA Industrial AI Copilot ───────────────────────────────────────────────
+const { processCopilotPrompt } = require('./aiCopilotService');
+
+app.post('/api/ai/copilot', async (req, res) => {
+  try {
+    const { prompt, currentPersona, kpiContext, history } = req.body || {};
+    if (!prompt || typeof prompt !== 'string') {
+      return res.status(400).json({ error: 'Missing prompt in request body' });
+    }
+
+    const result = await processCopilotPrompt({
+      prompt,
+      currentPersona,
+      kpiContext,
+      history,
+      client
+    });
+
+    res.json(result);
+  } catch (error) {
+    console.error('❌ [copilot-route] Error processing AI prompt:', error);
+    res.status(500).json({
+      error: 'AI Copilot processing failed',
+      details: error.message
+    });
+  }
+});
+
 app.listen(port, () => {
   console.log(`✅ Combined server is running at http://localhost:${port}`);
   console.log(`🌐 GEN CSV Download available at: http://localhost:${port}/gen-automated`);
